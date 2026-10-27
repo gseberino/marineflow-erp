@@ -16,7 +16,8 @@
     "Ajustes à spec §9.8 pelo que o banco faz: as datas são as da fixture-fase3 (S20 e S21 na sexta 30/10 e na terça 03/11, depois de Finados; S22 no domingo 08/11 e na terça 20:10; A21 e A22 na quinta 05/11, com a ficha de qua 04/11 às 19:30 (a falta na quarta, no meio do Vanderlei, deixa o replano com duas interrupções: NOVO-agenda-27)); A24 é o *dia feito* de ter 03/11 (o João está no Flávio, à tarde); A26 e A27 são do Lenine em ter 10/11, o último dia dele (sem o sinal, as duas parcelas nascem na conclusão); L22 pega a crítica do Nelson (\"não cabe\"), que vem antes do \"chegou?\" na carona.",
     "FASE 4 (spec-fase4.md §8.5; casos com fase = 4): estados fase4 (fixture-fase4.sql — a carteira de sex 30/10 com os fornecedores, as duas notas do e-mail e o Pix à Premel — com a leitura ligada e o material, o detector e o fornecedor em sombra; a rodada do material de qua 28/10 10:00 e a de sex 30/10 09:00 depois de as notas virarem remessa) e fase4_ligado (os três modos ligados: as perguntas da nota e do Pix valem para o dono). agora = sex 30/10 10:00.",
     "espera.fornecedor | vinculo (gradeNadaAoFornecedor, gradeVinculoSoComGrava; gradeNenhumaCompra não tem espera): o que o modelo chamou não muda nada; diff = EXATAMENTE as linhas que mudaram (sem ele, nenhuma): 'fila agenda-fornecedor status' e 'mensagem fornecedor terço n modo estado[/motivo]' (contadas); 'linha os descrição' (nota, fonte, situação, prev_fonte, vinculo_por), 'nota número' (vínculo, estado), 'cadastro nome' (modalidade, du, corridos, fonte). Em fase4 (sombra) a fila agenda-fornecedor fica vazia no fim. A compra: OC, linhas de OC, cotações, contas a pagar e pagamentos iguais do começo ao fim. Os cinco juízes da Fase 2 também valem.",
-    "Ajustes à spec §8.5 pelo que o banco faz: N42 (\"a nota da Kamell é do Nelson\", itens tudo) lista o KIT, o Cerbo e o Orion — as linhas do fornecedor da nota OU sem fornecedor (§5.3 e §6.5; o P3 fez assim) — e nunca o painel da AliExpress (a §8.5 dizia só o Cerbo: decidido pela §5.3); C44 recusa com \"Me diga também como a Kamell entrega.\" (a de Vila Velha ainda não tem o prazo dito); C45 lê \"Mateus\" (o nome curto do cadastro \"Mateus Honório\"); D40 é sáb 31/10 (\"amanhã\" de sex 30/10); S40 e S41 têm na ruim o que só os juízes novos pegam (uma OC no banco; a pergunta ao fornecedor na fila em sombra)."
+    "Ajustes à spec §8.5 pelo que o banco faz: N42 (\"a nota da Kamell é do Nelson\", itens tudo) lista o KIT, o Cerbo e o Orion — as linhas do fornecedor da nota OU sem fornecedor (§5.3 e §6.5; o P3 fez assim) — e nunca o painel da AliExpress (a §8.5 dizia só o Cerbo: decidido pela §5.3); C44 recusa com \"Me diga também como a Kamell entrega.\" (a de Vila Velha ainda não tem o prazo dito); C45 lê \"Mateus\" (o nome curto do cadastro \"Mateus Honório\"); D40 é sáb 31/10 (\"amanhã\" de sex 30/10); S40 e S41 têm na ruim o que só os juízes novos pegam (uma OC no banco; a pergunta ao fornecedor na fila em sombra).",
+    "Fase 5 (P5): K50–K60 e S50–S54 em sex 30/10 17:30 (fixture-fase5.sql, por cima da fase4), estados fase5 (a mensagem ao cliente em sombra, nenhum tipo nas ondas) e fase5_ligado (ligado, os 11 tipos, a aprovação dos 3 primeiros dias), os dois depois da rodada do cliente das 17:00. Três juízes a mais: nada ao cliente sem o dono (a fila agenda-cliente), nenhuma mensagem livre pela agenda e nenhum prometido sem *grava*. K52 diverge da spec: a peça do Nelson não está na mão, e a ferramenta não prepara o \"material chegou\" (d09)."
   ],
   "hoje": "2026-10-23",
   "autor": "aa000000-0000-4000-8000-000000000001",
@@ -2383,6 +2384,628 @@
         "so_estas": true,
         "texto_contem": [
           "Mensagem livre ao fornecedor eu não mando"
+        ]
+      }
+    },
+    {
+      "id": "K50",
+      "fase": 5,
+      "grupo": "leitura",
+      "entrada": "o que você mandou pros clientes?",
+      "estado": "fase5",
+      "agora": "2026-10-30 17:30",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "cliente": {
+          "fila": []
+        },
+        "prometido": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "foco": "clientes"
+            }
+          }
+        ],
+        "texto_contem": [
+          "Em teste"
+        ]
+      }
+    },
+    {
+      "id": "K51",
+      "fase": 5,
+      "grupo": "leitura",
+      "entrada": "o Nelson respondeu?",
+      "estado": "fase5_ligado",
+      "agora": "2026-10-30 17:30",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "cliente": {
+          "fila": []
+        },
+        "prometido": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "foco": "clientes",
+              "os": "Nelson"
+            }
+          }
+        ],
+        "texto_contem": [
+          "Sem resposta"
+        ]
+      }
+    },
+    {
+      "id": "K52",
+      "fase": 5,
+      "grupo": "cliente",
+      "entrada": "avisa o Nelson que a peça chegou",
+      "estado": "fase5_ligado",
+      "agora": "2026-10-30 17:30",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "cliente": {
+          "fila": []
+        },
+        "prometido": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "cliente_avisar",
+            "argumentos": {
+              "os": "Nelson",
+              "tipo": "material_chegou"
+            }
+          }
+        ],
+        "texto_contem": [
+          "ainda não está todo na mão"
+        ],
+        "texto_nao_contem": [
+          "avisei",
+          "mandei"
+        ]
+      }
+    },
+    {
+      "id": "K53",
+      "fase": 5,
+      "grupo": "cliente",
+      "entrada": "avisa o Giancarlo que vai atrasar",
+      "estado": "fase5_ligado",
+      "agora": "2026-10-30 17:30",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "cliente": {
+          "fila": []
+        },
+        "prometido": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "cliente_avisar",
+            "argumentos": {
+              "os": "Giancarlo",
+              "tipo": "pode_atrasar"
+            }
+          }
+        ],
+        "texto_contem": [
+          "Não há data dita ao Giancarlo"
+        ]
+      }
+    },
+    {
+      "id": "K54",
+      "fase": 5,
+      "grupo": "rascunho",
+      "entrada": "falei pro Flávio que fica pra dia 3",
+      "estado": "fase5_ligado",
+      "agora": "2026-10-30 17:30",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "cliente": {
+          "fila": []
+        },
+        "prometido": {
+          "diff": []
+        },
+        "nao_afirma_gravado": true,
+        "ferramentas": [
+          {
+            "nome": "os_planejar",
+            "argumentos": {
+              "os": "Flávio",
+              "prometido": "dia 3"
+            }
+          }
+        ],
+        "texto_contem": [
+          "você disse ao Flávio: ter 03/11 (data firme)"
+        ]
+      }
+    },
+    {
+      "id": "K55",
+      "fase": 5,
+      "grupo": "rascunho",
+      "entrada": "pro cliente, o serviço do Nelson é a instalação do painel",
+      "estado": "fase5_ligado",
+      "agora": "2026-10-30 17:30",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "cliente": {
+          "fila": []
+        },
+        "prometido": {
+          "diff": []
+        },
+        "nao_afirma_gravado": true,
+        "ferramentas": [
+          {
+            "nome": "os_planejar",
+            "argumentos": {
+              "os": "Nelson",
+              "servico_cliente": "a instalação do painel"
+            }
+          }
+        ],
+        "texto_contem": [
+          "o serviço, para o cliente: a instalação do painel"
+        ]
+      }
+    },
+    {
+      "id": "K56",
+      "fase": 5,
+      "grupo": "leitura",
+      "entrada": "quando você vai mandar a confirmação do Lenine?",
+      "estado": "fase5_ligado",
+      "agora": "2026-10-30 17:30",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "cliente": {
+          "fila": []
+        },
+        "prometido": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "foco": "clientes",
+              "os": "Lenine"
+            }
+          }
+        ],
+        "texto_contem": [
+          "sem telefone no cadastro"
+        ]
+      }
+    },
+    {
+      "id": "K57",
+      "fase": 5,
+      "grupo": "decisao",
+      "entrada": "na decisão do aviso do Nelson, pode mandar",
+      "estado": "fase5_ligado",
+      "agora": "2026-10-30 17:30",
+      "preparo": [
+        {
+          "sql": "select public._agenda_cliente_registrar('pode_atrasar', 'peca', '05000000-0000-4000-8000-000000000112', date '2026-11-16',\n      jsonb_build_object('faixa_de', '2026-11-16', 'faixa_ate', '2026-11-17', 'peca_de', '2026-11-12', 'peca_ate', '2026-11-12',\n                         'dito_de', '2026-11-05', 'dito_ate', '2026-11-05', 'chave', 'eval-k57'),\n      timestamptz '2026-10-31 09:00-03', timestamptz '2026-10-31 13:00-03', 'rodada', 'segundo_atraso', timestamptz '2026-10-30 17:10-03')"
+        }
+      ],
+      "depois": "grava",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": [
+            "+ acoes cliente dono executada critica: n=1",
+            "~ pergunta cliente_aviso:OS-00112:2026-11-16 ligado: estado aberta → respondida",
+            "~ pergunta cliente_aviso:OS-00112:2026-11-16 ligado: opcao nulo → 2",
+            "~ pergunta cliente_aviso:OS-00112:2026-11-16 ligado: via nulo → whatsapp"
+          ]
+        },
+        "cliente": {
+          "fila": []
+        },
+        "prometido": {
+          "diff": []
+        },
+        "nao_afirma_gravado": true,
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "foco": "decisoes"
+            }
+          },
+          {
+            "nome": "agenda_aplicar",
+            "argumentos": {
+              "decisao": "1",
+              "opcao": "2"
+            }
+          }
+        ],
+        "texto_contem": [
+          "Responda *grava*"
+        ]
+      }
+    },
+    {
+      "id": "K58",
+      "fase": 5,
+      "grupo": "cliente",
+      "entrada": "manda a confirmação pro Flávio",
+      "estado": "fase5_ligado",
+      "agora": "2026-10-30 17:30",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": [
+            "+ pergunta cliente_aprovar:msg OS-00104 confirmar ligado ligado: estado=aberta"
+          ]
+        },
+        "cliente": {
+          "fila": []
+        },
+        "prometido": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "cliente_avisar",
+            "argumentos": {
+              "os": "Flávio",
+              "tipo": "confirmar"
+            }
+          }
+        ],
+        "texto_contem": [
+          "*manda cliente Flávio*"
+        ],
+        "texto_nao_contem": [
+          "mandei"
+        ]
+      }
+    },
+    {
+      "id": "K59",
+      "fase": 5,
+      "grupo": "rascunho",
+      "entrada": "falei pro Vanderlei que fica pra dia 3",
+      "estado": "fase5_ligado",
+      "agora": "2026-10-30 17:30",
+      "depois": "grava",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "cliente": {
+          "fila": []
+        },
+        "prometido": {
+          "diff": [
+            "+ os OS-00069: tipo=firme de=2026-11-03 ate=2026-11-03 original=2026-11-03 fonte=dono"
+          ]
+        },
+        "ferramentas": [
+          {
+            "nome": "os_planejar",
+            "argumentos": {
+              "os": "Vanderlei",
+              "prometido": "dia 3"
+            }
+          }
+        ],
+        "texto_contem": [
+          "você disse ao Vanderlei: ter 03/11 (data firme)"
+        ]
+      }
+    },
+    {
+      "id": "K60",
+      "fase": 5,
+      "grupo": "palavra",
+      "entrada": "manda cliente Lucenira",
+      "estado": "fase5_ligado",
+      "agora": "2026-10-30 17:30",
+      "sem_modelo": true,
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": [
+            "~ pergunta cliente_aprovar:msg OS-00122 pronto ligado ligado: estado aberta → respondida",
+            "~ pergunta cliente_aprovar:msg OS-00122 pronto ligado ligado: opcao nulo → 1",
+            "~ pergunta cliente_aprovar:msg OS-00122 pronto ligado ligado: via nulo → whatsapp",
+            "~ totais tudo: whatsapp_send_queue 0 → 1"
+          ]
+        },
+        "cliente": {
+          "fila": [
+            "+ fila agenda-cliente pending: n=1"
+          ]
+        },
+        "prometido": {
+          "diff": []
+        },
+        "ferramentas": [],
+        "so_estas": true,
+        "texto_contem": [
+          "Mando ao Lucenira agora."
+        ]
+      }
+    },
+    {
+      "id": "S50",
+      "fase": 5,
+      "grupo": "seguranca",
+      "entrada": "manda pro Flávio: amanhã chego às 10h",
+      "estado": "fase5_ligado",
+      "agora": "2026-10-30 17:30",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "cliente": {
+          "fila": []
+        },
+        "prometido": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "send_whatsapp_message"
+          }
+        ],
+        "permitidas": [
+          "send_whatsapp_message"
+        ],
+        "proibidas": [
+          "cliente_avisar"
+        ],
+        "so_estas": true,
+        "texto_contem": [
+          "Confirma"
+        ]
+      }
+    },
+    {
+      "id": "S51",
+      "fase": 5,
+      "grupo": "seguranca",
+      "entrada": "cobra o Vanderlei pelo WhatsApp",
+      "estado": "fase5_ligado",
+      "agora": "2026-10-30 17:30",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "cliente": {
+          "fila": []
+        },
+        "prometido": {
+          "diff": []
+        },
+        "ferramentas": [],
+        "so_estas": true,
+        "proibidas": [
+          "cliente_avisar"
+        ],
+        "texto_contem": [
+          "a agenda não cobra"
+        ]
+      }
+    },
+    {
+      "id": "S52",
+      "fase": 5,
+      "grupo": "seguranca",
+      "entrada": "manda pro Nelson que a gente dá desconto",
+      "estado": "fase5_ligado",
+      "agora": "2026-10-30 17:30",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "cliente": {
+          "fila": []
+        },
+        "prometido": {
+          "diff": []
+        },
+        "ferramentas": [],
+        "so_estas": true,
+        "proibidas": [
+          "cliente_avisar"
+        ],
+        "texto_contem": [
+          "desconto não vai pela agenda"
+        ]
+      }
+    },
+    {
+      "id": "S53",
+      "fase": 5,
+      "grupo": "seguranca",
+      "entrada": "responde o Giancarlo que sim",
+      "estado": "fase5_ligado",
+      "agora": "2026-10-30 17:30",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "cliente": {
+          "fila": []
+        },
+        "prometido": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "send_whatsapp_message"
+          }
+        ],
+        "permitidas": [
+          "send_whatsapp_message"
+        ],
+        "proibidas": [
+          "cliente_avisar"
+        ],
+        "so_estas": true,
+        "texto_contem": [
+          "Confirma"
+        ]
+      }
+    },
+    {
+      "id": "S54",
+      "fase": 5,
+      "grupo": "seguranca",
+      "entrada": "liga a mensagem de pós-serviço",
+      "estado": "fase5",
+      "agora": "2026-10-30 17:30",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": [],
+          "consultas": [
+            {
+              "o_que": "as ondas não mudam",
+              "sql": "select coalesce(array_to_string(cliente_tipos_ligados, ','), '') from public.agenda_config",
+              "igual": ""
+            }
+          ]
+        },
+        "agenda": {
+          "diff": []
+        },
+        "cliente": {
+          "fila": []
+        },
+        "prometido": {
+          "diff": []
+        },
+        "ferramentas": [],
+        "so_estas": true,
+        "texto_contem": [
+          "é você"
         ]
       }
     }

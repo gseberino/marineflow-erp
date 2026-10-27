@@ -744,3 +744,108 @@ Deno.test("Fase 4 (P6) — webhook: com a leitura em sombra ou ligada, *agenda c
     assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda("desligado"), t), false, t);
   }
 });
+
+// ─── Fase 5 (P5, spec-fase5.md §5.5, §7.2): *manda cliente*, *segura cliente* e *agenda clientes* ───────────────
+
+const mandaCliente = (alvo: string | null): ComandoDaAgenda => ({ comando: "cliente", acao: "manda", alvo });
+const seguraCliente = (alvo: string | null): ComandoDaAgenda => ({ comando: "cliente", acao: "segura", alvo });
+const verClientes: ComandoDaAgenda = { comando: "ver", periodo: null, foco: "clientes", pessoa: null };
+
+const TABELA_F5: Array<[string, ComandoDaAgenda]> = [
+  ["manda cliente", mandaCliente(null)],
+  ["*Manda cliente*", mandaCliente(null)],
+  ["Manda cliente.", mandaCliente(null)],
+  ["manda cliente Nelson", mandaCliente("nelson")],
+  ["Manda cliente Nelson!", mandaCliente("nelson")],
+  ["🎤 Manda cliente Nelson.", mandaCliente("nelson")],
+  ["manda cliente o Nelson", mandaCliente("nelson")],
+  ["manda cliente Rodrigo Souza", mandaCliente("rodrigo souza")],
+  ["segura cliente", seguraCliente(null)],
+  ["Segura cliente Flávio", seguraCliente("flavio")],
+  ["*segura cliente Flávio*", seguraCliente("flavio")],
+  ["agenda clientes", verClientes],
+  ["Agenda clientes", verClientes],
+  ["agenda clientes?", verClientes],
+];
+
+Deno.test("Fase 5 (P5) — lerComandoDaAgenda: *manda cliente [nome]*, *segura cliente [nome]* e *agenda clientes*", () => {
+  for (const [texto, esperado] of TABELA_F5) assertEquals(lerComandoDaAgenda(texto), esperado, texto);
+});
+
+// Os pedidos normais ao assistente com "manda" e "cliente" (o orçamento, o PDF, o Pix, a mensagem livre) NÃO são palavra:
+// vão ao modelo, que tem a ferramenta do orçamento e a mensagem com a confirmação dele (spec §5.5, casos negativos).
+const CONVERSA_F5 = [
+  "manda o orçamento do Brisa", "manda pro cliente o PDF", "manda o PDF ao cliente", "manda pro cliente o orçamento",
+  "manda o pix", "segura aí", "manda cliente o orçamento", "manda cliente o orçamento do Brisa", "manda cliente o pdf",
+  "manda cliente a foto", "manda cliente o link", "manda cliente a mensagem", "manda ao cliente", "manda pro cliente",
+  "manda clientes", "segura clientes", "manda cliente b", "manda cliente o item C", "manda", "segura", "cliente",
+  "clientes", "agenda cliente", "agenda dos clientes", "lista clientes", "manda a confirmação pro Flávio",
+  "avisa o Nelson que a peça chegou", "manda pro Flávio: amanhã chego às 10h", "responde o Giancarlo que sim",
+  "manda cliente Nelson que a gente dá desconto", "segura o Nelson", "manda pro Nelson",
+];
+
+Deno.test("Fase 5 (P5) — o orçamento, o PDF, o Pix, a mensagem livre e o 'segura aí' não são a palavra (vão ao modelo)", () => {
+  for (const t of CONVERSA_F5) assertEquals(lerComandoDaAgenda(t), null, t);
+});
+
+Deno.test("Fase 5 (P5) — *manda/segura cliente* dito como pergunta não é ordem; *agenda clientes* vale com \"?\"", () => {
+  for (const t of ["manda cliente?", "Manda cliente Nelson?", "segura cliente Flávio?"]) assertEquals(lerComandoDaAgenda(t), null, t);
+  assertEquals(lerComandoDaAgenda("agenda clientes?"), verClientes);
+});
+
+Deno.test("Fase 5 (P5) — as palavras novas não são do secretário (nem o FILTRO \"clientes\"), da confirmação, do menu, do PDF, dos comprovantes nem da pergunta ativa", () => {
+  const formas = TABELA_F5.map(([t]) => t);
+  for (const t of [...formas, ...formas.map((x) => `*${x.replace(/^\*|\*$/g, "")}*`)]) {
+    assertEquals(lerComandoDoSecretario(t), null, `secretário: ${t}`);
+    assertEquals(parseConfirmationReply(t), null, `confirmação: ${t}`);
+    assertEquals(parseOptionReply(t, 9), null, `opção: ${t}`);
+    assertEquals(lerPedidoDePdf(t), null, `pdf: ${t}`);
+    assertEquals(lerComando(t), null, `comprovantes: ${t}`);
+    const n = normalizarResposta(t.replace(/[*_~]/g, ""));
+    assertEquals(lerSimNao(n), null, `sim/não: ${t}`);
+    assertEquals(lerNumero(n, 99), null, `número: ${t}`);
+    assertEquals(pareceRespostaCurta(t), false, `resposta curta: ${t}`);
+    const trava = travaDaConfirmacao(estadoComCmpNoConfirmar(), t, { pending_confirm_action_id: "pend-1" });
+    assertEquals(trava.travar, false, `trava do CMP: ${t}`);
+  }
+  // o secretário continua dono do "lista clientes" (o filtro) e a agenda não o lê
+  assert(lerComandoDoSecretario("lista clientes") !== null, "lista clientes deixou de ser do secretário");
+  assertEquals(lerComandoDaAgenda("lista clientes"), null);
+  // "sim", "ok" e "1" continuam da confirmação
+  for (const t of ["sim", "ok", "1"]) assertEquals(lerComandoDaAgenda(t), null, t);
+});
+
+/** O admin de mentira da Fase 5: a leitura e a mensagem ao cliente. */
+function adminDoCliente(leitura: string, cliente: string | "erro") {
+  return {
+    from() {
+      const q = {
+        select: (cols: string) => ({
+          maybeSingle: () => Promise.resolve(
+            cols.includes("modo_cliente")
+              ? (cliente === "erro" ? { data: null, error: { code: "42703" } } : { data: { modo_cliente: cliente }, error: null })
+              : { data: { modo_leitura: leitura, modo_proposta: "ligado", modo_vigia: "ligado" }, error: null },
+          ),
+        }),
+      };
+      return q;
+    },
+  };
+}
+
+Deno.test("Fase 5 (P5) — webhook: *manda cliente* vai ao assistente só com a mensagem ao cliente fora de desligado (o CMP no 'confirmar' não o lê)", async () => {
+  for (const modo of ["sombra", "ligado"]) {
+    for (const t of ["manda cliente Nelson", "segura cliente", "agenda clientes"]) {
+      assertEquals(await ehComandoDaAgendaLigada(adminDoCliente("sombra", modo), t), true, `${modo}: ${t}`);
+    }
+  }
+  for (const c of ["desligado", "erro"]) {
+    for (const t of ["manda cliente Nelson", "segura cliente", "agenda clientes"]) {
+      assertEquals(await ehComandoDaAgendaLigada(adminDoCliente("sombra", c), t), false, `${c}: ${t}`);
+    }
+  }
+  // a leitura desligada cala tudo (como as outras palavras)
+  assertEquals(await ehComandoDaAgendaLigada(adminDoCliente("desligado", "ligado"), "manda cliente"), false);
+  // e os pedidos ao assistente nem leem a chave
+  assertEquals(await ehComandoDaAgendaLigada(adminDoCliente("sombra", "ligado"), "manda pro cliente o PDF"), false);
+});

@@ -36,12 +36,14 @@ function sbFalso(resposta: (c: Chamada) => { data: unknown; error: unknown }) {
 const ctx = (sb: unknown, extra: Record<string, unknown> = {}) =>
   ({ sb, admin: sb, userId: ADMIN, userRole: "admin", jwt: "", appOrigin: "", settings: {}, ...extra }) as never;
 
-Deno.test("as 9 estão em allTools, risco low, só admin", () => {
+Deno.test("as 10 estão em allTools, risco low, só admin", () => {
   for (const nome of [
     "agenda_ver", "os_planejar", "material_informar", "equipe_disponibilidade",
     "agenda_propor", "agenda_aplicar", "agenda_desfazer", "os_registrar_andamento",
     // Fase 4 (P1)
     "fornecedor_prazo",
+    // Fase 5 (P5)
+    "cliente_avisar",
   ]) {
     const t = allTools.find((x) => x.name === nome);
     assert(t, `${nome} fora de allTools`);
@@ -91,7 +93,7 @@ Deno.test("as três de escrita: a RPC do rascunho, p_canal = painel no painel e 
   }
 });
 
-Deno.test("erro do banco LANÇA nas nove (nunca vira agenda vazia nem 'anotado')", async () => {
+Deno.test("erro do banco LANÇA nas dez (nunca vira agenda vazia nem 'anotado')", async () => {
   const args: Record<string, Record<string, unknown>> = {
     agenda_ver: { foco: "atrasos" },
     os_planejar: { os: "Lenine", dias: 2, trecho: "dois dias" },
@@ -102,6 +104,8 @@ Deno.test("erro do banco LANÇA nas nove (nunca vira agenda vazia nem 'anotado')
     agenda_desfazer: { alvo: "Nelson", trecho: "desfaz o Nelson" },
     os_registrar_andamento: { os: "Vanderlei", evento: "trabalhou", quem: ["Roberto"], dia: "hoje", trecho: "hoje o Roberto trabalhou" },
     fornecedor_prazo: { fornecedor: "Kamell", prazo: 4, unidade: "uteis", trecho: "a Kamell chega em 4 dias úteis" },
+    // Fase 5 (P5)
+    cliente_avisar: { os: "Nelson", tipo: "material_chegou", trecho: "avisa o Nelson que a peça chegou" },
   };
   for (const t of agendaProducaoTools) {
     const { sb } = sbFalso(() => ({ data: null, error: { message: "permission denied", code: "42501" } }));
@@ -518,4 +522,54 @@ Deno.test("Fase 4: material_informar ensina o aviso e o nao_e_de_servico, e não
     assertStringIncludes(t.description, f);
   }
   assertEquals(t.description.includes("só avisa a agenda"), false);
+});
+
+// ───────── Fase 5 (P5): cliente_avisar (prepara, nunca envia) e o os_planejar com o prometido ─────────
+Deno.test("Fase 5: cliente_avisar chama agenda_cliente_preparar (só o tipo e a OS) e devolve o texto do banco com a instrução de que nada saiu", async () => {
+  const texto = "Pronto para o Flávio, sai agora: \"Olá, Flávio! …\". Para mandar: *manda cliente Flávio*.";
+  const { sb, chamadas } = sbFalso(() => ({ data: { ok: true, status: "preparada", texto, mensagem_id: "m1", modo: "ligado" }, error: null }));
+  const r = await porNome("cliente_avisar").execute(
+    { os: "Flávio", tipo: "confirmar", trecho: "manda a confirmação pro Flávio" }, ctx(sb)) as Record<string, unknown>;
+  assertEquals(chamadas.map((c) => c.nome), ["agenda_cliente_preparar"]);
+  assertEquals(chamadas[0].params, {
+    p_autor: ADMIN, p_os: "Flávio", p_tipo: "confirmar", p_firme: false, p_trecho: "manda a confirmação pro Flávio",
+  });
+  assertEquals([r.ok, r.texto], [true, texto]);
+  assertStringIncludes(String(r.instrucao), "Nada foi enviado ao cliente");
+  assertEquals("mensagem_id" in r, false);
+});
+
+Deno.test("Fase 5: cliente_avisar — texto livre e tipo fora da lista voltam como { error } e NADA é chamado; o técnico não alcança", async () => {
+  for (const args of [
+    { os: "Nelson", tipo: "pode_atrasar", texto: "Nelson, a peça atrasou", trecho: "avisa o Nelson" },
+    { os: "Nelson", tipo: "cobranca", trecho: "cobra o Nelson" },
+    { os: "Nelson", tipo: "mudanca_no_dia", trecho: "avisa o Nelson" },
+  ]) {
+    const { sb, chamadas } = sbFalso(() => ({ data: { ok: true, texto: "x" }, error: null }));
+    const r = await porNome("cliente_avisar").execute(args, ctx(sb)) as Record<string, unknown>;
+    assert(typeof r.error === "string", JSON.stringify(args));
+    assertEquals(chamadas.length, 0);
+  }
+  const { sb, chamadas } = sbFalso(() => ({ data: { ok: true, texto: "x" }, error: null }));
+  const r = await porNome("cliente_avisar").execute({ os: "Nelson", tipo: "pronto", trecho: "x" }, ctx(sb, { userRole: "technician" }));
+  assertEquals(r, { error: "Só o administrador mexe na agenda de produção." });
+  assertEquals(chamadas.length, 0);
+});
+
+Deno.test("Fase 5: a descrição de cliente_avisar diz que NÃO envia, a palavra que manda e a fronteira com a mensagem livre; o os_planejar ensina o prometido", () => {
+  const d = porNome("cliente_avisar").description;
+  assertStringIncludes(d, "NÃO envia");
+  assertStringIncludes(d, "*manda cliente <nome>*");
+  assertStringIncludes(d, "Texto livre ao cliente não é aqui");
+  assertStringIncludes(d, "Nunca cobrança, valor ou desconto");
+  assertEquals(porNome("cliente_avisar").input_schema.required, ["os", "tipo", "trecho"]);
+  const props = (porNome("cliente_avisar").input_schema as { properties: Record<string, unknown> }).properties;
+  assertEquals(Object.keys(props).sort(), ["firme", "os", "tipo", "trecho"]);
+  const plan = porNome("os_planejar");
+  assertStringIncludes(plan.description, "é prometido = \"dia 3\"");
+  const pp = (plan.input_schema as { properties: Record<string, unknown> }).properties;
+  assert("prometido" in pp && "servico_cliente" in pp);
+  const foco = (porNome("agenda_ver").input_schema as { properties: Record<string, { enum?: string[] }> }).properties.foco.enum ?? [];
+  assert(foco.includes("clientes"));
+  assertStringIncludes(porNome("agenda_ver").description, "(foco clientes");
 });

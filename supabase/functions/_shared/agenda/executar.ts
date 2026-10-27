@@ -36,9 +36,16 @@
 // fornecedores), pelo mesmo caminho das de ver da Fase 1 (só com modo_leitura fora de 'desligado'; o banco diz "em teste"
 // do que é da sombra do material). Nenhuma delas age; nada novo aqui além do foco que o mapeamento já aceita (FOCOS).
 
+//
+// Fase 5 (P5, 27/10/2026; spec-fase5.md §5.5, §7.2): *manda cliente [nome]* e *segura cliente [nome]* executam direto
+// (agenda_cliente_decidir_dito: a decisão do dono sobre a mensagem-modelo que espera por ele; o envio continua pelas três
+// travas) e *agenda clientes* é agenda_ver foco clientes. Só com agenda_config.modo_cliente fora de 'desligado'
+// (modoDoClienteNoBanco, num SELECT à parte, como a diária: a coluna nova não pode calar as palavras de antes). O nome que
+// não espera nada é a resposta do banco ("Não achei mensagem esperando para …"): não segue ao modelo (nada sai).
+
 import { logEdgeError } from "../log-error.ts";
 import { lerModoDaProposta, type ModoDaProposta, modoDaPropostaNoBanco } from "../agenda-modo.ts";
-import { type ComandoDaAgenda, ehPalavraDaDiaria, ehPalavraDaFase2, lerComandoDaAgenda } from "./comandos.ts";
+import { type ComandoDaAgenda, ehPalavraDaDiaria, ehPalavraDaFase2, ehPalavraDoCliente, lerComandoDaAgenda } from "./comandos.ts";
 import { paraAgendaVer, RPC_AGENDA_VER } from "./rpc-das-ferramentas.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -55,6 +62,8 @@ export const RPC_CONCLUIR_DITO = "agenda_concluir_dito";
 export const RPC_ENTREGAR_DITO = "agenda_entregar_dito";
 /** Fase 3 (P4): a palavra da diária. */
 export const RPC_DIARIA_DITA = "agenda_diaria_dita";
+/** Fase 5 (P5): *manda cliente* / *segura cliente*. */
+export const RPC_CLIENTE_DITO = "agenda_cliente_decidir_dito";
 
 export { modoDaPropostaNoBanco };
 export type { ModoDaProposta };
@@ -117,6 +126,20 @@ export async function modoDaDiariaNoBanco(admin: Cliente): Promise<ModoDaLeitura
 }
 
 /**
+ * (Fase 5, P5) agenda_config.modo_cliente (um SELECT só dela). Nunca lança: erro, coluna ausente ou linha ausente =
+ * "desligado" — *manda cliente*, *segura cliente* e *agenda clientes* seguem ao modelo como antes.
+ */
+export async function modoDoClienteNoBanco(admin: Cliente): Promise<ModoDaLeitura> {
+  try {
+    const { data, error } = await admin.from("agenda_config").select("modo_cliente").maybeSingle();
+    if (error) return "desligado";
+    return lerModoDaLeitura(data?.modo_cliente);
+  } catch {
+    return "desligado";
+  }
+}
+
+/**
  * Há rascunho da agenda aberto e dentro da validade (do autor, se vier)? Só para o *grava* ou *descarta* com a agenda
  * desligada. Nunca lança: erro, tabela ausente ou exceção = false (o caminho de hoje).
  */
@@ -155,6 +178,8 @@ export async function ehComandoDaAgendaLigada(admin: Cliente, texto: string): Pr
   if ((await modoDaLeituraNoBanco(admin)) !== "desligado") {
     // (Fase 3, P4) a palavra *diária* só com a diária automática fora de 'desligado'
     if (ehPalavraDaDiaria(cmd)) return (await modoDaDiariaNoBanco(admin)) !== "desligado";
+    // (Fase 5, P5) as palavras da mensagem ao cliente só com modo_cliente fora de 'desligado'
+    if (ehPalavraDoCliente(cmd)) return (await modoDoClienteNoBanco(admin)) !== "desligado";
     return !ehPalavraDaFase2(cmd) || fase2Ligada(await modosDaAgendaNoBanco(admin));
   }
   return passaDesligada(cmd) && (await rascunhoAbertoNoBanco(admin));
@@ -201,6 +226,10 @@ export function chamadaDoComando(
       params: comHoje({ p_autor: autor, p_nome: cmd.nome, p_jornada: cmd.jornada, p_quando: cmd.quando, p_canal: canal }),
     };
   }
+  // Fase 5 (P5): a ação e o nome como o dono disse (o banco resolve o cliente e decide pela pergunta de cada mensagem)
+  if (cmd.comando === "cliente") {
+    return { rpc: RPC_CLIENTE_DITO, params: comHoje({ p_autor: autor, p_acao: cmd.acao, p_alvo: cmd.alvo, p_canal: canal }) };
+  }
   const args: Record<string, unknown> = { foco: cmd.foco };
   if (cmd.periodo) args.periodo = cmd.periodo;
   // (Fase 3, P6) o mês da comissão como o dono disse ("outubro"): o banco resolve (_agenda_mes_dito)
@@ -232,6 +261,10 @@ export const TEXTO_SEM_ENTREGAR =
 export const TEXTO_SEM_DIARIA =
   "Não consegui mexer na diária agora. Mande de novo em alguns minutos: se já tiver feito, eu digo que já está assim.";
 
+/** Fase 5 (P5): quando o banco falha no *manda cliente* / *segura cliente* (nada saiu; mandar de novo não manda em dobro). */
+export const TEXTO_SEM_CLIENTE =
+  "Não consegui decidir a mensagem ao cliente agora: nada saiu. Mande de novo em alguns minutos.";
+
 function textoDoErro(cmd: ComandoDaAgenda, e: unknown): string {
   if ((e as { code?: unknown })?.code === "42501") return TEXTO_SO_ADMIN;
   switch (cmd.comando) {
@@ -250,6 +283,8 @@ function textoDoErro(cmd: ComandoDaAgenda, e: unknown): string {
       return TEXTO_SEM_ENTREGAR;
     case "diaria":
       return TEXTO_SEM_DIARIA;
+    case "cliente":
+      return TEXTO_SEM_CLIENTE;
     default:
       return TEXTO_SEM_AGENDA;
   }
@@ -274,6 +309,8 @@ function rpcDoComando(cmd: ComandoDaAgenda): string {
       return RPC_ENTREGAR_DITO;
     case "diaria":
       return RPC_DIARIA_DITA;
+    case "cliente":
+      return RPC_CLIENTE_DITO;
     default:
       return RPC_AGENDA_VER;
   }
@@ -365,6 +402,11 @@ export interface DependenciasDaCamada {
    * 'desligado' (a palavra segue ao modelo).
    */
   modoDaDiaria?(): Promise<ModoDaLeitura>;
+  /**
+   * (Fase 5, P5) agenda_config.modo_cliente (modoDoClienteNoBanco). Só é chamado com *manda cliente*, *segura cliente* ou
+   * *agenda clientes*. Ausente ou erro = 'desligado' (a palavra segue ao modelo).
+   */
+  modoDoCliente?(): Promise<ModoDaLeitura>;
   /** executarComandoDaAgenda com o cliente do canal. */
   executar(cmd: ComandoDaAgenda): Promise<RespostaDoComando>;
   /**
@@ -430,6 +472,15 @@ export async function camadaDaAgenda(texto: string, deps: DependenciasDaCamada):
       md = "desligado";
     }
     if (md === "desligado") return null;
+  }
+  if (ehPalavraDoCliente(comando)) {
+    let mc: ModoDaLeitura = "desligado";
+    try {
+      mc = (await deps.modoDoCliente?.()) ?? "desligado";
+    } catch {
+      mc = "desligado";
+    }
+    if (mc === "desligado") return null;
   }
   let r: RespostaDoComando;
   try {

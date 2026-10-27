@@ -340,6 +340,11 @@ export const SO_PELA_REDE: ReadonlySet<string> = new Set([
   //   o *grava* do dono. Mesmo teto (113, d14): fica na rede e roda direto (ESCRITAS_VERIFICADAS_DA_REDE). O prompt a
   //   ensina (AGENDA DE PRODUÇÃO). —
   "fornecedor_prazo",
+  // — Agenda de Produção, Fase 5 (27/10/2026, P5): a mensagem-modelo ao cliente que o dono pede ("avisa o Nelson que a peça
+  //   chegou"). Só registra a mensagem ESPERANDO o dono (o texto é do banco); a fila só recebe depois do *manda cliente*,
+  //   comando lido antes do modelo. Mesmo teto (113, d14): fica na rede e roda direto (ESCRITAS_VERIFICADAS_DA_REDE). O
+  //   prompt a ensina (AGENDA DE PRODUÇÃO). —
+  "cliente_avisar",
   // — E-mail (08/10/2026): silenciar um remetente é gesto raro e pede confirmação. —
   "silenciar_remetente_email",
   // — Memória por entidade: as notas APROVADAS já chegam prontas no contexto (ai-agent), então
@@ -645,6 +650,12 @@ export const ESCRITAS_VERIFICADAS_DA_REDE: Readonly<Record<string, string>> = {
     "só grava o rascunho da releitura (agenda_rascunho, pela RPC agenda_rascunho_fornecedor, que confere o cargo e o " +
     "número no trecho); suppliers só muda pelo *grava* do dono, comando lido antes do modelo (agenda_rascunho_gravar), que " +
     "o modelo não alcança; não manda mensagem ao fornecedor",
+  // 27/10/2026 (Agenda de Produção, Fase 5, P5): pela rede, preparar viraria uma pendência e depois o *manda cliente* (dois
+  // portões para a mesma coisa). Lido o execute: uma RPC só, nenhuma tabela, nenhum texto livre (só o tipo e a OS).
+  cliente_avisar:
+    "só registra a mensagem esperando o dono (agenda_cliente_mensagens, pela RPC agenda_cliente_preparar, que confere o cargo); " +
+    "o texto e as datas são do banco; a fila só recebe depois do *manda cliente* do dono, comando lido antes do modelo " +
+    "(agenda_cliente_decidir_dito), que o modelo não alcança, e ainda passa pelas três travas do envio",
 };
 
 /**

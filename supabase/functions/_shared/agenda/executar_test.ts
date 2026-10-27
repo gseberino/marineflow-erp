@@ -12,10 +12,12 @@ import {
   lerModoDaLeitura,
   modoDaDiariaNoBanco,
   modoDaLeituraNoBanco,
+  modoDoClienteNoBanco,
   rascunhoAbertoNoBanco,
   modoDaPropostaNoBanco,
   modosDaAgendaNoBanco,
   RPC_CHOVEU,
+  RPC_CLIENTE_DITO,
   RPC_CONCLUIR_DITO,
   RPC_CONFERIR_DIA,
   RPC_DESCARTAR,
@@ -24,6 +26,7 @@ import {
   RPC_ENTREGAR_DITO,
   RPC_GRAVAR,
   TEXTO_SEM_AGENDA,
+  TEXTO_SEM_CLIENTE,
   TEXTO_SEM_ANOTAR,
   TEXTO_SEM_CONCLUIR,
   TEXTO_SEM_DESCARTAR,
@@ -638,4 +641,71 @@ Deno.test("Fase 4 (P6) — chamadaDoComando: *agenda compras* e *agenda forneced
   assertEquals(ver("agenda compras"), { rpc: RPC_AGENDA_VER, params: { ...base, p_periodo: null, p_foco: "compras" } });
   assertEquals(ver("Agenda compras?"), { rpc: RPC_AGENDA_VER, params: { ...base, p_periodo: null, p_foco: "compras" } });
   assertEquals(ver("*agenda fornecedores*"), { rpc: RPC_AGENDA_VER, params: { ...base, p_periodo: null, p_foco: "fornecedores" } });
+});
+
+// ─── Fase 5 (P5): *manda cliente* / *segura cliente* e *agenda clientes* ─────────────────────────────────────
+
+
+Deno.test("Fase 5 (P5) — chamadaDoComando: *manda/segura cliente* → agenda_cliente_decidir_dito com a ação, o nome e o canal; *agenda clientes* → agenda_ver foco clientes", () => {
+  assertEquals(chamadaDoComando({ comando: "cliente", acao: "manda", alvo: "nelson" }, AUTOR, "2026-10-30", "whatsapp"), {
+    rpc: RPC_CLIENTE_DITO, params: { p_autor: AUTOR, p_acao: "manda", p_alvo: "nelson", p_canal: "whatsapp", p_hoje: "2026-10-30" },
+  });
+  assertEquals(chamadaDoComando({ comando: "cliente", acao: "segura", alvo: null }, AUTOR, undefined, "painel"), {
+    rpc: RPC_CLIENTE_DITO, params: { p_autor: AUTOR, p_acao: "segura", p_alvo: null, p_canal: "painel" },
+  });
+  const ver = chamadaDoComando(lerComandoDaAgenda("agenda clientes") as ComandoDaAgenda, AUTOR);
+  assertEquals([ver.rpc, ver.params.p_foco], [RPC_AGENDA_VER, "clientes"]);
+});
+
+Deno.test("Fase 5 (P5) — executar: o texto do banco vale (também o 'Não achei…', que não segue ao modelo); erro = frase + log", async () => {
+  const manda: ComandoDaAgenda = { comando: "cliente", acao: "manda", alvo: "nelson" };
+  const ok = cliente({ [RPC_CLIENTE_DITO]: { data: { ok: true, status: "ok", texto: "Mando ao Nelson amanhã às 09:01." } } });
+  assertEquals(await executarComandoDaAgenda(ok, manda, { autor: AUTOR }), { ok: true, texto: "Mando ao Nelson amanhã às 09:01." });
+  const nao = cliente({ [RPC_CLIENTE_DITO]: { data: { ok: false, status: "nao_achei", texto: "Não achei mensagem esperando para \"orçamento\"." } } });
+  const r = await executarComandoDaAgenda(nao, { comando: "cliente", acao: "manda", alvo: "orcamento" }, { autor: AUTOR });
+  assertEquals([r.ok, r.texto, r.seguirAoModelo], [true, "Não achei mensagem esperando para \"orçamento\".", undefined]);
+  const erro = cliente({ [RPC_CLIENTE_DITO]: { error: { message: "rede", code: "XX000" } } });
+  const r2 = await executarComandoDaAgenda(erro, manda, { autor: AUTOR });
+  assertEquals([r2.ok, r2.texto, erro.logs().length], [false, TEXTO_SEM_CLIENTE, 1]);
+  assertEquals(erro.logs()[0].p_action, "comando:cliente");
+  const so = cliente({ [RPC_CLIENTE_DITO]: { error: { message: "Só o administrador mexe na agenda.", code: "42501" } } });
+  assertEquals((await executarComandoDaAgenda(so, manda, { autor: AUTOR })).texto, TEXTO_SO_ADMIN);
+});
+
+Deno.test("Fase 5 (P5) — camada: as palavras do cliente só com modo_cliente fora de desligado (ausente ou erro = desligado)", async () => {
+  type Modo = "desligado" | "sombra" | "ligado";
+  const deps = (mc: (() => Promise<Modo>) | undefined): DependenciasDaCamada => ({
+    ehDoDono: () => true,
+    modo: () => Promise.resolve("sombra"),
+    modosDaFase2: () => Promise.resolve({ proposta: "ligado", vigia: "ligado" }),
+    ...(mc ? { modoDoCliente: mc } : {}),
+    executar: (cmd) => executarComandoDaAgenda(cliente({
+      [RPC_CLIENTE_DITO]: { data: { ok: false, status: "em_teste", texto: "As mensagens ao cliente estão em teste: nada sai ainda." } },
+      [RPC_AGENDA_VER]: { data: { ok: true, texto: "Mensagens ao cliente (em teste: nada sai ainda):" } },
+    }), cmd, { autor: AUTOR }),
+  });
+  for (const t of ["manda cliente Nelson", "segura cliente", "agenda clientes"]) {
+    assert((await camadaDaAgenda(t, deps(() => Promise.resolve("sombra"))))?.texto, t);
+    assert((await camadaDaAgenda(t, deps(() => Promise.resolve("ligado"))))?.texto, t);
+    assertEquals(await camadaDaAgenda(t, deps(() => Promise.resolve("desligado"))), null, t);
+    assertEquals(await camadaDaAgenda(t, deps(undefined)), null, t);
+    assertEquals(await camadaDaAgenda(t, deps(() => Promise.reject(new Error("rede")))), null, t);
+  }
+  assertEquals((await camadaDaAgenda("manda cliente Nelson", deps(() => Promise.resolve("sombra"))))?.texto,
+               "As mensagens ao cliente estão em teste: nada sai ainda.");
+  // os pedidos normais nem chegam a ler o modo
+  let lidas = 0;
+  const contando = deps(() => { lidas++; return Promise.resolve("ligado"); });
+  for (const t of ["manda pro cliente o PDF", "manda o orçamento do Brisa", "manda cliente o orçamento"]) {
+    assertEquals(await camadaDaAgenda(t, contando), null, t);
+  }
+  assertEquals(lidas, 0);
+});
+
+Deno.test("Fase 5 (P5) — modoDoClienteNoBanco: um SELECT só da coluna; erro, coluna ausente ou exceção = desligado", async () => {
+  assertEquals(await modoDoClienteNoBanco(adminDoModo({ data: { modo_cliente: "ligado" } })), "ligado");
+  assertEquals(await modoDoClienteNoBanco(adminDoModo({ data: { modo_cliente: "sombra" } })), "sombra");
+  assertEquals(await modoDoClienteNoBanco(adminDoModo({ error: { code: "42703" } })), "desligado");
+  assertEquals(await modoDoClienteNoBanco(adminDoModo({ data: null })), "desligado");
+  assertEquals(await modoDoClienteNoBanco(adminDoModo({ lanca: true })), "desligado");
 });

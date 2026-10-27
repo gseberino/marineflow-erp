@@ -3,6 +3,7 @@
 import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import type { LinhaComLetra } from "./secretario-tarde-regras.ts";
 import { REGRAS } from "./secretario-candidatos.ts";
+import { linhasDaAgenda } from "./secretario-tarde-coleta.ts";
 import {
   type AgendaDoFechamento,
   amanhaComAAgenda,
@@ -11,6 +12,7 @@ import {
   semanaCabe,
   linhaDaSemana,
   linhasDaAgendaQueCabem,
+  TIPOS_DE_LINHA_DA_AGENDA,
   linhaDeAmanha,
   linhaSemResposta,
   linhaDoEscritorio,
@@ -587,4 +589,33 @@ Deno.test("Fase 3: na sombra (as linhas novas com modo 'sombra') o fechamento é
     const antes = textoDaTarde(quinta(extra)).texto;
     assertEquals(textoDaTarde(quinta(extra, comLinhas(emSombra(SEIS)))).texto, antes, JSON.stringify(extra));
   }
+});
+
+// ─── (27/10/2026) Agenda de Produção, Fase 5 (P5): a linha cliente ───────────────────────────────────────────
+// Os textos são os do banco (supabase/tests/agenda_fase5_leituras.sql, L4b e L4e). A linha da aprovação leva a mensagem
+// inteira (até 600 caracteres: o banco corta acima disso e diz que *agenda clientes* mostra) e disputa as vagas pela perda
+// (75 a que espera *manda cliente*; 40 o que sai sozinho amanhã), como as outras.
+
+const CLIENTE_F5 = "Mensagem para o Lucenira (ficou pronto), sai agora: \"Olá, Lucenira! Aqui é o Gustavo, da HBR Marine Solutions. " +
+  "A troca das baterias está concluída. Quando fica bom para combinarmos a entrega?\". *manda cliente Lucenira* ou *segura " +
+  "cliente Lucenira*. E mais 3: *agenda clientes* mostra; *manda cliente* manda todas.";
+const AMANHA_F5 = "Amanhã, a partir das 09:00, vou mandar: a confirmação de ter 03/11 ao Flávio. Para não mandar: *segura cliente Flávio*.";
+
+Deno.test("Fase 5: a linha cliente entra pela perda nas mesmas vagas (decisão 100 > cliente 75 > dia 70 … > cliente 40)", () => {
+  const linhas = [l2("cliente", CLIENTE_F5, 75, "ligado", { pergunta_id: "q-cliente" }), l2("cliente", AMANHA_F5, 40), ...SEIS];
+  const tipos = (ficaram: number) => linhasDaAgendaQueCabem(ficaram, comLinhas(linhas)).map((l) => `${l.tipo} ${l.perda}`);
+  assertEquals(tipos(0), ["cliente 75", "dia 70", "ppc 55"]);
+  assertEquals(tipos(2), ["cliente 75"]);
+  assertEquals(linhasDaAgendaQueCabem(0, comLinhas(emSombra(linhas))), []);
+  assertEquals((TIPOS_DE_LINHA_DA_AGENDA as readonly string[]).includes("cliente"), true);
+});
+
+Deno.test("Fase 5: a coleta aceita a linha cliente de até 600 caracteres (o teto da coleta é 640); acima disso fica de fora, inteira", () => {
+  const de600 = CLIENTE_F5 + " ".repeat(0) + "x".repeat(600 - CLIENTE_F5.length);
+  assertEquals(de600.length, 600);
+  const lidas = linhasDaAgenda([
+    { tipo: "cliente", texto: de600, perda: 75, pergunta_id: "q", acao_ids: [], modo: "ligado" },
+    { tipo: "cliente", texto: "x".repeat(641), perda: 75, pergunta_id: null, acao_ids: [], modo: "ligado" },
+  ]);
+  assertEquals(lidas.map((l) => l.texto.length), [600]);
 });

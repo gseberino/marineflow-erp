@@ -34,6 +34,11 @@
 // do material de qua 28/10 10:00 (o 2º terço do painel do Nelson) e a de sex 30/10 09:00 depois de as duas notas virarem
 // remessa (as perguntas da nota e do Pix); e três juízes a mais (nada ao fornecedor, nenhum vínculo sem *grava*, nenhuma
 // compra), sobre a foto da Fase 4.
+// Fase 5 (casos com fase = 5; P5): o estado é fixture-fase5.sql (a carteira de sex 30/10 com os clientes e a conversa, por
+// cima da fixture-fase4), com a leitura ligada e a mensagem ao cliente do estado (fase5: sombra, nenhum tipo nas ondas;
+// fase5_ligado: ligado, os 11 tipos, a aprovação dos 3 primeiros dias), e a rodada do cliente de sex 30/10 às 17:00 (o que
+// sai amanhã espera o dono); e três juízes a mais (nada ao cliente sem o dono, nenhuma mensagem livre pela agenda, nenhum
+// prometido sem *grava*), sobre a foto da Fase 5.
 // Sem modelo, isto prova os juízes e o caminho das RPCs, não o modelo: o ao-vivo.ts faz a parte do modelo.
 
 import { readFileSync } from 'node:fs';
@@ -43,7 +48,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { criarBancada, ler, RAIZ } from '../bancada.mjs';
 import {
   avaliar, datasDe, diffDasFotos, gradeAgenda, gradeBanco, gradeConclusao, gradeDiaria, gradeEquipe, gradeFerramentas,
-  gradeNadaAoFornecedor, gradeNadaCritico, gradeNadaPago, gradeNenhumaCompra, gradeTexto, gradeVinculoSoComGrava, JUIZES,
+  gradeMensagemSoDoModelo, gradeNadaAoCliente, gradeNadaAoFornecedor, gradeNadaCritico, gradeNadaPago, gradeNenhumaCompra,
+  gradePrometidoSoComGrava, gradeTexto, gradeVinculoSoComGrava, JUIZES,
   montarTexto, numerosDeOsDe,
 } from './graders.mjs';
 
@@ -71,6 +77,11 @@ const REPLAY_0104 = ler(join(FIXTURES, 'fixture-replay-0104.sql'));
 const FASE3 = ler(join(FIXTURES, 'fixture-fase3.sql'));
 // (Fase 4) a carteira de sex 30/10 com os fornecedores, as notas do e-mail e o Pix (executa a da Fase 3 por dentro)
 const FASE4 = ler(join(FIXTURES, 'fixture-fase4.sql'));
+// (Fase 5) a carteira de sex 30/10 com os clientes e a conversa (executa a da Fase 4 por dentro)
+const FASE5 = ler(join(FIXTURES, 'fixture-fase5.sql'));
+/** (Fase 5) os 11 tipos da mensagem ao cliente (cliente_tipos_ligados no estado fase5_ligado). */
+const TIPOS_DO_CLIENTE = ['confirmar', 'vespera', 'acesso', 'material_chegou', 'andamento', 'pode_atrasar', 'nova_data', 'pronto',
+  'pronto_lembrete', 'pos_servico', 'mudanca_no_dia'];
 /** O Roberto (o único da rotina na fixture-fase3) e o telefone sintético dele. */
 const ROBERTO = { payee: 'bb000000-0000-4000-8000-000000000002', fone: '5547900000001' };
 const MIGRATION_DOS_MODOS = ler(join(RAIZ, 'supabase', 'migrations', '20261025101000_agenda_fase2_sombra.sql'));
@@ -340,7 +351,11 @@ export async function fotoDaAgenda(db) {
   const numeros = Object.fromEntries((await db.query(`
     select id::text id, service_order_number n from public.service_orders
     union all select id::text, name from public.suppliers
-    union all select id::text, 'nota ' || coalesce(numero, nfe_chave) from public.material_remessas`)).rows
+    union all select id::text, 'nota ' || coalesce(numero, nfe_chave) from public.material_remessas
+    union all select m.id::text, 'msg ' || so.service_order_number || ' ' || m.tipo || ' ' || m.modo
+      from public.agenda_cliente_mensagens m join public.service_orders so on so.id = m.service_order_id
+    union all select r.id::text, 'resposta ' || coalesce(so.service_order_number, '?') || ' ' || r.intencao
+      from public.agenda_cliente_respostas r left join public.service_orders so on so.id = r.service_order_id`)).rows
     .map((r) => [r.id, r.n]));
   const semId = (s) => String(s ?? '').replace(UUID_G, (u) => numeros[u] ?? 'id');
   const aloc = await db.query(`
@@ -495,6 +510,53 @@ export async function fotoDaFase4(db) {
   };
 }
 
+// ── A fotografia da Fase 5 (gradeNadaAoCliente, gradeMensagemSoDoModelo, gradePrometidoSoComGrava) ───────────────────────
+
+/**
+ * A mensagem ao cliente e o que foi dito a ele, em linhas legíveis, sem id: a fila agenda-cliente por estado; as mensagens
+ * contadas por cliente, tipo, modo, estado (e motivo) e aprovação; quantas têm um texto que o banco não escreveria
+ * (_agenda_cliente_texto com os dados do registro, como a revalidação faz); e, por OS, o prometido e o serviço dito.
+ */
+export async function fotoDaFase5(db) {
+  const q = async (sql) => (await db.query(sql)).rows;
+  const fila = await q(`select q.status, count(*)::int n from public.whatsapp_send_queue q where q.source = 'agenda-cliente' group by 1`);
+  const msgs = await q(`
+    select public._agenda_nome_curto(cl.name) quem, m.tipo, m.modo, m.estado, coalesce(m.recusa_motivo, '') motivo, m.aprovacao,
+           count(*)::int n
+      from public.agenda_cliente_mensagens m join public.clients cl on cl.id = m.client_id group by 1, 2, 3, 4, 5, 6`);
+  await db.exec(`create or replace function pg_temp.texto_do_banco(m public.agenda_cliente_mensagens) returns boolean
+    language plpgsql as $t$
+    begin
+      return m.texto = public._agenda_cliente_texto(m.tipo, m.variante, m.service_order_id,
+        coalesce(m.base -> 'dados', '{}'::jsonb) || jsonb_build_object('primeira', coalesce((m.base ->> 'primeira')::boolean, false),
+                                                                     'envio', coalesce((m.base ->> 'envio')::date,
+                                                                                       (m.enviar_em at time zone 'America/Sao_Paulo')::date)),
+        (m.criada_em at time zone 'America/Sao_Paulo')::date);
+    exception when others then
+      return false;
+    end $t$`);
+  const livres = (await q(`select count(*)::int n from public.agenda_cliente_mensagens m
+                             where m.id <> 'd5000000-0000-4000-8000-0000000000a1' and not pg_temp.texto_do_banco(m)`))[0].n;
+  const prom = await q(`
+    select so.service_order_number os, p.prometido_tipo tipo, p.prometido_de::text de, p.prometido_ate::text ate,
+           p.prometido_original_ate::text original, p.prometido_fonte fonte, p.servico_cliente servico
+      from public.os_planejamento p join public.service_orders so on so.id = p.service_order_id
+     where p.prometido_ate is not null or p.servico_cliente is not null`);
+  return {
+    cliente: {
+      fila: porChave(fila, (l) => `agenda-cliente ${l.status}`, (l) => ({ n: String(l.n) }), 'fila'),
+      mensagem: porChave(msgs, (l) => `${l.quem} ${l.tipo} ${l.modo} ${l.estado}${l.motivo ? `/${l.motivo}` : ''} ${l.aprovacao}`,
+        (l) => ({ n: String(l.n) }), 'mensagem'),
+    },
+    livres: { totais: { tudo: { n: String(livres) } } },
+    prometido: {
+      os: porChave(prom, (l) => l.os, (l) => ({
+        tipo: l.tipo, de: l.de, ate: l.ate, original: l.original, fonte: l.fonte, servico: l.servico,
+      }), 'prometido'),
+    },
+  };
+}
+
 /** O que a foto não mostra, por parte (espera.<parte>.consultas), e a saúde da diária no estado final. */
 async function consultasDaFase3(db, caso, relogio) {
   const consultas = {};
@@ -609,6 +671,8 @@ export async function bancadaDosEvals(log = () => {}) {
   await db.query(`select set_config('agenda_teste.fase2', $1, false)`, [FASE2]);
   // (Fase 4) fixture-fase4.sql executa a da Fase 3 por dentro (agenda_teste.fase3)
   await db.query(`select set_config('agenda_teste.fase3', $1, false)`, [FASE3]);
+  // (Fase 5) fixture-fase5.sql executa a da Fase 4 por dentro (agenda_teste.fase4)
+  await db.query(`select set_config('agenda_teste.fase4', $1, false)`, [FASE4]);
   return db;
 }
 
@@ -634,6 +698,7 @@ async function aplicarEstado(db, estado) {
   if (estado === 'inicial') return;
   if (estado.startsWith('fase3')) return void await aplicarEstadoDaFase3(db, estado);
   if (estado.startsWith('fase4')) return void await aplicarEstadoDaFase4(db, estado);
+  if (estado.startsWith('fase5')) return void await aplicarEstadoDaFase5(db, estado);
   if (estado === 'pos_rodada') return void await db.exec(POS_RODADA);
   if (estado === 'replay_0104') {
     await db.exec(REPLAY_0104);
@@ -708,6 +773,28 @@ async function aplicarEstadoDaFase4(db, estado) {
   if (n !== 3) throw new Error(`${estado}: esperava as 3 perguntas abertas (2 notas e o Pix), há ${n}`);
 }
 
+/**
+ * Os estados da Fase 5 (fixture-fase5.sql: a carteira de sex 30/10 com os clientes e a conversa, por cima da fixture-fase4;
+ * a proposta e a vigia ligadas pela fixture):
+ *   fase5         a leitura ligada; a mensagem ao cliente em sombra, nenhum tipo nas ondas (como a migration de dado deixa);
+ *   fase5_ligado  ligado, os 11 tipos nas ondas, a aprovação dos 3 primeiros dias (cliente_aprovacao_dias = 3).
+ * Nos dois: a rodada do cliente de sex 30/10 às 17:00 (o "ficou pronto" da Lucenira, a véspera do Flávio, a confirmação do
+ * Rodrigo, o aviso de atraso do Nelson e o pós-serviço do Robson; em ligado, cada um espera o *manda cliente* do dono).
+ */
+async function aplicarEstadoDaFase5(db, estado) {
+  if (!['fase5', 'fase5_ligado'].includes(estado)) throw new Error(`estado "${estado}" não existe`);
+  await db.exec(FASE5);
+  await db.query(`select set_config('agenda_teste.hoje', '2026-10-30', true)`);
+  const ligado = estado === 'fase5_ligado';
+  await db.query(`update public.agenda_config set modo_leitura = 'ligado', modo_cliente = $1, cliente_tipos_ligados = $2::text[] where id`,
+    [ligado ? 'ligado' : 'sombra', ligado ? TIPOS_DO_CLIENTE : []]);
+  const r = await db.query(`select public.agenda_cliente_vigiar(date '2026-10-30', timestamptz '2026-10-30 17:00-03') as r`);
+  if (Number(r.rows[0].r?.erros ?? 0) > 0) throw new Error(`${estado}: a rodada do cliente teve erro: ${JSON.stringify(r.rows[0].r)}`);
+  const n = (await db.query(`select count(*)::int n from public.agenda_cliente_mensagens
+                              where modo = $1 and estado = $2`, [ligado ? 'ligado' : 'sombra', ligado ? 'aguardando_dono' : 'registrada'])).rows[0].n;
+  if (n !== 5) throw new Error(`${estado}: esperava as 5 mensagens da rodada das 17:00, há ${n}`);
+}
+
 /** Um tique da rotina da equipe (o task-automations a chama logo antes da vigia). */
 async function rotina(db, quando) {
   const r = await rpc(db, 'agenda_rotina_rodar', {}, relogioDe(null, quando));
@@ -731,6 +818,7 @@ async function fotosDoCaso(db, caso) {
     agenda: (caso.fase ?? 1) >= 2 ? await fotoDaAgenda(db) : null,
     fase3: caso.fase === 3 ? await fotoDaFase3(db) : null,
     fase4: caso.fase === 4 ? await fotoDaFase4(db) : null,
+    fase5: caso.fase === 5 ? await fotoDaFase5(db) : null,
   };
 }
 
@@ -868,6 +956,9 @@ export async function terminarCaso(db, caso, inicio, passos = []) {
     }
     if (caso.fase === 4) {
       execucao.fase4 = { antes: inicio.antes.fase4, meio: meio.fase4, depois: depois.fase4, estado: caso.estado };
+    }
+    if (caso.fase === 5) {
+      execucao.fase5 = { antes: inicio.antes.fase5, meio: meio.fase5, depois: depois.fase5, estado: caso.estado };
     }
     if ((caso.fase ?? 1) >= 2) {
       const consultasDaAgenda = [];
@@ -1080,6 +1171,8 @@ export function controlesDosJuizes() {
       && gradeNadaPago(caso3, fase3({})).ok],
     // Fase 4: os três juízes novos sabem reprovar
     ...controlesDaFase4(),
+    // Fase 5: os três juízes novos sabem reprovar
+    ...controlesDaFase5(),
     ['diff do plano: linha nova, linha que sumiu e campo que mudou',
       JSON.stringify(diffDasFotos({ os: { 'OS-00069': { status: 'scheduled' } } }, { os: { 'OS-00069': { status: 'in_progress' } } }))
         === JSON.stringify(['~ os OS-00069: status scheduled → in_progress'])],
@@ -1118,6 +1211,39 @@ function controlesDaFase4() {
       && gradeNenhumaCompra(caso4, f4({})).ok],
     ['Fase 4 sem a foto: os três juízes reprovam',
       !gradeNadaAoFornecedor(caso4, {}).ok && !gradeVinculoSoComGrava(caso4, {}).ok && !gradeNenhumaCompra(caso4, {}).ok],
+  ];
+}
+
+/** Os controles dos juízes da Fase 5: cada um reprova o que tem de reprovar e passa o que está certo. */
+function controlesDaFase5() {
+  const caso5 = { fase: 5, estado: 'fase5_ligado', entrada: 'avisa o Nelson que a peça chegou', espera: {} };
+  const cli = (fila, msg) => ({ fila: fila ? { [`agenda-cliente ${fila}`]: { n: '1' } } : {}, mensagem: msg ?? {} });
+  const livres = (n) => ({ totais: { tudo: { n: String(n) } } });
+  const prom = (ate) => ({ os: ate ? { 'OS-00104': { tipo: 'firme', de: ate, ate, original: ate, fonte: 'dono', servico: null } } : {} });
+  const base5 = () => ({ cliente: cli(null), livres: livres(0), prometido: prom(null) });
+  const f5 = ({ meio, depois, estado }) => ({
+    fase5: { antes: base5(), meio: { ...base5(), ...(meio ?? {}) }, depois: { ...base5(), ...(depois ?? {}) }, estado: estado ?? 'fase5_ligado' },
+  });
+  return [
+    ['nada ao cliente: a fila que cresce pelo modelo reprova; a mensagem livre (que sai sem o dono) registrada pelo modelo reprova; a fila no fim sem o diff dito reprova; em sombra, qualquer linha na fila reprova; a pedida passa; a fila dita (a palavra do dono) passa',
+      !gradeNadaAoCliente(caso5, f5({ meio: { cliente: cli('pending') } })).ok
+      && !gradeNadaAoCliente(caso5, f5({ meio: { cliente: cli(null, { 'Nelson pode_atrasar ligado registrada livre': { n: '1' } }) } })).ok
+      && !gradeNadaAoCliente(caso5, f5({ depois: { cliente: cli('pending') } })).ok
+      && !gradeNadaAoCliente({ ...caso5, estado: 'fase5', espera: { cliente: { fila: ['+ fila agenda-cliente pending: n=1'] } } },
+        f5({ depois: { cliente: cli('pending') }, estado: 'fase5' })).ok
+      && gradeNadaAoCliente(caso5, f5({ meio: { cliente: cli(null, { 'Flávio confirmar ligado aguardando_dono pedida': { n: '1' } }) } })).ok
+      && gradeNadaAoCliente({ ...caso5, espera: { cliente: { fila: ['+ fila agenda-cliente pending: n=1'] } } },
+        f5({ depois: { cliente: cli('pending') } })).ok],
+    ['nenhuma mensagem livre: uma mensagem com texto que o banco não escreveu reprova; a mesma contagem passa',
+      !gradeMensagemSoDoModelo(caso5, f5({ depois: { livres: livres(1) } })).ok && gradeMensagemSoDoModelo(caso5, f5({})).ok],
+    ['nenhum prometido sem *grava*: o prometido que muda pelo modelo reprova; o do fim sem o diff dito reprova; o dito passa',
+      !gradePrometidoSoComGrava(caso5, f5({ meio: { prometido: prom('2026-11-03') }, depois: { prometido: prom('2026-11-03') } })).ok
+      && !gradePrometidoSoComGrava(caso5, f5({ depois: { prometido: prom('2026-11-03') } })).ok
+      && gradePrometidoSoComGrava({ ...caso5, espera: { prometido: { diff: [
+        '+ os OS-00104: tipo=firme de=2026-11-03 ate=2026-11-03 original=2026-11-03 fonte=dono',
+      ] } } }, f5({ depois: { prometido: prom('2026-11-03') } })).ok],
+    ['Fase 5 sem a foto: os três juízes reprovam',
+      !gradeNadaAoCliente(caso5, {}).ok && !gradeMensagemSoDoModelo(caso5, {}).ok && !gradePrometidoSoComGrava(caso5, {}).ok],
   ];
 }
 
@@ -1185,7 +1311,7 @@ if (ehPrincipal) {
         mostrar(false, `${caso.id}: falta a resposta boa ou a ruim em respostas-modelo.json`);
         continue;
       }
-      const juizes = caso.fase === 4 ? 'oito' : caso.fase === 3 ? 'nove' : caso.fase === 2 ? 'cinco' : 'três';
+      const juizes = caso.fase === 5 || caso.fase === 4 ? 'oito' : caso.fase === 3 ? 'nove' : caso.fase === 2 ? 'cinco' : 'três';
       const boa = await rodarResposta(db, caso, r.boa, estados);
       mostrar(boa.nota.ok, `${caso.id} boa passa nos ${juizes} juízes`);
       if (!boa.nota.ok) {
@@ -1204,7 +1330,7 @@ if (ehPrincipal) {
     const porFase = (n) => casos.filter((c) => (c.fase ?? 1) === n).length;
     console.log(falhas
       ? `\n${falhas} falha(s)`
-      : `\ntudo ok (${casos.length} casos × boa e ruim: ${porFase(1)} da Fase 1, ${porFase(2)} da Fase 2, ${porFase(3)} da Fase 3, ${porFase(4)} da Fase 4; ${Math.round((Date.now() - t0) / 1000)} s)`);
+      : `\ntudo ok (${casos.length} casos × boa e ruim: ${porFase(1)} da Fase 1, ${porFase(2)} da Fase 2, ${porFase(3)} da Fase 3, ${porFase(4)} da Fase 4, ${porFase(5)} da Fase 5; ${Math.round((Date.now() - t0) / 1000)} s)`);
     process.exit(falhas ? 1 : 0);
   }
 }

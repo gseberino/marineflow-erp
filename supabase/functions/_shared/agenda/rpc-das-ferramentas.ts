@@ -74,6 +74,18 @@ export const UNIDADES_DO_PRAZO = ["uteis", "corridos"] as const;
 export const FOCOS = [
   "tudo", "livre", "o_que_fazer", "riscos", "material", "atrasos", "aprontar", "decisoes", "mudancas", "plano",
   "ppc", "diarias", "marcos", "comissao", "equipe", "compras", "fornecedores",
+  // (Fase 5, P5) as mensagens ao cliente: o que espera o dono, o que vai sair, o que saiu e quem respondeu (20261028100500)
+  "clientes",
+] as const;
+/** (Fase 5, P5) cliente_avisar → agenda_cliente_preparar (migration 20261028100500): prepara, nunca envia. */
+export const RPC_CLIENTE_PREPARAR = "agenda_cliente_preparar";
+/**
+ * (Fase 5, P5) Os tipos da mensagem-modelo que o dono pode pedir (agenda_cliente_mensagens.tipo, menos mudanca_no_dia: essa
+ * sai sozinha quando o dia muda no plano). Os textos e as datas são do banco.
+ */
+export const TIPOS_DA_MENSAGEM_AO_CLIENTE = [
+  "confirmar", "vespera", "acesso", "material_chegou", "nova_data", "pode_atrasar", "andamento", "pronto", "pronto_lembrete",
+  "pos_servico",
 ] as const;
 /**
  * As situações de material_informar. (Fase 4, P3) Mais nao_e_de_servico: a nota, o Pix ou a mensagem que a agenda perguntou
@@ -305,6 +317,12 @@ export function paraPlanejar(args: unknown, ctx: ContextoDaRpc): ChamadaDaRpc {
       const v = texto(a[campo], campo, max);
       if (v) dados[campo] = v;
     }
+    // (Fase 5, P5) o que o dono disse ao cliente ("dia 3", "entre 4 e 8/11": a data que o cliente OUVIU, como ele disse; o
+    // banco confere no trecho e converte) e como o cliente chama o serviço (o banco aceita até 40 caracteres, sem valor)
+    const prometido = dataDita(a.prometido, "prometido");
+    if (prometido) dados.prometido = prometido;
+    const servicoCliente = texto(a.servico_cliente, "servico_cliente", 80);
+    if (servicoCliente) dados.servico_cliente = servicoCliente;
     const prioridade = numero(a.prioridade, "prioridade");
     if (prioridade !== null) {
       if (![1, 2, 3].includes(prioridade)) recusar("'prioridade' aceita só 1, 2 ou 3");
@@ -324,7 +342,8 @@ export function paraPlanejar(args: unknown, ctx: ContextoDaRpc): ChamadaDaRpc {
     }
     if (Object.keys(dados).length === 0) {
       recusar("diga o que mudou no serviço (dias, com_quem, dono, precisa_ate, bem_fora, bem_livre_em, nao_antes_de, " +
-        "escopo_em_aberto, escopo_decidido, congelar_ate, prioridade, sem_material, aceitar_sugestao, adiantavel_patio ou limpar)");
+        "escopo_em_aberto, escopo_decidido, congelar_ate, prioridade, sem_material, aceitar_sugestao, adiantavel_patio, " +
+        "prometido, servico_cliente ou limpar)");
     }
     return comHoje({ p_autor: ctx.autor, p_canal: ctx.canal, p_os: os, p_dados: dados, p_trecho: t }, ctx);
   });
@@ -579,6 +598,43 @@ export function paraFornecedor(args: unknown, ctx: ContextoDaRpc): ChamadaDaRpc 
       p_trecho: t,
     }, ctx);
   });
+}
+
+// ── Fase 5 (P5): a mensagem-modelo ao cliente ───────────────────────────────────────────────────────────
+
+/**
+ * cliente_avisar → agenda_cliente_preparar: os (número ou nome, nunca o id), tipo (TIPOS_DA_MENSAGEM_AO_CLIENTE), firme (só
+ * no pode_atrasar: a data firme do plano no lugar da faixa) e o trecho (as palavras do dono). Nenhum texto ao cliente vai
+ * daqui: o banco escreve a mensagem e só a registra esperando o *manda cliente* do dono.
+ */
+export function paraCliente(args: unknown, ctx: ContextoDaRpc): ChamadaDaRpc {
+  return mapear(RPC_CLIENTE_PREPARAR, () => {
+    const a = objeto(args);
+    const os = referenciaDaOs(a.os, true);
+    const tipo = umDe(a.tipo, "tipo", TIPOS_DA_MENSAGEM_AO_CLIENTE, true);
+    const firme = booleano(a.firme, "firme") ?? false;
+    if (firme && tipo !== "pode_atrasar") recusar("'firme' só vale no tipo pode_atrasar (a data firme do plano no lugar da faixa)");
+    for (const campo of ["texto", "mensagem", "conteudo"]) {
+      if (a[campo] !== undefined && a[campo] !== null) {
+        recusar(`'${campo}' não existe: o texto ao cliente é do banco (só o tipo e a OS vêm daqui)`);
+      }
+    }
+    const t = trecho(a.trecho);
+    return comHoje({ p_autor: ctx.autor, p_os: os, p_tipo: tipo, p_firme: firme, p_trecho: t }, ctx);
+  });
+}
+
+/** (Fase 5, P5) Depois de preparar: nada saiu. */
+export const INSTRUCAO_CLIENTE =
+  "Nada foi enviado ao cliente: mostre o texto ao dono como está, com a palavra que ele manda (*manda cliente <nome>*). Não diga que mandou nem avisou.";
+
+/** (Fase 5, P5) A resposta de agenda_cliente_preparar → o modelo: o texto pronto (a mensagem e a palavra) ou o que falta. */
+export function resultadoDaMensagemAoCliente(data: unknown): ResultadoParaOModelo {
+  const r = respostaDoBanco(data, RPC_CLIENTE_PREPARAR);
+  if (r.ok === false) {
+    return { ok: false, texto: String(r.texto ?? r.pergunta ?? ""), instrucao: INSTRUCAO_LEITURA_SEM_RESPOSTA };
+  }
+  return { ok: true, texto: String(r.texto ?? ""), instrucao: INSTRUCAO_CLIENTE };
 }
 
 /** As opções de uma pergunta, só em texto (o resolvedor do banco traz ids: não vão ao modelo). */

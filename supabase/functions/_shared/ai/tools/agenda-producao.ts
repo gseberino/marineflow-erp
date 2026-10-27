@@ -33,6 +33,12 @@
 // fornecedor que a agenda perguntou, como o dono disse) e a situação nao_e_de_servico (só com o aviso, sem OS nem itens).
 // A ligação nota/Pix ↔ OS continua sendo do dono: a ferramenta só deixa o rascunho, e só o *grava* liga.
 //
+// Fase 5 (P5, 27/10/2026; spec-fase5.md §7.1): cliente_avisar — a mensagem-modelo ao cliente que o dono pede ("avisa o Nelson
+// que a peça chegou"): só o tipo e a OS vão daqui; o texto e as datas são do banco (agenda_cliente_preparar, migration
+// 20261028100500), que a registra ESPERANDO o *manda cliente <nome>* do dono. Nunca envia, nunca recebe texto livre, nunca
+// cobrança. os_planejar ganha prometido (a data que o cliente ouviu, como o dono disse) e servico_cliente; agenda_ver ganha o
+// foco clientes. Fora da vista como as outras (pela ferramenta_extra, d14): o teto de 113 não muda.
+//
 // Cada execute chama UMA RPC com ctx.sb (painel: o JWT do dono; WhatsApp: service role), p_autor = ctx.userId e
 // p_canal pelo ctx.canal. O mapeamento argumento → parâmetro é o de _shared/agenda/rpc-das-ferramentas.ts (puro), o
 // mesmo dos evals. `if (error) throw`: leitura que falha nunca vira "nada marcado".
@@ -49,6 +55,7 @@ import {
   paraAgendaVer,
   paraAndamento,
   paraAplicar,
+  paraCliente,
   paraDesfazer,
   paraDisponibilidade,
   paraFornecedor,
@@ -57,10 +64,12 @@ import {
   paraPropor,
   PRESENCAS_DO_DONO,
   resultadoDaLeitura,
+  resultadoDaMensagemAoCliente,
   resultadoDaProposta,
   resultadoDoRascunho,
   SITUACOES_DA_EQUIPE,
   SITUACOES_DO_MATERIAL,
+  TIPOS_DA_MENSAGEM_AO_CLIENTE,
   TURNOS,
   UNIDADES_DO_PRAZO,
 } from "../../agenda/rpc-das-ferramentas.ts";
@@ -107,6 +116,8 @@ export const agendaProducaoTools: ToolDef[] = [
       "cliente aprova e a pergunta da agenda ao fornecedor (foco compras; com os, a espera de peça daquela OS: da aprovação " +
       "até a compra, do fornecedor e o parado com o material na mão), como a agenda conta o prazo de cada fornecedor " +
       "(foco fornecedores), " +
+      "as mensagens ao cliente: o que espera o dono, o que a agenda vai mandar, o que mandou e quem respondeu (foco " +
+      "clientes; com os, só daquela OS, e o que foi dito ao cliente), " +
       "o dia de alguém da equipe (pessoa + periodo), uma OS (os), " +
       "\"se o cliente aprovar hoje, quando dá\" (os + simular_aprovacao) ou um serviço que ainda não existe (simular). " +
       "Datas, dias livres, capacidade e duração vêm SÓ daqui: repita o texto, sem calcular nem mudar número, data ou nome. " +
@@ -155,7 +166,9 @@ export const agendaProducaoTools: ToolDef[] = [
       "(aceitar_sugestao); o que ele desfaz (\"pode voltar\", \"tira da espera\", \"o cliente não tem mais prazo\") vai em " +
       "limpar. NÃO grava de fato: devolve a releitura para o dono conferir, e só o *grava* dele grava. Passe " +
       "só números e datas que ele disse, como disse (\"dia 3\", \"terça\"), e em trecho as palavras dele. Correção = chame " +
-      "de novo para o mesmo serviço. Não agenda OS nem cria tarefa.",
+      "de novo para o mesmo serviço. Não agenda OS nem cria tarefa. " +
+      "\"Falei pro Flávio que é dia 3\" é prometido = \"dia 3\" (a data que o cliente OUVIU, não a do plano); \"pro " +
+      "cliente, o serviço é a instalação do compressor\" é servico_cliente. Nada vai ao cliente por aqui.",
     input_schema: {
       type: "object",
       properties: {
@@ -185,6 +198,14 @@ export const agendaProducaoTools: ToolDef[] = [
         adiantavel_patio: {
           type: "number",
           description: "Dias que dá para adiantar no pátio, sem o barco/motorhome (\"dá para adiantar um dia no pátio\"). Só o dito.",
+        },
+        prometido: {
+          type: "string",
+          description: "A data que o dono DISSE ao cliente, como ele disse (\"dia 3\", \"entre 4 e 8/11\", \"semana que vem\"). Nunca calcule.",
+        },
+        servico_cliente: {
+          type: "string",
+          description: "Como o cliente chama o serviço, nas palavras do dono (\"a instalação do compressor\"; até 40 letras, sem valor).",
         },
         limpar: {
           type: "array",
@@ -444,6 +465,43 @@ export const agendaProducaoTools: ToolDef[] = [
       const chamada = paraFornecedor(args, contexto(ctx));
       if (!chamada.ok) return { error: chamada.error };
       return resultadoDoRascunho(await chamar(ctx, chamada), chamada.rpc);
+    },
+  },
+  // ── Fase 5 (P5): a mensagem-modelo ao cliente (prepara, nunca envia) ──
+  {
+    name: "cliente_avisar",
+    description:
+      "Prepara a MENSAGEM-MODELO da agenda a um cliente (\"avisa o Nelson que a peça chegou\", \"manda a confirmação pro " +
+      "Flávio\", \"avisa o Giancarlo que vai atrasar\"). O texto e as datas são do banco; você só escolhe a OS e o tipo. NÃO " +
+      "envia: devolve o texto, e só sai quando o dono manda *manda cliente <nome>*. Texto livre ao cliente não é aqui (é a " +
+      "mensagem do assistente, com a confirmação de sempre). Nunca cobrança, valor ou desconto.",
+    input_schema: {
+      type: "object",
+      properties: {
+        os: OS_DITA,
+        tipo: {
+          type: "string",
+          enum: [...TIPOS_DA_MENSAGEM_AO_CLIENTE],
+          description:
+            "confirmar = a data do serviço; vespera = o aviso da véspera; acesso = a véspera perguntando onde está o bem e a " +
+            "chave; material_chegou = a peça chegou; nova_data = a data firme depois do atraso; pode_atrasar = o aviso de " +
+            "atraso; andamento; pronto = ficou pronto; pronto_lembrete = combinar a entrega; pos_servico = como ficou.",
+        },
+        firme: {
+          type: "boolean",
+          description: "Só em pode_atrasar e só se o dono disse: a data firme do plano no lugar da faixa (\"pode dizer que é terça\").",
+        },
+        trecho: TRECHO,
+      },
+      required: ["os", "tipo", "trecho"],
+    },
+    risk: "low",
+    roles: SO_ADMIN,
+    async execute(args, ctx) {
+      if (ctx.userRole !== "admin") return SO_O_ADMINISTRADOR;
+      const chamada = paraCliente(args, contexto(ctx));
+      if (!chamada.ok) return { error: chamada.error };
+      return resultadoDaMensagemAoCliente(await chamar(ctx, chamada));
     },
   },
 ];

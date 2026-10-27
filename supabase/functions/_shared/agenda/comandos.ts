@@ -62,6 +62,16 @@
 //   As duas são de VER (valem com "?"); nenhuma age. "compras" sozinho, "o que falta comprar" e "agenda do fornecedor" são
 //   conversa (vão ao modelo, que chama agenda_ver foco compras).
 //
+// Fase 5 (P5, 27/10/2026; spec-fase5.md §5.5, §7.2) — a mensagem ao cliente:
+//   manda cliente · manda cliente <nome>        → aprova a mensagem-modelo que espera o dono (agenda_cliente_decidir_dito;
+//                                                  sem nome, todas); só sai pelas travas de sempre
+//   segura cliente · segura cliente <nome>      → segura (não sai), também a que ia sair sozinha
+//   agenda clientes                             → foco clientes (o que espera, o que vai sair, o que saiu, quem respondeu)
+//   O alvo segue a régua do *desfaz* (até 3 palavras, sem conectivo nem palavra de outra ferramenta, nunca uma letra):
+//   "manda cliente o orçamento", "manda pro cliente o PDF", "manda o PDF ao cliente", "manda o pix" e "segura aí" NÃO são
+//   palavra (vão ao modelo, que tem as ferramentas do orçamento e da mensagem com a confirmação dele). Só com
+//   agenda_config.modo_cliente fora de 'desligado' (ehPalavraDoCliente; em teste o banco responde "nada sai ainda").
+//
 // Só a frase inteira vale (normalizada pelo MESMO normalizarComando do secretário: sem acento, sem negrito, sem
 // pontuação no fim, sem o 🎤 do áudio). Qualquer palavra a mais é conversa e vai ao modelo como sempre.
 // (Revisão da Fase 3, C1) A palavra que AGE (concluiu, entreguei, diária, desfaz, dia feito/não/parcial, choveu) dita com
@@ -86,7 +96,9 @@ export type FocoDoComando =
   // (Fase 3, P6) a semana medida, o que a equipe respondeu e a comissão do mês
   | "ppc" | "equipe" | "comissao"
   // (Fase 4, P6) o que comprar e até quando; como a agenda conta o prazo de cada fornecedor
-  | "compras" | "fornecedores";
+  | "compras" | "fornecedores"
+  // (Fase 5, P5) as mensagens ao cliente
+  | "clientes";
 export type ResultadoDoDia = "cumprido" | "parcial" | "nao_cumprido";
 
 export type ComandoDaAgenda =
@@ -110,7 +122,9 @@ export type ComandoDaAgenda =
   /** (Fase 3) agenda_entregar_dito: o alvo como o dono disse */
   | { comando: "entregar"; alvo: string }
   /** (Fase 3, P4) agenda_diaria_dita: a pessoa como o dono disse, a jornada e o dia (null = o da pergunta ou hoje) */
-  | { comando: "diaria"; nome: string; jornada: JornadaDita; quando: string | null };
+  | { comando: "diaria"; nome: string; jornada: JornadaDita; quando: string | null }
+  /** (Fase 5, P5) agenda_cliente_decidir_dito: manda ou segura a mensagem ao cliente (alvo null = todas as que esperam) */
+  | { comando: "cliente"; acao: "manda" | "segura"; alvo: string | null };
 
 /** A jornada da palavra *diária*: inteira (também "dia inteiro"), meia ou não (não lançar / apagar). */
 export type JornadaDita = "inteira" | "meia" | "nao";
@@ -161,6 +175,8 @@ frases(["comissao", "comissao do mes"], ver(null, "comissao"));
 // Fase 4 (P6): o material e o prazo dos fornecedores
 frases(["agenda compras"], ver(null, "compras"));
 frases(["agenda fornecedores"], ver(null, "fornecedores"));
+// Fase 5 (P5): as mensagens ao cliente
+frases(["agenda clientes"], ver(null, "clientes"));
 
 /** A maior frase da tabela: texto maior do que isto nunca é comando da tabela (custo zero na conversa comum). */
 const MAIOR = Math.max(...[...FRASES.keys()].map((f) => f.length));
@@ -294,7 +310,36 @@ function lerPalavraComplemento(t: string): ComandoDaAgenda | null {
     const jornada: JornadaDita = m[2] === "meia" ? "meia" : m[2] === "nao" ? "nao" : "inteira";
     return { comando: "diaria", nome, jornada, quando };
   }
+  // Fase 5 (P5): *manda cliente [nome]* / *segura cliente [nome]* (o nome pela régua do *desfaz*)
+  m = /^(manda|segura) cliente(?: (.+))?$/.exec(t);
+  if (m) {
+    const acao = m[1] as "manda" | "segura";
+    const alvo = (m[2] ?? "").trim();
+    if (!alvo) return { comando: "cliente", acao, alvo: null };
+    const nome = alvoDito(alvo);
+    if (nome === undefined || nome.split(" ").some((p) => NAO_E_CLIENTE.has(p))) return null;
+    return { comando: "cliente", acao, alvo: nome };
+  }
   return null;
+}
+
+/**
+ * (Fase 5, P5) O que o dono manda AO cliente pelas outras ferramentas ("manda cliente o pdf", "manda cliente a foto",
+ * "manda cliente o link"): não é nome de cliente — a frase vai ao modelo (o envio do orçamento e a mensagem com a
+ * confirmação dele).
+ */
+const NAO_E_CLIENTE = new Set([
+  "pdf", "link", "proposta", "foto", "fotos", "documento", "recibo", "boleto", "contrato", "arquivo", "video", "audio",
+  "relatorio", "laudo", "comprovante", "valor", "preco", "desconto", "resumo", "os", "orc", "texto", "msg", "localizacao",
+]);
+
+/**
+ * (Fase 5, P5) As palavras da mensagem ao cliente (*manda cliente*, *segura cliente*, *agenda clientes*): só valem com
+ * agenda_config.modo_cliente fora de 'desligado' (antes disso não há mensagem da agenda ao cliente, e "manda cliente …" é
+ * conversa com o modelo).
+ */
+export function ehPalavraDoCliente(cmd: ComandoDaAgenda): boolean {
+  return cmd.comando === "cliente" || (cmd.comando === "ver" && cmd.foco === "clientes");
 }
 
 /**
@@ -337,6 +382,8 @@ export function ehPalavraDaFase2(cmd: ComandoDaAgenda): boolean {
  */
 const PALAVRAS_QUE_AGEM: ReadonlySet<ComandoDaAgenda["comando"]> = new Set([
   "concluir", "entregar", "diaria", "desfazer", "dia", "choveu",
+  // (Fase 5, P5) "manda cliente Nelson?" é pergunta, não ordem
+  "cliente",
 ]);
 
 /** O texto termina em pergunta? O "?" final que o normalizarComando tira (também com negrito, espaço ou aspas depois). */
@@ -356,8 +403,8 @@ export function lerComandoDaAgenda(texto: string): ComandoDaAgenda | null {
     // cópia: quem chama não muda a tabela
     if (fixo) cmd = { ...fixo };
   }
-  // Fase 2: as palavras com complemento (curtas: "desfaz" + até 40 caracteres é a maior)
-  if (!cmd && t.length <= ALVO_MAX + 12) cmd = lerPalavraComplemento(t);
+  // Fase 2: as palavras com complemento (curtas: "desfaz" + até 40 caracteres; Fase 5: "segura cliente " + 40 é a maior)
+  if (!cmd && t.length <= ALVO_MAX + 16) cmd = lerPalavraComplemento(t);
   // (C1) a pergunta do dono nunca vira ordem
   if (cmd && PALAVRAS_QUE_AGEM.has(cmd.comando) && terminaEmPergunta(texto)) return null;
   return cmd;

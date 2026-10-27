@@ -135,8 +135,10 @@ Deno.test("SO_PELA_REDE: pela rede, roda direto só leitura e escrita de sugest�
   // executa é o *grava* do dono.
   // fornecedor_prazo (25/10/2026, Agenda de Produção, Fase 4): só anota o rascunho do prazo do fornecedor; quem grava em
   // suppliers é o *grava* do dono.
+  // cliente_avisar (27/10/2026, Agenda de Produção, Fase 5): só registra a mensagem-modelo esperando o dono; a fila só recebe
+  // depois do *manda cliente* (comando sem IA) e das três travas do envio.
   assertEquals(escritasDiretas, [
-    "agenda_aplicar", "agenda_desfazer", "agenda_propor", "completar_comprovante", "enviar_arquivo_do_dropbox",
+    "agenda_aplicar", "agenda_desfazer", "agenda_propor", "cliente_avisar", "completar_comprovante", "enviar_arquivo_do_dropbox",
     "equipe_disponibilidade", "fornecedor_prazo", "interpret_customer_reply", "material_informar", "os_planejar",
     "os_registrar_andamento", "remember_about_entity",
   ]);

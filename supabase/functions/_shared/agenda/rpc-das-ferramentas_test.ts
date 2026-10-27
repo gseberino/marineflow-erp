@@ -5,6 +5,12 @@
 import { assert, assertEquals, assertThrows } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   canalDaRpc,
+  FOCOS,
+  INSTRUCAO_CLIENTE,
+  paraCliente,
+  resultadoDaMensagemAoCliente,
+  RPC_CLIENTE_PREPARAR,
+  TIPOS_DA_MENSAGEM_AO_CLIENTE,
   ESCOPOS_DA_PROPOSTA,
   EVENTOS_DO_ANDAMENTO,
   INSTRUCAO_AGENDA_DESLIGADA,
@@ -462,4 +468,61 @@ Deno.test("paraPlanejar (Fase 2): adiantavel_patio como o dono disse e limpar pa
     { limpar: ["patio"] });
   assertEquals(erro(paraPlanejar({ os: "Giancarlo", adiantavel_patio: 0, trecho: "x" }, CTX)).includes("'adiantavel_patio'"), true);
   assertEquals(erro(paraPlanejar({ os: "Giancarlo", adiantavel_patio: "dois", trecho: "x" }, CTX)).includes("tem de ser número"), true);
+});
+
+// ─── Fase 5 (P5): cliente_avisar e o os_planejar com o que foi dito ao cliente ───────────────────────────────
+
+
+const CTX5 = { autor: "00000000-0000-4000-8000-000000000001", canal: "whatsapp" as const, hoje: "2026-10-30" };
+
+Deno.test("Fase 5: paraCliente — a OS, o tipo, o firme e o trecho; nenhum texto ao cliente vai daqui", () => {
+  const c = paraCliente({ os: "Nelson", tipo: "material_chegou", trecho: "avisa o Nelson que a peça chegou" }, CTX5);
+  assertEquals(c, {
+    ok: true, rpc: RPC_CLIENTE_PREPARAR,
+    params: { p_autor: CTX5.autor, p_os: "Nelson", p_tipo: "material_chegou", p_firme: false,
+              p_trecho: "avisa o Nelson que a peça chegou", p_hoje: "2026-10-30" },
+  });
+  const f = paraCliente({ os: "Flávio", tipo: "pode_atrasar", firme: true, trecho: "pode dizer que é terça" }, CTX5);
+  assertEquals(f.ok && f.params.p_firme, true);
+});
+
+Deno.test("Fase 5: paraCliente recusa o texto livre, o id, o tipo fora da lista (a mudança no dia é sozinha), o firme fora do atraso e sem trecho", () => {
+  const recusas: Array<[Record<string, unknown>, string]> = [
+    [{ os: "Nelson", tipo: "pode_atrasar", texto: "Nelson, vai atrasar", trecho: "avisa" }, "'texto' não existe"],
+    [{ os: "Nelson", tipo: "pode_atrasar", mensagem: "oi", trecho: "avisa" }, "'mensagem' não existe"],
+    [{ os: "05000000-0000-4000-8000-000000000112", tipo: "pronto", trecho: "avisa" }, "não o id"],
+    [{ os: "Nelson", tipo: "mudanca_no_dia", trecho: "avisa" }, "'tipo' aceita só"],
+    [{ os: "Nelson", tipo: "cobranca", trecho: "cobra o Nelson" }, "'tipo' aceita só"],
+    [{ os: "Nelson", tipo: "confirmar", firme: true, trecho: "avisa" }, "'firme' só vale no tipo pode_atrasar"],
+    [{ os: "Nelson", tipo: "confirmar" }, "falta 'trecho'"],
+    [{ tipo: "confirmar", trecho: "avisa" }, "falta 'os'"],
+  ];
+  for (const [args, msg] of recusas) {
+    const c = paraCliente(args, CTX5);
+    assertEquals(c.ok, false, JSON.stringify(args));
+    if (!c.ok) assert(c.error.includes(msg), `${JSON.stringify(args)}: ${c.error}`);
+  }
+  assertEquals((TIPOS_DA_MENSAGEM_AO_CLIENTE as readonly string[]).includes("mudanca_no_dia"), false);
+  assertEquals(TIPOS_DA_MENSAGEM_AO_CLIENTE.length, 10);
+});
+
+Deno.test("Fase 5: resultadoDaMensagemAoCliente — o texto pronto e a instrução de que nada saiu; a recusa = o que falta", () => {
+  const ok = resultadoDaMensagemAoCliente({ ok: true, status: "preparada", texto: "Pronto para o Flávio, sai agora: \"…\". Para mandar: *manda cliente Flávio*.", mensagem_id: "x" });
+  assertEquals([ok.ok, ok.instrucao], [true, INSTRUCAO_CLIENTE]);
+  assert(!("mensagem_id" in ok));
+  const nao = resultadoDaMensagemAoCliente({ ok: false, motivo: "sem_prometido", pergunta: "Não há data dita ao Giancarlo…", texto: "Não há data dita ao Giancarlo…" });
+  assertEquals([nao.ok, nao.texto], [false, "Não há data dita ao Giancarlo…"]);
+  assertThrows(() => resultadoDaMensagemAoCliente(null), Error, "respondeu sem texto");
+});
+
+Deno.test("Fase 5: paraPlanejar leva prometido (como o dono disse; ISO volta) e servico_cliente; agenda_ver aceita o foco clientes", () => {
+  const c = paraPlanejar({ os: "Flávio", prometido: "dia 3", trecho: "falei pro Flávio que fica pra dia 3" }, CTX5);
+  assertEquals(c.ok && c.params.p_dados, { prometido: "dia 3" });
+  const s = paraPlanejar({ os: "Nelson", servico_cliente: "a instalação do painel", trecho: "pro cliente é a instalação do painel" }, CTX5);
+  assertEquals(s.ok && s.params.p_dados, { servico_cliente: "a instalação do painel" });
+  const iso = paraPlanejar({ os: "Flávio", prometido: "2026-11-03", trecho: "dia 3" }, CTX5);
+  assertEquals(iso.ok, false);
+  assertEquals((FOCOS as readonly string[]).includes("clientes"), true);
+  const v = paraAgendaVer({ foco: "clientes", os: "Nelson" }, CTX5);
+  assertEquals(v.ok && [v.params.p_foco, v.params.p_os], ["clientes", "Nelson"]);
 });

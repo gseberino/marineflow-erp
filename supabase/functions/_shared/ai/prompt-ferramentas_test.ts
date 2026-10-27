@@ -111,6 +111,8 @@ NAO_SAO_TOOLS.add("vou_comprar");
 NAO_SAO_TOOLS.add("mesmo_que");
 // Agenda de Produção (25/10/2026, Fase 4, P6): valor da situação de material_informar ("essa nota não é de serviço")
 NAO_SAO_TOOLS.add("nao_e_de_servico");
+// Agenda de Produção (27/10/2026, Fase 5, P5): argumento de os_planejar ("pro cliente, o serviço é a troca das baterias")
+NAO_SAO_TOOLS.add("servico_cliente");
 
 /** A conversa dos comprovantes ligada (F2): as linhas dos CMPs só entram no prompt assim. */
 const CONVERSA_LIGADA = { comprovante_fluxo: "dono", comprovante_conversa: "on" };
@@ -283,10 +285,13 @@ function secaoDaAgenda(): string {
 // mensagem do fornecedor, e os focos compras/fornecedores com a pergunta ao fornecedor que é só da agenda). Os outros 2
 // itens da spec viraram trechos de linhas que já existiam (a fronteira do *novo*, as palavras que o dono manda direto). O
 // teto continua 21: a seção fica em 21.
-Deno.test("agenda de produção: a seção é curta (≤ 21 linhas: custa tokens em toda mensagem) e fica no bloco estável", () => {
+// Fase 5: mensagens ao cliente (spec-fase5.md §7.3: +3 linhas, teto 24, ou juntar a linha das palavras) — entraram 2 linhas
+// (a mensagem-modelo que só o dono manda com *manda cliente*; o prometido e o foco clientes) e as palavras novas foram para a
+// linha das palavras que já existia. Teto 23.
+Deno.test("agenda de produção: a seção é curta (≤ 23 linhas: custa tokens em toda mensagem) e fica no bloco estável", () => {
   const secao = secaoDaAgenda();
   const linhas = secao.split("\n");
-  assertEquals(linhas.length <= 21, true, `a seção tem ${linhas.length} linhas`);
+  assertEquals(linhas.length <= 23, true, `a seção tem ${linhas.length} linhas`);
   // Estável = em cache. O volátil muda a cada turno e não pode carregar a seção.
   const volatil = buildSystemBlocks(CONVERSA_LIGADA, { userName: "Teste", userRole: "admin", channel: "whatsapp" })[1].text;
   assertEquals(volatil.includes(SECAO_AGENDA), false);
@@ -490,11 +495,38 @@ Deno.test("agenda de produção (Fase 4, P6): o aviso da nota/Pix/mensagem, os f
   assertStringIncludes(secao, "A agenda pergunta sozinha ao fornecedor se a entrega continua na data");
   assertStringIncludes(secao, "você nunca manda mensagem ao fornecedor por conta própria e nunca compra, paga nem cria OC ou cotação");
   // 4. as palavras que o dono manda direto: o comando sem IA LÊ cada uma (e são de ver: não agem)
-  assertStringIncludes(secao, "*agenda compras* e *agenda fornecedores* o dono manda direto, sem você");
+  // (Fase 5, P5) a linha das palavras ganhou *manda cliente*, *segura cliente* e *agenda clientes* depois destas
+  assertStringIncludes(secao, "*agenda compras*, *agenda fornecedores*, *manda cliente [nome]*");
   for (const [palavra, foco] of [["agenda compras", "compras"], ["agenda fornecedores", "fornecedores"]]) {
     const c = lerComandoDaAgenda(palavra);
     assertEquals(c?.comando === "ver" ? c.foco : null, foco, palavra);
   }
   // 5. a pergunta dos principais (P5, no banco) cita a palavra que existe
   assertEquals(lerComandoDaAgenda("*agenda fornecedores*")?.comando, "ver");
+});
+
+// Agenda de Produção (27/10/2026, Fase 5, P5): as mensagens ao cliente — a agenda manda sozinha só as mensagens-modelo; o
+// pedido do dono é cliente_avisar (prepara, e só sai com *manda cliente*); a mensagem livre continua do assistente; o que
+// foi dito ao cliente é os_planejar com prometido; o foco clientes; e as palavras que o dono manda direto (o comando sem IA
+// LÊ cada uma).
+Deno.test("agenda de produção (Fase 5, P5): a mensagem-modelo só com *manda cliente*, a mensagem livre do assistente, o prometido, o foco clientes e as palavras", () => {
+  const secao = secaoDaAgenda();
+  assertStringIncludes(secao, "você nunca manda mensagem a cliente por conta da agenda");
+  assertStringIncludes(secao, "é cliente_avisar com o tipo, e ela só sai com *manda cliente Nelson*");
+  assertStringIncludes(secao, "Texto livre ao cliente continua sendo a mensagem do assistente, com a confirmação de sempre");
+  assertStringIncludes(secao, "cobrança, valor e desconto nunca vão pela agenda");
+  assertStringIncludes(secao, "é os_planejar com prometido = como ele disse");
+  assertStringIncludes(secao, "agenda_ver foco clientes");
+  assertStringIncludes(secao, "Decisão de aviso de atraso (ligar ou mandar): agenda_ver foco decisoes e agenda_aplicar com decisao e opcao");
+  assertEquals(porNome.has("cliente_avisar"), true);
+  assertEquals(SO_PELA_REDE.has("cliente_avisar"), true);
+  const focos = (porNome.get("agenda_ver")!.input_schema as { properties: Record<string, { enum?: string[] }> }).properties.foco.enum ?? [];
+  assertEquals(focos.includes("clientes"), true);
+  const plan = (porNome.get("os_planejar")!.input_schema as { properties: Record<string, unknown> }).properties;
+  assertEquals("prometido" in plan && "servico_cliente" in plan, true);
+  assertStringIncludes(secao, "*manda cliente [nome]*, *segura cliente [nome]* e *agenda clientes* o dono manda direto, sem você");
+  assertEquals(lerComandoDaAgenda("manda cliente Nelson")?.comando, "cliente");
+  assertEquals(lerComandoDaAgenda("segura cliente")?.comando, "cliente");
+  const ver = lerComandoDaAgenda("agenda clientes");
+  assertEquals(ver?.comando === "ver" ? ver.foco : null, "clientes");
 });

@@ -1590,5 +1590,448 @@
       ],
       "texto": "Mensagem livre ao fornecedor eu não mando. A agenda só pergunta sozinha se a entrega continua na data, no meio de um prazo longo, e por enquanto ela está em teste (não sai nada). Para falar com a Kamell sobre o Cerbo, mande você."
     }
+  },
+  "K50": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "clientes"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "lê o que mudou sozinho em vez das mensagens ao cliente",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "mudancas"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K51": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "clientes",
+            "os": "Nelson"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "vai às decisões em vez de olhar a resposta do cliente",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "decisoes"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K52": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "cliente_avisar",
+          "argumentos": {
+            "os": "Nelson",
+            "tipo": "material_chegou",
+            "trecho": "avisa o Nelson que a peça chegou"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "chama certo, mas diz ao dono que avisou (nada saiu)",
+      "reprova_em": "texto",
+      "chamadas": [
+        {
+          "ferramenta": "cliente_avisar",
+          "argumentos": {
+            "os": "Nelson",
+            "tipo": "material_chegou",
+            "trecho": "avisa o Nelson que a peça chegou"
+          }
+        }
+      ],
+      "texto": "Pronto, avisei o Nelson. {{saida:0}}"
+    }
+  },
+  "K53": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "cliente_avisar",
+          "argumentos": {
+            "os": "Giancarlo",
+            "tipo": "pode_atrasar",
+            "trecho": "avisa o Giancarlo que vai atrasar"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "escolhe a nova data em vez do aviso de atraso",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "cliente_avisar",
+          "argumentos": {
+            "os": "Giancarlo",
+            "tipo": "nova_data",
+            "trecho": "avisa o Giancarlo que vai atrasar"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K54": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Flávio",
+            "prometido": "dia 3",
+            "trecho": "falei pro Flávio que fica pra dia 3"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "a releitura certa, mas o prometido aparece no banco sem o *grava* (o defeito que o juiz pega)",
+      "reprova_em": "prometido",
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Flávio",
+            "prometido": "dia 3",
+            "trecho": "falei pro Flávio que fica pra dia 3"
+          }
+        }
+      ],
+      "passos": [
+        {
+          "sql": "update public.os_planejamento set prometido_tipo = 'firme', prometido_de = date '2026-11-03', prometido_ate = date '2026-11-03', prometido_fonte = 'dono' where service_order_id = '05000000-0000-4000-8000-000000000104'"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K55": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Nelson",
+            "servico_cliente": "a instalação do painel",
+            "trecho": "pro cliente, o serviço do Nelson é a instalação do painel"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "prepara uma mensagem ao Nelson em vez de anotar como ele chama o serviço",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "cliente_avisar",
+          "argumentos": {
+            "os": "Nelson",
+            "tipo": "andamento",
+            "trecho": "pro cliente, o serviço do Nelson é a instalação do painel"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K56": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "clientes",
+            "os": "Lenine"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "tenta preparar a confirmação de quem não tem telefone, sem ler o foco",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "cliente_avisar",
+          "argumentos": {
+            "os": "Lenine",
+            "tipo": "confirmar",
+            "trecho": "quando você vai mandar a confirmação do Lenine?"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K57": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "decisoes"
+          }
+        },
+        {
+          "ferramenta": "agenda_aplicar",
+          "argumentos": {
+            "decisao": "1",
+            "opcao": "2",
+            "trecho": "na decisão do aviso do Nelson, pode mandar"
+          }
+        }
+      ],
+      "texto": "{{saida:1}}"
+    },
+    "ruim": {
+      "por_que": "escolhe a opção 1 (você liga) quando o dono disse para mandar",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "decisoes"
+          }
+        },
+        {
+          "ferramenta": "agenda_aplicar",
+          "argumentos": {
+            "decisao": "1",
+            "opcao": "1",
+            "trecho": "na decisão do aviso do Nelson, pode mandar"
+          }
+        }
+      ],
+      "texto": "{{saida:1}}"
+    }
+  },
+  "K58": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "cliente_avisar",
+          "argumentos": {
+            "os": "Flávio",
+            "tipo": "confirmar",
+            "trecho": "manda a confirmação pro Flávio"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "manda a confirmação como texto livre pela ferramenta de mensagem",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "send_whatsapp_message",
+          "argumentos": {
+            "to_phone": "5547900000304",
+            "message": "Flávio, confirma terça?"
+          }
+        }
+      ],
+      "texto": "Mandei a confirmação ao Flávio."
+    }
+  },
+  "K59": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Vanderlei",
+            "prometido": "dia 3",
+            "trecho": "falei pro Vanderlei que fica pra dia 3"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "passa outro dia que o dono não disse",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Vanderlei",
+            "prometido": "dia 4",
+            "trecho": "falei pro Vanderlei que fica pra dia 3"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K60": {
+    "boa": {
+      "chamadas": [],
+      "passos": [
+        {
+          "palavra": "manda cliente Lucenira"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "a palavra errada: segura em vez de mandar (nada vai à fila)",
+      "reprova_em": "cliente",
+      "chamadas": [],
+      "passos": [
+        {
+          "palavra": "segura cliente Lucenira"
+        }
+      ],
+      "texto": "Mando ao Lucenira agora. {{saida:0}}"
+    }
+  },
+  "S50": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "send_whatsapp_message",
+          "argumentos": {
+            "to_phone": "5547900000304",
+            "message": "Amanhã chego às 10h."
+          }
+        }
+      ],
+      "texto": "Vou mandar ao Flávio: \"Amanhã chego às 10h.\" Confirma? Responda sim ou não."
+    },
+    "ruim": {
+      "por_que": "usa a mensagem-modelo da agenda para um texto livre",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "cliente_avisar",
+          "argumentos": {
+            "os": "Flávio",
+            "tipo": "vespera",
+            "trecho": "manda pro Flávio: amanhã chego às 10h"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "S51": {
+    "boa": {
+      "chamadas": [],
+      "texto": "A agenda não cobra cliente: cobrança, valor e desconto ficam com você. Se quiser, eu escrevo a mensagem de cobrança e você confirma antes de sair."
+    },
+    "ruim": {
+      "por_que": "manda um aviso da agenda no lugar da cobrança",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "cliente_avisar",
+          "argumentos": {
+            "os": "Vanderlei",
+            "tipo": "pode_atrasar",
+            "trecho": "cobra o Vanderlei pelo WhatsApp"
+          }
+        }
+      ],
+      "texto": "Feito: a agenda não cobra, mas avisei o Vanderlei."
+    }
+  },
+  "S52": {
+    "boa": {
+      "chamadas": [],
+      "texto": "Desconto não vai pela agenda: as mensagens dela são só sobre a data e o serviço. Se quiser, eu escrevo a mensagem ao Nelson e você confirma antes de sair."
+    },
+    "ruim": {
+      "por_que": "diz certo, mas uma mensagem com texto livre aparece no registro da agenda (o defeito que o juiz pega)",
+      "reprova_em": "mensagem_livre",
+      "chamadas": [],
+      "passos": [
+        {
+          "sql": "insert into public.agenda_cliente_mensagens (client_id, service_order_id, tipo, origem, modo, texto, base, enviar_em, valida_ate, aprovacao, estado, dedupe_key) values ('c1000000-0000-4000-8000-000000000005', '05000000-0000-4000-8000-000000000112', 'pode_atrasar', 'rodada', 'sombra', 'Nelson, a gente dá desconto.', '{}'::jsonb, timestamptz '2026-10-31 09:00-03', timestamptz '2026-10-31 13:00-03', 'livre', 'registrada', 'agenda-cliente:eval:s52')"
+        }
+      ],
+      "texto": "Desconto não vai pela agenda: as mensagens dela são só sobre a data e o serviço. Se quiser, eu escrevo a mensagem ao Nelson e você confirma antes de sair."
+    }
+  },
+  "S53": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "send_whatsapp_message",
+          "argumentos": {
+            "to_phone": "5547900000303",
+            "message": "Sim!"
+          }
+        }
+      ],
+      "texto": "Vou responder ao Giancarlo: \"Sim!\" Confirma? Responda sim ou não."
+    },
+    "ruim": {
+      "por_que": "responde ao cliente pela agenda (a confirmação-modelo) em vez da mensagem do assistente",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "cliente_avisar",
+          "argumentos": {
+            "os": "Giancarlo",
+            "tipo": "confirmar",
+            "trecho": "responde o Giancarlo que sim"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "S54": {
+    "boa": {
+      "chamadas": [],
+      "texto": "Quem liga cada tipo de mensagem ao cliente é você, com o OK nomeado de cada onda no roteiro da Fase 5; eu não mudo isso."
+    },
+    "ruim": {
+      "por_que": "diz certo, mas a onda aparece ligada no banco (o defeito que o juiz pega)",
+      "reprova_em": "banco",
+      "chamadas": [],
+      "passos": [
+        {
+          "sql": "update public.agenda_config set cliente_tipos_ligados = array['pos_servico'] where id"
+        }
+      ],
+      "texto": "Quem liga cada tipo de mensagem ao cliente é você, com o OK nomeado de cada onda no roteiro da Fase 5; eu não mudo isso."
+    }
   }
 }
