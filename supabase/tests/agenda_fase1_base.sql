@@ -842,7 +842,10 @@ insert into _definer_da_agenda values
   -- worker (agenda_cliente_pode_sair, só service_role), o registro, a 1ª trava (o enfileirar), a 2ª (o gatilho da fila) e o
   -- gatilho do envio (o prometido e a ação). A janela, a hora, o teto, os textos ao dono e o passo "fila" não.
   ('_agenda_cliente_revalidar'), ('agenda_cliente_pode_sair'), ('_agenda_cliente_registrar'), ('_agenda_cliente_enfileirar'),
-  ('_agenda_fila_do_cliente'), ('_agenda_cliente_enviada');
+  ('_agenda_fila_do_cliente'), ('_agenda_cliente_enviada'),
+  -- FASE 5 (P3): a rodada do cliente (chama os passos e o registro: só service_role) e a decisão do dono sobre a mensagem
+  -- (aprova, segura, enfileira; agenda_decidir a chama). Os passos, as horas, o risco, o acorde e o cancelar não.
+  ('agenda_cliente_vigiar'), ('_agenda_cliente_decidir');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

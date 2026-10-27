@@ -113,6 +113,21 @@ begin
   end loop;
   return v_b;
 end $f$;
+-- (Fase 5, P3) o corpo sem os blocos "-- FASE 5: … -- FASE 5: fim" (a agenda_saude recriada em 20261028100300).
+create function pg_temp.sem_fase5(p_corpo text) returns text[] language plpgsql as $f$
+declare
+  v_b text[] := '{}'; v_bloco boolean := false; l text;
+begin
+  foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
+    if not v_bloco and l ~ '^\s*-- FASE 5:' and l !~ '^\s*-- FASE 5: fim' then v_bloco := true; continue; end if;
+    if v_bloco then
+      if l ~ '^\s*-- FASE 5: fim' then v_bloco := false; end if;
+      continue;
+    end if;
+    v_b := v_b || l;
+  end loop;
+  return v_b;
+end $f$;
 
 create function pg_temp.em(p_dia date, p_hora text) returns timestamptz language sql immutable as $f$
   select (p_dia + p_hora::time) at time zone 'America/Sao_Paulo'
@@ -1071,7 +1086,10 @@ begin
       end if;
     end loop;
   end loop;
-  v_novo := pg_temp.sem_fase4((select p.prosrc from pg_proc p where p.oid = 'public.agenda_saude(date, timestamptz)'::regprocedure));
+  -- (Fase 5, P3) agenda_saude foi recriada de novo em 20261028100300 (o bloco cliente), só com blocos "-- FASE 5:" fora
+  -- dos da Fase 4: tira-os antes (o agenda_fase5_rodada.sql, R12, confere a cópia da Fase 5 contra a de 20261027100500).
+  v_novo := pg_temp.sem_fase4(array_to_string(pg_temp.sem_fase5(
+              (select p.prosrc from pg_proc p where p.oid = 'public.agenda_saude(date, timestamptz)'::regprocedure)), E'\n'));
   insert into _resultado values ('V6 a cópia de agenda_saude só muda nos blocos "-- FASE 4:" e nas 2 linhas da vírgula (× 20261026100300)',
     v_n = 2 and v_novo = v_velho
     and (select count(*) from regexp_matches((select p.prosrc from pg_proc p where p.oid = 'public.agenda_saude(date, timestamptz)'::regprocedure),
