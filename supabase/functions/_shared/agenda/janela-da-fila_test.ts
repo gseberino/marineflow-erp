@@ -9,15 +9,22 @@
 //     nova); erro, sem a linha, horário ilegível ou o sábado que não é sim/não = lança (a linha não sai);
 //  4. faltando a janela da origem (a outra foi lida, esta não), a linha não sai; a equipe segue igual (o sábado é dia dela,
 //     a resposta direta continua só dela).
+//  5. (Fase 5, P2) 'agenda-cliente' é origem da agenda, com a janela 'cliente': [cliente_janela_inicio, cliente_janela_fim)
+//     de segunda a sexta, até cliente_sabado_fim no sábado, nunca domingo nem feriado (Finados, o 15/06 de Itajaí, a
+//     Sexta-feira Santa: a lista de feriados.ts), só com modo_cliente = 'ligado'; um SELECT à parte, só das colunas dela;
+//     a resposta do banco (agenda_cliente_pode_sair) lida por recusaDoBanco; a equipe e o fornecedor não ganham o feriado.
 import { assertEquals, assertRejects, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   COLUNAS_DA_JANELA,
+  COLUNAS_DA_JANELA_DO_CLIENTE,
   COLUNAS_DA_JANELA_DO_FORNECEDOR,
+  ehMensagemAoCliente,
   ehRespostaDireta,
   janelaDaOrigem,
   type JanelasDaAgenda,
   lerJanelasDaAgenda,
   origemComJanelaDaAgenda,
+  recusaDoBanco,
   recusaNaHoraDeEnviar,
 } from "./janela-da-fila.ts";
 
@@ -53,7 +60,7 @@ Deno.test("origens: agenda-fornecedor tem a janela do fornecedor; agenda-equipe 
   assertEquals(origemComJanelaDaAgenda("agenda-fornecedor"), true);
   assertEquals(janelaDaOrigem("agenda-fornecedor"), "fornecedor");
   assertEquals(janelaDaOrigem("agenda-equipe"), "equipe");
-  for (const o of [null, undefined, "", "reply-router", "quote-reminders", "agenda-cliente", "Agenda-Fornecedor",
+  for (const o of [null, undefined, "", "reply-router", "quote-reminders", "Agenda-Cliente", "Agenda-Fornecedor",
                    "agenda-fornecedor ", "fornecedor", "quote-request", 7]) {
     assertEquals(origemComJanelaDaAgenda(o), false, String(o));
     assertEquals(janelaDaOrigem(o), null, String(o));
@@ -178,4 +185,109 @@ Deno.test("leitura do fornecedor: erro, sem a linha, horário ilegível e o sáb
     const { db } = bancoDeMentira({ [COLUNAS_DA_JANELA_DO_FORNECEDOR]: resp });
     await assertRejects(() => lerJanelasDaAgenda(db, "fornecedor"), Error, trecho);
   }
+});
+
+// ── 5. (Fase 5, P2) A mensagem ao cliente ───────────────────────────────────────────────────────────────
+/** A janela do cliente do DEFAULT de 20261028100000. */
+const CLIENTE = { ligado: true, inicio: "08:00:00", fim: "19:00:00", sabadoFim: "13:00:00" };
+const COM_CLIENTE: JanelasDaAgenda = { ...TODAS, cliente: CLIENTE };
+const cli = (marcada: string) => linha(marcada, "agenda-cliente");
+
+Deno.test("P2 origens: agenda-cliente tem a janela do cliente; só ela é mensagem ao cliente; sem resposta direta", () => {
+  assertEquals(origemComJanelaDaAgenda("agenda-cliente"), true);
+  assertEquals(janelaDaOrigem("agenda-cliente"), "cliente");
+  assertEquals(ehMensagemAoCliente("agenda-cliente"), true);
+  for (const o of ["agenda-equipe", "agenda-fornecedor", "agenda-confirmacao", "Agenda-Cliente", "agenda-cliente ", null, 7]) {
+    assertEquals(ehMensagemAoCliente(o), false, String(o));
+  }
+  assertEquals(ehRespostaDireta({ source: "agenda-cliente", dedupe_key: "agenda-equipe:resposta:x:y" }), false);
+  // o botão antigo (agenda-confirmacao) continua fora da janela da agenda, como antes
+  assertEquals(origemComJanelaDaAgenda("agenda-confirmacao"), false);
+});
+
+Deno.test("P2 cliente de segunda a sexta: 07:59 não, 08:00 sim, 18:59 sim, 19:00 não; só no dia dela", () => {
+  const casos: Array<[string, string, string | null]> = [
+    ["2026-10-30T07:59:00", "2026-10-30T07:59:59", "janela"],
+    ["2026-10-30T08:00:00", "2026-10-30T08:00:00", null],
+    ["2026-10-30T18:59:00", "2026-10-30T18:59:59", null],
+    ["2026-10-30T18:59:00", "2026-10-30T19:00:00", "janela"],
+    ["2026-10-29T18:00:00", "2026-10-30T09:00:00", "janela"],
+  ];
+  for (const [marcada, agora, motivo] of casos) {
+    assertEquals(recusaNaHoraDeEnviar(cli(marcada), brt(agora), COM_CLIENTE)?.motivo ?? null, motivo, `${marcada} → ${agora}`);
+  }
+  assertEquals(recusaNaHoraDeEnviar(cli("2026-10-30T10:00:00"), brt("2026-10-30T19:30:00"), COM_CLIENTE)?.texto,
+    "agenda-cliente: fora da janela na hora de enviar (08:00–19:00): não saiu");
+});
+
+Deno.test("P2 cliente no sábado: até cliente_sabado_fim (12:59 sim, 13:00 não); domingo nunca", () => {
+  assertEquals(recusaNaHoraDeEnviar(cli("2026-10-31T09:00:00"), brt("2026-10-31T09:00:00"), COM_CLIENTE), null);
+  assertEquals(recusaNaHoraDeEnviar(cli("2026-10-31T12:59:00"), brt("2026-10-31T12:59:59"), COM_CLIENTE), null);
+  const r = recusaNaHoraDeEnviar(cli("2026-10-31T12:59:00"), brt("2026-10-31T13:00:00"), COM_CLIENTE);
+  assertEquals(r, { motivo: "janela", texto: "agenda-cliente: fora da janela na hora de enviar (08:00–13:00): não saiu" });
+  assertEquals(recusaNaHoraDeEnviar(cli("2026-11-01T10:00:00"), brt("2026-11-01T10:00:00"), COM_CLIENTE),
+    { motivo: "domingo", texto: "agenda-cliente: domingo, não sai (nunca no domingo)" });
+  // o fim do sábado é o do banco: até 14:00, as 13:30 saem
+  const outra: JanelasDaAgenda = { cliente: { ...CLIENTE, sabadoFim: "14:00" } };
+  assertEquals(recusaNaHoraDeEnviar(cli("2026-10-31T13:30:00"), brt("2026-10-31T13:30:00"), outra), null);
+});
+
+Deno.test("P2 cliente: nunca em feriado (Finados, o 15/06 de Itajaí, a Sexta-feira Santa); a equipe e o fornecedor não ganham o feriado", () => {
+  for (const [dia, nome] of [["2026-11-02", "Finados"], ["2027-06-15", "aniversário de Itajaí"], ["2027-03-26", "Sexta-feira Santa"]]) {
+    const r = recusaNaHoraDeEnviar(cli(`${dia}T10:00:00`), brt(`${dia}T10:00:00`), COM_CLIENTE);
+    assertEquals(r, { motivo: "feriado", texto: `agenda-cliente: feriado (${nome}), não sai` }, dia);
+  }
+  // a equipe e o fornecedor seguem iguais no feriado (quem marca a hora deles nunca a põe num feriado)
+  assertEquals(recusaNaHoraDeEnviar(linha("2026-11-02T10:00:00", "agenda-equipe"), brt("2026-11-02T10:00:00"), COM_CLIENTE), null);
+  assertEquals(recusaNaHoraDeEnviar(linha("2026-11-02T10:00:00"), brt("2026-11-02T10:00:00"), COM_CLIENTE), null);
+});
+
+Deno.test("P2 cliente: modo_cliente fora de ligado = modo; sem a janela do cliente (só as outras lidas) = não sai", () => {
+  assertEquals(recusaNaHoraDeEnviar(cli("2026-10-30T10:00:00"), brt("2026-10-30T10:00:00"), { cliente: { ...CLIENTE, ligado: false } }),
+    { motivo: "modo", texto: "agenda-cliente: modo_cliente saiu de ligado" });
+  const r = recusaNaHoraDeEnviar(cli("2026-10-30T10:00:00"), brt("2026-10-30T10:00:00"), TODAS);
+  assertEquals(r?.motivo, "janela");
+  assertStringIncludes(String(r?.texto), "não consegui ler a janela da agenda (sem a janela cliente)");
+});
+
+Deno.test("P2 leitura do cliente: um SELECT só das colunas dele; erro, sem a linha e horário ilegível lançam", async () => {
+  assertEquals(COLUNAS_DA_JANELA_DO_CLIENTE, "modo_cliente, cliente_janela_inicio, cliente_janela_fim, cliente_sabado_fim");
+  assertEquals(COLUNAS_DA_JANELA.includes("cliente"), false);
+  assertEquals(COLUNAS_DA_JANELA_DO_FORNECEDOR.includes("cliente"), false);
+  const ok = { modo_cliente: "ligado", cliente_janela_inicio: "08:00:00", cliente_janela_fim: "19:00:00", cliente_sabado_fim: "13:00:00" };
+  const { db, leituras } = bancoDeMentira({ [COLUNAS_DA_JANELA_DO_CLIENTE]: { data: ok } });
+  assertEquals(await lerJanelasDaAgenda(db, "cliente"), { cliente: CLIENTE });
+  assertEquals(leituras, [`agenda_config: ${COLUNAS_DA_JANELA_DO_CLIENTE}`]);
+  const { db: sombra } = bancoDeMentira({ [COLUNAS_DA_JANELA_DO_CLIENTE]: { data: { ...ok, modo_cliente: "sombra" } } });
+  assertEquals((await lerJanelasDaAgenda(sombra, "cliente")).cliente?.ligado, false);
+  const casos: Array<[{ data?: unknown; error?: unknown }, string]> = [
+    [{ error: { message: "column agenda_config.modo_cliente does not exist", code: "42703" } }, "modo_cliente does not exist"],
+    [{ data: null }, "sem a linha de parâmetros"],
+    [{ data: { ...ok, cliente_janela_inicio: "oito" } }, "a janela do cliente está ilegível"],
+    [{ data: { ...ok, cliente_sabado_fim: null } }, "a janela do cliente está ilegível"],
+  ];
+  for (const [resp, trecho] of casos) {
+    const { db: d } = bancoDeMentira({ [COLUNAS_DA_JANELA_DO_CLIENTE]: resp });
+    await assertRejects(() => lerJanelasDaAgenda(d, "cliente"), Error, trecho);
+  }
+});
+
+Deno.test("P2 recusaDoBanco: {pode: true} sai; o motivo do banco vira a recusa; erro, resposta estranha ou motivo que não é nome = janela", () => {
+  assertEquals(recusaDoBanco({ data: { pode: true, motivo: null } }), null);
+  assertEquals(recusaDoBanco({ data: { pode: false, motivo: "status" } }),
+    { motivo: "status", texto: "agenda-cliente: o banco diz que não sai mais (status): não saiu" });
+  for (const m of ["tipo_em_teste", "vencida", "opt_out", "data_mudou", "material", "passou_da_data", "mesmo_tipo_24h",
+                   "desatualizada", "feriado", "domingo", "modo"]) {
+    assertEquals(recusaDoBanco({ data: { pode: false, motivo: m } })?.motivo, m, m);
+  }
+  assertEquals(recusaDoBanco({ data: { pode: false, motivo: "outra coisa" } })?.motivo, "janela");
+  assertEquals(recusaDoBanco({ data: { pode: false, motivo: "Status" } })?.motivo, "janela");
+  assertEquals(recusaDoBanco({ data: { pode: false, motivo: 7 } })?.motivo, "janela");
+  assertEquals(recusaDoBanco({ data: { pode: "true" } })?.motivo, "janela");
+  assertEquals(recusaDoBanco({ data: null })?.motivo, "janela");
+  assertEquals(recusaDoBanco({}), { motivo: "janela", texto: "agenda-cliente: o banco diz que não sai mais (sem resposta): não saiu" });
+  assertEquals(recusaDoBanco({ error: { message: "function agenda_cliente_pode_sair does not exist", code: "42883" } }), {
+    motivo: "janela",
+    texto: "agenda-cliente: não consegui perguntar ao banco se ainda vale (function agenda_cliente_pode_sair does not exist): não saiu",
+  });
 });

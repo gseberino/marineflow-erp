@@ -16,10 +16,15 @@
 //     [fornecedor_janela_inicio, fornecedor_janela_fim), de segunda a sexta (o sábado só com fornecedor_sabado), com o
 //     fornecedor ligado; fora disso vira 'failed' e o registro em agenda_fornecedor_mensagens fica recusado; a janela dele é
 //     lida à parte (a que não se lê não segura a equipe); e NENHUMA outra origem muda de comportamento com ela no lote.
+//  8. (Fase 5, P2) a linha 'agenda-cliente': a janela dela (segunda a sexta e sábado até o fim do sábado, nunca domingo nem
+//     feriado, modo_cliente); no máximo UMA por lote (as outras voltam a 'pending' sem contar tentativa); antes de mandar, a
+//     pergunta ao banco (agenda_cliente_pode_sair) — "não pode" ou erro = failed, o registro recusado com o motivo e nada
+//     sai; as outras origens nem chamam a RPC.
 import { assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { enviarLote, type ItemDaFila, travarLote } from "./enviar.ts";
 import {
   COLUNAS_DA_JANELA,
+  COLUNAS_DA_JANELA_DO_CLIENTE,
   COLUNAS_DA_JANELA_DO_FORNECEDOR,
   ehRespostaDireta,
   intervaloEmSegundos,
@@ -110,8 +115,8 @@ Deno.test("outras origens: saem como sempre, até no domingo às 23:00, e a conf
     item("1", null, "2026-11-01T22:59:00"),
     item("2", "reply-router", "2026-11-01T03:00:00"),
     item("3", "quote-reminders", "2026-10-30T23:59:00"),
-    // a Fase 5 ainda não cadastrou origem de cliente: até lá ela não tem janela (o helper é o único lugar de cadastrar)
-    item("4", "agenda-cliente", "2026-11-01T23:00:00"),
+    // só a origem exata tem janela: "Agenda-Cliente" (outra caixa) sai como qualquer outra (o helper é o único lugar)
+    item("4", "Agenda-Cliente", "2026-11-01T23:00:00"),
     item("5", "Agenda-Equipe", "2026-11-01T23:00:00"),
   ];
   const r = await enviarLote(db, provider, lote, { delayMs: 0, agora: () => domingoNoite });
@@ -267,7 +272,7 @@ Deno.test("a janela: o início fechado e o fim aberto (07:30:00 sai, 20:00:00 n�
   // os horários são os do banco: com a janela até 21:00, as 20:30 saem
   assertEquals(recusaNaHoraDeEnviar(l("2026-11-03T20:30:00", "2026-11-03T20:30:00"), brt("2026-11-03T20:30:00"),
     { equipe: { ligado: true, inicio: "07:30", fim: "21:00" }, respostaDireta: RD }), null);
-  for (const o of [null, undefined, "", "reply-router", "quote-reminders", "agenda-cliente", "agenda-equipe ", 7]) {
+  for (const o of [null, undefined, "", "reply-router", "quote-reminders", "Agenda-Cliente", "agenda-equipe ", 7]) {
     assertEquals(origemComJanelaDaAgenda(o), false);
     assertEquals(recusaNaHoraDeEnviar({ source: o, scheduled_for: "x" }, brt("2026-11-01T23:00:00"), null), null);
   }
@@ -521,7 +526,7 @@ Deno.test("P5 nenhuma outra origem muda: com ou sem a linha do fornecedor no lot
     item("1", null, "2026-10-31T22:59:00"),
     item("2", "reply-router", "2026-10-31T03:00:00"),
     item("3", "quote-reminders", "2026-10-30T23:59:00"),
-    item("4", "agenda-cliente", "2026-10-31T23:00:00"),
+    item("4", "agenda-confirmacao", "2026-10-31T23:00:00"),
     item("5", "comprovantes", "2026-10-31T23:00:00"),
   ];
   const sem = bancoPorColunas();
@@ -543,4 +548,146 @@ Deno.test("P5 nenhuma outra origem muda: com ou sem a linha do fornecedor no lot
   // a do fornecedor (sábado, sem fornecedor_sabado) não saiu
   assertEquals(r2[5].janela_da_agenda, "fim_de_semana");
   assertEquals(com.leituras, [`agenda_config: ${COLUNAS_DA_JANELA_DO_FORNECEDOR}`]);
+});
+
+// ── 8. (Fase 5, P2) A mensagem ao cliente: a 3ª trava ───────────────────────────────────────────────────
+const CONFIG_CLIENTE = {
+  modo_cliente: "ligado", cliente_janela_inicio: "08:00:00", cliente_janela_fim: "19:00:00", cliente_sabado_fim: "13:00:00",
+};
+/** O banco por colunas + a RPC agenda_cliente_pode_sair (a resposta por id da fila; o padrão: pode). */
+function bancoDoCliente(
+  podeSair: Record<string, { data?: unknown; error?: unknown }> = {},
+  respostas: Record<string, { data?: unknown; error?: unknown }> = {
+    [COLUNAS_DA_JANELA]: { data: CONFIG },
+    [COLUNAS_DA_JANELA_DO_FORNECEDOR]: { data: CONFIG_FORNECEDOR },
+    [COLUNAS_DA_JANELA_DO_CLIENTE]: { data: CONFIG_CLIENTE },
+  },
+) {
+  const base = bancoPorColunas(respostas);
+  const chamadas: Array<[string, unknown]> = [];
+  const db = {
+    ...base.db,
+    rpc(nome: string, args: { p_fila: string }) {
+      chamadas.push([nome, args]);
+      return Promise.resolve(podeSair[args.p_fila] ?? { data: { pode: true, motivo: null }, error: null });
+    },
+  };
+  return { db, escritas: base.escritas, leituras: base.leituras, chamadas };
+}
+const cli = (id: string, marcada: string, extra: Partial<ItemDaFila> = {}) =>
+  item(id, "agenda-cliente", marcada, { dedupe_key: `agenda-cliente:confirmar:os-${id}:2026-11-03`, ...extra });
+
+Deno.test("P2 agenda-cliente na janela (sex 10:00), o banco diz que pode: sai; só a configuração do cliente é lida; a RPC com o id da fila", async () => {
+  const { db, escritas, leituras, chamadas } = bancoDoCliente();
+  const { provider, enviados } = provedorDeMentira();
+  const r = await enviarLote(db, provider, [cli("1", "2026-10-30T10:00:00")], { delayMs: 0, agora: () => brt("2026-10-30T10:00:40") });
+  assertEquals(r, [{ id: "1", ok: true }]);
+  assertEquals(enviados, ["5547900000001"]);
+  assertEquals(leituras, [`agenda_config: ${COLUNAS_DA_JANELA_DO_CLIENTE}`]);
+  assertEquals(chamadas, [["agenda_cliente_pode_sair", { p_fila: "1" }]]);
+  assertEquals(daFila(escritas, "1")[0].valores.status, "sent");
+});
+
+Deno.test("P2 uma mensagem ao cliente por lote: a 2ª e a 3ª voltam a pending sem contar tentativa; as outras origens do lote saem", async () => {
+  const { db, escritas, chamadas } = bancoDoCliente();
+  const { provider, enviados } = provedorDeMentira();
+  const r = await enviarLote(db, provider, [
+    cli("1", "2026-10-30T10:00:00"),
+    item("2", "reply-router", "2026-10-30T10:00:00"),
+    cli("3", "2026-10-30T10:00:45"),
+    cli("4", "2026-10-30T10:01:30", { attempts: 1 }),
+  ], { delayMs: 0, agora: () => brt("2026-10-30T10:02:00") });
+  assertEquals(r.map((x) => [x.id, x.ok, x.adiada ?? false, x.give_up ?? false]),
+    [["1", true, false, false], ["2", true, false, false], ["3", false, true, false], ["4", false, true, false]]);
+  assertEquals(enviados, ["5547900000001", "5547900000002"]);
+  for (const id of ["3", "4"]) {
+    assertEquals(daFila(escritas, id).map((e) => e.valores), [{ status: "pending", processing_started_at: null }], id);
+  }
+  // a RPC só para a que foi; nenhuma escrita no registro do cliente
+  assertEquals(chamadas.map((c) => (c[1] as { p_fila: string }).p_fila), ["1"]);
+  assertEquals(escritas.some((e) => e.tabela === "agenda_cliente_mensagens"), false);
+});
+
+Deno.test("P2 o banco diz que não sai (status, desatualizada…): failed com o motivo, nada sai, o registro do cliente recusado com ele", async () => {
+  for (const motivo of ["status", "data_mudou", "material", "opt_out", "desatualizada", "vencida", "tipo_em_teste"]) {
+    const { db, escritas } = bancoDoCliente({ "1": { data: { pode: false, motivo } } });
+    const { provider, enviados } = provedorDeMentira();
+    const r = await enviarLote(db, provider, [cli("1", "2026-10-30T10:00:00")], { delayMs: 0, agora: () => brt("2026-10-30T10:00:30") });
+    assertEquals(enviados, [], motivo);
+    assertEquals(r[0], {
+      id: "1", ok: false, give_up: true, janela_da_agenda: motivo,
+      error: `agenda-cliente: o banco diz que não sai mais (${motivo}): não saiu`,
+    });
+    assertEquals(daFila(escritas, "1")[0].valores, { status: "failed", failed_reason: r[0].error, processing_started_at: null });
+    const reg = escritas.filter((e) => e.tabela === "agenda_cliente_mensagens");
+    assertEquals(reg.map((e) => [e.valores, e.filtros]), [[{ estado: "recusada", recusa_motivo: motivo }, [["fila_id", "1"], ["estado", "enfileirada"]]]]);
+  }
+});
+
+Deno.test("P2 a pergunta ao banco que falha (erro, exceção, função ausente): não sai (janela, com o erro)", async () => {
+  const casos: Array<[{ data?: unknown; error?: unknown } | "lança", string]> = [
+    [{ error: { message: "function public.agenda_cliente_pode_sair(uuid) does not exist", code: "42883" } }, "does not exist"],
+    [{ data: null, error: null }, "sem resposta"],
+    ["lança", "rede fora"],
+  ];
+  for (const [resp, trecho] of casos) {
+    const base = bancoDoCliente();
+    const db = resp === "lança" ? { ...base.db, rpc: () => Promise.reject(new Error("rede fora")) } : bancoDoCliente({ "1": resp }).db;
+    const escritas = resp === "lança" ? base.escritas : undefined;
+    const { provider, enviados } = provedorDeMentira();
+    const r = await enviarLote(db, provider, [cli("1", "2026-10-30T10:00:00")], { delayMs: 0, agora: () => brt("2026-10-30T10:00:30") });
+    assertEquals([enviados.length, r[0].ok, r[0].janela_da_agenda], [0, false, "janela"], trecho);
+    assertStringIncludes(String(r[0].error), trecho);
+    if (escritas) assertEquals(daFila(escritas, "1")[0].valores.status, "failed");
+  }
+});
+
+Deno.test("P2 a janela do cliente vem antes da pergunta ao banco: sáb 13:00, domingo, Finados e o modo desligado não chamam a RPC", async () => {
+  const casos: Array<[string, string, Record<string, unknown>, string | null]> = [
+    ["2026-10-31T12:59:00", "2026-10-31T12:59:30", CONFIG_CLIENTE, null],
+    ["2026-10-31T12:59:00", "2026-10-31T13:00:00", CONFIG_CLIENTE, "janela"],
+    ["2026-11-01T10:00:00", "2026-11-01T10:00:00", CONFIG_CLIENTE, "domingo"],
+    ["2026-11-02T10:00:00", "2026-11-02T10:00:00", CONFIG_CLIENTE, "feriado"],
+    ["2026-10-30T10:00:00", "2026-10-30T10:00:00", { ...CONFIG_CLIENTE, modo_cliente: "sombra" }, "modo"],
+    ["2026-10-30T19:00:00", "2026-10-30T19:00:00", CONFIG_CLIENTE, "janela"],
+  ];
+  for (const [marcada, agora, config, motivo] of casos) {
+    const { db, escritas, chamadas } = bancoDoCliente({}, { [COLUNAS_DA_JANELA_DO_CLIENTE]: { data: config } });
+    const { provider, enviados } = provedorDeMentira();
+    const r = await enviarLote(db, provider, [cli("1", marcada)], { delayMs: 0, agora: () => brt(agora) });
+    assertEquals([enviados.length, r[0].janela_da_agenda ?? null, chamadas.length], [motivo ? 0 : 1, motivo, motivo ? 0 : 1],
+      `${marcada} → ${agora}`);
+    if (motivo) {
+      assertEquals(escritas.find((e) => e.tabela === "agenda_cliente_mensagens")?.valores, { estado: "recusada", recusa_motivo: motivo });
+    }
+  }
+});
+
+Deno.test("P2 nenhuma outra origem muda: com ou sem linhas de cliente no lote, as mesmas escritas e os mesmos envios; a RPC só para o cliente", async () => {
+  const outras = () => [
+    item("1", null, "2026-10-30T22:59:00"),
+    item("2", "reply-router", "2026-10-30T03:00:00"),
+    item("3", "agenda-confirmacao", "2026-10-30T23:00:00"),
+    item("5", "comprovantes", "2026-10-30T23:00:00"),
+  ];
+  const sem = bancoDoCliente();
+  const p1 = provedorDeMentira();
+  const r1 = await enviarLote(sem.db, p1.provider, outras(), { delayMs: 0, agora: () => brt("2026-10-30T23:00:00") });
+  const com = bancoDoCliente();
+  const p2 = provedorDeMentira();
+  const r2 = await enviarLote(com.db, p2.provider, [...outras(), cli("8", "2026-10-30T10:00:00"), cli("9", "2026-10-30T10:01:00")],
+    { delayMs: 0, agora: () => brt("2026-10-30T23:00:00") });
+  assertEquals(sem.leituras, []);
+  assertEquals(sem.chamadas, []);
+  assertEquals(r2.slice(0, 4), r1);
+  assertEquals(p2.enviados, p1.enviados);
+  for (const id of ["1", "2", "3", "5"]) {
+    const a = daFila(sem.escritas, id).map((e) => ({ ...e.valores, sent_at: "x" }));
+    const b = daFila(com.escritas, id).map((e) => ({ ...e.valores, sent_at: "x" }));
+    assertEquals(b, a, id);
+  }
+  // a 1ª do cliente (às 23:00, fora da janela) falhou sem chamar a RPC; a 2ª voltou à fila
+  assertEquals([r2[4].janela_da_agenda, r2[5].adiada], ["janela", true]);
+  assertEquals(com.chamadas, []);
+  assertEquals(com.leituras, [`agenda_config: ${COLUNAS_DA_JANELA_DO_CLIENTE}`]);
 });

@@ -14,12 +14,23 @@
 // Fase 4 (P5): a mensagem ao fornecedor ('agenda-fornecedor') passa pelo mesmo helper, com a janela dela (segunda a sexta,
 // fornecedor_janela_inicio a fornecedor_janela_fim, modo_fornecedor). Cada janela é lida à parte, uma vez por lote e só se
 // o lote tiver linha daquela origem: a leitura de uma não segura a outra, e as outras origens continuam sem ler nada.
+//
+// Fase 5 (P2): a mensagem ao CLIENTE ('agenda-cliente') passa pela janela dela (segunda a sexta e sábado até
+// cliente_sabado_fim, nunca domingo nem feriado, modo_cliente) e por mais duas conferências, só dela:
+//   · no máximo UMA linha de cliente por lote (o banco já marca 30 a 60 s entre uma e outra; o worker roda a cada minuto e
+//     manda o lote com 1,5 s entre as linhas): as outras voltam a 'pending' sem contar tentativa e saem no próximo disparo;
+//   · antes de mandar, a pergunta ao banco (agenda_cliente_pode_sair: o modo, o tipo, a validade, a janela e a
+//     revalidação — status, data, material, opt-out, o mesmo tipo em 24 h, o texto). Erro na pergunta ou "não pode" = não
+//     sai: a linha vira 'failed' e o registro em agenda_cliente_mensagens fica recusado com o motivo.
+// As outras origens não chamam a RPC nem mudam (provado em enviar_test.ts).
 
 import {
+  ehMensagemAoCliente,
   janelaDaOrigem,
   type JanelasDaAgenda,
   lerJanelasDaAgenda,
   type NomeDaJanela,
+  recusaDoBanco,
   recusaNaHoraDeEnviar,
   recusarNaFila,
 } from "../_shared/agenda/janela-da-fila.ts";
@@ -53,8 +64,10 @@ export interface ResultadoDoItem {
   ok: boolean;
   error?: string;
   give_up?: boolean;
-  /** a janela da agenda segurou a linha (o motivo: janela, domingo, modo) */
+  /** a janela da agenda segurou a linha (o motivo: janela, domingo, modo; no cliente também feriado e os do banco) */
   janela_da_agenda?: string;
+  /** (Fase 5, P2) a 2ª linha de cliente do lote: voltou a 'pending' sem contar tentativa (sai no próximo disparo) */
+  adiada?: boolean;
 }
 
 export interface OpcoesDoLote {
@@ -101,6 +114,8 @@ export async function enviarLote(
   // A janela da agenda: cada uma lida só se o lote tiver linha dela, uma vez (sem a chave = ainda não lida; janelas null =
   // falhou, com o erro).
   const lidas = new Map<NomeDaJanela, { janelas: JanelasDaAgenda | null; erro?: string }>();
+  // (Fase 5, P2) já foi uma linha de cliente neste lote?
+  let clienteNoLote = false;
 
   for (let i = 0; i < batch.length; i++) {
     const item = batch[i];
@@ -108,6 +123,18 @@ export async function enviarLote(
     // Fase 3 (P7b): a linha da agenda fora da janela, na hora do envio, não sai. Fase 4 (P5): a do fornecedor também.
     const qual = janelaDaOrigem(item.source);
     if (qual) {
+      // Fase 5 (P2): no máximo uma linha de cliente por lote — as outras voltam a 'pending' sem contar tentativa.
+      if (ehMensagemAoCliente(item.source)) {
+        if (clienteNoLote) {
+          const { error: eVolta } = await admin.from("whatsapp_send_queue")
+            .update({ status: "pending", processing_started_at: null })
+            .eq("id", item.id);
+          if (eVolta) console.error("whatsapp-queue-worker: a 2ª linha de cliente não voltou à fila", item.id, eVolta.message ?? eVolta);
+          results.push({ id: item.id, ok: false, adiada: true, error: "agenda-cliente: uma mensagem ao cliente por disparo (sai no próximo)" });
+          continue;
+        }
+        clienteNoLote = true;
+      }
       let lida = lidas.get(qual);
       if (!lida) {
         try {
@@ -124,6 +151,22 @@ export async function enviarLote(
         if (erroAoMarcar) console.error("whatsapp-queue-worker: a recusa da janela não foi gravada", item.id, erroAoMarcar);
         results.push({ id: item.id, ok: false, error: recusa.texto, give_up: true, janela_da_agenda: recusa.motivo });
         continue;
+      }
+      // Fase 5 (P2): a revalidação na saída — o banco diz se a mensagem ao cliente ainda vale AGORA.
+      if (ehMensagemAoCliente(item.source)) {
+        let resposta: { data?: unknown; error?: unknown };
+        try {
+          resposta = await admin.rpc("agenda_cliente_pode_sair", { p_fila: item.id });
+        } catch (e) {
+          resposta = { error: { message: e instanceof Error ? e.message : String(e) } };
+        }
+        const doBanco = recusaDoBanco(resposta ?? {}, String(item.source));
+        if (doBanco) {
+          const erroAoMarcar = await recusarNaFila(admin, item, doBanco);
+          if (erroAoMarcar) console.error("whatsapp-queue-worker: a recusa do banco não foi gravada", item.id, erroAoMarcar);
+          results.push({ id: item.id, ok: false, error: doBanco.texto, give_up: true, janela_da_agenda: doBanco.motivo });
+          continue;
+        }
       }
     }
 
