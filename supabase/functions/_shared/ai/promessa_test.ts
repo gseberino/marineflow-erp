@@ -2,7 +2,8 @@
 // pergunta e conversa sem compromisso, e marca o lembrete dentro da janela (8h–20h, seg–sáb).
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
-  dentroDaJanela, detectarPrazoDeFornecedor, detectarPromessa, type PrazoDoFornecedor, quandoLembrar,
+  dentroDaJanela, detectarPrazoDeFornecedor, detectarPromessa, expressoesDeData, type PrazoDoFornecedor, quandoLembrar,
+  semAsDatasDitas,
 } from "./promessa.ts";
 
 // Terça 06/10/2026, 18:40 em Brasília.
@@ -241,4 +242,18 @@ Deno.test("prazo do fornecedor (C1): 'não vai atrasar' não é atraso; 'sem fal
   for (const [texto, esperado] of casos) {
     assertEquals(sem(detectarPrazoDeFornecedor(texto, TER_13_1719, "recebida")), esperado, texto);
   }
+});
+
+// (Agenda, Fase 5, P4 — 27/10/2026) as datas ditas numa frase do cliente: as MESMAS expressões do prazo do fornecedor.
+Deno.test("expressoesDeData: as datas da frase, na ordem, como o banco lê; 'essa semana' só com periodo", () => {
+  assertEquals(expressoesDeData("não posso quinta, pode ser sexta?"), ["quinta", "sexta"]);
+  assertEquals(expressoesDeData("Quarta dia 04/11 fica melhor"), ["dia 04/11"]);
+  assertEquals(expressoesDeData("vou viajar até sexta"), ["até sexta"]);
+  assertEquals(expressoesDeData("deixa pra semana que vem"), ["semana que vem"]);
+  assertEquals(expressoesDeData("essa semana não dá"), []);
+  assertEquals(expressoesDeData("essa semana não dá", { periodo: true }), ["essa semana"]);
+  assertEquals(expressoesDeData("a chave fica com o marinheiro"), []);
+  assertEquals(expressoesDeData(null), []);
+  assertEquals(semAsDatasDitas("Na sexta então"), "entao");
+  assertEquals(semAsDatasDitas("pode ser sexta"), "pode ser");
 });

@@ -303,6 +303,41 @@ function achadoDaFrase(n: string, pergunta: boolean, direcao: "recebida" | "envi
   return null;
 }
 
+// ── As datas ditas numa frase do CLIENTE (Agenda de Produção, Fase 5, P4 — 27/10/2026) ──────────────────────────
+// spec-fase5 §5.4: o leitor da resposta do cliente (_shared/ai/comms/reply-router.ts, classificarRespostaDoCliente) acha
+// "pode ser sexta?", "não dá pra amanhã", "quarta dia 04/11" com as MESMAS expressões do prazo do fornecedor (UMA_DATA e
+// expressaoDaData, acima): nada de regex de data duplicada. Quem converte é o banco (agenda_data_dita, com o dia da
+// mensagem). O período "essa semana" (o dia que o cliente recusou e os seguintes da mesma semana) só com `periodo`: o
+// banco o lê como a semana do dia combinado; o detector do fornecedor não o usa (não muda).
+
+/** "Essa semana", "esta semana", "nessa semana", "nesta semana" (o período recusado; sem acento e minúsculo). */
+const ESSA_SEMANA = /(?:^|\s)n?(?:essa|esta) semana\b/g;
+
+/**
+ * As expressões de data de UMA frase, na ordem em que aparecem, já como o banco lê ("sexta", "amanhã", "dia 04/11",
+ * "até sexta", "semana que vem"); vazio = nenhuma. `periodo` = também "essa semana" (só para o dia recusado). Nada aqui
+ * calcula data.
+ */
+export function expressoesDeData(frase: string | null | undefined, op: { periodo?: boolean } = {}): string[] {
+  const n = normalizar(String(frase ?? "")).replace(/["“”]/g, "");
+  if (!n) return [];
+  const achadas: Array<{ pos: number; expressao: string }> = [];
+  for (const m of n.matchAll(new RegExp("(?:^|\\s)" + ANTES_DA_DATA + DATA, "g"))) {
+    achadas.push({ pos: m.index ?? 0, expressao: expressaoDaData(m[1]) });
+  }
+  if (op.periodo) {
+    for (const m of n.matchAll(ESSA_SEMANA)) achadas.push({ pos: m.index ?? 0, expressao: "essa semana" });
+  }
+  return achadas.sort((a, b) => a.pos - b.pos).map((a) => a.expressao);
+}
+
+/** A frase (sem acento e minúscula) sem as datas ditas: o que sobra além do dia ("na sexta então" → "então"). */
+export function semAsDatasDitas(frase: string | null | undefined): string {
+  return normalizar(String(frase ?? "")).replace(/["“”]/g, "")
+    .replace(new RegExp("(?:^|\\s)" + ANTES_DA_DATA + DATA, "g"), " ")
+    .replace(/\s+/g, " ").trim();
+}
+
 /**
  * O prazo de entrega numa mensagem da conversa com o fornecedor: o tipo, a expressão de data dita (sem converter), se
  * depende de uma condição e a frase. null = nada sobre a entrega. `direcao` = quem escreveu: o fornecedor (recebida) ou
