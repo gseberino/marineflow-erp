@@ -2151,13 +2151,18 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         </div>
       )}
 
-      {/* Deposit pending banner */}
-      {!isNew && (orderData as any)?.quote_status === 'awaiting_deposit' && form.status === 'draft' && (
+      {/* Deposit pending banner. Também no aprovado (28/10/2026): a tarefa "aprovado sem sinal"
+          abre o orçamento, e aqui não havia nem o sinal nem a conversão sem sinal. */}
+      {!isNew && ['awaiting_deposit', 'approved'].includes((orderData as any)?.quote_status) && form.status === 'draft' && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-orange-200 bg-orange-50 p-4">
           <div className="flex items-center gap-2">
             <DollarSign className="h-5 w-5 text-orange-600 shrink-0" />
             <div>
-              <p className="text-sm font-medium text-orange-800">Aguardando pagamento do sinal</p>
+              <p className="text-sm font-medium text-orange-800">
+                {orderData?.quote_status === 'approved'
+                  ? 'Orçamento aprovado — falta o sinal'
+                  : 'Aguardando pagamento do sinal'}
+              </p>
               <p className="text-xs text-orange-600 mt-0.5">
                 O orçamento será convertido em OS automaticamente após o registro — ou converta sem
                 sinal, com o valor inteiro na conclusão.
