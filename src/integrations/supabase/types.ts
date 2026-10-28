@@ -35,6 +35,12 @@ export type Database = {
           saldo_anterior: number
           status: string
           telefone_enviado: string | null
+          assinado_em: string | null
+          assinatura_arquivo: string | null
+          documento: Json | null
+          hash: string | null
+          pagos_ate: string | null
+          pix_quitacao_id: string | null
           trabalhado: number
           valor_do_acerto: number
         }
@@ -58,6 +64,12 @@ export type Database = {
           saldo_anterior: number
           status?: string
           telefone_enviado?: string | null
+          assinado_em?: string | null
+          assinatura_arquivo?: string | null
+          documento?: Json | null
+          hash?: string | null
+          pagos_ate?: string | null
+          pix_quitacao_id?: string | null
           trabalhado: number
           valor_do_acerto: number
         }
@@ -81,6 +93,12 @@ export type Database = {
           saldo_anterior?: number
           status?: string
           telefone_enviado?: string | null
+          assinado_em?: string | null
+          assinatura_arquivo?: string | null
+          documento?: Json | null
+          hash?: string | null
+          pagos_ate?: string | null
+          pix_quitacao_id?: string | null
           trabalhado?: number
           valor_do_acerto?: number
         }
@@ -6652,6 +6670,7 @@ export type Database = {
           id: string
           kind: string
           name: string
+          nit: string | null
           notes: string | null
           phone: string | null
           pix_key: string | null
@@ -6675,6 +6694,7 @@ export type Database = {
           id?: string
           kind?: string
           name: string
+          nit: string | null
           notes?: string | null
           phone?: string | null
           pix_key?: string | null
@@ -6698,6 +6718,7 @@ export type Database = {
           id?: string
           kind?: string
           name?: string
+          nit?: string | null
           notes?: string | null
           phone?: string | null
           pix_key?: string | null
@@ -12135,6 +12156,7 @@ export type Database = {
           modo_pagamento: string
           observacao: string | null
           paga_dsr: boolean
+          servico: string | null
           payee_id: string | null
           pct_domingo: number
           pct_hora_extra: number
@@ -12157,6 +12179,7 @@ export type Database = {
           modo_pagamento: string
           observacao?: string | null
           paga_dsr?: boolean
+          servico?: string | null
           payee_id?: string | null
           pct_domingo?: number
           pct_hora_extra?: number
@@ -12179,6 +12202,7 @@ export type Database = {
           modo_pagamento?: string
           observacao?: string | null
           paga_dsr?: boolean
+          servico?: string | null
           payee_id?: string | null
           pct_domingo?: number
           pct_hora_extra?: number
@@ -14647,6 +14671,8 @@ export type Database = {
           p_ate?: string
           p_autor?: string
           p_favorecido_id: string
+          p_de?: string
+          p_pix_id?: string
           p_simular?: boolean
         }
         Returns: Json

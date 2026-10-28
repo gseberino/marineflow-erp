@@ -10,7 +10,7 @@ import { downloadBlob } from '@/lib/download';
 import { exportToCSV } from '@/lib/export-utils';
 import { credencialDaSessao, renderizarNoServidor } from '@/lib/pdf-server';
 import {
-  COLUNAS_DO_CSV, linhasDoCsv, montarExtratoHtml, montarReciboHtml, nomeDoArquivo, numeroDoRecibo,
+  COLUNAS_DO_CSV, linhasDoCsv, montarExtratoHtml, montarReciboDeServicosHtml, montarReciboHtml, nomeDoArquivo, numeroDoRecibo,
   type EmpresaNoDocumento, type FreelancerNoDocumento,
 } from '@/lib/extrato-diarias';
 import { chaveDaConta, lerContaCorrente, type Acerto, type ContaCorrente } from '@/hooks/use-diarias';
@@ -24,6 +24,16 @@ async function lerEmpresa(): Promise<EmpresaNoDocumento> {
     cnpj: v.cnpj || null,
     cidade: [v.city, v.state].filter(Boolean).join('/') || null,
   };
+}
+
+/**
+ * O dono liberou o recibo (contrato, contadora e advogado — portão F0J da revisão de 24/10)? Até lá o
+ * papel sai com o aviso de conferência. Chave app_settings "diarias_recibo_liberado" = true.
+ */
+async function reciboLiberado(): Promise<boolean> {
+  const { data } = await supabase.from('app_settings').select('value').eq('key', 'diarias_recibo_liberado').maybeSingle();
+  const v = (data as { value?: unknown } | null)?.value;
+  return v === true || v === 'true';
 }
 
 async function lerFreelancers(ids: string[]): Promise<Map<string, FreelancerNoDocumento>> {
@@ -77,17 +87,26 @@ export function useDocumentosDasDiarias() {
   }
 
   /**
-   * O recibo numerado do acerto: totais da foto do acerto (inclusive `reembolsos`, F2b); dias,
-   * reembolsos (com o código CMP) e vales da conta do mesmo período.
+   * O recibo numerado. Recibo de serviços (F2, 27/10/2026): só da foto congelada no banco
+   * (`documento`) — o papel reimpresso é sempre o mesmo. Acerto do modelo antigo (sem foto): totais
+   * da foto do acerto (inclusive `reembolsos`, F2b); dias, reembolsos e vales da conta do período.
    */
   async function reciboEmPdf(favorecidoId: string, acerto: Acerto) {
     setGerando('pdf');
     try {
-      const periodo: PedidoDePeriodo = { de: acerto.de, ate: acerto.ate, atalho: null };
-      const [c, empresa, pessoas] = await Promise.all([conta(favorecidoId, periodo), lerEmpresa(), lerFreelancers([favorecidoId])]);
-      const freelancer = pessoas.get(favorecidoId) ?? { nome: c.favorecido.nome, documento: null, pix: null };
-      const html = montarReciboHtml({ empresa, freelancer, acerto, linhas: c.linhas, geradoEm: new Date() });
-      const arquivo = nomeDoArquivo(`recibo-diarias-${numeroDoRecibo(acerto.numero)}`, freelancer.nome, acerto, 'pdf');
+      let html: string;
+      let nome: string;
+      if (acerto.documento) {
+        html = montarReciboDeServicosHtml({ numero: acerto.numero, documento: acerto.documento, liberado: await reciboLiberado(), geradoEm: new Date() });
+        nome = acerto.documento.prestador.nome;
+      } else {
+        const periodo: PedidoDePeriodo = { de: acerto.de, ate: acerto.ate, atalho: null };
+        const [c, empresa, pessoas] = await Promise.all([conta(favorecidoId, periodo), lerEmpresa(), lerFreelancers([favorecidoId])]);
+        const freelancer = pessoas.get(favorecidoId) ?? { nome: c.favorecido.nome, documento: null, pix: null };
+        html = montarReciboHtml({ empresa, freelancer, acerto, linhas: c.linhas, geradoEm: new Date() });
+        nome = freelancer.nome;
+      }
+      const arquivo = nomeDoArquivo(`recibo-${acerto.documento ? 'servicos' : 'diarias'}-${numeroDoRecibo(acerto.numero)}`, nome, acerto, 'pdf');
       const pdf = await renderizarNoServidor(html, arquivo, await credencialDaSessao());
       if (pdf) {
         downloadBlob(pdf, arquivo);

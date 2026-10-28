@@ -23,7 +23,7 @@ import { chaveDeEnvio, liberarEnvio } from "../../whatsapp/idempotencia.ts";
 import { desviadoPorTeste } from "../../whatsapp/marcar-enviado.ts";
 import { guardarEEntregar, limitarNomeDoArquivo } from "../../pdf/gerar-e-guardar.ts";
 import {
-  CONTA_FALTA_APROVAR, montarExtratoHtml, montarReciboHtml, nomeDoArquivo, numeroDoRecibo, ROTULO_REEMBOLSO, ROTULO_REEMBOLSOS, type ContaDoExtrato,
+  CONTA_FALTA_APROVAR, montarExtratoHtml, montarReciboDeServicosHtml, montarReciboHtml, nomeDoArquivo, numeroDoRecibo, ROTULO_REEMBOLSO, ROTULO_REEMBOLSOS, type ContaDoExtrato, type DocumentoDoRecibo,
 } from "../../diarias/extrato.ts";
 import { codigoDoCmp } from "./comprovantes.ts";
 
@@ -791,7 +791,9 @@ async function documentoDoExtrato(ctx: ToolCtx, f: Freelancer, periodo: PeriodoP
  * com o comprovante (CMP), que entram no acerto a favor dele.
  */
 type Acerto = { id: string; numero: number; de: string; ate: string; saldo_anterior: number; dias: number; trabalhado: number;
-  pago_no_periodo: number; valor_do_acerto: number; status: string; reembolsos?: number };
+  pago_no_periodo: number; valor_do_acerto: number; status: string; reembolsos?: number;
+  /** F2: o dia do Pix de quitação e a foto congelada do recibo (nula no acerto do modelo antigo). */
+  pagos_ate?: string | null; documento?: DocumentoDoRecibo | null };
 
 /**
  * " · reembolso de despesas pagas pelo técnico R$ 62,00" quando há (F2b; o rótulo inequívoco é a
@@ -805,7 +807,7 @@ function reembolsosNoTexto(valor: unknown, separador = " · "): string {
 /** O acerto pedido (pelo número) ou o último fechado da pessoa. */
 async function acertoDe(ctx: ToolCtx, f: Freelancer, numero?: unknown): Promise<Acerto | { error: string }> {
   let q = ctx.admin.from("acertos_diarias")
-    .select("id, numero, de, ate, saldo_anterior, dias, trabalhado, pago_no_periodo, valor_do_acerto, status, reembolsos")
+    .select("id, numero, de, ate, saldo_anterior, dias, trabalhado, pago_no_periodo, valor_do_acerto, status, reembolsos, pagos_ate, documento")
     .eq("favorecido_id", f.id);
   const n = numero == null || numero === "" ? null : Number(String(numero).replace(/\D/g, ""));
   q = n ? q.eq("numero", n) : q.eq("status", "fechado").order("ate", { ascending: false }).limit(1);
@@ -817,8 +819,23 @@ async function acertoDe(ctx: ToolCtx, f: Freelancer, numero?: unknown): Promise<
     pago_no_periodo: Number(a.pago_no_periodo), valor_do_acerto: Number(a.valor_do_acerto), reembolsos: Number(a.reembolsos ?? 0) || 0 };
 }
 
-/** O recibo do acerto: totais da foto; linhas (dias e vales) da conta corrente do mesmo período. */
+/**
+ * O recibo. De serviços (F2, 27/10/2026): só da foto congelada no banco — o papel é sempre o mesmo, com
+ * o aviso de conferência até o dono liberar (app_settings diarias_recibo_liberado). Acerto do modelo
+ * antigo: totais da foto; linhas (dias e vales) da conta corrente do mesmo período.
+ */
 async function documentoDoRecibo(ctx: ToolCtx, f: Freelancer, a: Acerto): Promise<DocumentoPronto | { error: string }> {
+  const n0 = numeroDoRecibo(a.numero);
+  if (a.documento) {
+    return {
+      html: montarReciboDeServicosHtml({ numero: a.numero, documento: a.documento, liberado: String(ctx.settings.diarias_recibo_liberado ?? "") === "true", geradoEm: new Date() }),
+      arquivo: limitarNomeDoArquivo(nomeDoArquivo(`recibo-servicos-${n0}`, f.nome, { de: a.de, ate: a.ate }, "pdf")),
+      legenda: `🧾 Recibo de serviços nº ${n0} — ${f.nome}\nServiços de ${ddmm(a.de)} a ${ddmm(a.ate)} · Pix de ${brl.format(a.valor_do_acerto)}` +
+        (a.pagos_ate ? ` em ${ddmm(a.pagos_ate)}` : "") + " quitou o total" +
+        (a.status !== "fechado" ? "\n⚠️ Este recibo foi REABERTO." : ""),
+      chave: chaveDeEnvio("agente-recibo-servicos", f.id, a.numero, a.status),
+    };
+  }
   const conta = await chamar(ctx, "conta_corrente_freelancer", { p_favorecido_id: f.id, p_de: a.de, p_ate: a.ate }) as Record<string, any>;
   if (conta && "error" in conta) return { error: String(conta.error) };
   const cad = await cadastroDoFreelancer(ctx, f);
@@ -866,23 +883,29 @@ async function telefoneDeQuemPediu(ctx: ToolCtx): Promise<string | { error: stri
 /** Contexto do envio ao FREELANCER (não é cliente nem o dono; nunca 'quote'). */
 const CONTEXTO_AO_FREELANCER = "diarias_ao_freelancer";
 
-/** A confirmação do acerto: a função do banco simulando — período, dias, vales, a pagar. */
+/**
+ * A confirmação do recibo: a função do banco simulando (F2, 27/10/2026) — serviços, já recebido e o Pix
+ * que zera a conta; com trava, as frases do banco (todas) e o aviso de que vai recusar.
+ */
 export async function resumirAcerto(ctx: ToolCtx, args: Record<string, unknown>): Promise<string | null> {
   const f = await acharFreelancer(ctx, args.freelancer);
   if ("error" in f) return null;
   const ate = args.ate ? dataDoDito(args.ate) : null;
   const { data, error } = await ctx.admin.rpc("fechar_acerto_diarias", { p_favorecido_id: f.id, p_ate: ate, p_simular: true, p_autor: null });
-  if (error) return `Fechar acerto de *${f.nome}*\n⚠️ ${semCodigo(error.message)} — o sistema vai recusar.`;
+  if (error) return `Recibo de *${f.nome}*\n⚠️ ${semCodigo(error.message)} — o sistema vai recusar.`;
   const s = data as Record<string, any>;
-  const linhas = [`Fechar acerto de *${f.nome}*: ${ddmm(s.de)} a ${ddmm(s.ate)}`,
+  const travas = Array.isArray(s.travas) ? s.travas.map(String) : [];
+  if (s.ok === false || travas.length) {
+    return [`Recibo de *${f.nome}*`, "⚠️ Antes do recibo:", ...travas.map((t: string) => `• ${t}`), "— o sistema vai recusar."].join("\n");
+  }
+  const pix = s.pix ?? {};
+  return [`Recibo de *${f.nome}*: serviços de ${ddmm(s.de)} a ${ddmm(s.ate)}`,
     `${String(s.dias).replace(".", ",")} diária(s) = ${brl.format(Number(s.trabalhado))}` +
       (Number(s.saldo_anterior) ? ` · saldo anterior ${brl.format(Number(s.saldo_anterior))}` : "") +
       reembolsosNoTexto(s.reembolsos) +
-      ` · vales já pagos ${brl.format(Number(s.pago_no_periodo))}`,
-    `*A pagar neste acerto: ${brl.format(Number(s.valor_do_acerto))}*`,
-    `Os dias até ${ddmm(s.ate)} ficam travados (reabrir só pela tela ou pedindo, com motivo).`];
-  if (Number(s.pago_aguardando_banco) > 0) linhas.push(`⚠️ ${brl.format(Number(s.pago_aguardando_banco))} dos vales são Pix lançados à mão que o banco ainda não confirmou.`);
-  return linhas.join("\n");
+      ` · já recebido ${brl.format(Number(s.pago_no_periodo))}`,
+    `*Pix de ${pix.data ? ddmm(pix.data) : "—"} que quita: ${brl.format(Number(s.valor_do_acerto))}*`,
+    `Os dias até ${ddmm(s.ate)} ficam travados (reabrir só pela tela ou pedindo, com motivo).`].join("\n");
 }
 
 /** A confirmação do envio ao freelancer: o quê, para que número, e o que acontece com a resposta. */
@@ -1252,14 +1275,15 @@ export const diariasTools: ToolDef[] = [
   {
     name: "fechar_acerto_freelancer",
     description:
-      "FECHA o acerto de um freelancer ao pagar: 'fecha o acerto do Roberto', 'acerta a quinzena do João até sexta'. Do dia seguinte " +
-      "ao último acerto até 'ate' (padrão hoje): guarda a foto (dias, vales já pagos, a pagar), gera o recibo numerado e TRAVA os dias " +
-      "até essa data. Não registra o pagamento do acerto (isso é registrar_pagamento_freelancer, ou vem do banco). Pede confirmação.",
+      "EMITE o recibo de serviços de um freelancer DEPOIS de pago: 'fecha o acerto do Roberto', 'faz o recibo do João até sexta'. " +
+      "O recibo sai no Pix que ZERA a conta (o sistema acha o Pix; 'ate' = último dia de serviço, padrão o dia do Pix): guarda o " +
+      "papel numerado e TRAVA os dias até essa data. Não registra pagamento: se ainda falta pagar, o Pix está na fila ou falta CPF, " +
+      "a confirmação diz o que fazer antes. Pede confirmação.",
     input_schema: {
       type: "object",
       properties: {
         freelancer: { type: "string", description: "Nome como a pessoa falou." },
-        ate: { type: "string", description: "Até que dia fechar: 'hoje' (padrão), 'sexta', dd/mm." },
+        ate: { type: "string", description: "Último dia de serviço do recibo: dd/mm, 'sexta'; padrão o dia do Pix que zera." },
       },
       required: ["freelancer"],
     },
@@ -1275,7 +1299,7 @@ export const diariasTools: ToolDef[] = [
       const r = await chamar(ctx, "fechar_acerto_diarias", { p_favorecido_id: f.id, p_ate: ate, p_simular: false }) as Record<string, unknown>;
       if (r && "error" in r) return r;
       return { ok: true, numero: r?.numero, valor_do_acerto: r?.valor_do_acerto,
-        aviso: `${String(r?.message ?? "Acerto fechado.")} O recibo sai com enviar_extrato_freelancer (documento=recibo) ou vai a ele com enviar_acerto_ao_freelancer.` };
+        aviso: `${String(r?.message ?? "Recibo fechado.")} O PDF sai com enviar_extrato_freelancer (documento=recibo) ou vai a ele com enviar_acerto_ao_freelancer.` };
     },
   },
   {
@@ -1337,7 +1361,11 @@ export const diariasTools: ToolDef[] = [
       const doc = await documentoDoRecibo(ctx, f, a);
       if ("error" in doc) return await falhaDoExtrato(doc.error);
       const primeiro = f.nome.split(" ")[0];
-      doc.legenda = `Olá, ${primeiro}! Segue o recibo das suas diárias de ${ddmm(a.de)} a ${ddmm(a.ate)}: ` +
+      doc.legenda = a.documento
+        ? `Olá, ${primeiro}! Segue o recibo nº ${numeroDoRecibo(a.numero)} dos seus serviços de ${ddmm(a.de)} a ${ddmm(a.ate)}: ` +
+          `o Pix de ${brl.format(a.valor_do_acerto)}${a.pagos_ate ? ` em ${ddmm(a.pagos_ate)}` : ""} quitou o total.\nConfere? Se estiver tudo certo, responda *OK*. ` +
+          "A via em papel para assinar fica na oficina."
+        : `Olá, ${primeiro}! Segue o recibo das suas diárias de ${ddmm(a.de)} a ${ddmm(a.ate)}: ` +
         `${String(a.dias).replace(".", ",")} diária(s), ${brl.format(a.trabalhado)}${reembolsosNoTexto(a.reembolsos, "; ")}; vales já pagos ${brl.format(a.pago_no_periodo)}; ` +
         `a receber ${brl.format(a.valor_do_acerto)}.\nConfere? Se estiver tudo certo, responda *OK*.`;
       const envio = await mandarPdf(ctx, cad.telefone, doc, CONTEXTO_AO_FREELANCER, `recibo de diárias ao freelancer ${f.nome}`);

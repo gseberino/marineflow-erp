@@ -481,12 +481,20 @@ Deno.test("acerto: fechar chama a função do banco com quem pediu; a confirmaç
   assertStringIncludes(String(r.aviso), "travados");
 
   const txt = String(await resumirAcerto(ctx({ simulacao: { data: {
-    de: "2026-09-16", ate: "2026-10-01", dias: 2.5, trabalhado: 400, saldo_anterior: 0, pago_no_periodo: 100, valor_do_acerto: 300, pago_aguardando_banco: 100,
+    ok: true, travas: [], de: "2026-09-16", ate: "2026-10-01", dias: 2.5, trabalhado: 400, saldo_anterior: 0, pago_no_periodo: 100,
+    valor_do_acerto: 300, pix: { id: "px", data: "2026-10-02", valor: 300 },
   } } }).c as never, { freelancer: "roberto" })).replace(/\u00a0/g, " ");
-  assertStringIncludes(txt, "Fechar acerto de *Roberto Daniel Rodrigues Correa*: 16/09 a 01/10");
-  assertStringIncludes(txt, "2,5 diária(s) = R$ 400,00 · vales já pagos R$ 100,00");
-  assertStringIncludes(txt, "*A pagar neste acerto: R$ 300,00*");
-  assertStringIncludes(txt, "Pix lançados à mão");
+  assertStringIncludes(txt, "Recibo de *Roberto Daniel Rodrigues Correa*: serviços de 16/09 a 01/10");
+  assertStringIncludes(txt, "2,5 diária(s) = R$ 400,00 · já recebido R$ 100,00");
+  assertStringIncludes(txt, "*Pix de 02/10 que quita: R$ 300,00*");
+
+  // F2 (27/10): com trava, a confirmação diz todas as frases do banco e que vai recusar
+  const travado = String(await resumirAcerto(ctx({ simulacao: { data: {
+    ok: false, travas: ["Falta o CPF de Roberto no cadastro.", "Pix de 10/10 (R$ 510,00) está na fila: aprove antes do recibo."],
+  } } }).c as never, { freelancer: "roberto" }));
+  assertStringIncludes(travado, "• Falta o CPF de Roberto no cadastro.");
+  assertStringIncludes(travado, "• Pix de 10/10 (R$ 510,00) está na fila: aprove antes do recibo.");
+  assertStringIncludes(travado, "o sistema vai recusar");
 
   const recusa = String(await resumirAcerto(ctx({ simulacao: { error: { message: "P0001: Nada a fechar: o acerto nº 0001 de Roberto já vai até 15/09." } } }).c as never, { freelancer: "roberto" }));
   assertStringIncludes(recusa, "⚠️ Nada a fechar");
@@ -530,14 +538,15 @@ Deno.test("F2b consultar: o reembolso é a favor dele (com o código do CMP), n�
 
 Deno.test("F2b acerto: a confirmação diz os reembolsos (antes dos vales) só quando há", async () => {
   const simular = (reembolsos: number | undefined) => ctx({ simulacao: { data: {
-    de: "2026-09-16", ate: "2026-10-01", dias: 1, trabalhado: 300, saldo_anterior: 0, reembolsos, pago_no_periodo: 100, valor_do_acerto: 262,
+    ok: true, travas: [], de: "2026-09-16", ate: "2026-10-01", dias: 1, trabalhado: 300, saldo_anterior: 0, reembolsos, pago_no_periodo: 100,
+    valor_do_acerto: 262, pix: { id: "px", data: "2026-10-02", valor: 262 },
   } } }).c;
   const com = String(await resumirAcerto(simular(62) as never, { freelancer: "roberto" })).replace(/ /g, " ");
-  assertStringIncludes(com, "1 diária(s) = R$ 300,00 · reembolso de despesas pagas pelo técnico R$ 62,00 · vales já pagos R$ 100,00");
-  assertStringIncludes(com, "*A pagar neste acerto: R$ 262,00*");
+  assertStringIncludes(com, "1 diária(s) = R$ 300,00 · reembolso de despesas pagas pelo técnico R$ 62,00 · já recebido R$ 100,00");
+  assertStringIncludes(com, "*Pix de 02/10 que quita: R$ 262,00*");
   for (const sem of [0, undefined]) {
     const txt = String(await resumirAcerto(simular(sem) as never, { freelancer: "roberto" })).replace(/ /g, " ");
-    assertStringIncludes(txt, "1 diária(s) = R$ 300,00 · vales já pagos R$ 100,00");
+    assertStringIncludes(txt, "1 diária(s) = R$ 300,00 · já recebido R$ 100,00");
     assertEquals(txt.includes("reembolso"), false);
   }
 });

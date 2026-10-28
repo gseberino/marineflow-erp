@@ -5,7 +5,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import type { EstadoDoSaldo, Jornada } from '@/lib/diarias';
-import { CONTA_FALTA_APROVAR, ROTULO_REEMBOLSOS } from '@/lib/extrato-diarias';
+import { CONTA_FALTA_APROVAR, ROTULO_REEMBOLSOS, type DocumentoDoRecibo } from '@/lib/extrato-diarias';
 import { mensagemDoErro, recarregarFinanceiro } from '@/hooks/use-lancamentos';
 
 export interface FreelancerNoResumo {
@@ -373,6 +373,10 @@ export function useCadastrarFreelancer() {
 // ── Acerto: fechar o período ao pagar (pedido do dono 06/10/2026; migration 20261006220000) ──────
 // O acerto é a FOTO do período (dias, vales já pagos, a pagar), gera o recibo nº e trava os dias até
 // a data. As mesmas funções do assistente (fechar_acerto_freelancer / reabrir_acerto_freelancer).
+//
+// Desde 27/10/2026 (F2, migration 20261027180000) o recibo sai do Pix que ZERA a conta: o banco
+// escolhe o Pix (ou o dono escolhe entre os candidatos), diz as travas e congela o papel em
+// `documento` (com hash). Acerto com `documento` nulo é do modelo antigo (fechado antes de pagar).
 
 export interface Acerto {
   id: string;
@@ -394,6 +398,23 @@ export interface Acerto {
   enviado_ao_freelancer_em: string | null;
   conferido_em: string | null;
   conferido_texto: string | null;
+  /** F2: dia do Pix de quitação (os pagamentos do recibo vão até ele). */
+  pagos_ate: string | null;
+  /** F2: a foto congelada do recibo; nulo = acerto do modelo antigo. */
+  documento: DocumentoDoRecibo | null;
+  hash: string | null;
+  assinado_em: string | null;
+}
+
+/** Um Pix que poderia quitar o recibo, com o que sobraria fechando nele (zera = é o da quitação). */
+export interface PixCandidato {
+  id: string;
+  data: string;
+  valor: number;
+  conta: string | null;
+  aguardando: boolean;
+  saldo_final: number;
+  zera: boolean;
 }
 
 /** Um reembolso que entra no acerto (a linha `reembolso` da conta corrente, F2b). */
@@ -413,11 +434,19 @@ export interface SimulacaoDoAcerto {
   dias: number;
   trabalhado: number;
   pago_no_periodo: number;
+  /** F2: o valor do Pix de quitação. */
   valor_do_acerto: number;
-  pago_aguardando_banco: number;
   reembolsos: number;
   reembolsos_itens: ReembolsoNoAcerto[];
-  resumo: string;
+  resumo: string | null;
+  /** F2: pode fechar? (sem nenhuma trava). */
+  ok: boolean;
+  /** F2: por que não fecha, em frases prontas (todas de uma vez). */
+  travas: string[];
+  candidatos: PixCandidato[];
+  pix: { id: string; data: string; valor: number; conta: string | null } | null;
+  /** Sem Pix que zere: o saldo de hoje (positivo = falta pagar; negativo = adiantado). */
+  saldo_hoje: number | null;
 }
 
 export function useAcertos(favorecidoId: string | null) {
@@ -426,7 +455,7 @@ export function useAcertos(favorecidoId: string | null) {
     enabled: !!favorecidoId,
     queryFn: async (): Promise<Acerto[]> => {
       const { data, error } = await supabase.from('acertos_diarias' as never)
-        .select('id, numero, favorecido_id, de, ate, saldo_anterior, dias, trabalhado, pago_no_periodo, valor_do_acerto, reembolsos, status, criado_em, reaberto_em, motivo_reabertura, enviado_ao_freelancer_em, conferido_em, conferido_texto')
+        .select('id, numero, favorecido_id, de, ate, saldo_anterior, dias, trabalhado, pago_no_periodo, valor_do_acerto, reembolsos, status, criado_em, reaberto_em, motivo_reabertura, enviado_ao_freelancer_em, conferido_em, conferido_texto, pagos_ate, documento, hash, assinado_em')
         .eq('favorecido_id', favorecidoId!)
         .order('numero', { ascending: false });
       if (error) throw error;
@@ -456,27 +485,39 @@ export function comoTirarOReembolso(codigo: string | null | undefined, acerto: A
   return `Reembolso vem do comprovante: para tirar, mande "cancelar cmp ${numero ?? 'N'} motivo" no WhatsApp.`;
 }
 
-/** O que o acerto FARIA — nada é gravado. A recusa ("nada a fechar") vem como erro. */
-export async function simularAcerto(favorecidoId: string, ate: string | null): Promise<SimulacaoDoAcerto> {
+/**
+ * O que o recibo SERIA — nada é gravado. Sem `pixId`, o banco escolhe o último Pix que zera a conta;
+ * sem nenhum, `ok` = false e as travas dizem quanto falta (ou sobra). `de` só vale no primeiro recibo.
+ */
+export async function simularAcerto(favorecidoId: string, ate: string | null, pixId: string | null = null, de: string | null = null): Promise<SimulacaoDoAcerto> {
   const { data, error } = await supabase.rpc('fechar_acerto_diarias' as never, {
-    p_favorecido_id: favorecidoId, p_ate: ate, p_simular: true,
+    p_favorecido_id: favorecidoId, p_ate: ate, p_simular: true, p_pix_id: pixId, p_de: de,
   } as never);
   if (error) throw error;
   const s = data as unknown as SimulacaoDoAcerto;
-  return { ...s, saldo_anterior: num(s.saldo_anterior), dias: num(s.dias), trabalhado: num(s.trabalhado),
-    pago_no_periodo: num(s.pago_no_periodo), valor_do_acerto: num(s.valor_do_acerto), pago_aguardando_banco: num(s.pago_aguardando_banco),
+  return {
+    favorecido: s.favorecido, de: s.de, ate: s.ate ?? '',
+    saldo_anterior: num(s.saldo_anterior), dias: num(s.dias), trabalhado: num(s.trabalhado),
+    pago_no_periodo: num(s.pago_no_periodo), valor_do_acerto: num(s.valor_do_acerto),
     reembolsos: num(s.reembolsos),
     reembolsos_itens: (s.reembolsos_itens ?? []).map((r) => ({
       data: r.data, valor: num(r.valor), descricao: r.descricao ?? null, codigo: r.codigo ?? null,
-    })) };
+    })),
+    resumo: s.resumo ?? null,
+    ok: !!s.ok,
+    travas: s.travas ?? [],
+    candidatos: (s.candidatos ?? []).map((c) => ({ ...c, valor: num(c.valor), saldo_final: num(c.saldo_final), aguardando: !!c.aguardando, zera: !!c.zera })),
+    pix: s.pix ? { id: s.pix.id, data: s.pix.data, valor: num(s.pix.valor), conta: s.pix.conta ?? null } : null,
+    saldo_hoje: s.saldo_hoje == null ? null : num(s.saldo_hoje),
+  };
 }
 
 export function useFecharAcerto() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ favorecidoId, ate }: { favorecidoId: string; ate: string | null }) => {
+    mutationFn: async ({ favorecidoId, ate, pixId, de }: { favorecidoId: string; ate: string | null; pixId: string; de?: string | null }) => {
       const { data, error } = await supabase.rpc('fechar_acerto_diarias' as never, {
-        p_favorecido_id: favorecidoId, p_ate: ate, p_simular: false,
+        p_favorecido_id: favorecidoId, p_ate: ate, p_simular: false, p_pix_id: pixId, p_de: de ?? null,
       } as never);
       if (error) throw error;
       return data as unknown as { id: string; numero: number; message: string };

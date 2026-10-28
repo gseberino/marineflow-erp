@@ -162,9 +162,11 @@ beforeEach(() => {
         return { data: { ok: true, message: 'Anotado.' }, error: null };
       case 'fechar_acerto_diarias':
         return args.p_simular
-          ? { data: { favorecido: 'Roberto', de: '2026-09-17', ate: args.p_ate, saldo_anterior: 180, dias: 0, trabalhado: 0,
-              pago_no_periodo: 100, valor_do_acerto: 80, pago_aguardando_banco: 0, resumo: '' }, error: null }
-          : { data: { id: 'ac2', numero: 2, message: 'Acerto nº 0002 fechado.' }, error: null };
+          ? { data: { ok: true, favorecido: 'Roberto', de: '2026-09-17', ate: args.p_ate ?? '2026-10-05', saldo_anterior: 180, dias: 0, trabalhado: 0,
+              pago_no_periodo: 100, valor_do_acerto: 80, resumo: '', travas: [],
+              pix: { id: 'px', data: '2026-10-05', valor: 80, conta: 'C6' },
+              candidatos: [{ id: 'px', data: '2026-10-05', valor: 80, conta: 'C6', aguardando: false, saldo_final: 0, zera: true }] }, error: null }
+          : { data: { id: 'ac2', numero: 2, message: 'Recibo nº 0002 fechado.' }, error: null };
       case 'cadastrar_freelancer':
         if (String(args.p_nome).startsWith('Roberto')) {
           return { data: null, error: { message: 'Roberto já tem diária cadastrada (veja em Financeiro › Diárias).' } };
@@ -395,16 +397,16 @@ describe('DiariasPanel', () => {
     expect(screen.queryByRole('menuitem', { name: /Excluir o dia/ })).not.toBeInTheDocument();
   });
 
-  it('fechar acerto: confere (simula) pela data e só então fecha', async () => {
+  it('emitir recibo: confere (simula) e só então fecha, no Pix que zera', async () => {
     const user = userEvent.setup();
     renderizar('extrato');
     await screen.findByText('OS-0042');
-    await user.click(screen.getByRole('button', { name: /Fechar acerto/ }));
+    await user.click(screen.getByRole('button', { name: /Emitir recibo/ }));
     const dialogo = await screen.findByRole('dialog');
-    expect(await within(dialogo).findByText('A pagar neste acerto')).toBeInTheDocument();
+    expect(await within(dialogo).findByText('Pix de 05/10')).toBeInTheDocument();
     expect(chamadas('fechar_acerto_diarias')[0]).toMatchObject({ p_favorecido_id: 'r', p_simular: true });
-    await user.click(within(dialogo).getByRole('button', { name: 'Fechar acerto' }));
-    await waitFor(() => expect(chamadas('fechar_acerto_diarias').some((a) => a.p_simular === false)).toBe(true));
+    await user.click(within(dialogo).getByRole('button', { name: /^Emitir recibo$/ }));
+    await waitFor(() => expect(chamadas('fechar_acerto_diarias').some((a) => a.p_simular === false && a.p_pix_id === 'px')).toBe(true));
   });
 
   // ── Reembolso do técnico pelo comprovante (F2b, 11/10/2026) ──
