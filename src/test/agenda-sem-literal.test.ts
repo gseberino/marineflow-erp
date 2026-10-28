@@ -43,6 +43,11 @@
 //     aprovação dos primeiros dias, as horas do toque e do preparo, as validades e a conversa) ficam em 20261028100000, fora
 //     de função; o atraso longo e o remarcar confirmado são os da Fase 2 (reusados). A correção C1 (20261028100700) entra pelo
 //     mesmo prefixo; o DEFAULT novo (cliente_pedido_max_du) fica fora de função, na própria 100700.
+//   · (Fase 6, P1) também as funções das migrations 2026102910* (a classe de campo, os dias no início, a medida, o percentil,
+//     o leitor e o gravador do que foi aprendido e os pacotes seguintes da fase, pelo prefixo). Os DEFAULTs novos de
+//     agenda_config (a hora da rodada, a janela, a trava, os mínimos, os percentis, os limites de troca, a capacidade do dono,
+//     o cliente, a revisão da carga, os gatilhos do planejador e as palavras da classe) ficam em 20261029100000, fora de
+//     função; o 1,5 que o fator aprendido substitui é o estouro_fator da Fase 1 (o padrão chega ao gravador como parâmetro).
 // Os inteiros pequenos (0, 1, 2, 7: meios-dias por dia, dias da semana…) e os limites de tamanho de texto dos CHECKs
 // são estrutura e não entram na regra.
 import { describe, expect, it } from 'vitest';
@@ -229,7 +234,7 @@ export function corposDasFuncoes(sql: string, arquivo: string): Trecho[] {
 
 function funcoesDasMigrations(): Trecho[] {
   return fs.readdirSync(MIGRATIONS)
-    .filter((f) => /^(2026102416|2026102510|2026102610|2026102710|2026102810)\d{4}_.+\.sql$/.test(f))
+    .filter((f) => /^(2026102416|2026102510|2026102610|2026102710|2026102810|2026102910)\d{4}_.+\.sql$/.test(f))
     .sort()
     .flatMap((f) => corposDasFuncoes(fs.readFileSync(path.join(MIGRATIONS, f), 'utf8').replace(/\r\n/g, '\n'), f));
 }
@@ -398,6 +403,10 @@ describe('agenda: parâmetro só em agenda_config', () => {
       '_pedir_confirmacao', '_agenda_cliente_outra_conversa', '_agenda_cliente_motivo_texto', '_agenda_cliente_avisar_recusa',
       // Correção C2 da Fase 5: o texto sem artigo, o prometido que sai e o erro de uma OS
       '_agenda_cliente_sem_artigo', '_agenda_cliente_tirar_prometido', '_agenda_cliente_erro_da_os',
+      // Fase 6 (P1): a classe de campo, os dias no início, a medida, o percentil, o leitor, os textos e o gravador
+      '_agenda_classe_de_campo', '_agenda_classe_pares_ok', '_agenda_dias_no_inicio', '_agenda_aprender_congelar',
+      'agenda_medir_os', '_agenda_aprender_medir', '_agenda_percentil', '_agenda_aprendido', '_agenda_aprendizado_texto',
+      '_agenda_aprendizado_gravar',
     ]));
     expect(tsAgenda.map((t) => t.onde)).toEqual(expect.arrayContaining([
       path.join('supabase', 'functions', 'task-automations', 'agenda-vigia.ts'),

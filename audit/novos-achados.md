@@ -3070,3 +3070,48 @@ porque só o dono pode preenchê-las.
   o número do dono, da equipe ou de quem recebe diária, e o leitor da resposta (P4) não lê esses números como cliente. Como o
   volume dele é alto, a "conversa viva" (d19) e o teto por cliente vão segurar mensagens dele mais que a média: a medição da
   Fase 5 deve olhar o MP à parte.
+
+### [NOVO-agenda-43] `fator_promessa` não tem leitor
+
+- **Encontrado em:** Agenda de Produção, Fase 6, conferência da spec (28/10/2026, leitura do código no HEAD 4004f7f3).
+- **O quê:** o parâmetro `agenda_config.fator_promessa` (1,5; `20261024160000:70`) nasceu na Fase 1 para a "faixa de promessa"
+  do plano (§4.2: prometer o fim mais metade da duração), mas nenhuma função de nenhuma migration o lê. A faixa nunca foi
+  construída: a M1 diz o início e os dias de trabalho, e o prometido firme é o fim do plano. O 1,5 que age de verdade é o
+  `estouro_fator` (o limiar do "estourou" da vigia e do risco de atraso da execução).
+- **Na Fase 6:** o fator de campo aprendido substitui o `estouro_fator` (P2 e P5), não o `fator_promessa`. A migration
+  20261029100000 (P1) diz no comentário da coluna que ela não tem leitor. Criar a faixa mudaria o que a M1 diz ao cliente:
+  fica para decisão do dono depois de ver a pontualidade medida (spec-fase6 §13, item 4).
+
+### [NOVO-agenda-44] O original da promessa ao cliente se perde no aviso "peça sem data"
+
+- **Encontrado em:** Agenda de Produção, Fase 6, conferência da spec (28/10/2026, `_agenda_cliente_tirar_prometido` em
+  `20261028100800:170`).
+- **O quê:** quando sai o M6 "ainda faltam peças sem data", `_agenda_cliente_tirar_prometido` zera `prometido_original_ate`
+  junto com o prometido (o CHECK `prometido_original` da Fase 5 exige o prometido para haver original). Só o histórico guarda o
+  de antes, e ele corta em 20 entradas. E o próximo aviso com data grava a data nova como se fosse a 1ª. Sem conserto, a
+  pontualidade com o cliente perderia justamente as OS que mais atrasaram.
+- **Na Fase 6:** `os_planejamento.prometido_primeiro_ate` (P1) guarda a 1ª data dita e nunca zera; a medida da OS
+  (`agenda_medir_os`, P1) usa `coalesce(prometido_primeiro_ate, prometido_original_ate)`. Quem passa a gravá-la na 1ª
+  promessa é a cópia de `_agenda_cliente_gravar_prometido` do P5. A fixture-fase6 tem o caso (a OS-00137: o aviso sem data de
+  20/10 zerou o 23/10, e o aviso da peça de 23/10 gravou 26/10 como original).
+
+### [NOVO-agenda-45] Classe de serviço sem cadastro
+
+- **Encontrado em:** Agenda de Produção, Fase 6, conferência da spec (28/10/2026, SELECT `f6-02`, `f6-03`; conferido no P1 com
+  `f6p1/q01_principais`).
+- **O quê:** `services.category` está preenchida em só 4 das 91 linhas de serviço das OS concluídas e ativas, e as 21 OS
+  concluídas têm `service_type` "repair" ou nulo. Não há onde ler "esta OS é de energia em motorhome".
+- **Na Fase 6:** a classe sai sem IA da palavra da linha principal (a de maior valor) e do tipo do bem
+  (`_agenda_classe_de_campo`, P1), com as palavras em `agenda_config.classe_bens` e `classe_sistemas` (parâmetro, não código).
+  Conferido com as 31 linhas principais de produção: a palavra "motor" casava com "motorhome" (uma OS de motorhome iria para
+  "motor e gerador"); a lista nasce com "motor(?! ?home)". Quando a classe fina tem poucas OS, vale a mais larga (P2).
+
+### [NOVO-agenda-46] O R$ 764 por diária é instável e não se mede sem a diária ligada à OS
+
+- **Encontrado em:** Agenda de Produção, Fase 6, conferência da spec (28/10/2026, SELECT `f6-06`, `f6-12`).
+- **O quê:** medido pelo método grosseiro (a mão de obra das OS concluídas ÷ as diárias de freelancer na janela), o rendimento dá
+  R$ 648 nas 8 semanas até 25/10 (5 OS, 46 diárias) e R$ 320 nas 8 semanas até 27/09. Nenhuma das 56 diárias está ligada a uma
+  OS (`work_shift_os` vazia): o número de hoje (`mo_por_diaria_real` = 764) não pode ser trocado por medida nenhuma.
+- **Na Fase 6:** a medida de cada OS (P1) guarda as diárias ligadas e a mão de obra; o R$ por diária aprendido (P2) só conta OS
+  válidas com diária ligada e diarista (a OS só do dono fica de fora), com mínimo de 6 (`mo_n_min`) e piso `mo_min`. Até a
+  diária automática da Fase 3 ligar as diárias, o 764 continua valendo.
