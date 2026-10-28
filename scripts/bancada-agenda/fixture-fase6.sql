@@ -367,3 +367,76 @@ begin
   end if;
 end
 $confere_p3$;
+
+-- ── P4 (28/10): as semanas do dono no plano (o insumo da capacidade do dono) ────────────────────────────
+-- As 8 semanas completas antes de sex 30/10 vão de seg 31/08 a dom 25/10. O dono (Gustavo, bb…01) no plano, por semana
+-- (presença turno; c = cumprido, p = parcial, n = não cumprido, x = cancelado; entre parênteses o motivo):
+--   31/08  1º m c, 1º t c, 02 m c, 02 t p (esqueci), 03 m x (dono)          → 3,5 de 5 = 0,70; fora da conta: 03 t x (clima),
+--                                                                             04 m sem registro
+--   07/09  08 m c, 08 t n (esqueci), 09 m c, 09 t n (urgencia_outra_os)      → 2 de 4 = 0,50; fora: 10 m n (material)
+--   14/09  15 m c, 15 t c, 16 m p, 16 t p (trabalho_anterior), 17 m n (equipe_faltou) → 3 de 5 = 0,60
+--   21/09  22 m c, 22 t c (a OS-00140 do P1, o diagnóstico só dele)         → 2 de 2 = 1,00
+--   28/09  29 m c, 29 t c                                                     → 2 de 2 = 1,00
+--   05/10 e 12/10  nada
+--   19/10  19 m c (na OS-00134, com o Roberto)                               → 1 meio-dia só: a semana NÃO conta
+--   26/10  26 m c, 26 t c (na OS-00136, com o Roberto)                       → a semana de hoje (incompleta): fora
+-- Contam 5 semanas (6 com o dono no plano); a mediana 0,70 × carga_max 0,80 = 0,56 → troca de 0,24 (> capacidade_troca_max
+-- 0,20): pergunta ("você fez 7 de cada 10 meios-dias seus marcados no plano (5 semanas medidas)"). As idas fora do plano na
+-- janela: 20/10 o dia todo e 22/10 de manhã (as do P2) = 3 meios-dias (a de 27/10 é desta semana; a "passou" não conta).
+-- Os meios-dias de 31/08 a 29/09 ficam numa OS própria, a OS-00145 (Paulo), CANCELADA: não é medida (não concluída) nem está
+-- na carteira, então nada do P1 ao P3 muda. Os de 19/10 e 26/10 caem em meios-dias que o Roberto cumpriu nas OS-00134 e 136:
+-- a medida delas (o melhor do meio-dia) e o plano cumprido daquelas semanas (por OS e dia) não mudam.
+-- PARA O P6 (o plano cumprido): a OS-00145 entra no PPC das semanas de 31/08 (01/09 cumprido, 02/09 não, 04/09 sem
+-- conferência), 07/09 (08, 09 e 10/09 não cumpridos), 14/09 (15/09 cumprido, 16 e 17/09 não) e 28/09 (29/09 cumprido); as de
+-- 05, 12 e 19/10 não mudam.
+create temp table _fase6_versao_p4 on commit drop as select versao_plano from public.agenda_config where id;
+select set_config('agenda.hoje', '2026-10-30', true);
+
+insert into public.clients (id, type, name) values ('c6000000-0000-4000-8000-000000000145', 'individual', 'Paulo');
+insert into public.vessels (id, client_id, name, asset_type)
+values ('f6000000-0000-4000-8000-000000000145', 'c6000000-0000-4000-8000-000000000145', 'Motorhome', 'Motorhome');
+select set_config('agenda.porta', 'on', true);
+insert into public.service_orders (id, service_order_number, client_id, vessel_id, status, quote_status, service_type,
+  created_at, updated_at, converted_to_os_at, grand_total)
+values ('05000000-0000-4000-8000-000000000145', 'OS-00145', 'c6000000-0000-4000-8000-000000000145',
+        'f6000000-0000-4000-8000-000000000145', 'cancelled', 'approved', 'repair', timestamptz '2026-08-20 10:00-03',
+        timestamptz '2026-10-02 10:00-03', timestamptz '2026-08-25 10:00-03', 4800);
+select set_config('agenda.porta', 'off', true);
+
+insert into public.agenda_alocacoes (service_order_id, payee_id, dia, turno, presenca, tipo, estado, origem, publicada_em,
+                                     resultado, motivo, resultado_via, resultado_em, cancelada_em, cancelada_motivo)
+select ('05000000-0000-4000-8000-000000000' || n)::uuid, 'bb000000-0000-4000-8000-000000000001', dia::date, turno,
+       'turno', 'execucao', case when canc is null then 'publicada' else 'cancelada' end, 'motor',
+       (dia::date - 1 + time '16:30') at time zone 'America/Sao_Paulo',
+       resultado, motivo, case when resultado is not null then 'dia_feito' end,
+       case when resultado is not null then (dia::date + time '17:30') at time zone 'America/Sao_Paulo' end,
+       case when canc is not null then (dia::date - 1 + time '18:00') at time zone 'America/Sao_Paulo' end, canc
+  from (values
+    ('145', '2026-09-01', 'manha', 'cumprido', null, null), ('145', '2026-09-01', 'tarde', 'cumprido', null, null),
+    ('145', '2026-09-02', 'manha', 'cumprido', null, null), ('145', '2026-09-02', 'tarde', 'parcial', 'esqueci', null),
+    ('145', '2026-09-03', 'manha', null, null, 'dono'), ('145', '2026-09-03', 'tarde', null, null, 'clima'),
+    ('145', '2026-09-04', 'manha', 'sem_registro', null, null),
+    ('145', '2026-09-08', 'manha', 'cumprido', null, null), ('145', '2026-09-08', 'tarde', 'nao_cumprido', 'esqueci', null),
+    ('145', '2026-09-09', 'manha', 'cumprido', null, null), ('145', '2026-09-09', 'tarde', 'nao_cumprido', 'urgencia_outra_os', null),
+    ('145', '2026-09-10', 'manha', 'nao_cumprido', 'material', null),
+    ('145', '2026-09-15', 'manha', 'cumprido', null, null), ('145', '2026-09-15', 'tarde', 'cumprido', null, null),
+    ('145', '2026-09-16', 'manha', 'parcial', 'trabalho_anterior', null), ('145', '2026-09-16', 'tarde', 'parcial', 'trabalho_anterior', null),
+    ('145', '2026-09-17', 'manha', 'nao_cumprido', 'equipe_faltou', null),
+    ('145', '2026-09-29', 'manha', 'cumprido', null, null), ('145', '2026-09-29', 'tarde', 'cumprido', null, null),
+    ('134', '2026-10-19', 'manha', 'cumprido', null, null),
+    ('136', '2026-10-26', 'manha', 'cumprido', null, null), ('136', '2026-10-26', 'tarde', 'cumprido', null, null)
+  ) as a(n, dia, turno, resultado, motivo, canc);
+
+update public.agenda_config set versao_plano = (select versao_plano from _fase6_versao_p4) where id;
+select set_config('agenda.hoje', '', true);
+
+do $confere_p4$
+begin
+  if (select count(*) from public.agenda_alocacoes a
+       where a.payee_id = 'bb000000-0000-4000-8000-000000000001' and a.dia between date '2026-08-31' and date '2026-10-29'
+         and a.presenca = 'turno') <> 24
+     or (select status from public.service_orders where id = '05000000-0000-4000-8000-000000000145') <> 'cancelled' then
+    raise exception 'fixture-fase6 (P4): os 24 meios-dias do dono de 31/08 a 29/10 (a OS-00145 cancelada) não estão lá';
+  end if;
+end
+$confere_p4$;
