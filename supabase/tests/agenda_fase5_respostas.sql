@@ -294,9 +294,9 @@ begin
     perform pg_temp.enviada(c_cli_kal, c_kal1, 'vespera', date '2026-11-03', '2026-10-31 09:00');
     perform pg_temp.enviada(c_cli_kal, c_kal2, 'confirmar', date '2026-11-05', '2026-10-31 09:01');
     r := pg_temp.resp('5547900000309', 'ok', 'acordo', null, '2026-10-31 10:00');
-    v_res := pg_temp.ok(v_res, 'A1e duas OS do mesmo cliente esperando = ambígua ("há 2 serviços esperando resposta dele")',
+    v_res := pg_temp.ok(v_res, 'A1e duas OS do mesmo cliente esperando = ambígua ("há 2 serviços esperando resposta do cliente")',
       r ->> 'efeito' = 'ambigua'
-      and (select q.texto from public.agenda_perguntas q where q.id = (r ->> 'pergunta_id')::uuid) like '%há 2 serviços esperando resposta dele%'
+      and (select q.texto from public.agenda_perguntas q where q.id = (r ->> 'pergunta_id')::uuid) like '%há 2 serviços esperando resposta do cliente%'
       and (select mensagem_id is null from public.agenda_cliente_respostas where id = (r ->> 'resposta_id')::uuid),
       r::text);
     raise exception 'desfaz' using errcode = 'P0098';
@@ -351,7 +351,7 @@ begin
   begin
     r := pg_temp.resp(c_f, 'Sim', 'acordo', null, '2026-10-31 10:00');
     v_res := pg_temp.ok(v_res, 'A3a "Sim" ao M1 confirma: ter 03/11 fixado (cliente_confirmou), qua 04/11 igual, client_confirmed_for = ter 03/11 13:00, a ação fixar (origem cliente, *desfaz*), o sino, a mensagem respondida',
-      r ->> 'consumiu' = 'true' and r ->> 'efeito' = 'confirmou' and r ->> 'texto' = 'O Flávio confirmou ter 03/11.'
+      r ->> 'consumiu' = 'true' and r ->> 'efeito' = 'confirmou' and r ->> 'texto' = 'Flávio confirmou ter 03/11.'
       and pg_temp.plano(c_flav) = '2026-11-03 tarde fixada cliente_confirmou,2026-11-04 manha publicada'
       and (select client_confirmed_for = pg_temp.em('2026-11-03 13:00') and client_confirmed_at = pg_temp.em('2026-10-31 10:00')
              from public.service_orders where id = c_flav)
@@ -365,7 +365,7 @@ begin
       r::text || ' ' || pg_temp.plano(c_flav));
     r2 := public.agenda_desfazer_dito(c_dono, 'Flávio', 'whatsapp', date '2026-10-31', pg_temp.em('2026-10-31 11:00'));
     v_res := pg_temp.ok(v_res, 'A3b *desfaz Flávio* volta a confirmação: o dia de novo publicado (a fixada cancelada, a publicada igual criada), client_confirmed_* nulos, a ação desfeita',
-      r2 ->> 'ok' = 'true' and r2 ->> 'texto' = 'Desfeito: a confirmação do Flávio (ter 03/11) sai; o dia continua no plano, sem fixar.'
+      r2 ->> 'ok' = 'true' and r2 ->> 'texto' = 'Desfeito: a confirmação de Flávio (ter 03/11) sai; o dia continua no plano, sem fixar.'
       and pg_temp.plano(c_flav) = c_plano
       and (select client_confirmed_at is null and client_confirmed_for is null from public.service_orders where id = c_flav)
       and (select desfeita_em is not null from public.agenda_acoes where id = (r ->> 'acao_id')::uuid)
@@ -427,7 +427,7 @@ begin
     v_res := pg_temp.ok(v_res, 'A3g o "ok" ao "ficou pronto" vai ao dono (combine a entrega); ao pós-serviço não faz nada (a mensagem fica respondida)',
       r ->> 'efeito' = 'ao_dono'
       and (select q.texto from public.agenda_perguntas q where q.id = (r ->> 'pergunta_id')::uuid)
-          = 'Lucenira respondeu "Ok" ao "ficou pronto": combine a entrega com ele. Não respondi nada; é com você.'
+          = 'Lucenira respondeu "Ok" ao "ficou pronto": combine a entrega com o cliente. Não respondi nada; é com você.'
       and r2 ->> 'efeito' = 'nada' and r2 -> 'pergunta_id' = 'null'::jsonb
       and (select estado from public.agenda_cliente_mensagens where service_order_id = c_rob and tipo = 'pos_servico') = 'respondida',
       r::text || ' ' || r2::text);
@@ -483,7 +483,7 @@ begin
       and exists (select 1 from public.agenda_acoes a where a.id = (r ->> 'acao_id')::uuid and a.tipo = 'cliente' and a.origem = 'cliente'
                      and a.executada and a.desfazivel_ate is not null and (a.depois ->> 'acorde')::boolean
                      and jsonb_array_length(a.depois -> 'replano_acoes') > 0
-                     and a.texto = format('O Flávio pediu sex 06/11: remarquei para %s%s. *desfaz Flávio* volta como estava.',
+                     and a.texto = format('Flávio pediu sex 06/11: remarquei para %s%s. *desfaz Flávio* volta como estava.',
                                           public._dia_curto((x ->> 'proximo_dia')::date),
                                           case when (x ->> 'proximo_dia')::date > date '2026-11-06' then ', o 1º dia que coube' else '' end)),
       r::text || ' ' || x::text);
@@ -492,7 +492,7 @@ begin
       exists (select 1 from jsonb_array_elements(x -> 'acordes') e where e ->> 'acao_id' = r ->> 'acao_id'), (x -> 'acordes')::text);
     r2 := public.agenda_desfazer_dito(c_dono, 'Flávio', 'whatsapp', date '2026-10-31', pg_temp.em('2026-10-31 11:00'));
     v_res := pg_temp.ok(v_res, 'A5c *desfaz Flávio* volta tudo: o plano de ter 03/11 e qua 04/11, sem "não antes de" e sem dia fora',
-      r2 ->> 'ok' = 'true' and r2 ->> 'texto' = 'Desfeito: o pedido do Flávio sai; o serviço fica para ter 03/11.'
+      r2 ->> 'ok' = 'true' and r2 ->> 'texto' = 'Desfeito: o pedido de Flávio sai; o serviço fica para ter 03/11.'
       and pg_temp.plano(c_flav) = c_plano
       and (select nao_antes_de is null and nao_antes_motivo is null and bem_indisponivel = '{}'::datemultirange
              from public.os_planejamento where service_order_id = c_flav)
@@ -511,10 +511,10 @@ begin
     v_t := pg_temp.resp(c_f, 'Pode ser no dia de São Nunca?', 'data', 'dia de são nunca', '2026-10-31 10:03') ->> 'pergunta_id';
     v_res := pg_temp.ok(v_res, 'A5d o dia pedido que é hoje, mais cedo que o combinado (seg 02/11), o mesmo dia ou que o banco não entende vai ao dono; nada muda',
       r ->> 'efeito' = 'ao_dono' and r2 ->> 'efeito' = 'ao_dono' and x ->> 'efeito' = 'ao_dono'
-      and (select q.texto from public.agenda_perguntas q where q.id = (r ->> 'pergunta_id')::uuid) like '%: o dia que ele pediu já passou ou é hoje.%'
+      and (select q.texto from public.agenda_perguntas q where q.id = (r ->> 'pergunta_id')::uuid) like '%: o dia pedido já passou ou é hoje.%'
       and (select q.texto from public.agenda_perguntas q where q.id = (r2 ->> 'pergunta_id')::uuid) like '%: pediu um dia antes do combinado (seg 02/11).%'
       and (select q.texto from public.agenda_perguntas q where q.id = (x ->> 'pergunta_id')::uuid) like '%: falou do mesmo dia combinado.%'
-      and (select q.texto from public.agenda_perguntas q where q.id = v_t::uuid) like '%: não entendi o dia que ele pediu.%'
+      and (select q.texto from public.agenda_perguntas q where q.id = v_t::uuid) like '%: não entendi o dia pedido.%'
       and pg_temp.plano(c_flav) = c_plano
       and (select nao_antes_de is null and bem_indisponivel = '{}'::datemultirange from public.os_planejamento where service_order_id = c_flav),
       r::text || ' ' || r2::text || ' ' || x::text);
@@ -546,7 +546,7 @@ begin
              from public.os_planejamento where service_order_id = c_flav)
       and pg_temp.plano(c_flav) not like '%2026-11-03%'
       and exists (select 1 from public.agenda_acoes a where a.id = (r ->> 'acao_id')::uuid and not (a.depois ->> 'acorde')::boolean
-                     and a.texto like 'O Flávio pediu outro dia (ter 03/11 não dá): tirei o dia e remarquei para %. *desfaz Flávio* volta como estava.'),
+                     and a.texto like 'Flávio pediu outro dia (ter 03/11 não dá): tirei o dia e remarquei para %. *desfaz Flávio* volta como estava.'),
       r::text || ' ' || pg_temp.plano(c_flav));
     -- A12a: desfazer DIRETO o replano (a ação do motor, pela tela): o pedido sai junto e a ação do cliente fica desfeita
     v_t := (select a.depois -> 'replano_acoes' ->> 0 from public.agenda_acoes a where a.id = (r ->> 'acao_id')::uuid);
@@ -566,7 +566,7 @@ begin
       r ->> 'efeito' = 'replanejou' and r ->> 'intencao' = 'falta'
       and (select bem_indisponivel = '{[2026-10-31,2026-11-07)}'::datemultirange from public.os_planejamento where service_order_id = c_flav)
       and (x ->> 'proximo_dia')::date > date '2026-11-06'
-      and (select (a.depois ->> 'acorde')::boolean and a.texto like 'O Flávio pediu outro dia (sáb 31/10 a sex 06/11 não dá): tirei o dia%'
+      and (select (a.depois ->> 'acorde')::boolean and a.texto like 'Flávio pediu outro dia (sáb 31/10 a sex 06/11 não dá): tirei o dia%'
              from public.agenda_acoes a where a.id = (r ->> 'acao_id')::uuid),
       r::text || ' ' || x::text);
     raise exception 'desfaz' using errcode = 'P0098';
@@ -598,7 +598,7 @@ begin
     r := pg_temp.resp(c_f, 'Vou viajar até sexta', 'falta', 'até sexta', '2026-10-31 10:00');
     v_res := pg_temp.ok(v_res, 'A6e o que o cliente confirmou movido mais de 2 dias úteis vira a pergunta crítica do motor: "a decisão ficou com você"',
       r ->> 'efeito' = 'replanejou'
-      and r ->> 'texto' = 'O Flávio pediu outro dia (sáb 31/10 a sex 06/11 não dá): tirei o dia; a decisão ficou com você. *desfaz Flávio* volta como estava.'
+      and r ->> 'texto' = 'Flávio pediu outro dia (sáb 31/10 a sex 06/11 não dá): tirei o dia; a decisão ficou com você. *desfaz Flávio* volta como estava.'
       and exists (select 1 from public.agenda_perguntas q where q.service_order_id = c_flav and q.estado = 'aberta' and q.critica),
       r::text);
     raise exception 'desfaz' using errcode = 'P0098';
@@ -613,12 +613,12 @@ begin
       and (select site_access from public.service_orders where id = c_flav) = 'Cliente (31/10): A chave fica com o marinheiro, vaga 12'
       and (select acesso_ok_em = pg_temp.em('2026-10-31 10:00') from public.os_planejamento where service_order_id = c_flav)
       and (public._agenda_cliente_contexto(c_flav, date '2026-10-31') ->> 'acesso_conhecido')::boolean
-      and (select a.texto = 'Anotei o acesso que o Flávio disse: "A chave fica com o marinheiro, vaga 12".' and a.desfazivel_ate is not null
+      and (select a.texto = 'Anotei o acesso que Flávio disse: "A chave fica com o marinheiro, vaga 12".' and a.desfazivel_ate is not null
              from public.agenda_acoes a where a.id = (r ->> 'acao_id')::uuid),
       r::text);
     r2 := public.agenda_desfazer((r ->> 'acao_id')::uuid, c_dono, 'dono', date '2026-10-31', pg_temp.em('2026-10-31 11:00'));
     v_res := pg_temp.ok(v_res, 'A7b *desfaz*: o campo e o acesso_ok_em voltam ao que eram',
-      r2 ->> 'ok' = 'true' and r2 ->> 'texto' = 'Desfeito: o acesso que o Flávio disse saiu da OS.'
+      r2 ->> 'ok' = 'true' and r2 ->> 'texto' = 'Desfeito: o acesso que Flávio disse saiu da OS.'
       and (select site_access is null from public.service_orders where id = c_flav)
       and (select acesso_ok_em is null from public.os_planejamento where service_order_id = c_flav), r2::text);
     raise exception 'desfaz' using errcode = 'P0098';
@@ -680,10 +680,10 @@ begin
     r := pg_temp.resp(c_f, 'PARAR', 'opt_out', null, '2026-10-31 10:00');
     r2 := public.agenda_desfazer((r ->> 'acao_id')::uuid, c_dono, 'dono', date '2026-10-31', pg_temp.em('2026-10-31 11:00'));
     v_res := pg_temp.ok(v_res, 'A9 opt-out: o cadastro marcado, a viva recusada (opt_out), a ação calada ao dono; não se desfaz por aqui',
-      r ->> 'efeito' = 'opt_out' and r ->> 'texto' = 'O Flávio pediu para não receber mais mensagens: não mando mais nada a ele.'
+      r ->> 'efeito' = 'opt_out' and r ->> 'texto' = 'Flávio pediu para não receber mais mensagens: não mando mais nada.'
       and (select opt_out_whatsapp from public.clients where id = c_cli_flav)
       and (select estado = 'recusada' and recusa_motivo = 'opt_out' from public.agenda_cliente_mensagens where id = v_id2)
-      and r2 ->> 'ok' = 'false' and r2 ->> 'texto' like 'O pedido do Flávio para não receber mensagens não se desfaz%'
+      and r2 ->> 'ok' = 'false' and r2 ->> 'texto' like 'O pedido de Flávio para não receber mensagens não se desfaz por aqui: só o cliente pode pedir para voltar.'
       and not exists (select 1 from public.whatsapp_send_queue q where q.source = 'agenda-cliente'),
       r::text || ' ' || r2::text);
     raise exception 'desfaz' using errcode = 'P0098';

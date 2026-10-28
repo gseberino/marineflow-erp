@@ -295,7 +295,7 @@ begin
     v_id := (r ->> 'id')::uuid;
     v_res := pg_temp.ok(v_res, 'C2d1 o risco do replano com o mesmo início que o cliente ouviu vem com a forma fim; o texto (byte a byte) e o fim no base',
       x ->> 'variante' = 'remarcado' and x ->> 'forma' = 'fim'
-      and r ->> 'texto' = 'Olá, Flávio! Aqui é o Gustavo, da HBR Marine Solutions. A instalação do compressor vai precisar de mais um dia: agora fica de terça (03/11) até quarta (04/11). Desculpe pela mudança. Pode ser? Responda SIM ou me diga outro dia.'
+      and r ->> 'texto' = 'Olá, Flávio! Aqui é o Gustavo, da HBR Marine Solutions. A instalação do compressor vai terminar um dia depois do previsto: agora fica de terça (03/11) até quarta (04/11). Desculpe pela mudança. Pode ser? Responda SIM ou me diga outro dia.'
       and (select m.base ->> 'fim' = '2026-11-04' and m.base #>> '{dados,forma}' = 'fim' and m.prometido_tipo = 'firme'
              from public.agenda_cliente_mensagens m where m.id = v_id),
       x::text || ' ' || r::text);
@@ -322,7 +322,7 @@ begin
     v_res := pg_temp.ok(v_res, 'C2e1 (x6) o firme do dono com o material ainda não todo na mão: preparado com firme_do_dono e, no *manda cliente*, vai à fila (antes: recusado por "material")',
       r2 ->> 'texto' = 'Mando para Vanderlei agora.' and jsonb_array_length(x) = 1 and x -> 0 ->> 'estado' = 'enfileirada'
       and (x -> 0 #>> '{base,dados,firme_do_dono}')::boolean
-      and r ->> 'texto' like 'Pronto para Vanderlei, sai agora: "Olá, Vanderlei! Aqui é o Gustavo, da HBR Marine Solutions. O serviço no Mar Azul vai precisar de mais um dia: agora fica de terça (03/11) até quinta (05/11).%',
+      and r ->> 'texto' like 'Pronto para Vanderlei, sai agora: "Olá, Vanderlei! Aqui é o Gustavo, da HBR Marine Solutions. O serviço no Mar Azul vai terminar um dia depois do previsto: agora fica de terça (03/11) até quinta (05/11).%',
       r::text || ' ' || r2::text || ' ' || x::text);
     -- a mesma data firme registrada pela rodada (sem o dono): o passo do material continua valendo
     r := public._agenda_cliente_registrar('pode_atrasar', 'remarcado', c_ven, date '2026-11-03',
@@ -346,7 +346,7 @@ begin
     perform pg_temp.saiu(v_id, '2026-10-31 09:15:20');
     v_res := pg_temp.ok(v_res, 'C2f1 o Nelson (2 críticos sem previsão, o painel em 11/11): o aviso sem data (peca_sem_data, condicional, o texto byte a byte), sem prometido; ao sair, o prometido da OS fica nulo (o de antes no histórico)',
       x ->> 'variante' = 'peca_sem_data' and x ->> 'tipo' = 'condicional'
-      and (select m.estado = 'enviada' and m.prometido_tipo is null and m.texto = 'Nelson, quero te avisar com antecedência: ainda faltam peças do serviço no seu veleiro sem data de chegada, então o serviço no seu veleiro, que estava para quinta (05/11), vai atrasar. Te digo a nova data assim que elas chegarem. Se isso atrapalhar algum plano seu, me diga.'
+      and (select m.estado = 'enviada' and m.prometido_tipo is null and m.texto = 'Nelson, quero te avisar com antecedência: ainda faltam peças sem data de chegada, então o serviço no seu veleiro, que estava para quinta (05/11), vai atrasar. Te digo a nova data assim que elas chegarem. Se isso atrapalhar algum plano seu, me diga.'
              from public.agenda_cliente_mensagens m where m.id = v_id)
       and (select p.prometido_ate is null and p.prometido_tipo is null and p.prometido_original_ate is null
                   and p.historico -> -1 #>> '{antes,prometido_ate}' = '2026-11-05'

@@ -264,13 +264,13 @@ begin
   v_res := pg_temp.igual(v_res, 'L1d ligado: o que a rodada registrou espera o dono (a pergunta dos 3 primeiros dias)', pg_temp.msgs(),
     'OS-00096 confirmar ligado aguardando_dono pedida,OS-00104 acesso ligado aguardando_dono pedida,OS-00112 pode_atrasar ligado aguardando_dono pedida,OS-00121 pos_servico ligado aguardando_dono pedida,OS-00122 pronto ligado aguardando_dono pedida');
   v_res := pg_temp.igual(v_res, 'L1e ligado: esperando você (a 1ª inteira; as outras encurtam para caber), o "não respondeu" no bloco dele, o que não consigo mandar', v_ger,
-    E'Mensagens ao cliente:\nEsperando você:\n• Lucenira (ficou pronto), sai agora: "Olá, Lucenira! Aqui é o Gustavo, da HBR Marine Solutions. A troca das baterias está concluída. Quando fica bom para combinarmos a entrega?" — *manda cliente Lucenira* ou *segura cliente Lucenira*\n• Rodrigo (confirmação), sai amanhã às 09:00: "Olá, Rodrigo! Conseguimos encaixar o serviço na sua lancha para…" — *manda cliente Rodrigo*\n• Flávio (véspera, com a pergunta do acesso), sai amanhã às 09:00: "Bom dia, Flávio! Na terça (03/11) chegamos à tarde para a instalação…" — *manda cliente Flávio*\n• Nelson (aviso de atraso), sai amanhã às 09:01: "Nelson, quero te avisar com antecedência: ainda faltam peças do…" — *manda cliente Nelson*\n• Robson (pós-serviço), sai ter 03/11 às 09:00: "Olá, Robson! Tudo certo com o serviço no seu motorhome? Já deu para…" — *manda cliente Robson*\nSem resposta:\n• Nelson: a confirmação de qui 05/11, mandada qui 22/10\n(e mais 1 linha)');
+    E'Mensagens ao cliente:\nEsperando você:\n• Lucenira (ficou pronto), sai agora: "Olá, Lucenira! Aqui é o Gustavo, da HBR Marine Solutions. A troca das baterias está concluída. Quando fica bom para combinarmos a entrega?" — *manda cliente Lucenira* ou *segura cliente Lucenira*\n• Rodrigo (confirmação), sai amanhã às 09:00: "Olá, Rodrigo! Conseguimos encaixar o serviço na sua lancha para…" — *manda cliente Rodrigo*\n• Flávio (véspera, com a pergunta do acesso), sai amanhã às 09:00: "Bom dia, Flávio! Na terça (03/11) chegamos à tarde para a instalação…" — *manda cliente Flávio*\n• Nelson (aviso de atraso), sai amanhã às 09:01: "Nelson, quero te avisar com antecedência: ainda faltam peças sem data…" — *manda cliente Nelson*\n• Robson (pós-serviço), sai ter 03/11 às 09:00: "Olá, Robson! Tudo certo com o serviço no seu motorhome? Já deu para…" — *manda cliente Robson*\nSem resposta:\n• Nelson: a confirmação de qui 05/11, mandada qui 22/10\n(e mais 1 linha)');
   v_res := pg_temp.ok(v_res, 'L1f ligado: o foco cabe em texto_max (1000)', char_length(v_ger) <= 1000, char_length(v_ger)::text);
   v_res := pg_temp.igual(v_res, 'L1g com a OS: o que foi dito, a mensagem inteira e o sem resposta', v_nel,
-    E'Mensagens ao cliente — Nelson (OS-00112):\nO que foi dito a ele: qui 05/11 (data firme, por mensagem da agenda em qui 22/10).\nEsperando você:\n• Nelson (aviso de atraso), sai amanhã às 09:01: "Nelson, quero te avisar com antecedência: ainda faltam peças do serviço no seu veleiro sem data de chegada, então o serviço no seu veleiro, que estava para quinta (05/11), vai atrasar. Te digo a nova data assim que elas chegarem. Se isso atrapalhar algum plano seu, me diga." — *manda cliente Nelson* ou *segura cliente Nelson*\nSem resposta:\n• Nelson: a confirmação de qui 05/11, mandada qui 22/10');
+    E'Mensagens ao cliente — Nelson (OS-00112):\nO que foi dito ao cliente: qui 05/11 (data firme, por mensagem da agenda em qui 22/10).\nEsperando você:\n• Nelson (aviso de atraso), sai amanhã às 09:01: "Nelson, quero te avisar com antecedência: ainda faltam peças sem data de chegada, então o serviço no seu veleiro, que estava para quinta (05/11), vai atrasar. Te digo a nova data assim que elas chegarem. Se isso atrapalhar algum plano seu, me diga." — *manda cliente Nelson* ou *segura cliente Nelson*\nSem resposta:\n• Nelson: a confirmação de qui 05/11, mandada qui 22/10');
   v_t := pg_temp.ver('Lenine');
   v_res := pg_temp.ok(v_res, 'L1h com a OS sem telefone: "sem telefone no cadastro" e o que foi dito (nada ainda)',
-    v_t like '%O que foi dito a ele: nada ainda.%' and v_t like '%Não consigo mandar: Lenine (sem telefone no cadastro).%', v_t);
+    v_t like '%O que foi dito ao cliente: nada ainda.%' and v_t like '%Não consigo mandar: Lenine (sem telefone no cadastro).%', v_t);
   v_res := pg_temp.ok(v_res, 'L1i o foco que não existe cita os 18 (com clientes)',
     pg_temp.como(null, 'service_role', $q$select public.agenda_ver(null, null, null, 'nada', null, null, false, date '2026-10-30')::text$q$)
       like 'erro 22023: agenda_ver: foco "nada" não existe (%, compras, fornecedores ou clientes)', null);
@@ -330,14 +330,14 @@ begin
   -- ── L3: cliente_avisar (ligado)
   r := pg_temp.prep('Nelson', 'material_chegou');
   v_res := pg_temp.igual(v_res, 'L3a sem o material todo na mão (d09): não prepara e diz o que falta', r ->> 'texto',
-    'O material do Nelson ainda não está todo na mão (tem peça sem previsão de chegada): não digo data firme ao cliente. Quando chegar, me avise e eu preparo.');
+    'O material de Nelson ainda não está todo na mão (tem peça sem previsão de chegada): não digo data firme ao cliente. Quando chegar, me avise e eu preparo.');
   r := pg_temp.prep('Giancarlo', 'pode_atrasar');
   v_res := pg_temp.igual(v_res, 'L3b sem data dita ao cliente: não há atraso a avisar', r ->> 'texto',
-    'Não há data dita ao Giancarlo: sem data dita, não há atraso a avisar. Se você disse uma data a ele, me conte ("falei pro Giancarlo que é dia 3").');
+    'Não há data dita para Giancarlo: sem data dita, não há atraso a avisar. Se você disse uma data, me conte ("falei pro Giancarlo que é dia 3").');
   r := pg_temp.prep('Lenine', 'confirmar');
   r2 := pg_temp.prep('Flávio', 'mudanca_no_dia');
   v_res := pg_temp.ok(v_res, 'L3c sem telefone e a mudança no dia: não prepara',
-    r ->> 'texto' = 'O Lenine não tem telefone no cadastro: não tenho como mandar.' and r2 ->> 'motivo' = 'mudanca_no_dia',
+    r ->> 'texto' = 'Lenine não tem telefone no cadastro: não tenho como mandar.' and r2 ->> 'motivo' = 'mudanca_no_dia',
     r::text || r2::text);
   r := pg_temp.prep('Nelson', 'pode_atrasar');
   v_res := pg_temp.ok(v_res, 'L3d a que a rodada já registrou: "Já está pronta, esperando você" (não duplica)',
@@ -356,7 +356,7 @@ begin
     and pg_temp.fila() = v_n, pg_temp.msgs());
   r := pg_temp.prep('Nelson', 'pode_atrasar', true);
   v_res := pg_temp.igual(v_res, 'L3g a firme sem o plano publicado: não prepara', r ->> 'texto',
-    'O Nelson não tem o plano publicado: não tenho data firme para dizer; vai a faixa.');
+    'Nelson não tem o plano publicado: não tenho data firme para dizer; vai a faixa.');
   begin
     -- a firme do plano: o Flávio ouviu seg 02/11 e o plano é ter 03/11 → o M6 remarcado com o dia do plano
     perform public._agenda_cliente_gravar_prometido(c_flav, 'firme', date '2026-11-02', date '2026-11-02', 'dono', null,
@@ -486,14 +486,14 @@ begin
              where g ->> 'os' = c_flav::text and g ->> 'tipo' = 'acao');
     v_res := pg_temp.ok(v_res, 'L9a o pedido do cliente e o replano dele: um grupo só, com a frase do cliente (sem o *desfaz* em dobro), as duas ações contadas',
       r ->> 'efeito' = 'replanejou' and v_n = 1
-      and v_t = '["O Flávio pediu sex 06/11: remarquei para seg 09/11, o 1º dia que coube."]'
+      and v_t = '["Flávio pediu sex 06/11: remarquei para seg 09/11, o 1º dia que coube."]'
       and (select jsonb_array_length(g -> 'acao_ids') from jsonb_array_elements(public._agenda_mudancas(date '2026-10-24', date '2026-10-30',
              true, true, pg_temp.em('2026-10-30 17:30'))) g where g ->> 'os' = c_flav::text and g ->> 'tipo' = 'acao') = 2,
       coalesce(v_t, '(nada)') || ' ' || r::text);
     v_t := (select l ->> 'texto' from jsonb_array_elements(public._agenda_linhas_do_fechamento(date '2026-10-30')) l
              where l ->> 'tipo' = 'mudancas' and l ->> 'modo' = 'ligado');
     v_res := pg_temp.igual(v_res, 'L9b a linha mudancas do fechamento: o pedido do cliente uma vez, com o *desfaz*', v_t,
-      'Agenda, mudei sozinho. O Flávio pediu sex 06/11: remarquei para seg 09/11, o 1º dia que coube. *desfaz Flávio* volta como estava.');
+      'Agenda, mudei sozinho. Flávio pediu sex 06/11: remarquei para seg 09/11, o 1º dia que coube. *desfaz Flávio* volta como estava.');
     v_t := pg_temp.ver('Flávio');
     v_res := pg_temp.ok(v_res, 'L1l o foco com a OS mostra a resposta e o efeito ("Responderam")',
       v_t like E'%Responderam (7 dias):\n• Flávio respondeu "pode ser sexta?" à confirmação de ter 03/11: pediu outro dia, e eu replanejei%', v_t);

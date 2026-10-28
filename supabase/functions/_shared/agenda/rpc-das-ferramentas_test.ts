@@ -510,8 +510,8 @@ Deno.test("Fase 5: resultadoDaMensagemAoCliente — o texto pronto e a instruç�
   const ok = resultadoDaMensagemAoCliente({ ok: true, status: "preparada", texto: "Pronto para Flávio, sai agora: \"…\". Para mandar: *manda cliente Flávio*.", mensagem_id: "x" });
   assertEquals([ok.ok, ok.instrucao], [true, INSTRUCAO_CLIENTE]);
   assert(!("mensagem_id" in ok));
-  const nao = resultadoDaMensagemAoCliente({ ok: false, motivo: "sem_prometido", pergunta: "Não há data dita ao Giancarlo…", texto: "Não há data dita ao Giancarlo…" });
-  assertEquals([nao.ok, nao.texto], [false, "Não há data dita ao Giancarlo…"]);
+  const nao = resultadoDaMensagemAoCliente({ ok: false, motivo: "sem_prometido", pergunta: "Não há data dita para Giancarlo…", texto: "Não há data dita para Giancarlo…" });
+  assertEquals([nao.ok, nao.texto], [false, "Não há data dita para Giancarlo…"]);
   assertThrows(() => resultadoDaMensagemAoCliente(null), Error, "respondeu sem texto");
 });
 

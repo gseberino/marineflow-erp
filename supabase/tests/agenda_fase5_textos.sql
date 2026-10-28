@@ -164,9 +164,9 @@ begin
       -- correção C2 da Fase 5 (os textos novos, para o dono aprovar): (item 8) a peça sem data de chegada; (item 6) o remarcado
       -- em que só o fim mudou (a forma fim); (item 12) a saudação pela hora do envio ("Boa tarde" a partir das 12:00)
       (19, 'pode_atrasar', 'peca_sem_data', c_nel, '{}',
-       'Nelson, quero te avisar com antecedência: ainda faltam peças do serviço no seu veleiro sem data de chegada, então o serviço no seu veleiro, que estava para quinta (05/11), vai atrasar. Te digo a nova data assim que elas chegarem. Se isso atrapalhar algum plano seu, me diga.'),
+       'Nelson, quero te avisar com antecedência: ainda faltam peças sem data de chegada, então o serviço no seu veleiro, que estava para quinta (05/11), vai atrasar. Te digo a nova data assim que elas chegarem. Se isso atrapalhar algum plano seu, me diga.'),
       (20, 'pode_atrasar', 'remarcado', c_ven, '{"primeira": false, "forma": "fim", "dia_dito": "2026-11-03"}',
-       'Vanderlei, o serviço no Mar Azul vai precisar de mais um dia: agora fica de terça (03/11) até quinta (05/11). Desculpe pela mudança. Pode ser? Responda SIM ou me diga outro dia.'),
+       'Vanderlei, o serviço no Mar Azul vai terminar 2 dias depois do previsto: agora fica de terça (03/11) até quinta (05/11). Desculpe pela mudança. Pode ser? Responda SIM ou me diga outro dia.'),
       (21, 'vespera', null, c_len, '{"primeira": false, "envio": "2026-11-05", "saudacao": "Boa tarde"}',
        'Boa tarde, Lenine! Amanhã chegamos pela manhã para o serviço no Brisa, na Marina de Itajaí. Está tudo certo para recebermos? Responda SIM, ou me avise se algo mudou.'),
       (22, 'acesso', null, c_fla, '{"primeira": true, "envio": "2026-10-31", "saudacao": "Boa tarde"}',

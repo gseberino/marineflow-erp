@@ -165,8 +165,9 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
   // Correção C1 da Fase 5 (20261028100700): revalidar e enfileirar recriados (+1 cada: a cópia leva o mesmo nome do motivo);
   // o corpo do botão foi para _pedir_confirmacao (a cópia de 100200, com o mesmo nome); a casca nova não tem nenhum.
   // Correção C2 da Fase 5 (20261028100800): revalidar e enfileirar recriados de novo (+1 cada: a mesma cópia).
+  // Fase 6 (P7, 20261029100700): _pedir_confirmacao recriado (+1: a cópia leva o mesmo nome do motivo; o texto do botão sem "ele").
   ...([['_agenda_cliente_revalidar', 3], ['_agenda_cliente_enfileirar', 3], ['pedir_confirmacao_do_agendamento', 1],
-        ['_pedir_confirmacao', 1]] as const).map(([onde, vezes]) => ({
+        ['_pedir_confirmacao', 2]] as const).map(([onde, vezes]) => ({
     onde,
     casou: '24h',
     vezes,
@@ -428,6 +429,10 @@ describe('agenda: parâmetro só em agenda_config', () => {
       // recriadas (agenda_decidir, agenda_desfazer, agenda_desfazer_dito e agenda_saude) já estavam na lista pelas fases de antes
       'agenda_aprender', '_agenda_aprender_revisao', '_agenda_aprender_solver', '_agenda_aprendizado_decidir',
       '_agenda_desfazer_aprendizado', '_agenda_aprendizado_carga',
+      // Fase 6 (P7): o acabamento dos textos da Fase 5 (nenhuma nova; as recriadas que ainda não estavam na lista)
+      'agenda_cliente_preparar', 'agenda_resposta_do_cliente', '_agenda_cliente_da_os', '_agenda_ver_clientes',
+      '_agenda_cliente_confirmar_dia', '_agenda_cliente_anotar_acesso', '_agenda_cliente_pedido_de_dia', '_agenda_desfazer_cliente',
+      '_agenda_cliente_teria_feito',
     ]));
     expect(tsAgenda.map((t) => t.onde)).toEqual(expect.arrayContaining([
       path.join('supabase', 'functions', 'task-automations', 'agenda-vigia.ts'),

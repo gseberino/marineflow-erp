@@ -228,8 +228,8 @@ begin
   begin
     update public.service_orders set client_confirmed_for = pg_temp.em('2026-11-03 13:00'), client_confirmed_at = pg_temp.em('2026-10-30 16:00')
      where id = c_flav;
-    v_res := pg_temp.igual(v_res, 'T1n a confirmação do cliente: "Ele confirmou ter 03/11."', pg_temp.cli('104') ->> 'confirmado_texto',
-                           'Ele confirmou ter 03/11.');
+    v_res := pg_temp.igual(v_res, 'T1n a confirmação do cliente: "O cliente confirmou ter 03/11."', pg_temp.cli('104') ->> 'confirmado_texto',
+                           'O cliente confirmou ter 03/11.');
     insert into public.agenda_cliente_respostas (client_id, service_order_id, mensagem_id, recebida_em, tipo_msg, texto, intencao,
                                                  efeito, modo)
     values ('c1000000-0000-4000-8000-000000000005', c_nel, 'd5000000-0000-4000-8000-0000000000a1', pg_temp.em('2026-10-30 17:20'),

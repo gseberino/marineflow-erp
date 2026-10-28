@@ -252,7 +252,7 @@ declare
   c_cli_rod constant uuid := 'c1000000-0000-4000-8000-000000000006';
   c_painel constant uuid := md5('peca:112:4')::uuid;
   -- correção C2 da Fase 5 (item 8): o Nelson tem 2 críticos sem previsão (e o painel em 11/11): o aviso é o "sem data"
-  c_m6 constant text := 'Nelson, quero te avisar com antecedência: ainda faltam peças do serviço no seu veleiro sem data de chegada, então o serviço no seu veleiro, que estava para quinta (05/11), vai atrasar. Te digo a nova data assim que elas chegarem. Se isso atrapalhar algum plano seu, me diga.';
+  c_m6 constant text := 'Nelson, quero te avisar com antecedência: ainda faltam peças sem data de chegada, então o serviço no seu veleiro, que estava para quinta (05/11), vai atrasar. Te digo a nova data assim que elas chegarem. Se isso atrapalhar algum plano seu, me diga.';
   r     jsonb;
   r2    jsonb;
   x     jsonb;
@@ -946,7 +946,7 @@ begin
     v_p := (select q.id from public.agenda_perguntas q where q.chave = 'cliente_aviso:' || c_nel || ':2026-10-29');
     r := public.agenda_decidir(v_p, 2::smallint, c_dono, 'whatsapp', null, date '2026-10-30', pg_temp.em('2026-10-30 10:05'));
     v_res := pg_temp.ok(v_res, 'R10j a pergunta "passou" (sem mensagem) com a opção 2: nada sai, "Não há aviso escrito para mandar para Nelson: …"',
-      r ->> 'ok' = 'true' and r ->> 'texto' like 'Não há aviso escrito para mandar para Nelson: a data que ele ouviu já passou%'
+      r ->> 'ok' = 'true' and r ->> 'texto' like 'Não há aviso escrito para mandar para Nelson: a data dita já passou%'
       and pg_temp.pergunta(v_p) ->> 'estado' = 'respondida' and jsonb_array_length(pg_temp.msgs(c_nel)) = 0
       and not exists (select 1 from public.whatsapp_send_queue q join public.agenda_cliente_mensagens m on m.id = q.source_ref_id
                        where q.source = 'agenda-cliente' and m.service_order_id = c_nel), r::text);

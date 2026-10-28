@@ -138,8 +138,19 @@ end $f$;
 create function pg_temp.sem_correcao(p_corpo text) returns text[] language plpgsql as $f$
 declare
   v_b text[] := '{}'; v_bloco boolean := false; l text;
+  -- FASE 6: (P7) os blocos "-- FASE 6: … -- FASE 6: fim" também saem (a Fase 6 recria agenda_resposta_do_cliente e
+  -- _pedir_confirmacao: spec-fase6 §3.1, item 11); um bloco da Fase 6 dentro de um da correção sai junto com ele
+  v_f6 boolean := false;
+  -- FASE 6: fim
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
+    -- FASE 6: (P7) fora de um bloco da correção, o bloco da Fase 6 sai inteiro (o fim é lido pelo prefixo)
+    if not v_bloco and not v_f6 and l ~ '^\s*-- FASE 6:' and l !~ '^\s*-- FASE 6: fim' then v_f6 := true; continue; end if;
+    if v_f6 then
+      if l ~ '^\s*-- FASE 6: fim' then v_f6 := false; end if;
+      continue;
+    end if;
+    -- FASE 6: fim
     if not v_bloco and l ~ '^\s*-- CORREÇÃO FASE 5:' and l !~ '^\s*-- CORREÇÃO FASE 5: fim' then v_bloco := true; continue; end if;
     if v_bloco then
       if l ~ '^\s*-- CORREÇÃO FASE 5: fim' then v_bloco := false; end if;
@@ -303,7 +314,7 @@ begin
       and (select m.estado = 'recusada' and m.recusa_motivo = 'opt_out' from public.agenda_cliente_mensagens m where m.id = v_id2)
       and (select x.efeito = 'opt_out' and x.intencao = 'opt_out' and x.mensagem_id = v_id and x.acao_id = (r ->> 'acao_id')::uuid
              from public.agenda_cliente_respostas x where x.id = (r ->> 'resposta_id')::uuid)
-      and (select a.texto = 'O Robson pediu para não receber mais mensagens: não mando mais nada a ele.' and a.origem = 'cliente'
+      and (select a.texto = 'Robson pediu para não receber mais mensagens: não mando mais nada.' and a.origem = 'cliente'
                   and a.desfazivel_ate is null and (a.depois ->> 'canceladas')::int = 1
              from public.agenda_acoes a where a.id = (r ->> 'acao_id')::uuid),
       r::text);
@@ -391,7 +402,7 @@ begin
     r3 := pg_temp.resp(c_f, 'Vou viajar até 20/12', 'falta', 'até 20/12', pg_temp.em('2026-11-03 07:02'));
     v_res := pg_temp.ok(v_res, 'C1e3 (A5c/A5d) "dia 31" em novembro vai ao dono (não entendi); "dia 3/12" e "vou viajar até 20/12" passam de cliente_pedido_max_du (10) dias úteis do combinado: ao dono, sem replano',
       r ->> 'efeito' = 'ao_dono' and r2 ->> 'efeito' = 'ao_dono' and r3 ->> 'efeito' = 'ao_dono'
-      and (select q.texto from public.agenda_perguntas q where q.id = (r ->> 'pergunta_id')::uuid) like '%: não entendi o dia que ele pediu.%'
+      and (select q.texto from public.agenda_perguntas q where q.id = (r ->> 'pergunta_id')::uuid) like '%: não entendi o dia pedido.%'
       and (select q.texto from public.agenda_perguntas q where q.id = (r2 ->> 'pergunta_id')::uuid)
           like '%: pediu qui 03/12, mais de 10 dias úteis depois do combinado: remarque você.%'
       and (select q.texto from public.agenda_perguntas q where q.id = (r3 ->> 'pergunta_id')::uuid)
@@ -437,7 +448,7 @@ begin
      where id = v_id;
     r3 := pg_temp.botao(c_rod, '2026-10-30 17:40');
     v_res := pg_temp.ok(v_res, 'C1f3 (E9g) com a da rodada segurada, o clique registra a 2ª pelo botão (agenda-cliente:confirmar:<os>:<dia>:botao), aprovada, na fila agora; a segurada não muda',
-      r3 ->> 'message' = 'Pedido de confirmação na fila para Rodrigo. Quando ele responder SIM, a OS fica confirmada.'
+      r3 ->> 'message' = 'Pedido de confirmação na fila para Rodrigo. Quando a resposta for SIM, a OS fica confirmada.'
       and (select m.dedupe_key = format('agenda-cliente:confirmar:%s:2026-11-04:botao', c_rod) and m.origem = 'botao'
                   and m.aprovacao = 'aprovada' and m.estado = 'enfileirada'
              from public.agenda_cliente_mensagens m where m.id = (r3 ->> 'id')::uuid)
