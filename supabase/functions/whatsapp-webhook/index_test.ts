@@ -503,3 +503,35 @@ Deno.test("cliente P4: no código, a ordem é equipe → cliente → o bloco de 
   // o manejarRespostaAutomatica (o opt-out de hoje) não muda e vem antes
   assertEquals(bloco.indexOf('manejarRespostaAutomatica(admin, "clients", clientId, body)') < equipe, true);
 });
+
+// ─── Agenda de Produção, correção C1 da Fase 5 (27/10/2026) ─────────────────────────────────────────────────────────
+// Item 10: a resposta que a agenda consumiu não é lida de novo pela revisão (o "sim" confirmaria a OS e criaria "Agendar
+// revisão"; o "pode ser dia 5?" remarcaria e adiaria o plano de manutenção). A1: o banco que diz "outra conversa" (o botão
+// antigo ou o dono falaram com o cliente depois da mensagem da agenda) devolve consumiu false — o "sim" de 30/09 e a
+// revisão leem como sempre.
+Deno.test("C1 (item 10): consumida pela agenda = a resposta da revisão também não lê o texto", async () => {
+  const falso = await rodarCliente({ cliente: { consumiu: true, efeito: "confirmou" } }, { conversation: "Sim" }, "WAID-C1-1");
+  assertEquals(falso.conta("/rest/v1/rpc/agenda_resposta_do_cliente", "POST"), 1);
+  assertEquals(falso.conta("/rest/v1/rpc/registrar_resposta_da_revisao"), 0);
+  assertEquals(falso.conta("/rest/v1/rpc/registrar_confirmacao_do_cliente"), 0);
+});
+
+Deno.test("C1 (item 10): não consumida (em teste, sem mensagem) = a revisão lê como sempre", async () => {
+  const falso = await rodarCliente({ cliente: { consumiu: false, modo: "sombra" } }, { conversation: "Sim" }, "WAID-C1-2");
+  assertEquals(falso.conta("/rest/v1/rpc/registrar_resposta_da_revisao"), 1);
+});
+
+Deno.test("C1 (A1): a outra conversa (consumiu false, motivo outra_conversa) = o SIM de 30/09 e a revisão leem", async () => {
+  const falso = await rodarCliente({ cliente: { consumiu: false, modo: "ligado", motivo: "outra_conversa" } }, { conversation: "Sim" },
+                                   "WAID-C1-3");
+  assertEquals(falso.conta("/rest/v1/rpc/registrar_confirmacao_do_cliente"), 1);
+  assertEquals(falso.conta("/rest/v1/rpc/registrar_conferencia_do_freelancer"), 1);
+  assertEquals(falso.conta("/rest/v1/rpc/registrar_resposta_da_revisao"), 1);
+});
+
+Deno.test("C1 (item 10): no código, a revisão fica atrás da trava doCliente", async () => {
+  const fonte = (await Deno.readTextFile(new URL("./index.ts", import.meta.url))).replace(/\r\n/g, "\n");
+  assertStringIncludes(fonte, "if (body.trim().length <= 500 && !doCliente) {");
+  const revisao = fonte.indexOf("if (body.trim().length <= 500 && !doCliente) {");
+  assertEquals(fonte.indexOf('admin.rpc("registrar_resposta_da_revisao"', revisao) > revisao, true);
+});

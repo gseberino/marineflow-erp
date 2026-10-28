@@ -615,7 +615,10 @@ export async function handler(req: Request): Promise<Response> {
       // Resposta ao lembrete de revisão (07/10/2026): só vale para quem recebeu lembrete/campanha nos
       // últimos 21 dias (a RPC confere). PARAR → opt-out; "sim" → tarefa "Agendar revisão"; uma data
       // ("dia 15", "mês que vem" — lida aqui, com teste) → adia o plano; outro texto → sino.
-      if (body.trim().length <= 500) {
+      // Agenda de Produção (correção C1 da Fase 5, item 10): a resposta que a agenda consumiu (doCliente) não é lida de
+      // novo como resposta à revisão — o "sim" confirmaria a OS E criaria "Agendar revisão"; o "pode ser dia 5?"
+      // remarcaria a OS E adiaria o plano de manutenção. O "ok" tem um dono só.
+      if (body.trim().length <= 500 && !doCliente) {
         admin.rpc("registrar_resposta_da_revisao", {
           p_telefone: phone, p_texto: body, p_mensagem: msg?.id ?? null, p_data: lerDataDaResposta(body),
         }).then(() => {}, () => {});

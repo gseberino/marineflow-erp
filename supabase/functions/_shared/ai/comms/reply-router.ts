@@ -115,6 +115,8 @@ const NAO_POSSO =
 const REMARCAR = /\boutro dia\b|\bremarc|\badiar?\b|\bmais (?:pra|para) frente\b|\boutra data\b|\boutro horario\b/;
 const ACESSO =
   /\bchaves?\b|\bportaria\b|\bsecretaria\b|\bmarinheiro\b|\bvaga\b|\bno seco\b|\bna agua\b|\bgaragem\b|\btomada\b|\bcaseiro\b|\bsenha\b|\bportao\b/;
+/** (Correção C1 da Fase 5, item 16) O acesso que ele ainda não sabe ou não tem não é acesso dito. */
+const ACESSO_NEGADO = /\bnao sei\b|\bnao tenho\b|\bainda nao\b/;
 const PERGUNTA_DO_CLIENTE = /\?|^\s*(?:qual|quais|quanto|como|onde|quando|que horas|por que|porque|voces tem|tem previsao)\b/;
 const ACORDO_DO_CLIENTE =
   /\b(?:sim|ok|okay|beleza|blz|combinado|fechado|certo|perfeito|pode ser|pode vir|podem vir|tudo certo|ta certo|de acordo|confirmo|confirmado|aceito)\b|👍/u;
@@ -214,11 +216,13 @@ export function classificarRespostaDoCliente(texto: string | null | undefined): 
   const rem = n.match(REMARCAR);
   if (rem) return achou("remarcar", rem[0], recusado);
 
-  // 6. acesso: só o que ele AFIRMA (a pergunta sobre a chave é pergunta)
+  // 6. acesso: só o que ele AFIRMA (a pergunta sobre a chave é pergunta). Correção C1 da Fase 5 (item 16): o acesso com
+  //    negação em qualquer parte ("não sei onde vai estar a chave ainda", "não tenho a chave", "ainda não sei") não é acesso dito — é
+  //    pergunta, e vai ao dono (o banco não anota o acesso nem desliga a pergunta do acesso).
   for (const o of ditas) {
     if (o.pergunta) continue;
     const a = o.texto.match(ACESSO);
-    if (a) return achou("acesso", a[0]);
+    if (a) return ACESSO_NEGADO.test(n) ? achou("pergunta", a[0]) : achou("acesso", a[0]);
   }
   // 7. pergunta, acordo, outro
   const perg = n.match(PERGUNTA_DO_CLIENTE);

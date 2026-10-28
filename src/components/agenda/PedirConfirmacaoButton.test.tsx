@@ -20,7 +20,11 @@ vi.mock('@/integrations/supabase/client', () => ({
   },
 }));
 vi.mock('sonner', () => ({
-  toast: { success: (m: string) => banco.toasts.push(m), error: (m: string) => banco.toasts.push(`erro: ${m}`) },
+  toast: {
+    success: (m: string) => banco.toasts.push(m),
+    error: (m: string) => banco.toasts.push(`erro: ${m}`),
+    info: (m: string) => banco.toasts.push(`info: ${m}`),
+  },
 }));
 
 import { PedirConfirmacaoButton, lerComoSaiAConfirmacao, textoDoPedido } from './PedirConfirmacaoButton';
@@ -78,5 +82,55 @@ describe('PedirConfirmacaoButton', () => {
     expect(await lerComoSaiAConfirmacao({})).toBe('nao_sei');
     expect(textoDoPedido('agora')).toMatch(/^Vai agora, pelo WhatsApp da HBR/);
     expect(textoDoPedido('nao_sei')).toMatch(/na hora, ou no próximo horário de mensagens ao cliente/);
+  });
+});
+
+// Correção C1 da Fase 5 (27/10/2026): o banco responde na hora o que antes ficava calado até a manhã seguinte (o cliente
+// que não escreveu para a HBR, o teto, o caminho antigo fora do horário) e diz quando a confirmação já estava com a agenda
+// (já mandada, na fila, indo sair sozinha) — esse aviso é neutro, não "enviado".
+describe('PedirConfirmacaoButton (correção C1 da Fase 5)', () => {
+  it('a confirmação que já estava com a agenda aparece como aviso neutro, não como enviada', async () => {
+    banco.resposta = {
+      data: { ok: true, agenda: true, nada_feito: true, message: 'Já mandei a confirmação de qua 04/11 para Flávio (sex 30/10 às 10:00).' },
+      error: null,
+    };
+    render(<PedirConfirmacaoButton osId="os-5" />);
+    fireEvent.click(screen.getByRole('button', { name: /Pedir confirmação/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Enviar pedido' }));
+    await waitFor(() => expect(banco.toasts).toContain('info: Já mandei a confirmação de qua 04/11 para Flávio (sex 30/10 às 10:00).'));
+    expect(banco.toasts.some((t) => !t.startsWith('info: '))).toBe(false);
+  });
+
+  it('o clique que aprovou a confirmação que esperava o dono aparece como feito', async () => {
+    banco.resposta = { data: { ok: true, agenda: true, aprovou: true, message: 'Mando ao Rodrigo amanhã às 09:00.' }, error: null };
+    render(<PedirConfirmacaoButton osId="os-6" />);
+    fireEvent.click(screen.getByRole('button', { name: /Pedir confirmação/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Enviar pedido' }));
+    await waitFor(() => expect(banco.toasts).toContain('Mando ao Rodrigo amanhã às 09:00.'));
+  });
+
+  it('a recusa no clique (sem conversa, fora do horário no caminho antigo) aparece como erro, com o texto do banco', async () => {
+    for (const msg of [
+      'Flávio não escreveu para a HBR nos últimos 365 dias: mensagem automática a quem não escreve arrisca o número. Confirme por telefone.',
+      'Fora do horário de mensagens ao cliente: peça amanhã a partir das 08:00.',
+    ]) {
+      banco.toasts = [];
+      banco.resposta = { data: null, error: { message: msg } };
+      const r = render(<PedirConfirmacaoButton osId="os-7" />);
+      fireEvent.click(screen.getByRole('button', { name: /Pedir confirmação/ }));
+      fireEvent.click(screen.getByRole('button', { name: 'Enviar pedido' }));
+      await waitFor(() => expect(banco.toasts).toContain(`erro: ${msg}`));
+      r.unmount();
+    }
+  });
+
+  it('o diálogo diz que, em teste ou fora das ondas, o pedido só sai no horário; pela agenda, que a recusa vem na hora', () => {
+    for (const como of ['agora_em_teste', 'agora_sem_onda'] as const) {
+      expect(textoDoPedido(como)).toMatch(/Fora do horário de mensagens ao cliente o pedido não sai/);
+    }
+    expect(textoDoPedido('agenda')).toMatch(/o aviso diz na hora/);
+    expect(textoDoPedido('agenda')).toMatch(/o clique a aprova/);
+    // desligado: como em 30/09 (o banco não olha o horário)
+    expect(textoDoPedido('agora')).not.toMatch(/Fora do horário/);
   });
 });

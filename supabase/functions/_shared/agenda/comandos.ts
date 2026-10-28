@@ -316,6 +316,9 @@ function lerPalavraComplemento(t: string): ComandoDaAgenda | null {
     const acao = m[1] as "manda" | "segura";
     const alvo = (m[2] ?? "").trim();
     if (!alvo) return { comando: "cliente", acao, alvo: null };
+    // Correção C1 da Fase 5 (item 18): "manda cliente todos/todas/tudo" é o mesmo que sem nome (todas as que esperam);
+    // "agora" e "depois" não são nome (NAO_E_CLIENTE: a frase vai ao modelo)
+    if (/^(?:todos|todas|tudo)$/.test(alvo)) return { comando: "cliente", acao, alvo: null };
     const nome = alvoDito(alvo);
     if (nome === undefined || nome.split(" ").some((p) => NAO_E_CLIENTE.has(p))) return null;
     return { comando: "cliente", acao, alvo: nome };
@@ -331,6 +334,8 @@ function lerPalavraComplemento(t: string): ComandoDaAgenda | null {
 const NAO_E_CLIENTE = new Set([
   "pdf", "link", "proposta", "foto", "fotos", "documento", "recibo", "boleto", "contrato", "arquivo", "video", "audio",
   "relatorio", "laudo", "comprovante", "valor", "preco", "desconto", "resumo", "os", "orc", "texto", "msg", "localizacao",
+  // Correção C1 da Fase 5 (item 18): "manda cliente agora" / "manda cliente depois" não é nome de cliente
+  "agora", "depois",
 ]);
 
 /**

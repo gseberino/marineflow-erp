@@ -17,6 +17,13 @@ import { supabase } from '@/integrations/supabase/client';
  * limite por cliente (o aviso depois do clique diz quando). Fora disso — desligado, em teste ou com a
  * confirmação ainda fora das ondas — vai na hora, como antes. O texto do diálogo diz qual dos dois
  * acontece; quando a tela não consegue ler o modo, diz os dois. O comportamento é todo do banco.
+ *
+ * Correção C1 da Fase 5 (27/10/2026): o banco confere no clique o que não depende da hora (o cliente que
+ * pediu para parar, que não escreveu para a HBR no último ano, sem telefone, ou que já recebeu as mensagens
+ * que cabem) e responde o erro na hora, dentro ou fora do horário; a confirmação que a agenda já tinha
+ * esperando o dono é aprovada pelo clique; a que já saiu (ou vai sair sozinha) só é dita (`nada_feito`:
+ * aviso neutro, não "enviado"). Com as mensagens automáticas em teste (ou a confirmação fora das ondas),
+ * o pedido sai como antes, mas só no horário de mensagens ao cliente.
  */
 
 /** Como o pedido sai, pelo que a tela leu de agenda_config. */
@@ -48,19 +55,25 @@ export async function lerComoSaiAConfirmacao(db: Cliente): Promise<ComoSaiAConfi
 }
 
 const DEPOIS = 'Quando ele responder SIM, a OS fica confirmada e esta tarefa se fecha sozinha.';
+/** (Correção C1 da Fase 5) O caminho de antes, com a agenda fora de desligado: só no horário de mensagens ao cliente. */
+const SO_NO_HORARIO = 'Fora do horário de mensagens ao cliente o pedido não sai: o aviso diz a partir de quando pedir.';
 
 export function textoDoPedido(como: ComoSaiAConfirmacao): string {
   switch (como) {
     case 'agenda':
       return 'A confirmação ao cliente agora é da agenda: a mensagem com o dia do atendimento, pedindo para ele responder '
         + 'SIM, sai no horário de mensagens ao cliente e dentro do limite de mensagens por cliente — agora, ou no próximo '
-        + 'horário que couber. O aviso depois do clique diz quando ela sai. ' + DEPOIS;
+        + 'horário que couber. O aviso depois do clique diz quando ela sai; se o cliente não pode receber (pediu para '
+        + 'parar, não escreveu para a HBR no último ano ou está sem telefone), o aviso diz na hora. Se a agenda já tem a '
+        + 'confirmação esperando você, o clique a aprova. ' + DEPOIS;
     case 'agora_em_teste':
       return 'Vai agora, pelo WhatsApp da HBR, a mensagem com o dia e a hora do atendimento pedindo para o cliente responder '
-        + 'SIM. As mensagens automáticas da agenda ao cliente estão em teste, mas este pedido sai de verdade. ' + DEPOIS;
+        + 'SIM. As mensagens automáticas da agenda ao cliente estão em teste, mas este pedido sai de verdade. '
+        + SO_NO_HORARIO + ' ' + DEPOIS;
     case 'agora_sem_onda':
       return 'Vai agora, pelo WhatsApp da HBR, a mensagem com o dia e a hora do atendimento pedindo para o cliente responder '
-        + 'SIM (a confirmação automática da agenda ainda não está ligada, então este pedido sai como antes). ' + DEPOIS;
+        + 'SIM (a confirmação automática da agenda ainda não está ligada, então este pedido sai como antes). '
+        + SO_NO_HORARIO + ' ' + DEPOIS;
     case 'agora':
       return 'Vai agora, pelo WhatsApp da HBR, a mensagem com o dia e a hora do atendimento pedindo para o cliente responder '
         + 'SIM. ' + DEPOIS;
@@ -89,7 +102,11 @@ export function PedirConfirmacaoButton({ osId }: { osId: string }) {
     try {
       const { data, error } = await supabase.rpc('pedir_confirmacao_do_agendamento' as never, { p_os: osId } as never);
       if (error) throw error;
-      toast.success(String((data as unknown as { message?: string })?.message ?? 'Pedido de confirmação enviado.'));
+      const r = data as unknown as { message?: string; nada_feito?: boolean } | null;
+      // (Correção C1 da Fase 5) a confirmação que já saiu, que está na fila ou que vai sair sozinha não é "enviada" agora:
+      // o aviso diz o que já estava acontecendo
+      if (r?.nada_feito) toast.info(String(r.message ?? 'A confirmação já estava com a agenda.'));
+      else toast.success(String(r?.message ?? 'Pedido de confirmação enviado.'));
       setAberto(false);
     } catch (e) {
       toast.error((e as Error)?.message || 'Não deu para enviar o pedido de confirmação.');

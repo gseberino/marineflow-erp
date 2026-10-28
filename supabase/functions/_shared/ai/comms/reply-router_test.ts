@@ -179,3 +179,25 @@ Deno.test("classificarRespostaDoCliente: os sinais (o trecho que disparou, até 
   assertEquals(EXPRESSAO_MAX, 60);
   assertEquals(classificarRespostaDoCliente(null).intencao, "outro");
 });
+
+// ─── Correção C1 da Fase 5 (27/10/2026) ──────────────────────────────────────────────────────────────────────────────
+// Item 16: o acesso com negação não é acesso dito (a pergunta do acesso não pode desligar por 90 dias com "não sei onde vai
+// estar a chave"): é pergunta, e vai ao dono. Item 2: o PARAR sozinho (e "Pare", "SAIR") é do leitor do cliente; o de hoje
+// (classificarResposta) continua sem pegar — o corpus de 70 frases acima prova que ele não mudou.
+Deno.test("C1 (item 16): o acesso com negação vira pergunta; o afirmado continua acesso", () => {
+  for (const t of ["Não sei onde vai estar a chave ainda", "não tenho a chave", "Ainda não sei quem fica com a chave",
+                   "A chave? não sei, vou ver com o marinheiro"]) {
+    assertEquals(classificarRespostaDoCliente(t).intencao, "pergunta", t);
+  }
+  for (const t of ["A chave fica com o marinheiro", "a chave tá com o caseiro", "Tá na garagem, a senha é 1234"]) {
+    assertEquals(classificarRespostaDoCliente(t).intencao, "acesso", t);
+  }
+});
+
+Deno.test("C1 (item 2): PARAR, Pare e SAIR sozinhos são opt-out no leitor do cliente; no de hoje, não (o corpus é o mesmo)", () => {
+  for (const t of ["PARAR", "parar", "Pare", "SAIR", "Parar.", "stop"]) {
+    assertEquals(classificarRespostaDoCliente(t).intencao, "opt_out", t);
+  }
+  for (const t of ["PARAR", "pare"]) assertEquals(classificarResposta(t).intencao, "outro", t);
+  assertEquals(CORPUS_DE_ANTES.length, 70);
+});

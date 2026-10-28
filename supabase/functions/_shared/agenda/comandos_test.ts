@@ -849,3 +849,24 @@ Deno.test("Fase 5 (P5) — webhook: *manda cliente* vai ao assistente só com a 
   // e os pedidos ao assistente nem leem a chave
   assertEquals(await ehComandoDaAgendaLigada(adminDoCliente("sombra", "ligado"), "manda pro cliente o PDF"), false);
 });
+
+// ─── Correção C1 da Fase 5 (item 18, 27/10/2026): "todos/todas/tudo" é sem nome; "agora/depois" não é nome ─────────────
+// Antes, "manda cliente todos" virava o nome "todos" e o banco respondia "Não achei mensagem esperando para todos" (nada
+// saía, mas o dono não entendia); "manda cliente agora" virava o nome "agora".
+Deno.test("C1 (item 18) — *manda/segura cliente todos|todas|tudo* = todas as que esperam; *agora*/*depois* vão ao modelo", () => {
+  for (const [t, esperado] of [
+    ["manda cliente todos", mandaCliente(null)],
+    ["Manda cliente todas", mandaCliente(null)],
+    ["manda cliente tudo", mandaCliente(null)],
+    ["*segura cliente todos*", seguraCliente(null)],
+  ] as Array<[string, ComandoDaAgenda]>) {
+    assertEquals(lerComandoDaAgenda(t), esperado, t);
+    assertEquals(lerComandoDoSecretario(t), null, `secretário: ${t}`);
+    assertEquals(parseConfirmationReply(t), null, `confirmação: ${t}`);
+  }
+  for (const t of ["manda cliente agora", "manda cliente depois", "segura cliente agora", "Manda cliente depois."]) {
+    assertEquals(lerComandoDaAgenda(t), null, t);
+  }
+  // o nome continua nome
+  assertEquals(lerComandoDaAgenda("manda cliente Nelson"), mandaCliente("nelson"));
+});
