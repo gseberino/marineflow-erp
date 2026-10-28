@@ -38,6 +38,8 @@ import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/
 import { FaturarOsDialog } from '@/components/fiscal/FaturarOsDialog';
 import { OrcamentoTecnicoIADialog } from '@/components/orcamento-tecnico/OrcamentoTecnicoIADialog';
 import { AgruparOrcamentosDialog } from '@/components/service-order/AgruparOrcamentosDialog';
+import { AgruparOsDialog } from '@/components/service-order/AgruparOsDialog';
+import { origemAgrupadaDeOs } from '@/lib/agrupar-os';
 import { useOptionalAuth } from '@/hooks/use-auth';
 import { exportToCSV } from '@/lib/export';
 import { PageShell } from '@/v2/components/PageShell';
@@ -79,8 +81,12 @@ type SORow = {
   share_token?: string | null;
   client_id?: string | null;
   vessel_id?: string | null;
-  /** Só nas origens de um agrupamento ativo: o orçamento que as reúne (agrupar_orcamentos). */
+  /** Só nas origens de um agrupamento ativo: o orçamento/OS que as reúne (agrupar_orcamentos / agrupar_os). */
   merged_into_id?: string | null;
+  /** Origem de OS agrupada tem (já era OS); origem de orçamento agrupado nunca tem. */
+  converted_to_os_at?: string | null;
+  /** Na origem agrupada: "Agrupada em OS-N…" (OS, também a antiga sem converted_to_os_at) ou "Agrupado em…". */
+  cancellation_reason?: string | null;
   customer_po_number?: string | null;
   customer_buyer_name?: string | null;
   requested_by_name?: string | null;
@@ -141,8 +147,9 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
   const auth = useOptionalAuth();
   const podeUsarIA = !isOrders && auth?.user?.role === 'admin';
   const [iaAberto, setIaAberto] = useState(false);
-  // Agrupar orçamentos: só admin ou financeiro (o banco confere de novo).
-  const podeAgrupar = !isOrders && (auth?.user?.role === 'admin' || auth?.user?.role === 'financial');
+  // Agrupar orçamentos (aba de orçamentos) ou OS (aba de OS, agrupar_os): só admin ou financeiro (o banco
+  // confere de novo).
+  const podeAgrupar = auth?.user?.role === 'admin' || auth?.user?.role === 'financial';
   const [agruparAlvo, setAgruparAlvo] = useState<{
     clientId: string; vesselId: string; unidade: UnidadeResumo | null; ids: string[]; principal: string;
   } | null>(null);
@@ -172,14 +179,19 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
     if (pdfGenCountRef.current > 0) document.body.style.overflow = '';
   }, []);
 
-  /* Origem de um agrupamento fica `cancelled` como histórico, mas é orçamento: não vai para a aba
-     de OS. Na aba de orçamentos aparece com o selo "Agrupado em ORÇ-X" (só na visão "Todos"). */
+  /* Origem de um agrupamento fica `cancelled` como histórico. A de orçamento não vai para a aba de OS: na
+     de orçamentos aparece com o selo "Agrupado em ORÇ-X". A de OS (agrupar_os) fica na aba de OS, com o
+     selo "Agrupada em OS-X". As duas só na visão "Todos", sem filtro de situação, e fora da contagem. */
   const agrupada = (so: SORow) => !!so.merged_into_id;
+  const origemDeOs = (so: SORow) => agrupada(so) && origemAgrupadaDeOs(so);
   const belongsToMode = (so: SORow) =>
-    (isOrders ? so.status !== 'draft' && !agrupada(so) : so.status === 'draft' || agrupada(so));
+    (isOrders
+      ? so.status !== 'draft' && (!agrupada(so) || origemDeOs(so))
+      : so.status === 'draft' || (agrupada(so) && !origemDeOs(so)));
   const numeroPorId = useMemo(() => new Map(orders.map((o) => [o.id, o.service_order_number])), [orders]);
   const agrupadaEm = (so: SORow) =>
-    (so.merged_into_id ? numeroPorId.get(so.merged_into_id) ?? 'outro orçamento' : null);
+    (so.merged_into_id ? numeroPorId.get(so.merged_into_id) ?? (origemDeOs(so) ? 'outra OS' : 'outro orçamento') : null);
+  const seloAgrupada = (so: SORow) => `${origemDeOs(so) ? 'Agrupada' : 'Agrupado'} em ${agrupadaEm(so)}`;
 
   const quickViews: QuickView[] = isOrders
     ? [
@@ -219,8 +231,9 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
     const list = orders.filter((so) => {
       if (!belongsToMode(so)) return false;
       if (!activeView.match(so)) return false;
-      // Agrupada é histórico: só em "Todos" e sem filtro de status do orçamento.
-      if (agrupada(so) && (activeView.id !== 'all' || (f.quoteStatus as string[] | undefined)?.length)) return false;
+      // Agrupada é histórico: só em "Todos" e sem filtro de situação (do orçamento ou da OS).
+      if (agrupada(so) && (activeView.id !== 'all' || (f.quoteStatus as string[] | undefined)?.length
+        || (f.status as string[] | undefined)?.length)) return false;
       if (search) {
         const hay = `${so.service_order_number} ${so.clients?.name ?? ''} ${so.vessels?.name ?? ''}`.toLowerCase();
         if (!hay.includes(search)) return false;
@@ -440,10 +453,10 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
       key: 'status', header: 'Status', minWidth: 200, priority: 2, detailLabel: 'Status',
       render: (so) => (
         <span className="inline-flex flex-wrap items-center gap-1" onClick={(e) => e.stopPropagation()}>
-          {isOrders ? (
+          {agrupada(so) ? (
+            <StatusChip tone="neutral">{seloAgrupada(so)}</StatusChip>
+          ) : isOrders ? (
             <StatusQuickChange orderId={so.id} currentStatus={so.status as ServiceOrderStatus} />
-          ) : agrupada(so) ? (
-            <StatusChip tone="neutral">Agrupado em {agrupadaEm(so)}</StatusChip>
           ) : (
             <QuoteStatusQuickChange
               orderId={so.id}
@@ -478,7 +491,8 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
       ? [
           {
             key: 'payment', header: 'Pgto', minWidth: 104, priority: 4, detailLabel: 'Pagamento',
-            render: (so) => so.payment_status
+            // Origem agrupada: o dinheiro dela foi para a OS que a reúne — a situação de pagamento é de lá.
+            render: (so) => so.payment_status && !agrupada(so)
               ? <StatusChip tone={paymentTone[so.payment_status] ?? 'neutral'}>{PAYMENT_LABELS[so.payment_status] ?? so.payment_status}</StatusChip>
               : <span className="text-xs text-muted-foreground">—</span>,
           } satisfies DataColumn<SORow>,
@@ -516,10 +530,10 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuItem onClick={() => navigate(`/v2/service-orders/${so.merged_into_id}`)} className="gap-2 font-medium">
-          <Combine className="h-4 w-4" /> Abrir orçamento agrupado
+          <Combine className="h-4 w-4" /> {origemDeOs(so) ? 'Abrir OS agrupada' : 'Abrir orçamento agrupado'}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => setPdfTarget({ id: so.id, type: 'quote' })} className="gap-2">
+        <DropdownMenuItem onClick={() => setPdfTarget({ id: so.id, type: origemDeOs(so) ? 'service_order' : 'quote' })} className="gap-2">
           <FileDown className="h-4 w-4" /> Imprimir / Baixar
         </DropdownMenuItem>
       </DropdownMenuContent>
@@ -595,7 +609,9 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
     const mesmoAlvo = !!primeira?.client_id && !!primeira?.vessel_id && linhas.length === ids.length
       && linhas.every((o) => o.client_id === primeira.client_id && o.vessel_id === primeira.vessel_id);
     if (!mesmoAlvo) {
-      toast.error('Para agrupar, escolha orçamentos do mesmo cliente e da mesma embarcação ou veículo.');
+      toast.error(isOrders
+        ? 'Para agrupar, escolha OS do mesmo cliente e da mesma embarcação ou veículo.'
+        : 'Para agrupar, escolha orçamentos do mesmo cliente e da mesma embarcação ou veículo.');
       return;
     }
     const maisAntiga = [...linhas].sort((a, b) =>
@@ -604,10 +620,11 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
     setAgruparAlvo({ clientId: primeira.client_id!, vesselId: primeira.vessel_id!, unidade: primeira.vessels ?? null, ids, principal: maisAntiga.id });
   };
 
-  // Origem agrupada sai com a situação dita ("Agrupado em ORÇ-X"), não com o quote_status 'draft' que o
-  // agrupar grava nela: senão a linha pareceria um rascunho aberto e somaria junto com o agrupado.
+  // Origem agrupada sai com a situação dita ("Agrupado em ORÇ-X", "Agrupada em OS-X"), não com o quote_status
+  // 'draft' / status 'cancelled' que o agrupar grava nela: senão a linha pareceria um rascunho aberto (ou uma
+  // OS cancelada à toa).
   const csvExport = () =>
-    exportToCSV(filtered.map((so) => (agrupada(so) ? { ...so, quote_status: `Agrupado em ${agrupadaEm(so)}` } : so)) as never[],
+    exportToCSV(filtered.map((so) => (agrupada(so) ? { ...so, quote_status: seloAgrupada(so), status: seloAgrupada(so) } : so)) as never[],
       isOrders ? 'ordens_servico' : 'orcamentos', [
       { key: 'service_order_number', label: 'Número' },
       { key: isOrders ? 'status' : 'quote_status', label: 'Status' },
@@ -783,7 +800,7 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
                     </Button>
                     {podeAgrupar && keys.length >= 2 && (
                       <Button size="sm" variant="secondary" disabled={bulkDownloading} onClick={() => abrirAgrupar(keys)} className="gap-1.5">
-                        <Combine className="h-4 w-4" /> Agrupar
+                        <Combine className="h-4 w-4" /> {isOrders ? 'Agrupar OS' : 'Agrupar'}
                       </Button>
                     )}
                     <button type="button" className="ml-auto text-xs underline-offset-2 hover:underline" onClick={clear} disabled={bulkDownloading}>
@@ -804,7 +821,7 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
                   badge={
                     <>
                       {agrupada(so) ? (
-                        <StatusChip tone="neutral">Agrupado em {agrupadaEm(so)}</StatusChip>
+                        <StatusChip tone="neutral">{seloAgrupada(so)}</StatusChip>
                       ) : (
                         <StatusChip tone={isOrders ? (serviceOrderStatusTone[so.status] ?? 'neutral') : (quoteStatusTone[so.quote_status ?? 'draft'] ?? 'neutral')}>
                           {isOrders ? (statusLabels[so.status] ?? so.status) : (QUOTE_STATUS_LABELS[so.quote_status ?? 'draft'] ?? so.quote_status)}
@@ -935,8 +952,19 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
       />
 
       {podeUsarIA && <OrcamentoTecnicoIADialog aberto={iaAberto} onFechar={() => setIaAberto(false)} />}
-      {/* Sucesso: o diálogo abre o orçamento novo (sai desta lista, e a seleção vai junto). */}
-      {podeAgrupar && agruparAlvo && (
+      {/* Sucesso: o diálogo abre o orçamento/OS novo (sai desta lista, e a seleção vai junto). */}
+      {podeAgrupar && agruparAlvo && isOrders && (
+        <AgruparOsDialog
+          aberto
+          onFechar={() => setAgruparAlvo(null)}
+          clientId={agruparAlvo.clientId}
+          vesselId={agruparAlvo.vesselId}
+          unidade={agruparAlvo.unidade}
+          preSelecionados={agruparAlvo.ids}
+          principalSugerido={agruparAlvo.principal}
+        />
+      )}
+      {podeAgrupar && agruparAlvo && !isOrders && (
         <AgruparOrcamentosDialog
           aberto
           onFechar={() => setAgruparAlvo(null)}

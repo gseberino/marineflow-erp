@@ -28,7 +28,7 @@ import {
   validarAgendamento,
 } from "./agendamento.ts";
 import { validarMensagem } from "./resposta.ts";
-import { agrupadoEm } from "./service-orders.ts";
+import { agrupadoEm, ehOsAgrupada } from "./service-orders.ts";
 // Frente financeiro (07/10/2026): o lembrete enviado entra no histórico da cobrança, como na tela.
 import { registrarEnvioDaCobranca } from "./cobrancas.ts";
 
@@ -317,9 +317,16 @@ export function mascararTelefone(telefone: unknown): string {
 const CAMPOS_DA_ORDEM_PARA_ENVIO =
   "id, service_order_number, share_token, client_id, status, grand_total, quote_status, created_at, quote_validity_days, quote_validity_date, cancellation_reason";
 
-/** Ordem cancelada: se ela é a origem de um agrupamento, a frase aponta o orçamento que vale agora. */
+/** Ordem cancelada: se ela é a origem de um agrupamento, a frase aponta o orçamento (ou a OS) que vale agora. */
 export function frasesDaOrdemCancelada(so: { service_order_number?: string; status?: unknown; cancellation_reason?: unknown }) {
   const agrupado = agrupadoEm(so);
+  // OS agrupada (28/10/2026): "foi agrupada em OS-…", e o que vale é a OS nova.
+  if (agrupado && ehOsAgrupada(so)) {
+    return {
+      aviso: `⚠️ ${so.service_order_number} foi agrupada em ${agrupado} — o envio será recusado; mande a ${agrupado}.`,
+      erro: `${so.service_order_number} foi agrupada em ${agrupado} e não vale mais sozinha: mande a ${agrupado} ao cliente.`,
+    };
+  }
   return agrupado
     ? {
       aviso: `⚠️ ${so.service_order_number} foi agrupado em ${agrupado} — o envio será recusado; mande o ${agrupado}.`,

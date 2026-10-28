@@ -177,7 +177,7 @@ export default function VesselDetail() {
             <div className="flex gap-4 mb-4 text-sm">
               <div className="rounded-lg border bg-card px-4 py-2">
                 <span className="text-muted-foreground">OS: </span>
-                {/* Sem as origens agrupadas (agrupar_orcamentos): o valor delas já está no agrupado. */}
+                {/* Sem as origens agrupadas (agrupar_orcamentos e agrupar_os): o valor delas já está no agrupado. */}
                 <strong>{orders.filter((o: any) => !o.merged_into_id).length}</strong>
               </div>
               <div className="rounded-lg border bg-card px-4 py-2">

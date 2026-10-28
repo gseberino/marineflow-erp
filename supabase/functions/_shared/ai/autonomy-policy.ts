@@ -62,6 +62,10 @@ export const NEVER_AUTONOMOUS = new Set<string>([
   // reprovado vira a PERGUNTA ao dono. Sempre com o "sim".
   "agrupar_orcamentos",
   "desagrupar_orcamento",
+  // agrupar OS (28/10/2026): cancela as originais e muda recebíveis, cobranças e tarefas de OS (agrupar), ou cancela
+  // a agrupada e devolve tudo (desagrupar) — e a autonomia pularia o resumo, onde o impedimento vira recusa. Sempre com o "sim".
+  "agrupar_os",
+  "desagrupar_os",
   // quem paga por um cliente (leva 8, 22/10/2026): é o SIM do dono que faz o pagador valer — decisão dele: sempre com
   // o "sim", sobre o resumo resolvido (quem pagou, o cliente, a relação).
   "guardar_pagador_do_cliente",

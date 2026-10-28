@@ -5,6 +5,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import type { CandidatoAgrupar } from '@/lib/agrupar-orcamentos';
+import { origemAgrupadaDeOs, osAgrupadaDesagrupavel } from '@/lib/agrupar-os';
 
 const COLUNAS_DO_CANDIDATO =
   'id, service_order_number, status, quote_status, grand_total, created_at, client_id, vessel_id, signed_at, converted_to_os_at, merged_into_id, discount_amount, tax_amount, commission_rate, commissioned_user_id, commissioned_person, payment_condition_preset_id, payment_conditions, travel_cost_total, problem_description';
@@ -32,14 +33,30 @@ export interface ResultadoDesagrupar {
   envios_reativados?: number;
 }
 
+/**
+ * De que agrupamento se trata: de orçamentos (agrupar_orcamentos) ou de OS (agrupar_os, 28/10/2026). Vem das
+ * ORIGENS, não da coluna orcamento_agrupamentos.tipo: origem de orçamento nunca tem converted_to_os_at (o banco
+ * recusa agrupar o que já virou OS e trava a origem enquanto agrupada); a de OS tem, ou — OS antiga sem ele —
+ * leva o motivo "Agrupada em OS-N…" (origemAgrupadaDeOs).
+ */
+export type TipoDoAgrupamento = 'orcamento' | 'os';
+
 export interface AgrupamentoDoOrcamento {
-  /** Este orçamento reúne outros (agrupamento ativo): os originais, na ordem do agrupamento. */
-  comoAgrupado: { agrupamentoId: string; origens: Array<{ id: string; numero: string }> } | null;
   /**
-   * Este orçamento foi agrupado em outro (fica cancelado como histórico). `agrupadoEmAberto`: o agrupado
-   * ainda é orçamento em aberto (rascunho, não convertido, não assinado), ou seja, ainda dá para desagrupar.
+   * Este documento reúne outros (agrupamento ativo): os originais, na ordem do agrupamento. `assinada`: o
+   * cliente tinha assinado aquela original (a assinatura fica nela; a OS agrupada nasce sem).
    */
-  comoOrigem: { agrupadoId: string; agrupadoNumero: string; agrupadoEmAberto: boolean } | null;
+  comoAgrupado: {
+    agrupamentoId: string;
+    tipo: TipoDoAgrupamento;
+    origens: Array<{ id: string; numero: string; assinada: boolean }>;
+  } | null;
+  /**
+   * Este documento foi agrupado em outro (fica cancelado como histórico). `agrupadoEmAberto`: ainda dá para
+   * desagrupar — no orçamento, o agrupado ainda é orçamento em aberto (rascunho, não convertido, não
+   * assinado); na OS, a agrupada ainda não começou (pela situação; o resto o banco confere).
+   */
+  comoOrigem: { agrupadoId: string; agrupadoNumero: string; agrupadoEmAberto: boolean; tipo: TipoDoAgrupamento } | null;
 }
 
 function recarregar(qc: ReturnType<typeof useQueryClient>) {
@@ -111,7 +128,7 @@ export function useDesagruparOrcamento() {
 }
 
 /**
- * Se o orçamento aberto reúne outros (pode desagrupar) ou foi agrupado em outro (mostra para onde foi).
+ * Se o orçamento/OS aberto reúne outros (pode desagrupar) ou foi agrupado em outro (mostra para onde foi).
  * Devolve a consulta com `comoAgrupado` / `comoOrigem` também no primeiro nível (null enquanto carrega),
  * para a tela ler direto sem `data?.`.
  */
@@ -127,7 +144,7 @@ export function useAgrupamentoDoOrcamento(id: string | null | undefined) {
           .eq('agrupado_id', id!)
           .is('desfeito_em', null)
           .maybeSingle(),
-        supabase.from('service_orders').select('merged_into_id').eq('id', id!).maybeSingle(),
+        supabase.from('service_orders').select('merged_into_id, converted_to_os_at, cancellation_reason').eq('id', id!).maybeSingle(),
       ]);
       if (grupo.error) throw grupo.error;
       if (proprio.error) throw proprio.error;
@@ -140,9 +157,16 @@ export function useAgrupamentoDoOrcamento(id: string | null | undefined) {
           .eq('agrupamento_id', grupo.data.id)
           .order('ordem', { ascending: true });
         if (error) throw error;
+        const ids = (origens ?? []).map((o) => o.origem_id);
+        const { data: dasOrigens, error: erroDasOrigens } = ids.length
+          ? await supabase.from('service_orders').select('id, converted_to_os_at, cancellation_reason, signed_at').in('id', ids)
+          : { data: [], error: null };
+        if (erroDasOrigens) throw erroDasOrigens;
+        const porId = new Map((dasOrigens ?? []).map((o) => [o.id, o]));
         comoAgrupado = {
           agrupamentoId: grupo.data.id,
-          origens: (origens ?? []).map((o) => ({ id: o.origem_id, numero: o.numero })),
+          tipo: (dasOrigens ?? []).some(origemAgrupadaDeOs) ? 'os' : 'orcamento',
+          origens: (origens ?? []).map((o) => ({ id: o.origem_id, numero: o.numero, assinada: !!porId.get(o.origem_id)?.signed_at })),
         };
       }
 
@@ -155,10 +179,14 @@ export function useAgrupamentoDoOrcamento(id: string | null | undefined) {
           .eq('id', destino)
           .maybeSingle();
         if (error) throw error;
+        const tipo: TipoDoAgrupamento = origemAgrupadaDeOs(proprio.data) ? 'os' : 'orcamento';
         comoOrigem = {
           agrupadoId: destino,
-          agrupadoNumero: agrupado?.service_order_number ?? 'outro orçamento',
-          agrupadoEmAberto: !!agrupado && agrupado.status === 'draft' && !agrupado.converted_to_os_at && !agrupado.signed_at,
+          tipo,
+          agrupadoNumero: agrupado?.service_order_number ?? (tipo === 'os' ? 'outra OS' : 'outro orçamento'),
+          agrupadoEmAberto: tipo === 'os'
+            ? osAgrupadaDesagrupavel(agrupado)
+            : !!agrupado && agrupado.status === 'draft' && !agrupado.converted_to_os_at && !agrupado.signed_at,
         };
       }
 

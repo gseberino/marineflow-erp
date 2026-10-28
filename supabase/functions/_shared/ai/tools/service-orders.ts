@@ -243,10 +243,20 @@ const SITUACAO_LABELS: Record<string, string> = {
   approved: "Aprovado", awaiting_deposit: "Aguardando sinal", rejected: "Reprovado",
 };
 
-/** Origem de agrupamento (agrupar_orcamentos grava "Agrupado em ORÇ-00125 (reúne …)"): o número do agrupado. */
+/**
+ * Origem de agrupamento: o número do agrupado. agrupar_orcamentos grava "Agrupado em ORÇ-00125 (reúne …)" e,
+ * desde 28/10/2026, agrupar_os grava "Agrupada em OS-00131 (reúne …)".
+ */
 export function agrupadoEm(so: { status?: unknown; cancellation_reason?: unknown }): string | undefined {
   if (so?.status !== "cancelled" || typeof so.cancellation_reason !== "string") return undefined;
-  return so.cancellation_reason.match(/^Agrupado em (\S+)/)?.[1];
+  return so.cancellation_reason.match(/^Agrupad[oa] em ([^\s.,;:()]+)/)?.[1];
+}
+
+/** A origem agrupada é uma OS (agrupar_os: "Agrupada em OS-…"), não um orçamento. */
+export function ehOsAgrupada(so: { status?: unknown; cancellation_reason?: unknown }): boolean {
+  const destino = agrupadoEm(so);
+  if (!destino) return false;
+  return /^Agrupada em /.test(String(so.cancellation_reason)) || /^OS-/i.test(destino);
 }
 
 export interface FiltroDaListagem {
@@ -446,7 +456,8 @@ export const serviceOrderTools: ToolDef[] = [
         numero: so.service_order_number,
         // Origem de um agrupamento (15/10/2026) fica cancelada com o motivo "Agrupado em ORÇ-…": não é OS.
         // Lido do motivo (coluna antiga), não de merged_into_id: a listagem não depende da migration nova.
-        tipo: so.status === "draft" ? "Orçamento" : agrupadoEm(so) ? "Orçamento agrupado" : "OS",
+        // Origem de OS agrupada (28/10/2026): "Agrupada em OS-…" — é "OS agrupada", e vale a OS do agrupado_em.
+        tipo: so.status === "draft" ? "Orçamento" : ehOsAgrupada(so) ? "OS agrupada" : agrupadoEm(so) ? "Orçamento agrupado" : "OS",
         ...(agrupadoEm(so) ? { agrupado_em: agrupadoEm(so) } : {}),
         status: STATUS_LABELS[so.status] || so.status,
         status_raw: so.status,

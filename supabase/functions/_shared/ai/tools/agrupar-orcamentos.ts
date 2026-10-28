@@ -279,7 +279,12 @@ export function problemasDoPedido(
       foraDeVez.push(o.id);
     };
     if (o.merged_into_id) fora(`${n} já foi agrupado em ${destinos[o.merged_into_id] ?? "outro orçamento"}: não pode entrar de novo.`);
-    else if (o.status !== "draft" || o.converted_to_os_at) fora(`${n} não é mais um orçamento em aberto (já virou OS ou foi cancelado).`);
+    else if (o.status !== "draft" || o.converted_to_os_at) {
+      // A fronteira com agrupar_os (28/10/2026): já virou OS → a tool de OS; cancelado → fora.
+      fora(o.status === "cancelled"
+        ? `${n} não é mais um orçamento em aberto (foi cancelado).`
+        : `${n} não é mais um orçamento em aberto: já virou OS. Para juntar OS, use agrupar_os (listar_os_para_agrupar mostra as candidatas).`);
+    }
     else if (o.client_id !== principal.client_id || o.vessel_id !== principal.vessel_id) {
       fora(`${n} é de outro cliente ou de outra embarcação ou veículo: só dá para agrupar orçamentos do mesmo cliente e da mesma unidade.`);
     } else if (!item) fora(`Não consegui conferir ${n} na leitura do banco: liste os orçamentos de novo.`);
@@ -550,7 +555,10 @@ function problemaDoDesagrupar(l: AgrupadoLido, leitura: LeituraDoBarco | null, d
   const n = l.agrupado.service_order_number;
   if (!l.origens.length) return `${n} não é um orçamento agrupado (ou já foi desagrupado).`;
   if (l.agrupado.merged_into_id) return `${n} foi agrupado de novo em ${destino ?? "outro orçamento"}: desagrupe ${destino ?? "aquele"} primeiro.`;
-  if (l.agrupado.status !== "draft" || l.agrupado.converted_to_os_at) return `${n} já virou OS ou foi cancelado: não dá mais para desagrupar.`;
+  if (l.agrupado.status !== "draft" || l.agrupado.converted_to_os_at) {
+    // Agrupamento de OS (28/10/2026) mora nas mesmas tabelas: quem o desfaz é desagrupar_os.
+    return `${n} já virou OS ou foi cancelado: não dá mais para desagrupar como orçamento (se ${n} é uma OS que reúne outras OS, use desagrupar_os).`;
+  }
   const ativo = leitura?.agrupados_ativos?.find((g) => g.id === l.agrupado.id);
   if (ativo && ativo.pode_desagrupar === false && ativo.motivo) return `${n} não pode ser desagrupado agora: ${ativo.motivo}. Resolva isso antes.`;
   return null;
@@ -601,7 +609,8 @@ export const agruparOrcamentosTools: ToolDef[] = [
       "INCLUSIVE os reprovados, com número, data, situação, total, resumo, se pode entrar no agrupamento (elegivel) e, se não " +
       "pode, o motivo; os documentos recentes que ficaram fora da lista (virou OS, cancelado, já agrupado); e os agrupados ativos " +
       "(para desagrupar). Use ANTES de agrupar_orcamentos. Resolva antes a unidade com search_vessels (o cliente é o dono " +
-      "dela). 'Os N últimos' = os N primeiros desta lista (os mais novos), contando os reprovados. Só leitura.",
+      "dela). 'Os N últimos' = os N primeiros desta lista (os mais novos), contando os reprovados. Já viraram OS? Use " +
+      "listar_os_para_agrupar. Só leitura.",
     input_schema: {
       type: "object",
       properties: {
@@ -643,7 +652,7 @@ export const agruparOrcamentosTools: ToolDef[] = [
       "dos originais e os preços como estão. Condição de pagamento, contato e comissão vêm do PRINCIPAL (padrão: o mais antigo); a " +
       "comissão é recalculada. Os originais ficam cancelados como histórico, com o link do cliente desligado. Use depois de " +
       "listar_orcamentos_para_agrupar. A chamada já pede o 'sim' ao dono, com a lista, o principal e o total: não pergunte antes. " +
-      "Reprovado só entra se o dono disser que entra: ponha-o também em voltar_para_em_elaboracao.",
+      "Reprovado só entra se o dono disser que entra: ponha-o também em voltar_para_em_elaboracao. Já virou OS? Use agrupar_os.",
     input_schema: {
       type: "object",
       properties: {
@@ -732,7 +741,7 @@ export const agruparOrcamentosTools: ToolDef[] = [
     description:
       "Desfaz um agrupamento: os orçamentos originais voltam exatamente como estavam (situação e link do cliente) e o agrupado fica " +
       "cancelado como histórico. Só enquanto o agrupado está em aberto (não virou OS, não foi assinado, sem dinheiro/nota ligados). " +
-      "O que foi editado no agrupado NÃO volta para os originais — avise o dono. Pede confirmação.",
+      "O que foi editado no agrupado NÃO volta para os originais — avise o dono. OS agrupada é desagrupar_os. Pede confirmação.",
     input_schema: {
       type: "object",
       properties: {

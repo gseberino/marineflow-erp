@@ -84,10 +84,38 @@ function descreverComissao(c: CandidatoAgrupar): string {
 }
 
 /**
- * Avisos do que muda ao juntar (frases prontas para a tela). Nada aqui impede o agrupamento, exceto o
- * deslocamento duplo, que o banco recusa — o aviso chega antes para o dono acertar o orçamento primeiro.
+ * As palavras dos avisos: os mesmos avisos servem para orçamento (masculino, "o orçamento inteiro") e para
+ * OS (feminino, "a OS inteira" — agrupar_os, 28/10/2026). Os de orçamento saem palavra por palavra como antes.
  */
-export function diferencasEntreOrcamentos(cs: ReadonlyArray<CandidatoAgrupar>): string[] {
+export type PalavrasDoAgrupamento = {
+  /** "os orçamentos" / "as OS" */
+  todos: string;
+  /** "no agrupado" / "na agrupada" */
+  noAgrupado: string;
+  /** "o orçamento inteiro" / "a OS inteira" */
+  inteiro: string;
+  /** "de cada um" / "de cada uma" */
+  deCadaUm: string;
+  /** "Mais de um orçamento" / "Mais de uma OS" */
+  maisDeUm: string;
+  /** "em um só" / "em uma só" */
+  emUmSo: string;
+};
+
+export const PALAVRAS_DE_ORCAMENTO: PalavrasDoAgrupamento = {
+  todos: 'os orçamentos',
+  noAgrupado: 'no agrupado',
+  inteiro: 'o orçamento inteiro',
+  deCadaUm: 'de cada um',
+  maisDeUm: 'Mais de um orçamento',
+  emUmSo: 'em um só',
+};
+
+/**
+ * Avisos do que muda ao juntar (frases prontas para a tela). Nada aqui impede o agrupamento, exceto o
+ * deslocamento duplo, que o banco recusa — o aviso chega antes para o dono acertar o documento primeiro.
+ */
+export function diferencasAoAgrupar(cs: ReadonlyArray<CandidatoAgrupar>, p: PalavrasDoAgrupamento): string[] {
   const lista = porData(cs);
   if (lista.length < 2) return [];
   const avisos: string[] = [];
@@ -103,14 +131,14 @@ export function diferencasEntreOrcamentos(cs: ReadonlyArray<CandidatoAgrupar>): 
   const chavePagamento = (c: CandidatoAgrupar) =>
     `${c.payment_condition_preset_id ?? ''}|${texto(c.payment_conditions).toLowerCase()}`;
   if (new Set(lista.map(chavePagamento)).size > 1) {
-    avisos.push('Condições de pagamento diferentes entre os orçamentos. Vale a do principal.');
+    avisos.push(`Condições de pagamento diferentes entre ${p.todos}. Vale a do principal.`);
   }
 
   const comDesconto = lista.filter((c) => centavos(c.discount_amount) !== 0);
   if (comDesconto.length > 0) {
     const total = somaDosTotais(comDesconto.map((c) => ({ grand_total: c.discount_amount })));
     avisos.push(
-      `Desconto no cabeçalho em ${comDesconto.map((c) => c.service_order_number).join(', ')}: no agrupado vira um desconto só de ${emReais(total)}, sobre o orçamento inteiro (não mais sobre os itens de cada um).`,
+      `Desconto no cabeçalho em ${comDesconto.map((c) => c.service_order_number).join(', ')}: ${p.noAgrupado} vira um desconto só de ${emReais(total)}, sobre ${p.inteiro} (não mais sobre os itens ${p.deCadaUm}).`,
     );
   }
 
@@ -118,28 +146,34 @@ export function diferencasEntreOrcamentos(cs: ReadonlyArray<CandidatoAgrupar>): 
   if (comImposto.length > 0) {
     const total = somaDosTotais(comImposto.map((c) => ({ grand_total: c.tax_amount })));
     avisos.push(
-      `Imposto no cabeçalho em ${comImposto.map((c) => c.service_order_number).join(', ')}: no agrupado vira um valor só de ${emReais(total)}, sobre o orçamento inteiro.`,
+      `Imposto no cabeçalho em ${comImposto.map((c) => c.service_order_number).join(', ')}: ${p.noAgrupado} vira um valor só de ${emReais(total)}, sobre ${p.inteiro}.`,
     );
   }
 
   const comDeslocamento = lista.filter((c) => centavos(c.travel_cost_total) !== 0);
   if (comDeslocamento.length > 1) {
     avisos.push(
-      `Mais de um orçamento tem deslocamento (${comDeslocamento.map((c) => c.service_order_number).join(', ')}). Deixe o deslocamento em um só antes de agrupar, para não cobrar a viagem duas vezes.`,
+      `${p.maisDeUm} tem deslocamento (${comDeslocamento.map((c) => c.service_order_number).join(', ')}). Deixe o deslocamento ${p.emUmSo} antes de agrupar, para não cobrar a viagem duas vezes.`,
     );
   }
 
   return avisos;
 }
 
+/** Os avisos para orçamentos (agrupar_orcamentos). */
+export function diferencasEntreOrcamentos(cs: ReadonlyArray<CandidatoAgrupar>): string[] {
+  return diferencasAoAgrupar(cs, PALAVRAS_DE_ORCAMENTO);
+}
+
 /**
- * A gravação foi recusada porque o orçamento mudou de papel em outra aba/por outra pessoa: foi agrupado
+ * A gravação foi recusada porque o documento mudou de papel em outra aba/por outra pessoa: foi agrupado
  * em outro (guarda da origem) ou já foi desagrupado (guarda do agrupado). As frases são as do banco
- * (migration 20261015180000); 42501 sozinho não basta — é também o código de qualquer falta de permissão.
+ * (migrations 20261015180000 e, para OS, 20261028120000 — "foi agrupada em", "foi desagrupada"); 42501
+ * sozinho não basta — é também o código de qualquer falta de permissão.
  */
 export function ehRecusaDeAgrupamento(e: unknown): boolean {
   const msg = String((e as { message?: unknown } | null)?.message ?? '');
-  return msg.includes('foi agrupado em') || msg.includes('foi desagrupado');
+  return /foi agrupad[oa] em|foi desagrupad[oa]/.test(msg);
 }
 
 /** O principal sugerido é o mais antigo (mesma ordem do banco: created_at, depois id). '' sem candidatos. */

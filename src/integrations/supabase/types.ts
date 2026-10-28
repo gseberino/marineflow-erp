@@ -6211,6 +6211,7 @@ export type Database = {
           origem_id: string
           quote_status_antes: string | null
           share_token_antes: string | null
+          status_antes: string | null
         }
         Insert: {
           agrupamento_id: string
@@ -6222,6 +6223,7 @@ export type Database = {
           origem_id: string
           quote_status_antes?: string | null
           share_token_antes?: string | null
+          status_antes?: string | null
         }
         Update: {
           agrupamento_id?: string
@@ -6233,6 +6235,7 @@ export type Database = {
           origem_id?: string
           quote_status_antes?: string | null
           share_token_antes?: string | null
+          status_antes?: string | null
         }
         Relationships: [
           {
@@ -6259,6 +6262,8 @@ export type Database = {
           desfeito_em: string | null
           desfeito_por: string | null
           id: string
+          saldo_criado_id: string | null
+          tipo: string
         }
         Insert: {
           agrupado_id: string
@@ -6267,6 +6272,8 @@ export type Database = {
           desfeito_em?: string | null
           desfeito_por?: string | null
           id?: string
+          saldo_criado_id?: string | null
+          tipo?: string
         }
         Update: {
           agrupado_id?: string
@@ -6275,11 +6282,62 @@ export type Database = {
           desfeito_em?: string | null
           desfeito_por?: string | null
           id?: string
+          saldo_criado_id?: string | null
+          tipo?: string
         }
         Relationships: [
           {
             foreignKeyName: "orcamento_agrupamentos_agrupado_id_fkey"
             columns: ["agrupado_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "orcamento_agrupamentos_saldo_criado_id_fkey"
+            columns: ["saldo_criado_id"]
+            isOneToOne: false
+            referencedRelation: "receivables"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      os_agrupamento_movidos: {
+        Row: {
+          agrupamento_id: string
+          coluna: string
+          origem_id: string
+          registro_id: string
+          tabela: string
+          valor_antes: string | null
+        }
+        Insert: {
+          agrupamento_id: string
+          coluna: string
+          origem_id: string
+          registro_id: string
+          tabela: string
+          valor_antes?: string | null
+        }
+        Update: {
+          agrupamento_id?: string
+          coluna?: string
+          origem_id?: string
+          registro_id?: string
+          tabela?: string
+          valor_antes?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "os_agrupamento_movidos_agrupamento_id_fkey"
+            columns: ["agrupamento_id"]
+            isOneToOne: false
+            referencedRelation: "orcamento_agrupamentos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "os_agrupamento_movidos_origem_id_fkey"
+            columns: ["origem_id"]
             isOneToOne: false
             referencedRelation: "service_orders"
             referencedColumns: ["id"]
@@ -13965,6 +14023,15 @@ export type Database = {
         }
         Returns: Json
       }
+      agrupar_os: {
+        Args: {
+          p_autor?: string
+          p_base?: string
+          p_os: string[]
+          p_total_esperado?: number
+        }
+        Returns: Json
+      }
       ai_claude_max_disponivel: { Args: never; Returns: boolean }
       ai_gateway_claim_job: {
         Args: {
@@ -14481,6 +14548,10 @@ export type Database = {
         Args: { p_agrupado: string; p_autor?: string }
         Returns: Json
       }
+      desagrupar_os: {
+        Args: { p_agrupado: string; p_autor?: string }
+        Returns: Json
+      }
       desfazer_aplicacao: {
         Args: { p_autor?: string; p_motivo?: string; p_pagamento: string }
         Returns: Json
@@ -14783,6 +14854,15 @@ export type Database = {
       }
       normalize_alias: { Args: { _s: string }; Returns: string }
       normalize_product_text: { Args: { t: string }; Returns: string }
+      os_para_agrupar: {
+        Args: {
+          p_autor?: string
+          p_client_id?: string
+          p_incluir?: string[]
+          p_vessel_id: string
+        }
+        Returns: Json
+      }
       pagadores_para_conferir: {
         Args: never
         Returns: {

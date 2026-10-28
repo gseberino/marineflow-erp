@@ -68,6 +68,8 @@ import { dropboxTools } from "./dropbox.ts";
 import { comprovanteTools } from "./comprovantes.ts";
 // Agrupar orçamentos (15/10/2026): listar os candidatos, agrupar e desagrupar (paridade com a tela).
 import { agruparOrcamentosTools } from "./agrupar-orcamentos.ts";
+// Agrupar OS (28/10/2026): listar as candidatas, agrupar e desagrupar ordens de serviço (paridade com a tela).
+import { agruparOsTools } from "./agrupar-os.ts";
 // O lote semanal da papelada (16/10/2026, secretário Passo 5): só pela pendência do comando *lote*.
 import { papeladaTools } from "./papelada.ts";
 
@@ -142,6 +144,8 @@ export const allTools: ToolDef[] = [
   ...comprovanteTools,
   // agrupar orçamentos (15/10/2026)
   ...agruparOrcamentosTools,
+  // agrupar OS (28/10/2026)
+  ...agruparOsTools,
 ].sort((a, b) => a.name.localeCompare(b.name));
 
 /**

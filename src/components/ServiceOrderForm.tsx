@@ -117,6 +117,11 @@ import { useAgrupamentoDoOrcamento } from '@/hooks/use-agrupar-orcamentos';
 import { ehRecusaDeAgrupamento } from '@/lib/agrupar-orcamentos';
 import { AgruparOrcamentosDialog } from '@/components/service-order/AgruparOrcamentosDialog';
 import { DesagruparOrcamentoDialog } from '@/components/service-order/DesagruparOrcamentoDialog';
+import { AgruparOsDialog } from '@/components/service-order/AgruparOsDialog';
+import { DesagruparOsDialog } from '@/components/service-order/DesagruparOsDialog';
+import { FaixaOsAgrupadaEm, FaixaOsQueReune } from '@/components/service-order/FaixasDoAgrupamentoOs';
+import { STATUS_AGRUPAVEIS_OS, origemAgrupadaDeOs, osAgrupadaDesagrupavel } from '@/lib/agrupar-os';
+import { useDesagrupavelDaOsAgrupada } from '@/hooks/use-agrupar-os';
 import { Combine, Ungroup } from 'lucide-react';
 
 interface Props {
@@ -477,6 +482,17 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   // Agrupar / desagrupar orçamentos (agrupar_orcamentos / desagrupar_orcamentos). Quem decide é o
   // banco; a tela só esconde o que ele recusaria. Só admin ou financeiro.
   const agrupamento = useAgrupamentoDoOrcamento(orderId);
+  // Agrupamento de OS: se a agrupada (esta, ou a que recebeu esta origem) ainda é desfazível quem diz é o
+  // banco (os_para_agrupar → agrupados_ativos, a régua do desagrupar_os e da guarda do Cancelar). A situação
+  // é só o palpite até a resposta chegar (ou para quem não tem cargo para ler).
+  const agrupadaOsId: string | null = agrupamento.comoAgrupado?.tipo === 'os' ? (orderId ?? null)
+    : agrupamento.comoOrigem?.tipo === 'os' ? agrupamento.comoOrigem.agrupadoId
+    : null;
+  const desagrupavelNoBanco = useDesagrupavelDaOsAgrupada({
+    agrupadoId: agrupadaOsId,
+    vesselId: orderData?.vessel_id,
+    enabled: authUser?.role === 'admin' || authUser?.role === 'financial',
+  });
   const [agruparAberto, setAgruparAberto] = useState(false);
   const [desagruparAberto, setDesagruparAberto] = useState(false);
   const [faturarOsOpen, setFaturarOsOpen] = useState(false);
@@ -1290,8 +1306,10 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     try {
       // In the form context, replicate the same type as the source:
       // draft → quote (ORÇ), anything else → order (OS). A origem de um agrupamento fica `cancelled`
-      // como histórico, mas é orçamento: duplica como orçamento.
-      const mode = orderData?.status === 'draft' || orderData?.merged_into_id ? 'quote' : 'order';
+      // como histórico, mas é orçamento: duplica como orçamento — a não ser que seja OS agrupada
+      // (agrupar_os), que já era OS e duplica como OS (origemAgrupadaDeOs).
+      const mode = orderData?.status === 'draft' || (orderData?.merged_into_id && !origemAgrupadaDeOs(orderData))
+        ? 'quote' : 'order';
       const newSO = await duplicate.mutateAsync({ sourceId: orderId, mode });
       toast.success(mode === 'quote' ? 'Orçamento duplicado!' : 'OS duplicada com sucesso!');
       navigate(`/service-orders/${(newSO as any).id}`);
@@ -1849,11 +1867,29 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     && orderData?.quote_status !== 'rejected';
   const comoAgrupado = agrupamento.comoAgrupado;
   const comoOrigem = agrupamento.comoOrigem;
+  // O agrupamento pode ser de orçamentos (agrupar_orcamentos) ou de OS (agrupar_os, 28/10/2026): faixas,
+  // diálogos e frases são de um ou de outro.
+  const comoAgrupadoOrc = comoAgrupado && comoAgrupado.tipo !== 'os' ? comoAgrupado : null;
+  const comoAgrupadoOs = comoAgrupado?.tipo === 'os' ? comoAgrupado : null;
   const agrupadoDestinoId: string | null = comoOrigem?.agrupadoId ?? orderData?.merged_into_id ?? null;
-  const podeDesagrupar = cargoAgrupa && orcamentoAbertoSalvo && !!comoAgrupado;
+  // Origem de OS: a própria linha diz (converted_to_os_at ou o motivo "Agrupada em…" — origemAgrupadaDeOs).
+  const origemDeOs = comoOrigem ? comoOrigem.tipo === 'os' : origemAgrupadaDeOs(orderData);
+  const podeDesagrupar = cargoAgrupa && orcamentoAbertoSalvo && !!comoAgrupadoOrc;
+  // OS: agrupa a que ainda não começou (seção 9 do agrupar_os) — o resto (hora apontada, foto, nota…)
+  // o banco confere e recusa com a frase pronta. Sem exigir converted_to_os_at: há OS antigas sem ele e o
+  // banco as agrupa (a situação já tira o rascunho).
+  const osAgrupavelSalva = !isNew
+    && (STATUS_AGRUPAVEIS_OS as readonly string[]).includes(orderData?.status ?? '');
+  const podeAgruparOs = cargoAgrupa && osAgrupavelSalva && !orderData?.merged_into_id;
+  // A leitura do banco vale para a agrupada (esta OS reúne outras) ou para o destino desta origem.
+  const leituraDaAgrupadaOs = comoAgrupadoOs ? (desagrupavelNoBanco.data ?? null) : null;
+  const leituraDoDestinoOs = !comoAgrupadoOs && comoOrigem?.tipo === 'os' ? (desagrupavelNoBanco.data ?? null) : null;
+  const osAgrupadaDesfazivel = !!comoAgrupadoOs
+    && (leituraDaAgrupadaOs ? leituraDaAgrupadaOs.podeDesagrupar : osAgrupadaDesagrupavel(orderData));
+  const podeDesagruparOs = cargoAgrupa && osAgrupadaDesfazivel;
   // Agrupado que ainda dá para desfazer: o banco recusa cancelá-lo (os originais ficariam presos). Em vez
   // de deixar digitar o motivo e só então recusar, a tela tira o "Cancelar" e a faixa explica.
-  const cancelarPedeDesagrupar = orcamentoAbertoSalvo && !!comoAgrupado;
+  const cancelarPedeDesagrupar = (orcamentoAbertoSalvo && !!comoAgrupadoOrc) || osAgrupadaDesfazivel;
   const transicoesDeStatus = cancelarPedeDesagrupar
     ? validTransitions.filter((s) => s !== 'cancelled')
     : validTransitions;
@@ -1987,7 +2023,15 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     <div className="space-y-6 animate-fade-in max-w-5xl">
       {/* Origem de um agrupamento: fica cancelada como histórico (travada pelo isLocked).
           A faixa genérica de bloqueio dá lugar a esta, que diz para onde ele foi. */}
-      {!isNew && agrupadoDestinoId && (
+      {!isNew && agrupadoDestinoId && origemDeOs && (
+        <FaixaOsAgrupadaEm
+          agrupadoId={agrupadoDestinoId}
+          agrupadoNumero={comoOrigem?.agrupadoNumero ?? null}
+          desagrupavel={leituraDoDestinoOs ? leituraDoDestinoOs.podeDesagrupar : comoOrigem ? comoOrigem.agrupadoEmAberto : null}
+          motivo={leituraDoDestinoOs?.motivo ?? null}
+        />
+      )}
+      {!isNew && agrupadoDestinoId && !origemDeOs && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 p-4">
           <div className="flex items-center gap-2">
             <Combine className="h-5 w-5 shrink-0 text-slate-600" />
@@ -2011,13 +2055,22 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       )}
 
       {/* Orçamento que reúne outros: dá para desfazer enquanto ele estiver em aberto. */}
-      {!isNew && comoAgrupado && (
+      {!isNew && comoAgrupadoOs && (
+        <FaixaOsQueReune
+          origens={comoAgrupadoOs.origens}
+          podeDesagrupar={podeDesagruparOs}
+          cancelarPedeDesagrupar={cancelarPedeDesagrupar}
+          motivoSemDesagrupar={leituraDaAgrupadaOs?.motivo ?? null}
+          onDesagrupar={() => setDesagruparAberto(true)}
+        />
+      )}
+      {!isNew && comoAgrupadoOrc && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-sky-200 bg-sky-50 p-4">
           <div className="flex items-center gap-2">
             <Combine className="h-5 w-5 shrink-0 text-sky-600" />
             <div>
               <p className="text-sm font-medium text-sky-800">
-                Este orçamento reúne {comoAgrupado.origens.map((o) => o.numero).join(', ')}.
+                Este orçamento reúne {comoAgrupadoOrc.origens.map((o) => o.numero).join(', ')}.
               </p>
               {cancelarPedeDesagrupar && (
                 <p className="mt-0.5 text-xs text-sky-700">
@@ -2051,13 +2104,35 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         />
       )}
 
-      {desagruparAberto && orderId && comoAgrupado && (
+      {desagruparAberto && orderId && comoAgrupadoOrc && (
         <DesagruparOrcamentoDialog
           aberto={desagruparAberto}
           onFechar={() => setDesagruparAberto(false)}
           agrupadoId={orderId}
           agrupadoNumero={orderData?.service_order_number || ''}
-          origens={comoAgrupado.origens}
+          origens={comoAgrupadoOrc.origens}
+        />
+      )}
+
+      {agruparAberto && orderId && podeAgruparOs && orderData?.client_id && orderData?.vessel_id && (
+        <AgruparOsDialog
+          aberto={agruparAberto}
+          onFechar={() => setAgruparAberto(false)}
+          clientId={orderData.client_id}
+          vesselId={orderData.vessel_id}
+          unidade={allVessels?.find((v) => v.id === orderData.vessel_id)}
+          preSelecionados={[orderId]}
+          principalSugerido={orderId}
+        />
+      )}
+
+      {desagruparAberto && orderId && comoAgrupadoOs && podeDesagruparOs && (
+        <DesagruparOsDialog
+          aberto={desagruparAberto}
+          onFechar={() => setDesagruparAberto(false)}
+          agrupadoId={orderId}
+          agrupadoNumero={orderData?.service_order_number || ''}
+          origens={comoAgrupadoOs.origens}
         />
       )}
 
@@ -2315,7 +2390,12 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                       <Combine className="h-4 w-4" /> Agrupar com outros orçamentos…
                     </DropdownMenuItem>
                   )}
-                  {podeDesagrupar && (
+                  {podeAgruparOs && (
+                    <DropdownMenuItem onClick={abrirAgrupar} className="gap-2">
+                      <Combine className="h-4 w-4" /> Agrupar com outras OS…
+                    </DropdownMenuItem>
+                  )}
+                  {(podeDesagrupar || podeDesagruparOs) && (
                     <DropdownMenuItem onClick={() => setDesagruparAberto(true)} className="gap-2">
                       <Ungroup className="h-4 w-4" /> Desagrupar…
                     </DropdownMenuItem>
@@ -2458,6 +2538,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           : orderId && agrupamento.isLoading ? true
           : orderId && agrupamento.isError ? 'Não deu para conferir se este orçamento reúne outros: recarregue a página para trocar o cliente.'
           : !comoAgrupado ? undefined
+          : comoAgrupadoOs ? (podeDesagruparOs
+            ? 'Esta OS reúne outras do mesmo cliente: para trocar o cliente, desagrupe antes.'
+            : 'O cliente não muda: esta OS reúne outras do mesmo cliente.')
           : podeDesagrupar ? 'Este orçamento reúne outros do mesmo cliente: para trocar o cliente, desagrupe antes.'
           : 'O cliente não muda: este documento reúne orçamentos do mesmo cliente.'
         }
@@ -2473,6 +2556,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           : agrupamento.isLoading ? true
           : agrupamento.isError ? 'Não deu para conferir se este orçamento reúne outros: recarregue a página para trocar.'
           : !comoAgrupado ? undefined
+          : comoAgrupadoOs ? (podeDesagruparOs
+            ? `Esta OS reúne outras ${unidadeDaOSFeminina ? 'da mesma' : 'do mesmo'} ${rotuloDaUnidade(unidadeDaOS?.asset_type).toLowerCase()}: para trocar, desagrupe antes.`
+            : `${aUnidadeDaOS.charAt(0).toUpperCase()}${aUnidadeDaOS.slice(1)} não muda: esta OS reúne outras ${unidadeDaOSFeminina ? 'dela' : 'dele'}.`)
           : podeDesagrupar ? `Este orçamento reúne outros ${unidadeDaOSFeminina ? 'da mesma' : 'do mesmo'} ${rotuloDaUnidade(unidadeDaOS?.asset_type).toLowerCase()}: para trocar, desagrupe antes.`
           : `${aUnidadeDaOS.charAt(0).toUpperCase()}${aUnidadeDaOS.slice(1)} não muda: este documento reúne orçamentos ${unidadeDaOSFeminina ? 'dela' : 'dele'}.`
         }
