@@ -507,7 +507,7 @@ Deno.test("Fase 5: paraCliente recusa o texto livre, o id, o tipo fora da lista 
 });
 
 Deno.test("Fase 5: resultadoDaMensagemAoCliente — o texto pronto e a instrução de que nada saiu; a recusa = o que falta", () => {
-  const ok = resultadoDaMensagemAoCliente({ ok: true, status: "preparada", texto: "Pronto para o Flávio, sai agora: \"…\". Para mandar: *manda cliente Flávio*.", mensagem_id: "x" });
+  const ok = resultadoDaMensagemAoCliente({ ok: true, status: "preparada", texto: "Pronto para Flávio, sai agora: \"…\". Para mandar: *manda cliente Flávio*.", mensagem_id: "x" });
   assertEquals([ok.ok, ok.instrucao], [true, INSTRUCAO_CLIENTE]);
   assert(!("mensagem_id" in ok));
   const nao = resultadoDaMensagemAoCliente({ ok: false, motivo: "sem_prometido", pergunta: "Não há data dita ao Giancarlo…", texto: "Não há data dita ao Giancarlo…" });

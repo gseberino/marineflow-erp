@@ -526,7 +526,7 @@ Deno.test("Fase 4: material_informar ensina o aviso e o nao_e_de_servico, e não
 
 // ───────── Fase 5 (P5): cliente_avisar (prepara, nunca envia) e o os_planejar com o prometido ─────────
 Deno.test("Fase 5: cliente_avisar chama agenda_cliente_preparar (só o tipo e a OS) e devolve o texto do banco com a instrução de que nada saiu", async () => {
-  const texto = "Pronto para o Flávio, sai agora: \"Olá, Flávio! …\". Para mandar: *manda cliente Flávio*.";
+  const texto = "Pronto para Flávio, sai agora: \"Olá, Flávio! …\". Para mandar: *manda cliente Flávio*.";
   const { sb, chamadas } = sbFalso(() => ({ data: { ok: true, status: "preparada", texto, mensagem_id: "m1", modo: "ligado" }, error: null }));
   const r = await porNome("cliente_avisar").execute(
     { os: "Flávio", tipo: "confirmar", trecho: "manda a confirmação pro Flávio" }, ctx(sb)) as Record<string, unknown>;

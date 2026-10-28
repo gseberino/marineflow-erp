@@ -596,7 +596,7 @@ Deno.test("Fase 3: na sombra (as linhas novas com modo 'sombra') o fechamento é
 // inteira (até 600 caracteres: o banco corta acima disso e diz que *agenda clientes* mostra) e disputa as vagas pela perda
 // (75 a que espera *manda cliente*; 40 o que sai sozinho amanhã), como as outras.
 
-const CLIENTE_F5 = "Mensagem para o Lucenira (ficou pronto), sai agora: \"Olá, Lucenira! Aqui é o Gustavo, da HBR Marine Solutions. " +
+const CLIENTE_F5 = "Mensagem para Lucenira (ficou pronto), sai agora: \"Olá, Lucenira! Aqui é o Gustavo, da HBR Marine Solutions. " +
   "A troca das baterias está concluída. Quando fica bom para combinarmos a entrega?\". *manda cliente Lucenira* ou *segura " +
   "cliente Lucenira*. E mais 3: *agenda clientes* mostra; *manda cliente* manda todas.";
 const AMANHA_F5 = "Amanhã, a partir das 09:00, vou mandar: a confirmação de ter 03/11 ao Flávio. Para não mandar: *segura cliente Flávio*.";

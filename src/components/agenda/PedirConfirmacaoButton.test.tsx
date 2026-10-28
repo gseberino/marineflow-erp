@@ -102,11 +102,11 @@ describe('PedirConfirmacaoButton (correção C1 da Fase 5)', () => {
   });
 
   it('o clique que aprovou a confirmação que esperava o dono aparece como feito', async () => {
-    banco.resposta = { data: { ok: true, agenda: true, aprovou: true, message: 'Mando ao Rodrigo amanhã às 09:00.' }, error: null };
+    banco.resposta = { data: { ok: true, agenda: true, aprovou: true, message: 'Mando para Rodrigo amanhã às 09:00.' }, error: null };
     render(<PedirConfirmacaoButton osId="os-6" />);
     fireEvent.click(screen.getByRole('button', { name: /Pedir confirmação/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Enviar pedido' }));
-    await waitFor(() => expect(banco.toasts).toContain('Mando ao Rodrigo amanhã às 09:00.'));
+    await waitFor(() => expect(banco.toasts).toContain('Mando para Rodrigo amanhã às 09:00.'));
   });
 
   it('a recusa no clique (sem conversa, fora do horário no caminho antigo) aparece como erro, com o texto do banco', async () => {

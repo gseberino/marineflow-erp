@@ -87,8 +87,7 @@ Deno.test("cliente: com o modo desligado o banco ainda é chamado (o passo fila 
 });
 
 Deno.test("cliente: erro da RPC nunca lança — vira { erro } e app_error_logs (task-automations / agenda:cliente-vigia)", async () => {
-  for (const rodada of [{ data: null, error: { code: "PGRST202", message: "Could not find the function agenda_cliente_vigiar" } },
-                        { data: null, error: { code: "57014", message: "canceling statement due to statement timeout" } },
+  for (const rodada of [{ data: null, error: { code: "57014", message: "canceling statement due to statement timeout" } },
                         "lança" as const]) {
     const { db, chamadas, fila } = mkDb({ rodada });
     const r = await vigiarClienteDaAgenda(db, AS_10H_BR, deps());
@@ -97,6 +96,20 @@ Deno.test("cliente: erro da RPC nunca lança — vira { erro } e app_error_logs 
     assertEquals(logs.length, 1);
     assertEquals([logs[0].p_context, logs[0].p_action], ["task-automations", "agenda:cliente-vigia"]);
     assertStringIncludes(String(logs[0].p_message), "rodada do cliente:");
+    assertEquals(fila, []);
+  }
+});
+
+// Correção C2 da Fase 5 (regressão B2): o código publicado antes da migration 20261028100300 não enche app_error_logs a
+// cada 15 min (eram 96 linhas por dia): a função ausente (PGRST202 do PostgREST, 42883 do Postgres) cala, como o passo do
+// material sem a Fase 4.
+Deno.test("cliente: sem a função no banco (PGRST202/42883), o passo é pulado calado — sem app_error_logs e sem nada na fila", async () => {
+  for (const code of ["PGRST202", "42883"]) {
+    const { db, chamadas, fila } = mkDb({ rodada: { data: null, error: { code, message: "Could not find the function agenda_cliente_vigiar" } } });
+    const r = await vigiarClienteDaAgenda(db, AS_10H_BR, deps());
+    assertEquals(r, { pulado: "a migration 20261028100300 ainda não está no banco" });
+    assertEquals(chamadas("agenda_cliente_vigiar").length, 1);
+    assertEquals(chamadas("log_app_error"), []);
     assertEquals(fila, []);
   }
 });

@@ -659,8 +659,8 @@ Deno.test("Fase 5 (P5) — chamadaDoComando: *manda/segura cliente* → agenda_c
 
 Deno.test("Fase 5 (P5) — executar: o texto do banco vale (também o 'Não achei…', que não segue ao modelo); erro = frase + log", async () => {
   const manda: ComandoDaAgenda = { comando: "cliente", acao: "manda", alvo: "nelson" };
-  const ok = cliente({ [RPC_CLIENTE_DITO]: { data: { ok: true, status: "ok", texto: "Mando ao Nelson amanhã às 09:01." } } });
-  assertEquals(await executarComandoDaAgenda(ok, manda, { autor: AUTOR }), { ok: true, texto: "Mando ao Nelson amanhã às 09:01." });
+  const ok = cliente({ [RPC_CLIENTE_DITO]: { data: { ok: true, status: "ok", texto: "Mando para Nelson amanhã às 09:01." } } });
+  assertEquals(await executarComandoDaAgenda(ok, manda, { autor: AUTOR }), { ok: true, texto: "Mando para Nelson amanhã às 09:01." });
   const nao = cliente({ [RPC_CLIENTE_DITO]: { data: { ok: false, status: "nao_achei", texto: "Não achei mensagem esperando para \"orçamento\"." } } });
   const r = await executarComandoDaAgenda(nao, { comando: "cliente", acao: "manda", alvo: "orcamento" }, { autor: AUTOR });
   assertEquals([r.ok, r.texto, r.seguirAoModelo], [true, "Não achei mensagem esperando para \"orçamento\".", undefined]);

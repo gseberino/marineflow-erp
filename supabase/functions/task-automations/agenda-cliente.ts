@@ -26,7 +26,18 @@ import { acordesValidos, type DepsDaVigia, enviarAcordesDaAgenda, type Resultado
 // deno-lint-ignore no-explicit-any
 type Db = any;
 
+/** O resumo quando a função da rodada do cliente ainda não está no banco (a migration 20261028100300 não foi aplicada). */
+export const RODADA_DO_CLIENTE_AUSENTE = "a migration 20261028100300 ainda não está no banco";
+
+/** A função ainda não existe no banco (o PostgREST não acha, ou o Postgres não acha). */
+function funcaoAusente(e: { code?: unknown } | null | undefined): boolean {
+  const code = String(e?.code ?? "");
+  return code === "PGRST202" || code === "42883";
+}
+
 export interface ResultadoDaRodadaDoCliente {
+  /** Por que não rodou: a função agenda_cliente_vigiar ainda não existe no banco (o código publicado antes da migration). */
+  pulado?: string;
   rodou?: boolean;
   /** agenda_config.modo_cliente na hora da rodada. */
   modo?: string;
@@ -45,7 +56,12 @@ export interface ResultadoDaRodadaDoCliente {
 export async function vigiarClienteDaAgenda(db: Db, agora: Date = new Date(), deps?: DepsDaVigia): Promise<ResultadoDaRodadaDoCliente> {
   try {
     const { data, error } = await db.rpc("agenda_cliente_vigiar", { p_hoje: diaBR(agora.getTime()), p_agora: agora.toISOString() });
-    if (error) throw error;
+    if (error) {
+      // (correção C2 da Fase 5, regressão B2) o código publicado antes da migration 20261028100300: a função ainda não
+      // existe — cala, como o passo do material sem a Fase 4 (sem uma linha em app_error_logs a cada 15 min)
+      if (funcaoAusente(error)) return { pulado: RODADA_DO_CLIENTE_AUSENTE };
+      throw error;
+    }
     const v = (data ?? {}) as Record<string, unknown>;
     const resultado: ResultadoDaRodadaDoCliente = {
       rodou: v.rodou === true,
