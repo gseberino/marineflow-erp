@@ -7,6 +7,10 @@
  * Só para administrador e financeiro, OS fora de orçamento e a agenda de produção ligada (PlanoDaOsNaOs decide). Fecha
  * numa linha (o estado e a duração) para não empurrar o formulário no celular.
  *
+ * Fase 6 (P8): uma linha em Duração ("Pelas OS parecidas", rótulo acima): o que as OS da mesma classe levam além do
+ * combinado (agenda_fator_de_campo, o texto do banco; "Em teste: …" em sombra). Só aparece com o aprendizado fora de
+ * desligado e na OS que ainda vai ser feita. A presença aprendida já vem no texto da presença ("pelo que medi: …").
+ *
  * Fase 5 (P6): o bloco "Cliente" — o que foi dito ao cliente (e se ainda vale), a confirmação e as mensagens desta OS
  * (lista curta, "em teste" quando o modo é sombra). Sem botão de mandar: a aprovação é pela palavra (*manda cliente
  * <nome>* / *segura cliente <nome>*) ou na conversa; a tela só cita a palavra que o banco escreve.
@@ -178,6 +182,12 @@ export function PlanoDaOs({ osId, status, className }: { osId: string; status: s
             <Dado rotulo="Duração">
               {data.duracao.texto}
               {data.duracao.faixa_texto && <span className="block text-xs text-muted-foreground">{data.duracao.faixa_texto}</span>}
+              {data.duracao.campo && (
+                <span className="mt-2 block" data-testid="plano-duracao-campo">
+                  <span className="block text-xs text-muted-foreground">Pelas OS parecidas</span>
+                  <span className="block break-words text-sm">{data.duracao.campo}</span>
+                </span>
+              )}
             </Dado>
             <Dado rotulo="Presença do dono">{data.presenca_dono.texto}</Dado>
             <Dado rotulo="Janela do bem">{janela.length > 0 ? janela.join(' · ') : 'Sem restrição'}</Dado>

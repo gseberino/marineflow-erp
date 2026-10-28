@@ -349,8 +349,18 @@ export interface PlanoDaOsDados {
     faixa: { otimista: number | null; realista: number | null };
     faixa_texto: string | null;
     texto: string | null;
+    /**
+     * Fase 6 (P8): o que as OS parecidas levam (a linha do fator de campo da classe da OS, de agenda_fator_de_campo: "Em teste:
+     * as OS de energia em motorhome levam até 1,7× o combinado (7 OS); …"). Ausente antes da migration 20261029100800; null
+     * com o aprendizado desligado e na OS concluída, faturada ou cancelada.
+     */
+    campo?: string | null;
   };
-  presenca_dono: { valor: string | null; pela_regra: boolean; texto: string };
+  /**
+   * Fase 6 (P8): aprendida = o motivo da presença que a agenda aprendeu ("você foi a 3 de 4 OS de energia em motorhome"); o
+   * texto já diz "(pelo que medi: …)". Ausente antes da migration 20261029100800; null sem a aprendida.
+   */
+  presenca_dono: { valor: string | null; pela_regra: boolean; texto: string; aprendida?: string | null };
   material: { estado: string | null; itens: MaterialDoPlano[] };
   janela: {
     bem_indisponivel: string | null;
