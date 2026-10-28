@@ -27,7 +27,7 @@
 --   C2k (item 24) a OS faturada (invoiced) logo depois de concluída recebe o "ficou pronto"
 --   C2l (B3) o cartão conta o que espera o dono igual ao foco, sem chamá-lo; o índice da conversa existe e serve ao d10
 --   C2z as cópias recriadas só mudam nos blocos "-- CORREÇÃO FASE 5:" (os da C1 incluídos); as portas e o security
---       definer das novas
+--       definer das novas. Os blocos "-- FASE 6:" saem também (a Fase 6, P5, recria _agenda_cliente_risco)
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -110,8 +110,19 @@ end $f$;
 create function pg_temp.sem_correcao(p_corpo text) returns text[] language plpgsql as $f$
 declare
   v_b text[] := '{}'; v_bloco boolean := false; l text;
+  -- FASE 6: os blocos "-- FASE 6: … -- FASE 6: fim" também saem (a Fase 6 recria _agenda_cliente_risco: spec-fase6 §3.1,
+  -- item 11); um bloco da Fase 6 dentro de um da correção sai junto com ele
+  v_f6 boolean := false;
+  -- FASE 6: fim
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
+    -- FASE 6: (P5) fora de um bloco da correção, o bloco da Fase 6 sai inteiro (o fim é lido pelo prefixo)
+    if not v_bloco and not v_f6 and l ~ '^\s*-- FASE 6:' and l !~ '^\s*-- FASE 6: fim' then v_f6 := true; continue; end if;
+    if v_f6 then
+      if l ~ '^\s*-- FASE 6: fim' then v_f6 := false; end if;
+      continue;
+    end if;
+    -- FASE 6: fim
     if not v_bloco and l ~ '^\s*-- CORREÇÃO FASE 5:' and l !~ '^\s*-- CORREÇÃO FASE 5: fim' then v_bloco := true; continue; end if;
     if v_bloco then
       if l ~ '^\s*-- CORREÇÃO FASE 5: fim' then v_bloco := false; end if;

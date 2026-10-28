@@ -141,6 +141,13 @@ const FIXTURES_COMO_TEXTO = [
   ['agenda_teste.mig_compras_fase4', '../../supabase/migrations/20261027100200_agenda_fase4_compras.sql'],
   ['agenda_teste.mig_os_fase6', '../../supabase/migrations/20261029100200_agenda_fase6_os.sql'],
   ['agenda_teste.mig_fornecedor_fase6', '../../supabase/migrations/20261029100300_agenda_fase6_fornecedor.sql'],
+  // Fase 6 (P5): as fontes do que agenda_fase6_cliente.sql confere — _agenda_cliente_risco de 20261028100800 (a cópia e a
+  // definição de antes rodada no lugar, para o byte a byte em teste), _agenda_aprendizado_texto de 20261029100400 (o P4) e a
+  // própria 20261029100500 (o preenchimento da 1ª promessa rodado de novo, e nada nela escreve mensagem a terceiros).
+  // _agenda_cliente_gravar_prometido (mig_textos_fase5) já está acima.
+  ['agenda_teste.mig_correcao_rodada_fase5', '../../supabase/migrations/20261028100800_agenda_fase5_correcao_rodada.sql'],
+  ['agenda_teste.mig_dono_fase6', '../../supabase/migrations/20261029100400_agenda_fase6_dono.sql'],
+  ['agenda_teste.mig_cliente_fase6', '../../supabase/migrations/20261029100500_agenda_fase6_cliente.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */
