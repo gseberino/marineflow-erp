@@ -233,8 +233,35 @@ export function numeroDito(v: unknown): number | null {
 /** Até 31 dias por pedido — mais que isso é engano de data, não pedido. */
 const MAX_DIAS = 31;
 
+/** O que o plano da agenda decide para a OS de um dia de trabalho (inteiro ou meio) da pessoa. */
+interface PlanoDoDia {
+  plano: OsDoPlano[];
+  /** As OS do dia: as ditas ou, sem OS dita, as do plano. */
+  os: { id: string; numero: string }[];
+  /** Sem OS dita, a OS veio do plano. */
+  osDoPlano: boolean;
+  /** Meia diária sem OS dita e duas OS no plano: a pergunta do "sim" (a diária fica sem OS). */
+  pergunta?: string;
+}
+
+/**
+ * Agenda de Produção, Fase 2 (P4): num dia de trabalho, sem OS dita a diária vai na OS do plano daquela pessoa no dia.
+ * Revisão da Fase 2: meia diária com mais de uma OS no plano do dia não vai nas duas (o valor se dividiria e ela
+ * trabalhou só um turno): fica sem OS e o "sim" pergunta qual. PÓS-MERGE (B): o mesmo para cada dia do lote.
+ */
+async function planoDoDia(
+  ctx: ToolCtx, f: Freelancer, dia: string, jornada: Jornada, ditas: { id: string; numero: string }[],
+): Promise<PlanoDoDia> {
+  const plano = await osDoPlanoNoDia(ctx, f.id, dia);
+  if (ditas.length || !plano.length) return { plano, os: ditas, osDoPlano: false };
+  if (jornada === "meio" && plano.length > 1) return { plano, os: [], osDoPlano: false, pergunta: perguntaDaMeiaDiaria(f.nome, plano) };
+  return { plano, os: plano.map((o) => ({ id: o.id, numero: o.numero })), osDoPlano: true };
+}
+
 /** Resolve o pedido como a pessoa falou. Devolve a pergunta quando há dúvida — sem gravar nada. */
-export async function resolverDiaria(ctx: ToolCtx, args: Record<string, unknown>): Promise<PedidoDeDiaria | { error: string }> {
+export async function resolverDiaria(
+  ctx: ToolCtx, args: Record<string, unknown>, opcoes: { semPlano?: boolean } = {},
+): Promise<PedidoDeDiaria | { error: string }> {
   const jornada = String(args.jornada ?? "") as Jornada;
   if (jornada === "faltou") return { error: SEM_FALTA };
   if (!JORNADAS.includes(jornada)) return { error: `Jornada "${args.jornada}" não existe: use inteiro, meio, apagar ou manter.` };
@@ -269,19 +296,16 @@ export async function resolverDiaria(ctx: ToolCtx, args: Record<string, unknown>
   // do plano daquela pessoa no dia; com OS dita diferente do plano, o "sim" mostra a divergência.
   // Revisão da Fase 2: meia diária com mais de uma OS no plano do dia não vai nas duas (o valor se dividiria e ela
   // trabalhou só um turno): fica sem OS e o "sim" pergunta qual.
+  // PÓS-MERGE (B): o lote (resolverLote) pede semPlano e faz a mesma decisão DIA A DIA (planoDoDia), também nos intervalos.
   let plano: OsDoPlano[] = [];
   let osDoPlano = false;
   let perguntaDoPlano: string | undefined;
-  if (!intervalo && (jornada === "inteiro" || jornada === "meio")) {
-    plano = await osDoPlanoNoDia(ctx, f.id, data);
-    if (!os.length && plano.length) {
-      if (jornada === "meio" && plano.length > 1) {
-        perguntaDoPlano = perguntaDaMeiaDiaria(f.nome, plano);
-      } else {
-        os.push(...plano.map((o) => ({ id: o.id, numero: o.numero })));
-        osDoPlano = true;
-      }
-    }
+  if (!opcoes.semPlano && !intervalo && (jornada === "inteiro" || jornada === "meio")) {
+    const d = await planoDoDia(ctx, f, data, jornada, os);
+    plano = d.plano;
+    osDoPlano = d.osDoPlano;
+    perguntaDoPlano = d.pergunta;
+    if (osDoPlano) os.push(...d.os);
   }
   const observacao = typeof args.observacao === "string" && args.observacao.trim() ? args.observacao.trim() : null;
   // Valor do dia só vale para quem trabalhou; ao apagar não há o que valer.
@@ -332,7 +356,12 @@ export function divergenciaDoPlano(p: PedidoDeDiaria): string | null {
 // `dias` (cada trecho: um dia ou um intervalo, com a jornada), UMA confirmação e UMA gravação
 // (registrar_diarias_em_lote: ou entram todos, ou nenhum).
 
-export interface PedidoDeLote { freelancer: Freelancer; itens: PedidoDeDiaria[] }
+/**
+ * Um trecho do lote. comPlano (PÓS-MERGE B): a jornada dita é de trabalho (inteiro ou meio) — os dias que entram leem o
+ * plano da agenda um a um, como o registrar_diaria de um dia (o "manter" não lê, como lá).
+ */
+export type ItemDoLote = PedidoDeDiaria & { comPlano: boolean };
+export interface PedidoDeLote { freelancer: Freelancer; itens: ItemDoLote[] }
 
 /** Até 15 trechos por pedido — mais que isso é engano, não semana. */
 const MAX_TRECHOS = 15;
@@ -341,13 +370,15 @@ export async function resolverLote(ctx: ToolCtx, args: Record<string, unknown>):
   const dias = args.dias;
   if (!Array.isArray(dias) || !dias.length) return { error: "Diga os dias: cada dia (ou cada intervalo) com a jornada." };
   if (dias.length > MAX_TRECHOS) return { error: `Trechos demais (${dias.length}): até ${MAX_TRECHOS} por pedido.` };
-  const itens: PedidoDeDiaria[] = [];
+  const itens: ItemDoLote[] = [];
   for (const [i, d] of dias.entries()) {
     const item = (d ?? {}) as Record<string, unknown>;
     if (item.jornada === "apagar") return { error: "Apagar é um dia de cada vez, fora da lista: diga qual dia." };
-    const p = await resolverDiaria(ctx, { ...item, freelancer: args.freelancer, fim_de_semana: item.fim_de_semana ?? args.fim_de_semana });
+    // PÓS-MERGE (B): o plano é lido dia a dia em diasDoLote (só os dias que entram), não aqui.
+    const p = await resolverDiaria(ctx, { ...item, freelancer: args.freelancer, fim_de_semana: item.fim_de_semana ?? args.fim_de_semana },
+      { semPlano: true });
     if ("error" in p) return { error: dias.length > 1 ? `Trecho ${i + 1}: ${p.error}` : p.error };
-    itens.push(p);
+    itens.push({ ...p, comPlano: item.jornada === "inteiro" || item.jornada === "meio" });
   }
   const vistos = new Set<string>();
   for (const p of itens) {
@@ -368,23 +399,63 @@ type DiaDoLote = {
  * Os dias que o lote grava. Num intervalo, o dia já lançado fica como está (como no data_ate); o dia
  * dito sozinho corrige o que havia (como no registrar_diaria de um dia).
  */
+type DiaResolvido = DiaDoLote & { item: ItemDoLote; plano: PlanoDoDia | null };
+
+/** Só os campos que registrar_diarias_em_lote lê (o resto é da confirmação). */
+const paraOBanco = ({ item: _i, plano: _p, ...d }: DiaResolvido): DiaDoLote => d;
+
 async function diasDoLote(ctx: ToolCtx, l: PedidoDeLote) {
   const lancados = await diasLancados(ctx, l.freelancer, l.itens.flatMap((p) => p.datas));
-  const dias: Array<DiaDoLote & { item: PedidoDeDiaria }> = [];
+  const aGravar: Array<{ item: ItemDoLote; data: string }> = [];
   const mantidos: string[] = [];
+  const diasMantidos: string[] = [];
   const corrigidos: string[] = [];
   for (const p of l.itens) {
     for (const d of p.datas) {
       const atual = lancados.get(d);
-      if (p.intervalo && atual) { mantidos.push(`${ddmm(d)} (${rotuloDaFracao(atual.fracao)})`); continue; }
+      if (p.intervalo && atual) { mantidos.push(`${ddmm(d)} (${rotuloDaFracao(atual.fracao)})`); diasMantidos.push(d); continue; }
       if (atual) corrigidos.push(`${ddmm(d)} (era ${rotuloDaFracao(atual.fracao)}, ${brl.format(atual.valorDia)})`);
-      dias.push({
-        item: p, data: d, jornada: p.jornada, os_ids: p.os.length ? p.os.map((o) => o.id) : null, observacao: p.observacao,
-        extras: p.extras, descontos: p.descontos, valor_diaria: p.valorDiaria,
-      });
+      aGravar.push({ item: p, data: d });
     }
   }
-  return { dias, mantidos, corrigidos, lancados };
+  // PÓS-MERGE (B): cada dia de trabalho que entra pergunta o plano DAQUELE dia (agenda_os_do_dia), como a diária de um
+  // dia (Fase 2, P4): sem OS dita, vai na OS do plano; meia diária com duas OS no plano fica sem OS (o "sim" pergunta).
+  const planos = await Promise.all(aGravar.map(({ item, data }) =>
+    item.comPlano ? planoDoDia(ctx, l.freelancer, data, item.jornada, item.os) : Promise.resolve(null)));
+  const dias: DiaResolvido[] = aGravar.map(({ item: p, data: d }, i) => {
+    const plano = planos[i];
+    const os = plano ? plano.os : p.os;
+    return {
+      item: p, plano, data: d, jornada: p.jornada, os_ids: os.length ? os.map((o) => o.id) : null, observacao: p.observacao,
+      extras: p.extras, descontos: p.descontos, valor_diaria: p.valorDiaria,
+    };
+  });
+  return { dias, mantidos, diasMantidos, corrigidos, lancados };
+}
+
+/** A OS de um dia do lote na linha do "sim": "OS-00069 (Vanderlei), pelo plano", a OS dita ou "" (sem OS). */
+function osDoDiaNoSim(d: DiaResolvido): string {
+  if (d.plano?.osDoPlano) return `${d.plano.plano.map(osComCliente).join(", ")}, pelo plano`;
+  return d.item.os.map((o) => o.numero).join(", ");
+}
+
+/** "21/09, 22/09 OS-00069 (Vanderlei); 23/09 OS-00060 (Lenine)": os dias agrupados pela OS, na ordem. */
+function osDosDiasNoSim(ds: DiaResolvido[]): string {
+  const grupos: Array<{ texto: string; dias: string[] }> = [];
+  for (const d of ds) {
+    const texto = d.plano?.osDoPlano ? d.plano.plano.map(osComCliente).join(", ") : (osDoDiaNoSim(d) || "sem OS");
+    const ultimo = grupos[grupos.length - 1];
+    if (ultimo?.texto === texto) ultimo.dias.push(ddmm(d.data));
+    else grupos.push({ texto, dias: [ddmm(d.data)] });
+  }
+  return grupos.map((g) => `${g.dias.join(", ")} ${g.texto}`).join("; ");
+}
+
+/** Linhas por dia, juntando os dias de texto igual: "seg 21/09, ter 22/09: <texto>". */
+function linhasPorDia(pares: Array<[string, string]>): string[] {
+  const grupos = new Map<string, string[]>();
+  for (const [dia, texto] of pares) grupos.set(texto, [...(grupos.get(texto) ?? []), diaCurto(dia)]);
+  return [...grupos].map(([texto, dias]) => `${dias.join(", ")}: ${texto}`);
 }
 
 /** O que o dia vai valer: a diária dita, a já gravada ou a do cadastro, mais extras, menos descontos. */
@@ -398,7 +469,7 @@ function valorDoDia(p: PedidoDeDiaria, data: string, atual: DiaLancado | undefin
 export async function resumirLote(ctx: ToolCtx, args: Record<string, unknown>): Promise<string> {
   const l = await resolverLote(ctx, args);
   if ("error" in l) return `Registrar diárias\n⚠️ ${l.error} — nada vai ser gravado assim.`;
-  const { dias, mantidos, corrigidos, lancados } = await diasDoLote(ctx, l);
+  const { dias, mantidos, diasMantidos, corrigidos, lancados } = await diasDoLote(ctx, l);
   const total = dias.reduce((s, d) => s + valorDoDia(d.item, d.data, lancados.get(d.data)), 0);
   const linhas = [`Registrar diárias de *${l.freelancer.nome}*: ${dias.length} dia(s) · ${brl.format(total)}`];
   for (const p of l.itens) {
@@ -411,15 +482,37 @@ export async function resumirLote(ctx: ToolCtx, args: Record<string, unknown>): 
     const valor = valores.every((v) => v === valores[0])
       ? `${brl.format(valores[0])}${ds.length > 1 ? " cada" : ""}`
       : brl.format(valores.reduce((a, b) => a + b, 0));
+    // PÓS-MERGE (B): a OS é de cada dia (a dita ou a do plano daquele dia); igual em todos, sai uma vez.
+    const osDosDias = ds.map(osDoDiaNoSim);
+    const os = osDosDias.every((o) => o === osDosDias[0])
+      ? (osDosDias[0] ? ` · ${osDosDias[0]}` : "")
+      : ` · pelo plano: ${osDosDiasNoSim(ds)}`;
     linhas.push(`• ${quando} · ${ROTULO[p.jornada]} · ${valor}` +
       (p.extras ? ` (extras ${brl.format(p.extras)})` : "") + (p.descontos ? ` (descontos ${brl.format(p.descontos)})` : "") +
-      (p.os.length ? ` · ${p.os.map((o) => o.numero).join(", ")}` : "") + (p.observacao ? ` · ${p.observacao}` : ""));
+      os + (p.observacao ? ` · ${p.observacao}` : ""));
   }
+  // PÓS-MERGE (B): o que o "sim" de um dia diz sobre o plano, dia a dia — a OS dita diferente do plano e a pergunta da
+  // meia diária com duas OS no plano; o valor que se divide entre as OS.
+  const divergencias: Array<[string, string]> = [];
+  const perguntas: Array<[string, string]> = [];
+  for (const d of dias) {
+    if (!d.plano) continue;
+    const div = divergenciaDoPlano({ ...d.item, plano: d.plano.plano, osDoPlano: d.plano.osDoPlano });
+    if (div) divergencias.push([d.data, div]);
+    if (d.plano.pergunta) perguntas.push([d.data, d.plano.pergunta]);
+  }
+  linhas.push(...linhasPorDia(divergencias), ...linhasPorDia(perguntas));
+  if (dias.some((d) => (d.os_ids?.length ?? 0) > 1)) linhas.push("O valor do dia se divide em partes iguais entre as OS.");
   if (corrigidos.length) linhas.push(`Já lançados, vão ser corrigidos (não duplicados): ${corrigidos.join(", ")}.`);
   if (mantidos.length) linhas.push(`Já lançados, ficam como estão: ${mantidos.join(", ")}.`);
   if (!dias.length) linhas.push("Todos esses dias já estão lançados: nada vai mudar.");
   const semPerfil = dias.filter((d) => !d.item.freelancer.perfis.some((x) => x.vigencia_inicio <= d.data && (!x.vigencia_fim || x.vigencia_fim >= d.data)));
   if (semPerfil.length) linhas.push(`⚠️ Sem diária cadastrada em ${semPerfil.map((d) => ddmm(d.data)).join(", ")}: o sistema vai recusar e nada entra.`);
+  // PÓS-MERGE (B): como no "sim" de um dia (Fase 3, P4), o dia já lançado que foi a agenda que lançou diz isso, com a
+  // palavra que corrige — o que vai ser corrigido e o que fica como está. Só os dias já lançados perguntam.
+  const jaLancados = [...dias.map((d) => d.data), ...diasMantidos].filter((d) => lancados.has(d)).sort();
+  const daAgenda = await Promise.all(jaLancados.map((d) => diariaDaAgenda(ctx, l.freelancer.id, d)));
+  linhas.push(...jaLancados.flatMap((d, i) => (daAgenda[i] ? [`${diaCurto(d)}: ${daAgenda[i]}`] : [])));
   return linhas.join("\n");
 }
 
@@ -431,7 +524,7 @@ async function registrarLote(ctx: ToolCtx, args: Record<string, unknown>) {
     return { ok: true, registrados: [], mantidos, aviso: `Todos esses dias já estavam lançados para ${l.freelancer.nome}; nada mudou.` };
   }
   const r = await chamar(ctx, "registrar_diarias_em_lote", {
-    p_favorecido_id: l.freelancer.id, p_dias: dias.map(({ item: _i, ...d }) => d), p_origem: "agente",
+    p_favorecido_id: l.freelancer.id, p_dias: dias.map(paraOBanco), p_origem: "agente",
   }) as Record<string, unknown>;
   if (r && "error" in r) return r;
   const partes = [`${l.freelancer.nome} · ${dias.length} dia(s) registrado(s): ${dias.map((d) => ddmm(d.data)).join(", ")}.`];

@@ -21,6 +21,8 @@ type Opcoes = {
   plano?: unknown[]; erroDoPlano?: string;
   /** Fase 3 (P4): o que agenda_diaria_da_agenda devolve (a diária que a agenda lançou), ou o erro dela. */
   daAgenda?: { data?: unknown; error?: { code?: string; message: string } };
+  /** PÓS-MERGE (B): o plano e a diária da agenda DIA A DIA (o lote pergunta um dia de cada vez); vale sobre plano/daAgenda. */
+  planoPorDia?: Record<string, unknown[]>; daAgendaPorDia?: Record<string, unknown>;
 };
 function admin(opcoes: Opcoes = {}) {
   const tabelas: Record<string, any[]> = {
@@ -70,10 +72,11 @@ function admin(opcoes: Opcoes = {}) {
     if (n === "agenda_os_do_dia") {
       return Promise.resolve(opcoes.erroDoPlano
         ? { data: null, error: { message: opcoes.erroDoPlano } }
-        : { data: opcoes.plano ?? [], error: null });
+        : { data: opcoes.planoPorDia ? (opcoes.planoPorDia[String(a.p_dia)] ?? []) : opcoes.plano ?? [], error: null });
     }
     if (n === "log_app_error") return Promise.resolve({ data: null, error: null });
     if (n === "agenda_diaria_da_agenda") {
+      if (opcoes.daAgendaPorDia) return Promise.resolve({ data: opcoes.daAgendaPorDia[String(a.p_dia)] ?? { lancada: false }, error: null });
       return Promise.resolve({ data: opcoes.daAgenda?.data ?? { lancada: false }, error: opcoes.daAgenda?.error ?? null });
     }
     return Promise.resolve({ data: opcoes.simulacao?.data ?? null, error: opcoes.simulacao?.error ?? null });
@@ -919,6 +922,75 @@ Deno.test("lote: grava numa chamada só (registrar_diarias_em_lote) só os dias 
   assertStringIncludes(String(r.aviso), "5 dia(s) registrado(s): 21/09, 22/09, 23/09, 25/09, 26/09.");
   assertStringIncludes(String(r.aviso), "Já lançados, mantidos: 24/09 (meio período).");
   assertStringIncludes(String(r.aviso), "Saldo com Roberto");
+});
+
+// ── PÓS-MERGE (B, 28/10/2026): a diária em lote faz, dia a dia, o que a diária de um dia faz com a agenda ────────────
+// O lote (dias=[…], do main) gravava sem a OS do plano e sem dizer "a agenda já lançou essa diária" (Fase 2, P4; Fase 3,
+// P4). Agora cada dia que entra pergunta o plano DAQUELE dia (também os dias de um intervalo do lote): sem OS dita, vai na
+// OS do plano; meia diária com duas OS no plano fica sem OS e o "sim" pergunta qual; OS dita diferente do plano vira a
+// divergência no "sim". E cada dia já lançado que a agenda lançou ganha a linha da agenda, com a palavra que corrige.
+const VANDERLEI = { os: "os69", numero: "OS-00069", cliente_curto: "Vanderlei", turnos: ["manha", "tarde"], tipo: "execucao", reserva: false };
+const LENINE = { os: "os60", numero: "OS-00060", cliente_curto: "Lenine", turnos: ["manha", "tarde"], tipo: "execucao", reserva: false };
+
+Deno.test("lote (pós-merge B): sem OS dita, cada dia vai na OS do plano DAQUELE dia — também dentro de um intervalo", async () => {
+  const planoPorDia = { "2026-09-21": [VANDERLEI], "2026-09-22": [VANDERLEI], "2026-09-23": [LENINE] };
+  const args = { freelancer: "roberto", dias: [
+    { data: "21/09/2026", data_ate: "23/09/2026", jornada: "inteiro" }, { data: "25/09/2026", jornada: "inteiro" },
+  ] };
+  const { c, chamadas } = ctx({ planoPorDia });
+  await tool("registrar_diaria").execute(args, c as never);
+  const lote = chamadas.find((x) => x.n === "registrar_diarias_em_lote")!;
+  assertEquals((lote.a.p_dias as any[]).map((d) => [d.data, d.os_ids]),
+    [["2026-09-21", ["os69"]], ["2026-09-22", ["os69"]], ["2026-09-23", ["os60"]], ["2026-09-25", null]]);
+  const pedidos = (c.admin as any).simuladas.filter((s: any) => s.n === "agenda_os_do_dia").map((s: any) => s.p_dia).sort();
+  assertEquals(pedidos, ["2026-09-21", "2026-09-22", "2026-09-23", "2026-09-25"]);
+  const txt = String(await resumirLote(ctx({ planoPorDia }).c as never, args)).replace(/ /g, " ");
+  assertStringIncludes(txt, "• seg 21/09 a qua 23/09 (3 dias, só dias úteis) · dia inteiro · R$ 160,00 cada · pelo plano: 21/09, 22/09 OS-00069 (Vanderlei); 23/09 OS-00060 (Lenine)");
+  assertEquals(txt.endsWith("\n• sex 25/09 · dia inteiro · R$ 160,00"), true, "o dia sem plano vai sem OS");
+  // um trecho só com a mesma OS todos os dias: a linha diz a OS uma vez
+  const igual = String(await resumirLote(ctx({ plano: [VANDERLEI] }).c as never, { freelancer: "roberto", dias: [
+    { data: "21/09/2026", data_ate: "22/09/2026", jornada: "inteiro" },
+  ] })).replace(/ /g, " ");
+  assertStringIncludes(igual, "dia inteiro · R$ 160,00 cada · OS-00069 (Vanderlei), pelo plano");
+});
+
+Deno.test("lote (pós-merge B): meia diária com duas OS no plano fica sem OS e pergunta; OS dita diferente vira divergência; manter não lê o plano", async () => {
+  const duas = [{ ...VANDERLEI, turnos: ["manha"] }, { ...LENINE, turnos: ["tarde"] }];
+  const planoPorDia = { "2026-09-21": duas, "2026-09-22": [VANDERLEI] };
+  const args = { freelancer: "roberto", dias: [{ data: "21/09/2026", jornada: "meio" }, { data: "22/09/2026", jornada: "inteiro", os: "60" }] };
+  const { c, chamadas } = ctx({ planoPorDia });
+  await tool("registrar_diaria").execute(args, c as never);
+  assertEquals((chamadas.find((x) => x.n === "registrar_diarias_em_lote")!.a.p_dias as any[]).map((d) => [d.data, d.os_ids]),
+    [["2026-09-21", null], ["2026-09-22", ["os60"]]]);
+  const txt = String(await resumirLote(ctx({ planoPorDia }).c as never, args)).replace(/ /g, " ");
+  assertStringIncludes(txt, "seg 21/09: Pelo plano, Roberto Daniel Rodrigues Correa estava na OS-00069 (Vanderlei) de manhã e na OS-00060 (Lenine) à tarde: a meia diária é de qual? Diga a OS; sem ela, a diária fica sem OS.");
+  assertStringIncludes(txt, "ter 22/09: Pelo plano, Roberto Daniel Rodrigues Correa estava na OS-00069 (Vanderlei) nesse dia; vai na OS-00060, como você disse.");
+  assertEquals(txt.includes("se divide em partes iguais"), false);
+  // duas OS no plano num dia inteiro: vão as duas, e o "sim" diz que o valor se divide
+  const inteiro = String(await resumirLote(ctx({ planoPorDia }).c as never, { freelancer: "roberto", dias: [{ data: "21/09/2026", jornada: "inteiro" }] }));
+  assertStringIncludes(inteiro, "O valor do dia se divide em partes iguais entre as OS.");
+  // manter (só extras do dia já lançado) não lê o plano, como no caminho de um dia
+  const manter = ctx({ diaLancado: true, plano: [VANDERLEI] });
+  await resumirLote(manter.c as never, { freelancer: "roberto", dias: [{ data: "24/09/2026", jornada: "manter", extras: 10 }] });
+  assertEquals((manter.c.admin as any).simuladas.some((s: any) => s.n === "agenda_os_do_dia"), false);
+});
+
+Deno.test("lote (pós-merge B): o \"sim\" diz, dia a dia, a diária que a agenda já lançou (e só pergunta pelos dias já lançados)", async () => {
+  const texto = "A agenda já lançou essa diária às 17:12 (corrige com *diária Roberto meia*).";
+  const { c } = ctx({ diaLancado: true, daAgendaPorDia: { "2026-09-24": { lancada: true, texto } } });
+  const txt = String(await resumirLote(c as never, { freelancer: "roberto", dias: [
+    { data: "24/09/2026", jornada: "inteiro" }, { data: "25/09/2026", jornada: "meio" },
+  ] }));
+  assertStringIncludes(txt, `qui 24/09: ${texto}`);
+  const perguntados = (c.admin as any).simuladas.filter((s: any) => s.n === "agenda_diaria_da_agenda").map((s: any) => [s.p_payee, s.p_dia]);
+  assertEquals(perguntados, [["p-rob", "2026-09-24"]]);
+  // o dia lançado que fica como está (intervalo) também diz que foi a agenda
+  const mantido = String(await resumirLote(ctx({ diaLancado: true, daAgendaPorDia: { "2026-09-24": { lancada: true, texto } } }).c as never,
+    { freelancer: "roberto", dias: [{ data: "21/09/2026", data_ate: "25/09/2026", jornada: "inteiro" }] }));
+  assertStringIncludes(mantido, `qui 24/09: ${texto}`);
+  // sem diária da agenda, nenhuma linha
+  const nada = String(await resumirLote(ctx({ diaLancado: true }).c as never, { freelancer: "roberto", dias: [{ data: "24/09/2026", jornada: "inteiro" }] }));
+  assertEquals(nada.includes("A agenda já lançou"), false);
 });
 
 Deno.test("PDF só depois do sim: com lançamento da pessoa esperando, extrato e recibo não saem", async () => {
