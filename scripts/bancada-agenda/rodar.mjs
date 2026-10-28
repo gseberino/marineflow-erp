@@ -130,6 +130,10 @@ const FIXTURES_COMO_TEXTO = [
   // migrations de onde copiam os corpos que recriam (spec-fase6 §5.9) como mig_*_fase6, para as conferências das cópias (o
   // C2z e o C1z tiram os blocos "-- FASE 6:"); as que já estão acima não se repetem.
   ['agenda_teste.fase6', 'fixture-fase6.sql'],
+  // Fase 6 (P2): a fonte de _agenda_aprendizado_texto (a 20261029100100 do P1), para o O6 de agenda_fase6_os.sql conferir a
+  // cópia; as de os_duracao_sugerida/os_presenca_do_dono (mig_prontidao_fase1) e de _agenda_vigia_estouro
+  // (mig_conferencia_fase2) já estão acima.
+  ['agenda_teste.mig_medicao_fase6', '../../supabase/migrations/20261029100100_agenda_fase6_medicao.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

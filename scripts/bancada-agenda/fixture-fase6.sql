@@ -284,3 +284,27 @@ begin
   end if;
 end
 $confere$;
+
+-- ── P2 (28/10): as idas do dono sem estar no plano (o insumo da presença aprendida) ─────────────────────
+-- Três idas ditas pelo dono na conversa ("eu fui no Davi", manhã/tarde/dia) em 3 das 4 OS de energia em motorhome de outubro
+-- (134 em 20/10, 135 em 22/10, 136 em 27/10) e uma "passou" da conferência na 137 (26/10), que não conta. A 1ª ida registrada
+-- é a de 20/10: a presença conta as OS concluídas desde ela (134, 135, 136 e 137) → 3 de 4 → o dia todo (spec-fase6 §6.2).
+insert into public.agenda_intervencoes_do_dono (service_order_id, dia, prevista, dita, classe, origem, trecho, criado_em)
+select ('05000000-0000-4000-8000-000000000' || n)::uuid, dia::date, 'nenhuma', dita, 'execucao', origem, trecho,
+       (dia::date + time '18:00') at time zone 'America/Sao_Paulo'
+  from (values
+    ('134', '2026-10-20', 'dia', 'conversa', 'hoje eu fiquei o dia todo no Davi'),
+    ('135', '2026-10-22', 'manha', 'conversa', 'de manhã eu fui na Elisa'),
+    ('136', '2026-10-27', 'tarde', 'conversa', 'à tarde eu fui no Fábio'),
+    ('137', '2026-10-26', 'passou', 'conferencia', null)
+  ) as i(n, dia, dita, origem, trecho);
+
+do $confere_p2$
+begin
+  if (select count(*) from public.agenda_intervencoes_do_dono i
+       where i.service_order_id::text between '05000000-0000-4000-8000-000000000131' and '05000000-0000-4000-8000-000000000144') <> 4
+     or (select min(i.dia) from public.agenda_intervencoes_do_dono i) <> date '2026-10-20' then
+    raise exception 'fixture-fase6 (P2): as 4 idas do dono (a 1ª em 20/10) não estão lá';
+  end if;
+end
+$confere_p2$;
