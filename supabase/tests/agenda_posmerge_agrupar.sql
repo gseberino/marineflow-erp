@@ -75,18 +75,21 @@ do $copia$
 declare
   v_porta text := current_setting('agenda_teste.mig_levantamento_fase3', true);
   v_agr   text := current_setting('agenda_teste.mig_agrupar_os', true);
+  -- _os_impedimento_para_agrupar: a mais nova é a do "Fechar juntas" (20261028190000, o cadastro genérico)
+  v_juntas text := current_setting('agenda_teste.mig_fechar_juntas', true);
   v_nome  text;
   v_fonte text;
   v_novo  text;
 begin
-  if coalesce(v_porta, '') = '' or coalesce(v_agr, '') = '' then
+  if coalesce(v_porta, '') = '' or coalesce(v_agr, '') = '' or coalesce(v_juntas, '') = '' then
     insert into _resultado values ('C0 as cópias só mudam nos blocos "-- PÓS-MERGE: (C)"', true,
-      'PULADO: sem agenda_teste.mig_levantamento_fase3/mig_agrupar_os (rode pela bancada)');
+      'PULADO: sem agenda_teste.mig_levantamento_fase3/mig_agrupar_os/mig_fechar_juntas (rode pela bancada)');
     return;
   end if;
   foreach v_nome in array array['os_transicionar_status', '_os_impedimento_para_agrupar', '_os_impedimento_para_desagrupar',
                                 '_agrupar_os_montar', '_desagrupar_os_desfazer'] loop
-    v_fonte := pg_temp.corpo(case when v_nome = 'os_transicionar_status' then v_porta else v_agr end, v_nome);
+    v_fonte := pg_temp.corpo(case when v_nome = 'os_transicionar_status' then v_porta
+                                  when v_nome = '_os_impedimento_para_agrupar' then v_juntas else v_agr end, v_nome);
     if v_nome = '_desagrupar_os_desfazer' then
       v_fonte := replace(v_fonte,
         E'       set status = coalesce(o.status_antes, ''approved''),\n           quote_status = o.quote_status_antes,',

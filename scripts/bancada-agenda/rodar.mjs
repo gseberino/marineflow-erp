@@ -156,6 +156,8 @@ const FIXTURES_COMO_TEXTO = [
   // (20261028120000) —, para o agenda_posmerge_agrupar.sql conferir que as cópias só mudam nos blocos "-- PÓS-MERGE: (C)".
   ['agenda_teste.mig_levantamento_fase3', '../../supabase/migrations/20261026100700_agenda_fase3_levantamento_na_porta.sql'],
   ['agenda_teste.mig_agrupar_os', '../../supabase/migrations/20261028120000_agrupar_os.sql'],
+  // (e a do "Fechar juntas", 20261028190000: a mais nova de _os_impedimento_para_agrupar)
+  ['agenda_teste.mig_fechar_juntas', '../../supabase/migrations/20261028190000_fechar_juntas_f0.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

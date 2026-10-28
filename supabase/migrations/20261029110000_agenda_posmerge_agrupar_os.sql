@@ -44,7 +44,8 @@
 --     de antes de começar; escreve pela _agenda_escrever_os e grava a ação 'status'.
 --   RECRIADAS
 --   · os_transicionar_status (de 20261026100700): a via 'desagrupar' vai à _os_porta_desagrupar. Nada mais muda.
---   · _os_impedimento_para_agrupar (de 20261028120000): o dia feito na agenda recusa como execução.
+--   · _os_impedimento_para_agrupar (de 20261028190000, o "Fechar juntas": já recusa o cadastro genérico, e a chegada no
+--     barco conta como execução em _os_execucao_iniciada): o dia feito na agenda recusa como execução.
 --   · _os_impedimento_para_desagrupar (de 20261028120000): o dia feito na agenda recusa; a data dita ao cliente DEPOIS de
 --     agrupar recusa (é da agrupada; as originais não a têm).
 --   · _agrupar_os_montar (de 20261028120000): chama _agrupar_os_agenda depois de cancelar as origens; os avisos entram.
@@ -57,7 +58,7 @@
 -- data), a rodada do cliente confere o plano novo contra ela e o M6/a pergunta ao dono saem pelo caminho de sempre se não
 -- couber; o aviso do agrupar diz. Os meios-dias saem com 'os_saiu' e a OS-N entra no próximo planejamento.
 --
--- APLICAR (só com o OK nomeado do dono; depois de 20261028120000 e 20261029101000):
+-- APLICAR (só com o OK nomeado do dono; depois de 20261028120000, 20261028190000 e 20261029101000):
 --   npx supabase db query --linked -f supabase/migrations/20261029110000_agenda_posmerge_agrupar_os.sql
 --   npx supabase db query --linked -e "insert into supabase_migrations.schema_migrations (version, name)
 --     values ('20261029110000', 'agenda_posmerge_agrupar_os');"
@@ -70,12 +71,15 @@
 -- agrupada, e o desagrupar de antes também o devolve — o laço de os_agrupamento_movidos é genérico):
 --   npx supabase db query --linked -f supabase/migrations/20261026100700_agenda_fase3_levantamento_na_porta.sql
 --   npx supabase db query --linked -f supabase/migrations/20261028120000_agrupar_os.sql
+--   npx supabase db query --linked -f supabase/migrations/20261028190000_fechar_juntas_f0.sql   (DEPOIS da de cima: devolve
+--     _os_execucao_iniciada e _os_impedimento_para_agrupar do "Fechar juntas", que a 20261028120000 reescreveria)
 --   npx supabase db query --linked -e "drop function if exists public._os_porta_desagrupar(uuid, text, uuid, date, timestamptz);
 --     drop function if exists public._agrupar_os_agenda(uuid, uuid[], uuid, uuid, text, jsonb, jsonb, uuid);
 --     drop function if exists public._agenda_os_saiu_por_agrupar(uuid, uuid, text, uuid);
 --     drop function if exists public._os_agenda_execucao(uuid);
 --     delete from supabase_migrations.schema_migrations where version = '20261029110000';"
---   (as duas migrations reaplicadas são idempotentes: create or replace, if not exists, drop trigger if exists.)
+--   (as três migrations reaplicadas são idempotentes: create or replace, if not exists, drop trigger if exists; a marca do
+--   cadastro genérico só age se ele ainda não estiver marcado.)
 --
 -- IDEMPOTENTE: só create or replace function, revoke/grant e comment.
 
@@ -753,7 +757,7 @@ $function$;
 comment on function public.os_transicionar_status(uuid, text, text, text, uuid, timestamptz, date, timestamptz, timestamptz) is
   'Agenda de Produção (Fase 2; Fase 3: conclusão, faturamento, reabertura, conversão e p_check_out; Fase 3, P7a: as regras que só dependem do cargo, do status, do pedido e do caminho moram em _os_porta_regra, a mesma função que a tela lê; Fase 3, P7b: o D11 — concluir exige o levantamento respondido nos serviços marcados "exige levantamento", em todo caminho, com a frase do formulário): a porta única de status da OS. Vias: tela, tela_agendar, aprovacao, assistente, check_in, oc, motor, vigia, equipe, conferencia, dono, assinatura, desfazer. Status de agenda (todos os modos): em andamento nunca volta (agendada/aberta/aprovada) e só volta a aguardar com o motivo, pelo dono ou pela tela (admin/financeiro, técnico da OS; sem o motivo {ok false, pede_motivo true}) (a OC: ok, nada muda); aguardando peças só sai com o material completo; aguardando o cliente só sai pelo dono, a tela de agendar, a aprovação ou a assinatura do cliente; agendada só volta (para o status de antes) pela agenda ou pelo dono e sem dia no plano, e pela tela (para o status escolhido) só o admin/financeiro com a agenda automática fora de ligado; com login, as vias motor, vigia, equipe e assinatura são recusadas (42501), e dono e conferência só valem para admin/financeiro; em modo_proposta ligado, agendada só com dia no plano; check_in_at uma vez. Fase 3: concluir (ativo → concluída) exige o levantamento respondido (_os_levantamentos_pendentes vazio; senão nada muda e {ok false} com "Para concluir, responda o levantamento de: …"), cria as cobranças da condição (_os_criar_recebiveis_da_conclusao, paridade com a tela) ANTES do status e grava a saída num UPDATE só, tudo ou nada ({ok false} com o texto); faturar só concluída; reabrir concluída (tela, dono) mantém saída e cobranças; orçamento → X (tela, assistente, dono, aprovação, assinatura) converte trocando só o prefixo do número e aplica aprovada → X na mesma chamada (se X recusar, a conversão também não fica); cancelar é Cancelar OS. Quem pode: status de agenda = admin/financeiro, técnico da OS, vendedor pela tela; converter = admin/financeiro, vendedor (tela, assistente), assinatura; concluir = admin/financeiro, técnico da OS, assinatura, equipe; faturar/reabrir/desfazer a conclusão = admin/financeiro. Toda mudança: linha em agenda_acoes (status; concluir com receivable_ids; desfazível quando foi motor/vigia/equipe, e a conclusão pela equipe ou pelo dono). Devolve {ok, mudou, de, para, texto, acao_id, check_in_at, check_out_at; na conclusão cobrancas e cobrancas_texto; na conversão convertido, numero, numero_antes}. PÓS-MERGE (C): via desagrupar — só de dentro do _desagrupar_os_desfazer (a chave marineflow.desagrupar_os), decidida e escrita pela _os_porta_desagrupar (cancelada → o status de antes de agrupar).';
 
--- ── 3. O agrupar e o desagrupar (corpos de 20261028120000; os blocos "-- PÓS-MERGE: (C)") ─────────────────
+-- ── 3. O agrupar e o desagrupar (corpos de 20261028190000 e 20261028120000, os mais novos; os blocos "-- PÓS-MERGE: (C)") ─────────────────
 create or replace function public._os_impedimento_para_agrupar(p_os uuid)
 returns text
 language plpgsql
@@ -781,6 +785,12 @@ begin
   end if;
   if r.status = 'cancelled' then
     return format('%s está cancelada e não pode ser agrupada.', r.service_order_number);
+  end if;
+  -- Cadastro genérico (sem CPF/CNPJ, junta clientes diferentes): nunca entra em agrupamento (28/10/2026).
+  v_motivo := public._cliente_generico(r.client_id);
+  if v_motivo is not null then
+    return format('O cadastro %s é genérico, sem CPF/CNPJ: a %s não entra em agrupamento. Passe a OS para o cadastro do cliente de verdade antes de agrupar.',
+                  v_motivo, r.service_order_number);
   end if;
   v_motivo := public._os_execucao_iniciada(p_os);
   if v_motivo <> '' then

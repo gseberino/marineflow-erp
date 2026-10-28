@@ -76,6 +76,9 @@ export const FORA_DA_BANCADA = new Set([
   // de PRIMEIRA. PÓS-MERGE (C, 29/10/2026): o agrupar_os (20261028120000) VOLTOU para a bancada — a 20261029110000 recria o
   // agrupar e o desagrupar conhecendo a agenda, e o teste dela (agenda_posmerge_agrupar.sql) roda o agrupar de verdade; as
   // tabelas que ele atravessa entraram em TABELAS e as duas migrations de agrupar orçamentos, em MIGRATIONS_DEPOIS_DO_SNAPSHOT.
+  // O "Fechar juntas" (20261028190000, main de 28/10: o cadastro genérico não agrupa, a chegada no barco conta como execução,
+  // OS com nota viva não cancela) também fica DENTRO: ele recria _os_impedimento_para_agrupar e _os_execucao_iniciada, que o
+  // agrupar da bancada tem de usar como em produção (a 20261029110000 recria a sua versão do impedimento).
   '20261027120000_diarias_leitura_certa.sql',
   '20261027150000_diarias_so_categoria_diarias.sql',
   '20261027180000_diarias_recibo_de_servicos.sql',
