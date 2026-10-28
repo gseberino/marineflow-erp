@@ -32,7 +32,7 @@ function cliente(p: Partial<Client> & Pick<Client, 'id' | 'name'>): Client {
     address_line_1: null, address_line_2: null, address_number: null, address_complement: null,
     neighborhood: null, city: null, state: null, postal_code: null, country: 'Brazil', notes: null,
     ie_indicator: 9, state_registration: null, display_name: null, communication_tone: null,
-    opt_out_whatsapp: false, created_at: '', updated_at: '',
+    opt_out_whatsapp: false, generico: false, created_at: '', updated_at: '',
     ...p,
   };
 }

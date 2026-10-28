@@ -16,6 +16,7 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 import { pickAutoApply, statementSignature } from "../_shared/banking/matching.ts";
 import { montarSugestoes } from "../_shared/banking/sugestoes.ts";
 import type { BankTx, Candidate, Suggestion } from "../_shared/banking/types.ts";
+import { mensagemCobrancaNaoFechou, quitarCobrancaConciliada } from "./cobranca-quitada.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
 /**
@@ -369,19 +370,17 @@ async function applySuggestion(
 
       // Liga a cobrança à conta criada e a marca como paga (o gatilho cuida do resto
       // quando o receivable já nasce quitado, mas aqui o vínculo ainda não existia).
-      await admin
-        .from("collections")
-        .update({
-          receivable_id: (rec as any).id,
-          status: "paid",
-          paid_at: new Date().toISOString(),
-          paid_amount: tx.amount,
-          paid_method: "bank_transfer",
-          payment_confirmed_by: "conciliacao",
-        })
-        .eq("id", candidate.id);
+      // [FECHAR-JUNTAS 0b] O resultado é conferido: antes o CHECK recusava o valor gravado
+      // e a cobrança ficava pendente em silêncio (ver cobranca-quitada.ts).
+      const fechada = await quitarCobrancaConciliada(admin, candidate.id, (rec as any).id, tx.amount);
 
+      // O dinheiro já está no financeiro: a transação fica conciliada mesmo se a cobrança não
+      // fechou, senão uma segunda tentativa lançaria o mesmo recebimento outra vez.
       await marcarConciliada(admin, tx.id, (pay as any).id, (cob as any).service_order_id ?? null);
+      if (!fechada.ok) {
+        console.error("[banking-reconcile] cobrança não fechou:", candidate.id, fechada.message);
+        return { ok: false, message: mensagemCobrancaNaoFechou(candidate.label, fechada.message) };
+      }
       await aprender(admin, tx, candidate);
       return { ok: true, message: `Cobrança quitada: ${candidate.label}` };
     }

@@ -1543,14 +1543,40 @@ export const serviceOrderTools: ToolDef[] = [
         return { error: "Só é possível reabrir OS com status Faturada ou Concluída." };
       }
 
-      const { data: receivables } = await admin.from("receivables").select("*").eq("service_order_id", args.service_order_id);
-      for (const rec of receivables || []) {
-        const { data: payments } = await admin.from("payments").select("*").eq("receivable_id", rec.id).eq("status", "confirmed");
-        for (const payment of payments || []) {
-          await admin.from("payments").update({ status: "cancelled", cancelled_at: new Date().toISOString(), cancellation_reason: `${args.reason} (reabertura de OS)` }).eq("id", payment.id);
-          await admin.from("bank_transactions").update({ reconciled: false, reconciled_payment_id: null }).eq("reconciled_payment_id", payment.id);
+      // Fase 0b do Fechar juntas (28/10/2026), paridade com a tela (src/lib/cascade-updates.ts, reopenServiceOrder):
+      // leitura que falha não vira "sem contas"; conta CANCELADA fica cancelada (antes voltava para 'pending' e
+      // ressuscitava dívida); e pagamento que veio do extrato não se estorna daqui — um Pix pode ter pago outras
+      // contas (forma A), e soltar a linha pelo reconciled_payment_id fazia o dinheiro voltar à fila e entrar em dobro.
+      const { data: receivables, error: recErr } = await admin.from("receivables").select("*").eq("service_order_id", args.service_order_id);
+      if (recErr) return { error: `Não consegui ler as contas da OS (${recErr.message}). Nada foi reaberto.` };
+      const contas = ((receivables || []) as Array<{ id: string; amount: number; status: string | null }>).filter((r) => r.status !== "cancelled");
+      let confirmados: Array<{ id: string; receivable_id: string; bank_transaction_id: string | null }> = [];
+      if (contas.length) {
+        const { data: pags, error: pagErr } = await admin.from("payments")
+          .select("id, receivable_id, bank_transaction_id").in("receivable_id", contas.map((r) => r.id)).eq("status", "confirmed");
+        if (pagErr) return { error: `Não consegui ler os pagamentos da OS (${pagErr.message}). Nada foi reaberto.` };
+        confirmados = pags || [];
+      }
+      let doExtrato = confirmados.some((p) => !!p.bank_transaction_id);
+      if (!doExtrato && confirmados.length) {
+        const { data: linhas, error: linErr } = await admin.from("bank_transactions")
+          .select("id").in("reconciled_payment_id", confirmados.map((p) => p.id)).limit(1);
+        if (linErr) return { error: `Não consegui conferir o extrato dos pagamentos (${linErr.message}). Nada foi reaberto.` };
+        doExtrato = (linhas || []).length > 0;
+      }
+      if (doExtrato) {
+        return {
+          error: "Esta OS tem pagamento que veio do extrato do banco. Para reabrir, desfaça antes o vínculo na correção do " +
+            "lançamento (Ligado ao extrato). Nada foi reaberto.",
+        };
+      }
+      for (const rec of contas) {
+        for (const payment of confirmados.filter((p) => p.receivable_id === rec.id)) {
+          const { error: e1 } = await admin.from("payments").update({ status: "cancelled", cancelled_at: new Date().toISOString(), cancellation_reason: `${args.reason} (reabertura de OS)` }).eq("id", payment.id);
+          if (e1) return { error: `Não consegui estornar um pagamento da OS (${e1.message}). A reabertura parou no meio: confira as contas da OS.` };
         }
-        await admin.from("receivables").update({ paid_amount: 0, balance_amount: rec.amount, status: "pending" }).eq("id", rec.id);
+        const { error: e2 } = await admin.from("receivables").update({ paid_amount: 0, balance_amount: rec.amount, status: "pending" }).eq("id", rec.id);
+        if (e2) return { error: `Não consegui reabrir uma conta da OS (${e2.message}). A reabertura parou no meio: confira as contas da OS.` };
       }
 
       const { data: updated, error: updErr } = await admin

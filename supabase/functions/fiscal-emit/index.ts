@@ -38,6 +38,8 @@ import {
   type NfseStandard,
 } from "../_shared/fiscal/nfse-payload-builder.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
+// [FECHAR-JUNTAS 0b] Colunas da ponte da NFS-e e a revalidação da OS na hora da emissão.
+import { COLUNAS_OS_PONTE_NFSE, conferirOsParaNota } from "./os-para-nota.ts";
 
 // SEFAZ exige justificativa com pelo menos 15 caracteres tanto no cancelamento
 // quanto na Carta de Correção Eletrônica.
@@ -814,7 +816,8 @@ async function buildNfseBodyFromServiceOrder(admin: any, body: any): Promise<
   const soId = String(body.service_order_id);
   const { data: so, error: soErr } = await admin
     .from("service_orders")
-    .select("id, service_order_number, status, client_id, discount_amount, is_travel_billable, travel_cost_total, operational_cost_total, subcontract_cost_total, card_fee_amount, tax_amount")
+    // [FECHAR-JUNTAS 0b] Inclui customer_po_number, usado no additional_info abaixo.
+    .select(COLUNAS_OS_PONTE_NFSE)
     .eq("id", soId)
     .maybeSingle();
   if (soErr) return { ok: false, error: "Falha ao consultar a OS: " + soErr.message, status: 500 };
@@ -1232,6 +1235,31 @@ async function handleBillingPreflight(admin: any, body: any): Promise<Response> 
     .eq("origin_id", soId)
     .order("created_at", { ascending: false });
 
+  // [FECHAR-JUNTAS 0b, item 5] A mesma revalidação da criação (conferirOsParaNota): sem ela o
+  // pré-voo dizia "pronto" para orçamento em rascunho, OS agrupada ou OS não concluída, e a
+  // recusa só aparecia no clique de emitir. Os documentos já emitidos continuam na resposta.
+  const valida = await conferirOsParaNota(admin, soId);
+  if (!valida.ok) {
+    if (valida.status !== 422) return jr({ error: valida.error }, valida.status);
+    const bloqueado = { aplicavel: true, pronto: false, erro: valida.error };
+    return jr({
+      ok: true,
+      data: {
+        os: {
+          id: so.id,
+          numero: so.service_order_number,
+          status: so.status,
+          invoicing_status: so.invoicing_status,
+          grand_total: so.grand_total,
+        },
+        ambiente: readFiscalEnvironment(),
+        nfse: bloqueado,
+        nfe: { ...bloqueado },
+        documentos: docs ?? [],
+      },
+    });
+  }
+
   // ── NFS-e (serviços) ──
   const nfse: Record<string, unknown> = { aplicavel: true, pronto: false };
   const ponteNfse = await buildNfseBodyFromServiceOrder(admin, { service_order_id: soId });
@@ -1451,6 +1479,13 @@ async function handleCreateNfse(admin: any, body: any): Promise<Response> {
   const originId: string | null = body.origin_id ?? null;
   const clientIdempotencyKey: string | null = body.idempotency_key || null;
 
+  // [FECHAR-JUNTAS 0b] Nota de OS só de OS de verdade e concluída, revalidada AGORA — vale
+  // também para o corpo montado na tela (`service` próprio), que não passa pela ponte.
+  if (originType === "service_order") {
+    const os = await conferirOsParaNota(admin, originId);
+    if (!os.ok) return jr({ error: os.error }, os.status);
+  }
+
   if (originId || clientIdempotencyKey) {
     const { data: existing, error: existingErr } = await findActiveDocument(
       admin, documentType, originType, originId, clientIdempotencyKey,
@@ -1594,6 +1629,13 @@ async function handleCreate(admin: any, body: any): Promise<Response> {
   // isso, o fluxo manual (único exposto na UI, sempre sem origin_id) não
   // tinha NENHUMA proteção contra emitir duas NF-e reais para a mesma venda.
   const clientIdempotencyKey: string | null = body.idempotency_key || null;
+
+  // [FECHAR-JUNTAS 0b] Mesma revalidação da NFS-e: a emissão detalhada da tela manda `items`
+  // próprios com origin_type "service_order" e não passa pela ponte da OS.
+  if (originType === "service_order") {
+    const os = await conferirOsParaNota(admin, originId);
+    if (!os.ok) return jr({ error: os.error }, os.status);
+  }
 
   if (originId || clientIdempotencyKey) {
     const { data: existing, error: existingErr } = await findActiveDocument(

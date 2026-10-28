@@ -70,6 +70,8 @@ import { comprovanteTools } from "./comprovantes.ts";
 import { agruparOrcamentosTools } from "./agrupar-orcamentos.ts";
 // Agrupar OS (28/10/2026): listar as candidatas, agrupar e desagrupar ordens de serviço (paridade com a tela).
 import { agruparOsTools } from "./agrupar-os.ts";
+// Cobrar juntas (28/10/2026, Fase 0 do Fechar juntas): o saldo de várias OS executadas do mesmo cliente numa mensagem só.
+import { cobrarJuntasTools } from "./cobrar-juntas.ts";
 // O lote semanal da papelada (16/10/2026, secretário Passo 5): só pela pendência do comando *lote*.
 import { papeladaTools } from "./papelada.ts";
 // Agenda de Produção, Fase 1 (24/10/2026): agenda_ver (a leitura com o texto pronto do banco) e as três que anotam o
@@ -151,6 +153,8 @@ export const allTools: ToolDef[] = [
   ...agendaProducaoTools,
   // agrupar OS (28/10/2026)
   ...agruparOsTools,
+  // cobrar juntas (28/10/2026)
+  ...cobrarJuntasTools,
 ].sort((a, b) => a.name.localeCompare(b.name));
 
 /**

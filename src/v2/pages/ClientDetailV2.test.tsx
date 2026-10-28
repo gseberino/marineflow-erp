@@ -1,6 +1,8 @@
 // Ficha do cliente (v2), aba das embarcações e veículos: cada cartão mostra os campos do tipo
 // (dono, 22/10/2026). Motorhome em metros, sem vaga de píer e sem "Sem marina".
 // Aba Financeiro (leva 8, 22/10/2026): "Quem paga por este cliente" só para administrador e financeiro.
+// Aba Financeiro (Fechar juntas, Fase 0 — 28/10/2026): totais pela regra do saldo em aberto, coluna OS,
+// "Cobrar juntas" e o selo do cadastro genérico.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -8,10 +10,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { I18nProvider } from '@/i18n';
 
-vi.mock('@/hooks/use-clients', () => {
-  const r = { isLoading: false, data: { id: 'c1', name: 'Fulano', type: 'individual', active: true } };
-  return { useClient: () => r };
-});
+const cliente = vi.hoisted(() => ({
+  r: { isLoading: false, data: { id: 'c1', name: 'Fulano', type: 'individual', active: true } as Record<string, unknown> },
+}));
+vi.mock('@/hooks/use-clients', () => ({ useClient: () => cliente.r }));
 vi.mock('@/hooks/use-vessels', () => {
   const r = {
     data: [
@@ -26,6 +28,8 @@ const estado = vi.hoisted(() => ({
   cargo: undefined as string | undefined,
   tabelas: [] as string[],
   pagadores: [] as unknown[],
+  contas: [] as unknown[],
+  cobrar: null as null | { open: boolean; osIniciais?: string[]; generico?: boolean | null },
 }));
 vi.mock('@/hooks/use-auth', () => ({
   useOptionalAuth: () => (estado.cargo ? { user: { id: 'u1', role: estado.cargo } } : null),
@@ -36,7 +40,10 @@ vi.mock('@/integrations/supabase/client', () => ({
       estado.tabelas.push(t);
       const q = {
         select: () => q, eq: () => q,
-        order: async () => ({ data: t === 'pagadores_do_cliente' ? estado.pagadores : [], error: null }),
+        order: async () => ({
+          data: t === 'pagadores_do_cliente' ? estado.pagadores : t === 'receivables' ? estado.contas : [],
+          error: null,
+        }),
       };
       return q;
     },
@@ -44,6 +51,12 @@ vi.mock('@/integrations/supabase/client', () => ({
 }));
 vi.mock('@/components/ClientFormDialog', () => ({ ClientFormDialog: () => null }));
 vi.mock('@/components/ClientStatementDialog', () => ({ ClientStatementDialog: () => null }));
+vi.mock('@/components/client/CobrarJuntasDialog', () => ({
+  CobrarJuntasDialog: (p: { open: boolean; osIniciais?: string[]; cliente: { generico?: boolean | null } }) => {
+    estado.cobrar = { open: p.open, osIniciais: p.osIniciais, generico: p.cliente.generico };
+    return null;
+  },
+}));
 vi.mock('@/components/RecordHistory', () => ({ RecordHistory: () => null }));
 vi.mock('@/components/agenda/EntityTasksPanel', () => ({ EntityTasksPanel: () => null }));
 vi.mock('@/components/agenda/OpenLoopsPanel', () => ({ OpenLoopsPanel: () => null }));
@@ -141,5 +154,91 @@ describe('ClientDetailV2 — aba Financeiro: quem paga por este cliente', () => 
     expect(screen.queryByText('Quem paga por este cliente')).toBeNull();
     expect(screen.queryByText('MARIA SOUZA')).toBeNull();
     expect(estado.tabelas).not.toContain('pagadores_do_cliente');
+  });
+});
+
+describe('ClientDetailV2 — aba Financeiro: totais certos e "Cobrar juntas"', () => {
+  // A MP MOTOR HOMES de 28/10/2026: OS-00045 (R$ 1.650) + OS-00046 (R$ 20 de saldo, R$ 30 pagos), uma conta
+  // cancelada que o total somava e o sinal já pago.
+  const CONTAS = [
+    { id: 's45', description: 'Sinal', due_date: '2026-06-01', status: 'paid', amount: 500, paid_amount: 500, balance_amount: 0, service_order_id: 'os45', service_orders: { service_order_number: 'OS-00045', status: 'completed' } },
+    { id: 'r45', description: 'Saldo', due_date: '2026-07-22', status: 'pending', amount: 1650, paid_amount: 0, balance_amount: 1650, service_order_id: 'os45', service_orders: { service_order_number: 'OS-00045', status: 'completed' } },
+    { id: 'r46', description: 'Saldo 46', due_date: '2026-07-22', status: 'partially_paid', amount: 50, paid_amount: 30, balance_amount: 20, service_order_id: 'os46', service_orders: { service_order_number: 'OS-00046', status: 'completed' } },
+    { id: 'c46', description: 'Anulada', due_date: '2026-07-01', status: 'cancelled', amount: 999, paid_amount: 0, balance_amount: 999, service_order_id: 'os46', service_orders: { service_order_number: 'OS-00046', status: 'completed' } },
+  ];
+  const ORIGINAL = { ...cliente.r.data };
+
+  beforeEach(() => {
+    estado.cargo = 'admin';
+    estado.tabelas = [];
+    estado.pagadores = [];
+    estado.contas = CONTAS;
+    estado.cobrar = null;
+    cliente.r.data = { ...ORIGINAL };
+  });
+
+  async function abrirFinanceiro() {
+    const user = userEvent.setup();
+    abrir();
+    await user.click(screen.getByRole('tab', { name: /financeiro/i }));
+    await screen.findByText(/Total \(3 lançamentos\)/);
+    return user;
+  }
+
+  it('total sem a cancelada, pago com o parcial, em aberto = soma dos saldos', async () => {
+    await abrirFinanceiro();
+    const painel = screen.getByRole('tabpanel');
+    // Total 500 + 1650 + 50 = 2.200 (a cancelada de 999 fora) ; Pago 530 ; Em aberto 1.670.
+    expect(painel).toHaveTextContent(/Total \(3 lançamentos\): R\$\s2\.200,00/);
+    expect(painel).toHaveTextContent(/Pago: R\$\s530,00/);
+    expect(painel).toHaveTextContent(/Em aberto: R\$\s1\.670,00/);
+  });
+
+  it('coluna OS com o número da OS de cada conta', async () => {
+    const user = await abrirFinanceiro();
+    // No jsdom a tabela não mede a largura: as colunas além da identidade ficam no "Ver detalhes".
+    // Uma linha aberta por vez; a ordem é a da consulta (s45, r45, r46, c46).
+    await user.click(screen.getAllByRole('button', { name: 'Ver detalhes' })[0]);
+    expect(screen.getByRole('link', { name: 'OS-00045' })).toHaveAttribute('href', '/v2/service-orders/os45');
+    await user.click(screen.getAllByRole('button', { name: 'Ver detalhes' })[1]);
+    expect(screen.getByRole('link', { name: 'OS-00046' })).toHaveAttribute('href', '/v2/service-orders/os46');
+  });
+
+  it('"Cobrar juntas" abre o diálogo com todas as OS que têm saldo', async () => {
+    const user = await abrirFinanceiro();
+    expect(estado.cobrar?.open).toBe(false);
+    await user.click(screen.getByRole('button', { name: /Cobrar juntas/ }));
+    expect(estado.cobrar).toMatchObject({ open: true, osIniciais: [] });
+  });
+
+  it('escolher contas na tabela → "Cobrar juntas" com as OS delas', async () => {
+    const user = await abrirFinanceiro();
+    await user.click(screen.getByRole('checkbox', { name: 'Selecionar r46' }));
+    const botoes = screen.getAllByRole('button', { name: /Cobrar juntas/ });
+    await user.click(botoes[0]);
+    expect(estado.cobrar).toMatchObject({ open: true, osIniciais: ['os46'] });
+  });
+
+  it('OS que ainda não começou não entra no Cobrar juntas (vai pelo Agrupar OS)', async () => {
+    estado.contas = [
+      ...CONTAS,
+      { id: 'r50', description: 'Sinal 50', due_date: '2026-11-30', status: 'pending', amount: 800, paid_amount: 0, balance_amount: 800, service_order_id: 'os50', service_orders: { service_order_number: 'OS-00050', status: 'open' } },
+    ];
+    const user = userEvent.setup();
+    abrir();
+    await user.click(screen.getByRole('tab', { name: /financeiro/i }));
+    await screen.findByText(/Total \(4 lançamentos\)/);
+    await user.click(screen.getByRole('checkbox', { name: 'Selecionar r50' }));
+    expect(screen.getByText(/nenhuma com saldo de OS já executada/)).toBeInTheDocument();
+    const botoes = screen.getAllByRole('button', { name: /Cobrar juntas/ });
+    expect(botoes[0]).toBeDisabled();
+  });
+
+  it('cadastro genérico: selo na ficha e o diálogo recebe a marca (quem recusa é ele)', async () => {
+    cliente.r.data = { ...ORIGINAL, name: 'Cliente Final', generico: true };
+    abrir();
+    expect(screen.getByText('Cadastro genérico')).toBeInTheDocument();
+    expect(screen.getByText(/não entra em cobrança conjunta nem em agrupamento/)).toBeInTheDocument();
+    expect(estado.cobrar?.generico).toBe(true);
   });
 });

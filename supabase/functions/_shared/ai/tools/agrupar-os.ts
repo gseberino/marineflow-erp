@@ -39,8 +39,10 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const SEM_CARGO = "Só administrador ou financeiro agrupa ou desagrupa OS.";
 const SEM_RETRATO_AGRUPAR = "Nada foi agrupado: não consegui conferir as OS quando o pedido foi feito. Peça de novo que eu confiro.";
 const SEM_RETRATO_DESAGRUPAR = "Nada foi desfeito: não consegui conferir o agrupamento quando o pedido foi feito. Peça de novo que eu confiro.";
+// A fronteira com cobrar_juntas (28/10/2026): OS executada não se agrupa; o que se junta dela é a COBRANÇA.
 const JA_COMECOU =
-  "Agrupar só junta OS que ainda não começaram; cada OS executada mantém seu histórico.";
+  "Agrupar só junta OS que ainda não começaram; cada OS executada mantém seu histórico. " +
+  "Para cobrar numa mensagem só o saldo de OS já executadas do mesmo cliente, use cobrar_juntas.";
 
 const centavos = (v: unknown): number => Math.round((Number(v) || 0) * 100);
 const situacaoDaOS = (s: unknown) => ROTULOS_STATUS_OS[String(s) as keyof typeof ROTULOS_STATUS_OS] ?? String(s ?? "—");
