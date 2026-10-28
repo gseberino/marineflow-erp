@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AcoesDaLinha } from '@/components/AcoesDaLinha';
 import { useI18n } from '@/i18n';
-import { JORNADAS, diaCurto, rotuloDaJornada, type Jornada } from '@/lib/diarias';
+import { diaCurto, jornadasParaLancar, rotuloDaJornada, type Jornada } from '@/lib/diarias';
 import {
   acertoQueTrava, comoTirarOReembolso, diaParaEditar, useAcertos, useExcluirDiaComDesfazer, useRegistrarDiaria,
   type DiaParaEditar, type FreelancerNoResumo, type LinhaDaContaCorrente,
@@ -61,7 +61,7 @@ export function FichaDoDia({ pessoa, data, linhas, onFechar, onEditar, onDetalhe
         </DialogHeader>
 
         <div className="flex flex-wrap gap-2" role="group" aria-label="Neste dia">
-          {JORNADAS.map((j) => (
+          {jornadasParaLancar(dia?.jornada).map((j) => (
             <Button key={j.valor} type="button" size="sm" variant={dia?.jornada === j.valor ? 'default' : 'outline'}
                     aria-pressed={dia?.jornada === j.valor} disabled={registrar.isPending}
                     onClick={() => { void marcar(j.valor); }}>

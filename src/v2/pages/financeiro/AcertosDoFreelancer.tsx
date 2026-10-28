@@ -11,8 +11,8 @@
 // Reembolsos (F2b dos comprovantes, 11/10/2026): as despesas da empresa que ele pagou, com o
 // comprovante (CMP), entram no recibo a favor dele — na lista e na conferência, só quando há, com o
 // rótulo de todo lugar: "Reembolso de despesas pagas pelo técnico" (resposta 9 do dono).
-import { useEffect, useState } from 'react';
-import { CheckCircle2, FileDown, Lock, RotateCcw, Send } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { CheckCircle2, Eye, FileDown, Lock, Paperclip, RotateCcw, Send } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -28,6 +28,7 @@ import { ROTULO_REEMBOLSOS, numeroDoRecibo } from '@/lib/extrato-diarias';
 import {
   simularAcerto, useFecharAcerto, useReabrirAcerto, type Acerto, type SimulacaoDoAcerto,
 } from '@/hooks/use-diarias';
+import { linkDoReciboAssinado, useAnexarReciboAssinado } from '@/hooks/use-documentos-diarias';
 
 const ddmm = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
 const diasTexto = (n: number) => `${n.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} diária(s)`;
@@ -49,6 +50,27 @@ export function AcertosDoFreelancer({ favorecidoId, nome, acertos, gerandoPdf, o
   const [fechando, setFechando] = useState(false);
   const [reabrindo, setReabrindo] = useState<Acerto | null>(null);
   const ultimoFechado = acertos.find((a) => a.status === 'fechado');
+  // O papel assinado (F4): um seletor de arquivo só, apontado para o recibo da linha clicada.
+  const arquivo = useRef<HTMLInputElement>(null);
+  const [anexandoEm, setAnexandoEm] = useState<Acerto | null>(null);
+  const anexar = useAnexarReciboAssinado();
+  async function aoEscolher(f: File | undefined) {
+    const a = anexandoEm;
+    setAnexandoEm(null);
+    if (!f || !a) return;
+    try {
+      toast.success((await anexar.mutateAsync({ acertoId: a.id, arquivo: f })).message);
+    } catch (e) {
+      toast.error((e as Error).message || 'Não deu para anexar o papel assinado.');
+    }
+  }
+  async function verPapel(a: Acerto) {
+    try {
+      window.open(await linkDoReciboAssinado(a.assinatura_arquivo!), '_blank', 'noopener');
+    } catch (e) {
+      toast.error((e as Error).message || 'Não deu para abrir o papel assinado.');
+    }
+  }
 
   return (
     <Card className="space-y-3 p-3">
@@ -82,6 +104,8 @@ export function AcertosDoFreelancer({ favorecidoId, nome, acertos, gerandoPdf, o
                 <Badge variant="outline" className="text-amber-700 dark:text-amber-400" title={a.motivo_reabertura ?? undefined}>Reaberto</Badge>
               ) : a.documento && !a.assinado_em ? (
                 <Badge variant="outline" className="text-muted-foreground">Falta o papel assinado</Badge>
+              ) : a.documento && a.assinado_em ? (
+                <Badge variant="outline" className="gap-1 text-success"><CheckCircle2 className="h-3 w-3" /> Assinado {formatDate(a.assinado_em)}</Badge>
               ) : a.conferido_em ? (
                 <Badge variant="outline" className="gap-1 text-success" title={`Respondeu "${a.conferido_texto ?? ''}"`}>
                   <CheckCircle2 className="h-3 w-3" /> Conferido {formatDate(a.conferido_em)}
@@ -92,17 +116,30 @@ export function AcertosDoFreelancer({ favorecidoId, nome, acertos, gerandoPdf, o
               <AcoesDaLinha
                 className="ml-auto"
                 rotulo={`recibo nº ${numeroDoRecibo(a.numero)}`}
-                rapidas={[{ texto: 'Recibo em PDF', icone: FileDown, desabilitada: gerandoPdf, onClick: () => onRecibo(a) }]}
-                menu={a.id === ultimoFechado?.id
-                  ? [{ texto: 'Reabrir o recibo', icone: RotateCcw, perigo: true, onClick: () => setReabrindo(a) }]
-                  : []}
+                rapidas={[
+                  { texto: 'Recibo em PDF', icone: FileDown, desabilitada: gerandoPdf, onClick: () => onRecibo(a) },
+                  ...(a.assinatura_arquivo ? [{ texto: 'Ver papel assinado', icone: Eye, onClick: () => { void verPapel(a); } }] : []),
+                ]}
+                menu={[
+                  ...(a.documento && a.status === 'fechado'
+                    ? [{
+                      texto: a.assinado_em ? 'Trocar o papel assinado' : 'Anexar papel assinado', icone: Paperclip,
+                      desabilitada: anexar.isPending, onClick: () => { setAnexandoEm(a); arquivo.current?.click(); },
+                    }]
+                    : []),
+                  ...(a.id === ultimoFechado?.id
+                    ? [{ texto: 'Reabrir o recibo', icone: RotateCcw, perigo: true, onClick: () => setReabrindo(a) }]
+                    : []),
+                ]}
               />
             </div>
           ))}
         </div>
       )}
+      <input ref={arquivo} type="file" accept="image/*,application/pdf" className="hidden" aria-label="Papel assinado"
+             onChange={(e) => { void aoEscolher(e.target.files?.[0]); e.target.value = ''; }} />
       <p className="text-xs text-muted-foreground">
-        Para mandar o recibo ao {nome.split(' ')[0]} conferir pelo WhatsApp, peça ao assistente: "manda o recibo pro {nome.split(' ')[0]} conferir".
+        Imprima o recibo, colha a assinatura com a data escrita à mão e anexe a foto do papel (menu ⋯ da linha). Para mandar o recibo ao {nome.split(' ')[0]} conferir pelo WhatsApp, peça ao assistente: "manda o recibo pro {nome.split(' ')[0]} conferir".
       </p>
 
       {fechando && (

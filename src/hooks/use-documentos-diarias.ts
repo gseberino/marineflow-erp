@@ -1,9 +1,9 @@
-// Extrato em PDF e CSV do contador das diárias.
+// Extrato em PDF, recibo (e o papel assinado dele) e CSV do contador das diárias.
 //
 // O PDF é o HTML de `montarExtratoHtml` renderizado no servidor (/api/pdf, o mesmo Chromium dos
 // orçamentos); se o servidor não responder, abre a impressão do navegador — o documento sempre sai.
 import { useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { downloadBlob } from '@/lib/download';
@@ -149,4 +149,34 @@ export function useDocumentosDasDiarias() {
   }
 
   return { extratoEmPdf, reciboEmPdf, csvDoPeriodo, gerando };
+}
+
+// ── O papel assinado (documento, não lançamento: não passa pela paridade tela × assistente) ──
+
+/**
+ * O papel assinado do recibo (F4, 27/10/2026): sobe a foto/PDF no bucket privado "documents"
+ * (diarias/recibos/<acerto>/…) e o banco marca o recibo como assinado (anexar_recibo_assinado).
+ */
+export function useAnexarReciboAssinado() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ acertoId, arquivo }: { acertoId: string; arquivo: File }) => {
+      const ext = (arquivo.name.split('.').pop() ?? '').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+      const caminho = `diarias/recibos/${acertoId}/${Date.now()}.${ext}`;
+      const { error: erroDoUpload } = await supabase.storage.from('documents')
+        .upload(caminho, arquivo, { contentType: arquivo.type || undefined, upsert: false });
+      if (erroDoUpload) throw erroDoUpload;
+      const { data, error } = await supabase.rpc('anexar_recibo_assinado' as never, { p_acerto_id: acertoId, p_arquivo: caminho } as never);
+      if (error) throw error;
+      return data as unknown as { message: string };
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['diarias'] }),
+  });
+}
+
+/** Link de 5 minutos para ver o papel assinado (o bucket é privado). */
+export async function linkDoReciboAssinado(caminho: string): Promise<string> {
+  const { data, error } = await supabase.storage.from('documents').createSignedUrl(caminho, 300);
+  if (error || !data?.signedUrl) throw error ?? new Error('Não deu para abrir o papel assinado.');
+  return data.signedUrl;
 }

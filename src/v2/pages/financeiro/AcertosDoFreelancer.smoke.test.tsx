@@ -23,7 +23,7 @@ const acerto = (o: Partial<Acerto> = {}): Acerto => ({
   id: 'ac1', numero: 1, favorecido_id: 'r', de: '2026-09-01', ate: '2026-09-16', saldo_anterior: 0, dias: 1,
   trabalhado: 180, pago_no_periodo: 100, valor_do_acerto: 142, reembolsos: 62, status: 'fechado',
   criado_em: '2026-09-17T12:00:00Z', reaberto_em: null, motivo_reabertura: null, enviado_ao_freelancer_em: null,
-  conferido_em: null, conferido_texto: null, pagos_ate: null, documento: null, hash: null, assinado_em: null, ...o,
+  conferido_em: null, conferido_texto: null, pagos_ate: null, documento: null, hash: null, assinado_em: null, assinatura_arquivo: null, ...o,
 });
 
 /** O que o banco devolve ao simular o recibo (fechar_acerto_diarias com p_simular). */
@@ -82,6 +82,20 @@ describe('AcertosDoFreelancer: recibo no Pix que zera', () => {
     expect(screen.getByText('Falta o papel assinado')).toBeInTheDocument();
     expect(screen.getByText(/a pagar R\$\s?142,00/)).toBeInTheDocument();
     expect(screen.getByText(/1 diária\(s\) · reembolso de despesas pagas pelo técnico R\$\s?62,00 · já recebido R\$\s?100,00/)).toBeInTheDocument();
+  });
+
+  it('papel assinado (F4): o recibo assinado diz quando e oferece ver o papel; o que falta oferece anexar no menu', async () => {
+    const user = userEvent.setup();
+    renderizar([
+      acerto({ id: 'n2', numero: 3, documento: {} as never, assinado_em: '2026-10-25T15:00:00Z', assinatura_arquivo: 'diarias/recibos/n2/1.jpg' }),
+      acerto({ id: 'n1', numero: 2, documento: {} as never }),
+    ]);
+    expect(screen.getByText((_, el) => el?.tagName === 'DIV' && (el.textContent ?? '').trim() === 'Assinado 25/10/2026')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Ver papel assinado/ })).toBeInTheDocument();
+    expect(screen.getByText('Falta o papel assinado')).toBeInTheDocument();
+    await user.click(screen.getAllByRole('button', { name: /Mais ações/ })[1]);
+    expect(await screen.findByRole('menuitem', { name: /Anexar papel assinado/ })).toBeInTheDocument();
+    expect(screen.getByLabelText('Papel assinado')).toHaveAttribute('accept', 'image/*,application/pdf');
   });
 
   it('a conferência: o reembolso entre o trabalhado e o já recebido, e o Pix que zera por último', async () => {

@@ -199,15 +199,23 @@ function renderizar(aba: 'resumo' | 'extrato' | 'grade', onVerExtrato = vi.fn(),
 const chamadas = (nome: string) => rpc.mock.calls.filter(([n]) => n === nome).map(([, a]) => a as Record<string, unknown>);
 
 describe('DiariasPanel', () => {
-  it('um cartão por freelancer, com o saldo e se você deve ou adiantou', async () => {
+  it('um cartão por freelancer com UM número ("A pagar" neutro, "Adiantado" em vermelho), na ordem do que mais se deve (F4)', async () => {
     const user = userEvent.setup();
     const { onVerExtrato } = renderizar('resumo');
     expect(await screen.findByText('Roberto')).toBeInTheDocument();
     expect(screen.getByText('Mickael')).toBeInTheDocument();
-    expect(screen.getAllByText('Você deve').length).toBeGreaterThan(0);
-    expect(screen.getByText('Adiantado')).toBeInTheDocument();
-    await user.click(screen.getAllByRole('button', { name: 'Ver extrato' })[0]);
+    const aPagar = screen.getAllByText('A pagar');
+    expect(aPagar.length).toBeGreaterThan(0);
+    expect(aPagar[0]).not.toHaveClass('text-destructive');
+    // no topo, só o total a pagar (e o adiantado); os totais do período que não fechavam saíram
+    expect(screen.getByText('A pagar a todos')).toBeInTheDocument();
+    expect(screen.queryByText('Trabalhado no período')).not.toBeInTheDocument();
+    expect(screen.queryByText('Saldo acumulado')).not.toBeInTheDocument();
+    const nomes = screen.getAllByText(/^(Roberto|Mickael)$/).map((e) => e.textContent);
+    expect(nomes[0]).toBe('Roberto');
+    await user.click(screen.getAllByRole('button', { name: 'Lançamentos e recibo' })[0]);
     expect(onVerExtrato).toHaveBeenCalledWith('r');
+    expect(screen.getAllByRole('button', { name: 'Pagar' }).length).toBeGreaterThan(0);
   });
 
   it('o extrato mostra o dia com a OS e o pagamento com a conta de onde saiu', async () => {
@@ -278,6 +286,19 @@ describe('DiariasPanel', () => {
     expect(arquivo).toMatch(/\.csv$/);
   });
 
+  it('registrar dia (F4/F5): sem "Não trabalhou"; OS, extras e descontos atrás de "Mais detalhes"', async () => {
+    const user = userEvent.setup();
+    renderizar('extrato');
+    await screen.findByText('OS-0042');
+    await user.click(screen.getByRole('button', { name: /Registrar dia/ }));
+    const dialogo = await screen.findByRole('dialog');
+    expect(within(dialogo).queryByRole('button', { name: 'Não trabalhou' })).not.toBeInTheDocument();
+    expect(within(dialogo).queryByLabelText('Extras (R$)')).not.toBeInTheDocument();
+    await user.click(within(dialogo).getByRole('button', { name: /Mais detalhes/ }));
+    expect(within(dialogo).getByLabelText('Extras (R$)')).toBeInTheDocument();
+    expect(within(dialogo).getByLabelText('Em qual OS (opcional)')).toBeInTheDocument();
+  });
+
   it('vários dias: só os dias úteis que faltam; o já lançado fica como está', async () => {
     const user = userEvent.setup();
     renderizar('extrato');
@@ -295,7 +316,7 @@ describe('DiariasPanel', () => {
     expect(chamadas('registrar_diaria')[0]).toMatchObject({ p_favorecido_id: 'r', p_jornada: 'inteiro', p_origem: 'painel' });
   });
 
-  it('grade: "Não trabalhou" grava a falta; dia antes do início da conta corrente não abre', async () => {
+  it('grade: falta não se lança (F5) — o dia vazio oferece só inteiro e meio; dia antes do início da conta corrente não abre', async () => {
     const user = userEvent.setup();
     renderizar('grade');
     const antes = (await screen.findAllByRole('gridcell', { name: 'Mickael em ter 01/09' }))[0];
@@ -304,8 +325,9 @@ describe('DiariasPanel', () => {
     await user.click(screen.getAllByRole('gridcell', { name: 'Mickael em seg 14/09' })[0]);
     const ficha = await screen.findByRole('dialog');
     expect(within(ficha).getByText('Nada lançado neste dia.')).toBeInTheDocument();
-    await user.click(within(ficha).getByRole('button', { name: 'Não trabalhou' }));
-    await waitFor(() => expect(chamadas('registrar_diaria')[0]).toMatchObject({ p_favorecido_id: 'm', p_data: '2026-09-14', p_jornada: 'faltou' }));
+    expect(within(ficha).queryByRole('button', { name: 'Não trabalhou' })).not.toBeInTheDocument();
+    await user.click(within(ficha).getByRole('button', { name: 'Meio período' }));
+    await waitFor(() => expect(chamadas('registrar_diaria')[0]).toMatchObject({ p_favorecido_id: 'm', p_data: '2026-09-14', p_jornada: 'meio' }));
   });
 
   // ── Períodos e Pix anotado (pedido do dono, 06/10/2026) ──

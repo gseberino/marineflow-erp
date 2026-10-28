@@ -213,30 +213,28 @@ function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPagar, onPdf, ger
   porPessoa: boolean;
 }) {
   const { formatCurrency, formatDate } = useI18n();
-  // Reembolsos (F2b) só aparecem quando há: sem eles, a tela é a de antes.
-  const totais: Array<readonly [string, string, string]> = [
-    ['Trabalhado no período', formatCurrency(total.trabalhado), `${total.dias.toLocaleString('pt-BR')} diárias`],
-    ...(total.reembolsos > 0
-      ? [[ROTULO_REEMBOLSOS, formatCurrency(total.reembolsos), 'no período, com comprovante (CMP)'] as const]
-      : []),
-    ['Pago no período', formatCurrency(total.pago), 'do extrato e do bolso de sócio'],
-    ['Você deve (acumulado)', formatCurrency(total.deve), 'até o fim do período'],
-    ['Adiantado (acumulado)', formatCurrency(total.adiantado), 'pago antes do trabalho'],
+  // F4 da revisão (27/10/2026): no topo, só o que se deve a todos (e o adiantado, quando há) — os
+  // totais do período e os acumulados não fechavam entre si. Cada pessoa tem UM número, "A pagar";
+  // os cartões vêm na ordem do que mais se deve. Reembolsos (F2b) só aparecem quando há.
+  const ordenadas = [...pessoas].sort((a, b) => b.saldo_final - a.saldo_final);
+  const topo: Array<readonly [string, string, string]> = [
+    ['A pagar a todos', formatCurrency(total.deve), 'text-foreground'],
+    ...(total.adiantado > 0 ? [['Adiantado', formatCurrency(total.adiantado), 'text-destructive'] as const] : []),
+    ...(total.reembolsos > 0 ? [[ROTULO_REEMBOLSOS, formatCurrency(total.reembolsos), 'text-foreground'] as const] : []),
   ];
   return (
     <div className="space-y-4">
-      <div className={`grid grid-cols-2 gap-2 ${totais.length > 4 ? 'lg:grid-cols-5' : 'lg:grid-cols-4'}`}>
-        {totais.map(([rotulo, valor, nota]) => (
-          <Card key={rotulo} className="min-w-0 p-3">
+      <Card className="flex min-w-0 flex-wrap gap-x-8 gap-y-2 p-3">
+        {topo.map(([rotulo, valor, classe]) => (
+          <div key={rotulo} className="min-w-0">
             <p className="truncate text-xs text-muted-foreground" title={rotulo}>{rotulo}</p>
-            <p className="truncate text-lg font-semibold tabular-nums">{valor}</p>
-            <p className="truncate text-xs text-muted-foreground">{nota}</p>
-          </Card>
+            <p className={`truncate text-lg font-semibold tabular-nums ${classe}`}>{valor}</p>
+          </div>
         ))}
-      </div>
+      </Card>
 
       <div className="grid gap-3 md:grid-cols-2">
-        {pessoas.map((p) => {
+        {ordenadas.map((p) => {
           const estado = ESTADO_DO_SALDO[p.estado];
           return (
             <Card key={p.id} className="min-w-0 p-4">
@@ -249,9 +247,8 @@ function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPagar, onPdf, ger
                   </p>
                 </div>
                 <div className="text-right">
-                  <p className="text-xs text-muted-foreground">Saldo acumulado</p>
+                  <p className={`text-xs font-medium ${estado.classe}`}>{estado.rotulo}</p>
                   <p className={`text-2xl font-bold tabular-nums ${estado.classe}`}>{formatCurrency(Math.abs(p.saldo_final))}</p>
-                  <Badge variant="outline" className={estado.classe}>{estado.rotulo}</Badge>
                 </div>
               </div>
               {/* Com reembolso são 5 campos: 3 por linha no celular grande, sem apertar a ponto de rolar de lado. */}
@@ -281,10 +278,10 @@ function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPagar, onPdf, ger
                 rotulo={p.nome}
                 rapidas={[
                   { texto: 'Registrar dia', icone: CalendarPlus, onClick: () => onRegistrar(p.id) },
-                  { texto: 'Ver extrato', icone: FileText, onClick: () => onVerExtrato(p.id) },
+                  { texto: 'Pagar', icone: Banknote, onClick: () => onPagar(p.id) },
+                  { texto: 'Lançamentos e recibo', icone: FileText, onClick: () => onVerExtrato(p.id) },
                 ]}
                 menu={[
-                  { texto: 'Registrar pagamento', icone: Banknote, onClick: () => onPagar(p.id) },
                   { texto: 'Extrato em PDF', icone: FileDown, desabilitada: gerandoPdf, onClick: () => onPdf(p.id) },
                 ]}
               />

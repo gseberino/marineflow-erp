@@ -404,6 +404,8 @@ export interface Acerto {
   documento: DocumentoDoRecibo | null;
   hash: string | null;
   assinado_em: string | null;
+  /** F4: caminho no bucket privado "documents" da foto/PDF do papel assinado. */
+  assinatura_arquivo: string | null;
 }
 
 /** Um Pix que poderia quitar o recibo, com o que sobraria fechando nele (zera = é o da quitação). */
@@ -455,7 +457,7 @@ export function useAcertos(favorecidoId: string | null) {
     enabled: !!favorecidoId,
     queryFn: async (): Promise<Acerto[]> => {
       const { data, error } = await supabase.from('acertos_diarias' as never)
-        .select('id, numero, favorecido_id, de, ate, saldo_anterior, dias, trabalhado, pago_no_periodo, valor_do_acerto, reembolsos, status, criado_em, reaberto_em, motivo_reabertura, enviado_ao_freelancer_em, conferido_em, conferido_texto, pagos_ate, documento, hash, assinado_em')
+        .select('id, numero, favorecido_id, de, ate, saldo_anterior, dias, trabalhado, pago_no_periodo, valor_do_acerto, reembolsos, status, criado_em, reaberto_em, motivo_reabertura, enviado_ao_freelancer_em, conferido_em, conferido_texto, pagos_ate, documento, hash, assinado_em, assinatura_arquivo')
         .eq('favorecido_id', favorecidoId!)
         .order('numero', { ascending: false });
       if (error) throw error;
