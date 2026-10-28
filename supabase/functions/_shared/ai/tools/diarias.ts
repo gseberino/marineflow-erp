@@ -42,7 +42,8 @@ const FRACAO: Record<string, number> = { inteiro: 1, meio: 0.5, faltou: 0 };
 const JORNADAS_DITAS = ["inteiro", "meio", "apagar", "manter"] as const;
 const SEM_FALTA =
   "Dia sem trabalho não se lança: ele só fica sem a diária desse dia (o saldo e o recibo contam só os dias lançados). " +
-  "Nada foi registrado. Se o dia foi lançado por engano, use apagar.";
+  "Nada foi registrado. Se foi numa OS do plano da agenda, o fato (quem não foi) vai por os_registrar_andamento; " +
+  "se o dia foi lançado por engano, use apagar.";
 
 function semAcesso(ctx: ToolCtx): { error: string } | null {
   const b = blockTechnician(ctx);
@@ -297,7 +298,7 @@ export async function resolverDiaria(ctx: ToolCtx, args: Record<string, unknown>
   let atual: DiaLancado | null = null;
   if (jornada === "manter") {
     atual = await diaLancado(ctx, f, data);
-    if (!atual) return { error: `Não há dia lançado para ${f.nome} em ${diaCurto(data)}: diga se foi dia inteiro, meio período ou falta.` };
+    if (!atual) return { error: `Não há dia lançado para ${f.nome} em ${diaCurto(data)}: diga se foi dia inteiro ou meio período.` };
     if (extras == null && descontos == null && valorDiaria == null && !os.length && !observacao) {
       return { error: "Diga o que mudar no dia: extras, descontos, OS, observação ou o valor." };
     }
@@ -515,7 +516,7 @@ export async function resumirDiaria(ctx: ToolCtx, args: Record<string, unknown>)
   const quem = `*${p.freelancer.nome}* · ${diaCurto(p.data)}`;
   if (p.jornada === "apagar") {
     return atual
-      ? `Apagar o dia de ${quem} (${rotuloDaFracao(atual.fracao)}, ${brl.format(atual.valorDia)}). Some do saldo dele — diferente de "faltou", que registra a ausência.`
+      ? `Apagar o dia de ${quem} (${rotuloDaFracao(atual.fracao)}, ${brl.format(atual.valorDia)}). Some do saldo dele (é o caminho do dia lançado por engano, inclusive o de quem não veio).`
       : `Apagar o dia de ${quem} — não há dia lançado nessa data; nada vai mudar.`;
   }
   const perfil = p.freelancer.perfis.find((x) => x.vigencia_inicio <= p.data && (!x.vigencia_fim || x.vigencia_fim >= p.data));

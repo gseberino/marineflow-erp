@@ -280,7 +280,8 @@ export const agendaProducaoTools: ToolDef[] = [
     description:
       "Anota num RASCUNHO quem vem quando: vem, nao_vem, so_manha ou so_tarde, numa data (\"terça\") ou toda semana " +
       "(padrao = true: \"segunda a sexta\"). pessoa \"eu\" = o dono (\"fico em campo de segunda a sexta\"). É quem VAI vir; o " +
-      "dia que já aconteceu (\"não veio hoje\", \"faltou ontem\") é registrar_diaria. NÃO grava de fato nem avisa ninguém: " +
+      "dia que já aconteceu sem trabalho (\"não veio hoje\", \"faltou ontem\") não se lança (fica sem diária; na OS do plano, é " +
+      "os_registrar_andamento) e o dia trabalhado é registrar_diaria. NÃO grava de fato nem avisa ninguém: " +
       "devolve a releitura, e só o *grava* do dono grava.",
     input_schema: {
       type: "object",

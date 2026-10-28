@@ -160,6 +160,19 @@ Deno.test("'o Roberto não veio hoje': falta não se lança (F5, 27/10) — expl
   assertStringIncludes(String(tool("registrar_diaria").preValidar!({ freelancer: "roberto", dias: [{ data: "21/09", jornada: "faltou" }] }, {} as never)?.error), "não se lança");
 });
 
+// PÓS-MERGE (A, 28/10/2026): os textos que a tool devolve também seguem a regra nova — a recusa diz para onde vai o fato
+// (a OS do plano é os_registrar_andamento; o engano é apagar), e nem o "sim" do apagar nem a pergunta do "manter" falam
+// de "faltou" como se ainda se lançasse.
+Deno.test("pós-merge (A): a recusa da falta aponta o andamento e o apagar; o \"sim\" do apagar e o manter não falam de falta", async () => {
+  const r = await tool("registrar_diaria").execute({ freelancer: "Roberto", jornada: "faltou" }, ctx().c as never) as { error?: string };
+  assertStringIncludes(String(r.error), "os_registrar_andamento");
+  assertStringIncludes(String(r.error), "apagar");
+  const apagar = String(await resumirDiaria(ctx({ diaLancado: true }).c as never, { freelancer: "roberto", data: "24/09/2026", jornada: "apagar" }));
+  assertEquals(apagar.includes("faltou"), false, apagar);
+  const manter = await resolverDiaria(ctx().c as never, { freelancer: "roberto", data: "24/09/2026", jornada: "manter", extras: 10 });
+  assertEquals(String((manter as { error: string }).error).includes("falta"), false, String((manter as { error: string }).error));
+});
+
 Deno.test("dia comum: grava pela função do banco, sem OS e com quem pediu; a resposta traz o saldo", async () => {
   const { c, chamadas } = ctx();
   const r = await tool("registrar_diaria").execute({ freelancer: "Roberto", jornada: "inteiro" }, c as never) as Record<string, unknown>;

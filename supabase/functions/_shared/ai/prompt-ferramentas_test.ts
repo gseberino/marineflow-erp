@@ -332,7 +332,8 @@ Deno.test("agenda de produção: só agenda_ver dá data; nada é gravado sem *g
   // material_informar com novo × add_service_order_item (a peça que entra no orçamento). FASE 4 (P6): o *novo* entra na
   // lista do que comprar, sem preço (P2: a linha do dono na compra e na R16) — a fronteira é o orçamento, não a compra.
   assertStringIncludes(secao, "equipe_disponibilidade é quem VAI vir");
-  assertStringIncludes(secao, "(\"não veio hoje\", \"faltou ontem\") é registrar_diaria");
+  // PÓS-MERGE (A, 28/10/2026): a falta não se lança mais (registrar_diaria recusa) — o dia sem trabalho fica sem diária.
+  assertStringIncludes(secao, "(\"não veio hoje\", \"faltou ontem\") não se lança: fica sem diária");
   assertStringIncludes(secao, "material_informar com novo põe a peça na lista do que comprar (sem preço), não no orçamento: para cobrar, add_service_order_item");
   assertEquals(secao.includes("só avisa a agenda e não põe a peça na OS nem na compra"), false, "sobrou a fronteira antiga do novo");
 });
@@ -559,4 +560,35 @@ Deno.test("agenda de produção (Fase 6, P8): o foco aprendizado, os números do
   assertEquals(desfaz?.comando === "desfazer" ? desfaz.alvo : null, "aprendizado");
   // sem crase no texto ensinado (o prompt é um template literal)
   assertEquals(secao.includes("`"), false);
+});
+
+// PÓS-MERGE (A, 28/10/2026): "faltou" não se lança mais — registrar_diaria recusa a falta (main, Diárias fase 1b). O texto
+// que o modelo lê não pode mandar o dia sem trabalho para registrar_diaria: ele chamaria, levaria a recusa e daria uma
+// volta a mais. A regra nova: dia sem trabalho fica sem diária (nada a lançar); dito com a OS do plano, o fato vai por
+// os_registrar_andamento; quem VAI faltar é equipe_disponibilidade; lançado por engano = apagar.
+Deno.test("pós-merge (A): o dia sem trabalho não vai para registrar_diaria — sem diária, andamento na OS do plano, futuro na disponibilidade, engano = apagar", () => {
+  const texto = textoDoPrompt();
+  assertEquals(texto.includes("jornada='faltou'"), false, "o prompt ainda manda jornada='faltou'");
+  assertEquals(texto.includes("é 'faltou'"), false, "o prompt ainda manda 'faltou' no lugar do apagar");
+  assertEquals(/faltou ontem"\) é registrar_diaria/.test(texto), false, "o prompt ainda manda \"faltou ontem\" para registrar_diaria");
+  assertEquals(texto.includes("trabalhou ou faltou"), false, "a diária de quem faltou não existe mais");
+  assertEquals(texto.includes("inteiro, meio ou falta"), false, "não se pergunta se foi falta: falta não se lança");
+  assertEquals(texto.includes("\"faltou desde 19/09\" →"), false, "o exemplo do intervalo não pode ser uma falta");
+  // A seção das diárias ensina a regra nova, com as vizinhas certas.
+  const i = texto.indexOf("════ DIÁRIAS DE FREELANCERS");
+  const diarias = texto.slice(i, texto.indexOf("\n════", i + 10));
+  assertStringIncludes(diarias, "dia sem trabalho não se lança");
+  assertStringIncludes(diarias, "os_registrar_andamento");
+  assertStringIncludes(diarias, "equipe_disponibilidade");
+  assertStringIncludes(diarias, "jornada='apagar'");
+  // A seção da agenda: a fronteira com registrar_diaria passa a dizer que a falta fica sem diária.
+  const secao = secaoDaAgenda();
+  assertStringIncludes(secao, "(\"não veio hoje\", \"faltou ontem\") não se lança: fica sem diária");
+  // E o que as ferramentas dizem ao modelo: nenhuma descrição manda a falta para registrar_diaria.
+  for (const t of allTools) {
+    assertEquals(/faltou[^.;]{0,20}\) é registrar_diaria/.test(t.description), false, `${t.name} manda a falta para registrar_diaria`);
+  }
+  const diaria = porNome.get("registrar_diaria")!.input_schema as { properties: Record<string, any> };
+  assertEquals(diaria.properties.jornada.enum.includes("faltou"), false);
+  assertEquals(diaria.properties.dias.items.properties.jornada.enum.includes("faltou"), false);
 });
