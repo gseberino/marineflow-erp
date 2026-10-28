@@ -3225,6 +3225,7 @@ export type Database = {
           created_at: string
           display_name: string | null
           email: string | null
+          generico: boolean
           id: string
           ie_indicator: number | null
           name: string
@@ -3252,6 +3253,7 @@ export type Database = {
           created_at?: string
           display_name?: string | null
           email?: string | null
+          generico?: boolean
           id?: string
           ie_indicator?: number | null
           name: string
@@ -3279,6 +3281,7 @@ export type Database = {
           created_at?: string
           display_name?: string | null
           email?: string | null
+          generico?: boolean
           id?: string
           ie_indicator?: number | null
           name?: string

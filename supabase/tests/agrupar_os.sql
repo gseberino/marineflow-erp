@@ -1,4 +1,5 @@
--- Prova: agrupar e desagrupar ORDENS DE SERVIÇO (migration 20261028120000_agrupar_os).
+-- Prova: agrupar e desagrupar ORDENS DE SERVIÇO (migrations 20261028120000_agrupar_os e
+-- 20261028190000_fechar_juntas_f0 — a chegada no barco conta como execução).
 --
 --   A1  caminho feliz: OS A (agendada, ASSINADA, sinal pago, técnico, 2 passos pendentes, envio do link e
 --       tarefa manual + tarefa automática) + OS B (principal, aprovada: saldo pendente com cobrança, boleto
@@ -10,7 +11,8 @@
 --       envio do link cancelado; originais canceladas, sem link, apontando para a nova, totais intactos,
 --       payment_status 'unpaid', "antes" guardado (status_antes); a assinatura de A NÃO é superada;
 --       reserva de estoque sem contar duas vezes; "Saldo — OS-N" pelos 990 sem título; avisos (assinaturas,
---       situações, data, saldo, chegada no barco — que fica na original); auditoria
+--       situações, data, saldo; o da chegada no barco não aparece mais: desde 20261028190000 a chegada
+--       recusa, B24/B25); auditoria
 --   A2–A4 sem recebível nenhum não lança saldo; missão aguardando resposta vai e volta; recebíveis cobrindo
 --       o total não lançam saldo; principal aguardando sinal: a nova herda, o sinal pago a aprova e o
 --       desagrupar devolve a original aprovada
@@ -19,6 +21,8 @@
 --       total esperado errado, técnico (sem cargo), orçamento (rascunho), em andamento, hora apontada,
 --       despesa, passo iniciado, foto, baixa de estoque, repasse do cartão, uma só, serviço com situação de campo
 --   B22 baixa ESTORNADA (OS que voltou de concluída) não conta como execução: agrupa
+--   B24–B25 chegada no barco registrada (check_in_at; só check_out_at) é execução: recusa (decisão do dono
+--       28/10/2026, migration 20261028190000_fechar_juntas_f0)
 --   C1–C4 guardas: origem agrupada não muda de situação nem é apagada ("Esta OS foi agrupada"); recebível
 --       na origem agrupada recusado ("Esta OS foi agrupada em"); merged_into_id só pelas funções ("OS")
 --   D1–D3 portas: técnico/inativo/sem autor 42501; porta pública sem sessão pede login e o
@@ -27,7 +31,7 @@
 --       intacta, envio de volta à fila; o Pix do saldo conciliado e o lembrete criados na agrupada seguem o
 --       recebível; o saldo lançado é cancelado); de novo recusa; depois de hora apontada recusa; com
 --       recebível novo recusa; técnico recusa; lançamento/anotação do extrato na agrupada recusa; saldo
---       lançado com pagamento recusa
+--       lançado com pagamento recusa; E9 agrupada que ganhou chegada no barco recusa
 --   F1–F3 cancelar a agrupada pelo caminho normal (update e cascata) recusa "Desagrupar"; depois de
 --       começar a execução cancela; a já desagrupada não reabre ("desagrupada")
 --   G1  leitura os_para_agrupar: elegível/motivo (mesma mensagem do agrupar), agrupados_ativos com
@@ -272,9 +276,9 @@ begin
   -- A: agendada, 1 serviço (2 × 150) com 2 passos pendentes, 1 peça (2 × 75), técnico T1, sinal pago 100,
   --    envio do link pendente, tarefa manual e tarefa automática; ASSINADA (depois das linhas)
   v_a := pg_temp._os_vazia(v_cli, v_ves, 'scheduled', now() - interval '2 hours');
-  -- chegada no barco registrada (visita de levantamento): não recusa, fica na original e o retorno avisa
+  -- (sem chegada no barco: desde 20261028190000 a chegada registrada é execução e recusa — B24/B25)
   update public.service_orders set scheduled_start_at = v_agenda, scheduled_end_at = v_agenda + interval '2 hours',
-         problem_description = 'Revisar o quadro elétrico', commission_rate = 3, check_in_at = now() - interval '1 day'
+         problem_description = 'Revisar o quadro elétrico', commission_rate = 3
    where id = v_a;
   v_sa := pg_temp._servico(v_a, 'A1 Revisão do quadro', 2, 150, now() - interval '2 hours');
   insert into public.service_order_steps (service_order_id, service_order_service_id, seq, title, status)
@@ -428,7 +432,7 @@ begin
                 and exists (select 1 from jsonb_array_elements_text(r -> 'avisos') a where a like '%situações diferentes%')
                 and exists (select 1 from jsonb_array_elements_text(r -> 'avisos') a where a like 'Tinha atendimento marcado%')
                 and exists (select 1 from jsonb_array_elements_text(r -> 'avisos') a where a like '%ganhou o recebível "Saldo — %')
-                and exists (select 1 from jsonb_array_elements_text(r -> 'avisos') a where a like 'Já houve chegada no barco registrada%')
+                and not exists (select 1 from jsonb_array_elements_text(r -> 'avisos') a where a like 'Já houve chegada no barco registrada%')
                 and n.check_in_at is null, 'avisos'),
     pg_temp._se((select count(*) from public.audit_log l where l.table_name = 'service_orders' and l.action = 'cancel'
                   and l.triggered_by_id = v_novo and l.record_id in (v_a, v_b)) = 2, 'auditoria'));
@@ -655,6 +659,17 @@ begin
   update public.service_order_services set field_status = 'feito' where service_order_id = v[2];
   perform pg_temp._bloqueio('B23 serviço com situação de campo ("serviço com situação de campo")', v, null, pg_temp._id('admin'), null,
     'serviço com situação de campo');
+
+  -- Decisão do dono (28/10/2026): a chegada no barco registrada já é execução (antes só avisava)
+  v := pg_temp._dupla();
+  update public.service_orders set check_in_at = now() - interval '1 day' where id = v[2];
+  perform pg_temp._bloqueio('B24 chegada no barco registrada ("já começou a ser executada (chegada no barco registrada)")', v, null,
+    pg_temp._id('admin'), null, 'já começou a ser executada (chegada no barco registrada)');
+
+  v := pg_temp._dupla();
+  update public.service_orders set check_out_at = now() - interval '1 day' where id = v[1];
+  perform pg_temp._bloqueio('B25 só a saída do barco registrada (check_out_at) também conta ("chegada no barco registrada")', v, null,
+    pg_temp._id('admin'), null, 'chegada no barco registrada');
 exception when others then
   insert into _resultado values ('B15–B21', false, 'erro: ' || sqlstate || ' ' || sqlerrm);
 end $$;
@@ -941,6 +956,26 @@ begin
     coalesce(e8, 'PASSOU'));
 exception when others then
   insert into _resultado values ('E6–E8 desagrupar: extrato, anotação, saldo pago', false, 'erro: ' || sqlstate || ' ' || sqlerrm);
+end $$;
+
+do $$
+declare
+  v uuid[]; v_g uuid; e9 text; e10 text;
+begin
+  -- A agrupada que ganhou chegada no barco começou a execução: não desagrupa, e cancela como qualquer outra
+  v := pg_temp._dupla();
+  v_g := (public._agrupar_os_montar(v, null, pg_temp._numero_agrupado(), pg_temp._id('admin'), null) ->> 'service_order_id')::uuid;
+  update public.service_orders set check_in_at = now() where id = v_g;
+  e9 := pg_temp._erro_desfazer(v_g, pg_temp._id('admin'));
+  e10 := pg_temp._erro_sql(format('select public.cancel_service_order_cascade(%L::uuid, %L)', v_g, 'teste'));
+  insert into _resultado values ('E9 agrupada com chegada no barco: desagrupar recusa ("chegada no barco registrada"); cancelar passa',
+    strpos(coalesce(e9, ''), 'já começou a ser executada (chegada no barco registrada)') > 0
+    and e10 is null and exists (select 1 from public.service_orders where id = v_g and status = 'cancelled')
+    and (select count(*) from public.service_orders where id = any(v) and merged_into_id = v_g and status = 'cancelled') = 2,
+    'desagrupar: ' || coalesce(e9, 'PASSOU') || ' | cancelar: ' || coalesce(e10, 'ok'));
+exception when others then
+  insert into _resultado values ('E9 agrupada com chegada no barco: desagrupar recusa ("chegada no barco registrada"); cancelar passa',
+    false, 'erro: ' || sqlstate || ' ' || sqlerrm);
 end $$;
 
 -- ═══ F cancelar / reabrir a agrupada ════════════════════════════════════════════════════════

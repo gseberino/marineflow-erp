@@ -133,6 +133,25 @@ describe('reopenServiceOrder', () => {
     expect(gravacoes('bank_transactions')).toEqual([]);
   });
 
+  it('conta cancelada não volta a ser cobrada (Fase 0b): nem na leitura, nem na gravação', async () => {
+    banco.respostas['service_orders.select'] = ok({ status: 'completed' });
+    // Mesmo que a leitura devolva uma cancelada (filtro ignorado), ela não é reaberta.
+    banco.respostas['receivables.select'] = ok([
+      { id: 'r1', amount: 1000, paid_amount: 1000, status: 'paid' },
+      { id: 'rc', amount: 999, paid_amount: 0, status: 'cancelled' },
+    ]);
+    banco.respostas['payments.select'] = [ok([]), ok([])];
+    await reopenServiceOrder('os1', 'ajuste');
+    const leitura = banco.chamadas.find((c) => c.alvo === 'receivables' && c.op === 'select')!;
+    expect(leitura.filtros).toContainEqual(['not', 'status', 'eq', 'cancelled']);
+    const reabertas = gravacoes('receivables');
+    expect(reabertas).toHaveLength(1);
+    expect(reabertas[0].filtros).toContainEqual(['eq', 'id', 'r1']);
+    // A guarda do extrato olha só as contas que vão reabrir.
+    const guarda = banco.chamadas.find((c) => c.alvo === 'payments' && c.op === 'select')!;
+    expect(guarda.filtros).toContainEqual(['in', 'receivable_id', ['r1']]);
+  });
+
   it('só reabre OS faturada ou concluída', async () => {
     banco.respostas['service_orders.select'] = ok({ status: 'open' });
     await expect(reopenServiceOrder('os1', 'x')).rejects.toThrow('Só é possível reabrir');

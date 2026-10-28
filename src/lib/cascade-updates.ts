@@ -109,10 +109,14 @@ export async function reopenServiceOrder(serviceOrderId: string, reason: string)
   }
 
   // Cancel payments on receivables
-  const { data: receivables } = conferir(await supabase
+  // Conta cancelada fica cancelada (Fase 0b, 28/10/2026): reabrir voltava TODAS as contas da OS para
+  // 'pending', inclusive as canceladas de antes — o cliente passava a dever de novo uma parcela anulada.
+  const { data: lidas } = conferir(await supabase
     .from('receivables')
     .select('*')
-    .eq('service_order_id', serviceOrderId), 'Não consegui ler as contas da OS');
+    .eq('service_order_id', serviceOrderId)
+    .not('status', 'eq', 'cancelled'), 'Não consegui ler as contas da OS');
+  const receivables = (lidas || []).filter((r) => r.status !== 'cancelled');
 
   // Pagamento que veio de uma linha do banco não se estorna daqui: um Pix pode pagar outras contas
   // (forma A), e soltar a linha faria o dinheiro voltar para a fila e entrar em dobro (03/10/2026).

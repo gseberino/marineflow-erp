@@ -14,6 +14,8 @@ import { resumirLembreteDeRevisao, TITULOS_DOS_PLANOS } from "./tools/planos-man
 import { resumirAgrupamento, resumirDesagrupamento } from "./tools/agrupar-orcamentos.ts";
 // agrupar OS (28/10/2026): o mesmo para ordens de serviço — o impedimento (já começou, nota, outro cliente) vira recusa.
 import { resumirAgrupamentoDeOS, resumirDesagrupamentoDeOS } from "./tools/agrupar-os.ts";
+// cobrar juntas (28/10/2026, Fase 0 do Fechar juntas): o resumo mostra cada OS com o saldo e a mensagem exata; trava vira recusa.
+import { resumirCobrancaConjunta } from "./tools/cobrar-juntas.ts";
 import {
   callClaude,
   ClaudeApiError,
@@ -251,6 +253,8 @@ const TOOL_LABELS_PT: Record<string, string> = {
   agrupar_os: "Agrupar OS em uma só",
   desagrupar_os: "Desagrupar OS",
   listar_os_para_agrupar: "Listar OS para agrupar",
+  // cobrar juntas (28/10/2026): o saldo de várias OS executadas do mesmo cliente numa mensagem só.
+  cobrar_juntas: "Cobrar OS juntas (WhatsApp)",
 };
 // financeiro (07/10/2026): anotação de Pix, estorno, cobrança formal e favorecido.
 Object.assign(TOOL_LABELS_PT, TITULOS_DO_FINANCEIRO);
@@ -418,6 +422,9 @@ RESUMO_QUE_RESOLVE.add("desagrupar_orcamento");
 // cliente/embarcação, já agrupada — o resumo diz por quê numa linha "⚠️": é recusa, não pendência.
 RESUMO_QUE_RESOLVE.add("agrupar_os");
 RESUMO_QUE_RESOLVE.add("desagrupar_os");
+// cobrar juntas (28/10/2026): cadastro genérico, OS que não começou, outro cliente, sem saldo, Pix esperando no Extrato,
+// opt-out, piso — o resumo diz por quê numa linha "⚠️": é recusa, não pendência.
+RESUMO_QUE_RESOLVE.add("cobrar_juntas");
 // "Sim, é do X" (leva 8, revisão de 23/10/2026): entrada confirmada sem cliente sugerido, cliente fora do cadastro ou
 // leitura que falha — o resumo diz por quê numa linha "⚠️": é recusa, não pendência.
 RESUMO_QUE_RESOLVE.add("aprovar_propostas_de_lancamento");
@@ -608,6 +615,16 @@ export async function buildPendingSummary(
     } catch (e) {
       const motivo = String((e as { message?: string })?.message ?? e).replace(/\s*\n+\s*/g, " ");
       return `⚠️ Não consegui conferir as OS agora (${motivo}). Nada foi registrado; tente de novo.`;
+    }
+  }
+  // Cobrar juntas (28/10/2026): o "sim" é sobre cada OS com o saldo, o total, o número inteiro e a MENSAGEM EXATA que vai
+  // ao cliente. Trava (genérico, Pix esperando, opt-out, piso…) vira uma linha "⚠️"; leitura que falha também.
+  if (toolName === "cobrar_juntas") {
+    try {
+      return await resumirCobrancaConjunta(admin, args);
+    } catch (e) {
+      const motivo = String((e as { message?: string })?.message ?? e).replace(/\s*\n+\s*/g, " ");
+      return `⚠️ Não consegui conferir as contas das OS agora (${motivo}). Nada foi registrado; tente de novo.`;
     }
   }
   // Macros de fluxo: a confirmação PRECISA mostrar o que vai acontecer de verdade (a lista

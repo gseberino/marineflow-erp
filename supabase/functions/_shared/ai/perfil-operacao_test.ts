@@ -89,6 +89,8 @@ ACRESCENTADAS.push("agenda_ver");
 ACRESCENTADAS.push("converter_sem_sinal");
 // agrupar OS (28/10/2026, pedido do dono): as mesmas três, para ordens de serviço.
 ACRESCENTADAS.push("listar_os_para_agrupar", "agrupar_os", "desagrupar_os");
+// cobrar juntas (28/10/2026, Fase 0 do Fechar juntas): o saldo de várias OS executadas numa mensagem só.
+ACRESCENTADAS.push("cobrar_juntas");
 // 06/10/2026: levantamento e roteiro de execução — escondidos da tela em 05/10 (chave
 // roteiro_execucao_visivel); o prompt deixou de ensinar as duas seções.
 const REMOVIDAS = ["registrar_jornada", "fechar_jornada", "minhas_horas", "apurar_pagamento",

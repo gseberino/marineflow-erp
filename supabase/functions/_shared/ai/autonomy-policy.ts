@@ -66,6 +66,9 @@ export const NEVER_AUTONOMOUS = new Set<string>([
   // a agrupada e devolve tudo (desagrupar) — e a autonomia pularia o resumo, onde o impedimento vira recusa. Sempre com o "sim".
   "agrupar_os",
   "desagrupar_os",
+  // cobrar juntas (28/10/2026): cobrança a CLIENTE com o saldo de várias OS — como send_collection_reminder, nunca
+  // autônoma (dinheiro + sensível); e a autonomia pularia o resumo, onde a trava (genérico, Pix esperando) vira recusa.
+  "cobrar_juntas",
   // quem paga por um cliente (leva 8, 22/10/2026): é o SIM do dono que faz o pagador valer — decisão dele: sempre com
   // o "sim", sobre o resumo resolvido (quem pagou, o cliente, a relação).
   "guardar_pagador_do_cliente",
