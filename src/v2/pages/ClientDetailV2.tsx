@@ -35,7 +35,7 @@ import '@/v2/tokens.css';
 
 type SORow = {
   id: string; service_order_number: string; service_type?: string | null; status: string; grand_total?: number | null;
-  /** Origem de um agrupamento (agrupar_orcamentos): o valor dela já está no orçamento que a reúne. */
+  /** Origem de um agrupamento (agrupar_orcamentos / agrupar_os): o valor dela já está no orçamento/OS que a reúne. */
   merged_into_id?: string | null;
 };
 type RecRow = { id: string; description: string; due_date: string; status?: string | null; amount: number };

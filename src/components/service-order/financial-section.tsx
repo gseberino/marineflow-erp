@@ -21,7 +21,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { MoneyInput } from '@/components/MoneyInput';
 import { useI18n } from '@/i18n';
 import { USER_ROLES } from '@/hooks/use-app-users';
-import type { InstallmentRow } from '@/lib/os-financials';
+import { isSignalRow, type InstallmentRow } from '@/lib/os-financials';
 import { primeiraValidade, VALIDADE_MAXIMA_EM_DIAS } from '@/lib/pdf-generator';
 import { CustomInstallmentEditor } from './form-parts';
 
@@ -399,7 +399,7 @@ export function FinancialSection(props: FinancialSectionProps) {
                       <div className="rounded-md bg-background border divide-y text-sm">
                         {installmentRows.map((row, i) => {
                           const amount = calcInstallmentAmount(row);
-                          const isSignal = row.tipo === 'aprovacao' || row.days_after_approval === 0;
+                          const isSignal = isSignalRow(row);
                           const daysLabel = row.tipo === 'entrega' ? 'na entrega'
                             : row.tipo === 'prazo' || row.days_after_approval > 0 ? `em ${row.days_after_approval} dias`
                             : 'na aprovação';
@@ -641,6 +641,6 @@ export function FinancialSection(props: FinancialSectionProps) {
             </div>
           </div>
         </CollapsibleContent>
-      </Collapsible>
+      </Collapsible>
   );
 }

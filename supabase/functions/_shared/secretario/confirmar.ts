@@ -3,7 +3,8 @@
 //   1. ai_operator_pending_actions (status pending, expira);
 //   2. a sessão do WhatsApp aponta para ela (pending_confirm_action_id, PIN zerado, não herdada) — é assim que a camada
 //      de confirmação do ai-agent casa o "sim <PIN>" do dono, ANTES de qualquer comando;
-//   3. a pendência anterior da conversa é cancelada (vale só a última: cancelarPendenciaSubstituida);
+//   3. a pendência anterior da conversa: cancelada se é o mesmo pedido (outro lote), guardada para voltar depois se
+//      é outro assunto (cancelarPendenciaSubstituida, 27/10/2026);
 //   4. o par no histórico da conversa e a pergunta ativa registrada (enviarComRegistro), para o desempate com o
 //      comprovante continuar certo;
 //   5. a auditoria.

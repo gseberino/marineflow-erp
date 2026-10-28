@@ -69,6 +69,7 @@ import { printPDF } from '@/lib/pdf-print';
 import type { PDFOptions } from '@/lib/pdf-generator';
 import { PDFOptionsDialog } from '@/components/PDFOptionsDialog';
 import { RegisterDepositDialog } from '@/components/RegisterDepositDialog';
+import { useConverterSemSinal } from '@/components/ConverterSemSinal';
 import { CompletionSendDialog } from '@/components/CompletionSendDialog';
 import { FaturarOsDialog } from '@/components/fiscal/FaturarOsDialog';
 import { useOptionalAuth } from '@/hooks/use-auth';
@@ -83,7 +84,7 @@ import { ServiceOrderSignatures } from '@/components/ServiceOrderSignatures';
 import { WhatsAppSendHistoryDialog } from '@/components/WhatsAppSendHistoryDialog';
 import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/SendViaWhatsAppDialog';
 import { useWhatsAppSendHistory } from '@/hooks/use-whatsapp-send-log';
-import { CheckCircle2, XCircle, History as HistoryIcon, Send, Sparkles } from 'lucide-react';
+import { CheckCircle2, XCircle, History as HistoryIcon, Send, Sparkles, ArrowRightCircle } from 'lucide-react';
 import { decideAutosave } from '@/lib/autosave-guard';
 import { manterSeMexeu, mesclarReleitura, mesmoValor } from '@/lib/releitura-da-os';
 import { trocarEmbarcacaoNoForm } from '@/lib/troca-de-cliente';
@@ -119,6 +120,11 @@ import { useAgrupamentoDoOrcamento } from '@/hooks/use-agrupar-orcamentos';
 import { ehRecusaDeAgrupamento } from '@/lib/agrupar-orcamentos';
 import { AgruparOrcamentosDialog } from '@/components/service-order/AgruparOrcamentosDialog';
 import { DesagruparOrcamentoDialog } from '@/components/service-order/DesagruparOrcamentoDialog';
+import { AgruparOsDialog } from '@/components/service-order/AgruparOsDialog';
+import { DesagruparOsDialog } from '@/components/service-order/DesagruparOsDialog';
+import { FaixaOsAgrupadaEm, FaixaOsQueReune } from '@/components/service-order/FaixasDoAgrupamentoOs';
+import { STATUS_AGRUPAVEIS_OS, origemAgrupadaDeOs, osAgrupadaDesagrupavel } from '@/lib/agrupar-os';
+import { useDesagrupavelDaOsAgrupada } from '@/hooks/use-agrupar-os';
 import { Combine, Ungroup } from 'lucide-react';
 
 interface Props {
@@ -288,6 +294,16 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   // banco fazia o salvamento automático regravar a data: NOVO-agenda-11). Leitura que falha = desligado (o de antes).
   const { data: modoDaProposta } = useModoDaProposta();
   const datasDaAgenda = modoDaProposta === 'ligado';
+  // A condição nova entra também no estado do formulário: uma edição não salva desses campos
+  // venceria a releitura e o próximo salvar gravaria a condição antiga por cima.
+  const semSinal = useConverterSemSinal({
+    aoConverter: (c) => setForm((f) => ({
+      ...f,
+      payment_condition_preset_id: c.payment_condition_preset_id || '',
+      payment_conditions: c.payment_conditions,
+      custom_payment_installments: c.custom_payment_installments,
+    })),
+  });
   const cancelSO = useCancelServiceOrder();
   const reopenSO = useReopenServiceOrder();
   const duplicate = useDuplicateServiceOrder();
@@ -474,6 +490,17 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   // Agrupar / desagrupar orçamentos (agrupar_orcamentos / desagrupar_orcamentos). Quem decide é o
   // banco; a tela só esconde o que ele recusaria. Só admin ou financeiro.
   const agrupamento = useAgrupamentoDoOrcamento(orderId);
+  // Agrupamento de OS: se a agrupada (esta, ou a que recebeu esta origem) ainda é desfazível quem diz é o
+  // banco (os_para_agrupar → agrupados_ativos, a régua do desagrupar_os e da guarda do Cancelar). A situação
+  // é só o palpite até a resposta chegar (ou para quem não tem cargo para ler).
+  const agrupadaOsId: string | null = agrupamento.comoAgrupado?.tipo === 'os' ? (orderId ?? null)
+    : agrupamento.comoOrigem?.tipo === 'os' ? agrupamento.comoOrigem.agrupadoId
+    : null;
+  const desagrupavelNoBanco = useDesagrupavelDaOsAgrupada({
+    agrupadoId: agrupadaOsId,
+    vesselId: orderData?.vessel_id,
+    enabled: authUser?.role === 'admin' || authUser?.role === 'financial',
+  });
   const [agruparAberto, setAgruparAberto] = useState(false);
   const [desagruparAberto, setDesagruparAberto] = useState(false);
   const [faturarOsOpen, setFaturarOsOpen] = useState(false);
@@ -1298,8 +1325,10 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     try {
       // In the form context, replicate the same type as the source:
       // draft → quote (ORÇ), anything else → order (OS). A origem de um agrupamento fica `cancelled`
-      // como histórico, mas é orçamento: duplica como orçamento.
-      const mode = orderData?.status === 'draft' || orderData?.merged_into_id ? 'quote' : 'order';
+      // como histórico, mas é orçamento: duplica como orçamento — a não ser que seja OS agrupada
+      // (agrupar_os), que já era OS e duplica como OS (origemAgrupadaDeOs).
+      const mode = orderData?.status === 'draft' || (orderData?.merged_into_id && !origemAgrupadaDeOs(orderData))
+        ? 'quote' : 'order';
       const newSO = await duplicate.mutateAsync({ sourceId: orderId, mode });
       toast.success(mode === 'quote' ? 'Orçamento duplicado!' : 'OS duplicada com sucesso!');
       navigate(`/service-orders/${(newSO as any).id}`);
@@ -1857,11 +1886,29 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     && orderData?.quote_status !== 'rejected';
   const comoAgrupado = agrupamento.comoAgrupado;
   const comoOrigem = agrupamento.comoOrigem;
+  // O agrupamento pode ser de orçamentos (agrupar_orcamentos) ou de OS (agrupar_os, 28/10/2026): faixas,
+  // diálogos e frases são de um ou de outro.
+  const comoAgrupadoOrc = comoAgrupado && comoAgrupado.tipo !== 'os' ? comoAgrupado : null;
+  const comoAgrupadoOs = comoAgrupado?.tipo === 'os' ? comoAgrupado : null;
   const agrupadoDestinoId: string | null = comoOrigem?.agrupadoId ?? orderData?.merged_into_id ?? null;
-  const podeDesagrupar = cargoAgrupa && orcamentoAbertoSalvo && !!comoAgrupado;
+  // Origem de OS: a própria linha diz (converted_to_os_at ou o motivo "Agrupada em…" — origemAgrupadaDeOs).
+  const origemDeOs = comoOrigem ? comoOrigem.tipo === 'os' : origemAgrupadaDeOs(orderData);
+  const podeDesagrupar = cargoAgrupa && orcamentoAbertoSalvo && !!comoAgrupadoOrc;
+  // OS: agrupa a que ainda não começou (seção 9 do agrupar_os) — o resto (hora apontada, foto, nota…)
+  // o banco confere e recusa com a frase pronta. Sem exigir converted_to_os_at: há OS antigas sem ele e o
+  // banco as agrupa (a situação já tira o rascunho).
+  const osAgrupavelSalva = !isNew
+    && (STATUS_AGRUPAVEIS_OS as readonly string[]).includes(orderData?.status ?? '');
+  const podeAgruparOs = cargoAgrupa && osAgrupavelSalva && !orderData?.merged_into_id;
+  // A leitura do banco vale para a agrupada (esta OS reúne outras) ou para o destino desta origem.
+  const leituraDaAgrupadaOs = comoAgrupadoOs ? (desagrupavelNoBanco.data ?? null) : null;
+  const leituraDoDestinoOs = !comoAgrupadoOs && comoOrigem?.tipo === 'os' ? (desagrupavelNoBanco.data ?? null) : null;
+  const osAgrupadaDesfazivel = !!comoAgrupadoOs
+    && (leituraDaAgrupadaOs ? leituraDaAgrupadaOs.podeDesagrupar : osAgrupadaDesagrupavel(orderData));
+  const podeDesagruparOs = cargoAgrupa && osAgrupadaDesfazivel;
   // Agrupado que ainda dá para desfazer: o banco recusa cancelá-lo (os originais ficariam presos). Em vez
   // de deixar digitar o motivo e só então recusar, a tela tira o "Cancelar" e a faixa explica.
-  const cancelarPedeDesagrupar = orcamentoAbertoSalvo && !!comoAgrupado;
+  const cancelarPedeDesagrupar = (orcamentoAbertoSalvo && !!comoAgrupadoOrc) || osAgrupadaDesfazivel;
   const transicoesDeStatus = cancelarPedeDesagrupar
     ? validTransitions.filter((s) => s !== 'cancelled')
     : validTransitions;
@@ -1995,7 +2042,15 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     <div className="space-y-6 animate-fade-in max-w-5xl">
       {/* Origem de um agrupamento: fica cancelada como histórico (travada pelo isLocked).
           A faixa genérica de bloqueio dá lugar a esta, que diz para onde ele foi. */}
-      {!isNew && agrupadoDestinoId && (
+      {!isNew && agrupadoDestinoId && origemDeOs && (
+        <FaixaOsAgrupadaEm
+          agrupadoId={agrupadoDestinoId}
+          agrupadoNumero={comoOrigem?.agrupadoNumero ?? null}
+          desagrupavel={leituraDoDestinoOs ? leituraDoDestinoOs.podeDesagrupar : comoOrigem ? comoOrigem.agrupadoEmAberto : null}
+          motivo={leituraDoDestinoOs?.motivo ?? null}
+        />
+      )}
+      {!isNew && agrupadoDestinoId && !origemDeOs && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 p-4">
           <div className="flex items-center gap-2">
             <Combine className="h-5 w-5 shrink-0 text-slate-600" />
@@ -2019,13 +2074,22 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       )}
 
       {/* Orçamento que reúne outros: dá para desfazer enquanto ele estiver em aberto. */}
-      {!isNew && comoAgrupado && (
+      {!isNew && comoAgrupadoOs && (
+        <FaixaOsQueReune
+          origens={comoAgrupadoOs.origens}
+          podeDesagrupar={podeDesagruparOs}
+          cancelarPedeDesagrupar={cancelarPedeDesagrupar}
+          motivoSemDesagrupar={leituraDaAgrupadaOs?.motivo ?? null}
+          onDesagrupar={() => setDesagruparAberto(true)}
+        />
+      )}
+      {!isNew && comoAgrupadoOrc && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-sky-200 bg-sky-50 p-4">
           <div className="flex items-center gap-2">
             <Combine className="h-5 w-5 shrink-0 text-sky-600" />
             <div>
               <p className="text-sm font-medium text-sky-800">
-                Este orçamento reúne {comoAgrupado.origens.map((o) => o.numero).join(', ')}.
+                Este orçamento reúne {comoAgrupadoOrc.origens.map((o) => o.numero).join(', ')}.
               </p>
               {cancelarPedeDesagrupar && (
                 <p className="mt-0.5 text-xs text-sky-700">
@@ -2059,13 +2123,35 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         />
       )}
 
-      {desagruparAberto && orderId && comoAgrupado && (
+      {desagruparAberto && orderId && comoAgrupadoOrc && (
         <DesagruparOrcamentoDialog
           aberto={desagruparAberto}
           onFechar={() => setDesagruparAberto(false)}
           agrupadoId={orderId}
           agrupadoNumero={orderData?.service_order_number || ''}
-          origens={comoAgrupado.origens}
+          origens={comoAgrupadoOrc.origens}
+        />
+      )}
+
+      {agruparAberto && orderId && podeAgruparOs && orderData?.client_id && orderData?.vessel_id && (
+        <AgruparOsDialog
+          aberto={agruparAberto}
+          onFechar={() => setAgruparAberto(false)}
+          clientId={orderData.client_id}
+          vesselId={orderData.vessel_id}
+          unidade={allVessels?.find((v) => v.id === orderData.vessel_id)}
+          preSelecionados={[orderId]}
+          principalSugerido={orderId}
+        />
+      )}
+
+      {desagruparAberto && orderId && comoAgrupadoOs && podeDesagruparOs && (
+        <DesagruparOsDialog
+          aberto={desagruparAberto}
+          onFechar={() => setDesagruparAberto(false)}
+          agrupadoId={orderId}
+          agrupadoNumero={orderData?.service_order_number || ''}
+          origens={comoAgrupadoOs.origens}
         />
       )}
 
@@ -2084,26 +2170,51 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         </div>
       )}
 
-      {/* Deposit pending banner */}
-      {!isNew && (orderData as any)?.quote_status === 'awaiting_deposit' && form.status === 'draft' && (
-        <div className="flex items-center justify-between rounded-lg border border-orange-200 bg-orange-50 p-4">
+      {/* Deposit pending banner. Também no aprovado (28/10/2026): a tarefa "aprovado sem sinal"
+          abre o orçamento, e aqui não havia nem o sinal nem a conversão sem sinal. */}
+      {!isNew && ['awaiting_deposit', 'approved'].includes((orderData as any)?.quote_status) && form.status === 'draft' && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-orange-200 bg-orange-50 p-4">
           <div className="flex items-center gap-2">
             <DollarSign className="h-5 w-5 text-orange-600 shrink-0" />
             <div>
-              <p className="text-sm font-medium text-orange-800">Aguardando pagamento do sinal</p>
-              <p className="text-xs text-orange-600 mt-0.5">O orçamento será convertido em OS automaticamente após o registro.</p>
+              <p className="text-sm font-medium text-orange-800">
+                {orderData?.quote_status === 'approved'
+                  ? 'Orçamento aprovado — falta o sinal'
+                  : 'Aguardando pagamento do sinal'}
+              </p>
+              <p className="text-xs text-orange-600 mt-0.5">
+                O orçamento será convertido em OS automaticamente após o registro — ou converta sem
+                sinal, com o valor inteiro na conclusão.
+              </p>
             </div>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="border-orange-300 text-orange-700 hover:bg-orange-100 gap-1 shrink-0"
-            onClick={() => setDepositDialogOpen(true)}
-          >
-            <DollarSign className="h-4 w-4" /> Registrar sinal
-          </Button>
+          <div className="flex gap-2 shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-orange-300 text-orange-700 hover:bg-orange-100 gap-1"
+              onClick={() => setDepositDialogOpen(true)}
+            >
+              <DollarSign className="h-4 w-4" /> Registrar sinal
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1"
+              disabled={semSinal.convertendo}
+              onClick={() => semSinal.pedir({
+                id: orderId!,
+                number: orderData?.service_order_number,
+                client: clienteDaOs?.name ?? null,
+                grandTotal,
+              })}
+            >
+              <ArrowRightCircle className="h-4 w-4" /> Converter sem sinal
+            </Button>
+          </div>
         </div>
       )}
+      {semSinal.dialogo}
 
       {/* Deposit dialog */}
       {!isNew && orderId && (
@@ -2306,7 +2417,12 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                       <Combine className="h-4 w-4" /> Agrupar com outros orçamentos…
                     </DropdownMenuItem>
                   )}
-                  {podeDesagrupar && (
+                  {podeAgruparOs && (
+                    <DropdownMenuItem onClick={abrirAgrupar} className="gap-2">
+                      <Combine className="h-4 w-4" /> Agrupar com outras OS…
+                    </DropdownMenuItem>
+                  )}
+                  {(podeDesagrupar || podeDesagruparOs) && (
                     <DropdownMenuItem onClick={() => setDesagruparAberto(true)} className="gap-2">
                       <Ungroup className="h-4 w-4" /> Desagrupar…
                     </DropdownMenuItem>
@@ -2450,6 +2566,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           : orderId && agrupamento.isLoading ? true
           : orderId && agrupamento.isError ? 'Não deu para conferir se este orçamento reúne outros: recarregue a página para trocar o cliente.'
           : !comoAgrupado ? undefined
+          : comoAgrupadoOs ? (podeDesagruparOs
+            ? 'Esta OS reúne outras do mesmo cliente: para trocar o cliente, desagrupe antes.'
+            : 'O cliente não muda: esta OS reúne outras do mesmo cliente.')
           : podeDesagrupar ? 'Este orçamento reúne outros do mesmo cliente: para trocar o cliente, desagrupe antes.'
           : 'O cliente não muda: este documento reúne orçamentos do mesmo cliente.'
         }
@@ -2465,6 +2584,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           : agrupamento.isLoading ? true
           : agrupamento.isError ? 'Não deu para conferir se este orçamento reúne outros: recarregue a página para trocar.'
           : !comoAgrupado ? undefined
+          : comoAgrupadoOs ? (podeDesagruparOs
+            ? `Esta OS reúne outras ${unidadeDaOSFeminina ? 'da mesma' : 'do mesmo'} ${rotuloDaUnidade(unidadeDaOS?.asset_type).toLowerCase()}: para trocar, desagrupe antes.`
+            : `${aUnidadeDaOS.charAt(0).toUpperCase()}${aUnidadeDaOS.slice(1)} não muda: esta OS reúne outras ${unidadeDaOSFeminina ? 'dela' : 'dele'}.`)
           : podeDesagrupar ? `Este orçamento reúne outros ${unidadeDaOSFeminina ? 'da mesma' : 'do mesmo'} ${rotuloDaUnidade(unidadeDaOS?.asset_type).toLowerCase()}: para trocar, desagrupe antes.`
           : `${aUnidadeDaOS.charAt(0).toUpperCase()}${aUnidadeDaOS.slice(1)} não muda: este documento reúne orçamentos ${unidadeDaOSFeminina ? 'dela' : 'dele'}.`
         }

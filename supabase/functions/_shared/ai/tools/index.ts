@@ -47,6 +47,8 @@ import { caixaTools } from "./caixa.ts";
 import { diariasTools } from "./diarias.ts";
 import { followupTools } from "./followups.ts";
 import { condicaoPagamentoTools } from "./condicao-pagamento.ts";
+// 27/10/2026: orçamento vira OS sem sinal, valor inteiro na conclusão (paridade com a tela).
+import { converterSemSinalTools } from "./converter-sem-sinal.ts";
 import { acompanhamentoTools } from "./acompanhamento.ts";
 // operacional (07/10/2026): caixa de sugestões da agenda (listar, aceitar, descartar).
 import { agendaSugestaoTools } from "./agenda-sugestoes.ts";
@@ -66,6 +68,8 @@ import { dropboxTools } from "./dropbox.ts";
 import { comprovanteTools } from "./comprovantes.ts";
 // Agrupar orçamentos (15/10/2026): listar os candidatos, agrupar e desagrupar (paridade com a tela).
 import { agruparOrcamentosTools } from "./agrupar-orcamentos.ts";
+// Agrupar OS (28/10/2026): listar as candidatas, agrupar e desagrupar ordens de serviço (paridade com a tela).
+import { agruparOsTools } from "./agrupar-os.ts";
 // O lote semanal da papelada (16/10/2026, secretário Passo 5): só pela pendência do comando *lote*.
 import { papeladaTools } from "./papelada.ts";
 // Agenda de Produção, Fase 1 (24/10/2026): agenda_ver (a leitura com o texto pronto do banco) e as três que anotam o
@@ -82,6 +86,7 @@ export const allTools: ToolDef[] = [
   ...productTools,
   ...serviceOrderTools,
   ...condicaoPagamentoTools,
+  ...converterSemSinalTools,
   ...agendaTools,
   ...financialTools,
   ...reportTools,
@@ -144,6 +149,8 @@ export const allTools: ToolDef[] = [
   ...agruparOrcamentosTools,
   // agenda de produção (24/10/2026)
   ...agendaProducaoTools,
+  // agrupar OS (28/10/2026)
+  ...agruparOsTools,
 ].sort((a, b) => a.name.localeCompare(b.name));
 
 /**

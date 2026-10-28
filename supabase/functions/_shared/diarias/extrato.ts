@@ -1,5 +1,6 @@
-// Documentos das diárias: o extrato em PDF (para imprimir e o freelancer assinar no papel) e as
-// linhas do CSV do contador. Puro — sem Supabase, sem janela —, para ser testado.
+// Documentos das diárias: o extrato em PDF (consulta, sem assinatura desde 27/10/2026), o recibo de
+// pagamento de serviços que o prestador assina e as linhas do CSV do contador. Puro — sem Supabase,
+// sem janela —, para ser testado.
 //
 // Mora em _shared desde 06/10/2026: a tela (Financeiro › Diárias, "Extrato em PDF") e o assistente
 // do WhatsApp ("me manda o extrato do Roberto") montam o MESMO documento — uma fonte só, como o PDF
@@ -46,9 +47,14 @@ export interface LinhaDoExtrato {
   observacao: string | null;
   os: { id: string; numero: string }[];
   saldo: number;
-  /** Pagamento lançado à mão que o banco ainda não confirmou (já desconta). */
+  /** Pagamento ainda sem lançamento (já desconta): anotado à mão, ou já no banco esperando a fila. */
   aguardando?: boolean;
 }
+
+/** O Pix que o banco já trouxe e espera a aprovação na fila (a frase vem do banco na coluna "conta"). */
+export const CONTA_FALTA_APROVAR = 'No banco — falta aprovar na fila';
+/** Só o anotado à mão é "ainda não confirmado pelo banco"; o que já está na fila saiu de fato. */
+const lancadoAMao = (l: Pick<LinhaDoExtrato, 'aguardando' | 'conta'>) => !!l.aguardando && l.conta !== CONTA_FALTA_APROVAR;
 
 export interface ContaDoExtrato {
   favorecido: { id: string; nome: string; desde: string | null; saldo_inicial: number; diaria: number | null };
@@ -156,7 +162,7 @@ const codigosDe = (linhas: LinhaDoExtrato[]) => [...new Set(linhas.map((l) => l.
 const totalDosReembolsos = (informado: number | null | undefined, linhas: LinhaDoExtrato[]) =>
   informado != null ? Number(informado) || 0 : reembolsosDe(linhas).reduce((s, l) => s + (Number(l.trabalhado) || 0), 0);
 
-/** O extrato de um freelancer no período, em A4, com as duas linhas de assinatura. */
+/** O extrato de um freelancer no período, em A4: consulta, sem assinatura (quem assina é o recibo). */
 export function montarExtratoHtml(p: {
   empresa: EmpresaNoDocumento;
   freelancer: FreelancerNoDocumento;
@@ -166,7 +172,7 @@ export function montarExtratoHtml(p: {
   const { empresa, freelancer, conta } = p;
   const dias = conta.linhas.filter((l) => l.tipo === 'dia');
   const pagamentos = conta.linhas.filter((l) => l.tipo === 'pagamento');
-  const aguardando = pagamentos.some((l) => l.aguardando);
+  const aguardando = pagamentos.some(lancadoAMao);
   // Reembolso de comprovante (F2b): coluna no total e seção própria SÓ quando há — sem ele, o
   // documento é byte a byte o de antes (teste em src/lib/extrato-diarias.test.ts).
   const reembolsos = reembolsosDe(conta.linhas);
@@ -186,7 +192,7 @@ export function montarExtratoHtml(p: {
       </tr>`;
   const linhaDoPagamento = (l: LinhaDoExtrato) => `
       <tr>
-        <td>${dataBR(l.data)}</td><td>${esc(l.aguardando ? 'Pix lançado à mão *' : l.conta ?? '')}</td><td>${esc(l.descricao ?? '')}</td>
+        <td>${dataBR(l.data)}</td><td>${esc(lancadoAMao(l) ? 'Pix lançado à mão *' : l.aguardando ? 'Pix (extrato do banco)' : l.conta ?? '')}</td><td>${esc(l.descricao ?? '')}</td>
         <td class="n b">${brl(l.pago)}</td>
       </tr>`;
   const linhaDoReembolso = (l: LinhaDoExtrato) => `
@@ -229,8 +235,6 @@ export function montarExtratoHtml(p: {
   tfoot td { background: #eef2f3; font-weight: bold; }
   .vazio { color: #7f929c; font-style: italic; }
   .nota { color: #4b616f; font-size: 9.5px; margin-top: 6px; }
-  .assinaturas { display: flex; justify-content: space-between; gap: 30px; margin-top: 42px; page-break-inside: avoid; }
-  .assinaturas div { flex: 1; border-top: 1px solid #4b616f; padding-top: 4px; text-align: center; font-size: 10px; }
   .rodape { margin-top: 18px; color: #7f929c; font-size: 9px; display: flex; justify-content: space-between; }
 </style>
 </head>
@@ -283,12 +287,7 @@ export function montarExtratoHtml(p: {
 
   <p class="nota">Saldo positivo = valor a pagar ao prestador; negativo = pago adiantado. ${NOTA_DO_EXTRA}${comReembolso ? ` ${NOTA_DO_REEMBOLSO}` : ''}${aguardando ? ' * Pagamento lançado à mão, ainda não confirmado pelo extrato do banco.' : ''}</p>
 
-  <div class="assinaturas">
-    <div>${esc(empresa.nome)}</div>
-    <div>${esc(freelancer.nome)}${freelancer.documento ? `<br>CPF ${esc(documentoFormatado(freelancer.documento))}` : ''}</div>
-  </div>
-
-  <div class="rodape"><span>Controle interno de prestação de serviços por dia.</span><span>Gerado em ${quandoEmBrasilia(p.geradoEm)}</span></div>
+  <div class="rodape"><span>Extrato para conferência: não é recibo nem quitação (o papel assinado é o recibo de serviços).</span><span>Gerado em ${quandoEmBrasilia(p.geradoEm)}</span></div>
 </body>
 </html>`;
 }
@@ -391,7 +390,7 @@ export function montarReciboHtml(p: {
       <tr><td>${dataBR(l.data)}</td><td>${diaDaSemana(l.data)}</td><td>${esc(tipoDoDia(l.jornada))}</td>
         <td>${esc(l.os.map((o) => o.numero).join(', '))}</td><td class="n">${brl(l.trabalhado)}</td></tr>`;
   const linhaDoVale = (l: LinhaDoExtrato) => `
-      <tr><td>${dataBR(l.data)}</td><td>${esc(l.descricao ?? '')}${l.aguardando ? ' *' : ''}</td><td class="n">${brl(l.pago)}</td></tr>`;
+      <tr><td>${dataBR(l.data)}</td><td>${esc(l.descricao ?? '')}${lancadoAMao(l) ? ' *' : ''}</td><td class="n">${brl(l.pago)}</td></tr>`;
   const linhaDoReembolso = (l: LinhaDoExtrato) => `
       <tr><td>${dataBR(l.data)}</td><td>${esc(l.conta ?? '')}</td><td>${esc(descricaoDoReembolso(l))}</td><td class="n">${brl(l.trabalhado)}</td></tr>`;
   // O recibo é a declaração do prestador ("Recebi…"), mas quem mais lê é a contadora: o reembolso
@@ -471,7 +470,7 @@ export function montarReciboHtml(p: {
     <tr><td>(−) Vales e adiantamentos já pagos</td><td class="n">${brl(acerto.pago_no_periodo)}</td></tr>
     <tr class="total"><td>${aReceber ? 'Valor deste recibo' : 'Saldo'}</td><td class="n">${brl(acerto.valor_do_acerto)}</td></tr>
   </table>
-  ${vales.some((l) => l.aguardando) ? '<p class="nota">* Pix lançado à mão, ainda não confirmado pelo extrato do banco quando o acerto foi fechado.</p>' : ''}
+  ${vales.some(lancadoAMao) ? '<p class="nota">* Pix lançado à mão, ainda não confirmado pelo extrato do banco quando o acerto foi fechado.</p>' : ''}
   ${freelancer.pix ? `<p class="nota">Chave Pix do prestador: ${esc(freelancer.pix)}</p>` : ''}
 
   <p class="local">${esc(empresa.cidade || '')}${empresa.cidade ? ', ' : ''}${dataPorExtenso(p.geradoEm)}.</p>
@@ -480,6 +479,187 @@ export function montarReciboHtml(p: {
   <div class="rodape"><span>Prestação de serviços por dia · acerto nº ${numeroDoRecibo(acerto.numero)}</span><span>Gerado em ${quandoEmBrasilia(p.geradoEm)}</span></div>
 </body>
 </html>`;
+}
+
+// ── Recibo de pagamento de serviços (F2, 27/10/2026) ────────────────────────────────────────
+// O papel que o prestador assina, aprovado pelo dono na revisão de 24/10 (protótipo v3): sai no Pix
+// que zera a conta e é montado SÓ da foto congelada no banco (acertos_diarias.documento, com hash) —
+// reimprimir o nº N dá sempre o mesmo papel. Uma conta só, de cima para baixo, até "Pago neste
+// acerto, por Pix"; depois a lista dos serviços e dos pagamentos parciais; por fim a declaração e a
+// assinatura. Nada sai como "a informar": o que não há (NIT, E2E, chave Pix) simplesmente não sai.
+// Quadro de INSS: só depois da resposta da contadora (portão F0J da revisão).
+
+/** A foto que fechar_acerto_diarias grava em acertos_diarias.documento (migration 20261027180000). */
+export interface DocumentoDoRecibo {
+  versao: number;
+  empresa: { nome: string; cnpj: string | null; endereco: string | null; bairro: string | null; cidade: string | null; uf: string | null };
+  prestador: { id: string; nome: string; cpf: string | null; nit: string | null; pix: string | null };
+  servico: string;
+  diaria: number | null;
+  pix: { id: string; data: string; valor: number; conta: string | null; e2e: string | null; pelo_socio: string | null };
+  de: string;
+  ate: string;
+  pagos_ate: string;
+  saldo_anterior: number;
+  dias: number;
+  trabalhado: number;
+  reembolsos: number;
+  /** Tudo o que ele recebeu no recibo, com o Pix de quitação. */
+  pago: number;
+  linhas: Array<LinhaDoExtrato & { quitacao?: boolean }>;
+}
+
+/** O aviso enquanto o dono não liberou o recibo (contrato, contadora e advogado: portão F0J). */
+export const AVISO_RECIBO_EM_CONFERENCIA =
+  'Documento de conferência: ainda não vale como recibo. Falta o contrato de prestação de serviços e a revisão da contadora e do advogado.';
+
+const SOCIO = /^Bolso de\s+/i;
+/** "R$ 160" quando é redondo (cabe na linha do cabeçalho); com centavos, o valor inteiro. */
+const brlCurto = (v: number) => (Number.isInteger(v) ? `R$ ${numero(v)}` : brl(v));
+const quantas = (n: number, um: string, varios: string) => `${numero(n)} ${n === 1 ? um : varios}`;
+
+export function montarReciboDeServicosHtml(p: {
+  numero: number;
+  documento: DocumentoDoRecibo;
+  /** Falso enquanto o dono não liberar: o papel sai com o aviso de conferência. */
+  liberado: boolean;
+  geradoEm: Date;
+}): string {
+  const d = p.documento;
+  const n = numeroDoRecibo(p.numero);
+  // Dia sem diária (fração 0) não vai para a lista de serviços (F5: "falta" não se lança mais), mas um
+  // adicional ou desconto lançado nele continua na conta.
+  const todosOsDias = d.linhas.filter((l) => l.tipo === 'dia');
+  const dias = todosOsDias.filter((l) => (Number(l.fracao) || 0) > 0);
+  const reembolsos = d.linhas.filter((l) => l.tipo === 'reembolso');
+  const parciais = d.linhas.filter((l) => l.tipo === 'pagamento' && !l.quitacao);
+  const inteiros = dias.filter((l) => Number(l.fracao) === 1);
+  const meios = dias.filter((l) => Number(l.fracao) === 0.5);
+  const base = dias.reduce((s, l) => s + (Number(l.fracao) || 0) * (Number(l.valor_diaria) || 0), 0);
+  const adicionais = todosOsDias.filter((l) => (Number(l.extras) || 0) > 0);
+  const descontos = todosOsDias.filter((l) => (Number(l.descontos) || 0) > 0);
+  const somaParciais = parciais.reduce((s, l) => s + (Number(l.pago) || 0), 0);
+  const anterior = Number(d.saldo_anterior) || 0;
+  const pix = Number(d.pix.valor) || 0;
+  // O que ele tinha a receber; o adiantamento de antes entra do lado do que já recebeu.
+  const devido = Math.max(anterior, 0) + (Number(d.trabalhado) || 0) + (Number(d.reembolsos) || 0);
+  const jaRecebido = somaParciais + Math.max(-anterior, 0);
+  const socios = [...new Set(parciais.map((l) => l.conta ?? '').filter((c) => SOCIO.test(c)).map((c) => c.replace(SOCIO, '')))];
+  const pelaEmpresa = d.pix.pelo_socio ? `feito por ${esc(d.pix.pelo_socio)} em nome da empresa` : 'da empresa';
+  const precos = [...new Set(dias.map((l) => Number(l.valor_diaria) || 0))];
+  const formula = precos.length === 1
+    ? ` <span class="det">(${[inteiros.length ? `${inteiros.length} × ${numero(precos[0])}` : '', meios.length ? `${meios.length} × ${numero(precos[0] / 2)}` : '']
+      .filter(Boolean).join(' + ')})</span>` : '';
+  const qtd = [inteiros.length ? quantas(inteiros.length, 'diária', 'diárias') : '', meios.length ? quantas(meios.length, 'meia diária', 'meias diárias') : '']
+    .filter(Boolean).join(' e ') || 'Nenhuma diária';
+  const motivo = (l: LinhaDoExtrato) => (l.observacao ? ` <span class="det">(${esc(l.observacao)})</span>` : '');
+  const linhaDaConta = (op: string, texto: string, valor: number) =>
+    `<tr><td><span class="op">${op}</span>${texto}</td><td class="n">${brl(valor)}</td></tr>`;
+  const conta = [
+    anterior > 0.005 ? linhaDaConta('', `Saldo a receber de antes de ${dataBR(d.de)}`, anterior) : '',
+    anterior < -0.005 ? linhaDaConta('−', `Adiantamento recebido antes de ${dataBR(d.de)}`, -anterior) : '',
+    dias.length ? linhaDaConta('+', `${qtd}${formula}`, base) : '',
+    ...adicionais.map((l) => linhaDaConta('+', `Adicional em ${dataBR(l.data).slice(0, 5)}${motivo(l)}`, Number(l.extras))),
+    ...descontos.map((l) => linhaDaConta('−', `Desconto em ${dataBR(l.data).slice(0, 5)}${motivo(l)}`, Number(l.descontos))),
+    reembolsos.length ? linhaDaConta('+', `${ROTULO_REEMBOLSOS} <span class="det">(${esc(codigosDe(reembolsos))})</span>`, Number(d.reembolsos)) : '',
+    parciais.length ? linhaDaConta('−', `Pagamentos parciais já recebidos <span class="det">(${parciais.length}, lista abaixo)</span>`, somaParciais) : '',
+  ].join('');
+  const identificacao = d.pix.e2e ? ` · identificação ${esc(d.pix.e2e)}` : d.pix.conta ? ` · ${esc(d.pix.conta)}` : '';
+  const diaDoServico = (l: LinhaDoExtrato) =>
+    `<li><b>${dataBR(l.data).slice(0, 5)}</b> ${Number(l.fracao) === 1 ? 'diária' : 'meia diária'}${(Number(l.extras) || 0) > 0 ? ` <span class="mais">+ ${brl(Number(l.extras))}</span>` : ''}${(Number(l.descontos) || 0) > 0 ? ` <span class="menos">− ${brl(Number(l.descontos))}</span>` : ''}${l.os.length ? ` <span class="os">${esc(l.os.map((o) => o.numero).join(', '))}</span>` : ''}</li>`;
+  const pagamento = (l: LinhaDoExtrato) =>
+    `<li><b>${dataBR(l.data).slice(0, 5)}</b>${SOCIO.test(l.conta ?? '') ? '<span class="soc">pelo sócio</span>' : ''} <span class="v">${brl(Number(l.pago))}</span></li>`;
+  const reembolso = (l: LinhaDoExtrato) =>
+    `<li><b>${dataBR(l.data).slice(0, 5)}</b> <span class="os">${esc(l.conta ?? '')}</span> <span class="v">${brl(Number(l.trabalhado))}</span></li>`;
+  const porQue = [anterior > 0.005 ? 'pelo saldo de antes' : '', reembolsos.length ? `pelo ${ROTULO_REEMBOLSOS.toLowerCase()}` : '']
+    .filter(Boolean).join(' e ');
+  const recebimentos = [
+    parciais.length ? `${brl(somaParciais)} nos ${parciais.length} pagamentos parciais listados, feitos por conta destes serviços${socios.length ? ` (os marcados “pelo sócio” foram feitos por ${socios.map(esc).join(' e ')} em nome da empresa)` : ''}` : '',
+    anterior < -0.005 ? `${brl(-anterior)} adiantados antes de ${dataBR(d.de)}` : '',
+  ].filter(Boolean);
+  const declaracao = `Declaro que prestei à <b>${esc(d.empresa.nome)}</b>${d.empresa.cnpj ? `, CNPJ ${esc(documentoFormatado(d.empresa.cnpj))}` : ''}, como autônomo, os serviços listados neste recibo, de ${dataBR(d.de)} a ${dataBR(d.ate)}. Por eles${porQue ? ` e ${porQue}` : ''}, eu tinha a receber <b>${brl(devido)} (${esc(valorPorExtenso(devido))})</b>, que recebi por inteiro: ${recebimentos.length ? `${recebimentos.join(', ')}, e ` : ''}<b>${brl(pix)} (${esc(valorPorExtenso(pix))})</b> no Pix ${pelaEmpresa} de ${dataBR(d.pix.data)}${d.pix.e2e ? `, identificação ${esc(d.pix.e2e)}` : ''}. Nada mais tenho a receber pelos serviços prestados até ${dataBR(d.ate)}.`;
+  const cidade = [d.empresa.cidade, d.empresa.uf].filter(Boolean).join('/');
+  const cpf = d.prestador.cpf ? documentoFormatado(d.prestador.cpf) : '';
+  // Sem o "jaRecebido" a conta não fecha: o banco só fecha com saldo zero, mas o papel confere de novo.
+  const fecha = Math.abs(devido - jaRecebido - pix) < 0.005;
+
+  return `<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8">
+<title>Recibo de serviços nº ${n} — ${esc(d.prestador.nome)}</title>
+<style>
+  @page { size: A4; margin: 12mm; }
+  * { box-sizing: border-box; }
+  body { margin: 0; color: #1a1f2b; font: 12px/1.38 "Segoe UI", Arial, Helvetica, sans-serif; }
+  .aviso { font-size: 10px; color: #8a5a00; border: 1px dashed #c9a55a; border-radius: 6px; padding: 4px 8px; margin-bottom: 7px; }
+  header { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; border-bottom: 2px solid #1a1f2b; padding-bottom: 7px; }
+  h1 { font-size: 19px; margin: 0; }
+  .sub { color: #5b6474; margin-top: 2px; }
+  .emp { text-align: right; color: #5b6474; font-size: 10.5px; line-height: 1.4; }
+  .emp b { color: #1a1f2b; font-size: 12px; }
+  .quem { margin: 8px 0 10px; display: grid; grid-template-columns: 1.45fr 1fr 1fr; gap: 5px 18px; }
+  .rot { display: block; font-size: 9.5px; color: #5b6474; text-transform: uppercase; letter-spacing: .4px; }
+  .val { font-size: 12px; font-weight: 600; }
+  .conta { width: 100%; border-collapse: collapse; background: #f3f5f8; font-size: 13.5px; }
+  .conta td { padding: 4px 14px; }
+  .conta td.n { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .op { display: inline-block; width: 16px; color: #5b6474; font-weight: 700; }
+  .det { color: #5b6474; font-size: 11.5px; }
+  .conta .total td { border-top: 2px solid #1a1f2b; font-size: 17px; font-weight: 700; color: #0b3a66; padding-top: 7px; padding-bottom: 1px; }
+  .conta .pix td { font-size: 10.5px; color: #5b6474; padding-top: 0; padding-bottom: 7px; }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: #5b6474; margin: 10px 0 3px; }
+  ul.g { list-style: none; margin: 0; padding: 0; display: grid; gap: 0 14px; grid-template-columns: repeat(4, 1fr); }
+  ul.g li { padding: 1.5px 0; border-bottom: 1px solid #d9dde4; font-variant-numeric: tabular-nums; }
+  ul.g li b { font-weight: 600; margin-right: 4px; }
+  .mais { color: #0b3a66; font-weight: 600; }
+  .menos { color: #8a2b2b; font-weight: 600; }
+  .os, .soc { color: #5b6474; font-size: 10px; margin-left: 4px; }
+  .v { float: right; }
+  .soma { text-align: right; font-weight: 700; margin-top: 2px; }
+  .bloco { break-inside: avoid; page-break-inside: avoid; margin-top: 12px; border: 1.5px solid #1a1f2b; border-radius: 8px; padding: 11px 15px 10px; }
+  .bloco p { margin: 0 0 7px; font-size: 12px; line-height: 1.48; }
+  .fim { display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; margin-top: 18px; }
+  .data { font-size: 12px; white-space: nowrap; padding-bottom: 16px; }
+  .assina { flex: 1; border-top: 1px solid #1a1f2b; text-align: center; padding-top: 4px; font-size: 12px; }
+  .assina small { color: #5b6474; }
+  footer { margin-top: 6px; color: #5b6474; font-size: 10px; display: flex; justify-content: space-between; gap: 12px; }
+</style></head>
+<body>
+  ${p.liberado ? '' : `<div class="aviso">${AVISO_RECIBO_EM_CONFERENCIA}</div>`}
+  ${fecha ? '' : '<div class="aviso">A conta deste recibo não fecha: não imprima, reabra o acerto e confira.</div>'}
+  <header>
+    <div><h1>Recibo de pagamento de serviços nº ${n}</h1><div class="sub">Serviços de ${dataBR(d.de)} a ${dataBR(d.ate)}</div></div>
+    <div class="emp"><b>${esc(d.empresa.nome)}</b>${d.empresa.cnpj ? `<br>CNPJ ${esc(documentoFormatado(d.empresa.cnpj))}` : ''}${d.empresa.endereco ? `<br>${esc(d.empresa.endereco)}` : ''}${d.empresa.bairro || cidade ? `<br>${[d.empresa.bairro, cidade].filter(Boolean).map(esc).join(' · ')}` : ''}</div>
+  </header>
+  <div class="quem">
+    <div><span class="rot">Prestador (autônomo)</span><span class="val">${esc(d.prestador.nome)}</span></div>
+    <div><span class="rot">CPF</span><span class="val">${esc(cpf)}</span></div>
+    ${d.prestador.nit ? `<div><span class="rot">NIT/PIS</span><span class="val">${esc(d.prestador.nit)}</span></div>` : '<div></div>'}
+    <div><span class="rot">Serviço</span><span class="val">${esc(d.servico)}</span></div>
+    ${d.diaria != null ? `<div><span class="rot">Valor combinado</span><span class="val">diária ${brlCurto(Number(d.diaria))} · meia diária ${brlCurto(Number(d.diaria) / 2)}</span></div>` : ''}
+    ${d.prestador.pix ? `<div><span class="rot">Chave Pix do prestador</span><span class="val">${esc(d.prestador.pix)}</span></div>` : ''}
+  </div>
+  <table class="conta">
+    ${conta}
+    <tr class="total"><td><span class="op">=</span>Pago neste acerto, por Pix</td><td class="n">${brl(pix)}</td></tr>
+    <tr class="pix"><td colspan="2"><span class="op"></span>Pix de ${dataBR(d.pix.data)}${identificacao}</td></tr>
+  </table>
+  ${dias.length ? `<h2>Serviços prestados</h2>
+  <ul class="g">${dias.map(diaDoServico).join('')}</ul>` : ''}
+  ${reembolsos.length ? `<h2>${ROTULO_REEMBOLSOS}</h2>
+  <ul class="g">${reembolsos.map(reembolso).join('')}</ul>` : ''}
+  ${parciais.length ? `<h2>Pagamentos parciais já recebidos</h2>
+  <ul class="g">${parciais.map(pagamento).join('')}</ul>
+  <div class="soma">${parciais.length} ${parciais.length === 1 ? 'pagamento' : 'pagamentos'} · ${brl(somaParciais)}</div>` : ''}
+  <div class="bloco">
+    <p>${declaracao}</p>
+    <p>O original assinado fica com a empresa; recebo uma cópia.</p>
+    <div class="fim">
+      <div class="data">${esc(cidade || '')}${cidade ? ', ' : ''}____/____/________</div>
+      <div class="assina">${esc(d.prestador.nome)}<br><small>${cpf ? `CPF ${esc(cpf)} · ` : ''}assinatura e data de próprio punho</small></div>
+    </div>
+  </div>
+  <footer><span>Original na pasta do prestador, guardado por 10 anos.</span><span>Recibo nº ${n} · gerado em ${quandoEmBrasilia(p.geradoEm)}</span></footer>
+</body></html>`;
 }
 
 // ── CSV do contador ─────────────────────────────────────────────────────────────────────────
@@ -523,7 +703,7 @@ export function linhasDoCsv(contas: Array<{ conta: ContaDoExtrato; documento: st
       linhas.push({
         _ordem: `${l.data}|${ORDEM_NO_DIA[l.tipo] ?? 2}|${conta.favorecido.nome}`,
         data: dataBR(l.data),
-        tipo: dia ? 'Diária' : reembolso ? ROTULO_REEMBOLSO : l.aguardando ? 'Pagamento (aguardando o banco)' : 'Pagamento',
+        tipo: dia ? 'Diária' : reembolso ? ROTULO_REEMBOLSO : lancadoAMao(l) ? 'Pagamento (aguardando o banco)' : l.aguardando ? 'Pagamento (falta aprovar na fila)' : 'Pagamento',
         freelancer: conta.favorecido.nome,
         cpf: documentoFormatado(documento),
         jornada: dia ? tipoDoDia(l.jornada) : '',

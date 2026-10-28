@@ -43,6 +43,7 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   "update_service_order_status",
   "update_service_order_notes",
   "update_quote_status",
+  "converter_sem_sinal", // 27/10/2026: orçamento vira OS sem sinal, tudo na conclusão (pede o "sim")
   "duplicate_service_order",
   // 15/10/2026 (pedido do dono): agrupar orçamentos conversando — listar os candidatos (leitura), agrupar e
   // desagrupar (pedem o "sim"). No perfil enxuto do admin ficam FORA de PERFIL_ADMIN (teto de 113, que não
@@ -51,6 +52,11 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   "listar_orcamentos_para_agrupar",
   "agrupar_orcamentos",
   "desagrupar_orcamento",
+  // 28/10/2026 (pedido do dono): agrupar OS conversando — as mesmas três, para ordens de serviço. Também FORA de
+  // PERFIL_ADMIN (teto): o admin alcança pela ferramenta_extra (a leitura roda direto; as duas de escrita pedem o "sim").
+  "listar_os_para_agrupar",
+  "agrupar_os",
+  "desagrupar_os",
   "get_service_order_margin",
   "get_os_profitability",
   "present_options",
@@ -580,6 +586,10 @@ export const PERFIL_ADMIN: ReadonlySet<string> = new Set([
   //   pela ferramenta_extra (leitura pelo nome, RPC conferida em perfil-operacao_test.ts); agrupar_orcamentos e
   //   desagrupar_orcamento viram pendência; o "sim" (sino ou WhatsApp) executa por toolsByName, com o perfil
   //   que for.
+  // converter sem sinal (27/10/2026): fora da lista à vista (teto de 113). O admin alcança converter_sem_sinal
+  //   pela ferramenta_extra; vira pendência (risco médio) e o "sim" executa por toolsByName.
+  // agrupar OS (28/10/2026): idem — NENHUMA à vista; listar_os_para_agrupar roda direto pela ferramenta_extra (RPC
+  //   os_para_agrupar conferida em perfil-operacao_test.ts); agrupar_os e desagrupar_os viram pendência.
 ]);
 
 /**

@@ -104,10 +104,16 @@ Deno.test("ficha 360: OS aguardando cliente conta como em andamento", async () =
 const mudarStatus = serviceOrderTools.find((t) => t.name === "update_service_order_status")!;
 
 /** service_orders falso: a leitura do status atual e o update, gravados. Sem .catch, como o real. */
-function osFalsa(statusAtual: string, porta: Record<string, unknown> | null = null, opcoes: { leitura?: string; cargo?: string } = {}) {
+function osFalsa(
+  statusAtual: string,
+  porta: Record<string, unknown> | null = null,
+  opcoes: { leitura?: string; cargo?: string; atual?: Record<string, unknown>; semPorta?: boolean } = {},
+) {
+  const atual = opcoes.atual ?? { service_order_number: "OS-00104" };
   const updates: Record<string, unknown>[] = [];
   const rpcs: Array<{ nome: string; params: Record<string, unknown> }> = [];
   let leituras = 0;
+  let chamouSequencia = false;
   const from = () => {
     let upd: Record<string, unknown> | null = null;
     const b: Record<string, unknown> = {};
@@ -115,22 +121,25 @@ function osFalsa(statusAtual: string, porta: Record<string, unknown> | null = nu
     b.update = (p: Record<string, unknown>) => { upd = p; updates.push(p); return b; };
     b.then = (ok: (v: unknown) => unknown) => {
       if (!upd) leituras++;
-      const data = upd ? { id: "so1", ...upd } : { status: statusAtual, service_order_number: "OS-00104" };
+      const data = upd ? { id: "so1", ...upd } : { status: statusAtual, ...atual };
       return Promise.resolve({ data, error: null }).then(ok);
     };
     return b;
   };
-  // A porta única de status (Fase 2, P4): o que ela responde, e cada chamada gravada.
+  // A porta única de status (Fase 2, P4): o que ela responde, e cada chamada gravada. opcoes.semPorta: a porta completa
+  // ainda não está no banco (PGRST202) — o PLANO B de _shared/porta-ausente.ts.
   const sb = {
     from,
     rpc: (nome: string, params: Record<string, unknown>) => {
       rpcs.push({ nome, params });
+      if (opcoes.semPorta) return Promise.resolve({ data: null, error: { code: "PGRST202", message: "Could not find the function" } });
       return Promise.resolve({ data: porta ?? { ok: true, mudou: true, de: statusAtual, para: params.p_para, texto: "OS-00104: mudou." }, error: null });
     },
   };
-  // agenda_config.modo_leitura (revisão da Fase 2: em andamento → aguardando depende dela); sem a opção, a tabela falta
+  // agenda_config.modo_leitura (revisão da Fase 2: em andamento → aguardando depende dela); sem a opção, a tabela falta.
+  // admin.rpc é a sequência next_document_number (main, 28/10/2026): a conversão não pode puxar número novo.
   const admin = {
-    rpc: () => Promise.resolve({ data: 120, error: null }),
+    rpc: () => { chamouSequencia = true; return Promise.resolve({ data: 120, error: null }); },
     from: (t: string) => {
       const b: Record<string, unknown> = {};
       b.select = () => b;
@@ -140,8 +149,38 @@ function osFalsa(statusAtual: string, porta: Record<string, unknown> | null = nu
       return b;
     },
   };
-  return { ctx: { sb, admin, settings: {}, userId: "u-dono", userRole: opcoes.cargo ?? "admin" } as never, updates, rpcs, leituras: () => leituras };
+  return {
+    ctx: { sb, admin, settings: {}, userId: "u-dono", userRole: opcoes.cargo ?? "admin" } as never,
+    updates, rpcs, leituras: () => leituras, chamouSequencia: () => chamouSequencia,
+  };
 }
+
+// Teste do main (28/10/2026, "Assistente converte ORÇ em OS mantendo o número, como a tela"), trazido para o caminho da
+// agenda: com a porta completa a conversão é dela (teste "Fase 3: a conversão do orçamento…" abaixo); sem ela, o PLANO B
+// faz o UPDATE com o mesmo número, o valor orçado guardado e sem puxar a sequência.
+Deno.test("conversão ORÇ→OS mantém o número (como a tela) e guarda o valor orçado — sem puxar a sequência", async () => {
+  const orc = osFalsa("draft", null, { semPorta: true, atual: { service_order_number: "ORÇ-00042", converted_to_os_at: null, grand_total: 4200, original_quote_amount: null } });
+  const r = await mudarStatus.execute({ id: "so1", status: "approved" }, orc.ctx) as Record<string, any>;
+  assertEquals(r.ok, true);
+  assertEquals(orc.updates.length, 1);
+  const u = orc.updates[0];
+  assertEquals(u.status, "approved");
+  assertEquals(u.service_order_number, "OS-00042");
+  assertEquals(u.original_quote_amount, 4200);
+  assertEquals(typeof u.converted_to_os_at, "string");
+  assertEquals(orc.chamouSequencia(), false, "número novo da sequência desencontrava a OS do orçamento enviado");
+
+  // Valor orçado já guardado não é sobrescrito.
+  const comOrcado = osFalsa("draft", null, { semPorta: true, atual: { service_order_number: "ORÇ-00043", converted_to_os_at: null, grand_total: 5000, original_quote_amount: 4800 } });
+  await mudarStatus.execute({ id: "so1", status: "scheduled" }, comOrcado.ctx);
+  assertEquals("original_quote_amount" in comOrcado.updates[0], false);
+
+  // Pela porta, nem UPDATE nem sequência: a porta troca só o prefixo.
+  const pelaPorta = osFalsa("draft", { ok: true, mudou: true, de: "draft", para: "approved", convertido: true, numero: "OS-00042" },
+    { atual: { service_order_number: "ORÇ-00042" } });
+  await mudarStatus.execute({ id: "so1", status: "approved" }, pelaPorta.ctx);
+  assertEquals([pelaPorta.updates.length, pelaPorta.chamouSequencia()], [0, false]);
+});
 
 // FASE 3 (P3): concluir deixou de ser recusa — o execute devolve a instrução de os_registrar_andamento (a releitura e o
 // *grava* do dono) e nada é lido nem escrito. Cancelar continua recusado.

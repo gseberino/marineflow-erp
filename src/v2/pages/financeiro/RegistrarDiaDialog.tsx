@@ -17,7 +17,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { MoneyInput } from '@/components/MoneyInput';
 import { useI18n } from '@/i18n';
 import { hojeLocal } from '@/lib/dia';
-import { JORNADAS, datasDoIntervalo, valorDoDia, type Jornada } from '@/lib/diarias';
+import { datasDoIntervalo, jornadasParaLancar, valorDoDia, type Jornada } from '@/lib/diarias';
 import { useServiceOrdersVinculaveis } from '@/hooks/use-payees';
 import {
   useContaCorrente, useRegistrarDiaria, useRegistrarVariosDias, type DiaParaEditar, type FreelancerNoResumo,
@@ -55,6 +55,9 @@ export function RegistrarDiaDialog({ pessoas, favorecidoInicial, dataInicial, ed
   const [sabado, setSabado] = useState(false);
   const [domingo, setDomingo] = useState(false);
   const [jornada, setJornada] = useState<Jornada>(editar?.jornada ?? 'inteiro');
+  // F4 da revisão (27/10/2026): em 56 dias, OS em 0, extras em 7, descontos em 2 — os campos raros ficam
+  // atrás de "Mais detalhes" (abertos ao editar um dia, que pode já ter algum deles).
+  const [detalhes, setDetalhes] = useState(!!editar);
   const [osIds, setOsIds] = useState<string[]>(editar?.os.map((o) => o.id) ?? []);
   const [extras, setExtras] = useState<number>(editar?.extras ?? 0);
   const [descontos, setDescontos] = useState<number>(editar?.descontos ?? 0);
@@ -197,7 +200,7 @@ export function RegistrarDiaDialog({ pessoas, favorecidoInicial, dataInicial, ed
           <div className="space-y-1.5 sm:col-span-2">
             <span className="text-sm font-medium" id="dia-jornada">Jornada</span>
             <div className="flex flex-wrap gap-2" role="group" aria-labelledby="dia-jornada">
-              {JORNADAS.map((j) => (
+              {jornadasParaLancar(editar?.jornada).map((j) => (
                 <Button key={j.valor} type="button" size="sm" variant={jornada === j.valor ? 'default' : 'outline'}
                         aria-pressed={jornada === j.valor} onClick={() => setJornada(j.valor)}>
                   {j.rotulo}
@@ -206,6 +209,13 @@ export function RegistrarDiaDialog({ pessoas, favorecidoInicial, dataInicial, ed
             </div>
           </div>
 
+          {!detalhes ? (
+            <div className="sm:col-span-2">
+              <Button type="button" variant="link" size="sm" className="h-auto px-0" onClick={() => setDetalhes(true)}>
+                Mais detalhes (OS, valor do dia, extras, descontos, observação)
+              </Button>
+            </div>
+          ) : (<>
           <div className="space-y-1.5 sm:col-span-2">
             <Label htmlFor="dia-os">Em qual OS (opcional)</Label>
             {osIds.length > 0 && (
@@ -256,6 +266,7 @@ export function RegistrarDiaDialog({ pessoas, favorecidoInicial, dataInicial, ed
             <Textarea id="dia-obs" rows={2} value={observacao} onChange={(e) => setObservacao(e.target.value)}
                       placeholder="Serviço feito, obra, barco…" />
           </div>
+          </>)}
         </div>
 
         <DialogFooter className="flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

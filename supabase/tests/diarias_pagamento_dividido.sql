@@ -77,7 +77,11 @@ begin
   -- R1 dentro do acerto que vai fechar; R2..R6 depois dele (período aberto; R2 sozinho no dia, para a
   -- ordem da proposta não depender do empate em criado_em); R9 de outro técnico
   r1 := pg_temp._reemb(v_fav, 6, 62, 'CMP-99911', 'Combustível e deslocamento');
-  v_ac := public.fechar_acerto_diarias(v_fav, pg_temp._hoje() - 5, false, v_dono);
+  -- Um acerto do modelo antigo (fechado antes de pagar, como o nº 0004 de 26/10): desde 27/10 o
+  -- fechar_acerto_diarias só fecha no Pix que zera, então o de antes entra direto na tabela.
+  insert into public.acertos_diarias (favorecido_id, de, ate, saldo_anterior, dias, trabalhado, reembolsos, pago_no_periodo,
+                                      valor_do_acerto, criado_por)
+  values (v_fav, pg_temp._hoje() - 30, pg_temp._hoje() - 5, 0, 1, 300, 62, 0, 362, v_dono);
   r2 := pg_temp._reemb(v_fav, 2, 30, 'CMP-99912', null);
   r3 := pg_temp._reemb(v_fav, 1, 40, 'CMP-99913', 'Alimentação de campo');
   r4 := pg_temp._reemb(v_fav, 1, 25, 'CMP-99914', 'Combustível e deslocamento');

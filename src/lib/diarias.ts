@@ -22,13 +22,22 @@ export const JORNADAS: { valor: Jornada; rotulo: string; fracao: number }[] = [
   { valor: 'faltou', rotulo: 'Não trabalhou', fracao: 0 },
 ];
 
+/**
+ * O que se LANÇA (F5 da revisão de 24/10, 27/10/2026): falta não se lança mais — o dia sem trabalho só
+ * fica sem diária. "Não trabalhou" continua para ler (e corrigir) as linhas antigas.
+ */
+export function jornadasParaLancar(atual?: Jornada | null): typeof JORNADAS {
+  return JORNADAS.filter((j) => j.valor !== 'faltou' || atual === 'faltou');
+}
+
 export function rotuloDaJornada(j: Jornada | null | undefined): string {
   return JORNADAS.find((x) => x.valor === j)?.rotulo ?? '—';
 }
 
 export const ESTADO_DO_SALDO: Record<EstadoDoSaldo, { rotulo: string; classe: string }> = {
-  deve: { rotulo: 'Você deve', classe: 'text-destructive' },
-  adiantado: { rotulo: 'Adiantado', classe: 'text-sky-700 dark:text-sky-400' },
+  // F4 (27/10/2026): "A pagar" é o normal, em cor neutra; o vermelho fica para o adiantado (ele deve dias).
+  deve: { rotulo: 'A pagar', classe: 'text-foreground' },
+  adiantado: { rotulo: 'Adiantado', classe: 'text-destructive' },
   quitado: { rotulo: 'Quitado', classe: 'text-success' },
   semdias: { rotulo: 'Sem dias lançados', classe: 'text-amber-700 dark:text-amber-400' },
 };

@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
-  COLUNAS_DO_CSV, ROTULO_REEMBOLSO, ROTULO_REEMBOLSOS, descricaoDoReembolso, documentoFormatado, linhasDoCsv, montarExtratoHtml,
-  montarReciboHtml, nomeDoArquivo, textoDoPeriodo, valorPorExtenso,
-  type ContaDoExtrato, type LinhaDoExtrato,
+  AVISO_RECIBO_EM_CONFERENCIA, COLUNAS_DO_CSV, ROTULO_REEMBOLSO, ROTULO_REEMBOLSOS, descricaoDoReembolso, documentoFormatado, linhasDoCsv,
+  montarExtratoHtml, montarReciboDeServicosHtml, montarReciboHtml, nomeDoArquivo, textoDoPeriodo, valorPorExtenso,
+  type ContaDoExtrato, type DocumentoDoRecibo, type LinhaDoExtrato,
 } from './extrato-diarias';
 
 const conta = (o: Partial<ContaDoExtrato> = {}): ContaDoExtrato => ({
@@ -45,10 +45,9 @@ describe('extrato de diárias em PDF', () => {
     expect(html).toContain('Gerado em 29/09/2026 às 14:05');
   });
 
-  it('tem as duas linhas de assinatura: empresa e prestador, com o CPF', () => {
-    const assinaturas = html.slice(html.indexOf('<div class="assinaturas">'));
-    expect(assinaturas).toContain('HBR Marine Solutions');
-    expect(assinaturas).toContain('Roberto Daniel<br>CPF 123.456.789-40');
+  it('é consulta, sem assinatura: quem assina é o recibo de serviços (F2, 27/10/2026)', () => {
+    expect(html).not.toContain('class="assinaturas"');
+    expect(html).toContain('Extrato para conferência: não é recibo nem quitação');
   });
 
   it('não registra horário: é prestação por dia, não ponto', () => {
@@ -86,6 +85,17 @@ describe('extrato de diárias em PDF', () => {
     expect(h).toContain('ainda não confirmado pelo extrato do banco');
     expect(html).not.toContain('ainda não confirmado');
     expect(linhasDoCsv([{ conta: c, documento: null }]).filter((l) => l.tipo === 'Pagamento (aguardando o banco)')).toHaveLength(1);
+  });
+
+  it('Pix que o banco já trouxe e espera a fila: saiu de fato, sem a marca de "lançado à mão"', () => {
+    const c = conta();
+    c.linhas = [...c.linhas, { ...c.linhas[2], id: 'b1', aguardando: true, conta: 'No banco — falta aprovar na fila' }];
+    const h = montarExtratoHtml({ empresa: { nome: 'HBR', cnpj: null, cidade: null },
+      freelancer: { nome: 'Roberto', documento: null, pix: null }, conta: c, geradoEm: new Date() });
+    expect(h).toContain('Pix (extrato do banco)');
+    expect(h).not.toContain('Pix lançado à mão');
+    expect(h).not.toContain('ainda não confirmado');
+    expect(linhasDoCsv([{ conta: c, documento: null }]).filter((l) => l.tipo === 'Pagamento (falta aprovar na fila)')).toHaveLength(1);
   });
 });
 
@@ -318,5 +328,91 @@ describe('reembolso de comprovante no CSV do contador', () => {
   it('sem reembolso, as linhas da planilha não falam de reembolso', () => {
     const sem = linhasDoCsv([{ conta: conta(), documento: '12345678940' }]);
     expect(sem.every((l) => l.reembolso === '' && !/reembols/i.test(l.tipo))).toBe(true);
+  });
+});
+
+describe('recibo de pagamento de serviços (F2, 27/10/2026)', () => {
+  const dia = (data: string, fracao: number, o: Partial<LinhaDoExtrato> = {}): LinhaDoExtrato => ({
+    data, tipo: 'dia', id: `d${data}`, jornada: fracao === 1 ? 'inteiro' : fracao === 0.5 ? 'meio' : 'faltou', fracao, valor_diaria: 160,
+    extras: 0, descontos: 0, trabalhado: fracao * 160, pago: 0, descricao: null, conta: null, categoria: null, observacao: null, os: [],
+    saldo: 0, ...o,
+  });
+  const pag = (data: string, valor: number, conta: string, o: Partial<LinhaDoExtrato> & { quitacao?: boolean } = {}) => ({
+    data, tipo: 'pagamento' as const, id: `p${data}${valor}`, jornada: null, fracao: null, valor_diaria: null, extras: null, descontos: null,
+    trabalhado: 0, pago: valor, descricao: 'Pix enviado para Roberto', conta, categoria: 'Diárias de freelancers', observacao: null,
+    os: [], saldo: 0, ...o,
+  });
+  const documento = (o: Partial<DocumentoDoRecibo> = {}): DocumentoDoRecibo => ({
+    versao: 1,
+    empresa: { nome: 'HBR SYSTEMS LTDA', cnpj: '50057049000159', endereco: 'Rua Antonio Carlos Pereira Leão Filho, 645', bairro: 'São Vicente', cidade: 'Itajaí', uf: 'SC' },
+    prestador: { id: 'r', nome: 'Roberto Daniel Rodrigues Correa', cpf: '12345678940', nit: null, pix: null },
+    servico: 'Instalação e manutenção elétrica em embarcações',
+    diaria: 160,
+    pix: { id: 'q', data: '2026-10-24', valor: 650, conta: 'C6 - Conta PJ HBR', e2e: 'E2E123ABC', pelo_socio: null },
+    de: '2026-10-01', ate: '2026-10-23', pagos_ate: '2026-10-24',
+    saldo_anterior: 880, dias: 2.5, trabalhado: 420, reembolsos: 0, pago: 1300,
+    linhas: [
+      dia('2026-10-01', 1), dia('2026-10-02', 0.5), dia('2026-10-03', 0),
+      dia('2026-10-16', 1, { extras: 20, trabalhado: 180, observacao: 'almoço' }),
+      pag('2026-10-01', 550, 'Bolso de Gustavo Seberino da Silva'), pag('2026-10-06', 100, 'C6 - Conta PJ HBR'),
+      { ...pag('2026-10-24', 650, 'C6 - Conta PJ HBR'), id: 'q', quitacao: true },
+    ],
+    ...o,
+  });
+  const html = (o: Partial<DocumentoDoRecibo> = {}, liberado = true) =>
+    montarReciboDeServicosHtml({ numero: 1, documento: documento(o), liberado, geradoEm: new Date(Date.UTC(2026, 9, 24, 18, 0)) });
+
+  it('a conta de cima a baixo fecha no Pix: saldo de antes + diárias + adicional − parciais = Pix', () => {
+    const h = html();
+    expect(h).toContain('Recibo de pagamento de serviços nº 0001');
+    expect(h).toContain('Saldo a receber de antes de 01/10/2026');
+    expect(h).toContain('2 diárias e 1 meia diária <span class="det">(2 × 160 + 1 × 80)</span>');
+    expect(h).toContain('Adicional em 16/10 <span class="det">(almoço)</span>');
+    expect(h).toContain('Pagamentos parciais já recebidos <span class="det">(2, lista abaixo)</span>');
+    expect(h).toMatch(/Pago neste acerto, por Pix<\/td><td class="n">R\$\s650,00/);
+    expect(h).toContain('Pix de 24/10/2026 · identificação E2E123ABC');
+    expect(h).not.toContain('A conta deste recibo não fecha');
+  });
+
+  it('a declaração quita o total e amarra os parciais e o Pix, com o sócio nomeado', () => {
+    const h = html();
+    expect(h).toContain('Declaro que prestei à <b>HBR SYSTEMS LTDA</b>, CNPJ 50.057.049/0001-59, como autônomo');
+    expect(h).toContain('eu tinha a receber <b>R$ 1.300,00 (mil e trezentos reais)</b>');
+    expect(h).toContain('R$ 650,00 nos 2 pagamentos parciais listados');
+    expect(h).toContain('os marcados “pelo sócio” foram feitos por Gustavo Seberino da Silva em nome da empresa');
+    expect(h).toContain('<b>R$ 650,00 (seiscentos e cinquenta reais)</b> no Pix da empresa de 24/10/2026, identificação E2E123ABC');
+    expect(h).toContain('Nada mais tenho a receber pelos serviços prestados até 23/10/2026.');
+    expect(h.replace(/ /g, ' ')).toContain('Itajaí/SC, ____/____/________');
+  });
+
+  it('sem "falta": dia sem diária não aparece; sem "a informar": o que não há não sai', () => {
+    const h = html();
+    expect(h).not.toMatch(/03\/10/);
+    expect(h).not.toMatch(/faltou|falta\b/i);
+    expect(h).not.toContain('NIT/PIS');
+    expect(h).not.toContain('Chave Pix do prestador');
+    expect(h).not.toMatch(/a informar/i);
+    expect(html({ prestador: { ...documento().prestador, nit: '123.45678.90-1', pix: 'roberto@pix' } })).toContain('123.45678.90-1');
+  });
+
+  it('enquanto o dono não libera, o papel sai com o aviso de conferência', () => {
+    expect(html({}, false)).toContain(AVISO_RECIBO_EM_CONFERENCIA);
+    expect(html({}, true)).not.toContain(AVISO_RECIBO_EM_CONFERENCIA);
+  });
+
+  it('adiantamento de antes entra do lado do recebido; Pix do sócio diz quem fez', () => {
+    const h = html({
+      saldo_anterior: -100, pago: 300, pix: { ...documento().pix, valor: 300, e2e: null, pelo_socio: 'Gustavo Seberino da Silva' },
+      linhas: [dia('2026-10-01', 1), dia('2026-10-02', 1), dia('2026-10-03', 0.5), { ...pag('2026-10-24', 300, 'Bolso de Gustavo Seberino da Silva'), id: 'q', quitacao: true }],
+      trabalhado: 400,
+    });
+    expect(h).toContain('Adiantamento recebido antes de 01/10/2026');
+    expect(h).toContain('R$ 100,00 adiantados antes de 01/10/2026, e <b>R$ 300,00');
+    expect(h).toContain('no Pix feito por Gustavo Seberino da Silva em nome da empresa de 24/10/2026.');
+    expect(h).not.toContain('A conta deste recibo não fecha');
+  });
+
+  it('conta que não fecha avisa para não imprimir', () => {
+    expect(html({ pix: { ...documento().pix, valor: 600 } })).toContain('A conta deste recibo não fecha');
   });
 });

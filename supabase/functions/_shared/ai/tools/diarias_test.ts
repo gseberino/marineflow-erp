@@ -8,13 +8,14 @@ import { assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.
 import {
   dataDoDito, datasDoIntervalo, diaCurto, diariasTools, numeroDito, pagamentoQueSeDivide, paramsDoCadastro, periodoDito, reembolsosDitos,
   resolverDiaria, resolverPagamento, resumirAcerto, resumirCadastro, resumirDiaria, resumirDivisaoDoPagamento, resumirEnvioAoFreelancer,
-  resumirPagamento, textoDaDivisao,
+  resumirPagamento, textoDaDivisao, resolverLote, resumirLote, textoDaFilaSemIdentidade,
 } from "./diarias.ts";
 import { buildPendingSummary } from "../agent.ts";
 
 /** Banco falso: só o que as tools leem. `simulacao` é o que cadastrar_freelancer devolve simulando. */
 type Opcoes = {
   diaLancado?: boolean; cargo?: string; semTelefone?: boolean; semAcerto?: boolean; acertoReaberto?: boolean;
+  pendencias?: Record<string, unknown>[];
   simulacao?: { data?: unknown; error?: { message: string } };
   /** Agenda de Produção, Fase 2 (P4): o que agenda_os_do_dia devolve (o plano da pessoa no dia), ou o erro dela. */
   plano?: unknown[]; erroDoPlano?: string;
@@ -40,6 +41,7 @@ function admin(opcoes: Opcoes = {}) {
       { id: "s-out", name: "Outro Sócio", kind: "socio", active: true, app_user_id: null },
     ],
     app_users: [{ id: "u-dono", phone_normalized: opcoes.semTelefone ? null : "5547999990000" }],
+    ai_operator_pending_actions: opcoes.pendencias ?? [],
     acertos_diarias: opcoes.semAcerto ? [] : [
       { id: "ac-1", numero: 1, favorecido_id: "p-rob", de: "2026-09-01", ate: "2026-09-15", saldo_anterior: 0, dias: 10,
         trabalhado: 1600, pago_no_periodo: 600, valor_do_acerto: 1000, status: opcoes.acertoReaberto ? "reaberto" : "fechado" },
@@ -86,6 +88,7 @@ function ctx(opcoes: Opcoes = {}) {
     chamadas.push({ n, a });
     if (n === "registrar_diaria") return Promise.resolve({ data: { ok: true, acao: "criado", message: "Roberto · qui 24/09 · faltou · R$ 0,00 — registrado." }, error: null });
     if (n === "conta_corrente_freelancer") return Promise.resolve({ data: { saldo_final: 290, estado: "deve", dias: 12, trabalhado: 1820, pago: 1530, linhas: [] }, error: null });
+    if (n === "registrar_diarias_em_lote") return Promise.resolve({ data: { ok: true, quantos: (a.p_dias as unknown[]).length }, error: null });
     if (n === "apagar_diaria") return Promise.resolve({ data: { ok: true, apagado: {}, message: "Diária de Roberto em qui 24/09 apagada." }, error: null });
     if (n === "resumo_freelancers") return Promise.resolve({ data: { pessoas: [{ nome: "Roberto", dias: 12, trabalhado: 1980, pago: 1530, saldo_final: 450, estado: "deve" }] }, error: null });
     if (n === "cadastrar_freelancer") return Promise.resolve({ data: { ok: true, acao: "criado", message: "João Marcelo cadastrado: diária de R$ 150,00 desde ter 29/09." }, error: null });
@@ -115,15 +118,19 @@ Deno.test("nove ferramentas: as que gravam ou mandam a terceiro pedem confirmaç
   assertEquals(tool("enviar_extrato_freelancer").risk, "low");
   assertEquals((tool("registrar_pagamento_freelancer").input_schema as any).required, ["freelancer", "valor", "forma"]);
   for (const t of diariasTools) assertEquals(t.roles, ["admin", "financial"]);
-  assertEquals((tool("registrar_diaria").input_schema as any).required, ["freelancer", "jornada"]);
+  assertEquals((tool("registrar_diaria").input_schema as any).required, ["freelancer"]);
   assertEquals((tool("cadastrar_freelancer").input_schema as any).required, ["nome", "valor_diaria"]);
   // "manter" (07/10/2026): só extras/descontos do dia já lançado.
-  assertEquals((tool("registrar_diaria").input_schema as any).properties.jornada.enum, ["inteiro", "meio", "faltou", "apagar", "manter"]);
+  // F5 (27/10): "faltou" não se lança mais; F3: vários trechos em "dias".
+  assertEquals((tool("registrar_diaria").input_schema as any).properties.jornada.enum, ["inteiro", "meio", "apagar", "manter"]);
+  assertEquals((tool("registrar_diaria").input_schema as any).properties.dias.items.properties.jornada.enum, ["inteiro", "meio", "manter"]);
 });
 
 Deno.test("a descrição separa diária de pagamento, de hora de OS e de 'apagar'", () => {
   const d = tool("registrar_diaria").description;
-  assertStringIncludes(d, "'faltou' grava a ausência");
+  assertStringIncludes(d, "Dia que ele NÃO trabalhou não se lança");
+  assertStringIncludes(d, "UMA chamada com dias=[");
+  assertStringIncludes(d, "sem perguntar 'lanço?' antes");
   assertStringIncludes(d, "lancar_no_caixa");
   assertStringIncludes(d, "log_service_order_hours");
   assertStringIncludes(d, "ENGANO");
@@ -144,19 +151,22 @@ Deno.test("resolver: o nome acha só quem tem diária e está ativo; a data e a 
   assertStringIncludes(String((dataRuim as { error: string }).error), "Não entendi a data");
 });
 
-Deno.test("'o Roberto não veio hoje': grava a falta pela função do banco, sem OS e com quem pediu", async () => {
+Deno.test("'o Roberto não veio hoje': falta não se lança (F5, 27/10) — explica e não chama o banco", async () => {
   const { c, chamadas } = ctx();
-  const r = await tool("registrar_diaria").execute({ freelancer: "Roberto", jornada: "faltou" }, c as never) as Record<string, unknown>;
+  const r = await tool("registrar_diaria").execute({ freelancer: "Roberto", jornada: "faltou" }, c as never) as { error?: string };
+  assertStringIncludes(String(r.error), "Dia sem trabalho não se lança");
+  assertEquals(chamadas.length, 0);
+  assertStringIncludes(String(tool("registrar_diaria").preValidar!({ freelancer: "roberto", jornada: "faltou" }, {} as never)?.error), "Nada foi registrado");
+  assertStringIncludes(String(tool("registrar_diaria").preValidar!({ freelancer: "roberto", dias: [{ data: "21/09", jornada: "faltou" }] }, {} as never)?.error), "não se lança");
+});
+
+Deno.test("dia comum: grava pela função do banco, sem OS e com quem pediu; a resposta traz o saldo", async () => {
+  const { c, chamadas } = ctx();
+  const r = await tool("registrar_diaria").execute({ freelancer: "Roberto", jornada: "inteiro" }, c as never) as Record<string, unknown>;
   const reg = chamadas.find((x) => x.n === "registrar_diaria")!;
-  assertEquals(reg.a.p_favorecido_id, "p-rob");
-  assertEquals(reg.a.p_jornada, "faltou");
-  assertEquals(reg.a.p_os_ids, null);
-  assertEquals(reg.a.p_valor_diaria, null);
-  assertEquals(reg.a.p_origem, "agente");
-  assertEquals(reg.a.p_autor, "u-dono");
-  // A confirmação depois do "sim" traz o que foi gravado E o saldo com a pessoa.
-  assertStringIncludes(String(r.aviso), "faltou");
-  assertStringIncludes(String(r.aviso).replace(/ /g, " "), "Saldo com Roberto Daniel Rodrigues Correa: R$ 290,00 (você deve a ele)");
+  assertEquals([reg.a.p_favorecido_id, reg.a.p_jornada, reg.a.p_os_ids, reg.a.p_valor_diaria, reg.a.p_origem, reg.a.p_autor],
+    ["p-rob", "inteiro", null, null, "agente", "u-dono"]);
+  assertStringIncludes(String(r.aviso).replace(/\u00a0/g, " "), "Saldo com Roberto Daniel Rodrigues Correa: R$ 290,00 (você deve a ele)");
 });
 
 Deno.test("'apagar' só apaga o dia que existe; sem dia lançado, avisa e não chama o banco", async () => {
@@ -368,12 +378,12 @@ Deno.test("dia da semana é o mais recente até hoje; o intervalo pula sábado e
 
 Deno.test("resolver com data_ate: lista os dias; invertido, futuro, grande demais e apagar em lote viram pergunta", async () => {
   const { c } = ctx();
-  const p = await resolverDiaria(c as never, { freelancer: "mickael", jornada: "faltou", data: "19/09/2026", data_ate: "25/09/2026" });
+  const p = await resolverDiaria(c as never, { freelancer: "mickael", jornada: "inteiro", data: "19/09/2026", data_ate: "25/09/2026" });
   if ("error" in p) throw new Error(p.error);
   assertEquals(p.intervalo, true);
   assertEquals(p.datas, ["2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24", "2026-09-25"]);
 
-  const erro = async (a: Record<string, unknown>) => String(((await resolverDiaria(c as never, { freelancer: "mickael", jornada: "faltou", ...a })) as { error?: string }).error);
+  const erro = async (a: Record<string, unknown>) => String(((await resolverDiaria(c as never, { freelancer: "mickael", jornada: "inteiro", ...a })) as { error?: string }).error);
   assertStringIncludes(await erro({ data: "25/09/2026", data_ate: "19/09/2026" }), "invertido");
   assertStringIncludes(await erro({ data: "25/09/2026", data_ate: "31/12/2099" }), "futuro");
   assertStringIncludes(await erro({ data: "01/01/2026", data_ate: "30/06/2026" }), "grande demais");
@@ -384,7 +394,7 @@ Deno.test("resolver com data_ate: lista os dias; invertido, futuro, grande demai
 Deno.test("vários dias: registra só os que faltam — o dia já lançado no meio fica como está", async () => {
   const { c, chamadas } = ctx({ diaLancado: true }); // 24/09 já tem meio período do Roberto
   const r = await tool("registrar_diaria").execute(
-    { freelancer: "roberto", jornada: "faltou", data: "21/09/2026", data_ate: "25/09/2026" }, c as never) as Record<string, any>;
+    { freelancer: "roberto", jornada: "inteiro", data: "21/09/2026", data_ate: "25/09/2026" }, c as never) as Record<string, any>;
   const registradas = chamadas.filter((x) => x.n === "registrar_diaria").map((x) => x.a.p_data);
   assertEquals(registradas, ["2026-09-21", "2026-09-22", "2026-09-23", "2026-09-25"]);
   assertEquals(r.registrados, registradas);
@@ -407,7 +417,7 @@ Deno.test("jornada 'apagar' com data_ate é recusada antes de virar pendência",
 
 // ── Valor dito para o dia ("na quarta foram 130") — pedido do dono, 01/10/2026 ──
 
-Deno.test("valor dito: vai para o banco só nesse dia, aparece na confirmação; falta ignora o valor", async () => {
+Deno.test("valor dito: vai para o banco só nesse dia, aparece na confirmação; apagar ignora o valor", async () => {
   assertEquals(numeroDito(130), 130);
   assertEquals(numeroDito("130,00"), 130);
   assertEquals(numeroDito("R$ 1.300,50"), 1300.5);
@@ -421,9 +431,9 @@ Deno.test("valor dito: vai para o banco só nesse dia, aparece na confirmação;
   assertStringIncludes(txt, "*dia inteiro* · R$ 150,00");
   assertStringIncludes(txt, "Diária desse dia: R$ 150,00 (a do cadastro é R$ 130,00).");
 
-  const falta = await resolverDiaria(c as never, { freelancer: "mickael", jornada: "faltou", valor_diaria: 150 });
-  if ("error" in falta) throw new Error(falta.error);
-  assertEquals(falta.valorDiaria, null);
+  const apagar = await resolverDiaria(c as never, { freelancer: "mickael", jornada: "apagar", valor_diaria: 150 });
+  if ("error" in apagar) throw new Error(apagar.error);
+  assertEquals(apagar.valorDiaria, null);
   const ruim = await resolverDiaria(c as never, { freelancer: "mickael", jornada: "inteiro", valor_diaria: "muito" });
   assertStringIncludes(String((ruim as { error: string }).error), "valor do dia");
 });
@@ -494,12 +504,20 @@ Deno.test("acerto: fechar chama a função do banco com quem pediu; a confirmaç
   assertStringIncludes(String(r.aviso), "travados");
 
   const txt = String(await resumirAcerto(ctx({ simulacao: { data: {
-    de: "2026-09-16", ate: "2026-10-01", dias: 2.5, trabalhado: 400, saldo_anterior: 0, pago_no_periodo: 100, valor_do_acerto: 300, pago_aguardando_banco: 100,
+    ok: true, travas: [], de: "2026-09-16", ate: "2026-10-01", dias: 2.5, trabalhado: 400, saldo_anterior: 0, pago_no_periodo: 100,
+    valor_do_acerto: 300, pix: { id: "px", data: "2026-10-02", valor: 300 },
   } } }).c as never, { freelancer: "roberto" })).replace(/\u00a0/g, " ");
-  assertStringIncludes(txt, "Fechar acerto de *Roberto Daniel Rodrigues Correa*: 16/09 a 01/10");
-  assertStringIncludes(txt, "2,5 diária(s) = R$ 400,00 · vales já pagos R$ 100,00");
-  assertStringIncludes(txt, "*A pagar neste acerto: R$ 300,00*");
-  assertStringIncludes(txt, "Pix lançados à mão");
+  assertStringIncludes(txt, "Recibo de *Roberto Daniel Rodrigues Correa*: serviços de 16/09 a 01/10");
+  assertStringIncludes(txt, "2,5 diária(s) = R$ 400,00 · já recebido R$ 100,00");
+  assertStringIncludes(txt, "*Pix de 02/10 que quita: R$ 300,00*");
+
+  // F2 (27/10): com trava, a confirmação diz todas as frases do banco e que vai recusar
+  const travado = String(await resumirAcerto(ctx({ simulacao: { data: {
+    ok: false, travas: ["Falta o CPF de Roberto no cadastro.", "Pix de 10/10 (R$ 510,00) está na fila: aprove antes do recibo."],
+  } } }).c as never, { freelancer: "roberto" }));
+  assertStringIncludes(travado, "• Falta o CPF de Roberto no cadastro.");
+  assertStringIncludes(travado, "• Pix de 10/10 (R$ 510,00) está na fila: aprove antes do recibo.");
+  assertStringIncludes(travado, "o sistema vai recusar");
 
   const recusa = String(await resumirAcerto(ctx({ simulacao: { error: { message: "P0001: Nada a fechar: o acerto nº 0001 de Roberto já vai até 15/09." } } }).c as never, { freelancer: "roberto" }));
   assertStringIncludes(recusa, "⚠️ Nada a fechar");
@@ -543,14 +561,15 @@ Deno.test("F2b consultar: o reembolso é a favor dele (com o código do CMP), n�
 
 Deno.test("F2b acerto: a confirmação diz os reembolsos (antes dos vales) só quando há", async () => {
   const simular = (reembolsos: number | undefined) => ctx({ simulacao: { data: {
-    de: "2026-09-16", ate: "2026-10-01", dias: 1, trabalhado: 300, saldo_anterior: 0, reembolsos, pago_no_periodo: 100, valor_do_acerto: 262,
+    ok: true, travas: [], de: "2026-09-16", ate: "2026-10-01", dias: 1, trabalhado: 300, saldo_anterior: 0, reembolsos, pago_no_periodo: 100,
+    valor_do_acerto: 262, pix: { id: "px", data: "2026-10-02", valor: 262 },
   } } }).c;
   const com = String(await resumirAcerto(simular(62) as never, { freelancer: "roberto" })).replace(/ /g, " ");
-  assertStringIncludes(com, "1 diária(s) = R$ 300,00 · reembolso de despesas pagas pelo técnico R$ 62,00 · vales já pagos R$ 100,00");
-  assertStringIncludes(com, "*A pagar neste acerto: R$ 262,00*");
+  assertStringIncludes(com, "1 diária(s) = R$ 300,00 · reembolso de despesas pagas pelo técnico R$ 62,00 · já recebido R$ 100,00");
+  assertStringIncludes(com, "*Pix de 02/10 que quita: R$ 262,00*");
   for (const sem of [0, undefined]) {
     const txt = String(await resumirAcerto(simular(sem) as never, { freelancer: "roberto" })).replace(/ /g, " ");
-    assertStringIncludes(txt, "1 diária(s) = R$ 300,00 · vales já pagos R$ 100,00");
+    assertStringIncludes(txt, "1 diária(s) = R$ 300,00 · já recebido R$ 100,00");
     assertEquals(txt.includes("reembolso"), false);
   }
 });
@@ -837,4 +856,75 @@ Deno.test("agenda P4: a função ainda não aplicada não muda o resumo nem regi
   assertEquals(r2!.includes("A agenda já lançou"), false);
   const log = (quebrou.c.admin as any).simuladas.find((s: any) => s.n === "log_app_error");
   assertEquals([log.p_context, log.p_action, log.p_level], ["agenda", "diaria:da_agenda", "warn"]);
+});
+
+// ── F3 (27/10/2026): a semana numa confirmação só; PDF só depois do "sim"; Pix sem identidade ──
+
+Deno.test("lote: trechos de jornadas diferentes viram UMA confirmação, com o total e cada trecho", async () => {
+  const txt = String(await resumirDiaria(ctx().c as never, { freelancer: "roberto", dias: [
+    { data: "21/09/2026", data_ate: "24/09/2026", jornada: "inteiro" },
+    { data: "25/09/2026", jornada: "meio", observacao: "lancha do Marcelo" },
+    { data: "26/09/2026", jornada: "inteiro", extras: 20 },
+  ] })).replace(/\u00a0/g, " ");
+  assertStringIncludes(txt, "Registrar diárias de *Roberto Daniel Rodrigues Correa*: 6 dia(s) · R$ 900,00");
+  assertStringIncludes(txt, "• seg 21/09 a qui 24/09 (4 dias, só dias úteis) · dia inteiro · R$ 160,00 cada");
+  assertStringIncludes(txt, "• sex 25/09 · meio período · R$ 80,00 · lancha do Marcelo");
+  assertStringIncludes(txt, "• sáb 26/09 · dia inteiro · R$ 180,00 (extras R$ 20,00)");
+});
+
+Deno.test("lote: dia já lançado num intervalo fica; dito sozinho, corrige; dia repetido e apagar viram pergunta", async () => {
+  const txt = String(await resumirLote(ctx({ diaLancado: true }).c as never, { freelancer: "roberto", dias: [
+    { data: "21/09/2026", data_ate: "25/09/2026", jornada: "inteiro" },
+  ] })).replace(/\u00a0/g, " ");
+  assertStringIncludes(txt, "Já lançados, ficam como estão: 24/09 (meio período).");
+  const corrige = String(await resumirLote(ctx({ diaLancado: true }).c as never, { freelancer: "roberto", dias: [
+    { data: "24/09/2026", jornada: "inteiro" }, { data: "25/09/2026", jornada: "meio" },
+  ] })).replace(/\u00a0/g, " ");
+  assertStringIncludes(corrige, "vão ser corrigidos (não duplicados): 24/09 (era meio período, R$ 80,00)");
+  const repetido = await resolverLote(ctx().c as never, { freelancer: "roberto", dias: [
+    { data: "21/09/2026", data_ate: "25/09/2026", jornada: "inteiro" }, { data: "23/09/2026", jornada: "meio" },
+  ] });
+  assertStringIncludes(String((repetido as { error: string }).error), "aparece em dois trechos");
+  const apagar = await resolverLote(ctx().c as never, { freelancer: "roberto", dias: [{ data: "21/09/2026", jornada: "apagar" }] });
+  assertStringIncludes(String((apagar as { error: string }).error), "Apagar é um dia de cada vez");
+});
+
+Deno.test("lote: grava numa chamada só (registrar_diarias_em_lote) só os dias que entram, e diz o saldo", async () => {
+  const { c, chamadas } = ctx({ diaLancado: true });
+  const r = await tool("registrar_diaria").execute({ freelancer: "roberto", dias: [
+    { data: "21/09/2026", data_ate: "25/09/2026", jornada: "inteiro" }, { data: "26/09/2026", jornada: "meio" },
+  ] }, c as never) as Record<string, any>;
+  const lote = chamadas.filter((x) => x.n === "registrar_diarias_em_lote");
+  assertEquals(lote.length, 1);
+  assertEquals(chamadas.filter((x) => x.n === "registrar_diaria").length, 0);
+  assertEquals((lote[0].a.p_dias as any[]).map((d) => [d.data, d.jornada]),
+    [["2026-09-21", "inteiro"], ["2026-09-22", "inteiro"], ["2026-09-23", "inteiro"], ["2026-09-25", "inteiro"], ["2026-09-26", "meio"]]);
+  assertEquals("item" in (lote[0].a.p_dias as any[])[0], false, "só os campos do banco");
+  assertEquals(lote[0].a.p_autor, "u-dono");
+  assertStringIncludes(String(r.aviso), "5 dia(s) registrado(s): 21/09, 22/09, 23/09, 25/09, 26/09.");
+  assertStringIncludes(String(r.aviso), "Já lançados, mantidos: 24/09 (meio período).");
+  assertStringIncludes(String(r.aviso), "Saldo com Roberto");
+});
+
+Deno.test("PDF só depois do sim: com lançamento da pessoa esperando, extrato e recibo não saem", async () => {
+  const pendencias = [{ id: "pa1", status: "pending", action_name: "registrar_diaria", payload: { freelancer: "Roberto" }, expires_at: "2999-01-01T00:00:00Z" }];
+  const { c, chamadas } = ctx({ pendencias });
+  const r = await tool("enviar_extrato_freelancer").execute({ freelancer: "roberto" }, c as never) as { error?: string };
+  assertStringIncludes(String(r.error), "esperando o seu \"sim\": o PDF sai depois que você confirmar");
+  assertEquals(chamadas.length, 0);
+  const r2 = await tool("enviar_acerto_ao_freelancer").execute({ freelancer: "roberto" }, c as never) as { error?: string };
+  assertStringIncludes(String(r2.error), "Não mandei nada");
+  // pendência de OUTRA pessoa, ou vencida, não trava
+  const outra = ctx({ pendencias: [{ ...pendencias[0], payload: { freelancer: "João" } }, { ...pendencias[0], id: "pa2", expires_at: "2000-01-01T00:00:00Z" }] });
+  const r3 = await tool("enviar_acerto_ao_freelancer").execute({ freelancer: "roberto" }, outra.c as never) as { error?: string };
+  assertEquals(String(r3.error ?? "").includes("esperando"), false);
+});
+
+Deno.test("Pix na fila em outro nome: não afirma que é de outra pessoa; diz o que fazer", () => {
+  const t = textoDaFilaSemIdentidade({ freelancer: { id: "p-joa", nome: "João Marcelo", perfis: [] }, valor: 310 }, "JOAO MARCELO RODRIGUES CORREA").replace(/\u00a0/g, " ");
+  assertEquals(/é de outro/.test(t), false);
+  assertStringIncludes(t, "já desconta no saldo dele");
+  assertStringIncludes(t, "o nome do extrato não identifica a pessoa");
+  assertStringIncludes(t, "aprove-a na fila como diária dele: a anotação sai sozinha");
+  assertStringIncludes(t, "ponha o CPF dele no cadastro");
 });

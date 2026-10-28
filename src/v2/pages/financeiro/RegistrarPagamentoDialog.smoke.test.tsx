@@ -20,7 +20,7 @@ vi.mock('@/hooks/use-payees', () => ({ usePayees: () => ({ data: [{ id: 's1', na
 
 const roberto: FreelancerNoResumo = {
   id: 'r', nome: 'Roberto Daniel', diaria: 160, desde: '2026-08-25', dias: 3, trabalhado: 480, pago: 0, reembolsos: 92,
-  ultimo_pagamento: null, saldo_final: 572, estado: 'deve', de: null, ate: null, pago_aguardando_banco: 0,
+  ultimo_pagamento: null, saldo_final: 572, estado: 'deve', de: null, ate: null, pago_aguardando_banco: 0, pago_falta_aprovar: 0,
 };
 
 /** Os reembolsos em aberto do Roberto (o do acerto nº 0007 primeiro, por data). */

@@ -85,6 +85,10 @@ ACRESCENTADAS.push("listar_orcamentos_para_agrupar", "agrupar_orcamentos", "desa
 // agenda de produção (24/10/2026, Fase 1, P5): a leitura da agenda de produção do dono (só admin, pelos roles). As três
 // que anotam o rascunho ficam em SO_PELA_REDE (rodam direto: ESCRITAS_VERIFICADAS_DA_REDE).
 ACRESCENTADAS.push("agenda_ver");
+// converter sem sinal (27/10/2026, pedido do dono): orçamento vira OS com tudo na conclusão.
+ACRESCENTADAS.push("converter_sem_sinal");
+// agrupar OS (28/10/2026, pedido do dono): as mesmas três, para ordens de serviço.
+ACRESCENTADAS.push("listar_os_para_agrupar", "agrupar_os", "desagrupar_os");
 // 06/10/2026: levantamento e roteiro de execução — escondidos da tela em 05/10 (chave
 // roteiro_execucao_visivel); o prompt deixou de ensinar as duas seções.
 const REMOVIDAS = ["registrar_jornada", "fechar_jornada", "minhas_horas", "apurar_pagamento",
@@ -270,6 +274,9 @@ const RPC_SO_LEITURA_CONFERIDAS = new Set([
   // Agrupar orçamentos (15/10/2026): a leitura de listar_orcamentos_para_agrupar, conferida no texto da
   // migration 20261015181000 (teste abaixo).
   "orcamentos_para_agrupar",
+  // Agrupar OS (28/10/2026): a leitura de listar_os_para_agrupar, conferida no texto da migration que a cria
+  // (teste abaixo).
+  "os_para_agrupar",
 ]);
 
 /** O corpo ($$ … $$) da função `nome` no texto da migration, sem comentários, em minúsculas. */
@@ -301,6 +308,58 @@ Deno.test("orcamentos_para_agrupar só lê: stable, sem insert/update/delete e s
     Deno.readTextFileSync(new URL("20261015180000_agrupar_orcamentos.sql", dir)), "_orcamento_vinculos_que_prendem");
   assertEquals(/\bstable\b/.test(vinculos.cabecalho), true, "_orcamento_vinculos_que_prendem deixou de ser stable");
   assertEquals(/\b(insert\s+into|update\s+public\.|delete\s+from|perform\s+)/.test(vinculos.corpo), false, "_orcamento_vinculos_que_prendem grava");
+  // A versão que vale é a da ÚLTIMA migration que a recria (agrupar OS, 28/10/2026, mudou só o filtro por tipo):
+  // a mesma régua vale para ela.
+  const atual = corpoDaFuncao(ultimaMigrationQueCria("orcamentos_para_agrupar")!, "orcamentos_para_agrupar");
+  assertEquals(/\bas\s+\$[a-z_]*\$\s*$/.test(atual.cabecalho.trimEnd()), true,
+    "a versão atual de orcamentos_para_agrupar não abre o corpo com $$ (um 'as $' solto quebra a migration)");
+  assertEquals(/\bstable\b/.test(atual.cabecalho) && /security\s+definer/.test(atual.cabecalho), true, "a versão atual tem de ser stable e security definer");
+  assertEquals(/\b(insert\s+into|update\s+public\.|delete\s+from|perform\s+)/.test(atual.corpo), false, "a versão atual de orcamentos_para_agrupar grava");
+  assertEquals([...new Set([...atual.corpo.matchAll(/public\.([a-z_0-9]+)\s*\(/g)].map((m) => m[1]))].sort(),
+    ["_orcamento_vinculos_que_prendem", "calc_so_totals", "is_admin_or_financial"]);
+});
+
+/**
+ * os_para_agrupar (agrupar OS, 28/10/2026): a leitura que a listar_os_para_agrupar chama e que a rede do admin
+ * roda direto. A ÚLTIMA migration que cria a função (as de agrupar OS foram escritas em paralelo; a assinatura
+ * pode ser recriada) tem de ser stable + security definer, não gravar, e só chamar funções que também só leem:
+ * as já conferidas acima ou as que alguma migration cria como stable/immutable sem insert/update/delete.
+ */
+const DIR_DAS_MIGRATIONS = new URL("../../../migrations/", import.meta.url);
+const criaAFuncao = (nome: string) => new RegExp(`create\\s+or\\s+replace\\s+function\\s+public\\.${nome}\\s*\\(`, "i");
+/** O texto da última migration (pela ordem do nome) que cria public.`nome`, ou null. */
+function ultimaMigrationQueCria(nome: string): string | null {
+  const arquivos = [...Deno.readDirSync(DIR_DAS_MIGRATIONS)].filter((e) => e.isFile && e.name.endsWith(".sql")).map((e) => e.name).sort();
+  for (const a of arquivos.reverse()) {
+    const sql = Deno.readTextFileSync(new URL(a, DIR_DAS_MIGRATIONS));
+    if (criaAFuncao(nome).test(sql.replace(/--[^\n]*/g, ""))) return sql;
+  }
+  return null;
+}
+const GRAVA = /\b(insert\s+into|update\s+public\.|delete\s+from|perform\s+)/;
+const LEITURAS_JA_CONFERIDAS = new Set(["is_admin_or_financial", "calc_so_totals", "_orcamento_vinculos_que_prendem"]);
+const migrationDaLeituraDeOS = ultimaMigrationQueCria("os_para_agrupar");
+
+Deno.test({
+  name: "os_para_agrupar só lê: stable, sem insert/update/delete e só chama funções de leitura",
+  // Enquanto o pacote BANCO não escreveu a migration, fica ignorado; no fechamento ela existe e roda.
+  ignore: !migrationDaLeituraDeOS,
+  fn() {
+    const { cabecalho, corpo } = corpoDaFuncao(migrationDaLeituraDeOS!, "os_para_agrupar");
+    assertEquals(/\bas\s+\$[a-z_]*\$\s*$/.test(cabecalho.trimEnd()), true, "os_para_agrupar não abre o corpo com $$");
+    assertEquals(corpo.length > 200, true, "corpo da função vazio — o recorte quebrou?");
+    assertEquals(/\bstable\b/.test(cabecalho) && /security\s+definer/.test(cabecalho), true, "a leitura tem de ser stable e security definer");
+    assertEquals(GRAVA.test(corpo), false, "os_para_agrupar grava");
+    const chamadas = new Set([...corpo.matchAll(/public\.([a-z_0-9]+)\s*\(/g)].map((m) => m[1]));
+    for (const f of chamadas) {
+      if (LEITURAS_JA_CONFERIDAS.has(f)) continue;
+      const sql = ultimaMigrationQueCria(f);
+      assertEquals(!!sql, true, `os_para_agrupar chama public.${f}, que nenhuma migration do repositório cria — confira à mão`);
+      const g = corpoDaFuncao(sql!, f);
+      assertEquals(/\b(stable|immutable)\b/.test(g.cabecalho), true, `public.${f} (chamada por os_para_agrupar) não é stable`);
+      assertEquals(GRAVA.test(g.corpo), false, `public.${f} (chamada por os_para_agrupar) grava`);
+    }
+  },
 });
 
 /**

@@ -280,10 +280,20 @@ const SITUACAO_LABELS: Record<string, string> = {
   approved: "Aprovado", awaiting_deposit: "Aguardando sinal", rejected: "Reprovado",
 };
 
-/** Origem de agrupamento (agrupar_orcamentos grava "Agrupado em ORÇ-00125 (reúne …)"): o número do agrupado. */
+/**
+ * Origem de agrupamento: o número do agrupado. agrupar_orcamentos grava "Agrupado em ORÇ-00125 (reúne …)" e,
+ * desde 28/10/2026, agrupar_os grava "Agrupada em OS-00131 (reúne …)".
+ */
 export function agrupadoEm(so: { status?: unknown; cancellation_reason?: unknown }): string | undefined {
   if (so?.status !== "cancelled" || typeof so.cancellation_reason !== "string") return undefined;
-  return so.cancellation_reason.match(/^Agrupado em (\S+)/)?.[1];
+  return so.cancellation_reason.match(/^Agrupad[oa] em ([^\s.,;:()]+)/)?.[1];
+}
+
+/** A origem agrupada é uma OS (agrupar_os: "Agrupada em OS-…"), não um orçamento. */
+export function ehOsAgrupada(so: { status?: unknown; cancellation_reason?: unknown }): boolean {
+  const destino = agrupadoEm(so);
+  if (!destino) return false;
+  return /^Agrupada em /.test(String(so.cancellation_reason)) || /^OS-/i.test(destino);
 }
 
 export interface FiltroDaListagem {
@@ -513,7 +523,8 @@ export const serviceOrderTools: ToolDef[] = [
         numero: so.service_order_number,
         // Origem de um agrupamento (15/10/2026) fica cancelada com o motivo "Agrupado em ORÇ-…": não é OS.
         // Lido do motivo (coluna antiga), não de merged_into_id: a listagem não depende da migration nova.
-        tipo: so.status === "draft" ? "Orçamento" : agrupadoEm(so) ? "Orçamento agrupado" : "OS",
+        // Origem de OS agrupada (28/10/2026): "Agrupada em OS-…" — é "OS agrupada", e vale a OS do agrupado_em.
+        tipo: so.status === "draft" ? "Orçamento" : ehOsAgrupada(so) ? "OS agrupada" : agrupadoEm(so) ? "Orçamento agrupado" : "OS",
         ...(agrupadoEm(so) ? { agrupado_em: agrupadoEm(so) } : {}),
         status: STATUS_LABELS[so.status] || so.status,
         status_raw: so.status,
@@ -743,6 +754,7 @@ export const serviceOrderTools: ToolDef[] = [
     name: "update_service_order_status",
     description:
       "Altera o status de uma OS/orçamento. IMPORTANTE: ao aprovar um orçamento (draft → outro status), o sistema automaticamente renomeia o número de ORÇ-XXXXX para OS-XXXXX. " +
+      "Orçamento que vira OS SEM sinal, com tudo pago na conclusão, é converter_sem_sinal (troca a condição junto) — não esta. " +
       "O que ela NÃO faz: NÃO conclui (concluir grava a saída e lança as cobranças da condição: é os_registrar_andamento, evento concluiu, com o trecho do dono, que deixa a releitura para o *grava* dele; pedir completed aqui devolve essa instrução e nada muda), NÃO cancela (cancelar é cancel_service_order, que estorna estoque, cobranças e pagamentos; pedir cancelled aqui é recusado) e NÃO fatura OS que ainda não foi concluída (faturar é só do administrador). " +
       "Fronteira com os_registrar_andamento: a OS que JÁ COMEÇOU e parou (\"o Nelson parou, falta a peça\") é os_registrar_andamento (evento parou, motivo material ou cliente, trecho) quando a agenda de produção está ligada; com ela desligada, é aqui, com status awaiting_parts ou awaiting_client e motivo = o porquê que o dono disse.",
     input_schema: {
@@ -783,7 +795,7 @@ export const serviceOrderTools: ToolDef[] = [
 
       const { data: current, error: erroAtual } = await sb
         .from("service_orders")
-        .select("status, service_order_number")
+        .select("status, service_order_number, converted_to_os_at, grand_total, original_quote_amount")
         .eq("id", args.id)
         .maybeSingle();
       if (erroAtual) throw erroAtual;

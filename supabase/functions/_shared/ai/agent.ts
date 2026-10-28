@@ -12,6 +12,8 @@ import { resumirExclusaoDeOC, resumirRecebimento } from "./tools/compras-ciclo.t
 import { resumirLembreteDeRevisao, TITULOS_DOS_PLANOS } from "./tools/planos-manutencao.ts";
 // agrupar orçamentos (15/10/2026): o resumo lê o banco e vira PERGUNTA (recusa) quando há reprovado/inelegível.
 import { resumirAgrupamento, resumirDesagrupamento } from "./tools/agrupar-orcamentos.ts";
+// agrupar OS (28/10/2026): o mesmo para ordens de serviço — o impedimento (já começou, nota, outro cliente) vira recusa.
+import { resumirAgrupamentoDeOS, resumirDesagrupamentoDeOS } from "./tools/agrupar-os.ts";
 import {
   callClaude,
   ClaudeApiError,
@@ -243,6 +245,12 @@ const TOOL_LABELS_PT: Record<string, string> = {
   // "Marca o Lenine pra quinta" (o prompt manda o dono a schedule_service_order): fora do perfil enxuto do admin, pela
   // rede vira cartão de "sim" — sem esta linha o título saía "Schedule Service Order".
   schedule_service_order: "Agendar OS",
+  // 27/10/2026: paridade com o "Converter sem sinal" da tela.
+  converter_sem_sinal: "Converter orçamento em OS sem sinal",
+  // agrupar OS (28/10/2026): paridade com o Agrupar OS/Desagrupar da tela.
+  agrupar_os: "Agrupar OS em uma só",
+  desagrupar_os: "Desagrupar OS",
+  listar_os_para_agrupar: "Listar OS para agrupar",
 };
 // financeiro (07/10/2026): anotação de Pix, estorno, cobrança formal e favorecido.
 Object.assign(TOOL_LABELS_PT, TITULOS_DO_FINANCEIRO);
@@ -406,6 +414,10 @@ RESUMO_QUE_RESOLVE.add("send_maintenance_reminder_now");
 // OS, outro cliente/embarcação — o resumo diz por quê numa linha "⚠️": é recusa, não pendência.
 RESUMO_QUE_RESOLVE.add("agrupar_orcamentos");
 RESUMO_QUE_RESOLVE.add("desagrupar_orcamento");
+// agrupar OS (28/10/2026): já começou a ser executada, nota, fatura, comissão lançada, ainda é orçamento, outro
+// cliente/embarcação, já agrupada — o resumo diz por quê numa linha "⚠️": é recusa, não pendência.
+RESUMO_QUE_RESOLVE.add("agrupar_os");
+RESUMO_QUE_RESOLVE.add("desagrupar_os");
 // "Sim, é do X" (leva 8, revisão de 23/10/2026): entrada confirmada sem cliente sugerido, cliente fora do cadastro ou
 // leitura que falha — o resumo diz por quê numa linha "⚠️": é recusa, não pendência.
 RESUMO_QUE_RESOLVE.add("aprovar_propostas_de_lancamento");
@@ -584,6 +596,18 @@ export async function buildPendingSummary(
     } catch (e) {
       const motivo = String((e as { message?: string })?.message ?? e).replace(/\s*\n+\s*/g, " ");
       return `⚠️ Não consegui conferir os orçamentos agora (${motivo}). Nada foi registrado; tente de novo.`;
+    }
+  }
+  // Agrupar/desagrupar OS (28/10/2026): o "sim" é sobre a lista resolvida (número, data, situação, total), a
+  // principal, a soma e o dinheiro que passa para a nova. Impedimento vira uma linha "⚠️"; leitura que falha também.
+  if (toolName === "agrupar_os" || toolName === "desagrupar_os") {
+    try {
+      return toolName === "agrupar_os"
+        ? await resumirAgrupamentoDeOS(admin, args, quem.userId || null)
+        : await resumirDesagrupamentoDeOS(admin, args, quem.userId || null);
+    } catch (e) {
+      const motivo = String((e as { message?: string })?.message ?? e).replace(/\s*\n+\s*/g, " ");
+      return `⚠️ Não consegui conferir as OS agora (${motivo}). Nada foi registrado; tente de novo.`;
     }
   }
   // Macros de fluxo: a confirmação PRECISA mostrar o que vai acontecer de verdade (a lista

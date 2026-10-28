@@ -490,6 +490,12 @@ begin
   r := pg_temp._cmp(jsonb_build_object('valor', pg_temp._val(), 'forma', 'dinheiro', 'destino', 'os', 'os', v_os, 'tipo_na_os', 'despesa', 'categoria', 'Peças e materiais',
                                        'quem', 'tecnico', 'pagador', v_b, 'cnpj', pg_temp._cnpj()));
   select * into c5 from public.comprovantes where id = (r->>'id')::uuid;
+  -- Desde 27/10 o recibo sai do Pix que zera a conta (20261027180000): CPF e o Pix do reembolso.
+  update public.payees set document = '999' || lpad((floor(random() * 100000000))::int::text, 8, '0') where id = v_b;
+  insert into public.payables (description, issue_date, due_date, amount, paid_amount, balance_amount, status, expense_category,
+                               payee_id, origin)
+  select 'Pix quitação teste', pg_temp._hoje(), pg_temp._hoje(), x.s, x.s, 0, 'paid', 'Diárias de freelancers', v_b, 'bank_reconciliation'
+    from (select (public.conta_corrente_freelancer(v_b, null, null, pg_temp._dono(), null)->>'saldo_final')::numeric s) x;
   v_acerto := public.fechar_acerto_diarias(v_b, pg_temp._hoje(), false, pg_temp._dono());
   k5 := public.comprovante_cancelar(c5.id, 'teste do acerto fechado', pg_temp._dono());
   v_cc := public.conta_corrente_freelancer(v_b, null, null, pg_temp._dono(), null);

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ChevronDown, Loader2, RotateCcw, DollarSign, XCircle } from 'lucide-react';
+import { ChevronDown, Loader2, RotateCcw, DollarSign, XCircle, ArrowRightCircle } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import { usePaymentConditionPresets } from '@/hooks/use-payment-conditions';
 import { computeDeposit, type DepositComputation } from '@/lib/quote-deposit';
+import { useConverterSemSinal } from '@/components/ConverterSemSinal';
 
 interface Props {
   orderId: string;
@@ -30,7 +31,10 @@ export function QuoteStatusQuickChange({ orderId, currentQuoteStatus, serviceOrd
   const [appliedLabel, setAppliedLabel] = useState('');
   const [installments, setInstallments] = useState<any[] | null>(null);
   const [scheduledEndAt, setScheduledEndAt] = useState<string | null>(null);
-  const isBusy = updateQuoteStatus.isPending || abandoning;
+  const semSinal = useConverterSemSinal();
+  const isBusy = updateQuoteStatus.isPending || abandoning || semSinal.convertendo;
+  // Aprovado ou aguardando sinal: dá para seguir sem entrada, com tudo na conclusão.
+  const pedirSemSinal = () => semSinal.pedir({ id: orderId, number: serviceOrderNumber, grandTotal });
 
   // Ao abrir "Receber sinal": carrega os dados do orçamento + a condição de pagamento e computa
   // o sinal pela MESMA lib que o orçamento usa — para a janela bater exatamente com o orçamento
@@ -108,6 +112,18 @@ export function QuoteStatusQuickChange({ orderId, currentQuoteStatus, serviceOrd
           <Button
             type="button"
             size="sm"
+            variant="outline"
+            disabled={isBusy}
+            onClick={pedirSemSinal}
+            className="h-6 px-2 text-xs gap-1"
+            title="Converter em OS sem sinal — o valor inteiro fica para a conclusão"
+          >
+            <ArrowRightCircle className="h-3 w-3" />
+            Sem sinal
+          </Button>
+          <Button
+            type="button"
+            size="sm"
             variant="ghost"
             disabled={isBusy}
             onClick={handleAbandon}
@@ -135,6 +151,7 @@ export function QuoteStatusQuickChange({ orderId, currentQuoteStatus, serviceOrd
           installments={installments ?? undefined}
           scheduledEndAt={scheduledEndAt}
         />
+        {semSinal.dialogo}
       </>
     );
   }
@@ -168,6 +185,7 @@ export function QuoteStatusQuickChange({ orderId, currentQuoteStatus, serviceOrd
   }
 
   return (
+    <>
     <DropdownMenu>
       <DropdownMenuTrigger asChild>{badge}</DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56">
@@ -197,7 +215,18 @@ export function QuoteStatusQuickChange({ orderId, currentQuoteStatus, serviceOrd
             </DropdownMenuItem>
           );
         })}
+        {currentQuoteStatus === 'approved' && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={pedirSemSinal} className="gap-2 cursor-pointer">
+              <ArrowRightCircle className="h-3.5 w-3.5 shrink-0" />
+              Converter em OS sem sinal
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
+    {semSinal.dialogo}
+    </>
   );
 }

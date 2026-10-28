@@ -112,8 +112,8 @@ beforeEach(() => {
     switch (nome) {
       case 'resumo_freelancers':
         if (args.p_atalho === 'em_aberto') {
-          return { data: { pessoas: [{ ...pessoas[0], de: '2026-09-23', ate: null, pago_aguardando_banco: 100 }],
-            trabalhado: 160, pago: 100, dias: 1, deve: 60, adiantado: 0 }, error: null };
+          return { data: { pessoas: [{ ...pessoas[0], de: '2026-09-23', ate: null, pago_aguardando_banco: 100, pago_falta_aprovar: 50 }],
+            trabalhado: 160, pago: 150, dias: 1, deve: 10, adiantado: 0 }, error: null };
         }
         if (comReembolso) {
           return { data: { pessoas: [{ ...pessoas[0], reembolsos: 62, saldo_final: 512 }, pessoas[1]],
@@ -122,9 +122,13 @@ beforeEach(() => {
         return { data: { pessoas, trabalhado: 2560, pago: 2130, dias: 16, deve: 450, adiantado: 20 }, error: null };
       case 'conta_corrente_freelancer':
         if (args.p_atalho === 'em_aberto') {
-          return { data: { ...contaDoRoberto, de: '2026-09-23', ate: null, saldo_anterior: 0, pago: 100, pago_aguardando_banco: 100,
+          return { data: { ...contaDoRoberto, de: '2026-09-23', ate: null, saldo_anterior: 0, pago: 150, pago_aguardando_banco: 100,
+            pago_falta_aprovar: 50,
             linhas: [{ ...contaDoRoberto.linhas[1], id: 'a1', data: '2026-10-06', conta: 'Anotado — aguardando o banco',
-              descricao: 'Adiantamento diarias', aguardando: true }] }, error: null };
+              descricao: 'Adiantamento diarias', aguardando: true },
+              // 27/10/2026: o Pix que o banco já trouxe e espera a fila (por CPF, ou anotado e já casado)
+              { ...contaDoRoberto.linhas[1], id: 'b1', data: '2026-10-10', pago: 50, conta: 'No banco — falta aprovar na fila',
+                descricao: 'Pix enviado para Roberto', categoria: null, aguardando: true }] }, error: null };
         }
         if (args.p_favorecido_id === 'r') {
           return { data: pagamentoJaDividido ? contaComPagamentoDividido() : comReembolso ? contaComReembolso() : contaDoRoberto, error: null };
@@ -158,9 +162,11 @@ beforeEach(() => {
         return { data: { ok: true, message: 'Anotado.' }, error: null };
       case 'fechar_acerto_diarias':
         return args.p_simular
-          ? { data: { favorecido: 'Roberto', de: '2026-09-17', ate: args.p_ate, saldo_anterior: 180, dias: 0, trabalhado: 0,
-              pago_no_periodo: 100, valor_do_acerto: 80, pago_aguardando_banco: 0, resumo: '' }, error: null }
-          : { data: { id: 'ac2', numero: 2, message: 'Acerto nº 0002 fechado.' }, error: null };
+          ? { data: { ok: true, favorecido: 'Roberto', de: '2026-09-17', ate: args.p_ate ?? '2026-10-05', saldo_anterior: 180, dias: 0, trabalhado: 0,
+              pago_no_periodo: 100, valor_do_acerto: 80, resumo: '', travas: [],
+              pix: { id: 'px', data: '2026-10-05', valor: 80, conta: 'C6' },
+              candidatos: [{ id: 'px', data: '2026-10-05', valor: 80, conta: 'C6', aguardando: false, saldo_final: 0, zera: true }] }, error: null }
+          : { data: { id: 'ac2', numero: 2, message: 'Recibo nº 0002 fechado.' }, error: null };
       case 'cadastrar_freelancer':
         if (String(args.p_nome).startsWith('Roberto')) {
           return { data: null, error: { message: 'Roberto já tem diária cadastrada (veja em Financeiro › Diárias).' } };
@@ -193,15 +199,23 @@ function renderizar(aba: 'resumo' | 'extrato' | 'grade', onVerExtrato = vi.fn(),
 const chamadas = (nome: string) => rpc.mock.calls.filter(([n]) => n === nome).map(([, a]) => a as Record<string, unknown>);
 
 describe('DiariasPanel', () => {
-  it('um cartão por freelancer, com o saldo e se você deve ou adiantou', async () => {
+  it('um cartão por freelancer com UM número ("A pagar" neutro, "Adiantado" em vermelho), na ordem do que mais se deve (F4)', async () => {
     const user = userEvent.setup();
     const { onVerExtrato } = renderizar('resumo');
     expect(await screen.findByText('Roberto')).toBeInTheDocument();
     expect(screen.getByText('Mickael')).toBeInTheDocument();
-    expect(screen.getAllByText('Você deve').length).toBeGreaterThan(0);
-    expect(screen.getByText('Adiantado')).toBeInTheDocument();
-    await user.click(screen.getAllByRole('button', { name: 'Ver extrato' })[0]);
+    const aPagar = screen.getAllByText('A pagar');
+    expect(aPagar.length).toBeGreaterThan(0);
+    expect(aPagar[0]).not.toHaveClass('text-destructive');
+    // no topo, só o total a pagar (e o adiantado); os totais do período que não fechavam saíram
+    expect(screen.getByText('A pagar a todos')).toBeInTheDocument();
+    expect(screen.queryByText('Trabalhado no período')).not.toBeInTheDocument();
+    expect(screen.queryByText('Saldo acumulado')).not.toBeInTheDocument();
+    const nomes = screen.getAllByText(/^(Roberto|Mickael)$/).map((e) => e.textContent);
+    expect(nomes[0]).toBe('Roberto');
+    await user.click(screen.getAllByRole('button', { name: 'Lançamentos e recibo' })[0]);
     expect(onVerExtrato).toHaveBeenCalledWith('r');
+    expect(screen.getAllByRole('button', { name: 'Pagar' }).length).toBeGreaterThan(0);
   });
 
   it('o extrato mostra o dia com a OS e o pagamento com a conta de onde saiu', async () => {
@@ -272,6 +286,19 @@ describe('DiariasPanel', () => {
     expect(arquivo).toMatch(/\.csv$/);
   });
 
+  it('registrar dia (F4/F5): sem "Não trabalhou"; OS, extras e descontos atrás de "Mais detalhes"', async () => {
+    const user = userEvent.setup();
+    renderizar('extrato');
+    await screen.findByText('OS-0042');
+    await user.click(screen.getByRole('button', { name: /Registrar dia/ }));
+    const dialogo = await screen.findByRole('dialog');
+    expect(within(dialogo).queryByRole('button', { name: 'Não trabalhou' })).not.toBeInTheDocument();
+    expect(within(dialogo).queryByLabelText('Extras (R$)')).not.toBeInTheDocument();
+    await user.click(within(dialogo).getByRole('button', { name: /Mais detalhes/ }));
+    expect(within(dialogo).getByLabelText('Extras (R$)')).toBeInTheDocument();
+    expect(within(dialogo).getByLabelText('Em qual OS (opcional)')).toBeInTheDocument();
+  });
+
   it('vários dias: só os dias úteis que faltam; o já lançado fica como está', async () => {
     const user = userEvent.setup();
     renderizar('extrato');
@@ -289,7 +316,7 @@ describe('DiariasPanel', () => {
     expect(chamadas('registrar_diaria')[0]).toMatchObject({ p_favorecido_id: 'r', p_jornada: 'inteiro', p_origem: 'painel' });
   });
 
-  it('grade: "Não trabalhou" grava a falta; dia antes do início da conta corrente não abre', async () => {
+  it('grade: falta não se lança (F5) — o dia vazio oferece só inteiro e meio; dia antes do início da conta corrente não abre', async () => {
     const user = userEvent.setup();
     renderizar('grade');
     const antes = (await screen.findAllByRole('gridcell', { name: 'Mickael em ter 01/09' }))[0];
@@ -298,8 +325,9 @@ describe('DiariasPanel', () => {
     await user.click(screen.getAllByRole('gridcell', { name: 'Mickael em seg 14/09' })[0]);
     const ficha = await screen.findByRole('dialog');
     expect(within(ficha).getByText('Nada lançado neste dia.')).toBeInTheDocument();
-    await user.click(within(ficha).getByRole('button', { name: 'Não trabalhou' }));
-    await waitFor(() => expect(chamadas('registrar_diaria')[0]).toMatchObject({ p_favorecido_id: 'm', p_data: '2026-09-14', p_jornada: 'faltou' }));
+    expect(within(ficha).queryByRole('button', { name: 'Não trabalhou' })).not.toBeInTheDocument();
+    await user.click(within(ficha).getByRole('button', { name: 'Meio período' }));
+    await waitFor(() => expect(chamadas('registrar_diaria')[0]).toMatchObject({ p_favorecido_id: 'm', p_data: '2026-09-14', p_jornada: 'meio' }));
   });
 
   // ── Períodos e Pix anotado (pedido do dono, 06/10/2026) ──
@@ -316,6 +344,18 @@ describe('DiariasPanel', () => {
     expect(await screen.findByText('Anotado')).toBeInTheDocument();
     expect(screen.getByText('Anotado — aguardando o banco')).toBeInTheDocument();
     expect(chamadas('conta_corrente_freelancer')).toContainEqual({ p_favorecido_id: 'r', p_de: null, p_ate: null, p_atalho: 'em_aberto' });
+  });
+
+  it('o Pix que já saiu do banco e espera a fila aparece como "Falta aprovar", à parte do anotado', async () => {
+    renderizar('resumo', vi.fn(), { periodo: 'em_aberto' });
+    expect(await screen.findByText(/em Pix que já saiu do banco para ele e falta aprovar na fila/)).toBeInTheDocument();
+  });
+
+  it('extrato: o Pix da fila tem selo próprio e não vira "Anotado"', async () => {
+    renderizar('extrato', vi.fn(), { periodo: 'em_aberto' });
+    expect(await screen.findByText('Falta aprovar')).toBeInTheDocument();
+    expect(screen.getByText('No banco — falta aprovar na fila')).toBeInTheDocument();
+    expect(screen.getByText('Anotado')).toBeInTheDocument();
   });
 
   it('"Escolher datas…": De/Até vão para o banco; datas invertidas não consultam', async () => {
@@ -379,16 +419,16 @@ describe('DiariasPanel', () => {
     expect(screen.queryByRole('menuitem', { name: /Excluir o dia/ })).not.toBeInTheDocument();
   });
 
-  it('fechar acerto: confere (simula) pela data e só então fecha', async () => {
+  it('emitir recibo: confere (simula) e só então fecha, no Pix que zera', async () => {
     const user = userEvent.setup();
     renderizar('extrato');
     await screen.findByText('OS-0042');
-    await user.click(screen.getByRole('button', { name: /Fechar acerto/ }));
+    await user.click(screen.getByRole('button', { name: /Emitir recibo/ }));
     const dialogo = await screen.findByRole('dialog');
-    expect(await within(dialogo).findByText('A pagar neste acerto')).toBeInTheDocument();
+    expect(await within(dialogo).findByText('Pix de 05/10')).toBeInTheDocument();
     expect(chamadas('fechar_acerto_diarias')[0]).toMatchObject({ p_favorecido_id: 'r', p_simular: true });
-    await user.click(within(dialogo).getByRole('button', { name: 'Fechar acerto' }));
-    await waitFor(() => expect(chamadas('fechar_acerto_diarias').some((a) => a.p_simular === false)).toBe(true));
+    await user.click(within(dialogo).getByRole('button', { name: /^Emitir recibo$/ }));
+    await waitFor(() => expect(chamadas('fechar_acerto_diarias').some((a) => a.p_simular === false && a.p_pix_id === 'px')).toBe(true));
   });
 
   // ── Reembolso do técnico pelo comprovante (F2b, 11/10/2026) ──

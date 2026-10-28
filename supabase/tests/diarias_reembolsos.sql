@@ -92,6 +92,12 @@ declare
   f jsonb;
   v_ac record;
 begin
+  -- Desde 27/10 o recibo sai do Pix que zera a conta (20261027180000): CPF e o Pix de quitação.
+  update public.payees set document = '999' || lpad((floor(random() * 100000000))::int::text, 8, '0') where id = pg_temp._fav();
+  insert into public.payables (description, issue_date, due_date, amount, paid_amount, balance_amount, status, expense_category,
+                               payee_id, origin)
+  values ('Pix quitação teste', pg_temp._hoje() - 1, pg_temp._hoje() - 1, 362, 362, 0, 'paid', 'Diárias de freelancers',
+          pg_temp._fav(), 'bank_reconciliation');
   s := public.fechar_acerto_diarias(pg_temp._fav(), pg_temp._hoje() - 1, true, null);
   f := public.fechar_acerto_diarias(pg_temp._fav(), pg_temp._hoje() - 1, false, pg_temp._dono());
   select * into v_ac from public.acertos_diarias where id = (f->>'id')::uuid;
@@ -99,7 +105,7 @@ begin
   insert into _resultado values ('D3 acerto: a simulação lista os reembolsos; o fechado guarda a foto e mostra na mensagem',
     (s->>'reembolsos')::numeric = 62 and jsonb_array_length(s->'reembolsos_itens') = 1
     and s->'reembolsos_itens'->0->>'codigo' = 'CMP-99901' and (s->'reembolsos_itens'->0->>'valor')::numeric = 62
-    and (s->>'valor_do_acerto')::numeric = 362 and s->>'resumo' like '%· reembolso de despesas pagas pelo técnico R$ 62,00 · vales%'
+    and (s->>'valor_do_acerto')::numeric = 362 and s->>'resumo' like '%· reembolso de despesas pagas pelo técnico R$ 62,00 · já recebido%'
     and (f->>'ok')::boolean and v_ac.reembolsos = 62 and v_ac.trabalhado = 300 and v_ac.valor_do_acerto = 362
     and f->>'message' like '%· reembolso de despesas pagas pelo técnico R$ 62,00%',
     coalesce(s->>'resumo', '-'));
