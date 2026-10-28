@@ -283,7 +283,59 @@ export interface DiaDoPlano {
   diaria: 'lançada' | 'a confirmar' | null;
 }
 
+/** Uma mensagem ao cliente desta OS, como o dono lê (Fase 5, P6: _agenda_cliente_da_os). */
+export interface MensagemAoClienteDoPlano {
+  tipo: string;
+  /** "Confirmação", "Aviso de atraso", "Véspera, com a pergunta do acesso"… */
+  tipo_texto: string;
+  /** "amanhã às 09:00", "agora", "qui 22/10 às 10:00" */
+  quando_texto: string | null;
+  estado: string;
+  /** "espera você", "mandada; sem resposta", "em teste: sairia", "você segurou: não saiu"… (pode citar *segura cliente <nome>*) */
+  estado_texto: string | null;
+  /** o texto do banco, inteiro (nunca valor, número de OS nem link) */
+  texto: string;
+  em_teste: boolean;
+  espera_voce: boolean;
+}
+
+/** O bloco "Cliente" do cartão (Fase 5, P6). Nenhum botão de mandar: a aprovação é pela palavra, na conversa. */
+export interface ClienteDoPlano {
+  modo: ModoDaAgenda;
+  em_teste: boolean;
+  em_teste_texto: string | null;
+  nome: string | null;
+  telefone_ok: boolean;
+  conversou: boolean;
+  /** o cliente não recebe (pediu para parar, cadastro inativo ou número bloqueado) */
+  opt_out: boolean;
+  /** "sem telefone no cadastro" | "pediu para não receber mensagens" | "não escreveu para a HBR no último ano…" | null */
+  contato_texto: string | null;
+  /** como o serviço é dito ao cliente ("a instalação do compressor") */
+  servico: string | null;
+  prometido: {
+    tipo: 'firme' | 'faixa' | 'condicional';
+    de: string;
+    ate: string;
+    original_ate: string | null;
+    fonte: 'mensagem' | 'dono' | 'confirmacao' | null;
+    /** "qui 05/11 (data firme, por mensagem da agenda em qui 22/10)" */
+    texto: string;
+    /** "Pode atrasar: agora a previsão é de qui 12/11 a sex 13/11." | null */
+    risco_texto: string | null;
+  } | null;
+  confirmado_texto: string | null;
+  /** as 5 mais recentes desta OS */
+  mensagens: MensagemAoClienteDoPlano[];
+  /** quantas passam das 5 (*agenda clientes* mostra) */
+  mensagens_mais: number;
+  /** o texto só em ligado, com *manda cliente <nome>* / *segura cliente <nome>* */
+  esperando_voce: { n: number; texto: string | null };
+}
+
 export interface PlanoDaOsDados {
+  /** Fase 5 (P6): ausente antes da migration 20261028100600; null sem o cliente na OS */
+  cliente?: ClienteDoPlano | null;
   os: string;
   numero: string;
   status: string;

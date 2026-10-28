@@ -6,6 +6,10 @@
  *
  * Só para administrador e financeiro, OS fora de orçamento e a agenda de produção ligada (PlanoDaOsNaOs decide). Fecha
  * numa linha (o estado e a duração) para não empurrar o formulário no celular.
+ *
+ * Fase 5 (P6): o bloco "Cliente" — o que foi dito ao cliente (e se ainda vale), a confirmação e as mensagens desta OS
+ * (lista curta, "em teste" quando o modo é sombra). Sem botão de mandar: a aprovação é pela palavra (*manda cliente
+ * <nome>* / *segura cliente <nome>*) ou na conversa; a tela só cita a palavra que o banco escreve.
  */
 import { useId, useState } from 'react';
 import { AlertCircle, ChevronDown, Loader2, PackageCheck } from 'lucide-react';
@@ -16,7 +20,7 @@ import { Campo } from '@/components/Campo';
 import { Dado, DadosDaFicha } from '@/components/DadosDaFicha';
 import { useOptionalAuth } from '@/hooks/use-auth';
 import {
-  useAgendaConfig, usePlanejarPelaTela, usePlanoDaOs, useRegistrarEntrega, type MaterialDoPlano,
+  useAgendaConfig, usePlanejarPelaTela, usePlanoDaOs, useRegistrarEntrega, type ClienteDoPlano, type MaterialDoPlano,
 } from '@/hooks/use-agenda-producao';
 import { cn } from '@/lib/utils';
 
@@ -33,6 +37,61 @@ function SeloDoNivel({ item }: { item: MaterialDoPlano }) {
     >
       {item.nivel}
     </span>
+  );
+}
+
+/**
+ * O bloco "Cliente" (Fase 5, P6). Some quando a mensagem ao cliente está desligada e não há nada dito nem mandado (o
+ * cartão fica como na Fase 3). Rótulo acima do valor, como o resto do cartão. Nenhum botão: só o texto do banco.
+ */
+export function BlocoDoCliente({ cliente }: { cliente: ClienteDoPlano | null | undefined }) {
+  if (!cliente) return null;
+  if (cliente.modo === 'desligado' && !cliente.prometido && cliente.mensagens.length === 0) return null;
+  const dito = cliente.prometido;
+  return (
+    <div className="min-w-0 space-y-3" data-testid="plano-cliente">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <h3 className="text-xs font-semibold text-muted-foreground">Cliente{cliente.nome ? ` · ${cliente.nome}` : ''}</h3>
+        {cliente.em_teste && (
+          <span className="rounded border border-amber-600 px-1.5 text-[11px] font-medium text-amber-700 dark:text-amber-400">em teste</span>
+        )}
+      </div>
+      {cliente.em_teste_texto && <p className="break-words text-xs text-muted-foreground">{cliente.em_teste_texto}</p>}
+      {cliente.contato_texto && (
+        <p className="break-words text-sm text-amber-700 dark:text-amber-400">Não recebe mensagem: {cliente.contato_texto}.</p>
+      )}
+      <DadosDaFicha>
+        <Dado rotulo="O que foi dito ao cliente" largo>
+          {dito ? dito.texto : 'Nada ainda.'}
+          {dito?.risco_texto && <span className="block text-sm text-amber-700 dark:text-amber-400">{dito.risco_texto}</span>}
+          {cliente.confirmado_texto && <span className="block text-sm">{cliente.confirmado_texto}</span>}
+        </Dado>
+        {cliente.servico && <Dado rotulo="O serviço, como ele ouve" largo>{cliente.servico}</Dado>}
+      </DadosDaFicha>
+      <div className="min-w-0 space-y-1.5">
+        <p className="text-xs text-muted-foreground">Mensagens</p>
+        {cliente.esperando_voce.texto && <p className="break-words text-sm font-medium">{cliente.esperando_voce.texto}</p>}
+        {cliente.mensagens.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Nenhuma mensagem a este cliente ainda.</p>
+        ) : (
+          <ul className="space-y-2">
+            {cliente.mensagens.map((m, i) => (
+              <li key={`${m.tipo}-${m.quando_texto}-${i}`} className="min-w-0 text-sm">
+                <p className="break-words">
+                  <span className="font-medium">{m.tipo_texto}</span>
+                  {m.quando_texto && <span className="text-muted-foreground"> · {m.quando_texto}</span>}
+                  {m.estado_texto && <span className={cn(m.espera_voce && 'font-medium')}> · {m.estado_texto}</span>}
+                </p>
+                <p className="break-words text-xs text-muted-foreground">“{m.texto}”</p>
+              </li>
+            ))}
+          </ul>
+        )}
+        {cliente.mensagens_mais > 0 && (
+          <p className="text-xs text-muted-foreground">E mais {cliente.mensagens_mais}: *agenda clientes* mostra todas.</p>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -137,6 +196,8 @@ export function PlanoDaOs({ osId, status, className }: { osId: string; status: s
               </div>
             </Campo>
           )}
+
+          <BlocoDoCliente cliente={data.cliente} />
 
           <div className="space-y-2">
             <h3 className="text-xs font-semibold text-muted-foreground">Material</h3>

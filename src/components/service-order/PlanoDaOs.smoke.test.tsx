@@ -2,12 +2,16 @@
 // marcos, a duração com a fonte, o material com o nível A–E e o trecho, planejado × realizado com a diária só "lançada"/"a
 // confirmar" (nunca o valor); o Corrigir dias (rótulo acima, meio em meio dia) e o Entregue pela porta; o erro com a frase
 // do banco; a tela ainda não instalada some sem erro; e quem não é admin/financeiro não vê o cartão.
+// Fase 5 (P6): o bloco "Cliente" — o que foi dito (rótulo acima), o risco, as mensagens com o estado, a palavra *manda
+// cliente* / *segura cliente* citada e NENHUM botão de mandar; "em teste" em sombra; some desligado sem nada a mostrar.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
-import { PLANO_DE_EXEMPLO } from '@/components/agenda/producao/dados-de-exemplo';
+import {
+  CLIENTE_DO_PLANO_DE_EXEMPLO, CLIENTE_DO_PLANO_EM_TESTE, PLANO_DE_EXEMPLO,
+} from '@/components/agenda/producao/dados-de-exemplo';
 
 const h = vi.hoisted(() => ({
   rpc: vi.fn(),
@@ -137,5 +141,68 @@ describe('cartão Plano da OS', () => {
     h.config = { data: { jornada_horas: 8, carga_max: '0.80', modo_leitura: 'sombra', modo_proposta: 'sombra' }, error: null };
     montar(<PlanoDaOsNaOs osId="os-69" status="scheduled" />);
     expect(await screen.findByTestId('plano-da-os')).toBeInTheDocument();
+  });
+
+  it('o bloco Cliente (ligado): o que foi dito com o rótulo acima, o risco, as mensagens e a palavra — sem botão de mandar', async () => {
+    const user = userEvent.setup();
+    h.rpc.mockResolvedValue({ data: { ...PLANO_DE_EXEMPLO, cliente: CLIENTE_DO_PLANO_DE_EXEMPLO }, error: null });
+    montar(<PlanoDaOs osId="os-112" status="scheduled" />);
+    await user.click(await screen.findByRole('button', { name: /Ver o plano/ }));
+    const bloco = screen.getByTestId('plano-cliente');
+    expect(within(bloco).getByText('Cliente · Nelson')).toBeInTheDocument();
+    // rótulo acima do valor (DadosDaFicha): o termo vem antes da definição
+    const rotulo = within(bloco).getByText('O que foi dito ao cliente');
+    expect(rotulo.tagName).toBe('DT');
+    expect(rotulo.nextElementSibling?.textContent).toContain('qui 05/11 (data firme, por mensagem da agenda em qui 22/10)');
+    expect(within(bloco).getByText('Pode atrasar: agora a previsão é de qui 12/11 a sex 13/11.')).toBeInTheDocument();
+    expect(within(bloco).getByText('Mensagens')).toBeInTheDocument();
+    expect(within(bloco).getByText('1 mensagem esperando você: *manda cliente Nelson* manda; *segura cliente Nelson* segura.'))
+      .toBeInTheDocument();
+    const itens = within(bloco).getAllByRole('listitem');
+    expect(itens).toHaveLength(2);
+    expect(itens[0].textContent).toMatch(/^Aviso de atraso · amanhã às 09:01 · espera você“Nelson, quero te avisar/);
+    expect(itens[1].textContent).toMatch(/^Confirmação · qui 22\/10 às 10:00 · mandada; sem resposta“Olá, Nelson!/);
+    expect(within(bloco).queryByText('em teste')).not.toBeInTheDocument();
+    // nenhum botão de mandar no bloco (a aprovação é pela palavra)
+    expect(within(bloco).queryAllByRole('button')).toHaveLength(0);
+    expect(bloco.textContent).not.toMatch(/R\$|OS-\d|http/);
+  });
+
+  it('o bloco Cliente em teste (sombra): o selo "em teste", "nada sai ainda" e o que sairia; sem a palavra', async () => {
+    const user = userEvent.setup();
+    h.rpc.mockResolvedValue({ data: { ...PLANO_DE_EXEMPLO, cliente: CLIENTE_DO_PLANO_EM_TESTE }, error: null });
+    montar(<PlanoDaOs osId="os-112" status="scheduled" />);
+    await user.click(await screen.findByRole('button', { name: /Ver o plano/ }));
+    const bloco = screen.getByTestId('plano-cliente');
+    expect(within(bloco).getByText('em teste')).toBeInTheDocument();
+    expect(within(bloco).getByText('Em teste: nada sai ainda. Aqui fica o que eu teria mandado.')).toBeInTheDocument();
+    expect(within(bloco).getAllByRole('listitem')[0].textContent).toMatch(/^Aviso de atraso · amanhã às 09:00 · em teste: sairia/);
+    expect(bloco.textContent).not.toMatch(/manda cliente/);
+  });
+
+  it('o bloco Cliente: sem telefone avisa; desligado sem nada dito some; o cartão de antes (sem a chave) segue igual', async () => {
+    const user = userEvent.setup();
+    h.rpc.mockResolvedValueOnce({ data: { ...PLANO_DE_EXEMPLO, cliente: {
+      ...CLIENTE_DO_PLANO_EM_TESTE, nome: 'Lenine', telefone_ok: false, conversou: false, contato_texto: 'sem telefone no cadastro',
+      prometido: null, mensagens: [], mensagens_mais: 0 } }, error: null });
+    const a = montar(<PlanoDaOs osId="os-74" status="scheduled" />);
+    await user.click(await screen.findByRole('button', { name: /Ver o plano/ }));
+    expect(screen.getByText('Não recebe mensagem: sem telefone no cadastro.')).toBeInTheDocument();
+    expect(screen.getByText('Nada ainda.')).toBeInTheDocument();
+    expect(screen.getByText('Nenhuma mensagem a este cliente ainda.')).toBeInTheDocument();
+    a.unmount();
+
+    h.rpc.mockResolvedValueOnce({ data: { ...PLANO_DE_EXEMPLO, cliente: {
+      ...CLIENTE_DO_PLANO_DE_EXEMPLO, modo: 'desligado', prometido: null, mensagens: [], esperando_voce: { n: 0, texto: null } } }, error: null });
+    const b = montar(<PlanoDaOs osId="os-69" status="scheduled" />);
+    await user.click(await screen.findByRole('button', { name: /Ver o plano/ }));
+    expect(screen.queryByTestId('plano-cliente')).not.toBeInTheDocument();
+    b.unmount();
+
+    h.rpc.mockResolvedValueOnce({ data: PLANO_DE_EXEMPLO, error: null });
+    montar(<PlanoDaOs osId="os-69" status="scheduled" />);
+    await user.click(await screen.findByRole('button', { name: /Ver o plano/ }));
+    expect(screen.getByText('Planejado × realizado')).toBeInTheDocument();
+    expect(screen.queryByTestId('plano-cliente')).not.toBeInTheDocument();
   });
 });

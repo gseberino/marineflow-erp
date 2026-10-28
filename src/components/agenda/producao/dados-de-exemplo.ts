@@ -1,7 +1,7 @@
 // Dados de exemplo das telas de produção (Fase 3, P7a), no formato que o banco devolve (agenda_tela_semana,
 // agenda_tela_carteira, os_plano_da_os) — tirados da bancada com a carteira sintética da Fase 3 (só primeiros nomes).
 // Servem aos testes de render; nada aqui vai para produção.
-import type { CarteiraDeProducao, PlanoDaOsDados, SemanaDeProducao } from '@/hooks/use-agenda-producao';
+import type { CarteiraDeProducao, ClienteDoPlano, PlanoDaOsDados, SemanaDeProducao } from '@/hooks/use-agenda-producao';
 
 export const SEMANA_DE_EXEMPLO: SemanaDeProducao = {
   modo: 'ligado', em_teste: false, de: '2026-11-02', ate: '2026-11-07',
@@ -114,4 +114,43 @@ export const PLANO_DE_EXEMPLO: PlanoDaOsDados = {
       resultado: 'parcial', resultado_texto: 'feito em parte', motivo_texto: 'chuva', diaria: 'a confirmar' },
   ],
   intervencoes: [{ dia: '2026-11-04', texto: 'Qua 04/11: você foi à tarde (no plano: nada)' }],
+};
+
+// Fase 5 (P6): o bloco "Cliente" do cartão, no formato de os_plano_da_os.cliente — o Nelson da fixture-fase5 (sex 30/10,
+// 17:30), com a mensagem ao cliente ligada e o aviso de atraso esperando o dono; e o mesmo em teste (sombra).
+const AVISO_DO_NELSON = 'Nelson, quero te avisar com antecedência: a peça do serviço no seu veleiro ainda não chegou e agora está '
+  + 'prevista para quarta (11/11). Por isso, o serviço no seu veleiro, que estava para quinta (05/11), deve ficar entre quinta '
+  + '(12/11) e sexta (13/11). Te confirmo a data assim que a peça chegar. Se isso atrapalhar algum plano seu, me diga.';
+const CONFIRMACAO_DO_NELSON = 'Olá, Nelson! Aqui é o Gustavo, da HBR Marine Solutions. Conseguimos encaixar o serviço no seu veleiro '
+  + 'para quinta (05/11), o dia todo, com previsão de 1 dia de trabalho. Pode ser? Responda SIM para confirmar, ou me diga um dia '
+  + 'melhor. A partir de agora te mando por aqui as novidades do serviço.';
+
+export const CLIENTE_DO_PLANO_DE_EXEMPLO: ClienteDoPlano = {
+  modo: 'ligado', em_teste: false, em_teste_texto: null, nome: 'Nelson',
+  telefone_ok: true, conversou: true, opt_out: false, contato_texto: null, servico: null,
+  prometido: {
+    tipo: 'firme', de: '2026-11-05', ate: '2026-11-05', original_ate: '2026-11-05', fonte: 'mensagem',
+    texto: 'qui 05/11 (data firme, por mensagem da agenda em qui 22/10)',
+    risco_texto: 'Pode atrasar: agora a previsão é de qui 12/11 a sex 13/11.',
+  },
+  confirmado_texto: null,
+  mensagens: [
+    { tipo: 'pode_atrasar', tipo_texto: 'Aviso de atraso', quando_texto: 'amanhã às 09:01', estado: 'aguardando_dono',
+      estado_texto: 'espera você', texto: AVISO_DO_NELSON, em_teste: false, espera_voce: true },
+    { tipo: 'confirmar', tipo_texto: 'Confirmação', quando_texto: 'qui 22/10 às 10:00', estado: 'sem_resposta',
+      estado_texto: 'mandada; sem resposta', texto: CONFIRMACAO_DO_NELSON, em_teste: false, espera_voce: false },
+  ],
+  mensagens_mais: 0,
+  esperando_voce: { n: 1, texto: '1 mensagem esperando você: *manda cliente Nelson* manda; *segura cliente Nelson* segura.' },
+};
+
+export const CLIENTE_DO_PLANO_EM_TESTE: ClienteDoPlano = {
+  ...CLIENTE_DO_PLANO_DE_EXEMPLO,
+  modo: 'sombra', em_teste: true, em_teste_texto: 'Em teste: nada sai ainda. Aqui fica o que eu teria mandado.',
+  mensagens: [
+    { ...CLIENTE_DO_PLANO_DE_EXEMPLO.mensagens[0], quando_texto: 'amanhã às 09:00', estado: 'registrada',
+      estado_texto: 'em teste: sairia', em_teste: true, espera_voce: false },
+    CLIENTE_DO_PLANO_DE_EXEMPLO.mensagens[1],
+  ],
+  esperando_voce: { n: 0, texto: null },
 };
