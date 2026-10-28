@@ -2,8 +2,12 @@
 //
 // Paridade com a tela (src/components/ConverterSemSinal.tsx): mesma condição (fonte única em
 // _shared/banking/condicao-na-conclusao.ts), mesma ordem — condição + orçamento aprovado, depois a
-// conversão — e o MESMO número: ORÇ-00042 vira OS-00042, como faz useUpdateServiceOrderStatus. (A
-// update_service_order_status do assistente puxa um número novo da sequência; aqui não.)
+// conversão — e o MESMO número: ORÇ-00042 vira OS-00042, como faz useUpdateServiceOrderStatus.
+//
+// Agenda de Produção (merge de 28/10/2026): a conversão vai pela porta única de status (os_transicionar_status, via
+// 'assistente'), como a da tela e a de update_service_order_status: a porta troca só o prefixo do número, guarda o valor
+// orçado, confere que o número novo não é de outra OS e registra a conversão em agenda_acoes. Sem a porta da Fase 3 no
+// banco (PGRST202), o caminho de antes (PLANO B, _shared/porta-ausente.ts), com o mesmo número.
 //
 // Risco médio: troca a condição de pagamento e compromete o serviço, então pede o "sim". O retrato
 // guarda o total que o dono viu; se o orçamento mudar até o "sim", a execução recusa.
@@ -11,6 +15,7 @@
 import { blockTechnician, lerRetrato, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
 import { condicaoTudoNaConclusao } from "../../banking/condicao-na-conclusao.ts";
 import { fmtCurrency } from "../../pdf/documento.ts";
+import { argumentosDaPortaCompleta, ehPortaAusente, ehSemDireitoNaPorta, statusPelaTelaSemAPorta } from "../../porta-ausente.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -108,32 +113,31 @@ export const converterSemSinalTools: ToolDef[] = [
         .eq("id", o.id);
       if (cErr) throw cErr;
 
-      const numero = numeroDaOS(o.service_order_number);
-      const { data: os, error: sErr } = await sb
-        .from("service_orders")
-        .update({
-          status: "approved",
-          converted_to_os_at: new Date().toISOString(),
-          service_order_number: numero,
-          ...(o.original_quote_amount ? {} : { original_quote_amount: o.grand_total }),
-        })
-        .eq("id", o.id)
-        .eq("status", "draft")
-        .is("converted_to_os_at", null)
-        .select("id, service_order_number, status")
-        .maybeSingle();
-      if (sErr) throw sErr;
-      if (!os) {
-        return {
-          error: `A condição de ${o.service_order_number} foi trocada para "${condicao.payment_conditions}", mas a conversão não aconteceu (alguém converteu ao mesmo tempo?). Confira na tela.`,
-        };
+      const soCondicao = (porque: string) => ({
+        error: `A condição de ${o.service_order_number} foi trocada para "${condicao.payment_conditions}", mas a conversão não aconteceu (${porque}). Confira na tela.`,
+      });
+      let documento: string | null;
+      let convertido: boolean;
+      const { data: porta, error: erroPorta } = await sb.rpc("os_transicionar_status",
+        argumentosDaPortaCompleta(o.id, "approved", "assistente", { p_autor: ctx.userId ?? null }));
+      if (erroPorta) {
+        if (ehSemDireitoNaPorta(erroPorta)) return soCondicao(String(erroPorta.message ?? "você não pode converter este orçamento"));
+        if (!ehPortaAusente(erroPorta)) throw erroPorta;
+        const antes = await statusPelaTelaSemAPorta(sb, o.id, "approved");
+        documento = antes.numero ?? numeroDaOS(o.service_order_number);
+        convertido = antes.convertido;
+      } else {
+        if (!porta?.ok) return soCondicao(String(porta?.texto ?? "o sistema recusou"));
+        documento = porta.numero ?? numeroDaOS(o.service_order_number);
+        convertido = porta.convertido === true;
       }
+      if (!convertido) return soCondicao("alguém converteu ao mesmo tempo?");
 
       const avisos: string[] = [];
       if (o.signed_at) avisos.push("O orçamento estava ASSINADO com outra condição: o cliente precisa assinar de novo.");
       return {
         ok: true,
-        documento: os.service_order_number,
+        documento,
         orcamento_era: o.service_order_number,
         condicao: condicao.payment_conditions,
         condicao_anterior: o.payment_conditions || null,
