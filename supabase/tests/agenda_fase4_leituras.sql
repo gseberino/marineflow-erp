@@ -87,14 +87,16 @@ end $f$;
 
 -- O corpo sem os blocos "-- FASE 4: … -- FASE 4: fim" (linhas).
 -- (Fase 5, P5) o corpo sem os blocos "-- FASE 5: … -- FASE 5: fim" (P5 recriou agenda_ver em 20261028100500).
+-- FASE 6 (P8): tira também os blocos "-- FASE 6:" (agenda_ver foi recriada de novo em 20261029100800, com o bloco do
+-- foco aprendizado fora dos da Fase 5).
 create function pg_temp.sem_fase5(p_corpo text) returns text[] language plpgsql as $f$
 declare
   v_b text[] := '{}'; v_bloco boolean := false; l text;
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
-    if not v_bloco and l ~ '^\s*-- FASE 5:' and l !~ '^\s*-- FASE 5: fim' then v_bloco := true; continue; end if;
+    if not v_bloco and l ~ '^\s*-- FASE [56]:' and l !~ '^\s*-- FASE [56]: fim' then v_bloco := true; continue; end if;
     if v_bloco then
-      if l ~ '^\s*-- FASE 5: fim' then v_bloco := false; end if;
+      if l ~ '^\s*-- FASE [56]: fim' then v_bloco := false; end if;
       continue;
     end if;
     v_b := v_b || l;
@@ -450,9 +452,9 @@ begin
     end;
     v_t := pg_temp.como(null, 'service_role',
       $q$select public.agenda_ver(null, null, null, 'comprar', null, null, false, '2026-10-30') ->> 'texto'$q$);
-    -- (Fase 5, P5) a lista ganhou clientes (os 18)
-    v_res := pg_temp.ok(v_res, 'L3c o foco que não existe lança 22023 e a mensagem cita os 18 (com compras e fornecedores)',
-      v_t = 'erro 22023: agenda_ver: foco "comprar" não existe (tudo, livre, o_que_fazer, riscos, material, atrasos, aprontar, decisoes, mudancas, plano, ppc, diarias, marcos, comissao, equipe, compras, fornecedores ou clientes)', v_t);
+    -- (Fase 5, P5) a lista ganhou clientes (os 18); (Fase 6, P8) e aprendizado (os 19)
+    v_res := pg_temp.ok(v_res, 'L3c o foco que não existe lança 22023 e a mensagem cita os 19 (com compras e fornecedores)',
+      v_t = 'erro 22023: agenda_ver: foco "comprar" não existe (tudo, livre, o_que_fazer, riscos, material, atrasos, aprontar, decisoes, mudancas, plano, ppc, diarias, marcos, comissao, equipe, compras, fornecedores, clientes ou aprendizado)', v_t);
     begin
       update public.agenda_config set modo_leitura = 'desligado' where id;
       r := pg_temp.ver('compras');

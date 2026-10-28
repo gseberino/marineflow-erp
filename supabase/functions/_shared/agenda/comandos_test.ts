@@ -870,3 +870,71 @@ Deno.test("C1 (item 18) — *manda/segura cliente todos|todas|tudo* = todas as q
   // o nome continua nome
   assertEquals(lerComandoDaAgenda("manda cliente Nelson"), mandaCliente("nelson"));
 });
+
+// ─── Fase 6 (P8, spec-fase6.md §7): *agenda aprendizado* e *desfaz aprendizado* ───────────────────────────────────
+
+const verAprendizado: ComandoDaAgenda = { comando: "ver", periodo: null, foco: "aprendizado", pessoa: null };
+
+const TABELA_F6: Array<[string, ComandoDaAgenda]> = [
+  ["agenda aprendizado", verAprendizado],
+  ["Agenda aprendizado", verAprendizado],
+  ["*agenda aprendizado*", verAprendizado],
+  ["agenda aprendizado?", verAprendizado],
+  ["🎤 Agenda aprendizado.", verAprendizado],
+  // o *desfaz aprendizado* é o *desfaz <alvo>* da Fase 2: o banco (agenda_desfazer_dito) resolve "aprendizado"
+  ["desfaz aprendizado", { comando: "desfazer", alvo: "aprendizado" }],
+  ["Desfaz o aprendizado", { comando: "desfazer", alvo: "aprendizado" }],
+  ["*desfaz aprendizado*", { comando: "desfazer", alvo: "aprendizado" }],
+];
+
+Deno.test("Fase 6 (P8) — lerComandoDaAgenda: *agenda aprendizado* (de ver) e *desfaz aprendizado* (o *desfaz <alvo>*)", () => {
+  for (const [texto, esperado] of TABELA_F6) assertEquals(lerComandoDaAgenda(texto), esperado, texto);
+  assert(frasesDaAgenda().includes("agenda aprendizado"));
+});
+
+// A conversa sobre o aprendizado e os pedidos de mudar parâmetro NÃO são palavra: vão ao modelo (que só lê o foco e diz que
+// mudar é decisão do dono pelas perguntas da agenda).
+const CONVERSA_F6 = [
+  "aprendizado", "o aprendizado", "agenda aprendeu", "o que a agenda aprendeu?", "o que você aprendeu", "liga o aprendizado",
+  "muda o fator para 2", "desfaz aprendizado do fator", "desfaz o aprendizado da Kamell", "agenda do aprendizado",
+  "agenda aprendizados", "aprendizado da agenda", "desfaz aprendizado?", "a Kamell costuma atrasar?", "quanto rende uma diária?",
+];
+
+Deno.test("Fase 6 (P8) — a conversa sobre o aprendizado e os pedidos de mudar parâmetro não são palavra (vão ao modelo)", () => {
+  for (const t of CONVERSA_F6) assertEquals(lerComandoDaAgenda(t), null, t);
+});
+
+Deno.test("Fase 6 (P8) — as palavras novas não são do secretário, da confirmação, do menu, do PDF, dos comprovantes nem da pergunta ativa", () => {
+  const formas = TABELA_F6.map(([t]) => t);
+  for (const t of [...formas, ...formas.map((x) => `*${x.replace(/^\*|\*$/g, "")}*`), "aprendizado"]) {
+    assertEquals(lerComandoDoSecretario(t), null, `secretário: ${t}`);
+    assertEquals(parseConfirmationReply(t), null, `confirmação: ${t}`);
+    assertEquals(parseOptionReply(t, 9), null, `opção: ${t}`);
+    assertEquals(lerPedidoDePdf(t), null, `pdf: ${t}`);
+    assertEquals(lerComando(t), null, `comprovantes: ${t}`);
+    const n = normalizarResposta(t.replace(/[*_~]/g, ""));
+    assertEquals(lerSimNao(n), null, `sim/não: ${t}`);
+    assertEquals(lerNumero(n, 99), null, `número: ${t}`);
+    assertEquals(pareceRespostaCurta(t), false, `resposta curta: ${t}`);
+    const trava = travaDaConfirmacao(estadoComCmpNoConfirmar(), t, { pending_confirm_action_id: "pend-1" });
+    assertEquals(trava.travar, false, `trava do CMP: ${t}`);
+  }
+  // nenhuma frase fixa de antes passa a ser lida como aprendizado, e "sim", "ok" e "1" continuam da confirmação
+  for (const f of frasesDaAgenda().filter((x) => x !== "agenda aprendizado")) {
+    const c = lerComandoDaAgenda(f);
+    assert(!(c?.comando === "ver" && c.foco === "aprendizado"), f);
+  }
+  for (const t of ["sim", "ok", "1"]) assertEquals(lerComandoDaAgenda(t), null, t);
+});
+
+Deno.test("Fase 6 (P8) — webhook: *agenda aprendizado* vai ao assistente só com a leitura fora de desligado (como as de ver)", async () => {
+  for (const modo of ["sombra", "ligado"]) {
+    assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(modo), "agenda aprendizado"), true, modo);
+  }
+  for (const modo of ["desligado", "erro", "sem_tabela"]) {
+    assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(modo), "agenda aprendizado"), false, modo);
+  }
+  // *desfaz aprendizado* é palavra da Fase 2: só com a agenda automática fora de desligado
+  assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda("sombra", "desligado"), "desfaz aprendizado"), false);
+  assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda("sombra", "sombra"), "desfaz aprendizado"), true);
+});

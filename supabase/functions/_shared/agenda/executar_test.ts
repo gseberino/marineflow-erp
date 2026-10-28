@@ -709,3 +709,31 @@ Deno.test("Fase 5 (P5) — modoDoClienteNoBanco: um SELECT só da coluna; erro, 
   assertEquals(await modoDoClienteNoBanco(adminDoModo({ data: null })), "desligado");
   assertEquals(await modoDoClienteNoBanco(adminDoModo({ lanca: true })), "desligado");
 });
+
+// ─── Fase 6 (P8): *agenda aprendizado* e *desfaz aprendizado* ───────────────────────────────────────────────────────
+
+Deno.test("Fase 6 (P8) — chamadaDoComando: *agenda aprendizado* → agenda_ver foco aprendizado; *desfaz aprendizado* → agenda_desfazer_dito com o alvo", () => {
+  const base = { p_autor: AUTOR, p_os: null, p_simular: null, p_simular_aprovacao: false, p_pessoa: null };
+  assertEquals(chamadaDoComando(lerComandoDaAgenda("agenda aprendizado") as ComandoDaAgenda, AUTOR),
+               { rpc: RPC_AGENDA_VER, params: { ...base, p_periodo: null, p_foco: "aprendizado" } });
+  assertEquals(chamadaDoComando(lerComandoDaAgenda("Agenda aprendizado?") as ComandoDaAgenda, AUTOR, "2026-10-30"),
+               { rpc: RPC_AGENDA_VER, params: { ...base, p_periodo: null, p_foco: "aprendizado", p_hoje: "2026-10-30" } });
+  assertEquals(chamadaDoComando(lerComandoDaAgenda("desfaz aprendizado") as ComandoDaAgenda, AUTOR, "2026-10-30", "whatsapp"),
+               { rpc: RPC_DESFAZER_DITO, params: { p_autor: AUTOR, p_alvo: "aprendizado", p_canal: "whatsapp", p_hoje: "2026-10-30" } });
+});
+
+Deno.test("Fase 6 (P8) — executar: o texto do foco e o do *desfaz aprendizado* vêm do banco; erro = frase + log", async () => {
+  const ver = lerComandoDaAgenda("agenda aprendizado") as ComandoDaAgenda;
+  const ok = cliente({ [RPC_AGENDA_VER]: { data: { ok: true, texto: "O que a agenda aprendeu com o que aconteceu (em teste: nada disto muda o plano ainda):" } } });
+  assertEquals(await executarComandoDaAgenda(ok, ver, { autor: AUTOR }),
+               { ok: true, texto: "O que a agenda aprendeu com o que aconteceu (em teste: nada disto muda o plano ainda):" });
+  const desfaz = lerComandoDaAgenda("desfaz aprendizado") as ComandoDaAgenda;
+  const nada = cliente({ [RPC_DESFAZER_DITO]: { data: { ok: false, status: "nenhuma", texto: "Não tenho mudança do aprendizado para desfazer agora." } } });
+  const r = await executarComandoDaAgenda(nada, desfaz, { autor: AUTOR });
+  assertEquals([r.ok, r.texto], [true, "Não tenho mudança do aprendizado para desfazer agora."]);
+  const erro = cliente({ [RPC_AGENDA_VER]: { error: { message: "rede", code: "XX000" } } });
+  const r2 = await executarComandoDaAgenda(erro, ver, { autor: AUTOR });
+  assertEquals([r2.ok, r2.texto, erro.logs().length], [false, TEXTO_SEM_AGENDA, 1]);
+  const so = cliente({ [RPC_AGENDA_VER]: { error: { message: "O que a agenda aprendeu é com o administrador ou o financeiro.", code: "42501" } } });
+  assertEquals((await executarComandoDaAgenda(so, ver, { autor: AUTOR })).texto, TEXTO_SO_ADMIN);
+});

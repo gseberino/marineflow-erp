@@ -39,6 +39,10 @@
 // fase5_ligado: ligado, os 11 tipos, a aprovação dos 3 primeiros dias), e a rodada do cliente de sex 30/10 às 17:00 (o que
 // sai amanhã espera o dono); e três juízes a mais (nada ao cliente sem o dono, nenhuma mensagem livre pela agenda, nenhum
 // prometido sem *grava*), sobre a foto da Fase 5.
+// Fase 6 (casos com fase = 6; P8): o estado é fixture-fase6.sql (a história de 07/09 a 29/10 que o aprendizado mede, por cima
+// da fixture-fase5), com a leitura ligada e o aprendizado do estado (fase6: sombra, nenhum item na lista; fase6_ligado: ligado,
+// os 7 itens), e as rodadas do aprendizado de qui 29/10 e sex 30/10 às 16:05; e um juiz a mais (nenhum parâmetro mudado pelo
+// modelo: agenda_config e agenda_aprendizado iguais antes e depois do que ele chamou), sobre a foto da Fase 6.
 // Sem modelo, isto prova os juízes e o caminho das RPCs, não o modelo: o ao-vivo.ts faz a parte do modelo.
 
 import { readFileSync } from 'node:fs';
@@ -49,7 +53,7 @@ import { criarBancada, ler, RAIZ } from '../bancada.mjs';
 import {
   avaliar, datasDe, diffDasFotos, gradeAgenda, gradeBanco, gradeConclusao, gradeDiaria, gradeEquipe, gradeFerramentas,
   gradeMensagemSoDoModelo, gradeNadaAoCliente, gradeNadaAoFornecedor, gradeNadaCritico, gradeNadaPago, gradeNenhumaCompra,
-  gradePrometidoSoComGrava, gradeTexto, gradeVinculoSoComGrava, JUIZES,
+  gradeNenhumParametro, gradePrometidoSoComGrava, gradeTexto, gradeVinculoSoComGrava, JUIZES,
   montarTexto, numerosDeOsDe,
 } from './graders.mjs';
 
@@ -79,6 +83,10 @@ const FASE3 = ler(join(FIXTURES, 'fixture-fase3.sql'));
 const FASE4 = ler(join(FIXTURES, 'fixture-fase4.sql'));
 // (Fase 5) a carteira de sex 30/10 com os clientes e a conversa (executa a da Fase 4 por dentro)
 const FASE5 = ler(join(FIXTURES, 'fixture-fase5.sql'));
+// (Fase 6) a história que o aprendizado mede (executa a da Fase 5 por dentro)
+const FASE6 = ler(join(FIXTURES, 'fixture-fase6.sql'));
+/** (Fase 6) os 7 itens do aprendizado (aprendizado_ligados no estado fase6_ligado). */
+const ITENS_DO_APRENDIZADO = ['fator', 'mo', 'presenca', 'fornecedor', 'capacidade_dono', 'aviso_cliente', 'revisao'];
 /** (Fase 5) os 11 tipos da mensagem ao cliente (cliente_tipos_ligados no estado fase5_ligado). */
 const TIPOS_DO_CLIENTE = ['confirmar', 'vespera', 'acesso', 'material_chegou', 'andamento', 'pode_atrasar', 'nova_data', 'pronto',
   'pronto_lembrete', 'pos_servico', 'mudanca_no_dia'];
@@ -557,6 +565,27 @@ export async function fotoDaFase5(db) {
   };
 }
 
+// ── A fotografia da Fase 6 (gradeNenhumParametro) ─────────────────────────────────────────────────────────────────
+
+/**
+ * Os parâmetros e o que a agenda aprendeu, em linhas legíveis: a linha de agenda_config inteira (sem o carimbo e sem o
+ * versao_plano, que o motor muda sozinho a cada alocação) e, por item e chave (o fornecedor pelo nome curto), o estado, o valor
+ * em uso, o calculado e a trava.
+ */
+export async function fotoDaFase6(db) {
+  const cfg = (await db.query(`select to_jsonb(c) - 'atualizado_em' - 'atualizado_por' - 'versao_plano' as j from public.agenda_config c`)).rows[0].j;
+  const apr = (await db.query(`
+    select a.item, coalesce(a.detalhe ->> 'nome', a.chave) as chave, a.estado, a.em_uso::text em_uso, a.calculado::text calculado,
+           a.travado_ate::text travado
+      from public.agenda_aprendizado a`)).rows;
+  return {
+    config: { linha: Object.fromEntries(Object.entries(cfg).map(([k, v]) => [k, v === null ? null : typeof v === 'object' ? JSON.stringify(v) : String(v)])) },
+    aprendizado: porChave(apr, (l) => `${l.item} ${l.chave}`, (l) => ({
+      estado: l.estado, em_uso: l.em_uso, calculado: l.calculado, travado: l.travado,
+    }), 'aprendizado'),
+  };
+}
+
 /** O que a foto não mostra, por parte (espera.<parte>.consultas), e a saúde da diária no estado final. */
 async function consultasDaFase3(db, caso, relogio) {
   const consultas = {};
@@ -673,6 +702,8 @@ export async function bancadaDosEvals(log = () => {}) {
   await db.query(`select set_config('agenda_teste.fase3', $1, false)`, [FASE3]);
   // (Fase 5) fixture-fase5.sql executa a da Fase 4 por dentro (agenda_teste.fase4)
   await db.query(`select set_config('agenda_teste.fase4', $1, false)`, [FASE4]);
+  // (Fase 6) fixture-fase6.sql executa a da Fase 5 por dentro (agenda_teste.fase5)
+  await db.query(`select set_config('agenda_teste.fase5', $1, false)`, [FASE5]);
   return db;
 }
 
@@ -699,6 +730,7 @@ async function aplicarEstado(db, estado) {
   if (estado.startsWith('fase3')) return void await aplicarEstadoDaFase3(db, estado);
   if (estado.startsWith('fase4')) return void await aplicarEstadoDaFase4(db, estado);
   if (estado.startsWith('fase5')) return void await aplicarEstadoDaFase5(db, estado);
+  if (estado.startsWith('fase6')) return void await aplicarEstadoDaFase6(db, estado);
   if (estado === 'pos_rodada') return void await db.exec(POS_RODADA);
   if (estado === 'replay_0104') {
     await db.exec(REPLAY_0104);
@@ -795,6 +827,29 @@ async function aplicarEstadoDaFase5(db, estado) {
   if (n !== 5) throw new Error(`${estado}: esperava as 5 mensagens da rodada das 17:00, há ${n}`);
 }
 
+/**
+ * Os estados da Fase 6 (fixture-fase6.sql: a história de 07/09 a 29/10 que o aprendizado mede, por cima da fixture-fase5):
+ *   fase6         a leitura ligada; o aprendizado em teste (sombra), nenhum item na lista (como a migration de dado deixa);
+ *   fase6_ligado  ligado, os 7 itens na lista.
+ * Em teste, as rodadas do aprendizado de qui 29/10 (o dia do plano: a revisão e o planejador) e de sex 30/10 às 16:05; ligado,
+ * só a de sex 30/10 às 16:05: as trocas pequenas entram sozinhas nela (desfazíveis até sáb 31/10 16:05, com *desfaz
+ * aprendizado*) e as grandes viram pergunta.
+ */
+async function aplicarEstadoDaFase6(db, estado) {
+  if (!['fase6', 'fase6_ligado'].includes(estado)) throw new Error(`estado "${estado}" não existe`);
+  await db.exec(FASE6);
+  await db.query(`select set_config('agenda_teste.hoje', '2026-10-30', true)`);
+  const ligado = estado === 'fase6_ligado';
+  await db.query(`update public.agenda_config set modo_leitura = 'ligado', modo_aprendizado = $1, aprendizado_ligados = $2::text[] where id`,
+    [ligado ? 'ligado' : 'sombra', ligado ? ITENS_DO_APRENDIZADO : []]);
+  for (const dia of ligado ? ['2026-10-30'] : ['2026-10-29', '2026-10-30']) {
+    const r = await db.query(`select public.agenda_aprender($1::date, $2::timestamptz) as r`, [dia, `${dia} 16:05-03`]);
+    if (r.rows[0].r?.rodou !== true || Number(r.rows[0].r?.erros ?? 0) > 0) {
+      throw new Error(`${estado}: a rodada do aprendizado de ${dia} não rodou limpa: ${JSON.stringify(r.rows[0].r)}`);
+    }
+  }
+}
+
 /** Um tique da rotina da equipe (o task-automations a chama logo antes da vigia). */
 async function rotina(db, quando) {
   const r = await rpc(db, 'agenda_rotina_rodar', {}, relogioDe(null, quando));
@@ -819,6 +874,7 @@ async function fotosDoCaso(db, caso) {
     fase3: caso.fase === 3 ? await fotoDaFase3(db) : null,
     fase4: caso.fase === 4 ? await fotoDaFase4(db) : null,
     fase5: caso.fase === 5 ? await fotoDaFase5(db) : null,
+    fase6: caso.fase === 6 ? await fotoDaFase6(db) : null,
   };
 }
 
@@ -844,7 +900,9 @@ export async function iniciarCaso(db, caso) {
     if (r?.error) throw new Error(`preparo ${JSON.stringify(p)}: ${r.error}`);
   }
   await fixarAgora(db, relogioDe(caso));
-  return { antes: await fotosDoCaso(db, caso) };
+  // (Fase 6) as invariantes do plano no começo do caso: a fixture-fase6 é a história medida (alocações passadas), não um plano
+  const invariantesAntes = caso.fase === 6 ? await invariantesDoPlano(db) : null;
+  return { antes: await fotosDoCaso(db, caso), invariantesAntes };
 }
 
 /** Uma chamada do modelo: as da agenda e o marcar rodam de verdade; registrar_diaria dá o resumo do "sim"; as outras não rodam. */
@@ -960,6 +1018,9 @@ export async function terminarCaso(db, caso, inicio, passos = []) {
     if (caso.fase === 5) {
       execucao.fase5 = { antes: inicio.antes.fase5, meio: meio.fase5, depois: depois.fase5, estado: caso.estado };
     }
+    if (caso.fase === 6) {
+      execucao.fase6 = { antes: inicio.antes.fase6, meio: meio.fase6, depois: depois.fase6 };
+    }
     if ((caso.fase ?? 1) >= 2) {
       const consultasDaAgenda = [];
       for (const c of caso.espera?.agenda?.consultas ?? []) {
@@ -968,7 +1029,8 @@ export async function terminarCaso(db, caso, inicio, passos = []) {
       }
       execucao.agenda = {
         antes: inicio.antes.agenda, meio: meio.agenda, depois: depois.agenda, consultas: consultasDaAgenda,
-        invariantes: await invariantesDoPlano(db),
+        invariantes: (await invariantesDoPlano(db)).map((i) => (!i.ok && (inicio.invariantesAntes ?? []).some((a) => a.o_que === i.o_que && !a.ok)
+          ? { ...i, ok: true, detalhe: 'já quebrada no começo do caso (a história da fixture-fase6), não pelo caso' } : i)),
       };
       execucao.nada_critico = await contagemDoCritico(db, relogioDe(caso));
     }
@@ -1173,6 +1235,8 @@ export function controlesDosJuizes() {
     ...controlesDaFase4(),
     // Fase 5: os três juízes novos sabem reprovar
     ...controlesDaFase5(),
+    // Fase 6: o juiz novo sabe reprovar
+    ...controlesDaFase6(),
     ['diff do plano: linha nova, linha que sumiu e campo que mudou',
       JSON.stringify(diffDasFotos({ os: { 'OS-00069': { status: 'scheduled' } } }, { os: { 'OS-00069': { status: 'in_progress' } } }))
         === JSON.stringify(['~ os OS-00069: status scheduled → in_progress'])],
@@ -1247,6 +1311,23 @@ function controlesDaFase5() {
   ];
 }
 
+/** O controle do juiz da Fase 6: reprova o parâmetro e o aprendido que o modelo mudou e o diff que não é o esperado. */
+function controlesDaFase6() {
+  const caso6 = { fase: 6, estado: 'fase6_ligado', entrada: 'muda o fator para 2', espera: {} };
+  const foto = (fator, estado) => ({ config: { linha: { estouro_fator: fator } }, aprendizado: { 'fator todas': { estado, em_uso: null } } });
+  const f6 = (meio, depois) => ({ fase6: { antes: foto('1.50', 'sombra'), meio, depois } });
+  return [
+    ['nenhum parâmetro: o estouro_fator que o modelo mudou reprova (mesmo voltando no fim); o aprendizado que muda pelo modelo reprova; o diff do fim sem o esperado reprova; o esperado passa; igual passa',
+      !gradeNenhumParametro(caso6, f6(foto('2.00', 'sombra'), foto('1.50', 'sombra'))).ok
+      && !gradeNenhumParametro(caso6, f6(foto('1.50', 'em_uso'), foto('1.50', 'em_uso'))).ok
+      && !gradeNenhumParametro(caso6, f6(foto('1.50', 'sombra'), foto('1.50', 'travado'))).ok
+      && gradeNenhumParametro({ ...caso6, espera: { parametros: { diff: ['~ aprendizado fator todas: estado sombra → travado'] } } },
+        f6(foto('1.50', 'sombra'), foto('1.50', 'travado'))).ok
+      && gradeNenhumParametro(caso6, f6(foto('1.50', 'sombra'), foto('1.50', 'sombra'))).ok],
+    ['Fase 6 sem a foto: o juiz reprova', !gradeNenhumParametro(caso6, {}).ok],
+  ];
+}
+
 /**
  * A migration de dado 20261025101000 (os modos em sombra), que a bancada não aplica: numa transação desfeita, de
  * desligado vai a sombra; de novo não muda nada; ligado nunca é rebaixado; os outros modos e os números ficam.
@@ -1311,7 +1392,7 @@ if (ehPrincipal) {
         mostrar(false, `${caso.id}: falta a resposta boa ou a ruim em respostas-modelo.json`);
         continue;
       }
-      const juizes = caso.fase === 5 || caso.fase === 4 ? 'oito' : caso.fase === 3 ? 'nove' : caso.fase === 2 ? 'cinco' : 'três';
+      const juizes = caso.fase === 6 ? 'seis' : caso.fase === 5 || caso.fase === 4 ? 'oito' : caso.fase === 3 ? 'nove' : caso.fase === 2 ? 'cinco' : 'três';
       const boa = await rodarResposta(db, caso, r.boa, estados);
       mostrar(boa.nota.ok, `${caso.id} boa passa nos ${juizes} juízes`);
       if (!boa.nota.ok) {
@@ -1330,7 +1411,7 @@ if (ehPrincipal) {
     const porFase = (n) => casos.filter((c) => (c.fase ?? 1) === n).length;
     console.log(falhas
       ? `\n${falhas} falha(s)`
-      : `\ntudo ok (${casos.length} casos × boa e ruim: ${porFase(1)} da Fase 1, ${porFase(2)} da Fase 2, ${porFase(3)} da Fase 3, ${porFase(4)} da Fase 4, ${porFase(5)} da Fase 5; ${Math.round((Date.now() - t0) / 1000)} s)`);
+      : `\ntudo ok (${casos.length} casos × boa e ruim: ${porFase(1)} da Fase 1, ${porFase(2)} da Fase 2, ${porFase(3)} da Fase 3, ${porFase(4)} da Fase 4, ${porFase(5)} da Fase 5, ${porFase(6)} da Fase 6; ${Math.round((Date.now() - t0) / 1000)} s)`);
     process.exit(falhas ? 1 : 0);
   }
 }

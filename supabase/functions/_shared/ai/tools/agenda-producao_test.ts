@@ -573,3 +573,20 @@ Deno.test("Fase 5: a descrição de cliente_avisar diz que NÃO envia, a palavra
   assert(foco.includes("clientes"));
   assertStringIncludes(porNome("agenda_ver").description, "(foco clientes");
 });
+
+// Fase 6 (P8, spec-fase6.md §7): o foco aprendizado em agenda_ver (no enum e na descrição); nenhuma ferramenta nova e nenhuma
+// que escreva parâmetro.
+Deno.test("Fase 6 (P8) — agenda_ver tem o foco aprendizado (enum e descrição: só lê; mudar é decisão do dono)", () => {
+  const foco = (porNome("agenda_ver").input_schema as { properties: Record<string, { enum?: string[] }> }).properties.foco.enum ?? [];
+  assert(foco.includes("aprendizado"));
+  const d = porNome("agenda_ver").description;
+  assertStringIncludes(d, "o que a agenda aprendeu com o que aconteceu (foco aprendizado");
+  assertStringIncludes(d, "mudar é decisão do dono pelas perguntas da agenda");
+  // nenhuma ferramenta da agenda recebe parâmetro de agenda_config nem item do aprendizado para mudar
+  for (const t of agendaProducaoTools) {
+    const props = Object.keys((t.input_schema as { properties?: Record<string, unknown> }).properties ?? {});
+    for (const p of ["modo_aprendizado", "aprendizado_ligados", "estouro_fator", "carga_max", "fator"]) {
+      assertEquals(props.includes(p), false, `${t.name} recebe ${p}`);
+    }
+  }
+});

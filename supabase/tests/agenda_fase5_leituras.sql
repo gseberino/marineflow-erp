@@ -91,14 +91,16 @@ begin
 end $f$;
 
 -- O corpo sem os blocos "-- FASE 5: … -- FASE 5: fim" (linhas).
+-- FASE 6 (P8): tira também os blocos "-- FASE 6:" (agenda_ver foi recriada de novo em 20261029100800, com o bloco do
+-- foco aprendizado fora dos da Fase 5).
 create function pg_temp.sem_fase5(p_corpo text) returns text[] language plpgsql as $f$
 declare
   v_b text[] := '{}'; v_bloco boolean := false; l text;
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
-    if not v_bloco and l ~ '^\s*-- FASE 5:' and l !~ '^\s*-- FASE 5: fim' then v_bloco := true; continue; end if;
+    if not v_bloco and l ~ '^\s*-- FASE [56]:' and l !~ '^\s*-- FASE [56]: fim' then v_bloco := true; continue; end if;
     if v_bloco then
-      if l ~ '^\s*-- FASE 5: fim' then v_bloco := false; end if;
+      if l ~ '^\s*-- FASE [56]: fim' then v_bloco := false; end if;
       continue;
     end if;
     v_b := v_b || l;
@@ -271,9 +273,10 @@ begin
   v_t := pg_temp.ver('Lenine');
   v_res := pg_temp.ok(v_res, 'L1h com a OS sem telefone: "sem telefone no cadastro" e o que foi dito (nada ainda)',
     v_t like '%O que foi dito ao cliente: nada ainda.%' and v_t like '%Não consigo mandar: Lenine (sem telefone no cadastro).%', v_t);
-  v_res := pg_temp.ok(v_res, 'L1i o foco que não existe cita os 18 (com clientes)',
+  -- (Fase 6, P8) a lista ganhou aprendizado (os 19)
+  v_res := pg_temp.ok(v_res, 'L1i o foco que não existe cita os 19 (com clientes)',
     pg_temp.como(null, 'service_role', $q$select public.agenda_ver(null, null, null, 'nada', null, null, false, date '2026-10-30')::text$q$)
-      like 'erro 22023: agenda_ver: foco "nada" não existe (%, compras, fornecedores ou clientes)', null);
+      like 'erro 22023: agenda_ver: foco "nada" não existe (%, compras, fornecedores, clientes ou aprendizado)', null);
   begin
     update public.agenda_config set modo_leitura = 'desligado' where id;
     r := public.agenda_ver(null, null, null, 'clientes', null, null, false, date '2026-10-30');

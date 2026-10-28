@@ -1191,10 +1191,10 @@ Deno.test("motor: R9 e R13 aposentadas; o responsável vem de responsavel.ts", a
   // Agenda de Produção, Fase 1 (P2): o passo do material entra no resumo, e nada que fale com cliente.
   // Fase 2 (P3): a vigia também entra no resumo. Fase 3 (P4): e a rotina da equipe, antes da vigia. Fase 4 (P5): e a vigia
   // do material, depois do material. Fase 5 (P3): e a rodada do cliente, depois da vigia (o banco decide e enfileira; o
-  // TS só leva os acordes ao dono).
+  // TS só leva os acordes ao dono). Fase 6 (P8): e a rodada do aprendizado, depois da rotina e antes da vigia (nada sai).
   assertEquals(fonte.replace(/\r\n/g, "\n").includes(
     "const summary = {\n      identidade, fios, agenda_material: agendaMaterial, agenda_material_vigia: agendaMaterialVigia, agenda_rotina: agendaRotina,\n" +
-      "      agenda_vigia: agendaVigia, agenda_cliente_vigia: agendaClienteVigia, rules, r10, reminders, recurrence,\n    };"), true);
+      "      agenda_aprender: agendaAprender, agenda_vigia: agendaVigia, agenda_cliente_vigia: agendaClienteVigia, rules, r10, reminders, recurrence,\n    };"), true);
   assertEquals(fonte.includes('import { resolveAssignee } from "./responsavel.ts";'), true);
   assertEquals(/async function resolveAssignee/.test(fonte), false);
 });

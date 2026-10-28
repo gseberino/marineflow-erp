@@ -288,10 +288,14 @@ function secaoDaAgenda(): string {
 // Fase 5: mensagens ao cliente (spec-fase5.md §7.3: +3 linhas, teto 24, ou juntar a linha das palavras) — entraram 2 linhas
 // (a mensagem-modelo que só o dono manda com *manda cliente*; o prometido e o foco clientes) e as palavras novas foram para a
 // linha das palavras que já existia. Teto 23.
-Deno.test("agenda de produção: a seção é curta (≤ 23 linhas: custa tokens em toda mensagem) e fica no bloco estável", () => {
+// Fase 6 (P8): o aprendizado (spec-fase6.md §7: +1 linha, teto 24) — entrou 1 linha: o que a agenda aprendeu é agenda_ver foco
+// aprendizado, os números vêm do banco, nunca mudar parâmetro (é decisão do dono pelas perguntas da agenda), e as duas palavras
+// (*agenda aprendizado*, *desfaz aprendizado*) na própria linha (a das palavras de antes fica como está: o teste da Fase 5
+// fixa o fim dela). Teto 24.
+Deno.test("agenda de produção: a seção é curta (≤ 24 linhas: custa tokens em toda mensagem) e fica no bloco estável", () => {
   const secao = secaoDaAgenda();
   const linhas = secao.split("\n");
-  assertEquals(linhas.length <= 23, true, `a seção tem ${linhas.length} linhas`);
+  assertEquals(linhas.length <= 24, true, `a seção tem ${linhas.length} linhas`);
   // Estável = em cache. O volátil muda a cada turno e não pode carregar a seção.
   const volatil = buildSystemBlocks(CONVERSA_LIGADA, { userName: "Teste", userRole: "admin", channel: "whatsapp" })[1].text;
   assertEquals(volatil.includes(SECAO_AGENDA), false);
@@ -529,4 +533,26 @@ Deno.test("agenda de produção (Fase 5, P5): a mensagem-modelo só com *manda c
   assertEquals(lerComandoDaAgenda("segura cliente")?.comando, "cliente");
   const ver = lerComandoDaAgenda("agenda clientes");
   assertEquals(ver?.comando === "ver" ? ver.foco : null, "clientes");
+});
+
+// Agenda de Produção (28/10/2026, Fase 6, P8): o aprendizado — o foco aprendizado (existe no enum e na descrição de
+// agenda_ver), os números do banco, nunca mudar parâmetro ("muda o fator", "liga o aprendizado": é decisão do dono pelas
+// perguntas da agenda e pelo roteiro dos OKs) e as palavras que o dono manda direto (o comando sem IA LÊ cada uma). Nenhuma
+// ferramenta nova: o teto do perfil continua.
+Deno.test("agenda de produção (Fase 6, P8): o foco aprendizado, os números do banco, nunca mudar parâmetro e as palavras", () => {
+  const secao = secaoDaAgenda();
+  assertStringIncludes(secao, "agenda_ver foco aprendizado");
+  assertStringIncludes(secao, "Os números vêm do banco; nunca calcule nem mude parâmetro");
+  assertStringIncludes(secao, "mudar é decisão do dono pelas perguntas da agenda");
+  assertStringIncludes(secao, "*agenda aprendizado* e *desfaz aprendizado* o dono manda direto, sem você");
+  const agendaVer = porNome.get("agenda_ver")!;
+  const focos = (agendaVer.input_schema as { properties: Record<string, { enum?: string[] }> }).properties.foco.enum ?? [];
+  assertEquals(focos.includes("aprendizado"), true);
+  assertStringIncludes(agendaVer.description, "(foco aprendizado");
+  const ver = lerComandoDaAgenda("agenda aprendizado");
+  assertEquals(ver?.comando === "ver" ? ver.foco : null, "aprendizado");
+  const desfaz = lerComandoDaAgenda("desfaz aprendizado");
+  assertEquals(desfaz?.comando === "desfazer" ? desfaz.alvo : null, "aprendizado");
+  // sem crase no texto ensinado (o prompt é um template literal)
+  assertEquals(secao.includes("`"), false);
 });

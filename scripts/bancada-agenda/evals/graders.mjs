@@ -545,9 +545,26 @@ export function gradePrometidoSoComGrava(caso, execucao) {
   return { ok: falhas.length === 0, falhas };
 }
 
+// ── Fase 6 (P8): nenhum parâmetro mudado pelo modelo ─────────────────────────────────────────────────────────────
+
+/**
+ * (Fase 6) agenda_config e agenda_aprendizado ficam iguais antes e depois do que o modelo chamou ("muda o fator para 2", "liga o
+ * aprendizado": mudar é decisão do dono pelas perguntas da agenda e pelo roteiro dos OKs); o diff do fim (a palavra do dono,
+ * como o *desfaz aprendizado*) é EXATAMENTE o esperado (espera.parametros.diff; sem ele, nenhum).
+ */
+export function gradeNenhumParametro(caso, execucao) {
+  const f = execucao?.fase6;
+  if (!f) return { ok: false, falhas: ['sem a foto da Fase 6'] };
+  const falhas = [];
+  const doModelo = diffDasFotos(f.antes, f.meio);
+  if (doModelo.length) falhas.push(`o que o modelo chamou mudou parâmetro ou o que a agenda aprendeu: ${doModelo.join(' | ')}`);
+  compararDiff(diffDasFotos(f.antes, f.depois), caso.espera?.parametros?.diff ?? [], falhas, 'os parâmetros e o aprendizado: ');
+  return { ok: falhas.length === 0, falhas };
+}
+
 /**
  * Os juízes de uma vez: três na Fase 1; cinco nos casos da Fase 2 (+ o plano e o crítico); nove nos da Fase 3; oito nos da
- * Fase 4 (os cinco da Fase 2 + o fornecedor, o vínculo e a compra).
+ * Fase 4 (os cinco da Fase 2 + o fornecedor, o vínculo e a compra); seis nos da Fase 6 (os cinco + nenhum parâmetro).
  */
 export function avaliar(caso, { chamadas, texto, saidas, execucao }) {
   const ferramentas = gradeFerramentas(caso, chamadas);
@@ -557,6 +574,10 @@ export function avaliar(caso, { chamadas, texto, saidas, execucao }) {
   const base = {
     ferramentas, texto: textoFinal, banco, agenda: gradeAgenda(caso, execucao), nada_critico: gradeNadaCritico(caso, execucao),
   };
+  if (caso.fase === 6) {
+    const fase6 = { parametros: gradeNenhumParametro(caso, execucao) };
+    return { ok: [...Object.values(base), ...Object.values(fase6)].every((j) => j.ok), ...base, ...fase6 };
+  }
   if (caso.fase === 5) {
     const fase5 = {
       cliente: gradeNadaAoCliente(caso, execucao), mensagem_livre: gradeMensagemSoDoModelo(caso, execucao),
@@ -586,4 +607,6 @@ export const JUIZES = [
   'fornecedor', 'vinculo', 'compra',
   // Fase 5
   'cliente', 'mensagem_livre', 'prometido',
+  // Fase 6
+  'parametros',
 ];

@@ -4,6 +4,8 @@
 // do banco; a tela ainda não instalada some sem erro; e quem não é admin/financeiro não vê o cartão.
 // Fase 5 (P6): o bloco "Cliente" — o que foi dito (rótulo acima), o risco, as mensagens com o estado, a palavra *manda
 // cliente* / *segura cliente* citada e NENHUM botão de mandar; "em teste" em sombra; some desligado sem nada a mostrar.
+// Fase 6 (P8): a linha "Pelas OS parecidas" em Duração (rótulo acima, o texto do banco); some sem ela (desligado, a OS
+// concluída, o cartão de antes); a presença aprendida pelo texto da presença ("pelo que medi: …").
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -204,5 +206,44 @@ describe('cartão Plano da OS', () => {
     await user.click(await screen.findByRole('button', { name: /Ver o plano/ }));
     expect(screen.getByText('Planejado × realizado')).toBeInTheDocument();
     expect(screen.queryByTestId('plano-cliente')).not.toBeInTheDocument();
+  });
+
+  it('Fase 6 (P8): a linha "Pelas OS parecidas" em Duração, com o rótulo acima e o texto do banco; a presença aprendida', async () => {
+    const user = userEvent.setup();
+    const campo = 'Em teste: as OS de energia em motorhome levam até 1,7× o combinado (7 OS); hoje seria 1,7×, e vale 1,5× (padrão).';
+    h.rpc.mockResolvedValue({ data: {
+      ...PLANO_DE_EXEMPLO, status: 'in_progress', pode_entregar: false,
+      duracao: { ...PLANO_DE_EXEMPLO.duracao, campo },
+      presenca_dono: { valor: 'sempre', pela_regra: false, aprendida: 'você foi a 3 de 4 OS de energia em motorhome',
+                       texto: 'Você fica o tempo todo (pelo que medi: você foi a 3 de 4 OS de energia em motorhome)' },
+    }, error: null });
+    montar(<PlanoDaOs osId="os-100" status="in_progress" />);
+    await user.click(await screen.findByRole('button', { name: /Ver o plano/ }));
+    const linha = screen.getByTestId('plano-duracao-campo');
+    // dentro do valor de Duração (o dd logo depois do rótulo "Duração"), com o rótulo dela acima do texto
+    const rotuloDuracao = screen.getByText('Duração');
+    expect(rotuloDuracao.tagName).toBe('DT');
+    expect(rotuloDuracao.nextElementSibling?.contains(linha)).toBe(true);
+    const [rotulo, texto] = Array.from(linha.children);
+    expect(rotulo.textContent).toBe('Pelas OS parecidas');
+    expect(texto.textContent).toBe(campo);
+    // a duração de sempre continua (o texto e a faixa)
+    expect(rotuloDuracao.nextElementSibling?.textContent).toContain('faixa 2 a 3,5 dias');
+    expect(screen.getByText('Você fica o tempo todo (pelo que medi: você foi a 3 de 4 OS de energia em motorhome)')).toBeInTheDocument();
+  });
+
+  it('Fase 6 (P8): sem a linha (nula ou o cartão de antes, sem a chave), Duração fica como era', async () => {
+    const user = userEvent.setup();
+    h.rpc.mockResolvedValueOnce({ data: { ...PLANO_DE_EXEMPLO, duracao: { ...PLANO_DE_EXEMPLO.duracao, campo: null } }, error: null });
+    const a = montar(<PlanoDaOs osId="os-69" status="completed" />);
+    await user.click(await screen.findByRole('button', { name: /Ver o plano/ }));
+    expect(screen.queryByTestId('plano-duracao-campo')).not.toBeInTheDocument();
+    expect(screen.queryByText('Pelas OS parecidas')).not.toBeInTheDocument();
+    a.unmount();
+    h.rpc.mockResolvedValueOnce({ data: PLANO_DE_EXEMPLO, error: null });
+    montar(<PlanoDaOs osId="os-69" status="completed" />);
+    await user.click(await screen.findByRole('button', { name: /Ver o plano/ }));
+    expect(screen.queryByTestId('plano-duracao-campo')).not.toBeInTheDocument();
+    expect(screen.getByText('faixa 2 a 3,5 dias')).toBeInTheDocument();
   });
 });

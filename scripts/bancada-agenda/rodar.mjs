@@ -148,6 +148,10 @@ const FIXTURES_COMO_TEXTO = [
   ['agenda_teste.mig_correcao_rodada_fase5', '../../supabase/migrations/20261028100800_agenda_fase5_correcao_rodada.sql'],
   ['agenda_teste.mig_dono_fase6', '../../supabase/migrations/20261029100400_agenda_fase6_dono.sql'],
   ['agenda_teste.mig_cliente_fase6', '../../supabase/migrations/20261029100500_agenda_fase6_cliente.sql'],
+  // Fase 6 (P8): a migration de dado 20261029101000 (o aprendizado em sombra), que a bancada não aplica (FORA_DA_BANCADA):
+  // agenda_fase6_sombra.sql a roda numa subtransação desfeita. As fontes das 3 recriadas da 20261029100800 já estão acima
+  // (agenda_ver: mig_leituras_fase5; os_plano_da_os: mig_telas_fase5; _agenda_ver_fornecedores: mig_leituras_fase4).
+  ['agenda_teste.mig_sombra_fase6', '../../supabase/migrations/20261029101000_agenda_fase6_sombra.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

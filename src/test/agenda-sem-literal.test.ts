@@ -283,6 +283,8 @@ function tsDaAgenda(): Trecho[] {
     path.join(FUNCOES, 'task-automations', 'agenda-material.ts'),
     // Fase 5 (P3): o passo da rodada do cliente no motor de 15 min.
     path.join(FUNCOES, 'task-automations', 'agenda-cliente.ts'),
+    // Fase 6 (P8): o passo da rodada do aprendizado no motor de 15 min.
+    path.join(FUNCOES, 'task-automations', 'agenda-aprender.ts'),
     // Fase 3 (P7a): os hooks das telas (a Semana, a Carteira, o cartão Plano e o que a porta aceita pela tela).
     path.join(RAIZ, 'src', 'hooks', 'use-agenda-producao.ts'),
     path.join(RAIZ, 'src', 'hooks', 'use-status-da-porta.ts'),
@@ -433,6 +435,8 @@ describe('agenda: parâmetro só em agenda_config', () => {
       'agenda_cliente_preparar', 'agenda_resposta_do_cliente', '_agenda_cliente_da_os', '_agenda_ver_clientes',
       '_agenda_cliente_confirmar_dia', '_agenda_cliente_anotar_acesso', '_agenda_cliente_pedido_de_dia', '_agenda_desfazer_cliente',
       '_agenda_cliente_teria_feito',
+      // Fase 6 (P8): o foco aprendizado e o foco fornecedores recriado (agenda_ver e os_plano_da_os já estavam na lista)
+      '_agenda_ver_aprendizado', '_agenda_ver_fornecedores',
     ]));
     expect(tsAgenda.map((t) => t.onde)).toEqual(expect.arrayContaining([
       path.join('supabase', 'functions', 'task-automations', 'agenda-vigia.ts'),
