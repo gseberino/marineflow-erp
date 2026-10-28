@@ -77,6 +77,10 @@
 //                                                  capacidade do dono, o R$ por diária, o cliente e a revisão da carga)
 //   desfaz aprendizado · desfaz o aprendizado   → o *desfaz <alvo>* de sempre (agenda_desfazer_dito resolve "aprendizado" no
 //                                                  banco, antes do nome do cliente: a última troca que a agenda fez sozinha)
+//   desfaz aprendizado <coisa>                  → (correção C2) só aquela coisa: fator, presença, valor, diária, folga,
+//                                                  capacidade, carga, fornecedor ou o nome de um fornecedor ("desfaz aprendizado
+//                                                  Kamell"); a coisa vale mesmo quando é palavra de outra ferramenta no alvo de OS
+//                                                  ("diária"); o nome do fornecedor segue a régua do alvo (até 3 palavras no todo)
 //   De VER (vale com "?"); com a leitura fora de desligado, como as da Fase 1 (o banco diz "em teste" ou "desligado").
 //   "aprendizado" não é nome de cliente, pessoa, bem nem fornecedor (0 de 559 clientes em 28/10/2026) nem palavra de outra
 //   ferramenta (comandos_test.ts).
@@ -235,6 +239,12 @@ const NAO_E_ALVO = new Set([
   "lembrete", "despesa", "recebimento", "transferencia", "mensagem", "diaria",
 ]);
 
+/**
+ * (Fase 6, correção C2) A coisa do *desfaz aprendizado <coisa>*: o item do que a agenda aprendeu (o fator, a presença, o
+ * valor ou a diária, a folga, a capacidade ou a carga, os fornecedores). Já normalizado (sem acento): "presenca", "diaria".
+ */
+const COISA_DO_APRENDIZADO = /^(?:o )?aprendizado (fator|presenca|valor|diaria|folga|capacidade|carga|fornecedor)$/;
+
 /** O nome do alvo (já sem "o/a/do/da") serve? Até 3 palavras, sem conectivo e sem as palavras de outras ferramentas. */
 function alvoDeOs(nome: string): boolean {
   const palavras = nome.split(" ").filter(Boolean);
@@ -295,6 +305,11 @@ function lerPalavraComplemento(t: string): ComandoDaAgenda | null {
     if (alvo.length > ALVO_MAX || ALVO_DE_LETRA.test(alvo)) return null;
     // "desfaz a semana", "desfaz semana" → "semana"; "desfaz o Nelson" → "nelson" (o banco resolve o nome)
     if (/^(?:a |da )?semana$/.test(alvo)) return { comando: "desfazer", alvo: "semana" };
+    // Fase 6 (correção C2, item 6): *desfaz aprendizado <coisa>* — a coisa do aprendizado vale mesmo quando é palavra de
+    // outra ferramenta no alvo de OS ("diaria" está em NAO_E_ALVO); o nome do fornecedor ("desfaz aprendizado Kamell")
+    // segue a régua de sempre (alvoDito). O banco resolve as duas (agenda_desfazer_dito).
+    const doAprendizado = COISA_DO_APRENDIZADO.exec(alvo);
+    if (doAprendizado) return { comando: "desfazer", alvo: `aprendizado ${doAprendizado[1]}` };
     const nome = alvoDito(alvo);
     return nome === undefined ? null : { comando: "desfazer", alvo: nome };
   }

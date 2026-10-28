@@ -938,3 +938,51 @@ Deno.test("Fase 6 (P8) — webhook: *agenda aprendizado* vai ao assistente só c
   assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda("sombra", "desligado"), "desfaz aprendizado"), false);
   assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda("sombra", "sombra"), "desfaz aprendizado"), true);
 });
+
+// ─── Fase 6 (correção C2, item 6): *desfaz aprendizado <coisa>* ──────────────────────────────────────────────────
+
+const TABELA_F6_C2: Array<[string, ComandoDaAgenda]> = [
+  // a coisa do aprendizado: o banco desfaz só ela (agenda_desfazer_dito)
+  ["desfaz aprendizado fator", { comando: "desfazer", alvo: "aprendizado fator" }],
+  ["Desfaz o aprendizado fator", { comando: "desfazer", alvo: "aprendizado fator" }],
+  ["desfaz aprendizado presença", { comando: "desfazer", alvo: "aprendizado presenca" }],
+  ["desfaz aprendizado valor", { comando: "desfazer", alvo: "aprendizado valor" }],
+  // "diária" é palavra de outra ferramenta no alvo de OS ("desfaz a diária do Roberto"), mas aqui é a coisa do aprendizado
+  ["desfaz aprendizado diária", { comando: "desfazer", alvo: "aprendizado diaria" }],
+  ["*desfaz aprendizado folga*", { comando: "desfazer", alvo: "aprendizado folga" }],
+  ["desfaz aprendizado capacidade", { comando: "desfazer", alvo: "aprendizado capacidade" }],
+  ["desfaz aprendizado carga", { comando: "desfazer", alvo: "aprendizado carga" }],
+  ["desfaz aprendizado fornecedor", { comando: "desfazer", alvo: "aprendizado fornecedor" }],
+  // o nome do fornecedor: a régua de sempre do alvo (o banco acha o fornecedor pelo nome)
+  ["desfaz aprendizado Kamell", { comando: "desfazer", alvo: "aprendizado kamell" }],
+  ["🎤 Desfaz aprendizado Kamell.", { comando: "desfazer", alvo: "aprendizado kamell" }],
+];
+
+Deno.test("Fase 6 (correção C2) — lerComandoDaAgenda: *desfaz aprendizado <coisa>* (fator, presença, valor, diária, folga, capacidade, carga, fornecedor ou o nome)", () => {
+  for (const [texto, esperado] of TABELA_F6_C2) assertEquals(lerComandoDaAgenda(texto), esperado, texto);
+  // continuam conversa (ao modelo): com conectivo, com pergunta, com palavra de outra ferramenta junto
+  for (const t of ["desfaz aprendizado do fator", "desfaz o aprendizado da Kamell", "desfaz aprendizado fator?",
+                   "desfaz aprendizado diária do Roberto", "desfaz aprendizado da diária"]) {
+    assertEquals(lerComandoDaAgenda(t), null, t);
+  }
+  // e o *desfaz <nome>* de sempre não muda ("desfaz a diária" continua de outra ferramenta)
+  assertEquals(lerComandoDaAgenda("desfaz a diária"), null);
+  assertEquals(lerComandoDaAgenda("desfaz Nelson"), { comando: "desfazer", alvo: "nelson" });
+});
+
+Deno.test("Fase 6 (correção C2) — o *desfaz aprendizado <coisa>* não é do secretário, da confirmação, do menu, do PDF, dos comprovantes nem da pergunta ativa", () => {
+  const formas = TABELA_F6_C2.map(([t]) => t);
+  for (const t of [...formas, ...formas.map((x) => `*${x.replace(/^\*|\*$/g, "")}*`)]) {
+    assertEquals(lerComandoDoSecretario(t), null, `secretário: ${t}`);
+    assertEquals(parseConfirmationReply(t), null, `confirmação: ${t}`);
+    assertEquals(parseOptionReply(t, 9), null, `opção: ${t}`);
+    assertEquals(lerPedidoDePdf(t), null, `pdf: ${t}`);
+    assertEquals(lerComando(t), null, `comprovantes: ${t}`);
+    const n = normalizarResposta(t.replace(/[*_~]/g, ""));
+    assertEquals(lerSimNao(n), null, `sim/não: ${t}`);
+    assertEquals(lerNumero(n, 99), null, `número: ${t}`);
+    assertEquals(pareceRespostaCurta(t), false, `resposta curta: ${t}`);
+    const trava = travaDaConfirmacao(estadoComCmpNoConfirmar(), t, { pending_confirm_action_id: "pend-1" });
+    assertEquals(trava.travar, false, `trava do CMP: ${t}`);
+  }
+});

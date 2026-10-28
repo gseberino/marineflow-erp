@@ -545,6 +545,10 @@ Deno.test("agenda de produção (Fase 6, P8): o foco aprendizado, os números do
   assertStringIncludes(secao, "Os números vêm do banco; nunca calcule nem mude parâmetro");
   assertStringIncludes(secao, "mudar é decisão do dono pelas perguntas da agenda");
   assertStringIncludes(secao, "*agenda aprendizado* e *desfaz aprendizado* o dono manda direto, sem você");
+  // Fase 6 (correção C2, item 6): o *desfaz aprendizado <coisa>* volta só ela (o comando sem IA a LÊ)
+  assertStringIncludes(secao, "*desfaz aprendizado* com a coisa (fator, presença, valor, folga, capacidade ou o nome do fornecedor, como *desfaz aprendizado Kamell*) volta só ela");
+  const so = lerComandoDaAgenda("desfaz aprendizado Kamell");
+  assertEquals(so?.comando === "desfazer" ? so.alvo : null, "aprendizado kamell");
   const agendaVer = porNome.get("agenda_ver")!;
   const focos = (agendaVer.input_schema as { properties: Record<string, { enum?: string[] }> }).properties.foco.enum ?? [];
   assertEquals(focos.includes("aprendizado"), true);
