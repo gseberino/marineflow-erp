@@ -125,7 +125,12 @@ export function CobrarJuntasDialog({ open, onOpenChange, cliente, contas, osInic
       {
         onSuccess: (r) => {
           if (r.deduplicado) {
-            toast.info('Esta mesma cobrança já tinha saído hoje: não enviei de novo.');
+            toast.info(r.modoTeste
+              ? 'Esta mesma cobrança já tinha saído hoje para o número de teste: não enviei de novo.'
+              : 'Esta mesma cobrança já tinha saído hoje: não enviei de novo.');
+          } else if (r.modoTeste) {
+            // Modo de teste: foi para o número de teste, não para o cliente — "Cobrança enviada" seria fingir.
+            toast.warning(r.aviso);
           } else {
             toast.success(`Cobrança enviada: ${resumoDoCobrarJuntas(selecionadas)}.`);
             if (r.aviso) toast.warning(r.aviso);

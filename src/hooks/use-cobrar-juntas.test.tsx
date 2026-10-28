@@ -35,7 +35,10 @@ vi.mock('@/integrations/supabase/client', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     q.then = (ok: any, erro: any) => {
       banco.chamadas.push(registro);
-      return Promise.resolve(responder(`${tabela}.${registro.op}`)).then(ok, erro);
+      // A leitura do modo de teste (app_settings por lista de chaves) tem resposta própria; o piso
+      // (uma chave só) segue em 'app_settings.select'.
+      const modoTeste = tabela === 'app_settings' && registro.filtros.some((f) => f[0] === 'in' && f[1] === 'key');
+      return Promise.resolve(responder(modoTeste ? 'app_settings.select:modo-teste' : `${tabela}.${registro.op}`)).then(ok, erro);
     };
     return q;
   };
@@ -52,7 +55,7 @@ vi.mock('@/integrations/supabase/client', () => {
   };
 });
 
-import { relogioDoCobrarJuntasTela, useEnviarCobrarJuntas } from './use-cobrar-juntas';
+import { AVISO_MODO_TESTE, relogioDoCobrarJuntasTela, useEnviarCobrarJuntas } from './use-cobrar-juntas';
 
 const ok = (data: unknown): Resposta => ({ data, error: null });
 
@@ -78,8 +81,11 @@ const ENVIO = {
   servicoIds: ['os45', 'os46'],
 };
 
-async function enviar(e = ENVIO) {
-  const { result } = renderHook(() => useEnviarCobrarJuntas(), { wrapper });
+async function enviar(e = ENVIO, qc?: QueryClient) {
+  const comCliente = qc
+    ? ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    : wrapper;
+  const { result } = renderHook(() => useEnviarCobrarJuntas(), { wrapper: comCliente });
   result.current.mutate(e);
   await waitFor(() => expect(result.current.isSuccess || result.current.isError).toBe(true));
   return result.current;
@@ -91,6 +97,7 @@ beforeEach(() => {
     'clients.select': ok({ name: 'MP MOTOR HOMES', opt_out_whatsapp: false, generico: false, whatsapp: '(47) 99999-0000', phone: null }),
     'receivables.select': ok(CONTAS_NO_BANCO),
     'app_settings.select': ok({ value: '0' }),
+    'app_settings.select:modo-teste': ok([{ key: 'wa_test_mode', value: 'false' }]),
     'finance_review_queue.select': ok([]),
     // 1ª leitura: cobranças das contas; 2ª: cobrança só com a OS.
     'collections.select': [ok([{ id: 'col45', status: 'pending' }]), ok([{ id: 'colOs46', status: 'sent' }])],
@@ -229,5 +236,64 @@ describe('useEnviarCobrarJuntas', () => {
     const r = await enviar();
     expect(r.isSuccess).toBe(true);
     expect(r.data?.aviso).toContain('A mensagem foi enviada, mas não consegui registrar o envio nas cobranças (mês fechado)');
+  });
+
+  // A ficha não relê ao voltar para a aba (refetchOnWindowFocus false): sem invalidar no erro, o
+  // "feche e abra o Cobrar juntas de novo" mostrava os saldos velhos e a recusa se repetia.
+  it('recusa por saldo que mudou invalida as contas da ficha (reabrir traz o saldo novo)', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const FICHA = ['receivables', 'client', 'cli', 'com-os'];
+    qc.setQueryData(FICHA, [{ id: 'r45', balance_amount: 1650 }]);
+    qc.setQueryData(['collections', 'cobrar-juntas', ['r45'], ['os45']], 1);
+    banco.respostas['receivables.select'] = ok(CONTAS_NO_BANCO.map((c) => c.id === 'r45' ? { ...c, status: 'paid', paid_amount: 1650, balance_amount: 0 } : c));
+    const r = await enviar(ENVIO, qc);
+    expect(r.isError).toBe(true);
+    expect(qc.getQueryState(FICHA)?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(['collections', 'cobrar-juntas', ['r45'], ['os45']])?.isInvalidated).toBe(true);
+    expect(banco.invocacoes).toEqual([]);
+  });
+
+  it('qualquer recusa também invalida (ex.: fora do horário)', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    qc.setQueryData(['receivables', 'client', 'cli', 'com-os'], []);
+    relogioDoCobrarJuntasTela.agora = () => new Date('2026-10-29T01:00:00Z');
+    expect((await enviar(ENVIO, qc)).isError).toBe(true);
+    expect(qc.getQueryState(['receivables', 'client', 'cli', 'com-os'])?.isInvalidated).toBe(true);
+  });
+
+  it('modo de teste (desvia para o número de teste): chave com ":teste", nada registrado nas cobranças, aviso de teste', async () => {
+    await enviar();
+    const chaveReal = String(banco.invocacoes[0].body.dedupe_key);
+    expect(chaveReal.endsWith(':teste')).toBe(false);
+    banco.chamadas = [];
+    banco.invocacoes = [];
+
+    banco.respostas['app_settings.select:modo-teste'] = ok([
+      { key: 'wa_test_mode', value: 'true' }, { key: 'wa_test_number', value: '5547900001111' },
+    ]);
+    const r = await enviar();
+    expect(r.isSuccess).toBe(true);
+    expect(r.data).toEqual({ deduplicado: false, cobrancasRegistradas: 0, aviso: AVISO_MODO_TESTE, modoTeste: true });
+    expect(r.data?.aviso).toContain('foi para o número de teste');
+    expect(banco.invocacoes[0].body.dedupe_key).toBe(`${chaveReal}:teste`);
+    expect(banco.chamadas.filter((c) => c.alvo === 'collection_contacts')).toEqual([]);
+    expect(banco.chamadas.filter((c) => c.alvo === 'collections' && c.op === 'update')).toEqual([]);
+    const leitura = banco.chamadas.find((c) => c.alvo === 'app_settings' && c.filtros.some((f) => f[0] === 'in'));
+    expect(leitura?.filtros).toContainEqual(['in', 'key', ['wa_test_mode', 'wa_test_number', 'zapi_test_mode', 'zapi_test_number']]);
+  });
+
+  it('modo de teste ligado SEM número: a edge não desvia — chave e registro de sempre (como a tool)', async () => {
+    banco.respostas['app_settings.select:modo-teste'] = ok([{ key: 'wa_test_mode', value: 'true' }, { key: 'wa_test_number', value: '' }]);
+    const r = await enviar();
+    expect(r.data).toEqual({ deduplicado: false, cobrancasRegistradas: 2, aviso: null });
+    expect(String(banco.invocacoes[0].body.dedupe_key).endsWith(':teste')).toBe(false);
+  });
+
+  it('leitura do modo de teste que falha não vira "não é teste": não envia', async () => {
+    banco.respostas['app_settings.select:modo-teste'] = { data: null, error: { message: 'permission denied' } };
+    const r = await enviar();
+    expect(r.isError).toBe(true);
+    expect((r.error as Error).message).toContain('Não consegui ler o modo de teste do WhatsApp: permission denied');
+    expect(banco.invocacoes).toEqual([]);
   });
 });

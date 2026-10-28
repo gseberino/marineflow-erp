@@ -278,6 +278,7 @@ Deno.test("o 'sim': envia a mensagem da confirmação ao cadastro e registra o e
     assertEquals(enviados[0].message, mensagemAprovada.trim());
     assertEquals(enviados[0].kind, "text");
     assert(String(enviados[0].dedupe_key).startsWith(`cobrar-juntas:${MP}:2026-10-28:`), enviados[0].dedupe_key);
+    assert(!String(enviados[0].dedupe_key).endsWith(":teste"), "fora do modo de teste a chave é a de sempre");
     // registro nas cobranças: a da conta r45 e a da OS-00046 sem conta; a paga não
     const contatos = db.chamadas.insert.filter(([t]: [string]) => t === "collection_contacts").map(([, v]: [string, Linha]) => v.collection_id);
     assertEquals(contatos.sort(), ["col45", "col46"]);
@@ -304,6 +305,40 @@ Deno.test("o 'sim' repetido no mesmo dia: o whatsapp-send reconhece a chave e na
     assertEquals(r.ja_feito, true);
     assertStringIncludes(r.aviso, "já tinha saído hoje");
     assertEquals(db.chamadas.insert.filter(([t]: [string]) => t === "collection_contacts"), []);
+  });
+});
+
+Deno.test("o 'sim' no modo de teste: a chave ganha ':teste', nada se registra nas cobranças e o dono ouve que foi para o teste", async () => {
+  const { db, ctx } = ambiente();
+  const p = await pedir(ctx, db, { os: ["OS-00045", "OS-00046"] });
+  // A chave que o envio de verdade usa hoje (mesmo pedido, sem o modo de teste, noutro banco).
+  const real = await comEnvio({ messageId: "m0" }, async (enviados) => {
+    const outro = ambiente();
+    await toolsByName["cobrar_juntas"].execute(p.payload, outro.ctx);
+    return String(enviados[0].dedupe_key);
+  });
+  const teste = { ...ctx, settings: { wa_test_mode: "true", wa_test_number: "5547900001111" } };
+  await comEnvio({ messageId: "m1" }, async (enviados) => {
+    // deno-lint-ignore no-explicit-any
+    const r = await toolsByName["cobrar_juntas"].execute(p.payload, teste) as any;
+    assertEquals(r.ok, true, JSON.stringify(r));
+    assertEquals(enviados.length, 1);
+    assertEquals(enviados[0].dedupe_key, `${real}:teste`, "só a marca muda: o envio de verdade no mesmo dia não vira deduplicated");
+    assertEquals(db.chamadas.insert.filter(([t]: [string]) => t === "collection_contacts"), [], "sem contato nas cobranças");
+    assertEquals(db.chamadas.update.filter(([t]: [string]) => t === "collections"), [], "sem last_auto_sent_at");
+    assertEquals(db.tabelas.collections.find((c: Linha) => c.id === "col45").status, "pending");
+    assertEquals(r.cobrancas_registradas, 0);
+    assertStringIncludes(semNbsp(r.aviso), "foi para o número de TESTE, NÃO para MP MOTOR HOMES");
+    assertStringIncludes(r.aviso, "Nada foi registrado nas cobranças");
+  });
+  // Ligado SEM número de teste a edge não desvia (a mensagem vai ao cliente): chave e registro de sempre.
+  const semNumero = ambiente();
+  const p2 = await pedir(semNumero.ctx, semNumero.db, { os: ["OS-00045", "OS-00046"] });
+  await comEnvio({ messageId: "m2" }, async (enviados) => {
+    // deno-lint-ignore no-explicit-any
+    const r = await toolsByName["cobrar_juntas"].execute(p2.payload, { ...semNumero.ctx, settings: { wa_test_mode: "true" } }) as any;
+    assertEquals(enviados[0].dedupe_key, real);
+    assertEquals(r.cobrancas_registradas, 2);
   });
 });
 

@@ -223,10 +223,18 @@ function hashCurto(s: string): string {
 /**
  * dedupe_key do whatsapp-send: o mesmo cliente, as mesmas contas e o mesmo texto no mesmo dia
  * saem uma vez só (clique duplo, tela e assistente ao mesmo tempo).
+ *
+ * desviadoPorTeste: o whatsapp-send vai desviar o envio para o número de teste (a pergunta é a de
+ * _shared/whatsapp/marcar-enviado.ts, não só o interruptor). Aí a chave ganha ":teste", como as
+ * chaves do envio ao cliente (chaveDeEnvio): sem a marca, o teste reservava a chave do CLIENTE e o
+ * envio de verdade no mesmo dia ouvia "já enviado" sem o cliente ter recebido nada.
  */
-export function chaveDoCobrarJuntas(clientId: string, contaIds: string[], dia: string, mensagem: string): string {
+export function chaveDoCobrarJuntas(
+  clientId: string, contaIds: string[], dia: string, mensagem: string, desviadoPorTeste = false,
+): string {
   const contas = [...contaIds].sort().join(',');
-  return `cobrar-juntas:${clientId}:${dia}:${hashCurto(`${contas}|${mensagem.trim()}`)}`;
+  const chave = `cobrar-juntas:${clientId}:${dia}:${hashCurto(`${contas}|${mensagem.trim()}`)}`;
+  return desviadoPorTeste ? `${chave}:teste` : chave;
 }
 
 /** "OS-00045 + OS-00046 — R$ 1.670,00", para o resumo da confirmação. */

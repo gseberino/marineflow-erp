@@ -120,3 +120,9 @@ Deno.test("chave de envio: mesma conta e texto no mesmo dia = mesma chave; mudou
   assert(a.startsWith("cobrar-juntas:cli:2026-10-28:"));
   assert(a.length <= 200);
 });
+
+Deno.test("chave de envio desviado pelo modo de teste: só ganha ':teste' (não reserva a chave do cliente)", () => {
+  const real = chaveDoCobrarJuntas("cli", ["r45", "r46"], "2026-10-28", "Olá");
+  assertEquals(chaveDoCobrarJuntas("cli", ["r45", "r46"], "2026-10-28", "Olá", false), real);
+  assertEquals(chaveDoCobrarJuntas("cli", ["r46", "r45"], "2026-10-28", "Olá", true), `${real}:teste`);
+});

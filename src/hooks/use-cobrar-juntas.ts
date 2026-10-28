@@ -14,6 +14,7 @@ import { normalizePhoneE164 } from '@/lib/masks';
 import {
   chaveDoCobrarJuntas, hojeLocal, horaEmBrasilia, mudancaNasContas, SEM_COBRANCA_FORMAL, travaDoCobrarJuntas,
 } from '../../supabase/functions/_shared/receivables/cobrar-juntas';
+import { desviadoPorTeste } from '../../supabase/functions/_shared/whatsapp/marcar-enviado';
 
 /** O relógio da tela (horário de cobrança) — os testes trocam, como relogioDoCobrarJuntas da tool. */
 export const relogioDoCobrarJuntasTela = { agora: () => new Date() };
@@ -50,6 +51,19 @@ async function lerPiso(): Promise<number> {
   return Number((data as { value?: string | null } | null)?.value) || 0;
 }
 
+/**
+ * O whatsapp-send vai desviar este envio para o número de teste? A MESMA regra da edge e das tools
+ * (desviadoPorTeste, _shared/whatsapp/marcar-enviado.ts): ligado sem número não desvia. Leitura que
+ * falha LANÇA: "não é teste" por erro gravaria a cobrança e queimaria a chave do cliente.
+ */
+async function lerDesvioDeTeste(): Promise<boolean> {
+  const { data, error } = await supabase.from('app_settings').select('key, value')
+    .in('key', ['wa_test_mode', 'wa_test_number', 'zapi_test_mode', 'zapi_test_number']);
+  if (error) throw new Error(`Não consegui ler o modo de teste do WhatsApp: ${error.message}`);
+  const cfg = Object.fromEntries(((data ?? []) as Array<{ key: string; value: string | null }>).map((s) => [s.key, s.value]));
+  return desviadoPorTeste(cfg);
+}
+
 /** Para mostrar a trava ANTES do botão. O envio relê tudo na hora (useEnviarCobrarJuntas). */
 export function usePixEsperandoDoCliente(clientId: string | null | undefined, enabled = true) {
   return useQuery({
@@ -76,7 +90,13 @@ export interface ResultadoCobrarJuntas {
   deduplicado: boolean;
   cobrancasRegistradas: number;
   aviso: string | null;
+  /** O modo de teste desviou o envio para o número de teste: o cliente NÃO recebeu. */
+  modoTeste?: boolean;
 }
+
+/** Aviso da tela quando o envio foi desviado pelo modo de teste. */
+export const AVISO_MODO_TESTE =
+  'O modo de teste do WhatsApp está ligado: a mensagem foi para o número de teste, não para o cliente. Nada foi registrado nas cobranças.';
 
 type Cob = { id: string; status: string | null };
 
@@ -165,7 +185,7 @@ export function useEnviarCobrarJuntas() {
       const mudou = mudancaNasContas(e.contas, (contasAgora ?? []) as Parameters<typeof mudancaNasContas>[1]);
       if (mudou) throw new Error(mudou);
 
-      const [piso, pix] = await Promise.all([lerPiso(), lerPixEsperando(e.cliente.id)]);
+      const [piso, pix, modoTeste] = await Promise.all([lerPiso(), lerPixEsperando(e.cliente.id), lerDesvioDeTeste()]);
       const telefoneDoCadastro = c.whatsapp || c.phone || '';
       const trava = travaDoCobrarJuntas({
         clienteNome: c.name ?? e.cliente.name,
@@ -188,14 +208,19 @@ export function useEnviarCobrarJuntas() {
           message: e.mensagem,
           context: 'billing',
           kind: 'text',
-          dedupe_key: chaveDoCobrarJuntas(e.cliente.id, contaIds, hojeLocal(), e.mensagem),
+          // Desviado pelo modo de teste, a chave ganha ":teste" (a mesma da tool): o teste não
+          // reserva a chave do cliente para o dia.
+          dedupe_key: chaveDoCobrarJuntas(e.cliente.id, contaIds, hojeLocal(), e.mensagem, modoTeste),
         },
       });
       if (error) throw new Error(await extractInvokeErrorMessage(error));
       const res = (data ?? {}) as { error?: string; success?: boolean; deduplicated?: boolean };
       if (res.error) throw new Error(res.error);
       if (res.success === false) throw new Error('O WhatsApp não confirmou o envio.');
-      if (res.deduplicated) return { deduplicado: true, cobrancasRegistradas: 0, aviso: null };
+      if (res.deduplicated) return { deduplicado: true, cobrancasRegistradas: 0, aviso: null, ...(modoTeste ? { modoTeste } : {}) };
+      // Foi para o número de teste: nada se registra nas cobranças — o cliente não recebeu, e o
+      // last_auto_sent_at faria o plano de inadimplência achar que ele já foi cobrado hoje.
+      if (modoTeste) return { deduplicado: false, cobrancasRegistradas: 0, aviso: AVISO_MODO_TESTE, modoTeste };
 
       const r = await registrarNasCobrancas(contaIds, e.servicoIds);
       return {
@@ -211,6 +236,15 @@ export function useEnviarCobrarJuntas() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['collections'] });
       qc.invalidateQueries({ queryKey: ['receivables'] });
+    },
+    // Recusa ou falha: o dado que a tela mostrou pode estar velho (o caso do "saldo mudou desde que
+    // a tela abriu"). Sem invalidar, a ficha (sem refetch ao voltar para a aba) reabria o Cobrar
+    // juntas com os saldos antigos e a recusa se repetia até recarregar a página.
+    onError: () => {
+      qc.invalidateQueries({ queryKey: ['receivables'] });
+      qc.invalidateQueries({ queryKey: ['collections'] });
+      qc.invalidateQueries({ queryKey: ['finance-review', 'pix-esperando'] });
+      qc.invalidateQueries({ queryKey: ['app-settings'] });
     },
   });
 }

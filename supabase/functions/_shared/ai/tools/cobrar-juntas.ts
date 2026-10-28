@@ -37,6 +37,7 @@ import { registrarEnvioDaCobranca } from "./cobrancas.ts";
 import { guardaDeEnvio } from "../comms/send-guard.ts";
 import { registrarEnvio } from "../comms/send-log.ts";
 import { diaLocal } from "../../whatsapp/idempotencia.ts";
+import { desviadoPorTeste } from "../../whatsapp/marcar-enviado.ts";
 import { ROTULOS_STATUS_OS } from "../../service-order-status.ts";
 import {
   chaveDoCobrarJuntas,
@@ -550,12 +551,37 @@ export const cobrarJuntasTools: ToolDef[] = [
       }
 
       const contas = c.os.flatMap((o) => o.contas).map((x) => x.id);
-      const r = await sendWhatsapp(c.telefone, c.mensagem, ctx.jwt, chaveDoCobrarJuntas(c.cliente.id, contas, diaLocal(agora), c.mensagem), ctx.userId);
+      // Modo de teste: o whatsapp-send desvia o envio para o número de teste. A chave ganha ":teste"
+      // e nada se registra nas cobranças — sem isso o teste "queimava" a chave do dia e marcava o
+      // cliente como cobrado, e o envio de verdade no mesmo dia voltava deduplicated sem o cliente
+      // receber. A pergunta é "a edge VAI desviar?" (marcar-enviado.ts), como no envio ao cliente.
+      const modoTeste = desviadoPorTeste(ctx.settings);
+      const chave = chaveDoCobrarJuntas(c.cliente.id, contas, diaLocal(agora), c.mensagem, modoTeste);
+      const r = await sendWhatsapp(c.telefone, c.mensagem, ctx.jwt, chave, ctx.userId);
       await registrarEnvio(ctx.admin, { tipo: "cobranca", audiencia: "cliente", entityKind: "client", entityId: c.cliente.id, phone: c.telefone, preview: c.mensagem, status: r.ok ? "sent" : "failed" });
       if (!r.ok) return { error: `A mensagem não saiu (${"error" in r ? r.error : "falha no envio"}). Nada foi registrado nas cobranças.` };
       const nome = String(c.cliente.name ?? "").trim() || "o cliente";
       if (r.deduplicated) {
-        return { ok: true, ja_feito: true, os: numeros, aviso: `Esta mesma cobrança já tinha saído hoje para ${nome}; não reenviei.` };
+        return {
+          ok: true, ja_feito: true, os: numeros,
+          aviso: modoTeste
+            ? "Esta mesma cobrança já tinha saído hoje para o número de TESTE do WhatsApp; não reenviei."
+            : `Esta mesma cobrança já tinha saído hoje para ${nome}; não reenviei.`,
+        };
+      }
+      if (modoTeste) {
+        const texto = `O modo de teste do WhatsApp está ligado: a cobrança conjunta (${numeros.join(", ")} — em aberto ${emReais(c.emAberto)}) foi para o número de TESTE, NÃO para ${nome}. Nada foi registrado nas cobranças. Diga isso.`;
+        return {
+          ok: true,
+          cliente: nome,
+          os: numeros,
+          em_aberto: c.emAberto,
+          enviado_para: "o número de TESTE do WhatsApp (modo de teste ligado), não o cliente",
+          cobrancas_registradas: 0,
+          ...(g.avisos.length ? { avisos_estilo: g.avisos } : {}),
+          aviso: texto,
+          message: texto,
+        };
       }
 
       // Enviado: o contato 'whatsapp_sent' e o last_auto_sent_at em cada cobrança das contas (como o lembrete).
