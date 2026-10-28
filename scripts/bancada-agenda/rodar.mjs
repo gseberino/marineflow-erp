@@ -109,6 +109,9 @@ const FIXTURES_COMO_TEXTO = [
   ['agenda_teste.mig_detector_fase4', '../../supabase/migrations/20261027100400_agenda_fase4_detector.sql'],
   ['agenda_teste.mig_leituras_fase4', '../../supabase/migrations/20261027100600_agenda_fase4_leituras.sql'],
   ['agenda_teste.mig_notas_pix_fase4', '../../supabase/migrations/20261027100300_agenda_fase4_notas_pix.sql'],
+  // Fase 5 (P6): a migration de dado (modo_cliente em sombra), que a bancada não aplica (FORA_DA_BANCADA): o
+  // agenda_fase5_sombra.sql a roda como texto numa subtransação (e o DESFAZER do cabeçalho dela).
+  ['agenda_teste.mig_sombra_fase5', '../../supabase/migrations/20261028101000_agenda_fase5_sombra.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

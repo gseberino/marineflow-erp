@@ -58,11 +58,15 @@ select 'C2 modo_leitura é um dos três (nasce sombra; ligado só com o OK depoi
 -- acusaria defeito no que é o caminho combinado.
 -- FASE 3 (P7b): o mesmo para a equipe depois da migration de dado 20261026101000 (modo_equipe em sombra; passos 4–9 de
 -- fila-do-dono/fase3-oks.md): quem confere a equipe e a diária depois dela é supabase/tests/agenda_fase3_pos_deploy.sql (C3).
+-- FASE 5 (P6): o mesmo para o cliente depois da migration de dado 20261028101000 (modo_cliente em sombra; passos 3–7 de
+-- fila-do-dono/fase5-oks.md): quem confere o modo do cliente depois dela é supabase/tests/agenda_fase5_pos_deploy.sql (C2).
 insert into _resultado
 select 'C3 o que é das Fases 2–5 continua desligado (proposta e vigia: até a Fase 2 ligar a sombra; equipe: até a Fase 3; cliente)',
        coalesce(bool_and((c.modo_equipe = 'desligado'
                           or exists (select 1 from supabase_migrations.schema_migrations m where m.version = '20261026101000'))
-                         and c.modo_cliente = 'desligado'
+                         -- FASE 5 (P6): o cliente só até a 20261028101000
+                         and (c.modo_cliente = 'desligado'
+                              or exists (select 1 from supabase_migrations.schema_migrations m where m.version = '20261028101000'))
                          and ((c.modo_proposta = 'desligado' and c.modo_vigia = 'desligado')
                               or exists (select 1 from supabase_migrations.schema_migrations m where m.version = '20261025101000'))), false),
        string_agg(format('proposta %s, vigia %s, equipe %s, cliente %s', c.modo_proposta, c.modo_vigia, c.modo_equipe,

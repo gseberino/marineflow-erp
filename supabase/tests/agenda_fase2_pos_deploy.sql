@@ -69,11 +69,14 @@ select 'C2 os modos da Fase 2: com a 101000 registrada, sombra (ou ligado com o 
 -- FASE 3 (P7b): depois da migration de dado 20261026101000 (passos 4–9 de fila-do-dono/fase3-oks.md) a equipe sai de
 -- desligado: C3 passa a valer para ela só antes dessa migration, e quem confere a equipe e a diária depois é
 -- supabase/tests/agenda_fase3_pos_deploy.sql (C3, N1–N3). Sem isto, este SQL acusaria defeito no caminho combinado.
+-- FASE 5 (P6): o mesmo para o cliente depois da migration de dado 20261028101000 (modo_cliente em sombra; passos 3–7 de
+-- fila-do-dono/fase5-oks.md): quem confere o modo do cliente depois dela é supabase/tests/agenda_fase5_pos_deploy.sql (C2).
 insert into _resultado
 select 'C3 o que é das Fases 3 e 5 continua desligado (equipe: até a migration de dado da Fase 3; cliente)',
        coalesce(bool_and((c.modo_equipe = 'desligado'
                           or exists (select 1 from supabase_migrations.schema_migrations m where m.version = '20261026101000'))
-                         and c.modo_cliente = 'desligado'), false),
+                         and (c.modo_cliente = 'desligado'
+                              or exists (select 1 from supabase_migrations.schema_migrations m where m.version = '20261028101000'))), false),
        string_agg(format('equipe %s, cliente %s', c.modo_equipe, c.modo_cliente), '; ')
   from public.agenda_config c;
 

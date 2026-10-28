@@ -92,9 +92,13 @@ select 'C4 a sombra da equipe só depois da Fase 2 ligada: com a 101000 registra
        string_agg(format('proposta %s, vigia %s, leitura %s', c.modo_proposta, c.modo_vigia, c.modo_leitura), '; ')
   from public.agenda_config c;
 
+-- FASE 5 (P6): depois da migration de dado 20261028101000 (modo_cliente em sombra; passos 3–7 de fila-do-dono/fase5-oks.md)
+-- o cliente sai de desligado: C5 passa a valer só antes dela, e quem confere o modo do cliente depois é
+-- supabase/tests/agenda_fase5_pos_deploy.sql (C2). Sem isto, este SQL acusaria defeito no caminho combinado.
 insert into _resultado
-select 'C5 o que é da Fase 5 continua desligado (cliente)',
-       coalesce(bool_and(c.modo_cliente = 'desligado'), false), string_agg(c.modo_cliente, ', ')
+select 'C5 o que é da Fase 5 continua desligado (cliente: até a migration de dado da Fase 5)',
+       coalesce(bool_and(c.modo_cliente = 'desligado'
+                         or exists (select 1 from supabase_migrations.schema_migrations m where m.version = '20261028101000')), false), string_agg(c.modo_cliente, ', ')
   from public.agenda_config c;
 
 insert into _resultado
