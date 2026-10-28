@@ -407,6 +407,9 @@ describe('agenda: parâmetro só em agenda_config', () => {
       '_agenda_classe_de_campo', '_agenda_classe_pares_ok', '_agenda_dias_no_inicio', '_agenda_aprender_congelar',
       'agenda_medir_os', '_agenda_aprender_medir', '_agenda_percentil', '_agenda_aprendido', '_agenda_aprendizado_texto',
       '_agenda_aprendizado_gravar',
+      // Fase 6 (P2): o fator de campo, o R$ por diária e a presença aprendida (os passos e as leituras)
+      '_agenda_aprender_fator', 'agenda_fator_de_campo', '_agenda_aprender_mo', '_agenda_mo_por_diaria_real',
+      '_agenda_aprender_presenca', '_agenda_presenca_aprendida',
     ]));
     expect(tsAgenda.map((t) => t.onde)).toEqual(expect.arrayContaining([
       path.join('supabase', 'functions', 'task-automations', 'agenda-vigia.ts'),

@@ -364,7 +364,10 @@ insert into _funcoes_f6 values
   ('public._agenda_aprendido(text, text)', 'leitura'),
   ('public._agenda_aprendizado_valor(text, numeric)', 'leitura'),
   ('public._agenda_aprendizado_texto(text, text, jsonb)', 'leitura'),
-  ('public._agenda_classe_de_campo(uuid)', 'interna'),
+  -- FASE 6 (P2): a 20261029100200 abre a classe de campo como leitura (invoker; é lida de dentro de os_presenca_do_dono e
+  -- da vigia, que o painel e o motor chamam). Antes dela, interna.
+  ('public._agenda_classe_de_campo(uuid)',
+   case when to_regprocedure('public.agenda_fator_de_campo(uuid, date)') is null then 'interna' else 'leitura' end),
   ('public._agenda_dias_no_inicio(uuid)', 'interna'),
   ('public._agenda_aprender_medir(date)', 'interna'),
   ('public._agenda_aprendizado_troca_cabe(text, text, numeric, numeric)', 'interna'),
