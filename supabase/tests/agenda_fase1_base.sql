@@ -425,6 +425,11 @@ begin
      -- agenda_fase6_os.sql (O9l)
      and c.conname <> 'presenca_publicada_coerente'
      -- CORREÇÃO FASE 6: fim
+     -- CORREÇÃO FASE 6: (C2) os 4 CHECKs novos de agenda_config (as janelas do aprendizado, 20261029100950) têm o caso deles
+     -- em agenda_fase6_base.sql (B6)
+     and c.conname not in ('agenda_config_aprender_saude_dias_check', 'agenda_config_aprender_atraso_h_check',
+                           'agenda_config_aprender_parar_dias_check', 'agenda_config_aprender_respostas_dias_check')
+     -- CORREÇÃO FASE 6: fim
      -- FASE 6: os 45 que a Fase 6 pôs em agenda_config e os 3 de os_planejamento (20261029100000) têm o caso deles em
      -- agenda_fase6_base.sql (B1z cobra os 45 pelo nome; o outro B1z, os de os_planejamento e das tabelas novas).
      and not (c.conname = any (array(

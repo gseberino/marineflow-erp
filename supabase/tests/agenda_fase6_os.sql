@@ -225,7 +225,8 @@ begin
     v3 := public.agenda_fator_de_campo(pg_temp.os('032'), c_hoje);
     v_res := pg_temp.ok(v_res, 'O2e em uso: energia em motorhome 1,7× (aprendido), geladeira em motorhome 1,6× (pelo bem), motor em barco 1,5× (todas, aprendido igual ao padrão)',
       (v ->> 'fator')::numeric = 1.7 and v ->> 'fonte' = 'aprendido' and v ->> 'estado' = 'em_uso'
-      and v ->> 'texto' = 'As OS de energia em motorhome levam até 1,7× o combinado (7 OS): é o que uso desde sex 30/10.'
+      -- (correção C2, texto 1) a linha do fator em uso diz para que serve
+      and v ->> 'texto' = 'As OS de energia em motorhome levam até 1,7× o combinado (7 OS): uso 1,7× desde sex 30/10 para perguntar o que falta (os dias do plano continuam os que você disse).'
       and (v2 ->> 'fator')::numeric = 1.6 and v2 ->> 'fonte' = 'aprendido'
       and (v3 ->> 'fator')::numeric = 1.5 and v3 ->> 'fonte' = 'aprendido' and v3 ->> 'chave' = 'todas',
       v::text || ' / ' || v2::text || ' / ' || v3::text);
@@ -366,7 +367,8 @@ begin
     select * into v_q from public.agenda_perguntas where id = (v ->> 'pergunta_id')::uuid;
     v_res := pg_temp.ok(v_res, 'O4c ligado, a troca grande (R$ 764 → R$ 1.097) vira pergunta crítica; até a resposta vale R$ 764',
       v ->> 'estado' = 'pergunta' and v_q.tipo = 'aprendizado' and v_q.critica and v_q.chave = 'aprendizado:mo:todas'
-      and v_q.texto = 'Medi a mão de obra por diária: cada diária rendeu R$ 1.097 (10 OS com diária ligada), e hoje eu uso R$ 764 para estimar os dias pelo valor. É uma troca grande. 1) Passo a usar R$ 1.097 (recomendo); 2) Fico com R$ 764.'
+      -- (correção C2, texto 5) a conta inclui as OS em que o dono também trabalhou; a opção 1 sem o "(recomendo)"
+      and v_q.texto = 'Medi a mão de obra por diária: cada diária rendeu R$ 1.097 (10 OS com diária ligada; inclui as OS em que você também trabalhou), e hoje eu uso R$ 764 para estimar os dias pelo valor. É uma troca grande. 1) Passo a usar R$ 1.097; 2) Fico com R$ 764.'
       and public._agenda_mo_por_diaria_real() = 764 and not public.os_duracao_sugerida(pg_temp.os('100')) ? 'mo_fonte',
       v::text || ' / ' || coalesce(v_q.texto, '-'));
 

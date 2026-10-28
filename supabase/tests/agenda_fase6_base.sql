@@ -1,7 +1,7 @@
 -- Prova da base da Agenda de Produção, Fase 6 (pacote P1): o modo e os parâmetros do aprendizado, os dias ditos no início e a
 -- 1ª promessa (os_planejamento), as 2 tabelas do aprendizado e as listas fechadas ampliadas (migration 20261029100000), e as
 -- portas das funções da medição (20261029100100).
--- bancada: depende de 20261029100100
+-- bancada: depende de 20261029100950
 --
 --   B1 colunas, DEFAULTs e CHECKs (agenda_config, os_planejamento, agenda_medidas_os, agenda_aprendizado); todo CHECK novo de
 --      agenda_config tem caso; as palavras da classe são uma lista fechada de pares
@@ -11,6 +11,7 @@
 --   B4 as tabelas não se apagam; a medida só muda inteira (versão + 1 e o histórico); o valor aprendido não muda de item,
 --      chave nem nível
 --   B5 os CHECKs de rotina e de ação: aprender e aprendizado entram; o resto continua fora
+--   B6 (correção C2, 20261029100950) os 4 parâmetros novos do aprendizado (as janelas da saúde e do foco) e os CHECKs
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -545,6 +546,42 @@ select format('B5 %s', k.nome), r = k.espera, r
     ('pergunta de tipo que não existe', $q$insert into public.agenda_perguntas (tipo, chave, texto, modo) values ('aprender', 'aprender:x', 'Aprendo?', 'ligado')$q$, 'agenda_perguntas_tipo_check')
   ) as k(nome, sql, espera), lateral (select pg_temp.recusa(k.sql) as r) x;
 
+-- ── B6. A correção C2 (20261029100950): os 4 parâmetros novos (item 12) ─────────────────────────────────────
+-- As janelas do aprendizado que estavam escritas nas funções moram em agenda_config: NOT NULL, com o DEFAULT de antes, e cada
+-- CHECK tem caso (abaixo e acima).
+insert into _resultado
+select 'B6a (C2, item 12) agenda_config: aprender_saude_dias 7, aprender_atraso_h 26, aprender_parar_dias 30 e aprender_respostas_dias 30, NOT NULL com DEFAULT',
+       count(*) = 4 and bool_and(a.attnotnull and a.atthasdef)
+       and (select format('%s %s %s %s', c.aprender_saude_dias, c.aprender_atraso_h, c.aprender_parar_dias, c.aprender_respostas_dias)
+              from public.agenda_config c where c.id) = '7 26 30 30',
+       string_agg(a.attname, ', ' order by a.attname)
+  from pg_attribute a
+ where a.attrelid = 'public.agenda_config'::regclass and not a.attisdropped
+   and a.attname in ('aprender_saude_dias', 'aprender_atraso_h', 'aprender_parar_dias', 'aprender_respostas_dias');
+
+create temp table _casos_c2 (nome text, sql text, espera text) on commit drop;
+insert into _casos_c2 values
+  ('saúde de 0 dias', $q$update public.agenda_config set aprender_saude_dias = 0$q$, 'agenda_config_aprender_saude_dias_check'),
+  ('saúde de 31 dias', $q$update public.agenda_config set aprender_saude_dias = 31$q$, 'agenda_config_aprender_saude_dias_check'),
+  ('rodada atrasada em 24 h', $q$update public.agenda_config set aprender_atraso_h = 24$q$, 'agenda_config_aprender_atraso_h_check'),
+  ('rodada atrasada em 73 h', $q$update public.agenda_config set aprender_atraso_h = 73$q$, 'agenda_config_aprender_atraso_h_check'),
+  ('métricas de 6 dias', $q$update public.agenda_config set aprender_parar_dias = 6$q$, 'agenda_config_aprender_parar_dias_check'),
+  ('métricas de 91 dias', $q$update public.agenda_config set aprender_parar_dias = 91$q$, 'agenda_config_aprender_parar_dias_check'),
+  ('respostas de 6 dias', $q$update public.agenda_config set aprender_respostas_dias = 6$q$, 'agenda_config_aprender_respostas_dias_check'),
+  ('respostas de 91 dias', $q$update public.agenda_config set aprender_respostas_dias = 91$q$, 'agenda_config_aprender_respostas_dias_check');
+insert into _resultado
+select 'B6b (C2, item 12) ' || k.nome || ' é recusado por ' || k.espera, pg_temp.recusa(k.sql) = k.espera, pg_temp.recusa(k.sql)
+  from _casos_c2 k;
+insert into _resultado
+select 'B6c (C2, item 12) os 4 CHECKs novos existem e cada um tem caso; os limites aceitam (1 e 30 dias; 25 e 72 h; 7 e 90 dias)',
+       count(*) = 4 and bool_and(exists (select 1 from _casos_c2 x where x.espera = c.conname))
+       and pg_temp.recusa($q$update public.agenda_config set aprender_saude_dias = 1, aprender_atraso_h = 25, aprender_parar_dias = 7, aprender_respostas_dias = 7$q$) = 'aceitou'
+       and pg_temp.recusa($q$update public.agenda_config set aprender_saude_dias = 30, aprender_atraso_h = 72, aprender_parar_dias = 90, aprender_respostas_dias = 90$q$) = 'aceitou',
+       string_agg(c.conname, ', ' order by c.conname)
+  from pg_constraint c
+ where c.conrelid = 'public.agenda_config'::regclass and c.contype = 'c'
+   and c.conname in ('agenda_config_aprender_saude_dias_check', 'agenda_config_aprender_atraso_h_check',
+                     'agenda_config_aprender_parar_dias_check', 'agenda_config_aprender_respostas_dias_check');
 select teste, ok, detalhe from _resultado order by teste;
 
 rollback;

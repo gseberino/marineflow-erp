@@ -1,6 +1,6 @@
 -- Prova do fornecedor no aprendizado da Agenda de Produção, Fase 6 (pacote P3; migration 20261029100300): o atraso medido das
 -- entregas, o prazo medido da nota e a data provável do material na prontidão (só no nível B).
--- bancada: depende de 20261029100900
+-- bancada: depende de 20261029100950
 --
 --   F1 as entregas e o atraso: 3 linhas da mesma nota = 1 entrega (o maior atraso das linhas), o fornecedor da linha, da OC ou
 --      da nota, o atraso assinado (−1 = adiantou), o P80 (2 dias úteis, 4 de 6 no prazo); a Correa abaixo do mínimo; rodar 2×
@@ -28,6 +28,7 @@
 --   · os_plano_da_os (o cartão) e o TS (PlanoDaOs, ferramentas) só leem data_texto; os terços leem os_material.previsao_ate (F4).
 --   F8 (correção C1, 20261029100900) o publicado não cai pela data provável (nem o confirmado pelo cliente); a nota sem o
 --      atraso por cima e fora da medida do atraso; o fornecedor inativo mede e lê pelo principal
+--   F9 (correção C2, 20261029100950) a linha do atraso do foco compras pelo principal do cadastro inativo
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -829,6 +830,41 @@ begin
 end
 $f8$;
 
+-- ── F9. A correção C2 (20261029100950): a sobra (a) da C1 ──────────────────────────────────────────────────
+-- A linha do atraso do foco compras (_agenda_atraso_do_fornecedor) lê o cadastro inativo pelo principal, como a medição: a
+-- Kamell de Itajaí desativada tem a linha da Kamell de Vila Velha (antes, nada: lia pelo id cru).
+do $f9$
+declare
+  v_res jsonb := '[]'::jsonb;
+  c_kamell  constant text := 'dd000000-0000-4000-8000-000000000002';
+  c_itajai  constant text := 'dd000000-0000-4000-8000-000000000003';
+  v  jsonb;
+  w  jsonb;
+begin
+  if coalesce(current_setting('agenda_teste.fase6', true), '') = '' then
+    insert into _resultado values ('F9 a correção C2 do fornecedor (fixture-fase6)', true, 'PULADO: sem agenda_teste.fase6 (rode pela bancada)');
+    return;
+  end if;
+  begin
+    execute current_setting('agenda_teste.fase6');
+    update public.agenda_config set modo_aprendizado = 'ligado', aprendizado_ligados = '{fornecedor}' where id;
+    perform public._agenda_aprender_fornecedor(date '2026-10-30', timestamptz '2026-10-30 16:05-03');
+    update public.suppliers set active = false where id = c_itajai::uuid;
+    v := public._agenda_atraso_do_fornecedor(c_itajai::uuid);
+    w := public._agenda_atraso_do_fornecedor(c_kamell::uuid);
+    v_res := pg_temp.ok(v_res, 'F9a (C2, sobra a da C1) o atraso do cadastro inativo (a Kamell de Itajaí) é lido pelo principal: a mesma linha, o mesmo em uso (2) e o id pedido, como a medição',
+      v is not null and v ->> 'fornecedor_id' = c_itajai and (v ->> 'em_uso')::numeric = 2 and (v ->> 'du')::numeric = 2
+      and v ->> 'texto' = w ->> 'texto' and (w ->> 'em_uso')::numeric = 2,
+      coalesce(v::text, 'nulo') || ' / ' || coalesce(w::text, 'nulo'));
+    update public.suppliers set active = true where id = c_itajai::uuid;
+    v_res := pg_temp.ok(v_res, 'F9b (C2, sobra a da C1) o cadastro ativo sem medida (a de Itajaí de volta ao uso) não ganha a linha do outro',
+      public._agenda_atraso_do_fornecedor(c_itajai::uuid) is null, coalesce(public._agenda_atraso_do_fornecedor(c_itajai::uuid)::text, 'nulo'));
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  perform pg_temp.gravar(v_res);
+end
+$f9$;
 select teste, ok, detalhe from _resultado order by teste;
 
 rollback;

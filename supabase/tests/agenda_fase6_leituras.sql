@@ -1,7 +1,7 @@
 -- Prova das leituras do aprendizado da Agenda de Produção, Fase 6 (pacote P8; migration 20261029100800): o foco aprendizado
 -- do agenda_ver, o cartão "Plano" da OS (a linha do fator de campo em Duração e a presença aprendida) e o foco fornecedores
 -- com o prazo medido (spec-fase6 §5.8, §6.2 e §8.3).
--- bancada: depende de 20261029100800
+-- bancada: depende de 20261029100950
 --
 --   L1 o foco aprendizado byte a byte: os 7 blocos em teste e ligado (todos os itens) depois das rodadas de qui 29/10 (o dia
 --      do plano: a revisão e o planejador) e sex 30/10; o teto (texto_max 1.000: cada bloco encurta pelo fim e o fecho fica);
@@ -16,6 +16,8 @@
 --      chegaram):" (a Kamell não some do foco) e o resto igual
 --   L6 as cópias: as 3 recriadas só acrescentam os blocos "-- FASE 6:" (× a migration de onde cada uma foi copiada); o
 --      cabeçalho e as portas de antes
+--   L7 (correção C2, 20261029100950) o corte do foco sem perder as perguntas; a janela das respostas pelo agenda_config; a
+--      linha do fator; o rótulo do sem_fim; o JWT sem "sub" no cartão e nos focos de compras e fornecedores
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -206,7 +208,8 @@ begin
     v_esp := c_cab_teste || E'\n'
       || '• Em teste: as OS de energia em motorhome levam até 1,7× o combinado (7 OS); hoje seria 1,7×, e vale 1,5× (padrão).' || E'\n'
       || '• Em teste: as OS em motorhome levam até 1,6× o combinado (9 OS); hoje seria 1,6×, e vale 1,5× (padrão).' || E'\n'
-      || '• Em teste: as OS levam até 1,5× o combinado (11 OS); hoje seria 1,5×, e vale 1,5× (padrão).' || E'\n'
+      -- (correção C2, texto 1) o medido igual ao padrão não repete o "hoje seria 1,5×, e vale 1,5×"
+      || '• Em teste: as OS levam até 1,5× o combinado (11 OS): é o mesmo que eu já uso.' || E'\n'
       || '• Você foi a 3 de 4 OS de energia em motorhome sem estar no plano: em teste, eu contaria com você o dia todo nelas.' || E'\n'
       || '• Kamell: 4 de 6 entregas no prazo; o atraso chega a 2 dias úteis (em teste).' || E'\n'
       || '• Em teste: Kamell leva até 6 dias úteis da saída da nota até a chegada (5 notas); hoje conto 4 dias úteis (padrão).' || E'\n'
@@ -288,9 +291,10 @@ begin
     perform pg_temp.rodar('2026-10-29 16:05');
     perform pg_temp.rodar('2026-10-30 16:05');
     v_esp := 'O que a agenda aprendeu com o que aconteceu:' || E'\n'
-      || '• As OS de energia em motorhome levam até 1,7× o combinado (7 OS): é o que uso desde qui 29/10.' || E'\n'
-      || '• As OS em motorhome levam até 1,6× o combinado (9 OS): é o que uso desde qui 29/10.' || E'\n'
-      || '• As OS levam até 1,5× o combinado (11 OS): é o que uso desde qui 29/10.' || E'\n'
+      -- (correção C2, texto 1) o fator em uso diz para que serve; o em uso igual ao padrão, que é o mesmo de sempre
+      || '• As OS de energia em motorhome levam até 1,7× o combinado (7 OS): uso 1,7× desde qui 29/10 para perguntar o que falta (os dias do plano continuam os que você disse).' || E'\n'
+      || '• As OS em motorhome levam até 1,6× o combinado (9 OS): uso 1,6× desde qui 29/10 para perguntar o que falta (os dias do plano continuam os que você disse).' || E'\n'
+      || '• As OS levam até 1,5× o combinado (11 OS): é o mesmo que eu já usava.' || E'\n'
       || '• Você foi a 3 de 4 OS de energia em motorhome sem estar no plano: conto com você o dia todo nelas desde qui 29/10.' || E'\n'
       || '• Kamell: 4 de 6 entregas no prazo; o atraso chega a 2 dias úteis: conto a chegada 2 dias úteis depois do que o fornecedor diz (desde qui 29/10).' || E'\n'
       || '• Kamell leva até 6 dias úteis da saída da nota até a chegada (5 notas): é o prazo que uso desde qui 29/10.' || E'\n'
@@ -308,7 +312,8 @@ begin
     -- L2: o cartão ligado — a linha em uso e a presença aprendida com o texto "pelo que medi"
     r := pg_temp.cartao(c_gia);
     v_res := pg_temp.ok(v_res, 'L2d ligado: o Giancarlo com a linha em uso e a presença aprendida ("Você fica o tempo todo (pelo que medi: …)"; o de antes diria "(você disse)")',
-      r #>> '{duracao,campo}' = 'As OS de energia em motorhome levam até 1,7× o combinado (7 OS): é o que uso desde qui 29/10.'
+      -- (correção C2, texto 1) a linha diz para que o fator serve (os dias do plano continuam os ditos)
+      r #>> '{duracao,campo}' = 'As OS de energia em motorhome levam até 1,7× o combinado (7 OS): uso 1,7× desde qui 29/10 para perguntar o que falta (os dias do plano continuam os que você disse).'
       and r -> 'presenca_dono' = jsonb_build_object('valor', 'sempre', 'pela_regra', false,
             'aprendida', 'você foi a 3 de 4 OS de energia em motorhome',
             'texto', 'Você fica o tempo todo (pelo que medi: você foi a 3 de 4 OS de energia em motorhome)')
@@ -342,9 +347,10 @@ begin
   begin
     perform pg_temp.modo('sombra');
     perform pg_temp.rodar('2026-10-30 16:05');
-    v_res := pg_temp.ok(v_res, 'L2h um login sem "sub" e com o papel authenticated (não vê o aprendizado): o cartão sai sem a linha do fator, sem erro',
+    -- (correção C2, regressão B8) o login sem "sub" e com o papel authenticated não lê o cartão (antes lia, sem a linha do fator)
+    v_res := pg_temp.ok(v_res, 'L2h um login sem "sub" e com o papel authenticated: o cartão recusa com 42501 (correção C2, B8; antes saía sem a linha do fator)',
       pg_temp.como(null, 'authenticated',
-        format($q$select public.os_plano_da_os(%L, date '2026-10-30') #> '{duracao,campo}'$q$, c_gia)) = 'null',
+        format($q$select public.os_plano_da_os(%L, date '2026-10-30') #> '{duracao,campo}'$q$, c_gia)) like 'erro 42501:%',
       pg_temp.como(null, 'authenticated', format($q$select (public.os_plano_da_os(%L, date '2026-10-30') -> 'duracao')::text$q$, c_gia)));
     begin
       perform public.agenda_ver(null, null, null, 'aprendizado', null, null, false, null);
@@ -432,6 +438,116 @@ begin
 end
 $l6$;
 
+-- ── L7. A correção C2 (20261029100950): itens 10 e 12, texto 1, sobra (b) da C1 e regressão B8 ──────────────
+-- (item 10) o corte do foco não some com as perguntas abertas (tira primeiro o que está em teste e medindo); (item 12) a
+-- janela das respostas por áudio é aprender_respostas_dias; (texto 1) a linha do fator diz para que serve, e "é o mesmo"
+-- com o padrão; (sobra b) o motivo sem_fim tem rótulo; (B8) o authenticated sem "sub" não lê o cartão nem os focos de compras
+-- e fornecedores.
+-- O que o papel recebeu: 42501, outro erro ou leu.
+create function pg_temp.porta(p text) returns text language sql immutable as $f$
+  select case when p like 'erro 42501%' then '42501' when p like 'erro%' then p when p is null then 'nulo' else 'lê' end
+$f$;
+
+do $l7$
+declare
+  v_res  jsonb := '[]'::jsonb;
+  c_gia  constant uuid := '05000000-0000-4000-8000-000000000100';   -- Giancarlo: rv:energia, em andamento
+  c_nel  constant uuid := 'c1000000-0000-4000-8000-000000000005';   -- o cliente Nelson
+  c_adm  constant uuid := 'aa000000-0000-4000-8000-000000000001';   -- o dono (admin)
+  v_t  text;
+  v_f  text;
+  r    jsonb;
+  v_q  text;
+  v_n  int;
+begin
+  if coalesce(current_setting('agenda_teste.fase6', true), '') = '' then
+    insert into _resultado values ('L7 a correção C2 das leituras (fixture-fase6)', true, 'PULADO: sem agenda_teste.fase6 (rode pela bancada)');
+    return;
+  end if;
+  -- a fixture-fase6 já foi carregada pelo bloco L1–L5 (fora das subtransações); só a carrega quem roda este bloco sozinho
+  if not exists (select 1 from public.service_orders so where so.id = c_gia) then
+    execute current_setting('agenda_teste.fase6');
+  end if;
+
+  -- (item 10 e texto 1) ligado, todos os itens, as rodadas de qui 29/10 e sex 30/10
+  begin
+    update public.agenda_config set modo_leitura = 'ligado', texto_max = 3000 where id;
+    perform pg_temp.modo('ligado', pg_temp.todos());
+    perform pg_temp.rodar('2026-10-29 16:05');
+    perform pg_temp.rodar('2026-10-30 16:05');
+    r := pg_temp.cartao(c_gia);
+    v_res := pg_temp.ok(v_res, 'L7a (C2, texto 1) o cartão e o foco: a linha do fator em uso diz que serve para perguntar o que falta e que os dias do plano são os que o dono disse; a chave em uso com o valor do padrão diz que é o mesmo de sempre',
+      r #>> '{duracao,campo}' = 'As OS de energia em motorhome levam até 1,7× o combinado (7 OS): uso 1,7× desde qui 29/10 para perguntar o que falta (os dias do plano continuam os que você disse).'
+      and (select a.texto from public.agenda_aprendizado a where a.item = 'fator' and a.chave = 'todas')
+          = 'As OS levam até 1,5× o combinado (11 OS): é o mesmo que eu já usava.',
+      (r -> 'duracao')::text);
+    -- o teto de sempre (1.000): o foco ligado tem 3 perguntas abertas (a capacidade, o R$ por diária e a carga)
+    update public.agenda_config set texto_max = 1000 where id;
+    v_t := pg_temp.txt();
+    select string_agg(a.texto, ' | ' order by a.item) filter (where position(a.texto in v_t) = 0), count(*)
+      into v_f, v_n
+      from public.agenda_aprendizado a where a.estado = 'pergunta';
+    v_res := pg_temp.ok(v_res, 'L7b (C2, item 10) com texto_max 1.000, as 3 perguntas abertas (capacidade, R$ por diária, carga) estão no foco; o corte tirou primeiro o que mede (o Correa) e o fecho fica',
+      char_length(v_t) <= 1000 and v_f is null and v_n = 3
+      and v_t not like '%Correa: 4 de 5 entregas medidas.%' and v_t like '%• e mais %'
+      and v_t like E'%\nMedidas: 18 OS (11 valem;%' and v_t like 'O que a agenda aprendeu com o que aconteceu:%',
+      coalesce(v_f, '') || ' ## ' || v_t);
+    -- com 500, nem com tudo em uso cortado: só as perguntas (primeiro) e o fecho
+    update public.agenda_config set texto_max = 500 where id;
+    v_t := pg_temp.txt();
+    v_res := pg_temp.ok(v_res, 'L7c (C2, item 10) com texto_max 500, as perguntas vêm logo depois do cabeçalho, o corpo encurta pelo fim e o fecho fica',
+      char_length(v_t) <= 500
+      and v_t like E'O que a agenda aprendeu com o que aconteceu:\n• Nas últimas 8 semanas você fez 7 de cada 10 meios-dias%'
+      and v_t like E'%\nRespostas de cliente que foram a você por áudio: nenhuma em 30 dias.', v_t);
+    raise exception 'desfaz' using errcode = 'P0098';
+  exception when sqlstate 'P0098' then null;
+  end;
+
+  -- (item 12) a janela das respostas por áudio: 7 dias no config
+  begin
+    update public.agenda_config set modo_leitura = 'ligado', texto_max = 3000 where id;
+    perform pg_temp.modo('sombra');
+    perform pg_temp.rodar('2026-10-30 16:05');
+    insert into public.agenda_cliente_respostas (client_id, recebida_em, tipo_msg, intencao, efeito, modo, criada_em)
+    values (c_nel, pg_temp.em('2026-10-20 10:00'), 'audio', 'audio', 'ao_dono', 'ligado', pg_temp.em('2026-10-20 10:00')),
+           (c_nel, pg_temp.em('2026-10-29 18:00'), 'audio', 'audio', 'ao_dono', 'ligado', pg_temp.em('2026-10-29 18:00')),
+           (c_nel, pg_temp.em('2026-10-25 09:00'), 'text', 'outro', 'ao_dono', 'ligado', pg_temp.em('2026-10-25 09:00'));
+    update public.agenda_config set aprender_respostas_dias = 7 where id;
+    v_res := pg_temp.ok(v_res, 'L7d (C2, item 12) com aprender_respostas_dias 7, as respostas por áudio contam 7 dias (a de 20/10 fica fora) e a frase diz "em 7 dias"',
+      pg_temp.txt() like E'%\nRespostas de cliente que foram a você por áudio: 1 em 7 dias; sem eu entender: 1.'
+      and pg_temp.foco() #> '{dados,respostas_ao_dono}' = '{"dias": 7, "audio": 1, "nao_entendidas": 1}'::jsonb,
+      right(pg_temp.txt(), 120));
+    -- (sobra b da C1) a medida sem a conclusão registrada (sem_fim) tem o rótulo dela no fecho
+    alter table public.agenda_medidas_os disable trigger user;  -- (só a simulação: a medida não se reescreve assim)
+    update public.agenda_medidas_os set motivo = 'sem_fim', valida = false, fator = null
+     where service_order_id = (select m.service_order_id from public.agenda_medidas_os m where m.valida order by m.service_order_id limit 1);
+    alter table public.agenda_medidas_os enable trigger user;
+    v_res := pg_temp.ok(v_res, 'L7e (C2, sobra b da C1) o motivo sem_fim sai no fecho como "1 sem a conclusão registrada", e não "por outro motivo"',
+      pg_temp.txt() like '%Medidas: 18 OS (10 valem;%1 sem a conclusão registrada%' and pg_temp.txt() not like '%por outro motivo%',
+      pg_temp.txt());
+    raise exception 'desfaz' using errcode = 'P0098';
+  exception when sqlstate 'P0098' then null;
+  end;
+
+  -- (B8) o JWT authenticated sem "sub": 42501 no cartão e nos focos de compras e fornecedores; o service_role e o dono leem
+  begin
+    v_t := '';
+    foreach v_q in array array[
+      format($q$select public.os_plano_da_os(%L, date '2026-10-30')::text$q$, c_gia),
+      $q$select public._agenda_ver_compras(null, date '2026-10-30')::text$q$,
+      $q$select public._agenda_ver_fornecedores(date '2026-10-30')::text$q$] loop
+      v_t := v_t || pg_temp.porta(pg_temp.como(null, 'authenticated', v_q)) || '/'
+                 || pg_temp.porta(pg_temp.como(null, 'service_role', v_q)) || '/'
+                 || pg_temp.porta(pg_temp.como(c_adm, 'authenticated', v_q)) || ' ';
+    end loop;
+    v_res := pg_temp.ok(v_res, 'L7f (C2, regressão B8) o authenticated sem "sub" recebe 42501 em os_plano_da_os, _agenda_ver_compras e _agenda_ver_fornecedores; o service_role (sem sub) e o dono (com sub) leem',
+      v_t = '42501/lê/lê 42501/lê/lê 42501/lê/lê ', v_t);
+    raise exception 'desfaz' using errcode = 'P0098';
+  exception when sqlstate 'P0098' then null;
+  end;
+  perform pg_temp.gravar(v_res);
+end
+$l7$;
 select teste, ok, detalhe from _resultado order by teste;
 
 rollback;

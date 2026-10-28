@@ -108,8 +108,9 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     // rotina da equipe). Fase 4 (P5): + 6 na recriada (20261027100500: as mesmas 3 e o erros_24h da rodada do material,
     // contado e posto no bloco material). Fase 5 (P3): + 9 na recriada (20261028100300: as mesmas 6, o erros_24h da rodada do
     // cliente, contado e posto no bloco cliente, e a métrica resposta_24h_pct). Fase 6 (P6): + 10 na recriada (20261029100600:
-    // as mesmas 9 e o erros_24h da rodada do aprendizado, contado e posto no bloco aprendizado).
-    vezes: 30,
+    // as mesmas 9 e o erros_24h da rodada do aprendizado, contado e posto no bloco aprendizado). Correção C2 da Fase 6
+    // (20261029100950): + 10 na recriada (a mesma cópia; as janelas novas do aprendizado vêm de agenda_config).
+    vezes: 40,
     porque: 'nomes das chaves do resultado (rodadas_24h, erros_24h, resposta_24h_pct: a janela de um dia da conferência); não é rascunho_validade',
   },
   // Fase 3 (P4): a rotina da equipe grava a rodada como a vigia.

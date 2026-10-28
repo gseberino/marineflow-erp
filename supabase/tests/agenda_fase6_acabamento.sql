@@ -1,7 +1,7 @@
 -- Prova do acabamento da Fase 5 na Agenda de Produção, Fase 6 (pacote P7, migration 20261029100700): o texto ao dono sem artigo
 -- nem possessivo antes do nome e sem "ele"/"a ele", o M6 "só o fim muda" com o número de dias e o "peça sem data" sem a
 -- repetição (spec-fase6 §5.7, §6.1 e §6.4).
--- bancada: depende de 20261029100700
+-- bancada: depende de 20261029100950
 --
 --   A1 cada texto da §6.4 com a fixture (o SIM, o dia pedido, o acesso, o opt-out e os *desfaz* deles; as recusas de
 --      cliente_avisar; a pergunta ao dono da resposta; a decisão da data que passou; o foco clientes; o cartão; o que eu teria
@@ -14,6 +14,7 @@
 --      controle: a mesma varredura acha o texto de antes
 --   A4 as cópias: as 12 recriadas só acrescentam os blocos "-- FASE 6:" (× a migration de onde cada uma foi copiada); as
 --      portas de antes
+--   A5 (correção C2, 20261029100950) a forma fim sem atraso para avisar: a recusa ao dono em palavras
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -138,9 +139,18 @@ begin
 end $f$;
 create function pg_temp.sem_f6(p_corpo text) returns text[] language plpgsql as $f$
 declare
+  v_c6 boolean := false;  -- CORREÇÃO FASE 6 (C2): dentro de um bloco da correção da Fase 6
   v_b text[] := '{}'; v_bloco boolean := false; l text;
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
+    -- CORREÇÃO FASE 6: (C2) os blocos "-- CORREÇÃO FASE 6: … -- CORREÇÃO FASE 6: fim" também saem (a correção C2 da Fase 6
+    -- recria a função copiando a definição mais nova: só acréscimo); o fim é lido pelo prefixo
+    if not v_c6 and l ~ '^\s*-- CORREÇÃO FASE 6:' and l !~ '^\s*-- CORREÇÃO FASE 6: fim' then v_c6 := true; continue; end if;
+    if v_c6 then
+      if l ~ '^\s*-- CORREÇÃO FASE 6: fim' then v_c6 := false; end if;
+      continue;
+    end if;
+    -- CORREÇÃO FASE 6: fim
     if not v_bloco and l ~ '^\s*-- FASE 6:' and l !~ '^\s*-- FASE 6: fim' then v_bloco := true; continue; end if;
     if v_bloco then
       if l ~ '^\s*-- FASE 6: fim' then v_bloco := false; end if;
@@ -701,6 +711,41 @@ begin
 end
 $a4$;
 
+-- ── A5. A correção C2 (20261029100950): o texto 6 ──────────────────────────────────────────────────────────
+-- O *cliente_avisar* firme com a forma fim cujo fim novo não passa do dia que o cliente ouviu (n < 1): o dono recebe "Não
+-- preparei: o fim novo não passa do dia que o cliente ouviu, então não há atraso para avisar.", e não o texto técnico do erro.
+do $a5$
+declare
+  v_res jsonb := '[]'::jsonb;
+  c_ven constant uuid := '05000000-0000-4000-8000-000000000069';
+  r     jsonb;
+begin
+  if coalesce(current_setting('agenda_teste.fase6', true), '') = '' then
+    insert into _resultado values ('A5 a correção C2 do acabamento (fixture-fase6)', true, 'PULADO: sem agenda_teste.fase6 (rode pela bancada)');
+    return;
+  end if;
+  -- a fixture-fase6 já foi carregada pelo bloco de cima (fora das subtransações); só a carrega quem roda este bloco sozinho
+  if not exists (select 1 from public.service_orders so where so.id = c_ven) then
+    execute current_setting('agenda_teste.fase6');
+  end if;
+  begin
+    -- o Vanderlei ouviu ter 03 a qui 05/11 (firme), e o fim novo é qui 05/11: não passa do dia que ele ouviu (n = 0)
+    perform pg_temp.ligar();
+    update public.os_planejamento set prometido_tipo = 'firme', prometido_de = date '2026-11-03', prometido_ate = date '2026-11-05',
+           prometido_original_ate = date '2026-11-05', prometido_fonte = 'dono', prometido_em = now()
+     where service_order_id = c_ven;
+    r := pg_temp.prep('OS-00069', 'pode_atrasar', '2026-10-30 10:00', true);
+    v_res := pg_temp.ok(v_res, 'A5a (C2, texto 6) a forma fim sem atraso para avisar: "Não preparei: o fim novo não passa do dia que o cliente ouviu, então não há atraso para avisar." (sem o texto técnico do 22023), e nada registrado',
+      r ->> 'ok' = 'false'
+      and r ->> 'texto' = 'Não preparei: o fim novo não passa do dia que o cliente ouviu, então não há atraso para avisar.'
+      and not exists (select 1 from public.agenda_cliente_mensagens m where m.service_order_id = c_ven and m.tipo = 'pode_atrasar'),
+      r::text);
+    raise exception 'desfaz' using errcode = 'P0098';
+  exception when sqlstate 'P0098' then null;
+  end;
+  perform pg_temp.gravar(v_res);
+end
+$a5$;
 select teste, ok, detalhe from _resultado order by teste;
 
 rollback;

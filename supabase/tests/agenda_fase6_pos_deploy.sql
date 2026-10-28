@@ -1,7 +1,7 @@
 -- Conferência DEPOIS de aplicar a Agenda de Produção, Fase 6 (pacote P8): migrations 20261029100000..100800, as edge functions
 -- (task-automations com a rodada, ai-agent e erp-mcp com o foco), o front do cartão "Plano" e (passo 3) a migration de dado
 -- 20261029101000 — modo_aprendizado em sombra — fila-do-dono/fase6-oks.md, passos 1–3 (e de novo a cada item ligado, passo 4).
--- bancada: depende de 20261029100900
+-- bancada: depende de 20261029100950
 --
 -- SÓ LEITURA EM PRODUÇÃO: nenhum INSERT, UPDATE ou DELETE (só nas tabelas TEMPORÁRIAS do resultado); agenda_saude, agenda_ver
 -- e os_plano_da_os são STABLE e não gravam; termina em ROLLBACK. Na bancada (que não aplica a 20261029101000: lá o modo fica
@@ -21,6 +21,7 @@
 --   L  as leituras: o foco aprendizado devolve texto dentro de texto_max e o mesmo texto duas vezes (md5)
 --   K  (correção C1, 20261029100900) registrada; as 2 colunas e o CHECK novos de os_planejamento; o sem_fim; as 2 funções
 --      novas e as portas; o "já rodou hoje?" pelo índice novo
+--   P  (correção C2, 20261029100950) registrada; os 4 parâmetros novos; as portas das recriadas; a porta do JWT sem "sub"
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -268,6 +269,41 @@ begin
 end
 $k5$;
 
+-- ── P. A correção C2 (20261029100950) ─────────────────────────────────────────────────────────────────────
+insert into _resultado
+select 'P1 (C2) a migration 20261029100950 (a correção dos textos) registrada',
+       exists (select 1 from supabase_migrations.schema_migrations m where m.version = '20261029100950'), null;
+insert into _resultado
+select 'P2 (C2, item 12) agenda_config tem aprender_saude_dias, aprender_atraso_h, aprender_parar_dias e aprender_respostas_dias, com o DEFAULT de antes (7, 26, 30, 30) e os 4 CHECKs',
+       count(*) = 4
+       and (select format('%s %s %s %s', c.aprender_saude_dias, c.aprender_atraso_h, c.aprender_parar_dias, c.aprender_respostas_dias)
+              from public.agenda_config c where c.id) = '7 26 30 30'
+       and (select count(*) from pg_constraint k where k.conrelid = 'public.agenda_config'::regclass
+               and k.conname in ('agenda_config_aprender_saude_dias_check', 'agenda_config_aprender_atraso_h_check',
+                                 'agenda_config_aprender_parar_dias_check', 'agenda_config_aprender_respostas_dias_check')) = 4,
+       string_agg(column_name || '=' || column_default, ', ' order by column_name)
+  from information_schema.columns
+ where table_schema = 'public' and table_name = 'agenda_config'
+   and column_name in ('aprender_saude_dias', 'aprender_atraso_h', 'aprender_parar_dias', 'aprender_respostas_dias');
+insert into _resultado
+select 'P3 (C2) as portas das 14 recriadas continuam: nenhuma para anon; o gravador sem grant a ninguém; o desfazer pela tela só authenticated',
+       not has_function_privilege('anon', 'public.agenda_desfazer_dito(uuid, text, text, date, timestamptz)', 'execute')
+       and not has_function_privilege('anon', 'public.os_plano_da_os(uuid, date)', 'execute')
+       and not has_function_privilege('anon', 'public._agenda_ver_compras(uuid, date)', 'execute')
+       and not has_function_privilege('anon', 'public._agenda_ver_fornecedores(date)', 'execute')
+       and not has_function_privilege('anon', 'public._agenda_ver_aprendizado(date)', 'execute')
+       and not has_function_privilege('anon', 'public._agenda_mudancas(date, date, boolean, boolean, timestamptz)', 'execute')
+       and not has_function_privilege('anon', 'public.agenda_desfazer_pela_tela(uuid, date, timestamptz)', 'execute')
+       and has_function_privilege('authenticated', 'public.agenda_desfazer_pela_tela(uuid, date, timestamptz)', 'execute')
+       and not has_function_privilege('authenticated', 'public._agenda_aprendizado_gravar(text, text, text, numeric, integer, jsonb, numeric, jsonb, timestamptz)', 'execute')
+       and not has_function_privilege('service_role', 'public._agenda_aprendizado_gravar(text, text, text, numeric, integer, jsonb, numeric, jsonb, timestamptz)', 'execute')
+       and has_function_privilege('service_role', 'public.agenda_saude(date, timestamptz)', 'execute'),
+       null;
+insert into _resultado
+select 'P4 (C2, regressão B8) a porta do JWT sem "sub" está nas 3 leituras (os_plano_da_os, _agenda_ver_compras, _agenda_ver_fornecedores)',
+       bool_and(position('request.jwt.claims' in p.prosrc) > 0), string_agg(p.proname, ', ' order by p.proname)
+  from pg_proc p
+ where p.pronamespace = 'public'::regnamespace and p.proname in ('os_plano_da_os', '_agenda_ver_compras', '_agenda_ver_fornecedores');
 select teste, ok, detalhe from _resultado order by teste;
 
 rollback;

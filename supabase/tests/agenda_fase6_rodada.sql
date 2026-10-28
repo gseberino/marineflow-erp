@@ -1,7 +1,7 @@
 -- Prova da rodada do aprendizado da Agenda de Produção, Fase 6 (pacote P6; migration 20261029100600): a rodada diária, a
 -- decisão do dono, o *desfaz aprendizado*, a saúde, a revisão da carga pelo plano cumprido e os gatilhos de um planejador
 -- mais forte.
--- bancada: depende de 20261029100900
+-- bancada: depende de 20261029100950
 --
 --   R1 a orquestração: uma vez por dia, no 1º tique a partir de aprender_hora; em desligado só mede (nada aprendido, nada
 --      perguntado); o passo que falha não derruba a rodada nem os outros passos (e o que ele escreveu antes de falhar sai), e
@@ -20,6 +20,9 @@
 --   R8 as cópias só acrescentam os blocos "-- FASE 6:" (o cabeçalho de cada uma igual) e as portas
 --   R9 (correção C1, 20261029100900) a semanal depois do dia do plano quando não rodou (ou com outro modo ou lista); a
 --      trava da rodada antes da linha na decisão e no *desfaz*; o índice da rodada
+--   R10 (correção C2, 20261029100950) o *desfaz aprendizado <coisa>* por item (e o lote sozinho); o "o que mudou" uma
+--       linha por item, sem o sufixo e com a frase uma vez; o botão da tela; sem "*desfaz * volta"; "a última" e o *desfaz*
+--       sem nome sem o aprendizado; a pergunta do R$ por diária; as janelas da saúde pelo agenda_config
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -367,14 +370,18 @@ begin
     perform pg_temp.modo('ligado', pg_temp.todos());
     r := pg_temp.rodar('2026-10-30 16:05');
     v_m := public._agenda_mudancas(date '2026-10-30', date '2026-10-30', true, true, pg_temp.em('2026-10-30 17:30'));
-    v_res := pg_temp.ok(v_res, 'R3a o "o que mudou" das 17:30 (_agenda_mudancas, sem recriar) traz as 8 ações do aprendizado, desfazíveis, com o texto da spec (§6.3)',
+    -- (correção C2, item 6 e texto 2) uma linha por item (o fator e a presença de várias classes juntos): 5 linhas com as 8
+    -- ações; sem o "*desfaz aprendizado* volta." de cada ação (a frase vem uma vez, na 1ª linha: o R10i)
+    v_res := pg_temp.ok(v_res, 'R3a o "o que mudou" das 17:30 (_agenda_mudancas) traz as 8 ações do aprendizado, desfazíveis, em 5 linhas (uma por item: correção C2), com o texto da spec (§6.3)',
       (select count(*) from jsonb_array_elements(v_m) e
         where e ->> 'desfazivel' = 'true'
-          and exists (select 1 from public.agenda_acoes x where x.tipo = 'aprendizado' and e -> 'acao_ids' ? x.id::text)) = 8
+          and exists (select 1 from public.agenda_acoes x where x.tipo = 'aprendizado' and e -> 'acao_ids' ? x.id::text)) = 5
+      and (select sum(jsonb_array_length(e -> 'acao_ids')) from jsonb_array_elements(v_m) e
+            where exists (select 1 from public.agenda_acoes x where x.tipo = 'aprendizado' and e -> 'acao_ids' ? x.id::text)) = 8
       and exists (select 1 from jsonb_array_elements(v_m) e, jsonb_array_elements_text(e -> 'itens') t
-                   where t = 'Aprendi com as OS concluídas: as OS de energia em motorhome levam até 1,7× o combinado (7 OS). Passei a usar 1,7× no lugar de 1,5× para perguntar o que falta. *desfaz aprendizado* volta.')
+                   where t like 'Aprendi com as OS concluídas: as OS de energia em motorhome levam até 1,7× o combinado (7 OS). Passei a usar 1,7× no lugar de 1,5× para perguntar o que falta. Também nas OS de energia (1,7×) e nas em motorhome (1,6×).%')
       and exists (select 1 from jsonb_array_elements(v_m) e, jsonb_array_elements_text(e -> 'itens') t
-                   where t = 'Kamell atrasou até 2 dias úteis em 6 entregas: passei a contar a chegada 2 dias úteis depois do que o fornecedor diz. *desfaz aprendizado* volta.'),
+                   where t like 'Kamell atrasou até 2 dias úteis em 6 entregas: passei a contar a chegada 2 dias úteis depois do que o fornecedor diz.%'),
       v_m::text);
 
     d := public.agenda_desfazer_dito(c_dono, 'aprendizado', 'whatsapp', date '2026-10-30', pg_temp.em('2026-10-30 17:40'));
@@ -1036,6 +1043,228 @@ begin
 end
 $r9$;
 
+-- ── R10. A correção C2 (20261029100950): item 6, textos 2 e 5, regressões M1 e B1, item 12 ──────────────────
+-- (item 6) *desfaz aprendizado <coisa>* desfaz só aquela coisa (as outras do lote continuam em uso) e o lote sozinho continua;
+-- o "o que mudou" sai uma linha por item (texto 2), sem o sufixo em cada linha e com a frase UMA vez; a tela desfaz o item
+-- inteiro. (M1) nenhum "*desfaz * volta como estava." no fechamento nem no foco mudanças. (B1) "a última" e o *desfaz* sem
+-- nome não pegam o aprendizado, e a lista nunca sai vazia. (texto 5) a pergunta do R$ por diária. (item 12) as janelas da
+-- saúde pelo agenda_config.
+do $r10$
+declare
+  v_res jsonb := '[]'::jsonb;
+  c_dono constant uuid := 'aa000000-0000-4000-8000-000000000001';
+  c_kam  constant text := 'dd000000-0000-4000-8000-000000000002';
+  r     jsonb;
+  d     jsonb;
+  v_m   jsonb;
+  v_t   text;
+  v_f   text;
+  v_id  uuid;
+  q     public.agenda_perguntas;
+begin
+  if coalesce(current_setting('agenda_teste.fase6', true), '') = '' then
+    insert into _resultado values ('R10 a correção C2 da rodada (fixture-fase6)', true, 'PULADO: sem agenda_teste.fase6 (rode pela bancada)');
+    return;
+  end if;
+
+  -- (item 6) *desfaz aprendizado Kamell*: só os 2 da Kamell; depois *desfaz aprendizado* desfaz os 6 que sobraram
+  begin
+    execute current_setting('agenda_teste.fase6');
+    perform pg_temp.modo('ligado', pg_temp.todos());
+    r := pg_temp.rodar('2026-10-30 16:05');
+    d := public.agenda_desfazer_dito(c_dono, 'aprendizado kamell', 'whatsapp', date '2026-10-30', pg_temp.em('2026-10-30 17:40'));
+    v_res := pg_temp.ok(v_res, 'R10a (C2, item 6) *desfaz aprendizado Kamell* desfaz só o atraso e o prazo da Kamell (2 ações, as 2 travadas); o fator, a presença e a folga continuam em uso',
+      d ->> 'ok' = 'true' and jsonb_array_length(d -> 'acoes') = 2
+      and (pg_temp.linha('fornecedor_atraso', c_kam)).estado = 'travado' and (pg_temp.linha('fornecedor_prazo', c_kam)).estado = 'travado'
+      and (pg_temp.linha('fator', 'rv:energia')).estado = 'em_uso' and (pg_temp.linha('fator', 'rv:energia')).em_uso = 1.70
+      and (pg_temp.linha('presenca', 'rv:energia')).estado = 'em_uso' and (pg_temp.linha('aviso_folga', 'todas')).em_uso = 2
+      and (select count(*) from public.agenda_aprendizado y where y.estado = 'travado') = 2
+      and d ->> 'texto' like 'Desfeito: para Kamell volto a contar a chegada no dia que o fornecedor diz.%'
+      and d ->> 'texto' like '%Desfeito: para Kamell volto a contar 4 dias úteis da saída da nota até a chegada.%',
+      d::text || ' ' || pg_temp.estados());
+    d := public.agenda_desfazer_dito(c_dono, 'aprendizado Kamell', 'whatsapp', date '2026-10-30', pg_temp.em('2026-10-30 17:41'));
+    v_res := pg_temp.ok(v_res, 'R10b (C2, item 6) de novo *desfaz aprendizado Kamell*: "não tenho" (nada desfeito duas vezes)',
+      d ->> 'ok' = 'false' and d ->> 'status' = 'nenhuma'
+      and d ->> 'texto' = 'Não tenho mudança do aprendizado de Kamell para desfazer agora.', d::text);
+    d := public.agenda_desfazer_dito(c_dono, 'aprendizado', 'whatsapp', date '2026-10-30', pg_temp.em('2026-10-30 17:42'));
+    v_res := pg_temp.ok(v_res, 'R10c (C2, item 6) *desfaz aprendizado* sozinho continua o lote: desfaz as 6 que sobraram (todas travadas)',
+      d ->> 'ok' = 'true' and jsonb_array_length(d -> 'acoes') = 6
+      and (select count(*) from public.agenda_aprendizado y where y.estado = 'travado') = 8, d::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- (item 6) os outros alvos: fator (as 3 classes), presença (com acento, como a tela escreve), folga, fornecedor, o valor
+  -- (sem ação: "não tenho") e a coisa que não existe (nao_achei)
+  begin
+    execute current_setting('agenda_teste.fase6');
+    perform pg_temp.modo('ligado', pg_temp.todos());
+    r := pg_temp.rodar('2026-10-30 16:05');
+    d := public.agenda_desfazer_dito(c_dono, 'aprendizado fator', 'whatsapp', date '2026-10-30', pg_temp.em('2026-10-30 17:40'));
+    v_res := pg_temp.ok(v_res, 'R10d (C2, item 6) *desfaz aprendizado fator*: as 3 classes do fator (travadas); a presença e a Kamell continuam em uso',
+      d ->> 'ok' = 'true' and jsonb_array_length(d -> 'acoes') = 3
+      and (select count(*) from public.agenda_aprendizado y where y.item = 'fator' and y.estado = 'travado') = 3
+      and (pg_temp.linha('presenca', 'rv:energia')).estado = 'em_uso' and (pg_temp.linha('fornecedor_atraso', c_kam)).estado = 'em_uso',
+      d::text);
+    d := public.agenda_desfazer_dito(c_dono, 'o aprendizado presença', 'whatsapp', date '2026-10-30', pg_temp.em('2026-10-30 17:41'));
+    v_f := d ->> 'ok' || ':' || coalesce(jsonb_array_length(d -> 'acoes'), 0);
+    d := public.agenda_desfazer_dito(c_dono, 'aprendizado folga', 'whatsapp', date '2026-10-30', pg_temp.em('2026-10-30 17:42'));
+    v_f := v_f || ' ' || (d ->> 'ok') || ':' || coalesce(jsonb_array_length(d -> 'acoes'), 0);
+    d := public.agenda_desfazer_dito(c_dono, 'aprendizado fornecedor', 'whatsapp', date '2026-10-30', pg_temp.em('2026-10-30 17:43'));
+    v_f := v_f || ' ' || (d ->> 'ok') || ':' || coalesce(jsonb_array_length(d -> 'acoes'), 0);
+    v_res := pg_temp.ok(v_res, 'R10e (C2, item 6) "o aprendizado presença" (com acento e o "o") desfaz as 2 classes; "folga", a folga; "fornecedor", o atraso e o prazo (cada um trava só o que desfez: no fim, as 8)',
+      v_f = 'true:2 true:1 true:2' and (select count(*) from public.agenda_aprendizado y where y.estado = 'travado') = 8,
+      v_f || ' ' || pg_temp.estados());
+    d := public.agenda_desfazer_dito(c_dono, 'aprendizado diaria', 'whatsapp', date '2026-10-30', pg_temp.em('2026-10-30 17:44'));
+    v_t := d ->> 'status' || ' | ' || (d ->> 'texto');
+    d := public.agenda_desfazer_dito(c_dono, 'aprendizado gerador', 'whatsapp', date '2026-10-30', pg_temp.em('2026-10-30 17:44'));
+    v_t := v_t || ' | ' || (d ->> 'status') || ' | ' || (d ->> 'texto');
+    v_res := pg_temp.ok(v_res, 'R10f (C2, item 6) o valor sem ação (é pergunta): "não tenho" com o nome dele; a coisa que não é item nem fornecedor: nao_achei, com as palavras',
+      v_t = 'nenhuma | Não tenho mudança do aprendizado do valor por diária para desfazer agora. | nao_achei | Não achei isso no que eu aprendi. Diga *desfaz aprendizado* e fator, presença, valor, folga, capacidade ou o nome do fornecedor (ou só *desfaz aprendizado*, que volta tudo).',
+      v_t);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- (M1, texto 2 e a frase uma vez) o cenário do r08 da revisão: a rodada ligada de sex 30/10 (fator, presença, fornecedor,
+  -- aviso) e o fechamento das 17:30 e o foco mudanças
+  begin
+    execute current_setting('agenda_teste.fase6');
+    perform pg_temp.modo('sombra');
+    r := pg_temp.rodar('2026-10-29 16:05');
+    perform pg_temp.modo('ligado', '{fator,presenca,fornecedor,aviso_cliente}');
+    r := pg_temp.rodar('2026-10-30 16:05');
+    v_t := public.agenda_textos_do_fechamento(date '2026-10-30', date '2026-10-30')::text;
+    v_f := public.agenda_ver(c_dono, null, null, 'mudancas', null, null, false, date '2026-10-30') ->> 'texto';
+    v_res := pg_temp.ok(v_res, 'R10g (C2, regressão M1) nenhum "*desfaz * volta como estava." no fechamento das 17:30 nem no foco mudanças',
+      v_t not like '%*desfaz *%' and v_f not like '%*desfaz *%' and v_f like '%Aprendi com as OS concluídas%', v_f);
+    v_m := public._agenda_mudancas(date '2026-10-30', date '2026-10-30', true, true, pg_temp.em('2026-10-30 17:30'));
+    select string_agg(e -> 'itens' ->> 0, ' || ' order by o) into v_f
+      from jsonb_array_elements(v_m) with ordinality t(e, o)
+     where exists (select 1 from public.agenda_acoes x where x.tipo = 'aprendizado' and e -> 'acao_ids' ? x.id::text);
+    v_res := pg_temp.ok(v_res, 'R10h (C2, texto 2) o "o que mudou" sai UMA linha por item: 5 linhas (fator, presença, atraso e prazo da Kamell, folga) com as 8 ações nelas; a do fator diz a fina e "Também nas OS de energia (1,7×) e nas em motorhome (1,6×).", a da presença "Também nas OS de energia."',
+      (select count(*) from jsonb_array_elements(v_m) e
+        where exists (select 1 from public.agenda_acoes x where x.tipo = 'aprendizado' and e -> 'acao_ids' ? x.id::text)) = 5
+      and (select sum(jsonb_array_length(e -> 'acao_ids')) from jsonb_array_elements(v_m) e
+            where exists (select 1 from public.agenda_acoes x where x.tipo = 'aprendizado' and e -> 'acao_ids' ? x.id::text)) = 8
+      and v_f like '%Aprendi com as OS concluídas: as OS de energia em motorhome levam até 1,7× o combinado (7 OS). Passei a usar 1,7× no lugar de 1,5× para perguntar o que falta. Também nas OS de energia (1,7×) e nas em motorhome (1,6×).%'
+      and v_f like '%Você foi a 3 de 4 OS de energia em motorhome sem estar no plano: passei a contar com você o dia todo nas próximas dessas OS (as que você não disse como é). Também nas OS de energia.%'
+      and v_f like '%Kamell atrasou até 2 dias úteis em 6 entregas: passei a contar a chegada 2 dias úteis depois do que o fornecedor diz.%',
+      v_f);
+    v_res := pg_temp.ok(v_res, 'R10i (C2, item 6) as linhas perdem o "*desfaz aprendizado* volta." de cada ação, e a frase vem UMA vez, no fim da 1ª linha: "*desfaz aprendizado* volta tudo; *desfaz aprendizado <coisa>* volta só …" (no fechamento também)',
+      (length(v_f) - length(replace(v_f, '*desfaz aprendizado*', ''))) / length('*desfaz aprendizado*') = 1
+      and v_f ~ '^[^|]*\*desfaz aprendizado\* volta tudo; \*desfaz aprendizado [^*]+\* volta só (essa|o que é de [A-Za-z]+)\.( \|\||$)'
+      and v_t like '%*desfaz aprendizado* volta tudo; *desfaz aprendizado %'
+      and v_f not like '%*desfaz aprendizado* volta.%' and v_f not like '%volta ao abre e fecha%', v_f);
+    -- a tela: o botão da linha do fator desfaz as 3 classes de uma vez
+    select x.id into v_id from public.agenda_acoes x where x.tipo = 'aprendizado' and x.antes ->> 'chave' = 'sistema:energia'
+                                                         and x.antes ->> 'item' = 'fator';
+    -- (a tela tem login: o do dono)
+    perform set_config('request.jwt.claim.sub', c_dono::text, true);
+    perform set_config('request.jwt.claims', json_build_object('sub', c_dono, 'role', 'authenticated')::text, true);
+    d := public.agenda_desfazer_pela_tela(v_id, date '2026-10-30', pg_temp.em('2026-10-30 17:50'));
+    perform set_config('request.jwt.claim.sub', '', true);
+    perform set_config('request.jwt.claims', '', true);
+    v_res := pg_temp.ok(v_res, 'R10j (C2, item 6) na tela, o Desfazer da linha do fator desfaz o item inteiro daquele instante (as 3 classes), e o texto são os "Desfeito: …" (não "a publicação da semana")',
+      d ->> 'ok' = 'true' and jsonb_array_length(d -> 'acoes') = 3
+      and (select count(*) from public.agenda_aprendizado y where y.item = 'fator' and y.estado = 'travado') = 3
+      and (pg_temp.linha('presenca', 'rv:energia')).estado = 'em_uso'
+      and d ->> 'texto' like 'Desfeito: %' and d ->> 'texto' not like '%publicação%', d::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- (B1) o cenário do r06: "a última" e o *desfaz* sem nome com o lote do aprendizado desfazível
+  begin
+    execute current_setting('agenda_teste.fase6');
+    perform pg_temp.modo('ligado', '{fator,presenca,fornecedor,aviso_cliente}');
+    r := pg_temp.rodar('2026-10-30 16:05');
+    d := public.agenda_desfazer_dito(c_dono, 'a última', 'whatsapp', date '2026-10-30', pg_temp.em('2026-10-30 16:20'));
+    v_res := pg_temp.ok(v_res, 'R10k (C2, regressão B1) *desfaz a última* não desfaz uma chave solta do aprendizado (a bem:rv continua 1,6 com a rv:energia em 1,7): desfaz a última mudança de outro tipo',
+      d ->> 'ok' = 'true' and (pg_temp.linha('fator', 'bem:rv')).estado = 'em_uso' and (pg_temp.linha('fator', 'rv:energia')).em_uso = 1.70
+      and not exists (select 1 from public.agenda_acoes x where x.tipo = 'aprendizado' and x.desfeita_em is not null), d::text);
+    d := public.agenda_acao_desfazivel(null, date '2026-10-30', pg_temp.em('2026-10-30 16:21'));
+    v_res := pg_temp.ok(v_res, 'R10l (C2, regressão B1) *desfaz* sem nome: a lista "Qual?" sem as ações do aprendizado (nem os ids), cada opção com nome',
+      d ->> 'status' = 'ambiguo' and d ->> 'texto' like 'Qual? %' and d ->> 'texto' not like 'Qual?  %' and d ->> 'texto' not like '% ou  (%'
+      and jsonb_array_length(d -> 'acao_ids') > 1
+      and not exists (select 1 from public.agenda_acoes x, jsonb_array_elements_text(d -> 'acao_ids') o
+                       where x.tipo = 'aprendizado' and o = x.id::text), d::text);
+    -- 16:40: as ações do plano (de ter 27/10) já não se desfazem; só sobra o aprendizado
+    d := public.agenda_desfazer_dito(c_dono, null, 'whatsapp', date '2026-10-30', pg_temp.em('2026-10-30 16:40'));
+    v_t := d ->> 'status' || ' | ' || (d ->> 'texto');
+    d := public.agenda_desfazer_dito(c_dono, 'a última', 'whatsapp', date '2026-10-30', pg_temp.em('2026-10-30 16:40'));
+    v_t := v_t || ' | ' || (d ->> 'status') || ' | ' || (d ->> 'texto');
+    v_res := pg_temp.ok(v_res, 'R10m (C2, regressão B1) só com o aprendizado desfazível, o *desfaz* sem nome e "a última" não viram "Qual?  Diga…" nem desfazem uma chave: dizem a palavra do aprendizado',
+      v_t = 'nenhuma | Não tenho outra mudança minha para desfazer agora. O que eu aprendi sozinho volta com *desfaz aprendizado*. | nenhuma | Não tenho outra mudança minha para desfazer agora. O que eu aprendi sozinho volta com *desfaz aprendizado*.'
+      and not exists (select 1 from public.agenda_acoes x where x.tipo = 'aprendizado' and x.desfeita_em is not null), v_t);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- (texto 5) a pergunta do R$ por diária: sem "(recomendo)" e com "inclui as OS em que você também trabalhou"
+  begin
+    execute current_setting('agenda_teste.fase6');
+    perform pg_temp.modo('ligado', pg_temp.todos());
+    r := pg_temp.rodar('2026-10-30 16:05');
+    q := pg_temp.pergunta('mo', 'todas');
+    v_res := pg_temp.ok(v_res, 'R10n (C2, texto 5) a pergunta do R$ por diária diz que a conta inclui as OS em que o dono também trabalhou, e a opção 1 sai sem "(recomendo)" (a recomendação continua 1)',
+      q.texto = 'Medi a mão de obra por diária: cada diária rendeu R$ 1.097 (10 OS com diária ligada; inclui as OS em que você também trabalhou), e hoje eu uso R$ 764 para estimar os dias pelo valor. É uma troca grande. 1) Passo a usar R$ 1.097; 2) Fico com R$ 764.'
+      and q.recomendacao = 1 and q.texto not like '%recomendo%'
+      and (select q2.texto from public.agenda_perguntas q2
+            where q2.chave = 'aprendizado:capacidade_dono:dono' and q2.estado = 'aberta') like '%1) Passo a marcar até 56% (recomendo)%',
+      q.texto);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- (item 12) as janelas da saúde: a rodada atrasada (aprender_atraso_h), a troca grande (aprender_saude_dias), as métricas
+  -- (aprender_parar_dias) e o desfeito 2 vezes (aprender_trava_dias)
+  begin
+    execute current_setting('agenda_teste.fase6');
+    perform pg_temp.modo('ligado', '{fator}');
+    r := pg_temp.rodar('2026-10-30 16:05');
+    -- 25h30 depois: com 26 h não está atrasada; com 25 h está
+    v_t := (public.agenda_saude(date '2026-10-31', pg_temp.em('2026-10-31 17:35')) #>> '{aprendizado,rodada_atrasada}');
+    update public.agenda_config set aprender_atraso_h = 25 where id;
+    v_t := v_t || ' ' || (public.agenda_saude(date '2026-10-31', pg_temp.em('2026-10-31 17:35')) #>> '{aprendizado,rodada_atrasada}');
+    update public.agenda_config set aprender_atraso_h = 26 where id;
+    -- uma troca grande que entrou sozinha (o fator de 1,5 a 2,0: acima de fator_troca_max), 2 dias depois: com 7 dias
+    -- aparece; com aprender_saude_dias 1, não
+    alter table public.agenda_acoes disable trigger user;  -- (só a simulação: a ação gravada não se reescreve)
+    update public.agenda_acoes set depois = jsonb_set(depois, '{em_uso}', '2.0')
+     where tipo = 'aprendizado' and antes ->> 'chave' = 'rv:energia' and antes ->> 'item' = 'fator';
+    alter table public.agenda_acoes enable trigger user;
+    v_t := v_t || ' ' || (public.agenda_saude(date '2026-11-01', pg_temp.em('2026-11-01 16:05')) #>> '{aprendizado,troca_grande_sem_pergunta}');
+    update public.agenda_config set aprender_saude_dias = 1 where id;
+    v_t := v_t || ' ' || (public.agenda_saude(date '2026-11-01', pg_temp.em('2026-11-01 16:05')) #>> '{aprendizado,troca_grande_sem_pergunta}');
+    -- as trocas que entraram sozinhas nas métricas: 8 dias depois, com 30 dias as 3 do fator contam; com 7, nenhuma
+    v_t := v_t || ' ' || (public.agenda_saude(date '2026-11-07', pg_temp.em('2026-11-07 17:00')) #>> '{aprendizado,metricas,trocas_30d,sozinhas}');
+    update public.agenda_config set aprender_parar_dias = 7 where id;
+    v_t := v_t || ' ' || (public.agenda_saude(date '2026-11-07', pg_temp.em('2026-11-07 17:00')) #>> '{aprendizado,metricas,trocas_30d,sozinhas}');
+    v_res := pg_temp.ok(v_res, 'R10o (C2, item 12) as janelas da saúde vêm de agenda_config: a rodada atrasada pelas horas (26 h: 0; 25 h: 1), a troca grande pelos dias (7: 1; 1: 0) e as trocas das métricas pelos dias (30: 3; 7: 0)',
+      v_t = '0 1 1 0 3 0', v_t);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  begin
+    execute current_setting('agenda_teste.fase6');
+    perform pg_temp.modo('ligado', '{fator}');
+    r := pg_temp.rodar('2026-10-30 16:05');
+    d := public.agenda_desfazer_dito(c_dono, 'aprendizado', 'whatsapp', date '2026-10-30', pg_temp.em('2026-10-30 17:40'));
+    r := pg_temp.rodar('2026-11-28 16:05');
+    d := public.agenda_desfazer_dito(c_dono, 'aprendizado', 'whatsapp', date '2026-11-28', pg_temp.em('2026-11-28 16:40'));
+    -- os 2 desfeitos do fator estão a 28 dias e 23 h: dentro de 28 dias não; dentro de 30, sim
+    v_t := (public.agenda_saude(date '2026-11-28', pg_temp.em('2026-11-28 17:00')) #> '{aprendizado,metricas,desfeito_2x_em_4_semanas}')::text;
+    update public.agenda_config set aprender_trava_dias = 30 where id;
+    v_t := v_t || ' ' || (public.agenda_saude(date '2026-11-28', pg_temp.em('2026-11-28 17:00')) #> '{aprendizado,metricas,desfeito_2x_em_4_semanas}')::text;
+    v_res := pg_temp.ok(v_res, 'R10p (C2, item 12) o item desfeito 2 vezes é contado dentro de aprender_trava_dias (28: nada; 30: o fator), e não nos 28 dias escritos na função',
+      v_t = '[] ["fator"]', v_t || ' ' || d::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  perform pg_temp.gravar(v_res);
+end
+$r10$;
 select teste, ok, detalhe from _resultado order by teste;
 
 rollback;

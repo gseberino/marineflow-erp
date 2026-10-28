@@ -482,7 +482,8 @@ begin
     v_res := pg_temp.ok(v_res, 'M7d troca pequena (1,5× → 1,7×) entra sozinha: em uso, o leitor devolve 1,7 e o foco diz desde quando',
       a.estado = 'em_uso' and a.em_uso = 1.70 and a.em_uso_desde = c_agora and a.acao_id = x.id
       and public._agenda_aprendido('fator', c_fina) = 1.70
-      and a.texto = 'As OS de energia em motorhome levam até 1,7× o combinado (7 OS): é o que uso desde sex 30/10.',
+      -- (correção C2, texto 1) a linha do fator em uso diz para que serve
+      and a.texto = 'As OS de energia em motorhome levam até 1,7× o combinado (7 OS): uso 1,7× desde sex 30/10 para perguntar o que falta (os dias do plano continuam os que você disse).',
       a.texto);
     v_res := pg_temp.ok(v_res, 'M7e a ação: aprendizado, da vigia, executada, desfazível por 24 horas (desfazer_validade), com o antes e o depois e o texto da §6.3',
       x.tipo = 'aprendizado' and x.origem = 'vigia' and x.executada and not x.critica and x.dia = date '2026-10-30'

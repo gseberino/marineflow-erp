@@ -2133,6 +2133,26 @@
       "texto": "{{saida:0}}"
     }
   },
+  "K74": {
+    "boa": {
+      "passos": [
+        {
+          "palavra": "desfaz aprendizado Kamell"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "o *desfaz aprendizado* sozinho (o lote): desfaz também o fator, a presença e a folga, que o dono não contestou",
+      "reprova_em": "parametros",
+      "passos": [
+        {
+          "palavra": "desfaz aprendizado"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
   "S70": {
     "boa": {
       "chamadas": [],

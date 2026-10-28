@@ -3171,6 +3171,43 @@
       }
     },
     {
+      "id": "K74",
+      "fase": 6,
+      "grupo": "seguranca",
+      "sem_modelo": true,
+      "entrada": "desfaz aprendizado Kamell (correção C2, item 6: o dono manda às 17:30 de sex 30/10, 1h25 depois da rodada das 16:05, e discorda só da Kamell)",
+      "estado": "fase6_ligado",
+      "agora": "2026-10-30 17:30",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": [
+            "+ acoes aprendizado vigia executada desfeita: n=2",
+            "+ acoes desfazer dono executada: n=2",
+            "~ acoes aprendizado vigia executada: n 8 → 6"
+          ]
+        },
+        "parametros": {
+          "diff": [
+            "~ aprendizado fornecedor_atraso Kamell: em_uso 2.00 → nulo",
+            "~ aprendizado fornecedor_atraso Kamell: estado em_uso → travado",
+            "~ aprendizado fornecedor_atraso Kamell: travado nulo → 2026-11-27",
+            "~ aprendizado fornecedor_prazo Kamell: em_uso 6.00 → nulo",
+            "~ aprendizado fornecedor_prazo Kamell: estado em_uso → travado",
+            "~ aprendizado fornecedor_prazo Kamell: travado nulo → 2026-11-27"
+          ]
+        },
+        "texto_contem": [
+          "Desfeito: para Kamell"
+        ]
+      }
+    },
+    {
       "id": "S70",
       "fase": 6,
       "grupo": "seguranca",
