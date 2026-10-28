@@ -34,6 +34,7 @@ function labelFor(name: string): string {
     cancelar_missao_acompanhamento: 'Encerrar acompanhamento da IA',
     register_payment: 'Registrar pagamento',
     register_deposit_and_convert: 'Registrar sinal e converter em OS',
+    converter_sem_sinal: 'Converter orçamento em OS sem sinal',
     receive_purchase_order: 'Receber ordem de compra',
     cancel_service_order: 'Cancelar OS',
     reopen_service_order: 'Reabrir OS',

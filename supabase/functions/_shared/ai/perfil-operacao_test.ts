@@ -82,6 +82,8 @@ ACRESCENTADAS.push(
 );
 // agrupar orçamentos (15/10/2026, pedido do dono): listar os candidatos, agrupar e desagrupar conversando.
 ACRESCENTADAS.push("listar_orcamentos_para_agrupar", "agrupar_orcamentos", "desagrupar_orcamento");
+// converter sem sinal (27/10/2026, pedido do dono): orçamento vira OS com tudo na conclusão.
+ACRESCENTADAS.push("converter_sem_sinal");
 // 06/10/2026: levantamento e roteiro de execução — escondidos da tela em 05/10 (chave
 // roteiro_execucao_visivel); o prompt deixou de ensinar as duas seções.
 const REMOVIDAS = ["registrar_jornada", "fechar_jornada", "minhas_horas", "apurar_pagamento",

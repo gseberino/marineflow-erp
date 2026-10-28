@@ -47,6 +47,8 @@ import { caixaTools } from "./caixa.ts";
 import { diariasTools } from "./diarias.ts";
 import { followupTools } from "./followups.ts";
 import { condicaoPagamentoTools } from "./condicao-pagamento.ts";
+// 27/10/2026: orçamento vira OS sem sinal, valor inteiro na conclusão (paridade com a tela).
+import { converterSemSinalTools } from "./converter-sem-sinal.ts";
 import { acompanhamentoTools } from "./acompanhamento.ts";
 // operacional (07/10/2026): caixa de sugestões da agenda (listar, aceitar, descartar).
 import { agendaSugestaoTools } from "./agenda-sugestoes.ts";
@@ -79,6 +81,7 @@ export const allTools: ToolDef[] = [
   ...productTools,
   ...serviceOrderTools,
   ...condicaoPagamentoTools,
+  ...converterSemSinalTools,
   ...agendaTools,
   ...financialTools,
   ...reportTools,

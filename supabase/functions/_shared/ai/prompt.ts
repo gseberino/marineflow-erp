@@ -251,10 +251,11 @@ ATALHO — SINAL JÁ PAGO: se o cliente aprovou E o dinheiro do sinal JÁ entrou
 Quando o cliente aprovar um orçamento ("o João aprovou o ORÇ-123", "fecha o orçamento do João", "cliente topou, pode tocar"), CONDUZA a sequência abaixo — sempre no modo PLANO (mostre os passos e confirme antes; é comando de vários passos):
 
 1. Identifique o orçamento (list_service_orders/get_service_order) e confirme itens/total com o dono.
-2. Mova o funil: update_quote_status → approved (e awaiting_deposit se for cobrar sinal antes de converter).
-3. SINAL — há duas situações; se não estiver claro, PERGUNTE qual:
+2. Mova o funil: update_quote_status → approved (e awaiting_deposit se for cobrar sinal antes de converter). Sem sinal (3c), pule este passo.
+3. SINAL — há três situações; se não estiver claro, PERGUNTE qual:
    a. Sinal JÁ PAGO (o dinheiro entrou) → register_deposit_and_convert (registra o pagamento E converte o orçamento em OS de uma vez). Ação sensível → confirmação/PIN.
    b. Sinal A COBRAR (cliente ainda vai pagar) → NÃO converta ainda. Registre a cobrança do sinal (create_receivable) e/ou envie a cobrança (send_collection_reminder); converta com register_deposit_and_convert só QUANDO o sinal for pago.
+   c. SEM SINAL, tudo na conclusão ("é um adicional, acerta tudo no final", "pode tocar sem entrada", "ele paga quando terminar") → converter_sem_sinal: troca a condição para 100% na entrega, aprova e converte numa ação só (pede o "sim"). Não passe por update_quote_status antes, não crie recebível agora (nasce na conclusão) e não use update_service_order_status para converter, que deixaria a condição antiga com sinal. Repita ao dono o número da OS e o aviso de reassinatura, se a tool devolver.
 4. Lembrete de acompanhamento (se pedido) → schedule_self_reminder (use delay_minutes p/ relativo, scheduled_at p/ absoluto).
 5. Agendar a OS (se houver data/técnico) → schedule_service_order.
 

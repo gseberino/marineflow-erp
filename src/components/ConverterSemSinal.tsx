@@ -24,7 +24,7 @@ import { writeAuditLog } from '@/hooks/use-audit-log';
 import { useUpdateServiceOrderStatus } from '@/hooks/use-service-orders';
 import { usePaymentConditionPresets } from '@/hooks/use-payment-conditions';
 import { usePurchaseNeedsPrompt } from '@/hooks/use-purchase-needs-prompt';
-import { condicaoTudoNaConclusao } from '@/lib/condicao-na-conclusao';
+import { condicaoTudoNaConclusao, type CondicaoGravada } from '@/lib/condicao-na-conclusao';
 
 interface Alvo {
   id: string;
@@ -33,17 +33,32 @@ interface Alvo {
   grandTotal?: number;
 }
 
+interface Opcoes {
+  /** Depois de gravar: a tela aberta aplica a condição no próprio estado. Sem isto, uma edição
+      não salva dos campos de condição venceria a releitura (mesclarReleitura) e voltaria a
+      condição antiga no próximo salvar. */
+  aoConverter?: (condicao: CondicaoGravada) => void;
+}
+
 const brl = (n: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(n);
 
-export function useConverterSemSinal() {
+export function useConverterSemSinal({ aoConverter }: Opcoes = {}) {
   const qc = useQueryClient();
   const updateStatus = useUpdateServiceOrderStatus();
   const { data: presets } = usePaymentConditionPresets();
   const { promptIfConverted, dialog: avisoDeCompra } = usePurchaseNeedsPrompt();
   const [alvo, setAlvo] = useState<Alvo | null>(null);
+  const [assinado, setAssinado] = useState(false);
   const [convertendo, setConvertendo] = useState(false);
 
-  const pedir = useCallback((a: Alvo) => setAlvo(a), []);
+  // Orçamento assinado com outra condição: trocar a condição pede assinatura nova — a
+  // confirmação avisa antes (a mesma regra da definir_condicao_pagamento do assistente).
+  const pedir = useCallback((a: Alvo) => {
+    setAssinado(false);
+    setAlvo(a);
+    supabase.from('service_orders').select('signed_at').eq('id', a.id).maybeSingle()
+      .then(({ data }) => setAssinado(!!data?.signed_at), () => {});
+  }, []);
 
   const converter = async () => {
     if (!alvo) return;
@@ -59,6 +74,7 @@ export function useConverterSemSinal() {
         })
         .eq('id', alvo.id);
       if (error) throw error;
+      aoConverter?.(condicao);
       await writeAuditLog({
         table_name: 'service_orders',
         record_id: alvo.id,
@@ -96,6 +112,12 @@ export function useConverterSemSinal() {
                   A condição de pagamento passa a ser <strong className="text-foreground">100% na entrega</strong> —
                   é o que sai no PDF e na conta a receber.
                 </p>
+                {assinado && (
+                  <p className="text-amber-700">
+                    Este orçamento foi assinado com a condição anterior: com a troca, o cliente
+                    precisa assinar de novo.
+                  </p>
+                )}
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>

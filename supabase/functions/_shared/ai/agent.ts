@@ -234,6 +234,8 @@ const TOOL_LABELS_PT: Record<string, string> = {
   agrupar_orcamentos: "Agrupar orçamentos em um só",
   desagrupar_orcamento: "Desagrupar orçamento",
   listar_orcamentos_para_agrupar: "Listar orçamentos para agrupar",
+  // 27/10/2026: paridade com o "Converter sem sinal" da tela.
+  converter_sem_sinal: "Converter orçamento em OS sem sinal",
 };
 // financeiro (07/10/2026): anotação de Pix, estorno, cobrança formal e favorecido.
 Object.assign(TOOL_LABELS_PT, TITULOS_DO_FINANCEIRO);

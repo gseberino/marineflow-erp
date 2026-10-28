@@ -8,11 +8,15 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { QuoteStatusQuickChange } from './QuoteStatusQuickChange';
 
-const chamadas = vi.hoisted(() => ({ ordem: [] as string[], update: [] as unknown[], status: [] as unknown[] }));
+const chamadas = vi.hoisted(() => ({
+  ordem: [] as string[], update: [] as unknown[], status: [] as unknown[], assinadoEm: null as string | null,
+}));
 
 vi.mock('@/integrations/supabase/client', () => ({
   supabase: {
     from: () => ({
+      // leitura do signed_at ao abrir a confirmação
+      select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { signed_at: chamadas.assinadoEm }, error: null }) }) }),
       update: (v: unknown) => {
         chamadas.ordem.push('update');
         chamadas.update.push(v);
@@ -71,6 +75,7 @@ beforeEach(() => {
   chamadas.ordem.length = 0;
   chamadas.update.length = 0;
   chamadas.status.length = 0;
+  chamadas.assinadoEm = null;
 });
 
 describe('QuoteStatusQuickChange — converter sem sinal', () => {
@@ -94,6 +99,21 @@ describe('QuoteStatusQuickChange — converter sem sinal', () => {
     expect(chamadas.status[0]).toEqual({ id: 'so-1', status: 'approved' });
     // A conversão abre o aviso de necessidade de compra, com o número novo.
     await waitFor(() => expect(screen.getByText('aviso de compra OS-00321')).toBeTruthy());
+  });
+
+  it('orçamento assinado: a confirmação avisa que o cliente assina de novo', async () => {
+    chamadas.assinadoEm = '2026-10-20T10:00:00Z';
+    renderSelo('awaiting_deposit');
+    fireEvent.click(screen.getByRole('button', { name: /sem sinal/i }));
+    expect(await screen.findByText(/precisa assinar de novo/)).toBeTruthy();
+  });
+
+  it('sem assinatura, não há aviso de reassinatura', async () => {
+    renderSelo('awaiting_deposit');
+    fireEvent.click(screen.getByRole('button', { name: /sem sinal/i }));
+    await screen.findByText(/Converter ORÇ-00321 em OS sem sinal\?/);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByText(/precisa assinar de novo/)).toBeNull();
   });
 
   it('"Voltar" não grava nada', () => {

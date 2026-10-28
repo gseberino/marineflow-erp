@@ -675,6 +675,7 @@ export const serviceOrderTools: ToolDef[] = [
     name: "update_service_order_status",
     description:
       "Altera o status de uma OS/orçamento. IMPORTANTE: ao aprovar um orçamento (draft → outro status), o sistema automaticamente renomeia o número de ORÇ-XXXXX para OS-XXXXX. " +
+      "Orçamento que vira OS SEM sinal, com tudo pago na conclusão, é converter_sem_sinal (troca a condição junto) — não esta. " +
       "O que ela NÃO faz: NÃO conclui (concluir é pela tela, no botão Concluir da OS, que grava a saída e lança as cobranças da conclusão), NÃO cancela (cancelar é cancel_service_order, que estorna estoque, cobranças e pagamentos) e NÃO fatura OS que ainda não foi concluída. Pedir completed ou cancelled aqui é recusado.",
     input_schema: {
       type: "object",

@@ -281,7 +281,16 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const createSO = useCreateServiceOrder();
   const updateSO = useUpdateServiceOrder();
   const updateStatus = useUpdateServiceOrderStatus();
-  const semSinal = useConverterSemSinal();
+  // A condição nova entra também no estado do formulário: uma edição não salva desses campos
+  // venceria a releitura e o próximo salvar gravaria a condição antiga por cima.
+  const semSinal = useConverterSemSinal({
+    aoConverter: (c) => setForm((f) => ({
+      ...f,
+      payment_condition_preset_id: c.payment_condition_preset_id || '',
+      payment_conditions: c.payment_conditions,
+      custom_payment_installments: c.custom_payment_installments,
+    })),
+  });
   const cancelSO = useCancelServiceOrder();
   const reopenSO = useReopenServiceOrder();
   const duplicate = useDuplicateServiceOrder();
