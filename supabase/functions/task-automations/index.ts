@@ -7,6 +7,11 @@
 //      a confirmação da manhã e o "como foi hoje?" (só com agenda_config.modo_equipe ligado, na janela e no teto que o
 //      banco confere), remaneja pelo silêncio, lança a diária (modo_diaria) e devolve os acordes. Antes da vigia: a
 //      vigia lê o que ela mudou. Passo à parte: nunca lança (agenda:rotina).
+//   0b2. A rodada do aprendizado (agenda-aprender.ts, Fase 6 P8): agenda_aprender roda uma vez por dia, no 1º tique a
+//      partir de agenda_config.aprender_hora (o banco decide; nos outros tiques devolve cedo ou ja_rodou): mede as OS
+//      concluídas SEMPRE e, com modo_aprendizado fora de desligado, calcula o que aprendeu (o uso só com o modo ligado e o
+//      item na lista). Depois da rotina (a conferência do dia em dia) e antes da vigia (que lê o que ela aprendeu). Passo à
+//      parte: nunca lança (agenda:aprender); a função ausente (código antes da migration) é pulada calada.
 //   0c. A vigia da Agenda de Produção (agenda-vigia.ts, Fase 2 P3): agenda_vigiar publica a semana na quinta,
 //      replaneja quando algo muda, promove e solta reservas, pergunta o que só o dono sabe e devolve os acordes
 //      (a perda de hoje ou amanhã), que vão ao dono pelo portão. Passo à parte: nunca lança (agenda:vigia).
@@ -41,6 +46,7 @@ import { vigiarAgenda } from "./agenda-vigia.ts";
 import { rodarRotinaDaAgenda } from "./agenda-rotina.ts";
 import { vigiarMaterialDaAgenda } from "./agenda-material.ts";
 import { vigiarClienteDaAgenda } from "./agenda-cliente.ts";
+import { aprenderDaAgenda } from "./agenda-aprender.ts";
 import { expandOccurrences } from "../_shared/recurrence.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { logEdgeError } from "../_shared/log-error.ts";
@@ -471,6 +477,18 @@ servirComCors(async (req) => {
       agendaRotina = { erro: String((e as any)?.message ?? e) };
     }
 
+    // A rodada do aprendizado (Fase 6, P8): depois da rotina (a medida lê a conferência do dia em dia) e antes da vigia (a
+    // vigia, o motor e a rodada do cliente leem o que ela aprendeu no mesmo tique). Chamada a cada tique: o banco roda uma vez
+    // por dia, a partir de aprender_hora (cedo e ja_rodou são o normal). Tem o próprio try/catch (aprenderDaAgenda nunca
+    // lança: devolve { erro } e grava em app_error_logs); o de fora é a segunda trava, para nada daqui parar a vigia e as regras.
+    let agendaAprender: unknown = null;
+    try {
+      agendaAprender = await aprenderDaAgenda(db, new Date());
+    } catch (e) {
+      console.error("agenda:aprender:", e);
+      agendaAprender = { erro: String((e as any)?.message ?? e) };
+    }
+
     // A vigia da Agenda de Produção (Fase 2, P3): depois do material (lê a conta em dia) e antes das regras (a R1, a
     // R2 e a R16 leem o que ela fez). Tem o próprio try/catch (vigiarAgenda nunca lança: devolve { erro } e grava em
     // app_error_logs); o de fora é a segunda trava, para nada daqui parar as regras.
@@ -501,7 +519,7 @@ servirComCors(async (req) => {
 
     const summary = {
       identidade, fios, agenda_material: agendaMaterial, agenda_material_vigia: agendaMaterialVigia, agenda_rotina: agendaRotina,
-      agenda_vigia: agendaVigia, agenda_cliente_vigia: agendaClienteVigia, rules, r10, reminders, recurrence,
+      agenda_aprender: agendaAprender, agenda_vigia: agendaVigia, agenda_cliente_vigia: agendaClienteVigia, rules, r10, reminders, recurrence,
     };
     // Regra que falhou também é motivo para auditar: sem isto, um tick em que TODAS as
     // regras quebraram não deixaria registro nenhum (created e resolved vazios).

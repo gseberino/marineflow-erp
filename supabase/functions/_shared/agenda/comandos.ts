@@ -72,6 +72,15 @@
 //   palavra (vão ao modelo, que tem as ferramentas do orçamento e da mensagem com a confirmação dele). Só com
 //   agenda_config.modo_cliente fora de 'desligado' (ehPalavraDoCliente; em teste o banco responde "nada sai ainda").
 //
+// Fase 6 (P8, 28/10/2026; spec-fase6.md §7) — o que a agenda aprendeu com o que aconteceu:
+//   agenda aprendizado                          → foco aprendizado (o fator por tipo de OS, a presença, os fornecedores, a
+//                                                  capacidade do dono, o R$ por diária, o cliente e a revisão da carga)
+//   desfaz aprendizado · desfaz o aprendizado   → o *desfaz <alvo>* de sempre (agenda_desfazer_dito resolve "aprendizado" no
+//                                                  banco, antes do nome do cliente: a última troca que a agenda fez sozinha)
+//   De VER (vale com "?"); com a leitura fora de desligado, como as da Fase 1 (o banco diz "em teste" ou "desligado").
+//   "aprendizado" não é nome de cliente, pessoa, bem nem fornecedor (0 de 559 clientes em 28/10/2026) nem palavra de outra
+//   ferramenta (comandos_test.ts).
+//
 // Só a frase inteira vale (normalizada pelo MESMO normalizarComando do secretário: sem acento, sem negrito, sem
 // pontuação no fim, sem o 🎤 do áudio). Qualquer palavra a mais é conversa e vai ao modelo como sempre.
 // (Revisão da Fase 3, C1) A palavra que AGE (concluiu, entreguei, diária, desfaz, dia feito/não/parcial, choveu) dita com
@@ -98,7 +107,9 @@ export type FocoDoComando =
   // (Fase 4, P6) o que comprar e até quando; como a agenda conta o prazo de cada fornecedor
   | "compras" | "fornecedores"
   // (Fase 5, P5) as mensagens ao cliente
-  | "clientes";
+  | "clientes"
+  // (Fase 6, P8) o que a agenda aprendeu com o que aconteceu
+  | "aprendizado";
 export type ResultadoDoDia = "cumprido" | "parcial" | "nao_cumprido";
 
 export type ComandoDaAgenda =
@@ -177,6 +188,8 @@ frases(["agenda compras"], ver(null, "compras"));
 frases(["agenda fornecedores"], ver(null, "fornecedores"));
 // Fase 5 (P5): as mensagens ao cliente
 frases(["agenda clientes"], ver(null, "clientes"));
+// Fase 6 (P8): o que a agenda aprendeu (o *desfaz aprendizado* já é o *desfaz <alvo>* da Fase 2: o banco resolve o alvo)
+frases(["agenda aprendizado"], ver(null, "aprendizado"));
 
 /** A maior frase da tabela: texto maior do que isto nunca é comando da tabela (custo zero na conversa comum). */
 const MAIOR = Math.max(...[...FRASES.keys()].map((f) => f.length));

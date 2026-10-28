@@ -39,6 +39,10 @@
 // cobrança. os_planejar ganha prometido (a data que o cliente ouviu, como o dono disse) e servico_cliente; agenda_ver ganha o
 // foco clientes. Fora da vista como as outras (pela ferramenta_extra, d14): o teto de 113 não muda.
 //
+// Fase 6 (P8, 28/10/2026; spec-fase6.md §7): agenda_ver ganha o foco aprendizado (o que a agenda aprendeu com o que aconteceu:
+// _agenda_ver_aprendizado, migration 20261029100800). Nenhuma ferramenta nova; nenhuma escreve parâmetro (mudar é decisão do
+// dono pelas perguntas da agenda e pelo roteiro dos OKs).
+//
 // Cada execute chama UMA RPC com ctx.sb (painel: o JWT do dono; WhatsApp: service role), p_autor = ctx.userId e
 // p_canal pelo ctx.canal. O mapeamento argumento → parâmetro é o de _shared/agenda/rpc-das-ferramentas.ts (puro), o
 // mesmo dos evals. `if (error) throw`: leitura que falha nunca vira "nada marcado".
@@ -118,6 +122,9 @@ export const agendaProducaoTools: ToolDef[] = [
       "(foco fornecedores), " +
       "as mensagens ao cliente: o que espera o dono, o que a agenda vai mandar, o que mandou e quem respondeu (foco " +
       "clientes; com os, só daquela OS, e o que foi dito ao cliente), " +
+      "o que a agenda aprendeu com o que aconteceu (foco aprendizado: quanto as OS de cada tipo levam além do combinado, o " +
+      "atraso de cada fornecedor, a capacidade do dono, a presença dele e o valor por diária, com quantas medidas; só lê, " +
+      "e mudar é decisão do dono pelas perguntas da agenda), " +
       "o dia de alguém da equipe (pessoa + periodo), uma OS (os), " +
       "\"se o cliente aprovar hoje, quando dá\" (os + simular_aprovacao) ou um serviço que ainda não existe (simular). " +
       "Datas, dias livres, capacidade e duração vêm SÓ daqui: repita o texto, sem calcular nem mudar número, data ou nome. " +
