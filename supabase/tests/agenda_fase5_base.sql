@@ -263,7 +263,10 @@ select 'B1z todo CHECK novo de agenda_config tem caso (nenhum ficou sem prova)',
               coalesce(string_agg(c.conname, ', ') filter (where not exists (select 1 from _casos k where k.espera = c.conname)), '—'))
   from pg_constraint c
  where c.conrelid = 'public.agenda_config'::regclass and c.contype = 'c'
-   and c.conname ~ '^agenda_config_(modo_cliente|cliente_)';
+   and c.conname ~ '^agenda_config_(modo_cliente|cliente_)'
+   -- FASE 6: o mínimo da pontualidade com o cliente (20261029100000) tem o caso dele em agenda_fase6_base.sql (B1z)
+   and c.conname <> 'agenda_config_cliente_n_min_check';
+   -- FASE 6: fim
 
 insert into _resultado
 select 'B1z os 3 CHECKs nomeados de os_planejamento e os 3 de coluna têm caso',

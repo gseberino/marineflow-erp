@@ -419,8 +419,26 @@ begin
      and c.conname !~ '^agenda_config_cliente_'
      and not (c.conname = any (array[
        'prometido_coerente', 'prometido_faixa', 'prometido_original', 'os_planejamento_prometido_tipo_check',
-       'os_planejamento_prometido_fonte_check', 'os_planejamento_servico_cliente_check']));
+       'os_planejamento_prometido_fonte_check', 'os_planejamento_servico_cliente_check']))
      -- FASE 5: fim
+     -- FASE 6: os 45 que a Fase 6 pôs em agenda_config e os 3 de os_planejamento (20261029100000) têm o caso deles em
+     -- agenda_fase6_base.sql (B1z cobra os 45 pelo nome; o outro B1z, os de os_planejamento e das tabelas novas).
+     and not (c.conname = any (array(
+       select 'agenda_config_' || n || '_check'
+         from unnest(array['modo_aprendizado', 'aprendizado_ligados', 'aprender_hora', 'aprender_janela_dias',
+                           'aprender_trava_dias', 'fator_n_min', 'fator_percentil', 'fator_amostra_max', 'fator_min', 'fator_max',
+                           'fator_troca_max', 'mo_n_min', 'mo_min', 'mo_troca_max', 'presenca_n_min', 'presenca_intervencoes_min',
+                           'presenca_taxa_min', 'fornecedor_n_min', 'fornecedor_percentil', 'fornecedor_troca_max_du',
+                           'capacidade_semanas', 'capacidade_semanas_min', 'capacidade_meios_min', 'capacidade_dono_min',
+                           'capacidade_troca_max', 'capacidade_motivos', 'cliente_n_min', 'aviso_n_min', 'aviso_folga_max_du',
+                           'aviso_troca_max_du', 'revisao_semanas', 'ppc_baixo', 'ppc_alto', 'ppc_baixo_semanas',
+                           'ppc_alto_semanas', 'carga_ppc_baixo', 'carga_ppc_alto', 'solver_os_ativas', 'solver_pessoas',
+                           'solver_curtas_dia', 'solver_descarte_pct', 'solver_semanas', 'solver_gatilhos_min', 'classe_bens',
+                           'classe_sistemas']) n
+       union all
+       select unnest(array['dias_no_inicio_coerente', 'os_planejamento_dias_no_inicio_check',
+                           'os_planejamento_dias_no_inicio_fonte_check']))));
+     -- FASE 6: fim
   insert into _resultado values ('B todo CHECK das 6 tabelas tem um caso que ele recusa', v_sem_caso is null, v_sem_caso);
 end
 $b$;
@@ -861,7 +879,13 @@ insert into _definer_da_agenda values
   ('_agenda_cliente_motivo_texto'), ('_agenda_cliente_outra_conversa'), ('_agenda_cliente_avisar_recusa'),
   -- FASE 5 (correção C2): tirar o prometido da OS quando sai o aviso "ainda faltam peças sem data" (escreve
   -- os_planejamento de dentro do gatilho do envio). Sem grant. O texto sem artigo e o registro do erro por OS são invoker.
-  ('_agenda_cliente_tirar_prometido');
+  ('_agenda_cliente_tirar_prometido'),
+  -- FASE 6 (P1): o aprendizado — congelar os dias ditos no início (escreve os_planejamento.dias_no_inicio), medir a OS
+  -- concluída (escreve agenda_medidas_os e lê o plano, as diárias e as mensagens ao cliente) e o gravador único do que foi
+  -- aprendido (escreve agenda_aprendizado, a ação e a pergunta). Os três sem grant a ninguém, nem service_role
+  -- (agenda_fase6_base.sql prova as portas). A classe, os dias no início, o passo da medição, o percentil, o leitor, os
+  -- textos e o limite de troca são invoker.
+  ('_agenda_aprender_congelar'), ('agenda_medir_os'), ('_agenda_aprendizado_gravar');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

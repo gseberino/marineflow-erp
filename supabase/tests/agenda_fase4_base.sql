@@ -279,7 +279,11 @@ select 'B1z todo CHECK novo de agenda_config tem caso (nenhum ficou sem prova)',
        string_agg(c.conname, ', ') filter (where not exists (select 1 from _casos k where k.espera = c.conname))
   from pg_constraint c
  where c.conrelid = 'public.agenda_config'::regclass and c.contype = 'c'
-   and c.conname ~ '^agenda_config_(modo_material|modo_detector|modo_fornecedor|oc_viva|remessa|material_|nfe_|pix_|prazo_longo|detector_|fornecedor)';
+   and c.conname ~ '^agenda_config_(modo_material|modo_detector|modo_fornecedor|oc_viva|remessa|material_|nfe_|pix_|prazo_longo|detector_|fornecedor)'
+   -- FASE 6: os 3 do fornecedor aprendido (20261029100000) têm o caso deles em agenda_fase6_base.sql (B1z)
+   and c.conname not in ('agenda_config_fornecedor_n_min_check', 'agenda_config_fornecedor_percentil_check',
+                         'agenda_config_fornecedor_troca_max_du_check');
+   -- FASE 6: fim
 
 insert into _resultado
 select 'B1y a remessa: o despacho é a saída, senão a emissão; nasce a caminho e sem resposta',

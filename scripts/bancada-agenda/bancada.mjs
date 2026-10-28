@@ -20,8 +20,8 @@
 //      (MIGRATIONS_DEPOIS_DO_SNAPSHOT: o acerto de diárias de 06/10, que trava o dia pago);
 //   4. as migrations do worktree a partir de 20261024150000, em ordem, DUAS vezes (prova de idempotência),
 //      menos o que é dado de produção e não estrutura (a faxina 20261024153000, os modos em sombra 20261025101000,
-//      20261026101000, 20261027101000 e 20261028101000 e o acento das cidades 20261027102000: na bancada quem liga os modos
-//      é cada teste),
+//      20261026101000, 20261027101000, 20261028101000 e 20261029101000 e o acento das cidades 20261027102000: na bancada quem
+//      liga os modos é cada teste),
 //      cada versão registrada em
 //      supabase_migrations.schema_migrations como em produção. A semente 20261024161000 entra: na bancada vazia ela não
 //      acha diária e não semeia (a fixture semeia o dia 23/10). `ate` corta a lista (cada pacote testa até a sua). Na 2ª
@@ -66,6 +66,9 @@ export const FORA_DA_BANCADA = new Set([
   '20261027102000_fornecedores_cidade_com_acento.sql',
   // Fase 5 (P6, nome fixado pelo P1): modo_cliente em sombra. O teste dela a roda numa subtransação.
   '20261028101000_agenda_fase5_sombra.sql',
+  // Fase 6 (P8; o nome é o da spec-fase6 §5.8, fixado no P1): modo_aprendizado em sombra. O teste dela a roda numa
+  // subtransação; na bancada cada teste liga o modo que precisa.
+  '20261029101000_agenda_fase6_sombra.sql',
 ]);
 
 /**

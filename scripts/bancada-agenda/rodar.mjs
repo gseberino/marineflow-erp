@@ -125,6 +125,11 @@ const FIXTURES_COMO_TEXTO = [
   ['agenda_teste.mig_leituras_fase5', '../../supabase/migrations/20261028100500_agenda_fase5_leituras.sql'],
   ['agenda_teste.mig_telas_fase5', '../../supabase/migrations/20261028100600_agenda_fase5_telas.sql'],
   ['agenda_teste.mig_correcao_resposta_fase5', '../../supabase/migrations/20261028100700_agenda_fase5_correcao_resposta.sql'],
+  // Fase 6 (P1): a história de 07/09 a 29/10 que o aprendizado mede (14 OS concluídas com os dias ditos, o plano conferido, as
+  // diárias ligadas, a 1ª promessa e os avisos de atraso; por cima da fixture-fase5). Os pacotes seguintes acrescentam aqui as
+  // migrations de onde copiam os corpos que recriam (spec-fase6 §5.9) como mig_*_fase6, para as conferências das cópias (o
+  // C2z e o C1z tiram os blocos "-- FASE 6:"); as que já estão acima não se repetem.
+  ['agenda_teste.fase6', 'fixture-fase6.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */
