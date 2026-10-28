@@ -1,9 +1,9 @@
 -- Prova dos textos da Agenda de Produção, Fase 5 (pacote P1): o contexto, os modelos M1–M10 escritos pelo banco, o que a
 -- mensagem ao cliente nunca leva e a gravação do que foi dito ao cliente (migration 20261028100100).
--- bancada: depende de 20261028100100
+-- bancada: depende de 20261028100800
 --
 --   X1 os 18 textos da §6.1 byte a byte com a fixture-fase5 (e o T5 de cada um: nada proibido, até 400 caracteres, nenhum
---      número de OS, nenhum "http")
+--      número de OS, nenhum "http"), e os 5 da correção C2 (20261028100800): a peça sem data, a forma fim e o "Boa tarde"
 --   X2 a assinatura só na 1ª mensagem (o M1 escolhe primeira/seguinte; os outros ganham a assinatura no começo; sem o dono,
 --      "Aqui é da …"; a janela de um ano; a mensagem em teste não conta)
 --   X3 o serviço padrão pelo tipo do bem, o gênero, o nome próprio, o local e o acesso conhecido
@@ -160,7 +160,19 @@ begin
       (17, 'mudanca_no_dia', 'equipe', c_fla, '{"primeira": false, "quando": "hoje"}',
        'Flávio, tive um imprevisto com a equipe e não vamos conseguir ir hoje. Desculpe o transtorno. Podemos ir terça (03/11), à tarde? Responda SIM ou me diga outro dia.'),
       (18, 'mudanca_no_dia', 'geral', c_fla, '{"primeira": false, "quando": "amanhã"}',
-       'Flávio, tive um imprevisto e não vamos conseguir ir amanhã. Desculpe o transtorno. Podemos ir terça (03/11), à tarde? Responda SIM ou me diga outro dia.');
+       'Flávio, tive um imprevisto e não vamos conseguir ir amanhã. Desculpe o transtorno. Podemos ir terça (03/11), à tarde? Responda SIM ou me diga outro dia.'),
+      -- correção C2 da Fase 5 (os textos novos, para o dono aprovar): (item 8) a peça sem data de chegada; (item 6) o remarcado
+      -- em que só o fim mudou (a forma fim); (item 12) a saudação pela hora do envio ("Boa tarde" a partir das 12:00)
+      (19, 'pode_atrasar', 'peca_sem_data', c_nel, '{}',
+       'Nelson, quero te avisar com antecedência: ainda faltam peças do serviço no seu veleiro sem data de chegada, então o serviço no seu veleiro, que estava para quinta (05/11), vai atrasar. Te digo a nova data assim que elas chegarem. Se isso atrapalhar algum plano seu, me diga.'),
+      (20, 'pode_atrasar', 'remarcado', c_ven, '{"primeira": false, "forma": "fim", "dia_dito": "2026-11-03"}',
+       'Vanderlei, o serviço no Mar Azul vai precisar de mais um dia: agora fica de terça (03/11) até quinta (05/11). Desculpe pela mudança. Pode ser? Responda SIM ou me diga outro dia.'),
+      (21, 'vespera', null, c_len, '{"primeira": false, "envio": "2026-11-05", "saudacao": "Boa tarde"}',
+       'Boa tarde, Lenine! Amanhã chegamos pela manhã para o serviço no Brisa, na Marina de Itajaí. Está tudo certo para recebermos? Responda SIM, ou me avise se algo mudou.'),
+      (22, 'acesso', null, c_fla, '{"primeira": true, "envio": "2026-10-31", "saudacao": "Boa tarde"}',
+       'Boa tarde, Flávio! Aqui é o Gustavo, da HBR Marine Solutions. Na terça (03/11) chegamos à tarde para a instalação do compressor. Para não perdermos a viagem: onde o seu motorhome vai estar, e a chave fica com quem? Pode responder por aqui mesmo, até por áudio.'),
+      (23, 'mudanca_no_dia', 'clima', c_fla, '{"primeira": false, "quando": "hoje", "saudacao": "Boa tarde"}',
+       'Boa tarde, Flávio. Com a chuva de hoje não dá para trabalhar no seu motorhome com segurança. Podemos passar para terça (03/11), à tarde? Responda SIM ou me diga outro dia.');
 
     for r in select * from _x1 order by n loop
       v := pg_temp.texto(r.tipo, r.variante, r.os, r.dados);
@@ -171,8 +183,8 @@ begin
                           and v !~* '\m(os|or[cç])-',
                           format('%s caracteres; proibido %s', char_length(v), public._agenda_cliente_texto_proibido(v)));
     end loop;
-    v_res := pg_temp.ok(v_res, 'X1z os 11 tipos e as 18 variantes da §6.1 têm caso',
-      (select count(distinct tipo) = 11 and count(*) = 18 from _x1));
+    v_res := pg_temp.ok(v_res, 'X1z os 11 tipos e as 18 variantes da §6.1 têm caso (e os 5 textos novos da correção C2: 19 a 23)',
+      (select count(distinct tipo) = 11 and count(*) = 23 and count(*) filter (where n <= 18) = 18 from _x1));
 
     -- ── X2. A assinatura só na 1ª mensagem ──
     v_res := pg_temp.ok(v_res, 'X2a o M1 sem variante, para quem nunca recebeu: a primeira (com a assinatura)',

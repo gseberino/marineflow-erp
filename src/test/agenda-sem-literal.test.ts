@@ -151,7 +151,8 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
   // agenda_cliente_mensagens.recusa_motivo, criada no P1). As horas são agenda_config.cliente_mesmo_tipo_horas.
   // Correção C1 da Fase 5 (20261028100700): revalidar e enfileirar recriados (+1 cada: a cópia leva o mesmo nome do motivo);
   // o corpo do botão foi para _pedir_confirmacao (a cópia de 100200, com o mesmo nome); a casca nova não tem nenhum.
-  ...([['_agenda_cliente_revalidar', 2], ['_agenda_cliente_enfileirar', 2], ['pedir_confirmacao_do_agendamento', 1],
+  // Correção C2 da Fase 5 (20261028100800): revalidar e enfileirar recriados de novo (+1 cada: a mesma cópia).
+  ...([['_agenda_cliente_revalidar', 3], ['_agenda_cliente_enfileirar', 3], ['pedir_confirmacao_do_agendamento', 1],
         ['_pedir_confirmacao', 1]] as const).map(([onde, vezes]) => ({
     onde,
     casou: '24h',
@@ -395,6 +396,8 @@ describe('agenda: parâmetro só em agenda_config', () => {
       '_agenda_fila_do_cliente', '_agenda_cliente_fila', 'pedir_confirmacao_do_agendamento', 'registrar_confirmacao_do_cliente',
       // Correção C1 da Fase 5: o botão interno, a outra conversa, o motivo em texto e o aviso de "não saiu"
       '_pedir_confirmacao', '_agenda_cliente_outra_conversa', '_agenda_cliente_motivo_texto', '_agenda_cliente_avisar_recusa',
+      // Correção C2 da Fase 5: o texto sem artigo, o prometido que sai e o erro de uma OS
+      '_agenda_cliente_sem_artigo', '_agenda_cliente_tirar_prometido', '_agenda_cliente_erro_da_os',
     ]));
     expect(tsAgenda.map((t) => t.onde)).toEqual(expect.arrayContaining([
       path.join('supabase', 'functions', 'task-automations', 'agenda-vigia.ts'),

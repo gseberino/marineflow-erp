@@ -1,25 +1,27 @@
--- Conferência DEPOIS de ligar a Agenda de Produção, Fase 5 (pacote P6; correção C1): migrations 20261028100000..100700, as edge
+-- Conferência DEPOIS de ligar a Agenda de Produção, Fase 5 (pacote P6; correções C1 e C2): migrations 20261028100000..100800, as edge
 -- functions, o front do cartão "Plano" e (passo 3) a migration de dado 20261028101000 — modo_cliente em sombra —
 -- fila-do-dono/fase5-oks.md, passos 1–3 (e de novo a cada onda, passos 4–7).
--- bancada: depende de 20261028100700
+-- bancada: depende de 20261028100800
 --
 -- SÓ LEITURA EM PRODUÇÃO: nenhum INSERT, UPDATE ou DELETE (só na tabela TEMPORÁRIA do resultado); agenda_saude, agenda_ver
 -- e os_plano_da_os são STABLE e não gravam; termina em ROLLBACK. Na bancada (que não aplica a 20261028101000: lá o modo fica
 -- como a linha está, desligado) ele passa do mesmo jeito.
 --
---   M  as 8 versões de estrutura da Fase 5 (a 100700 é a correção C1) registradas em supabase_migrations.schema_migrations; a de dado (101000, a
+--   M  as 9 versões de estrutura da Fase 5 (a 100700 e a 100800 são as correções C1 e C2) registradas em supabase_migrations.schema_migrations; a de dado (101000, a
 --      sombra) é mostrada
 --   C  agenda_config: as 26 colunas novas existem (cliente_pedido_max_du é da correção C1); modo_cliente: com a 101000 registrada, sombra (ou ligado, depois dos OKs
 --      das ondas); sem ela, desligado; a sombra só com a agenda automática e a vigia ligadas (pré-requisito da §10); em
---      ligado, a lista das ondas não está vazia; a R15 (onda 2) é mostrada
+--      ligado, a lista das ondas não está vazia; a R15 (onda 2) é mostrada; (correção C2, regressão B4) ligado só depois de 14
+--      dias de sombra (uma rodada do cliente em sombra há 14 dias ou mais — o roteiro da §10), provado na bancada
+--      (C2b0); o motivo novo "entrega" na lista fechada da recusa (C5)
 --   T  as 9 colunas novas de os_planejamento e as 2 tabelas novas: RLS ligada, policies só de leitura e TO authenticated,
 --      anon sem nada, authenticated só lê
 --   G  os gatilhos ligados: os 3 da fila do WhatsApp (as 2 travas e o envio) e os 4 das 2 tabelas (não apagam; só mudam no
 --      que podem), e o do "não saiu" (correção C1: a mensagem aprovada pelo dono e recusada depois abre a pergunta)
---   F  as 86 funções da Fase 5 (novas e recriadas, P1–P6 e a correção C1) existem com as portas certas — nunca anon; as de tela para
+--   F  as 89 funções da Fase 5 (novas e recriadas, P1–P6 e as correções C1 e C2) existem com as portas certas — nunca anon; as de tela para
 --      authenticated e service_role; as do motor, do worker e do webhook só service_role; as internas para ninguém —, o
 --      security definer de cada uma, nenhuma agenda_*/_agenda_*/os_* executável por anon, a agenda_ver com os 18 focos
---      (clientes) e o cartão com a chave cliente
+--      (clientes) e o cartão com a chave cliente; (correção C2, B3) o índice da conversa e o d10 que o usa (F9)
 --   N  em sombra nada sai: sem rodada do cliente em ligado, nada na fila agenda-cliente e nenhuma mensagem em ligado (só a
 --      sombra registrada); toda linha agenda-cliente da fila tem a mensagem em ligado
 --   S  agenda_saude().cliente: os 11 zeros obrigatórios; o modo que a saúde mostra é o da linha; a rodada do cliente nas
@@ -49,7 +51,7 @@ select format('M1 migration %s registrada', v),
        exists (select 1 from supabase_migrations.schema_migrations m where m.version = v),
        null
   from unnest(array['20261028100000', '20261028100100', '20261028100200', '20261028100300', '20261028100400',
-                    '20261028100500', '20261028100600', '20261028100700']) v;
+                    '20261028100500', '20261028100600', '20261028100700', '20261028100800']) v;
 
 insert into _resultado
 select 'M2 a migration de dado 20261028101000 (modo_cliente em sombra) — só mostra', true,
@@ -75,6 +77,60 @@ select 'C2 modo_cliente: com a 101000 registrada, sombra (ou ligado com o OK das
                               else c.modo_cliente = 'desligado' end), false),
        string_agg(format('cliente %s, ondas %s', c.modo_cliente, c.cliente_tipos_ligados), '; ')
   from public.agenda_config c;
+
+-- (correção C2, regressão B4) ligado só depois das 2 semanas de sombra do roteiro (§10): uma rodada do cliente em sombra há
+-- 14 dias ou mais. Depois da 101000 as Fases 1 a 3 não olham mais o modo do cliente (só este C2): sem isto, ligado no dia
+-- seguinte passaria. Se o dono encurtar a sombra de propósito, esta linha acusa e o OK dele fica anotado no roteiro.
+create function pg_temp.ligado_cedo() returns table (cedo boolean, detalhe text) language sql stable as $f$
+  select c.modo_cliente = 'ligado'
+         and not exists (select 1 from public.agenda_vigia_rodadas r
+                          where r.rotina = 'cliente' and r.contagens ->> 'modo_cliente' = 'sombra'
+                            and r.rodou_em <= now() - interval '14 days'),
+         format('cliente %s; 1ª rodada em sombra: %s', c.modo_cliente,
+                coalesce((select to_char(min(r.rodou_em) at time zone 'America/Sao_Paulo', 'DD/MM/YYYY')
+                            from public.agenda_vigia_rodadas r
+                           where r.rotina = 'cliente' and r.contagens ->> 'modo_cliente' = 'sombra'), 'nenhuma'))
+    from public.agenda_config c
+$f$;
+
+insert into _resultado
+select 'C2b (correção C2, B4) ligado só depois de 14 dias de sombra (uma rodada do cliente em sombra há 14 dias ou mais)',
+       not coalesce(bool_or(x.cedo), false), string_agg(x.detalhe, '; ')
+  from pg_temp.ligado_cedo() x;
+
+-- só na bancada (a fixture-fase5 existe): ligado sem a sombra acusa; com uma rodada em sombra de 15 dias atrás, não. Em
+-- produção não grava nada: a linha diz PULADO.
+do $c2b$
+declare
+  v1 boolean;
+  v2 boolean;
+begin
+  if coalesce(current_setting('agenda_teste.fase5', true), '') = '' then
+    insert into _resultado values ('C2b0 a regra do ligado cedo, na bancada', true, 'PULADO: só na bancada');
+    return;
+  end if;
+  begin
+    update public.agenda_config set modo_cliente = 'ligado', cliente_tipos_ligados = array['pode_atrasar'] where id;
+    select x.cedo into v1 from pg_temp.ligado_cedo() x;
+    insert into public.agenda_vigia_rodadas (rodou_em, p_hoje, p_agora, modo_proposta, modo_vigia, contagens, erros, duracao_ms,
+                                             rotina, modo_equipe, modo_diaria)
+    select now() - interval '15 days', (now() - interval '15 days')::date, now() - interval '15 days', c.modo_proposta, c.modo_vigia,
+           jsonb_build_object('modo_cliente', 'sombra'), 0, 1, 'cliente', c.modo_equipe, c.modo_diaria
+      from public.agenda_config c;
+    select x.cedo into v2 from pg_temp.ligado_cedo() x;
+    insert into _resultado values ('C2b0 a regra do ligado cedo, na bancada: ligado sem sombra acusa; com a sombra de 15 dias, não',
+                                   v1 and not v2, format('sem sombra %s; com sombra %s', v1, v2));
+    raise exception 'desfaz' using errcode = 'P0098';
+  exception when sqlstate 'P0098' then null;
+  end;
+end
+$c2b$;
+
+insert into _resultado
+select 'C5 (correção C2) a recusa da mensagem ao cliente tem o motivo "entrega" (o provedor não entregou) na lista fechada',
+       coalesce(bool_and(pg_get_constraintdef(k.oid) like '%entrega%'), false), null
+  from pg_constraint k
+ where k.conrelid = 'public.agenda_cliente_mensagens'::regclass and k.conname = 'agenda_cliente_mensagens_recusa_motivo_check';
 
 insert into _resultado
 select 'C3 a mensagem ao cliente fora de desligado só com a agenda automática e a vigia ligadas (pré-requisito da §10)',
@@ -155,7 +211,7 @@ select 'G2 as travas da fila do cliente só olham agenda-cliente; o gatilho do e
    and tg.tgname in ('trg_agenda_fila_do_cliente', 'trg_agenda_fila_do_cliente_linha', 'trg_agenda_cliente_enviada');
 
 -- ── F. As funções ───────────────────────────────────────────────────────────────────────────────────────
--- As 86 funções que as migrations da Fase 5 (e a correção C1) criam ou recriam, com a porta de cada uma (tela = authenticated e
+-- As 89 funções que as migrations da Fase 5 (e as correções C1 e C2) criam ou recriam, com a porta de cada uma (tela = authenticated e
 -- service_role; servico = só service_role; interna = ninguém, nem service_role: só outra função a chama por dentro;
 -- gatilho = só o gatilho) e se é security definer. Nunca anon.
 create temp table _pd_funcoes (f text primary key, quem text not null, definer boolean not null) on commit drop;
@@ -199,6 +255,9 @@ insert into _pd_funcoes values
 ('_agenda_cliente_o_que(text,date)', 'tela', false),
 ('_agenda_cliente_outra_conversa(uuid[],text,timestamp with time zone,timestamp with time zone)', 'interna', true),
 ('_agenda_cliente_ouviu(uuid,date,timestamp with time zone)', 'tela', false),
+('_agenda_cliente_erro_da_os(text,uuid,text,text,date)', 'interna', false),
+('_agenda_cliente_sem_artigo(text,uuid)', 'interna', false),
+('_agenda_cliente_tirar_prometido(uuid,uuid,timestamp with time zone,text)', 'interna', true),
 ('_agenda_cliente_pedido_de_dia(uuid,uuid,daterange,date,text,text,date,timestamp with time zone)', 'interna', false),
 ('_agenda_cliente_perguntar(text,text,uuid,date,date,text,text,timestamp with time zone,timestamp with time zone)', 'interna', false),
 ('_agenda_cliente_pos_servico(date,timestamp with time zone)', 'interna', false),
@@ -248,7 +307,7 @@ insert into _pd_funcoes values
 ('registrar_confirmacao_do_cliente(text,text,uuid)', 'servico', true);
 
 insert into _resultado
-select 'F1 as 86 funções da Fase 5 existem (82 dos pacotes + 4 da correção C1)', count(*) = 86 and count(to_regprocedure('public.' || k.f)) = 86,
+select 'F1 as 89 funções da Fase 5 existem (82 dos pacotes + 4 da correção C1 + 3 da C2)', count(*) = 89 and count(to_regprocedure('public.' || k.f)) = 89,
        coalesce(string_agg(k.f, ', ') filter (where to_regprocedure('public.' || k.f) is null), 'todas')
   from _pd_funcoes k;
 
@@ -308,6 +367,35 @@ insert into _resultado
 select 'F7 o cartão "Plano" (os_plano_da_os) traz a chave cliente (_agenda_cliente_da_os)',
        p.prosrc like '%''cliente'', public._agenda_cliente_da_os(p_os, p_hoje),%', null
   from pg_proc p where p.oid = to_regprocedure('public.os_plano_da_os(uuid, date)');
+
+-- (correção C2, regressão B3) o d10 (_agenda_cliente_conversou) tem o índice das mensagens recebidas pela chave do telefone,
+-- e a consulta dele pode usá-lo (com a varredura sequencial desligada só nesta conferência, o plano usa o índice)
+insert into _resultado
+select 'F9 (correção C2, B3) o índice agenda_wa_recebidas_por_chave existe (as recebidas pela chave do telefone)',
+       exists (select 1 from pg_indexes i where i.schemaname = 'public' and i.indexname = 'agenda_wa_recebidas_por_chave'
+                  and i.indexdef like '%_agenda_chave_telefone(phone_normalized)%' and i.indexdef like '%inbound%'),
+       null;
+create temp table _pd_plano (linha text) on commit drop;
+do $f9$
+declare
+  l text;
+begin
+  set local enable_seqscan = off;
+  for l in execute $q$explain select 1 from public.clients c join public.whatsapp_messages w
+                         on public._agenda_chave_telefone(w.phone_normalized)
+                            in (public._agenda_chave_telefone(c.whatsapp), public._agenda_chave_telefone(c.phone))
+                      where c.id = '00000000-0000-0000-0000-000000000000'::uuid and w.direction = 'inbound'
+                        and w.occurred_at <= now() and w.occurred_at > now() - interval '365 days'$q$ loop
+    insert into _pd_plano values (l);
+  end loop;
+  set local enable_seqscan = on;
+end
+$f9$;
+insert into _resultado
+select 'F9b (correção C2, B3) a consulta do d10 pode usar o índice (sem Seq Scan em whatsapp_messages)',
+       coalesce(bool_or(linha like '%agenda_wa_recebidas_por_chave%') and not bool_or(linha like '%Seq Scan on whatsapp_messages%'), false),
+       string_agg(btrim(linha), ' / ')
+  from _pd_plano;
 
 -- ── N. Em sombra nada sai ───────────────────────────────────────────────────────────────────────────────
 insert into _resultado

@@ -118,6 +118,13 @@ const FIXTURES_COMO_TEXTO = [
   ['agenda_teste.mig_envio_fase5', '../../supabase/migrations/20261028100200_agenda_fase5_envio.sql'],
   ['agenda_teste.mig_rodada_fase5', '../../supabase/migrations/20261028100300_agenda_fase5_rodada.sql'],
   ['agenda_teste.mig_respostas_fase5', '../../supabase/migrations/20261028100400_agenda_fase5_respostas.sql'],
+  // Correção C2 da Fase 5: as outras migrations de onde a 20261028100800 copia os corpos (os textos, as leituras, a tela e a
+  // própria C1), para o C2z (agenda_fase5_correcao_rodada.sql) conferir que as cópias só mudam nos blocos
+  // "-- CORREÇÃO FASE 5:" (e guardam os da C1). O envio e a rodada já estão acima.
+  ['agenda_teste.mig_textos_fase5', '../../supabase/migrations/20261028100100_agenda_fase5_textos.sql'],
+  ['agenda_teste.mig_leituras_fase5', '../../supabase/migrations/20261028100500_agenda_fase5_leituras.sql'],
+  ['agenda_teste.mig_telas_fase5', '../../supabase/migrations/20261028100600_agenda_fase5_telas.sql'],
+  ['agenda_teste.mig_correcao_resposta_fase5', '../../supabase/migrations/20261028100700_agenda_fase5_correcao_resposta.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

@@ -28,6 +28,15 @@
 //      rodada, a view que uma migration mais nova recriou com colunas a mais sai antes da antiga (VIEWS_RECRIADAS_DEPOIS);
 //   5. com `fixture`, scripts/bancada-agenda/fixture-2310.sql (a carteira sintética de 23/10).
 //
+// O RELÓGIO DA BANCADA (correção C2 da Fase 5): o now() do PGlite é o Date.now() do Node, e a bancada o FIXA em
+// RELOGIO_DA_BANCADA (ter 27/10/2026 15:00 de Brasília, andando a partir dali) — o dia em que as fixtures das Fases 1 a 5
+// foram escritas. Sem isso, os testes que leem o relógio real vencem: a trava da fila do cliente revalida em
+// greatest(now(), scheduled_for), e com o relógio depois de ter 03/11/2026 (os dias do plano da fixture-fase5) a fila
+// recusa e os testes da Fase 5 que enfileiram quebram (provado com o relógio do processo em 04/11 e 25/11). Nada muda em
+// produção: o relógio de mentira só existe neste processo de teste. BANCADA_RELOGIO troca a hora (ISO) ou, com "real",
+// deixa o relógio de verdade. Se o PGlite deixar de seguir o Date.now(), a bancada para com o erro (nunca roda calada
+// com o relógio real).
+//
 // O PGlite vem da bancada dos comprovantes (0.5.8), fora do repo: PGLITE_DIR troca a pasta.
 // Se o PGlite recusar algum DEFAULT ou sintaxe do snapshot, a troca vai na lista TROCAS_DO_SNAPSHOT abaixo,
 // nunca no snapshot.
@@ -83,6 +92,30 @@ export const VIEWS_RECRIADAS_DEPOIS = {
 export const MIGRATIONS_DEPOIS_DO_SNAPSHOT = ['20261006220000_diarias_acerto_e_recibo.sql'];
 
 export const ler = (p) => readFileSync(p, 'utf8').replace(/\r\n/g, '\n');
+
+/** A hora em que a bancada começa (ver "O RELÓGIO DA BANCADA" no cabeçalho). */
+export const RELOGIO_DA_BANCADA = '2026-10-27T15:00:00-03:00';
+let relogioFixado = null;
+
+/**
+ * Fixa o relógio do processo (Date.now, que o PGlite lê) em BANCADA_RELOGIO ou RELOGIO_DA_BANCADA, andando dali em diante.
+ * Uma vez por processo. Devolve a hora fixada (ms) ou null com BANCADA_RELOGIO=real.
+ */
+export function fixarRelogioDaBancada() {
+  if (relogioFixado !== null) return relogioFixado || null;
+  const pedido = process.env.BANCADA_RELOGIO ?? RELOGIO_DA_BANCADA;
+  if (pedido === 'real') {
+    relogioFixado = false;
+    return null;
+  }
+  const alvo = Date.parse(pedido);
+  if (Number.isNaN(alvo)) throw new Error(`BANCADA_RELOGIO inválido: "${pedido}" (use a hora ISO ou "real")`);
+  const antes = Date.now;
+  const desvio = alvo - antes.call(Date);
+  Date.now = () => antes.call(Date) + desvio;
+  relogioFixado = alvo;
+  return alvo;
+}
 
 /** As tabelas do snapshot que a agenda (e a família de compras) lê. */
 export const TABELAS = [
@@ -336,8 +369,18 @@ async function carregarPglite() {
  * depois de logar, porque nada adiante faz sentido sem ela.
  */
 export async function criarBancada({ ate, fixture = true, log = () => {} } = {}) {
+  const relogio = fixarRelogioDaBancada();
   const { PGlite, extensions } = await carregarPglite();
   const db = await PGlite.create({ extensions });
+  if (relogio) {
+    // o PGlite tem de seguir o relógio fixado; senão a bancada rodaria calada com o relógio real (e os testes venceriam)
+    const { rows } = await db.query('select extract(epoch from now()) * 1000 as ms');
+    const ms = Number(rows[0].ms);
+    if (Math.abs(ms - Date.now()) > 5 * 60 * 1000) {
+      throw new Error(`o PGlite não segue o relógio da bancada (now() = ${new Date(ms).toISOString()}, fixado ${new Date(Date.now()).toISOString()})`);
+    }
+    log(true, `relógio da bancada: ${new Date(ms).toISOString()} (BANCADA_RELOGIO=real usa o relógio de verdade)`);
+  }
   await db.exec(SHIM);
   await db.exec(SEQUENCIAS.map(sequencia).join('\n'));
   await db.exec(TABELAS.map(tabela).join('\n'));

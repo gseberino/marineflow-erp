@@ -247,7 +247,7 @@ begin
                            'As mensagens ao cliente estão em teste: nada sai ainda.');
     r := pg_temp.prep('Flávio', 'confirmar');
     v_res := pg_temp.ok(v_res, 'L3h em teste: cliente_avisar diz o que teria preparado; nenhuma pergunta, nada na fila',
-      r ->> 'texto' like 'Em teste (as mensagens ao cliente ainda não saem): eu teria preparado para o Flávio, para sair agora: "Olá, Flávio! Aqui é o Gustavo%'
+      r ->> 'texto' like 'Em teste (as mensagens ao cliente ainda não saem): eu teria preparado para Flávio, para sair agora: "Olá, Flávio! Aqui é o Gustavo%'
       and not exists (select 1 from public.agenda_perguntas q where q.tipo = 'cliente_aprovar') and pg_temp.fila() = 0, r ->> 'texto');
     v_res := pg_temp.ok(v_res, 'L4a em teste: nenhuma linha cliente no fechamento',
       not exists (select 1 from jsonb_array_elements(public._agenda_linhas_do_fechamento(date '2026-10-30')) l where l ->> 'tipo' = 'cliente'),
@@ -264,10 +264,10 @@ begin
   v_res := pg_temp.igual(v_res, 'L1d ligado: o que a rodada registrou espera o dono (a pergunta dos 3 primeiros dias)', pg_temp.msgs(),
     'OS-00096 confirmar ligado aguardando_dono pedida,OS-00104 acesso ligado aguardando_dono pedida,OS-00112 pode_atrasar ligado aguardando_dono pedida,OS-00121 pos_servico ligado aguardando_dono pedida,OS-00122 pronto ligado aguardando_dono pedida');
   v_res := pg_temp.igual(v_res, 'L1e ligado: esperando você (a 1ª inteira; as outras encurtam para caber), o "não respondeu" no bloco dele, o que não consigo mandar', v_ger,
-    E'Mensagens ao cliente:\nEsperando você:\n• Lucenira (ficou pronto), sai agora: "Olá, Lucenira! Aqui é o Gustavo, da HBR Marine Solutions. A troca das baterias está concluída. Quando fica bom para combinarmos a entrega?" — *manda cliente Lucenira* ou *segura cliente Lucenira*\n• Rodrigo (confirmação), sai amanhã às 09:00: "Olá, Rodrigo! Conseguimos encaixar o serviço na sua lancha para…" — *manda cliente Rodrigo*\n• Flávio (véspera, com a pergunta do acesso), sai amanhã às 09:00: "Bom dia, Flávio! Na terça (03/11) chegamos à tarde para a instalação…" — *manda cliente Flávio*\n• Nelson (aviso de atraso), sai amanhã às 09:01: "Nelson, quero te avisar com antecedência: a peça do serviço no seu…" — *manda cliente Nelson*\n• Robson (pós-serviço), sai ter 03/11 às 09:00: "Olá, Robson! Tudo certo com o serviço no seu motorhome? Já deu para…" — *manda cliente Robson*\nSem resposta:\n• Nelson: a confirmação de qui 05/11, mandada qui 22/10\n(e mais 1 linha)');
+    E'Mensagens ao cliente:\nEsperando você:\n• Lucenira (ficou pronto), sai agora: "Olá, Lucenira! Aqui é o Gustavo, da HBR Marine Solutions. A troca das baterias está concluída. Quando fica bom para combinarmos a entrega?" — *manda cliente Lucenira* ou *segura cliente Lucenira*\n• Rodrigo (confirmação), sai amanhã às 09:00: "Olá, Rodrigo! Conseguimos encaixar o serviço na sua lancha para…" — *manda cliente Rodrigo*\n• Flávio (véspera, com a pergunta do acesso), sai amanhã às 09:00: "Bom dia, Flávio! Na terça (03/11) chegamos à tarde para a instalação…" — *manda cliente Flávio*\n• Nelson (aviso de atraso), sai amanhã às 09:01: "Nelson, quero te avisar com antecedência: ainda faltam peças do…" — *manda cliente Nelson*\n• Robson (pós-serviço), sai ter 03/11 às 09:00: "Olá, Robson! Tudo certo com o serviço no seu motorhome? Já deu para…" — *manda cliente Robson*\nSem resposta:\n• Nelson: a confirmação de qui 05/11, mandada qui 22/10\n(e mais 1 linha)');
   v_res := pg_temp.ok(v_res, 'L1f ligado: o foco cabe em texto_max (1000)', char_length(v_ger) <= 1000, char_length(v_ger)::text);
   v_res := pg_temp.igual(v_res, 'L1g com a OS: o que foi dito, a mensagem inteira e o sem resposta', v_nel,
-    E'Mensagens ao cliente — Nelson (OS-00112):\nO que foi dito a ele: qui 05/11 (data firme, por mensagem da agenda em qui 22/10).\nEsperando você:\n• Nelson (aviso de atraso), sai amanhã às 09:01: "Nelson, quero te avisar com antecedência: a peça do serviço no seu veleiro ainda não chegou e agora está prevista para quarta (11/11). Por isso, o serviço no seu veleiro, que estava para quinta (05/11), deve ficar entre quinta (12/11) e sexta (13/11). Te confirmo a data assim que a peça chegar. Se isso atrapalhar algum plano seu, me diga." — *manda cliente Nelson* ou *segura cliente Nelson*\nSem resposta:\n• Nelson: a confirmação de qui 05/11, mandada qui 22/10');
+    E'Mensagens ao cliente — Nelson (OS-00112):\nO que foi dito a ele: qui 05/11 (data firme, por mensagem da agenda em qui 22/10).\nEsperando você:\n• Nelson (aviso de atraso), sai amanhã às 09:01: "Nelson, quero te avisar com antecedência: ainda faltam peças do serviço no seu veleiro sem data de chegada, então o serviço no seu veleiro, que estava para quinta (05/11), vai atrasar. Te digo a nova data assim que elas chegarem. Se isso atrapalhar algum plano seu, me diga." — *manda cliente Nelson* ou *segura cliente Nelson*\nSem resposta:\n• Nelson: a confirmação de qui 05/11, mandada qui 22/10');
   v_t := pg_temp.ver('Lenine');
   v_res := pg_temp.ok(v_res, 'L1h com a OS sem telefone: "sem telefone no cadastro" e o que foi dito (nada ainda)',
     v_t like '%O que foi dito a ele: nada ainda.%' and v_t like '%Não consigo mandar: Lenine (sem telefone no cadastro).%', v_t);
@@ -287,7 +287,7 @@ begin
   v_fech := (select l ->> 'texto' from jsonb_array_elements(public._agenda_linhas_do_fechamento(date '2026-10-30')) l
               where l ->> 'tipo' = 'cliente' and (l ->> 'perda')::int = 75);
   v_res := pg_temp.igual(v_res, 'L4b a aprovação no fechamento: perda 75, a 1ª inteira, "E mais 3" (as que saem até o próximo dia de janela; a de ter 03/11 não)', v_fech,
-    'Mensagem para o Lucenira (ficou pronto), sai agora: "Olá, Lucenira! Aqui é o Gustavo, da HBR Marine Solutions. A troca das baterias está concluída. Quando fica bom para combinarmos a entrega?". *manda cliente Lucenira* ou *segura cliente Lucenira*. E mais 3: *agenda clientes* mostra; *manda cliente* manda todas.');
+    'Mensagem para Lucenira (ficou pronto), sai agora: "Olá, Lucenira! Aqui é o Gustavo, da HBR Marine Solutions. A troca das baterias está concluída. Quando fica bom para combinarmos a entrega?". *manda cliente Lucenira* ou *segura cliente Lucenira*. E mais 3: *agenda clientes* mostra; *manda cliente* manda todas.');
   v_res := pg_temp.ok(v_res, 'L4c a linha cliente vem com o tipo, o modo ligado e a pergunta (o secretário conta a mostrada)',
     exists (select 1 from jsonb_array_elements(public._agenda_linhas_do_fechamento(date '2026-10-30')) l
              where l ->> 'tipo' = 'cliente' and l ->> 'modo' = 'ligado' and l ->> 'pergunta_id' is not null), null);
@@ -305,7 +305,7 @@ begin
     v_t := (select l ->> 'texto' from jsonb_array_elements(public._agenda_linhas_do_fechamento(date '2026-10-30')) l
              where l ->> 'tipo' = 'cliente' and (l ->> 'perda')::int = 75);
     v_res := pg_temp.ok(v_res, 'L4d a mensagem longa: o texto cortado em 300 com "(*agenda clientes* mostra inteira)", a linha ≤ 600',
-      v_t like 'Mensagem para o Vanderlei (confirmação), sai agora: "Vanderlei, palavra%…" (*agenda clientes* mostra inteira). *manda cliente Vanderlei* ou *segura cliente Vanderlei*. E mais 4:%'
+      v_t like 'Mensagem para Vanderlei (confirmação), sai agora: "Vanderlei, palavra%…" (*agenda clientes* mostra inteira). *manda cliente Vanderlei* ou *segura cliente Vanderlei*. E mais 4:%'
       and char_length(v_t) <= 600, char_length(v_t)::text || ' ' || v_t);
     raise exception 'desfaz' using errcode = 'P0098';
   exception when sqlstate 'P0098' then null;
@@ -348,7 +348,7 @@ begin
   v_n := pg_temp.fila();
   r := pg_temp.prep('Flávio', 'confirmar');
   v_res := pg_temp.igual(v_res, 'L3e a preparada: o texto do banco e a palavra que manda', r ->> 'texto',
-    'Pronto para o Flávio, sai agora: "Olá, Flávio! Aqui é o Gustavo, da HBR Marine Solutions. Conseguimos encaixar a instalação do compressor para terça (03/11), à tarde, com previsão de 2 dias de trabalho. Pode ser? Responda SIM para confirmar, ou me diga um dia melhor. A partir de agora te mando por aqui as novidades do serviço.". Para mandar: *manda cliente Flávio*.');
+    'Pronto para Flávio, sai agora: "Olá, Flávio! Aqui é o Gustavo, da HBR Marine Solutions. Conseguimos encaixar a instalação do compressor para terça (03/11), à tarde, com previsão de 2 dias de trabalho. Pode ser? Responda SIM para confirmar, ou me diga um dia melhor. A partir de agora te mando por aqui as novidades do serviço.". Para mandar: *manda cliente Flávio*.');
   v_res := pg_temp.ok(v_res, 'L3f a preparada fica esperando o dono (origem dono, pedida, com a pergunta); nada na fila',
     exists (select 1 from public.agenda_cliente_mensagens m join public.agenda_perguntas q on q.id = m.pergunta_id
              where m.service_order_id = c_flav and m.tipo = 'confirmar' and m.origem = 'dono' and m.aprovacao = 'pedida'
@@ -363,7 +363,7 @@ begin
                                                     pg_temp.em('2026-10-29 10:00'), 'teste');
     r := pg_temp.prep('Flávio', 'pode_atrasar', true);
     v_res := pg_temp.ok(v_res, 'L3i a firme do plano: o aviso remarcado com o dia do plano, esperando o dono',
-      r ->> 'texto' like 'Pronto para o Flávio, sai hoje às 17:30: "Olá, Flávio! Aqui é o Gustavo, da HBR Marine Solutions. A instalação do compressor, que estava para segunda (02/11), precisou passar para terça (03/11), à tarde. Desculpe pela mudança.%'
+      r ->> 'texto' like 'Pronto para Flávio, sai hoje às 17:30: "Olá, Flávio! Aqui é o Gustavo, da HBR Marine Solutions. A instalação do compressor, que estava para segunda (02/11), precisou passar para terça (03/11), à tarde. Desculpe pela mudança.%'
       and exists (select 1 from public.agenda_cliente_mensagens m where m.service_order_id = c_flav and m.tipo = 'pode_atrasar'
                    and m.variante = 'remarcado' and m.prometido_tipo = 'firme' and m.aprovacao = 'pedida'), r ->> 'texto');
     raise exception 'desfaz' using errcode = 'P0098';
@@ -378,7 +378,7 @@ begin
     r ->> 'status' = 'nao_achei' and r ->> 'texto' = 'Não achei mensagem esperando para "orçamento".'
     and pg_temp.msgs() = v_ms and pg_temp.fila() = v_n, r::text);
   r := pg_temp.dito('manda', 'Nelson');
-  v_res := pg_temp.igual(v_res, 'L2c *manda cliente Nelson*: aprovada, sai na hora dela', r ->> 'texto', 'Mando ao Nelson amanhã às 09:01.');
+  v_res := pg_temp.igual(v_res, 'L2c *manda cliente Nelson*: aprovada, sai na hora dela', r ->> 'texto', 'Mando para Nelson amanhã às 09:01.');
   v_res := pg_temp.ok(v_res, 'L2d o Nelson aprovado espera a hora (nada na fila ainda); a pergunta respondida pelo WhatsApp',
     exists (select 1 from public.agenda_cliente_mensagens m join public.agenda_perguntas q on q.id = m.pergunta_id
              where m.service_order_id = c_nel and m.tipo = 'pode_atrasar' and m.aprovacao = 'aprovada'
@@ -386,12 +386,12 @@ begin
     and pg_temp.fila() = v_n, pg_temp.msgs());
   r := pg_temp.dito('segura', 'Flávio');
   v_res := pg_temp.ok(v_res, 'L2e *segura cliente Flávio*: as duas do Flávio (a véspera e a preparada) não saem',
-    r ->> 'texto' like 'Segurei 2: as mensagens do Flávio não saem.'
+    r ->> 'texto' like 'Segurei 2: as mensagens de Flávio não saem.'
     and not exists (select 1 from public.agenda_cliente_mensagens m where m.service_order_id = c_flav and m.estado <> 'recusada'),
     r ->> 'texto');
   r := pg_temp.dito('segura', 'Nelson');
   v_res := pg_temp.ok(v_res, 'L2f *segura cliente Nelson* depois do *manda*: a aprovada que espera a hora também se segura',
-    r ->> 'texto' = 'Segurei a mensagem do Nelson: ela não sai.'
+    r ->> 'texto' = 'Segurei a mensagem de Nelson: ela não sai.'
     and exists (select 1 from public.agenda_cliente_mensagens m where m.service_order_id = c_nel and m.tipo = 'pode_atrasar'
                  and m.estado = 'recusada' and m.recusa_motivo = 'segurada' and m.aprovacao = 'segurada'), r::text);
   begin
@@ -429,13 +429,13 @@ begin
       and exists (select 1 from public.agenda_cliente_mensagens m where m.id = (r ->> 'id')::uuid and m.aprovacao = 'critica'),
       r::text || r2::text);
     v_t := pg_temp.ver('Nelson');
-    v_res := pg_temp.ok(v_res, 'L1k o aviso que é decisão aparece em "Esperando você" como decisão', v_t like '%• Decisão: O serviço no seu veleiro do Nelson vai atrasar de novo%', v_t);
+    v_res := pg_temp.ok(v_res, 'L1k o aviso que é decisão aparece em "Esperando você" como decisão', v_t like '%• Decisão: O serviço da OS-00112 de Nelson vai atrasar de novo%', v_t);
     raise exception 'desfaz' using errcode = 'P0098';
   exception when sqlstate 'P0098' then null;
   end;
   r := pg_temp.dito('manda', null);
   v_res := pg_temp.igual(v_res, 'L2i *manda cliente* (todas): as que ainda esperam', r ->> 'texto',
-    'Mando ao Lucenira agora. Mando ao Rodrigo amanhã às 09:00. Mando ao Robson ter 03/11 às 09:00.');
+    'Mando para Lucenira agora. Mando para Rodrigo amanhã às 09:00. Mando para Robson ter 03/11 às 09:00.');
   v_res := pg_temp.ok(v_res, 'L2j só a da hora entrou na fila (a do Lucenira, agora); as outras esperam a hora; a do Rodrigo vai recusar sem conversa na saída',
     pg_temp.fila() = v_n + 1
     and not exists (select 1 from public.agenda_cliente_mensagens m where m.estado = 'aguardando_dono' and m.aprovacao = 'pedida'),
@@ -454,10 +454,10 @@ begin
     v_t := (select l ->> 'texto' from jsonb_array_elements(public._agenda_linhas_do_fechamento(date '2026-10-30')) l
              where l ->> 'tipo' = 'cliente' and (l ->> 'perda')::int = 40);
     v_res := pg_temp.igual(v_res, 'L4e o que sai sozinho amanhã: perda 40, com *segura cliente*', v_t,
-      'Amanhã, a partir das 09:00, vou mandar: a confirmação de ter 03/11 ao Flávio. Para não mandar: *segura cliente Flávio*.');
+      'Amanhã, a partir das 09:00, vou mandar: a confirmação de ter 03/11 para Flávio. Para não mandar: *segura cliente Flávio*.');
     r2 := pg_temp.dito('segura', 'Flávio', '2026-10-30 17:40');
     v_res := pg_temp.ok(v_res, 'L2l *segura cliente Flávio* segura a que ia sair sozinha',
-      r2 ->> 'texto' = 'Segurei a mensagem do Flávio: ela não sai.'
+      r2 ->> 'texto' = 'Segurei a mensagem de Flávio: ela não sai.'
       and exists (select 1 from public.agenda_cliente_mensagens m where m.id = (r ->> 'id')::uuid and m.estado = 'recusada'
                    and m.recusa_motivo = 'segurada' and m.aprovacao = 'segurada'), r::text || r2::text);
     raise exception 'desfaz' using errcode = 'P0098';

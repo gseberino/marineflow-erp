@@ -420,7 +420,7 @@ begin
     select m.id into v_id from public.agenda_cliente_mensagens m where m.service_order_id = c_rod and m.tipo = 'confirmar';
     r := pg_temp.botao(c_rod, '2026-10-30 17:30');
     v_res := pg_temp.ok(v_res, 'C1f1 (E9g) a confirmação da rodada esperando o dono: o clique a APROVA (a pergunta respondida pela tela) e diz quando sai; nada novo registrado',
-      (r ->> 'aprovou')::boolean and r ->> 'message' = 'Mando ao Rodrigo amanhã às 09:00.' and (r ->> 'id')::uuid = v_id
+      (r ->> 'aprovou')::boolean and r ->> 'message' = 'Mando para Rodrigo amanhã às 09:00.' and (r ->> 'id')::uuid = v_id
       and (select m.aprovacao = 'aprovada' and m.aprovada_por = c_dono and m.estado = 'aguardando_dono'
              from public.agenda_cliente_mensagens m where m.id = v_id)
       and (select q.estado = 'respondida' and q.respondida_via = 'tela' and q.opcao_escolhida = 1
@@ -575,7 +575,7 @@ begin
     v_id2 := pg_temp.enviada(c_cli_luc, c_luc, 'pronto', null, pg_temp.em('2026-10-30 16:00'));
     update public.agenda_cliente_mensagens set estado = 'recusada', recusa_motivo = 'janela', enviada_em = null where id = v_id2;
     v_res := pg_temp.ok(v_res, 'C1g3 a recusa na hora do *manda cliente* vai no texto da resposta, sem a pergunta "não saiu"; a da rodada não aprovada recusada também não abre',
-      r ->> 'texto' like 'Não mandei ao Rodrigo: %'
+      r ->> 'texto' like 'Não mandei para Rodrigo: %'
       and (select m.estado = 'recusada' from public.agenda_cliente_mensagens m where m.id = v_id)
       and not exists (select 1 from public.agenda_perguntas q where q.chave like 'cliente_resposta:nao_saiu:%')
       and coalesce(current_setting('agenda.cliente_recusa_na_hora', true), '') = '', r::text);

@@ -249,7 +249,8 @@ declare
   c_cli_van constant uuid := 'c1000000-0000-4000-8000-000000000001';
   c_cli_rod constant uuid := 'c1000000-0000-4000-8000-000000000006';
   c_painel constant uuid := md5('peca:112:4')::uuid;
-  c_m6 constant text := 'Nelson, quero te avisar com antecedência: a peça do serviço no seu veleiro ainda não chegou e agora está prevista para quarta (11/11). Por isso, o serviço no seu veleiro, que estava para quinta (05/11), deve ficar entre quinta (12/11) e sexta (13/11). Te confirmo a data assim que a peça chegar. Se isso atrapalhar algum plano seu, me diga.';
+  -- correção C2 da Fase 5 (item 8): o Nelson tem 2 críticos sem previsão (e o painel em 11/11): o aviso é o "sem data"
+  c_m6 constant text := 'Nelson, quero te avisar com antecedência: ainda faltam peças do serviço no seu veleiro sem data de chegada, então o serviço no seu veleiro, que estava para quinta (05/11), vai atrasar. Te digo a nova data assim que elas chegarem. Se isso atrapalhar algum plano seu, me diga.';
   r     jsonb;
   r2    jsonb;
   x     jsonb;
@@ -277,7 +278,7 @@ begin
       r ->> 'rodou' = 'true' and r ->> 'modo' = 'sombra' and jsonb_array_length(x) = 1 and x -> 0 ->> 'modo' = 'sombra'
       and x -> 0 ->> 'estado' = 'registrada' and x -> 0 ->> 'chave' like '%:sombra' and pg_temp.n_fila() = 0
       and exists (select 1 from public.agenda_acoes a where a.tipo = 'cliente' and not a.executada
-                     and a.depois ->> 'mensagem_id' = x -> 0 ->> 'id' and a.texto like 'Em teste: eu teria mandado ao Flávio%')
+                     and a.depois ->> 'mensagem_id' = x -> 0 ->> 'id' and a.texto like 'Em teste: eu teria mandado para Flávio%')
       and (select count(*) from public.agenda_vigia_rodadas v where v.rotina = 'cliente' and v.erros = 0
              and v.contagens ->> 'modo_cliente' = 'sombra') = 1,
       r::text || ' ' || x::text);
@@ -413,10 +414,10 @@ begin
       jsonb_array_length(pg_temp.msgs(c_nel)) = 0 and (r #>> '{contagens,atraso,esperando_fechamento}')::int = 1, r #>> '{contagens,atraso}');
     r := pg_temp.vig('2026-10-30 17:00');
     x := pg_temp.msgs(c_nel);
-    v_res := pg_temp.ok(v_res, 'R4b no 1º tique a partir das 17:00 o aviso (M6 peça) nasce para sáb 31/10 09:00, válido até o fim de qui 05/11, condicional (há crítico sem previsão), não crítico (6 dias úteis), com o texto do modelo',
-      jsonb_array_length(x) = 1 and x -> 0 ->> 'tipo' = 'pode_atrasar' and x -> 0 ->> 'variante' = 'peca'
+    v_res := pg_temp.ok(v_res, 'R4b no 1º tique a partir das 17:00 o aviso (M6 peça sem data: há crítico sem previsão — correção C2, item 8) nasce para sáb 31/10 09:00, válido até o fim de qui 05/11, sem prometido (não diz data), não crítico (6 dias úteis), com o texto do modelo',
+      jsonb_array_length(x) = 1 and x -> 0 ->> 'tipo' = 'pode_atrasar' and x -> 0 ->> 'variante' = 'peca_sem_data'
       and x -> 0 ->> 'enviar' like '31/10 09:0%' and x -> 0 ->> 'valida' = '05/11 19:00' and x -> 0 ->> 'aprovacao' = 'livre'
-      and x -> 0 ->> 'prometido_tipo' = 'condicional' and x -> 0 ->> 'dia_alvo' = '2026-11-12' and x -> 0 ->> 'texto' = c_m6,
+      and x -> 0 ->> 'prometido_tipo' is null and x -> 0 ->> 'dia_alvo' = '2026-11-12' and x -> 0 ->> 'texto' = c_m6,
       x::text);
     -- o risco muda (a peça vai para qua 18/11): o aviso velho sai do caminho e nasce o novo (crítico: 11 dias úteis)
     update public.os_material set previsao_ate = date '2026-11-18' where service_order_part_id = c_painel;
@@ -438,7 +439,7 @@ begin
     x := pg_temp.msgs(c_nel);
     v_res := pg_temp.ok(v_res, 'R4d o prometido vence em até 2 dias úteis (ter 03/11): registra na hora (10:00), e é crítico (ter 03 → sex 13/11 = 8 dias úteis: atraso longo)',
       jsonb_array_length(x) = 1 and x -> 0 ->> 'enviar' = '30/10 10:00' and x -> 0 ->> 'aprovacao' = 'critica'
-      and pg_temp.pergunta((x -> 0 ->> 'pergunta_id')::uuid) ->> 'texto' like 'O serviço no seu veleiro do Nelson vai atrasar 10 dias (ter 03/11 → qui 12 e sex 13/11): recomendo você ligar.%',
+      and pg_temp.pergunta((x -> 0 ->> 'pergunta_id')::uuid) ->> 'texto' like 'O serviço da OS-00112 de Nelson vai atrasar 10 dias (ter 03/11 → qui 12 e sex 13/11): recomendo você ligar.%',
       x::text || ' ' || coalesce(pg_temp.pergunta((x -> 0 ->> 'pergunta_id')::uuid) ->> 'texto', ''));
     raise exception 'desfaz' using errcode = 'P0098';
   exception when sqlstate 'P0098' then null;
@@ -468,9 +469,9 @@ begin
     v_res := pg_temp.ok(v_res, 'R4f a data dita já passou (qui 29/10): o risco vem com passou; nada ao cliente; a pergunta crítica "passou" uma vez (o tique seguinte não repete), com o acorde ao dono',
       (x ->> 'passou')::boolean and (x ->> 'risco')::boolean and jsonb_array_length(pg_temp.msgs(c_nel)) = 0
       and (select count(*) from public.agenda_perguntas q where q.chave = 'cliente_aviso:' || c_nel || ':2026-10-29') = 1
-      and (select q.critica and q.texto like 'A data que o Nelson ouviu (qui 29/10) passou sem aviso. Recomendo você ligar hoje. 1) Você liga%'
+      and (select q.critica and q.texto like 'A data que Nelson ouviu (qui 29/10) passou sem aviso. Recomendo você ligar hoje. 1) Você liga%'
              from public.agenda_perguntas q where q.chave = 'cliente_aviso:' || c_nel || ':2026-10-29')
-      and jsonb_array_length(r -> 'acordes') = 1 and r -> 'acordes' -> 0 ->> 'texto' like 'A data que o Nelson ouviu (qui 29/10) passou sem aviso%'
+      and jsonb_array_length(r -> 'acordes') = 1 and r -> 'acordes' -> 0 ->> 'texto' like 'A data que Nelson ouviu (qui 29/10) passou sem aviso%'
       and (r2 #>> '{contagens,atraso,passou}')::int = 0,
       x::text || ' ' || (r -> 'acordes')::text);
     raise exception 'desfaz' using errcode = 'P0098';
@@ -496,7 +497,7 @@ begin
     x := pg_temp.msgs(c_nel, 'pode_atrasar');
     v_res := pg_temp.ok(v_res, 'R4h já houve um aviso de atraso enviado: o novo é o 2º atraso (pergunta crítica, o texto "vai atrasar de novo")',
       jsonb_array_length(x) = 2 and x -> 1 ->> 'aprovacao' = 'critica'
-      and pg_temp.pergunta((x -> 1 ->> 'pergunta_id')::uuid) ->> 'texto' = 'O serviço no seu veleiro do Nelson vai atrasar de novo (qui 05/11 → qui 12 e sex 13/11). É o 2º atraso: recomendo você ligar. 1) Você liga e eu não mando nada (recomendo); 2) Eu mando o aviso escrito; 3) Não aviso agora.',
+      and pg_temp.pergunta((x -> 1 ->> 'pergunta_id')::uuid) ->> 'texto' = 'O serviço da OS-00112 de Nelson vai atrasar de novo (qui 05/11 → qui 12 e sex 13/11). É o 2º atraso: recomendo você ligar. 1) Você liga e eu não mando nada (recomendo); 2) Eu mando o aviso escrito; 3) Não aviso agora.',
       x::text);
     raise exception 'desfaz' using errcode = 'P0098';
   exception when sqlstate 'P0098' then null;
@@ -508,7 +509,7 @@ begin
     x := pg_temp.msgs(c_nel);
     v_res := pg_temp.ok(v_res, 'R4i a previsão em sex 20/11 (a faixa nova seg 23 e ter 24/11, 13 dias úteis): atraso longo (pergunta crítica, "vai atrasar 19 dias")',
       jsonb_array_length(x) = 1 and x -> 0 ->> 'aprovacao' = 'critica' and x -> 0 ->> 'dia_alvo' = '2026-11-23'
-      and pg_temp.pergunta((x -> 0 ->> 'pergunta_id')::uuid) ->> 'texto' like 'O serviço no seu veleiro do Nelson vai atrasar 19 dias (qui 05/11 → seg 23 e ter 24/11): recomendo você ligar.%',
+      and pg_temp.pergunta((x -> 0 ->> 'pergunta_id')::uuid) ->> 'texto' like 'O serviço da OS-00112 de Nelson vai atrasar 19 dias (qui 05/11 → seg 23 e ter 24/11): recomendo você ligar.%',
       x::text || ' ' || coalesce(pg_temp.pergunta((x -> 0 ->> 'pergunta_id')::uuid) ->> 'texto', ''));
     raise exception 'desfaz' using errcode = 'P0098';
   exception when sqlstate 'P0098' then null;
@@ -589,10 +590,10 @@ begin
     update public.agenda_alocacoes set estado = 'cancelada', cancelada_em = pg_temp.em('2026-11-02 10:00'), cancelada_motivo = 'pessoa'
      where service_order_id = c_flav and estado in ('publicada', 'fixada');
     r := pg_temp.vig('2026-11-02 10:15');
-    v_res := pg_temp.ok(v_res, 'R5b sem dia novo (a decisão com o dono): nada ao Flávio; o acorde "O Flávio esperava a equipe amanhã: a decisão está com você; recomendo ligar." (uma ação executada, devolvida pela rodada)',
+    v_res := pg_temp.ok(v_res, 'R5b sem dia novo (a decisão com o dono): nada ao Flávio; o acorde "Flávio esperava a equipe amanhã: a decisão está com você; recomendo ligar." (uma ação executada, devolvida pela rodada)',
       jsonb_array_length(pg_temp.msgs(c_flav)) = 0 and (r #>> '{contagens,mudanca_no_dia,sem_decisao}')::int = 1
       and jsonb_array_length(r -> 'acordes') = 1
-      and r -> 'acordes' -> 0 ->> 'texto' = 'O Flávio esperava a equipe amanhã: a decisão está com você; recomendo ligar.'
+      and r -> 'acordes' -> 0 ->> 'texto' = 'Flávio esperava a equipe amanhã: a decisão está com você; recomendo ligar.'
       and exists (select 1 from public.agenda_acoes a where a.id = (r -> 'acordes' -> 0 ->> 'acao_id')::uuid and a.executada
                     and a.tipo = 'cliente' and (a.depois ->> 'acorde')::boolean),
       r::text);
@@ -734,7 +735,7 @@ begin
       and not exists (select 1 from public.whatsapp_send_queue q where q.source = 'agenda-cliente' and q.source_ref_id = (x -> 0 ->> 'id')::uuid)
       and pg_temp.pergunta((x -> 0 ->> 'pergunta_id')::uuid) ->> 'tipo' = 'cliente_aprovar'
       and pg_temp.pergunta((x -> 0 ->> 'pergunta_id')::uuid) ->> 'texto'
-          = format('Mensagem para o Robson (pós-serviço), sai agora: "%s". *manda cliente Robson* ou *segura cliente Robson*.', x -> 0 ->> 'texto'),
+          = format('Mensagem para Robson (pós-serviço), sai agora: "%s". *manda cliente Robson* ou *segura cliente Robson*.', x -> 0 ->> 'texto'),
       x::text || ' ' || coalesce(pg_temp.pergunta((x -> 0 ->> 'pergunta_id')::uuid) ->> 'texto', ''));
     -- sem resposta até o fim da validade (o 3º dia de janela do envio: ter 03/11 19:00): vence, com a pergunta
     r := pg_temp.vig('2026-11-03 19:15');
@@ -845,8 +846,8 @@ begin
     v_p := (pg_temp.msgs(c_rob) -> 0 ->> 'pergunta_id')::uuid;
     r := public.agenda_decidir(v_p, 1::smallint, c_dono, 'whatsapp', 'manda cliente Robson', date '2026-10-30', pg_temp.em('2026-10-30 10:05'));
     x := pg_temp.msgs(c_rob);
-    v_res := pg_temp.ok(v_res, 'R10a cliente_aprovar 1: "Mando ao Robson agora.", a mensagem aprovada (aprovada_por o dono) e na fila; a pergunta respondida (opção 1, as palavras)',
-      r ->> 'ok' = 'true' and r ->> 'texto' = 'Mando ao Robson agora.' and x -> 0 ->> 'aprovacao' = 'aprovada'
+    v_res := pg_temp.ok(v_res, 'R10a cliente_aprovar 1: "Mando para Robson agora.", a mensagem aprovada (aprovada_por o dono) e na fila; a pergunta respondida (opção 1, as palavras)',
+      r ->> 'ok' = 'true' and r ->> 'texto' = 'Mando para Robson agora.' and x -> 0 ->> 'aprovacao' = 'aprovada'
       and x -> 0 ->> 'estado' = 'enfileirada'
       and (select m.aprovada_por from public.agenda_cliente_mensagens m where m.id = (x -> 0 ->> 'id')::uuid) = c_dono
       and pg_temp.pergunta(v_p) ->> 'estado' = 'respondida' and pg_temp.pergunta(v_p) ->> 'opcao_escolhida' = '1'
@@ -864,8 +865,8 @@ begin
     v_p := (pg_temp.msgs(c_rob) -> 0 ->> 'pergunta_id')::uuid;
     r := public.agenda_decidir(v_p, 2::smallint, c_dono, 'whatsapp', 'segura cliente Robson', date '2026-10-30', pg_temp.em('2026-10-30 10:05'));
     x := pg_temp.msgs(c_rob);
-    v_res := pg_temp.ok(v_res, 'R10c cliente_aprovar 2: "Segurei a mensagem do Robson: ela não sai." (recusada/segurada, nada na fila)',
-      r ->> 'texto' = 'Segurei a mensagem do Robson: ela não sai.' and x -> 0 ->> 'estado' = 'recusada'
+    v_res := pg_temp.ok(v_res, 'R10c cliente_aprovar 2: "Segurei a mensagem de Robson: ela não sai." (recusada/segurada, nada na fila)',
+      r ->> 'texto' = 'Segurei a mensagem de Robson: ela não sai.' and x -> 0 ->> 'estado' = 'recusada'
       and x -> 0 ->> 'motivo' = 'segurada' and x -> 0 ->> 'aprovacao' = 'segurada' and pg_temp.n_fila() = 0, r::text || ' ' || x::text);
     r := public.agenda_decidir(v_p, 3::smallint, c_dono, 'whatsapp', null, date '2026-10-30', pg_temp.em('2026-10-30 10:05'));
     v_res := pg_temp.ok(v_res, 'R10d depois de respondida, nada mais muda', r ->> 'ok' = 'false', r::text);
@@ -898,11 +899,11 @@ begin
       r := public.agenda_decidir(v_p, k::smallint, c_dono, 'whatsapp', 'opção ' || k, date '2026-10-30', pg_temp.em('2026-10-30 17:05'));
       x := pg_temp.msgs(c_nel, 'pode_atrasar') -> 1;
       v_res := pg_temp.ok(v_res, format('R10g cliente_aviso %s: %s', k, case k when '1' then 'você liga (segurada, nada sai) e a ação crítica fica na trilha'
-                                                              when '2' then 'manda (aprovada; sai no tique de sáb 09:00 — "Mando ao Nelson amanhã às 09:0x.")'
+                                                              when '2' then 'manda (aprovada; sai no tique de sáb 09:00 — "Mando para Nelson amanhã às 09:0x.")'
                                                               else 'não avisa agora (segurada)' end),
         r ->> 'ok' = 'true'
-        and r ->> 'texto' like case k when '1' then 'Combinado: você liga para o Nelson; eu não mando nada.'
-                                      when '2' then 'Mando ao Nelson amanhã às 09:0_.' else 'Combinado: não aviso o Nelson agora.' end
+        and r ->> 'texto' like case k when '1' then 'Combinado: você liga para Nelson; eu não mando nada.'
+                                      when '2' then 'Mando para Nelson amanhã às 09:0_.' else 'Combinado: não aviso Nelson agora.' end
         and x ->> 'aprovacao' = case k when '2' then 'aprovada' else 'segurada' end
         and x ->> 'estado' = case k when '2' then 'aguardando_dono' else 'recusada' end
         and exists (select 1 from public.agenda_acoes a where a.pergunta_id = v_p and a.critica and a.executada and a.tipo = 'cliente'
@@ -928,8 +929,8 @@ begin
     v_p := (pg_temp.msgs(c_nel, 'pode_atrasar') -> 0 ->> 'pergunta_id')::uuid;
     perform pg_temp.falsa(c_cli_nel, c_nel, 'andamento', 'agenda-cliente:r10i', '2026-10-30 10:01', 'enfileirada', p_var => 'semanal');
     r := public.agenda_decidir(v_p, 2::smallint, c_dono, 'whatsapp', null, date '2026-10-30', pg_temp.em('2026-10-30 10:05'));
-    v_res := pg_temp.ok(v_res, 'R10i cliente_aviso 2 com o teto do dia cheio: não sai, e o texto diz ("Não mandei ao Nelson: ele já recebeu as mensagens que cabem …")',
-      r ->> 'ok' = 'true' and r ->> 'texto' like 'Não mandei ao Nelson: ele já recebeu as mensagens que cabem (no máximo 1 por dia e 3 por semana)%'
+    v_res := pg_temp.ok(v_res, 'R10i cliente_aviso 2 com o teto do dia cheio: não sai, e o texto diz ("Não mandei para Nelson: o cliente já recebeu as mensagens que cabem … Recomendo ligar." — o motivo pela correção C2)',
+      r ->> 'ok' = 'true' and r ->> 'texto' like 'Não mandei para Nelson: o cliente já recebeu as mensagens que cabem (no máximo 1 por dia e 3 por semana). Recomendo ligar.'
       and pg_temp.msgs(c_nel, 'pode_atrasar') -> 0 ->> 'estado' = 'recusada', r::text);
     raise exception 'desfaz' using errcode = 'P0098';
   exception when sqlstate 'P0098' then null;
@@ -942,8 +943,8 @@ begin
     r := pg_temp.vig('2026-10-30 10:00');
     v_p := (select q.id from public.agenda_perguntas q where q.chave = 'cliente_aviso:' || c_nel || ':2026-10-29');
     r := public.agenda_decidir(v_p, 2::smallint, c_dono, 'whatsapp', null, date '2026-10-30', pg_temp.em('2026-10-30 10:05'));
-    v_res := pg_temp.ok(v_res, 'R10j a pergunta "passou" (sem mensagem) com a opção 2: nada sai, "Não há aviso escrito para mandar ao Nelson: …"',
-      r ->> 'ok' = 'true' and r ->> 'texto' like 'Não há aviso escrito para mandar ao Nelson: a data que ele ouviu já passou%'
+    v_res := pg_temp.ok(v_res, 'R10j a pergunta "passou" (sem mensagem) com a opção 2: nada sai, "Não há aviso escrito para mandar para Nelson: …"',
+      r ->> 'ok' = 'true' and r ->> 'texto' like 'Não há aviso escrito para mandar para Nelson: a data que ele ouviu já passou%'
       and pg_temp.pergunta(v_p) ->> 'estado' = 'respondida' and jsonb_array_length(pg_temp.msgs(c_nel)) = 0
       and not exists (select 1 from public.whatsapp_send_queue q join public.agenda_cliente_mensagens m on m.id = q.source_ref_id
                        where q.source = 'agenda-cliente' and m.service_order_id = c_nel), r::text);

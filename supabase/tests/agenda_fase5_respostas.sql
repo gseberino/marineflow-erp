@@ -282,7 +282,7 @@ begin
       and (select estado from public.agenda_cliente_mensagens where id = v_id) = 'enviada'
       and exists (select 1 from public.agenda_perguntas q where q.id = (r ->> 'pergunta_id')::uuid and q.tipo = 'cliente_resposta'
                      and q.estado = 'aberta' and q.chave = 'cliente_resposta:' || (r ->> 'resposta_id')
-                     and q.texto like 'Chegou "Sim" do número do Flávio, mas o número é de 2 clientes: não sei a qual mensagem é.%'),
+                     and q.texto like 'Chegou "Sim" do número de Flávio, mas o número é de 2 clientes: não sei a qual mensagem é.%'),
       r::text);
     raise exception 'desfaz' using errcode = 'P0098';
   exception when sqlstate 'P0098' then null;
@@ -388,7 +388,7 @@ begin
       r ->> 'efeito' = 'ao_dono' and r ->> 'intencao' = 'acordo' and pg_temp.plano(c_flav) = c_plano
       and (select client_confirmed_at is null from public.service_orders where id = c_flav)
       and (select q.texto from public.agenda_perguntas q where q.id = (r ->> 'pergunta_id')::uuid)
-          = 'O Flávio respondeu "Sim, mas preciso ver o horário" à confirmação de ter 03/11: parece que concorda, mas não é um SIM claro. Não respondi nada; é com você.',
+          = 'Flávio respondeu "Sim, mas preciso ver o horário" à confirmação de ter 03/11: parece que concorda, mas não é um SIM claro. Não respondi nada; é com você.',
       r::text);
     raise exception 'desfaz' using errcode = 'P0098';
   exception when sqlstate 'P0098' then null;
@@ -425,7 +425,7 @@ begin
     v_res := pg_temp.ok(v_res, 'A3g o "ok" ao "ficou pronto" vai ao dono (combine a entrega); ao pós-serviço não faz nada (a mensagem fica respondida)',
       r ->> 'efeito' = 'ao_dono'
       and (select q.texto from public.agenda_perguntas q where q.id = (r ->> 'pergunta_id')::uuid)
-          = 'O Lucenira respondeu "Ok" ao "ficou pronto": combine a entrega com ele. Não respondi nada; é com você.'
+          = 'Lucenira respondeu "Ok" ao "ficou pronto": combine a entrega com ele. Não respondi nada; é com você.'
       and r2 ->> 'efeito' = 'nada' and r2 -> 'pergunta_id' = 'null'::jsonb
       and (select estado from public.agenda_cliente_mensagens where service_order_id = c_rob and tipo = 'pos_servico') = 'respondida',
       r::text || ' ' || r2::text);
@@ -439,7 +439,7 @@ begin
     v_res := pg_temp.ok(v_res, 'A3h o SIM a um dia que saiu do plano (qui 05/11) não confirma nada: vai ao dono',
       r ->> 'efeito' = 'ao_dono' and pg_temp.plano(c_flav) = c_plano
       and (select q.texto from public.agenda_perguntas q where q.id = (r ->> 'pergunta_id')::uuid)
-          like 'O Flávio respondeu "Sim" à confirmação de qui 05/11: confirmou, mas esse dia (qui 05/11) não está mais no plano: confira.%',
+          like 'Flávio respondeu "Sim" à confirmação de qui 05/11: confirmou, mas esse dia (qui 05/11) não está mais no plano: confira.%',
       r::text);
     raise exception 'desfaz' using errcode = 'P0098';
   exception when sqlstate 'P0098' then null;
@@ -452,7 +452,7 @@ begin
       r ->> 'consumiu' = 'true' and r ->> 'efeito' = 'ao_dono' and r ->> 'intencao' = 'audio' and pg_temp.plano(c_flav) = c_plano
       and (select client_confirmed_at is null from public.service_orders where id = c_flav)
       and (select q.texto from public.agenda_perguntas q where q.id = (r ->> 'pergunta_id')::uuid)
-          = 'O Flávio respondeu por áudio à confirmação de ter 03/11; a transcrição está na conversa. Não respondi nada; é com você.',
+          = 'Flávio respondeu por áudio à confirmação de ter 03/11; a transcrição está na conversa. Não respondi nada; é com você.',
       r::text);
     raise exception 'desfaz' using errcode = 'P0098';
   exception when sqlstate 'P0098' then null;
@@ -658,7 +658,7 @@ begin
         r ->> 'efeito' = 'ao_dono' and r ->> 'intencao' = split_part(v_t, '|', 1)
         and (select q.texto from public.agenda_perguntas q where q.id = (r ->> 'pergunta_id')::uuid and q.tipo = 'cliente_resposta'
                 and q.estado = 'aberta' and q.expira_em = pg_temp.em('2026-10-31 10:00') + interval '7 days')
-            = format('O Flávio respondeu "%s" à confirmação de ter 03/11: %s. Não respondi nada; é com você.', split_part(v_t, '|', 2),
+            = format('Flávio respondeu "%s" à confirmação de ter 03/11: %s. Não respondi nada; é com você.', split_part(v_t, '|', 2),
                      split_part(v_t, '|', 3))
         and not exists (select 1 from public.whatsapp_send_queue q where q.source = 'agenda-cliente')
         and pg_temp.plano(c_flav) = c_plano

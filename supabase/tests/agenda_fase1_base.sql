@@ -858,7 +858,10 @@ insert into _definer_da_agenda values
   -- de dentro da resposta do cliente) e o gatilho do "não saiu" (abre a pergunta ao dono quando a mensagem aprovada é
   -- recusada pelo worker, que escreve com o service_role). Todas sem grant; o botão interno (_pedir_confirmacao) não tem o
   -- nome da agenda (o C1z de agenda_fase5_correcao_resposta.sql prova as portas dele).
-  ('_agenda_cliente_motivo_texto'), ('_agenda_cliente_outra_conversa'), ('_agenda_cliente_avisar_recusa');
+  ('_agenda_cliente_motivo_texto'), ('_agenda_cliente_outra_conversa'), ('_agenda_cliente_avisar_recusa'),
+  -- FASE 5 (correção C2): tirar o prometido da OS quando sai o aviso "ainda faltam peças sem data" (escreve
+  -- os_planejamento de dentro do gatilho do envio). Sem grant. O texto sem artigo e o registro do erro por OS são invoker.
+  ('_agenda_cliente_tirar_prometido');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

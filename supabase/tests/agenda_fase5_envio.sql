@@ -425,7 +425,7 @@ begin
         and pg_temp.n_fila() = 0
         and (select a.texto from public.agenda_acoes a join public.agenda_cliente_mensagens m on m.acao_id = a.id
               where m.id = (r ->> 'id')::uuid and not a.executada and a.tipo = 'cliente')
-            = 'Em teste: eu teria mandado ao Lucenira que o serviço ficou pronto (sairia agora).',
+            = 'Em teste: eu teria mandado para Lucenira que o serviço ficou pronto (sairia agora).',
         (select string_agg(a.texto, ' | ') from public.agenda_acoes a where a.tipo = 'cliente'));
       raise exception 'desfaz' using errcode = 'P0098';
     exception when sqlstate 'P0098' then null;
@@ -439,7 +439,7 @@ begin
         r ->> 'aprovacao' = 'pedida' and r ->> 'estado' = 'aguardando_dono' and pg_temp.n_fila() = 0
         and (select p.tipo || ' | ' || p.chave || ' | ' || p.texto || ' | ' || p.modo || ' | ' || pg_temp.hora(p.expira_em) || ' | ' || p.perda_em
                from public.agenda_perguntas p where p.id = (r ->> 'pergunta_id')::uuid)
-            = 'cliente_aprovar | cliente_aprovar:' || (r ->> 'id') || ' | Mensagem para o Lucenira (ficou pronto), sai agora: "Olá, Lucenira! Aqui é o Gustavo, da HBR Marine Solutions. A troca das baterias está concluída. Quando fica bom para combinarmos a entrega?". *manda cliente Lucenira* ou *segura cliente Lucenira*. | ligado | 30/10 19:00:00 | 2026-10-30',
+            = 'cliente_aprovar | cliente_aprovar:' || (r ->> 'id') || ' | Mensagem para Lucenira (ficou pronto), sai agora: "Olá, Lucenira! Aqui é o Gustavo, da HBR Marine Solutions. A troca das baterias está concluída. Quando fica bom para combinarmos a entrega?". *manda cliente Lucenira* ou *segura cliente Lucenira*. | ligado | 30/10 19:00:00 | 2026-10-30',
         (select p.texto from public.agenda_perguntas p where p.id = (r ->> 'pergunta_id')::uuid));
       -- 2 dias aprovados da rodada + 1 segurado + 1 da preparada pelo dono: ainda não
       insert into public.agenda_cliente_mensagens (client_id, service_order_id, tipo, origem, modo, texto, enviar_em, valida_ate,
@@ -463,10 +463,10 @@ begin
         public._agenda_cliente_tipo_liberado('pronto') and r2 ->> 'aprovacao' = 'pedida' and not public._agenda_cliente_tipo_liberado('pos_servico'),
         r2::text);
       r3 := pg_temp.reg('pronto_lembrete', null, c_luc, null, '{}', '2026-10-30 10:00', '2026-10-30 10:00', 'dono');
-      v_res := pg_temp.ok(v_res, 'E3h a preparada pelo dono pede sempre (pedida), com o texto "Pronto para o …" (sem assinatura: ela já recebeu em setembro; a hora longe das outras duas que esperam o dono)',
+      v_res := pg_temp.ok(v_res, 'E3h a preparada pelo dono pede sempre (pedida), com o texto "Pronto para …" (sem assinatura: ela já recebeu em setembro; a hora longe das outras duas que esperam o dono)',
         r3 ->> 'aprovacao' = 'pedida'
         and (select p.texto from public.agenda_perguntas p where p.id = (r3 ->> 'pergunta_id')::uuid)
-            = 'Pronto para o Lucenira, sai hoje às 10:01: "Lucenira, só para combinarmos a entrega da sua lancha: qual dia fica bom pra você?". Para mandar: *manda cliente Lucenira*.',
+            = 'Pronto para Lucenira, sai hoje às 10:01: "Lucenira, só para combinarmos a entrega da sua lancha: qual dia fica bom pra você?". Para mandar: *manda cliente Lucenira*.',
         (select p.texto from public.agenda_perguntas p where p.id = (r3 ->> 'pergunta_id')::uuid));
       raise exception 'desfaz' using errcode = 'P0098';
     exception when sqlstate 'P0098' then null;
@@ -478,7 +478,7 @@ begin
         r ->> 'aprovacao' = 'critica' and r ->> 'estado' = 'aguardando_dono' and pg_temp.n_fila() = 0
         and (select p.critica and p.tipo = 'cliente_aviso' and p.recomendacao = 1 and jsonb_array_length(p.opcoes) = 3
                     and p.chave = 'cliente_aviso:' || c_nel || ':2026-11-12'
-                    and p.texto = 'O serviço no seu veleiro do Nelson vai atrasar de novo (qui 05/11 → qui 12 e sex 13/11). É o 2º atraso: recomendo você ligar. 1) Você liga e eu não mando nada (recomendo); 2) Eu mando o aviso escrito; 3) Não aviso agora.'
+                    and p.texto = 'O serviço da OS-00112 de Nelson vai atrasar de novo (qui 05/11 → qui 12 e sex 13/11). É o 2º atraso: recomendo você ligar. 1) Você liga e eu não mando nada (recomendo); 2) Eu mando o aviso escrito; 3) Não aviso agora.'
                from public.agenda_perguntas p where p.id = (r ->> 'pergunta_id')::uuid),
         (select p.texto from public.agenda_perguntas p where p.id = (r ->> 'pergunta_id')::uuid));
       -- o segurado (a resposta do dono): o enfileirar recusa
@@ -543,13 +543,15 @@ begin
         begin
           r2 := pg_temp.reg('pronto', null, c_luc, null, '{}', '2026-11-10 10:00', '2026-10-29 08:00', 'rodada', null, '2026-11-10 19:00');
           update public.agenda_cliente_mensagens set enviar_em = pg_temp.em(q ->> 'em') where id = (r2 ->> 'id')::uuid;
-          r := r || jsonb_build_object(v_txt, public._agenda_cliente_enfileirar((r2 ->> 'id')::uuid, pg_temp.em(q ->> 'agora')) ->> 'motivo');
+          -- (correção C2, item 3a) a de ontem que ainda vale não é mais recusada: ganha a hora de agora e vai à fila
+          r := r || jsonb_build_object(v_txt, (select coalesce(e ->> 'motivo', e ->> 'estado')
+                                                 from (select public._agenda_cliente_enfileirar((r2 ->> 'id')::uuid, pg_temp.em(q ->> 'agora')) as e) z));
           raise exception 'desfaz' using errcode = 'P0097';
         exception when sqlstate 'P0097' then null;
         end;
       end loop;
-      v_res := pg_temp.ok(v_res, 'E3l a mensagem marcada no domingo = domingo; no feriado = feriado; a de ontem (o tique parado) e a que chega depois das 19:00 = janela',
-        r = '{"domingo": "domingo", "feriado": "feriado", "ontem": "janela", "noite": "janela"}'::jsonb and pg_temp.n_fila() = 0, r::text);
+      v_res := pg_temp.ok(v_res, 'E3l a mensagem marcada no domingo = domingo; no feriado = feriado; a que chega depois das 19:00 = janela; a de ontem que ainda vale (o tique parado) ganha a hora de agora e vai à fila (correção C2, item 3a)',
+        r = '{"domingo": "domingo", "feriado": "feriado", "ontem": "enfileirada", "noite": "janela"}'::jsonb and pg_temp.n_fila() = 0, r::text);
       raise exception 'desfaz' using errcode = 'P0098';
     exception when sqlstate 'P0098' then null;
     end;
@@ -610,7 +612,7 @@ begin
         r ->> 'estado' = 'aguardando_dono' and r ->> 'motivo' = 'teto_dia' and pg_temp.n_fila() = 0
         and (select m.aprovacao = 'critica' and m.pergunta_id = (r ->> 'pergunta_id')::uuid
                from public.agenda_cliente_mensagens m where m.id = (r ->> 'id')::uuid)
-        and (select p.critica and p.texto = 'O aviso de atraso do Nelson não cabe: ele já recebeu 1 mensagem esta semana. Recomendo você ligar. 1) Você liga e eu não mando nada (recomendo); 2) Eu mando o aviso escrito; 3) Não aviso agora.'
+        and (select p.critica and p.texto = 'O aviso de atraso de Nelson não cabe: Nelson já recebeu 1 mensagem esta semana. Recomendo você ligar. 1) Você liga e eu não mando nada (recomendo); 2) Eu mando o aviso escrito; 3) Não aviso agora.'
                from public.agenda_perguntas p where p.id = (r ->> 'pergunta_id')::uuid),
         r::text || ' ' || coalesce((select p.texto from public.agenda_perguntas p where p.id = (r ->> 'pergunta_id')::uuid), '-'));
       -- o dono escolhe "eu mando" (aprovada): o teto continua cheio → aí é recusada
@@ -972,7 +974,7 @@ begin
                from public.agenda_cliente_mensagens m where m.id = v_m)
         and p.prometido_tipo = 'firme' and p.prometido_de = date '2026-11-03' and p.prometido_ate = date '2026-11-04'
         and p.prometido_original_ate = date '2026-11-04' and p.prometido_fonte = 'mensagem' and p.prometido_mensagem_id = v_m
-        and (select a.texto = 'Mandei ao Flávio a véspera com a pergunta do acesso (ter 03/11).' and a.executada and a.origem = 'vigia'
+        and (select a.texto = 'Mandei para Flávio a véspera com a pergunta do acesso (ter 03/11).' and a.executada and a.origem = 'vigia'
                     and a.tipo = 'cliente' and a.desfazivel_ate is null and a.dia = date '2026-10-31'
                from public.agenda_acoes a join public.agenda_cliente_mensagens m on m.acao_id = a.id where m.id = v_m),
         (select string_agg(a.texto, ' | ') from public.agenda_acoes a where a.tipo = 'cliente') || ' / ' || to_jsonb(p)::text);
@@ -991,7 +993,7 @@ begin
       v_res := pg_temp.ok(v_res, 'E8c a mensagem sem data (o pronto da Lucenira): enviada e a ação, sem prometido',
         (select m.estado from public.agenda_cliente_mensagens m where m.id = (r ->> 'id')::uuid) = 'enviada'
         and (select p2.prometido_tipo is null from public.os_planejamento p2 where p2.service_order_id = c_luc)
-        and exists (select 1 from public.agenda_acoes a where a.texto = 'Mandei ao Lucenira que o serviço ficou pronto.'), r::text);
+        and exists (select 1 from public.agenda_acoes a where a.texto = 'Mandei para Lucenira que o serviço ficou pronto.'), r::text);
       raise exception 'desfaz' using errcode = 'P0097';
     exception when sqlstate 'P0097' then null;
     end;
