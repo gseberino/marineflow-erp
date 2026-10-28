@@ -2,6 +2,8 @@ import { assert, assertEquals, assertStringIncludes } from "https://deno.land/st
 import {
   avisoDoCmpSubstituido,
   cancelarPendenciaSubstituida,
+  mesmoAssunto,
+  proximaPendenciaGuardada,
   checkWhatsAppRateLimit,
   conversaDosComprovantesLigada,
   decidirPendenciaHerdada,
@@ -240,33 +242,74 @@ Deno.test("resolveOptionAsUserText: valor não-UUID vira só o label", () => {
   assertEquals(resolveOptionAsUserText({ label: "Sim", value: "sim" }), "Sim");
 });
 
-// ─── Uma pendência por conversa (05/10/2026) ─────────────────────────────────────────────
-function bancoDePendencias(viva: boolean) {
+// ─── Uma pendência por conversa (05/10/2026; revisto 27/10/2026) ─────────────────────────
+// Mesmo pedido corrigido: a anterior é cancelada. Outro assunto: a anterior fica guardada e volta
+// quando a nova for decidida (a semana do Roberto de 24/10 morreu por uma mensagem ao Flávio).
+const ENVIO_COM_LINK = { action_name: "send_service_order_link", payload: { numero: "ORÇ-00113", com_link: true } };
+const ENVIO_SEM_LINK = { action_name: "send_service_order_link", payload: { numero: "ORÇ-00113", com_link: false } };
+const SEMANA_ROBERTO = { action_name: "registrar_diaria", payload: { freelancer: "Roberto", data: "19/10", data_ate: "24/10" } };
+const MENSAGEM_FLAVIO = { action_name: "enviar_mensagem_whatsapp", payload: { telefone: "5547999990000", texto: "oi" } };
+
+function bancoDePendencias(viva: boolean, anterior: Record<string, unknown> = ENVIO_COM_LINK, nova: Record<string, unknown> = ENVIO_SEM_LINK) {
   const gravado: { update?: Record<string, unknown>; filtros: unknown[][]; auditoria?: Record<string, unknown> } = { filtros: [] };
+  const linhas: Record<string, Record<string, unknown>> = {
+    velha: { title: "Enviar orçamento/OS ao cliente (WhatsApp)", session_id: "s1", status: viva ? "pending" : "approved", ...anterior },
+    nova: { status: "pending", ...nova },
+  };
   const admin = {
     from(tabela: string) {
       if (tabela === "ai_operator_audit") {
         return { insert: (linha: Record<string, unknown>) => { gravado.auditoria = linha; return Promise.resolve({ error: null }); } };
       }
+      let id = "";
       const b: Record<string, unknown> = {};
       b.update = (v: Record<string, unknown>) => { gravado.update = v; return b; };
-      b.eq = (...a: unknown[]) => { gravado.filtros.push(a); return b; };
-      b.select = () => Promise.resolve({ data: viva ? [{ title: "Enviar orçamento/OS ao cliente (WhatsApp)", action_name: "send_service_order_link", session_id: "s1" }] : [], error: null });
+      b.eq = (...a: unknown[]) => { if (a[0] === "id") id = String(a[1]); if (gravado.update) gravado.filtros.push(a); return b; };
+      b.maybeSingle = () => Promise.resolve({ data: linhas[id] ?? null, error: null });
+      b.select = () => (gravado.update ? Promise.resolve({ data: viva ? [linhas.velha] : [], error: null }) : b);
       return b;
     },
   };
   return { admin, gravado };
 }
 
-Deno.test("pendência nova cancela a anterior que ainda esperava, avisa e audita", async () => {
+Deno.test("mesmo pedido corrigido: cancela a anterior que ainda esperava, avisa e audita", async () => {
   const { admin, gravado } = bancoDePendencias(true);
-  const aviso = await cancelarPendenciaSubstituida(admin, { pending_confirm_action_id: "velha" }, { pending_confirm_action_id: "nova" }, "u1");
+  const depois: Record<string, unknown> = { pending_confirm_action_id: "nova" };
+  const aviso = await cancelarPendenciaSubstituida(admin, { pending_confirm_action_id: "velha" }, depois, "u1");
   assertEquals(gravado.update?.status, "rejected");
   assertEquals(gravado.filtros, [["id", "velha"], ["status", "pending"]], "só cancela se ainda estava pendente");
   assertEquals(gravado.auditoria?.event_type, "superseded:send_service_order_link");
   assertEquals(gravado.auditoria?.event_category, "data");
   assertEquals(gravado.auditoria?.actor_kind, "system");
   assertEquals(aviso, "\n\n(O pedido anterior — Enviar orçamento/OS ao cliente (WhatsApp) — foi cancelado: vale só este.)");
+  assertEquals(depois.pendencias_guardadas, undefined);
+});
+
+Deno.test("outro assunto antes do sim: a anterior NÃO é cancelada, fica guardada e o aviso diz que volta", async () => {
+  const { admin, gravado } = bancoDePendencias(true, SEMANA_ROBERTO, MENSAGEM_FLAVIO);
+  const depois: Record<string, unknown> = { pending_confirm_action_id: "nova" };
+  const aviso = await cancelarPendenciaSubstituida(admin, { pending_confirm_action_id: "velha", pendencias_guardadas: ["outra"] }, depois, "u1");
+  assertEquals(gravado.update, undefined, "nada é cancelado");
+  assertEquals(depois.pendencias_guardadas, ["outra", "velha"]);
+  assertEquals(gravado.auditoria?.event_type, "kept:registrar_diaria");
+  assertStringIncludes(aviso, "continua esperando: depois deste eu pergunto dele de novo.");
+  // a mesma ação para OUTRA pessoa também é outro assunto
+  const b2 = bancoDePendencias(true, SEMANA_ROBERTO, { action_name: "registrar_diaria", payload: { freelancer: "João", data: "24/10" } });
+  const d2: Record<string, unknown> = { pending_confirm_action_id: "nova" };
+  await cancelarPendenciaSubstituida(b2.admin, { pending_confirm_action_id: "velha" }, d2, "u1");
+  assertEquals([b2.gravado.update, d2.pendencias_guardadas], [undefined, ["velha"]]);
+});
+
+Deno.test("mesmoAssunto: mesma ação e mesmos campos de assunto (sem diferenciar maiúscula)", () => {
+  assertEquals(mesmoAssunto(ENVIO_COM_LINK, ENVIO_SEM_LINK), true);
+  assertEquals(mesmoAssunto(SEMANA_ROBERTO, { action_name: "registrar_diaria", payload: { freelancer: "roberto ", data: "19/10", data_ate: "24/10", jornada: "meio" } }), true);
+  assertEquals(mesmoAssunto(SEMANA_ROBERTO, { action_name: "registrar_diaria", payload: { freelancer: "Roberto", data: "20/10" } }), false, "outro dia é outro pedido");
+  assertEquals(mesmoAssunto({ action_name: "registrar_diaria", payload: { freelancer: "Roberto", dias: [{ data: "19/10" }] } },
+    { action_name: "registrar_diaria", payload: { freelancer: "Roberto", dias: [{ data: "19/10" }] } }), true);
+  assertEquals(mesmoAssunto(SEMANA_ROBERTO, { action_name: "registrar_diaria", payload: { freelancer: "João" } }), false);
+  assertEquals(mesmoAssunto(SEMANA_ROBERTO, MENSAGEM_FLAVIO), false);
+  assertEquals(mesmoAssunto({ action_name: null }, { action_name: null }), false);
 });
 
 Deno.test("sem troca de pendência, ou anterior já decidida: não mexe em nada", async () => {
@@ -276,12 +319,28 @@ Deno.test("sem troca de pendência, ou anterior já decidida: não mexe em nada"
     [{ pending_confirm_action_id: "velha" }, { pending_confirm_action_id: null }],
   ] as const) {
     const { admin, gravado } = bancoDePendencias(true);
-    assertEquals(await cancelarPendenciaSubstituida(admin, antes, depois, "u1"), "");
+    assertEquals(await cancelarPendenciaSubstituida(admin, antes, { ...depois }, "u1"), "");
     assertEquals(gravado.update, undefined);
   }
   const { admin, gravado } = bancoDePendencias(false);
   assertEquals(await cancelarPendenciaSubstituida(admin, { pending_confirm_action_id: "velha" }, { pending_confirm_action_id: "nova" }, "u1"), "");
   assertEquals(gravado.auditoria, undefined, "já decidida: sem auditoria nem aviso");
+});
+
+Deno.test("proximaPendenciaGuardada: a primeira viva, sem as decididas nem as vencidas; as que sobram", async () => {
+  const linhas: Record<string, Record<string, unknown>> = {
+    decidida: { id: "decidida", status: "approved" },
+    vencida: { id: "vencida", status: "pending", expires_at: "2026-09-27T10:00:00.000Z" },
+    viva: { id: "viva", status: "pending", expires_at: "2026-09-28T10:00:00.000Z", title: "Registrar diária", summary: "Roberto · 19–24/10", risk_level: "low", created_at: "2026-09-27T13:20:17.000Z" },
+    depois: { id: "depois", status: "pending" },
+  };
+  const admin = { from: () => { let id = ""; const b: Record<string, unknown> = {}; b.select = () => b; b.eq = (_c: string, v: string) => { id = v; return b; }; b.maybeSingle = () => Promise.resolve({ data: linhas[id] ?? null }); return b; } };
+  const r = await proximaPendenciaGuardada(admin, { pendencias_guardadas: ["decidida", "sumiu", "vencida", "viva", "depois"] }, AGORA);
+  assertEquals(r?.pendencia.id, "viva");
+  assertEquals(r?.pendencia.title, "Registrar diária");
+  assertEquals(r?.restantes, ["depois"]);
+  assertEquals(await proximaPendenciaGuardada(admin, { pendencias_guardadas: ["decidida"] }, AGORA), null);
+  assertEquals(await proximaPendenciaGuardada(admin, {}, AGORA), null);
 });
 
 

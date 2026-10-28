@@ -319,12 +319,43 @@ export async function queueWhatsAppReply(admin: any, phoneNormalized: string, me
   return null;
 }
 
+/** Os campos do pedido que dizem de quem ou do quê ele é: mesma ação com o mesmo assunto = pedido corrigido. */
+const CHAVES_DO_ASSUNTO = [
+  "freelancer", "favorecido", "numero", "quote_number", "orcamento", "os", "service_order_number", "cliente", "client_name",
+  "telefone", "phone",
+  // diária e pagamento (27/10/2026): "Roberto de 19 a 24" e "Roberto dia 20" são pedidos diferentes
+  "data", "data_ate", "dias",
+];
+
 /**
- * Uma pendência por conversa (05/10/2026): quando o turno cria uma pendência NOVA e a anterior
- * ainda esperava, a anterior é cancelada — senão ela ficava órfã por 24h (a conversa só guarda
- * uma referência), aprovável pelo sino do painel sem ninguém lembrar dela. Caso real: o dono
- * pediu o ORÇ-00113 "sem o link" depois de um pedido com link; o primeiro envio seguia vivo.
- * Devolve o aviso que vai junto da resposta ("" = nada foi cancelado).
+ * A pendência nova é o MESMO pedido corrigido ("sem o link", "não, só até quinta")? Mesma ação e os
+ * mesmos campos de assunto. Outra ação, ou a mesma para outra pessoa/OS, é outro assunto.
+ */
+export function mesmoAssunto(
+  a: { action_name?: string | null; payload?: unknown },
+  b: { action_name?: string | null; payload?: unknown },
+): boolean {
+  if (!a.action_name || a.action_name !== b.action_name) return false;
+  const chave = (p: unknown) =>
+    JSON.stringify(CHAVES_DO_ASSUNTO.map((k) => {
+      const v = (p as Record<string, unknown> | null)?.[k];
+      if (v == null || v === "") return null;
+      return typeof v === "object" ? JSON.stringify(v) : String(v).trim().toLowerCase();
+    }));
+  return chave(a.payload) === chave(b.payload);
+}
+
+/**
+ * Pendência nova com a anterior ainda esperando (05/10/2026; revisto 27/10/2026).
+ *
+ * Mesmo pedido corrigido (mesmoAssunto): a anterior é cancelada — senão ficava órfã por 24h,
+ * aprovável pelo sino sem ninguém lembrar dela. Caso real: o ORÇ-00113 "sem o link" depois do
+ * pedido com link; o primeiro envio seguia vivo.
+ *
+ * Outro assunto: a anterior NÃO morre (27/10/2026, revisão das diárias): em 24/10 a semana do
+ * Roberto foi cancelada 12 s depois por uma mensagem ao Flávio, e o sábado 24/10 nunca foi gravado.
+ * Ela fica em `depois.pendencias_guardadas` e volta a ser apresentada quando a nova for decidida
+ * (proximaPendenciaGuardada). Devolve o aviso que vai junto da resposta ("" = nada mudou).
  */
 export async function cancelarPendenciaSubstituida(
   // deno-lint-ignore no-explicit-any
@@ -336,6 +367,33 @@ export async function cancelarPendenciaSubstituida(
   const velha = antes?.pending_confirm_action_id;
   const nova = depois?.pending_confirm_action_id;
   if (typeof velha !== "string" || !velha || !nova || velha === nova) return "";
+  const { data: anterior } = await admin
+    .from("ai_operator_pending_actions")
+    .select("title, action_name, session_id, payload, status")
+    .eq("id", velha)
+    .maybeSingle();
+  if (!anterior || anterior.status !== "pending") return "";
+  const { data: atual } = await admin
+    .from("ai_operator_pending_actions")
+    .select("action_name, payload")
+    .eq("id", nova)
+    .maybeSingle();
+  if (atual && !mesmoAssunto(anterior, atual)) {
+    const guardadas = Array.isArray(antes?.pendencias_guardadas) ? (antes.pendencias_guardadas as unknown[]).map(String) : [];
+    depois.pendencias_guardadas = [...new Set([...guardadas, velha])].filter((id) => id !== nova);
+    await admin.from("ai_operator_audit").insert({
+      session_id: anterior.session_id,
+      pending_action_id: velha,
+      actor_user_id: userId,
+      actor_kind: "system",
+      event_type: `kept:${anterior.action_name}`,
+      event_category: "data",
+      payload: { channel: "whatsapp", guardada_por: nova },
+    });
+    return `
+
+(O pedido anterior — ${anterior.title} — continua esperando: depois deste eu pergunto dele de novo.)`;
+  }
   const { data } = await admin
     .from("ai_operator_pending_actions")
     .update({ status: "rejected", rejected_by_user_id: userId, rejected_at: new Date().toISOString() })
@@ -357,6 +415,33 @@ export async function cancelarPendenciaSubstituida(
   return `
 
 (O pedido anterior — ${p.title} — foi cancelado: vale só este.)`;
+}
+
+/**
+ * A primeira pendência guardada (cancelarPendenciaSubstituida) que ainda espera resposta, e as que
+ * sobram depois dela. As já decididas ou vencidas saem da lista. null = nada guardado vivo.
+ */
+export async function proximaPendenciaGuardada(
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  metadata: Record<string, unknown> | null | undefined,
+  agora: Date = new Date(),
+): Promise<{ pendencia: { id: string; title: string; summary: string | null; risk_level: string | null; created_at: string | null }; restantes: string[] } | null> {
+  const ids = Array.isArray(metadata?.pendencias_guardadas) ? (metadata!.pendencias_guardadas as unknown[]).map(String) : [];
+  for (let i = 0; i < ids.length; i++) {
+    const { data: p } = await admin
+      .from("ai_operator_pending_actions")
+      .select("id, status, expires_at, title, summary, risk_level, created_at")
+      .eq("id", ids[i])
+      .maybeSingle();
+    if (!p || p.status !== "pending") continue;
+    if (p.expires_at && new Date(p.expires_at).getTime() <= agora.getTime()) continue;
+    return {
+      pendencia: { id: String(p.id), title: String(p.title || "ação pendente"), summary: p.summary ?? null, risk_level: p.risk_level ?? null, created_at: p.created_at ?? null },
+      restantes: ids.slice(i + 1),
+    };
+  }
+  return null;
 }
 
 // ─── Registro único de pergunta ativa (F2 dos comprovantes, 11/10/2026) ─────────────────────

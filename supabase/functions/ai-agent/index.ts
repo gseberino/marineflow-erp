@@ -50,6 +50,7 @@ import {
   formatOptionsAsNumberedText,
   notaDeConfirmacao,
   parseConfirmationReply,
+  proximaPendenciaGuardada,
   textoDaPendenciaReapresentada,
   textoDaProximaPendencia,
   parseOptionReply,
@@ -457,7 +458,16 @@ async function comAProximaPendencia(
 ): Promise<{ message: string; metadata: Record<string, any>; titulo?: string | null }> {
   const decidida = { id: pending.id, created_at: pending.created_at };
   const proxima = await proximaPendenciaDaSessao(admin, pending.session_id, decidida);
-  if (!proxima) return { message: mensagem, metadata: metadataLimpa };
+  if (!proxima) {
+    // A guardada de um turno anterior (outro assunto chegou antes do "sim", 27/10/2026) volta agora.
+    const guardada = await proximaPendenciaGuardada(admin, metadataLimpa);
+    if (!guardada) return { message: mensagem, metadata: { ...metadataLimpa, pendencias_guardadas: [] } };
+    return {
+      message: `${mensagem}\n\n${textoDaPendenciaReapresentada(guardada.pendencia)}`,
+      metadata: { ...metadataLimpa, pending_confirm_action_id: guardada.pendencia.id, pendencias_guardadas: guardada.restantes },
+      titulo: guardada.pendencia.title,
+    };
+  }
   const restantes = await quantasPendenciasAbertas(admin, pending.session_id, decidida);
   return {
     message: `${mensagem}\n\n${textoDaProximaPendencia(

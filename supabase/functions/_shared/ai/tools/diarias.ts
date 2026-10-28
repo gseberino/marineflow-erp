@@ -36,6 +36,12 @@ const JORNADAS = ["inteiro", "meio", "faltou", "apagar", "manter"] as const;
 type Jornada = typeof JORNADAS[number];
 const ROTULO: Record<Jornada, string> = { inteiro: "dia inteiro", meio: "meio período", faltou: "faltou", apagar: "apagar", manter: "como está" };
 const FRACAO: Record<string, number> = { inteiro: 1, meio: 0.5, faltou: 0 };
+// Falta não se lança mais (revisão de 24/10, padrão adotado pelo dono): o dia sem trabalho só fica sem
+// diária — o saldo e o recibo contam os dias lançados. "faltou" continua no banco para as linhas antigas.
+const JORNADAS_DITAS = ["inteiro", "meio", "apagar", "manter"] as const;
+const SEM_FALTA =
+  "Dia sem trabalho não se lança: ele só fica sem a diária desse dia (o saldo e o recibo contam só os dias lançados). " +
+  "Nada foi registrado. Se o dia foi lançado por engano, use apagar.";
 
 function semAcesso(ctx: ToolCtx): { error: string } | null {
   const b = blockTechnician(ctx);
@@ -146,7 +152,8 @@ const MAX_DIAS = 31;
 /** Resolve o pedido como a pessoa falou. Devolve a pergunta quando há dúvida — sem gravar nada. */
 export async function resolverDiaria(ctx: ToolCtx, args: Record<string, unknown>): Promise<PedidoDeDiaria | { error: string }> {
   const jornada = String(args.jornada ?? "") as Jornada;
-  if (!JORNADAS.includes(jornada)) return { error: `Jornada "${args.jornada}" não existe: use inteiro, meio, faltou ou apagar.` };
+  if (jornada === "faltou") return { error: SEM_FALTA };
+  if (!JORNADAS.includes(jornada)) return { error: `Jornada "${args.jornada}" não existe: use inteiro, meio, apagar ou manter.` };
   const f = await acharFreelancer(ctx, args.freelancer);
   if ("error" in f) return f;
   const hoje = dataDita("hoje")!;
@@ -175,9 +182,9 @@ export async function resolverDiaria(ctx: ToolCtx, args: Record<string, unknown>
     if (achada) os.push(achada);
   }
   const observacao = typeof args.observacao === "string" && args.observacao.trim() ? args.observacao.trim() : null;
-  // Valor do dia só vale para quem trabalhou; numa falta (ou ao apagar) não há o que valer.
+  // Valor do dia só vale para quem trabalhou; ao apagar não há o que valer.
   let valorDiaria: number | null = null;
-  if (args.valor_diaria != null && args.valor_diaria !== "" && jornada !== "faltou" && jornada !== "apagar") {
+  if (args.valor_diaria != null && args.valor_diaria !== "" && jornada !== "apagar") {
     valorDiaria = numeroDito(args.valor_diaria);
     if (valorDiaria == null || valorDiaria <= 0) return { error: `Não entendi o valor do dia: "${args.valor_diaria}".` };
   }
@@ -197,6 +204,138 @@ export async function resolverDiaria(ctx: ToolCtx, args: Record<string, unknown>
   const resolvida: Jornada = atual ? (atual.fracao === 1 ? "inteiro" : atual.fracao === 0.5 ? "meio" : "faltou") : jornada;
   return { freelancer: f, data, datas, intervalo, fimDeSemana, jornada: resolvida, os, observacao, valorDiaria, extras, descontos, atual };
 }
+
+// ── A semana numa frase só (F3 da revisão, 27/10/2026) ────────────────────────────────────────────
+// "Roberto: seg a qui inteiro, sex meio, sáb inteiro" era três pendências, três "sim" e três gravações
+// soltas (em 24/10 a semana foi cancelada no meio e o sábado nunca entrou). Agora é UMA chamada com
+// `dias` (cada trecho: um dia ou um intervalo, com a jornada), UMA confirmação e UMA gravação
+// (registrar_diarias_em_lote: ou entram todos, ou nenhum).
+
+export interface PedidoDeLote { freelancer: Freelancer; itens: PedidoDeDiaria[] }
+
+/** Até 15 trechos por pedido — mais que isso é engano, não semana. */
+const MAX_TRECHOS = 15;
+
+export async function resolverLote(ctx: ToolCtx, args: Record<string, unknown>): Promise<PedidoDeLote | { error: string }> {
+  const dias = args.dias;
+  if (!Array.isArray(dias) || !dias.length) return { error: "Diga os dias: cada dia (ou cada intervalo) com a jornada." };
+  if (dias.length > MAX_TRECHOS) return { error: `Trechos demais (${dias.length}): até ${MAX_TRECHOS} por pedido.` };
+  const itens: PedidoDeDiaria[] = [];
+  for (const [i, d] of dias.entries()) {
+    const item = (d ?? {}) as Record<string, unknown>;
+    if (item.jornada === "apagar") return { error: "Apagar é um dia de cada vez, fora da lista: diga qual dia." };
+    const p = await resolverDiaria(ctx, { ...item, freelancer: args.freelancer, fim_de_semana: item.fim_de_semana ?? args.fim_de_semana });
+    if ("error" in p) return { error: dias.length > 1 ? `Trecho ${i + 1}: ${p.error}` : p.error };
+    itens.push(p);
+  }
+  const vistos = new Set<string>();
+  for (const p of itens) {
+    for (const d of p.datas) {
+      if (vistos.has(d)) return { error: `O dia ${diaCurto(d)} aparece em dois trechos: diga cada dia uma vez só.` };
+      vistos.add(d);
+    }
+  }
+  return { freelancer: itens[0].freelancer, itens };
+}
+
+type DiaDoLote = {
+  data: string; jornada: Jornada; os_ids: string[] | null; observacao: string | null;
+  extras: number | null; descontos: number | null; valor_diaria: number | null;
+};
+
+/**
+ * Os dias que o lote grava. Num intervalo, o dia já lançado fica como está (como no data_ate); o dia
+ * dito sozinho corrige o que havia (como no registrar_diaria de um dia).
+ */
+async function diasDoLote(ctx: ToolCtx, l: PedidoDeLote) {
+  const lancados = await diasLancados(ctx, l.freelancer, l.itens.flatMap((p) => p.datas));
+  const dias: Array<DiaDoLote & { item: PedidoDeDiaria }> = [];
+  const mantidos: string[] = [];
+  const corrigidos: string[] = [];
+  for (const p of l.itens) {
+    for (const d of p.datas) {
+      const atual = lancados.get(d);
+      if (p.intervalo && atual) { mantidos.push(`${ddmm(d)} (${rotuloDaFracao(atual.fracao)})`); continue; }
+      if (atual) corrigidos.push(`${ddmm(d)} (era ${rotuloDaFracao(atual.fracao)}, ${brl.format(atual.valorDia)})`);
+      dias.push({
+        item: p, data: d, jornada: p.jornada, os_ids: p.os.length ? p.os.map((o) => o.id) : null, observacao: p.observacao,
+        extras: p.extras, descontos: p.descontos, valor_diaria: p.valorDiaria,
+      });
+    }
+  }
+  return { dias, mantidos, corrigidos, lancados };
+}
+
+/** O que o dia vai valer: a diária dita, a já gravada ou a do cadastro, mais extras, menos descontos. */
+function valorDoDia(p: PedidoDeDiaria, data: string, atual: DiaLancado | undefined): number {
+  const perfil = p.freelancer.perfis.find((x) => x.vigencia_inicio <= data && (!x.vigencia_fim || x.vigencia_fim >= data));
+  const base = (p.valorDiaria ?? (atual?.valorDiaria || null) ?? perfil?.valor_diaria ?? 0) * (FRACAO[p.jornada] ?? 0);
+  return Math.round((base + (p.extras ?? atual?.extras ?? 0) - (p.descontos ?? atual?.descontos ?? 0)) * 100) / 100;
+}
+
+/** A confirmação do lote: um trecho por linha, o total, e o que já estava lançado. */
+export async function resumirLote(ctx: ToolCtx, args: Record<string, unknown>): Promise<string> {
+  const l = await resolverLote(ctx, args);
+  if ("error" in l) return `Registrar diárias\n⚠️ ${l.error} — nada vai ser gravado assim.`;
+  const { dias, mantidos, corrigidos, lancados } = await diasDoLote(ctx, l);
+  const total = dias.reduce((s, d) => s + valorDoDia(d.item, d.data, lancados.get(d.data)), 0);
+  const linhas = [`Registrar diárias de *${l.freelancer.nome}*: ${dias.length} dia(s) · ${brl.format(total)}`];
+  for (const p of l.itens) {
+    const ds = dias.filter((d) => d.item === p);
+    if (!ds.length) continue;
+    const valores = ds.map((d) => valorDoDia(p, d.data, lancados.get(d.data)));
+    const quando = ds.length > 1
+      ? `${diaCurto(ds[0].data)} a ${diaCurto(ds[ds.length - 1].data)} (${ds.length} dias${p.fimDeSemana ? "" : ", só dias úteis"})`
+      : diaCurto(ds[0].data);
+    const valor = valores.every((v) => v === valores[0])
+      ? `${brl.format(valores[0])}${ds.length > 1 ? " cada" : ""}`
+      : brl.format(valores.reduce((a, b) => a + b, 0));
+    linhas.push(`• ${quando} · ${ROTULO[p.jornada]} · ${valor}` +
+      (p.extras ? ` (extras ${brl.format(p.extras)})` : "") + (p.descontos ? ` (descontos ${brl.format(p.descontos)})` : "") +
+      (p.os.length ? ` · ${p.os.map((o) => o.numero).join(", ")}` : "") + (p.observacao ? ` · ${p.observacao}` : ""));
+  }
+  if (corrigidos.length) linhas.push(`Já lançados, vão ser corrigidos (não duplicados): ${corrigidos.join(", ")}.`);
+  if (mantidos.length) linhas.push(`Já lançados, ficam como estão: ${mantidos.join(", ")}.`);
+  if (!dias.length) linhas.push("Todos esses dias já estão lançados: nada vai mudar.");
+  const semPerfil = dias.filter((d) => !d.item.freelancer.perfis.some((x) => x.vigencia_inicio <= d.data && (!x.vigencia_fim || x.vigencia_fim >= d.data)));
+  if (semPerfil.length) linhas.push(`⚠️ Sem diária cadastrada em ${semPerfil.map((d) => ddmm(d.data)).join(", ")}: o sistema vai recusar e nada entra.`);
+  return linhas.join("\n");
+}
+
+async function registrarLote(ctx: ToolCtx, args: Record<string, unknown>) {
+  const l = await resolverLote(ctx, args);
+  if ("error" in l) return l;
+  const { dias, mantidos } = await diasDoLote(ctx, l);
+  if (!dias.length) {
+    return { ok: true, registrados: [], mantidos, aviso: `Todos esses dias já estavam lançados para ${l.freelancer.nome}; nada mudou.` };
+  }
+  const r = await chamar(ctx, "registrar_diarias_em_lote", {
+    p_favorecido_id: l.freelancer.id, p_dias: dias.map(({ item: _i, ...d }) => d), p_origem: "agente",
+  }) as Record<string, unknown>;
+  if (r && "error" in r) return r;
+  const partes = [`${l.freelancer.nome} · ${dias.length} dia(s) registrado(s): ${dias.map((d) => ddmm(d.data)).join(", ")}.`];
+  if (mantidos.length) partes.push(`Já lançados, mantidos: ${mantidos.join(", ")}.`);
+  return { ok: true, registrados: dias.map((d) => d.data), mantidos, aviso: `${partes.join(" ")}${await saldoDito(ctx, l.freelancer)}`.trim() };
+}
+
+/**
+ * Lançamentos da pessoa esperando o "sim" (F3, 27/10/2026): o PDF mandado antes do "sim" sai
+ * desatualizado (4 assim em 10 e 24/10). As pendências guardam o nome como a pessoa falou: vale o
+ * primeiro nome.
+ */
+async function lancamentosEsperandoSim(ctx: ToolCtx, f: Freelancer): Promise<number> {
+  const { data } = await ctx.admin.from("ai_operator_pending_actions")
+    .select("id, payload, expires_at")
+    .eq("status", "pending")
+    .in("action_name", ["registrar_diaria", "registrar_pagamento_freelancer", "dividir_pagamento_freelancer"]);
+  const primeiro = normal(f.nome).split(" ")[0];
+  const agora = Date.now();
+  return ((data ?? []) as any[]).filter((p) =>
+    (!p.expires_at || new Date(p.expires_at).getTime() > agora) && normal(p.payload?.freelancer ?? "").split(" ")[0] === primeiro).length;
+}
+
+const textoDoPdfEsperando = (f: Freelancer, n: number) =>
+  `Há ${n} lançamento(s) de ${f.nome} esperando o seu "sim": o PDF sai depois que você confirmar (agora sairia desatualizado). Não mandei nada.`;
 
 /** Extra/desconto dito: nulo = não disse; undefined = disse algo que não é valor (vira pergunta). */
 function valorDoDito(v: unknown): number | null | undefined {
@@ -248,6 +387,7 @@ function linhasDosExtras(p: PedidoDeDiaria, atual: DiaLancado | null): string[] 
 
 /** O texto da confirmação: o pedido resolvido, e como o dia está hoje quando já existe. */
 export async function resumirDiaria(ctx: ToolCtx, args: Record<string, unknown>): Promise<string | null> {
+  if (Array.isArray(args.dias)) return await resumirLote(ctx, args);
   const p = await resolverDiaria(ctx, args);
   if ("error" in p) return null;
   if (p.intervalo) return await resumirIntervalo(ctx, p);
@@ -716,6 +856,18 @@ export async function resumirDivisaoDoPagamento(ctx: ToolCtx, args: Record<strin
   return linhas.join("\n");
 }
 
+/**
+ * A anotação ficou esperando e há, na fila, uma transação do mesmo valor nesses dias em outro nome. Só
+ * CPF ou nome igual identificam (regra do dono): sem isso, não se sabe se é dele — e não se afirma.
+ */
+export function textoDaFilaSemIdentidade(p: Pick<PedidoDePagamento, "freelancer" | "valor">, nomeNoExtrato: string): string {
+  return `Anotado: o Pix de ${brl.format(p.valor)} para ${p.freelancer.nome} já desconta no saldo dele. ` +
+    `Na fila há uma transação de ${brl.format(p.valor)} nesses dias no nome "${nomeNoExtrato.slice(0, 120)}"; ` +
+    `não liguei as duas sozinho porque o nome do extrato não identifica a pessoa (só o CPF ou o nome igual ao cadastro). ` +
+    `Se aquela transação é desse pagamento, aprove-a na fila como diária dele: a anotação sai sozinha, sem contar duas vezes. ` +
+    `Para ligar sem perguntar da próxima vez, ponha o CPF dele no cadastro.`;
+}
+
 async function registrarPagamento(ctx: ToolCtx, p: PedidoDePagamento) {
   const desc = descricaoDoPagamento(p);
   // resposta 4 do dono: com reembolso a quitar, o pagamento vai já dividido (o mesmo caminho da tela)
@@ -730,11 +882,18 @@ async function registrarPagamento(ctx: ToolCtx, p: PedidoDePagamento) {
     }) as Record<string, unknown>;
   }
   if (p.forma === "pix") {
-    return await chamar(ctx, "anotar_transacao", {
+    const r = await chamar(ctx, "anotar_transacao", {
       p_sentido: "saida", p_valor: p.valor, p_data: p.data, p_documento: null, p_nome: null,
       p_fornecedor_id: null, p_favorecido_id: p.freelancer.id, p_cliente_id: null,
       p_categoria: CATEGORIA_DIARIAS, p_os_id: null, p_descricao: desc,
     }) as Record<string, unknown>;
+    // 27/10/2026: o banco dizia "a transação na fila é de OUTRO (JOAO MARCELO RODRIGUES CORREA)" — era o
+    // próprio João, com o cadastro sem CPF. Nome diferente não prova que é outra pessoa (nem que é a mesma):
+    // diz o que se sabe e o que fazer, sem afirmar de quem é.
+    if (r && !("error" in r) && r.outra_contraparte && !r.falta_quem) {
+      return { ...r, message: textoDaFilaSemIdentidade(p, String(r.outra_contraparte)) };
+    }
+    return r;
   }
   return await chamar(ctx, "lancar_no_caixa", {
     p_sentido: "saida", p_valor: p.valor, p_descricao: desc, p_data: p.data, p_categoria: CATEGORIA_DIARIAS,
@@ -924,12 +1083,14 @@ export const diariasTools: ToolDef[] = [
   {
     name: "registrar_diaria",
     description:
-      "Registra o DIA de um freelancer de diária já cadastrado: 'o Roberto não veio hoje' (faltou), 'Mickael fez meio período " +
-      "ontem', 'Roberto trabalhou dia inteiro na OS 1234'. Um dia por pessoa: repetir a mesma data CORRIGE o dia, não duplica. " +
-      "'faltou' grava a ausência (valor zero); 'apagar' só para dia lançado por ENGANO. A diária vem do cadastro — não pergunte " +
+      "Registra o DIA de um freelancer de diária já cadastrado: 'Mickael fez meio período ontem', 'Roberto trabalhou dia inteiro " +
+      "na OS 1234'. Um dia por pessoa: repetir a mesma data CORRIGE o dia, não duplica. Dia que ele NÃO trabalhou não se lança " +
+      "(fica sem diária; diga isso ao dono); 'apagar' só para dia lançado por ENGANO. VÁRIOS TRECHOS numa frase ('seg a qui " +
+      "inteiro, sex meio, sáb inteiro'): UMA chamada com dias=[{data, data_ate, jornada}, …] — uma confirmação só. Chame direto, " +
+      "sem perguntar 'lanço?' antes: o sistema já mostra o resumo e pede o sim. A diária vem do cadastro — não pergunte " +
       "valor nem horário; valor_diaria só quando a pessoa DISSER outro valor para o dia ('na quarta foram 130'). Freelancer que " +
       "ainda não existe: cadastrar_freelancer antes. Não é pagamento (pagamento vem do extrato; em dinheiro é lancar_no_caixa) nem hora de OS " +
-      "(log_service_order_hours). Vários dias ('faltou desde 19/09', 'a semana toda', 'de segunda até hoje'): data + data_ate; " +
+      "(log_service_order_hours). Vários dias com a mesma jornada ('a semana toda', 'de segunda até hoje'): data + data_ate; " +
       "só dias úteis, salvo fim_de_semana; dia já lançado no intervalo fica como está. EXTRAS e DESCONTOS do dia, como na tela: " +
       "'diária inteira mais 50 de almoço' (extras=50, observacao='almoço'), 'desconta 30 da diária do Mickael de ontem, chegou " +
       "atrasado' (jornada='manter', descontos=30) — o valor é o TOTAL do dia e substitui o que havia (a confirmação mostra o antes). " +
@@ -942,8 +1103,21 @@ export const diariasTools: ToolDef[] = [
         data_ate: { type: "string", description: "Só para vários dias: o último dia ('hoje', dd/mm, 'sexta'). Nunca no futuro." },
         fim_de_semana: { type: "boolean", description: "Num intervalo, incluir sábado e domingo — só se a pessoa disser." },
         jornada: {
-          type: "string", enum: [...JORNADAS],
-          description: "inteiro, meio, faltou (não veio), apagar (lançado por engano; um dia só) ou manter (o dia já lançado fica como está; só muda extras, descontos, OS ou observação).",
+          type: "string", enum: [...JORNADAS_DITAS],
+          description: "inteiro, meio, apagar (lançado por engano; um dia só) ou manter (o dia já lançado fica como está; só muda extras, descontos, OS ou observação). Sem dias.",
+        },
+        dias: {
+          type: "array",
+          description: "Vários trechos de uma vez (uma confirmação só): cada um com data (e data_ate num intervalo) e a jornada; extras, descontos, os, observacao e valor_diaria do trecho se a pessoa disser. Com dias, não mande data/jornada fora.",
+          items: {
+            type: "object",
+            properties: {
+              data: { type: "string" }, data_ate: { type: "string" }, jornada: { type: "string", enum: ["inteiro", "meio", "manter"] },
+              fim_de_semana: { type: "boolean" }, extras: { type: "number" }, descontos: { type: "number" },
+              os: { type: "string" }, observacao: { type: "string" }, valor_diaria: { type: "number" },
+            },
+            required: ["data", "jornada"],
+          },
         },
         os: { type: "string", description: "Número da OS em que trabalhou; duas OS separadas por vírgula (o dia se divide igual)." },
         observacao: { type: "string", description: "Serviço feito, obra, embarcação ou veículo — se a pessoa disser." },
@@ -951,13 +1125,25 @@ export const diariasTools: ToolDef[] = [
         extras: { type: "number", description: "Extras do dia em reais (o almoço quando ele traz o próprio, condução, hora a mais) — o total do dia. Só se a pessoa disser." },
         descontos: { type: "number", description: "Descontos do dia em reais (atraso, vale) — o total do dia. Só se a pessoa disser." },
       },
-      required: ["freelancer", "jornada"],
+      required: ["freelancer"],
     },
     risk: "medium",
     roles: CARGOS,
     preValidar(args) {
-      if (!JORNADAS.includes(String(args?.jornada ?? "") as Jornada)) {
-        return { error: `Jornada "${args?.jornada}" não existe: use inteiro, meio, faltou, apagar ou manter.` };
+      if (Array.isArray(args?.dias)) {
+        if (!args.dias.length) return { error: "Diga os dias: cada dia (ou cada intervalo) com a jornada." };
+        if (args.dias.length > MAX_TRECHOS) return { error: `Trechos demais (${args.dias.length}): até ${MAX_TRECHOS} por pedido.` };
+        for (const d of args.dias as Array<Record<string, unknown>>) {
+          if (d?.jornada === "faltou") return { error: SEM_FALTA };
+          if (!["inteiro", "meio", "manter"].includes(String(d?.jornada ?? ""))) {
+            return { error: `Jornada "${d?.jornada}" não existe na lista: use inteiro, meio ou manter (apagar é fora da lista).` };
+          }
+        }
+        return null;
+      }
+      if (args?.jornada === "faltou") return { error: SEM_FALTA };
+      if (!JORNADAS_DITAS.includes(String(args?.jornada ?? "") as typeof JORNADAS_DITAS[number])) {
+        return { error: `Jornada "${args?.jornada}" não existe: use inteiro, meio, apagar ou manter.` };
       }
       if (args?.jornada === "apagar" && args?.data_ate) return { error: "Apagar é um dia de cada vez: diga qual dia." };
       if (args?.jornada === "manter" && args?.data_ate) return { error: "Mexer só em extras/descontos é um dia de cada vez: diga qual dia." };
@@ -966,6 +1152,7 @@ export const diariasTools: ToolDef[] = [
     async execute(args, ctx) {
       const b = semAcesso(ctx);
       if (b) return b;
+      if (Array.isArray(args.dias)) return await registrarLote(ctx, args);
       const p = await resolverDiaria(ctx, args);
       if ("error" in p) return p;
       if (p.intervalo) return await registrarIntervalo(ctx, p);
@@ -1246,6 +1433,8 @@ export const diariasTools: ToolDef[] = [
       if (periodo && "error" in periodo) return periodo;
       const f = await acharFreelancer(ctx, args.freelancer);
       if ("error" in f) return f;
+      const esperando = await lancamentosEsperandoSim(ctx, f);
+      if (esperando) return { error: textoDoPdfEsperando(f, esperando) };
       const telefone = await telefoneDeQuemPediu(ctx);
       if (typeof telefone !== "string") return telefone;
 
@@ -1356,6 +1545,8 @@ export const diariasTools: ToolDef[] = [
       const a = await acertoDe(ctx, f, args.numero);
       if ("error" in a) return a;
       if (a.status !== "fechado") return { error: `O acerto nº ${numeroDoRecibo(a.numero)} está reaberto: feche de novo antes de mandar.` };
+      const esperando = await lancamentosEsperandoSim(ctx, f);
+      if (esperando) return { error: textoDoPdfEsperando(f, esperando) };
       const cad = await cadastroDoFreelancer(ctx, f);
       if (!cad.telefone) return { error: `${f.nome} não tem telefone no cadastro. Cadastre o WhatsApp dele em Financeiro › Favorecidos e peça de novo.` };
       const doc = await documentoDoRecibo(ctx, f, a);
@@ -1366,6 +1557,8 @@ export const diariasTools: ToolDef[] = [
           `o Pix de ${brl.format(a.valor_do_acerto)}${a.pagos_ate ? ` em ${ddmm(a.pagos_ate)}` : ""} quitou o total.\nConfere? Se estiver tudo certo, responda *OK*. ` +
           "A via em papel para assinar fica na oficina."
         : `Olá, ${primeiro}! Segue o recibo das suas diárias de ${ddmm(a.de)} a ${ddmm(a.ate)}: ` +
+        // a conta fecha (27/10/2026): sem o saldo de antes, "2.660 − 2.673" não dava os 867 da mensagem de 24/10
+        (a.saldo_anterior ? `${a.saldo_anterior > 0 ? "saldo de antes" : "adiantamento de antes"} ${brl.format(Math.abs(a.saldo_anterior))}; ` : "") +
         `${String(a.dias).replace(".", ",")} diária(s), ${brl.format(a.trabalhado)}${reembolsosNoTexto(a.reembolsos, "; ")}; vales já pagos ${brl.format(a.pago_no_periodo)}; ` +
         `a receber ${brl.format(a.valor_do_acerto)}.\nConfere? Se estiver tudo certo, responda *OK*.`;
       const envio = await mandarPdf(ctx, cad.telefone, doc, CONTEXTO_AO_FREELANCER, `recibo de diárias ao freelancer ${f.nome}`);
