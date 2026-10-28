@@ -152,6 +152,10 @@ const FIXTURES_COMO_TEXTO = [
   // agenda_fase6_sombra.sql a roda numa subtransação desfeita. As fontes das 3 recriadas da 20261029100800 já estão acima
   // (agenda_ver: mig_leituras_fase5; os_plano_da_os: mig_telas_fase5; _agenda_ver_fornecedores: mig_leituras_fase4).
   ['agenda_teste.mig_sombra_fase6', '../../supabase/migrations/20261029101000_agenda_fase6_sombra.sql'],
+  // Pós-merge (C): as fontes das 5 recriadas da 20261029110000 — a porta (20261026100700) e o agrupar/desagrupar de OS
+  // (20261028120000) —, para o agenda_posmerge_agrupar.sql conferir que as cópias só mudam nos blocos "-- PÓS-MERGE: (C)".
+  ['agenda_teste.mig_levantamento_fase3', '../../supabase/migrations/20261026100700_agenda_fase3_levantamento_na_porta.sql'],
+  ['agenda_teste.mig_agrupar_os', '../../supabase/migrations/20261028120000_agrupar_os.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

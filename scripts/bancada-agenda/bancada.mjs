@@ -73,13 +73,14 @@ export const FORA_DA_BANCADA = new Set([
   // pela data. Mexem em diárias (conta corrente, recibo, lote, anotação × CPF) e no agrupar OS — tabelas que a bancada
   // não modela (anotacoes_do_extrato, orcamento_agrupamentos, os_agrupamento_movidos…) e funções que a agenda não chama
   // (nenhum objeto em comum com as migrations da agenda). Em produção já rodaram; aqui ficam de fora, como as de antes
-  // de PRIMEIRA.
+  // de PRIMEIRA. PÓS-MERGE (C, 29/10/2026): o agrupar_os (20261028120000) VOLTOU para a bancada — a 20261029110000 recria o
+  // agrupar e o desagrupar conhecendo a agenda, e o teste dela (agenda_posmerge_agrupar.sql) roda o agrupar de verdade; as
+  // tabelas que ele atravessa entraram em TABELAS e as duas migrations de agrupar orçamentos, em MIGRATIONS_DEPOIS_DO_SNAPSHOT.
   '20261027120000_diarias_leitura_certa.sql',
   '20261027150000_diarias_so_categoria_diarias.sql',
   '20261027180000_diarias_recibo_de_servicos.sql',
   '20261027200000_diarias_em_lote.sql',
   '20261027210000_diarias_recibo_assinado.sql',
-  '20261028120000_agrupar_os.sql',
   '20261028150000_diarias_anotacao_e_banco_pelo_cpf.sql',
 ]);
 
@@ -104,7 +105,11 @@ export const VIEWS_RECRIADAS_DEPOIS = {
  *   · 20261006220000: acertos_diarias, a trava trg_dia_em_acerto_fechado em work_shifts ("dia de acerto fechado não
  *     entra, não muda e não sai") e registrar_conferencia_do_freelancer (o "ok" do recibo: NOVO-agenda-17).
  */
-export const MIGRATIONS_DEPOIS_DO_SNAPSHOT = ['20261006220000_diarias_acerto_e_recibo.sql'];
+export const MIGRATIONS_DEPOIS_DO_SNAPSHOT = ['20261006220000_diarias_acerto_e_recibo.sql',
+  // PÓS-MERGE (C): o agrupar de orçamentos (15/10), de que o agrupar de OS (20261028120000) depende — orcamento_agrupamentos,
+  // as guardas da origem e do destino em service_orders e receivables, _agrupar_orcamentos_juntar/_reais e
+  // orcamentos_para_agrupar. As guardas só disparam com merged_into_id ou saindo de cancelado (nenhuma fixture faz isso).
+  '20261015180000_agrupar_orcamentos.sql', '20261015181000_agrupar_orcamentos_assistente.sql'];
 
 export const ler = (p) => readFileSync(p, 'utf8').replace(/\r\n/g, '\n');
 
@@ -162,6 +167,11 @@ export const TABELAS = [
   'ai_comms_log', 'whatsapp_blocked_numbers',
   // Fase 5 (P2): o aviso do sino do "sim" ao pedido de confirmação (registrar_confirmacao_do_cliente, recriada no D9).
   'app_notifications',
+  // PÓS-MERGE (C): o que o agrupar/desagrupar de OS (20261028120000 e a recriada em 20261029110000) lê ou move — a auditoria,
+  // a cobrança do banco, as anotações do extrato, a fatura, a assinatura, os envios agendados, as fotos, o roteiro, as horas,
+  // as pendências, as sugestões de agenda e as missões de acompanhamento. Só a tabela (sem gatilho nem FK do snapshot).
+  'audit_log', 'bank_charges', 'anotacoes_do_extrato', 'invoices', 'service_order_signatures', 'whatsapp_scheduled_sends',
+  'service_order_photos', 'service_order_steps', 'time_entries', 'entity_open_loops', 'agenda_suggestions', 'ai_followup_missions',
 ];
 
 /**
@@ -184,7 +194,15 @@ create table if not exists public.comprovantes (
   destino         text,
   destino_os_id   uuid,
   situacao        text not null default 'recebido',
-  recebido_em     timestamptz not null default now()
+  recebido_em     timestamptz not null default now(),
+  -- PÓS-MERGE (C): o vínculo à peça da OS (20261011200000), que o agrupar de OS remapeia para a linha copiada.
+  so_part_id      uuid
+);
+-- PÓS-MERGE (C): diarias_reembolsos (20261011301000: o reembolso de despesa paga pelo técnico), espelho mínimo — o agrupar de OS
+-- só pergunta se a OS tem algum (é execução).
+create table if not exists public.diarias_reembolsos (
+  id    uuid primary key default gen_random_uuid(),
+  os_id uuid
 );
 `;
 
@@ -252,6 +270,8 @@ export const FUNCOES = [
   // Fase 3 (P4): o que o registrar_diaria chama por dentro (a decisão do dono numa diária que já existe e a palavra
   // *diária <nome> meia* depois do automático passam por ele): o cargo do financeiro e o rótulo da jornada.
   '_autor_do_financeiro', '_rotulo_jornada',
+  // PÓS-MERGE (C): os totais da OS pelo banco (o agrupar confere o total da nova e recalcula as originais no desagrupar).
+  'calc_so_totals', 'recalc_so_totals',
 ];
 
 let snapshot;
@@ -407,6 +427,10 @@ export async function criarBancada({ ate, fixture = true, log = () => {} } = {})
   await db.exec(RLS_DE_PRODUCAO.map(rls).join('\n'));
   await db.exec(ESTOQUE_DE_MENTIRA);
   await db.exec(GATILHOS.map(gatilho).join('\n'));
+  // PÓS-MERGE (C): em produção o anon não lê service_orders inteira (09-privilegios.sql: só DELETE, INSERT e UPDATE; o link
+  // público lê por coluna). A prova de privilégios da 20261015180000 confere que ele não lê merged_into_id — com o SELECT
+  // padrão da bancada ela recusaria.
+  await db.exec('revoke select on public.service_orders from anon;');
   for (const m of MIGRATIONS_DEPOIS_DO_SNAPSHOT) {
     try {
       await db.exec(ler(join(MIG, m)));

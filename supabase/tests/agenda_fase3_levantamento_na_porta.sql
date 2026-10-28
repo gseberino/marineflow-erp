@@ -106,6 +106,13 @@ begin
   v_corpo := substr(v_corpo, position(E'as $function$\n' in v_corpo) + length(E'as $function$'));
   v_corpo := left(v_corpo, position(E'\n$function$;' in v_corpo));
   v_novo := replace(v_novo, E'\r\n', E'\n');
+  -- PÓS-MERGE (C, 29/10/2026): a 20261029110000 recriou a porta com o bloco "-- PÓS-MERGE: (C)" no começo (a via desagrupar;
+  -- o agenda_posmerge_agrupar.sql confere essa cópia). Fora dele, a porta é a de 20261026100700 — a que este teste confere.
+  v_ini := position('  -- PÓS-MERGE: (C) ' in v_novo);
+  v_fim := position(E'  -- PÓS-MERGE: fim\n' in v_novo);
+  if v_ini > 0 and v_fim > v_ini then
+    v_novo := substr(v_novo, 1, v_ini - 1) || substr(v_novo, v_fim + length(E'  -- PÓS-MERGE: fim\n'));
+  end if;
   v_ini := position('    -- FASE 3 (P7b): ' in v_novo);
   v_fim := position(E'    -- FASE 3 (P7b): fim\n' in v_novo);
   v_bloco := case when v_ini > 0 and v_fim > v_ini then substr(v_novo, v_ini, v_fim + length(E'    -- FASE 3 (P7b): fim\n') - v_ini) end;

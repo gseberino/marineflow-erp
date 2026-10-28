@@ -899,7 +899,11 @@ insert into _definer_da_agenda values
   -- pergunta do aprendizado e o *desfaz* da ação dele (escrevem agenda_aprendizado, a pergunta e a ação; agenda_decidir e
   -- agenda_desfazer as chamam, sem grant) e a única escrita de parâmetro por função (agenda_config.carga_max, sem grant; só a
   -- decisão e o *desfaz* a chamam). A revisão e o planejador mais forte são invoker. agenda_fase6_rodada.sql prova as portas.
-  ('agenda_aprender'), ('_agenda_aprendizado_decidir'), ('_agenda_desfazer_aprendizado'), ('_agenda_aprendizado_carga');
+  ('agenda_aprender'), ('_agenda_aprendizado_decidir'), ('_agenda_desfazer_aprendizado'), ('_agenda_aprendizado_carga'),
+  -- PÓS-MERGE (C, 20261029110000): tirar do plano a OS que o agrupar (ou o desagrupar) de OS tirou de cena (escreve
+  -- agenda_alocacoes, agenda_acoes, agenda_propostas e agenda_rascunho; só o _agrupar_os_agenda e o _desagrupar_os_desfazer,
+  -- definer, a chamam; sem grant). agenda_posmerge_agrupar.sql prova as portas.
+  ('_agenda_os_saiu_por_agrupar');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',
