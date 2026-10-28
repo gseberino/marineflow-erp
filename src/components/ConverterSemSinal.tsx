@@ -83,7 +83,8 @@ export function useConverterSemSinal({ aoConverter }: Opcoes = {}) {
       });
 
       const res = await updateStatus.mutateAsync({ id: alvo.id, status: 'approved' });
-      const numero: string | null | undefined = res?.service_order_number || alvo.number;
+      // Agenda (Fase 3): o status vai pela porta, que devolve o número depois da conversão em `numero` (só o prefixo troca).
+      const numero: string | null | undefined = res?.numero || alvo.number;
       toast.success(`${numero} convertido em OS — pagamento integral na conclusão`);
       qc.invalidateQueries({ queryKey: ['pdf-data'] });
       promptIfConverted(res, { id: alvo.id, number: numero, client: alvo.client });

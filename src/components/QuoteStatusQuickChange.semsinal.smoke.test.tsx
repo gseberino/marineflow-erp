@@ -50,7 +50,7 @@ vi.mock('@/hooks/use-service-orders', async (importOriginal) => {
       mutateAsync: async (v: unknown) => {
         chamadas.ordem.push('status');
         chamadas.status.push(v);
-        return { service_order_number: 'OS-00321', justConverted: true };
+        return { mudou: true, status: 'approved', texto: '', justConverted: true, numero: 'OS-00321' };
       },
       isPending: false,
     }),
