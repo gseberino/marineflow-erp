@@ -813,9 +813,11 @@ Deno.test("plano: sem plano (agenda fora de ligado), falta, intervalo e reserva 
   const semPlano = ctx();
   await tool("registrar_diaria").execute({ freelancer: "Roberto", data: "24/09/2026", jornada: "inteiro" }, semPlano.c as never);
   assertEquals(semPlano.chamadas.find((x) => x.n === "registrar_diaria")!.a.p_os_ids, null);
+  // Falta (main, Diárias fase 1b, 27/10/2026): dia não trabalhado não se lança — a tool recusa antes de gravar e de ler o plano.
   const falta = ctx({ plano: PLANO_DO_DIA });
-  await tool("registrar_diaria").execute({ freelancer: "Roberto", data: "24/09/2026", jornada: "faltou" }, falta.c as never);
-  assertEquals(falta.chamadas.find((x) => x.n === "registrar_diaria")!.a.p_os_ids, null);
+  const rFalta = await tool("registrar_diaria").execute({ freelancer: "Roberto", data: "24/09/2026", jornada: "faltou" }, falta.c as never) as { error?: string };
+  assertEquals(typeof rFalta.error, "string");
+  assertEquals(falta.chamadas.some((x) => x.n === "registrar_diaria"), false);
   assertEquals((falta.c.admin as any).simuladas.some((s: any) => s.n === "agenda_os_do_dia"), false);
   const reserva = ctx({ plano: [{ ...PLANO_DO_DIA[0], reserva: true }] });
   await tool("registrar_diaria").execute({ freelancer: "Roberto", data: "24/09/2026", jornada: "inteiro" }, reserva.c as never);
