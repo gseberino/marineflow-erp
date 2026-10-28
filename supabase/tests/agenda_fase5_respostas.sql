@@ -134,9 +134,11 @@ declare
   v_b text[] := '{}'; v_bloco boolean := false; l text;
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
-    if not v_bloco and l ~ '^\s*-- FASE 5:' and l !~ '^\s*-- FASE 5: fim' then v_bloco := true; continue; end if;
+    -- FASE 6 (P6): também os blocos "-- FASE 6: … -- FASE 6: fim" (agenda_desfazer, agenda_decidir e agenda_saude foram
+    -- recriadas de novo em 20261029100600, só com blocos da Fase 6 fora dos da Fase 5)
+    if not v_bloco and l ~ '^\s*-- FASE [56]:' and l !~ '^\s*-- FASE [56]: fim' then v_bloco := true; continue; end if;
     if v_bloco then
-      if l ~ '^\s*-- FASE 5: fim' then v_bloco := false; end if;
+      if l ~ '^\s*-- FASE [56]: fim' then v_bloco := false; end if;
       continue;
     end if;
     v_b := v_b || l;

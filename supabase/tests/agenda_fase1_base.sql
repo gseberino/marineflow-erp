@@ -885,7 +885,12 @@ insert into _definer_da_agenda values
   -- aprendido (escreve agenda_aprendizado, a ação e a pergunta). Os três sem grant a ninguém, nem service_role
   -- (agenda_fase6_base.sql prova as portas). A classe, os dias no início, o passo da medição, o percentil, o leitor, os
   -- textos e o limite de troca são invoker.
-  ('_agenda_aprender_congelar'), ('agenda_medir_os'), ('_agenda_aprendizado_gravar');
+  ('_agenda_aprender_congelar'), ('agenda_medir_os'), ('_agenda_aprendizado_gravar'),
+  -- FASE 6 (P6): a rodada do aprendizado (só service_role; chama os passos, que não têm porta), a decisão do dono sobre a
+  -- pergunta do aprendizado e o *desfaz* da ação dele (escrevem agenda_aprendizado, a pergunta e a ação; agenda_decidir e
+  -- agenda_desfazer as chamam, sem grant) e a única escrita de parâmetro por função (agenda_config.carga_max, sem grant; só a
+  -- decisão e o *desfaz* a chamam). A revisão e o planejador mais forte são invoker. agenda_fase6_rodada.sql prova as portas.
+  ('agenda_aprender'), ('_agenda_aprendizado_decidir'), ('_agenda_desfazer_aprendizado'), ('_agenda_aprendizado_carga');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

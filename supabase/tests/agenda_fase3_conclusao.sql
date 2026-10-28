@@ -824,9 +824,18 @@ begin
     v_novo := left(v_novo, v_ini - 1)
               || substr(v_novo, position(E'  -- FASE 5: fim\n' in v_novo) + length(E'  -- FASE 5: fim\n'));
   end loop;
-  insert into _resultado values ('J5 a cópia de agenda_desfazer só muda nos blocos "-- FASE 3:", "-- FASE 4:" e "-- FASE 5:" (o resto é o corpo de 20261025100200)',
+  -- FASE 6 (P6): recriada de novo em 20261029100600 (a ação aprendizado vai a _agenda_desfazer_aprendizado), com um bloco
+  -- "-- FASE 6: … -- FASE 6: fim" depois dos da Fase 5: sai do mesmo jeito.
+  loop
+    v_ini := position('  -- FASE 6: ' in v_novo);
+    exit when v_ini = 0 or position(E'  -- FASE 6: fim\n' in v_novo) < v_ini;
+    v_novo := left(v_novo, v_ini - 1)
+              || substr(v_novo, position(E'  -- FASE 6: fim\n' in v_novo) + length(E'  -- FASE 6: fim\n'));
+  end loop;
+  insert into _resultado values ('J5 a cópia de agenda_desfazer só muda nos blocos "-- FASE 3:", "-- FASE 4:", "-- FASE 5:" e "-- FASE 6:" (o resto é o corpo de 20261025100200)',
     v_novo = v_corpo and position('_agenda_desfazer_marco' in v_novo) = 0 and position('_agenda_desfazer_diaria' in v_novo) = 0
-    and position('_agenda_desfazer_material' in v_novo) = 0 and position('_agenda_desfazer_cliente' in v_novo) = 0,
+    and position('_agenda_desfazer_material' in v_novo) = 0 and position('_agenda_desfazer_cliente' in v_novo) = 0
+    and position('_agenda_desfazer_aprendizado' in v_novo) = 0,
     case when v_novo = v_corpo then null else format('%s × %s caracteres', length(v_novo), length(v_corpo)) end);
 end
 $copia$;

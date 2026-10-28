@@ -440,3 +440,74 @@ begin
   end if;
 end
 $confere_p4$;
+
+-- ── P6 (28/10): o plano cumprido das semanas de 05, 12 e 19/10 (o insumo da revisão da carga) ───────────
+-- A revisão lê o plano cumprido (agenda_ppc: os pares OS × dia de serviço publicados antes do dia e conferidos) das semanas
+-- completas antes de hoje. As de 05/10 e 12/10 estavam vazias e a de 19/10 tinha 6 pares (5 cumpridos, os das OS-00134 e
+-- 135). Cinco OS próprias, CANCELADAS (OS-00147 a 151: Rita, Sílvio, Tânia, Ugo e Vera; não são medidas nem estão na
+-- carteira, como a OS-00145 do P4), com o Roberto (R), o João (J) e o Mickael (M) — nunca o dono (a capacidade dele não muda):
+--   05/10  147 R manhã, 148 R tarde, 149 J manhã, 150 J tarde, 151 M manhã, de seg 05 a sex 09/10 = 25 pares: 13 cumpridos
+--          (147 e 148 nos 5 dias, 149 de 05 a 07/10) e 12 não (o resto, por material) → 52%
+--   12/10  147 J manhã, 148 J tarde, de ter 13 a sex 16/10 (12/10 é feriado), e 149 M manhã de 13 a 15/10 = 11 pares: 6
+--          cumpridos (147 nos 4 dias, 148 em 13 e 14/10) e 5 não → 55% (sem o Roberto: os testes do fator e do risco põem a
+--          OS-00100 com ele de 13 a 16/10)
+--   19/10  148 J tarde, 149 M manhã, 150 M tarde, de seg 19 a sex 23/10 = 15 pares: 5 cumpridos (148) e 10 não; com os 6 de
+--          antes, 10 de 21 → 48%
+-- Seguidas abaixo de 60% (ppc_baixo) desde a semana de 19/10: 3 (a de 28/09 é 100%) → a revisão pergunta 70%.
+create temp table _fase6_versao_p6 on commit drop as select versao_plano from public.agenda_config where id;
+select set_config('agenda.hoje', '2026-10-30', true);
+
+insert into public.clients (id, type, name)
+select ('c6000000-0000-4000-8000-000000000' || n)::uuid, 'individual', nome
+  from (values ('147', 'Rita'), ('148', 'Sílvio'), ('149', 'Tânia'), ('150', 'Ugo'), ('151', 'Vera')) c(n, nome);
+insert into public.vessels (id, client_id, name, asset_type)
+select ('f6000000-0000-4000-8000-000000000' || n)::uuid, ('c6000000-0000-4000-8000-000000000' || n)::uuid, 'Motorhome', 'Motorhome'
+  from unnest(array['147', '148', '149', '150', '151']) n;
+select set_config('agenda.porta', 'on', true);
+insert into public.service_orders (id, service_order_number, client_id, vessel_id, status, quote_status, service_type,
+  created_at, updated_at, converted_to_os_at, grand_total)
+select ('05000000-0000-4000-8000-000000000' || n)::uuid, 'OS-00' || n, ('c6000000-0000-4000-8000-000000000' || n)::uuid,
+       ('f6000000-0000-4000-8000-000000000' || n)::uuid, 'cancelled', 'approved', 'repair', timestamptz '2026-09-25 10:00-03',
+       timestamptz '2026-10-26 10:00-03', timestamptz '2026-09-28 10:00-03', 3000
+  from unnest(array['147', '148', '149', '150', '151']) n;
+select set_config('agenda.porta', 'off', true);
+
+insert into public.agenda_alocacoes (service_order_id, payee_id, dia, turno, presenca, tipo, estado, origem, publicada_em,
+                                     resultado, motivo, resultado_via, resultado_em)
+select ('05000000-0000-4000-8000-000000000' || a.n)::uuid, ('bb000000-0000-4000-8000-00000000000' || a.p)::uuid, d.dia, a.turno,
+       'turno', 'execucao', 'publicada', 'motor', (d.dia - 1 + time '16:30') at time zone 'America/Sao_Paulo',
+       case when a.cumpre @> array[d.dia] then 'cumprido' else 'nao_cumprido' end,
+       case when a.cumpre @> array[d.dia] then null else 'material' end,
+       'dia_feito', (d.dia + time '17:30') at time zone 'America/Sao_Paulo'
+  from (values
+    -- semana de 05/10
+    ('147', '2', 'manha', date '2026-10-05', date '2026-10-09', array[date '2026-10-05', date '2026-10-06', date '2026-10-07', date '2026-10-08', date '2026-10-09']),
+    ('148', '2', 'tarde', date '2026-10-05', date '2026-10-09', array[date '2026-10-05', date '2026-10-06', date '2026-10-07', date '2026-10-08', date '2026-10-09']),
+    ('149', '3', 'manha', date '2026-10-05', date '2026-10-09', array[date '2026-10-05', date '2026-10-06', date '2026-10-07']),
+    ('150', '3', 'tarde', date '2026-10-05', date '2026-10-09', '{}'::date[]),
+    ('151', '4', 'manha', date '2026-10-05', date '2026-10-09', '{}'::date[]),
+    -- semana de 12/10 (12/10 é feriado; sem o Roberto)
+    ('147', '3', 'manha', date '2026-10-13', date '2026-10-16', array[date '2026-10-13', date '2026-10-14', date '2026-10-15', date '2026-10-16']),
+    ('148', '3', 'tarde', date '2026-10-13', date '2026-10-16', array[date '2026-10-13', date '2026-10-14']),
+    ('149', '4', 'manha', date '2026-10-13', date '2026-10-15', '{}'::date[]),
+    -- semana de 19/10 (o Roberto já está nas OS-00134 e 135; o João na 135 em 21/10 de manhã)
+    ('148', '3', 'tarde', date '2026-10-19', date '2026-10-23', array[date '2026-10-19', date '2026-10-20', date '2026-10-21', date '2026-10-22', date '2026-10-23']),
+    ('149', '4', 'manha', date '2026-10-19', date '2026-10-23', '{}'::date[]),
+    ('150', '4', 'tarde', date '2026-10-19', date '2026-10-23', '{}'::date[])
+  ) as a(n, p, turno, de, ate, cumpre)
+  cross join lateral (select g::date as dia from generate_series(a.de, a.ate, interval '1 day') g) d;
+
+update public.agenda_config set versao_plano = (select versao_plano from _fase6_versao_p6) where id;
+select set_config('agenda.hoje', '', true);
+
+do $confere_p6$
+declare
+  v text;
+begin
+  select string_agg(round(100 * (public.agenda_ppc(s, date '2026-10-30') ->> 'ppc')::numeric)::text, ',' order by s) into v
+    from unnest(array[date '2026-10-05', date '2026-10-12', date '2026-10-19']) s;
+  if v is distinct from '52,55,48' then
+    raise exception 'fixture-fase6 (P6): o plano cumprido das semanas de 05, 12 e 19/10 não é 52%%, 55%% e 48%% (veio %)', v;
+  end if;
+end
+$confere_p6$;

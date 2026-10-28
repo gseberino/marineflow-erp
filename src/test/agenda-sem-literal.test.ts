@@ -107,8 +107,9 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     // Fase 3 (P4): 2 na versão da Fase 2 (20261025100300) + 3 na recriada (20261026100300: as mesmas 2 e o erros_24h da
     // rotina da equipe). Fase 4 (P5): + 6 na recriada (20261027100500: as mesmas 3 e o erros_24h da rodada do material,
     // contado e posto no bloco material). Fase 5 (P3): + 9 na recriada (20261028100300: as mesmas 6, o erros_24h da rodada do
-    // cliente, contado e posto no bloco cliente, e a métrica resposta_24h_pct).
-    vezes: 20,
+    // cliente, contado e posto no bloco cliente, e a métrica resposta_24h_pct). Fase 6 (P6): + 10 na recriada (20261029100600:
+    // as mesmas 9 e o erros_24h da rodada do aprendizado, contado e posto no bloco aprendizado).
+    vezes: 30,
     porque: 'nomes das chaves do resultado (rodadas_24h, erros_24h, resposta_24h_pct: a janela de um dia da conferência); não é rascunho_validade',
   },
   // Fase 3 (P4): a rotina da equipe grava a rodada como a vigia.
@@ -131,6 +132,13 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     casou: '1000',
     vezes: 1,
     porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_vigiar, agenda_rotina_rodar e agenda_material_vigiar); não é texto_max nem peca_embutida_acima',
+  },
+  // Fase 6 (P6): a rodada do aprendizado grava a rodada como a vigia, a rotina, o material e o cliente.
+  {
+    onde: 'agenda_aprender',
+    casou: '1000',
+    vezes: 1,
+    porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_cliente_vigiar); não é texto_max nem peca_embutida_acima',
   },
   // Fase 3 (P6): o custo da simulação do livre de verdade e a ordem das OS do turno no job do Claude Max.
   {
@@ -416,6 +424,10 @@ describe('agenda: parâmetro só em agenda_config', () => {
       '_agenda_aprender_capacidade', '_agenda_carga_da_pessoa',
       // Fase 6 (P5): a pontualidade e a folga do aviso ao cliente (o passo); o risco e o gravador do prometido recriados
       '_agenda_aprender_cliente', '_agenda_cliente_risco', '_agenda_cliente_gravar_prometido',
+      // Fase 6 (P6): a rodada, a revisão da carga, o planejador mais forte, a decisão, o *desfaz* e a escrita da carga; as
+      // recriadas (agenda_decidir, agenda_desfazer, agenda_desfazer_dito e agenda_saude) já estavam na lista pelas fases de antes
+      'agenda_aprender', '_agenda_aprender_revisao', '_agenda_aprender_solver', '_agenda_aprendizado_decidir',
+      '_agenda_desfazer_aprendizado', '_agenda_aprendizado_carga',
     ]));
     expect(tsAgenda.map((t) => t.onde)).toEqual(expect.arrayContaining([
       path.join('supabase', 'functions', 'task-automations', 'agenda-vigia.ts'),

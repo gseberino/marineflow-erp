@@ -641,16 +641,22 @@ begin
       ('_agenda_aprendizado_texto', 'public._agenda_aprendizado_texto(text, text, jsonb)', v_dono, '20261029100400', 1)
     ) t(nome, sig, fonte, de, novos)
   loop
+    -- FASE 6 (P6): _agenda_aprendizado_texto foi recriada de novo em 20261029100600 (a carga e o planejador): a cópia do P5 é
+    -- conferida no texto da 20261029100500 (o R8 de agenda_fase6_rodada.sql confere a do P6 contra ela); as outras duas, no
+    -- banco, como antes
     insert into _resultado
     select format('C5c a cópia de %s (de %s) só acrescenta %s bloco(s) "-- FASE 6:"; fora deles, a fonte linha a linha', rc.nome, rc.de, rc.novos),
-           pg_temp.sem_blocos(p.prosrc) = pg_temp.sem_blocos(pg_temp.corpo(rc.fonte, rc.nome))
-           and cardinality(pg_temp.sem_blocos(p.prosrc)) > 5
-           and (select count(*) from regexp_matches(p.prosrc, '-- FASE 6: fim', 'g'))
+           pg_temp.sem_blocos(x.src) = pg_temp.sem_blocos(pg_temp.corpo(rc.fonte, rc.nome))
+           and cardinality(pg_temp.sem_blocos(x.src)) > 5
+           and (select count(*) from regexp_matches(x.src, '-- FASE 6: fim', 'g'))
                = (select count(*) from regexp_matches(pg_temp.corpo(rc.fonte, rc.nome), '-- FASE 6: fim', 'g')) + rc.novos
-           and p.prosrc ~ '-- FASE 6: \(P5\)',
-           format('%s linhas fora dos blocos; %s blocos', cardinality(pg_temp.sem_blocos(p.prosrc)),
-                  (select count(*) from regexp_matches(p.prosrc, '-- FASE 6: fim', 'g')))
-      from pg_proc p where p.oid = rc.sig::regprocedure;
+           and x.src ~ '-- FASE 6: \(P5\)',
+           format('%s linhas fora dos blocos; %s blocos', cardinality(pg_temp.sem_blocos(x.src)),
+                  (select count(*) from regexp_matches(x.src, '-- FASE 6: fim', 'g')))
+      from pg_proc p
+      cross join lateral (select case when rc.nome = '_agenda_aprendizado_texto' then pg_temp.corpo(v_esta, rc.nome)
+                                      else p.prosrc end as src) x
+     where p.oid = rc.sig::regprocedure;
   end loop;
   insert into _resultado
   select 'C5d o risco sem os blocos da correção C2 e da Fase 6 é o de 20261028100300 (o que o C2z confere); a folga mora dentro do bloco da correção do retorno',
