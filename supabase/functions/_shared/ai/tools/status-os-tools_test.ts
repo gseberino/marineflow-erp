@@ -104,9 +104,10 @@ Deno.test("ficha 360: OS aguardando cliente conta como em andamento", async () =
 const mudarStatus = serviceOrderTools.find((t) => t.name === "update_service_order_status")!;
 
 /** service_orders falso: a leitura do status atual e o update, gravados. Sem .catch, como o real. */
-function osFalsa(statusAtual: string) {
+function osFalsa(statusAtual: string, atual: Record<string, unknown> = { service_order_number: "OS-00104" }) {
   const updates: Record<string, unknown>[] = [];
   let leituras = 0;
+  let chamouSequencia = false;
   const from = () => {
     let upd: Record<string, unknown> | null = null;
     const b: Record<string, unknown> = {};
@@ -114,15 +115,33 @@ function osFalsa(statusAtual: string) {
     b.update = (p: Record<string, unknown>) => { upd = p; updates.push(p); return b; };
     b.then = (ok: (v: unknown) => unknown) => {
       if (!upd) leituras++;
-      const data = upd ? { id: "so1", ...upd } : { status: statusAtual, service_order_number: "OS-00104" };
+      const data = upd ? { id: "so1", ...upd } : { status: statusAtual, ...atual };
       return Promise.resolve({ data, error: null }).then(ok);
     };
     return b;
   };
   const sb = { from };
-  const admin = { rpc: () => Promise.resolve({ data: 120, error: null }) };
-  return { ctx: { sb, admin, settings: {} } as never, updates, leituras: () => leituras };
+  const admin = { rpc: () => { chamouSequencia = true; return Promise.resolve({ data: 120, error: null }); } };
+  return { ctx: { sb, admin, settings: {} } as never, updates, leituras: () => leituras, chamouSequencia: () => chamouSequencia };
 }
+
+Deno.test("conversão ORÇ→OS mantém o número (como a tela) e guarda o valor orçado — sem puxar a sequência", async () => {
+  const orc = osFalsa("draft", { service_order_number: "ORÇ-00042", converted_to_os_at: null, grand_total: 4200, original_quote_amount: null });
+  const r = await mudarStatus.execute({ id: "so1", status: "approved" }, orc.ctx) as Record<string, any>;
+  assertEquals(r.ok, true);
+  assertEquals(orc.updates.length, 1);
+  const u = orc.updates[0];
+  assertEquals(u.status, "approved");
+  assertEquals(u.service_order_number, "OS-00042");
+  assertEquals(u.original_quote_amount, 4200);
+  assertEquals(typeof u.converted_to_os_at, "string");
+  assertEquals(orc.chamouSequencia(), false, "número novo da sequência desencontrava a OS do orçamento enviado");
+
+  // Valor orçado já guardado não é sobrescrito.
+  const comOrcado = osFalsa("draft", { service_order_number: "ORÇ-00043", converted_to_os_at: null, grand_total: 5000, original_quote_amount: 4800 });
+  await mudarStatus.execute({ id: "so1", status: "scheduled" }, comOrcado.ctx);
+  assertEquals("original_quote_amount" in comOrcado.updates[0], false);
+});
 
 Deno.test("D7: preValidar recusa concluir (manda para a tela) e cancelar (manda para cancel_service_order)", () => {
   const concluir = mudarStatus.preValidar!({ id: "so1", status: "completed" }, {} as never)!;

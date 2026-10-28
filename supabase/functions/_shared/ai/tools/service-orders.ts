@@ -4,6 +4,7 @@ import { dayOverloadNotice } from "./agenda.ts";
 import { recalcularOSComCascata } from "../../receivables/cascata.ts";
 import { validadePadraoDoOrcamento } from "../validade-orcamento.ts";
 import { acharOS } from "./os-referencia.ts";
+import { numeroDaOS } from "./converter-sem-sinal.ts";
 import { ehErro } from "./caixa.ts";
 import { ROTULOS_STATUS_OS, STATUS_OS, statusAoAgendar, type StatusOS } from "../../service-order-status.ts";
 
@@ -702,7 +703,7 @@ export const serviceOrderTools: ToolDef[] = [
     // Recusa antes de a pendência nascer (quando a tool chega pela rede e pede o "sim"): o dono não
     // aprova uma conclusão que a execução vai recusar.
     preValidar: (args) => recusaDoStatusPeloAssistente(args?.status),
-    async execute(args, { sb, admin }) {
+    async execute(args, { sb }) {
       // D7 (Agenda de Produção, Fase 0, 23/10/2026): a mesma recusa do preValidar (defesa dupla —
       // no perfil a tool é low e roda direto, sem passar pelo preValidar).
       const recusa = recusaDoStatusPeloAssistente(args.status);
@@ -710,7 +711,7 @@ export const serviceOrderTools: ToolDef[] = [
 
       const { data: current, error: erroAtual } = await sb
         .from("service_orders")
-        .select("status, service_order_number")
+        .select("status, service_order_number, converted_to_os_at, grand_total, original_quote_amount")
         .eq("id", args.id)
         .maybeSingle();
       if (erroAtual) throw erroAtual;
@@ -729,14 +730,17 @@ export const serviceOrderTools: ToolDef[] = [
 
       const updatePayload: Record<string, any> = { status: args.status };
 
-      if (current?.status === "draft" && args.status !== "draft") {
-        try {
-          const { data: seqVal } = await admin.rpc("next_document_number");
-          if (seqVal !== null) {
-            updatePayload.service_order_number = `OS-${String(seqVal as number).padStart(5, "0")}`;
-            updatePayload.converted_to_os_at = new Date().toISOString();
-          }
-        } catch { /* mantém número atual se RPC falhar */ }
+      // Conversão ORÇ→OS igual à da tela (useUpdateServiceOrderStatus): o MESMO número com o
+      // prefixo trocado (ORÇ-00042 → OS-00042; orçamento e OS dividem o contador) e o valor orçado
+      // guardado para comparar com o realizado. Até 28/10/2026 aqui se puxava um número NOVO da
+      // sequência — a OS do assistente não batia com o orçamento que o cliente tinha recebido, e
+      // se o RPC falhasse a OS ficava sem converted_to_os_at.
+      if (current?.status === "draft" && !current?.converted_to_os_at && args.status !== "draft") {
+        updatePayload.converted_to_os_at = new Date().toISOString();
+        updatePayload.service_order_number = numeroDaOS(current.service_order_number);
+        if (!current.original_quote_amount && current.grand_total) {
+          updatePayload.original_quote_amount = current.grand_total;
+        }
       }
 
       const { data, error } = await sb.from("service_orders").update(updatePayload).eq("id", args.id).select().single();
