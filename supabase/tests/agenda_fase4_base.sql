@@ -107,6 +107,22 @@ begin
   end loop;
   return v_b;
 end $f$;
+-- FASE 6: (P3) o corpo sem os blocos "-- FASE 6: … -- FASE 6: fim" (20261029100300 recriou os_prontidao com a data provável)
+create function pg_temp.sem_fase6(p_corpo text) returns text language plpgsql as $f$
+declare
+  v_b text[] := '{}'; v_bloco boolean := false; l text;
+begin
+  foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
+    if not v_bloco and l ~ '^\s*-- FASE 6:' and l !~ '^\s*-- FASE 6: fim' then v_bloco := true; continue; end if;
+    if v_bloco then
+      if l ~ '^\s*-- FASE 6: fim' then v_bloco := false; end if;
+      continue;
+    end if;
+    v_b := v_b || l;
+  end loop;
+  return array_to_string(v_b, E'\n');
+end $f$;
+-- FASE 6: fim
 create function pg_temp.sem_fase4(p_corpo text) returns text[] language plpgsql as $f$
 declare
   v_b text[] := '{}'; v_bloco boolean := false; l text;
@@ -652,6 +668,9 @@ begin
       v_a := v_a || l;
     end loop;
     v_b := pg_temp.sem_fase4((select p.prosrc from pg_proc p where p.oid = 'public.os_prontidao(uuid, date)'::regprocedure));
+    -- FASE 6: (P3) sem os blocos "-- FASE 6:" também (20261029100300: a data provável, só acréscimo)
+    v_b := pg_temp.sem_fase4(pg_temp.sem_fase6((select p.prosrc from pg_proc p where p.oid = 'public.os_prontidao(uuid, date)'::regprocedure)));
+    -- FASE 6: fim
     -- Os 8 blocos do P1 e o 9º do P2 (20261027100200: a OC recebida ligada ao texto livre não conta duas vezes; só
     -- acréscimo, sem linha trocada).
     insert into _resultado values ('B7z a cópia de os_prontidao só muda nos 9 blocos "-- FASE 4:" (fora deles, linha a linha a de 20261025100200)',

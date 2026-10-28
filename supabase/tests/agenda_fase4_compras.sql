@@ -72,6 +72,22 @@ begin
 end $f$;
 
 -- O corpo sem os blocos "-- FASE 4: … -- FASE 4: fim" (linhas).
+-- FASE 6: (P3) o corpo sem os blocos "-- FASE 6: … -- FASE 6: fim" (20261029100300 recriou os_prontidao com a data provável)
+create function pg_temp.sem_fase6(p_corpo text) returns text language plpgsql as $f$
+declare
+  v_b text[] := '{}'; v_bloco boolean := false; l text;
+begin
+  foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
+    if not v_bloco and l ~ '^\s*-- FASE 6:' and l !~ '^\s*-- FASE 6: fim' then v_bloco := true; continue; end if;
+    if v_bloco then
+      if l ~ '^\s*-- FASE 6: fim' then v_bloco := false; end if;
+      continue;
+    end if;
+    v_b := v_b || l;
+  end loop;
+  return array_to_string(v_b, E'\n');
+end $f$;
+-- FASE 6: fim
 create function pg_temp.sem_fase4(p_corpo text) returns text[] language plpgsql as $f$
 declare
   v_b text[] := '{}'; v_bloco boolean := false; l text;
@@ -717,6 +733,9 @@ begin
 
   -- os_prontidao já vem da Fase 4 (P1): os dois sem os blocos "-- FASE 4:" (o do P2 é só acréscimo), e um bloco a mais.
   v_novo := (select prosrc from pg_proc where oid = 'public.os_prontidao(uuid, date)'::regprocedure);
+  -- FASE 6: (P3) sem os blocos "-- FASE 6:" (20261029100300: a data provável, só acréscimo)
+  v_novo := pg_temp.sem_fase6(v_novo);
+  -- FASE 6: fim
   v_res := pg_temp.copia(pg_temp.sem_fase4(pg_temp.corpo(v_p, 'os_prontidao')), v_novo, '{}'::text[]);
   insert into _resultado values ('C8f os_prontidao: só acréscimo sobre a de 20261027100100 (um bloco "-- FASE 4:" a mais)',
     v_res = 'ok'

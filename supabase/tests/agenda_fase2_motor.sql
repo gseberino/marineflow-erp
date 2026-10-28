@@ -1052,13 +1052,14 @@ begin
     v_a := v_a || l;
   end loop;
   -- o de agora, sem os blocos "-- FASE 2: … -- FASE 2: fim" (FASE 4: e sem os "-- FASE 4: … -- FASE 4: fim")
+  -- (Fase 6, P3: e sem os "-- FASE 6: … -- FASE 6: fim": 20261029100300 recriou os_prontidao com a data provável, só acréscimo)
   foreach l in array string_to_array(v_novo, E'\n') loop
-    if not v_bloco and l ~ '^\s*-- FASE [24]:' and l !~ '^\s*-- FASE [24]: fim' then
+    if not v_bloco and l ~ '^\s*-- FASE [246]:' and l !~ '^\s*-- FASE [246]: fim' then
       v_bloco := true;
       continue;
     end if;
     if v_bloco then
-      if l ~ '^\s*-- FASE [24]: fim' then v_bloco := false; end if;
+      if l ~ '^\s*-- FASE [246]: fim' then v_bloco := false; end if;
       continue;
     end if;
     v_b := v_b || l;

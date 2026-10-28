@@ -410,6 +410,8 @@ describe('agenda: parâmetro só em agenda_config', () => {
       // Fase 6 (P2): o fator de campo, o R$ por diária e a presença aprendida (os passos e as leituras)
       '_agenda_aprender_fator', 'agenda_fator_de_campo', '_agenda_aprender_mo', '_agenda_mo_por_diaria_real',
       '_agenda_aprender_presenca', '_agenda_presenca_aprendida',
+      // Fase 6 (P3): o atraso e o prazo medidos do fornecedor (o passo e a leitura)
+      '_agenda_aprender_fornecedor', '_agenda_atraso_do_fornecedor',
     ]));
     expect(tsAgenda.map((t) => t.onde)).toEqual(expect.arrayContaining([
       path.join('supabase', 'functions', 'task-automations', 'agenda-vigia.ts'),
