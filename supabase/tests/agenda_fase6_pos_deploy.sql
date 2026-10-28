@@ -1,7 +1,7 @@
 -- Conferência DEPOIS de aplicar a Agenda de Produção, Fase 6 (pacote P8): migrations 20261029100000..100800, as edge functions
 -- (task-automations com a rodada, ai-agent e erp-mcp com o foco), o front do cartão "Plano" e (passo 3) a migration de dado
 -- 20261029101000 — modo_aprendizado em sombra — fila-do-dono/fase6-oks.md, passos 1–3 (e de novo a cada item ligado, passo 4).
--- bancada: depende de 20261029100800
+-- bancada: depende de 20261029100900
 --
 -- SÓ LEITURA EM PRODUÇÃO: nenhum INSERT, UPDATE ou DELETE (só nas tabelas TEMPORÁRIAS do resultado); agenda_saude, agenda_ver
 -- e os_plano_da_os são STABLE e não gravam; termina em ROLLBACK. Na bancada (que não aplica a 20261029101000: lá o modo fica
@@ -19,6 +19,8 @@
 --   S  agenda_saude().aprendizado: os 6 zeros obrigatórios; o modo que a saúde mostra é o da linha; nenhum erro aprender:% em
 --      24 h nem aberto em app_error_logs; a rodada do dia depois das 16:00 (só mostra antes do 1º tique dela)
 --   L  as leituras: o foco aprendizado devolve texto dentro de texto_max e o mesmo texto duas vezes (md5)
+--   K  (correção C1, 20261029100900) registrada; as 2 colunas e o CHECK novos de os_planejamento; o sem_fim; as 2 funções
+--      novas e as portas; o "já rodou hoje?" pelo índice novo
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -217,6 +219,54 @@ insert into _resultado
 select 'L2 duas leituras seguidas do foco aprendizado = o mesmo texto (md5)',
        md5(coalesce(l.apr ->> 'texto', '')) = md5(coalesce(l.apr2 ->> 'texto', '')), null
   from _pd_leituras l;
+
+-- ── K. A correção C1 (20261029100900) ─────────────────────────────────────────────────────────────────────
+insert into _resultado
+select 'K1 (C1) a migration 20261029100900 (a correção dos cálculos) registrada',
+       exists (select 1 from supabase_migrations.schema_migrations m where m.version = '20261029100900'), null;
+insert into _resultado
+select 'K2 (C1, item 3) os_planejamento tem presenca_publicada e presenca_publicada_motivo, com o CHECK presenca_publicada_coerente',
+       count(*) = 2 and exists (select 1 from pg_constraint c where c.conrelid = 'public.os_planejamento'::regclass
+                                                             and c.conname = 'presenca_publicada_coerente'),
+       string_agg(column_name, ', ')
+  from information_schema.columns
+ where table_schema = 'public' and table_name = 'os_planejamento' and column_name in ('presenca_publicada', 'presenca_publicada_motivo');
+insert into _resultado
+select 'K3 (C1, item 9) a lista de agenda_medidas_os.motivo aceita sem_fim',
+       pg_get_constraintdef(c.oid) like '%sem_fim%', pg_get_constraintdef(c.oid)
+  from pg_constraint c where c.conrelid = 'public.agenda_medidas_os'::regclass and c.conname = 'agenda_medidas_os_motivo_check';
+insert into _resultado
+select 'K4 (C1) as 2 funções novas existem; nenhuma para anon; _agenda_concluida_em sem grant a ninguém',
+       to_regprocedure('public._agenda_fornecedor_da_medida(uuid)') is not null
+       and to_regprocedure('public._agenda_concluida_em(uuid)') is not null
+       and not has_function_privilege('anon', 'public._agenda_fornecedor_da_medida(uuid)', 'execute')
+       and not has_function_privilege('anon', 'public._agenda_concluida_em(uuid)', 'execute')
+       and not has_function_privilege('authenticated', 'public._agenda_concluida_em(uuid)', 'execute')
+       and not has_function_privilege('service_role', 'public._agenda_concluida_em(uuid)', 'execute'),
+       null;
+-- (B4) o "já rodou hoje?" da rodada do aprendizado pelo índice: com a varredura sequencial proibida (só nesta transação, que
+-- termina em ROLLBACK), o plano usa agenda_vigia_rodadas_rotina_dia; o plano de verdade (com a tabela do tamanho que ela tem)
+-- só é mostrado.
+do $k5$
+declare
+  l text;
+  v_com text := '';
+  v_sem text := '';
+begin
+  for l in execute $q$explain select 1 from public.agenda_vigia_rodadas x where x.rotina = 'aprender' and x.p_hoje = date '2026-10-30'$q$ loop
+    v_sem := v_sem || l || ' ';
+  end loop;
+  set local enable_seqscan = off;
+  for l in execute $q$explain select 1 from public.agenda_vigia_rodadas x where x.rotina = 'aprender' and x.p_hoje = date '2026-10-30'$q$ loop
+    v_com := v_com || l || ' ';
+  end loop;
+  set local enable_seqscan = on;
+  insert into _resultado values ('K5 (C1, B4) o "já rodou hoje?" da rodada pode ir pelo índice agenda_vigia_rodadas_rotina_dia (sem varrer a tabela)',
+    v_com like '%agenda_vigia_rodadas_rotina_dia%', left(v_com, 300));
+  insert into _resultado values ('K6 (C1, B4) o plano de agora (só mostra; com poucas rodadas o Postgres ainda pode preferir varrer)', true,
+    left(v_sem, 300));
+end
+$k5$;
 
 select teste, ok, detalhe from _resultado order by teste;
 

@@ -998,6 +998,7 @@ $motor$;
 -- ── Q5. A cópia de os_prontidao: fora dos pontos "-- FASE 2:", igual ao corpo da Fase 1 (160400) ──────
 do $copia$
 declare
+  v_c6 boolean := false;  -- CORREÇÃO FASE 6 (C1): dentro de um bloco da correção da Fase 6
   v_mig   text := current_setting('agenda_teste.mig_prontidao_fase1', true);
   v_ini   int;
   v_corpo text;
@@ -1054,6 +1055,14 @@ begin
   -- o de agora, sem os blocos "-- FASE 2: … -- FASE 2: fim" (FASE 4: e sem os "-- FASE 4: … -- FASE 4: fim")
   -- (Fase 6, P3: e sem os "-- FASE 6: … -- FASE 6: fim": 20261029100300 recriou os_prontidao com a data provável, só acréscimo)
   foreach l in array string_to_array(v_novo, E'\n') loop
+    -- CORREÇÃO FASE 6: (C1) os blocos "-- CORREÇÃO FASE 6: … -- CORREÇÃO FASE 6: fim" também saem (a correção C1 da Fase 6
+    -- recria a função copiando a definição mais nova: só acréscimo); o fim é lido pelo prefixo
+    if not v_c6 and l ~ '^\s*-- CORREÇÃO FASE 6:' and l !~ '^\s*-- CORREÇÃO FASE 6: fim' then v_c6 := true; continue; end if;
+    if v_c6 then
+      if l ~ '^\s*-- CORREÇÃO FASE 6: fim' then v_c6 := false; end if;
+      continue;
+    end if;
+    -- CORREÇÃO FASE 6: fim
     if not v_bloco and l ~ '^\s*-- FASE [246]:' and l !~ '^\s*-- FASE [246]: fim' then
       v_bloco := true;
       continue;

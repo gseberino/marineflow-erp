@@ -39,8 +39,10 @@
 --     antes da Fase 6) e a 137 23/10 pelo prometido_primeiro_ate: o aviso "ainda faltam peças sem data" de 20/10 zerou o
 --     prometido e o original, e o aviso da peça de 23/10 gravou 26/10 como se fosse o 1º (NOVO-agenda-44). No prazo: 131,
 --     132, 133, 134 e 136 (5 de 7); 135 e 137 dois dias úteis depois;
---   · os avisos de atraso enviados (pode_atrasar): 133 (faixa até 15/09), 134 (20/10), 135 (21/10), 136 (26/10) e a 137 (o sem
---     data, sem faixa, e o da peça, até 26/10): a conclusão 2, 0, 2, 3 e 1 dia útil depois da faixa → P80 2,2 (a folga 2).
+--   · os avisos de atraso enviados (pode_atrasar): 133 (faixa até 15/09), 134 (20/10), 135 (21/10), 136 (26 a 27/10) e a 137 (o
+--     sem data, sem faixa, e o da peça, até 26/10): a conclusão 2, 0, 2, 2 e 1 dia útil depois da faixa → P80 2 (a folga 2).
+--     CORREÇÃO FASE 6 (C1, item 11): a folga arredonda para cima; com a faixa da 136 até 26/10 (estouro 3) o P80 seria 2,2 e
+--     daria 3 — o C8 de agenda_fase6_cliente.sql prova isso voltando a faixa dela a 26/10 dentro do teste.
 --     Os avisos que estreitam a faixa dentro da promessa (133, 134, 136) estouram a faixa sem atrasar a promessa.
 -- O que os pacotes seguintes acrescentam (em seções próprias no fim deste arquivo): as intervenções do dono de 20/10, 22/10 e
 -- 27/10 (P2: na 134, na 135 e na 136, e uma "passou"), os fornecedores (P3), as semanas do dono no plano (P4) e o plano
@@ -177,8 +179,8 @@ select ('d6000000-0000-4000-8000-0000000006' || k)::uuid, ('c6000000-0000-4000-8
      'Davi, o serviço no seu motorhome vai até terça (20/10), de manhã. Qualquer coisa, me avise.'),
     ('35', '135', 'execucao', '2026-10-20', '2026-10-21', '2026-10-20 17:00',
      'Elisa, o serviço no seu motorhome deve terminar entre terça (20/10) e quarta (21/10). Qualquer coisa, me avise.'),
-    ('36', '136', 'peca', '2026-10-26', '2026-10-26', '2026-10-22 10:00',
-     'Fábio, a peça chegou: o serviço no seu motorhome fica para segunda (26/10). Qualquer coisa, me avise.'),
+    ('36', '136', 'peca', '2026-10-26', '2026-10-27', '2026-10-22 10:00',
+     'Fábio, a peça chegou: o serviço no seu motorhome deve terminar entre segunda (26/10) e terça (27/10). Qualquer coisa, me avise.'),
     ('37', '137', 'peca_sem_data', null, null, '2026-10-20 10:00',
      'Gil, quero te avisar com antecedência: ainda faltam peças sem data de chegada, então o serviço no seu motorhome, que estava para sexta (23/10), vai atrasar. Te digo a nova data assim que elas chegarem.'),
     ('38', '137', 'peca', '2026-10-26', '2026-10-26', '2026-10-23 10:00',
@@ -317,6 +319,9 @@ $confere_p2$;
 -- chegada: 4 (03/09 → 10/09: 07/09 é feriado), 5, 6, 6 (05/10 → 14/10: 12/10 é feriado) e 6 dias úteis → o P80 é 6 (o
 -- padrão de "outro estado" é 4). Nada aqui manda mensagem: são fatos do passado. As linhas não têm comprado_em (o dia da
 -- 1ª previsão fica em previsao_original_em): assim o "tempo até comprar" do foco compras continua o da Fase 4.
+-- CORREÇÃO FASE 6 (C1, item 2): as 3 linhas da nota da 133 têm a 1ª previsão do FORNECEDOR (o vendedor disse o dia; a nota
+-- chegou depois e as ligou à remessa): o atraso só mede a promessa de quem vende (fornecedor, OC, Pix) — a previsão da
+-- nota (nfe) já é "saída + prazo" e fica só para o prazo medido. As 6 entregas da Kamell e o P80 2 não mudam.
 insert into public.material_remessas (id, nfe_chave, fornecedor_id, emitente, emitente_uf, numero, emitida_em, saida_em,
   classe, prazo_du, previsao_ate, estado, vinculo, os_ids, respondida_em, chegou_em, criada_em)
 select ('d6300000-0000-4000-8000-00000000010' || k)::uuid, rpad('3226099999' || k, 44, '0'), 'dd000000-0000-4000-8000-000000000002',
@@ -341,9 +346,9 @@ select ('d6300000-0000-4000-8000-0000000000' || id)::uuid, ('05000000-0000-4000-
     -- Kamell (dd…02)
     ('01', '131', 'dono', 'Bateria de lítio 100Ah (AG6F)', 'fornecedor', 'dd000000-0000-4000-8000-000000000002', '2026-09-01', '2026-09-03', '2026-09-03', false),
     ('02', '132', 'dono', 'Inversor 2000W (AG6F)', 'fornecedor', 'dd000000-0000-4000-8000-000000000002', '2026-09-01', '2026-09-04', '2026-09-03', false),
-    ('03', '133', 'dono', 'Cabo 25mm vermelho (AG6F)', 'nfe', null, '2026-09-03', '2026-09-11', '2026-09-10', true),
-    ('04', '133', 'dono', 'Terminal 25mm (AG6F)', 'nfe', null, '2026-09-03', '2026-09-10', '2026-09-10', true),
-    ('05', '133', 'dono', 'Fusível ANL 150A (AG6F)', 'nfe', null, '2026-09-03', '2026-09-10', '2026-09-10', true),
+    ('03', '133', 'dono', 'Cabo 25mm vermelho (AG6F)', 'fornecedor', null, '2026-09-03', '2026-09-11', '2026-09-10', true),
+    ('04', '133', 'dono', 'Terminal 25mm (AG6F)', 'fornecedor', null, '2026-09-03', '2026-09-10', '2026-09-10', true),
+    ('05', '133', 'dono', 'Fusível ANL 150A (AG6F)', 'fornecedor', null, '2026-09-03', '2026-09-10', '2026-09-10', true),
     ('06', '134', 'dono', 'Inversor 3000W 12V (AG6F)', 'oc', 'dd000000-0000-4000-8000-000000000002', '2026-10-08', '2026-10-14', '2026-10-14', false),
     ('07', '135', 'dono', 'Carregador DC-DC 30A (AG6F)', 'fornecedor', 'dd000000-0000-4000-8000-000000000002', '2026-10-09', '2026-10-15', '2026-10-19', false),
     ('08', '136', 'dono', 'Painel solar 400W (AG6F)', 'fornecedor', 'dd000000-0000-4000-8000-000000000002', '2026-10-13', '2026-10-20', '2026-10-23', false),
@@ -371,7 +376,7 @@ $confere_p3$;
 -- ── P4 (28/10): as semanas do dono no plano (o insumo da capacidade do dono) ────────────────────────────
 -- As 8 semanas completas antes de sex 30/10 vão de seg 31/08 a dom 25/10. O dono (Gustavo, bb…01) no plano, por semana
 -- (presença turno; c = cumprido, p = parcial, n = não cumprido, x = cancelado; entre parênteses o motivo):
---   31/08  1º m c, 1º t c, 02 m c, 02 t p (esqueci), 03 m x (dono)          → 3,5 de 5 = 0,70; fora da conta: 03 t x (clima),
+--   31/08  1º m c, 1º t c, 02 m c, 02 t p (esqueci), 03 m x (pessoa)        → 3,5 de 5 = 0,70; fora da conta: 03 t x (clima),
 --                                                                             04 m sem registro
 --   07/09  08 m c, 08 t n (esqueci), 09 m c, 09 t n (urgencia_outra_os)      → 2 de 4 = 0,50; fora: 10 m n (material)
 --   14/09  15 m c, 15 t c, 16 m p, 16 t p (trabalho_anterior), 17 m n (equipe_faltou) → 3 de 5 = 0,60
@@ -380,6 +385,9 @@ $confere_p3$;
 --   05/10 e 12/10  nada
 --   19/10  19 m c (na OS-00134, com o Roberto)                               → 1 meio-dia só: a semana NÃO conta
 --   26/10  26 m c, 26 t c (na OS-00136, com o Roberto)                       → a semana de hoje (incompleta): fora
+-- CORREÇÃO FASE 6 (C1, item 5): o cancelado de 03/09 de manhã é por ele não poder (cancelada_motivo 'pessoa', que conta); o
+-- cancelado a pedido dele ('dono', o motor obedecendo a um pedido) saiu da conta — o D8 de agenda_fase6_dono.sql prova isso
+-- voltando este a 'dono' dentro do teste (0,875 → 0,70).
 -- Contam 5 semanas (6 com o dono no plano); a mediana 0,70 × carga_max 0,80 = 0,56 → troca de 0,24 (> capacidade_troca_max
 -- 0,20): pergunta ("você fez 7 de cada 10 meios-dias seus marcados no plano (5 semanas medidas)"). As idas fora do plano na
 -- janela: 20/10 o dia todo e 22/10 de manhã (as do P2) = 3 meios-dias (a de 27/10 é desta semana; a "passou" não conta).
@@ -414,7 +422,7 @@ select ('05000000-0000-4000-8000-000000000' || n)::uuid, 'bb000000-0000-4000-800
   from (values
     ('145', '2026-09-01', 'manha', 'cumprido', null, null), ('145', '2026-09-01', 'tarde', 'cumprido', null, null),
     ('145', '2026-09-02', 'manha', 'cumprido', null, null), ('145', '2026-09-02', 'tarde', 'parcial', 'esqueci', null),
-    ('145', '2026-09-03', 'manha', null, null, 'dono'), ('145', '2026-09-03', 'tarde', null, null, 'clima'),
+    ('145', '2026-09-03', 'manha', null, null, 'pessoa'), ('145', '2026-09-03', 'tarde', null, null, 'clima'),
     ('145', '2026-09-04', 'manha', 'sem_registro', null, null),
     ('145', '2026-09-08', 'manha', 'cumprido', null, null), ('145', '2026-09-08', 'tarde', 'nao_cumprido', 'esqueci', null),
     ('145', '2026-09-09', 'manha', 'cumprido', null, null), ('145', '2026-09-09', 'tarde', 'nao_cumprido', 'urgencia_outra_os', null),

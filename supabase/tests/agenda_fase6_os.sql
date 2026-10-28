@@ -1,6 +1,6 @@
 -- Prova da OS no aprendizado da Agenda de Produção, Fase 6 (pacote P2; migration 20261029100200): o fator de campo por classe,
 -- o R$ por diária e a presença do dono aprendida.
--- bancada: depende de 20261029100200
+-- bancada: depende de 20261029100900
 --
 --   O1 o fator por nível e o recuo: o P80 das medidas válidas em cada uma das 4 chaves (rv:energia 1,70; bem:rv 1,60; todas
 --      1,50); as de barco ficam abaixo do mínimo e caem no nível todas; o prender em [fator_min, fator_max]; rodar 2× não
@@ -20,6 +20,9 @@
 --      definições de antes (20261024160400, rodadas como pg_temp) devolvem para todas as OS; o motor (agenda_meios_da_os) da
 --      carteira também não muda
 --   O8 os textos do R$ por diária e da presença em cada momento (spec §6.2/§6.3), sem jargão (em qualquer lugar)
+--   O9 (correção C1, 20261029100900) a presença guardada na 1ª publicação (o motor, o cartão e o CHECK novo); a presença
+--      geral só com mais de uma classe; a vigia conta as diárias fora do plano como a medida; a vigia sem o fator fora de
+--      ligado e sem cair pelo erro dele
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -90,9 +93,18 @@ end $f$;
 -- As linhas fora dos blocos "-- FASE 6: … -- FASE 6: fim" (o fim é lido pelo prefixo, como nos testes de cópia de antes).
 create function pg_temp.sem_fase6(p_corpo text) returns text[] language plpgsql as $f$
 declare
+  v_c6 boolean := false;  -- CORREÇÃO FASE 6 (C1): dentro de um bloco da correção da Fase 6
   v_b text[] := '{}'; v_bloco boolean := false; l text;
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
+    -- CORREÇÃO FASE 6: (C1) os blocos "-- CORREÇÃO FASE 6: … -- CORREÇÃO FASE 6: fim" também saem (a correção C1 da Fase 6
+    -- recria a função copiando a definição mais nova: só acréscimo); o fim é lido pelo prefixo
+    if not v_c6 and l ~ '^\s*-- CORREÇÃO FASE 6:' and l !~ '^\s*-- CORREÇÃO FASE 6: fim' then v_c6 := true; continue; end if;
+    if v_c6 then
+      if l ~ '^\s*-- CORREÇÃO FASE 6: fim' then v_c6 := false; end if;
+      continue;
+    end if;
+    -- CORREÇÃO FASE 6: fim
     if not v_bloco and l ~ '^\s*-- FASE 6:' and l !~ '^\s*-- FASE 6: fim' then v_bloco := true; continue; end if;
     if v_bloco then
       if l ~ '^\s*-- FASE 6: fim' then v_bloco := false; end if;
@@ -415,9 +427,9 @@ begin
 
     update public.agenda_config set modo_aprendizado = 'sombra' where id;
     v := public._agenda_aprender_presenca(c_hoje, c_agora);
-    v_res := pg_temp.ok(v_res, 'O5a em teste: desde a 1ª ida registrada (20/10), 3 de 4 OS de energia em motorhome → o dia todo, em rv:energia, sistema:energia e todas',
-      v = '{"desde": "2026-10-20", "chaves": 3, "estados": {"sombra": 3}, "acoes": 0, "perguntas": 0, "erros": 0}'
-      and pg_temp.linhas('presenca') = 'rv:energia=1.00/4/sombra sistema:energia=1.00/4/sombra todas=1.00/4/sombra'
+    v_res := pg_temp.ok(v_res, 'O5a em teste: desde a 1ª ida registrada (20/10), 3 de 4 OS de energia em motorhome → o dia todo, em rv:energia e sistema:energia; todas medindo (correção C1, item 7: uma classe só)',
+      v = '{"desde": "2026-10-20", "chaves": 3, "estados": {"sombra": 2, "medindo": 1}, "acoes": 0, "perguntas": 0, "erros": 0}'
+      and pg_temp.linhas('presenca') = 'rv:energia=1.00/4/sombra sistema:energia=1.00/4/sombra todas=-/4/medindo'
       and (select bool_and(a.detalhe ->> 'k' = '3' and a.padrao = 0) from public.agenda_aprendizado a where a.item = 'presenca'),
       v::text || ' / ' || pg_temp.linhas('presenca'));
     v_res := pg_temp.ok(v_res, 'O5b o texto do foco em teste (spec §6.2), e a presença da OS não muda',
@@ -429,13 +441,11 @@ begin
     update public.agenda_config set modo_aprendizado = 'ligado', aprendizado_ligados = '{presenca}' where id;
     v := public._agenda_aprender_presenca(c_hoje, c_agora);
     select * into v_q from public.agenda_perguntas where chave = 'aprendizado:presenca:todas' and estado = 'aberta';
-    v_res := pg_temp.ok(v_res, 'O5c ligado: na classe e no sistema entra sozinha (2 ações); no geral, pergunta (a regra d05 inteira)',
-      v ->> 'estados' = '{"em_uso": 2, "pergunta": 1}' and v ->> 'acoes' = '2' and v ->> 'perguntas' = '1'
+    v_res := pg_temp.ok(v_res, 'O5c ligado: na classe e no sistema entra sozinha (2 ações); no geral, medindo e sem a pergunta (correção C1, item 7: as mesmas OS de uma classe só; a pergunta do geral, com mais de uma classe, é o O9g2)',
+      v ->> 'estados' = '{"em_uso": 2, "medindo": 1}' and v ->> 'acoes' = '2' and v ->> 'perguntas' = '0'
       and (select x.texto from public.agenda_acoes x where x.tipo = 'aprendizado' and x.depois ->> 'chave' = 'rv:energia')
           = 'Você foi a 3 de 4 OS de energia em motorhome sem estar no plano: passei a contar com você o dia todo nas próximas dessas OS (as que você não disse como é). *desfaz aprendizado* volta ao abre e fecha.'
-      and v_q.critica
-      and v_q.texto = 'Você foi a 3 de 4 OS sem estar no plano. Quer que eu conte com você o dia todo por padrão, e não só para abrir e fechar? 1) Sim, o dia todo (recomendo pelo medido); 2) Não, continuo com o abre e fecha.'
-      and jsonb_array_length(v_q.opcoes) = 2,
+      and v_q.id is null,
       v::text || ' / ' || coalesce(v_q.texto, '-'));
 
     v := public.os_presenca_do_dono(pg_temp.os('100'));
@@ -499,7 +509,7 @@ begin
     update public.agenda_config set modo_aprendizado = 'ligado', aprendizado_ligados = '{presenca}' where id;
     v := public._agenda_aprender_presenca(c_hoje, c_agora);
     v_res := pg_temp.ok(v_res, 'O5k o "passou" não conta: com a ida da 136 como passou, 2 de 4 (abaixo de presenca_intervencoes_min) → o abre e fecha, sem ação nem pergunta',
-      pg_temp.linhas('presenca') = 'rv:energia=0.00/4/em_uso sistema:energia=0.00/4/em_uso todas=0.00/4/em_uso'
+      pg_temp.linhas('presenca') = 'rv:energia=0.00/4/em_uso sistema:energia=0.00/4/em_uso todas=-/4/medindo'
       and v ->> 'acoes' = '0' and v ->> 'perguntas' = '0'
       and (select a.detalhe ->> 'k' from public.agenda_aprendizado a where a.item = 'presenca' and a.chave = 'rv:energia') = '2'
       and public.os_presenca_do_dono(pg_temp.os('100')) ->> 'fonte' = 'regra',
@@ -688,6 +698,203 @@ select 'O8c nenhum jargão nos textos do R$ por diária e da presença (P80, per
           from unnest(array['mo', 'presenca']) i,
                unnest(array['foco_medindo', 'foco_sombra', 'foco_em_uso', 'foco_pergunta', 'foco_travado', 'acao', 'pergunta',
                             'opcao1', 'opcao2', 'opcao3', 'desfeito', 'fico']) m) t;
+
+-- ── O9. A correção C1 (20261029100900): itens 3, 7 e 15; regressão B3 ────────────────────────────────────
+-- (item 3) a presença guardada na 1ª publicação: publicado o 1º dia com o dono o dia todo, o resto da OS continua assim, e o
+-- cartão diz que foi o que a agenda mediu quando planejou (o rev-f6 c2). (item 7) a presença geral só com mais de uma classe.
+-- (item 15) com o fator aprendido em uso, a vigia conta as diárias ligadas fora do plano, como a medida. (B3) a vigia do
+-- estouro não lê o fator fora de ligado, e o erro dele não a derruba.
+do $o9$
+declare
+  v_res jsonb := '[]'::jsonb;
+  c_hoje  constant date := date '2026-10-30';
+  c_agora constant timestamptz := timestamptz '2026-10-30 16:05-03';
+  v    jsonb;
+  v_p  jsonb;
+  v_ap jsonb;
+  v_m  jsonb;
+  v_q  text;
+  v_c  numeric;
+  v_n0 jsonb;
+  v_err text;
+begin
+  if coalesce(current_setting('agenda_teste.fase6', true), '') = '' then
+    insert into _resultado values ('O9 a correção C1 da OS (fixture-fase6)', true, 'PULADO: sem agenda_teste.fase6 (rode pela bancada)');
+    return;
+  end if;
+
+  -- (item 3) a OS-00100 (energia em motorhome, sem plano) publicada pelo motor com a presença aprendida
+  begin
+    execute current_setting('agenda_teste.fase6');
+    perform public._agenda_aprender_medir(c_hoje);
+    update public.agenda_config set modo_aprendizado = 'ligado', aprendizado_ligados = '{presenca}', modo_proposta = 'ligado' where id;
+    perform public._agenda_aprender_presenca(c_hoje, c_agora);
+    v_p := public.agenda_propor('os', null, null, array[pg_temp.os('100')], '{}'::jsonb, true, 'motor', null, c_hoje,
+                                timestamptz '2026-10-30 16:30-03');
+    v_ap := public.agenda_aplicar((v_p ->> 'proposta_id')::uuid, null, 'motor', null, null, c_hoje, timestamptz '2026-10-30 16:31-03');
+    v_res := pg_temp.ok(v_res, 'O9a (C1, item 3) a 1ª publicação guarda a presença aprendida com que a OS entrou no plano (os_planejamento.presenca_publicada sempre, com o motivo)',
+      v_ap ->> 'ok' = 'true'
+      and (select to_jsonb(pl) ->> 'presenca_publicada' from public.os_planejamento pl where pl.service_order_id = pg_temp.os('100')) = 'sempre'
+      and (select to_jsonb(pl) ->> 'presenca_publicada_motivo' from public.os_planejamento pl where pl.service_order_id = pg_temp.os('100'))
+          = 'você foi a 3 de 4 OS de energia em motorhome',
+      coalesce(v_ap ->> 'texto', '—'));
+    v := public.os_presenca_do_dono(pg_temp.os('100'));
+    v_m := public.agenda_meios_da_os(pg_temp.os('100'), c_hoje);
+    v_res := pg_temp.ok(v_res, 'O9b (C1, item 3) publicado o plano, o resto da OS continua com você o dia todo (a presença guardada; o motor: dono no turno, sem abrir e fechar)',
+      v ->> 'presenca' = 'sempre' and v ->> 'fonte' = 'aprendida' and v ->> 'motivo' = 'você foi a 3 de 4 OS de energia em motorhome'
+      and v_m -> 'dono_turno' = '{"manha": true, "tarde": true}' and v_m ->> 'fecha' = 'false' and v_m ->> 'presenca' = 'sempre',
+      v::text || ' / ' || v_m::text);
+    v_res := pg_temp.ok(v_res, 'O9c (C1, item 3) o cartão diz que foi o que a agenda mediu quando planejou',
+      public.os_plano_da_os(pg_temp.os('100'), c_hoje) #>> '{presenca_dono,texto}'
+        = 'Você fica o tempo todo (pelo que medi quando planejei: você foi a 3 de 4 OS de energia em motorhome)',
+      public.os_plano_da_os(pg_temp.os('100'), c_hoje) #>> '{presenca_dono,texto}');
+    -- o publicado não muda pelo aprendizado: a aprendida de agora volta a abre e fecha (a ida da 136 vira "passou"), e a OS
+    -- publicada fica como foi planejada
+    update public.agenda_intervencoes_do_dono set dita = 'passou' where service_order_id = pg_temp.os('136');
+    perform public._agenda_aprender_presenca(c_hoje, timestamptz '2026-10-30 16:40-03');
+    v := public.os_presenca_do_dono(pg_temp.os('100'));
+    v_res := pg_temp.ok(v_res, 'O9d (C1, item 3) a aprendida de agora volta ao abre e fecha, e a OS já publicada continua o dia todo (a guardada)',
+      v ->> 'presenca' = 'sempre' and pg_temp.linhas('presenca') like 'rv:energia=0.00/4/%', v::text || ' / ' || pg_temp.linhas('presenca'));
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- (item 7) a presença geral (todas) com as OS de uma classe só: medindo, sem a pergunta
+  begin
+    execute current_setting('agenda_teste.fase6');
+    perform public._agenda_aprender_medir(c_hoje);
+    update public.agenda_config set modo_aprendizado = 'sombra' where id;
+    perform public._agenda_aprender_presenca(c_hoje, c_agora);
+    v_res := pg_temp.ok(v_res, 'O9e (C1, item 7) em teste, com as 4 OS de energia em motorhome (um sistema só), a presença geral fica medindo (sem calculado); a da classe e a do sistema, o dia todo',
+      pg_temp.linhas('presenca') = 'rv:energia=1.00/4/sombra sistema:energia=1.00/4/sombra todas=-/4/medindo', pg_temp.linhas('presenca'));
+    update public.agenda_config set modo_aprendizado = 'ligado', aprendizado_ligados = '{presenca}' where id;
+    v := public._agenda_aprender_presenca(c_hoje, c_agora);
+    v_res := pg_temp.ok(v_res, 'O9f (C1, item 7) ligado, a classe e o sistema entram sozinhos e NÃO sai a pergunta "conto com você o dia todo por padrão?"',
+      v ->> 'acoes' = '2' and v ->> 'perguntas' = '0'
+      and not exists (select 1 from public.agenda_perguntas q where q.chave = 'aprendizado:presenca:todas'), v::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  -- o controle: uma ida a uma OS de diagnóstico (outro sistema), e a de todas passa a ter calculado
+  begin
+    execute current_setting('agenda_teste.fase6');
+    insert into public.agenda_intervencoes_do_dono (service_order_id, dia, prevista, dita, classe, origem, trecho, criado_em)
+    values (pg_temp.os('140'), date '2026-09-22', 'nenhuma', 'dia', 'execucao', 'conversa', 'fiquei o dia todo no diagnóstico',
+            timestamptz '2026-09-22 18:00-03');
+    perform public._agenda_aprender_medir(c_hoje);
+    update public.agenda_config set modo_aprendizado = 'sombra' where id;
+    perform public._agenda_aprender_presenca(c_hoje, c_agora);
+    v_res := pg_temp.ok(v_res, 'O9g (C1, item 7) o controle: com as OS de mais de um sistema (energia, diagnóstico, conforto) e mais OS que a classe mais larga, a de todas tem calculado',
+      pg_temp.linhas('presenca') like '%todas=1.00/6/sombra%', pg_temp.linhas('presenca'));
+    update public.agenda_config set modo_aprendizado = 'ligado', aprendizado_ligados = '{presenca}' where id;
+    perform public._agenda_aprender_presenca(c_hoje, c_agora);
+    v_q := (select q.texto from public.agenda_perguntas q where q.chave = 'aprendizado:presenca:todas' and q.estado = 'aberta' and q.critica
+              and jsonb_array_length(q.opcoes) = 2);
+    v_res := pg_temp.ok(v_res, 'O9g2 (C1, item 7) e ligado, a pergunta crítica do geral (a regra d05 inteira), com o texto de sempre',
+      v_q = 'Você foi a 4 de 6 OS sem estar no plano. Quer que eu conte com você o dia todo por padrão, e não só para abrir e fechar? 1) Sim, o dia todo (recomendo pelo medido); 2) Não, continuo com o abre e fecha.',
+      coalesce(v_q, '—'));
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- (item 15) a OS-00100 em andamento com 6 de 4 meios-dias feitos e 1,7× em uso: sem diária fora do plano, não pergunta; com 2
+  -- diárias do Roberto ligadas a ela em dia sem plano (4 meios-dias), a vigia conta 10 — o que a medida contaria
+  begin
+    execute current_setting('agenda_teste.fase6');
+    perform pg_temp.os100_em_andamento(false);
+    perform public._agenda_aprender_medir(c_hoje);
+    update public.agenda_config set modo_aprendizado = 'ligado', aprendizado_ligados = '{fator}' where id;
+    perform public._agenda_aprender_fator(c_hoje, c_agora);
+    insert into public.work_shifts (id, work_profile_id, data, tipo, fracao, valor_diaria, origem, status, registrado_por,
+                                    aprovado_por, aprovado_em)
+    select md5('c1:ws:' || d)::uuid, 'cc000000-0000-4000-8000-000000000002', d::date, 'diaria', 1, 180, 'painel', 'aprovado',
+           'aa000000-0000-4000-8000-000000000001', 'aa000000-0000-4000-8000-000000000001', (d || ' 20:00-03')::timestamptz
+      from unnest(array['2026-10-24', '2026-10-30']) d;
+    insert into public.work_shift_os (shift_id, service_order_id)
+    select md5('c1:ws:' || d)::uuid, pg_temp.os('100') from unnest(array['2026-10-24', '2026-10-30']) d;
+    v := public._agenda_vigia_estouro(c_hoje, c_agora);
+    select q.texto into v_q from public.agenda_perguntas q where q.chave = 'estouro:' || pg_temp.os('100') || ':4';
+    v_res := pg_temp.ok(v_res, 'O9h (C1, item 15) com 1,7× em uso, os 6 meios-dias do plano mais os 4 das 2 diárias fora do plano (10 de 4) passam de 6,8 → a pergunta diz 5 dias',
+      v ->> 'criadas' = '1' and v_q = 'Giancarlo (OS-00100) já teve 5 dias de serviço e o combinado era 2 dias. O que falta?',
+      v::text || ' / ' || coalesce(v_q, '—'));
+    -- a mesma OS concluída: a medida conta os mesmos 10 (os 6 do plano e os 4 fora dele)
+    perform set_config('agenda.porta', 'on', true);
+    update public.service_orders set status = 'completed', check_out_at = timestamptz '2026-10-30 12:00-03' where id = pg_temp.os('100');
+    perform set_config('agenda.porta', 'off', true);
+    perform public.agenda_medir_os(pg_temp.os('100'), c_hoje);
+    select m.meios_cumpridos into v_c from public.agenda_medidas_os m where m.service_order_id = pg_temp.os('100');
+    v_res := pg_temp.ok(v_res, 'O9i (C1, item 15) a medida da mesma OS conta os mesmos 10 meios-dias (6 do plano + 4 fora dele): a razão da vigia é a da medida',
+      v_c = 10, coalesce(v_c::text, '—'));
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- (B3) a classe de campo que lança (uma expressão de classe_sistemas que quebra, por exemplo)
+  begin
+    execute current_setting('agenda_teste.fase6');
+    perform pg_temp.os100_em_andamento(true);
+    perform public._agenda_aprender_medir(c_hoje);
+    create or replace function public._agenda_classe_de_campo(p_os uuid) returns jsonb
+    language plpgsql stable as $x$ begin raise exception 'falha de teste na classe de campo'; end $x$;
+    update public.agenda_config set modo_aprendizado = 'desligado' where id;
+    begin
+      v := public._agenda_vigia_estouro(c_hoje, c_agora);
+      v_err := null;
+    exception when others then
+      v := null;
+      v_err := sqlerrm;
+    end;
+    v_res := pg_temp.ok(v_res, 'O9j (C1, B3) em desligado a vigia do estouro nem lê o fator de campo: a classe que lança não a derruba, e a pergunta de sempre sai (6,5 de 4 com 1,5×)',
+      v_err is null and v ->> 'criadas' = '1', coalesce(v_err, v::text));
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  begin
+    execute current_setting('agenda_teste.fase6');
+    perform pg_temp.os100_em_andamento(true);
+    perform public._agenda_aprender_medir(c_hoje);
+    create or replace function public._agenda_classe_de_campo(p_os uuid) returns jsonb
+    language plpgsql stable as $x$ begin raise exception 'falha de teste na classe de campo'; end $x$;
+    update public.agenda_config set modo_aprendizado = 'ligado', aprendizado_ligados = '{fator}' where id;
+    begin
+      v := public._agenda_vigia_estouro(c_hoje, timestamptz '2026-10-30 16:20-03');
+      v_err := null;
+    exception when others then
+      v := null;
+      v_err := sqlerrm;
+    end;
+    v_res := pg_temp.ok(v_res, 'O9k (C1, B3) ligado com o fator: o erro vira o padrão (1,5×; a mesma pergunta) e vai a app_error_logs (agenda / vigia:estouro)',
+      v_err is null and v ->> 'criadas' = '1'
+      and exists (select 1 from public.app_error_logs e where e.context = 'agenda' and e.action = 'vigia:estouro'),
+      coalesce(v_err, v::text));
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  -- o CHECK novo (presenca_publicada_coerente): a presença guardada é uma das três, e o motivo não vem sem ela
+  begin
+  execute current_setting('agenda_teste.fase6');
+  begin
+    update public.os_planejamento set presenca_publicada = 'talvez' where service_order_id = pg_temp.os('104');
+    v_err := 'aceitou';
+  exception when others then
+    v_err := sqlerrm;
+  end;
+  begin
+    update public.os_planejamento set presenca_publicada = null, presenca_publicada_motivo = 'sem a presença'
+     where service_order_id = pg_temp.os('104');
+    v_err := v_err || ' / aceitou';
+  exception when others then
+    v_err := v_err || ' / ' || sqlerrm;
+  end;
+  v_res := pg_temp.ok(v_res, 'O9l (C1, item 3) o CHECK presenca_publicada_coerente recusa a presença desconhecida e o motivo sem a presença',
+    v_err like '%presenca_publicada_coerente% / %presenca_publicada_coerente%'
+    and exists (select 1 from public.os_planejamento where service_order_id = pg_temp.os('104')), v_err);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  perform pg_temp.gravar(v_res);
+end
+$o9$;
 
 select teste, ok, detalhe from _resultado order by teste;
 

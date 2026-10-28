@@ -1,6 +1,6 @@
 -- Prova do cliente no aprendizado da Agenda de Produção, Fase 6 (pacote P5; migration 20261029100500): a 1ª data dita ao
 -- cliente (que nunca zera), a pontualidade medida contra ela e a folga do aviso de atraso (a faixa do M6).
--- bancada: depende de 20261029100500
+-- bancada: depende de 20261029100900
 --
 --   C1 a 1ª promessa: a 1ª gravação grava, a 2ª não muda; o aviso "ainda faltam peças sem data" (o caminho real: a rodada, a
 --      fila e o envio) zera o prometido e o original, e não a 1ª; a promessa seguinte acha a de antes; o preenchimento da
@@ -23,6 +23,8 @@
 --      4 dias e a rodada do cliente inteira (as mensagens, as perguntas e as ações de 4 tiques e um envio) saem iguais às das
 --      definições de 20261028100800/20261028100100 (rodadas no lugar por um instante); o controle, com a folga e o fator em
 --      uso, acusa a diferença
+--   C8 (correção C1, 20261029100900) o teto no P80 da folga (2,2 → 3); a folga mede contra o fim do plano (faixa_ate_plano),
+--      sem o vaivém de 2 para 0
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -434,9 +436,9 @@ begin
     select * into a from public.agenda_aprendizado where item = 'aviso_folga' and chave = 'todas';
     r0 := public._agenda_cliente_risco(c_nel, c_hoje);
     e0 := public._agenda_cliente_risco(pg_temp.os('100'), c_hoje);
-    v_res := pg_temp.ok(v_res, 'C3a em teste: os 5 avisos (estouros 2, 0, 2, 3 e 1) dão 2 dias úteis (P80 2,2 ao mais próximo); padrão 0; o texto da spec; o leitor devolve nulo',
+    v_res := pg_temp.ok(v_res, 'C3a em teste: os 5 avisos (estouros 2, 0, 2, 2 e 1; a correção C1 pôs a faixa da 136 até 27/10 na fixture) dão 2 dias úteis (P80 2); padrão 0; o texto da spec; o leitor devolve nulo',
       a.calculado = 2 and a.n = 5 and a.n_min = 5 and a.padrao = 0 and a.estado = 'sombra' and a.em_uso is null
-      and a.detalhe = '{"n": 5, "p50": 2, "maior": 3, "no_prazo": 1}'::jsonb
+      and a.detalhe = '{"n": 5, "p50": 2, "maior": 2, "no_prazo": 1}'::jsonb
       and a.texto = 'Avisos de atraso: em 5, o serviço terminou até 2 dias úteis depois do fim que eu disse (em teste: eu daria a faixa com 2 dias úteis a mais).'
       and jsonb_array_length(a.amostra) = 5 and public._agenda_aprendido('aviso_folga', 'todas') is null,
       to_jsonb(a)::text);
@@ -831,6 +833,84 @@ begin
   perform pg_temp.gravar(v_res);
 end
 $c7$;
+
+-- ── C8. A correção C1 (20261029100900): itens 4 e 11 ─────────────────────────────────────────────────────
+-- (item 11) um arredondamento só: o P80 da folga sobe para o teto, como o atraso do fornecedor (2,2 → 3). (item 4) a folga
+-- mede o erro do PLANO: o aviso que sai com a folga em uso guarda o fim da faixa sem ela (base.dados.faixa_ate_plano), e a
+-- rodada seguinte, com os avisos que já saíram com a folga, continua com ela — sem o vaivém de 2 para 0 (o rev-f6 c5).
+do $c8$
+declare
+  v_res jsonb := '[]'::jsonb;
+  c_nel constant uuid := '05000000-0000-4000-8000-000000000112';
+  j  jsonb;
+  a  public.agenda_aprendizado;
+  n0 int;
+  v_m jsonb;
+begin
+  if coalesce(current_setting('agenda_teste.fase6', true), '') = '' then
+    insert into _resultado values ('C8 a correção C1 do cliente (fixture-fase6)', true, 'PULADO: sem agenda_teste.fase6 (rode pela bancada)');
+    return;
+  end if;
+
+  -- (item 11) com a faixa da 136 até 26/10 (estouro 3): os estouros 2, 0, 2, 3 e 1 → P80 2,2 → 3 dias úteis (o teto)
+  begin
+    execute current_setting('agenda_teste.fase6');
+    alter table public.agenda_cliente_mensagens disable trigger user;  -- (só a simulação: a mensagem que saiu não se reescreve)
+    update public.agenda_cliente_mensagens set faixa_ate = date '2026-10-26' where id = 'd6000000-0000-4000-8000-000000000636';
+    alter table public.agenda_cliente_mensagens enable trigger user;
+    j := pg_temp.aprender('sombra', '{}');
+    select * into a from public.agenda_aprendizado where item = 'aviso_folga' and chave = 'todas';
+    v_res := pg_temp.ok(v_res, 'C8a (C1, item 11) os estouros 2, 0, 2, 3 e 1 (P80 2,2) dão 3 dias úteis de folga: o teto, como o atraso do fornecedor (não o mais próximo)',
+      a.calculado = 3 and a.n = 5 and (a.detalhe ->> 'maior')::numeric = 3, to_jsonb(a)::text);
+    v_res := pg_temp.ok(v_res, 'C8b (C1, item 11) a pontualidade usa a mesma conta (o P80 1,6 do atraso com o cliente → 2 dias úteis)',
+      (select (x.detalhe ->> 'p80_atraso_du')::int from public.agenda_aprendizado x where x.item = 'cliente_pontualidade') = 2, null);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- (item 4) a folga em uso (2) e os avisos que saíram com ela: a rodada seguinte continua em 2, sem ação nova
+  begin
+    execute current_setting('agenda_teste.fase6');
+    j := pg_temp.aprender('ligado', '{aviso_cliente}');
+    select count(*) into n0 from public.agenda_acoes x where x.tipo = 'aprendizado' and x.antes ->> 'item' = 'aviso_folga';
+    -- os mesmos 5 serviços, com o aviso que teria saído com a folga em uso: o fim da faixa 2 dias úteis depois e, guardado, o fim
+    -- do plano (o que _agenda_cliente_registrar grava em base.dados.faixa_ate_plano)
+    alter table public.agenda_cliente_mensagens disable trigger user;  -- (só a simulação)
+    update public.agenda_cliente_mensagens
+       set base = jsonb_set(coalesce(base, '{}'::jsonb), '{dados}',
+                            coalesce(base -> 'dados', '{}'::jsonb) || jsonb_build_object('faixa_ate_plano', faixa_ate)),
+           faixa_ate = public.agenda_somar_du(faixa_ate, 2)
+     where tipo = 'pode_atrasar' and modo = 'ligado' and enviada_em is not null and faixa_ate is not null;
+    alter table public.agenda_cliente_mensagens enable trigger user;
+    perform public._agenda_aprender_medir(date '2026-11-03');
+    j := public._agenda_aprender_cliente(date '2026-11-03', pg_temp.em('2026-11-03 16:05'));
+    select * into a from public.agenda_aprendizado where item = 'aviso_folga' and chave = 'todas';
+    v_res := pg_temp.ok(v_res, 'C8c (C1, item 4) os avisos que saíram com a folga medem contra o fim do PLANO: na rodada seguinte a folga continua 2, em uso, sem ação nova (sem o vaivém de 2 para 0)',
+      a.estado = 'em_uso' and a.em_uso = 2 and a.calculado = 2
+      and (select count(*) from public.agenda_acoes x where x.tipo = 'aprendizado' and x.antes ->> 'item' = 'aviso_folga') = n0,
+      to_jsonb(a)::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- (item 4) o M6 novo com a folga em uso guarda o fim do plano
+  begin
+    execute current_setting('agenda_teste.fase6');
+    perform pg_temp.nelson_com_data();
+    perform pg_temp.ligar_cliente();
+    j := pg_temp.aprender('ligado', '{aviso_cliente}');
+    perform pg_temp.vig('2026-10-30 17:00');
+    select m.base -> 'dados' into v_m from public.agenda_cliente_mensagens m
+     where m.service_order_id = c_nel and m.tipo = 'pode_atrasar' and m.id <> 'd5000000-0000-4000-8000-0000000000a1'
+     order by m.criada_em desc limit 1;
+    v_res := pg_temp.ok(v_res, 'C8d (C1, item 4) o aviso registrado com a folga em uso diz a faixa com ela (até ter 17/11) e guarda o fim do plano (faixa_ate_plano sex 13/11)',
+      v_m ->> 'faixa_ate' = '2026-11-17' and v_m ->> 'faixa_ate_plano' = '2026-11-13', coalesce(v_m::text, '—'));
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  perform pg_temp.gravar(v_res);
+end
+$c8$;
 
 select teste, ok, detalhe from _resultado order by teste;
 

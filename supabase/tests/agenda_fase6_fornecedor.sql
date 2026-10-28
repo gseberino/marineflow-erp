@@ -1,6 +1,6 @@
 -- Prova do fornecedor no aprendizado da Agenda de Produção, Fase 6 (pacote P3; migration 20261029100300): o atraso medido das
 -- entregas, o prazo medido da nota e a data provável do material na prontidão (só no nível B).
--- bancada: depende de 20261029100300
+-- bancada: depende de 20261029100900
 --
 --   F1 as entregas e o atraso: 3 linhas da mesma nota = 1 entrega (o maior atraso das linhas), o fornecedor da linha, da OC ou
 --      da nota, o atraso assinado (−1 = adiantou), o P80 (2 dias úteis, 4 de 6 no prazo); a Correa abaixo do mínimo; rodar 2×
@@ -26,6 +26,8 @@
 --   · agenda_ver_material ("você ainda não me disse que chegou" com data <= hoje) → no dia dito, data = o dia dito (F3d);
 --   · _agenda_compras_da_os ("chega … (pela nota …)") → recriada: com data_dita, o data_texto (F3c);
 --   · os_plano_da_os (o cartão) e o TS (PlanoDaOs, ferramentas) só leem data_texto; os terços leem os_material.previsao_ate (F4).
+--   F8 (correção C1, 20261029100900) o publicado não cai pela data provável (nem o confirmado pelo cliente); a nota sem o
+--      atraso por cima e fora da medida do atraso; o fornecedor inativo mede e lê pelo principal
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -92,9 +94,18 @@ end $f$;
 -- As linhas fora dos blocos "-- FASE 6: … -- FASE 6: fim" (o fim é lido pelo prefixo, como nos testes de cópia de antes).
 create function pg_temp.sem_fase6(p_corpo text) returns text[] language plpgsql as $f$
 declare
+  v_c6 boolean := false;  -- CORREÇÃO FASE 6 (C1): dentro de um bloco da correção da Fase 6
   v_b text[] := '{}'; v_bloco boolean := false; l text;
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
+    -- CORREÇÃO FASE 6: (C1) os blocos "-- CORREÇÃO FASE 6: … -- CORREÇÃO FASE 6: fim" também saem (a correção C1 da Fase 6
+    -- recria a função copiando a definição mais nova: só acréscimo); o fim é lido pelo prefixo
+    if not v_c6 and l ~ '^\s*-- CORREÇÃO FASE 6:' and l !~ '^\s*-- CORREÇÃO FASE 6: fim' then v_c6 := true; continue; end if;
+    if v_c6 then
+      if l ~ '^\s*-- CORREÇÃO FASE 6: fim' then v_c6 := false; end if;
+      continue;
+    end if;
+    -- CORREÇÃO FASE 6: fim
     if not v_bloco and l ~ '^\s*-- FASE 6:' and l !~ '^\s*-- FASE 6: fim' then v_bloco := true; continue; end if;
     if v_bloco then
       if l ~ '^\s*-- FASE 6: fim' then v_bloco := false; end if;
@@ -686,6 +697,137 @@ select 'F7c nenhum jargão nos textos do fornecedor (P80, percentil, amostra, re
           from unnest(array['fornecedor_atraso', 'fornecedor_prazo']) i,
                unnest(array['foco_medindo', 'foco_sombra', 'foco_em_uso', 'foco_pergunta', 'foco_travado', 'acao', 'pergunta',
                             'opcao1', 'opcao2', 'opcao3', 'desfeito', 'fico']) m) t;
+
+-- ── F8. A correção C1 (20261029100900): itens 1, 2 e 8 ───────────────────────────────────────────────────
+-- (item 1) o publicado não cai pelo aprendizado: com o atraso do fornecedor em uso, o dia publicado no início pelo material de
+-- antes (o do dia dito) fica — e o confirmado pelo cliente também; a data provável só encaixa o que é novo (o rev-f6 c10).
+-- (item 2) a nota não ganha o atraso por cima (a previsão dela já é saída + prazo) e a entrega da nota não entra no atraso
+-- (o c3). (item 8) o cadastro inativo mede pelo principal, e o prazo dele é lido como medido (o c11).
+do $f8$
+declare
+  v_res jsonb := '[]'::jsonb;
+  c_hoje    constant date := date '2026-10-30';
+  c_agora   constant timestamptz := timestamptz '2026-10-30 16:05-03';
+  c_nelson  constant uuid := '05000000-0000-4000-8000-000000000112';
+  c_kamell  constant text := 'dd000000-0000-4000-8000-000000000002';
+  c_itajai  constant text := 'dd000000-0000-4000-8000-000000000003';
+  c_roberto constant uuid := 'bb000000-0000-4000-8000-000000000002';
+  v_fix  text;
+  v_ini  date;
+  v_prev date;
+  v      jsonb;
+  p      jsonb;
+  r      jsonb;
+  v_canc text;
+  a      public.agenda_aprendizado;
+  pf     jsonb;
+  n0     int;
+begin
+  if coalesce(current_setting('agenda_teste.fase6', true), '') = '' then
+    insert into _resultado values ('F8 a correção C1 do fornecedor (fixture-fase6)', true, 'PULADO: sem agenda_teste.fase6 (rode pela bancada)');
+    return;
+  end if;
+
+  -- (item 1) o dia publicado pelo motor e o dia confirmado pelo cliente
+  foreach v_fix in array array['publicada', 'cliente_confirmou'] loop
+    begin
+      execute current_setting('agenda_teste.fase6');
+      perform pg_temp.painel_da_kamell(date '2026-11-10', 'oc', true);
+      update public.os_material set situacao = 'a_caminho', critico = true
+       where service_order_id = c_nelson and descricao like 'Painel Touch%';
+      update public.agenda_config set modo_aprendizado = 'sombra' where id;
+      perform public._agenda_aprender_fornecedor(c_hoje, c_agora);
+      v_ini := (public.os_prontidao(c_nelson, c_hoje) #>> '{material,inicio_mat}')::date;
+      update public.agenda_config set modo_aprendizado = 'ligado', aprendizado_ligados = '{fornecedor}' where id;
+      perform public._agenda_aprender_fornecedor(c_hoje, c_agora);
+      p := public.os_prontidao(c_nelson, c_hoje) -> 'material';
+      -- o 1º dia publicado (antes de ligar) no início pelo material do dia dito
+      insert into public.agenda_alocacoes (service_order_id, payee_id, dia, turno, presenca, tipo, estado, fixado_por, origem,
+                                           publicada_em)
+      select c_nelson, c_roberto, v_ini, t, 'turno', 'execucao', case when v_fix = 'publicada' then 'publicada' else 'fixada' end,
+             case when v_fix = 'publicada' then null else v_fix end, 'motor', timestamptz '2026-10-29 16:30-03'
+        from (values ('manha'), ('tarde')) tt(t);
+      r := public.agenda_propor('os', null, null, array[c_nelson], '{}'::jsonb, false, 'motor', null, c_hoje,
+                                timestamptz '2026-10-30 16:30-03');
+      select string_agg((i ->> 'motivo') || ': ' || (i ->> 'texto'), ' | ') into v_canc
+        from jsonb_array_elements(r -> 'itens') i where i ->> 'op' = 'cancelar';
+      if v_fix = 'publicada' then
+        v_res := pg_temp.ok(v_res, 'F8a (C1, item 1) a prontidão diz os dois inícios: pelo dia dito (inicio_mat_dito = o de teste, qua 11/11) e pela data provável (inicio_mat, 2 dias úteis depois)',
+          p ->> 'inicio_mat_dito' = v_ini::text and (p ->> 'inicio_mat')::date = public.agenda_somar_du(v_ini, 2), p::text);
+        v_res := pg_temp.ok(v_res, 'F8b (C1, item 1) ligado com o atraso da Kamell em uso, o dia JÁ publicado no início do dia dito não sai pelo material (nenhum "cancelar")',
+          v_canc is null, coalesce(v_canc, '—'));
+      else
+        v_res := pg_temp.ok(v_res, 'F8c (C1, item 1) o dia confirmado pelo cliente (fixado_por cliente_confirmou) também não sai pela data provável',
+          v_canc is null, coalesce(v_canc, '—'));
+      end if;
+      raise exception 'desfaz' using errcode = 'P0099';
+    exception when sqlstate 'P0099' then null;
+    end;
+  end loop;
+
+  -- (item 2) a previsão da nota não ganha o atraso; a da OC ganha
+  begin
+    execute current_setting('agenda_teste.fase6');
+    update public.agenda_config set modo_aprendizado = 'ligado', aprendizado_ligados = '{fornecedor}' where id;
+    perform public._agenda_aprender_fornecedor(c_hoje, c_agora);
+    v_prev := public.agenda_somar_du(c_hoje, (public._agenda_prazo_do_fornecedor(c_kamell::uuid) ->> 'du')::int);
+    perform pg_temp.painel_da_kamell(v_prev, 'nfe', true);
+    update public.os_material set situacao = 'a_caminho' where service_order_id = c_nelson and descricao like 'Painel Touch%';
+    v := pg_temp.item(c_nelson, 'Painel Touch', c_hoje);
+    v_res := pg_temp.ok(v_res, 'F8d (C1, item 2) com o prazo medido (6) e o atraso (2) em uso, a linha da nota despachada hoje conta com o dia da nota (ter 10/11), sem o atraso por cima (sem data_dita)',
+      public._agenda_aprendido('fornecedor_atraso', c_kamell) = 2 and public._agenda_prazo_do_fornecedor(c_kamell::uuid) ->> 'fonte' = 'medido'
+      and v ->> 'nivel' = 'B' and v ->> 'data' = v_prev::text and not (v ? 'data_dita') and v ->> 'data_texto' = 'chega ter 10/11 (pela nota)',
+      v::text);
+    update public.os_material set previsao_fonte = 'oc' where service_order_id = c_nelson and descricao like 'Painel Touch%';
+    v := pg_temp.item(c_nelson, 'Painel Touch', c_hoje);
+    v_res := pg_temp.ok(v_res, 'F8e (C1, item 2) a mesma previsão dita pela OC continua com o atraso medido (+2 dias úteis, data_dita = o dia da OC)',
+      v ->> 'data' = public.agenda_somar_du(v_prev, 2)::text and v ->> 'data_dita' = v_prev::text, v::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- (item 2) a entrega cuja 1ª previsão é a da nota não entra no atraso
+  begin
+    execute current_setting('agenda_teste.fase6');
+    insert into public.os_material (id, service_order_id, origem, descricao, quantidade_necessaria, quantidade_na_mao, situacao,
+      fonte, fornecedor_id, previsao_ate, previsao_fonte, previsao_original, previsao_original_fonte, previsao_original_em,
+      chegou_em, atualizado_em)
+    values ('d6300000-0000-4000-8000-0000000000c1', '05000000-0000-4000-8000-000000000138', 'dono', 'Barramento 150A (C1)', 1, 1,
+            'na_mao', 'nfe', c_kamell::uuid, date '2026-10-01', 'nfe', date '2026-10-01', 'nfe', date '2026-09-28',
+            date '2026-10-08', timestamptz '2026-10-08 17:00-03');
+    update public.agenda_config set modo_aprendizado = 'sombra' where id;
+    perform public._agenda_aprender_fornecedor(c_hoje, c_agora);
+    select * into a from public.agenda_aprendizado where item = 'fornecedor_atraso' and chave = c_kamell;
+    v_res := pg_temp.ok(v_res, 'F8f (C1, item 2) uma entrega da Kamell com a 1ª previsão da nota (5 dias úteis depois dela) não entra no atraso: as 6 entregas e o P80 2 de sempre',
+      a.n = 6 and a.calculado = 2
+      and not exists (select 1 from jsonb_array_elements(a.amostra) e where e ->> 'entrega' = 'linha:d6300000-0000-4000-8000-0000000000c1'),
+      to_jsonb(a)::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- (item 8) o cadastro inativo (a Kamell de Itajaí) com as 5 notas: mede pelo principal (a de Vila Velha)
+  begin
+    execute current_setting('agenda_teste.fase6');
+    update public.suppliers set active = false where id = c_itajai::uuid;
+    alter table public.material_remessas disable trigger user;  -- (só a simulação: as notas chegaram para o cadastro de Itajaí)
+    update public.material_remessas set fornecedor_id = c_itajai::uuid where fornecedor_id = c_kamell::uuid and estado = 'chegou';
+    alter table public.material_remessas enable trigger user;
+    update public.agenda_config set modo_aprendizado = 'ligado', aprendizado_ligados = '{fornecedor}' where id;
+    perform public._agenda_aprender_fornecedor(c_hoje, c_agora);
+    select * into a from public.agenda_aprendizado where item = 'fornecedor_prazo' and chave = c_kamell;
+    pf := public._agenda_prazo_do_fornecedor(c_itajai::uuid);
+    v_res := pg_temp.ok(v_res, 'F8g (C1, item 8) as notas do cadastro inativo medem pelo principal: a chave é a Kamell de Vila Velha (6, em uso), nenhuma linha com a de Itajaí, e o prazo da de Itajaí é o medido (6)',
+      a.n = 5 and a.em_uso = 6 and a.estado = 'em_uso'
+      and not exists (select 1 from public.agenda_aprendizado x where x.item like 'fornecedor%' and x.chave = c_itajai)
+      and pf ->> 'fonte' = 'medido' and pf ->> 'du' = '6' and pf ->> 'principal_id' = c_kamell,
+      coalesce(to_jsonb(a)::text, '—') || ' / ' || pf::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  perform pg_temp.gravar(v_res);
+end
+$f8$;
 
 select teste, ok, detalhe from _resultado order by teste;
 

@@ -117,9 +117,18 @@ end $f$;
 -- As linhas fora dos blocos "-- FASE 6: … -- FASE 6: fim" (o fim é lido pelo prefixo, como nos testes de cópia de antes).
 create function pg_temp.sem_fase6(p_corpo text) returns text[] language plpgsql as $f$
 declare
+  v_c6 boolean := false;  -- CORREÇÃO FASE 6 (C1): dentro de um bloco da correção da Fase 6
   v_b text[] := '{}'; v_bloco boolean := false; l text;
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
+    -- CORREÇÃO FASE 6: (C1) os blocos "-- CORREÇÃO FASE 6: … -- CORREÇÃO FASE 6: fim" também saem (a correção C1 da Fase 6
+    -- recria a função copiando a definição mais nova: só acréscimo); o fim é lido pelo prefixo
+    if not v_c6 and l ~ '^\s*-- CORREÇÃO FASE 6:' and l !~ '^\s*-- CORREÇÃO FASE 6: fim' then v_c6 := true; continue; end if;
+    if v_c6 then
+      if l ~ '^\s*-- CORREÇÃO FASE 6: fim' then v_c6 := false; end if;
+      continue;
+    end if;
+    -- CORREÇÃO FASE 6: fim
     if not v_bloco and l ~ '^\s*-- FASE 6:' and l !~ '^\s*-- FASE 6: fim' then v_bloco := true; continue; end if;
     if v_bloco then
       if l ~ '^\s*-- FASE 6: fim' then v_bloco := false; end if;
@@ -282,7 +291,6 @@ begin
       || '• As OS de energia em motorhome levam até 1,7× o combinado (7 OS): é o que uso desde qui 29/10.' || E'\n'
       || '• As OS em motorhome levam até 1,6× o combinado (9 OS): é o que uso desde qui 29/10.' || E'\n'
       || '• As OS levam até 1,5× o combinado (11 OS): é o que uso desde qui 29/10.' || E'\n'
-      || '• Você foi a 3 de 4 OS sem estar no plano: perguntei se passo a contar com você o dia todo por padrão; espero a sua resposta.' || E'\n'
       || '• Você foi a 3 de 4 OS de energia em motorhome sem estar no plano: conto com você o dia todo nelas desde qui 29/10.' || E'\n'
       || '• Kamell: 4 de 6 entregas no prazo; o atraso chega a 2 dias úteis: conto a chegada 2 dias úteis depois do que o fornecedor diz (desde qui 29/10).' || E'\n'
       || '• Kamell leva até 6 dias úteis da saída da nota até a chegada (5 notas): é o prazo que uso desde qui 29/10.' || E'\n'
@@ -294,7 +302,7 @@ begin
       || '• O plano foi cumprido em 52%, 55% e 48% nas últimas 3 semanas (meta 70%): perguntei se passo a marcar até 70% da semana de cada pessoa (hoje 80%); espera a sua resposta.' || E'\n'
       || '• Gatilhos de um planejador mais forte: 0 de 4 (11 OS ativas, 4 pessoas); medi 1 de 4 semanas.' || E'\n'
       || c_medidas || E'\n' || c_audio0;
-    v_res := pg_temp.igual(v_res, 'L1b ligado (todos os itens), os 7 blocos byte a byte: em uso, as perguntas primeiro em cada bloco (a presença no geral antes da da classe)',
+    v_res := pg_temp.igual(v_res, 'L1b ligado (todos os itens), os 7 blocos byte a byte: em uso, as perguntas primeiro em cada bloco (a presença no geral não pergunta mais com as OS de uma classe só: correção C1, item 7)',
       pg_temp.txt(), v_esp);
 
     -- L2: o cartão ligado — a linha em uso e a presença aprendida com o texto "pelo que medi"

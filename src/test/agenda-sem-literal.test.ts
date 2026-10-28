@@ -134,10 +134,11 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_vigiar, agenda_rotina_rodar e agenda_material_vigiar); não é texto_max nem peca_embutida_acima',
   },
   // Fase 6 (P6): a rodada do aprendizado grava a rodada como a vigia, a rotina, o material e o cliente.
+  // Correção C1 da Fase 6 (20261029100900): agenda_aprender recriada (+1: a mesma cópia).
   {
     onde: 'agenda_aprender',
     casou: '1000',
-    vezes: 1,
+    vezes: 2,
     porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_cliente_vigiar); não é texto_max nem peca_embutida_acima',
   },
   // Fase 3 (P6): o custo da simulação do livre de verdade e a ordem das OS do turno no job do Claude Max.
@@ -437,6 +438,8 @@ describe('agenda: parâmetro só em agenda_config', () => {
       '_agenda_cliente_teria_feito',
       // Fase 6 (P8): o foco aprendizado e o foco fornecedores recriado (agenda_ver e os_plano_da_os já estavam na lista)
       '_agenda_ver_aprendizado', '_agenda_ver_fornecedores',
+      // Correção C1 da Fase 6: o fornecedor da medida e o dia da conclusão (as recriadas já estavam na lista)
+      '_agenda_fornecedor_da_medida', '_agenda_concluida_em',
     ]));
     expect(tsAgenda.map((t) => t.onde)).toEqual(expect.arrayContaining([
       path.join('supabase', 'functions', 'task-automations', 'agenda-vigia.ts'),

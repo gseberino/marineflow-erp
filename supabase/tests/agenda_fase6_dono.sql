@@ -1,5 +1,5 @@
 -- Prova da capacidade do dono no motor da Agenda de Produção, Fase 6 (pacote P4; migration 20261029100400).
--- bancada: depende de 20261029100400
+-- bancada: depende de 20261029100900
 --
 --   D1 as semanas: as 8 semanas completas antes de sex 30/10; por meio-dia do dono no plano, cumprido 1, parcial 0,5, não
 --      cumprido 0 só com o motivo dele (o de material sai da conta; o cancelado por ele conta; o cancelado pela chuva e o sem
@@ -20,6 +20,8 @@
 --      (agenda_propor) saem iguais às definições de antes (20261025100200, rodadas como pg_temp ou trocadas por um instante)
 --      em toda a fixture
 --   D7 os textos da capacidade em cada momento (spec §6.2/§6.3), sem jargão (em qualquer lugar)
+--   D8 (correção C1, 20261029100900) o cancelado a pedido do dono e o parcial pela chuva fora da conta; sem o vaivém da
+--      capacidade (a carga com que a semana foi marcada); a reserva por teto diz a parte da semana do dono
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -246,9 +248,9 @@ begin
       (v ->> 'calculado')::numeric = 0.68 and (pg_temp.linha()).n = 6, v::text);
     update public.agenda_config set capacidade_meios_min = 2, capacidade_motivos = '{esqueci}' where id;
     v := pg_temp.capacidade();
-    v_res := pg_temp.ok(v_res, 'D1i com só "esqueci" em capacidade_motivos, a outra urgência e a equipe faltou saem da conta (07/09 2 de 3, 14/09 3 de 4): a mediana 0,75 → 0,60',
-      (v ->> 'calculado')::numeric = 0.60
-      and pg_temp.semanas((pg_temp.linha()).amostra) = '31/08 3.5/5 | 07/09 2/3 | 14/09 3/4 | 21/09 2/2 | 28/09 2/2',
+    v_res := pg_temp.ok(v_res, 'D1i com só "esqueci" em capacidade_motivos, a outra urgência, a equipe faltou e (correção C1, item 5) os parciais pelo trabalho de antes saem da conta (07/09 2 de 3, 14/09 2 de 2): a mediana 1 → 0,80',
+      (v ->> 'calculado')::numeric = 0.80
+      and pg_temp.semanas((pg_temp.linha()).amostra) = '31/08 3.5/5 | 07/09 2/3 | 14/09 2/2 | 21/09 2/2 | 28/09 2/2',
       pg_temp.semanas((pg_temp.linha()).amostra));
     update public.agenda_config set capacidade_motivos = '{equipe_faltou,urgencia_outra_os,trabalho_anterior,esqueci}' where id;
 
@@ -717,6 +719,127 @@ select 'D7m nenhum jargão nos textos da capacidade (mediana, percentil, P80, am
   from (select public._agenda_aprendizado_texto('capacidade_dono', m, '{"chave": "dono", "calculado": 0.56, "em_uso": 0.56, "efetivo": 0.8, "padrao": 0.8, "volta": null, "n": 5, "n_min": 4, "desde": "2026-10-30", "travado_ate": "2026-11-27", "trava_dias": 28, "detalhe": {"taxa": 0.7, "janela": 8}}') as x
           from unnest(array['foco_medindo', 'foco_sombra', 'foco_em_uso', 'foco_pergunta', 'foco_travado', 'acao', 'pergunta',
                             'opcao1', 'opcao2', 'opcao3', 'desfeito', 'fico']) m) t;
+
+-- ── D8. A correção C1 (20261029100900): itens 4, 5 e 14 ──────────────────────────────────────────────────
+-- (item 5, decisão do dono com a recomendação aplicada) a capacidade conta só a falta dele: o cancelado a pedido do dono e o
+-- parcial pela chuva saem da conta (o rev-f6 c4). (item 4) sem o vaivém: com 0,56 em uso e o dono fazendo tudo o que o motor
+-- marcou com ela, a rodada seguinte fica em 0,56 (antes ia a 0,80). (item 14) a reserva por teto da OS que precisa do dono
+-- diz a parte da semana dele.
+do $d8$
+declare
+  v_res jsonb := '[]'::jsonb;
+  c_dono    constant uuid := 'bb000000-0000-4000-8000-000000000001';
+  c_hoje    constant date := date '2026-10-30';
+  v   jsonb;
+  a   public.agenda_aprendizado;
+  n0  int;
+  r   jsonb;
+  v_t text;
+begin
+  if coalesce(current_setting('agenda_teste.fase6', true), '') = '' then
+    insert into _resultado values ('D8 a correção C1 da capacidade (fixture-fase6)', true, 'PULADO: sem agenda_teste.fase6 (rode pela bancada)');
+    return;
+  end if;
+
+  -- (item 5) o cancelado de qui 03/09 de manhã a pedido do dono (o motor obedecendo a ele: cancelada_motivo 'dono')
+  begin
+    execute current_setting('agenda_teste.fase6');
+    update public.agenda_alocacoes set cancelada_motivo = 'dono'
+     where payee_id = c_dono and dia = date '2026-09-03' and turno = 'manha' and estado = 'cancelada';
+    update public.agenda_config set modo_aprendizado = 'sombra' where id;
+    v := pg_temp.capacidade();
+    a := pg_temp.linha();
+    v_res := pg_temp.ok(v_res, 'D8a (C1, item 5) o cancelado a pedido do dono não é falta dele: 31/08 3,5 de 4, a mediana 0,875 → 0,70',
+      a.calculado = 0.70 and (a.detalhe ->> 'taxa')::numeric = 0.88 and pg_temp.semanas(a.amostra) like '31/08 3.5/4 |%',
+      pg_temp.semanas(a.amostra) || ' / ' || to_jsonb(a)::text);
+    update public.agenda_config set modo_aprendizado = 'ligado', aprendizado_ligados = '{capacidade_dono}' where id;
+    v := pg_temp.capacidade();
+    a := pg_temp.linha();
+    v_res := pg_temp.ok(v_res, 'D8b (C1, item 5) ligado, 0,80 → 0,70 cabe na troca (0,20): entra sozinha, com a ação',
+      a.estado = 'em_uso' and a.em_uso = 0.70 and a.acao_id is not null and v ->> 'pergunta_id' is null, v::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- (item 5) a tarde de ter 22/09 parou pela chuva (parcial, motivo clima): fora da conta
+  begin
+    execute current_setting('agenda_teste.fase6');
+    update public.agenda_alocacoes set resultado = 'parcial', motivo = 'clima'
+     where payee_id = c_dono and dia = date '2026-09-22' and turno = 'tarde';
+    update public.agenda_config set modo_aprendizado = 'sombra' where id;
+    v := pg_temp.capacidade();
+    a := pg_temp.linha();
+    v_res := pg_temp.ok(v_res, 'D8c (C1, item 5) o parcial pela chuva sai da conta (não pesa meio meio-dia contra ele): a semana de 21/09 fica com 1 de 1 (e não conta)',
+      exists (select 1 from jsonb_array_elements(a.detalhe -> 'semanas') s
+               where s ->> 'semana' = '2026-09-21' and s ->> 'planejados' = '1' and s ->> 'feitos' = '1' and s ->> 'conta' = 'false'),
+      (a.detalhe -> 'semanas')::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- (item 4) o vaivém: 0,56 em uso desde antes da janela e o dono fez tudo o que o motor marcou com ela
+  begin
+    execute current_setting('agenda_teste.fase6');
+    perform pg_temp.em_uso_056();
+    update public.agenda_config set capacidade_troca_max = 0.20 where id;
+    update public.agenda_aprendizado set em_uso_desde = timestamptz '2026-08-28 16:05-03'
+     where item = 'capacidade_dono' and chave = 'dono';
+    update public.agenda_alocacoes set resultado = 'cumprido', motivo = null
+     where payee_id = c_dono and dia between date '2026-08-31' and date '2026-10-25' and estado in ('publicada', 'fixada')
+       and resultado is not null;
+    update public.agenda_alocacoes set cancelada_motivo = 'clima'
+     where payee_id = c_dono and dia between date '2026-08-31' and date '2026-10-25' and estado = 'cancelada';
+    select count(*) into n0 from public.agenda_acoes x where x.tipo = 'aprendizado' and x.antes ->> 'item' = 'capacidade_dono';
+    v := pg_temp.capacidade();
+    a := pg_temp.linha();
+    v_res := pg_temp.ok(v_res, 'D8d (C1, item 4) sem o vaivém: com 0,56 em uso e tudo o que o motor marcou feito (taxa 1), a capacidade continua 0,56 (1 × a carga com que as semanas foram marcadas), sem ação nem pergunta',
+      a.estado = 'em_uso' and a.em_uso = 0.56 and a.calculado = 0.56 and v ->> 'pergunta_id' is null
+      and (select count(*) from public.agenda_acoes x where x.tipo = 'aprendizado' and x.antes ->> 'item' = 'capacidade_dono') = n0,
+      v::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- (item 14) a OS-00160 (Silas): 3 dias com você o dia todo e o Roberto, pronta; com 0,56 em uso a semana de 02/11 não tem lugar
+  -- para você, e a equipe guarda o lugar (reserva por teto)
+  begin
+    execute current_setting('agenda_teste.fase6');
+    insert into public.clients (id, type, name) values ('c6000000-0000-4000-8000-000000000160', 'individual', 'Silas');
+    insert into public.vessels (id, client_id, name, asset_type)
+    values ('f6000000-0000-4000-8000-000000000160', 'c6000000-0000-4000-8000-000000000160', 'Motorhome', 'Motorhome');
+    insert into public.service_orders (id, service_order_number, client_id, vessel_id, status, quote_status, service_type,
+      created_at, updated_at, converted_to_os_at, grand_total)
+    values ('05000000-0000-4000-8000-000000000160', 'OS-00160', 'c6000000-0000-4000-8000-000000000160',
+            'f6000000-0000-4000-8000-000000000160', 'approved', 'approved', 'repair', timestamptz '2026-10-15 12:00-03',
+            timestamptz '2026-10-20 12:00-03', timestamptz '2026-10-20 12:00-03', 3000);
+    insert into public.service_order_services (id, service_order_id, service_id, name_snapshot, billing_unit_snapshot, quantity,
+      unit_price_snapshot, line_total, created_at)
+    values (md5('c1:servico:160')::uuid, '05000000-0000-4000-8000-000000000160', null, 'Instalação do sistema de energia solar',
+            'visit', 1, 3000, 3000, timestamptz '2026-10-15 12:00-03');
+    insert into public.receivables (id, client_id, service_order_id, description, issue_date, due_date, amount, status, paid_amount,
+      balance_amount, is_deposit)
+    values (md5('c1:sinal:160')::uuid, 'c6000000-0000-4000-8000-000000000160', '05000000-0000-4000-8000-000000000160', 'Sinal',
+            date '2026-10-20', date '2026-10-20', 1000, 'paid', 1000, 0, true);
+    insert into public.os_planejamento (service_order_id, dias, estimativa_fonte, estimativa_em, dono_presenca, material_conferido_em)
+    values ('05000000-0000-4000-8000-000000000160', 3, 'dono', timestamptz '2026-10-28 18:00-03', 'sempre',
+            timestamptz '2026-10-28 18:00-03');
+    insert into public.os_planejamento_equipe (service_order_id, payee_id, turnos)
+    values ('05000000-0000-4000-8000-000000000160', 'bb000000-0000-4000-8000-000000000002', 'dia');
+    perform pg_temp.em_uso_056();
+    -- (o piso, 40%: com 0,56 a OS ainda cabe na semana de 02/11)
+    update public.agenda_aprendizado set em_uso = 0.40, calculado = 0.40 where item = 'capacidade_dono' and chave = 'dono';
+    r := pg_temp.propor('semana');
+    select string_agg(m #>> '{}', ' | ') into v_t
+      from jsonb_array_elements(r -> 'itens') i, jsonb_array_elements(i -> 'motivos') m
+     where i ->> 'numero' = 'OS-00160' and i ->> 'reserva_de' = 'teto';
+    v_res := pg_temp.ok(v_res, 'D8e (C1, item 14) a reserva por teto da OS que precisa de você, com 40% em uso, diz "não coube na sua parte da semana (40%)" (e não "na carga de 80%")',
+      public._agenda_carga_da_pessoa(c_dono) = 0.40 and v_t = 'não coube na sua parte da semana (40%)', coalesce(v_t, '—'));
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  perform pg_temp.gravar(v_res);
+end
+$d8$;
 
 select teste, ok, detalhe from _resultado order by teste;
 

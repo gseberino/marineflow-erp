@@ -109,6 +109,7 @@ begin
 end $f$;
 create function pg_temp.sem_correcao(p_corpo text) returns text[] language plpgsql as $f$
 declare
+  v_c6 boolean := false;  -- CORREÇÃO FASE 6 (C1): dentro de um bloco da correção da Fase 6
   v_b text[] := '{}'; v_bloco boolean := false; l text;
   -- FASE 6: os blocos "-- FASE 6: … -- FASE 6: fim" também saem (a Fase 6 recria _agenda_cliente_risco: spec-fase6 §3.1,
   -- item 11); um bloco da Fase 6 dentro de um da correção sai junto com ele
@@ -116,6 +117,14 @@ declare
   -- FASE 6: fim
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
+    -- CORREÇÃO FASE 6: (C1) os blocos "-- CORREÇÃO FASE 6: … -- CORREÇÃO FASE 6: fim" também saem (a correção C1 da Fase 6
+    -- recria a função copiando a definição mais nova: só acréscimo); o fim é lido pelo prefixo
+    if not v_c6 and l ~ '^\s*-- CORREÇÃO FASE 6:' and l !~ '^\s*-- CORREÇÃO FASE 6: fim' then v_c6 := true; continue; end if;
+    if v_c6 then
+      if l ~ '^\s*-- CORREÇÃO FASE 6: fim' then v_c6 := false; end if;
+      continue;
+    end if;
+    -- CORREÇÃO FASE 6: fim
     -- FASE 6: (P5) fora de um bloco da correção, o bloco da Fase 6 sai inteiro (o fim é lido pelo prefixo)
     if not v_bloco and not v_f6 and l ~ '^\s*-- FASE 6:' and l !~ '^\s*-- FASE 6: fim' then v_f6 := true; continue; end if;
     if v_f6 then

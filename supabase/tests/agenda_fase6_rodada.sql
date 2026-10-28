@@ -1,7 +1,7 @@
 -- Prova da rodada do aprendizado da Agenda de Produção, Fase 6 (pacote P6; migration 20261029100600): a rodada diária, a
 -- decisão do dono, o *desfaz aprendizado*, a saúde, a revisão da carga pelo plano cumprido e os gatilhos de um planejador
 -- mais forte.
--- bancada: depende de 20261029100600
+-- bancada: depende de 20261029100900
 --
 --   R1 a orquestração: uma vez por dia, no 1º tique a partir de aprender_hora; em desligado só mede (nada aprendido, nada
 --      perguntado); o passo que falha não derruba a rodada nem os outros passos (e o que ele escreveu antes de falhar sai), e
@@ -18,6 +18,8 @@
 --      respondida, nem depois da trava volta)
 --   R7 a saúde: os 6 zeros com a rodada ligada e cada violação forçada aparece
 --   R8 as cópias só acrescentam os blocos "-- FASE 6:" (o cabeçalho de cada uma igual) e as portas
+--   R9 (correção C1, 20261029100900) a semanal depois do dia do plano quando não rodou (ou com outro modo ou lista); a
+--      trava da rodada antes da linha na decisão e no *desfaz*; o índice da rodada
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -125,9 +127,18 @@ end $f$;
 -- As linhas fora dos blocos "-- FASE 6: … -- FASE 6: fim" (o fim é lido pelo prefixo, como nos testes de cópia de antes).
 create function pg_temp.sem_fase6(p_corpo text) returns text[] language plpgsql as $f$
 declare
+  v_c6 boolean := false;  -- CORREÇÃO FASE 6 (C1): dentro de um bloco da correção da Fase 6
   v_b text[] := '{}'; v_bloco boolean := false; l text;
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
+    -- CORREÇÃO FASE 6: (C1) os blocos "-- CORREÇÃO FASE 6: … -- CORREÇÃO FASE 6: fim" também saem (a correção C1 da Fase 6
+    -- recria a função copiando a definição mais nova: só acréscimo); o fim é lido pelo prefixo
+    if not v_c6 and l ~ '^\s*-- CORREÇÃO FASE 6:' and l !~ '^\s*-- CORREÇÃO FASE 6: fim' then v_c6 := true; continue; end if;
+    if v_c6 then
+      if l ~ '^\s*-- CORREÇÃO FASE 6: fim' then v_c6 := false; end if;
+      continue;
+    end if;
+    -- CORREÇÃO FASE 6: fim
     if not v_bloco and l ~ '^\s*-- FASE 6:' and l !~ '^\s*-- FASE 6: fim' then v_bloco := true; continue; end if;
     if v_bloco then
       if l ~ '^\s*-- FASE 6: fim' then v_bloco := false; end if;
@@ -210,8 +221,9 @@ begin
       r ->> 'rodou' = 'true' and (r ->> 'erros')::int = 3
       and (select array_agg(e ->> 'passo' order by e ->> 'passo') from jsonb_array_elements(r -> 'falhas') e)
           = array['capacidade', 'congelar', 'mo'], r -> 'falhas' #>> '{}');
-    v_res := pg_temp.ok(v_res, 'R1g os outros passos rodaram (medir, fator, presenca, fornecedor, cliente) e gravaram em teste; o mo que gravou antes de falhar não deixou nada',
-      (select array_agg(k order by k) from jsonb_object_keys(r -> 'contagens') k) = array['cliente', 'fator', 'fornecedor', 'medir', 'presenca']
+    v_res := pg_temp.ok(v_res, 'R1g os outros passos rodaram (medir, fator, presenca, fornecedor, cliente e, sem a rodada de quinta, a revisão e o planejador: correção C1, item 13) e gravaram em teste; o mo que gravou antes de falhar não deixou nada',
+      (select array_agg(k order by k) from jsonb_object_keys(r -> 'contagens') k)
+        = array['cliente', 'fator', 'fornecedor', 'medir', 'presenca', 'revisao', 'solver']
       and exists (select 1 from public.agenda_aprendizado a where a.item = 'fator' and a.estado = 'sombra')
       and exists (select 1 from public.agenda_aprendizado a where a.item = 'aviso_folga')
       and not exists (select 1 from public.agenda_aprendizado a where a.item in ('mo', 'capacidade_dono')), pg_temp.estados());
@@ -286,17 +298,17 @@ begin
     perform pg_temp.modo('ligado', pg_temp.todos());
     v_f0 := pg_temp.filas();
     r := pg_temp.rodar('2026-10-30 16:05');
-    v_res := pg_temp.ok(v_res, 'R2a sex 30/10 (não é o dia do plano): os 8 passos de todo dia, sem a revisão e o planejador; nenhum erro',
-      r ->> 'rodou' = 'true' and r ->> 'semanal' = 'false' and (r ->> 'erros')::int = 0
+    v_res := pg_temp.ok(v_res, 'R2a sex 30/10, sem a rodada de quinta (o dia do plano): os 8 passos de todo dia e (correção C1, item 13) a revisão e o planejador, que a quinta não fez; nenhum erro',
+      r ->> 'rodou' = 'true' and r ->> 'semanal' = 'true' and (r ->> 'erros')::int = 0
       and (select array_agg(k order by k) from jsonb_object_keys(r -> 'contagens') k)
-          = array['capacidade', 'cliente', 'congelar', 'fator', 'fornecedor', 'medir', 'mo', 'presenca'],
+          = array['capacidade', 'cliente', 'congelar', 'fator', 'fornecedor', 'medir', 'mo', 'presenca', 'revisao', 'solver'],
       r::text);
-    v_res := pg_temp.ok(v_res, 'R2b os estados (ligado, todos os itens): o fator 1,7 entra sozinho nas classes com 6 OS (rv:energia, sistema:energia, bem:rv 1,6; todas 1,5 = o padrão), as de barco medindo; o R$ por diária (1.097 × 764) e a capacidade (0,56 × 0,80) perguntam; a presença entra na classe e pergunta no geral; a Kamell entra (atraso 2, prazo 6), a Correa medindo; a folga entra (2); a pontualidade só em teste',
-      pg_temp.estados() = 'aviso_folga:todas=em_uso capacidade_dono:dono=pergunta cliente_pontualidade:todas=sombra fator:barco:motor=medindo fator:bem:barco=medindo fator:bem:rv=em_uso fator:rv:conforto=medindo fator:rv:diagnostico=medindo fator:rv:energia=em_uso fator:sistema:conforto=medindo fator:sistema:diagnostico=medindo fator:sistema:energia=em_uso fator:sistema:motor=medindo fator:todas=em_uso fornecedor_atraso:Correa=medindo fornecedor_atraso:Kamell=em_uso fornecedor_prazo:Kamell=em_uso mo:todas=pergunta presenca:rv:energia=em_uso presenca:sistema:energia=em_uso presenca:todas=pergunta',
+    v_res := pg_temp.ok(v_res, 'R2b os estados (ligado, todos os itens): o fator 1,7 entra sozinho nas classes com 6 OS (rv:energia, sistema:energia, bem:rv 1,6; todas 1,5 = o padrão), as de barco medindo; o R$ por diária (1.097 × 764) e a capacidade (0,56 × 0,80) perguntam; a presença entra na classe e, no geral, mede (correção C1, item 7: uma classe só); a carga pergunta (a revisão de sexta, item 13); a Kamell entra (atraso 2, prazo 6), a Correa medindo; a folga entra (2); a pontualidade só em teste',
+      pg_temp.estados() = 'aviso_folga:todas=em_uso capacidade_dono:dono=pergunta carga:todas=pergunta cliente_pontualidade:todas=sombra fator:barco:motor=medindo fator:bem:barco=medindo fator:bem:rv=em_uso fator:rv:conforto=medindo fator:rv:diagnostico=medindo fator:rv:energia=em_uso fator:sistema:conforto=medindo fator:sistema:diagnostico=medindo fator:sistema:energia=em_uso fator:sistema:motor=medindo fator:todas=em_uso fornecedor_atraso:Correa=medindo fornecedor_atraso:Kamell=em_uso fornecedor_prazo:Kamell=em_uso mo:todas=pergunta presenca:rv:energia=em_uso presenca:sistema:energia=em_uso presenca:todas=medindo solver:gatilhos=medindo',
       pg_temp.estados());
     select count(*) into n_a from public.agenda_acoes a where a.tipo = 'aprendizado';
     select count(*) into n_q from public.agenda_perguntas q where q.tipo = 'aprendizado' and q.estado = 'aberta';
-    v_res := pg_temp.ok(v_res, 'R2c 8 ações que entraram sozinhas (origem vigia, executadas, desfazíveis por 24 h) e 3 perguntas críticas (mo, capacidade e a presença no geral); o leitor devolve o que entrou',
+    v_res := pg_temp.ok(v_res, 'R2c 8 ações que entraram sozinhas (origem vigia, executadas, desfazíveis por 24 h) e 3 perguntas críticas (mo, capacidade e a carga; a presença no geral não pergunta mais: correção C1, item 7); o leitor devolve o que entrou',
       n_a = 8 and n_q = 3
       and not exists (select 1 from public.agenda_acoes a
                        where a.tipo = 'aprendizado' and not (a.origem = 'vigia' and a.executada and not a.critica
@@ -700,12 +712,12 @@ begin
   exception when sqlstate 'P0099' then null;
   end;
 
-  -- só no dia do plano (pela rodada)
+  -- só a partir do dia do plano (pela rodada; a de depois dele na semana, quando a semanal não rodou, é o R9 da correção C1)
   begin
     execute current_setting('agenda_teste.fase6');
     perform pg_temp.modo('ligado', array['revisao']);
-    perform pg_temp.rodar('2026-10-30 16:05');
-    v_res := pg_temp.ok(v_res, 'R5h a rodada de sex (fora do dia do plano) não revisa nem mede o planejador',
+    perform pg_temp.rodar('2026-10-26 16:05');
+    v_res := pg_temp.ok(v_res, 'R5h a rodada de seg 26/10 (antes do dia do plano) não revisa nem mede o planejador',
       pg_temp.linha('carga', 'todas') is null and pg_temp.linha('solver', 'gatilhos') is null, pg_temp.estados());
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
@@ -947,6 +959,82 @@ begin
   perform pg_temp.gravar(v_res);
 end
 $r8$;
+
+-- ── R9. A correção C1 (20261029100900): item 13; regressões B2 e B4 ──────────────────────────────────────
+-- (item 13) a revisão e o planejador rodam no dia do plano OU depois dele na semana, enquanto não houve rodada semanal com o
+-- modo e a lista de agora: a quinta que não rodou não espera a semana seguinte, e o dono que liga a revisão na sexta também
+-- não. (B2) a decisão e o *desfaz* do aprendizado tomam a trava da rodada antes de travar a linha. (B4) o índice da rodada.
+do $r9$
+declare
+  v_res jsonb := '[]'::jsonb;
+  r    jsonb;
+  f    text;
+  v_src text;
+begin
+  if coalesce(current_setting('agenda_teste.fase6', true), '') = '' then
+    insert into _resultado values ('R9 a correção C1 da rodada (fixture-fase6)', true, 'PULADO: sem agenda_teste.fase6 (rode pela bancada)');
+  else
+    -- a quinta 29/10 sem rodada nenhuma: a de sexta faz a semanal
+    begin
+      execute current_setting('agenda_teste.fase6');
+      perform pg_temp.modo('ligado', '{revisao}');
+      r := pg_temp.rodar('2026-10-30 16:05');
+      v_res := pg_temp.ok(v_res, 'R9a (C1, item 13) ligado na sexta, sem a rodada de quinta (o dia do plano): a revisão e o planejador rodam na sexta, e a carga pergunta',
+        r ->> 'semanal' = 'true' and r -> 'contagens' ? 'revisao' and r -> 'contagens' ? 'solver'
+        and (pg_temp.linha('carga', 'todas')).estado = 'pergunta', r::text);
+      r := pg_temp.rodar('2026-10-31 16:05');
+      v_res := pg_temp.ok(v_res, 'R9b (C1, item 13) uma vez por semana: no sábado (a semanal já rodou na sexta, com o mesmo modo e a mesma lista) não roda de novo',
+        r ->> 'semanal' = 'false' and not (r -> 'contagens' ? 'revisao'), r::text);
+      raise exception 'desfaz' using errcode = 'P0099';
+    exception when sqlstate 'P0099' then null;
+    end;
+    -- a quinta rodou em teste; o dono liga a revisão na sexta: a de sexta faz a semanal de novo (com a lista de agora)
+    begin
+      execute current_setting('agenda_teste.fase6');
+      perform pg_temp.modo('sombra');
+      r := pg_temp.rodar('2026-10-29 16:05');
+      perform pg_temp.modo('ligado', '{revisao}');
+      r := pg_temp.rodar('2026-10-30 16:05');
+      v_res := pg_temp.ok(v_res, 'R9c (C1, item 13) a quinta rodou em teste e o dono ligou a revisão na sexta: a sexta revisa (a pergunta da carga sai na sexta, sem esperar a quinta seguinte)',
+        r ->> 'semanal' = 'true' and (pg_temp.linha('carga', 'todas')).estado = 'pergunta', r::text);
+      raise exception 'desfaz' using errcode = 'P0099';
+    exception when sqlstate 'P0099' then null;
+    end;
+    -- a quinta rodou ligada com a mesma lista: a sexta não repete; e antes do dia do plano (seg 02/11) a semanal não roda
+    begin
+      execute current_setting('agenda_teste.fase6');
+      perform pg_temp.modo('ligado', '{revisao}');
+      r := pg_temp.rodar('2026-10-29 16:05');
+      r := pg_temp.rodar('2026-10-30 16:05');
+      v_res := pg_temp.ok(v_res, 'R9d (C1, item 13) a quinta rodou ligada com a mesma lista: a sexta não repete a revisão',
+        r ->> 'semanal' = 'false', r::text);
+      r := pg_temp.rodar('2026-11-02 16:05');
+      v_res := pg_temp.ok(v_res, 'R9e (C1, item 13) na segunda da semana seguinte (antes do dia do plano) a semanal não roda',
+        r ->> 'semanal' = 'false', r::text);
+      raise exception 'desfaz' using errcode = 'P0099';
+    exception when sqlstate 'P0099' then null;
+    end;
+    perform pg_temp.gravar(v_res);
+  end if;
+
+  -- (B2) a trava da rodada antes da 1ª linha travada (em qualquer lugar: só o prosrc)
+  foreach f in array array['public.agenda_decidir(uuid, smallint, uuid, text, text, date, timestamptz)',
+                           'public._agenda_aprendizado_decidir(uuid, smallint, uuid, text, text, date, timestamptz)',
+                           'public._agenda_desfazer_aprendizado(uuid, uuid, text, date, timestamptz)'] loop
+    v_src := (select p.prosrc from pg_proc p where p.oid = to_regprocedure(f));
+    insert into _resultado values (format('R9f (C1, B2) %s toma a trava da rodada do aprendizado antes do 1º "for update"', f),
+      position('pg_advisory_xact_lock(hashtext(''agenda_aprender''))' in coalesce(v_src, '')) > 0
+      and position('pg_advisory_xact_lock(hashtext(''agenda_aprender''))' in v_src) < position('for update' in v_src),
+      null);
+  end loop;
+  -- (B4) o índice da rodada
+  insert into _resultado values ('R9g (C1, B4) agenda_vigia_rodadas tem o índice (rotina, p_hoje, p_agora desc)',
+    exists (select 1 from pg_indexes where schemaname = 'public' and tablename = 'agenda_vigia_rodadas'
+                                       and indexname = 'agenda_vigia_rodadas_rotina_dia'
+                                       and indexdef like '%(rotina, p_hoje, p_agora DESC)%'),
+    (select indexdef from pg_indexes where indexname = 'agenda_vigia_rodadas_rotina_dia'));
+end
+$r9$;
 
 select teste, ok, detalhe from _resultado order by teste;
 

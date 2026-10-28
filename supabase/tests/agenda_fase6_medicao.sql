@@ -1,5 +1,5 @@
 -- Prova da medição e do gravador da Agenda de Produção, Fase 6 (pacote P1; migration 20261029100100).
--- bancada: depende de 20261029100100
+-- bancada: depende de 20261029100900
 --
 --   M1 a classe de campo: as linhas principais reais de produção (f6p1/q01_principais), byte a byte; as armadilhas (o
 --      "motorhome" que não é motor, a refrigeração); a linha de maior valor e o desempate; as palavras são parâmetro; o texto
@@ -13,6 +13,8 @@
 --      derruba a medição das outras
 --   M6 _agenda_percentil
 --   M7 o gravador: os 6 passos, a pergunta (as opções), a trava e o fim dela, o leitor nulo fora de ligado, os textos do fator
+--   M9 (correção C1, 20261029100900) a conclusão sem check-out (a porta, senão sem_fim, e tocar a OS não a move); a medição
+--      olha de novo só a janela, a reaberta e a que mudou
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -276,7 +278,7 @@ begin
       ('133', 'rv:energia|2.0 dono|4 5.0 0 0|3.00|f|2070.00|1.25|-|2026-09-18 -1|1 2026-09-15 2'),
       ('134', 'rv:energia|1.0 dono|2 3.0 0 0|1.50|f|1035.00|1.50|-|2026-10-21 -1|1 2026-10-20 0'),
       ('135', 'rv:energia|2.0 dono|4 6.0 0 0|4.00|f|2760.00|1.50|-|2026-10-21 2|1 2026-10-21 2'),
-      ('136', 'rv:energia|2.0 dono|4 7.0 0 0|4.00|f|2760.00|1.75|-|2026-10-30 -1|1 2026-10-26 3'),
+      ('136', 'rv:energia|2.0 dono|4 7.0 0 0|4.00|f|2760.00|1.75|-|2026-10-30 -1|1 2026-10-27 2'),
       ('137', 'rv:energia|1.0 dono|2 4.0 2 0|2.00|f|1380.00|2.00|-|2026-10-23 2|2 2026-10-26 1'),
       ('138', 'barco:motor|1.0 dono|2 2.0 0 0|1.00|f|2400.00|1.00|-|- -|0 - -'),
       ('139', 'barco:motor|1.0 dono|2 3.0 0 0|2.00|f|7800.00|1.50|-|- -|0 - -'),
@@ -322,11 +324,11 @@ begin
     v_res := pg_temp.ok(v_res, 'M4d o R$ por diária das 7 de energia: R$ 11.385 de mão de obra ÷ 16,5 diárias = R$ 690',
       (select sum(mo) / sum(diarias_ligadas) from public.agenda_medidas_os
         where classe_bem = 'rv' and classe_sistema = 'energia' and valida) = 690);
-    v_res := pg_temp.ok(v_res, 'M4e a pontualidade e a folga: 5 de 7 no prazo da 1ª promessa; os estouros da faixa 0, 1, 2, 2 e 3 (P80 2,2)',
+    v_res := pg_temp.ok(v_res, 'M4e a pontualidade e a folga: 5 de 7 no prazo da 1ª promessa; os estouros da faixa 0, 1, 2, 2 e 2 (P80 2; a correção C1 pôs a faixa da 136 até 27/10 na fixture: com 26/10, 2,2)',
       (select count(*) filter (where atraso_cliente_du <= 0) = 5 and count(*) = 7
          from public.agenda_medidas_os where prometido_primeiro_ate is not null)
-      and (select public._agenda_percentil(array_agg(aviso_estouro_du), 0.80) = 2.2
-                  and string_agg(aviso_estouro_du::text, ',' order by aviso_estouro_du) = '0,1,2,2,3'
+      and (select public._agenda_percentil(array_agg(aviso_estouro_du), 0.80) = 2
+                  and string_agg(aviso_estouro_du::text, ',' order by aviso_estouro_du) = '0,1,2,2,2'
              from public.agenda_medidas_os where aviso_estouro_du is not null));
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
@@ -610,6 +612,84 @@ begin
   perform pg_temp.gravar(v_res);
 end
 $m7$;
+
+-- ── M9. A correção C1 (20261029100900): item 9 e regressão B5 ────────────────────────────────────────────
+-- (item 9) a OS concluída sem check-out: a conclusão é o 1º instante em que a porta a deixou concluída; sem ele, a medida não
+-- vale (sem_fim) e a data fica a já medida — tocar a OS (faturar em 19/11) não a move (o rev-f6 c8). (B5) a medição olha de
+-- novo só a OS da janela, a reaberta e a que mudou depois de medida: a medida de fora da janela que não mudou não é olhada.
+do $m9$
+declare
+  v_res jsonb := '[]'::jsonb;
+  c_hoje constant date := date '2026-10-30';
+  r1 jsonb;
+  r2 jsonb;
+  v  jsonb;
+  m  public.agenda_medidas_os;
+  n_janela int;
+begin
+  if coalesce(current_setting('agenda_teste.fase6', true), '') = '' then
+    insert into _resultado values ('M9 a correção C1 da medição (fixture-fase6)', true, 'PULADO: sem agenda_teste.fase6 (rode pela bancada)');
+    return;
+  end if;
+  begin
+    execute current_setting('agenda_teste.fase6');
+    perform public._agenda_aprender_medir(c_hoje);
+    -- a OS-00131 (concluída 08/09) sem check-out, faturada (tocada) em 19/11
+    alter table public.service_orders disable trigger user;  -- (só a simulação: o check-out sumido, a edição de 19/11)
+    update public.service_orders set check_out_at = null, delivered_at = null, updated_at = timestamptz '2026-11-19 10:00-03'
+     where id = pg_temp.os('131');
+    alter table public.service_orders enable trigger user;
+    v := public.agenda_medir_os(pg_temp.os('131'), date '2026-11-20');
+    select * into m from public.agenda_medidas_os where service_order_id = pg_temp.os('131');
+    v_res := pg_temp.ok(v_res, 'M9a (C1, item 9) sem check-out e sem a conclusão na porta, a medida não vale (sem_fim) e a conclusão continua 08/09 (tocar a OS não a move; antes ia a 19/11, com 50 dias úteis de atraso ao cliente)',
+      m.concluida_em = date '2026-09-08' and m.motivo = 'sem_fim' and not m.valida and m.fator is null
+      and m.atraso_cliente_du = 0, to_jsonb(m)::text);
+    -- a OS-00132 (concluída 09/09) sem check-out, mas com a conclusão pela porta (qua 09/09 17:30)
+    alter table public.service_orders disable trigger user;
+    update public.service_orders set check_out_at = null, delivered_at = null, updated_at = timestamptz '2026-11-19 10:00-03'
+     where id = pg_temp.os('132');
+    alter table public.service_orders enable trigger user;
+    insert into public.agenda_acoes (criada_em, dia, executada, origem, tipo, service_order_id, os_ids, status_antes, status_depois,
+                                     antes, depois, texto)
+    values (timestamptz '2026-09-09 17:30-03', date '2026-09-09', true, 'dono', 'status', pg_temp.os('132'), array[pg_temp.os('132')],
+            'in_progress', 'completed', '{"status": "in_progress"}', '{"status": "completed"}', 'Teste (C1): concluída.');
+    v := public.agenda_medir_os(pg_temp.os('132'), date '2026-11-20');
+    select * into m from public.agenda_medidas_os where service_order_id = pg_temp.os('132');
+    v_res := pg_temp.ok(v_res, 'M9b (C1, item 9) sem check-out, a conclusão é o 1º instante em que a porta a deixou concluída (09/09): a medida vale, e só a entrega (que a simulação tirou) muda',
+      m.concluida_em = date '2026-09-09' and m.valida and m.historico -> -1 -> 'depois' = '{"entregue_em": null}'::jsonb,
+      to_jsonb(m)::text || ' / ' || v::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- (B5) um ano depois, sem nada mudado: só as medidas da janela são olhadas
+  begin
+    execute current_setting('agenda_teste.fase6');
+    r1 := public._agenda_aprender_medir(c_hoje);
+    alter table public.service_orders disable trigger user;  -- (só a simulação: nenhuma OS mudou depois de medida)
+    update public.service_orders so set updated_at = timestamptz '2026-10-01 10:00-03'
+     where exists (select 1 from public.agenda_medidas_os x where x.service_order_id = so.id);
+    alter table public.service_orders enable trigger user;
+    r2 := public._agenda_aprender_medir(date '2027-10-05');
+    select count(*) into n_janela from public.agenda_medidas_os x where x.concluida_em between date '2026-10-05' and date '2027-10-05';
+    v_res := pg_temp.ok(v_res, 'M9c (C1, B5) um ano depois, sem nada mudado, a medição olha só as medidas da janela (as concluídas desde 05/10/2026), e não as 18',
+      r1 ->> 'olhadas' = '18' and (r2 ->> 'olhadas')::int = n_janela and n_janela between 1 and 17 and r2 ->> 'medidas' = '0',
+      r2::text || ' / na janela: ' || n_janela);
+    -- a que mudou depois de medida (a edição depois da medida) volta a ser olhada
+    alter table public.service_orders disable trigger user;
+    update public.service_orders set updated_at = now() + interval '1 minute' where id = pg_temp.os('131');
+    alter table public.service_orders enable trigger user;
+    r2 := public._agenda_aprender_medir(date '2027-10-06');
+    select count(*) into n_janela from public.agenda_medidas_os x
+     where x.concluida_em between date '2026-10-06' and date '2027-10-06' and x.service_order_id <> pg_temp.os('131');
+    v_res := pg_temp.ok(v_res, 'M9d (C1, B5) a medida de fora da janela que mudou depois de medida volta a ser olhada (só ela a mais)',
+      (r2 ->> 'olhadas')::int = n_janela + 1, r2::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  perform pg_temp.gravar(v_res);
+end
+$m9$;
 
 select teste, ok, detalhe from _resultado order by teste;
 

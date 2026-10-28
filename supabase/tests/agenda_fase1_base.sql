@@ -421,6 +421,10 @@ begin
        'prometido_coerente', 'prometido_faixa', 'prometido_original', 'os_planejamento_prometido_tipo_check',
        'os_planejamento_prometido_fonte_check', 'os_planejamento_servico_cliente_check']))
      -- FASE 5: fim
+     -- CORREÇÃO FASE 6: (C1) o CHECK novo de os_planejamento (presenca_publicada_coerente, 20261029100900) tem o caso dele em
+     -- agenda_fase6_os.sql (O9l)
+     and c.conname <> 'presenca_publicada_coerente'
+     -- CORREÇÃO FASE 6: fim
      -- FASE 6: os 45 que a Fase 6 pôs em agenda_config e os 3 de os_planejamento (20261029100000) têm o caso deles em
      -- agenda_fase6_base.sql (B1z cobra os 45 pelo nome; o outro B1z, os de os_planejamento e das tabelas novas).
      and not (c.conname = any (array(
