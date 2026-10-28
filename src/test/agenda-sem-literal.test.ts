@@ -412,6 +412,8 @@ describe('agenda: parâmetro só em agenda_config', () => {
       '_agenda_aprender_presenca', '_agenda_presenca_aprendida',
       // Fase 6 (P3): o atraso e o prazo medidos do fornecedor (o passo e a leitura)
       '_agenda_aprender_fornecedor', '_agenda_atraso_do_fornecedor',
+      // Fase 6 (P4): a capacidade do dono (o passo) e a carga de cada pessoa no motor
+      '_agenda_aprender_capacidade', '_agenda_carga_da_pessoa',
     ]));
     expect(tsAgenda.map((t) => t.onde)).toEqual(expect.arrayContaining([
       path.join('supabase', 'functions', 'task-automations', 'agenda-vigia.ts'),
