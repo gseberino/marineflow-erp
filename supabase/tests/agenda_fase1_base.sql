@@ -853,7 +853,12 @@ insert into _definer_da_agenda values
   -- FASE 5 (P5): as palavras *manda cliente* / *segura cliente* e a ferramenta cliente_avisar (conferem o administrador e
   -- escrevem a decisão e a mensagem preparada) e o foco clientes (confere quem vê; lê a fila e as respostas). A linha do
   -- fechamento e os textos não.
-  ('agenda_cliente_decidir_dito'), ('agenda_cliente_preparar'), ('_agenda_ver_clientes');
+  ('agenda_cliente_decidir_dito'), ('agenda_cliente_preparar'), ('_agenda_ver_clientes'),
+  -- FASE 5 (correção C1): o motivo da recusa em texto e a outra conversa (leem agenda_config, whatsapp_messages, a fila e as OS
+  -- de dentro da resposta do cliente) e o gatilho do "não saiu" (abre a pergunta ao dono quando a mensagem aprovada é
+  -- recusada pelo worker, que escreve com o service_role). Todas sem grant; o botão interno (_pedir_confirmacao) não tem o
+  -- nome da agenda (o C1z de agenda_fase5_correcao_resposta.sql prova as portas dele).
+  ('_agenda_cliente_motivo_texto'), ('_agenda_cliente_outra_conversa'), ('_agenda_cliente_avisar_recusa');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

@@ -112,6 +112,12 @@ const FIXTURES_COMO_TEXTO = [
   // Fase 5 (P6): a migration de dado (modo_cliente em sombra), que a bancada não aplica (FORA_DA_BANCADA): o
   // agenda_fase5_sombra.sql a roda como texto numa subtransação (e o DESFAZER do cabeçalho dela).
   ['agenda_teste.mig_sombra_fase5', '../../supabase/migrations/20261028101000_agenda_fase5_sombra.sql'],
+  // Correção C1 da Fase 5: as migrations de onde a 20261028100700 copia os corpos que recria (o envio, a rodada e a
+  // resposta), para o C1z (agenda_fase5_correcao_resposta.sql) conferir que as cópias só mudam nos blocos
+  // "-- CORREÇÃO FASE 5:".
+  ['agenda_teste.mig_envio_fase5', '../../supabase/migrations/20261028100200_agenda_fase5_envio.sql'],
+  ['agenda_teste.mig_rodada_fase5', '../../supabase/migrations/20261028100300_agenda_fase5_rodada.sql'],
+  ['agenda_teste.mig_respostas_fase5', '../../supabase/migrations/20261028100400_agenda_fase5_respostas.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

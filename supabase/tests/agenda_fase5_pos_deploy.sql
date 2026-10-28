@@ -1,22 +1,22 @@
--- Conferência DEPOIS de ligar a Agenda de Produção, Fase 5 (pacote P6): migrations 20261028100000..100600, as edge
+-- Conferência DEPOIS de ligar a Agenda de Produção, Fase 5 (pacote P6; correção C1): migrations 20261028100000..100700, as edge
 -- functions, o front do cartão "Plano" e (passo 3) a migration de dado 20261028101000 — modo_cliente em sombra —
 -- fila-do-dono/fase5-oks.md, passos 1–3 (e de novo a cada onda, passos 4–7).
--- bancada: depende de 20261028100600
+-- bancada: depende de 20261028100700
 --
 -- SÓ LEITURA EM PRODUÇÃO: nenhum INSERT, UPDATE ou DELETE (só na tabela TEMPORÁRIA do resultado); agenda_saude, agenda_ver
 -- e os_plano_da_os são STABLE e não gravam; termina em ROLLBACK. Na bancada (que não aplica a 20261028101000: lá o modo fica
 -- como a linha está, desligado) ele passa do mesmo jeito.
 --
---   M  as 7 versões de estrutura da Fase 5 registradas em supabase_migrations.schema_migrations; a de dado (101000, a
+--   M  as 8 versões de estrutura da Fase 5 (a 100700 é a correção C1) registradas em supabase_migrations.schema_migrations; a de dado (101000, a
 --      sombra) é mostrada
---   C  agenda_config: as 25 colunas novas existem; modo_cliente: com a 101000 registrada, sombra (ou ligado, depois dos OKs
+--   C  agenda_config: as 26 colunas novas existem (cliente_pedido_max_du é da correção C1); modo_cliente: com a 101000 registrada, sombra (ou ligado, depois dos OKs
 --      das ondas); sem ela, desligado; a sombra só com a agenda automática e a vigia ligadas (pré-requisito da §10); em
 --      ligado, a lista das ondas não está vazia; a R15 (onda 2) é mostrada
 --   T  as 9 colunas novas de os_planejamento e as 2 tabelas novas: RLS ligada, policies só de leitura e TO authenticated,
 --      anon sem nada, authenticated só lê
 --   G  os gatilhos ligados: os 3 da fila do WhatsApp (as 2 travas e o envio) e os 4 das 2 tabelas (não apagam; só mudam no
---      que podem)
---   F  as 82 funções da Fase 5 (novas e recriadas, P1–P6) existem com as portas certas — nunca anon; as de tela para
+--      que podem), e o do "não saiu" (correção C1: a mensagem aprovada pelo dono e recusada depois abre a pergunta)
+--   F  as 86 funções da Fase 5 (novas e recriadas, P1–P6 e a correção C1) existem com as portas certas — nunca anon; as de tela para
 --      authenticated e service_role; as do motor, do worker e do webhook só service_role; as internas para ninguém —, o
 --      security definer de cada uma, nenhuma agenda_*/_agenda_*/os_* executável por anon, a agenda_ver com os 18 focos
 --      (clientes) e o cartão com a chave cliente
@@ -49,7 +49,7 @@ select format('M1 migration %s registrada', v),
        exists (select 1 from supabase_migrations.schema_migrations m where m.version = v),
        null
   from unnest(array['20261028100000', '20261028100100', '20261028100200', '20261028100300', '20261028100400',
-                    '20261028100500', '20261028100600']) v;
+                    '20261028100500', '20261028100600', '20261028100700']) v;
 
 insert into _resultado
 select 'M2 a migration de dado 20261028101000 (modo_cliente em sombra) — só mostra', true,
@@ -67,7 +67,7 @@ select format('C1 agenda_config.%s existe (o DEFAULT é o único lugar do númer
                     'cliente_confirmar_du', 'cliente_resposta_validade', 'cliente_sem_resposta_horas', 'cliente_atraso_na_hora_du',
                     'cliente_acesso_validade_dias', 'cliente_andamento_min_du', 'cliente_andamento_intervalo_dias',
                     'cliente_pronto_lembrete_dias', 'cliente_pos_dias', 'cliente_conversa_dias', 'cliente_conversa_viva_min',
-                    'cliente_mesmo_tipo_horas']) c;
+                    'cliente_mesmo_tipo_horas', 'cliente_pedido_max_du']) c;
 
 insert into _resultado
 select 'C2 modo_cliente: com a 101000 registrada, sombra (ou ligado com o OK das ondas); sem ela, desligado',
@@ -138,7 +138,9 @@ select format('G1 gatilho %s em %s ligado', g.nome, g.tabela),
                ('agenda_cliente_mensagens', 'agenda_cliente_mensagens_nao_apaga'),
                ('agenda_cliente_mensagens', 'agenda_cliente_mensagens_so_muda'),
                ('agenda_cliente_respostas', 'agenda_cliente_respostas_nao_apaga'),
-               ('agenda_cliente_respostas', 'agenda_cliente_respostas_so_muda')) g(tabela, nome);
+               ('agenda_cliente_respostas', 'agenda_cliente_respostas_so_muda'),
+               -- correção C1: o aviso de "não saiu" da mensagem aprovada pelo dono e recusada depois
+               ('agenda_cliente_mensagens', 'trg_agenda_cliente_recusada')) g(tabela, nome);
 
 insert into _resultado
 select 'G2 as travas da fila do cliente só olham agenda-cliente; o gatilho do envio, agenda-cliente e agenda-confirmacao',
@@ -153,7 +155,7 @@ select 'G2 as travas da fila do cliente só olham agenda-cliente; o gatilho do e
    and tg.tgname in ('trg_agenda_fila_do_cliente', 'trg_agenda_fila_do_cliente_linha', 'trg_agenda_cliente_enviada');
 
 -- ── F. As funções ───────────────────────────────────────────────────────────────────────────────────────
--- As 82 funções que as migrations da Fase 5 criam ou recriam, com a porta de cada uma (tela = authenticated e
+-- As 86 funções que as migrations da Fase 5 (e a correção C1) criam ou recriam, com a porta de cada uma (tela = authenticated e
 -- service_role; servico = só service_role; interna = ninguém, nem service_role: só outra função a chama por dentro;
 -- gatilho = só o gatilho) e se é security definer. Nunca anon.
 create temp table _pd_funcoes (f text primary key, quem text not null, definer boolean not null) on commit drop;
@@ -164,6 +166,7 @@ insert into _pd_funcoes values
 ('_agenda_cliente_andamento(date,timestamp with time zone)', 'interna', false),
 ('_agenda_cliente_anotar_acesso(uuid,uuid,text,date,timestamp with time zone)', 'interna', false),
 ('_agenda_cliente_atraso(date,timestamp with time zone)', 'interna', false),
+('_agenda_cliente_avisar_recusa()', 'gatilho', true),
 ('_agenda_cliente_cancelar(uuid,text,text)', 'interna', false),
 ('_agenda_cliente_confirmar(date,timestamp with time zone)', 'interna', false),
 ('_agenda_cliente_confirmar_dia(uuid,uuid,text,date,timestamp with time zone)', 'interna', false),
@@ -190,9 +193,11 @@ insert into _pd_funcoes values
 ('_agenda_cliente_janela(uuid,date)', 'tela', false),
 ('_agenda_cliente_material(date,timestamp with time zone)', 'interna', false),
 ('_agenda_cliente_mensagens_so_muda()', 'gatilho', false),
+('_agenda_cliente_motivo_texto(text)', 'interna', true),
 ('_agenda_cliente_mudanca_no_dia(date,timestamp with time zone)', 'interna', false),
 ('_agenda_cliente_no_periodo(uuid,date,date,uuid)', 'interna', false),
 ('_agenda_cliente_o_que(text,date)', 'tela', false),
+('_agenda_cliente_outra_conversa(uuid[],text,timestamp with time zone,timestamp with time zone)', 'interna', true),
 ('_agenda_cliente_ouviu(uuid,date,timestamp with time zone)', 'tela', false),
 ('_agenda_cliente_pedido_de_dia(uuid,uuid,daterange,date,text,text,date,timestamp with time zone)', 'interna', false),
 ('_agenda_cliente_perguntar(text,text,uuid,date,date,text,text,timestamp with time zone,timestamp with time zone)', 'interna', false),
@@ -227,6 +232,7 @@ insert into _pd_funcoes values
 ('_agenda_mudancas(date,date,boolean,boolean,timestamp with time zone)', 'tela', false),
 ('_agenda_rascunho_frase(text,jsonb)', 'servico', false),
 ('_agenda_ver_clientes(uuid,date)', 'tela', true),
+('_pedir_confirmacao(uuid,uuid,timestamp with time zone)', 'interna', true),
 ('agenda_cliente_decidir_dito(uuid,text,text,text,date,timestamp with time zone)', 'tela', true),
 ('agenda_cliente_pode_sair(uuid,timestamp with time zone)', 'servico', true),
 ('agenda_cliente_preparar(uuid,text,text,boolean,text,date,timestamp with time zone)', 'tela', true),
@@ -242,7 +248,7 @@ insert into _pd_funcoes values
 ('registrar_confirmacao_do_cliente(text,text,uuid)', 'servico', true);
 
 insert into _resultado
-select 'F1 as 82 funções da Fase 5 existem', count(*) = 82 and count(to_regprocedure('public.' || k.f)) = 82,
+select 'F1 as 86 funções da Fase 5 existem (82 dos pacotes + 4 da correção C1)', count(*) = 86 and count(to_regprocedure('public.' || k.f)) = 86,
        coalesce(string_agg(k.f, ', ') filter (where to_regprocedure('public.' || k.f) is null), 'todas')
   from _pd_funcoes k;
 
@@ -292,6 +298,11 @@ select 'F6 a agenda_ver aceita o foco clientes e a mensagem do foco que não exi
        and p.prosrc like '%comissao, equipe, compras, fornecedores ou clientes)%',
        null
   from pg_proc p where p.oid = to_regprocedure('public.agenda_ver(uuid, text, text, text, text, jsonb, boolean, date)');
+
+insert into _resultado
+select 'F8 (correção C1) o botão é a casca: pedir_confirmacao_do_agendamento chama _pedir_confirmacao com now(); o webhook novo só depois da 100700',
+       p.prosrc like '%return public._pedir_confirmacao(p_os, p_autor, now());%', null
+  from pg_proc p where p.oid = to_regprocedure('public.pedir_confirmacao_do_agendamento(uuid, uuid)');
 
 insert into _resultado
 select 'F7 o cartão "Plano" (os_plano_da_os) traz a chave cliente (_agenda_cliente_da_os)',

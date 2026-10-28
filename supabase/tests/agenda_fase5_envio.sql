@@ -1,7 +1,7 @@
 -- Prova do envio ao cliente da Agenda de Produção, Fase 5 (pacote P2): a janela, a hora com o intervalo, o teto, as três
 -- travas da origem agenda-cliente (o enfileirar, o gatilho da fila e o pode_sair do worker), a revalidação na saída, o
 -- gatilho do envio (o que foi dito ao cliente) e o D9 (migration 20261028100200).
--- bancada: depende de 20261028100200
+-- bancada: depende de 20261028100700
 --
 --   E0  portas: o pode_sair só para service_role; o registro, as travas, os passos e o gatilho para ninguém de fora (nem o
 --       service_role); as leituras para authenticated e service_role; security definer só onde precisa; search_path fixo;
@@ -30,7 +30,9 @@
 --       sem o plano ligado, a regra de 30/09; em ligado registra pela agenda (aprovada, sai na hora da janela; o pedido conta
 --       do envio); a confirmação fora das ondas = como hoje; a recusa vira o erro com o motivo; o "sim" fixa as alocações
 --   E9z as cópias de pedir_confirmacao_do_agendamento e registrar_confirmacao_do_cliente só mudam nos blocos "-- FASE 5:"
---       (e, no registrar, nas 3 linhas listadas)
+--       (e, no registrar, nas 3 linhas listadas). Correção C1 (20261028100700): o corpo do botão mora em _pedir_confirmacao
+--       (o E9d–E9f a chamam com a hora fixa, de dia e de noite; o E9z-1 a confere); o E4f espera a hora remarcada pelo
+--       intervalo (não mais a recusa). Por isso este arquivo depende da 100700.
 --   E10 wa_test_mode: vai ao número de teste; sem ele, sem_telefone
 --   E11 o passo "fila": a fila velha (janela), o modo e o tipo que saíram, a revalidação, o que é hora de mandar, a validade
 --       que vence a aprovação (e a pergunta), a conversa viva (d19), e roda até desligado
@@ -157,6 +159,21 @@ begin
   return left(v, position(E'\n$$;' in v));
 end $f$;
 -- O corpo sem os blocos "-- FASE 5: … -- FASE 5: fim" (linhas).
+-- (correção C1) O corpo sem os blocos "-- CORREÇÃO FASE 5: … -- CORREÇÃO FASE 5: fim" (linhas).
+create function pg_temp.sem_correcao(p_corpo text) returns text[] language plpgsql as $f$
+declare
+  v_b text[] := '{}'; v_bloco boolean := false; l text;
+begin
+  foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
+    if not v_bloco and l ~ '^\s*-- CORREÇÃO FASE 5:' and l !~ '^\s*-- CORREÇÃO FASE 5: fim' then v_bloco := true; continue; end if;
+    if v_bloco then
+      if l ~ '^\s*-- CORREÇÃO FASE 5: fim' then v_bloco := false; end if;
+      continue;
+    end if;
+    v_b := v_b || l;
+  end loop;
+  return v_b;
+end $f$;
 create function pg_temp.sem_fase5(p_corpo text) returns text[] language plpgsql as $f$
 declare
   v_b text[] := '{}'; v_bloco boolean := false; l text;
@@ -613,8 +630,11 @@ begin
       v_id := (r3 ->> 'id')::uuid;
       update public.agenda_cliente_mensagens set enviar_em = pg_temp.em('2026-10-30 10:00:10') where id = v_id;
       r2 := public._agenda_cliente_enfileirar(v_id, pg_temp.em('2026-10-30 10:00'));
-      v_res := pg_temp.ok(v_res, 'E4f o intervalo: a mensagem marcada a 10 s da linha do Robson na fila = intervalo',
-        r ->> 'estado' = 'enfileirada' and r2 = '{"estado": "recusada", "motivo": "intervalo"}'::jsonb, r2::text);
+      -- (correção C1, item 14) o intervalo não recusa mais para sempre: a hora é remarcada (≥ 30 s depois da outra) e a
+      -- mensagem fica registrada para o passo fila; só a trava da fila recusa por intervalo (E5d)
+      v_res := pg_temp.ok(v_res, 'E4f o intervalo: a mensagem marcada a 10 s da linha do Robson na fila tem a hora remarcada (registrada, motivo intervalo), não é recusada',
+        r ->> 'estado' = 'enfileirada' and r2 ->> 'estado' = 'registrada' and r2 ->> 'motivo' = 'intervalo'
+        and (r2 ->> 'enviar_em')::timestamptz >= (r ->> 'enviar_em')::timestamptz + interval '30 seconds', r2::text);
       raise exception 'desfaz' using errcode = 'P0098';
     exception when sqlstate 'P0098' then null;
     end;
@@ -1221,68 +1241,91 @@ begin
       e ->> 'peca' = 'P0001 A OS espera peça (ou o cliente): confirmar o dia agora seria prometer o que não depende de nós.'
       and e ->> 'sem_dia' = 'P0001 A OS OS-00199 não tem dia marcado no plano de amanhã em diante.'
       and e ->> 'sem_plano' = 'P0001 A OS OS-00199 não está agendada.' and e ->> 'sem_plano_agendada' = 'sem erro', e::text);
+    -- (correção C1, item 21 / B1) o botão pela interna _pedir_confirmacao, com a hora fixa: de dia (sex 30/10 10:00) e de
+    -- noite (sex 30/10 20:00), os dois ramos SEMPRE — antes o teste lia now() e, à noite, passava pelo ramo vazio.
     begin
       perform pg_temp.ligar();
-      r := public.pedir_confirmacao_do_agendamento(c_os, c_admin);
+      perform set_config('agenda_teste.hoje', '2026-10-30', true);
+      r := public._pedir_confirmacao(c_os, c_admin, pg_temp.em('2026-10-30 10:00'));
       e := (select to_jsonb(m) - 'base' from public.agenda_cliente_mensagens m where m.service_order_id = c_os);
-      v_res := pg_temp.ok(v_res, 'E9d em ligado (com a confirmação nas ondas) o botão registra pela agenda: o M1 aprovado pelo clique (origem botao, aprovada_por o dono), o dia do plano; na fila ou esperando a hora da janela; nenhuma linha agenda-confirmacao; o pedido da OS ainda não anotado',
+      v_res := pg_temp.ok(v_res, 'E9d em ligado (com a confirmação nas ondas), de dia (sex 10:00), o botão registra pela agenda: o M1 aprovado pelo clique (origem botao, aprovada_por o dono), o dia do plano, na fila agora; nenhuma linha agenda-confirmacao; o pedido da OS ainda não anotado',
         (r ->> 'ok')::boolean and (r ->> 'agenda')::boolean
         and e ->> 'origem' = 'botao' and e ->> 'aprovacao' = 'aprovada' and (e ->> 'aprovada_por')::uuid = c_admin and e ->> 'tipo' = 'confirmar'
-        and e ->> 'modo' = 'ligado' and (e ->> 'dia_alvo')::date = v_d and e ->> 'estado' in ('enfileirada', 'registrada')
+        and e ->> 'modo' = 'ligado' and (e ->> 'dia_alvo')::date = v_d and e ->> 'estado' = 'enfileirada'
         and e ->> 'texto' like 'Olá, Flávio! Aqui é o Gustavo, da HBR Marine Solutions. Conseguimos encaixar o serviço no seu motorhome para '
                                || public._agenda_cliente_dia(v_d) || ', pela manhã, com previsão de 1 dia de trabalho.%'
-        and r ->> 'message' like 'Pedido de confirmação %'
+        and r ->> 'message' = 'Pedido de confirmação na fila para Flávio. Quando ele responder SIM, a OS fica confirmada.'
         and not exists (select 1 from public.whatsapp_send_queue q where q.source = 'agenda-confirmacao')
         and (select so.client_confirmation_requested_at is null from public.service_orders so where so.id = c_os),
         r::text || ' / ' || e::text);
-      -- quando sai (se a janela de agora deixou), o pedido conta do envio
-      if e ->> 'estado' = 'enfileirada' then
-        update public.whatsapp_send_queue set status = 'sent', sent_at = now() where id = (e ->> 'fila_id')::uuid;
-      end if;
-      v_res := pg_temp.ok(v_res, 'E9e ao sair, o pedido de confirmação da OS conta do envio e o prometido é o dia do plano (se a janela de agora deixou sair)',
-        e ->> 'estado' = 'registrada'
-        or ((select so.client_confirmation_requested_at is not null from public.service_orders so where so.id = c_os)
-            and (select p.prometido_de = v_d and p.prometido_fonte = 'mensagem' from public.os_planejamento p where p.service_order_id = c_os)),
+      -- quando sai, o pedido conta do envio
+      update public.whatsapp_send_queue set status = 'sent', sent_at = pg_temp.em('2026-10-30 10:00:30') where id = (e ->> 'fila_id')::uuid;
+      v_res := pg_temp.ok(v_res, 'E9e ao sair, o pedido de confirmação da OS conta do envio (10:00:30) e o prometido é o dia do plano',
+        (select so.client_confirmation_requested_at = pg_temp.em('2026-10-30 10:00:30') from public.service_orders so where so.id = c_os)
+        and (select p.prometido_de = v_d and p.prometido_fonte = 'mensagem' from public.os_planejamento p where p.service_order_id = c_os),
         e ->> 'estado');
+      raise exception 'desfaz' using errcode = 'P0097';
+    exception when sqlstate 'P0097' then null;
+    end;
+    begin
+      perform pg_temp.ligar();
+      perform set_config('agenda_teste.hoje', '2026-10-30', true);
+      r := public._pedir_confirmacao(c_os, c_admin, pg_temp.em('2026-10-30 20:00'));
+      e := (select to_jsonb(m) - 'base' from public.agenda_cliente_mensagens m where m.service_order_id = c_os);
+      v_res := pg_temp.ok(v_res, 'E9d de noite (sex 20:00), o mesmo M1 fica registrado para a manhã seguinte (sáb a partir das 08:00) e o aviso diz quando; nada na fila',
+        (r ->> 'ok')::boolean and e ->> 'origem' = 'botao' and e ->> 'estado' = 'registrada'
+        and (e ->> 'enviar_em')::timestamptz >= pg_temp.em('2026-10-31 08:00') and (e ->> 'enviar_em')::timestamptz < pg_temp.em('2026-10-31 08:05')
+        and r ->> 'message' like 'Pedido de confirmação a Flávio registrado: sai amanhã às 08:0_ (fora do horário de mensagens agora).'
+        and not exists (select 1 from public.whatsapp_send_queue q where q.source in ('agenda-cliente', 'agenda-confirmacao')),
+        r::text || ' / ' || e::text);
+      -- de manhã o passo fila a enfileira; ao sair, o pedido conta do envio (o E9e da noite)
+      perform set_config('agenda_teste.hoje', '2026-10-31', true);
+      perform public._agenda_cliente_fila(date '2026-10-31', pg_temp.em('2026-10-31 08:00'));
+      update public.whatsapp_send_queue set status = 'sent', sent_at = pg_temp.em('2026-10-31 08:00:40')
+       where source = 'agenda-cliente' and source_ref_id = (e ->> 'id')::uuid;
+      v_res := pg_temp.ok(v_res, 'E9e de noite: o passo fila da manhã a manda, e o pedido conta do envio (sáb 08:00:40)',
+        (select so.client_confirmation_requested_at = pg_temp.em('2026-10-31 08:00:40') from public.service_orders so where so.id = c_os)
+        and (select p.prometido_de = v_d from public.os_planejamento p where p.service_order_id = c_os),
+        (select m.estado from public.agenda_cliente_mensagens m where m.id = (e ->> 'id')::uuid));
       raise exception 'desfaz' using errcode = 'P0097';
     exception when sqlstate 'P0097' then null;
     end;
     e := jsonb_build_object();
     begin
+      -- a confirmação fora das ondas (o caminho antigo): de dia vai como hoje; de noite (correção C1, item 19) o erro
       perform pg_temp.ligar(array['pronto']);
-      r := public.pedir_confirmacao_do_agendamento(c_os, c_admin);
+      r := public._pedir_confirmacao(c_os, c_admin, pg_temp.em('2026-10-30 10:00'));
       e := e || jsonb_build_object('fora_das_ondas', exists (select 1 from public.whatsapp_send_queue q where q.source = 'agenda-confirmacao' and q.source_ref_id = c_os)
                                                     and not exists (select 1 from public.agenda_cliente_mensagens m where m.service_order_id = c_os));
       raise exception 'desfaz' using errcode = 'P0096';
     exception when sqlstate 'P0096' then null;
     end;
     begin
-      perform pg_temp.ligar();
-      delete from public.whatsapp_messages where phone_normalized = '5547900000304';
-      -- (Fase 5, P5) o botão lê now(): fora da janela do cliente (depois das 19:00 de Brasília, domingo, feriado) a mensagem
-      -- fica registrada para a próxima manhã e a recusa sem_conversa só vem no enfileirar (o passo fila), sem erro no clique.
-      -- O teste era dependente da hora em que a bancada roda; agora confere cada caso no seu horário.
-      if public._agenda_cliente_fora_da_janela(now(), now()) is null then
-        e := e || jsonb_build_object('dentro_da_janela', true,
-          'sem_conversa', pg_temp.erro_de(format('select public.pedir_confirmacao_do_agendamento(%L, %L)', c_os, c_admin)),
-          'nada_gravado', not exists (select 1 from public.agenda_cliente_mensagens m where m.service_order_id = c_os));
-      else
-        r := public.pedir_confirmacao_do_agendamento(c_os, c_admin);
-        e := e || jsonb_build_object('dentro_da_janela', false, 'resposta', r ->> 'message',
-          'recusa_na_fila', (select public._agenda_cliente_enfileirar(m.id, m.enviar_em) ->> 'motivo'
-                               from public.agenda_cliente_mensagens m where m.service_order_id = c_os
-                              order by m.criada_em desc limit 1));
-      end if;
+      perform pg_temp.ligar(array['pronto']);
+      e := e || jsonb_build_object('fora_das_ondas_noite',
+        pg_temp.erro_de(format('select public._pedir_confirmacao(%L, %L, %L)', c_os, c_admin, pg_temp.em('2026-10-30 20:00'))),
+        'nada_na_fila', not exists (select 1 from public.whatsapp_send_queue q where q.source = 'agenda-confirmacao'));
       raise exception 'desfaz' using errcode = 'P0096';
     exception when sqlstate 'P0096' then null;
     end;
-    v_res := pg_temp.ok(v_res, 'E9f com a confirmação fora das ondas, o botão faz como hoje; a recusa da agenda (o Flávio nunca escreveu) vira o erro com o motivo, e nada fica gravado',
+    begin
+      -- (correção C1, item 5a / M1) a recusa da agenda (o Flávio nunca escreveu) vira o erro no clique, de dia E de noite
+      perform pg_temp.ligar();
+      delete from public.whatsapp_messages where phone_normalized = '5547900000304';
+      e := e || jsonb_build_object(
+        'sem_conversa_dia', pg_temp.erro_de(format('select public._pedir_confirmacao(%L, %L, %L)', c_os, c_admin, pg_temp.em('2026-10-30 10:00'))),
+        'sem_conversa_noite', pg_temp.erro_de(format('select public._pedir_confirmacao(%L, %L, %L)', c_os, c_admin, pg_temp.em('2026-10-30 20:00'))),
+        'nada_gravado', not exists (select 1 from public.agenda_cliente_mensagens m where m.service_order_id = c_os));
+      raise exception 'desfaz' using errcode = 'P0096';
+    exception when sqlstate 'P0096' then null;
+    end;
+    v_res := pg_temp.ok(v_res, 'E9f com a confirmação fora das ondas, o botão faz como hoje de dia e recusa de noite (fora do horário de mensagens ao cliente); a recusa da agenda (o Flávio nunca escreveu) vira o erro com o motivo de dia e de noite, e nada fica gravado',
       (e ->> 'fora_das_ondas')::boolean
-      and case when (e ->> 'dentro_da_janela')::boolean
-               then e ->> 'sem_conversa' = 'P0001 Flávio não escreveu para a HBR nos últimos 365 dias: mensagem automática a quem não escreve arrisca o número. Confirme por telefone.'
-                    and (e ->> 'nada_gravado')::boolean
-               else e ->> 'resposta' like 'Pedido de confirmação a Flávio registrado: sai % (fora do horário de mensagens agora).'
-                    and e ->> 'recusa_na_fila' = 'sem_conversa' end, e::text);
+      and e ->> 'fora_das_ondas_noite' = 'P0001 Fora do horário de mensagens ao cliente: peça amanhã a partir das 08:00.'
+      and (e ->> 'nada_na_fila')::boolean
+      and e ->> 'sem_conversa_dia' = 'P0001 Flávio não escreveu para a HBR nos últimos 365 dias: mensagem automática a quem não escreve arrisca o número. Confirme por telefone.'
+      and e ->> 'sem_conversa_noite' = e ->> 'sem_conversa_dia'
+      and (e ->> 'nada_gravado')::boolean, e::text);
 
     raise exception 'desfaz tudo' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
@@ -1314,13 +1357,27 @@ begin
     insert into _resultado values ('E9z as cópias do D9', true, 'PULADO: sem agenda_teste.mig_confirmacao(_1012) (rode pela bancada)');
     return;
   end if;
+  -- (correção C1, item 21) o corpo do botão mora em _pedir_confirmacao (a casca chama com now()): fora dos blocos "-- FASE 5:"
+  -- e "-- CORREÇÃO FASE 5:", só as 2 linhas do now() de 30/09 que viraram p_agora (as outras 5 trocas da 100700 estão dentro
+  -- dos blocos da Fase 5; o C1z de agenda_fase5_correcao_resposta.sql confere as 7 contra a 100200)
   v_velho := string_to_array(pg_temp.corpo_dd(v_mig0930, 'pedir_confirmacao_do_agendamento'), E'\n');
-  v_novo := pg_temp.sem_fase5((select p.prosrc from pg_proc p where p.oid = 'public.pedir_confirmacao_do_agendamento(uuid, uuid)'::regprocedure));
-  insert into _resultado values ('E9z-1 a cópia de pedir_confirmacao_do_agendamento só muda nos blocos "-- FASE 5:" (× 20260930130000)',
-    v_novo = v_velho and cardinality(v_velho) > 40
-    and (select count(*) from regexp_matches((select p.prosrc from pg_proc p where p.oid = 'public.pedir_confirmacao_do_agendamento(uuid, uuid)'::regprocedure),
+  for i in 1 .. coalesce(array_length(v_velho, 1), 0) loop
+    if v_velho[i] = '  if v_os.scheduled_start_at < now() then' then
+      v_velho[i] := '  if v_os.scheduled_start_at < p_agora then';
+      v_n := v_n + 1;
+    elsif v_velho[i] = '     set client_confirmation_requested_at = now(), client_confirmed_at = null, client_confirmed_for = null' then
+      v_velho[i] := '     set client_confirmation_requested_at = p_agora, client_confirmed_at = null, client_confirmed_for = null';
+      v_n := v_n + 1;
+    end if;
+  end loop;
+  v_novo := pg_temp.sem_correcao(array_to_string(pg_temp.sem_fase5((select p.prosrc from pg_proc p
+              where p.oid = 'public._pedir_confirmacao(uuid, uuid, timestamptz)'::regprocedure)), E'\n'));
+  insert into _resultado values ('E9z-1 a cópia do botão (_pedir_confirmacao, a interna da casca pedir_confirmacao_do_agendamento) só muda nos blocos "-- FASE 5:" e "-- CORREÇÃO FASE 5:" e nas 2 linhas do now() (× 20260930130000)',
+    v_n = 2 and v_novo = v_velho and cardinality(v_velho) > 40
+    and (select count(*) from regexp_matches((select p.prosrc from pg_proc p where p.oid = 'public._pedir_confirmacao(uuid, uuid, timestamptz)'::regprocedure),
                                              '-- FASE 5: fim', 'g')) = 4,
-    format('linhas %s × %s', array_length(v_novo, 1), array_length(v_velho, 1)));
+    format('trocas %s; linhas %s × %s', v_n, array_length(v_novo, 1), array_length(v_velho, 1)));
+  v_n := 0;
   v_velho := string_to_array(pg_temp.corpo_dd(v_mig1012, 'registrar_confirmacao_do_cliente'), E'\n');
   for i in 1 .. coalesce(array_length(v_velho, 1), 0) loop
     for j in 1 .. 3 loop

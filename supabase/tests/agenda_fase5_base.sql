@@ -1,7 +1,7 @@
 -- Prova da base da Agenda de Produção, Fase 5 (pacote P1): o modo e os parâmetros da mensagem ao cliente, o que foi dito
 -- ao cliente (prometido_*), as 2 tabelas do cliente e as listas fechadas ampliadas (migrations 20261028100000 e
--- 20261028100100).
--- bancada: depende de 20261028100100
+-- 20261028100100; o parâmetro da correção C1, cliente_pedido_max_du, de 20261028100700).
+-- bancada: depende de 20261028100700
 --
 --   B1 colunas, DEFAULTs e CHECKs (agenda_config, os_planejamento, agenda_cliente_mensagens, agenda_cliente_respostas, as
 --      listas fechadas ampliadas); todo CHECK novo de agenda_config tem caso; o modelo gerado (M1–M10)
@@ -114,7 +114,7 @@ end $$;
 
 -- ── B1. Colunas, DEFAULTs e CHECKs ──────────────────────────────────────────────────────────────────────
 insert into _resultado
-select 'B1a agenda_config: modo_cliente nasce desligado na linha e o DEFAULT da coluna é sombra; a lista de tipos vazia; os 24 parâmetros com o valor da spec',
+select 'B1a agenda_config: modo_cliente nasce desligado na linha e o DEFAULT da coluna é sombra; a lista de tipos vazia; os 24 parâmetros com o valor da spec (e o cliente_pedido_max_du da correção C1)',
        c.modo_cliente = 'desligado' and c.cliente_tipos_ligados = '{}'
        and (select pg_get_expr(d.adbin, d.adrelid) from pg_attribute a join pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
              where a.attrelid = 'public.agenda_config'::regclass and a.attname = 'modo_cliente') like '''sombra''%'
@@ -126,6 +126,8 @@ select 'B1a agenda_config: modo_cliente nasce desligado na linha e o DEFAULT da 
        and c.cliente_atraso_na_hora_du = 2 and c.cliente_acesso_validade_dias = 90 and c.cliente_andamento_min_du = 5
        and c.cliente_andamento_intervalo_dias = 6 and c.cliente_pronto_lembrete_dias = 3 and c.cliente_pos_dias = 5
        and c.cliente_conversa_dias = 365 and c.cliente_conversa_viva_min = 60 and c.cliente_mesmo_tipo_horas = 24
+       -- (correção C1) o teto do dia que o cliente pede: 10 dias úteis do combinado
+       and c.cliente_pedido_max_du = 10
        -- os da Fase 2 reusados (não duplicados)
        and c.atraso_longo_dias = 7 and c.remarcar_confirmado_du = 2
        and not exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
@@ -177,6 +179,8 @@ insert into _casos values
   ('config', 'pós-serviço em 2 dias', $q$update public.agenda_config set cliente_pos_dias = 2$q$, 'agenda_config_cliente_pos_dias_check'),
   ('config', 'conversa em 731 dias', $q$update public.agenda_config set cliente_conversa_dias = 731$q$, 'agenda_config_cliente_conversa_dias_check'),
   ('config', 'conversa viva 241 min', $q$update public.agenda_config set cliente_conversa_viva_min = 241$q$, 'agenda_config_cliente_conversa_viva_min_check'),
+  ('config', 'pedido do cliente a 31 dias úteis (correção C1)', $q$update public.agenda_config set cliente_pedido_max_du = 31$q$, 'agenda_config_cliente_pedido_max_du_check'),
+  ('config', 'pedido do cliente a 0 dia útil (correção C1)', $q$update public.agenda_config set cliente_pedido_max_du = 0$q$, 'agenda_config_cliente_pedido_max_du_check'),
   ('config', 'mesmo tipo em 11 h', $q$update public.agenda_config set cliente_mesmo_tipo_horas = 11$q$, 'agenda_config_cliente_mesmo_tipo_horas_check'),
   ('config', 'os limites que entram (ligado, as 4 ondas, 07:00, 20:00, sáb 14:00, 10–300 s, 0 dias de aprovação e de conversa)',
    $q$update public.agenda_config set modo_cliente = 'ligado',
@@ -254,7 +258,7 @@ select format('B1 %s: %s', k.grupo, k.nome), r = k.espera, r
 
 insert into _resultado
 select 'B1z todo CHECK novo de agenda_config tem caso (nenhum ficou sem prova)',
-       bool_and(exists (select 1 from _casos k where k.espera = c.conname)) and count(*) = 25,
+       bool_and(exists (select 1 from _casos k where k.espera = c.conname)) and count(*) = 26,
        format('%s CHECKs; sem caso: %s', count(*),
               coalesce(string_agg(c.conname, ', ') filter (where not exists (select 1 from _casos k where k.espera = c.conname)), '—'))
   from pg_constraint c

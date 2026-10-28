@@ -41,7 +41,8 @@
 //   · (Fase 5, P1) também as funções das migrations 2026102810* (os textos ao cliente, o contexto, o proibido, o prometido e
 //     os pacotes seguintes da fase, pelo prefixo). Os DEFAULTs novos de agenda_config (a janela, o teto, o intervalo, a
 //     aprovação dos primeiros dias, as horas do toque e do preparo, as validades e a conversa) ficam em 20261028100000, fora
-//     de função; o atraso longo e o remarcar confirmado são os da Fase 2 (reusados).
+//     de função; o atraso longo e o remarcar confirmado são os da Fase 2 (reusados). A correção C1 (20261028100700) entra pelo
+//     mesmo prefixo; o DEFAULT novo (cliente_pedido_max_du) fica fora de função, na própria 100700.
 // Os inteiros pequenos (0, 1, 2, 7: meios-dias por dia, dias da semana…) e os limites de tamanho de texto dos CHECKs
 // são estrutura e não entram na regra.
 import { describe, expect, it } from 'vitest';
@@ -148,10 +149,13 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
   },
   // Fase 5 (P2): o nome de um motivo de recusa da mensagem ao cliente (a lista fechada de
   // agenda_cliente_mensagens.recusa_motivo, criada no P1). As horas são agenda_config.cliente_mesmo_tipo_horas.
-  ...['_agenda_cliente_revalidar', '_agenda_cliente_enfileirar', 'pedir_confirmacao_do_agendamento'].map((onde) => ({
+  // Correção C1 da Fase 5 (20261028100700): revalidar e enfileirar recriados (+1 cada: a cópia leva o mesmo nome do motivo);
+  // o corpo do botão foi para _pedir_confirmacao (a cópia de 100200, com o mesmo nome); a casca nova não tem nenhum.
+  ...([['_agenda_cliente_revalidar', 2], ['_agenda_cliente_enfileirar', 2], ['pedir_confirmacao_do_agendamento', 1],
+        ['_pedir_confirmacao', 1]] as const).map(([onde, vezes]) => ({
     onde,
     casou: '24h',
-    vezes: 1,
+    vezes,
     porque: 'o nome do motivo mesmo_tipo_24h (a lista fechada de recusa_motivo); as horas vêm de cliente_mesmo_tipo_horas, não é rascunho_validade',
   })),
 ];
@@ -389,6 +393,8 @@ describe('agenda: parâmetro só em agenda_config', () => {
       // Fase 5 (P2): o envio (a hora, a revalidação, o registro, as travas, o passo da fila) e o D9 recriado
       '_agenda_cliente_quando', '_agenda_cliente_revalidar', '_agenda_cliente_registrar', '_agenda_cliente_enfileirar',
       '_agenda_fila_do_cliente', '_agenda_cliente_fila', 'pedir_confirmacao_do_agendamento', 'registrar_confirmacao_do_cliente',
+      // Correção C1 da Fase 5: o botão interno, a outra conversa, o motivo em texto e o aviso de "não saiu"
+      '_pedir_confirmacao', '_agenda_cliente_outra_conversa', '_agenda_cliente_motivo_texto', '_agenda_cliente_avisar_recusa',
     ]));
     expect(tsAgenda.map((t) => t.onde)).toEqual(expect.arrayContaining([
       path.join('supabase', 'functions', 'task-automations', 'agenda-vigia.ts'),
