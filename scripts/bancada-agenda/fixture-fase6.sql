@@ -308,3 +308,62 @@ begin
   end if;
 end
 $confere_p2$;
+
+-- ── P3 (28/10): as entregas dos fornecedores (o insumo do atraso e do prazo medidos) ────────────────────
+-- Nas OS concluídas (o material já na mão; nenhuma OS da carteira muda). Kamell (Vila Velha/ES, dd…02): 6 entregas, o atraso
+-- de cada uma (dias úteis da 1ª previsão até a chegada) 0 (131), −1 (132, adiantou), 0 (133: UMA nota com 3 linhas, −1, 0 e 0
+-- → o maior, 0), 0 (134, pela OC), 2 (135) e 3 (136) → o P80 é 2 dias úteis, 4 no
+-- prazo. Correa (dd…08): 4 entregas (0, 1, 0, 0) → medindo (o mínimo é 5). As 5 notas da Kamell que chegaram, da saída até a
+-- chegada: 4 (03/09 → 10/09: 07/09 é feriado), 5, 6, 6 (05/10 → 14/10: 12/10 é feriado) e 6 dias úteis → o P80 é 6 (o
+-- padrão de "outro estado" é 4). Nada aqui manda mensagem: são fatos do passado. As linhas não têm comprado_em (o dia da
+-- 1ª previsão fica em previsao_original_em): assim o "tempo até comprar" do foco compras continua o da Fase 4.
+insert into public.material_remessas (id, nfe_chave, fornecedor_id, emitente, emitente_uf, numero, emitida_em, saida_em,
+  classe, prazo_du, previsao_ate, estado, vinculo, os_ids, respondida_em, chegou_em, criada_em)
+select ('d6300000-0000-4000-8000-00000000010' || k)::uuid, rpad('3226099999' || k, 44, '0'), 'dd000000-0000-4000-8000-000000000002',
+       'KAMELL COMERCIO GLOBAL LTDA', 'ES', '00010' || k, saida::date, saida::date, 'outro_estado', 4,
+       public.agenda_somar_du(saida::date, 4), 'chegou', vinculo,
+       case when vinculo = 'ligada' then array['05000000-0000-4000-8000-000000000133'::uuid] else '{}'::uuid[] end,
+       (saida::date + time '12:00') at time zone 'America/Sao_Paulo', chegou::date,
+       (saida::date + time '09:00') at time zone 'America/Sao_Paulo'
+  from (values ('1', '2026-09-03', '2026-09-10', 'ligada'), ('2', '2026-09-14', '2026-09-21', 'sem_servico'),
+               ('3', '2026-09-28', '2026-10-06', 'sem_servico'), ('4', '2026-10-05', '2026-10-14', 'sem_servico'),
+               ('5', '2026-10-13', '2026-10-21', 'sem_servico')) as r(k, saida, chegou, vinculo);
+
+insert into public.os_material (id, service_order_id, origem, descricao, quantidade_necessaria,
+  quantidade_na_mao, situacao, fonte, fornecedor_id, comprado_em, previsao_ate, previsao_fonte, previsao_original,
+  previsao_original_fonte, previsao_original_em, chegou_em, remessa_id, atualizado_em)
+select ('d6300000-0000-4000-8000-0000000000' || id)::uuid, ('05000000-0000-4000-8000-000000000' || os)::uuid,
+       origem, descr, 1, 1, 'na_mao', fonte,
+       forn::uuid, null, prev::date, fonte, prev::date, fonte, comprado::date, chegou::date,
+       case when nota then 'd6300000-0000-4000-8000-000000000101'::uuid end,
+       (chegou::date + time '17:00') at time zone 'America/Sao_Paulo'
+  from (values
+    -- Kamell (dd…02)
+    ('01', '131', 'dono', 'Bateria de lítio 100Ah (AG6F)', 'fornecedor', 'dd000000-0000-4000-8000-000000000002', '2026-09-01', '2026-09-03', '2026-09-03', false),
+    ('02', '132', 'dono', 'Inversor 2000W (AG6F)', 'fornecedor', 'dd000000-0000-4000-8000-000000000002', '2026-09-01', '2026-09-04', '2026-09-03', false),
+    ('03', '133', 'dono', 'Cabo 25mm vermelho (AG6F)', 'nfe', null, '2026-09-03', '2026-09-11', '2026-09-10', true),
+    ('04', '133', 'dono', 'Terminal 25mm (AG6F)', 'nfe', null, '2026-09-03', '2026-09-10', '2026-09-10', true),
+    ('05', '133', 'dono', 'Fusível ANL 150A (AG6F)', 'nfe', null, '2026-09-03', '2026-09-10', '2026-09-10', true),
+    ('06', '134', 'dono', 'Inversor 3000W 12V (AG6F)', 'oc', 'dd000000-0000-4000-8000-000000000002', '2026-10-08', '2026-10-14', '2026-10-14', false),
+    ('07', '135', 'dono', 'Carregador DC-DC 30A (AG6F)', 'fornecedor', 'dd000000-0000-4000-8000-000000000002', '2026-10-09', '2026-10-15', '2026-10-19', false),
+    ('08', '136', 'dono', 'Painel solar 400W (AG6F)', 'fornecedor', 'dd000000-0000-4000-8000-000000000002', '2026-10-13', '2026-10-20', '2026-10-23', false),
+    -- Correa (dd…08)
+    ('11', '138', 'dono', 'Disjuntor 63A (AG6F)', 'fornecedor', 'dd000000-0000-4000-8000-000000000008', '2026-09-08', '2026-09-09', '2026-09-09', false),
+    ('12', '139', 'dono', 'Contatora 40A (AG6F)', 'fornecedor', 'dd000000-0000-4000-8000-000000000008', '2026-09-09', '2026-09-10', '2026-09-11', false),
+    ('13', '142', 'dono', 'Relé de nível (AG6F)', 'fornecedor', 'dd000000-0000-4000-8000-000000000008', '2026-09-21', '2026-09-22', '2026-09-22', false),
+    ('14', '143', 'dono', 'Chave seletora (AG6F)', 'fornecedor', 'dd000000-0000-4000-8000-000000000008', '2026-09-22', '2026-09-23', '2026-09-23', false)
+  ) as m(id, os, origem, descr, fonte, forn, comprado, prev, chegou, nota);
+
+do $confere_p3$
+begin
+  if (select count(*) from public.os_material m where m.id::text like 'd6300000-%') <> 12
+     or (select count(*) from public.material_remessas r where r.id::text like 'd6300000-%' and r.estado = 'chegou') <> 5
+     or (select string_agg(public.agenda_du_entre(r.despacho_em, r.chegou_em)::text, ',' order by r.id)
+           from public.material_remessas r where r.id::text like 'd6300000-%') <> '4,5,6,6,6'
+     or exists (select 1 from public.os_material m
+                 where m.id::text like 'd6300000-%' and (m.previsao_original is distinct from m.previsao_ate
+                                                          or m.previsao_original_fonte is distinct from m.fonte)) then
+    raise exception 'fixture-fase6 (P3): as 12 linhas na mão e as 5 notas da Kamell (4, 5, 6, 6 e 6 dias úteis) não estão lá';
+  end if;
+end
+$confere_p3$;

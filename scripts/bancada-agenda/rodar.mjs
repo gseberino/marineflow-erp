@@ -134,6 +134,13 @@ const FIXTURES_COMO_TEXTO = [
   // cópia; as de os_duracao_sugerida/os_presenca_do_dono (mig_prontidao_fase1) e de _agenda_vigia_estouro
   // (mig_conferencia_fase2) já estão acima.
   ['agenda_teste.mig_medicao_fase6', '../../supabase/migrations/20261029100100_agenda_fase6_medicao.sql'],
+  // Fase 6 (P3): as fontes do que agenda_fase6_fornecedor.sql confere — os_prontidao de 20261027100200 (a cópia e a definição
+  // de antes rodada como pg_temp, para o byte a byte em teste) e _agenda_aprendizado_texto de 20261029100200 (o P2); a própria
+  // 20261029100300, para provar que nada nela escreve mensagem a terceiros. _agenda_prazo_do_fornecedor (mig_fornecedores_fase4)
+  // e _agenda_compras_da_os/_agenda_ver_compras (mig_leituras_fase4) já estão acima.
+  ['agenda_teste.mig_compras_fase4', '../../supabase/migrations/20261027100200_agenda_fase4_compras.sql'],
+  ['agenda_teste.mig_os_fase6', '../../supabase/migrations/20261029100200_agenda_fase6_os.sql'],
+  ['agenda_teste.mig_fornecedor_fase6', '../../supabase/migrations/20261029100300_agenda_fase6_fornecedor.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */
