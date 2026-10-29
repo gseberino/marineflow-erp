@@ -4,6 +4,7 @@
 // buildSystemBlocks etc.) — este módulo só as partes puras/testáveis isoladamente.
 import { conversaDosComprovantesLigada, lerModoDoComprovante } from "../comprovantes/modo.ts";
 import { donoDoWhatsApp } from "../whatsapp/dono.ts";
+import { mesmoAssunto } from "./assunto.ts";
 import {
   encerrarPerguntasExternas,
   lerEstadoDoTelefone,
@@ -124,19 +125,39 @@ export async function pendenciaParaHerdar(
   metadataAnterior: Record<string, unknown> | null | undefined,
   agora: Date = new Date(),
 ): Promise<Record<string, unknown> | null> {
+  const viva = async (id: unknown): Promise<boolean> => {
+    if (typeof id !== "string" || !id) return false;
+    const { data: pendencia } = await admin
+      .from("ai_operator_pending_actions")
+      .select("id, status, expires_at")
+      .eq("id", id)
+      .maybeSingle();
+    if (!pendencia || pendencia.status !== "pending") return false;
+    return !(pendencia.expires_at && new Date(pendencia.expires_at).getTime() <= agora.getTime());
+  };
   const id = metadataAnterior?.pending_confirm_action_id;
-  if (typeof id !== "string" || !id) return null;
-  const { data: pendencia } = await admin
-    .from("ai_operator_pending_actions")
-    .select("id, status, expires_at")
-    .eq("id", id)
-    .maybeSingle();
-  if (!pendencia || pendencia.status !== "pending") return null;
-  if (pendencia.expires_at && new Date(pendencia.expires_at).getTime() <= agora.getTime()) return null;
+  // As guardadas (outro assunto chegou antes do "sim", 27/10/2026) vão junto desde 29/10/2026: antes a conversa nova
+  // levava só o ponteiro, e as guardadas venciam sem ninguém perguntar delas de novo.
+  const guardadas: string[] = [];
+  for (const g of Array.isArray(metadataAnterior?.pendencias_guardadas) ? (metadataAnterior!.pendencias_guardadas as unknown[]) : []) {
+    if (typeof g === "string" && g !== id && !guardadas.includes(g) && await viva(g)) guardadas.push(g);
+  }
+  if (await viva(id)) {
+    return {
+      pending_confirm_action_id: id,
+      pin_attempts: Number(metadataAnterior?.pin_attempts) || 0,
+      pendencia_herdada: true,
+      ...(guardadas.length ? { pendencias_guardadas: guardadas } : {}),
+    };
+  }
+  // O ponteiro já foi decidido ou venceu, mas há guardada viva: ela vira a pendência herdada (as tentativas de PIN eram
+  // da outra, não passam).
+  if (guardadas.length === 0) return null;
   return {
-    pending_confirm_action_id: id,
-    pin_attempts: Number(metadataAnterior?.pin_attempts) || 0,
+    pending_confirm_action_id: guardadas[0],
+    pin_attempts: 0,
     pendencia_herdada: true,
+    ...(guardadas.length > 1 ? { pendencias_guardadas: guardadas.slice(1) } : {}),
   };
 }
 
@@ -319,31 +340,10 @@ export async function queueWhatsAppReply(admin: any, phoneNormalized: string, me
   return null;
 }
 
-/** Os campos do pedido que dizem de quem ou do quê ele é: mesma ação com o mesmo assunto = pedido corrigido. */
-const CHAVES_DO_ASSUNTO = [
-  "freelancer", "favorecido", "numero", "quote_number", "orcamento", "os", "service_order_number", "cliente", "client_name",
-  "telefone", "phone",
-  // diária e pagamento (27/10/2026): "Roberto de 19 a 24" e "Roberto dia 20" são pedidos diferentes
-  "data", "data_ate", "dias",
-];
-
-/**
- * A pendência nova é o MESMO pedido corrigido ("sem o link", "não, só até quinta")? Mesma ação e os
- * mesmos campos de assunto. Outra ação, ou a mesma para outra pessoa/OS, é outro assunto.
- */
-export function mesmoAssunto(
-  a: { action_name?: string | null; payload?: unknown },
-  b: { action_name?: string | null; payload?: unknown },
-): boolean {
-  if (!a.action_name || a.action_name !== b.action_name) return false;
-  const chave = (p: unknown) =>
-    JSON.stringify(CHAVES_DO_ASSUNTO.map((k) => {
-      const v = (p as Record<string, unknown> | null)?.[k];
-      if (v == null || v === "") return null;
-      return typeof v === "object" ? JSON.stringify(v) : String(v).trim().toLowerCase();
-    }));
-  return chave(a.payload) === chave(b.payload);
-}
+// A pendência nova é o MESMO pedido corrigido ("sem o link", "não, só até quinta")? Desde 29/10/2026 cada ação declara
+// o que identifica o assunto dela (assunto.ts); a lista fixa de campos que morava aqui não conhecia os campos que os
+// pedidos de verdade usam, e uma mensagem para uma pessoa cancelava a mensagem para outra (08/10 e 24/10).
+export { mesmoAssunto };
 
 /**
  * Pendência nova com a anterior ainda esperando (05/10/2026; revisto 27/10/2026).
@@ -378,7 +378,9 @@ export async function cancelarPendenciaSubstituida(
     .select("action_name, payload")
     .eq("id", nova)
     .maybeSingle();
-  if (atual && !mesmoAssunto(anterior, atual)) {
+  // Na dúvida, guarda (29/10/2026): sem conseguir ler a pendência nova, não dá para dizer que é a mesma — cancelar a
+  // anterior ali era o defeito de 08/10 e 24/10 por outro caminho.
+  if (!atual || !mesmoAssunto(anterior, atual)) {
     const guardadas = Array.isArray(antes?.pendencias_guardadas) ? (antes.pendencias_guardadas as unknown[]).map(String) : [];
     depois.pendencias_guardadas = [...new Set([...guardadas, velha])].filter((id) => id !== nova);
     await admin.from("ai_operator_audit").insert({

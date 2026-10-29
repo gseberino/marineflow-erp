@@ -97,7 +97,10 @@ export function PendingActionsBell() {
 
   const handle = async (id: string, decision: 'approve' | 'reject') => {
     const res = decision === 'approve' ? await approve(id) : await reject(id);
-    if (res.ok) toast.success(decision === 'approve' ? 'Ação confirmada e executada.' : 'Ação rejeitada.');
+    // O aviso diz o que aconteceu de verdade (29/10/2026): ação que falhou não é "confirmada e executada".
+    if (res.ok && res.resultado === 'failed') toast.error(res.mensagem || 'A ação falhou — nada foi feito.');
+    else if (res.ok) toast.success(decision === 'approve' ? (res.mensagem || 'Ação confirmada e executada.') : 'Ação rejeitada.');
+    else if (res.resultado) toast.info(res.error || 'Este pedido já tinha sido decidido.');
     else toast.error(res.error || 'Falha ao processar.');
   };
 

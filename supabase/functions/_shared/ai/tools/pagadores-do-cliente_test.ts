@@ -302,7 +302,8 @@ Deno.test("cartão do aprovar com cliente_confirmado: título, data, valor e 'cl
   // Sem cliente_confirmado: o resumo genérico de sempre (nada muda para quem não confirma cliente).
   assertEquals(await resumirClienteConfirmado(admin, { ids: ["s-posto"] }), null);
   assertEquals(await resumirClienteConfirmado(admin, { ids: ["s-posto"], cliente_confirmado: [] }), null);
-  assert((await buildPendingSummary(admin, "aprovar_propostas_de_lancamento", { ids: ["s-posto"] })).startsWith("- Ids:"));
+  // (29/10/2026: o campo "ids" ganhou rótulo em português, "Itens", no lugar do nome técnico "Ids")
+  assert((await buildPendingSummary(admin, "aprovar_propostas_de_lancamento", { ids: ["s-posto"] })).startsWith("- Itens:"));
 });
 
 Deno.test("cartão do aprovar: confirmado sem sugestão, fora da fila, sem cadastro ou leitura que falha → UMA linha ⚠️ (recusa)", async () => {

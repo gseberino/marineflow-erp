@@ -1,8 +1,64 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
 import { normalizarTermo } from "../keyword-resolver.ts";
+import { ROTULOS_DOS_VALORES } from "../rotulos.ts";
 import { produtoFiscalPendencias } from "../product-fiscal.ts";
 import { camposDeProduto, precoDeVenda, taxasPadrao } from "../product-create.ts";
 import { orContem } from "../filtro-or.ts";
+
+const fmtReais = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+
+/**
+ * O serviço ATIVO do catálogo com o mesmo nome — sem diferenciar maiúscula, acento nem espaço —, ou null.
+ *
+ * Aprovação em lote (29/10/2026): em 28/10 o dono aprovou "Realocação do banco de baterias" às 18:57; com vários itens
+ * no mesmo pedido, o mesmo nome pode vir duas vezes. Lê os nomes e compara aqui porque o acento do modelo varia
+ * ("Realocacao" × "Realocação") e o PostgREST não tem unaccent. Páginas de 1000 (o teto do PostgREST): o catálogo tem
+ * ~270 ativos.
+ */
+// deno-lint-ignore no-explicit-any
+export async function servicoComMesmoNome(admin: any, nome: string): Promise<{ id: string; name: string; created_at: string | null } | null> {
+  const alvo = normalizarTermo(nome);
+  if (!alvo) return null;
+  for (let pagina = 0; pagina < 10; pagina++) {
+    const { data, error } = await admin
+      .from("services")
+      .select("id, name, created_at")
+      .eq("active", true)
+      .order("created_at", { ascending: true })
+      .range(pagina * 1000, pagina * 1000 + 999);
+    if (error) throw new Error(error.message);
+    const linhas = (data ?? []) as Array<{ id: string; name: string; created_at: string | null }>;
+    const igual = linhas.find((s) => normalizarTermo(s.name) === alvo);
+    if (igual) return igual;
+    if (linhas.length < 1000) return null;
+  }
+  return null;
+}
+
+/**
+ * O resumo do cartão de "Cadastrar serviço" (aprovação em lote, 29/10/2026): nome, cobrança e preço em português. Nome
+ * que já está no catálogo vira uma linha "⚠️" — recusa (agent.ts, RESUMO_QUE_RESOLVE), não pendência.
+ */
+// deno-lint-ignore no-explicit-any
+export async function resumirServicoNovo(admin: any, args: Record<string, unknown>): Promise<string> {
+  const nome = String(args?.name ?? "").trim();
+  if (!nome) return "⚠️ Falta o nome do serviço. Nada foi registrado.";
+  const existente = await servicoComMesmoNome(admin, nome);
+  if (existente) {
+    const desde = existente.created_at
+      ? ` desde ${new Date(existente.created_at).toLocaleString("pt-BR", {
+        timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit",
+      })}`
+      : "";
+    return `⚠️ O serviço "${existente.name}" já está no catálogo${desde}. Nada foi registrado: use o que já existe.`;
+  }
+  const unidade = String(args?.billing_unit ?? "");
+  const linhas = [`- Nome: ${nome}`, `- Cobrança: ${ROTULOS_DOS_VALORES.billing_unit[unidade] ?? (unidade || "—")}`];
+  if (typeof args?.default_price === "number") linhas.push(`- Preço: ${fmtReais.format(args.default_price)}`);
+  const descricao = String(args?.description ?? "").trim();
+  if (descricao) linhas.push(`- Descrição: ${descricao}`);
+  return linhas.join("\n");
+}
 
 export const productTools: ToolDef[] = [
   {
@@ -477,7 +533,20 @@ export const productTools: ToolDef[] = [
       const blocked = blockTechnician(ctx);
       if (blocked) return blocked;
       const { admin } = ctx;
-      const { data, error } = await admin.from("services").insert(args).select().single();
+      // Aprovação em lote (29/10/2026): o mesmo nome aprovado duas vezes não vira dois serviços — o resumo já recusa, e
+      // isto cobre dois cartões do mesmo nome aprovados em seguida. Só os campos da ferramenta vão ao insert: uma chave a
+      // mais no payload derrubava o cadastro.
+      const nome = String(args?.name ?? "").trim();
+      const existente = nome ? await servicoComMesmoNome(admin, nome) : null;
+      if (existente) {
+        return { error: `O serviço "${existente.name}" já está no catálogo. Nada foi cadastrado.`, ja_cadastrado: true, service_id: existente.id };
+      }
+      const linha = Object.fromEntries(
+        (["name", "description", "billing_unit", "default_price"] as const)
+          .filter((k) => args?.[k] !== undefined)
+          .map((k) => [k, k === "name" ? nome : args[k]]),
+      );
+      const { data, error } = await admin.from("services").insert(linha).select().single();
       if (error) throw error;
       return { ok: true, service: data };
     },

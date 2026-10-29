@@ -193,7 +193,7 @@ export function PedirLembreteDialog({
   const decidir = useDecidirLembrete();
   const [proposta, setProposta] = useState<PropostaDeLembrete | null>(null);
   const [resposta, setResposta] = useState('');
-  const [status, setStatus] = useState<'pending' | 'confirmed' | 'cancelled' | 'executed'>('pending');
+  const [status, setStatus] = useState<'pending' | 'confirmed' | 'cancelled' | 'executed' | 'failed' | 'decidida'>('pending');
 
   useEffect(() => {
     if (alvo) { setProposta(null); setResposta(''); setStatus('pending'); }
@@ -218,8 +218,15 @@ export function PedirLembreteDialog({
     if (!proposta) return;
     setStatus(decisao === 'approve' ? 'confirmed' : 'cancelled');
     decidir.mutate({ id: proposta.pending_action_id, decisao, nota }, {
-      onSuccess: (texto) => {
-        if (decisao === 'approve') {
+      onSuccess: ({ texto, falhou, decidida }) => {
+        if (decidida) {
+          // decidido em outro lugar (sino, WhatsApp): o cartão não volta a oferecer Confirmar
+          setStatus('decidida');
+          toast.info(texto || 'Este lembrete já tinha sido decidido.');
+        } else if (decisao === 'approve' && falhou) {
+          setStatus('failed');
+          toast.error(texto || 'O lembrete não foi enviado.');
+        } else if (decisao === 'approve') {
           setStatus('executed');
           toast.success(texto || 'Lembrete enviado para a fila do WhatsApp.');
         } else {

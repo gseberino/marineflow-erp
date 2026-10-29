@@ -1,5 +1,5 @@
 import { assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { ERRO_DO_SISTEMA_PARA_O_DONO, erroParaODono, respostaDoTurnoNoWhatsApp } from "./whatsapp-resposta.ts";
+import { ERRO_DO_SISTEMA_PARA_O_DONO, erroParaODono, LINHA_SEM_RETOMADA, respostaDoTurnoNoWhatsApp, textoAcimaDoCartao } from "./whatsapp-resposta.ts";
 
 const antes = { pendencia_herdada: true, pending_confirm_action_id: "velha", pending_options: [{ label: "x", value: "y" }], outro: 1 };
 
@@ -90,4 +90,68 @@ Deno.test("fluxo (11/10/2026): o fluxo de comprovantes já falou — nada a envi
   assertEquals(viva.metadata.pending_confirm_action_id, "velha");
   // erro e pendência nova continuam mandando
   assertEquals(respostaDoTurnoNoWhatsApp({ texto: "", error: "falhou", fluxo: { codigo: "CMP-00001" } }, antes).replyText, "⚠️ falhou");
+});
+
+// ─── Aprovação em lote, Fase 1 (29/10/2026) ──────────────────────────────────────────────────────────────────────────
+// A frase do assistente vem acima do cartão (12 das 15 frases do Max que explicavam a fila nunca chegaram ao dono), com a
+// linha fixa que desmente a promessa de continuar sozinho; o "Conferido pelo sistema" vem antes do cartão.
+const CARTAO_2810 = {
+  pending_action_id: "p1",
+  title: "Cadastrar serviço",
+  summary_markdown: "- Nome: Realocação do banco de baterias\n- Cobrança: por unidade\n- Preço: R$ 1.135,00",
+  risk_level: "medium" as const,
+};
+
+Deno.test("cartão: a frase real do Max de 28/10 vai em cima, com a linha fixa, e o cartão embaixo", () => {
+  const frase = "Pedi sua confirmação para cadastrar o primeiro dos 10 serviços no catálogo. Cada serviço pede um 'sim' seu.";
+  const r = respostaDoTurnoNoWhatsApp({ texto: frase, proposal: CARTAO_2810 }, {});
+  assertEquals(
+    r.replyText,
+    `${frase}\n${LINHA_SEM_RETOMADA}\n\n*Cadastrar serviço*\n${CARTAO_2810.summary_markdown}\n\nResponda *sim* para aprovar ou *não* para rejeitar.`,
+  );
+  assertEquals(r.metadata.pending_confirm_action_id, "p1");
+});
+
+Deno.test("cartão: sem frase do modelo, nada em cima (nem a linha fixa)", () => {
+  const r = respostaDoTurnoNoWhatsApp({ texto: "  ", proposal: CARTAO_2810 }, {});
+  assertEquals(r.replyText.startsWith("*Cadastrar serviço*\n"), true, r.replyText);
+  assertEquals(r.replyText.includes(LINHA_SEM_RETOMADA), false);
+});
+
+Deno.test("textoAcimaDoCartao: frase longa é cortada no fim de uma frase (ou palavra), com reticências", () => {
+  const longa = "Cadastrei o primeiro. " + "Os outros oito serviços entram depois que você aprovar este, um por vez, como combinado. ".repeat(5);
+  const t = textoAcimaDoCartao(longa);
+  const [frase, linha] = t.split("\n");
+  assertEquals(linha, LINHA_SEM_RETOMADA);
+  assertEquals(frase.length <= 281, true, frase);
+  assertEquals(frase.endsWith("…"), true, frase);
+  assertEquals(/\s…$/.test(frase), false, "sem espaço antes das reticências");
+  // no painel cabe inteira
+  assertEquals(textoAcimaDoCartao(longa.trim(), 2000).split("\n")[0], longa.trim());
+  assertEquals(textoAcimaDoCartao(""), "");
+});
+
+Deno.test("conferido: antes do cartão e da lista; no fim do texto e do erro", () => {
+  const conferido = "⚠️ Conferido pelo sistema: 1 não entrou.\n- Remover item do orçamento/OS: Item não encontrado";
+  const cartao = respostaDoTurnoNoWhatsApp({ texto: "", proposal: CARTAO_2810, conferido }, {}).replyText;
+  assertEquals(cartao.startsWith(`${conferido}\n\n*Cadastrar serviço*`), true, cartao);
+  const texto = respostaDoTurnoNoWhatsApp({ texto: "✅ Feito!", conferido }, {}).replyText;
+  assertEquals(texto, `✅ Feito!\n\n${conferido}`);
+  const erro = respostaDoTurnoNoWhatsApp({ texto: "", error: "Resposta truncada por limite de tokens.", conferido }, {}).replyText;
+  assertEquals(erro.endsWith(conferido), true, erro);
+  const opcoes = respostaDoTurnoNoWhatsApp({ texto: "", options: { question: "Qual?", options: [{ label: "A", value: "a" }] }, conferido }, {}).replyText;
+  assertEquals(opcoes.startsWith(conferido), true, opcoes);
+  // fluxo: o dono já recebeu a mensagem do fluxo — nada a enviar, nem o conferido
+  assertEquals(respostaDoTurnoNoWhatsApp({ texto: "", fluxo: { codigo: "CMP-1" }, conferido }, {}).replyText, "");
+});
+
+Deno.test("aviso do turno que caiu no meio (revisão de 29/10): no topo do cartão, da lista e do texto", () => {
+  const aviso = "⚠️ O assistente parou no meio desta resposta (timeout).";
+  const cartao = respostaDoTurnoNoWhatsApp({ texto: "", proposal: CARTAO_2810, aviso }, {}).replyText;
+  assertEquals(cartao.startsWith(`${aviso}\n\n*Cadastrar serviço*`), true, cartao);
+  const lista = respostaDoTurnoNoWhatsApp({ texto: "", options: { question: "Qual cliente?", options: [{ label: "A", value: "a" }] }, aviso }, {}).replyText;
+  assertEquals(lista, `${aviso}\n\nQual cliente?\n1) A`);
+  // sem texto do modelo, não sai o "Ok." solto embaixo do aviso
+  assertEquals(respostaDoTurnoNoWhatsApp({ texto: "", aviso }, {}).replyText, aviso);
+  assertEquals(respostaDoTurnoNoWhatsApp({ texto: "", aviso, conferido: "⚠️ Conferido" }, {}).replyText, `${aviso}\n\n⚠️ Conferido`);
 });

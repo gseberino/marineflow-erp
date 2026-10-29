@@ -58,7 +58,10 @@ export function usePendingActions() {
   }, [user, refresh]);
 
   const decide = useCallback(
-    async (pendingActionId: string, decision: 'approve' | 'reject'): Promise<{ ok: boolean; error?: string }> => {
+    async (
+      pendingActionId: string,
+      decision: 'approve' | 'reject',
+    ): Promise<{ ok: boolean; error?: string; resultado?: string; mensagem?: string }> => {
       setActingId(pendingActionId);
       try {
         const { data, error } = await supabase.functions.invoke('ai-agent', {
@@ -70,6 +73,11 @@ export function usePendingActions() {
           if (rawBody) { try { msg = JSON.parse(rawBody).error || rawBody; } catch { msg = rawBody; } }
           throw new Error(msg);
         }
+        // Já decidida em outro lugar (29/10/2026): o servidor diz como terminou, e ela sai da lista.
+        if ((data as any)?.error && (data as any)?.resultado) {
+          setItems((prev) => prev.filter((p) => p.id !== pendingActionId));
+          return { ok: false, error: String((data as any).error), resultado: String((data as any).resultado) };
+        }
         if ((data as any)?.error) throw new Error((data as any).error);
         // Remove otimista + revalida dados de negócio que a ação possa ter mudado.
         setItems((prev) => prev.filter((p) => p.id !== pendingActionId));
@@ -77,7 +85,10 @@ export function usePendingActions() {
           ['service-orders', 'receivables', 'payables', 'payments', 'purchase-orders', 'products', 'inventory']
             .forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
         }
-        return { ok: true };
+        // O desfecho de verdade (29/10/2026): "failed" volta 200, e o sino dizia "confirmada e executada".
+        const resultado = (data as any)?.resultado as string | undefined;
+        const mensagem = (data as any)?.message?.content as string | undefined;
+        return { ok: true, ...(resultado ? { resultado } : {}), ...(mensagem ? { mensagem } : {}) };
       } catch (e: any) {
         return { ok: false, error: e?.message || 'Falha ao processar a decisão' };
       } finally {

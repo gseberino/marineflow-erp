@@ -39,6 +39,12 @@ import { construirFerramentaExtra, NOME_DA_FERRAMENTA_EXTRA } from "./ferramenta
 import { RESUMO_QUE_RESOLVE_DO_FINANCEIRO, resumirDoFinanceiro, TITULOS_DO_FINANCEIRO } from "./tools/resumos-do-financeiro.ts";
 import { resumirClienteConfirmado } from "./tools/finance-rules.ts";
 import { nomeDaUnidade, TERMO_GERAL, TERMO_GERAL_PLURAL } from "../unidade.ts";
+// aprovação em lote, Fase 1 (29/10/2026): títulos e rótulos do cartão para tudo que pode virar "sim"; cadastro de serviço
+// com resumo próprio (recusa nome que já está no catálogo).
+import {
+  CAMPOS_EM_PORCENTO, CAMPOS_EM_REAIS, ROTULOS_DOS_CAMPOS, ROTULOS_DOS_VALORES, TITULOS_DA_REDE_DO_ADMIN, TITULOS_DAS_ACOES_DIRETAS,
+} from "./rotulos.ts";
+import { resumirServicoNovo } from "./tools/products.ts";
 
 export interface Proposal {
   pending_action_id: string;
@@ -61,6 +67,12 @@ export interface ToolEvent {
   name: string;
   args: unknown;
   result: unknown;
+  /** true = a ferramenta RODOU agora (não virou pendência, não foi recusada antes) — aprovação em lote, 29/10/2026. */
+  executou?: boolean;
+  /** A ferramenta que rodou de fato: na ferramenta_extra, a que ela chamou. */
+  ferramenta?: string;
+  /** Em qual ida ao modelo a chamada veio (0 = a primeira). Chamadas da mesma resposta do modelo têm a mesma rodada. */
+  rodada?: number;
 }
 
 /**
@@ -260,6 +272,9 @@ const TOOL_LABELS_PT: Record<string, string> = {
 Object.assign(TOOL_LABELS_PT, TITULOS_DO_FINANCEIRO);
 // planos de manutenção (07/10/2026): planos e lembrete de revisão ao cliente.
 Object.assign(TOOL_LABELS_PT, TITULOS_DOS_PLANOS);
+// aprovação em lote (29/10/2026): o que a rede do admin enxuto transforma em cartão e o que roda direto (aparece no
+// "Conferido pelo sistema" quando falha). O título já escrito acima vence.
+for (const [nome, titulo] of Object.entries({ ...TITULOS_DAS_ACOES_DIRETAS, ...TITULOS_DA_REDE_DO_ADMIN })) TOOL_LABELS_PT[nome] ??= titulo;
 
 function humanizeToolNamePt(name: string): string {
   return TOOL_LABELS_PT[name] || humanizeToolName(name);
@@ -320,15 +335,30 @@ const FIELD_LABELS_PT: Record<string, string> = {
   saldo_contado: "Saldo contado",
   documento: "Documento",
 };
+// aprovação em lote (29/10/2026): os campos das ações que podem virar cartão (rotulos.ts). O rótulo acima vence.
+for (const [campo, rotulo] of Object.entries(ROTULOS_DOS_CAMPOS)) FIELD_LABELS_PT[campo] ??= rotulo;
 
-const CURRENCY_FIELDS = new Set(["amount", "card_fee_percent"]);
 const DATE_FIELDS = new Set(["payment_date", "scheduled_at", "issue_date", "due_date"]);
 const fmtBRL = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
-function formatFieldValue(key: string, v: unknown): string {
+/** O rótulo do campo no resumo genérico (o mesmo que o teste agent-titulos_test.ts cobra). */
+export function rotuloDoCampo(key: string): string {
+  return FIELD_LABELS_PT[key] || humanizeToolName(key);
+}
+
+/** O campo tem rótulo escrito em português (e não o nome técnico humanizado)? */
+export function campoTemRotulo(key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(FIELD_LABELS_PT, key);
+}
+
+export function formatFieldValue(key: string, v: unknown): string {
   if (v === null || v === undefined) return "—";
-  if (key === "amount" && typeof v === "number") return fmtBRL.format(v);
-  if (CURRENCY_FIELDS.has(key) && key !== "amount" && typeof v === "number") return `${v}%`;
+  // 29/10/2026: "true"/"false" e "unit" chegavam crus ao cartão; dinheiro além de amount saía sem R$ ("1135").
+  if (typeof v === "boolean") return v ? "sim" : "não";
+  if (CAMPOS_EM_REAIS.has(key) && typeof v === "number") return fmtBRL.format(v);
+  if (CAMPOS_EM_PORCENTO.has(key) && typeof v === "number") return `${v}%`;
+  const doValor = typeof v === "string" ? ROTULOS_DOS_VALORES[key]?.[v] : undefined;
+  if (doValor) return doValor;
   if (DATE_FIELDS.has(key) && typeof v === "string") {
     const d = new Date(v);
     if (!isNaN(d.getTime())) return d.toLocaleDateString("pt-BR");
@@ -374,6 +404,14 @@ async function resolveIdLabel(admin: any, key: string, id: string): Promise<stri
     } else if (key === "cost_center_id") {
       const { data } = await admin.from("cost_centers").select("name").eq("id", id).maybeSingle();
       if (data?.name) return data.name;
+    } else if (key === "product_id" || key === "service_id" || key === "vessel_id" || key === "cliente_id") {
+      // aprovação em lote (29/10/2026): os ids que mais aparecem nos cartões que chegam pela rede do admin.
+      const tabela = { product_id: "products", service_id: "services", vessel_id: "vessels", cliente_id: "clients" }[key];
+      const { data } = await admin.from(tabela).select("name").eq("id", id).maybeSingle();
+      if (data?.name) return data.name;
+    } else if (key === "technician_user_id" || key === "assignee_user_id") {
+      const { data } = await admin.from("app_users").select("full_name").eq("id", id).maybeSingle();
+      if (data?.full_name) return data.full_name;
     } else if (key === "proposta_id") {
       const { data } = await admin.from("finance_review_queue").select("title, suggested_amount").eq("id", id).maybeSingle();
       if (data?.title) return `${data.title} · ${fmtBRL.format(Number(data.suggested_amount) || 0)}`;
@@ -428,6 +466,9 @@ RESUMO_QUE_RESOLVE.add("cobrar_juntas");
 // "Sim, é do X" (leva 8, revisão de 23/10/2026): entrada confirmada sem cliente sugerido, cliente fora do cadastro ou
 // leitura que falha — o resumo diz por quê numa linha "⚠️": é recusa, não pendência.
 RESUMO_QUE_RESOLVE.add("aprovar_propostas_de_lancamento");
+// aprovação em lote (29/10/2026): serviço com o nome de um que já está no catálogo — o resumo diz desde quando, numa linha
+// "⚠️": é recusa, não pendência (o dono aprovaria um segundo "Realocação do banco de baterias").
+RESUMO_QUE_RESOLVE.add("create_service");
 
 export function resumoQueRecusa(toolName: string, resumo: string): { error: string; nada_registrado: true } | null {
   const t = resumo.trim();
@@ -471,6 +512,16 @@ export async function buildPendingSummary(
       const r = await resumirDoFinanceiro(admin, toolName, args, quem);
       if (r) return r;
     } catch { /* cai no resumo genérico */ }
+  }
+  // Cadastro de serviço (aprovação em lote, 29/10/2026): nome, cobrança e preço em português; nome que já está no
+  // catálogo vira recusa. Leitura que falha também recusa — o genérico pediria um "sim" sem saber se já existe.
+  if (toolName === "create_service") {
+    try {
+      return await resumirServicoNovo(admin, args);
+    } catch (e) {
+      const motivo = String((e as { message?: string })?.message ?? e).replace(/\s*\n+\s*/g, " ");
+      return `⚠️ Não consegui conferir o catálogo de serviços agora (${motivo}). Nada foi registrado; tente de novo.`;
+    }
   }
   // Resposta a e-mail (08/10/2026): o "sim" é sobre o texto EXATO que vai sair, de qual caixa e
   // para quem — lido do rascunho guardado, não do que o modelo diz.
@@ -695,7 +746,7 @@ export async function buildPendingSummary(
 async function linhasDosArgumentos(admin: any, args: Record<string, unknown>): Promise<string[]> {
   const lines: string[] = [];
   for (const [k, v] of Object.entries(args || {})) {
-    const label = FIELD_LABELS_PT[k] || humanizeToolName(k);
+    const label = rotuloDoCampo(k);
     let value = formatFieldValue(k, v);
     // O id vira o texto do registro (linha do extrato, título da fila, descrição da conta), que pode trazer o CPF que o
     // banco escreve no nome ("12345678901-MARIA"): mascarado (leva 8, LGPD). Só esse texto — telefone de 11 dígitos dito
@@ -766,28 +817,30 @@ export function textoDoSim(titulo: string, resultado: unknown): string {
   return `✅ ${titulo} — executado.${ressalvaDoResultado(resultado)}`;
 }
 
-/** Auditoria best-effort — nunca derruba o turno se falhar. */
+/**
+ * Auditoria best-effort — nunca derruba o turno se falhar. `turno` (aprovação em lote, 29/10/2026) diz de qual turno
+ * do modelo a linha é: no Claude Max é o job, e a entrega confere por ele o que o turno gravou e o que falhou.
+ */
 async function writeAudit(
-  toolCtx: ToolCtx,
-  sessionId: string,
-  channel: string | undefined,
+  amb: Pick<AmbienteDaTool, "toolCtx" | "sessionId" | "channel" | "turno">,
   entry: { eventType: string; risk: string; args: unknown; result: unknown; autonomous?: boolean; detalhe?: Record<string, unknown> }
 ): Promise<void> {
   try {
-    await toolCtx.admin.from("ai_operator_audit").insert({
-      session_id: sessionId,
-      actor_user_id: toolCtx.userId,
+    await amb.toolCtx.admin.from("ai_operator_audit").insert({
+      session_id: amb.sessionId,
+      actor_user_id: amb.toolCtx.userId,
       actor_kind: "ai_model",
       event_type: entry.eventType,
       // Ação sensível executada SEM confirmação (autonomia concedida) entra como 'security'
       // para ficar fácil de auditar depois "o que o agente fez sozinho".
       event_category: entry.autonomous ? "security" : "data",
       payload: {
-        channel: channel ?? "panel",
+        channel: amb.channel ?? "panel",
         risk: entry.risk,
         args: entry.args,
         result_summary: summarizeForAudit(entry.result),
         ...(entry.autonomous ? { autonomous: true } : {}),
+        ...(amb.turno ? { turno: amb.turno.id } : {}),
         ...(entry.detalhe ?? {}),
       },
     });
@@ -984,6 +1037,8 @@ export interface AmbienteDaTool {
   toolCtx: ToolCtx;
   sessionId: string;
   channel?: RunAgentLoopParams["channel"];
+  /** O turno do modelo (aprovação em lote, 29/10/2026): um id por runAgentLoop; no Claude Max, o job. Vai à auditoria. */
+  turno?: { id: string; inicio: string };
 }
 
 export interface ResultadoDaTool {
@@ -992,6 +1047,10 @@ export interface ResultadoDaTool {
   proposal?: Proposal;
   /** No WhatsApp: o fluxo de comprovantes já falou com o dono (fluxoQueFalou). */
   fluxo?: FluxoQueFalou;
+  /** A ferramenta rodou agora (sem pendência nem recusa antes de rodar). */
+  executou?: boolean;
+  /** A ferramenta que rodou de fato (na ferramenta_extra, a que ela chamou). */
+  ferramenta?: string;
 }
 
 /**
@@ -1070,7 +1129,7 @@ export async function executarChamadaDeTool(
   } else if (recusaDoNumero) {
     // Número ambíguo (ORÇ e OS) ou não achado: nada roda, e o modelo recebe as opções.
     toolResult = recusaDoNumero;
-    await writeAudit(amb.toolCtx, amb.sessionId, amb.channel, { eventType: `pre_validacao_recusada:${tc.name}`, risk: effectiveRisk, args: tc.input, result: toolResult });
+    await writeAudit(amb, { eventType: `pre_validacao_recusada:${tc.name}`, risk: effectiveRisk, args: tc.input, result: toolResult });
   } else if (argumentosInvalidos.length > 0) {
     // Nada roda: devolve o que está errado JUNTO com o esquema, que o modelo não tinha visto.
     toolResult = {
@@ -1089,7 +1148,7 @@ export async function executarChamadaDeTool(
     }
     if (recusa) {
       toolResult = recusa;
-      await writeAudit(amb.toolCtx, amb.sessionId, amb.channel, { eventType: `pre_validacao_recusada:${tc.name}`, risk: effectiveRisk, args: tc.input, result: toolResult });
+      await writeAudit(amb, { eventType: `pre_validacao_recusada:${tc.name}`, risk: effectiveRisk, args: tc.input, result: toolResult });
     } else {
       // Interceptação por risco (Fase 3): não executa — grava a pendência e devolve
       // um tool_result sintético. A tool real só roda via confirm_action, sem LLM.
@@ -1129,7 +1188,7 @@ export async function executarChamadaDeTool(
         : tc.input;
       if (recusaDoResumo) {
         toolResult = recusaDoResumo;
-        await writeAudit(amb.toolCtx, amb.sessionId, amb.channel, { eventType: `pre_validacao_recusada:${tc.name}`, risk: effectiveRisk, args: tc.input, result: toolResult });
+        await writeAudit(amb, { eventType: `pre_validacao_recusada:${tc.name}`, risk: effectiveRisk, args: tc.input, result: toolResult });
       } else {
         const { data: pending, error: pendingErr } = await amb.toolCtx.admin
           .from("ai_operator_pending_actions")
@@ -1153,7 +1212,7 @@ export async function executarChamadaDeTool(
           toolResult = { pending: true, pending_action_id: pending.id, instruction: "Ação registrada para aprovação. Aguardando decisão do usuário — não repita a chamada." };
           createdPendingProposal = { pending_action_id: pending.id, title: pending.title, summary_markdown: pending.summary, risk_level: pending.risk_level };
         }
-        await writeAudit(amb.toolCtx, amb.sessionId, amb.channel, { eventType: `pending_action:${tc.name}`, risk: effectiveRisk, args: tc.input, result: toolResult });
+        await writeAudit(amb, { eventType: `pending_action:${tc.name}`, risk: effectiveRisk, args: tc.input, result: toolResult });
       }
     }
   } else {
@@ -1163,12 +1222,15 @@ export async function executarChamadaDeTool(
     } catch (e: any) {
       toolResult = { error: e?.message || "Falha na execução da tool" };
     }
-    await writeAudit(amb.toolCtx, amb.sessionId, amb.channel, {
+    await writeAudit(amb, {
       eventType: `tool:${tc.name}`,
       risk: toolDef.risk,
       args: tc.input,
       result: toolResult,
       autonomous: effectiveRisk !== "low", // sensível que rodou direto = autonomia concedida
+      // aprovação em lote (29/10/2026): o motivo da falha inteiro (o result_summary corta em 500 caracteres) — é o que a
+      // entrega do Claude Max lê para o "Conferido pelo sistema".
+      ...(temErro(toolResult) ? { detalhe: { erro: String((toolResult as { error: unknown }).error).slice(0, 300) } } : {}),
     });
   }
   // 11/10/2026: o fluxo de comprovantes já mandou a pergunta do CMP ao WhatsApp do dono — no
@@ -1191,7 +1253,7 @@ export async function executarChamadaDeTool(
       : executou
       ? (temErro(toolResult) ? "falha_na_execucao" : "executada")
       : createdPendingProposal ? "pendencia" : "falha_ao_registrar_pendencia";
-    await writeAudit(amb.toolCtx, amb.sessionId, amb.channel, {
+    await writeAudit(amb, {
       eventType: `fora_do_perfil:${tc.name}`,
       risk: effectiveRisk,
       args: tc.input,
@@ -1200,7 +1262,13 @@ export async function executarChamadaDeTool(
     });
   }
 
-  return { toolResult, ...(createdPendingProposal ? { proposal: createdPendingProposal } : {}), ...(fluxo ? { fluxo } : {}) };
+  return {
+    toolResult,
+    executou,
+    ferramenta: tc.name,
+    ...(createdPendingProposal ? { proposal: createdPendingProposal } : {}),
+    ...(fluxo ? { fluxo } : {}),
+  };
 }
 
 /**
@@ -1261,6 +1329,8 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
   const inicioDoTurno = Date.now();
   const orcamentoMs = params.timeBudgetMs ?? 100_000; // margem confortável sob os 150s
   let pausadoPorTempo = false;
+  // aprovação em lote (29/10/2026): o turno ganha um id, que vai a cada linha de auditoria dele.
+  const turno = { id: crypto.randomUUID(), inicio: new Date(inicioDoTurno).toISOString() };
 
   for (let iter = 0; iter < maxIterations; iter++) {
     if (Date.now() - inicioDoTurno > orcamentoMs) {
@@ -1324,9 +1394,11 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
 
     for (const tc of toolUses) {
       const r = await executarChamadaDeTool(tc, {
-        toolsByName, alcancaveisPelaRede, toolCtx: params.toolCtx, sessionId: params.sessionId, channel: params.channel,
+        toolsByName, alcancaveisPelaRede, toolCtx: params.toolCtx, sessionId: params.sessionId, channel: params.channel, turno,
       });
-      toolEvents.push({ name: tc.name, args: tc.input, result: r.toolResult });
+      toolEvents.push({
+        name: tc.name, args: tc.input, result: r.toolResult, executou: r.executou === true, ferramenta: r.ferramenta ?? tc.name, rodada: iter,
+      });
       toolResults.push({ type: "tool_result", tool_use_id: tc.id, content: JSON.stringify(r.toolResult) });
       if (!shortCircuit) shortCircuit = interrupcaoDaTool(tc, r, toolUses.length > 1);
     }

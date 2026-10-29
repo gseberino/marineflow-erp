@@ -10,6 +10,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
+import { conversaOndeOModeloLe, textoDoVencimento, vencidasPorConversa } from "../_shared/ai/vencimento.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -41,11 +42,35 @@ servirComCors(async (req) => {
       .update({ status: "expired" })
       .eq("status", "pending")
       .lt("expires_at", new Date().toISOString())
-      .select("id");
+      .select("id, session_id, title, created_at");
 
     if (error) throw error;
 
-    return jr({ ok: true, expired_count: data?.length ?? 0 });
+    // Aprovação em lote (29/10/2026): uma linha na conversa de cada pendência vencida — o modelo lê na próxima vez, e o
+    // dono não ouve mais "ainda espera o seu sim" sobre o que já venceu. Só registra (source 'system'): o aviso no
+    // WhatsApp é da Fase 5. No WhatsApp, a conversa que o modelo lê agora (conversaOndeOModeloLe). Uma linha por
+    // conversa; falha numa não impede as outras.
+    const destino = new Map<string, string>();
+    for (const sid of new Set((data ?? []).map((v) => v.session_id).filter((s): s is string => typeof s === "string" && !!s))) {
+      destino.set(sid, await conversaOndeOModeloLe(admin, sid));
+    }
+    const ondeLer = (data ?? []).map((v) => ({ ...v, session_id: v.session_id ? destino.get(v.session_id) ?? v.session_id : null }));
+    let avisos = 0;
+    for (const [sessionId, itens] of vencidasPorConversa(ondeLer)) {
+      const content = textoDoVencimento(itens);
+      if (!content) continue;
+      try {
+        const { error: erroDaLinha } = await admin
+          .from("ai_operator_messages")
+          .insert({ session_id: sessionId, role: "assistant", content, source: "system" });
+        if (erroDaLinha) console.error("expire-pending-actions: linha na conversa não gravada", sessionId, erroDaLinha.message);
+        else avisos++;
+      } catch (e: any) {
+        console.error("expire-pending-actions: linha na conversa não gravada", sessionId, e?.message || e);
+      }
+    }
+
+    return jr({ ok: true, expired_count: data?.length ?? 0, avisos_na_conversa: avisos });
   } catch (e: any) {
     console.error("expire-pending-actions error", e);
     return jr({ error: e?.message || "internal error" }, 500);

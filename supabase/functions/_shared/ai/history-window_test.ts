@@ -1,4 +1,4 @@
-import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { aparaJanela, marcarResultadosAnteriores, TAMANHO_DA_JANELA, type LinhaHistorico } from "./history-window.ts";
 
 // O que estes testes protegem: a janela volta para a API da Anthropic, que rejeita com 400 tanto
@@ -155,4 +155,45 @@ Deno.test("resultado de ferramenta do histórico vem marcado como consulta anter
   assertEquals(marcadas[2].tool_call_id, "t1");
   // Sem hora, sem "de …".
   assertEquals(marcarResultadosAnteriores([{ ...linhas[2], created_at: null }])[0].content?.startsWith("[Resultado de uma consulta anterior. Para"), true);
+});
+
+// ─── Aprovação em lote, Fase 1 (29/10/2026) ──────────────────────────────────────────────────────────────────────────
+// A decisão do WhatsApp ("sim" com PIN mascarado + o recibo, 1 ms depois) e a linha do vencimento entram na conversa
+// como TEXTO. A janela continua válida para a API (nenhum tool_result sem o tool_use dele) e a transcrição do Max mostra
+// o que foi decidido — era o que faltava para o modelo não errar o "você fez?".
+import { transcreverConversa } from "./max/claude-max.ts";
+
+Deno.test("lote F1: decisão e vencimento no meio da conversa não deixam tool_result órfão, e aparecem na transcrição do Max", () => {
+  const t = (s: number) => new Date(Date.UTC(2026, 9, 28, 21, 54, s)).toISOString();
+  const linhas = [
+    { role: "user" as const, content: "cadastra os 9 serviços da OS-00130", tool_calls: null, tool_call_id: null, created_at: t(0) },
+    { role: "assistant" as const, content: "Pedi sua confirmação para o primeiro.", tool_calls: [{ id: "c1", type: "function" as const, function: { name: "ferramenta_extra", arguments: "{\"nome\":\"create_service\"}" } }], tool_call_id: null, created_at: t(0) },
+    { role: "tool" as const, content: "{\"pending\":true,\"pending_action_id\":\"p1\"}", tool_calls: null, tool_call_id: "c1", created_at: t(0) },
+    // a decisão gravada por gravarDecisaoNaConversa (o "sim" do dono e o recibo, 1 ms depois)
+    { role: "user" as const, content: "sim", tool_calls: null, tool_call_id: null, created_at: "2026-10-28T21:57:00.000Z" },
+    { role: "assistant" as const, content: "✅ Cadastrar serviço — executado.", tool_calls: null, tool_call_id: null, created_at: "2026-10-28T21:57:00.001Z" },
+    // o vencimento de outro item, gravado pela expire-pending-actions
+    { role: "assistant" as const, content: "⏰ Venceu sem resposta: *Cadastrar serviço* (pedido de 27/10, 18:54). Nada foi feito.", tool_calls: null, tool_call_id: null, created_at: "2026-10-28T22:00:00.000Z" },
+    { role: "user" as const, content: "Você cadastrou todos os serviços?", tool_calls: null, tool_call_id: null, created_at: "2026-10-28T23:12:00.000Z" },
+  ];
+  const janela = aparaJanela(linhas);
+  assertEquals(janela.length, linhas.length, "nada é cortado");
+  // todo tool_result tem o tool_use antes dele
+  const pedidos = new Set<string>();
+  for (const l of janela) {
+    if (l.role === "assistant") for (const c of l.tool_calls ?? []) pedidos.add(c.id);
+    if (l.role === "tool") assertEquals(pedidos.has(String(l.tool_call_id)), true, `tool_result órfão: ${l.tool_call_id}`);
+  }
+  // a transcrição do Max (texto), como o claude-max monta: quem falou o quê
+  const mensagens = janela.map((l) => ({
+    role: (l.role === "tool" ? "user" : l.role) as "user" | "assistant",
+    content: l.role === "tool"
+      ? [{ type: "tool_result" as const, tool_use_id: String(l.tool_call_id), content: String(l.content) }]
+      : [{ type: "text" as const, text: String(l.content ?? "") }],
+  }));
+  const transcricao = transcreverConversa(mensagens);
+  assertStringIncludes(transcricao, "Usuário: sim");
+  assertStringIncludes(transcricao, "Assistente: ✅ Cadastrar serviço — executado.");
+  assertStringIncludes(transcricao, "Assistente: ⏰ Venceu sem resposta");
+  assertStringIncludes(transcricao, "<mensagem>\nVocê cadastrou todos os serviços?\n</mensagem>");
 });

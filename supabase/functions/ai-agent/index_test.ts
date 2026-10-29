@@ -247,7 +247,8 @@ Deno.test("carona (WhatsApp pelo OpenRouter): depois do loop, antes de gravar as
 Deno.test("carona (WhatsApp pelo Claude Max): pelas OS que o erp-mcp guardou no job, antes de gravar e de responder", () => {
   const c = entregaMax.indexOf('comCarona(admin, appUser.id, osDoJob(job.metadata), respostaDoMax, interrupcao, { canal: "whatsapp" })');
   assert(c > 0, "carona ausente");
-  assert(c < entregaMax.indexOf('await gravarTurnoDoMax(admin, sessionId, texto, resposta, job, "whatsapp");'), "antes de gravar");
+  // 29/10/2026: a gravação leva também o "Conferido pelo sistema"
+  assert(c < entregaMax.indexOf('await gravarTurnoDoMax(admin, sessionId, texto, [aviso, resposta, conferido].filter(Boolean).join("\\n\\n"), job, "whatsapp");'), "antes de gravar");
   assert(c < entregaMax.indexOf("respostaDoTurnoNoWhatsApp("), "antes da resposta ao WhatsApp");
   assertStringIncludes(entregaMax, 'appUser.role === "admin" && job.status === "completed"');
 });
@@ -260,12 +261,87 @@ Deno.test("carona (painel): pelo OpenRouter depois do loop e antes de gravar; pe
   assertStringIncludes(painelLoop, 'if (userRole === "admin") {');
   const m = painelMax.indexOf('comCarona(p.admin, p.userId, osDoJob((job as any).metadata), respostaDoMax, interrupcao, { canal: "painel" })');
   assert(m > 0, "carona do painel pelo Max ausente");
-  assert(m < painelMax.indexOf('await gravarTurnoDoMax(p.admin, p.loopParams.sessionId, p.texto, resposta, job as any, "web")'), "antes de gravar");
-  assert(m < painelMax.indexOf("const message = { role: \"assistant\", content: resposta };"), "antes de devolver");
+  // 29/10/2026: a gravação e a resposta levam também o "Conferido pelo sistema"
+  assert(m < painelMax.indexOf('await gravarTurnoDoMax(p.admin, p.loopParams.sessionId, p.texto, comConferido, job as any, "web")'), "antes de gravar");
+  assert(m < painelMax.indexOf("const message = { role: \"assistant\", content: comConferido };"), "antes de devolver");
 });
 
 Deno.test("carona: uma vez por turno (um caminho cada) e nunca na camada das palavras nem na confirmação", () => {
   assertEquals((fonte.match(/aplicarCarona\(result, carona\)/g) ?? []).length, 2);
   assertEquals((fonte.match(/await comCarona\(/g) ?? []).length, 2);
   assert(!turno.includes("caronaDoTurno(") && !turno.includes("comCarona("), "a carona não entra antes do modelo (palavras, sim, secretário)");
+});
+
+// ─── Aprovação em lote, Fase 1 (29/10/2026): a fiação no turno ─────────────────────────────────────────────────────────
+const confirmacao = turno.slice(turno.indexOf("const confirmation = parseConfirmationReply(text);"), turno.indexOf("parseOptionReply(text, pendingOptions.length)"));
+
+Deno.test("lote F1: toda resposta da camada de confirmação do WhatsApp entra na conversa (PIN mascarado) antes de sair", () => {
+  // as quatro saídas: ajuste junto, herdada reapresentada, decisão, e "sim <PIN>" sem nada esperando
+  const gravacoes = confirmacao.split("await gravarDecisaoNaConversa(admin, { sessionId, resposta: text, texto:").length - 1;
+  assertEquals(gravacoes, 4);
+  for (const [grava, envia] of [
+    ["texto: naoExecutei", "queueWhatsAppReply(admin, phoneNormalized, naoExecutei)"],
+    ["texto: reapresentada", "queueWhatsAppReply(admin, phoneNormalized, reapresentada)"],
+    ["texto: resolved.message", "await enviarComRegistro("],
+    ["texto: nadaEsperando", "queueWhatsAppReply(admin, phoneNormalized, nadaEsperando)"],
+  ]) {
+    const g = confirmacao.indexOf(grava);
+    assert(g > 0 && confirmacao.indexOf(envia, g) > g, `${grava}: grava antes de enviar`);
+  }
+});
+
+Deno.test("lote F1: 'já decidida' diz o desfecho real e segue a fila; o painel responde 409 em português com o resultado", () => {
+  const resolver = fonte.slice(fonte.indexOf("async function resolveWhatsAppConfirmation("), fonte.indexOf("async function comAProximaPendencia("));
+  assertStringIncludes(resolver, "return await comAProximaPendencia(admin, pending, textoDoDesfecho(pending), clearedMetadata);");
+  assert(!fonte.includes("Essa pendência não existe mais ou já foi decidida"), "a frase vaga saiu");
+  assertStringIncludes(fonte, "return jr({ error: textoDoDesfecho(pending), resultado: pending.status }, 409);");
+  assert(!fonte.includes('"processada" : pending.status'), "nada de 'já foi rejected'");
+});
+
+Deno.test("lote F1: confirm_action devolve o desfecho de verdade (o cartão e o sino deixam de dizer 'executada' na falha)", () => {
+  const confirm = fonte.slice(fonte.indexOf('if (body.type === "confirm_action") {'), fonte.indexOf("// ---------- MODO SALES COPY"));
+  assertStringIncludes(confirm, 'resultado: execError ? "failed" : "executed",');
+  assertStringIncludes(confirm, 'resultado: "rejected",');
+});
+
+Deno.test("lote F1: tipo desconhecido é recusado antes do turno do modelo", () => {
+  const recusa = fonte.indexOf('body.type !== "load_history" && body.type !== "confirm_action"');
+  assert(recusa > 0 && recusa < fonte.indexOf('if (body.type === "load_history") {'), "antes do load_history");
+  assert(recusa < fonte.indexOf("const result = await runAgentLoop({ ...loopParams"), "antes do modelo do painel");
+});
+
+Deno.test("lote F1: o 'Conferido pelo sistema' nos quatro caminhos (OpenRouter e Max, WhatsApp e painel)", () => {
+  assertEquals(fonte.split("reciboDasGravacoes(falhasDosEventos(result.toolEvents))").length - 1, 2, "OpenRouter: WhatsApp e painel");
+  assertStringIncludes(fonte, "reciboDasGravacoes(await falhasDaAuditoria(admin, sessionId, jobId))");
+  assertEquals(fonte.split("reciboDasGravacoes(await falhasDaAuditoria(p.admin, p.loopParams.sessionId, jobId))").length - 1, 2,
+    "painel pelo Max: pronto e parado no meio");
+  // no OpenRouter, vai para o histórico ANTES de gravar as mensagens do turno
+  for (const inicio of ["async function turnoDoModeloNoWhatsApp(", "// ---------- MODO SALES COPY"]) {
+    const bloco = fonte.slice(fonte.indexOf(inicio));
+    const anexa = bloco.indexOf("anexarAoHistoricoDoTurno(result.messages, conferido)");
+    assert(anexa > 0 && anexa < bloco.indexOf('from("ai_operator_messages").insert(rowsToInsert)'), `${inicio}: anexa antes de gravar`);
+  }
+});
+
+Deno.test("lote F1: guarda da reserva — o Max que já gravou ou criou pendência não é refeito pelo OpenRouter", () => {
+  const entrega = fonte.slice(fonte.indexOf("async function handleEntregaDoMax("), fonte.indexOf("async function gravarTurnoDoMax("));
+  const guarda = entrega.indexOf("jobDeixouTrabalho(meta) || await trabalhoNaAuditoria(admin, sessionId, jobId)");
+  assert(guarda > 0 && guarda < entrega.indexOf("refazendo pelo OpenRouter"), "WhatsApp: confere antes de refazer");
+  assertStringIncludes(entrega, 'const aviso = parouNoMeio ? avisoDoTurnoInterrompido(job.error_code) : "";');
+  // o aviso vai pelo campo próprio: no topo também da lista de opções que o Max deixou (revisão de 29/10)
+  assertStringIncludes(entrega, "texto: resposta, conferido, aviso }");
+  // a entrega tardia do painel também confere e não manda "peça de novo" a quem já gravou (revisão de 29/10)
+  const tardia = fonte.slice(fonte.indexOf("async function handleEntregaDoPainel("), fonte.indexOf("const dormir ="));
+  assertStringIncludes(tardia, "reciboDasGravacoes(await falhasDaAuditoria(admin, sessionId, String(job.id)))");
+  assertStringIncludes(tardia, "jobDeixouTrabalho(meta) || await trabalhoNaAuditoria(admin, sessionId, String(job.id))");
+  const painel = fonte.slice(fonte.indexOf("async function turnoDoPainelPeloMax("), fonte.indexOf("// ---------------- HANDLER"));
+  // e o painel parado no meio ainda devolve a lista de opções
+  assertStringIncludes(painel, "if (interrompido.options) return jr({ message, options: interrompido.options");
+  const guardaDoPainel = painel.indexOf("jobDeixouTrabalho((job as any).metadata) || await trabalhoNaAuditoria(p.admin, p.loopParams.sessionId, jobId)");
+  assert(guardaDoPainel > 0 && guardaDoPainel < painel.indexOf("vai pelo OpenRouter"), "painel: confere antes de seguir pelo OpenRouter");
+});
+
+Deno.test("lote F1: no painel, a frase do assistente acima do cartão (OpenRouter e Max)", () => {
+  assertStringIncludes(fonte, "textoAcimaDoCartao(result.message.content, 2000)");
+  assertStringIncludes(fonte, "textoAcimaDoCartao(resposta, 2000)");
 });

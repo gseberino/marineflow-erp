@@ -24,11 +24,29 @@ export type OptionsData = {
   options: OptionItem[];
 };
 
+/**
+ * O estado do cartão de confirmação. 'failed' e 'decidida' (29/10/2026) vêm do servidor (`resultado`): antes o cartão
+ * dizia "executada" sempre que a chamada HTTP dava certo, também quando a ação tinha falhado.
+ */
+export type ProposalStatus = 'pending' | 'confirmed' | 'cancelled' | 'executed' | 'failed' | 'decidida';
+
 export type DisplayItem =
   | { kind: 'message'; role: 'user' | 'assistant'; content: string }
-  | { kind: 'proposal'; proposal: Proposal; status: 'pending' | 'confirmed' | 'cancelled' }
+  | { kind: 'proposal'; proposal: Proposal; status: ProposalStatus }
   | { kind: 'options'; data: OptionsData; status: 'pending' | 'selected'; selectedValue?: string }
   | { kind: 'tool_summary'; text: string };
+
+/**
+ * O status do cartão depois do "Confirmar", pelo que o servidor respondeu (aprovação em lote, 29/10/2026). Servidor
+ * antigo (sem `resultado`) e chamada que deu certo = 'executed', como antes; já decidido em outro lugar = 'decidida';
+ * erro sem resposta = o cartão volta a esperar.
+ */
+export function statusDoCartao(r: { ok: boolean; resultado?: string }): ProposalStatus {
+  if (r.resultado === 'failed') return 'failed';
+  if (r.resultado === 'executed') return 'executed';
+  if (!r.ok) return r.resultado ? 'decidida' : 'pending';
+  return r.resultado === 'rejected' ? 'cancelled' : 'executed';
+}
 
 export function useAIAgent(context: AIContext) {
   const qc = useQueryClient();
@@ -122,8 +140,11 @@ export function useAIAgent(context: AIContext) {
 
         if ((data as any).proposal) {
           const proposal = (data as any).proposal as Proposal;
+          // A frase do assistente vem acima do cartão (29/10/2026): antes só o cartão aparecia, e o "este é o 1º de 9" sumia.
+          const acima = ((data as any).message?.content || '') as string;
           setDisplay((d) => {
             const next = [...d];
+            if (acima) next.push({ kind: 'message', role: 'assistant', content: acima });
             const idx = next.length;
             next.push({ kind: 'proposal', proposal, status: 'pending' });
             setActiveProposal({ idx, proposal });
@@ -131,8 +152,12 @@ export function useAIAgent(context: AIContext) {
           });
         } else if ((data as any).options) {
           const optionsData = (data as any).options as OptionsData;
+          // O que o servidor manda junto da lista (o "Conferido pelo sistema" e, no turno do Max que caiu, o aviso — 29/10/2026)
+          // vai acima dela.
+          const acimaDaLista = ((data as any).message?.content || '') as string;
           setDisplay((d) => {
             const next = [...d];
+            if (acimaDaLista) next.push({ kind: 'message', role: 'assistant', content: acimaDaLista });
             const idx = next.length;
             next.push({ kind: 'options', data: optionsData, status: 'pending' });
             setActiveOptions({ idx, data: optionsData });
@@ -173,7 +198,7 @@ export function useAIAgent(context: AIContext) {
   // Fase 3: confirmação/rejeição é determinística — o servidor executa (ou não) a tool
   // com o payload já gravado em ai_operator_pending_actions, SEM chamar o LLM de novo.
   const callConfirmAction = useCallback(
-    async (pendingActionId: string, decision: 'approve' | 'reject', note?: string) => {
+    async (pendingActionId: string, decision: 'approve' | 'reject', note?: string): Promise<{ ok: boolean; resultado?: string }> => {
       setLoading(true);
       setError(null);
       try {
@@ -186,6 +211,11 @@ export function useAIAgent(context: AIContext) {
             try { throw new Error(JSON.parse(rawBody).error || rawBody); } catch (parseErr: any) { if (parseErr?.message !== rawBody) throw parseErr; throw new Error(rawBody); }
           }
           throw error;
+        }
+        // Já tinha sido decidido em outro lugar (sino, WhatsApp): o servidor diz como terminou (29/10/2026).
+        if ((data as any)?.error && (data as any)?.resultado) {
+          setDisplay((d) => [...d, { kind: 'message', role: 'assistant', content: String((data as any).error) }]);
+          return { ok: false, resultado: String((data as any).resultado) };
         }
         if ((data as any)?.error) throw new Error((data as any).error);
         const content = (data as any).message?.content || '';
@@ -206,12 +236,13 @@ export function useAIAgent(context: AIContext) {
             return next;
           });
         }
-        return true;
+        const resultado = (data as any).resultado as string | undefined;
+        return { ok: true, ...(resultado ? { resultado } : {}) };
       } catch (e: any) {
         const msg = e?.message || 'Erro ao processar a decisão';
         setError(msg);
         setDisplay((d) => [...d, { kind: 'message', role: 'assistant', content: `❌ ${msg}` }]);
-        return false;
+        return { ok: false };
       } finally {
         setLoading(false);
       }
@@ -232,12 +263,10 @@ export function useAIAgent(context: AIContext) {
 
     setDisplay((d) => d.map((it, i) => (i === alvo && it.kind === 'proposal' ? { ...it, status: 'confirmed' } : it)));
     if (activeProposal?.idx === alvo) setActiveProposal(null);
-    const ok = await callConfirmAction(id, 'approve', note);
-    // Só marca como executada se a chamada REALMENTE passou — antes o cartão dizia "executada"
-    // mesmo quando a ação falhava, porque o catch engolia o erro e o fluxo seguia.
-    setDisplay((d) =>
-      d.map((it, i) => (i === alvo && it.kind === 'proposal' ? { ...it, status: (ok ? 'executed' : 'pending') as any } : it))
-    );
+    const r = await callConfirmAction(id, 'approve', note);
+    // O status vem do servidor (29/10/2026): o HTTP dar certo não quer dizer que a ação deu — "falhou" voltava 200 e o
+    // cartão dizia "executada com sucesso". Sem resposta do servidor, o cartão volta a esperar.
+    setDisplay((d) => d.map((it, i) => (i === alvo && it.kind === 'proposal' ? { ...it, status: statusDoCartao(r) } : it)));
   }, [activeProposal, callConfirmAction, display]);
 
   const cancelProposal = useCallback(async (note?: string, pendingActionId?: string) => {
@@ -249,7 +278,11 @@ export function useAIAgent(context: AIContext) {
 
     setDisplay((d) => d.map((it, i) => (i === alvo && it.kind === 'proposal' ? { ...it, status: 'cancelled' } : it)));
     if (activeProposal?.idx === alvo) setActiveProposal(null);
-    await callConfirmAction(id, 'reject', note);
+    const r = await callConfirmAction(id, 'reject', note);
+    // Já decidido em outro lugar (29/10/2026): o cartão não finge que foi este clique que cancelou.
+    if (!r.ok && r.resultado) {
+      setDisplay((d) => d.map((it, i) => (i === alvo && it.kind === 'proposal' ? { ...it, status: 'decidida' } : it)));
+    }
   }, [activeProposal, callConfirmAction, display]);
 
   const selectOption = useCallback(async (value: string, label: string) => {

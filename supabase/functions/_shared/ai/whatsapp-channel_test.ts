@@ -80,6 +80,38 @@ Deno.test("pendenciaParaHerdar: decidida, vencida, inexistente ou sem pendência
   assertEquals(await pendenciaParaHerdar(admin, null, AGORA), null);
 });
 
+// 29/10/2026: as guardadas (outro assunto chegou antes do "sim") vão junto para a conversa nova — antes só o ponteiro ia, e
+// elas venciam sem ninguém perguntar de novo.
+Deno.test("pendenciaParaHerdar: as guardadas vivas vão junto; as decididas e vencidas ficam", async () => {
+  const { admin } = bancoDoCanal({
+    pendencias: [
+      PENDENCIA_VIVA,
+      { id: "g-viva", status: "pending", expires_at: PENDENCIA_VIVA.expires_at },
+      { id: "g-decidida", status: "executed", expires_at: PENDENCIA_VIVA.expires_at },
+      { id: "g-vencida", status: "pending", expires_at: "2026-09-27T15:00:00.000Z" },
+    ],
+  });
+  assertEquals(
+    await pendenciaParaHerdar(admin, { pending_confirm_action_id: "p1", pin_attempts: 1, pendencias_guardadas: ["g-decidida", "g-viva", "g-vencida", "p1"] }, AGORA),
+    { pending_confirm_action_id: "p1", pin_attempts: 1, pendencia_herdada: true, pendencias_guardadas: ["g-viva"] },
+  );
+});
+
+Deno.test("pendenciaParaHerdar: ponteiro já decidido mas guardada viva — ela vira a herdada, sem as tentativas de PIN da outra", async () => {
+  const { admin } = bancoDoCanal({
+    pendencias: [
+      { id: "decidida", status: "rejected", expires_at: PENDENCIA_VIVA.expires_at },
+      { id: "g1", status: "pending", expires_at: PENDENCIA_VIVA.expires_at },
+      { id: "g2", status: "pending", expires_at: PENDENCIA_VIVA.expires_at },
+    ],
+  });
+  assertEquals(
+    await pendenciaParaHerdar(admin, { pending_confirm_action_id: "decidida", pin_attempts: 2, pendencias_guardadas: ["g1", "g2"] }, AGORA),
+    { pending_confirm_action_id: "g1", pin_attempts: 0, pendencia_herdada: true, pendencias_guardadas: ["g2"] },
+  );
+  assertEquals(await pendenciaParaHerdar(admin, { pending_confirm_action_id: "decidida", pendencias_guardadas: ["sumiu"] }, AGORA), null);
+});
+
 Deno.test("sessão nova depois de 4h leva a pendência viva da anterior", async () => {
   const antiga = {
     id: "s-antiga", channel: "whatsapp", external_thread_key: "5547999990000", status: "open",
@@ -245,10 +277,12 @@ Deno.test("resolveOptionAsUserText: valor não-UUID vira só o label", () => {
 // ─── Uma pendência por conversa (05/10/2026; revisto 27/10/2026) ─────────────────────────
 // Mesmo pedido corrigido: a anterior é cancelada. Outro assunto: a anterior fica guardada e volta
 // quando a nova for decidida (a semana do Roberto de 24/10 morreu por uma mensagem ao Flávio).
-const ENVIO_COM_LINK = { action_name: "send_service_order_link", payload: { numero: "ORÇ-00113", com_link: true } };
-const ENVIO_SEM_LINK = { action_name: "send_service_order_link", payload: { numero: "ORÇ-00113", com_link: false } };
+// 29/10/2026: os payloads com a forma de produção (o assunto de cada ação mora em assunto.ts). Antes o teste usava
+// {numero} e uma ação que não existe, e por isso passava com a regra que cancelava a mensagem de OUTRA pessoa.
+const ENVIO_COM_LINK = { action_name: "send_service_order_link", payload: { service_order_id: "ORÇ-00113", formato: "pdf_e_link" } };
+const ENVIO_SEM_LINK = { action_name: "send_service_order_link", payload: { service_order_id: "ORÇ-00113", formato: "pdf" } };
 const SEMANA_ROBERTO = { action_name: "registrar_diaria", payload: { freelancer: "Roberto", data: "19/10", data_ate: "24/10" } };
-const MENSAGEM_FLAVIO = { action_name: "enviar_mensagem_whatsapp", payload: { telefone: "5547999990000", texto: "oi" } };
+const MENSAGEM_FLAVIO = { action_name: "send_whatsapp_message", payload: { to_phone: "5547999990000", message: "oi" } };
 
 function bancoDePendencias(viva: boolean, anterior: Record<string, unknown> = ENVIO_COM_LINK, nova: Record<string, unknown> = ENVIO_SEM_LINK) {
   const gravado: { update?: Record<string, unknown>; filtros: unknown[][]; auditoria?: Record<string, unknown> } = { filtros: [] };
@@ -310,6 +344,19 @@ Deno.test("mesmoAssunto: mesma ação e mesmos campos de assunto (sem diferencia
   assertEquals(mesmoAssunto(SEMANA_ROBERTO, { action_name: "registrar_diaria", payload: { freelancer: "João" } }), false);
   assertEquals(mesmoAssunto(SEMANA_ROBERTO, MENSAGEM_FLAVIO), false);
   assertEquals(mesmoAssunto({ action_name: null }, { action_name: null }), false);
+  // o defeito de 08/10 e 24/10: mensagem ao Flávio NÃO é o mesmo pedido que mensagem a outra pessoa
+  assertEquals(mesmoAssunto(MENSAGEM_FLAVIO, { action_name: "send_whatsapp_message", payload: { to_phone: "5547999990001", message: "oi" } }), false);
+});
+
+Deno.test("mensagem a OUTRA pessoa antes do sim: a anterior fica guardada (era cancelada em 08/10 e 24/10)", async () => {
+  const outra = { action_name: "send_whatsapp_message", payload: { to_phone: "5547999990001", message: "outra" } };
+  const { admin, gravado } = bancoDePendencias(true, MENSAGEM_FLAVIO, outra);
+  const depois: Record<string, unknown> = { pending_confirm_action_id: "nova" };
+  const aviso = await cancelarPendenciaSubstituida(admin, { pending_confirm_action_id: "velha" }, depois, "u1");
+  assertEquals(gravado.update, undefined, "nada é cancelado");
+  assertEquals(depois.pendencias_guardadas, ["velha"]);
+  assertEquals(gravado.auditoria?.event_type, "kept:send_whatsapp_message");
+  assertStringIncludes(aviso, "continua esperando");
 });
 
 Deno.test("sem troca de pendência, ou anterior já decidida: não mexe em nada", async () => {
@@ -844,7 +891,32 @@ Deno.test("ai-agent: o destino do sim com pendência é decidido (com o PIN conf
   assertStringIncludes(src, "fluxo: interrupcao.fluxo");
   // revisão de 11/10/2026: o Max que caiu DEPOIS de o fluxo falar não é refeito pelo OpenRouter (a
   // tool rodaria de novo e a pergunta do CMP sairia duas vezes)
-  const entrega = src.indexOf('if (job.status === "completed" || interrupcao.fluxo)');
+  // 29/10/2026 (aprovação em lote): nem o que gravou algo ou criou pendência antes de cair (parouNoMeio)
+  const entrega = src.indexOf('if (job.status === "completed" || interrupcao.fluxo || parouNoMeio)');
   const reserva = src.indexOf("refazendo pelo OpenRouter");
   assert(entrega > 0 && reserva > entrega, "a entrega com o fluxo tem de vir antes da reserva pelo OpenRouter");
+});
+
+Deno.test("revisão de 29/10: sem conseguir ler a pendência nova, a anterior é guardada — nunca cancelada na dúvida", async () => {
+  const gravado: { update?: Record<string, unknown>; auditoria?: Record<string, unknown> } = {};
+  const admin = {
+    from(tabela: string) {
+      if (tabela === "ai_operator_audit") return { insert: (l: Record<string, unknown>) => { gravado.auditoria = l; return Promise.resolve({ error: null }); } };
+      let id = "";
+      const b: Record<string, unknown> = {};
+      b.update = (v: Record<string, unknown>) => { gravado.update = v; return b; };
+      b.select = () => b;
+      b.eq = (c: string, v: unknown) => { if (c === "id") id = String(v); return b; };
+      // a velha está viva; a leitura da nova falha (volta vazia)
+      b.maybeSingle = () => Promise.resolve(id === "velha"
+        ? { data: { title: "Enviar WhatsApp a cliente", action_name: "send_whatsapp_message", session_id: "s1", payload: { to_phone: "5547999990000" }, status: "pending" }, error: null }
+        : { data: null, error: { message: "timeout" } });
+      return b;
+    },
+  };
+  const depois: Record<string, unknown> = { pending_confirm_action_id: "nova" };
+  const aviso = await cancelarPendenciaSubstituida(admin, { pending_confirm_action_id: "velha" }, depois, "u1");
+  assertEquals(gravado.update, undefined, "nada é cancelado");
+  assertEquals(depois.pendencias_guardadas, ["velha"]);
+  assertStringIncludes(aviso, "continua esperando");
 });

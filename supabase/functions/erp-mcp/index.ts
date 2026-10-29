@@ -76,21 +76,54 @@ export async function handler(req: Request): Promise<Response> {
   // só o admin chega aqui pelo Max — ver provedorDoTurno).
   const toolCtx = { sb: admin, admin, userId: usuario.id, userRole: cargo, jwt: "", appOrigin: settings.app_public_url || "", settings, canal };
 
+  // O turno é o job (aprovação em lote, 29/10/2026): cada linha de auditoria leva o id dele, e a entrega confere por ali o
+  // que o turno gravou e o que falhou.
+  const turno = { id: jobId, inicio: String(job.started_at) };
+  // Na ferramenta_extra, o nome que conta é o da ferramenta que ela chamou; só pedir o esquema (descrever) não roda nada.
+  const nomeReal = (nome: string, argumentos: unknown) => {
+    const a = argumentos as Record<string, unknown> | null | undefined;
+    if (nome !== "ferramenta_extra" || typeof a?.nome !== "string" || !a.nome) return nome;
+    return a.descrever === true ? `ferramenta_extra:descrever:${a.nome}` : `ferramenta_extra:${a.nome}`;
+  };
+
   const servidor: ServidorDoTurno = {
     listar: () => Object.values(toolsByName).map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema })),
     async chamar(nome, argumentos) {
       // Pendência ou opções já encerraram o turno: nada mais roda (o usuário ainda vai decidir).
       const { data: atual } = await admin.from("ai_jobs").select("metadata").eq("id", jobId).maybeSingle();
       if ((atual?.metadata as Record<string, any> | null)?.interrupcao) {
+        // Registro da recusa (29/10/2026): mede o que o modelo tenta chamar depois da pendência antes de a Fase 2 deixar o
+        // turno seguir. Best-effort: a auditoria nunca derruba a ferramenta.
+        try {
+          await admin.from("ai_operator_audit").insert({
+            session_id: sessionId || null,
+            actor_user_id: usuario.id,
+            actor_kind: "ai_model",
+            event_type: `recusa_apos_interrupcao:${nomeReal(nome, argumentos)}`,
+            event_category: "data",
+            payload: { channel: canal, turno: jobId, args: argumentos ?? {} },
+          });
+        } catch (_e) {
+          // sem registro desta recusa
+        }
         return { resultado: { error: "Turno encerrado: aguardando a decisão do usuário. Não chame mais ferramentas." } };
       }
       const tc = { name: nome, input: argumentos ?? {} };
-      const r = await executarChamadaDeTool(tc, { toolsByName, alcancaveisPelaRede, toolCtx, sessionId, channel: canal });
+      const r = await executarChamadaDeTool(tc, { toolsByName, alcancaveisPelaRede, toolCtx, sessionId, channel: canal, turno });
       // Sem desambiguação forçada aqui (trabalhoComposto=true): o MCP recebe uma chamada por vez e
       // não sabe se o modelo disparou várias; pendência e present_options continuam encerrando.
       const interrupcao = interrupcaoDaTool(tc, r, true);
-      // Registro atômico no job (duas chamadas em paralelo não apagam a interrupção uma da outra).
-      await admin.rpc("ai_job_registrar_ferramenta", { p_job_id: jobId, p_nome: nome, p_interrupcao: interrupcao });
+      // Registro atômico no job (duas chamadas em paralelo não apagam a interrupção uma da outra). O erro da RPC agora é
+      // conferido (29/10/2026): sem o registro, a entrega não acha o cartão e o job pode ser refeito pela reserva.
+      const { data: registrado, error: erroDoRegistro } = await admin.rpc("ai_job_registrar_ferramenta", {
+        p_job_id: jobId, p_nome: nomeReal(nome, argumentos), p_interrupcao: interrupcao,
+      });
+      // A RPC devolve se o job FICOU com interrupção (false é o normal de uma chamada sem ela): só com interrupção o false
+      // quer dizer que o job já não estava em 'processing' e o cartão não foi registrado.
+      if (erroDoRegistro) console.error(`[erp-mcp] não registrei ${nome} no job ${jobId}:`, erroDoRegistro.message);
+      else if (interrupcao && registrado === false) {
+        console.warn(`[erp-mcp] ${nome} interrompeu o turno com o job ${jobId} fora de 'processing' (interrupção não registrada)`);
+      }
       // (Fase 3, P6) as OS que a ferramenta citou, para a carona da agenda na entrega do turno (ai-agent). Diagnóstico de
       // enriquecimento: nunca derruba a ferramenta (a migration 20261026100500 ainda não aplicada = sem carona).
       const os = osDoTurno([{ name: nome, args: argumentos ?? {}, result: r.toolResult }]);

@@ -13,6 +13,9 @@ import { formatOptionsAsNumberedText, notaDeConfirmacao } from "./whatsapp-chann
 const MARCAS_TECNICAS = [
   /\bHTTP\s*\d{3}\b/i, /\bPGRST\d*/i, /\bviolates\b/i, /\bconstraint\b/i, /\brelation\s+"/i, /\bcolumn\s+"/i,
   /\bsyntax error\b/i, /\bTypeError\b/, /\bJWT\b/i, /\bfetch failed\b/i, /\bAnthropic\b/i, /\bOpenRouter\b/i,
+  // 29/10/2026: "invalid input syntax for type uuid: …" chegava cru (o número da OS no lugar do id), e a página de erro
+  // do provedor ("<html>…503 Service Temporarily Unavailable…")
+  /\binvalid input syntax\b/i, /<html\b/i,
   /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i,
 ];
 export const ERRO_DO_SISTEMA_PARA_O_DONO = "não consegui concluir agora (erro do sistema, já anotado). Tente de novo em instantes.";
@@ -30,6 +33,37 @@ export interface DesfechoDoTurno {
   /** 11/10/2026: o fluxo de comprovantes já mandou a pergunta do CMP — o assistente não manda nada. */
   fluxo?: FluxoQueFalou;
   texto: string;
+  /** "Conferido pelo sistema" (aprovação em lote, 29/10/2026): as gravações diretas que falharam neste turno. */
+  conferido?: string;
+  /**
+   * Aviso do sistema que vai no TOPO, qualquer que seja o desfecho (29/10/2026): o Claude Max caiu no meio do turno depois
+   * de já ter feito algo (avisoDoTurnoInterrompido) — o cartão ou a lista que ficaram ainda chegam, com o aviso em cima.
+   */
+  aviso?: string;
+}
+
+/**
+ * A linha fixa que vai abaixo da frase do assistente no cartão (aprovação em lote, Fase 1, 29/10/2026). O modelo costuma
+ * prometer o passo seguinte ("depois que você aprovar, eu troco as linhas"), e nada cumpre essa promessa até a Fase 5
+ * (retomada, decisão 6 do dono): a linha desmente a promessa sem precisar adivinhá-la.
+ */
+export const LINHA_SEM_RETOMADA = "_Depois do sim, o assistente não continua sozinho: peça o próximo passo._";
+
+/**
+ * A frase do assistente para ir acima do cartão de confirmação, com a linha fixa. Até 29/10/2026 ela era descartada: 12
+ * das 15 frases do Max que explicavam a fila ("este é o 1º de 10") nunca chegaram ao dono. No WhatsApp vai curta (até
+ * `limite` caracteres, cortada no fim de uma frase ou palavra); no painel cabe inteira. "" = o modelo não escreveu nada.
+ */
+export function textoAcimaDoCartao(texto: string | null | undefined, limite = 280): string {
+  let t = String(texto ?? "").replace(/\r/g, "").replace(/\n{3,}/g, "\n\n").trim();
+  if (!t) return "";
+  if (t.length > limite) {
+    const trecho = t.slice(0, limite);
+    const fimDeFrase = Math.max(trecho.lastIndexOf(". "), trecho.lastIndexOf("! "), trecho.lastIndexOf("? "), trecho.lastIndexOf("\n"));
+    const cortado = fimDeFrase >= limite / 2 ? trecho.slice(0, fimDeFrase + 1) : trecho.replace(/\s+\S*$/, "");
+    t = `${cortado.replace(/[\s.,;:!?]+$/, "")}…`;
+  }
+  return `${t}\n${LINHA_SEM_RETOMADA}`;
 }
 
 export function respostaDoTurnoNoWhatsApp(
@@ -42,21 +76,31 @@ export function respostaDoTurnoNoWhatsApp(
   // abaixo zeram ou trocam pending_confirm_action_id, e a marca de herança vai junto.
   const novo: Record<string, any> = { ...metadata, pendencia_herdada: false };
   let replyText: string;
+  // "Conferido pelo sistema" (29/10/2026): no fim da resposta; antes do cartão e da lista, que terminam no "como responder".
+  // O aviso do turno interrompido vai no topo de tudo.
+  const juntar = (...partes: Array<string | null | undefined>) => partes.filter((p) => p && p.trim()).join("\n\n");
+  const textoOuOk = d.texto || (d.aviso ? "" : "Ok.");
 
   if (d.error) {
     // ⚠️ fica para erro e risco; o erro técnico cru não chega ao dono (erroParaODono).
     const paraODono = erroParaODono(d.error);
     if (paraODono !== d.error) console.warn("[whatsapp] erro do turno (cru):", d.error);
-    replyText = `⚠️ ${paraODono}`;
+    replyText = juntar(d.aviso, `⚠️ ${paraODono}`, d.conferido);
     novo.pending_confirm_action_id = null;
   } else if (d.options) {
-    replyText = formatOptionsAsNumberedText(d.options.question, d.options.options);
+    replyText = juntar(d.aviso, d.conferido, formatOptionsAsNumberedText(d.options.question, d.options.options));
     novo.pending_options = d.options.options;
     novo.pending_confirm_action_id = null;
   } else if (d.proposal) {
     // Cartão de confirmação sem ⚠️ (15/10/2026): o ícone dos erros em toda confirmação (67 em 30
     // dias) tirava o peso do aviso de verdade. O título em negrito é a pergunta.
-    replyText = `*${d.proposal.title}*\n${d.proposal.summary_markdown}${notaDeConfirmacao(d.proposal.risk_level)}`;
+    // 29/10/2026: a frase do assistente vem em cima, com a linha fixa (textoAcimaDoCartao).
+    replyText = juntar(
+      d.aviso,
+      textoAcimaDoCartao(d.texto),
+      d.conferido,
+      `*${d.proposal.title}*\n${d.proposal.summary_markdown}${notaDeConfirmacao(d.proposal.risk_level)}`,
+    );
     novo.pending_confirm_action_id = d.proposal.pending_action_id;
     novo.pin_attempts = 0;
     novo.pending_options = null;
@@ -69,12 +113,15 @@ export function respostaDoTurnoNoWhatsApp(
     // Conversa no meio de uma pendência viva (05/10/2026): a referência fica, e o dono vê que ela
     // ainda espera. Como na pendência herdada: "não" cancela, "sim <PIN>" aprova, e "sim" sem PIN
     // a mostra de novo em vez de executar — o "sim" pode ser resposta a outra coisa.
-    replyText = `${d.texto || "Ok."}
-
-⏳ Ainda espera a sua resposta: *${pendenciaViva.title}*.${notaDeConfirmacao(pendenciaViva.risk_level)}`;
+    replyText = juntar(
+      d.aviso,
+      textoOuOk,
+      d.conferido,
+      `⏳ Ainda espera a sua resposta: *${pendenciaViva.title}*.${notaDeConfirmacao(pendenciaViva.risk_level)}`,
+    );
     novo.pendencia_herdada = true;
   } else {
-    replyText = d.texto || "Ok.";
+    replyText = juntar(d.aviso, textoOuOk, d.conferido);
     novo.pending_confirm_action_id = null;
   }
   return { replyText, metadata: novo };

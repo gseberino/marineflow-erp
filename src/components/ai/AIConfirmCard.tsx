@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Button } from '@/components/ui/button';
 import { Check, X, ShieldCheck, Pencil } from 'lucide-react';
-import type { Proposal } from '@/hooks/use-ai-agent';
+import type { Proposal, ProposalStatus } from '@/hooks/use-ai-agent';
 
 export function AIConfirmCard({
   proposal,
@@ -13,7 +13,7 @@ export function AIConfirmCard({
   disabled,
 }: {
   proposal: Proposal;
-  status: 'pending' | 'confirmed' | 'cancelled' | 'executed';
+  status: ProposalStatus;
   // O id da ação viaja junto para o hook agir sobre ESTE cartão, e não sobre o último que chegou
   // na tela: com dois cartões pendentes, o clique no de cima executava a ação do de baixo.
   onConfirm: (note?: string, pendingActionId?: string) => void;
@@ -80,6 +80,12 @@ export function AIConfirmCard({
       )}
       {status === 'executed' && (
         <p className="text-xs text-green-600 dark:text-green-400 italic">✅ Ação executada com sucesso.</p>
+      )}
+      {status === 'failed' && (
+        <p className="text-xs text-destructive italic">⚠️ Não foi feito: a ação falhou (o motivo está na mensagem abaixo).</p>
+      )}
+      {status === 'decidida' && (
+        <p className="text-xs text-muted-foreground italic">Este pedido já tinha sido decidido (veja a mensagem abaixo).</p>
       )}
       {status === 'cancelled' && (
         <p className="text-xs text-muted-foreground italic">✕ Cancelado pelo usuário.</p>

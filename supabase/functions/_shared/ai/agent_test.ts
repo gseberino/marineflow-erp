@@ -157,7 +157,10 @@ Deno.test("runAgentLoop: tool_use único — executa a tool e responde no próxi
   assertEquals(calls.length, 2);
   assertEquals(result.message.content, "Tool executada, aqui está: bar");
   assertEquals(result.toolEvents.length, 1);
-  assertEquals(result.toolEvents[0], { name: "test_tool", args: { foo: "bar" }, result: { echoed: "bar" } });
+  // 29/10/2026 (aprovação em lote): o evento diz se a tool RODOU e qual (a base do "Conferido pelo sistema")
+  assertEquals(result.toolEvents[0], {
+    name: "test_tool", args: { foo: "bar" }, result: { echoed: "bar" }, executou: true, ferramenta: "test_tool", rodada: 0,
+  });
   // histórico: user inicial, assistant(tool_use), user(tool_result), assistant(texto final)
   assertEquals(result.messages.length, 4);
   assertEquals(result.messages[1].role, "assistant");

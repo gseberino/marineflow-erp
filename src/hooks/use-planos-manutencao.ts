@@ -288,9 +288,12 @@ export function useDecidirLembrete() {
         body: { type: 'confirm_action', pending_action_id: id, decision: decisao, note: nota || undefined },
       });
       if (error) throw error;
-      const d = data as { error?: string; message?: { content?: string } } | null;
+      const d = data as { error?: string; resultado?: string; message?: { content?: string } } | null;
+      // Já decidido em outro lugar (sino, WhatsApp): o servidor diz como terminou (29/10/2026) — não é erro deste clique.
+      if (d?.error && d.resultado) return { texto: d.error, falhou: false, decidida: true };
       if (d?.error) throw new Error(d.error);
-      return d?.message?.content ?? '';
+      // 29/10/2026: o desfecho vem do servidor — o envio que falhou volta 200 com "falhou", e o diálogo dizia enviado.
+      return { texto: d?.message?.content ?? '', falhou: d?.resultado === 'failed', decidida: false };
     },
     onSuccess: () => invalidarPlanos(qc),
   });

@@ -7,7 +7,20 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { prepararFerramentasDoTurno, runAgentLoop, textoDoSim, type Proposal } from "../_shared/ai/agent.ts";
-import { erroParaODono, respostaDoTurnoNoWhatsApp } from "../_shared/ai/whatsapp-resposta.ts";
+import { erroParaODono, respostaDoTurnoNoWhatsApp, textoAcimaDoCartao } from "../_shared/ai/whatsapp-resposta.ts";
+// aprovação em lote, Fase 1 (29/10/2026): o que o sistema diz do turno — decisão na conversa, desfecho real, conferido
+// das gravações diretas e a guarda da reserva do Claude Max.
+import {
+  anexarAoHistoricoDoTurno,
+  avisoDoTurnoInterrompido,
+  falhasDaAuditoria,
+  falhasDosEventos,
+  gravarDecisaoNaConversa,
+  jobDeixouTrabalho,
+  reciboDasGravacoes,
+  textoDoDesfecho,
+  trabalhoNaAuditoria,
+} from "../_shared/ai/pedido-do-turno.ts";
 import {
   desfechoDoPainel,
   enfileirarTurnoNoMax,
@@ -387,7 +400,10 @@ async function resolveWhatsAppConfirmation(
   const clearedMetadata = { ...metadata, pending_confirm_action_id: null, pin_attempts: 0, pendencia_herdada: false };
 
   if (!pending || pending.status !== "pending") {
-    return { message: "Essa pendência não existe mais ou já foi decidida.", metadata: clearedMetadata };
+    // 29/10/2026: o desfecho real (executado, falhou, cancelado, venceu), lido do banco — e a fila segue para o próximo
+    // item da mesma leva, se houver. Antes: "não existe mais ou já foi decidida", e o dono não sabia se tinha sido feito.
+    if (!pending) return { message: textoDoDesfecho(null), metadata: clearedMetadata };
+    return await comAProximaPendencia(admin, pending, textoDoDesfecho(pending), clearedMetadata);
   }
 
   if (confirmation.decision === "reject") {
@@ -581,11 +597,11 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
       // "sim <PIN> mas manda amanhã" (11/10/2026): aprovar executaria o pedido como está e perderia
       // o ajuste; mandar ao modelo levaria o PIN junto. Nada é executado e a pendência segue esperando.
       await admin.from("ai_operator_sessions").update({ last_activity_at: new Date().toISOString() }).eq("id", sessionId);
-      await queueWhatsAppReply(
-        admin,
-        phoneNormalized,
-        "Não executei: veio um ajuste junto da confirmação. Para aprovar como está, mande só *sim* (ou *sim <SEU PIN>*, se o pedido for de alto risco). Para ajustar, escreva o ajuste sem começar por sim/ok, que eu refaço o pedido.",
-      );
+      const naoExecutei =
+        "Não executei: veio um ajuste junto da confirmação. Para aprovar como está, mande só *sim* (ou *sim <SEU PIN>*, se o pedido for de alto risco). Para ajustar, escreva o ajuste sem começar por sim/ok, que eu refaço o pedido.";
+      // Na conversa (29/10/2026), com o PIN mascarado: o ajuste que vier depois tem a que se referir.
+      await gravarDecisaoNaConversa(admin, { sessionId, resposta: text, texto: naoExecutei });
+      await queueWhatsAppReply(admin, phoneNormalized, naoExecutei);
       return jr({ ok: true });
     } else if (destinoDoSim === "resolver" && confirmation) {
       // Pendência que veio da conversa anterior (resolveOrCreateWhatsAppSession): aprovar sem
@@ -600,12 +616,17 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
           await admin.from("ai_operator_sessions")
             .update({ metadata: { ...metadata, pendencia_herdada: false }, last_activity_at: new Date().toISOString() })
             .eq("id", sessionId);
-          await queueWhatsAppReply(admin, phoneNormalized, textoDaPendenciaReapresentada(herdada));
+          const reapresentada = textoDaPendenciaReapresentada(herdada);
+          await gravarDecisaoNaConversa(admin, { sessionId, resposta: text, texto: reapresentada });
+          await queueWhatsAppReply(admin, phoneNormalized, reapresentada);
           return jr({ ok: true });
         }
       }
       const resolved = await resolveWhatsAppConfirmation(admin, metadata, appUser, toolCtx, confirmation);
       await admin.from("ai_operator_sessions").update({ metadata: resolved.metadata, last_activity_at: new Date().toISOString() }).eq("id", sessionId);
+      // A decisão e o resultado entram na conversa (29/10/2026), com o PIN mascarado: até aqui 0 das 53 aprovações pelo
+      // WhatsApp em 90 dias ficavam registradas, e o modelo respondia "você fez?" sem saber o que tinha sido feito.
+      await gravarDecisaoNaConversa(admin, { sessionId, resposta: text, texto: resolved.message });
       // Registro único (F2): a próxima pendência da leva vira a pergunta aberta; sem próxima, as do
       // assistente se encerram (a pergunta de comprovante que esperava volta a poder abrir).
       await enviarComRegistro(
@@ -621,11 +642,10 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
     // para o modelo e para o histórico da conversa. Só age quando o número É o PIN (conferido no
     // hash): "sim 500" como resposta de conversa segue para o modelo normalmente.
     await admin.from("ai_operator_sessions").update({ last_activity_at: new Date().toISOString() }).eq("id", sessionId);
-    await queueWhatsAppReply(
-      admin,
-      phoneNormalized,
-      "Não há nenhuma ação esperando a sua confirmação agora — nada foi executado. Por segurança, o seu PIN não foi repassado ao assistente.",
-    );
+    const nadaEsperando =
+      "Não há nenhuma ação esperando a sua confirmação agora — nada foi executado. Por segurança, o seu PIN não foi repassado ao assistente.";
+    await gravarDecisaoNaConversa(admin, { sessionId, resposta: text, texto: nadaEsperando });
+    await queueWhatsAppReply(admin, phoneNormalized, nadaEsperando);
     return jr({ ok: true });
   }
 
@@ -873,6 +893,10 @@ async function turnoDoModeloNoWhatsApp(turno: TurnoDoModelo): Promise<Response> 
     const carona = await caronaDoTurno(admin, appUser.id, osDoTurno(result.toolEvents), result, { canal: "whatsapp" });
     if (carona) aplicarCarona(result, carona);
   }
+  // Conferido pelo sistema (29/10/2026): as gravações diretas do turno que falharam — na conversa (o modelo lê na
+  // próxima vez) e na mensagem ao dono. Em 90 dias, 20 falharam em 17 turnos e o texto do modelo citou uma.
+  const conferido = reciboDasGravacoes(falhasDosEventos(result.toolEvents));
+  if (conferido) anexarAoHistoricoDoTurno(result.messages, conferido);
 
   try {
     const newNativeSlice = result.messages.slice(alreadyPersistedCount);
@@ -887,7 +911,10 @@ async function turnoDoModeloNoWhatsApp(turno: TurnoDoModelo): Promise<Response> 
 
   // fluxo (11/10/2026): o fluxo de comprovantes já mandou a pergunta do CMP — o turno não manda mensagem.
   const { replyText, metadata: newMetadata } = respostaDoTurnoNoWhatsApp(
-    { error: result.error, options: result.options, proposal: result.proposal as Proposal | undefined, fluxo: result.fluxo, texto: result.message.content },
+    {
+      error: result.error, options: result.options, proposal: result.proposal as Proposal | undefined, fluxo: result.fluxo,
+      texto: result.message.content, conferido,
+    },
     metadata,
     await pendenciaQueSegueEsperando(admin, metadata),
   );
@@ -951,19 +978,27 @@ async function handleEntregaDoMax(body: Record<string, any>): Promise<Response> 
   });
 
   const interrupcao = (meta.interrupcao ?? {}) as Record<string, any>;
+  // Guarda da reserva (aprovação em lote, 29/10/2026): o Max caiu DEPOIS de gravar algo ou criar pendência. Refazer pelo
+  // OpenRouter repetiria as gravações e duplicaria a pendência; o turno fecha com o que existe e um aviso.
+  const parouNoMeio = job.status !== "completed" && !interrupcao.fluxo &&
+    (jobDeixouTrabalho(meta) || await trabalhoNaAuditoria(admin, sessionId, jobId));
   // 11/10/2026: o Max caiu DEPOIS de o fluxo de comprovantes falar com o dono (completar_comprovante
   // rodou e a pergunta do CMP já saiu). Refazer pelo OpenRouter chamaria a tool de novo e o dono
   // receberia a pergunta duas vezes: o turno fecha como o concluído, sem mensagem do assistente.
-  if (job.status === "completed" || interrupcao.fluxo) {
+  if (job.status === "completed" || interrupcao.fluxo || parouNoMeio) {
     const respostaDoMax = job.status === "completed" ? String((job.response as any)?.text ?? "") : "";
+    // o aviso do turno que caiu no meio vai no topo, também sobre o cartão ou a lista que ficaram
+    const aviso = parouNoMeio ? avisoDoTurnoInterrompido(job.error_code) : "";
     // (Fase 3, P6) a carona da agenda, pelas OS que as ferramentas do turno tocaram (o erp-mcp guardou no job)
     const resposta = appUser.role === "admin" && job.status === "completed"
       ? await comCarona(admin, appUser.id, osDoJob(job.metadata), respostaDoMax, interrupcao, { canal: "whatsapp" })
       : respostaDoMax;
-    await gravarTurnoDoMax(admin, sessionId, texto, resposta, job, "whatsapp");
+    // Conferido pelo sistema (29/10/2026): as falhas das gravações diretas do job, pela auditoria com turno = job.
+    const conferido = reciboDasGravacoes(await falhasDaAuditoria(admin, sessionId, jobId));
+    await gravarTurnoDoMax(admin, sessionId, texto, [aviso, resposta, conferido].filter(Boolean).join("\n\n"), job, "whatsapp");
     // fluxo (11/10/2026): a frase curta do Max fica só no histórico; a mensagem ao dono é a do fluxo.
     const { replyText, metadata: novo } = respostaDoTurnoNoWhatsApp(
-      { proposal: interrupcao.proposal, options: interrupcao.options, fluxo: interrupcao.fluxo, texto: resposta },
+      { proposal: interrupcao.proposal, options: interrupcao.options, fluxo: interrupcao.fluxo, texto: resposta, conferido, aviso },
       metadata,
       await pendenciaQueSegueEsperando(admin, metadata),
     );
@@ -1036,10 +1071,18 @@ async function handleEntregaDoPainel(admin: any, job: Record<string, any>): Prom
   const input = (job.input ?? {}) as Record<string, any>;
   const sessionId = String(meta.session_id || input.sessao || "");
   if (!sessionId) return jr({ error: "Turno sem sessão" }, 422);
+  // Aprovação em lote (29/10/2026): a entrega tardia também confere as gravações diretas, e o job que caiu DEPOIS de
+  // gravar ou criar pendência não manda "peça de novo" (o pedido refeito duplicaria o que já entrou).
+  const conferido = reciboDasGravacoes(await falhasDaAuditoria(admin, sessionId, String(job.id)));
+  const deixouTrabalho = job.status !== "completed" &&
+    (jobDeixouTrabalho(meta) || await trabalhoNaAuditoria(admin, sessionId, String(job.id)));
+  const esperando = (meta.interrupcao as Record<string, any> | undefined)?.proposal?.title;
   const resposta = job.status === "completed"
     ? String(job.response?.text ?? "")
+    : deixouTrabalho
+    ? `${avisoDoTurnoInterrompido(job.error_code)}${esperando ? `\n\nFicou esperando o seu sim, no sino de aprovações: *${esperando}*.` : ""}`
     : `⚠️ Não consegui terminar este pedido pelo Claude Max (${job.error_code ?? job.status}). Peça de novo.`;
-  await gravarTurnoDoMax(admin, sessionId, String(input.texto || ""), resposta, job, "web");
+  await gravarTurnoDoMax(admin, sessionId, String(input.texto || ""), [resposta, conferido].filter(Boolean).join("\n\n"), job, "web");
   return jr({ ok: true, entregue: "painel" });
 }
 
@@ -1103,6 +1146,20 @@ async function turnoDoPainelPeloMax(p: {
           .eq("id", jobId).eq("status", "pending")
           .select("id");
         if (!cancelado?.length) continue;
+      } else if (job && (jobDeixouTrabalho((job as any).metadata) || await trabalhoNaAuditoria(p.admin, p.loopParams.sessionId, jobId))) {
+        // Guarda da reserva (aprovação em lote, 29/10/2026): o Max caiu depois de gravar algo ou criar pendência —
+        // refazer pelo OpenRouter repetiria tudo. A tela recebe o aviso, o conferido e o cartão que ficou.
+        await p.admin.rpc("ai_job_marcar_entregue", { p_job_id: jobId });
+        const interrompido = ((job as any).metadata?.interrupcao ?? {}) as Record<string, any>;
+        const aviso = avisoDoTurnoInterrompido((job as any).error_code);
+        const conferido = reciboDasGravacoes(await falhasDaAuditoria(p.admin, p.loopParams.sessionId, jobId));
+        const avisoEConferido = [aviso, conferido].filter(Boolean).join("\n\n");
+        await gravarTurnoDoMax(p.admin, p.loopParams.sessionId, p.texto, avisoEConferido, job as any, "web");
+        const message = { role: "assistant", content: avisoEConferido };
+        // o cartão ou a lista que o Max deixou ainda chegam à tela, com o aviso em cima
+        if (interrompido.proposal) return jr({ message, proposal: interrompido.proposal, tool_events: [], session_id: p.loopParams.sessionId });
+        if (interrompido.options) return jr({ message, options: interrompido.options, tool_events: [], session_id: p.loopParams.sessionId });
+        return jr({ message, tool_events: [], session_id: p.loopParams.sessionId });
       }
       await p.admin.rpc("ai_job_marcar_entregue", { p_job_id: jobId });
       if (!reservaLigada(p.settings)) {
@@ -1132,11 +1189,21 @@ async function turnoDoPainelPeloMax(p: {
     const resposta = p.userRole === "admin"
       ? await comCarona(p.admin, p.userId, osDoJob((job as any).metadata), respostaDoMax, interrupcao, { canal: "painel" })
       : respostaDoMax;
+    // Conferido pelo sistema (29/10/2026): as falhas das gravações diretas do job, pela auditoria com turno = job.
+    const conferido = reciboDasGravacoes(await falhasDaAuditoria(p.admin, p.loopParams.sessionId, jobId));
+    const comConferido = [resposta, conferido].filter(Boolean).join("\n\n");
     const { data: primeiraVez } = await p.admin.rpc("ai_job_marcar_entregue", { p_job_id: jobId });
-    if (primeiraVez === true) await gravarTurnoDoMax(p.admin, p.loopParams.sessionId, p.texto, resposta, job as any, "web");
-    const message = { role: "assistant", content: resposta };
-    if (interrupcao.proposal) return jr({ message, proposal: interrupcao.proposal, tool_events: [], session_id: p.loopParams.sessionId });
-    if (interrupcao.options) return jr({ message, options: interrupcao.options, tool_events: [], session_id: p.loopParams.sessionId });
+    if (primeiraVez === true) await gravarTurnoDoMax(p.admin, p.loopParams.sessionId, p.texto, comConferido, job as any, "web");
+    const message = { role: "assistant", content: comConferido };
+    if (interrupcao.proposal) {
+      // A frase do assistente acima do cartão, com a linha fixa (29/10/2026): antes a tela só desenhava o cartão.
+      const acima = [textoAcimaDoCartao(resposta, 2000), conferido].filter(Boolean).join("\n\n");
+      return jr({ message: { role: "assistant", content: acima }, proposal: interrupcao.proposal, tool_events: [], session_id: p.loopParams.sessionId });
+    }
+    // com a lista, a tela mostra só o "Conferido pelo sistema", como o WhatsApp
+    if (interrupcao.options) {
+      return jr({ message: { role: "assistant", content: conferido }, options: interrupcao.options, tool_events: [], session_id: p.loopParams.sessionId });
+    }
     return jr({ message, tool_events: [], session_id: p.loopParams.sessionId });
   }
 }
@@ -1191,6 +1258,12 @@ servirComCors(async (req) => {
     const isSalesCopy = body.is_sales_copy === true;
     const requestedSessionId: string | undefined = typeof body.session_id === "string" ? body.session_id : undefined;
 
+    // Tipo que esta versão não conhece (29/10/2026): recusa em vez de cair num turno do modelo — uma tela mais nova que a
+    // edge (ex.: decidir um pedido inteiro) faria o modelo receber o histórico sem pergunta e repetir o último pedido.
+    if (typeof body.type === "string" && body.type !== "load_history" && body.type !== "confirm_action") {
+      return jr({ error: "Tipo de pedido desconhecido para o assistente." }, 400);
+    }
+
     // ---------- Carregar histórico (Fase 2) — usado pelo widget ao reabrir, sem chamar o LLM ----------
     if (body.type === "load_history") {
       if (!requestedSessionId) return jr({ error: "session_id obrigatório" }, 400);
@@ -1221,7 +1294,9 @@ servirComCors(async (req) => {
         .maybeSingle();
       if (pendingErr || !pending) return jr({ error: "Pendência não encontrada" }, 404);
       if (pending.status !== "pending") {
-        return jr({ error: `Esta pendência já foi ${pending.status === "approved" || pending.status === "executed" ? "processada" : pending.status}.` }, 409);
+        // 29/10/2026: o desfecho real, em português ("já foi rejected" saía em inglês); `resultado` deixa o cartão e o
+        // sino mostrarem o status de verdade.
+        return jr({ error: textoDoDesfecho(pending), resultado: pending.status }, 409);
       }
       const isOwner = pending.requested_by_user_id === userId;
       if (!isOwner && userRole !== "admin") return jr({ error: "Sem permissão para decidir esta pendência." }, 403);
@@ -1257,6 +1332,7 @@ servirComCors(async (req) => {
           message: { role: "assistant", content: rejectMsg },
           tool_events: [],
           session_id: pending.session_id,
+          resultado: "rejected",
           ...(proximaRej ? { proposal: proximaRej } : {}),
         });
       }
@@ -1308,6 +1384,9 @@ servirComCors(async (req) => {
         message: { role: "assistant", content: execMsg },
         tool_events: [{ name: pending.action_name, args: pending.payload, result: execResult }],
         session_id: pending.session_id,
+        // 29/10/2026: o desfecho de verdade. O cartão dizia "✅ Ação executada com sucesso" sempre que o HTTP dava certo, e
+        // o sino "Ação confirmada e executada" — também quando a ação tinha falhado.
+        resultado: execError ? "failed" : "executed",
         // A fila anda sozinha: a tela recebe a próxima proposta e mostra o card de novo.
         ...(proxima ? { proposal: proxima } : {}),
       });
@@ -1481,6 +1560,9 @@ servirComCors(async (req) => {
       const carona = await caronaDoTurno(admin, userId, osDoTurno(result.toolEvents), result, { canal: "painel" });
       if (carona) aplicarCarona(result, carona);
     }
+    // Conferido pelo sistema (29/10/2026): as gravações diretas do turno que falharam — na conversa e na tela.
+    const conferido = reciboDasGravacoes(falhasDosEventos(result.toolEvents));
+    if (conferido) anexarAoHistoricoDoTurno(result.messages, conferido);
 
     // ---- Persiste as mensagens novas deste turno (best-effort — não derruba a resposta) ----
     try {
@@ -1496,12 +1578,14 @@ servirComCors(async (req) => {
     }
 
     if (result.error) {
-      return jr({ error: result.error, session_id: resolvedSessionId }, result.errorStatus ?? 500);
+      return jr({ error: [result.error, conferido].filter(Boolean).join("\n\n"), session_id: resolvedSessionId }, result.errorStatus ?? 500);
     }
 
     if (result.options) {
       return jr({
-        message: result.message,
+        // Com a lista, a tela mostra só o "Conferido pelo sistema" (29/10/2026), como o WhatsApp; o texto do modelo segue
+        // no histórico (updated_messages).
+        message: { role: "assistant", content: conferido },
         options: result.options,
         tool_events: result.toolEvents,
         updated_messages: fromAnthropicMessages(result.messages),
@@ -1510,8 +1594,10 @@ servirComCors(async (req) => {
     }
 
     if (result.proposal) {
+      // A frase do assistente acima do cartão, com a linha fixa (29/10/2026): antes a tela só desenhava o cartão.
+      const acima = [textoAcimaDoCartao(result.message.content, 2000), conferido].filter(Boolean).join("\n\n");
       return jr({
-        message: result.message,
+        message: { role: "assistant", content: acima },
         proposal: result.proposal,
         tool_events: result.toolEvents,
         updated_messages: fromAnthropicMessages(result.messages),
@@ -1521,7 +1607,8 @@ servirComCors(async (req) => {
 
     // Resposta final sem tool calls no último giro — igual ao comportamento original,
     // não inclui updated_messages (o frontend só acrescenta esta mensagem ao seu estado local).
-    return jr({ message: result.message, tool_events: result.toolEvents, session_id: resolvedSessionId });
+    const final = conferido ? { role: "assistant", content: [result.message.content, conferido].filter(Boolean).join("\n\n") } : result.message;
+    return jr({ message: final, tool_events: result.toolEvents, session_id: resolvedSessionId });
   } catch (e: any) {
     console.error("ai-agent error", e);
     return jr({ error: e?.message || "internal error" }, 500);
