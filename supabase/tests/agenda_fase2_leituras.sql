@@ -191,9 +191,11 @@ begin
 
     -- ── M. O marcado em 'ligado' ──
     v_txt := split_part(pg_temp.ver(null, 'proxima_semana', c_hoje), E'\n', 1);
+    -- CORREÇÃO 29/10 (P1, 20261030100000): a semana que vem mostra o bloco inteiro (o Lenine até seg 09/11, não mais cortado
+    -- no sábado); o com quem não cabe no teto com as 4 OS e sai (agenda_correcao_2910_p1.sql B1 e B3)
     v_res := pg_temp.igual(v_res, 'M1 agenda_ver semana que vem: o marcado é o plano (os dias de verdade; a reserva diz que é reserva)',
       v_txt, 'A semana que vem (seg 02/11 a sáb 07/11): Vanderlei (ter 03 a qui 05/11), Rodrigo OS-00096 (ter 03/11 às 13:00), '
-             || 'Lenine (qua 04 a sex 06/11) e Flávio (reserva, qua 04 e sex 06/11). Nenhuma diária foi lançada depois de sáb 17/10: '
+             || 'Lenine (qua 04 a seg 09/11) e Flávio (reserva, qua 04 e sex 06/11). Nenhuma diária foi lançada depois de sáb 17/10: '
              || 'não sei o que a equipe fez de seg 19/10 até hoje.');
     v_txt := split_part(pg_temp.ver(null, 'hoje', date '2026-11-03'), E'\n', 1);
     v_res := pg_temp.igual(v_res, 'M2 agenda hoje (ter 03/11): a hora, o dia n de N e quem vai',
@@ -238,15 +240,18 @@ begin
 
     -- ── G. Os focos novos da agenda_ver ──
     perform pg_temp.agora(c_hoje, '17:40');
+    -- CORREÇÃO 29/10 (P1, 20261030100000): a reserva diz quem vai e "reservado" (acima da carga), e o 4º dia do Lenine, depois
+    -- do sábado, aparece como "(continua)" (agenda_correcao_2910_p1.sql C1)
     v_res := pg_temp.igual(v_res, 'G1 foco plano: o publicado dia a dia, com o feriado no meio',
       pg_temp.ver('plano', null, c_hoje),
       'De qui 29/10 a sáb 07/11, o que está publicado:' || E'\n'
       || 'Seg 02/11: Finados.' || E'\n'
       || 'Ter 03/11: 08:00 Vanderlei (OS-00069), dia 1 de 3: você abre, Roberto o dia todo; 13:00 Rodrigo (OS-00096): você.' || E'\n'
       || 'Qua 04/11: 08:00 Vanderlei (OS-00069), dia 2 de 3: Roberto o dia todo; 08:00 Lenine (OS-00074), dia 1 de 4: você abre, João; '
-      || '13:00 Reserva: Flávio (OS-00104): João.' || E'\n'
+      || '13:00 Flávio (OS-00104): João — reservado (acima da carga).' || E'\n'
       || 'Qui 05/11: 08:00 Vanderlei (OS-00069), dia 3 de 3: você fecha, Roberto o dia todo; 08:00 Lenine (OS-00074), dia 2 de 4: João.' || E'\n'
-      || 'Sex 06/11: 08:00 Lenine (OS-00074), dia 3 de 4: João; 08:00 Reserva: Flávio (OS-00104): Roberto.');
+      || 'Sex 06/11: 08:00 Lenine (OS-00074), dia 3 de 4: João; 08:00 Flávio (OS-00104): Roberto — reservado (acima da carga).' || E'\n'
+      || 'Seg 09/11 (continua): 08:00 Lenine (OS-00074), dia 4 de 4: você fecha, Roberto.');
     v_res := pg_temp.ok(v_res, 'G2 foco plano com o período dito (a semana que vem) começa na segunda',
       pg_temp.ver('plano', 'proxima_semana', c_hoje) like 'A semana que vem (seg 02/11 a sáb 07/11), o que está publicado:' || E'\n' || 'Seg 02/11: Finados.%',
       pg_temp.ver('plano', 'proxima_semana', c_hoje));

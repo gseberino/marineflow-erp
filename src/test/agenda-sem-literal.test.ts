@@ -48,6 +48,9 @@
 //     agenda_config (a hora da rodada, a janela, a trava, os mínimos, os percentis, os limites de troca, a capacidade do dono,
 //     o cliente, a revisão da carga, os gatilhos do planejador e as palavras da classe) ficam em 20261029100000, fora de
 //     função; o 1,5 que o fator aprendido substitui é o estouro_fator da Fase 1 (o padrão chega ao gravador como parâmetro).
+//   · (Correção de 29/10, P1) também as funções das migrations 2026103010* (as leituras do que o dono vê: o bloco inteiro, a
+//     reserva com quem vai e a semana que vem na *agenda*; e os pacotes seguintes da correção, pelo prefixo). Nenhum DEFAULT
+//     novo: o teto continua texto_max.
 // Os inteiros pequenos (0, 1, 2, 7: meios-dias por dia, dias da semana…) e os limites de tamanho de texto dos CHECKs
 // são estrutura e não entram na regra.
 import { describe, expect, it } from 'vitest';
@@ -245,7 +248,7 @@ export function corposDasFuncoes(sql: string, arquivo: string): Trecho[] {
 
 function funcoesDasMigrations(): Trecho[] {
   return fs.readdirSync(MIGRATIONS)
-    .filter((f) => /^(2026102416|2026102510|2026102610|2026102710|2026102810|2026102910)\d{4}_.+\.sql$/.test(f))
+    .filter((f) => /^(2026102416|2026102510|2026102610|2026102710|2026102810|2026102910|2026103010)\d{4}_.+\.sql$/.test(f))
     .sort()
     .flatMap((f) => corposDasFuncoes(fs.readFileSync(path.join(MIGRATIONS, f), 'utf8').replace(/\r\n/g, '\n'), f));
 }

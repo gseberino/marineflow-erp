@@ -158,6 +158,11 @@ const FIXTURES_COMO_TEXTO = [
   ['agenda_teste.mig_agrupar_os', '../../supabase/migrations/20261028120000_agrupar_os.sql'],
   // (e a do "Fechar juntas", 20261028190000: a mais nova de _os_impedimento_para_agrupar)
   ['agenda_teste.mig_fechar_juntas', '../../supabase/migrations/20261028190000_fechar_juntas_f0.sql'],
+  // Correção de 29/10 (P1): as fontes das 3 recriadas da 20261030100000 — as leituras da Fase 1 (_agenda_semana_de e
+  // agenda_semana, também rodadas como pg_temp: a régua do que não muda) e as da Fase 2 (_agenda_ver_plano) —, para o
+  // agenda_correcao_2910_p1.sql conferir que as cópias só acrescentam os blocos "-- CORREÇÃO 29/10 (P1):".
+  ['agenda_teste.mig_leituras_fase1', '../../supabase/migrations/20261024160500_agenda_fase1_leituras.sql'],
+  ['agenda_teste.mig_leituras_fase2', '../../supabase/migrations/20261025100500_agenda_fase2_leituras.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */
