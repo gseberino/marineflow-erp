@@ -2205,5 +2205,63 @@
       ],
       "texto": "Pagar comissão não é comigo."
     }
+  },
+  "L30": {
+    "boa": { "chamadas": [], "passos": [{ "palavra": "agenda" }], "texto": "{{saida:0}}" },
+    "ruim": {
+      "por_que": "a palavra errada (o dia de hoje): não mostra a semana que vem montada",
+      "reprova_em": "texto",
+      "chamadas": [],
+      "passos": [{ "palavra": "agenda hoje" }],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "L31": {
+    "boa": { "chamadas": [], "passos": [{ "palavra": "quais estão agendados?" }], "texto": "{{saida:0}}" },
+    "ruim": {
+      "por_que": "a semana em vez do plano: não diz quem vai na reserva nem o dia do bloco depois do sábado",
+      "reprova_em": "texto",
+      "chamadas": [],
+      "passos": [{ "palavra": "agenda" }],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "L32": {
+    "boa": { "chamadas": [], "passos": [{ "palavra": "como você pensou a semana que vem?" }], "texto": "{{saida:0}}" },
+    "ruim": {
+      "por_que": "o plano dia a dia em vez da semana que vem: não diz o porquê dos que ficaram de fora",
+      "reprova_em": "texto",
+      "chamadas": [],
+      "passos": [{ "palavra": "agenda plano" }],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "L33": {
+    "boa": { "chamadas": [], "passos": [{ "palavra": "quando tenho agenda livre?" }], "texto": "{{saida:0}}" },
+    "ruim": {
+      "por_que": "a semana em vez do livre (a semana que vem e a oferta no lugar da resposta)",
+      "reprova_em": "texto",
+      "chamadas": [],
+      "passos": [{ "palavra": "agenda" }],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "L34": {
+    "boa": { "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "foco": "livre" } }], "texto": "{{saida:0}}" },
+    "ruim": {
+      "por_que": "vaga não é o publicado: o plano em vez do livre",
+      "reprova_em": "ferramentas",
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "foco": "plano" } }],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "L35": {
+    "boa": { "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "foco": "plano", "periodo": "terça" } }], "texto": "{{saida:0}}" },
+    "ruim": {
+      "por_que": "o dia calculado pelo modelo (ISO) em vez do dia como o dono disse",
+      "reprova_em": "ferramentas",
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "foco": "plano", "periodo": "2026-11-03" } }],
+      "texto": "{{saida:0}}"
+    }
   }
 }

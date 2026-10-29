@@ -18,7 +18,8 @@
     "espera.fornecedor | vinculo (gradeNadaAoFornecedor, gradeVinculoSoComGrava; gradeNenhumaCompra não tem espera): o que o modelo chamou não muda nada; diff = EXATAMENTE as linhas que mudaram (sem ele, nenhuma): 'fila agenda-fornecedor status' e 'mensagem fornecedor terço n modo estado[/motivo]' (contadas); 'linha os descrição' (nota, fonte, situação, prev_fonte, vinculo_por), 'nota número' (vínculo, estado), 'cadastro nome' (modalidade, du, corridos, fonte). Em fase4 (sombra) a fila agenda-fornecedor fica vazia no fim. A compra: OC, linhas de OC, cotações, contas a pagar e pagamentos iguais do começo ao fim. Os cinco juízes da Fase 2 também valem.",
     "Ajustes à spec §8.5 pelo que o banco faz: N42 (\"a nota da Kamell é do Nelson\", itens tudo) lista o KIT, o Cerbo e o Orion — as linhas do fornecedor da nota OU sem fornecedor (§5.3 e §6.5; o P3 fez assim) — e nunca o painel da AliExpress (a §8.5 dizia só o Cerbo: decidido pela §5.3); C44 recusa com \"Me diga também como a Kamell entrega.\" (a de Vila Velha ainda não tem o prazo dito); C45 lê \"Mateus\" (o nome curto do cadastro \"Mateus Honório\"); D40 é sáb 31/10 (\"amanhã\" de sex 30/10); S40 e S41 têm na ruim o que só os juízes novos pegam (uma OC no banco; a pergunta ao fornecedor na fila em sombra).",
     "Fase 5 (P5): K50–K60 e S50–S54 em sex 30/10 17:30 (fixture-fase5.sql, por cima da fase4), estados fase5 (a mensagem ao cliente em sombra, nenhum tipo nas ondas) e fase5_ligado (ligado, os 11 tipos, a aprovação dos 3 primeiros dias), os dois depois da rodada do cliente das 17:00. Três juízes a mais: nada ao cliente sem o dono (a fila agenda-cliente), nenhuma mensagem livre pela agenda e nenhum prometido sem *grava*. K52 diverge da spec: a peça do Nelson não está na mão, e a ferramenta não prepara o \"material chegou\" (d09).",
-    "Fase 6 (P8): K70–K73 e S70–S72 em sex 30/10 17:30 (fixture-fase6.sql, por cima da fase5), estados fase6 (o aprendizado em teste, nenhum item na lista) e fase6_ligado (ligado, os 7 itens), os dois depois das rodadas do aprendizado de qui 29/10 e sex 30/10 às 16:05. Um juiz a mais (parametros): agenda_config e agenda_aprendizado iguais antes e depois do que o modelo chamou, e o diff do fim exatamente o esperado (espera.parametros.diff). Ajustes à spec §8.5 pelo que o banco faz: K72 diz R$ 1.097 (a fixture inteira; os R$ 690 da §8.2 são só as 7 OS de energia em motorhome: notas-fase6, P2); K73 desfaz o LOTE da rodada de sex 30/10 (as trocas que entraram sozinhas; P6), e o *desfaz aprendizado* é palavra direta (sem modelo)."
+    "Fase 6 (P8): K70–K73 e S70–S72 em sex 30/10 17:30 (fixture-fase6.sql, por cima da fase5), estados fase6 (o aprendizado em teste, nenhum item na lista) e fase6_ligado (ligado, os 7 itens), os dois depois das rodadas do aprendizado de qui 29/10 e sex 30/10 às 16:05. Um juiz a mais (parametros): agenda_config e agenda_aprendizado iguais antes e depois do que o modelo chamou, e o diff do fim exatamente o esperado (espera.parametros.diff). Ajustes à spec §8.5 pelo que o banco faz: K72 diz R$ 1.097 (a fixture inteira; os R$ 690 da §8.2 são só as 7 OS de energia em motorhome: notas-fase6, P2); K73 desfaz o LOTE da rodada de sex 30/10 (as trocas que entraram sozinhas; P6), e o *desfaz aprendizado* é palavra direta (sem modelo).",
+    "Correção de 29/10 (P1): L30–L35 em qui 29/10 17:40 (estado fase2: a semana de 03 a 06/11 publicada às 16:30). As palavras naturais do dono (L30–L33, sem modelo: a frase pelo caminho do ai-agent) e as variações que vão ao modelo (L34–L35, o roteiro do prompt): *agenda* de quinta mostra a semana que vem montada com o bloco inteiro e a oferta que diz que já tem plano; *quais estão agendados* é o plano dia a dia com quem vai na reserva e o dia do bloco depois do sábado; *como você pensou a semana que vem* é a semana que vem com os prontos e os de fora; *quando tenho agenda livre* é o livre (sem a oferta); \"quando tem vaga?\" e \"o que está agendado pra terça?\" o modelo leva ao foco livre e ao plano do dia dito."
   ],
   "hoje": "2026-10-23",
   "autor": "aa000000-0000-4000-8000-000000000001",
@@ -3286,6 +3287,116 @@
         "texto_contem": [
           "não é comigo"
         ]
+      }
+    },
+    {
+      "id": "L30",
+      "fase": 2,
+      "grupo": "leitura",
+      "sem_modelo": true,
+      "entrada": "agenda",
+      "estado": "fase2",
+      "agora": "2026-10-29 17:40",
+      "espera": {
+        "ferramentas": [],
+        "so_estas": true,
+        "texto_contem": ["A semana que vem (seg 02/11 a sáb 07/11): Vanderlei (ter 03 a qui 05/11)", "Lenine (qua 04 a seg 09/11)", "Flávio (reserva, qua 04 e sex 06/11)", "Para marcar mais na semana que vem"],
+        "texto_nao_contem": ["Esta semana (seg 26/10 a sáb 31/10) não tem nada marcado", "Quer que eu pergunte o que falta para montar a semana que vem?"],
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": { "rascunho_aberto": 0, "diff": [] },
+        "agenda": { "diff": [] }
+      }
+    },
+    {
+      "id": "L31",
+      "fase": 2,
+      "grupo": "leitura",
+      "sem_modelo": true,
+      "entrada": "quais estão agendados?",
+      "estado": "fase2",
+      "agora": "2026-10-29 17:40",
+      "espera": {
+        "ferramentas": [],
+        "so_estas": true,
+        "texto_contem": ["De qui 29/10 a sáb 07/11, o que está publicado:", "13:00 Flávio (OS-00104): João — reservado (acima da carga)", "Seg 09/11 (continua): 08:00 Lenine (OS-00074), dia 4 de 4"],
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": { "rascunho_aberto": 0, "diff": [] },
+        "agenda": { "diff": [] }
+      }
+    },
+    {
+      "id": "L32",
+      "fase": 2,
+      "grupo": "leitura",
+      "sem_modelo": true,
+      "entrada": "como você pensou a semana que vem?",
+      "estado": "fase2",
+      "agora": "2026-10-29 17:40",
+      "espera": {
+        "ferramentas": [],
+        "so_estas": true,
+        "texto_contem": ["A semana que vem (seg 02/11 a sáb 07/11):", "Lenine (qua 04 a seg 09/11)", "Prontos para começar:", "Para marcar mais na semana que vem"],
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": { "rascunho_aberto": 0, "diff": [] },
+        "agenda": { "diff": [] }
+      }
+    },
+    {
+      "id": "L33",
+      "fase": 2,
+      "grupo": "leitura",
+      "sem_modelo": true,
+      "entrada": "quando tenho agenda livre?",
+      "estado": "fase2",
+      "agora": "2026-10-29 17:40",
+      "espera": {
+        "ferramentas": [],
+        "so_estas": true,
+        "texto_contem": ["Livre ela não está"],
+        "texto_nao_contem": ["Para marcar mais", "A semana que vem (seg"],
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": { "rascunho_aberto": 0, "diff": [] },
+        "agenda": { "diff": [] }
+      }
+    },
+    {
+      "id": "L34",
+      "fase": 2,
+      "grupo": "leitura",
+      "entrada": "quando tem vaga?",
+      "estado": "fase2",
+      "agora": "2026-10-29 17:40",
+      "espera": {
+        "ferramentas": [{ "nome": "agenda_ver", "argumentos": { "foco": "livre", "periodo": null, "os": null } }],
+        "proibidas": ["agenda_propor", "schedule_service_order"],
+        "texto_contem": ["Livre ela não está"],
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": { "rascunho_aberto": 0, "diff": [] },
+        "agenda": { "diff": [] }
+      }
+    },
+    {
+      "id": "L35",
+      "fase": 2,
+      "grupo": "leitura",
+      "entrada": "o que está agendado pra terça?",
+      "estado": "fase2",
+      "agora": "2026-10-29 17:40",
+      "espera": {
+        "ferramentas": [{ "nome": "agenda_ver", "argumentos": { "foco": "plano", "periodo": { "um_de": ["terça", "terca", "pra terça"] } } }],
+        "proibidas": ["agenda_propor", "schedule_service_order"],
+        "texto_contem": ["Ter 03/11: 08:00 Vanderlei (OS-00069), dia 1 de 3: você abre, Roberto o dia todo"],
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": { "rascunho_aberto": 0, "diff": [] },
+        "agenda": { "diff": [] }
       }
     }
   ]

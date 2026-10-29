@@ -113,6 +113,8 @@ NAO_SAO_TOOLS.add("mesmo_que");
 NAO_SAO_TOOLS.add("nao_e_de_servico");
 // Agenda de Produção (27/10/2026, Fase 5, P5): argumento de os_planejar ("pro cliente, o serviço é a troca das baterias")
 NAO_SAO_TOOLS.add("servico_cliente");
+// Agenda de Produção (correção de 29/10, P1): valor do periodo de agenda_ver ("como você pensou a semana que vem?")
+NAO_SAO_TOOLS.add("proxima_semana");
 
 /** A conversa dos comprovantes ligada (F2): as linhas dos CMPs só entram no prompt assim. */
 const CONVERSA_LIGADA = { comprovante_fluxo: "dono", comprovante_conversa: "on" };
@@ -559,6 +561,35 @@ Deno.test("agenda de produção (Fase 6, P8): o foco aprendizado, os números do
   const desfaz = lerComandoDaAgenda("desfaz aprendizado");
   assertEquals(desfaz?.comando === "desfazer" ? desfaz.alvo : null, "aprendizado");
   // sem crase no texto ensinado (o prompt é um template literal)
+  assertEquals(secao.includes("`"), false);
+});
+
+// Correção de 29/10 (P1): as frases naturais do dono ("quais estão agendados?", "como você pensou a semana que vem?",
+// "quando tenho agenda livre?") caíam no modelo sem roteiro. As inequívocas viraram palavra (comandos.ts); as variações
+// (com o dia, com outra palavra, "quando tem vaga?") o prompt manda ao foco e ao período certos — na linha do publicado,
+// sem linha nova (o teto da seção continua 24).
+Deno.test("agenda de produção (correção 29/10, P1): as frases naturais vão ao foco plano, à semana que vem ou ao livre", () => {
+  const secao = secaoDaAgenda();
+  assertStringIncludes(secao, "\"Quais estão agendados?\", \"o que tem agendado?\", \"o que você marcou?\": foco plano sem periodo (de hoje ao sábado da semana que vem, com quem vai; com o dia dito, periodo = o dia como ele disse)");
+  assertStringIncludes(secao, "\"Como você pensou a semana que vem?\", \"como ficou a agenda da semana que vem?\": periodo proxima_semana sem foco (o plano e o porquê de quem ficou de fora)");
+  assertStringIncludes(secao, "\"Quando tenho agenda livre?\", \"quando estou livre?\", \"quando tem vaga?\": foco livre");
+  // o que o prompt ensina é o que a palavra lê (a mesma leitura pelo modelo e sem ele): o foco e o período existem
+  const agendaVer = porNome.get("agenda_ver")!;
+  const focos = (agendaVer.input_schema as { properties: Record<string, { enum?: string[] }> }).properties.foco.enum ?? [];
+  for (const f of ["plano", "livre"]) assertEquals(focos.includes(f), true, `${f} não é foco de agenda_ver`);
+  const comoPalavra = (t: string) => {
+    const c = lerComandoDaAgenda(t);
+    return c?.comando === "ver" ? `${c.foco}/${c.periodo}` : null;
+  };
+  assertEquals(comoPalavra("Quais estão agendados?"), "plano/null");
+  assertEquals(comoPalavra("o que tem agendado?"), "plano/null");
+  assertEquals(comoPalavra("o que você marcou?"), "plano/null");
+  assertEquals(comoPalavra("Como você pensou a semana que vem?"), "tudo/proxima_semana");
+  assertEquals(comoPalavra("como ficou a agenda da semana que vem?"), "tudo/proxima_semana");
+  assertEquals(comoPalavra("Quando tenho agenda livre?"), "livre/null");
+  assertEquals(comoPalavra("quando estou livre?"), "livre/null");
+  // "quando tem vaga?" sozinho não é palavra (vaga também é de marina): é o modelo que o leva ao foco livre
+  assertEquals(comoPalavra("quando tem vaga?"), null);
   assertEquals(secao.includes("`"), false);
 });
 

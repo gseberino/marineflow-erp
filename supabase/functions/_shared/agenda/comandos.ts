@@ -85,6 +85,18 @@
 //   "aprendizado" não é nome de cliente, pessoa, bem nem fornecedor (0 de 559 clientes em 28/10/2026) nem palavra de outra
 //   ferramenta (comandos_test.ts).
 //
+// Correção de 29/10 (P1) — as frases naturais do dono que caíam no modelo sem roteiro (todas de VER, valem com "?"):
+//   quando tenho agenda livre · quando eu tenho agenda livre · tenho agenda livre · eu tenho agenda livre
+//   quando estou livre · quando eu estou livre · tem vaga na agenda · quando tem vaga na agenda      → livre (como *livre*)
+//   quais estao agendados/agendadas · o que esta/ta agendado · o que tem agendado · o que voce marcou
+//                                                       → foco plano (como *agenda plano*: de hoje ao sábado da semana que
+//                                                         vem, dia a dia, com quem vai; só com a agenda automática)
+//   como voce pensou a semana que vem · como ficou a semana que vem · como ficou a agenda da semana que vem
+//                                                       → a semana que vem (como *agenda semana que vem*: o plano com quem
+//                                                         vai e, dos de fora, prontos, quase, travados, esperando você e
+//                                                         parados no cliente)
+//   "quando tem vaga" sozinho NÃO é palavra (vaga também é de marina): vai ao modelo, que o prompt manda ao foco livre.
+//
 // Só a frase inteira vale (normalizada pelo MESMO normalizarComando do secretário: sem acento, sem negrito, sem
 // pontuação no fim, sem o 🎤 do áudio). Qualquer palavra a mais é conversa e vai ao modelo como sempre.
 // (Revisão da Fase 3, C1) A palavra que AGE (concluiu, entreguei, diária, desfaz, dia feito/não/parcial, choveu) dita com
@@ -194,6 +206,22 @@ frases(["agenda fornecedores"], ver(null, "fornecedores"));
 frases(["agenda clientes"], ver(null, "clientes"));
 // Fase 6 (P8): o que a agenda aprendeu (o *desfaz aprendizado* já é o *desfaz <alvo>* da Fase 2: o banco resolve o alvo)
 frases(["agenda aprendizado"], ver(null, "aprendizado"));
+// Correção de 29/10 (P1): as frases naturais do dono (a mesma leitura da palavra curta; "quando tem vaga" sozinho é conversa)
+frases(
+  [
+    "quando tenho agenda livre", "quando eu tenho agenda livre", "tenho agenda livre", "eu tenho agenda livre",
+    "quando estou livre", "quando eu estou livre", "tem vaga na agenda", "quando tem vaga na agenda",
+  ],
+  ver(null, "livre"),
+);
+frases(
+  ["quais estao agendados", "quais estao agendadas", "o que esta agendado", "o que ta agendado", "o que tem agendado", "o que voce marcou"],
+  ver(null, "plano"),
+);
+frases(
+  ["como voce pensou a semana que vem", "como ficou a semana que vem", "como ficou a agenda da semana que vem"],
+  ver("proxima_semana"),
+);
 
 /** A maior frase da tabela: texto maior do que isto nunca é comando da tabela (custo zero na conversa comum). */
 const MAIOR = Math.max(...[...FRASES.keys()].map((f) => f.length));

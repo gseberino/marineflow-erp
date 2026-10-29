@@ -986,3 +986,102 @@ Deno.test("Fase 6 (correção C2) — o *desfaz aprendizado <coisa>* não é do 
     assertEquals(trava.travar, false, `trava do CMP: ${t}`);
   }
 });
+
+// ─── Correção de 29/10 (P1): as frases naturais do dono que caíam no modelo sem roteiro ────────────────────────────
+// "quando tenho agenda livre", "quais estão agendados", "como você pensou a semana que vem"… viram a mesma leitura da
+// palavra curta (todas de VER: valem com "?"). "quando tem vaga" sozinho é conversa (vaga também é de marina): o prompt
+// manda o modelo ao foco livre.
+
+const TABELA_P1_2910: Array<[string, ComandoDaAgenda]> = [
+  ["Quando tenho agenda livre?", livre],
+  ["quando eu tenho agenda livre", livre],
+  ["Tenho agenda livre?", livre],
+  ["eu tenho agenda livre?", livre],
+  ["Quando estou livre?", livre],
+  ["quando eu estou livre", livre],
+  ["🎤 Quando estou livre.", livre],
+  ["Tem vaga na agenda?", livre],
+  ["quando tem vaga na agenda?", livre],
+  ["Quais estão agendados?", plano],
+  ["quais estão agendadas", plano],
+  ["O que está agendado?", plano],
+  ["o que tá agendado?", plano],
+  ["o que tem agendado", plano],
+  ["O que você marcou?", plano],
+  ["*o que você marcou*", plano],
+  ["Como você pensou a semana que vem?", proxima],
+  ["como ficou a semana que vem?", proxima],
+  ["Como ficou a agenda da semana que vem?", proxima],
+  ["🎤 Como você pensou a semana que vem.", proxima],
+];
+
+Deno.test("Correção 29/10 (P1) — as frases naturais viram a leitura da palavra curta (livre, plano, a semana que vem)", () => {
+  for (const [texto, esperado] of TABELA_P1_2910) assertEquals(lerComandoDaAgenda(texto), esperado, texto);
+  for (const f of [
+    "quando tenho agenda livre", "tem vaga na agenda", "quais estao agendados", "o que esta agendado", "o que voce marcou",
+    "como voce pensou a semana que vem", "como ficou a agenda da semana que vem",
+  ]) {
+    assert(frasesDaAgenda().includes(f), `fora da tabela: ${f}`);
+  }
+});
+
+// Com uma palavra a mais, com outro alvo ou sem dizer de agenda: conversa (vai ao modelo, que tem o roteiro no prompt).
+const CONVERSA_P1_2910 = [
+  "quando tem vaga", "quando tem vaga?", "tem vaga", "tem vaga?", "tem vaga na marina?", "quando tem vaga na marina",
+  "quando tem vaga pro Lenine?", "o que está agendado pra amanhã?", "o que está agendado pra terça", "o que você marcou pro Lenine?",
+  "o que você marcou ontem?", "quais estão agendados amanhã?", "quais estão agendados pro Roberto", "o que tem agendado com o Nelson",
+  "quando o Roberto está livre?", "quando o Roberto fica livre", "como ficou a semana", "como ficou a semana?", "como você pensou a semana",
+  "como ficou a semana que vem do Lenine", "como ficou a semana passada", "agenda livre", "você marcou?", "marcou?", "agendados",
+  "agendado", "o que", "quais", "tenho agenda", "eu tenho", "estou livre", "como ficou",
+];
+
+Deno.test("Correção 29/10 (P1) — com palavra a mais, outro alvo ou sem a agenda, é conversa (vai ao modelo)", () => {
+  for (const t of CONVERSA_P1_2910) assertEquals(lerComandoDaAgenda(t), null, t);
+});
+
+Deno.test("Correção 29/10 (P1) — as frases novas não são do secretário, da confirmação, do menu, do PDF, dos comprovantes nem da pergunta ativa", () => {
+  const formas = TABELA_P1_2910.map(([t]) => t);
+  for (const t of [...formas, ...formas.map((x) => `*${x.replace(/^\*|\*$/g, "")}*`), ...formas.map((x) => `${x}.`)]) {
+    assertEquals(lerComandoDoSecretario(t), null, `secretário: ${t}`);
+    assertEquals(parseConfirmationReply(t), null, `confirmação: ${t}`);
+    assertEquals(parseOptionReply(t, 9), null, `opção: ${t}`);
+    assertEquals(lerPedidoDePdf(t), null, `pdf: ${t}`);
+    assertEquals(lerComando(t), null, `comprovantes: ${t}`);
+    const n = normalizarResposta(t.replace(/[*_~]/g, ""));
+    assertEquals(lerSimNao(n), null, `sim/não: ${t}`);
+    assertEquals(lerNumero(n, 99), null, `número: ${t}`);
+    assertEquals(pareceRespostaCurta(t), false, `resposta curta: ${t}`);
+    const trava = travaDaConfirmacao(estadoComCmpNoConfirmar(), t, { pending_confirm_action_id: "pend-1" });
+    assertEquals(trava.travar, false, `trava do CMP: ${t}`);
+  }
+  // nenhuma age (todas de ver: a pergunta vale), e "sim", "ok" e "1" continuam da confirmação
+  for (const [t] of TABELA_P1_2910) assertEquals(lerComandoDaAgenda(t)?.comando, "ver", t);
+  for (const t of ["sim", "ok", "1", "não", "2"]) assertEquals(lerComandoDaAgenda(t), null, t);
+  // as palavras de antes continuam lidas como eram
+  assertEquals(lerComandoDaAgenda("agenda"), semana);
+  assertEquals(lerComandoDaAgenda("livre"), livre);
+  assertEquals(lerComandoDaAgenda("agenda plano"), plano);
+  assertEquals(lerComandoDaAgenda("agenda semana que vem"), proxima);
+  assertEquals(lerComandoDaAgenda("como foi a semana"), verP6("ppc"));
+});
+
+Deno.test("Correção 29/10 (P1) — webhook: as frases de livre e da semana que vem vão ao assistente com a leitura ligada; as do plano, com a agenda automática", async () => {
+  for (const modo of ["sombra", "ligado"]) {
+    for (const t of ["Quando tenho agenda livre?", "tem vaga na agenda", "Como você pensou a semana que vem?"]) {
+      assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(modo), t), true, `${modo}: ${t}`);
+      const { d, c } = depsDoWebhook(modo);
+      assertEquals(await rotearTextoDoDono(TEXTO(t), d), "assistente", `${modo}: ${t}`);
+      assertEquals(c.chamar.length, 0, t);
+    }
+    // o plano é palavra da agenda automática (como *agenda plano*): com ela desligada, vai ao modelo
+    for (const t of ["Quais estão agendados?", "o que você marcou"]) {
+      assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(modo, "ligado"), t), true, `${modo}: ${t}`);
+      assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(modo, "desligado"), t), false, `${modo} sem a automática: ${t}`);
+    }
+  }
+  for (const modo of ["desligado", "erro", "sem_tabela"]) {
+    for (const t of ["quando estou livre", "quais estão agendados", "como ficou a semana que vem"]) {
+      assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(modo, "ligado"), t), false, `${modo}: ${t}`);
+    }
+  }
+});
