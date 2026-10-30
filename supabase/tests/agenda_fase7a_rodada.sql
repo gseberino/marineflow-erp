@@ -223,11 +223,13 @@ begin
     r := public.agenda_gestor_rodar(c_d29, pg_temp.em(c_d29, '16:52'));
     select x.contagens into v_l from public.agenda_vigia_rodadas x
      where x.rotina = 'gestor' and x.p_agora = pg_temp.em(c_d29, '16:52');
-    v_res := pg_temp.ok(v_res, 'R1d o 1º tique de dia útil a partir das 16:45 roda os diários: perguntas (em teste: pulado), equipe e sombra rodam; compre_ate, revisao, fichas, orcamentos e sabado ainda não existem; a rodada grava "diaria"',
+    -- (7a P11: o passo fichas existe e, sem o ligar do gestor — marcar_sozinho_desde nulo em teste —, pula)
+    v_res := pg_temp.ok(v_res, 'R1d o 1º tique de dia útil a partir das 16:45 roda os diários: perguntas (em teste: pulado), equipe e sombra rodam; fichas (7a P11) pula sem o ligar do gestor; compre_ate, revisao, orcamentos e sabado ainda não existem; a rodada grava "diaria"',
       (r ->> 'diaria')::boolean and v_l ? 'diaria' and v_l -> 'sombra' ? 'md5' and (v_l -> 'equipe' ->> 'criada')::boolean
       and v_l #>> '{perguntas,pulado}' = 'true'
+      and v_l #>> '{fichas,pulado}' = 'true' and v_l #>> '{fichas,motivo}' like 'o gestor ainda não marca sozinho%'
       and (select bool_and(v_l #>> array[p, 'motivo'] = 'ainda não existe')
-             from unnest(array['compre_ate', 'revisao', 'fichas', 'orcamentos', 'sabado']) p)
+             from unnest(array['compre_ate', 'revisao', 'orcamentos', 'sabado']) p)
       and (v_l ->> 'erros') is null and v_l -> 'modos' ->> 'marcar' = 'sombra' and (v_l ->> 'acoes')::int = 0
       and (v_l ->> 'mudou')::boolean = false,
       left(v_l::text, 800));

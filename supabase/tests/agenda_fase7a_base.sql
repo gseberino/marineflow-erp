@@ -614,12 +614,15 @@ begin
   -- quando o modo dela está ligado).
   update public.agenda_config set modo_marcar_sozinho = 'ligado', modo_revisao_diaria = 'sombra', modo_compre_ate = 'desligado',
          modo_proposta = 'sombra' where id;
-  v_res := pg_temp.ok(v_res, 'B4h o modo de quem faz os 13 tipos novos: dia_avisado e dia_prometido = o da proposta; reavaliar e reestimar = o da revisão; compre_ate = o da cobrança; os outros 8 = o do gestor que marca',
+  -- FASE 7 (7a P11, 20261031100850): a ficha_estimativa passou a ser das mensagens à equipe (modo_equipe), não do gestor que
+  -- marca: a proteção da ficha vale também com *gestor, só propor*
+  v_res := pg_temp.ok(v_res, 'B4h o modo de quem faz os 13 tipos novos: dia_avisado e dia_prometido = o da proposta; reavaliar e reestimar = o da revisão; compre_ate = o da cobrança; ficha_estimativa = o das mensagens à equipe (7a P11); os outros 7 = o do gestor que marca',
     (select string_agg(t || '=' || public._agenda_modo_da_pergunta(t, t || ':x'), ',' order by t)
        from unnest(array['situacao', 'estimativa', 'equipe_cadastro', 'reavaliar', 'reestimar', 'ficha_estimativa', 'bem_livre',
                          'compre_ate', 'sinal', 'onda', 'dia_avisado', 'dia_prometido', 'sabado']) t)
     = 'bem_livre=ligado,compre_ate=desligado,dia_avisado=sombra,dia_prometido=sombra,equipe_cadastro=ligado,estimativa=ligado,'
-      'ficha_estimativa=ligado,onda=ligado,reavaliar=sombra,reestimar=sombra,sabado=ligado,sinal=ligado,situacao=ligado'
+      'ficha_estimativa=' || (select k.modo_equipe from public.agenda_config k where k.id)
+      || ',onda=ligado,reavaliar=sombra,reestimar=sombra,sabado=ligado,sinal=ligado,situacao=ligado'
     and public._agenda_modo_da_pergunta('nao_cabe', 'x') = 'sombra' and public._agenda_modo_da_pergunta('outro', 'x') is null,
     (select string_agg(t || '=' || coalesce(public._agenda_modo_da_pergunta(t, t || ':x'), '-'), ',' order by t)
        from unnest(array['situacao', 'estimativa', 'equipe_cadastro', 'reavaliar', 'reestimar', 'ficha_estimativa', 'bem_livre',
@@ -916,8 +919,9 @@ begin
                                  l ~ '-- FASE 7: fim' as fecha
                             from unnest(string_to_array(v_novo, E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n') into v_sem;
-  insert into _resultado values ('B8d _agenda_modo_da_pergunta: sem o bloco "-- FASE 7:", é o corpo de 20261030100500 (a mais nova antes da 7a); só o service_role executa, como antes',
-    v_n = 1 and v_fonte <> '' and v_sem = v_fonte
+  -- (o bloco do 7a P1 e, desde a 20261031100850, o do 7a P11, que a recria copiando desta: 2 blocos; sem eles, a de 30/10)
+  insert into _resultado values ('B8d _agenda_modo_da_pergunta: sem os blocos "-- FASE 7:" (o do 7a P1 e o do 7a P11), é o corpo de 20261030100500 (a mais nova antes da 7a); só o service_role executa, como antes',
+    v_n = 2 and v_fonte <> '' and v_sem = v_fonte
     and not has_function_privilege('anon', 'public._agenda_modo_da_pergunta(text, text)', 'execute')
     and not has_function_privilege('authenticated', 'public._agenda_modo_da_pergunta(text, text)', 'execute')
     and has_function_privilege('service_role', 'public._agenda_modo_da_pergunta(text, text)', 'execute'),

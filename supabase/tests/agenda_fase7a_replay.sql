@@ -2,7 +2,7 @@
 -- (*gestor, só propor*), do pacote P7 (migration 20261031100600). O P8 acrescenta o C (o prazo vence e o encaixe marca), o P10 o
 -- E (compre até) e o P11 o F (cliente). O replay (fixture-replay-2910.sql) com a presença do dono de produção no Lenine e no
 -- Vanderlei (abre e fecha: o replay sozinho dá "sempre", notas do P2).
--- bancada: depende de 20261031100800
+-- bancada: depende de 20261031100850
 --
 --   A  tudo em sombra (o estado depois da migration de dado): (1) a prontidão das 11, os meios, a classe e o motor (a semana e as
 --      11) saem iguais aos de desligado (md5) — o portão é falso fora da simulação; os testes do P2, P3 e P5 provam desligado = as
@@ -27,6 +27,11 @@
 --      o 2º atraso já é do dono (a pergunta crítica segundo_atraso da Fase 2): nada automático, a cobrança fecha e o empurrão não
 --      conta. (A spec dizia o 1º empurrão em qua 04/11 e a reserva no 3º vencimento, com 4 e 2 dias úteis; o limite de 2
 --      empurrões automáticos está no C2d de agenda_fase7a_compras.sql.)
+--   F  (P11) B + a rodada do cliente de qui 29/10 17:05 (modo_cliente ligado, como produção), com o tipo confirmar já liberado
+--      pela Fase 5 (3 dias aprovados de outro cliente): a confirmação do Lenine (o D-3 de ter 03/11 já passou: sai na rodada, a
+--      variante primeira) fica pedida — por estimativa, sem compra pendente —, com base.dados.por_estimativa e a pergunta ao dono
+--      "… o dia é pela minha estimativa …"; o Vanderlei, com compra pendente, não recebe M1 (o material incompleto: a regra da
+--      Fase 5; a semana prevista é do 7f); o zero cliente_estimativa_sem_aprovacao da saúde fica 0
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -278,6 +283,39 @@ begin
     v_res := pg_temp.ok(v_res, 'E4 qua 04/11 sem a compra: o 2º atraso é do dono (a pergunta crítica segundo_atraso da Fase 2, aberta) — nada automático, o Vanderlei fica sem compromisso, a cobrança fecha e o empurrão do dono não conta (continua 1)',
       v_e ->> 'e4_critica' = 'segundo_atraso:aberta' and not (v_e ->> 'e4_compromisso')::boolean
       and (v_e ->> 'e4_abertas')::int = 0 and v_e ->> 'e4_vezes' = '1', v_e::text);
+
+    -- ── F. O cliente (P11): a confirmação por estimativa pede o sim do dono; com compra pendente, nenhum M1 ──
+    begin
+      -- o tipo confirmar já liberado pela Fase 5: 3 dias aprovados de outro cliente (a Kalmar), sem estimativa
+      insert into public.agenda_cliente_mensagens (client_id, service_order_id, tipo, origem, modo, texto, enviar_em, valida_ate,
+                                                   aprovacao, aprovada_em, estado, dedupe_key, enviada_em)
+      select so.client_id, so.id, 'confirmar', 'rodada', 'ligado', 'mensagem de teste (F)', pg_temp.em(date '2026-09-01' + k, '10:00'),
+             pg_temp.em(date '2026-09-01' + k, '11:00'), 'aprovada', pg_temp.em(date '2026-09-01' + k, '10:00'), 'enviada',
+             'agenda-cliente:replay-f:' || k, pg_temp.em(date '2026-09-01' + k, '10:00')
+        from generate_series(0, 2) k, public.service_orders so where so.service_order_number = 'OS-00032';
+      r := public.agenda_cliente_vigiar(c_d29, pg_temp.em(c_d29, '17:05'));
+      v_e := jsonb_build_object(
+        'liberado', public._agenda_cliente_tipo_liberado('confirmar'),
+        'lenine', (select jsonb_agg(jsonb_build_object('tipo', m.tipo, 'variante', m.variante, 'aprovacao', m.aprovacao, 'estado', m.estado,
+                                                       'dia', m.dia_alvo, 'est', m.base -> 'dados' ->> 'por_estimativa', 'pergunta', q.texto))
+                     from public.agenda_cliente_mensagens m left join public.agenda_perguntas q on q.id = m.pergunta_id
+                    where m.service_order_id = v_len),
+        'vanderlei', (select count(*) from public.agenda_cliente_mensagens m where m.service_order_id = v_van),
+        'compra', public._agenda_os_compra_pendente(v_van, c_d29) and not public._agenda_os_compra_pendente(v_len, c_d29),
+        'estimativa', public._agenda_os_por_estimativa(v_len, c_d29) and public._agenda_os_por_estimativa(v_van, c_d29),
+        'saude', public.agenda_saude(c_d29, pg_temp.em(c_d29, '17:20')) -> 'gestor' ->> 'cliente_estimativa_sem_aprovacao');
+      raise exception 'desfaz F' using errcode = 'P0098';
+    exception when sqlstate 'P0098' then null;
+    end;
+    v_res := pg_temp.ok(v_res, 'F1 qui 29/10 17:05, o tipo confirmar já liberado pela Fase 5: a confirmação do Lenine (variante primeira, ter 03/11) fica pedida, esperando o dono — marcado pela estimativa, sem compra pendente —, com base.dados.por_estimativa e a pergunta "Mensagem para Lenine (confirmação; o dia é pela minha estimativa), sai amanhã às 09:00: …"',
+      (v_e ->> 'liberado')::boolean and (v_e ->> 'estimativa')::boolean and jsonb_array_length(v_e -> 'lenine') = 1
+      and v_e -> 'lenine' -> 0 ->> 'tipo' = 'confirmar' and v_e -> 'lenine' -> 0 ->> 'variante' = 'primeira'
+      and v_e -> 'lenine' -> 0 ->> 'aprovacao' = 'pedida' and v_e -> 'lenine' -> 0 ->> 'estado' = 'aguardando_dono'
+      and v_e -> 'lenine' -> 0 ->> 'dia' = '2026-11-03' and v_e -> 'lenine' -> 0 ->> 'est' = 'true'
+      and v_e -> 'lenine' -> 0 ->> 'pergunta' like 'Mensagem para Lenine (confirmação; o dia é pela minha estimativa), sai amanhã às 09:00: "%',
+      v_e::text);
+    v_res := pg_temp.ok(v_res, 'F2 o Vanderlei, com compra pendente (3 itens críticos em falta), não recebe M1 nem véspera (o material incompleto: a regra da Fase 5; a semana prevista é do 7f); o zero cliente_estimativa_sem_aprovacao da saúde fica 0',
+      (v_e ->> 'compra')::boolean and (v_e ->> 'vanderlei')::int = 0 and (v_e ->> 'saude')::int = 0, v_e::text);
 
     -- ── D. *gestor, só propor* ──
     v_pub := (select md5(string_agg(a.id::text || a.estado, ',' order by a.id)) from public.agenda_alocacoes a);
