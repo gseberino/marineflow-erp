@@ -951,7 +951,12 @@ insert into _definer_da_agenda values
   -- FASE 7 (7a P2, 20261031100100): a palavra *<nome> com dupla* / *sem dupla* (escreve os_planejamento.dupla_* e a ação dupla;
   -- confere o administrador dentro; só service_role). O nome do serviço, a peça embutida, a situação e a estimativa são
   -- invoker. agenda_fase7a_duracao.sql prova as portas.
-  ('agenda_dupla_dita');
+  ('agenda_dupla_dita'),
+  -- FASE 7 (7a P4, 20261031100300): o gravador da pergunta do gestor, o dos dias (escreve os_planejamento.dias com a fonte
+  -- orcamento e a ação estimar) e o despacho das perguntas do gestor (agenda_decidir e o prazo vencido o chamam). Os três sem
+  -- grant a ninguém, nem service_role. O prazo, a pergunta da OS, o prazo vencido e a chamada da equipe são invoker.
+  -- agenda_fase7a_perguntas.sql prova as portas.
+  ('_agenda_gestor_perguntar'), ('_agenda_gestor_gravar_dias'), ('_agenda_gestor_decidir');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

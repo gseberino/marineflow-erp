@@ -112,11 +112,13 @@ begin
     -- recriadas de novo em 20261029100600, só com blocos da Fase 6 fora dos da Fase 5)
     -- CORREÇÃO 29/10 (P3): e os blocos "-- CORREÇÃO 29/10 (P3): … fim" (_agenda_vigia_limpeza foi recriada de novo em
     -- 20261030100200, com o bloco da pergunta de teste fora dos da Fase 4; o agenda_correcao_2910_p3.sql confere a cópia)
-    if not v_bloco and l ~ '^\s*-- (FASE [56]|CORREÇÃO 29/10 \(P3\)):' and l !~ '^\s*-- (FASE [56]|CORREÇÃO 29/10 \(P3\)): fim' then
+    -- FASE 7 (7a P4): e os blocos "-- FASE 7: … fim" (_agenda_vigia_limpeza foi recriada de novo em 20261031100300, com o bloco
+    -- da pergunta do gestor fora dos da Fase 4; o Q7b de agenda_fase7a_perguntas.sql confere a cópia)
+    if not v_bloco and l ~ '^\s*-- (FASE [567]|CORREÇÃO 29/10 \(P3\)):' and l !~ '^\s*-- (FASE [567]|CORREÇÃO 29/10 \(P3\)): fim' then
       v_bloco := true; continue;
     end if;
     if v_bloco then
-      if l ~ '^\s*-- (FASE [56]|CORREÇÃO 29/10 \(P3\)): fim' then v_bloco := false; end if;
+      if l ~ '^\s*-- (FASE [567]|CORREÇÃO 29/10 \(P3\)): fim' then v_bloco := false; end if;
       continue;
     end if;
     -- CORREÇÃO 29/10 (revisão): os blocos da revisão do lote (20261030100500) também saem, e a linha que um deles

@@ -142,9 +142,11 @@ begin
       continue;
     end if;
     -- CORREÇÃO FASE 6: fim
-    if not v_bloco and l ~ '^\s*-- FASE 6:' and l !~ '^\s*-- FASE 6: fim' then v_bloco := true; continue; end if;
+    -- FASE 7 (7a P4): também os blocos "-- FASE 7: … fim" (agenda_decidir foi recriada de novo em 20261031100300, com o despacho
+    -- das perguntas do gestor fora dos da Fase 6; o Q7a de agenda_fase7a_perguntas.sql confere a cópia)
+    if not v_bloco and l ~ '^\s*-- FASE [67]:' and l !~ '^\s*-- FASE [67]: fim' then v_bloco := true; continue; end if;
     if v_bloco then
-      if l ~ '^\s*-- FASE 6: fim' then v_bloco := false; end if;
+      if l ~ '^\s*-- FASE [67]: fim' then v_bloco := false; end if;
       continue;
     end if;
     v_b := v_b || l;
