@@ -101,9 +101,10 @@ begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
     -- CORREÇÃO FASE 6: (C1) os blocos "-- CORREÇÃO FASE 6: … -- CORREÇÃO FASE 6: fim" também saem (a correção C1 da Fase 6
     -- recria a função copiando a definição mais nova: só acréscimo); o fim é lido pelo prefixo
-    if not v_c6 and l ~ '^\s*-- CORREÇÃO FASE 6:' and l !~ '^\s*-- CORREÇÃO FASE 6: fim' then v_c6 := true; continue; end if;
+    -- CORREÇÃO 29/10 (P5): e os blocos "-- CORREÇÃO 29/10 (P5): … fim" (os_prontidao recriada de novo em 20261030100400)
+    if not v_c6 and l ~ '^\s*-- CORREÇÃO (FASE 6|29/10 \(P5\)):' and l !~ '^\s*-- CORREÇÃO (FASE 6|29/10 \(P5\)): fim' then v_c6 := true; continue; end if;
     if v_c6 then
-      if l ~ '^\s*-- CORREÇÃO FASE 6: fim' then v_c6 := false; end if;
+      if l ~ '^\s*-- CORREÇÃO (FASE 6|29/10 \(P5\)): fim' then v_c6 := false; end if;
       continue;
     end if;
     -- CORREÇÃO FASE 6: fim

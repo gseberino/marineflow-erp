@@ -105,8 +105,10 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
   {
     onde: 'agenda_vigiar',
     casou: '1000',
-    vezes: 1,
-    porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas); não é texto_max nem peca_embutida_acima',
+    // Correção de 29/10 (P5, 20261030100400): agenda_vigiar recriada (+1: a mesma duração da rodada; +1: o tempo de cada
+    // passo, contagens.ms, também em ms).
+    vezes: 3,
+    porque: 'segundos → milissegundos (a duração da rodada e o tempo de cada passo em agenda_vigia_rodadas); não é texto_max nem peca_embutida_acima',
   },
   {
     onde: 'agenda_saude',
