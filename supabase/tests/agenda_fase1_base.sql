@@ -460,8 +460,26 @@ begin
                            'classe_sistemas']) n
        union all
        select unnest(array['dias_no_inicio_coerente', 'os_planejamento_dias_no_inicio_check',
-                           'os_planejamento_dias_no_inicio_fonte_check']))));
+                           'os_planejamento_dias_no_inicio_fonte_check']))))
      -- FASE 6: fim
+     -- FASE 7: os 34 que a Fase 7a pôs em agenda_config, os 4 de os_planejamento e os 4 de os_material (20261031100000) têm o
+     -- caso deles em agenda_fase7a_base.sql (o B1z cobra os 56 da migration pelo nome).
+     and not (c.conname = any (array(
+       select 'agenda_config_' || n || '_check'
+         from unnest(array['modo_marcar_sozinho', 'modo_vaga_fechamento', 'modo_encaixe_aprovacao', 'modo_revisao_diaria',
+                           'modo_compre_ate', 'marcar_regras', 'fechamento_vagas_agenda', 'estimativa_max_diarias', 'mo_fora_regex',
+                           'dupla_gatilhos', 'dupla_notas', 'diagnostico_dias', 'sem_mo_dias', 'equipe_padrao', 'situacao_dias',
+                           'quanto_falta_dias', 'veto_du', 'veto_hora', 'ficha_veto_dias', 'critico_valor_min',
+                           'prazo_sem_fornecedor_du', 'compra_interna_du', 'compra_urgente_du', 'gestor_hora_revisao',
+                           'gestor_tempo_max', 'aprovada_sem_data_min', 'gestor_k_os', 'gestor_k_dias_avisados',
+                           'compre_ate_empurroes_max', 'compras_aviso_du', 'sabado_manha', 'simular_orcamento_acima',
+                           'simular_orcamento_dias', 'revisao_depois_do_plano']) n
+       union all
+       select unnest(array['os_planejamento_dupla_dita_check', 'os_planejamento_dupla_meios_check',
+                           'os_planejamento_dupla_motivo_check', 'dupla_meios_coerente', 'compre_ate_coerente',
+                           'os_material_compre_ate_base_check', 'os_material_cobrado_vezes_check',
+                           'os_material_empurrada_vezes_check']))));
+     -- FASE 7: fim
   insert into _resultado values ('B todo CHECK das 6 tabelas tem um caso que ele recusa', v_sem_caso is null, v_sem_caso);
 end
 $b$;
@@ -925,7 +943,11 @@ insert into _definer_da_agenda values
   -- CORREÇÃO 29/10 (P4, 20261030100300): o aviso do gestor ao dono — as 3 RPCs (só o service_role: as peças leem as do motor
   -- e o painel, o enfileirar e o conferir escrevem o aviso, a fila e o contado) e a 2ª trava da fila (o gatilho lê o aviso e o
   -- dono). As peças de dentro são invoker. agenda_correcao_2910_p4.sql prova as portas.
-  ('agenda_aviso_pecas'), ('agenda_aviso_enfileirar'), ('agenda_aviso_conferir'), ('_agenda_fila_do_dono');
+  ('agenda_aviso_pecas'), ('agenda_aviso_enfileirar'), ('agenda_aviso_conferir'), ('_agenda_fila_do_dono'),
+  -- FASE 7 (7a P1, 20261031100000): o gravador único do diário do gestor (escreve agenda_gestor_dia, que é só leitura para
+  -- authenticated; sem grant a ninguém, nem service_role: só os passos do gestor o chamam). O portão, o modo, o dia avisado, os
+  -- validadores e o ampliador são invoker. agenda_fase7a_base.sql prova as portas.
+  ('_agenda_gestor_dia_gravar');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

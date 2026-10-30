@@ -166,6 +166,17 @@ declare
   l text;
 begin
   foreach l in array string_to_array(replace(p, E'\r\n', E'\n'), E'\n') loop
+    -- FASE 7: os blocos "-- FASE 7:" de uma recriação depois do lote (a 20261031100000 recria _agenda_modo_da_pergunta) também
+    -- saem: a cópia continua conferida contra a fonte do lote.
+    if not v_dentro and l ~ '^\s*-- FASE 7:' and l !~ '^\s*-- FASE 7: fim' then
+      v_dentro := true;
+      continue;
+    end if;
+    if v_dentro and l ~ '^\s*-- FASE 7: fim' then
+      v_dentro := false;
+      continue;
+    end if;
+    -- FASE 7: fim
     if not v_dentro and l ~ '^\s*-- CORREÇÃO 29/10 \(revisão\):' and l !~ '^\s*-- CORREÇÃO 29/10 \(revisão\): fim' then
       v_dentro := true;
       continue;
@@ -685,9 +696,11 @@ select 'C2 os CHECKs recusam o início antes de 16:00, o fim depois de 20:00 e o
        and pg_temp.erro_de('update public.agenda_config set gestor_aviso_pausa_inicio = ''16:00'', gestor_aviso_pausa_fim = ''20:00'' where id') = 'ok',
        null;
 insert into _resultado
-select 'C3 a lista fechada dos tipos de pergunta: as 26 de antes e equipe_sem_dias (27); "outro" é recusado',
+select 'C3 a lista fechada dos tipos de pergunta: as 26 de antes e equipe_sem_dias (27; 40 com os 13 do gestor da Fase 7a); "outro" é recusado',
        (select count(*) from (select unnest(regexp_matches(pg_get_constraintdef(c.oid), '''([a-z_]+)''', 'g'))
-                                from pg_constraint c where c.conname = 'agenda_perguntas_tipo_check') y) = 27
+                                from pg_constraint c where c.conname = 'agenda_perguntas_tipo_check') y)
+         -- FASE 7: os 13 tipos do gestor da agenda (20261031100000)
+         = 27 + case when to_regprocedure('public._agenda_gestor_regra(text)') is null then 0 else 13 end
        and pg_get_constraintdef((select c.oid from pg_constraint c where c.conname = 'agenda_perguntas_tipo_check')) like '%''equipe_sem_dias''%'
        and pg_temp.erro_de($q$insert into public.agenda_perguntas (tipo, chave, texto, modo) values ('outro', 'outro:t', 'Pergunta?', 'sombra')$q$) = '23514',
        null;

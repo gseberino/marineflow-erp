@@ -404,7 +404,9 @@ begin
   v_res := pg_temp.ok(v_res, 'S4 (c) todo tipo de pergunta da lista fechada (26; 27 com a equipe_sem_dias da revisão, 20261030100500) tem o modo de quem a faz',
     v_t is null and (select count(*) from (select unnest(regexp_matches(pg_get_constraintdef(c.oid), '''([a-z_]+)''', 'g'))
                                              from pg_constraint c where c.conname = 'agenda_perguntas_tipo_check') y)
-          = 26 + case when to_regprocedure('public._agenda_vigia_equipe_sem_dias(date, timestamptz)') is null then 0 else 1 end, v_t);
+          = 26 + case when to_regprocedure('public._agenda_vigia_equipe_sem_dias(date, timestamptz)') is null then 0 else 1 end
+            -- FASE 7: os 13 tipos do gestor da agenda (20261031100000), com o modo dele em _agenda_modo_da_pergunta
+            + case when to_regprocedure('public._agenda_gestor_regra(text)') is null then 0 else 13 end, v_t);
   v_res := pg_temp.igual(v_res, 'S5 (c) o modo de cada grupo: crítica do plano, vigia, chegou? do fornecedor, material, diária, equipe, cliente, aprendizado',
     (select string_agg(public._agenda_modo_da_pergunta(t, c), ',' order by o)
        from unnest(array['nao_cabe', 'material_conferir', 'chegou', 'chegou', 'fornecedores_prazo', 'diaria', 'concluir', 'cliente_aviso', 'aprendizado'],

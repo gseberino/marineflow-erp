@@ -404,7 +404,12 @@ begin
      -- que não é da Fase 2. As listas fechadas que a Fase 3 ampliou (tipo e origem da ação, tipo da pergunta, resultado_via
      -- da alocação) continuam com o mesmo nome e o caso daqui continua valendo.
      and not (c.conname = any (array['agenda_vigia_rodadas_rotina_check', 'agenda_vigia_rodadas_modo_equipe_check',
-                                     'agenda_vigia_rodadas_modo_diaria_check']));
+                                     'agenda_vigia_rodadas_modo_diaria_check']))
+     -- FASE 7: os 3 que a Fase 7a pôs em agenda_alocacoes e agenda_perguntas (20261031100000: a fonte da duração, a opção
+     -- padrão só com prazo e a crítica sem prazo) têm o caso deles em agenda_fase7a_base.sql (B1z, que cobra pelo nome). As
+     -- listas que a 7a ampliou (tipo da pergunta e da ação, motivo do cancelamento) continuam com o nome e o caso daqui.
+     and not (c.conname = any (array['agenda_alocacoes_duracao_fonte_check', 'veto_padrao_tem_prazo', 'veto_nao_critica']));
+     -- FASE 7: fim
   insert into _resultado values ('B todo CHECK e EXCLUDE da Fase 2 tem um caso que ele recusa', v_sem_caso is null, v_sem_caso);
 end
 $b$;

@@ -3115,3 +3115,50 @@ porque só o dono pode preenchê-las.
 - **Na Fase 6:** a medida de cada OS (P1) guarda as diárias ligadas e a mão de obra; o R$ por diária aprendido (P2) só conta OS
   válidas com diária ligada e diarista (a OS só do dono fica de fora), com mínimo de 6 (`mo_n_min`) e piso `mo_min`. Até a
   diária automática da Fase 3 ligar as diárias, o 764 continua valendo.
+
+### [NOVO-agenda-47] "visit" não é visita: a unidade da linha não diz o que é deslocamento
+
+- **Encontrado em:** Agenda de Produção, Fase 7a, conferência da spec (29/10/2026, SELECT `wf7a_01_linhas`; conferido no P1 com o
+  replay `wf7a_p1_02_replay`).
+- **O quê:** `billing_unit_snapshot = 'visit'` é a unidade "por serviço" (as 9 linhas da Kalmar OS-00032, as 7 do Giancarlo
+  OS-00130). A cobrança de deslocamento é uma linha por hora com o nome "Deslocamento técnico" (OS-00076). Tirar o deslocamento
+  da mão de obra pela unidade tiraria o serviço inteiro.
+- **Na Fase 7a:** a regra `mo_limpa` vai pelo NOME normalizado (`agenda_config.mo_fora_regex`: deslocamento, viagem, translado,
+  visita técnica, km rodado, frete), nunca pela unidade. P1 cria o parâmetro; P2 aplica em `os_duracao_sugerida`.
+
+### [NOVO-agenda-48] A mão de obra realista põe 6 dias para trocar 4 baterias
+
+- **Encontrado em:** Agenda de Produção, Fase 7a, conferência da spec (29/10/2026, SELECT `wf7a_02_carteira`).
+- **O quê:** Lenine (OS-00074): 12 h cobradas por hora, mas R$ 4.560 de mão de obra ÷ R$ 764 = 5,97 diárias-pessoa; com 1 pessoa
+  (a regra `uma_pessoa`, AG7-04), 6 dias. É a conta de hoje (o realista), agora valendo como firme (D7-1: o dono corrige depois).
+- **Na Fase 7a:** o erro aparece à vista nas primeiras semanas (o texto diz "estimativa minha") e é o que a medição contra a
+  estimativa (P6: `agenda_medidas_os.fator_orcamento`, `dp_no_inicio`, `dp_reais`, criadas no P1) e o 7e corrigem. Acima de
+  `estimativa_max_diarias` (8) o gestor pergunta antes.
+
+### [NOVO-agenda-49] O sincronizador marcou crítico tudo o que veio do orçamento
+
+- **Encontrado em:** Agenda de Produção, Fase 7a, conferência da spec (29/10/2026, SELECT `wf7a_03_material`; conferido no P1).
+- **O quê:** as 19 linhas de material das 11 OS da carteira estão `critico = true`; 18 com `fonte` nula e o compressor da
+  OS-00104 com `fonte = 'oc'`. O valor unitário de VENDA vai de R$ 45,05 (porta-fusível MIDI do Vanderlei) a R$ 4.250 (kit da
+  MP): com o limiar de R$ 300 (AG7-05), 4 das 19 viram "separar na véspera" (porta-fusível MIDI do Vanderlei, voltímetro do
+  Giancarlo R$ 98,80, conector Starlink do Rodrigo R$ 240 e Sikaflex do Robson R$ 163,46). Os "Cabos Elétricos Diversos"
+  (venda R$ 350, custo R$ 0) continuam críticos: o limiar é pelo valor de venda (o custo está zerado em 3 linhas).
+- **Na Fase 7a:** `agenda_config.critico_valor_min` (P1) e a regra `critico_por_valor` na prontidão (P3); o fato do dono vence.
+
+### [NOVO-agenda-50] "Aguardando peças" sem nenhum rastro de início
+
+- **Encontrado em:** Agenda de Produção, Fase 7a, conferência da spec (29/10/2026, SELECTs `wf7a_02_carteira`, `wf7a_05_eventos_os`).
+- **O quê:** OS-00104 (Flávio) e OS-00112 (Nelson) estão `awaiting_parts` sem check-in e sem diária ligada; a conversa mostra que
+  a do Flávio foi executada de 21 a 28/10. O sistema não distingue "esperando peça para começar" de "parado no meio".
+- **Na Fase 7a:** a pergunta `situacao` ("quanto falta?", AG7-11; tipo criado no P1, perguntada no P4) com prazo; com rastro
+  (check-in, em andamento ou diária ligada) conta `quanto_falta_dias` (1), sem rastro o serviço inteiro.
+
+### [NOVO-agenda-51] A reserva do Lenine prende 2 pessoas por 3 dias que, com 1 pessoa, são 6
+
+- **Encontrado em:** Agenda de Produção, Fase 7a, conferência da spec (29/10/2026, SELECT `wf7a_09_plano_e_perguntas`; o replay
+  do P1 as traz).
+- **O quê:** as 12 alocações de reserva do Lenine (qui 05, sex 06 e ter 10/11, Roberto e João, manhã e tarde) somem na promoção;
+  o compromisso com a regra `uma_pessoa` tem 12 meios-dias de 1 pessoa. Em 30/10 00:15 a vigia soltou a reserva (a equipe da
+  agenda ficou vazia com a saída do Roberto e do João — corrigido no lote de 30/10, `20261030100600`).
+- **Na Fase 7a:** a promoção de reserva (motor de sempre) com a duração da estimativa; o replay de 29/10 (`fixture-replay-2910.sql`)
+  devolve as 12 reservas para a prova.

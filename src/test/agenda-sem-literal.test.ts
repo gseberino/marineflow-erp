@@ -55,6 +55,10 @@
 //     agenda_config (a janela, o teto do dia e o tamanho do aviso: gestor_aviso_*) ficam na própria migration, fora de função.
 //     O montador (_shared/agenda/aviso-do-gestor.ts) entra pela pasta e o passo do motor (task-automations/agenda-aviso.ts),
 //     pela lista.
+//   · (Fase 7a, P1) também as funções das migrations 2026103110* (a base do gestor da agenda: o portão, o modo, o dia avisado,
+//     a fonte da duração, o gravador do diário, os validadores e o ampliador; e os pacotes seguintes da etapa, pelo prefixo).
+//     Os DEFAULTs novos de agenda_config (os interruptores, as regras e os 30 parâmetros com o código AG7: R$ 300, 7 e 1 dias
+//     úteis, 18:00, 8 diárias, meio dia…) ficam em 20261031100000, fora de função.
 // Os inteiros pequenos (0, 1, 2, 7: meios-dias por dia, dias da semana…) e os limites de tamanho de texto dos CHECKs
 // são estrutura e não entram na regra.
 import { describe, expect, it } from 'vitest';
@@ -257,7 +261,7 @@ export function corposDasFuncoes(sql: string, arquivo: string): Trecho[] {
 
 function funcoesDasMigrations(): Trecho[] {
   return fs.readdirSync(MIGRATIONS)
-    .filter((f) => /^(2026102416|2026102510|2026102610|2026102710|2026102810|2026102910|2026103010)\d{4}_.+\.sql$/.test(f))
+    .filter((f) => /^(2026102416|2026102510|2026102610|2026102710|2026102810|2026102910|2026103010|2026103110)\d{4}_.+\.sql$/.test(f))
     .sort()
     .flatMap((f) => corposDasFuncoes(fs.readFileSync(path.join(MIGRATIONS, f), 'utf8').replace(/\r\n/g, '\n'), f));
 }
