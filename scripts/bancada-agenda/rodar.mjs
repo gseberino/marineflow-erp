@@ -231,6 +231,9 @@ const FIXTURES_COMO_TEXTO = [
   // está acima.
   ['agenda_teste.mig_protecoes_fase7a', '../../supabase/migrations/20261031100850_agenda_fase7a_protecoes.sql'],
   ['agenda_teste.mig_teto_fase7a', '../../supabase/migrations/20261031100400_agenda_fase7a_teto.sql'],
+  // Fase 7a (P13): a própria migration do bem (ela não recria nada), para o O3 de agenda_fase7a_bem.sql conferir pelo texto que
+  // ela só cria o passo _agenda_gestor_bem.
+  ['agenda_teste.mig_bem_fase7a', '../../supabase/migrations/20261031100950_agenda_fase7a_bem.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

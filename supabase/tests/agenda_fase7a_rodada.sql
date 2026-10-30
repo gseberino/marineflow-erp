@@ -213,12 +213,14 @@ begin
     perform pg_temp.replay('sombra');
     -- qui 29/10 10:07: só os de todo tique (antes das 16:45)
     r := public.agenda_gestor_rodar(c_d29, pg_temp.em(c_d29, '10:07'));
-    v_res := pg_temp.ok(v_res, 'R1c antes das 16:45: só os passos de todo tique (vetos; o sinal, do 7a P12, roda e em teste pula; bem e puxar ainda não existem: pulados), nenhum diário',
+    v_res := pg_temp.ok(v_res, 'R1c antes das 16:45: só os passos de todo tique (vetos; o encaixe, do 7a P8, roda; o sinal, do 7a P12, e o bem, do 7a P13, rodam e em teste pulam; o puxar ainda não existe: pulado), nenhum diário',
       (r ->> 'rodou')::boolean and not (r ->> 'diaria')::boolean
       and r #> '{contagens,vetos}' ? 'aplicadas'
-      and (select bool_and(r #>> array['contagens', p, 'motivo'] = 'ainda não existe') from unnest(array['encaixe', 'bem', 'puxar']) p)
-      -- (7a P12: o passo sinal existe; em teste ele pula: o gestor não marca sozinho)
+      and r #>> '{contagens,puxar,motivo}' = 'ainda não existe'
+      and coalesce(r #>> '{contagens,encaixe,motivo}', '') <> 'ainda não existe'
+      -- (7a P12 e P13: os passos sinal e bem existem; em teste eles pulam: o gestor não marca sozinho)
       and r #>> '{contagens,sinal,pulado}' = 'true' and r #>> '{contagens,sinal,motivo}' = 'o gestor não marca sozinho'
+      and r #>> '{contagens,bem,pulado}' = 'true' and r #>> '{contagens,bem,motivo}' = 'o gestor não marca sozinho'
       and not (r -> 'contagens' ? 'sombra') and not (r -> 'contagens' ? 'perguntas') and not (r -> 'contagens' ? 'diaria'),
       left(r::text, 600));
     -- 16:52: o 1º tique a partir de gestor_hora_revisao roda os diários
