@@ -434,6 +434,11 @@ begin
      -- caso dele em agenda_correcao_2910_p3.sql (C2)
      and c.conname <> 'agenda_config_padrao_do_dono_validade_check'
      -- CORREÇÃO 29/10 (P3): fim
+     -- CORREÇÃO 29/10 (P4): os 4 CHECKs novos de agenda_config (a janela, o teto e o tamanho do aviso do gestor, 20261030100300)
+     -- têm o caso deles em agenda_correcao_2910_p4.sql (C2)
+     and c.conname not in ('agenda_config_gestor_aviso_inicio_check', 'agenda_config_gestor_aviso_fim_check',
+                           'agenda_config_gestor_aviso_dia_max_check', 'agenda_config_gestor_aviso_texto_max_check')
+     -- CORREÇÃO 29/10 (P4): fim
      -- FASE 6: os 45 que a Fase 6 pôs em agenda_config e os 3 de os_planejamento (20261029100000) têm o caso deles em
      -- agenda_fase6_base.sql (B1z cobra os 45 pelo nome; o outro B1z, os de os_planejamento e das tabelas novas).
      and not (c.conname = any (array(
@@ -911,7 +916,11 @@ insert into _definer_da_agenda values
   -- CORREÇÃO 29/10 (P2, 20261030100100): o serviço novo no encaixe do motor (chama _agenda_encaixar e a grade de agora, que
   -- são só do service_role; confere quem vê antes de tudo e não grava nada). A agenda_livre_de_verdade, reescrita, continua
   -- definer (acima); a grade de agora e o texto dos meios-dias são invoker. agenda_correcao_2910_p2.sql prova as portas.
-  ('agenda_encaixe_do_novo');
+  ('agenda_encaixe_do_novo'),
+  -- CORREÇÃO 29/10 (P4, 20261030100300): o aviso do gestor ao dono — as 3 RPCs (só o service_role: as peças leem as do motor
+  -- e o painel, o enfileirar e o conferir escrevem o aviso, a fila e o contado) e a 2ª trava da fila (o gatilho lê o aviso e o
+  -- dono). As peças de dentro são invoker. agenda_correcao_2910_p4.sql prova as portas.
+  ('agenda_aviso_pecas'), ('agenda_aviso_enfileirar'), ('agenda_aviso_conferir'), ('_agenda_fila_do_dono');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

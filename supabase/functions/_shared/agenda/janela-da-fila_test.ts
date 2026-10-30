@@ -17,6 +17,7 @@ import { assertEquals, assertRejects, assertStringIncludes } from "https://deno.
 import {
   COLUNAS_DA_JANELA,
   COLUNAS_DA_JANELA_DO_CLIENTE,
+  COLUNAS_DA_JANELA_DO_DONO,
   COLUNAS_DA_JANELA_DO_FORNECEDOR,
   ehMensagemAoCliente,
   ehRespostaDireta,
@@ -290,4 +291,77 @@ Deno.test("P2 recusaDoBanco: {pode: true} sai; o motivo do banco vira a recusa; 
     motivo: "janela",
     texto: "agenda-cliente: não consegui perguntar ao banco se ainda vale (function agenda_cliente_pode_sair does not exist): não saiu",
   });
+});
+
+// ── 6. (Correção de 29/10, P4) O aviso do gestor ao dono ────────────────────────────────────────────────────
+/** A janela do aviso do DEFAULT de 20261030100300. */
+const DONO = { ligado: true, inicio: "09:30:00", fim: "19:30:00" };
+const COM_DONO: JanelasDaAgenda = { ...TODAS, dono: DONO };
+const dono = (marcada: string) => linha(marcada, "agenda-dono");
+
+Deno.test("P4 origens: agenda-dono tem a janela do aviso; não é mensagem ao cliente; sem resposta direta; o acorde 'agenda' segue fora", () => {
+  assertEquals(origemComJanelaDaAgenda("agenda-dono"), true);
+  assertEquals(janelaDaOrigem("agenda-dono"), "dono");
+  assertEquals(ehMensagemAoCliente("agenda-dono"), false);
+  assertEquals(ehRespostaDireta({ source: "agenda-dono", dedupe_key: "agenda-equipe:resposta:x:y" }), false);
+  for (const o of ["agenda", "Agenda-Dono", "agenda-dono ", "dono", "ai_briefing_tarde"]) {
+    assertEquals(origemComJanelaDaAgenda(o), false, o);
+    assertEquals(recusaNaHoraDeEnviar({ source: o, scheduled_for: "x" }, brt("2026-11-01T23:00:00"), null), null, o);
+  }
+});
+
+Deno.test("P4 aviso: 09:29 não, 09:30 sim, 19:29 sim, 19:30 não; o sábado é dia dele; só no dia dele", () => {
+  const casos: Array<[string, string, string | null]> = [
+    ["2026-10-29T09:00:00", "2026-10-29T09:29:59", "janela"],
+    ["2026-10-29T09:30:00", "2026-10-29T09:30:00", null],
+    ["2026-10-29T16:45:00", "2026-10-29T19:29:59", null],
+    ["2026-10-29T16:45:00", "2026-10-29T19:30:00", "janela"],
+    // o worker que voltou de madrugada: nunca sai fora de hora
+    ["2026-10-29T16:45:00", "2026-10-30T02:00:00", "janela"],
+    // de um dia para o outro, mesmo dentro do horário: não sai atrasado
+    ["2026-10-29T16:45:00", "2026-10-30T10:00:00", "janela"],
+    // sábado 31/10: dia dele
+    ["2026-10-31T10:00:00", "2026-10-31T10:05:00", null],
+  ];
+  for (const [marcada, agora, motivo] of casos) {
+    assertEquals(recusaNaHoraDeEnviar(dono(marcada), brt(agora), COM_DONO)?.motivo ?? null, motivo, `${marcada} → ${agora}`);
+  }
+  const r = recusaNaHoraDeEnviar(dono("2026-10-29T16:45:00"), brt("2026-10-29T19:45:00"), COM_DONO)!;
+  assertEquals(r.texto, "agenda-dono: fora da janela na hora de enviar (09:30–19:30): não saiu");
+});
+
+Deno.test("P4 aviso: domingo nunca; desligado = modo (com o texto do aviso); sem a janela dele = não sai", () => {
+  assertEquals(recusaNaHoraDeEnviar(dono("2026-11-01T10:00:00"), brt("2026-11-01T10:00:00"), COM_DONO)?.motivo, "domingo");
+  const desl = recusaNaHoraDeEnviar(dono("2026-10-29T10:00:00"), brt("2026-10-29T10:00:00"), { ...TODAS, dono: { ...DONO, ligado: false } });
+  assertEquals(desl, { motivo: "modo", texto: "agenda-dono: o aviso do gestor saiu de ligado (modo_proposta, modo_vigia ou gestor_aviso_dia_max)" });
+  assertEquals(recusaNaHoraDeEnviar(dono("2026-10-29T10:00:00"), brt("2026-10-29T10:00:00"), TODAS)?.motivo, "janela");
+  // e as outras origens não mudaram de texto
+  const eq = recusaNaHoraDeEnviar(linha("2026-10-29T10:00:00", "agenda-equipe"), brt("2026-10-29T10:00:00"),
+    { ...TODAS, equipe: { ...EQUIPE, ligado: false } });
+  assertEquals(eq?.texto, "agenda-equipe: modo_equipe saiu de ligado");
+});
+
+Deno.test("P4 leitura do aviso: um SELECT só das colunas dele; ligado só com as duas chaves em ligado e o teto > 0", async () => {
+  assertEquals(COLUNAS_DA_JANELA_DO_DONO, "modo_proposta, modo_vigia, gestor_aviso_dia_max, gestor_aviso_inicio, gestor_aviso_fim");
+  const ok = { modo_proposta: "ligado", modo_vigia: "ligado", gestor_aviso_dia_max: 3, gestor_aviso_inicio: "09:30:00", gestor_aviso_fim: "19:30:00" };
+  const { db, leituras } = bancoDeMentira({ [COLUNAS_DA_JANELA_DO_DONO]: { data: ok } });
+  assertEquals(await lerJanelasDaAgenda(db, "dono"), { dono: DONO });
+  assertEquals(leituras, [`agenda_config: ${COLUNAS_DA_JANELA_DO_DONO}`]);
+  for (const [mudanca, ligado] of [[{ modo_vigia: "sombra" }, false], [{ modo_proposta: "desligado" }, false],
+                                    [{ gestor_aviso_dia_max: 0 }, false], [{ modo_vigia: " LIGADO " }, true]] as const) {
+    const { db: d } = bancoDeMentira({ [COLUNAS_DA_JANELA_DO_DONO]: { data: { ...ok, ...mudanca } } });
+    assertEquals((await lerJanelasDaAgenda(d, "dono")).dono?.ligado, ligado, JSON.stringify(mudanca));
+  }
+  const casos: Array<[{ data?: unknown; error?: unknown }, string]> = [
+    [{ error: { message: "column agenda_config.gestor_aviso_inicio does not exist", code: "42703" } }, "gestor_aviso_inicio does not exist"],
+    [{ data: null }, "sem a linha de parâmetros"],
+    [{ data: { ...ok, gestor_aviso_inicio: "nove e meia" } }, "a janela do aviso do gestor está ilegível"],
+    [{ data: { ...ok, gestor_aviso_fim: null } }, "a janela do aviso do gestor está ilegível"],
+    [{ data: { ...ok, gestor_aviso_dia_max: "3" } }, "o teto do aviso do gestor está ilegível"],
+    [{ data: { ...ok, gestor_aviso_dia_max: null } }, "o teto do aviso do gestor está ilegível"],
+  ];
+  for (const [resp, trecho] of casos) {
+    const { db: d } = bancoDeMentira({ [COLUNAS_DA_JANELA_DO_DONO]: resp });
+    await assertRejects(() => lerJanelasDaAgenda(d, "dono"), Error, trecho);
+  }
 });

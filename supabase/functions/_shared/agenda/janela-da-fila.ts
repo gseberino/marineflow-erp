@@ -39,6 +39,13 @@
 // é lida num SELECT à parte, só com linha de cliente no lote. O worker manda no máximo UMA linha de cliente por lote e,
 // antes de mandar, pergunta ao banco se ela ainda vale (agenda_cliente_pode_sair: a revalidação na saída; recusaDoBanco
 // lê a resposta) — ver whatsapp-queue-worker/enviar.ts.
+//
+// Correção de 29/10 (P4): o AVISO DO GESTOR ao dono (source 'agenda-dono', registro agenda_dono_avisos: o que a agenda mudou
+// sozinha, o que ficou de fora e as perguntas que destravam) é a 4ª origem. A janela dela: agenda_config.gestor_aviso_inicio
+// até gestor_aviso_fim, de segunda a sábado, nunca no domingo, no dia em que estava marcada, e só com o aviso ligado
+// (modo_proposta e modo_vigia em 'ligado' e gestor_aviso_dia_max > 0) — a regra do banco (_agenda_aviso_fora_da_janela), nas
+// três travas. Também lida num SELECT à parte, só com linha do aviso no lote. Fora da janela a linha vira falha e o aviso fica
+// recusado; o agenda_aviso_conferir devolve as mudanças a "por contar" e elas saem no próximo aviso.
 
 import { feriadoDoDia } from "../secretario/feriados.ts";
 
@@ -82,18 +89,22 @@ export interface JanelasDaAgenda {
   fornecedor?: JanelaDoFornecedor;
   /** (Fase 5, P2) a mensagem ao cliente */
   cliente?: JanelaDoCliente;
+  /** (correção de 29/10, P4) o aviso do gestor ao dono */
+  dono?: JanelaDeEnvio;
 }
 
 /** O nome de uma janela (a chave em JanelasDaAgenda e o que lerJanelasDaAgenda lê). */
-export type NomeDaJanela = "equipe" | "fornecedor" | "cliente";
+export type NomeDaJanela = "equipe" | "fornecedor" | "cliente" | "dono";
 
 interface OrigemDaAgenda {
   /** qual janela vale para a origem */
   janela: NomeDaJanela;
   /** a coluna do modo (o texto do motivo quando ele saiu de ligado) */
-  modo: "modo_equipe" | "modo_fornecedor" | "modo_cliente";
+  modo: "modo_equipe" | "modo_fornecedor" | "modo_cliente" | "modo_vigia";
+  /** (P4) o texto do motivo quando a origem depende de mais de uma chave (no lugar de "<modo> saiu de ligado") */
+  textoDoModo?: string;
   /** a tabela do registro da mensagem (a linha da fila aponta para ela em source_ref_id / fila_id) */
-  registro: "agenda_equipe_mensagens" | "agenda_fornecedor_mensagens" | "agenda_cliente_mensagens";
+  registro: "agenda_equipe_mensagens" | "agenda_fornecedor_mensagens" | "agenda_cliente_mensagens" | "agenda_dono_avisos";
   /** (C1) a resposta direta da origem: a linha cuja chave começa por este prefixo tem também a janela respostaDireta */
   respostaDireta?: { prefixoDaChave: string };
 }
@@ -119,6 +130,13 @@ const ORIGENS_DA_AGENDA: Readonly<Record<string, OrigemDaAgenda>> = Object.freez
     modo: "modo_cliente",
     registro: "agenda_cliente_mensagens",
   },
+  // Correção de 29/10 (P4): o aviso do gestor ao dono (o que a agenda mudou sozinha). Sem resposta direta.
+  "agenda-dono": {
+    janela: "dono",
+    modo: "modo_vigia",
+    textoDoModo: "o aviso do gestor saiu de ligado (modo_proposta, modo_vigia ou gestor_aviso_dia_max)",
+    registro: "agenda_dono_avisos",
+  },
 });
 
 /** (Fase 5, P2) A linha da fila é mensagem ao cliente? (a do máximo de 1 por lote e da revalidação pelo banco) */
@@ -143,6 +161,7 @@ export function janelaDaOrigem(source: unknown): NomeDaJanela | null {
 export async function lerJanelasDaAgenda(db: Db, qual: NomeDaJanela = "equipe"): Promise<JanelasDaAgenda> {
   if (qual === "fornecedor") return { fornecedor: await lerJanelaDoFornecedor(db) };
   if (qual === "cliente") return { cliente: await lerJanelaDoCliente(db) };
+  if (qual === "dono") return { dono: await lerJanelaDoDono(db) };
   const { data, error } = await db.from("agenda_config")
     .select(COLUNAS_DA_JANELA)
     .maybeSingle();
@@ -213,6 +232,33 @@ async function lerJanelaDoCliente(db: Db): Promise<JanelaDoCliente> {
   }
   const modo = typeof data.modo_cliente === "string" ? data.modo_cliente.trim().toLowerCase() : "";
   return { ligado: modo === "ligado", inicio, fim, sabadoFim };
+}
+
+/** (correção de 29/10, P4) As colunas que a janela do aviso do gestor lê (um SELECT à parte, só com linha do aviso no lote). */
+export const COLUNAS_DA_JANELA_DO_DONO = "modo_proposta, modo_vigia, gestor_aviso_dia_max, gestor_aviso_inicio, gestor_aviso_fim";
+
+/**
+ * (correção de 29/10, P4) A janela do aviso do gestor: ligado = a agenda automática e a vigia em 'ligado' e algum aviso por
+ * dia (gestor_aviso_dia_max > 0), a regra de _agenda_aviso_ligado. Erro, sem a linha, horário ou teto ilegível = lança (a
+ * linha não sai).
+ */
+async function lerJanelaDoDono(db: Db): Promise<JanelaDeEnvio> {
+  const { data, error } = await db.from("agenda_config")
+    .select(COLUNAS_DA_JANELA_DO_DONO)
+    .maybeSingle();
+  if (error) throw new Error(String(error.message ?? error.code ?? "erro na leitura de agenda_config"));
+  if (!data) throw new Error("agenda_config sem a linha de parâmetros");
+  const inicio = String(data.gestor_aviso_inicio ?? "");
+  const fim = String(data.gestor_aviso_fim ?? "");
+  if (segundosDoDia(inicio) === null || segundosDoDia(fim) === null) {
+    throw new Error(`a janela do aviso do gestor está ilegível (${inicio || "—"} a ${fim || "—"})`);
+  }
+  const teto = data.gestor_aviso_dia_max;
+  if (typeof teto !== "number" || !Number.isInteger(teto)) {
+    throw new Error(`o teto do aviso do gestor está ilegível (${String(teto ?? "—")})`);
+  }
+  const modo = (v: unknown) => typeof v === "string" ? v.trim().toLowerCase() : "";
+  return { ligado: modo(data.modo_proposta) === "ligado" && modo(data.modo_vigia) === "ligado" && teto > 0, inicio, fim };
 }
 
 /** O interval do Postgres como o PostgREST devolve ("00:10:00", "10 minutes", "PT10M") → segundos; outra coisa → null. */
@@ -337,7 +383,7 @@ export function recusaNaHoraDeEnviar(
       texto: `${origem}: não consegui ler a janela da agenda (${erroDaLeitura ?? `sem a janela ${def.janela}`}): não saiu`,
     };
   }
-  if (!j.ligado) return { motivo: "modo", texto: `${origem}: ${def.modo} saiu de ligado` };
+  if (!j.ligado) return { motivo: "modo", texto: `${origem}: ${def.textoDoModo ?? `${def.modo} saiu de ligado`}` };
   const ag = instanteEmBrasilia(agora);
   if (ag.diaSemana === 0) return { motivo: "domingo", texto: `${origem}: domingo, não sai (nunca no domingo)` };
   // (Fase 5, P2) o cliente: nunca em feriado (a lista de feriados.ts, a mesma do banco)

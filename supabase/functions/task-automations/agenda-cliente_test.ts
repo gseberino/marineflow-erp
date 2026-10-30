@@ -158,7 +158,8 @@ Deno.test("cliente: o TS nunca enfileira mensagem ao cliente (source agenda-clie
 // O motor (index.ts sobe o servidor ao ser importado): pelo texto da fonte.
 Deno.test("motor: a rodada do cliente roda depois da vigia e antes das regras, com try/catch próprio, e vai ao resumo", async () => {
   const fonte = (await Deno.readTextFile(new URL("./index.ts", import.meta.url))).replace(/\r\n/g, "\n");
-  const vigia = fonte.indexOf("agendaVigia = await vigiarAgenda(db, new Date());");
+  // (correção de 29/10, P4) a vigia roda com o instante que o aviso do gestor também usa
+  const vigia = fonte.indexOf("agendaVigia = await vigiarAgenda(db, agoraDaVigia);");
   const cliente = fonte.indexOf("agendaClienteVigia = await vigiarClienteDaAgenda(db, new Date());");
   const regras = fonte.indexOf("const rules = await runRules(db, settings);");
   assertEquals(vigia > 0 && cliente > vigia && regras > cliente, true);

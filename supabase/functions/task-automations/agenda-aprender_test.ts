@@ -133,7 +133,7 @@ Deno.test("motor: a rodada do aprendizado roda depois da rotina e antes da vigia
   const fonte = (await Deno.readTextFile(new URL("./index.ts", import.meta.url))).replace(/\r\n/g, "\n");
   const rotina = fonte.indexOf("agendaRotina = await rodarRotinaDaAgenda(db, new Date());");
   const aprender = fonte.indexOf("agendaAprender = await aprenderDaAgenda(db, new Date());");
-  const vigia = fonte.indexOf("agendaVigia = await vigiarAgenda(db, new Date());");
+  const vigia = fonte.indexOf("agendaVigia = await vigiarAgenda(db, agoraDaVigia);");
   const cliente = fonte.indexOf("agendaClienteVigia = await vigiarClienteDaAgenda(db, new Date());");
   const regras = fonte.indexOf("const rules = await runRules(db, settings);");
   assertEquals(rotina > 0 && aprender > rotina && vigia > aprender && cliente > vigia && regras > cliente, true);

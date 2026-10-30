@@ -1192,9 +1192,11 @@ Deno.test("motor: R9 e R13 aposentadas; o responsável vem de responsavel.ts", a
   // Fase 2 (P3): a vigia também entra no resumo. Fase 3 (P4): e a rotina da equipe, antes da vigia. Fase 4 (P5): e a vigia
   // do material, depois do material. Fase 5 (P3): e a rodada do cliente, depois da vigia (o banco decide e enfileira; o
   // TS só leva os acordes ao dono). Fase 6 (P8): e a rodada do aprendizado, depois da rotina e antes da vigia (nada sai).
+  // Correção de 29/10 (P4): e o aviso do gestor ao dono, logo depois da vigia (só ao DONO, pela fila agenda-dono).
   assertEquals(fonte.replace(/\r\n/g, "\n").includes(
     "const summary = {\n      identidade, fios, agenda_material: agendaMaterial, agenda_material_vigia: agendaMaterialVigia, agenda_rotina: agendaRotina,\n" +
-      "      agenda_aprender: agendaAprender, agenda_vigia: agendaVigia, agenda_cliente_vigia: agendaClienteVigia, rules, r10, reminders, recurrence,\n    };"), true);
+      "      agenda_aprender: agendaAprender, agenda_vigia: agendaVigia, agenda_aviso: agendaAviso, agenda_cliente_vigia: agendaClienteVigia,\n" +
+      "      rules, r10, reminders, recurrence,\n    };"), true);
   assertEquals(fonte.includes('import { resolveAssignee } from "./responsavel.ts";'), true);
   assertEquals(/async function resolveAssignee/.test(fonte), false);
 });
@@ -1303,11 +1305,19 @@ Deno.test("R2: erro de leitura lança no find e no isResolved (nunca vira 'nenhu
 Deno.test("motor: a vigia roda depois do material e antes das regras, com try/catch próprio; as regras leem os modos", async () => {
   const fonte = (await Deno.readTextFile(new URL("./index.ts", import.meta.url))).replace(/\r\n/g, "\n");
   const material = fonte.indexOf("agendaMaterial = await sincronizarMaterialDaAgenda(db);");
-  const vigia = fonte.indexOf("agendaVigia = await vigiarAgenda(db, new Date());");
+  // (correção de 29/10, P4) a vigia e o aviso do gestor com o mesmo instante (a rodada do aviso é a da vigia)
+  const vigia = fonte.indexOf("agendaVigia = await vigiarAgenda(db, agoraDaVigia);");
   const regras = fonte.indexOf("const rules = await runRules(db, settings);");
   assertEquals(material > 0 && vigia > material && regras > vigia, true);
+  assertEquals(fonte.includes("const agoraDaVigia = new Date();"), true);
   const bloco = fonte.slice(fonte.lastIndexOf("let agendaVigia", vigia), regras);
   assertEquals(bloco.includes("try {") && bloco.includes("} catch (e) {"), true);
+  // (correção de 29/10, P4) o aviso do gestor: logo depois da vigia, antes da rodada do cliente e das regras, com try/catch
+  const aviso = fonte.indexOf("agendaAviso = await avisarDonoDaAgenda(db, agoraDaVigia);");
+  const cliente = fonte.indexOf("agendaClienteVigia = await vigiarClienteDaAgenda(db, new Date());");
+  assertEquals(aviso > vigia && cliente > aviso && regras > cliente, true);
+  const blocoDoAviso = fonte.slice(fonte.lastIndexOf("let agendaAviso", aviso), cliente);
+  assertEquals(blocoDoAviso.includes("try {") && blocoDoAviso.includes("} catch (e) {"), true);
   // o find e a auto-resolução passam pelos modos (nunca rule.find / rule.isResolved direto)
   assertEquals(fonte.includes("const modos = await lerModosDaAgenda(db);"), true);
   assertEquals(fonte.includes("await candidatosDaRegra(db, rule, modos)"), true);

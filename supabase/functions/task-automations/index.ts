@@ -15,6 +15,11 @@
 //   0c. A vigia da Agenda de Produção (agenda-vigia.ts, Fase 2 P3): agenda_vigiar publica a semana na quinta,
 //      replaneja quando algo muda, promove e solta reservas, pergunta o que só o dono sabe e devolve os acordes
 //      (a perda de hoje ou amanhã), que vão ao dono pelo portão. Passo à parte: nunca lança (agenda:vigia).
+//   0c2. O aviso do gestor ao dono (agenda-aviso.ts, correção de 29/10 P4): logo depois da vigia e com o MESMO instante dela
+//      (uma mensagem por rodada), o que a agenda mudou sozinha (publicou, encaixou, promoveu ou soltou reserva, remanejou),
+//      o que ficou de fora e as perguntas que destravam, pela fila (source agenda-dono), só na janela do aviso e no teto do
+//      dia (o banco decide: agenda_aviso_pecas e agenda_aviso_enfileirar); antes, agenda_aviso_conferir conta o que a fila
+//      mandou e devolve o que não saiu. Passo à parte: nunca lança (agenda:aviso).
 //   0d. A rodada da mensagem ao cliente (agenda-cliente.ts, Fase 5 P3): agenda_cliente_vigiar roda SEMPRE o passo "fila"
 //      (o que ficou velho na fila do cliente não sai) e, com agenda_config.modo_cliente fora de desligado, decide qual
 //      mensagem-modelo vai a quem e quando (o banco escreve o texto e confere a janela, o teto e a aprovação dos 3
@@ -43,6 +48,7 @@ import { resolveAssignee } from "./responsavel.ts";
 import { sincronizarMaterialDaAgenda } from "./material-da-agenda.ts";
 import { lerModosDaAgenda, lerModosDaEquipe, lerModosDoCliente, r10DesligadaPelaAgenda } from "./agenda-modos.ts";
 import { vigiarAgenda } from "./agenda-vigia.ts";
+import { avisarDonoDaAgenda } from "./agenda-aviso.ts";
 import { rodarRotinaDaAgenda } from "./agenda-rotina.ts";
 import { vigiarMaterialDaAgenda } from "./agenda-material.ts";
 import { vigiarClienteDaAgenda } from "./agenda-cliente.ts";
@@ -492,12 +498,25 @@ servirComCors(async (req) => {
     // A vigia da Agenda de Produção (Fase 2, P3): depois do material (lê a conta em dia) e antes das regras (a R1, a
     // R2 e a R16 leem o que ela fez). Tem o próprio try/catch (vigiarAgenda nunca lança: devolve { erro } e grava em
     // app_error_logs); o de fora é a segunda trava, para nada daqui parar as regras.
+    // (correção de 29/10, P4) a vigia e o aviso do gestor com o MESMO instante: a rodada do aviso é a da vigia.
+    const agoraDaVigia = new Date();
     let agendaVigia: unknown = null;
     try {
-      agendaVigia = await vigiarAgenda(db, new Date());
+      agendaVigia = await vigiarAgenda(db, agoraDaVigia);
     } catch (e) {
       console.error("agenda:vigia:", e);
       agendaVigia = { erro: String((e as any)?.message ?? e) };
+    }
+
+    // O aviso do gestor ao dono (correção de 29/10, P4): logo depois da vigia (conta o que ela acabou de mudar) e antes da
+    // rodada do cliente e das regras. Tem o próprio try/catch (avisarDonoDaAgenda nunca lança: devolve { erro } e grava em
+    // app_error_logs); o de fora é a segunda trava, para nada daqui parar o resto.
+    let agendaAviso: unknown = null;
+    try {
+      agendaAviso = await avisarDonoDaAgenda(db, agoraDaVigia);
+    } catch (e) {
+      console.error("agenda:aviso:", e);
+      agendaAviso = { erro: String((e as any)?.message ?? e) };
     }
 
     // A rodada da mensagem ao cliente (Fase 5, P3): depois da vigia (lê o plano já replanejado: a mudança no dia, o aviso de
@@ -519,7 +538,8 @@ servirComCors(async (req) => {
 
     const summary = {
       identidade, fios, agenda_material: agendaMaterial, agenda_material_vigia: agendaMaterialVigia, agenda_rotina: agendaRotina,
-      agenda_aprender: agendaAprender, agenda_vigia: agendaVigia, agenda_cliente_vigia: agendaClienteVigia, rules, r10, reminders, recurrence,
+      agenda_aprender: agendaAprender, agenda_vigia: agendaVigia, agenda_aviso: agendaAviso, agenda_cliente_vigia: agendaClienteVigia,
+      rules, r10, reminders, recurrence,
     };
     // Regra que falhou também é motivo para auditar: sem isto, um tick em que TODAS as
     // regras quebraram não deixaria registro nenhum (created e resolved vazios).

@@ -65,7 +65,7 @@ Deno.test("motor: a rotina roda antes da vigia, com try/catch prÃ³prio; a R10 lÃ
   const fonte = (await Deno.readTextFile(new URL("./index.ts", import.meta.url))).replace(/\r\n/g, "\n");
   const material = fonte.indexOf("agendaMaterial = await sincronizarMaterialDaAgenda(db);");
   const rotina = fonte.indexOf("agendaRotina = await rodarRotinaDaAgenda(db, new Date());");
-  const vigia = fonte.indexOf("agendaVigia = await vigiarAgenda(db, new Date());");
+  const vigia = fonte.indexOf("agendaVigia = await vigiarAgenda(db, agoraDaVigia);");
   assertEquals(material > 0 && rotina > material && vigia > rotina, true);
   const bloco = fonte.slice(fonte.lastIndexOf("let agendaRotina", rotina), vigia);
   assertEquals(bloco.includes("try {") && bloco.includes("} catch (e) {"), true);

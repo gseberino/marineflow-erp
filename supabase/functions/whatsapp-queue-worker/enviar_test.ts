@@ -25,6 +25,7 @@ import { enviarLote, type ItemDaFila, travarLote } from "./enviar.ts";
 import {
   COLUNAS_DA_JANELA,
   COLUNAS_DA_JANELA_DO_CLIENTE,
+  COLUNAS_DA_JANELA_DO_DONO,
   COLUNAS_DA_JANELA_DO_FORNECEDOR,
   ehRespostaDireta,
   intervaloEmSegundos,
@@ -690,4 +691,42 @@ Deno.test("P2 nenhuma outra origem muda: com ou sem linhas de cliente no lote, a
   assertEquals([r2[4].janela_da_agenda, r2[5].adiada], ["janela", true]);
   assertEquals(com.chamadas, []);
   assertEquals(com.leituras, [`agenda_config: ${COLUNAS_DA_JANELA_DO_CLIENTE}`]);
+});
+
+// ── (Correção de 29/10, P4) O aviso do gestor ao dono: a 3ª trava ──────────────────────────────────────────────
+/** A janela do aviso do DEFAULT de 20261030100300 (09:30–19:30, de segunda a sábado). */
+const CONFIG_DONO = {
+  modo_proposta: "ligado", modo_vigia: "ligado", gestor_aviso_dia_max: 3, gestor_aviso_inicio: "09:30:00", gestor_aviso_fim: "19:30:00",
+};
+const avisoDoDono = (id: string, marcada: string) => item(id, "agenda-dono", marcada, { dedupe_key: `agenda-dono:aviso:${id}` });
+
+Deno.test("P4 agenda-dono na janela (qui 16:45): sai; só a configuração do aviso é lida, uma vez", async () => {
+  const { db, escritas, leituras } = bancoPorColunas({ [COLUNAS_DA_JANELA_DO_DONO]: { data: CONFIG_DONO } });
+  const { provider, enviados } = provedorDeMentira();
+  const r = await enviarLote(db, provider, [avisoDoDono("1", "2026-10-29T16:45:00"), item("2", "reply-router", "2026-10-29T16:45:00")],
+    { delayMs: 0, agora: () => brt("2026-10-29T16:50:00") });
+  assertEquals(r, [{ id: "1", ok: true }, { id: "2", ok: true }]);
+  assertEquals(enviados.length, 2);
+  assertEquals(leituras, [`agenda_config: ${COLUNAS_DA_JANELA_DO_DONO}`]);
+  assertEquals(daFila(escritas, "1")[0].valores.status, "sent");
+});
+
+Deno.test("P4 agenda-dono de madrugada (o worker voltou às 02:00), no domingo ou com o aviso desligado: failed, nada sai, o aviso recusado", async () => {
+  const casos: Array<[string, string, Record<string, unknown>, string]> = [
+    ["2026-10-29T19:25:00", "2026-10-30T02:00:00", CONFIG_DONO, "janela"],
+    ["2026-10-29T16:45:00", "2026-10-29T19:30:00", CONFIG_DONO, "janela"],
+    ["2026-11-01T10:00:00", "2026-11-01T10:00:00", CONFIG_DONO, "domingo"],
+    ["2026-10-29T16:45:00", "2026-10-29T16:50:00", { ...CONFIG_DONO, gestor_aviso_dia_max: 0 }, "modo"],
+    ["2026-10-29T16:45:00", "2026-10-29T16:50:00", { ...CONFIG_DONO, modo_vigia: "sombra" }, "modo"],
+  ];
+  for (const [marcada, agora, config, motivo] of casos) {
+    const { db, escritas } = bancoPorColunas({ [COLUNAS_DA_JANELA_DO_DONO]: { data: config } });
+    const { provider, enviados } = provedorDeMentira();
+    const r = await enviarLote(db, provider, [avisoDoDono("1", marcada)], { delayMs: 0, agora: () => brt(agora) });
+    assertEquals([enviados.length, r[0].janela_da_agenda], [0, motivo], `${marcada} → ${agora} ${JSON.stringify(config)}`);
+    assertEquals(daFila(escritas, "1")[0].valores.status, "failed");
+    const reg = escritas.filter((e) => e.tabela === "agenda_dono_avisos");
+    assertEquals(reg.map((e) => e.valores), [{ estado: "recusada", recusa_motivo: motivo }]);
+    assertEquals(reg[0].filtros, [["fila_id", "1"], ["estado", "enfileirada"]]);
+  }
 });

@@ -51,6 +51,10 @@
 //   · (Correção de 29/10, P1) também as funções das migrations 2026103010* (as leituras do que o dono vê: o bloco inteiro, a
 //     reserva com quem vai e a semana que vem na *agenda*; e os pacotes seguintes da correção, pelo prefixo). Nenhum DEFAULT
 //     novo: o teto continua texto_max.
+//   · (Correção de 29/10, P4) o aviso do gestor ao dono (20261030100300) entra pelo mesmo prefixo; os DEFAULTs novos de
+//     agenda_config (a janela, o teto do dia e o tamanho do aviso: gestor_aviso_*) ficam na própria migration, fora de função.
+//     O montador (_shared/agenda/aviso-do-gestor.ts) entra pela pasta e o passo do motor (task-automations/agenda-aviso.ts),
+//     pela lista.
 // Os inteiros pequenos (0, 1, 2, 7: meios-dias por dia, dias da semana…) e os limites de tamanho de texto dos CHECKs
 // são estrutura e não entram na regra.
 import { describe, expect, it } from 'vitest';
@@ -291,6 +295,9 @@ function tsDaAgenda(): Trecho[] {
     path.join(FUNCOES, 'task-automations', 'agenda-cliente.ts'),
     // Fase 6 (P8): o passo da rodada do aprendizado no motor de 15 min.
     path.join(FUNCOES, 'task-automations', 'agenda-aprender.ts'),
+    // Correção de 29/10 (P4): o passo do aviso do gestor ao dono no motor de 15 min (o montador, _shared/agenda/
+    // aviso-do-gestor.ts, já entra pela pasta).
+    path.join(FUNCOES, 'task-automations', 'agenda-aviso.ts'),
     // Fase 3 (P7a): os hooks das telas (a Semana, a Carteira, o cartão Plano e o que a porta aceita pela tela).
     path.join(RAIZ, 'src', 'hooks', 'use-agenda-producao.ts'),
     path.join(RAIZ, 'src', 'hooks', 'use-status-da-porta.ts'),

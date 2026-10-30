@@ -172,6 +172,9 @@ const FIXTURES_COMO_TEXTO = [
   // antes como pg_temp (sem reserva, byte a byte). As de _agenda_encaixar (mig_motor_fase2), _agenda_vigia_limpeza
   // (mig_detector_fase4) e _agenda_vigia_padrao_do_dono (mig_conferencia_fase2) já estão acima.
   ['agenda_teste.mig_correcao_calculo_fase6', '../../supabase/migrations/20261029100900_agenda_fase6_correcao_calculo.sql'],
+  // Correção de 29/10 (P4): a fonte do gatilho _agenda_acoes_so_desfaz recriado na 20261030100300 (as tabelas da Fase 3, a mais
+  // nova), para o agenda_correcao_2910_p4.sql conferir que a cópia só acrescenta o bloco "-- CORREÇÃO 29/10 (P4):".
+  ['agenda_teste.mig_tabelas_fase3', '../../supabase/migrations/20261026100000_agenda_fase3_tabelas.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */
