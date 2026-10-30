@@ -104,6 +104,25 @@ begin
   end loop;
   return array_to_string(v_fora, E'\n');
 end $f$;
+-- FASE 7 (7a P3): as linhas fora dos blocos "-- FASE 7: … -- FASE 7: fim" (a 20261031100200 recriou os_prontidao): só para a
+-- cópia (K1). O G1 continua com o sem_blocos, que deixa os blocos da 7a à vista (a conta da prontidão é a que roda).
+create function pg_temp.sem_fase7(p text) returns text language plpgsql immutable as $f$
+declare
+  v_fora text[] := '{}';
+  v_dentro boolean := false;
+  l text;
+begin
+  foreach l in array string_to_array(replace(p, E'\r\n', E'\n'), E'\n') loop
+    if not v_dentro and l ~ '^\s*-- FASE 7:' and l !~ '^\s*-- FASE 7: fim' then v_dentro := true; continue; end if;
+    if v_dentro then
+      if l ~ '^\s*-- FASE 7: fim' then v_dentro := false; end if;
+      continue;
+    end if;
+    v_fora := v_fora || l;
+  end loop;
+  return array_to_string(v_fora, E'\n');
+end $f$;
+-- FASE 7 (7a P3): fim
 -- O texto sem os ids que a rodada gera (cada execução sorteia os seus): todo uuid que não é do molde das fixtures
 -- (xxxx0000-0000-4000-8000-…) vira U. As duas variantes partem do mesmo estado, então o resto tem de bater letra a letra.
 create function pg_temp.normal(p text) returns text language sql immutable as $f$
@@ -428,10 +447,13 @@ begin
     return;
   end if;
   select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = 'public.os_prontidao(uuid, date)'::regprocedure;
-  insert into _resultado values ('K1 os_prontidao: sem os 3 blocos "-- CORREÇÃO 29/10 (P5):" (a memória e a barreira), é o corpo de 20261029100900',
-    pg_temp.sem_blocos(v_novo) = pg_temp.corpo(v_c6, 'os_prontidao')
+  -- FASE 7 (7a P3): os_prontidao foi recriada de novo em 20261031100200 (só acréscimo, nos blocos "-- FASE 7:"), que saem antes
+  insert into _resultado values ('K1 os_prontidao: sem os 3 blocos "-- CORREÇÃO 29/10 (P5):" (a memória e a barreira) e sem os da 7a P3, é o corpo de 20261029100900',
+    pg_temp.sem_blocos(pg_temp.sem_fase7(v_novo)) = pg_temp.corpo(v_c6, 'os_prontidao')
     and (select count(*) from regexp_matches(v_novo, '-- CORREÇÃO 29/10 \(P5\): fim', 'g')) = 3,
-    format('fonte %s × novo sem blocos %s caracteres', length(pg_temp.corpo(v_c6, 'os_prontidao')), length(pg_temp.sem_blocos(v_novo))));
+    format('fonte %s × novo sem blocos %s caracteres', length(pg_temp.corpo(v_c6, 'os_prontidao')),
+           length(pg_temp.sem_blocos(pg_temp.sem_fase7(v_novo)))));
+  -- FASE 7 (7a P3): fim
   select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = 'public.agenda_vigiar(date, timestamptz)'::regprocedure;
   insert into _resultado values ('K2 agenda_vigiar: sem os 6 blocos "-- CORREÇÃO 29/10 (P5):" (abrir, o tempo de cada passo, fechar), é o corpo de 20261025100300',
     pg_temp.sem_blocos(v_novo) = pg_temp.corpo(v_f2, 'agenda_vigiar')
@@ -458,6 +480,13 @@ corpos as (
          case when p.proname in ('_agenda_gestor_regra', '_agenda_gestor_modo')
               then regexp_replace(regexp_replace(pg_temp.sem_blocos(p.prosrc), '--[^\n]*', '', 'g'),
                                   'current_setting\(''agenda\.gestor'', true\)', '', 'g')
+              -- FASE 7 (7a P3): a prontidão chama a estimativa do gestor (20261031100200), que chama a situação da OS
+              -- (_agenda_os_situacao): ela lê a última ação da agenda e a pergunta aberta (agenda_acoes, agenda_perguntas), só com a
+              -- regra situacao — e com essa regra a marca conta as duas (G4). Só essas duas, só nela, saem da conta.
+              when p.proname = '_agenda_os_situacao'
+              then regexp_replace(regexp_replace(pg_temp.sem_blocos(p.prosrc), '--[^\n]*', '', 'g'),
+                                  '\m(agenda_acoes|agenda_perguntas)\M', '', 'g')
+              -- FASE 7 (7a P3): fim
               else regexp_replace(pg_temp.sem_blocos(p.prosrc), '--[^\n]*', '', 'g') end as src
          -- FASE 7 (7a P2): fim
     from g join pg_proc p on p.oid = g.oid
@@ -509,6 +538,27 @@ select 'G2 a marca ignora exatamente as 5 tabelas (a pergunta, a ação, a propo
               and c.relname in ('agenda_perguntas', 'agenda_acoes', 'agenda_propostas', 'agenda_vigia_rodadas', 'app_error_logs')) = 5,
        null
   from pg_proc p where p.oid = 'public._agenda_rodada_marca()'::regprocedure;
+-- FASE 7 (7a P3): desde 20261031100200 a prontidão chama a estimativa do gestor, que chama a situação da OS: ela lê a última ação
+-- da agenda e a pergunta aberta (duas das 5 que a marca de sempre ignora), mas só depois do portão situacao; e com esse mesmo
+-- portão a marca soma as duas, num número negativo que nunca coincide com o de sempre (o P10 de agenda_fase7a_prontidao.sql prova
+-- na rodada: a prontidão lembrada recalcula depois de uma ação gravada). Antes da 7a P3 (a prontidão não chama a estimativa),
+-- não há o que conferir.
+with x as (
+  select (select prosrc from pg_proc where oid = to_regprocedure('public.os_prontidao(uuid, date)')) as pront,
+         (select prosrc from pg_proc where oid = to_regprocedure('public._agenda_os_situacao(uuid, date)')) as sit,
+         (select prosrc from pg_proc where oid = to_regprocedure('public._agenda_rodada_marca()')) as marca
+)
+insert into _resultado
+select 'G4 (7a P3) a ação e a pergunta só são lidas pela situação da OS, depois do portão situacao — e com esse portão a marca conta as duas',
+       case when coalesce(x.pront, '') !~ '_agenda_gestor_estimativa\(' then true
+            else x.sit ~ 'if p_os is null or not public\._agenda_gestor_regra\(''situacao''\) then\s+return v_nada;'
+                 and position('_agenda_gestor_regra(''situacao'')' in x.sit) < position('agenda_acoes' in x.sit)
+                 and position('_agenda_gestor_regra(''situacao'')' in x.sit) < position('agenda_perguntas' in x.sit)
+                 and x.marca like '%+ case when public._agenda_gestor_regra(''situacao'')%'
+                 and x.marca like '%d.relname in (''agenda_perguntas'', ''agenda_acoes'')%' end,
+       case when coalesce(x.pront, '') !~ '_agenda_gestor_estimativa\(' then 'a prontidão ainda não chama a estimativa do gestor' end
+  from x;
+-- FASE 7 (7a P3): fim
 
 -- ── P. Portas (sempre) ───────────────────────────────────────────────────────────────────────────────────
 with f(sig) as (values ('public._agenda_rodada_marca()'), ('public._agenda_rodada_contar(text)'), ('public._agenda_rodada_abrir(date)'),

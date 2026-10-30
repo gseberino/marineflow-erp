@@ -134,11 +134,20 @@ end $f$;
 create function pg_temp.sem_blocos(p text) returns text language plpgsql immutable as $f$
 declare
   v_rev boolean := false;  -- CORREÇÃO 29/10 (revisão): dentro de um bloco da revisão do lote
+  v_f7 boolean := false;   -- FASE 7 (7a P3): dentro de um bloco "-- FASE 7:"
   v_fora text[] := '{}';
   v_dentro boolean := false;
   l text;
 begin
   foreach l in array string_to_array(replace(p, E'\r\n', E'\n'), E'\n') loop
+    -- FASE 7 (7a P3): os blocos "-- FASE 7: … fim" de uma recriação depois do lote (a 20261031100200 recria agenda_propor)
+    -- também saem: a cópia continua conferida contra a fonte do lote.
+    if not v_f7 and l ~ '^\s*-- FASE 7:' and l !~ '^\s*-- FASE 7: fim' then v_f7 := true; continue; end if;
+    if v_f7 then
+      if l ~ '^\s*-- FASE 7: fim' then v_f7 := false; end if;
+      continue;
+    end if;
+    -- FASE 7 (7a P3): fim
     if not v_dentro and ltrim(l) like '-- CORREÇÃO 29/10 (P3):%' and ltrim(l) not like '-- CORREÇÃO 29/10 (P3): fim%' then
       v_dentro := true;
       continue;

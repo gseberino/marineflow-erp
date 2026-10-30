@@ -133,9 +133,10 @@ begin
       continue;
     end if;
     -- CORREÇÃO FASE 6: fim
-    if not v_bloco and l ~ '^\s*-- FASE 6:' and l !~ '^\s*-- FASE 6: fim' then v_bloco := true; continue; end if;
+    -- FASE 7 (7a P3): e os blocos "-- FASE 7: … fim" (os_prontidao recriada de novo em 20261031100200: só acréscimo)
+    if not v_bloco and l ~ '^\s*-- FASE [67]:' and l !~ '^\s*-- FASE [67]: fim' then v_bloco := true; continue; end if;
     if v_bloco then
-      if l ~ '^\s*-- FASE 6: fim' then v_bloco := false; end if;
+      if l ~ '^\s*-- FASE [67]: fim' then v_bloco := false; end if;
       continue;
     end if;
     v_b := v_b || l;
