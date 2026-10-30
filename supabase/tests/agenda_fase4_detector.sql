@@ -109,9 +109,13 @@ begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
     -- FASE 6 (P6): também os blocos "-- FASE 6: … -- FASE 6: fim" (agenda_desfazer, agenda_decidir e agenda_saude foram
     -- recriadas de novo em 20261029100600, só com blocos da Fase 6 fora dos da Fase 5)
-    if not v_bloco and l ~ '^\s*-- FASE [56]:' and l !~ '^\s*-- FASE [56]: fim' then v_bloco := true; continue; end if;
+    -- CORREÇÃO 29/10 (P3): e os blocos "-- CORREÇÃO 29/10 (P3): … fim" (_agenda_vigia_limpeza foi recriada de novo em
+    -- 20261030100200, com o bloco da pergunta de teste fora dos da Fase 4; o agenda_correcao_2910_p3.sql confere a cópia)
+    if not v_bloco and l ~ '^\s*-- (FASE [56]|CORREÇÃO 29/10 \(P3\)):' and l !~ '^\s*-- (FASE [56]|CORREÇÃO 29/10 \(P3\)): fim' then
+      v_bloco := true; continue;
+    end if;
     if v_bloco then
-      if l ~ '^\s*-- FASE [56]: fim' then v_bloco := false; end if;
+      if l ~ '^\s*-- (FASE [56]|CORREÇÃO 29/10 \(P3\)): fim' then v_bloco := false; end if;
       continue;
     end if;
     v_b := v_b || l;

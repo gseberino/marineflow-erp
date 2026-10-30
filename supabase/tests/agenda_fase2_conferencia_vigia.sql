@@ -329,7 +329,8 @@ begin
       and (select count(*) from public.agenda_acoes a where a.tipo = 'publicar' and a.origem = 'vigia' and a.executada) = 3
       and (select status from public.service_orders where id = pg_temp.os('201')) = 'scheduled'
       and (select status from public.service_orders where id = pg_temp.os('202')) = 'scheduled'
-      and r #>> '{contagens,publicacao,texto}' like 'Publiquei a semana de 03 a 06/11 (seg 02 é Finados): %*desfaz semana* volta como estava.',
+      -- CORREÇÃO 29/10 (P3): o título da semana diz quantos estão marcados firme e quantos só reservados (a do Caio é reserva)
+      and r #>> '{contagens,publicacao,texto}' like 'Publiquei a semana de 03 a 06/11 (seg 02 é Finados) — 2 serviços marcados, 1 reservado: %*desfaz semana* volta como estava.',
       (r -> 'contagens' -> 'publicacao')::text);
     r := pg_temp.vigiar(date '2026-10-29', '16:45');
     v_res := pg_temp.ok(v_res, 'V4 o tique das 16:45 não publica de novo (uma proposta da semana da vigia, nada a mais em vigor)',

@@ -430,6 +430,10 @@ begin
      and c.conname not in ('agenda_config_aprender_saude_dias_check', 'agenda_config_aprender_atraso_h_check',
                            'agenda_config_aprender_parar_dias_check', 'agenda_config_aprender_respostas_dias_check')
      -- CORREÇÃO FASE 6: fim
+     -- CORREÇÃO 29/10 (P3): o CHECK novo de agenda_config (a validade da pergunta dos seus dias em campo, 20261030100200) tem o
+     -- caso dele em agenda_correcao_2910_p3.sql (C2)
+     and c.conname <> 'agenda_config_padrao_do_dono_validade_check'
+     -- CORREÇÃO 29/10 (P3): fim
      -- FASE 6: os 45 que a Fase 6 pôs em agenda_config e os 3 de os_planejamento (20261029100000) têm o caso deles em
      -- agenda_fase6_base.sql (B1z cobra os 45 pelo nome; o outro B1z, os de os_planejamento e das tabelas novas).
      and not (c.conname = any (array(

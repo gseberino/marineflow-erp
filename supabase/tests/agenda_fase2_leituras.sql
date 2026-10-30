@@ -123,7 +123,8 @@ declare
   c_dono    constant uuid := 'bb000000-0000-4000-8000-000000000001';
   c_roberto constant uuid := 'bb000000-0000-4000-8000-000000000002';
   c_joao    constant uuid := 'bb000000-0000-4000-8000-000000000003';
-  c_semana  constant text := 'Agenda: publiquei a semana de 03 a 06/11 (seg 02 é Finados): Vanderlei (ter 03 a qui 05/11), '
+  -- CORREÇÃO 29/10 (P3): o título da semana diz quantos estão marcados firme e quantos só reservados (a do Flávio é reserva)
+  c_semana  constant text := 'Agenda: publiquei a semana de 03 a 06/11 (seg 02 é Finados) — 3 serviços marcados, 1 reservado: Vanderlei (ter 03 a qui 05/11), '
                              || 'Rodrigo OS-00096 (ter 03/11), Lenine (qua 04 a seg 09/11) e reserva para Flávio (qua 04 e sex 06/11). '
                              || 'Fora: Nelson (preciso de você) e Giancarlo (começa qui 26/11). Depois desta semana, só tem 6,5 dias '
                              || 'de serviço pronto na fila. *agenda plano* mostra tudo; *desfaz semana* volta.';
@@ -264,7 +265,8 @@ begin
     v_txt := pg_temp.ver('mudancas', null, c_hoje);
     v_res := pg_temp.ok(v_res, 'G4 foco mudancas: a publicação da semana numa linha, com *desfaz semana* (ainda vale às 17:40)',
       v_txt like 'O que mudei sozinho na agenda desde ontem:' || E'\n'
-                 || '• Publiquei a semana de 03 a 06/11 (seg 02 é Finados): Vanderlei (OS-00069): ter 03 a qui 05/11, você abre e fecha, Roberto os 3 dias.%'
+                 -- (CORREÇÃO 29/10, P3: o título diz quantos estão marcados firme e quantos só reservados)
+                 || '• Publiquei a semana de 03 a 06/11 (seg 02 é Finados) — 3 serviços marcados, 1 reservado: Vanderlei (OS-00069): ter 03 a qui 05/11, você abre e fecha, Roberto os 3 dias.%'
       and v_txt like '%Reserva (acima da carga) Flávio (OS-00104): qua 04 à tarde a sex 06/11 de manhã, João à tarde, Roberto de manhã. *desfaz semana* volta como estava.'
       and (select count(*) from regexp_matches(v_txt, '•', 'g')) = 1, v_txt);
     perform pg_temp.agora(date '2026-10-31', '09:00');
@@ -339,7 +341,8 @@ begin
       || '(compre até ter 03/11, fornecedor Premel)');
     v_res := pg_temp.igual(v_res, 'F7 o cenário na quinta: a semana sem "Fora" e com a fila vazia da vigia',
       pg_temp.fechamento(c_hoje),
-      'semana/60/ligado: Agenda: publiquei a semana de 03 a 06/11 (seg 02 é Finados): Antônio (ter 03 e qua 04/11), Beatriz (qui 05/11) '
+      -- (CORREÇÃO 29/10, P3: o título diz quantos estão marcados firme e quantos só reservados)
+      'semana/60/ligado: Agenda: publiquei a semana de 03 a 06/11 (seg 02 é Finados) — 2 serviços marcados, 1 reservado: Antônio (ter 03 e qua 04/11), Beatriz (qui 05/11) '
       || 'e reserva para Caio (qui 05 a ter 10/11). Depois desta semana, não tem serviço pronto na fila. *agenda plano* mostra tudo; '
       || '*desfaz semana* volta.');
     perform public.agenda_fechamento_registrar(c_hoje, public.agenda_textos_do_fechamento(c_hoje, null) -> 'linhas', 'fechamento',

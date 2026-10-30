@@ -167,6 +167,11 @@ const FIXTURES_COMO_TEXTO = [
   // agenda_correcao_2910_p2.sql conferir que a cópia só acrescenta os blocos "-- CORREÇÃO 29/10 (P2):" e rodar a definição
   // de antes como pg_temp (fora de ligado, byte a byte). A de agenda_simular (mig_leituras_fase1) já está acima.
   ['agenda_teste.mig_leituras_fase6', '../../supabase/migrations/20261029100800_agenda_fase6_leituras.sql'],
+  // Correção de 29/10 (P3): a fonte de agenda_propor recriada na 20261030100200 (a correção C1 da Fase 6, a mais nova), para o
+  // agenda_correcao_2910_p3.sql conferir que a cópia só acrescenta os blocos "-- CORREÇÃO 29/10 (P3):" e rodar a definição de
+  // antes como pg_temp (sem reserva, byte a byte). As de _agenda_encaixar (mig_motor_fase2), _agenda_vigia_limpeza
+  // (mig_detector_fase4) e _agenda_vigia_padrao_do_dono (mig_conferencia_fase2) já estão acima.
+  ['agenda_teste.mig_correcao_calculo_fase6', '../../supabase/migrations/20261029100900_agenda_fase6_correcao_calculo.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */
