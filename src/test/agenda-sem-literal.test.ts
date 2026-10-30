@@ -106,8 +106,9 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     onde: 'agenda_vigiar',
     casou: '1000',
     // Correção de 29/10 (P5, 20261030100400): agenda_vigiar recriada (+1: a mesma duração da rodada; +1: o tempo de cada
-    // passo, contagens.ms, também em ms).
-    vezes: 3,
+    // passo, contagens.ms, também em ms). Correção de 29/10 (revisão do lote, 20261030100500): recriada de novo (+2: a mesma
+    // cópia; +1: o tempo do passo novo, equipe_sem_dias, em contagens.ms).
+    vezes: 6,
     porque: 'segundos → milissegundos (a duração da rodada e o tempo de cada passo em agenda_vigia_rodadas); não é texto_max nem peca_embutida_acima',
   },
   {
@@ -156,7 +157,8 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     onde: 'agenda_livre_de_verdade',
     casou: '1000',
     // Correção de 29/10 (P2, 20261030100100): agenda_livre_de_verdade reescrita (+1: o mesmo ms do custo, no livre do plano).
-    vezes: 2,
+    // Correção de 29/10 (revisão do lote, 20261030100500): recriada de novo (+1: a mesma cópia).
+    vezes: 3,
     porque: 'segundos → milissegundos (o custo da simulação no resultado, ms; a meta < 2 s é do teste); não é texto_max nem peca_embutida_acima',
   },
   {

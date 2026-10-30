@@ -102,6 +102,7 @@ end $f$;
 -- (Fase 5, P5) o corpo sem os blocos "-- FASE 5: … -- FASE 5: fim" (P5 recriou _agenda_rascunho_frase e _agenda_mudancas em 20261028100500).
 create function pg_temp.sem_fase5(p_corpo text) returns text[] language plpgsql as $f$
 declare
+  v_rev boolean := false;  -- CORREÇÃO 29/10 (revisão): dentro de um bloco da revisão do lote
   v_c6 boolean := false;  -- CORREÇÃO FASE 6 (C2): dentro de um bloco da correção da Fase 6
   v_b text[] := '{}'; v_bloco boolean := false; l text;
 begin
@@ -119,6 +120,18 @@ begin
       if l ~ '^\s*-- FASE 5: fim' then v_bloco := false; end if;
       continue;
     end if;
+    -- CORREÇÃO 29/10 (revisão): os blocos da revisão do lote (20261030100500) também saem, e a linha que um deles
+    -- trocou ("-- antes: <a linha>", com o mesmo recuo) volta ao lugar
+    if not v_rev and l ~ '^\s*-- CORREÇÃO 29/10 \(revisão\):' and l !~ '^\s*-- CORREÇÃO 29/10 \(revisão\): fim' then
+      v_rev := true; continue;
+    end if;
+    if v_rev then
+      if l ~ '^\s*-- CORREÇÃO 29/10 \(revisão\): fim' then v_rev := false;
+      elsif l ~ '^\s*-- antes: ' then v_b := v_b || regexp_replace(l, '^(\s*)-- antes: ', '\1');
+      end if;
+      continue;
+    end if;
+    -- CORREÇÃO 29/10 (revisão): fim
     v_b := v_b || l;
   end loop;
   return v_b;

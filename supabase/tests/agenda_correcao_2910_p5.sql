@@ -72,6 +72,7 @@ end $f$;
 -- As linhas fora dos blocos "-- CORREÇÃO 29/10 (P5): … -- CORREÇÃO 29/10 (P5): fim".
 create function pg_temp.sem_blocos(p text) returns text language plpgsql immutable as $f$
 declare
+  v_rev boolean := false;  -- CORREÇÃO 29/10 (revisão): dentro de um bloco da revisão do lote
   v_fora text[] := '{}';
   v_dentro boolean := false;
   l text;
@@ -85,6 +86,18 @@ begin
       if ltrim(l) like '-- CORREÇÃO 29/10 (P5): fim%' then v_dentro := false; end if;
       continue;
     end if;
+    -- CORREÇÃO 29/10 (revisão): os blocos da revisão do lote (20261030100500) também saem, e a linha que um deles
+    -- trocou ("-- antes: <a linha>", com o mesmo recuo) volta ao lugar
+    if not v_rev and l ~ '^\s*-- CORREÇÃO 29/10 \(revisão\):' and l !~ '^\s*-- CORREÇÃO 29/10 \(revisão\): fim' then
+      v_rev := true; continue;
+    end if;
+    if v_rev then
+      if l ~ '^\s*-- CORREÇÃO 29/10 \(revisão\): fim' then v_rev := false;
+      elsif l ~ '^\s*-- antes: ' then v_fora := v_fora || regexp_replace(l, '^(\s*)-- antes: ', '\1');
+      end if;
+      continue;
+    end if;
+    -- CORREÇÃO 29/10 (revisão): fim
     v_fora := v_fora || l;
   end loop;
   return array_to_string(v_fora, E'\n');
@@ -275,8 +288,8 @@ begin
       not (r -> 'contagens' ? 'ms') and not (r -> 'contagens' ? 'memoria') and r -> 'contagens' ? 'material'
       and coalesce(current_setting('agenda.rodada', true), '') = '' and coalesce(current_setting('agenda.rodada_pront', true), '') = '',
       (r -> 'contagens')::text);
-    v_res := pg_temp.ok(v_res, 'T1 a linha da rodada guarda o tempo de cada um dos 15 passos (ms, inteiro, nenhum negativo, a soma cabe na duração)',
-      (select count(*) = 15 and bool_and(jsonb_typeof(e.value) = 'number' and (e.value)::int >= 0) from jsonb_each(v_ms) e)
+    v_res := pg_temp.ok(v_res, 'T1 a linha da rodada guarda o tempo de cada um dos 15 passos (16 com o equipe_sem_dias da revisão, 20261030100500; ms, inteiro, nenhum negativo, a soma cabe na duração)',
+      (select count(*) = 15 + case when to_regprocedure('public._agenda_vigia_equipe_sem_dias(date, timestamptz)') is null then 0 else 1 end and bool_and(jsonb_typeof(e.value) = 'number' and (e.value)::int >= 0) from jsonb_each(v_ms) e)
       and (select sum((e.value)::int) from jsonb_each(v_ms) e)
           <= (select x.duracao_ms + 15 from public.agenda_vigia_rodadas x where x.rotina = 'vigia' and x.p_agora = pg_temp.em(c_hoje, '17:00')),
       v_ms::text);

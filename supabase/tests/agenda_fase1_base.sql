@@ -439,6 +439,11 @@ begin
      and c.conname not in ('agenda_config_gestor_aviso_inicio_check', 'agenda_config_gestor_aviso_fim_check',
                            'agenda_config_gestor_aviso_dia_max_check', 'agenda_config_gestor_aviso_texto_max_check')
      -- CORREÇÃO 29/10 (P4): fim
+     -- CORREÇÃO 29/10 (revisão): os 3 CHECKs novos de agenda_config (a pausa do aviso durante o fechamento, 20261030100500)
+     -- têm o caso deles em agenda_correcao_2910_revisao.sql (C2)
+     and c.conname not in ('agenda_config_gestor_aviso_pausa_inicio_check', 'agenda_config_gestor_aviso_pausa_fim_check',
+                           'agenda_config_gestor_aviso_pausa_ordem_check')
+     -- CORREÇÃO 29/10 (revisão): fim
      -- FASE 6: os 45 que a Fase 6 pôs em agenda_config e os 3 de os_planejamento (20261029100000) têm o caso deles em
      -- agenda_fase6_base.sql (B1z cobra os 45 pelo nome; o outro B1z, os de os_planejamento e das tabelas novas).
      and not (c.conname = any (array(

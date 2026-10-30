@@ -501,7 +501,8 @@ begin
       and v_txt like '%' || E'\n' || 'Ocupa a equipe: %' and v_txt not like '%Livre ela não está%' and v_txt not like '%pela simulação%', v_txt);
     v_txt := pg_temp.ver(null, 'semana', d30);
     v_res := pg_temp.ok(v_res, 'V15 a semana em ligado: a linha do livre é a do plano, uma vez só, no lugar da fila em faixa',
-      v_txt like '%' || E'\n' || 'Livre de verdade: na semana de %' and v_txt not like '%Livre ela não está%'
+      -- CORREÇÃO 29/10 (revisão, 20261030100500): a 1ª semana pela metade sai com o rótulo do *livre* ("de qua 04 a sex 06/11")
+      v_txt like '%' || E'\n' || 'Livre de verdade: de qua 04 a sex 06/11, %; na semana de 09/11, %' and v_txt not like '%Livre ela não está%'
       and (char_length(v_txt) - char_length(replace(v_txt, 'Livre de verdade', ''))) / char_length('Livre de verdade') = 1, v_txt);
     update public.agenda_config set modo_proposta = 'sombra' where id;
     v_txt := pg_temp.ver('livre', null, d30);
@@ -530,7 +531,8 @@ begin
       r ->> 'fonte' = 'simulacao' and r ->> 'base' = 'plano' and jsonb_array_length(r -> 'semanas') = 3
       and extract(isodow from (r #>> '{semanas,0,seg}')::date) = 1
       and r #> '{nao_ocupam,prontos}' @> '["OS-00112"]'::jsonb
-      and r ->> 'texto' like 'Livre de verdade: na semana de %; na de %.'
+      -- CORREÇÃO 29/10 (revisão, 20261030100500): a 1ª semana pela metade sai com o rótulo do *livre* ("de qua 04 a sex 06/11")
+      and r ->> 'texto' like 'Livre de verdade: de qua 04 a sex 06/11, %; na semana de 09/11, %.'
       and r ->> 'texto_completo' like '%' || E'\n' || 'Pront%sem lugar no plano (não entra% na conta): %Nelson%',
       r::text);
     update public.agenda_config set modo_proposta = 'sombra' where id;

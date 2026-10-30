@@ -133,6 +133,7 @@ end $f$;
 -- As linhas fora dos blocos "-- CORREÇÃO 29/10 (P3): … -- CORREÇÃO 29/10 (P3): fim".
 create function pg_temp.sem_blocos(p text) returns text language plpgsql immutable as $f$
 declare
+  v_rev boolean := false;  -- CORREÇÃO 29/10 (revisão): dentro de um bloco da revisão do lote
   v_fora text[] := '{}';
   v_dentro boolean := false;
   l text;
@@ -146,6 +147,18 @@ begin
       if ltrim(l) like '-- CORREÇÃO 29/10 (P3): fim%' then v_dentro := false; end if;
       continue;
     end if;
+    -- CORREÇÃO 29/10 (revisão): os blocos da revisão do lote (20261030100500) também saem, e a linha que um deles
+    -- trocou ("-- antes: <a linha>", com o mesmo recuo) volta ao lugar
+    if not v_rev and l ~ '^\s*-- CORREÇÃO 29/10 \(revisão\):' and l !~ '^\s*-- CORREÇÃO 29/10 \(revisão\): fim' then
+      v_rev := true; continue;
+    end if;
+    if v_rev then
+      if l ~ '^\s*-- CORREÇÃO 29/10 \(revisão\): fim' then v_rev := false;
+      elsif l ~ '^\s*-- antes: ' then v_fora := v_fora || regexp_replace(l, '^(\s*)-- antes: ', '\1');
+      end if;
+      continue;
+    end if;
+    -- CORREÇÃO 29/10 (revisão): fim
     v_fora := v_fora || l;
   end loop;
   return array_to_string(v_fora, E'\n');
@@ -388,9 +401,10 @@ begin
     from (select unnest(regexp_matches(pg_get_constraintdef(c.oid), '''([a-z_]+)''', 'g')) as t
             from pg_constraint c where c.conname = 'agenda_perguntas_tipo_check') x
    where public._agenda_modo_da_pergunta(x.t, x.t || ':x') is null;
-  v_res := pg_temp.ok(v_res, 'S4 (c) todo tipo de pergunta da lista fechada (26) tem o modo de quem a faz',
+  v_res := pg_temp.ok(v_res, 'S4 (c) todo tipo de pergunta da lista fechada (26; 27 com a equipe_sem_dias da revisão, 20261030100500) tem o modo de quem a faz',
     v_t is null and (select count(*) from (select unnest(regexp_matches(pg_get_constraintdef(c.oid), '''([a-z_]+)''', 'g'))
-                                             from pg_constraint c where c.conname = 'agenda_perguntas_tipo_check') y) = 26, v_t);
+                                             from pg_constraint c where c.conname = 'agenda_perguntas_tipo_check') y)
+          = 26 + case when to_regprocedure('public._agenda_vigia_equipe_sem_dias(date, timestamptz)') is null then 0 else 1 end, v_t);
   v_res := pg_temp.igual(v_res, 'S5 (c) o modo de cada grupo: crítica do plano, vigia, chegou? do fornecedor, material, diária, equipe, cliente, aprendizado',
     (select string_agg(public._agenda_modo_da_pergunta(t, c), ',' order by o)
        from unnest(array['nao_cabe', 'material_conferir', 'chegou', 'chegou', 'fornecedores_prazo', 'diaria', 'concluir', 'cliente_aviso', 'aprendizado'],

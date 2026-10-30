@@ -267,8 +267,12 @@ begin
       and v_fila.source_ref_id = v_reg.id and v_reg.fila_id = v_fila.id and v_reg.estado = 'enfileirada'
       and v_reg.rodada = pg_temp.em(c_hoje, '16:45') and v_reg.dia = c_hoje and v_reg.telefone = c_fone and v_reg.com_perguntas
       and v_reg.pergunta_ids = v_pids and v_reg.acao_ids = array[v_acao], e::text || ' | ' || to_jsonb(v_fila)::text);
-    v_res := pg_temp.ok(v_res, 'H6 a ação fica contada desde já (contada_via aviso, às 16:45); o prazo do *desfaz* ainda o da publicação (sex 30/10 16:30)',
-      (select contada_via = 'aviso' and contada_em = pg_temp.em(c_hoje, '16:45') and desfazivel_ate = v_ate
+    -- CORREÇÃO 29/10 (revisão, 20261030100500): o prazo do *desfaz* já conta do enfileirar (sex 30/10 16:45, não mais o da
+    -- publicação, sex 16:30): o *desfaz* que o aviso promete vale desde que ele sai (agenda_correcao_2910_revisao.sql, D)
+    v_res := pg_temp.ok(v_res, 'H6 a ação fica contada desde já (contada_via aviso, às 16:45); o prazo do *desfaz* conta daqui (sex 30/10 16:45; era o da publicação, sex 16:30)',
+      (select contada_via = 'aviso' and contada_em = pg_temp.em(c_hoje, '16:45')
+              and desfazivel_ate = case when to_regprocedure('public._agenda_aviso_espera_o_fechamento(timestamptz)') is null
+                                        then v_ate else pg_temp.em(c_sexta, '16:45') end
          from public.agenda_acoes where id = v_acao)
       and v_ate = pg_temp.em(c_sexta, '16:30'), v_ate::text);
     v_t2 := (select y ->> 'texto' from jsonb_array_elements(public.agenda_textos_do_fechamento(c_hoje, null) -> 'linhas') y
@@ -686,6 +690,8 @@ select 'C1 os parâmetros do aviso: 09:30, 19:30, 3 por dia, 2400 letras; NOT NU
        and c.gestor_aviso_texto_max = 2400
        and (select bool_and(a.attnotnull and a.atthasdef) from pg_attribute a
              where a.attrelid = 'public.agenda_config'::regclass and a.attname like 'gestor_aviso_%' and not a.attisdropped
+               -- (a pausa durante o fechamento é da revisão do lote, 20261030100500: agenda_correcao_2910_revisao.sql, C1)
+               and a.attname not like 'gestor_aviso_pausa_%'
              having count(*) = 4),
        to_jsonb(c)::text
   from public.agenda_config c where c.id;

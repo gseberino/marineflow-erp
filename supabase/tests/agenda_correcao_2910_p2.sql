@@ -145,6 +145,7 @@ end $f$;
 -- As linhas fora dos blocos "-- CORREÇÃO 29/10 (P2): … -- CORREÇÃO 29/10 (P2): fim".
 create function pg_temp.sem_blocos(p text) returns text language plpgsql immutable as $f$
 declare
+  v_rev boolean := false;  -- CORREÇÃO 29/10 (revisão): dentro de um bloco da revisão do lote
   v_fora text[] := '{}';
   v_dentro boolean := false;
   l text;
@@ -158,6 +159,18 @@ begin
       if ltrim(l) like '-- CORREÇÃO 29/10 (P2): fim%' then v_dentro := false; end if;
       continue;
     end if;
+    -- CORREÇÃO 29/10 (revisão): os blocos da revisão do lote (20261030100500) também saem, e a linha que um deles
+    -- trocou ("-- antes: <a linha>", com o mesmo recuo) volta ao lugar
+    if not v_rev and l ~ '^\s*-- CORREÇÃO 29/10 \(revisão\):' and l !~ '^\s*-- CORREÇÃO 29/10 \(revisão\): fim' then
+      v_rev := true; continue;
+    end if;
+    if v_rev then
+      if l ~ '^\s*-- CORREÇÃO 29/10 \(revisão\): fim' then v_rev := false;
+      elsif l ~ '^\s*-- antes: ' then v_fora := v_fora || regexp_replace(l, '^(\s*)-- antes: ', '\1');
+      end if;
+      continue;
+    end if;
+    -- CORREÇÃO 29/10 (revisão): fim
     v_fora := v_fora || l;
   end loop;
   return array_to_string(v_fora, E'\n');
@@ -275,14 +288,14 @@ begin
       'Um serviço de 2 dias com Roberto (são 2 diárias de equipe): pelo plano de agora, cabe em seg 09 e qua 11/11, com Roberto; você abre e fecha.' || c_fim);
     v_res := pg_temp.igual(v_res, 'H10 1 dia com o Roberto: ter 03/11 (o 1º dia que a agenda ainda pode mudar)',
       pg_temp.sim('{"dias": 1, "com_quem": ["Roberto"]}', c_hoje) ->> 'texto',
-      'Um serviço de 1 dia com Roberto (são 1 diária de equipe): pelo plano de agora, cabe em ter 03/11, com Roberto; você abre e fecha.' || c_fim);
+      'Um serviço de 1 dia com Roberto (é 1 diária de equipe): pelo plano de agora, cabe em ter 03/11, com Roberto; você abre e fecha.' || c_fim);
     v_res := pg_temp.igual(v_res, 'H11 você e o Roberto: com você o tempo todo o motor não marca (sem os seus dias em campo) e diz como cabe com você abrindo e fechando',
       pg_temp.sim('{"dias": 2, "com_quem": ["eu", "Roberto"]}', c_hoje) ->> 'texto',
       'Um serviço de 2 dias com você e Roberto (são 2 diárias de equipe; você não entra nessa conta): com você o tempo todo não consigo encaixar: '
       || 'não sei em que dias você fica em campo. Com você só abrindo e fechando, pelo plano de agora, cabe em seg 09 e qua 11/11, com Roberto; você abre e fecha.' || c_fim);
     v_res := pg_temp.igual(v_res, 'H12 meio dia com o João: a semana dele está tomada pela reserva, e o motor põe o Roberto no lugar (a frase diz)',
       pg_temp.sim('{"dias": 0.5, "com_quem": ["João"]}', c_hoje) ->> 'texto',
-      'Um serviço de meio dia com João (são 0,5 diárias de equipe): pelo plano de agora, cabe em ter 03/11, com Roberto (no lugar de João); você abre e fecha.' || c_fim);
+      'Um serviço de meio dia com João (é meia diária de equipe): pelo plano de agora, cabe em ter 03/11, com Roberto (no lugar de João); você abre e fecha.' || c_fim);
     v_res := pg_temp.igual(v_res, 'H13 5 dias: não cabe até o fim do horizonte, nem acima da carga de sempre',
       pg_temp.sim('{"dias": 5}', c_hoje) ->> 'texto',
       'Um serviço de 5 dias (conto 2 pessoas, 10 diárias, porque você não disse com quem): não cabe até ter 15/12 com a equipe de agora, nem acima da carga de sempre.' || c_fim);

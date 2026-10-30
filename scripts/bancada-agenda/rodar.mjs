@@ -175,6 +175,16 @@ const FIXTURES_COMO_TEXTO = [
   // Correção de 29/10 (P4): a fonte do gatilho _agenda_acoes_so_desfaz recriado na 20261030100300 (as tabelas da Fase 3, a mais
   // nova), para o agenda_correcao_2910_p4.sql conferir que a cópia só acrescenta o bloco "-- CORREÇÃO 29/10 (P4):".
   ['agenda_teste.mig_tabelas_fase3', '../../supabase/migrations/20261026100000_agenda_fase3_tabelas.sql'],
+  // Correção de 29/10 (revisão do lote): as fontes das 9 recriadas da 20261030100500, para o agenda_correcao_2910_revisao.sql
+  // conferir que as cópias só mudam nos blocos "-- CORREÇÃO 29/10 (revisão):" e rodar as definições de antes como pg_temp:
+  // _agenda_mudancas (a correção de textos da Fase 6), agenda_livre_de_verdade e agenda_simular (P2), _agenda_modo_da_pergunta
+  // e _agenda_vigia_limpeza (P3), agenda_aviso_pecas e agenda_aviso_enfileirar (P4) e agenda_vigiar (P5). A de
+  // _agenda_linhas_do_fechamento (mig_leituras_fase5) já está acima.
+  ['agenda_teste.mig_correcao_textos_fase6', '../../supabase/migrations/20261029100950_agenda_fase6_correcao_textos.sql'],
+  ['agenda_teste.mig_correcao_livre', '../../supabase/migrations/20261030100100_agenda_correcao_livre.sql'],
+  ['agenda_teste.mig_correcao_motor', '../../supabase/migrations/20261030100200_agenda_correcao_motor.sql'],
+  ['agenda_teste.mig_correcao_aviso', '../../supabase/migrations/20261030100300_agenda_correcao_aviso.sql'],
+  ['agenda_teste.mig_correcao_desempenho', '../../supabase/migrations/20261030100400_agenda_correcao_desempenho.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */
