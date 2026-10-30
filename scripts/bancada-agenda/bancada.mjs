@@ -69,6 +69,9 @@ export const FORA_DA_BANCADA = new Set([
   // Fase 6 (P8; o nome é o da spec-fase6 §5.8, fixado no P1): modo_aprendizado em sombra. O teste dela a roda numa
   // subtransação; na bancada cada teste liga o modo que precisa.
   '20261029101000_agenda_fase6_sombra.sql',
+  // Fase 7a (P7; o nome é o da spec-fase7a §9 e do fase7-registro §3, fixado no P1): os 5 modos do gestor em sombra. O teste dela
+  // a roda numa subtransação; na bancada cada teste liga o modo que precisa.
+  '20261031100990_agenda_fase7a_sombra.sql',
   // Merge do main (28/10/2026): migrations de OUTRAS sessões, já aplicadas em produção, que caíram depois de PRIMEIRA
   // pela data. Mexem em diárias (conta corrente, recibo, lote, anotação × CPF) e no agrupar OS — tabelas que a bancada
   // não modela (anotacoes_do_extrato, orcamento_agrupamentos, os_agrupamento_movidos…) e funções que a agenda não chama

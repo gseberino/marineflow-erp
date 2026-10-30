@@ -190,6 +190,14 @@ const FIXTURES_COMO_TEXTO = [
   // nos blocos "-- CORREÇÃO 30/10 (equipe):" e rodar a definição de antes como pg_temp. As das 3 leituras da Fase 1
   // (agenda_capacidade, agenda_capacidade_semanal e agenda_resolver_pessoa) são a mig_prontidao_fase1, já acima.
   ['agenda_teste.mig_correcao_revisao', '../../supabase/migrations/20261030100500_agenda_correcao_revisao.sql'],
+  // Fase 7a (P1): a carteira REAL de qui 29/10 16:52 (gerada por gerar-replay-2910.mjs do SELECT de produção: as 11 OS, os 9
+  // orçamentos grandes, a equipe pela semente, as 12 reservas do Lenine, as 3 perguntas e a config de produção; tira o mundo
+  // sintético de 23/10 antes) e a sintética por cima dela (o rastro, a dupla dita, o deslocamento, o prometido firme, o sinal
+  // não pago, as 3 OS do mesmo diarista, a ficha enfileirada e, com agenda_teste.fase7a_sabado = 'on', o sábado do Roberto).
+  // Os pacotes seguintes acrescentam aqui as migrations de onde copiam os corpos que recriam (spec-fase7a §5.14) como
+  // mig_*_fase7a; as que já estão acima não se repetem (a de _agenda_perguntas_antes, recriada no P1, é a mig_tabelas_fase3).
+  ['agenda_teste.replay2910', 'fixture-replay-2910.sql'],
+  ['agenda_teste.fase7a', 'fixture-fase7a.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */
