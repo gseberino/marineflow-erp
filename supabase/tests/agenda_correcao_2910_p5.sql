@@ -23,7 +23,9 @@
 -- Sempre (com ou sem as fixtures):
 --   K  as cópias: os_prontidao e agenda_vigiar só acrescentam os blocos "-- CORREÇÃO 29/10 (P5):"
 --   G  o que torna a memória certa: a conta da prontidão (todas as funções que ela chama) não lê relógio, variável de sessão
---      nem SQL dinâmico, não chama função volátil e não lê nenhuma das 5 tabelas que a marca ignora
+--      nem SQL dinâmico, não chama função volátil e não lê nenhuma das 5 tabelas que a marca ignora. FASE 7 (7a P2): a única
+--      variável lida é a do portão do gestor (agenda.gestor, em _agenda_gestor_regra/_agenda_gestor_modo), e G3 prova que nada
+--      da rodada da vigia a escreve (constante na rodada = a memória continua certa)
 --   P  portas: as peças da memória, ninguém de fora (nem o service_role); as 2 recriadas com as portas de antes; com
 --      agenda.rodada posta à mão, a prontidão de um login recusa (42501)
 --   C  o interruptor: vigia_memoria, NOT NULL, ligado por padrão
@@ -449,7 +451,15 @@ with recursive g(oid) as (
     join pg_proc p2 on p2.proname = m[1] and p2.pronamespace = 'public'::regnamespace
 ),
 corpos as (
-  select p.proname, p.provolatile, regexp_replace(pg_temp.sem_blocos(p.prosrc), '--[^\n]*', '', 'g') as src
+  select p.proname, p.provolatile,
+         -- FASE 7 (7a P2): o portão do gestor (_agenda_gestor_regra, _agenda_gestor_modo) lê a variável da simulação da sombra,
+         -- agenda.gestor; os_duracao_sugerida o chama desde 20261031100100. Só essa leitura, só no portão, sai da conta: a
+         -- variável é da transação e nada da rodada da vigia a escreve (G3), então fica constante enquanto a memória vale.
+         case when p.proname in ('_agenda_gestor_regra', '_agenda_gestor_modo')
+              then regexp_replace(regexp_replace(pg_temp.sem_blocos(p.prosrc), '--[^\n]*', '', 'g'),
+                                  'current_setting\(''agenda\.gestor'', true\)', '', 'g')
+              else regexp_replace(pg_temp.sem_blocos(p.prosrc), '--[^\n]*', '', 'g') end as src
+         -- FASE 7 (7a P2): fim
     from g join pg_proc p on p.oid = g.oid
 ),
 vistas as (
@@ -471,6 +481,27 @@ select 'G1 a conta da prontidão (' || count(*) || ' funções) não lê relógi
                     or src ~* '\mexecute\M'
                     or src ~ '\m(agenda_perguntas|agenda_acoes|agenda_propostas|agenda_vigia_rodadas|app_error_logs)\M')
   from corpos;
+-- FASE 7 (7a P2): a variável do portão do gestor não muda dentro da rodada da vigia — nada que agenda_vigiar chama (pelo nome, até
+-- o fim; os passos, que ela chama por format('_agenda_vigia_' || passo), entram pelo prefixo) escreve agenda.gestor (quem escreve
+-- é a simulação da sombra do gestor, num job próprio). O dia em que a vigia chamar a sombra, a memória da prontidão passa a
+-- precisar da variável na marca, e este teste avisa.
+with recursive g(oid) as (
+  select p.oid from pg_proc p
+   where p.pronamespace = 'public'::regnamespace and (p.proname = 'agenda_vigiar' or p.proname like '\_agenda\_vigia\_%')
+  union
+  select p2.oid
+    from g join pg_proc p on p.oid = g.oid
+    cross join lateral regexp_matches(regexp_replace(p.prosrc, '--[^\n]*', '', 'g'), '([a-z_][a-z0-9_]*)\s*\(', 'g') m
+    join pg_proc p2 on p2.proname = m[1] and p2.pronamespace = 'public'::regnamespace
+)
+insert into _resultado
+select 'G3 nada da rodada da vigia (' || count(*) || ' funções) escreve a variável do portão do gestor (agenda.gestor): ela fica constante enquanto a memória vale',
+       count(*) > 50
+       and bool_and(regexp_replace(p.prosrc, '--[^\n]*', '', 'g') !~* 'set_config\(\s*''agenda\.gestor''')
+       and exists (select 1 from g g2 where g2.oid = 'public.os_prontidao(uuid, date)'::regprocedure::oid),
+       string_agg(p.proname, ', ') filter (where regexp_replace(p.prosrc, '--[^\n]*', '', 'g') ~* 'set_config\(\s*''agenda\.gestor''')
+  from g join pg_proc p on p.oid = g.oid;
+-- FASE 7 (7a P2): fim
 insert into _resultado
 select 'G2 a marca ignora exatamente as 5 tabelas (a pergunta, a ação, a proposta, a linha da rodada, o erro); todas existem em public',
        p.prosrc like '%c.relname not in (''agenda_perguntas'', ''agenda_acoes'', ''agenda_propostas'', ''agenda_vigia_rodadas'', ''app_error_logs'')%'

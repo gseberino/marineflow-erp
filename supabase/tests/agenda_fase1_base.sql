@@ -947,7 +947,11 @@ insert into _definer_da_agenda values
   -- FASE 7 (7a P1, 20261031100000): o gravador único do diário do gestor (escreve agenda_gestor_dia, que é só leitura para
   -- authenticated; sem grant a ninguém, nem service_role: só os passos do gestor o chamam). O portão, o modo, o dia avisado, os
   -- validadores e o ampliador são invoker. agenda_fase7a_base.sql prova as portas.
-  ('_agenda_gestor_dia_gravar');
+  ('_agenda_gestor_dia_gravar'),
+  -- FASE 7 (7a P2, 20261031100100): a palavra *<nome> com dupla* / *sem dupla* (escreve os_planejamento.dupla_* e a ação dupla;
+  -- confere o administrador dentro; só service_role). O nome do serviço, a peça embutida, a situação e a estimativa são
+  -- invoker. agenda_fase7a_duracao.sql prova as portas.
+  ('agenda_dupla_dita');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',
