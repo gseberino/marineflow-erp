@@ -590,3 +590,19 @@ Deno.test("Fase 6 (P8) — agenda_ver tem o foco aprendizado (enum e descrição
     }
   }
 });
+
+// Fase 7a (P7, spec-fase7a.md §7): o foco gestor em agenda_ver (no enum e na descrição); nenhuma ferramenta nova e nenhuma escreve
+// modo, regra ou parâmetro do gestor (ligar é o OK do roteiro; *gestor, só propor* é palavra do dono, antes do modelo).
+Deno.test("Fase 7a (P7) — agenda_ver tem o foco gestor (enum e descrição: só lê); nenhuma ferramenta muda o gestor", () => {
+  const ver = agendaProducaoTools.find((t) => t.name === "agenda_ver")!;
+  const foco = ((ver.input_schema as { properties: { foco: { enum: string[] } } }).properties.foco.enum);
+  assert(foco.includes("gestor"));
+  assertStringIncludes(ver.description, "o que o gestor da agenda marcou ou marcaria sozinho e por quê (foco gestor");
+  for (const t of agendaProducaoTools) {
+    const props = Object.keys((t.input_schema as { properties?: Record<string, unknown> }).properties ?? {});
+    for (const p of ["modo_marcar_sozinho", "gestor_so_propor", "marcar_regras", "so_propor", "dupla_dita", "modo_vaga_fechamento"]) {
+      assert(!props.includes(p), `${t.name}: ${p}`);
+    }
+  }
+  assert(!agendaProducaoTools.some((t) => /gestor|dupla/.test(t.name)), "nenhuma ferramenta nova do gestor");
+});

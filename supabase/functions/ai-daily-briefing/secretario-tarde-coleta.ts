@@ -394,7 +394,19 @@ export function agendaDoFechamento(data: unknown): AgendaDoFechamento | null {
   // (24/10/2026, Fase 2, P5) as linhas da agenda (decisão, dia, semana, mudanças, pergunta), cada uma com o seu modo; a
   // que vier fora da forma fica de fora (nunca uma linha pela metade). Sem o campo (a migration da Fase 2 não aplicada) = [].
   const linhas = linhasDaAgenda(r.linhas);
-  return { modo: r.modo, cauda, semana, ...(linhas.length ? { linhas } : {}) };
+  // (30/10/2026, Fase 7a, P7) as vagas garantidas da agenda (0 a 2) e, em sombra, as que ela teria: só repassa o que o banco disse
+  const vagas = vagasDaAgenda(r.vagas_garantidas);
+  const teria = vagasDaAgenda(r.vaga_teria);
+  return {
+    modo: r.modo, cauda, semana, ...(linhas.length ? { linhas } : {}), ...(vagas > 0 ? { vagas_garantidas: vagas } : {}),
+    ...(teria > 0 ? { vaga_teria: teria } : {}),
+  };
+}
+
+/** (Fase 7a, P7) Um número de vagas do banco: inteiro de 0 a 2; o que vier fora disso (ausente, texto, negativo) = 0. */
+export function vagasDaAgenda(v: unknown): number {
+  const n = typeof v === "number" ? v : NaN;
+  return Number.isInteger(n) && n >= 0 && n <= 2 ? n : 0;
 }
 
 /** Até quantos caracteres uma linha da agenda pode ter no fechamento (o banco corta em 480; o resto não entra). */

@@ -1085,3 +1085,96 @@ Deno.test("Correção 29/10 (P1) — webhook: as frases de livre e da semana que
     }
   }
 });
+
+// ─── Fase 7a (P7, spec-fase7a.md §7): o gestor da agenda e a dupla ─────────────────────────────────────────────────
+// *agenda gestor* e *o que você marcaria* são de VER (valem com "?"); *gestor, só propor*, *gestor, pode marcar* e
+// *<nome> com/sem dupla* AGEM (com "?" vão ao modelo). O normalizarComando não tira a vírgula do meio: as duas formas valem.
+
+const verGestor: ComandoDaAgenda = { comando: "ver", periodo: null, foco: "gestor", pessoa: null };
+const soPropor: ComandoDaAgenda = { comando: "gestor", so_propor: true };
+const podeMarcar: ComandoDaAgenda = { comando: "gestor", so_propor: false };
+
+const TABELA_F7A: Array<[string, ComandoDaAgenda]> = [
+  ["agenda gestor", verGestor],
+  ["Agenda gestor?", verGestor],
+  ["*agenda gestor*", verGestor],
+  ["O que você marcaria?", verGestor],
+  ["🎤 O que você marcaria.", verGestor],
+  ["gestor, só propor", soPropor],
+  ["Gestor, só propor.", soPropor],
+  ["gestor só propor", soPropor],
+  ["*gestor, só sugerir*", soPropor],
+  ["gestor so sugerir", soPropor],
+  ["gestor, pode marcar", podeMarcar],
+  ["Gestor pode marcar", podeMarcar],
+  ["gestor volta a marcar", podeMarcar],
+  ["🎤 Gestor, volta a marcar.", podeMarcar],
+  ["Lenine com dupla", { comando: "dupla", alvo: "lenine", dupla: true }],
+  ["o Lenine com dupla", { comando: "dupla", alvo: "lenine", dupla: true }],
+  ["*Lenine sem dupla*", { comando: "dupla", alvo: "lenine", dupla: false }],
+  ["OS-00074 com dupla", { comando: "dupla", alvo: "os-00074", dupla: true }],
+  ["Rodrigo Silva com dupla", { comando: "dupla", alvo: "rodrigo silva", dupla: true }],
+];
+
+Deno.test("Fase 7a (P7) — lerComandoDaAgenda: *agenda gestor* (de ver), *gestor, só propor* / *pode marcar* e *<nome> com/sem dupla*", () => {
+  for (const [texto, esperado] of TABELA_F7A) assertEquals(lerComandoDaAgenda(texto), esperado, texto);
+  for (const f of ["agenda gestor", "o que voce marcaria", "gestor, so propor", "gestor so propor", "gestor, pode marcar"]) {
+    assert(frasesDaAgenda().includes(f), `fora da tabela: ${f}`);
+  }
+});
+
+// A conversa sobre o gestor, as perguntas e o alvo que não é de OS NÃO são palavra: vão ao modelo.
+const CONVERSA_F7A = [
+  "gestor", "o gestor", "gestor?", "gestor, só propor?", "gestor só propor?", "gestor pode marcar?", "Lenine com dupla?",
+  "Lenine sem dupla?", "liga o gestor", "desliga o gestor", "o gestor marcou?", "gestor marca o Lenine", "com dupla", "sem dupla",
+  "dupla", "b com dupla", "o item C com dupla", "faz o Lenine com dupla do Roberto", "vai com dupla no Nelson",
+  "Lenine com a dupla", "Lenine com dupla de manhã", "manda o Roberto e o João em dupla", "desfaz Lenine com dupla",
+  "o que você marcaria pro Lenine?", "agenda do gestor", "gestor da agenda", "o pix do Roberto com dupla",
+];
+
+Deno.test("Fase 7a (P7) — a conversa sobre o gestor, as perguntas e o alvo que não é de OS vão ao modelo", () => {
+  for (const t of CONVERSA_F7A) assertEquals(lerComandoDaAgenda(t), null, t);
+});
+
+Deno.test("Fase 7a (P7) — as palavras novas não são do secretário, da confirmação, do menu, do PDF, dos comprovantes nem da pergunta ativa", () => {
+  const formas = TABELA_F7A.map(([t]) => t);
+  for (const t of [...formas, ...formas.map((x) => `*${x.replace(/^\*|\*$/g, "")}*`), "gestor", "dupla"]) {
+    assertEquals(lerComandoDoSecretario(t), null, `secretário: ${t}`);
+    assertEquals(parseConfirmationReply(t), null, `confirmação: ${t}`);
+    assertEquals(parseOptionReply(t, 9), null, `opção: ${t}`);
+    assertEquals(lerPedidoDePdf(t), null, `pdf: ${t}`);
+    assertEquals(lerComando(t), null, `comprovantes: ${t}`);
+    const n = normalizarResposta(t.replace(/[*_~]/g, ""));
+    assertEquals(lerSimNao(n), null, `sim/não: ${t}`);
+    assertEquals(lerNumero(n, 99), null, `número: ${t}`);
+    assertEquals(pareceRespostaCurta(t), false, `resposta curta: ${t}`);
+    const trava = travaDaConfirmacao(estadoComCmpNoConfirmar(), t, { pending_confirm_action_id: "pend-1" });
+    assertEquals(trava.travar, false, `trava do CMP: ${t}`);
+  }
+  // nenhuma frase fixa de antes passa a ser lida como do gestor ou da dupla, e "sim", "ok" e "1" continuam da confirmação
+  const novas = new Set(["agenda gestor", "o que voce marcaria", "gestor, so propor", "gestor so propor", "gestor, so sugerir",
+                         "gestor so sugerir", "gestor, pode marcar", "gestor pode marcar", "gestor volta a marcar", "gestor, volta a marcar"]);
+  for (const f of frasesDaAgenda().filter((x) => !novas.has(x))) {
+    const c = lerComandoDaAgenda(f);
+    assert(c?.comando !== "gestor" && c?.comando !== "dupla" && !(c?.comando === "ver" && c.foco === "gestor"), f);
+  }
+  for (const t of ["sim", "ok", "1", "não", "2"]) assertEquals(lerComandoDaAgenda(t), null, t);
+  // as palavras de antes continuam lidas como eram ("o que você marcou" é o plano; o *desfaz <nome>* de sempre)
+  assertEquals(lerComandoDaAgenda("o que você marcou"), plano);
+  assertEquals(lerComandoDaAgenda("desfaz Lenine"), { comando: "desfazer", alvo: "lenine" });
+});
+
+Deno.test("Fase 7a (P7) — webhook: *agenda gestor* vai ao assistente com a leitura ligada; o gestor e a dupla, com a agenda automática", async () => {
+  for (const modo of ["sombra", "ligado"]) {
+    assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(modo), "agenda gestor"), true, modo);
+    for (const t of ["gestor, só propor", "gestor pode marcar", "Lenine com dupla"]) {
+      assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(modo, "sombra"), t), true, `${modo}: ${t}`);
+      assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(modo, "desligado"), t), false, `${modo} sem a automática: ${t}`);
+    }
+  }
+  for (const modo of ["desligado", "erro", "sem_tabela"]) {
+    for (const t of ["agenda gestor", "gestor, só propor", "Lenine com dupla"]) {
+      assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(modo, "ligado"), t), false, `${modo}: ${t}`);
+    }
+  }
+});

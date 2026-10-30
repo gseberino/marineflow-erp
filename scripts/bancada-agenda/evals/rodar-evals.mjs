@@ -72,6 +72,8 @@ const FERRAMENTAS = new Map(
 );
 
 export const CASOS = JSON.parse(readFileSync(join(AQUI, 'casos.json'), 'utf8'));
+// (Fase 7a) o replay de 29/10 troca os ids (o administrador é o do replay): nos estados fase7a o autor é ele; nos outros, o de sempre
+const AUTOR_PADRAO = CASOS.autor;
 export const RESPOSTAS = JSON.parse(readFileSync(join(AQUI, 'respostas-modelo.json'), 'utf8'));
 const FIXTURES = join(RAIZ, 'scripts', 'bancada-agenda');
 const POS_RODADA = ler(join(FIXTURES, 'fixture-2310-pos-rodada.sql'));
@@ -85,6 +87,8 @@ const FASE4 = ler(join(FIXTURES, 'fixture-fase4.sql'));
 const FASE5 = ler(join(FIXTURES, 'fixture-fase5.sql'));
 // (Fase 6) a história que o aprendizado mede (executa a da Fase 5 por dentro)
 const FASE6 = ler(join(FIXTURES, 'fixture-fase6.sql'));
+// (Fase 7a, P7) a carteira REAL de qui 29/10 16:52 (fixture-replay-2910.sql, por cima da fixture-2310)
+const REPLAY2910 = ler(join(FIXTURES, 'fixture-replay-2910.sql'));
 /** (Fase 6) os 7 itens do aprendizado (aprendizado_ligados no estado fase6_ligado). */
 const ITENS_DO_APRENDIZADO = ['fator', 'mo', 'presenca', 'fornecedor', 'capacidade_dono', 'aviso_cliente', 'revisao'];
 /** (Fase 5) os 11 tipos da mensagem ao cliente (cliente_tipos_ligados no estado fase5_ligado). */
@@ -726,11 +730,13 @@ const vigiar = (db, quando) => rpc(db, 'agenda_vigiar', {}, relogioDe(null, quan
  *   replay_0104        o estado de sex 02/10 (fixture-replay-0104.sql), modos ligados.
  */
 async function aplicarEstado(db, estado) {
+  CASOS.autor = AUTOR_PADRAO;
   if (estado === 'inicial') return;
   if (estado.startsWith('fase3')) return void await aplicarEstadoDaFase3(db, estado);
   if (estado.startsWith('fase4')) return void await aplicarEstadoDaFase4(db, estado);
   if (estado.startsWith('fase5')) return void await aplicarEstadoDaFase5(db, estado);
   if (estado.startsWith('fase6')) return void await aplicarEstadoDaFase6(db, estado);
+  if (estado.startsWith('fase7a')) return void await aplicarEstadoDaFase7a(db, estado);
   if (estado === 'pos_rodada') return void await db.exec(POS_RODADA);
   if (estado === 'replay_0104') {
     await db.exec(REPLAY_0104);
@@ -850,6 +856,47 @@ async function aplicarEstadoDaFase6(db, estado) {
   }
 }
 
+/** (Fase 7a) as 15 regras do gestor (marcar_regras como a linha nasce). */
+const REGRAS_DO_GESTOR = ['estimativa', 'mo_limpa', 'uma_pessoa', 'diagnostico', 'situacao', 'sem_peca', 'embutida_suposta',
+  'critico_por_valor', 'prazo_padrao', 'compra_firme', 'teto_equipe', 'zona_travada', 'onda', 'escada', 'sinal_cobrar'];
+
+/**
+ * Os estados da Fase 7a (fixture-replay-2910.sql: a carteira real de qui 29/10 16:52, com a presença do dono de produção no
+ * Lenine e no Vanderlei — abre e fecha):
+ *   fase7a         os 5 modos do gestor em teste (como a migration de dado deixa) e a rodada do gestor de qui 29/10 16:52 (o
+ *                  "eu marcaria assim" no diário do dia);
+ *   fase7a_ligado  os 5 ligados desde qui 29/10 16:46: a carteira pelo motor (persistir e aplicar: Lenine e Vanderlei marcados
+ *                  pela estimativa) e as perguntas do gestor de 16:52 (Giancarlo, Nelson e Flávio, com o prazo).
+ */
+async function aplicarEstadoDaFase7a(db, estado) {
+  if (!['fase7a', 'fase7a_ligado'].includes(estado)) throw new Error(`estado "${estado}" não existe`);
+  await db.exec(REPLAY2910);
+  await db.query(`insert into public.os_planejamento (service_order_id, dono_presenca)
+                  select so.id, 'abre_e_fecha' from public.service_orders so where so.service_order_number in ('OS-00074', 'OS-00069')
+                  on conflict (service_order_id) do update set dono_presenca = 'abre_e_fecha'`);
+  CASOS.autor = (await db.query(`select u.id from public.app_users u where u.role = 'admin' and u.active order by u.id limit 1`)).rows[0].id;
+  const ligado = estado === 'fase7a_ligado';
+  const modo = ligado ? 'ligado' : 'sombra';
+  await db.query(`update public.agenda_config set modo_leitura = 'ligado', modo_marcar_sozinho = $1, modo_vaga_fechamento = $1,
+                         modo_encaixe_aprovacao = $1, modo_revisao_diaria = $1, modo_compre_ate = $1, gestor_so_propor = false,
+                         marcar_regras = $2::text[], marcar_sozinho_desde = $3::timestamptz where id`,
+    [modo, REGRAS_DO_GESTOR, ligado ? '2026-10-29 16:46-03' : null]);
+  const agora = '2026-10-29 16:52-03';
+  if (ligado) {
+    const p = await db.query(`select public.agenda_propor('os', null, null, array(select k.service_order_id from public.os_carteira('2026-10-29') k),
+                                '{}'::jsonb, true, 'vigia', null, '2026-10-29', $1::timestamptz) as r`, [agora]);
+    const a = await db.query(`select public.agenda_aplicar($1::uuid, null, 'vigia', null, null, '2026-10-29', $2::timestamptz) as r`,
+      [p.rows[0].r.proposta_id, agora]);
+    if (a.rows[0].r?.ok !== true) throw new Error(`${estado}: o motor não aplicou a carteira: ${JSON.stringify(a.rows[0].r)}`);
+    await db.query(`select public._agenda_gestor_perguntas('2026-10-29', $1::timestamptz)`, [agora]);
+  } else {
+    const r = await db.query(`select public.agenda_gestor_rodar('2026-10-29', $1::timestamptz) as r`, [agora]);
+    if (r.rows[0].r?.diaria !== true || Number(r.rows[0].r?.erros ?? 0) > 0) {
+      throw new Error(`${estado}: a rodada do gestor de qui 29/10 16:52 não rodou limpa: ${JSON.stringify(r.rows[0].r)}`);
+    }
+  }
+}
+
 /** Um tique da rotina da equipe (o task-automations a chama logo antes da vigia). */
 async function rotina(db, quando) {
   const r = await rpc(db, 'agenda_rotina_rodar', {}, relogioDe(null, quando));
@@ -874,7 +921,8 @@ async function fotosDoCaso(db, caso) {
     fase3: caso.fase === 3 ? await fotoDaFase3(db) : null,
     fase4: caso.fase === 4 ? await fotoDaFase4(db) : null,
     fase5: caso.fase === 5 ? await fotoDaFase5(db) : null,
-    fase6: caso.fase === 6 ? await fotoDaFase6(db) : null,
+    // (Fase 7a) a mesma foto dos parâmetros (agenda_config inteira e o aprendizado): o modelo não muda modo nem regra do gestor
+    fase6: caso.fase === 6 || caso.fase === 7 ? await fotoDaFase6(db) : null,
   };
 }
 
@@ -901,7 +949,8 @@ export async function iniciarCaso(db, caso) {
   }
   await fixarAgora(db, relogioDe(caso));
   // (Fase 6) as invariantes do plano no começo do caso: a fixture-fase6 é a história medida (alocações passadas), não um plano
-  const invariantesAntes = caso.fase === 6 ? await invariantesDoPlano(db) : null;
+  // (Fase 7a) e o replay de 29/10 (a carteira real: as reservas do Lenine, publicadas na quinta)
+  const invariantesAntes = caso.fase === 6 || caso.fase === 7 ? await invariantesDoPlano(db) : null;
   return { antes: await fotosDoCaso(db, caso), invariantesAntes };
 }
 
@@ -939,7 +988,8 @@ async function executarPasso(db, caso, passo) {
     await fixarAgora(db, relogio);
     const comando = lerComandoDaAgenda(passo.palavra);
     if (!comando) throw new Error(`"${passo.palavra}" não é palavra da agenda (lerComandoDaAgenda devolveu null)`);
-    const c = chamadaDoComando(comando, CASOS.autor, relogio.hoje, 'whatsapp');
+    // (Fase 7a) o gestor e a dupla levam o instante (p_agora): o do caso
+    const c = chamadaDoComando(comando, CASOS.autor, relogio.hoje, 'whatsapp', relogio.iso ?? undefined);
     const r = await rpc(db, c.rpc, c.params, relogio);
     if (r.error) return { error: r.error.message };
     return { texto: String(r.data?.texto ?? '') };
@@ -1018,7 +1068,7 @@ export async function terminarCaso(db, caso, inicio, passos = []) {
     if (caso.fase === 5) {
       execucao.fase5 = { antes: inicio.antes.fase5, meio: meio.fase5, depois: depois.fase5, estado: caso.estado };
     }
-    if (caso.fase === 6) {
+    if (caso.fase === 6 || caso.fase === 7) {
       execucao.fase6 = { antes: inicio.antes.fase6, meio: meio.fase6, depois: depois.fase6 };
     }
     if ((caso.fase ?? 1) >= 2) {
@@ -1411,7 +1461,7 @@ if (ehPrincipal) {
     const porFase = (n) => casos.filter((c) => (c.fase ?? 1) === n).length;
     console.log(falhas
       ? `\n${falhas} falha(s)`
-      : `\ntudo ok (${casos.length} casos × boa e ruim: ${porFase(1)} da Fase 1, ${porFase(2)} da Fase 2, ${porFase(3)} da Fase 3, ${porFase(4)} da Fase 4, ${porFase(5)} da Fase 5, ${porFase(6)} da Fase 6; ${Math.round((Date.now() - t0) / 1000)} s)`);
+      : `\ntudo ok (${casos.length} casos × boa e ruim: ${porFase(1)} da Fase 1, ${porFase(2)} da Fase 2, ${porFase(3)} da Fase 3, ${porFase(4)} da Fase 4, ${porFase(5)} da Fase 5, ${porFase(6)} da Fase 6, ${porFase(7)} da Fase 7; ${Math.round((Date.now() - t0) / 1000)} s)`);
     process.exit(falhas ? 1 : 0);
   }
 }

@@ -23,7 +23,9 @@ import {
   RPC_DESCARTAR,
   RPC_DESFAZER_DITO,
   RPC_DIARIA_DITA,
+  RPC_DUPLA_DITA,
   RPC_ENTREGAR_DITO,
+  RPC_GESTOR_DITO,
   RPC_GRAVAR,
   TEXTO_SEM_AGENDA,
   TEXTO_SEM_CLIENTE,
@@ -32,7 +34,9 @@ import {
   TEXTO_SEM_DESCARTAR,
   TEXTO_SEM_DESFAZER,
   TEXTO_SEM_DIARIA,
+  TEXTO_SEM_DUPLA,
   TEXTO_SEM_ENTREGAR,
+  TEXTO_SEM_GESTOR,
   TEXTO_SEM_GRAVAR,
   TEXTO_SO_ADMIN,
 } from "./executar.ts";
@@ -166,7 +170,8 @@ Deno.test("chamadaDoComando: cada palavra vira a RPC certa, com o mesmo mapeamen
 Deno.test("chamadaDoComando: toda frase da tabela tem parâmetros válidos (nenhuma vira erro)", () => {
   for (const f of frasesDaAgenda()) {
     const c = chamadaDoComando(lerComandoDaAgenda(f)!, AUTOR);
-    assert([RPC_AGENDA_VER, RPC_GRAVAR, RPC_DESCARTAR].includes(c.rpc), f);
+    // (Fase 7a, P7) *gestor, só propor* / *pode marcar* estão na tabela fixa: agenda_gestor_dito
+    assert([RPC_AGENDA_VER, RPC_GRAVAR, RPC_DESCARTAR, RPC_GESTOR_DITO].includes(c.rpc), f);
     assertEquals(c.params.p_autor, AUTOR, f);
   }
 });
@@ -736,4 +741,67 @@ Deno.test("Fase 6 (P8) — executar: o texto do foco e o do *desfaz aprendizado*
   assertEquals([r2.ok, r2.texto, erro.logs().length], [false, TEXTO_SEM_AGENDA, 1]);
   const so = cliente({ [RPC_AGENDA_VER]: { error: { message: "O que a agenda aprendeu é com o administrador ou o financeiro.", code: "42501" } } });
   assertEquals((await executarComandoDaAgenda(so, ver, { autor: AUTOR })).texto, TEXTO_SO_ADMIN);
+});
+
+// ─── Fase 7a (P7): o gestor da agenda e a dupla ──────────────────────────────────────────────────────────────────
+
+Deno.test("Fase 7a (P7) — chamadaDoComando: o gestor e a dupla levam o dia e a hora; *agenda gestor* é agenda_ver foco gestor", () => {
+  const agora = "2026-10-30T12:00:00.000Z";
+  assertEquals(chamadaDoComando(lerComandoDaAgenda("gestor, só propor")!, AUTOR, "2026-10-30", "whatsapp", agora),
+               { rpc: RPC_GESTOR_DITO, params: { p_autor: AUTOR, p_so_propor: true, p_hoje: "2026-10-30", p_agora: agora } });
+  assertEquals(chamadaDoComando(lerComandoDaAgenda("gestor, pode marcar")!, AUTOR, "2026-10-30", "painel", agora),
+               { rpc: RPC_GESTOR_DITO, params: { p_autor: AUTOR, p_so_propor: false, p_hoje: "2026-10-30", p_agora: agora } });
+  assertEquals(chamadaDoComando(lerComandoDaAgenda("Lenine com dupla")!, AUTOR, "2026-10-30", "whatsapp", agora),
+               { rpc: RPC_DUPLA_DITA, params: { p_autor: AUTOR, p_alvo: "lenine", p_dupla: true, p_hoje: "2026-10-30", p_agora: agora } });
+  assertEquals(chamadaDoComando(lerComandoDaAgenda("Lenine sem dupla")!, AUTOR, undefined, "whatsapp", agora).params.p_dupla, false);
+  // sem o dia do teste, o dia de Brasília do instante (às 22:30 de Brasília ainda é hoje)
+  assertEquals(chamadaDoComando(lerComandoDaAgenda("gestor só propor")!, AUTOR, undefined, "whatsapp", "2026-10-31T01:30:00.000Z").params.p_hoje,
+               "2026-10-30");
+  // sem nada, o instante de agora (não cabe a data no assertEquals: só a forma)
+  const semNada = chamadaDoComando(lerComandoDaAgenda("gestor só propor")!, AUTOR).params;
+  assert(/^\d{4}-\d{2}-\d{2}$/.test(String(semNada.p_hoje)) && !Number.isNaN(Date.parse(String(semNada.p_agora))));
+  const base = { p_autor: AUTOR, p_os: null, p_simular: null, p_simular_aprovacao: false, p_pessoa: null };
+  assertEquals(chamadaDoComando(lerComandoDaAgenda("agenda gestor")!, AUTOR),
+               { rpc: RPC_AGENDA_VER, params: { ...base, p_periodo: null, p_foco: "gestor" } });
+});
+
+Deno.test("Fase 7a (P7) — executar: o texto do banco volta como está; a dupla que não acha OS segue ao modelo; erro = frase + log", async () => {
+  const gestor = lerComandoDaAgenda("gestor, só propor")!;
+  const ok = cliente({ [RPC_GESTOR_DITO]: { data: { ok: true, mudou: true, texto: "Combinado: até você dizer *gestor, pode marcar*, eu só sugiro." } } });
+  assertEquals(await executarComandoDaAgenda(ok, gestor, { autor: AUTOR }),
+               { ok: true, texto: "Combinado: até você dizer *gestor, pode marcar*, eu só sugiro." });
+  const ja = cliente({ [RPC_GESTOR_DITO]: { data: { ok: true, mudou: false, texto: "Já estava assim." } } });
+  assertEquals(await executarComandoDaAgenda(ja, gestor, { autor: AUTOR }), { ok: true, texto: "Já estava assim." });
+  const dupla = lerComandoDaAgenda("Fulano com dupla")!;
+  const naoAchei = cliente({ [RPC_DUPLA_DITA]: { data: { ok: false, status: "nao_achei", texto: "Não encontrei Fulano na carteira." } } });
+  assertEquals(await executarComandoDaAgenda(naoAchei, dupla, { autor: AUTOR }),
+               { ok: true, texto: "Não encontrei Fulano na carteira.", seguirAoModelo: true });
+  const ambiguo = cliente({ [RPC_DUPLA_DITA]: { data: { ok: false, status: "ambiguo", texto: "Qual Rodrigo? 1) OS-00076; 2) OS-00096" } } });
+  assertEquals((await executarComandoDaAgenda(ambiguo, lerComandoDaAgenda("Rodrigo com dupla")!, { autor: AUTOR })).seguirAoModelo, undefined);
+  for (const [cmd, rpc, frase] of [[gestor, RPC_GESTOR_DITO, TEXTO_SEM_GESTOR], [dupla, RPC_DUPLA_DITA, TEXTO_SEM_DUPLA]] as const) {
+    const erro = cliente({ [rpc]: { error: { message: "rede", code: "XX000" } } });
+    const log = cliente();
+    assertEquals(await executarComandoDaAgenda(erro, cmd, { autor: AUTOR, log }), { ok: false, texto: frase });
+    const [l] = log.logs();
+    assertEquals([l.p_context, l.p_action, (l.p_details as Record<string, unknown>).rpc], ["agenda", `comando:${cmd.comando}`, rpc]);
+  }
+  const negado = cliente({ [RPC_GESTOR_DITO]: { error: { code: "42501", message: "Só o administrador mexe na agenda." } } });
+  assertEquals((await executarComandoDaAgenda(negado, gestor, { autor: AUTOR })).texto, TEXTO_SO_ADMIN);
+  for (const f of [TEXTO_SEM_GESTOR, TEXTO_SEM_DUPLA]) assert(!/erro|error|rpc|ferramenta/i.test(f), f);
+});
+
+Deno.test("Fase 7a (P7) — camada: o gestor e a dupla só com a agenda automática fora de desligado; *agenda gestor* com a leitura", async () => {
+  for (const t of ["gestor, só propor", "gestor pode marcar", "Lenine com dupla"]) {
+    const { d, c } = deps({ modo: "ligado", fase2: "sombra", texto: "texto do banco" });
+    assertEquals((await camadaDaAgenda(t, d))?.texto, "texto do banco", t);
+    assertEquals(c.executar.length, 1, t);
+    const desl = deps({ modo: "ligado", fase2: "desligado" });
+    assertEquals(await camadaDaAgenda(t, desl.d), null, t);
+    assertEquals(desl.c.executar.length, 0, t);
+  }
+  const { d } = deps({ modo: "sombra", fase2: "desligado", texto: "O gestor está em teste desde qui 29/10: …" });
+  assertEquals((await camadaDaAgenda("agenda gestor", d))?.texto, "O gestor está em teste desde qui 29/10: …");
+  // com "?" o gestor e a dupla são pergunta (vão ao modelo); o de ver vale
+  for (const t of ["gestor, só propor?", "Lenine com dupla?"]) assertEquals(await camadaDaAgenda(t, deps({ modo: "ligado" }).d), null, t);
+  assertEquals((await camadaDaAgenda("o que você marcaria?", deps({ modo: "ligado" }).d))?.comando, { comando: "ver", periodo: null, foco: "gestor", pessoa: null });
 });

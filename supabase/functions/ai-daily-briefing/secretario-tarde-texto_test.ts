@@ -3,7 +3,7 @@
 import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import type { LinhaComLetra } from "./secretario-tarde-regras.ts";
 import { REGRAS } from "./secretario-candidatos.ts";
-import { linhasDaAgenda } from "./secretario-tarde-coleta.ts";
+import { agendaDoFechamento, linhasDaAgenda, vagasDaAgenda } from "./secretario-tarde-coleta.ts";
 import {
   type AgendaDoFechamento,
   amanhaComAAgenda,
@@ -618,4 +618,58 @@ Deno.test("Fase 5: a coleta aceita a linha cliente de até 600 caracteres (o tet
     { tipo: "cliente", texto: "x".repeat(641), perda: 75, pergunta_id: null, acao_ids: [], modo: "ligado" },
   ]);
   assertEquals(lidas.map((l) => l.texto.length), [600]);
+});
+
+// ─── (30/10/2026) Agenda de Produção, Fase 7a (P7): a linha do gestor, a das compras e as vagas garantidas ─────────────
+// O texto do gestor é o do banco de verdade (supabase/tests/agenda_fase7a_replay.sql, cenário A: a carteira de 29/10 em
+// sombra). As vagas garantidas (agenda_textos_do_fechamento.vagas_garantidas, com modo_vaga_fechamento ligado) somam às que
+// sobram de REGRAS.maxManha: com 3 que ficaram, a linha do gestor ainda entra; em sombra (vaga_teria), nada a mais no texto.
+
+const GESTOR_F7A = "Agenda em teste (nada mudou): eu marcaria assim — Lenine de ter 03 a ter 10/11, Roberto e João (6 dias, estimativa " +
+  "minha); Vanderlei de qui 12 a ter 24/11, Roberto e João (7,5 dias, estimativa minha; compre até hoje: 3 itens). Antes de marcar eu " +
+  "perguntaria: Giancarlo (10 diárias pela estimativa), Nelson (já começou?), Flávio (já começou?). Continuam fora 6: esperando o " +
+  "cliente (3), orçamento sem virar OS, esperando o sinal, precisa de você em campo. *agenda gestor* mostra tudo.";
+const COMPRAS_F7A = "Compras: Sem fornecedor (contei 7 dias úteis): 3 itens do Vanderlei — compre até hoje.";
+
+Deno.test("Fase 7a (P7): os tipos gestor e compras entram na lista e a coleta aceita a linha do gestor de até 640 caracteres", () => {
+  assertEquals((TIPOS_DE_LINHA_DA_AGENDA as readonly string[]).includes("gestor"), true);
+  assertEquals((TIPOS_DE_LINHA_DA_AGENDA as readonly string[]).includes("compras"), true);
+  assert(GESTOR_F7A.length <= 640, `${GESTOR_F7A.length}`);
+  const lidas = linhasDaAgenda([
+    { tipo: "gestor", texto: GESTOR_F7A, perda: 65, pergunta_id: null, acao_ids: [], modo: "ligado" },
+    { tipo: "compras", texto: COMPRAS_F7A, perda: 80, pergunta_id: null, acao_ids: [], modo: "sombra" },
+    { tipo: "gestor", texto: "x".repeat(641), perda: 65, pergunta_id: null, acao_ids: [], modo: "ligado" },
+  ]);
+  assertEquals(lidas.map((l) => `${l.tipo} ${l.texto.length}`), [`gestor ${GESTOR_F7A.length}`, `compras ${COMPRAS_F7A.length}`]);
+});
+
+Deno.test("Fase 7a (P7): as vagas garantidas somam às que sobram (3 ficaram + 1 vaga = a linha do gestor entra); sem elas, nada a mais", () => {
+  const linhas = [l2("gestor", GESTOR_F7A, 65), ...QUATRO];
+  const com = (vagas: number | undefined, ficaram: number) =>
+    linhasDaAgendaQueCabem(ficaram, { ...comLinhas(linhas), ...(vagas === undefined ? {} : { vagas_garantidas: vagas }) }).map((l) => l.tipo);
+  assertEquals(com(undefined, 3), [], "sem a vaga, com o Secretário cheio, a agenda cala (como antes)");
+  assertEquals(com(0, 3), []);
+  assertEquals(com(1, 3), ["dia"], "1 vaga: a de maior perda (dia 70 > gestor 65)");
+  assertEquals(com(2, 3), ["dia", "gestor"]);
+  assertEquals(com(1, 0), ["dia", "gestor", "semana", "decisao"], "as 3 que sobram + 1");
+  assertEquals(com(undefined, 0), ["dia", "gestor", "semana"], "sem a vaga: as 3 de sempre");
+  // a sombra nunca entra, nem com vaga
+  assertEquals(linhasDaAgendaQueCabem(3, { ...comLinhas(emSombra(linhas)), vagas_garantidas: 2 }), []);
+  // a compra urgente (80) vai na frente do gestor
+  const urgente = l2("compras", COMPRAS_F7A, 80);
+  assertEquals(linhasDaAgendaQueCabem(3, { ...comLinhas([...linhas, urgente]), vagas_garantidas: 1 }).map((l) => `${l.tipo} ${l.perda}`),
+               ["compras 80"]);
+});
+
+Deno.test("Fase 7a (P7): a coleta só repassa as vagas que o banco disse (0 a 2; o resto vira 0)", () => {
+  const base = { modo: "ligado", cauda_amanha: null, semana_que_vem: [], linhas: [] };
+  assertEquals(agendaDoFechamento({ ...base, vagas_garantidas: 1 })?.vagas_garantidas, 1);
+  assertEquals(agendaDoFechamento({ ...base, vagas_garantidas: 2, vaga_teria: null })?.vagas_garantidas, 2);
+  assertEquals(agendaDoFechamento({ ...base, vagas_garantidas: 0, vaga_teria: 1 })?.vaga_teria, 1);
+  for (const v of [3, -1, 1.5, "1", null, undefined]) {
+    assertEquals(agendaDoFechamento({ ...base, vagas_garantidas: v })?.vagas_garantidas, undefined, String(v));
+    assertEquals(vagasDaAgenda(v), 0, String(v));
+  }
+  // o banco de antes da 7a (sem os campos): a agenda do fechamento é a de sempre
+  assertEquals(agendaDoFechamento(base), { modo: "ligado", cauda: null, semana: [] });
 });

@@ -294,10 +294,13 @@ function secaoDaAgenda(): string {
 // aprendizado, os números vêm do banco, nunca mudar parâmetro (é decisão do dono pelas perguntas da agenda), e as duas palavras
 // (*agenda aprendizado*, *desfaz aprendizado*) na própria linha (a das palavras de antes fica como está: o teste da Fase 5
 // fixa o fim dela). Teto 24.
-Deno.test("agenda de produção: a seção é curta (≤ 24 linhas: custa tokens em toda mensagem) e fica no bloco estável", () => {
+// Fase 7a (P7): o gestor da agenda (spec-fase7a.md §7: +1 linha, teto 25) — entrou 1 linha: o que ele marcou, marcaria em teste
+// e perguntou antes é agenda_ver foco gestor; o modelo nunca marca, calcula data nem escolhe técnico; e as palavras do dono
+// (*agenda gestor*, *gestor, só propor*, *gestor, pode marcar*, *<nome> com dupla*) na própria linha. Teto 25.
+Deno.test("agenda de produção: a seção é curta (≤ 25 linhas: custa tokens em toda mensagem) e fica no bloco estável", () => {
   const secao = secaoDaAgenda();
   const linhas = secao.split("\n");
-  assertEquals(linhas.length <= 24, true, `a seção tem ${linhas.length} linhas`);
+  assertEquals(linhas.length <= 25, true, `a seção tem ${linhas.length} linhas`);
   // Estável = em cache. O volátil muda a cada turno e não pode carregar a seção.
   const volatil = buildSystemBlocks(CONVERSA_LIGADA, { userName: "Teste", userRole: "admin", channel: "whatsapp" })[1].text;
   assertEquals(volatil.includes(SECAO_AGENDA), false);
@@ -606,7 +609,8 @@ Deno.test("agenda de produção (correção 29/10, P2): o serviço novo depois d
   assertStringIncludes(props.simular.description ?? "", "o 1º dia que cabe pelo plano de agora. Só simula: não marca nem reserva nada.");
   assertEquals(porNome.has("os_planejar"), true);
   assertEquals(secao.includes("`"), false);
-  assertEquals(secao.split("\n").length <= 24, true);
+  // (Fase 7a, P7) o teto da seção passou a 25 (a linha do gestor da agenda)
+  assertEquals(secao.split("\n").length <= 25, true);
 });
 
 // PÓS-MERGE (A, 28/10/2026): "faltou" não se lança mais — registrar_diaria recusa a falta (main, Diárias fase 1b). O texto

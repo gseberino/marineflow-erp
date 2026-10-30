@@ -106,6 +106,14 @@ export interface AgendaDoFechamento {
    * agenda diria e vão para o detalhe. Ausente = nenhuma (a Fase 2 não aplicada, ou nada a dizer).
    */
   linhas?: LinhaDaAgenda[];
+  /**
+   * (30/10/2026, Agenda de Produção Fase 7a, P7, migration 20261031100600) As vagas que a agenda tem garantidas no fechamento
+   * (agenda_config.modo_vaga_fechamento ligado: fechamento_vagas_agenda, +1 com decisão de perda ≥ 80, até 2), somadas às que
+   * sobram de REGRAS.maxManha. Ausente = 0 (o banco antes da 7a, ou o modo fora de ligado).
+   */
+  vagas_garantidas?: number;
+  /** (Fase 7a, P7) Em sombra, as vagas que a agenda teria (só para o detalhe; nada muda no texto). */
+  vaga_teria?: number;
 }
 
 /**
@@ -119,6 +127,9 @@ export interface AgendaDoFechamento {
  */
 export const TIPOS_DE_LINHA_DA_AGENDA = [
   "decisao", "dia", "semana", "mudancas", "pergunta", "diaria", "conclusao", "ppc", "comissao", "cliente",
+  // (30/10/2026, Fase 7a, P7) gestor: o "eu marcaria assim" do gestor em teste (perda 65, até 640 caracteres); compras: as compras
+  // da semana (perda 80 com compra urgente, 65 com "compre até" hoje ou amanhã, 45 até 2 dias úteis)
+  "gestor", "compras",
 ] as const;
 
 /**
@@ -129,7 +140,7 @@ export interface LinhaDaAgenda {
   tipo: (typeof TIPOS_DE_LINHA_DA_AGENDA)[number];
   /** o texto pronto do banco ("Agenda, preciso de você. …", "Agenda de hoje: …", "Agenda: publiquei a semana …") */
   texto: string;
-  /** 0–100: o que se perde sem a linha (decisão 100/80/50, cliente 75/40, dia 70, semana 60, ppc 55, diária 50/80, conclusão 45, mudanças 40, pergunta 30, comissão 20) */
+  /** 0–100: o que se perde sem a linha (decisão 100/80/50, compras 80/65/45, cliente 75/40, dia 70, gestor 65, semana 60, ppc 55, diária 50/80, conclusão 45, mudanças 40, pergunta 30, comissão 20) */
   perda: number;
   /** a pergunta que a linha mostra (a mostrada_vezes sobe quando o fechamento sai) */
   pergunta_id: string | null;
@@ -141,10 +152,11 @@ export interface LinhaDaAgenda {
 /**
  * (24/10/2026, Fase 2, P5) As linhas da agenda que cabem no fechamento: as de modo 'ligado', da maior perda para a menor
  * (desempate pelo tipo e pelo texto), até as vagas que sobram dos itens do Secretário (REGRAS.maxManha − os que ficaram de
- * hoje; nunca negativo). Na sombra, nenhuma.
+ * hoje; nunca negativo). Na sombra, nenhuma. (30/10/2026, Fase 7a, P7) Mais as vagas garantidas da agenda (vagas_garantidas,
+ * 0 a 2; ausente = 0): com o Secretário cheio, a agenda ainda fala.
  */
 export function linhasDaAgendaQueCabem(ficaram: number, agenda: AgendaDoFechamento | null | undefined): LinhaDaAgenda[] {
-  const vagas = Math.max(0, REGRAS.maxManha - ficaram);
+  const vagas = Math.max(0, REGRAS.maxManha - ficaram) + (agenda?.vagas_garantidas ?? 0);
   if (!agenda?.linhas?.length || vagas === 0) return [];
   return agenda.linhas
     .filter((l) => l.modo === "ligado")

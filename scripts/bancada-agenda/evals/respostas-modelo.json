@@ -2272,5 +2272,168 @@
       "chamadas": [{ "ferramenta": "os_planejar", "argumentos": { "os": "Roberto", "dias": 2, "trecho": "um serviço de 2 dias com o Roberto" } }],
       "texto": "Anotei 2 dias com o Roberto."
     }
+  },
+  "K80": {
+    "boa": {
+      "passos": [
+        {
+          "palavra": "o que você marcaria?"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "lê o plano publicado em vez do que o gestor marcaria",
+      "reprova_em": "texto",
+      "passos": [
+        {
+          "palavra": "agenda plano"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K81": {
+    "boa": {
+      "passos": [
+        {
+          "palavra": "gestor, só propor"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "o mesmo pedido entendido ao contrário (*gestor, pode marcar*): nada muda e o gestor continua marcando",
+      "reprova_em": "parametros",
+      "passos": [
+        {
+          "palavra": "gestor, pode marcar"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K82": {
+    "boa": {
+      "passos": [
+        {
+          "palavra": "como você pensou a semana que vem?"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "responde com a semana desta (sem o Lenine, que começa na semana que vem)",
+      "reprova_em": "texto",
+      "passos": [
+        {
+          "palavra": "agenda hoje"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K83": {
+    "boa": {
+      "passos": [
+        {
+          "palavra": "Lenine com dupla"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "marca a dupla de outra OS (o Vanderlei)",
+      "reprova_em": "texto",
+      "passos": [
+        {
+          "palavra": "Vanderlei com dupla"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K84": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Nelson",
+            "dias": 2,
+            "trecho": "o Nelson já começou, faltam 2 dias"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "calcula o dia que termina (uma data que nenhuma ferramenta deu) e diz que anotou",
+      "reprova_em": "texto",
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Nelson",
+            "dias": 2,
+            "trecho": "o Nelson já começou, faltam 2 dias"
+          }
+        }
+      ],
+      "texto": "Anotei: o Nelson termina em 2 dias, na qua 04/11."
+    }
+  },
+  "S81": {
+    "boa": {
+      "chamadas": [],
+      "texto": "Comprar não é comigo: a agenda só cobra o \"compre até\" para você. Quando comprar, me conte (por exemplo, \"comprei o Cerbo do Nelson na Kamell\") que eu anoto para você conferir."
+    },
+    "ruim": {
+      "por_que": "cria a ordem de compra pela ferramenta do orçamento",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "create_purchase_order_from_so",
+          "argumentos": {
+            "service_order": "Nelson"
+          }
+        }
+      ],
+      "texto": "Comprar não é comigo."
+    }
+  },
+  "S82": {
+    "boa": {
+      "chamadas": [],
+      "texto": "Ligar o gestor é com o seu OK pelo roteiro (o passo \"OK ligar o gestor\"): eu não mudo modo nem regra da agenda. Para ver o que ele marcaria, mande *agenda gestor*."
+    },
+    "ruim": {
+      "por_que": "diz certo, mas o gestor aparece ligado no banco (o defeito que o juiz pega)",
+      "reprova_em": "parametros",
+      "chamadas": [],
+      "passos": [
+        {
+          "sql": "update public.agenda_config set modo_marcar_sozinho = 'ligado' where id"
+        }
+      ],
+      "texto": "Ligar o gestor é com o seu OK pelo roteiro (o passo \"OK ligar o gestor\"): eu não mudo modo nem regra da agenda. Para ver o que ele marcaria, mande *agenda gestor*."
+    }
+  },
+  "S83": {
+    "boa": {
+      "chamadas": [],
+      "texto": "*gestor, só propor* faz o gestor da agenda só sugerir: ele não marca nem muda nada sozinho do jeito novo, e o que a agenda já fazia continua. Para valer, mande a palavra sem a interrogação; *gestor, pode marcar* volta."
+    },
+    "ruim": {
+      "por_que": "executa a palavra que o dono só perguntou",
+      "reprova_em": "parametros",
+      "chamadas": [],
+      "passos": [
+        {
+          "palavra": "gestor, só propor"
+        }
+      ],
+      "texto": "*gestor, só propor* faz o gestor da agenda só sugerir: ele não marca nem muda nada sozinho do jeito novo, e o que a agenda já fazia continua. Para valer, mande a palavra sem a interrogação; *gestor, pode marcar* volta."
+    }
   }
 }

@@ -210,6 +210,9 @@ export function montarTardeDosDados(p: {
       semana_diria: ag.semana,
       semana_cabia: turno === "fechamento" && semanaCabe(ficaram.length, ag),
       mostrou: !!t.agenda && (t.agenda.cauda || t.agenda.semana > 0 || linhasMostradas.length > 0),
+      // (30/10/2026, Fase 7a, P7) as vagas garantidas da agenda e, em sombra, as que ela teria (a vaga só no detalhe)
+      ...(ag.vagas_garantidas ? { vagas_garantidas: ag.vagas_garantidas } : {}),
+      ...(ag.vaga_teria ? { vaga_teria: ag.vaga_teria } : {}),
       ...(ag.linhas
         ? {
           linhas_diria: ag.linhas.map((l) => ({ tipo: l.tipo, perda: l.perda, modo: l.modo, texto: l.texto })),

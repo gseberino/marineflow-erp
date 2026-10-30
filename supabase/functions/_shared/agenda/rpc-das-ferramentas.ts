@@ -79,6 +79,9 @@ export const FOCOS = [
   // (Fase 6, P8) o que a agenda aprendeu com o que aconteceu: o fator por tipo de OS, a presença do dono, os fornecedores, a
   // capacidade do dono, o R$ por diária, o cliente e a revisão da carga, com o n de cada um (20261029100800)
   "aprendizado",
+  // (Fase 7a, P7) o que o gestor da agenda marcou ou marcaria sozinho e por quê, o que perguntou antes, o que fica de fora e como
+  // ele conta (_agenda_ver_gestor, 20261031100600)
+  "gestor",
 ] as const;
 /** (Fase 5, P5) cliente_avisar → agenda_cliente_preparar (migration 20261028100500): prepara, nunca envia. */
 export const RPC_CLIENTE_PREPARAR = "agenda_cliente_preparar";

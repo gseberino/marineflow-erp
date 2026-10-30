@@ -42,7 +42,14 @@
 // travas) e *agenda clientes* é agenda_ver foco clientes. Só com agenda_config.modo_cliente fora de 'desligado'
 // (modoDoClienteNoBanco, num SELECT à parte, como a diária: a coluna nova não pode calar as palavras de antes). O nome que
 // não espera nada é a resposta do banco ("Não achei mensagem esperando para …"): não segue ao modelo (nada sai).
+//
+// Fase 7a (P7, 30/10/2026; spec-fase7a.md §7): *gestor, só propor* / *gestor, pode marcar* executam direto (agenda_gestor_dito:
+// o gestor só sugere ou volta a marcar sozinho, com a ação desfazível) e *<nome> com dupla* / *<nome> sem dupla* também
+// (agenda_dupla_dita: a dupla da OS, que a próxima marcação usa). As duas funções pedem o dia e a hora (p_hoje, p_agora): vão daqui
+// (o dia de Brasília e o instante de agora; nos testes, os que o teste passa). *agenda gestor* é agenda_ver foco gestor. Como o
+// *desfaz*, só com a agenda automática fora de 'desligado'. O nome da dupla que não acha OS (nao_achei) segue ao modelo.
 
+import { diaBR } from "../agenda-dia.ts";
 import { logEdgeError } from "../log-error.ts";
 import { lerModoDaProposta, type ModoDaProposta, modoDaPropostaNoBanco } from "../agenda-modo.ts";
 import { type ComandoDaAgenda, ehPalavraDaDiaria, ehPalavraDaFase2, ehPalavraDoCliente, lerComandoDaAgenda } from "./comandos.ts";
@@ -64,6 +71,10 @@ export const RPC_ENTREGAR_DITO = "agenda_entregar_dito";
 export const RPC_DIARIA_DITA = "agenda_diaria_dita";
 /** Fase 5 (P5): *manda cliente* / *segura cliente*. */
 export const RPC_CLIENTE_DITO = "agenda_cliente_decidir_dito";
+/** Fase 7a (P7): *gestor, só propor* / *gestor, pode marcar*. */
+export const RPC_GESTOR_DITO = "agenda_gestor_dito";
+/** Fase 7a (P7): *<nome> com dupla* / *<nome> sem dupla*. */
+export const RPC_DUPLA_DITA = "agenda_dupla_dita";
 
 export { modoDaPropostaNoBanco };
 export type { ModoDaProposta };
@@ -197,8 +208,18 @@ export function chamadaDoComando(
   autor: string,
   hoje?: string,
   canal: "whatsapp" | "painel" = "whatsapp",
+  agora?: string,
 ): ChamadaDoComando {
   const comHoje = (p: Record<string, unknown>) => (hoje ? { ...p, p_hoje: hoje } : p);
+  // (Fase 7a, P7) o gestor e a dupla pedem o dia e a hora: os de agora (o dia de Brasília), ou os do teste
+  const comAgora = (p: Record<string, unknown>) => {
+    const instante = agora ?? new Date().toISOString();
+    return { ...p, p_hoje: hoje ?? diaBR(instante), p_agora: instante };
+  };
+  if (cmd.comando === "gestor") return { rpc: RPC_GESTOR_DITO, params: comAgora({ p_autor: autor, p_so_propor: cmd.so_propor }) };
+  if (cmd.comando === "dupla") {
+    return { rpc: RPC_DUPLA_DITA, params: comAgora({ p_autor: autor, p_alvo: cmd.alvo, p_dupla: cmd.dupla }) };
+  }
   if (cmd.comando === "gravar") return { rpc: RPC_GRAVAR, params: comHoje({ p_autor: autor }) };
   if (cmd.comando === "descartar") return { rpc: RPC_DESCARTAR, params: { p_autor: autor } };
   // Fase 2: a palavra vai como o dono disse (o dia e o alvo são resolvidos no banco; aqui nada é calculado)
@@ -264,6 +285,10 @@ export const TEXTO_SEM_DIARIA =
 /** Fase 5 (P5): quando o banco falha no *manda cliente* / *segura cliente* (nada saiu; mandar de novo não manda em dobro). */
 export const TEXTO_SEM_CLIENTE =
   "Não consegui decidir a mensagem ao cliente agora: nada saiu. Mande de novo em alguns minutos.";
+/** Fase 7a (P7): quando o banco falha no *gestor, só propor* / *pode marcar* ou na *dupla* (dizer de novo não muda em dobro). */
+export const TEXTO_SEM_GESTOR =
+  "Não consegui mudar o gestor da agenda agora: nada mudou. Mande de novo em alguns minutos.";
+export const TEXTO_SEM_DUPLA = "Não consegui anotar a dupla agora: nada mudou. Mande de novo em alguns minutos.";
 
 function textoDoErro(cmd: ComandoDaAgenda, e: unknown): string {
   if ((e as { code?: unknown })?.code === "42501") return TEXTO_SO_ADMIN;
@@ -285,6 +310,10 @@ function textoDoErro(cmd: ComandoDaAgenda, e: unknown): string {
       return TEXTO_SEM_DIARIA;
     case "cliente":
       return TEXTO_SEM_CLIENTE;
+    case "gestor":
+      return TEXTO_SEM_GESTOR;
+    case "dupla":
+      return TEXTO_SEM_DUPLA;
     default:
       return TEXTO_SEM_AGENDA;
   }
@@ -311,6 +340,10 @@ function rpcDoComando(cmd: ComandoDaAgenda): string {
       return RPC_DIARIA_DITA;
     case "cliente":
       return RPC_CLIENTE_DITO;
+    case "gestor":
+      return RPC_GESTOR_DITO;
+    case "dupla":
+      return RPC_DUPLA_DITA;
     default:
       return RPC_AGENDA_VER;
   }
@@ -332,6 +365,9 @@ function seguirAoModelo(cmd: ComandoDaAgenda, data: unknown): boolean {
   // (Fase 3, P4) *diária <nome> …* sem pergunta nem diária da agenda (ou a pessoa que não é da equipe): o registrar_diaria
   // de sempre, pelo modelo. Ambíguo, a opção que não existe e o acerto fechado ficam: são a resposta do banco.
   if (cmd.comando === "diaria") return !!r && r.ok !== true && String(r.status) === "nao_achei";
+  // (Fase 7a, P7) *<nome> com dupla* que não acha OS nenhuma ("faz isso com dupla"): não é da agenda. Ambíguo e fora da
+  // carteira ficam (são a resposta do banco sobre uma OS que existe).
+  if (cmd.comando === "dupla") return !!r && r.ok !== true && String(r.status) === "nao_achei";
   if (cmd.comando !== "desfazer" || cmd.alvo === null || cmd.alvo === "semana") return false;
   return !!r && r.ok !== true && NAO_E_DA_AGENDA.has(String(r.status));
 }

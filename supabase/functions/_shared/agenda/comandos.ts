@@ -85,6 +85,20 @@
 //   "aprendizado" não é nome de cliente, pessoa, bem nem fornecedor (0 de 559 clientes em 28/10/2026) nem palavra de outra
 //   ferramenta (comandos_test.ts).
 //
+// Fase 7a (P7, 30/10/2026; spec-fase7a.md §7) — o gestor da agenda (o que ele marca sozinho pela estimativa do orçamento):
+//   agenda gestor · o que voce marcaria                      → foco gestor (o que o gestor marcou ou marcaria e por quê, o que
+//                                                              perguntou antes, o que fica de fora e como ele conta); de VER
+//   gestor, so propor · gestor so propor · gestor, so sugerir · gestor so sugerir
+//                                                            → o gestor só sugere (agenda_gestor_dito so_propor true): as regras
+//                                                              e os jobs novos voltam a teste; o que as Fases 1–6 fazem continua
+//   gestor, pode marcar · gestor pode marcar · gestor volta a marcar
+//                                                            → volta a marcar sozinho (agenda_gestor_dito so_propor false)
+//   <alvo> com dupla · <alvo> sem dupla                      → a dupla da OS (agenda_dupla_dita): o alvo pela régua do *desfaz*
+//                                                              (o nome do cliente até 3 palavras ou o número, nunca uma letra)
+//   As que AGEM (gestor, dupla) dita com "?" vão ao modelo ("gestor só propor?"). O normalizarComando não tira a vírgula do
+//   meio: a tabela tem as duas formas. "gestor" e "dupla" não são nome de cliente nem palavra de outra ferramenta
+//   (comandos_test.ts). Gestor e dupla só com a agenda automática fora de 'desligado' (ehPalavraDaFase2), como o *desfaz*.
+//
 // Correção de 29/10 (P1) — as frases naturais do dono que caíam no modelo sem roteiro (todas de VER, valem com "?"):
 //   quando tenho agenda livre · quando eu tenho agenda livre · tenho agenda livre · eu tenho agenda livre
 //   quando estou livre · quando eu estou livre · tem vaga na agenda · quando tem vaga na agenda      → livre (como *livre*)
@@ -125,7 +139,9 @@ export type FocoDoComando =
   // (Fase 5, P5) as mensagens ao cliente
   | "clientes"
   // (Fase 6, P8) o que a agenda aprendeu com o que aconteceu
-  | "aprendizado";
+  | "aprendizado"
+  // (Fase 7a, P7) o que o gestor da agenda marcou ou marcaria sozinho e por quê
+  | "gestor";
 export type ResultadoDoDia = "cumprido" | "parcial" | "nao_cumprido";
 
 export type ComandoDaAgenda =
@@ -151,7 +167,11 @@ export type ComandoDaAgenda =
   /** (Fase 3, P4) agenda_diaria_dita: a pessoa como o dono disse, a jornada e o dia (null = o da pergunta ou hoje) */
   | { comando: "diaria"; nome: string; jornada: JornadaDita; quando: string | null }
   /** (Fase 5, P5) agenda_cliente_decidir_dito: manda ou segura a mensagem ao cliente (alvo null = todas as que esperam) */
-  | { comando: "cliente"; acao: "manda" | "segura"; alvo: string | null };
+  | { comando: "cliente"; acao: "manda" | "segura"; alvo: string | null }
+  /** (Fase 7a, P7) agenda_gestor_dito: *gestor, só propor* (so_propor true) / *gestor, pode marcar* (false) */
+  | { comando: "gestor"; so_propor: boolean }
+  /** (Fase 7a, P7) agenda_dupla_dita: *<alvo> com dupla* (dupla true) / *<alvo> sem dupla* (false); o alvo como o dono disse */
+  | { comando: "dupla"; alvo: string; dupla: boolean };
 
 /** A jornada da palavra *diária*: inteira (também "dia inteiro"), meia ou não (não lançar / apagar). */
 export type JornadaDita = "inteira" | "meia" | "nao";
@@ -206,6 +226,13 @@ frases(["agenda fornecedores"], ver(null, "fornecedores"));
 frases(["agenda clientes"], ver(null, "clientes"));
 // Fase 6 (P8): o que a agenda aprendeu (o *desfaz aprendizado* já é o *desfaz <alvo>* da Fase 2: o banco resolve o alvo)
 frases(["agenda aprendizado"], ver(null, "aprendizado"));
+// Fase 7a (P7): o gestor da agenda — o que ele marcou ou marcaria (de ver) e a palavra que o faz só sugerir (age)
+frases(["agenda gestor", "o que voce marcaria"], ver(null, "gestor"));
+frases(["gestor, so propor", "gestor so propor", "gestor, so sugerir", "gestor so sugerir"], { comando: "gestor", so_propor: true });
+frases(
+  ["gestor, pode marcar", "gestor pode marcar", "gestor volta a marcar", "gestor, volta a marcar"],
+  { comando: "gestor", so_propor: false },
+);
 // Correção de 29/10 (P1): as frases naturais do dono (a mesma leitura da palavra curta; "quando tem vaga" sozinho é conversa)
 frases(
   [
@@ -366,6 +393,12 @@ function lerPalavraComplemento(t: string): ComandoDaAgenda | null {
     const jornada: JornadaDita = m[2] === "meia" ? "meia" : m[2] === "nao" ? "nao" : "inteira";
     return { comando: "diaria", nome, jornada, quando };
   }
+  // Fase 7a (P7): *<alvo> com dupla* / *<alvo> sem dupla* (o alvo pela régua do *desfaz*; o banco resolve a OS)
+  m = /^(.+) (com|sem) dupla$/.exec(t);
+  if (m) {
+    const nome = alvoDito(m[1].trim());
+    return nome === undefined ? null : { comando: "dupla", alvo: nome, dupla: m[2] === "com" };
+  }
   // Fase 5 (P5): *manda cliente [nome]* / *segura cliente [nome]* (o nome pela régua do *desfaz*)
   m = /^(manda|segura) cliente(?: (.+))?$/.exec(t);
   if (m) {
@@ -432,6 +465,8 @@ export function ehPalavraDaDiaria(cmd: ComandoDaAgenda): boolean {
 export function ehPalavraDaFase2(cmd: ComandoDaAgenda): boolean {
   if (cmd.comando === "dia" || cmd.comando === "choveu" || cmd.comando === "desfazer") return true;
   if (cmd.comando === "concluir" || cmd.comando === "entregar") return true;
+  // (Fase 7a, P7) a palavra do gestor e a da dupla: como o *desfaz*, só com a agenda automática fora de 'desligado'
+  if (cmd.comando === "gestor" || cmd.comando === "dupla") return true;
   return cmd.comando === "ver" && (cmd.foco === "mudancas" || cmd.foco === "decisoes" || cmd.foco === "plano");
 }
 
@@ -445,6 +480,8 @@ const PALAVRAS_QUE_AGEM: ReadonlySet<ComandoDaAgenda["comando"]> = new Set([
   "concluir", "entregar", "diaria", "desfazer", "dia", "choveu",
   // (Fase 5, P5) "manda cliente Nelson?" é pergunta, não ordem
   "cliente",
+  // (Fase 7a, P7) "gestor só propor?" e "Lenine com dupla?" são pergunta, não ordem
+  "gestor", "dupla",
 ]);
 
 /** O texto termina em pergunta? O "?" final que o normalizarComando tira (também com negrito, espaço ou aspas depois). */

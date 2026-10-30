@@ -43,6 +43,10 @@
 // _agenda_ver_aprendizado, migration 20261029100800). Nenhuma ferramenta nova; nenhuma escreve parâmetro (mudar é decisão do
 // dono pelas perguntas da agenda e pelo roteiro dos OKs).
 //
+// Fase 7a (P7, 30/10/2026; spec-fase7a.md §7): agenda_ver ganha o foco gestor (o que o gestor da agenda marcou ou marcaria
+// sozinho e por quê: _agenda_ver_gestor, migration 20261031100600). Nenhuma ferramenta nova: *gestor, só propor*, *gestor, pode
+// marcar* e *<nome> com dupla* são palavras do dono, lidas antes do modelo; o teto de 113 não muda.
+//
 // Cada execute chama UMA RPC com ctx.sb (painel: o JWT do dono; WhatsApp: service role), p_autor = ctx.userId e
 // p_canal pelo ctx.canal. O mapeamento argumento → parâmetro é o de _shared/agenda/rpc-das-ferramentas.ts (puro), o
 // mesmo dos evals. `if (error) throw`: leitura que falha nunca vira "nada marcado".
@@ -125,6 +129,8 @@ export const agendaProducaoTools: ToolDef[] = [
       "o que a agenda aprendeu com o que aconteceu (foco aprendizado: quanto as OS de cada tipo levam além do combinado, o " +
       "atraso de cada fornecedor, a capacidade do dono, a presença dele e o valor por diária, com quantas medidas; só lê, " +
       "e mudar é decisão do dono pelas perguntas da agenda), " +
+      "o que o gestor da agenda marcou ou marcaria sozinho e por quê (foco gestor: pela estimativa do orçamento, o que ele " +
+      "perguntou antes de marcar e o que fica de fora; só lê), " +
       "o dia de alguém da equipe (pessoa + periodo), uma OS (os), " +
       "\"se o cliente aprovar hoje, quando dá\" (os + simular_aprovacao) ou um serviço que ainda não existe (simular). " +
       "Datas, dias livres, capacidade e duração vêm SÓ daqui: repita o texto, sem calcular nem mudar número, data ou nome. " +
