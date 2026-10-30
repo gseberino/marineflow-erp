@@ -14,11 +14,15 @@
 --   L  (achado 3) a linha curta do livre no sábado e no domingo: "de qua 04 a sex 06/11, …; na semana de 09/11, …" (o mesmo
 --      rótulo do *livre*); na quinta, como antes
 --   S  (achado 4) "(é 1 diária de equipe)" e "(é meia diária de equipe)", em ligado e fora dele; 2 diárias como antes
---   E  (achado 5) a equipe de produção de 30/10 (o dono tirou Roberto, João e Mickael e pôs o Alex, sem a diária
---      cadastrada): a vigia cancela a reserva do Lenine, a pergunta "Guardei lugar a partir de qui 05/11" resolve ("a
---      reserva saiu"), nasce UMA vez na semana a pergunta da equipe sem dias, com o nome do Alex e o que fazer, e o fechamento
---      a mostra; na semana seguinte a velha vence e nasce a nova; com a diária do Alex cadastrada, ela resolve; com a equipe
---      da fixture, nada; com a vigia desligada, o passo não roda
+--   E  (achado 5) a equipe de produção de 30/10 (o dono tirou Roberto, João e Mickael; o Alex, sem a diária cadastrada):
+--      a vigia cancela a reserva do Lenine, a pergunta "Guardei lugar a partir de qui 05/11" resolve ("a reserva saiu"),
+--      nasce UMA vez na semana a pergunta da equipe sem dias, com o nome do Alex e o que fazer, e o fechamento a mostra; na
+--      semana seguinte a velha vence e nasce a nova; com a diária do Alex cadastrada, ela resolve; com a equipe da fixture,
+--      nada; com a vigia desligada, o passo não roda.
+--      AJUSTADO em 30/10 pela correção da equipe (20261030100600): com a regra nova, quem o dono declara é da equipe, e o
+--      Alex declarado pelo dono (como em produção) conta — a pergunta não nasceria. Aqui o Alex entra com os dias só
+--      anotados pelo assistente (origem agente), o caso em que ele fica de fora, e o texto é o novo (pergunta os dias, não a
+--      diária). O cenário de produção com o Alex declarado pelo dono está em agenda_correcao_2910_equipe.sql.
 --   F  (achado 6) o aviso espera o fechamento: de segunda a sexta, de 17:25 a 18:00, nem as peças nem a 1ª trava avisam; a
 --      corrida das 17:30 (o fechamento lê, o aviso do mesmo minuto, o fechamento registra) dá UMA mensagem; antes, depois, e
 --      no sábado, o aviso sai
@@ -213,7 +217,8 @@ declare
   c_alex  constant uuid := 'bb000000-0000-4000-8000-0000000000a1';
   c_linha_qui constant text := 'Livre de verdade: na semana de 03/11, Roberto 1 dia e meio, João nada; na de 09/11, Roberto 3 dias, João 1 dia.';
   c_linha_sab constant text := 'Livre de verdade: de qua 04 a sex 06/11, Roberto 1 dia, João nada; na semana de 09/11, Roberto 3 dias, João 1 dia.';
-  c_equipe constant text := 'Não consigo marcar nenhum dos 11 serviços que esperam: ninguém da equipe tem dias na agenda. Alex tem dias na agenda, mas não tem a diária cadastrada, e sem ela não entra na conta. Me diga o valor da diária para eu cadastrar.';
+  -- (AJUSTADO em 30/10 pela correção da equipe: o texto novo, que pergunta os dias e não a diária)
+  c_equipe constant text := 'Não consigo marcar nenhum dos 11 serviços que esperam: ninguém da equipe tem dias na agenda. Alex tem dias na agenda, mas não está na equipe. Se for, me diga em que dias vem. Por exemplo: "Alex vem de segunda a sexta".';
   v_res   jsonb := '[]'::jsonb;
   r       jsonb;
   e       jsonb;
@@ -362,14 +367,15 @@ begin
     v_res := pg_temp.ok(v_res, 'E1 com a reserva do Lenine de pé, a pergunta "Guardei lugar a partir de qui 05/11" continua aberta',
       q.id is not null and q.texto like '%Guardei lugar a partir de qui 05/11%'
       and (select x.estado from public.agenda_perguntas x where x.id = q.id) = 'aberta', q.texto);
-    -- produção, 29/10 21:11 (00:11 UTC de 30/10): "os três saíram" (Roberto, João, Mickael) e "Alex: todo dia útil, manhã e
-    -- tarde" — o Alex sem a diária cadastrada (work_profiles)
+    -- produção, 29/10 21:11 (00:11 UTC de 30/10): "os três saíram" (Roberto, João, Mickael) — e o Alex sem a diária
+    -- cadastrada (work_profiles). AJUSTADO em 30/10 pela correção da equipe: os dias do Alex só anotados pelo assistente
+    -- (origem agente; declarados pelo dono, como em produção, ele conta e nada aqui nasce: agenda_correcao_2910_equipe.sql)
     update public.agenda_disponibilidade set substituida_em = pg_temp.em(c_qui, '21:11')
      where substituida_em is null and payee_id in ('bb000000-0000-4000-8000-000000000002', 'bb000000-0000-4000-8000-000000000003',
                                                    'bb000000-0000-4000-8000-000000000004');
     insert into public.payees (id, name, kind, active) values (c_alex, 'Alex Gonçalves Machado', 'prestador', true);
     insert into public.agenda_disponibilidade (payee_id, dias_semana, turno, situacao, origem, nota, trecho)
-    values (c_alex, '{1,2,3,4,5}', null, 'disponivel', 'dono', 'você disse em 29/10', 'dono 29/10: Alex todo dia útil, manhã e tarde');
+    values (c_alex, '{1,2,3,4,5}', null, 'disponivel', 'agente', 'anotado pelo assistente', null);
     r := pg_temp.vigiar(c_sex, '00:15');
     v_res := pg_temp.ok(v_res, 'E2 00:15: a vigia cancela a reserva do Lenine (como em produção) e pergunta da equipe sem dias, com o Alex pelo nome',
       exists (select 1 from public.agenda_acoes a where a.executada and a.tipo = 'cancelar' and a.service_order_id = c_len

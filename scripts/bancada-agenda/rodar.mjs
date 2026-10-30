@@ -185,6 +185,11 @@ const FIXTURES_COMO_TEXTO = [
   ['agenda_teste.mig_correcao_motor', '../../supabase/migrations/20261030100200_agenda_correcao_motor.sql'],
   ['agenda_teste.mig_correcao_aviso', '../../supabase/migrations/20261030100300_agenda_correcao_aviso.sql'],
   ['agenda_teste.mig_correcao_desempenho', '../../supabase/migrations/20261030100400_agenda_correcao_desempenho.sql'],
+  // Correção de 30/10 (equipe): a fonte de _agenda_vigia_equipe_sem_dias recriado na 20261030100600 (a revisão do lote, a
+  // única) e de _agenda_equipe_tem_dias (que não muda), para o agenda_correcao_2910_equipe.sql conferir que a cópia só muda
+  // nos blocos "-- CORREÇÃO 30/10 (equipe):" e rodar a definição de antes como pg_temp. As das 3 leituras da Fase 1
+  // (agenda_capacidade, agenda_capacidade_semanal e agenda_resolver_pessoa) são a mig_prontidao_fase1, já acima.
+  ['agenda_teste.mig_correcao_revisao', '../../supabase/migrations/20261030100500_agenda_correcao_revisao.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */
