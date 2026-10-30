@@ -593,6 +593,22 @@ Deno.test("agenda de produção (correção 29/10, P1): as frases naturais vão 
   assertEquals(secao.includes("`"), false);
 });
 
+// Correção de 29/10 (P2): o *livre* passou a ser UMA resposta (a do plano) e termina com "Para um serviço novo, me diga
+// quantos dias e com quem, que eu digo o 1º dia que cabe." A resposta do dono ("3 dias com o Roberto", sem OS) é o serviço
+// que ainda não existe — agenda_ver com simular, que agora é o encaixe do motor —, não um fato de os_planejar ("são dois
+// dias" de uma OS). Na mesma linha do livre, sem linha nova (o teto da seção continua 24).
+Deno.test("agenda de produção (correção 29/10, P2): o serviço novo depois do livre é agenda_ver simular, não os_planejar", () => {
+  const secao = secaoDaAgenda();
+  assertStringIncludes(secao, "\"Quando tenho agenda livre?\", \"quando estou livre?\", \"quando tem vaga?\": foco livre. Serviço que ainda não existe (\"se entrar um de 2 dias, quando dá?\"; ou, logo depois do livre, \"3 dias com o Roberto\" sem dizer a OS): agenda_ver com simular, os dias e com quem ele disse (só simula; não é os_planejar).");
+  const agendaVer = porNome.get("agenda_ver")!;
+  const props = (agendaVer.input_schema as { properties: Record<string, { properties?: Record<string, unknown>; description?: string }> }).properties;
+  assertEquals(Object.keys(props.simular.properties ?? {}).sort(), ["com_quem", "dias", "dono"]);
+  assertStringIncludes(props.simular.description ?? "", "o 1º dia que cabe pelo plano de agora. Só simula: não marca nem reserva nada.");
+  assertEquals(porNome.has("os_planejar"), true);
+  assertEquals(secao.includes("`"), false);
+  assertEquals(secao.split("\n").length <= 24, true);
+});
+
 // PÓS-MERGE (A, 28/10/2026): "faltou" não se lança mais — registrar_diaria recusa a falta (main, Diárias fase 1b). O texto
 // que o modelo lê não pode mandar o dia sem trabalho para registrar_diaria: ele chamaria, levaria a recusa e daria uma
 // volta a mais. A regra nova: dia sem trabalho fica sem diária (nada a lançar); dito com a OS do plano, o fato vai por

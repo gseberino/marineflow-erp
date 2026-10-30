@@ -2263,5 +2263,14 @@
       "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "foco": "plano", "periodo": "2026-11-03" } }],
       "texto": "{{saida:0}}"
     }
+  },
+  "L36": {
+    "boa": { "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "simular": { "dias": 2, "com_quem": ["Roberto"] } } }], "texto": "{{saida:0}}" },
+    "ruim": {
+      "por_que": "o serviço novo não é fato de OS: anota dias e equipe com os_planejar em vez de simular",
+      "reprova_em": "ferramentas",
+      "chamadas": [{ "ferramenta": "os_planejar", "argumentos": { "os": "Roberto", "dias": 2, "trecho": "um serviço de 2 dias com o Roberto" } }],
+      "texto": "Anotei 2 dias com o Roberto."
+    }
   }
 }

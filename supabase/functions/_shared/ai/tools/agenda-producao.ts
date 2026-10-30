@@ -145,7 +145,9 @@ export const agendaProducaoTools: ToolDef[] = [
         os: OS_DITA,
         simular: {
           type: "object",
-          description: "Serviço que ainda não existe (\"um serviço de 2 dias, eu e o Roberto\"). É projeção: não reserva nada.",
+          description:
+            "Serviço que ainda não existe (\"um serviço de 2 dias, eu e o Roberto\", \"se entrar um de 3 dias, quando dá?\"): " +
+            "o 1º dia que cabe pelo plano de agora. Só simula: não marca nem reserva nada.",
           properties: {
             dias: { type: "number", description: "Os dias que o dono disse." },
             com_quem: { type: "array", items: { type: "string" }, description: "Nomes, ou \"eu\"." },
