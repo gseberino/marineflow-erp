@@ -20,6 +20,7 @@ import { conversaEncerradaPeloContato } from "../_shared/whatsapp/contato-encerr
 import { historicoSemIdentidade } from "../_shared/banking/proposals.ts";
 import { normalizeText } from "../_shared/banking/matching.ts";
 import { lerAnalise } from "../_shared/financeiro/vigia-do-negocio.ts";
+import { logEdgeError } from "../_shared/log-error.ts";
 import { debitosSemComprovante, linhasDosComprovantes } from "./comprovantes.ts";
 import { type EntradaDoBanco, type PagamentoSemExtrato, separarEntradas } from "./entradas.ts";
 import { despesasPendentesDoMes, faturamentoPorCliente, GRUPOS_DO_RESULTADO } from "./mes.ts";
@@ -43,6 +44,24 @@ type Admin = any;
 
 function falhou(evento: string, e: unknown): void {
   console.warn(JSON.stringify({ fn: "ai-daily-briefing", tarde: evento, codigo: String((e as { code?: unknown })?.code ?? (e as Error)?.name ?? "erro") }));
+}
+
+/**
+ * (29/10/2026, Agenda de Produção, correção P4) A leitura da AGENDA no fechamento que falha: o aviso no log, como as outras, e
+ * uma linha em app_error_logs (ai-daily-briefing, tarde:<evento>) — em 28/10 ela estourou o tempo (57014) e sumiu calada do
+ * fechamento. O fechamento segue sem ela (o "Amanhã" volta à janela antiga). Nunca lança.
+ */
+export async function falhouNaAgenda(admin: Admin, evento: string, e: unknown): Promise<void> {
+  falhou(evento, e);
+  const codigo = String((e as { code?: unknown })?.code ?? (e as Error)?.name ?? "erro");
+  await logEdgeError(admin, {
+    context: "ai-daily-briefing",
+    action: `tarde:${evento}`,
+    message: `fechamento: a leitura da agenda (${evento}) falhou${codigo === "57014" ? " por tempo esgotado" : ""}: ${
+      String((e as { message?: unknown })?.message ?? codigo)}`,
+    details: { codigo },
+    error: e,
+  });
 }
 
 function ou<T>(r: { data: T | null; error: unknown }, nome: string): T {
@@ -302,7 +321,8 @@ export async function lerAmanha(
         if (error) throw error;
         doPlano = osDoPlano(data);
       } catch (e) {
-        falhou("amanha_plano", e);
+        // (29/10/2026, correção P4) a leitura do plano que falha também vai a app_error_logs
+        await falhouNaAgenda(admin, "amanha_plano", e);
       }
     }
     for (const o of doPlano ?? osDaAgenda(ou(agendadas, "OS de amanhã") as Array<Record<string, unknown>>, inicio, fim, CORTE_DO_ITEM_DE_AMANHA)) {
@@ -406,6 +426,7 @@ export function linhasDaAgenda(v: unknown): LinhaDaAgenda[] {
  * O que a agenda diria no fechamento das 17:30 (agenda_textos_do_fechamento(p_hoje, p_dia), migration 20261024160500):
  * a cauda do "Amanhã" e, na quinta, a semana que vem. Enriquecimento: erro (a função ainda não existe, o banco falhou)
  * = null, e o fechamento sai como na Fase 0. Quem chama decide o que publica (sombra × ligado).
+ * (29/10/2026, correção P4) O erro (o tempo esgotado de 28/10, 57014) vai também a app_error_logs (falhouNaAgenda).
  */
 export async function lerAgendaDoFechamento(admin: Admin, hoje: string, dia: string): Promise<AgendaDoFechamento | null> {
   try {
@@ -413,7 +434,7 @@ export async function lerAgendaDoFechamento(admin: Admin, hoje: string, dia: str
     if (error) throw error;
     return agendaDoFechamento(data);
   } catch (e) {
-    falhou("agenda", e);
+    await falhouNaAgenda(admin, "agenda", e);
     return null;
   }
 }

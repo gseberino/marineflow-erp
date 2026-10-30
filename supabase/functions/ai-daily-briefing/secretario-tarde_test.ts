@@ -429,6 +429,33 @@ Deno.test("agenda com erro, desligada, sem resposta ou sem a função: o fechame
   }
 });
 
+// (29/10/2026, Agenda de Produção, correção P4) Em 28/10 a leitura da agenda no fechamento estourou o tempo (57014) e o erro
+// foi engolido (só console.warn). Agora o fechamento sai igual (sem a agenda) e o erro fica em app_error_logs.
+Deno.test("agenda que estoura o tempo (57014): o fechamento sai sem ela e o erro vai para app_error_logs (tarde:agenda)", async () => {
+  const antes = await tardeComAgenda(null);
+  const f = falsoAdmin(banco({ formato: "sombra" }), RPCS);
+  const admin = {
+    from: f.admin.from,
+    rpc: (nome: string, args: unknown): Promise<{ data: unknown; error: unknown }> =>
+      nome === "agenda_textos_do_fechamento"
+        ? (f.chamadas.push({ nome, args }),
+          Promise.resolve({ data: null, error: { code: "57014", message: "canceling statement due to statement timeout" } }))
+        : f.admin.rpc(nome, args),
+  };
+  await rodarTurnoDaTarde(admin, { agora: AS_1730, pedido: "tarde", dry: false });
+  const p = registrar(f.chamadas)!;
+  assertEquals(p.texto, antes.p.texto);
+  assert(!("agenda" in (p.detalhe as Record<string, unknown>)));
+  const logs = f.chamadas.filter((c) => c.nome === "log_app_error").map((c) => c.args as Record<string, unknown>);
+  assertEquals(logs.length, 1, JSON.stringify(logs));
+  assertEquals([logs[0].p_source, logs[0].p_context, logs[0].p_action, logs[0].p_level], ["edge", "ai-daily-briefing", "tarde:agenda", "error"]);
+  assertEquals((logs[0].p_details as Record<string, unknown>).codigo, "57014");
+  assertEquals(String(logs[0].p_message).startsWith("fechamento: a leitura da agenda (agenda) falhou por tempo esgotado:"), true,
+    String(logs[0].p_message));
+  // sem erro, nada vai a app_error_logs
+  assertEquals(antes.chamadas.some((c) => c.nome === "log_app_error"), false);
+});
+
 Deno.test("agenda: só o fechamento e a revisão da semana leem a agenda (o 'Amanhã'); a revisão do mês não", async () => {
   const f = falsoAdmin(banco(), { ...RPCS, agenda_textos_do_fechamento: daAgenda("ligado") });
   await rodarTurnoDaTarde(f.admin, { agora: AS_1730, pedido: "revisao_mes", dry: true });
