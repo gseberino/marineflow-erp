@@ -550,8 +550,9 @@ begin
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
-  -- (7a P8: a onda decide no despacho — a opção sem efeito conhecido, como a deste teste, "não tem o que fazer")
-  v_res := pg_temp.ok(v_res, 'Q6a agenda_decidir manda os 10 tipos do gestor ao despacho (gestor = true: bem_livre, compre_ate e sinal "não tem opções"; a onda, do P8, "não tem o que fazer" com a opção sem efeito; os outros "ainda não sei decidir" até os pacotes deles) e não os de antes (equipe_cadastro e duracao: "não é de decisão"; dia_avisado: a crítica de sempre)',
+  -- (7a P8: a onda decide no despacho — a opção sem efeito conhecido, como a deste teste, "não tem o que fazer"; 7a P9: o
+  -- reavaliar e o reestimar também)
+  v_res := pg_temp.ok(v_res, 'Q6a agenda_decidir manda os 10 tipos do gestor ao despacho (gestor = true: bem_livre, compre_ate e sinal "não tem opções"; a onda, do P8, e o reavaliar e o reestimar, do P9, "não tem o que fazer" com a opção sem efeito; os outros "ainda não sei decidir" até os pacotes deles) e não os de antes (equipe_cadastro e duracao: "não é de decisão"; dia_avisado: a crítica de sempre)',
     v_t = 'bem_livre=true:Essa pergunta não tem opções: me responda com as suas palavras.'
           || ' | compre_ate=true:Essa pergunta não tem opções: me responda com as suas palavras.'
           || ' | dia_avisado=não:A agenda automática ainda está em teste: mostro como ficaria, mas não marco nada.'
@@ -559,8 +560,8 @@ begin
           || ' | estimativa=true:Essa opção não tem o que fazer: nada mudou.'
           || ' | ficha_estimativa=true:Ainda não sei decidir essa pergunta: nada mudou.'
           || ' | onda=true:Essa opção não tem o que fazer: nada mudou.'
-          || ' | reavaliar=true:Ainda não sei decidir essa pergunta: nada mudou.'
-          || ' | reestimar=true:Ainda não sei decidir essa pergunta: nada mudou.'
+          || ' | reavaliar=true:Essa opção não tem o que fazer: nada mudou.'
+          || ' | reestimar=true:Essa opção não tem o que fazer: nada mudou.'
           || ' | sabado=true:Ainda não sei decidir essa pergunta: nada mudou.'
           || ' | sinal=true:Essa pergunta não tem opções: me responda com as suas palavras.'
           || ' | situacao=true:Essa opção não tem o que fazer: nada mudou.',

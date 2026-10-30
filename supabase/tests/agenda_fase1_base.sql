@@ -964,7 +964,11 @@ insert into _definer_da_agenda values
   -- FASE 7 (7a P8, 20261031100700): a pergunta crítica da onda (escreve agenda_perguntas; só _agenda_propor_e_aplicar a chama;
   -- sem grant a ninguém, nem service_role). O encaixe, a conta da onda e a da zona são invoker. agenda_fase7a_encaixe.sql prova
   -- as portas.
-  ('_agenda_gestor_onda');
+  ('_agenda_gestor_onda'),
+  -- FASE 7 (7a P9, 20261031100750): o conserto da escada e o corte do reestimar aplicados (escrevem a proposta e as alocações e
+  -- chamam agenda_aplicar; só agenda_replanejar, a revisão e o despacho os chamam; sem grant a ninguém, nem service_role). As
+  -- contas, as perguntas da revisão e o passo são invoker. agenda_fase7a_revisao.sql prova as portas.
+  ('_agenda_gestor_reparar'), ('_agenda_gestor_reestimar');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

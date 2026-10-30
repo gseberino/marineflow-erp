@@ -82,13 +82,14 @@ begin
   v := substr(v, position(E'\nas $function$' in v) + length(E'\nas $function$'));
   return left(v, position('$function$' in v) - 1);
 end $f$;
--- O corpo sem os blocos deste pacote ("-- FASE 7: (7a P8 … -- FASE 7: fim"; os das etapas de antes ficam).
+-- O corpo sem os blocos deste pacote ("-- FASE 7: (7a P8 … -- FASE 7: fim"; os das etapas de antes ficam) e dos pacotes que
+-- recriam depois a mesma função (7a P9: _agenda_gestor_decidir, com o reestimar e o reavaliar).
 create function pg_temp.sem_p8(p_corpo text) returns text language plpgsql as $f$
 declare
   v_b text[] := '{}'; v_bloco boolean := false; l text;
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
-    if not v_bloco and l ~ '^\s*-- FASE 7: \(7a P8' then v_bloco := true; continue; end if;
+    if not v_bloco and l ~ '^\s*-- FASE 7: \(7a P(8|9)' then v_bloco := true; continue; end if;
     if v_bloco then
       if l ~ '^\s*-- FASE 7: fim' then v_bloco := false; end if;
       continue;
