@@ -956,7 +956,11 @@ insert into _definer_da_agenda values
   -- orcamento e a ação estimar) e o despacho das perguntas do gestor (agenda_decidir e o prazo vencido o chamam). Os três sem
   -- grant a ninguém, nem service_role. O prazo, a pergunta da OS, o prazo vencido e a chamada da equipe são invoker.
   -- agenda_fase7a_perguntas.sql prova as portas.
-  ('_agenda_gestor_perguntar'), ('_agenda_gestor_gravar_dias'), ('_agenda_gestor_decidir');
+  ('_agenda_gestor_perguntar'), ('_agenda_gestor_gravar_dias'), ('_agenda_gestor_decidir'),
+  -- FASE 7 (7a P7, 20261031100600): a rodada do gestor (o job agenda-gestor; os passos dela são invoker e sem grant) e a
+  -- palavra *gestor, só propor* / *pode marcar* (escreve gestor_so_propor e a ação gestor; confere o administrador dentro). As
+  -- duas só service_role. agenda_fase7a_rodada.sql prova as portas.
+  ('agenda_gestor_rodar'), ('agenda_gestor_dito');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

@@ -123,8 +123,9 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     // contado e posto no bloco material). Fase 5 (P3): + 9 na recriada (20261028100300: as mesmas 6, o erros_24h da rodada do
     // cliente, contado e posto no bloco cliente, e a métrica resposta_24h_pct). Fase 6 (P6): + 10 na recriada (20261029100600:
     // as mesmas 9 e o erros_24h da rodada do aprendizado, contado e posto no bloco aprendizado). Correção C2 da Fase 6
-    // (20261029100950): + 10 na recriada (a mesma cópia; as janelas novas do aprendizado vêm de agenda_config).
-    vezes: 40,
+    // (20261029100950): + 10 na recriada (a mesma cópia; as janelas novas do aprendizado vêm de agenda_config). Fase 7a (P7,
+    // 20261031100600): + 12 na recriada (a mesma cópia, 10, e o rodadas_24h e o erros_24h da rodada do gestor, no bloco gestor).
+    vezes: 52,
     porque: 'nomes das chaves do resultado (rodadas_24h, erros_24h, resposta_24h_pct: a janela de um dia da conferência); não é rascunho_validade',
   },
   // Fase 3 (P4): a rotina da equipe grava a rodada como a vigia.
@@ -155,6 +156,14 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     casou: '1000',
     vezes: 2,
     porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_cliente_vigiar); não é texto_max nem peca_embutida_acima',
+  },
+  // Fase 7a (P7, 20261031100600): a rodada do gestor da agenda grava a rodada como a vigia, a rotina, o material, o cliente e o
+  // aprendizado.
+  {
+    onde: 'agenda_gestor_rodar',
+    casou: '1000',
+    vezes: 1,
+    porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_aprender); não é texto_max nem peca_embutida_acima',
   },
   // Fase 3 (P6): o custo da simulação do livre de verdade e a ordem das OS do turno no job do Claude Max.
   {

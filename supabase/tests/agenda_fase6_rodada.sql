@@ -454,7 +454,15 @@ begin
    where n.nspname = 'public' and p.proname <> '_agenda_aprendizado_carga' and p.prosrc ~ '_agenda_aprendizado_carga\s*\(';
   insert into _resultado values
     ('R4a O RISCO: só duas funções escrevem em agenda_config — o versao_plano do gatilho das alocações (Fase 2) e _agenda_aprendizado_carga (só carga_max e o atualizado_*)',
-     v_esc = '_agenda_alocacoes_versao,_agenda_aprendizado_carga'
+     -- FASE 7 (7a P7): mais a palavra *gestor, só propor* / *pode marcar* (agenda_gestor_dito) e o *desfaz* dela (o ramo gestor
+     -- de agenda_desfazer): as duas só mexem em gestor_so_propor, gestor_so_propor_em e no atualizado_*
+     v_esc = '_agenda_alocacoes_versao,_agenda_aprendizado_carga,agenda_desfazer,agenda_gestor_dito'
+     and (select regexp_replace(p.prosrc, '\s+', ' ', 'g') ~ 'update public\.agenda_config set gestor_so_propor = p_so_propor, gestor_so_propor_em = p_agora, atualizado_em = p_agora, atualizado_por = v_autor where id;'
+                 and (select count(*) from regexp_matches(p.prosrc, 'update public\.agenda_config', 'g')) = 1
+            from pg_proc p where p.oid = 'public.agenda_gestor_dito(uuid, boolean, date, timestamptz)'::regprocedure)
+     and (select regexp_replace(p.prosrc, '\s+', ' ', 'g') ~ 'update public\.agenda_config set gestor_so_propor = coalesce\(\(v_a\.antes ->> ''gestor_so_propor''\)::boolean, false\), gestor_so_propor_em = \(v_a\.antes ->> ''gestor_so_propor_em''\)::timestamptz, atualizado_em = p_agora, atualizado_por = p_autor where id;'
+                 and (select count(*) from regexp_matches(p.prosrc, 'update public\.agenda_config', 'g')) = 1
+            from pg_proc p where p.oid = 'public.agenda_desfazer(uuid, uuid, text, date, timestamptz)'::regprocedure)
      and (select regexp_replace(p.prosrc, '\s+', ' ', 'g') ~ 'update public\.agenda_config set carga_max = p_para, atualizado_em = p_agora, atualizado_por = p_autor where id and carga_max = p_de;'
                  and (select count(*) from regexp_matches(p.prosrc, 'agenda_config', 'g')) = 1
             from pg_proc p where p.oid = 'public._agenda_aprendizado_carga(numeric, numeric, uuid, timestamptz)'::regprocedure)

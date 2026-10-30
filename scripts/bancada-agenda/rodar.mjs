@@ -198,6 +198,15 @@ const FIXTURES_COMO_TEXTO = [
   // mig_*_fase7a; as que já estão acima não se repetem (a de _agenda_perguntas_antes, recriada no P1, é a mig_tabelas_fase3).
   ['agenda_teste.replay2910', 'fixture-replay-2910.sql'],
   ['agenda_teste.fase7a', 'fixture-fase7a.sql'],
+  // Fase 7a (P7): as fontes de 2 das 6 recriadas da 20261031100600 que ainda não estavam acima — agenda_desfazer (a rodada da
+  // Fase 6) e _agenda_ver_plano (o P1 do lote) —, a própria 20261031100600 (o R8 confere o comando do job agenda-gestor pelo
+  // texto: a bancada não tem pg_cron; o R9, as cópias) e a migration de dado 20261031100990 (os 5 modos em sombra; FORA_DA_BANCADA:
+  // o agenda_fase7a_sombra.sql a roda numa subtransação). As fontes das outras 4 já estão acima (mig_correcao_revisao,
+  // mig_leituras_fase2, mig_correcao_livre e mig_correcao_textos_fase6).
+  ['agenda_teste.mig_rodada_fase6', '../../supabase/migrations/20261029100600_agenda_fase6_rodada.sql'],
+  ['agenda_teste.mig_correcao_leituras', '../../supabase/migrations/20261030100000_agenda_correcao_leituras.sql'],
+  ['agenda_teste.mig_rodada_fase7a', '../../supabase/migrations/20261031100600_agenda_fase7a_rodada.sql'],
+  ['agenda_teste.mig_sombra_fase7a', '../../supabase/migrations/20261031100990_agenda_fase7a_sombra.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

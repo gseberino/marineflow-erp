@@ -132,8 +132,17 @@ end $f$;
 create function pg_temp.sem_fase5(p_corpo text) returns text[] language plpgsql as $f$
 declare
   v_b text[] := '{}'; v_bloco boolean := false; l text;
+  v_f7 boolean := false;  -- FASE 7 (7a P7): dentro de um bloco da Fase 7
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
+    -- FASE 7 (7a P7): os blocos "-- FASE 7: … -- FASE 7: fim" também saem (a 20261031100600 recria agenda_desfazer e agenda_saude copiando a
+    -- definição mais nova: só acréscimo; o R9 de agenda_fase7a_rodada.sql confere a cópia); o fim é lido pelo prefixo
+    if not v_f7 and l ~ '^\s*-- FASE 7:' and l !~ '^\s*-- FASE 7: fim' then v_f7 := true; continue; end if;
+    if v_f7 then
+      if l ~ '^\s*-- FASE 7: fim' then v_f7 := false; end if;
+      continue;
+    end if;
+    -- FASE 7 (7a P7): fim
     -- FASE 6 (P6): também os blocos "-- FASE 6: … -- FASE 6: fim" (agenda_desfazer, agenda_decidir e agenda_saude foram
     -- recriadas de novo em 20261029100600, só com blocos da Fase 6 fora dos da Fase 5)
     if not v_bloco and l ~ '^\s*-- FASE [56]:' and l !~ '^\s*-- FASE [56]: fim' then v_bloco := true; continue; end if;

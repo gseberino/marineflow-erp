@@ -800,6 +800,15 @@ begin
   v_corpo := substr(v_corpo, position(E'as $function$\n' in v_corpo) + length(E'as $function$'));
   v_corpo := left(v_corpo, position(E'\n$function$;' in v_corpo));
   v_novo := replace(v_novo, E'\r\n', E'\n');
+  -- FASE 7 (7a P7): recriada de novo em 20261031100600 (os ramos estimar, dupla e gestor e quem saiu da equipe), com blocos
+  -- "-- FASE 7: … -- FASE 7: fim" (um deles dentro do laço, com 4 espaços): saem antes, linha a linha (o fim pelo prefixo)
+  v_novo := array_to_string(array(
+    select t.l from (select u.l, u.o, u.l ~ '^\s*-- FASE 7: fim' as fim,
+                            sum(case when u.l ~ '^\s*-- FASE 7:' and u.l !~ '^\s*-- FASE 7: fim' then 1
+                                     when u.l ~ '^\s*-- FASE 7: fim' then -1 else 0 end) over (order by u.o) as nivel
+                       from unnest(string_to_array(v_novo, E'\n')) with ordinality u(l, o)) t
+     where t.nivel = 0 and not t.fim order by t.o), E'\n');
+  -- FASE 7 (7a P7): fim
   -- FASE 3 (P4): agenda_desfazer foi recriada de novo em 20261026100300 (a diária da agenda e a ausência da equipe), com
   -- dois blocos "-- FASE 3: … -- FASE 3: fim": tira todos (cada um é só acréscimo ao corpo de 20261025100200).
   loop

@@ -1,0 +1,197 @@
+-- A prova com a carteira REAL de qui 29/10/2026 16:52 (spec-fase7a §8.3): os cenários A (tudo em sombra), B (a 7a-0 ligada) e D
+-- (*gestor, só propor*), do pacote P7 (migration 20261031100600). O P8 acrescenta o C (o prazo vence e o encaixe marca), o P10 o
+-- E (compre até) e o P11 o F (cliente). O replay (fixture-replay-2910.sql) com a presença do dono de produção no Lenine e no
+-- Vanderlei (abre e fecha: o replay sozinho dá "sempre", notas do P2).
+-- bancada: depende de 20261031100600
+--
+--   A  tudo em sombra (o estado depois da migration de dado): (1) a prontidão das 11, os meios, a classe e o motor (a semana e as
+--      11) saem iguais aos de desligado (md5) — o portão é falso fora da simulação; os testes do P2, P3 e P5 provam desligado = as
+--      definições de antes; (2) a rodada do gestor das 16:52 não escreve alocação, proposta, ação executada, mensagem nem fila;
+--      (3) o diário: Lenine e Vanderlei marcados, Giancarlo, Nelson e Flávio perguntados, 6 fora; (4) o texto do fechamento (§6.1)
+--   B  a 7a-0 ligada (o caminho da revisão: agenda_propor das 11 persistir + aplicar): o Lenine em compromisso de ter 03 a ter 10/11
+--      (12 meios-dias, 1 pessoa por meio-dia, você abre e fecha, a reserva promovida); o Vanderlei de qui 12 a ter 24/11 (15
+--      meios-dias); de fora, cada um pelo seu porquê (Giancarlo estimativa, Nelson situacao, Flávio material, Rodrigo-96 padrao_do_dono,
+--      Kalmar ×2 e Rodrigo-76 cliente, Robson orcamento, MP sinal); 0 choques; nada em qui 29 e sex 30/10; nenhuma crítica sem
+--      pergunta; todas as alocações novas com duracao_fonte orcamento; o texto das ações com "(estimativa minha: …)"
+--   D  B + *gestor, só propor*: os modos efetivos voltam a sombra, a regra fecha, a rodada seguinte não aplica nada, o publicado fica
+--
+-- ═══ COMO RODAR ═══
+--   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
+--   Fora da bancada não há o replay: PULADO. Termina em ROLLBACK.
+--
+-- A tabela final tem de mostrar ok = true em todas as linhas. Uma linha false é defeito.
+begin;
+
+create temp table _resultado (teste text, ok boolean, detalhe text) on commit drop;
+
+create function pg_temp.ok(p_res jsonb, p_nome text, p_ok boolean, p_detalhe text default null) returns jsonb
+language sql immutable as $f$
+  select p_res || jsonb_build_array(jsonb_build_array(p_nome, coalesce(p_ok, false), p_detalhe))
+$f$;
+create function pg_temp.gravar(p_res jsonb) returns void language sql as $f$
+  insert into _resultado select e ->> 0, (e ->> 1)::boolean, e ->> 2 from jsonb_array_elements(p_res) e
+$f$;
+create function pg_temp.os(p_numero text) returns uuid language sql stable as $f$
+  select so.id from public.service_orders so where so.service_order_number = p_numero
+$f$;
+create function pg_temp.em(p_dia date, p_hora text) returns timestamptz language sql immutable as $f$
+  select (p_dia + p_hora::time) at time zone 'America/Sao_Paulo'
+$f$;
+create function pg_temp.modos(p_modo text) returns void language sql as $f$
+  update public.agenda_config
+     set modo_marcar_sozinho = p_modo, modo_encaixe_aprovacao = p_modo, modo_revisao_diaria = p_modo, modo_compre_ate = p_modo,
+         modo_vaga_fechamento = p_modo, gestor_so_propor = false, gestor_so_propor_em = null,
+         marcar_sozinho_desde = case when p_modo = 'ligado' then timestamptz '2026-10-29 16:46-03' end,
+         marcar_regras = '{estimativa,mo_limpa,uma_pessoa,diagnostico,situacao,sem_peca,embutida_suposta,critico_por_valor,prazo_padrao,compra_firme,teto_equipe,zona_travada,onda,escada,sinal_cobrar}'
+   where id
+$f$;
+-- A leitura do motor e da prontidão das 11 (md5): a prontidão, os meios e a classe de cada uma, a semana e as 11 em simulação.
+create function pg_temp.leitura(p_cart uuid[], p_hoje date, p_agora timestamptz) returns jsonb language plpgsql as $f$
+declare
+  v_s jsonb;
+  v_o jsonb;
+begin
+  v_s := public.agenda_propor('semana', null, null, null, '{}'::jsonb, false, 'motor', null, p_hoje, p_agora);
+  v_o := public.agenda_propor('os', null, null, p_cart, '{}'::jsonb, false, 'motor', null, p_hoje, p_agora);
+  return jsonb_build_object(
+    'prontidao', md5((select string_agg(public.os_prontidao(o, p_hoje)::text, '|' order by o) from unnest(p_cart) o)),
+    'meios', md5((select string_agg(public.agenda_meios_da_os(o, p_hoje)::text, '|' order by o) from unnest(p_cart) o)),
+    'classe', md5((select string_agg((public._agenda_classe_agora(o, p_hoje) - 'pront')::text, '|' order by o) from unnest(p_cart) o)),
+    'semana', md5((v_s - 'proposta_id')::text), 'oss', md5((v_o - 'proposta_id')::text));
+end $f$;
+create function pg_temp.escritas() returns jsonb language sql stable as $f$
+  select jsonb_build_object(
+    'alocacoes', (select md5(coalesce(string_agg(a.id::text || a.estado, ',' order by a.id), '')) from public.agenda_alocacoes a),
+    'propostas', (select count(*) from public.agenda_propostas),
+    'acoes', (select count(*) from public.agenda_acoes where executada),
+    'equipe', (select count(*) from public.agenda_equipe_mensagens),
+    'cliente', (select count(*) from public.agenda_cliente_mensagens),
+    'fila', (select count(*) from public.whatsapp_send_queue))
+$f$;
+
+do $rp$
+declare
+  v_res   jsonb := '[]'::jsonb;
+  c_d29   constant date := date '2026-10-29';
+  c_a29   constant timestamptz := timestamptz '2026-10-29 16:52-03';
+  c_txt   constant text := 'Agenda em teste (nada mudou): eu marcaria assim — Lenine de ter 03 a ter 10/11, Roberto e João (6 dias, estimativa minha); Vanderlei de qui 12 a ter 24/11, Roberto e João (7,5 dias, estimativa minha; compre até hoje: 3 itens). Antes de marcar eu perguntaria: Giancarlo (10 diárias pela estimativa), Nelson (já começou?), Flávio (já começou?). Continuam fora 6: esperando o cliente (3), orçamento sem virar OS, esperando o sinal, precisa de você em campo. *agenda gestor* mostra tudo.';
+  v_cart  uuid[];
+  v_dono  uuid;
+  v_adm   uuid;
+  v_len   uuid;
+  v_van   uuid;
+  v_l0    jsonb;
+  v_l1    jsonb;
+  v_e0    jsonb;
+  v_s     jsonb;
+  v_p     jsonb;
+  v_ap    jsonb;
+  v_t     text;
+  v_pub   text;
+  r       jsonb;
+begin
+  if coalesce(current_setting('agenda_teste.replay2910', true), '') = '' then
+    insert into _resultado values ('A, B e D (o replay de 29/10)', true, 'PULADO: sem agenda_teste.replay2910 (rode pela bancada)');
+    return;
+  end if;
+  begin
+    execute current_setting('agenda_teste.replay2910');
+    insert into public.os_planejamento (service_order_id, dono_presenca)
+    select so.id, 'abre_e_fecha' from public.service_orders so where so.service_order_number in ('OS-00074', 'OS-00069')
+    on conflict (service_order_id) do update set dono_presenca = 'abre_e_fecha';
+    v_cart := array(select k.service_order_id from public.os_carteira(c_d29) k order by k.numero);
+    v_dono := public._agenda_dono(null);
+    select u.id into v_adm from public.app_users u where u.role = 'admin' order by u.id limit 1;
+    v_len := pg_temp.os('OS-00074');
+    v_van := pg_temp.os('OS-00069');
+
+    -- ── A. Tudo em sombra ──
+    perform pg_temp.modos('desligado');
+    v_l0 := pg_temp.leitura(v_cart, c_d29, c_a29);
+    perform pg_temp.modos('sombra');
+    v_l1 := pg_temp.leitura(v_cart, c_d29, c_a29);
+    v_res := pg_temp.ok(v_res, 'A1 em sombra, a prontidão das 11, os meios, a classe, a semana e o motor das 11 saem iguais aos de desligado (md5): fora da simulação o portão das regras é falso',
+      v_l0 = v_l1 and cardinality(v_cart) = 11, v_l1::text);
+    v_e0 := pg_temp.escritas();
+    r := public.agenda_gestor_rodar(c_d29, c_a29);
+    v_res := pg_temp.ok(v_res, 'A2 a rodada do gestor das 16:52 (os diários) não escreve alocação, proposta, ação executada, mensagem à equipe ou ao cliente, nem fila',
+      (r ->> 'rodou')::boolean and (r ->> 'diaria')::boolean and pg_temp.escritas() = v_e0 and pg_temp.leitura(v_cart, c_d29, c_a29) = v_l0,
+      (pg_temp.escritas())::text);
+    select g.sombra, g.texto_sombra into v_s, v_t from public.agenda_gestor_dia g where g.dia = c_d29;
+    v_res := pg_temp.ok(v_res, 'A3 o diário: Lenine e Vanderlei marcados (pela estimativa), Giancarlo, Nelson e Flávio perguntados, 6 fora',
+      (select string_agg(e ->> 'cliente', ',' order by o) from jsonb_array_elements(v_s -> 'itens') with ordinality t(e, o)) = 'Lenine,Vanderlei'
+      and (select string_agg(e ->> 'cliente', ',' order by o) from jsonb_array_elements(v_s -> 'perguntas') with ordinality t(e, o)) = 'Giancarlo,Nelson,Flávio'
+      and jsonb_array_length(v_s -> 'fora') = 6, left(v_s::text, 600));
+    v_res := pg_temp.ok(v_res, 'A4 o texto do fechamento (spec §6.1, com os números de agora) no diário e na linha gestor das linhas do fechamento',
+      v_t = c_txt and exists (select 1 from jsonb_array_elements(public._agenda_linhas_do_fechamento(c_d29)) x
+                               where x ->> 'tipo' = 'gestor' and x ->> 'texto' = c_txt), v_t);
+
+    -- ── B. A 7a-0 ligada: o caminho da revisão (as 11 pelo motor, persistir e aplicar) ──
+    perform pg_temp.modos('ligado');
+    v_p := public.agenda_propor('os', null, null, v_cart, '{}'::jsonb, true, 'vigia', null, c_d29, c_a29);
+    v_ap := public.agenda_aplicar((v_p ->> 'proposta_id')::uuid, null, 'vigia', null, null, c_d29, c_a29);
+    v_res := pg_temp.ok(v_res, 'B1 aplicada sem crítica: as duas marcadas pela estimativa e a reserva do Lenine promovida',
+      (v_ap ->> 'ok')::boolean
+      and not exists (select 1 from jsonb_array_elements(v_p -> 'itens') i where i ->> 'critica' is not null)
+      and jsonb_array_length(v_p -> 'perguntas') = 0, left(v_ap ->> 'texto', 600));
+    v_res := pg_temp.ok(v_res, 'B2 o Lenine: compromisso de ter 03 a ter 10/11, 12 meios-dias de 1 pessoa por meio-dia, você abre (ter 03) e fecha (ter 10); as 12 reservas canceladas como promovidas',
+      (select min(a.dia) = date '2026-11-03' and max(a.dia) = date '2026-11-10' and count(*) = 12
+         from public.agenda_alocacoes a where a.service_order_id = v_len and a.estado = 'publicada' and a.tipo <> 'reserva' and a.presenca = 'turno')
+      and not exists (select 1 from public.agenda_alocacoes a where a.service_order_id = v_len and a.estado = 'publicada'
+                       and a.presenca = 'turno' group by a.dia, a.turno having count(*) > 1)
+      and exists (select 1 from public.agenda_alocacoes a where a.service_order_id = v_len and a.estado = 'publicada' and a.payee_id = v_dono
+                   and a.presenca = 'abertura' and a.dia = date '2026-11-03')
+      and exists (select 1 from public.agenda_alocacoes a where a.service_order_id = v_len and a.estado = 'publicada' and a.payee_id = v_dono
+                   and a.presenca = 'fechamento' and a.dia = date '2026-11-10')
+      and (select count(*) = 12 and bool_and(a.cancelada_motivo = 'promovida') from public.agenda_alocacoes a
+            where a.service_order_id = v_len and a.tipo = 'reserva'),
+      (select string_agg(format('%s %s %s', a.dia, a.turno, a.presenca), ' | ' order by a.dia, a.turno) from public.agenda_alocacoes a
+        where a.service_order_id = v_len and a.estado = 'publicada'));
+    v_res := pg_temp.ok(v_res, 'B3 o Vanderlei: compromisso de qui 12 a ter 24/11, 15 meios-dias de 1 pessoa por meio-dia (o prazo padrão de 7 dias úteis + 1 de compra interna)',
+      (select min(a.dia) = date '2026-11-12' and max(a.dia) = date '2026-11-24' and count(*) = 15
+         from public.agenda_alocacoes a where a.service_order_id = v_van and a.estado = 'publicada' and a.tipo <> 'reserva' and a.presenca = 'turno')
+      and not exists (select 1 from public.agenda_alocacoes a where a.service_order_id = v_van and a.estado = 'publicada'
+                       and a.presenca = 'turno' group by a.dia, a.turno having count(*) > 1), null);
+    select string_agg(f ->> 'numero' || ':' || (f ->> 'motivo'), ' ' order by f ->> 'numero') into v_t
+      from jsonb_array_elements(v_p -> 'fora') f;
+    v_res := pg_temp.ok(v_res, 'B4 de fora, cada um pelo seu porquê: Giancarlo estimativa, Nelson situacao, Flávio material, Rodrigo-96 padrao_do_dono, Kalmar ×2 e Rodrigo-76 cliente, Robson orcamento, MP sinal',
+      v_t = 'ORÇ-00083:orcamento ORÇ-00095:sinal OS-00032:cliente OS-00033:cliente OS-00076:cliente OS-00096:padrao_do_dono OS-00104:material OS-00112:situacao OS-00130:estimativa',
+      v_t);
+    v_res := pg_temp.ok(v_res, 'B5 0 choques, nada em qui 29 e sex 30/10 (hoje e o próximo dia útil), nenhuma crítica executada sem a pergunta',
+      (select count(*) from public.agenda_alocacoes a join public.agenda_alocacoes b
+          on b.payee_id = a.payee_id and b.id > a.id and b.periodo && a.periodo
+        where a.estado in ('publicada', 'fixada') and b.estado in ('publicada', 'fixada')) = 0
+      and not exists (select 1 from public.agenda_alocacoes a where a.estado in ('publicada', 'fixada') and a.dia in (c_d29, c_d29 + 1))
+      and (public.agenda_saude(c_d29, c_a29) -> 'criticas' ->> 'sem_decisao')::int = 0, null);
+    v_res := pg_temp.ok(v_res, 'B6 todas as alocações novas com duracao_fonte orcamento e o texto das ações com "(estimativa minha: …)"',
+      not exists (select 1 from public.agenda_alocacoes a where a.estado = 'publicada' and a.tipo <> 'reserva'
+                   and a.duracao_fonte is distinct from 'orcamento')
+      and (select bool_and(x.texto like '%(estimativa minha: 6 dias)%' or x.texto like '%(estimativa minha: 7,5 dias)%' or x.tipo = 'promover_reserva')
+             from public.agenda_acoes x where x.proposta_id = (v_p ->> 'proposta_id')::uuid)
+      and (select count(*) from public.agenda_acoes x where x.proposta_id = (v_p ->> 'proposta_id')::uuid and x.texto like '%(estimativa minha:%') = 2,
+      (select string_agg(x.tipo || ': ' || left(x.texto, 120), ' | ') from public.agenda_acoes x where x.proposta_id = (v_p ->> 'proposta_id')::uuid));
+
+    -- ── D. *gestor, só propor* ──
+    v_pub := (select md5(string_agg(a.id::text || a.estado, ',' order by a.id)) from public.agenda_alocacoes a);
+    r := public.agenda_gestor_dito(v_adm, true, c_d29, pg_temp.em(c_d29, '17:40'));
+    v_res := pg_temp.ok(v_res, 'D1 *gestor, só propor*: os modos efetivos do gestor voltam a sombra (a vaga do fechamento fica) e as regras fecham',
+      (r ->> 'mudou')::boolean and public._agenda_gestor_modo('marcar') = 'sombra' and public._agenda_gestor_modo('encaixe') = 'sombra'
+      and public._agenda_gestor_modo('revisao') = 'sombra' and public._agenda_gestor_modo('compre_ate') = 'sombra'
+      and public._agenda_gestor_modo('vaga') = 'ligado' and not public._agenda_gestor_regra('estimativa'), r::text);
+    v_e0 := pg_temp.escritas();
+    r := public.agenda_gestor_rodar(c_d29 + 1, pg_temp.em(c_d29 + 1, '16:52'));
+    v_res := pg_temp.ok(v_res, 'D2 a rodada seguinte (sex 30/10 16:52) faz a conta em teste e não aplica nada; o publicado fica',
+      (r ->> 'rodou')::boolean and r -> 'modos' ->> 'marcar' = 'sombra' and (r ->> 'acoes')::int = 0
+      and pg_temp.escritas() = v_e0
+      and (select md5(string_agg(a.id::text || a.estado, ',' order by a.id)) from public.agenda_alocacoes a) = v_pub
+      and exists (select 1 from public.agenda_gestor_dia g where g.dia = c_d29 + 1 and g.sombra <> '{}'::jsonb), left(r::text, 400));
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  perform pg_temp.gravar(v_res);
+end
+$rp$;
+
+select teste, ok, detalhe from _resultado order by teste;
+
+rollback;
