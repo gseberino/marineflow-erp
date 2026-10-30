@@ -614,3 +614,25 @@ Deno.test("Fase 3: as linhas novas em sombra: o texto é o de antes byte a byte 
   const ag = (sombra.p.detalhe as { agenda: Record<string, unknown> }).agenda;
   assertEquals((ag.linhas_diria as Array<{ tipo: string }>).map((l) => l.tipo), ["diaria", "comissao"]);
 });
+
+// (30/10/2026, Agenda de Produção Fase 7a, correção da revisão, migration 20261031100980) A linha das perguntas do gestor leva várias
+// perguntas: o registro manda as pergunta_ids dela (o banco conta cada uma como mostrada); as outras linhas vão como antes.
+Deno.test("Correção da 7a: o registro do fechamento manda as pergunta_ids da linha das perguntas do gestor, e só dela", async () => {
+  const chamadas: Array<{ nome: string; args: unknown }> = [];
+  const admin = {
+    rpc: (nome: string, args: unknown) => {
+      chamadas.push({ nome, args });
+      return Promise.resolve({ data: { ok: true, perguntas: 3, acoes: 0 }, error: null });
+    },
+  };
+  const linhas = [
+    { tipo: "pergunta" as const, texto: "Agenda: Hoje às 19:30 a ficha de amanhã vai para Alex.", perda: 75, pergunta_id: "q-ficha",
+      pergunta_ids: ["q-ficha", "q-nelson", "q-mp"], acao_ids: [], modo: "ligado" as const },
+    { tipo: "decisao" as const, texto: DECISAO_DO_BANCO, perda: 50, pergunta_id: "q", acao_ids: [], modo: "ligado" as const },
+  ];
+  assertEquals(await registrarAgendaDoFechamento(admin, HOJE, linhas), { perguntas: 3, acoes: 0 });
+  assertEquals(chamadas[0].args, {
+    p_hoje: HOJE, p_via: "fechamento",
+    p_linhas: [{ pergunta_id: "q-ficha", acao_ids: [], pergunta_ids: ["q-ficha", "q-nelson", "q-mp"] }, { pergunta_id: "q", acao_ids: [] }],
+  });
+});

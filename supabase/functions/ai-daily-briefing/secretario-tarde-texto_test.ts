@@ -661,15 +661,44 @@ Deno.test("Fase 7a (P7): as vagas garantidas somam às que sobram (3 ficaram + 1
                ["compras 80"]);
 });
 
-Deno.test("Fase 7a (P7): a coleta só repassa as vagas que o banco disse (0 a 2; o resto vira 0)", () => {
+Deno.test("Fase 7a (P7; correção 20261031100980): a coleta só repassa as vagas que o banco disse (0 a 3; o resto vira 0)", () => {
   const base = { modo: "ligado", cauda_amanha: null, semana_que_vem: [], linhas: [] };
   assertEquals(agendaDoFechamento({ ...base, vagas_garantidas: 1 })?.vagas_garantidas, 1);
   assertEquals(agendaDoFechamento({ ...base, vagas_garantidas: 2, vaga_teria: null })?.vagas_garantidas, 2);
+  // (correção da 7a: cada linha que perde hoje tem a sua vaga, até 3)
+  assertEquals(agendaDoFechamento({ ...base, vagas_garantidas: 3 })?.vagas_garantidas, 3);
   assertEquals(agendaDoFechamento({ ...base, vagas_garantidas: 0, vaga_teria: 1 })?.vaga_teria, 1);
-  for (const v of [3, -1, 1.5, "1", null, undefined]) {
+  for (const v of [4, -1, 1.5, "1", null, undefined]) {
     assertEquals(agendaDoFechamento({ ...base, vagas_garantidas: v })?.vagas_garantidas, undefined, String(v));
     assertEquals(vagasDaAgenda(v), 0, String(v));
   }
   // o banco de antes da 7a (sem os campos): a agenda do fechamento é a de sempre
   assertEquals(agendaDoFechamento(base), { modo: "ligado", cauda: null, semana: [] });
+});
+
+// ─── (30/10/2026) Agenda de Produção, Fase 7a, correção da revisão (migration 20261031100980): a linha das perguntas do gestor ─────
+// O banco junta numa linha só as perguntas do gestor que esperam o dono (a ficha de amanhã, os dias que ele marca sem resposta) e
+// manda todas em pergunta_ids: a coleta as repassa (só strings), para o registro contar cada uma como mostrada; as outras linhas
+// continuam sem o campo. E cada linha que perde hoje tem a sua vaga, até 3.
+Deno.test("Correção da 7a: a coleta repassa as pergunta_ids da linha das perguntas do gestor (só as strings); sem elas, a linha de sempre", () => {
+  const lidas = linhasDaAgenda([
+    { tipo: "pergunta", texto: "Agenda: Hoje às 19:30 a ficha de amanhã vai para Alex.", perda: 75, pergunta_id: "q-ficha",
+      pergunta_ids: ["q-ficha", "q-nelson", 7, null], acao_ids: [], modo: "ligado" },
+    { tipo: "pergunta", texto: "Agenda: o Lenine tem peça?", perda: 30, pergunta_id: "q-lenine", acao_ids: [], modo: "ligado" },
+    { tipo: "pergunta", texto: "Agenda: x", perda: 30, pergunta_id: "q-x", pergunta_ids: [], acao_ids: [], modo: "ligado" },
+  ]);
+  assertEquals(lidas[0].pergunta_ids, ["q-ficha", "q-nelson"]);
+  assertEquals("pergunta_ids" in lidas[1], false);
+  assertEquals("pergunta_ids" in lidas[2], false);
+});
+
+Deno.test("Correção da 7a: com 3 vagas garantidas e o Secretário cheio, as 3 linhas que perdem hoje entram (a ficha, o cliente, a compra)", () => {
+  const linhas = [
+    l2("pergunta", "Agenda: Hoje às 19:30 a ficha de amanhã vai para Alex: Lenine, qua 04/11 o dia todo.", 75),
+    l2("cliente", "Mensagem para Lenine (véspera), sai amanhã às 09:00: …", 75),
+    l2("compras", "Compras: Sem fornecedor (contei 7 dias úteis): 3 itens de Vanderlei — compre até hoje.", 80),
+    l2("dia", "Agenda de hoje: nada marcado.", 70),
+  ];
+  assertEquals(linhasDaAgendaQueCabem(3, { ...comLinhas(linhas), vagas_garantidas: 3 }).map((l) => `${l.tipo} ${l.perda}`),
+               ["compras 80", "cliente 75", "pergunta 75"]);
 });

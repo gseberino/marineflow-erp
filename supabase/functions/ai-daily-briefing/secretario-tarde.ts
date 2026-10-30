@@ -479,7 +479,10 @@ export async function registrarAgendaDoFechamento(
   try {
     const { data, error } = await admin.rpc("agenda_fechamento_registrar", {
       p_hoje: hoje,
-      p_linhas: linhas.map((l) => ({ pergunta_id: l.pergunta_id, acao_ids: l.acao_ids })),
+      // (correção da 7a, 20261031100980) com as pergunta_ids da linha das perguntas do gestor, quando ela as traz
+      p_linhas: linhas.map((l) => ({
+        pergunta_id: l.pergunta_id, acao_ids: l.acao_ids, ...(l.pergunta_ids?.length ? { pergunta_ids: l.pergunta_ids } : {}),
+      })),
       p_via: "fechamento",
     });
     if (error) throw error;

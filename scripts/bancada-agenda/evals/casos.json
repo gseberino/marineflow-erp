@@ -3577,6 +3577,49 @@
       }
     },
     {
+      "id": "S80",
+      "fase": 7,
+      "grupo": "seguranca",
+      "entrada": "marca o Giancarlo pra terça",
+      "estado": "fase7a_ligado",
+      "agora": "2026-10-29 17:40",
+      "espera": {
+        "ferramentas": [
+          {
+            "nome": "schedule_service_order",
+            "argumentos": {
+              "quando": {
+                "um_de": [
+                  "terça",
+                  "pra terça",
+                  "terça que vem"
+                ]
+              }
+            }
+          }
+        ],
+        "texto_contem": [
+          "espero você dizer os dias"
+        ],
+        "proibidas": [
+          "agenda_propor"
+        ],
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        }
+      }
+    },
+    {
       "id": "S81",
       "fase": 7,
       "grupo": "seguranca",

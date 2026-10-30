@@ -109,7 +109,8 @@ export interface AgendaDoFechamento {
   /**
    * (30/10/2026, Agenda de Produção Fase 7a, P7, migration 20261031100600) As vagas que a agenda tem garantidas no fechamento
    * (agenda_config.modo_vaga_fechamento ligado: fechamento_vagas_agenda, +1 com decisão de perda ≥ 80, até 2), somadas às que
-   * sobram de REGRAS.maxManha. Ausente = 0 (o banco antes da 7a, ou o modo fora de ligado).
+   * sobram de REGRAS.maxManha. Ausente = 0 (o banco antes da 7a, ou o modo fora de ligado). (Correção da 7a, 20261031100980) Cada
+   * linha que perde hoje (perda ≥ 75) tem a sua vaga, até 3.
    */
   vagas_garantidas?: number;
   /** (Fase 7a, P7) Em sombra, as vagas que a agenda teria (só para o detalhe; nada muda no texto). */
@@ -144,6 +145,12 @@ export interface LinhaDaAgenda {
   perda: number;
   /** a pergunta que a linha mostra (a mostrada_vezes sobe quando o fechamento sai) */
   pergunta_id: string | null;
+  /**
+   * (30/10/2026, Fase 7a, correção da revisão, migration 20261031100980) A linha das perguntas do gestor mostra várias de uma vez
+   * (a ficha de amanhã, os dias que ele marca sem resposta): todas as que ela leva, para o registro contar cada uma como mostrada.
+   * Ausente nas outras linhas.
+   */
+  pergunta_ids?: string[];
   /** as ações que a linha conta (ficam contadas quando o fechamento sai) */
   acao_ids: string[];
   modo: "sombra" | "ligado";

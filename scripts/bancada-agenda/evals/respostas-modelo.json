@@ -2383,6 +2383,50 @@
       "texto": "Anotei: o Nelson termina em 2 dias, na qua 04/11."
     }
   },
+  "S80": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "list_service_orders",
+          "argumentos": {
+            "search": "Giancarlo"
+          }
+        },
+        {
+          "ferramenta": "schedule_service_order",
+          "argumentos": {
+            "service_order_id": "2ad90efc-e806-e2db-6f36-7accdcf1d8ec",
+            "scheduled_start_at": "2026-11-03T08:00:00-03:00",
+            "quando": "terça",
+            "trecho": "marca o Giancarlo pra terça"
+          }
+        }
+      ],
+      "texto": "{{saida:1}}"
+    },
+    "ruim": {
+      "por_que": "calcula o dia e escolhe o técnico sozinho, e diz que marcou sem o *grava* do dono",
+      "reprova_em": "texto",
+      "chamadas": [
+        {
+          "ferramenta": "list_service_orders",
+          "argumentos": {
+            "search": "Giancarlo"
+          }
+        },
+        {
+          "ferramenta": "schedule_service_order",
+          "argumentos": {
+            "service_order_id": "2ad90efc-e806-e2db-6f36-7accdcf1d8ec",
+            "scheduled_start_at": "2026-11-03T08:00:00-03:00",
+            "quando": "terça",
+            "trecho": "marca o Giancarlo pra terça"
+          }
+        }
+      ],
+      "texto": "Marquei o Giancarlo para terça, 03/11, com o Alex."
+    }
+  },
   "S81": {
     "boa": {
       "chamadas": [],

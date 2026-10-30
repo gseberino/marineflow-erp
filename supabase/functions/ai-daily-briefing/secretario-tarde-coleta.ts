@@ -403,10 +403,13 @@ export function agendaDoFechamento(data: unknown): AgendaDoFechamento | null {
   };
 }
 
-/** (Fase 7a, P7) Um número de vagas do banco: inteiro de 0 a 2; o que vier fora disso (ausente, texto, negativo) = 0. */
+/**
+ * (Fase 7a, P7) Um número de vagas do banco: inteiro de 0 a 3 (correção da 7a, 20261031100980: cada linha que perde hoje tem a
+ * sua vaga, até 3; antes, até 2); o que vier fora disso (ausente, texto, negativo, acima de 3) = 0.
+ */
 export function vagasDaAgenda(v: unknown): number {
   const n = typeof v === "number" ? v : NaN;
-  return Number.isInteger(n) && n >= 0 && n <= 2 ? n : 0;
+  return Number.isInteger(n) && n >= 0 && n <= 3 ? n : 0;
 }
 
 /** Até quantos caracteres uma linha da agenda pode ter no fechamento (o banco corta em 480; o resto não entra). */
@@ -429,6 +432,10 @@ export function linhasDaAgenda(v: unknown): LinhaDaAgenda[] {
       pergunta_id: typeof x.pergunta_id === "string" ? x.pergunta_id : null,
       acao_ids: Array.isArray(x.acao_ids) ? x.acao_ids.filter((a): a is string => typeof a === "string") : [],
       modo: x.modo,
+      // (correção da 7a, 20261031100980) a linha das perguntas do gestor leva várias: todas vão ao registro
+      ...(Array.isArray(x.pergunta_ids) && x.pergunta_ids.some((a) => typeof a === "string")
+        ? { pergunta_ids: x.pergunta_ids.filter((a): a is string => typeof a === "string") }
+        : {}),
     });
   }
   return r;
