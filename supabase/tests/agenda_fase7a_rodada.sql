@@ -213,10 +213,12 @@ begin
     perform pg_temp.replay('sombra');
     -- qui 29/10 10:07: só os de todo tique (antes das 16:45)
     r := public.agenda_gestor_rodar(c_d29, pg_temp.em(c_d29, '10:07'));
-    v_res := pg_temp.ok(v_res, 'R1c antes das 16:45: só os passos de todo tique (vetos; encaixe, bem, sinal e puxar ainda não existem: pulados), nenhum diário',
+    v_res := pg_temp.ok(v_res, 'R1c antes das 16:45: só os passos de todo tique (vetos; o sinal, do 7a P12, roda e em teste pula; bem e puxar ainda não existem: pulados), nenhum diário',
       (r ->> 'rodou')::boolean and not (r ->> 'diaria')::boolean
       and r #> '{contagens,vetos}' ? 'aplicadas'
-      and (select bool_and(r #>> array['contagens', p, 'motivo'] = 'ainda não existe') from unnest(array['encaixe', 'bem', 'sinal', 'puxar']) p)
+      and (select bool_and(r #>> array['contagens', p, 'motivo'] = 'ainda não existe') from unnest(array['encaixe', 'bem', 'puxar']) p)
+      -- (7a P12: o passo sinal existe; em teste ele pula: o gestor não marca sozinho)
+      and r #>> '{contagens,sinal,pulado}' = 'true' and r #>> '{contagens,sinal,motivo}' = 'o gestor não marca sozinho'
       and not (r -> 'contagens' ? 'sombra') and not (r -> 'contagens' ? 'perguntas') and not (r -> 'contagens' ? 'diaria'),
       left(r::text, 600));
     -- 16:52: o 1º tique a partir de gestor_hora_revisao roda os diários
@@ -224,12 +226,13 @@ begin
     select x.contagens into v_l from public.agenda_vigia_rodadas x
      where x.rotina = 'gestor' and x.p_agora = pg_temp.em(c_d29, '16:52');
     -- (7a P11: o passo fichas existe e, sem o ligar do gestor — marcar_sozinho_desde nulo em teste —, pula)
-    v_res := pg_temp.ok(v_res, 'R1d o 1º tique de dia útil a partir das 16:45 roda os diários: perguntas (em teste: pulado), equipe e sombra rodam; fichas (7a P11) pula sem o ligar do gestor; compre_ate, revisao, orcamentos e sabado ainda não existem; a rodada grava "diaria"',
+    v_res := pg_temp.ok(v_res, 'R1d o 1º tique de dia útil a partir das 16:45 roda os diários: perguntas (em teste: pulado), equipe e sombra rodam; fichas (7a P11) pula sem o ligar do gestor; compre_ate e revisao (7a P9 e P10) rodam; orcamentos e sabado (7a P12) rodam — os 6 orçamentos pela conta da sombra, o sábado sem ninguém de sábado; a rodada grava "diaria"',
       (r ->> 'diaria')::boolean and v_l ? 'diaria' and v_l -> 'sombra' ? 'md5' and (v_l -> 'equipe' ->> 'criada')::boolean
       and v_l #>> '{perguntas,pulado}' = 'true'
       and v_l #>> '{fichas,pulado}' = 'true' and v_l #>> '{fichas,motivo}' like 'o gestor ainda não marca sozinho%'
-      and (select bool_and(v_l #>> array[p, 'motivo'] = 'ainda não existe')
-             from unnest(array['compre_ate', 'revisao', 'orcamentos', 'sabado']) p)
+      and v_l ? 'compre_ate' and v_l ? 'revisao'
+      and v_l #>> '{orcamentos,orcamentos}' = '6' and v_l #>> '{orcamentos,simulacao}' = 'true'
+      and v_l #>> '{sabado,quem_vem_sabado}' = '0' and v_l #>> '{sabado,perguntas}' = '0'
       and (v_l ->> 'erros') is null and v_l -> 'modos' ->> 'marcar' = 'sombra' and (v_l ->> 'acoes')::int = 0
       and (v_l ->> 'mudou')::boolean = false,
       left(v_l::text, 800));
@@ -290,7 +293,9 @@ do $r2$
 declare
   v_res  jsonb := '[]'::jsonb;
   c_d29  constant date := date '2026-10-29';
-  c_txt  constant text := 'Agenda em teste (nada mudou): eu marcaria assim — Lenine de ter 03 a ter 10/11, Roberto e João (6 dias, estimativa minha); Vanderlei de qui 12 a ter 24/11, Roberto e João (7,5 dias, estimativa minha; compre até hoje: 3 itens). Antes de marcar eu perguntaria: Giancarlo (10 diárias pela estimativa), Nelson (já começou?), Flávio (já começou?). Continuam fora 6: esperando o cliente (3), orçamento sem virar OS, esperando o sinal, precisa de você em campo. *agenda gestor* mostra tudo.';
+  c_txt  constant text := 'Agenda em teste (nada mudou): eu marcaria assim — Lenine de ter 03 a ter 10/11, Roberto e João (6 dias, estimativa minha); Vanderlei de qui 12 a ter 24/11, Roberto e João (7,5 dias, estimativa minha; compre até hoje: 3 itens). Antes de marcar eu perguntaria: Giancarlo (10 diárias pela estimativa), Nelson (já começou?), Flávio (já começou?) (e mais 1). Continuam fora 5: esperando o cliente (3), orçamento sem virar OS, precisa de você em campo. *agenda gestor* mostra tudo.';
+  -- (7a P12: o sinal combinado e não pago não segura mais a OS — AG7-09, "marco e cobro o sinal" —, e o MP, sem mão de obra
+  -- separada, passa de "esperando o sinal" à pergunta "não tem mão de obra separada": o "(e mais 1)" e os 5 de fora)
   r      jsonb;
   v_e0   jsonb;
   v_s    jsonb;
@@ -321,12 +326,12 @@ begin
       (select string_agg(format('%s %s %s %s %s %s %s %s', e ->> 'numero', e ->> 'de', e ->> 'ate', e ->> 'dias', e ->> 'meios', e ->> 'fonte',
                                 coalesce(e ->> 'itens_a_comprar', '-'), jsonb_typeof(e -> 'alerta_dupla')), ' | ' order by o)
          from jsonb_array_elements(v_s -> 'itens') with ordinality t(e, o)));
-    v_res := pg_temp.ok(v_res, 'R2d perguntadas: Giancarlo (estimativa grande), Nelson e Flávio (situação, começou sem rastro); fora: os 6 com o porquê em uma palavra',
+    v_res := pg_temp.ok(v_res, 'R2d perguntadas: Giancarlo (estimativa grande), Nelson e Flávio (situação, começou sem rastro) e MP (sem mão de obra: o sinal não segura mais, 7a P12); fora: os 5 com o porquê em uma palavra',
       (select string_agg(e ->> 'numero' || ':' || split_part(e ->> 'chave', ':', 1) || ':' || split_part(e ->> 'chave', ':', 3), ' ' order by o)
-         from jsonb_array_elements(v_s -> 'perguntas') with ordinality t(e, o)) = 'OS-00130:estimativa:grande OS-00112:situacao:comecada OS-00104:situacao:comecada'
+         from jsonb_array_elements(v_s -> 'perguntas') with ordinality t(e, o)) = 'OS-00130:estimativa:grande OS-00112:situacao:comecada OS-00104:situacao:comecada ORÇ-00095:estimativa:sem_base'
       and (select string_agg(e ->> 'numero' || ':' || (e ->> 'grupo'), ' | ' order by e ->> 'numero')
              from jsonb_array_elements(v_s -> 'fora') e)
-          = 'ORÇ-00083:orçamento sem virar OS | ORÇ-00095:esperando o sinal | OS-00032:esperando o cliente | OS-00033:esperando o cliente | OS-00076:esperando o cliente | OS-00096:precisa de você em campo'
+          = 'ORÇ-00083:orçamento sem virar OS | OS-00032:esperando o cliente | OS-00033:esperando o cliente | OS-00076:esperando o cliente | OS-00096:precisa de você em campo'
       and jsonb_array_length(v_s -> 'reservas') = 0,
       (select string_agg(e ->> 'numero' || ':' || (e ->> 'grupo'), ' | ' order by e ->> 'numero') from jsonb_array_elements(v_s -> 'fora') e));
     v_res := pg_temp.ok(v_res, 'R2e nada gravado em alocação, proposta, ação executada, mensagem à equipe ou ao cliente, nem na fila; a variável agenda.gestor volta vazia',
@@ -468,8 +473,10 @@ do $r4$
 declare
   v_res  jsonb := '[]'::jsonb;
   c_d29  constant date := date '2026-10-29';
-  c_sombra constant text := E'O gestor está em teste desde qui 29/10: calcula o que marcaria, mas não muda nada.\nEu marcaria:\n• Lenine: ter 03 a ter 10/11, Roberto e João — 6 dias (estimativa minha). Pode precisar de dupla (banco de baterias): diga *Lenine com dupla*.\n• Vanderlei: qui 12 a ter 24/11, Roberto e João — 7,5 dias (estimativa minha); compre até hoje: 3 itens. Pode precisar de dupla (banco de baterias): diga *Vanderlei com dupla*.\nAntes de marcar eu perguntaria:\n• Giancarlo: 10 diárias pela estimativa.\n• Nelson: já começou?\n• Flávio: já começou?\nFora: esperando o cliente: Kalmar (2) e Rodrigo; orçamento sem virar OS: Robson; esperando o sinal: MP; precisa de você em campo: Rodrigo.\n(e mais 1 linha)';
-  c_ligado constant text := E'Eu marco sozinho desde qui 29/10 e te conto no fechamento; *desfaz <nome>* volta qualquer coisa que eu fiz.\nMarquei nos últimos 7 dias:\n• Lenine: ter 03 a ter 10/11, Roberto e João — 6 dias (estimativa minha). Pode precisar de dupla (banco de baterias): diga *Lenine com dupla*.\n• Vanderlei: qui 12 a ter 24/11, Roberto e João — 7,5 dias (estimativa minha). Pode precisar de dupla (banco de baterias): diga *Vanderlei com dupla*.\nPerguntei antes de marcar:\n• Giancarlo: 10 diárias pela estimativa — sem resposta até sex 30/10 18:00, marco assim.\n• Nelson: já começou? — sem resposta até sex 30/10 18:00, marco assim.\n• Flávio: já começou? — sem resposta até sex 30/10 18:00, marco assim.\nFora: esperando o cliente: Kalmar (2) e Rodrigo; orçamento sem virar OS: Robson; esperando o sinal: MP; precisa de você em campo: Rodrigo.\n(e mais 1 linha)';
+  c_sombra constant text := E'O gestor está em teste desde qui 29/10: calcula o que marcaria, mas não muda nada.\nEu marcaria:\n• Lenine: ter 03 a ter 10/11, Roberto e João — 6 dias (estimativa minha). Pode precisar de dupla (banco de baterias): diga *Lenine com dupla*.\n• Vanderlei: qui 12 a ter 24/11, Roberto e João — 7,5 dias (estimativa minha); compre até hoje: 3 itens. Pode precisar de dupla (banco de baterias): diga *Vanderlei com dupla*.\nAntes de marcar eu perguntaria:\n• Giancarlo: 10 diárias pela estimativa.\n• Nelson: já começou?\n• Flávio: já começou?\n• MP: não tem mão de obra separada.\nFora: esperando o cliente: Kalmar (2) e Rodrigo; orçamento sem virar OS: Robson; precisa de você em campo: Rodrigo.\nSe aprovar:\n• Everton (ORÇ-00117, R$ 120.020): pela estimativa, 28 dias com 2 pessoas; não cabe até ter 15/12 com a equipe de agora.\n• Santo (ORÇ-00116, R$ 70.050): pela estimativa, 10,5 dias com 2 pessoas; não cabe até ter 15/12 com a equipe de agora.\n(e mais 5 linhas)';
+  c_ligado constant text := E'Eu marco sozinho desde qui 29/10 e te conto no fechamento; *desfaz <nome>* volta qualquer coisa que eu fiz.\nMarquei nos últimos 7 dias:\n• Lenine: ter 03 a ter 10/11, Roberto e João — 6 dias (estimativa minha). Pode precisar de dupla (banco de baterias): diga *Lenine com dupla*.\n• Vanderlei: qui 12 a ter 24/11, Roberto e João — 7,5 dias (estimativa minha). Pode precisar de dupla (banco de baterias): diga *Vanderlei com dupla*.\nPerguntei antes de marcar:\n• Giancarlo: 10 diárias pela estimativa — sem resposta até sex 30/10 18:00, marco assim.\n• Nelson: já começou? — sem resposta até sex 30/10 18:00, marco assim.\n• Flávio: já começou? — sem resposta até sex 30/10 18:00, marco assim.\n• MP: não tem mão de obra separada — sem resposta até sex 30/10 18:00, marco assim.\nFora: esperando o cliente: Kalmar (2) e Rodrigo; orçamento sem virar OS: Robson; precisa de você em campo: Rodrigo.\nSe aprovar:\n(e mais 7 linhas)';
+  -- (7a P12: o MP perguntado — o sinal não segura mais —, e o "Se aprovar:" dos orçamentos grandes, que a rodada das 16:52 grava
+  -- no diário; o foco corta em texto_max pela linha inteira)
   c_conto constant text := 'Como eu conto: estimativa pelo valor do orçamento (R$ 764 de mão de obra por diária, sem deslocamento); 1 pessoa por serviço (dupla quando você marcar); peça sem fornecedor: 7 dias úteis; peça abaixo de R$ 300: separar na véspera; entre decidir e comprar: 1 dia útil (com o serviço a menos de 7 dias úteis, a compra é para hoje); pergunto antes acima de 8 diárias e quando o serviço já começou.';
   r      jsonb;
   v_p    jsonb;
@@ -706,9 +713,9 @@ begin
     perform public.agenda_gestor_rodar(c_d29, pg_temp.em(c_d29, '16:52'));
     perform public.agenda_gestor_rodar(c_d30, pg_temp.em(c_d30, '16:52'));
     g := public.agenda_saude(c_d30, pg_temp.em(c_d30, '17:00')) -> 'gestor';
-    v_res := pg_temp.ok(v_res, 'R7e ligado, com as perguntas das 16:52 e a rodada de sex 30/10 16:52: os zeros todos 0 e 3 perguntas com prazo abertas',
+    v_res := pg_temp.ok(v_res, 'R7e ligado, com as perguntas das 16:52 e a rodada de sex 30/10 16:52: os zeros todos 0 e 4 perguntas com prazo abertas (com o MP: o sinal não segura mais, 7a P12)',
       (select bool_and((g ->> zz)::int = 0) from unnest(c_zeros) zz) and (g ->> 'zeros_ok')::boolean
-      and (g #>> '{numeros,perguntas_com_prazo,abertas}')::int = 3, left(g::text, 700));
+      and (g #>> '{numeros,perguntas_com_prazo,abertas}')::int = 4, left(g::text, 700));
 
     v_os := pg_temp.os('OS-00130');
     v_jo := pg_temp.pessoa('João');
@@ -788,9 +795,9 @@ begin
      where tipo = 'estimativa' and service_order_id = v_os and estado = 'aberta' and modo = 'ligado';
     r := public.agenda_gestor_rodar(date '2026-11-03', pg_temp.em(date '2026-11-03', '18:07'));
     g := public.agenda_saude(date '2026-11-03', pg_temp.em(date '2026-11-03', '18:10')) -> 'gestor';
-    v_res := pg_temp.ok(v_res, 'R7g o prazo de ter 03/11 18:00: a rodada das 18:07 aplica a do Giancarlo (vista antes: 10 dias, pelo prazo) e deixa as duas não vistas abertas; prazo_vencido_sem_mostrar = 2 só se conta (zeros_ok continua)',
-      (r #>> '{contagens,vetos,aplicadas}')::int = 1 and (r #>> '{contagens,vetos,sem_mostrar}')::int = 2
-      and (g ->> 'prazo_vencido_sem_mostrar')::int = 2 and (g ->> 'zeros_ok')::boolean
+    v_res := pg_temp.ok(v_res, 'R7g o prazo de ter 03/11 18:00: a rodada das 18:07 aplica a do Giancarlo (vista antes: 10 dias, pelo prazo) e deixa as 3 não vistas abertas (Nelson, Flávio e, desde o 7a P12, o MP); prazo_vencido_sem_mostrar = 3 só se conta (zeros_ok continua)',
+      (r #>> '{contagens,vetos,aplicadas}')::int = 1 and (r #>> '{contagens,vetos,sem_mostrar}')::int = 3
+      and (g ->> 'prazo_vencido_sem_mostrar')::int = 3 and (g ->> 'zeros_ok')::boolean
       and (g #>> '{numeros,perguntas_com_prazo,pelo_prazo_7d}')::int = 1
       and (select dias = 10 and estimativa_fonte = 'orcamento' from public.os_planejamento where service_order_id = v_os),
       left(r #>> '{contagens,vetos}', 300) || ' / ' || (g ->> 'prazo_vencido_sem_mostrar'));

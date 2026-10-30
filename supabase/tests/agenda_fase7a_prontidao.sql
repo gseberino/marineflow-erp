@@ -14,7 +14,8 @@
 --   P5 a duração 'orcamento' (texto, sem a restrição "quantos dias?"), o texto do gestor quando ele pergunta antes, a restrição
 --      situacao, a Kalmar (esperando o cliente) sem nada disso, os dias 'orcamento' gravados "(estimativa minha)"
 --   P6 _agenda_classe_da_os: a carteira de 29/10 com tudo ligado (Lenine e Vanderlei classe 2; Giancarlo estimativa; Nelson
---      situacao; Flávio material; Kalmar e Rodrigo-76 cliente; Robson orçamento; MP sinal), a OS em andamento sem plano espera o
+--      situacao; Flávio material; Kalmar e Rodrigo-76 cliente; Robson orçamento; MP estimativa — sem mão de obra; o sinal não
+--      segura desde o 7a P12), a OS em andamento sem plano espera o
 --      "quanto falta?", e compra_firme
 --   P7 agenda_propor: o sufixo "(estimativa minha: 6 dias)." no compromisso; as recomendações das críticas do P8
 --   P8 com o portão falso (desligado, sombra sem a simulação, *gestor, só propor*, sem as regras do P3), a prontidão, a classe e a
@@ -391,8 +392,9 @@ begin
   -- ── P6. A classe ──────────────────────────────────────────────────────────────────────────────────────────
   select string_agg(format('%s=%s:%s', n, cl ->> 'classe', cl ->> 'motivo'), ' | ' order by n) into v_novo
     from unnest(v_carteira || array['OS-97001']) n cross join lateral (select pg_temp.classe(pg_temp.os(n), c_hoje) cl) z;
-  v_res := pg_temp.ok(v_res, 'P6a a carteira de 29/10 com tudo ligado: Lenine, Vanderlei e Rodrigo-96 no compromisso (2); Giancarlo estimativa, Nelson situacao, Flávio material, Kalmar ×2 e Rodrigo-76 cliente, Robson orçamento, MP sinal; Paulo (em andamento sem plano) espera o "quanto falta?"',
-    v_novo = 'ORÇ-00083=4:orcamento | ORÇ-00095=4:sinal | OS-00032=4:cliente | OS-00033=4:cliente | OS-00069=2:pronta'
+  -- (7a P12: com a regra sinal_cobrar o sinal não segura mais — AG7-09 —, e o MP, sem mão de obra separada, vai à estimativa)
+  v_res := pg_temp.ok(v_res, 'P6a a carteira de 29/10 com tudo ligado: Lenine, Vanderlei e Rodrigo-96 no compromisso (2); Giancarlo estimativa, Nelson situacao, Flávio material, Kalmar ×2 e Rodrigo-76 cliente, Robson orçamento, MP estimativa (sem mão de obra; o sinal não segura desde o 7a P12); Paulo (em andamento sem plano) espera o "quanto falta?"',
+    v_novo = 'ORÇ-00083=4:orcamento | ORÇ-00095=4:estimativa | OS-00032=4:cliente | OS-00033=4:cliente | OS-00069=2:pronta'
              || ' | OS-00074=2:pronta | OS-00076=4:cliente | OS-00096=2:pronta | OS-00104=4:material | OS-00112=4:situacao'
              || ' | OS-00130=4:estimativa | OS-97001=4:situacao',
     v_novo);
@@ -514,7 +516,8 @@ begin
   end if;
   for r in select * from (values
       ('os_prontidao', 'public.os_prontidao(uuid, date)', v_pr, '20261030100400', 10),
-      ('_agenda_classe_da_os', 'public._agenda_classe_da_os(jsonb, jsonb, date, boolean, boolean)', v_mot2, '20261025100200', 3),
+      -- (3 blocos do P3 + 1 do 7a P12, 20261031100900: o sinal que não trava; quem recria copia da mais nova)
+      ('_agenda_classe_da_os', 'public._agenda_classe_da_os(jsonb, jsonb, date, boolean, boolean)', v_mot2, '20261025100200', 4),
       -- (2 blocos do P3 + 3 do 7a P8, 20261031100700: a zona travada; quem recria copia da mais nova)
       ('agenda_propor', 'public.agenda_propor(text, date, date, uuid[], jsonb, boolean, text, uuid, date, timestamptz)', v_mot3, '20261030100200', 5),
       ('_agenda_rodada_marca', 'public._agenda_rodada_marca()', v_pr, '20261030100400', 1)

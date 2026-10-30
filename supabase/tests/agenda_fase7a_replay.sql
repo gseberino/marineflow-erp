@@ -7,15 +7,18 @@
 --   A  tudo em sombra (o estado depois da migration de dado): (1) a prontidão das 11, os meios, a classe e o motor (a semana e as
 --      11) saem iguais aos de desligado (md5) — o portão é falso fora da simulação; os testes do P2, P3 e P5 provam desligado = as
 --      definições de antes; (2) a rodada do gestor das 16:52 não escreve alocação, proposta, ação executada, mensagem nem fila;
---      (3) o diário: Lenine e Vanderlei marcados, Giancarlo, Nelson e Flávio perguntados, 6 fora; (4) o texto do fechamento (§6.1)
+--      (3) o diário: Lenine e Vanderlei marcados, Giancarlo, Nelson, Flávio e MP perguntados, 5 fora; (4) o texto do fechamento
+--      (§6.1; desde o 7a P12 o sinal não segura — AG7-09 — e o MP, sem mão de obra, sai de "esperando o sinal" para a pergunta)
 --   B  a 7a-0 ligada (o caminho da revisão: agenda_propor das 11 persistir + aplicar): o Lenine em compromisso de ter 03 a ter 10/11
 --      (12 meios-dias, 1 pessoa por meio-dia, você abre e fecha, a reserva promovida); o Vanderlei de qui 12 a ter 24/11 (15
 --      meios-dias); de fora, cada um pelo seu porquê (Giancarlo estimativa, Nelson situacao, Flávio material, Rodrigo-96 padrao_do_dono,
---      Kalmar ×2 e Rodrigo-76 cliente, Robson orcamento, MP sinal); 0 choques; nada em qui 29 e sex 30/10; nenhuma crítica sem
+--      Kalmar ×2 e Rodrigo-76 cliente, Robson orcamento, MP estimativa); 0 choques; nada em qui 29 e sex 30/10; nenhuma crítica sem
 --      pergunta; todas as alocações novas com duracao_fonte orcamento; o texto das ações com "(estimativa minha: …)"
 --   C  (P8) B + as perguntas do gestor das 16:52, vistas no fechamento das 17:30, e a rodada do gestor de sex 30/10 18:07 (o prazo
---      vence): o passo vetos aplica as 3 (Flávio 3,5 dias, Nelson 4, Giancarlo 10; as ações estimar de origem vigia) e o encaixe do
---      MESMO tique as pega pelas ações estimar: o Nelson marcado a partir de ter 24/11 (depois do Vanderlei, pelo teto da equipe); o
+--      vence): o passo vetos aplica as 4 (Flávio 3,5 dias, Nelson 4, Giancarlo 10 e, desde o 7a P12, o MP 1 dia; as ações estimar
+--      de origem vigia) e o encaixe do MESMO tique as pega pelas ações estimar: o MP marcado a partir de sex 13/11 — e o passo
+--      sinal do mesmo tique lembra o dono de cobrar o sinal dele (P12, C3) —; o Nelson marcado a partir de ter 24/11 (depois do
+--      Vanderlei, pelo teto da equipe); o
 --      Giancarlo sem encaixe em 6 semanas com a equipe de hoje (10 dias com 1 pessoa); o Flávio de fora pelo material (o compressor);
 --      nenhuma onda (OS novas não contam); a cobertura das 6 com mão de obra e sem espera do cliente: 3 (a spec dizia 4 de 6, com
 --      os números de antes do P3 e do P5: ver notas-fase77a.md, P8)
@@ -92,7 +95,9 @@ declare
   v_res   jsonb := '[]'::jsonb;
   c_d29   constant date := date '2026-10-29';
   c_a29   constant timestamptz := timestamptz '2026-10-29 16:52-03';
-  c_txt   constant text := 'Agenda em teste (nada mudou): eu marcaria assim — Lenine de ter 03 a ter 10/11, Roberto e João (6 dias, estimativa minha); Vanderlei de qui 12 a ter 24/11, Roberto e João (7,5 dias, estimativa minha; compre até hoje: 3 itens). Antes de marcar eu perguntaria: Giancarlo (10 diárias pela estimativa), Nelson (já começou?), Flávio (já começou?). Continuam fora 6: esperando o cliente (3), orçamento sem virar OS, esperando o sinal, precisa de você em campo. *agenda gestor* mostra tudo.';
+  -- (7a P12: o sinal combinado e não pago não segura mais — AG7-09 —: o MP, sem mão de obra, passa de "esperando o sinal" à
+  -- pergunta; o "(e mais 1)" e os 5 de fora)
+  c_txt   constant text := 'Agenda em teste (nada mudou): eu marcaria assim — Lenine de ter 03 a ter 10/11, Roberto e João (6 dias, estimativa minha); Vanderlei de qui 12 a ter 24/11, Roberto e João (7,5 dias, estimativa minha; compre até hoje: 3 itens). Antes de marcar eu perguntaria: Giancarlo (10 diárias pela estimativa), Nelson (já começou?), Flávio (já começou?) (e mais 1). Continuam fora 5: esperando o cliente (3), orçamento sem virar OS, precisa de você em campo. *agenda gestor* mostra tudo.';
   v_cart  uuid[];
   v_dono  uuid;
   v_adm   uuid;
@@ -108,6 +113,7 @@ declare
   v_pub   text;
   v_c     jsonb;
   v_t2    text;
+  v_t3    text;
   v_n     int;
   v_n2    int;
   v_q     boolean;
@@ -142,10 +148,10 @@ begin
       (r ->> 'rodou')::boolean and (r ->> 'diaria')::boolean and pg_temp.escritas() = v_e0 and pg_temp.leitura(v_cart, c_d29, c_a29) = v_l0,
       (pg_temp.escritas())::text);
     select g.sombra, g.texto_sombra into v_s, v_t from public.agenda_gestor_dia g where g.dia = c_d29;
-    v_res := pg_temp.ok(v_res, 'A3 o diário: Lenine e Vanderlei marcados (pela estimativa), Giancarlo, Nelson e Flávio perguntados, 6 fora',
+    v_res := pg_temp.ok(v_res, 'A3 o diário: Lenine e Vanderlei marcados (pela estimativa), Giancarlo, Nelson, Flávio e MP (o sinal não segura desde o 7a P12) perguntados, 5 fora',
       (select string_agg(e ->> 'cliente', ',' order by o) from jsonb_array_elements(v_s -> 'itens') with ordinality t(e, o)) = 'Lenine,Vanderlei'
-      and (select string_agg(e ->> 'cliente', ',' order by o) from jsonb_array_elements(v_s -> 'perguntas') with ordinality t(e, o)) = 'Giancarlo,Nelson,Flávio'
-      and jsonb_array_length(v_s -> 'fora') = 6, left(v_s::text, 600));
+      and (select string_agg(e ->> 'cliente', ',' order by o) from jsonb_array_elements(v_s -> 'perguntas') with ordinality t(e, o)) = 'Giancarlo,Nelson,Flávio,MP'
+      and jsonb_array_length(v_s -> 'fora') = 5, left(v_s::text, 600));
     v_res := pg_temp.ok(v_res, 'A4 o texto do fechamento (spec §6.1, com os números de agora) no diário e na linha gestor das linhas do fechamento',
       v_t = c_txt and exists (select 1 from jsonb_array_elements(public._agenda_linhas_do_fechamento(c_d29)) x
                                where x ->> 'tipo' = 'gestor' and x ->> 'texto' = c_txt), v_t);
@@ -178,8 +184,8 @@ begin
                        and a.presenca = 'turno' group by a.dia, a.turno having count(*) > 1), null);
     select string_agg(f ->> 'numero' || ':' || (f ->> 'motivo'), ' ' order by f ->> 'numero') into v_t
       from jsonb_array_elements(v_p -> 'fora') f;
-    v_res := pg_temp.ok(v_res, 'B4 de fora, cada um pelo seu porquê: Giancarlo estimativa, Nelson situacao, Flávio material, Rodrigo-96 padrao_do_dono, Kalmar ×2 e Rodrigo-76 cliente, Robson orcamento, MP sinal',
-      v_t = 'ORÇ-00083:orcamento ORÇ-00095:sinal OS-00032:cliente OS-00033:cliente OS-00076:cliente OS-00096:padrao_do_dono OS-00104:material OS-00112:situacao OS-00130:estimativa',
+    v_res := pg_temp.ok(v_res, 'B4 de fora, cada um pelo seu porquê: Giancarlo estimativa, Nelson situacao, Flávio material, Rodrigo-96 padrao_do_dono, Kalmar ×2 e Rodrigo-76 cliente, Robson orcamento, MP estimativa (sem mão de obra; o sinal não segura desde o 7a P12)',
+      v_t = 'ORÇ-00083:orcamento ORÇ-00095:estimativa OS-00032:cliente OS-00033:cliente OS-00076:cliente OS-00096:padrao_do_dono OS-00104:material OS-00112:situacao OS-00130:estimativa',
       v_t);
     v_res := pg_temp.ok(v_res, 'B5 0 choques, nada em qui 29 e sex 30/10 (hoje e o próximo dia útil), nenhuma crítica executada sem a pergunta',
       (select count(*) from public.agenda_alocacoes a join public.agenda_alocacoes b
@@ -213,18 +219,25 @@ begin
       v_n2 := (select count(*) from unnest(array['OS-00074', 'OS-00069', 'OS-00130', 'OS-00112', 'OS-00104', 'OS-00096']) n
                 where public._agenda_os_tem_dia(pg_temp.os(n), c_d29 + 1));
       v_q := not exists (select 1 from public.agenda_perguntas q where q.tipo = 'onda')
-             and (select count(*) = 3 and bool_and(a.origem = 'vigia') from public.agenda_acoes a where a.tipo = 'estimar' and a.executada);
+             and (select count(*) = 4 and bool_and(a.origem = 'vigia') from public.agenda_acoes a where a.tipo = 'estimar' and a.executada);
+      -- (7a P12) o passo sinal do mesmo tique: o MP, marcado sem o sinal pago, ganha a pergunta sinal ao dono
+      v_t3 := (select string_agg(q.texto, ' | ') from public.agenda_perguntas q where q.tipo = 'sinal' and q.estado = 'aberta');
       raise exception 'desfaz C' using errcode = 'P0098';
     exception when sqlstate 'P0098' then null;
     end;
-    v_res := pg_temp.ok(v_res, 'C1 o prazo vence (sex 30/10 18:07, as 3 perguntas vistas às 17:30): o passo vetos aplica as 3 — Flávio 3,5 dias, Nelson 4 dias, Giancarlo 10 dias (a estimativa, fonte orcamento) — com as 3 ações estimar de origem vigia',
-      v_n = 3 and (v_c -> 'vetos' ->> 'aplicadas')::int = 3 and v_t = 'OS-00104:3,5 dias OS-00112:4 dias OS-00130:10 dias' and v_q,
+    -- (7a P12: o MP, sem o sinal travando, é a 4ª pergunta vista e o prazo dá 1 dia a ele — sem_mo_dias —; o encaixe o marca)
+    v_res := pg_temp.ok(v_res, 'C1 o prazo vence (sex 30/10 18:07, as 4 perguntas vistas às 17:30): o passo vetos aplica as 4 — Flávio 3,5 dias, Nelson 4 dias, Giancarlo 10 dias, MP 1 dia (a estimativa, fonte orcamento) — com as 4 ações estimar de origem vigia',
+      v_n = 4 and (v_c -> 'vetos' ->> 'aplicadas')::int = 4 and v_t = 'ORÇ-00095:1 dia OS-00104:3,5 dias OS-00112:4 dias OS-00130:10 dias' and v_q,
       coalesce(v_t, '-') || ' | ' || left(coalesce((v_c -> 'vetos')::text, '-'), 300));
-    v_res := pg_temp.ok(v_res, 'C2 o encaixe do mesmo tique pega as 3 (pelas ações estimar): o Nelson marcado a partir de ter 24/11; o Giancarlo sem encaixe em 6 semanas com a equipe de hoje; o Flávio de fora pelo material; nenhuma onda; com mão de obra e sem espera do cliente, 3 das 6 com data',
-      v_t2 = 'OS-00104:fora:material OS-00112:marcada:2026-11-24 OS-00130:fora:sem_encaixe'
-      and not (v_c -> 'encaixe' ->> 'onda')::boolean and (v_c -> 'encaixe' ->> 'candidatas')::int = 3 and v_n2 = 3
+    v_res := pg_temp.ok(v_res, 'C2 o encaixe do mesmo tique pega as 4 (pelas ações estimar): o Nelson marcado a partir de ter 24/11 e o MP a partir de sex 13/11; o Giancarlo sem encaixe em 6 semanas com a equipe de hoje; o Flávio de fora pelo material; nenhuma onda; com mão de obra e sem espera do cliente, 3 das 6 com data',
+      v_t2 = 'ORÇ-00095:marcada:2026-11-13 OS-00104:fora:material OS-00112:marcada:2026-11-24 OS-00130:fora:sem_encaixe'
+      and not (v_c -> 'encaixe' ->> 'onda')::boolean and (v_c -> 'encaixe' ->> 'candidatas')::int = 4 and v_n2 = 3
       and jsonb_array_length(v_c -> 'falhas') = 0,
       coalesce(v_t2, '-') || ' | cobertura ' || coalesce(v_n2::text, '-'));
+    v_res := pg_temp.ok(v_res, 'C3 (7a P12, AG7-09 "marco e cobro o sinal") o passo sinal do mesmo tique: o MP marcado com o sinal não pago (sem recebível) ganha a pergunta ao dono, sem o valor; nada ao cliente',
+      v_t3 = 'Marquei MP (ORÇ-00095) a partir de sex 13/11 e o sinal ainda não entrou: cobre quando puder. Para o cliente eu não digo nada sobre isso.'
+      and (v_c -> 'sinal' ->> 'novas')::int = 1,
+      coalesce(v_t3, '-') || ' | ' || coalesce((v_c -> 'sinal')::text, '-'));
 
     -- ── E. O "compre até" (P10): ninguém compra os 3 itens do Vanderlei ──
     begin

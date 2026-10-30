@@ -594,7 +594,8 @@ begin
   end if;
   for r in select * from (values
       ('_agenda_contexto', 'public._agenda_contexto(date, date, date, uuid[], uuid[])', v_dono6, '20261029100400', 4),
-      ('_agenda_validar_itens', 'public._agenda_validar_itens(jsonb, jsonb, date, timestamptz, boolean, jsonb)', v_dono6, '20261029100400', 2),
+      -- (2 blocos do P5 + 1 do 7a P12, 20261031100900: a manhã de sábado autorizada; quem recria copia da mais nova)
+      ('_agenda_validar_itens', 'public._agenda_validar_itens(jsonb, jsonb, date, timestamptz, boolean, jsonb)', v_dono6, '20261029100400', 3),
       ('_agenda_tentar_bloco', 'public._agenda_tentar_bloco(jsonb, boolean[], integer[], integer[], integer[], integer[], integer[], integer[], integer[], integer[], integer[], jsonb, integer, boolean, integer)',
        v_mot2, '20261025100200', 4),
       ('_agenda_por_que_nao', 'public._agenda_por_que_nao(jsonb, jsonb, integer, integer)', v_mot2, '20261025100200', 2),

@@ -7,7 +7,8 @@
 --      agenda_decidir continua só do service_role e a limpeza sem grant
 --   Q1 as perguntas da §6.3 byte a byte (situacao: começou sem rastro — Nelson —, com rastro — Paulo —, parada — Vanderlei em
 --      05/11 —; estimativa: grande — Giancarlo —, embutida — Sérgio —, sem mão de obra — Tânia —; a chamada da equipe) e o que
---      não ganha pergunta (esperando o cliente, o orçamento, o sinal; a classe 2); o Flávio preso pelo material também é
+--      não ganha pergunta (esperando o cliente, o orçamento; a classe 2); desde o 7a P12 o sinal não segura e o MP (sem mão de
+--      obra) ganha a pergunta sem mão de obra da §6.3; o Flávio preso pelo material também é
 --      perguntado; o seco não grava; o gravado (prazo, opção padrão, perda, validade), uma aberta por chave, o motivo que muda, a
 --      fechada que não volta (e a vencida sem ser vista, que volta); desligado e sombra
 --   Q2 o prazo (_agenda_veto_ate): qui 16:52 = sex 30/10 18:00; sex = ter 03/11 (Finados); sábado; p_du 3 e 0; veto_hora e veto_du
@@ -218,11 +219,19 @@ begin
     (e ->> 'motivo') || ' | ' || coalesce(p ->> 'texto', p::text));
   select string_agg(n || ':' || coalesce(y2.r ->> 'classe_motivo', '?'), ' ' order by n), count(*) filter (where y2.r ? 'chave')
     into v_t, v_n
-    from unnest(array['OS-00032', 'OS-00033', 'OS-00076', 'ORÇ-00083', 'ORÇ-00095', 'OS-00074', 'OS-00069', 'OS-00096']) n
+    from unnest(array['OS-00032', 'OS-00033', 'OS-00076', 'ORÇ-00083', 'OS-00074', 'OS-00069', 'OS-00096']) n
    cross join lateral (select public._agenda_gestor_perguntas_da_os(pg_temp.os(n), c_hoje, c_agora, true) as r) y2;
-  v_res := pg_temp.ok(v_res, 'Q1h não ganham pergunta: Kalmar ×2 e Rodrigo-76 (esperando o cliente; a Kalmar tem check-in em junho e "marco 1 dia" seria falso), Robson (orçamento), MP (sinal) e a classe 2 (Lenine, Vanderlei, Rodrigo-96)',
-    v_n = 0 and v_t = 'ORÇ-00083:orcamento ORÇ-00095:sinal OS-00032:cliente OS-00033:cliente OS-00069:pronta OS-00074:pronta OS-00076:cliente OS-00096:pronta',
+  v_res := pg_temp.ok(v_res, 'Q1h não ganham pergunta: Kalmar ×2 e Rodrigo-76 (esperando o cliente; a Kalmar tem check-in em junho e "marco 1 dia" seria falso), Robson (orçamento) e a classe 2 (Lenine, Vanderlei, Rodrigo-96)',
+    v_n = 0 and v_t = 'ORÇ-00083:orcamento OS-00032:cliente OS-00033:cliente OS-00069:pronta OS-00074:pronta OS-00076:cliente OS-00096:pronta',
     v_t);
+  -- (7a P12: com a regra sinal_cobrar o sinal não segura mais — AG7-09 —, e o MP, que esperava o sinal, ganha a pergunta da
+  -- estimativa sem mão de obra: o texto da §6.3, byte a byte)
+  p := public._agenda_gestor_perguntas_da_os(pg_temp.os('ORÇ-00095'), c_hoje, c_agora, true);
+  v_res := pg_temp.ok(v_res, 'Q1i o MP (ORÇ-00095, só kits), sem o sinal travando desde o 7a P12, ganha a pergunta da estimativa sem mão de obra (§6.3): "MP (ORÇ-00095): o orçamento não tem mão de obra separada, então não sei quantos dias leva. …"; padrão 1, recomendação 2',
+    p ->> 'texto' = 'MP (ORÇ-00095): o orçamento não tem mão de obra separada, então não sei quantos dias leva. Se você não me disser nada até sex 30/10 às 18:00, marco 1 dia. 1) Marque 1 dia; 2) Eu digo os dias (recomendo).'
+    and p ->> 'chave' = 'estimativa:' || pg_temp.os('ORÇ-00095') || ':sem_base' and (p ->> 'opcao_padrao')::int = 1
+    and (p ->> 'recomendacao')::int = 2,
+    coalesce(p ->> 'texto', p::text));
   select count(*) into v_n from public.agenda_perguntas;
   v_res := pg_temp.ok(v_res, 'Q1i o seco não grava nada', v_n = v_k, format('%s → %s', v_k, v_n));
 
@@ -551,8 +560,8 @@ begin
   exception when sqlstate 'P0099' then null;
   end;
   -- (7a P8: a onda decide no despacho — a opção sem efeito conhecido, como a deste teste, "não tem o que fazer"; 7a P9: o
-  -- reavaliar e o reestimar também; 7a P11: a ficha_estimativa também)
-  v_res := pg_temp.ok(v_res, 'Q6a agenda_decidir manda os 10 tipos do gestor ao despacho (gestor = true: bem_livre, compre_ate e sinal "não tem opções"; a onda, do P8, o reavaliar e o reestimar, do P9, e a ficha_estimativa, do P11, "não tem o que fazer" com a opção sem efeito; os outros "ainda não sei decidir" até os pacotes deles) e não os de antes (equipe_cadastro e duracao: "não é de decisão"; dia_avisado: a crítica de sempre)',
+  -- reavaliar e o reestimar também; 7a P11: a ficha_estimativa também; 7a P12: o sabado também)
+  v_res := pg_temp.ok(v_res, 'Q6a agenda_decidir manda os 10 tipos do gestor ao despacho (gestor = true: bem_livre, compre_ate e sinal "não tem opções"; a onda, do P8, o reavaliar e o reestimar, do P9, a ficha_estimativa, do P11, e o sabado, do P12, "não tem o que fazer" com a opção sem efeito) e não os de antes (equipe_cadastro e duracao: "não é de decisão"; dia_avisado: a crítica de sempre)',
     v_t = 'bem_livre=true:Essa pergunta não tem opções: me responda com as suas palavras.'
           || ' | compre_ate=true:Essa pergunta não tem opções: me responda com as suas palavras.'
           || ' | dia_avisado=não:A agenda automática ainda está em teste: mostro como ficaria, mas não marco nada.'
@@ -562,7 +571,7 @@ begin
           || ' | onda=true:Essa opção não tem o que fazer: nada mudou.'
           || ' | reavaliar=true:Essa opção não tem o que fazer: nada mudou.'
           || ' | reestimar=true:Essa opção não tem o que fazer: nada mudou.'
-          || ' | sabado=true:Ainda não sei decidir essa pergunta: nada mudou.'
+          || ' | sabado=true:Essa opção não tem o que fazer: nada mudou.'
           || ' | sinal=true:Essa pergunta não tem opções: me responda com as suas palavras.'
           || ' | situacao=true:Essa opção não tem o que fazer: nada mudou.',
     v_t);
