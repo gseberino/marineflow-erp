@@ -2,7 +2,7 @@
 -- (*gestor, só propor*), do pacote P7 (migration 20261031100600). O P8 acrescenta o C (o prazo vence e o encaixe marca), o P10 o
 -- E (compre até) e o P11 o F (cliente). O replay (fixture-replay-2910.sql) com a presença do dono de produção no Lenine e no
 -- Vanderlei (abre e fecha: o replay sozinho dá "sempre", notas do P2).
--- bancada: depende de 20261031100600
+-- bancada: depende de 20261031100700
 --
 --   A  tudo em sombra (o estado depois da migration de dado): (1) a prontidão das 11, os meios, a classe e o motor (a semana e as
 --      11) saem iguais aos de desligado (md5) — o portão é falso fora da simulação; os testes do P2, P3 e P5 provam desligado = as
@@ -13,6 +13,12 @@
 --      meios-dias); de fora, cada um pelo seu porquê (Giancarlo estimativa, Nelson situacao, Flávio material, Rodrigo-96 padrao_do_dono,
 --      Kalmar ×2 e Rodrigo-76 cliente, Robson orcamento, MP sinal); 0 choques; nada em qui 29 e sex 30/10; nenhuma crítica sem
 --      pergunta; todas as alocações novas com duracao_fonte orcamento; o texto das ações com "(estimativa minha: …)"
+--   C  (P8) B + as perguntas do gestor das 16:52, vistas no fechamento das 17:30, e a rodada do gestor de sex 30/10 18:07 (o prazo
+--      vence): o passo vetos aplica as 3 (Flávio 3,5 dias, Nelson 4, Giancarlo 10; as ações estimar de origem vigia) e o encaixe do
+--      MESMO tique as pega pelas ações estimar: o Nelson marcado a partir de ter 24/11 (depois do Vanderlei, pelo teto da equipe); o
+--      Giancarlo sem encaixe em 6 semanas com a equipe de hoje (10 dias com 1 pessoa); o Flávio de fora pelo material (o compressor);
+--      nenhuma onda (OS novas não contam); a cobertura das 6 com mão de obra e sem espera do cliente: 3 (a spec dizia 4 de 6, com
+--      os números de antes do P3 e do P5: ver notas-fase77a.md, P8)
 --   D  B + *gestor, só propor*: os modos efetivos voltam a sombra, a regra fecha, a rodada seguinte não aplica nada, o publicado fica
 --
 -- ═══ COMO RODAR ═══
@@ -88,6 +94,11 @@ declare
   v_ap    jsonb;
   v_t     text;
   v_pub   text;
+  v_c     jsonb;
+  v_t2    text;
+  v_n     int;
+  v_n2    int;
+  v_q     boolean;
   r       jsonb;
 begin
   if coalesce(current_setting('agenda_teste.replay2910', true), '') = '' then
@@ -170,6 +181,37 @@ begin
              from public.agenda_acoes x where x.proposta_id = (v_p ->> 'proposta_id')::uuid)
       and (select count(*) from public.agenda_acoes x where x.proposta_id = (v_p ->> 'proposta_id')::uuid and x.texto like '%(estimativa minha:%') = 2,
       (select string_agg(x.tipo || ': ' || left(x.texto, 120), ' | ') from public.agenda_acoes x where x.proposta_id = (v_p ->> 'proposta_id')::uuid));
+
+    -- ── C. O prazo vence e o encaixe do mesmo tique (P8) ──
+    begin
+      r := public._agenda_gestor_perguntas(c_d29, c_a29);
+      -- as 3 perguntas do gestor vistas pelo dono antes do prazo (o fechamento das 17:30)
+      update public.agenda_perguntas set mostrada_vezes = 1, mostrada_em = pg_temp.em(c_d29, '17:30'), mostrada_via = 'fechamento'
+       where estado = 'aberta' and modo = 'ligado' and tipo in ('situacao', 'estimativa');
+      get diagnostics v_n = row_count;
+      r := public.agenda_gestor_rodar(c_d29 + 1, pg_temp.em(c_d29 + 1, '18:07'));
+      v_c := r -> 'contagens';
+      select string_agg(so.service_order_number || ':' || public._agenda_dias(pl.dias), ' ' order by so.service_order_number)
+        into v_t from public.os_planejamento pl join public.service_orders so on so.id = pl.service_order_id
+       where pl.estimativa_fonte = 'orcamento';
+      select string_agg(format('%s:%s:%s', e ->> 'numero', e ->> 'resultado', coalesce(e ->> 'primeiro_dia', e ->> 'motivo', '-')), ' '
+                        order by e ->> 'numero')
+        into v_t2 from jsonb_array_elements(v_c -> 'encaixe' -> 'por_os') e;
+      v_n2 := (select count(*) from unnest(array['OS-00074', 'OS-00069', 'OS-00130', 'OS-00112', 'OS-00104', 'OS-00096']) n
+                where public._agenda_os_tem_dia(pg_temp.os(n), c_d29 + 1));
+      v_q := not exists (select 1 from public.agenda_perguntas q where q.tipo = 'onda')
+             and (select count(*) = 3 and bool_and(a.origem = 'vigia') from public.agenda_acoes a where a.tipo = 'estimar' and a.executada);
+      raise exception 'desfaz C' using errcode = 'P0098';
+    exception when sqlstate 'P0098' then null;
+    end;
+    v_res := pg_temp.ok(v_res, 'C1 o prazo vence (sex 30/10 18:07, as 3 perguntas vistas às 17:30): o passo vetos aplica as 3 — Flávio 3,5 dias, Nelson 4 dias, Giancarlo 10 dias (a estimativa, fonte orcamento) — com as 3 ações estimar de origem vigia',
+      v_n = 3 and (v_c -> 'vetos' ->> 'aplicadas')::int = 3 and v_t = 'OS-00104:3,5 dias OS-00112:4 dias OS-00130:10 dias' and v_q,
+      coalesce(v_t, '-') || ' | ' || left(coalesce((v_c -> 'vetos')::text, '-'), 300));
+    v_res := pg_temp.ok(v_res, 'C2 o encaixe do mesmo tique pega as 3 (pelas ações estimar): o Nelson marcado a partir de ter 24/11; o Giancarlo sem encaixe em 6 semanas com a equipe de hoje; o Flávio de fora pelo material; nenhuma onda; com mão de obra e sem espera do cliente, 3 das 6 com data',
+      v_t2 = 'OS-00104:fora:material OS-00112:marcada:2026-11-24 OS-00130:fora:sem_encaixe'
+      and not (v_c -> 'encaixe' ->> 'onda')::boolean and (v_c -> 'encaixe' ->> 'candidatas')::int = 3 and v_n2 = 3
+      and jsonb_array_length(v_c -> 'falhas') = 0,
+      coalesce(v_t2, '-') || ' | cobertura ' || coalesce(v_n2::text, '-'));
 
     -- ── D. *gestor, só propor* ──
     v_pub := (select md5(string_agg(a.id::text || a.estado, ',' order by a.id)) from public.agenda_alocacoes a);

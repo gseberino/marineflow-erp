@@ -207,6 +207,12 @@ const FIXTURES_COMO_TEXTO = [
   ['agenda_teste.mig_correcao_leituras', '../../supabase/migrations/20261030100000_agenda_correcao_leituras.sql'],
   ['agenda_teste.mig_rodada_fase7a', '../../supabase/migrations/20261031100600_agenda_fase7a_rodada.sql'],
   ['agenda_teste.mig_sombra_fase7a', '../../supabase/migrations/20261031100990_agenda_fase7a_sombra.sql'],
+  // Fase 7a (P8): as fontes de 2 das 5 recriadas da 20261031100700 que ainda não estavam acima — agenda_propor (o 7a P3) e
+  // _agenda_gestor_decidir (o 7a P4) —, para o E6 de agenda_fase7a_encaixe.sql conferir que as cópias só acrescentam os blocos
+  // "-- FASE 7: (7a P8" e rodar o motor de antes como pg_temp (o portão falso, byte a byte). As de _agenda_criticidade
+  // (mig_motor_fase2), _agenda_criticidade_da_acao e _agenda_propor_e_aplicar (mig_conferencia_fase2) já estão acima.
+  ['agenda_teste.mig_prontidao_fase7a', '../../supabase/migrations/20261031100200_agenda_fase7a_prontidao.sql'],
+  ['agenda_teste.mig_perguntas_fase7a', '../../supabase/migrations/20261031100300_agenda_fase7a_perguntas.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

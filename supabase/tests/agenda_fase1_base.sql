@@ -960,7 +960,11 @@ insert into _definer_da_agenda values
   -- FASE 7 (7a P7, 20261031100600): a rodada do gestor (o job agenda-gestor; os passos dela são invoker e sem grant) e a
   -- palavra *gestor, só propor* / *pode marcar* (escreve gestor_so_propor e a ação gestor; confere o administrador dentro). As
   -- duas só service_role. agenda_fase7a_rodada.sql prova as portas.
-  ('agenda_gestor_rodar'), ('agenda_gestor_dito');
+  ('agenda_gestor_rodar'), ('agenda_gestor_dito'),
+  -- FASE 7 (7a P8, 20261031100700): a pergunta crítica da onda (escreve agenda_perguntas; só _agenda_propor_e_aplicar a chama;
+  -- sem grant a ninguém, nem service_role). O encaixe, a conta da onda e a da zona são invoker. agenda_fase7a_encaixe.sql prova
+  -- as portas.
+  ('_agenda_gestor_onda');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

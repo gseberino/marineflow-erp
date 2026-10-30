@@ -515,7 +515,8 @@ begin
   for r in select * from (values
       ('os_prontidao', 'public.os_prontidao(uuid, date)', v_pr, '20261030100400', 10),
       ('_agenda_classe_da_os', 'public._agenda_classe_da_os(jsonb, jsonb, date, boolean, boolean)', v_mot2, '20261025100200', 3),
-      ('agenda_propor', 'public.agenda_propor(text, date, date, uuid[], jsonb, boolean, text, uuid, date, timestamptz)', v_mot3, '20261030100200', 2),
+      -- (2 blocos do P3 + 3 do 7a P8, 20261031100700: a zona travada; quem recria copia da mais nova)
+      ('agenda_propor', 'public.agenda_propor(text, date, date, uuid[], jsonb, boolean, text, uuid, date, timestamptz)', v_mot3, '20261030100200', 5),
       ('_agenda_rodada_marca', 'public._agenda_rodada_marca()', v_pr, '20261030100400', 1)
     ) t(nome, assinatura, fonte, versao, blocos)
   loop
