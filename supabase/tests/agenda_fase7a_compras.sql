@@ -321,8 +321,9 @@ begin
       raise exception 'desfaz' using errcode = 'P0098';
     exception when sqlstate 'P0098' then null;
     end;
-    v_res := pg_temp.ok(v_res, 'C3d sem o urgente (a peça do Wagner saiu), a linha é a do Vanderlei com perda 65 ("compre até" hoje)',
-      v_t = 'Compras: ' || c_cs_v || ' [65]', v_t);
+    -- (correção da 7a, achado 19: o "compre até" de hoje é decisão de hoje — perda 80, com a vaga dela no fechamento)
+    v_res := pg_temp.ok(v_res, 'C3d sem o urgente (a peça do Wagner saiu), a linha é a do Vanderlei com perda 80 ("compre até" hoje: decisão de hoje, correção da 7a, achado 19)',
+      v_t = 'Compras: ' || c_cs_v || ' [80]', v_t);
     v_c := public._agenda_compras_da_semana(date '2026-11-11');
     v_res := pg_temp.ok(v_res, 'C3e qua 11/11 (o Vanderlei começa qui 12/11): o miúdo vai no fim, "Separar amanhã: 8 × Porta Fusível MIDI… (Vanderlei)." (sem "compre até")',
       v_c -> -1 ->> 'texto' = c_sep and (v_c -> -1 ->> 'separar')::boolean and v_c -> -1 -> 'compre_ate' = 'null'::jsonb, v_c::text);

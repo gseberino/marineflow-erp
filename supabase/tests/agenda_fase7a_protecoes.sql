@@ -559,6 +559,11 @@ begin
     ) t(nome, assinatura, fonte, versao, blocos)
   loop
     select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = r.assinatura::regprocedure;
+    -- (a correção da 7a, 20261031100980, recriou _agenda_linhas_do_fechamento: a cópia do P11 é conferida no texto da migration
+    -- do P11, agenda_teste.mig_protecoes_fase7a)
+    if r.nome = '_agenda_linhas_do_fechamento' and coalesce(current_setting('agenda_teste.mig_protecoes_fase7a', true), '') <> '' then
+      v_novo := pg_temp.corpo(current_setting('agenda_teste.mig_protecoes_fase7a', true), r.nome);
+    end if;
     select count(*) into v_n from regexp_matches(v_novo, '-- FASE 7: \(7a P11', 'g');
     v_res := pg_temp.ok(v_res,
       format('P4 %s: sem os %s blocos "-- FASE 7: (7a P11", é o corpo de %s (a mais nova antes do P11)', r.nome, r.blocos, r.versao),

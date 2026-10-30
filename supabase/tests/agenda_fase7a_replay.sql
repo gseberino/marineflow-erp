@@ -219,19 +219,20 @@ begin
       v_n2 := (select count(*) from unnest(array['OS-00074', 'OS-00069', 'OS-00130', 'OS-00112', 'OS-00104', 'OS-00096']) n
                 where public._agenda_os_tem_dia(pg_temp.os(n), c_d29 + 1));
       v_q := not exists (select 1 from public.agenda_perguntas q where q.tipo = 'onda')
-             and (select count(*) = 4 and bool_and(a.origem = 'vigia') from public.agenda_acoes a where a.tipo = 'estimar' and a.executada);
+             and (select count(*) = 3 and bool_and(a.origem = 'vigia') from public.agenda_acoes a where a.tipo = 'estimar' and a.executada);
       -- (7a P12) o passo sinal do mesmo tique: o MP, marcado sem o sinal pago, ganha a pergunta sinal ao dono
       v_t3 := (select string_agg(q.texto, ' | ') from public.agenda_perguntas q where q.tipo = 'sinal' and q.estado = 'aberta');
       raise exception 'desfaz C' using errcode = 'P0098';
     exception when sqlstate 'P0098' then null;
     end;
     -- (7a P12: o MP, sem o sinal travando, é a 4ª pergunta vista e o prazo dá 1 dia a ele — sem_mo_dias —; o encaixe o marca)
-    v_res := pg_temp.ok(v_res, 'C1 o prazo vence (sex 30/10 18:07, as 4 perguntas vistas às 17:30): o passo vetos aplica as 4 — Flávio 3,5 dias, Nelson 4 dias, Giancarlo 10 dias, MP 1 dia (a estimativa, fonte orcamento) — com as 4 ações estimar de origem vigia',
-      v_n = 4 and (v_c -> 'vetos' ->> 'aplicadas')::int = 4 and v_t = 'ORÇ-00095:1 dia OS-00104:3,5 dias OS-00112:4 dias OS-00130:10 dias' and v_q,
+    -- (correção da 7a, achado 20: a do Giancarlo, 10 diárias, é sem prazo — o gestor não marca sozinho acima de 8 diárias)
+    v_res := pg_temp.ok(v_res, 'C1 o prazo vence (sex 30/10 18:07, as 4 perguntas vistas às 17:30): o passo vetos aplica as 3 com prazo — Flávio 3,5 dias, Nelson 4 dias, MP 1 dia (a estimativa, fonte orcamento) — com as 3 ações estimar de origem vigia; a do Giancarlo, acima de 8 diárias, não tem prazo e espera o dono (correção da 7a, achado 20)',
+      v_n = 4 and (v_c -> 'vetos' ->> 'aplicadas')::int = 3 and v_t = 'ORÇ-00095:1 dia OS-00104:3,5 dias OS-00112:4 dias' and v_q,
       coalesce(v_t, '-') || ' | ' || left(coalesce((v_c -> 'vetos')::text, '-'), 300));
-    v_res := pg_temp.ok(v_res, 'C2 o encaixe do mesmo tique pega as 4 (pelas ações estimar): o Nelson marcado a partir de ter 24/11 e o MP a partir de sex 13/11; o Giancarlo sem encaixe em 6 semanas com a equipe de hoje; o Flávio de fora pelo material; nenhuma onda; com mão de obra e sem espera do cliente, 3 das 6 com data',
-      v_t2 = 'ORÇ-00095:marcada:2026-11-13 OS-00104:fora:material OS-00112:marcada:2026-11-24 OS-00130:fora:sem_encaixe'
-      and not (v_c -> 'encaixe' ->> 'onda')::boolean and (v_c -> 'encaixe' ->> 'candidatas')::int = 4 and v_n2 = 3
+    v_res := pg_temp.ok(v_res, 'C2 o encaixe do mesmo tique pega as 3 (pelas ações estimar): o Nelson marcado a partir de ter 24/11 e o MP a partir de sex 13/11; o Flávio de fora pelo material; o Giancarlo não é candidato (sem os dias: a pergunta dele espera o dono, correção da 7a, achado 20); nenhuma onda; com mão de obra e sem espera do cliente, 3 das 6 com data',
+      v_t2 = 'ORÇ-00095:marcada:2026-11-13 OS-00104:fora:material OS-00112:marcada:2026-11-24'
+      and not (v_c -> 'encaixe' ->> 'onda')::boolean and (v_c -> 'encaixe' ->> 'candidatas')::int = 3 and v_n2 = 3
       and jsonb_array_length(v_c -> 'falhas') = 0,
       coalesce(v_t2, '-') || ' | cobertura ' || coalesce(v_n2::text, '-'));
     v_res := pg_temp.ok(v_res, 'C3 (7a P12, AG7-09 "marco e cobro o sinal") o passo sinal do mesmo tique: o MP marcado com o sinal não pago (sem recebível) ganha a pergunta ao dono, sem o valor; nada ao cliente',

@@ -354,11 +354,12 @@ begin
   select string_agg(format('%s=%s', n, coalesce(pg_temp.texto(pg_temp.os(n), c_hoje, 'duracao'), '-')), ' | ' order by n) into v_novo
     from unnest(array['OS-00130', 'OS-00112', 'OS-97001', 'OS-97002', 'ORÇ-00095']) n;
   v_res := pg_temp.ok(v_res, 'P5c quando o gestor pergunta antes, "quantos dias?" diz o que ele faz sem resposta: grande (Giancarlo), começou sem rastro (Nelson), com rastro (Paulo), peça junto (Sérgio), sem mão de obra (MP)',
+    -- (correção da 7a: acima de 8 diárias o gestor espera o dono, achado 20; a peça embutida não pergunta mais, achado 21)
     v_novo = 'ORÇ-00095=o orçamento não tem mão de obra separada: perguntei quantos dias; sem resposta, marco 1 dia'
              || ' | OS-00112=perguntei se já começou; sem resposta, conto 4 dias'
-             || ' | OS-00130=pelo valor do orçamento são 10 diárias, mais de 8: perguntei antes de marcar; sem resposta, marco 10 dias'
+             || ' | OS-00130=pelo valor do orçamento são 10 diárias, mais de 8: perguntei antes de marcar e espero você dizer os dias'
              || ' | OS-97001=perguntei quanto falta; sem resposta, marco 1 dia para terminar'
-             || ' | OS-97002=pode ter peça junto em "Instalação de banco…": perguntei antes de marcar; sem resposta, marco 2 dias',
+             || ' | OS-97002=-',
     v_novo);
   p := public.os_prontidao(pg_temp.os('OS-00112'), c_hoje);
   e := (select y from jsonb_array_elements(p -> 'restricoes') y where y ->> 'tipo' = 'situacao');
@@ -366,7 +367,8 @@ begin
     e ->> 'quem' = 'dono' and (e ->> 'bloqueia')::boolean and e ->> 'pergunta' = 'o serviço já começou?'
     and e ->> 'texto' = public._agenda_os_situacao(pg_temp.os('OS-00112'), c_hoje) ->> 'texto'
     and e ->> 'desde' = public._agenda_os_situacao(pg_temp.os('OS-00112'), c_hoje) ->> 'desde'
-    and pg_temp.restr(pg_temp.os('OS-00112'), c_hoje) = 'compre_ate:true situacao:true duracao:false', e::text);
+    -- (correção da 7a, achado 24: enquanto o gestor pergunta, a duração trava — a OS não é "pronta para começar")
+    and pg_temp.restr(pg_temp.os('OS-00112'), c_hoje) = 'compre_ate:true duracao:true situacao:true', e::text);
   v_res := pg_temp.ok(v_res, 'P5e parada há mais de 30 dias (Vanderlei em 05/11): "perguntei se ainda é para fazer o serviço inteiro; sem resposta, conto 7,5 dias"; a situação pergunta "ainda é para fazer o serviço inteiro?"',
     pg_temp.texto(pg_temp.os('OS-00069'), date '2026-11-05', 'duracao') = 'perguntei se ainda é para fazer o serviço inteiro; sem resposta, conto 7,5 dias'
     and (select y ->> 'pergunta' from jsonb_array_elements(public.os_prontidao(pg_temp.os('OS-00069'), date '2026-11-05') -> 'restricoes') y
@@ -401,7 +403,7 @@ begin
   v_res := pg_temp.ok(v_res, 'P6b o texto da classe é o do gestor: Nelson (o "já começou?") e Giancarlo (as 10 diárias)',
     pg_temp.classe(pg_temp.os('OS-00112'), c_hoje) ->> 'texto' = public._agenda_os_situacao(pg_temp.os('OS-00112'), c_hoje) ->> 'texto'
     and pg_temp.classe(pg_temp.os('OS-00130'), c_hoje) ->> 'texto'
-        = 'pelo valor do orçamento são 10 diárias, mais de 8: perguntei antes de marcar; sem resposta, marco 10 dias', null);
+        = 'pelo valor do orçamento são 10 diárias, mais de 8: perguntei antes de marcar e espero você dizer os dias', null);
   -- sem a estimativa, o "sem base" volta a ser 'duracao' e a situação não segura (as chaves não existem)
   update public.agenda_config set marcar_regras = array_remove(c_todas, 'estimativa') where id;
   select string_agg(format('%s=%s:%s', n, cl ->> 'classe', cl ->> 'motivo'), ' | ' order by n) into v_t
@@ -473,27 +475,33 @@ begin
   insert into public.agenda_acoes (criada_em, dia, executada, origem, tipo, service_order_id, os_ids, texto)
   values (c_agora, c_hoje, false, 'vigia', 'criar', pg_temp.os('OS-00033'), array[pg_temp.os('OS-00033')], 'TESTE AG7A P3: ação 2');
   v_t := public._agenda_rodada_marca()::text;
-  v_res := pg_temp.ok(v_res, 'P10a sem a regra situacao a marca não conta a ação (como antes: igual depois dela); com a regra, conta — negativa (nunca igual a uma marca sem a regra) e anda com a ação',
-    v_k0 >= 0 and v_k1 = v_k0 and v_k2 < 0 and v_t::bigint < v_k2,
+  -- (correção da 7a, achado 10, 20261031100980: a situação da OS não lê mais as ações nem as perguntas — a parada conta a última
+  -- mexida da agenda pelas alocações —, e a marca volta a ser a de sempre, com ou sem a regra situacao: a pergunta e a ação gravadas
+  -- na rodada não fazem a vigia recalcular a prontidão de todas as OS)
+  v_res := pg_temp.ok(v_res, 'P10a a marca não conta a ação, com ou sem a regra situacao (correção da 7a, achado 10: a de sempre, nunca negativa)',
+    v_k0 >= 0 and v_k1 = v_k0 and v_k2 >= 0 and v_t::bigint = v_k2,
     format('sem a regra %s → %s; com a regra %s → %s', v_k0, v_k1, v_k2, v_t));
   insert into public.agenda_perguntas (tipo, chave, service_order_id, os_ids, texto, modo)
   values ('situacao', 'situacao:teste-p3', pg_temp.os('OS-00033'), array[pg_temp.os('OS-00033')], 'TESTE AG7A P3: já começou?', 'sombra');
-  v_res := pg_temp.ok(v_res, 'P10b com a regra, a pergunta gravada também move a marca', public._agenda_rodada_marca() < v_t::bigint,
-    v_t || ' → ' || public._agenda_rodada_marca());
-  -- a prontidão lembrada numa rodada (agenda.rodada = o dia) recalcula depois de uma ação gravada na própria rodada: Vanderlei em
-  -- 05/11 está parado (situação pendente); a ação da agenda nele, na rodada, tira a pendência
+  v_res := pg_temp.ok(v_res, 'P10b com a regra, a pergunta gravada também não move a marca (correção da 7a, achado 10)',
+    public._agenda_rodada_marca() = v_t::bigint, v_t || ' → ' || public._agenda_rodada_marca());
+  -- a prontidão lembrada numa rodada (agenda.rodada = o dia): Vanderlei em 05/11 está parado (situação pendente); a ação da agenda
+  -- nele, na rodada, não muda a conta (é lembrada); a OS mexida (o que a prontidão lê) a recalcula, e a pendência sai
   perform public._agenda_rodada_abrir(date '2026-11-05');
   e := public.os_prontidao(pg_temp.os('OS-00069'), date '2026-11-05');
   insert into public.agenda_acoes (criada_em, dia, executada, origem, tipo, service_order_id, os_ids, texto)
   values (timestamptz '2026-11-05 10:00-03', date '2026-11-05', false, 'vigia', 'criar', pg_temp.os('OS-00069'),
           array[pg_temp.os('OS-00069')], 'TESTE AG7A P3: ação na rodada');
   x := public.os_prontidao(pg_temp.os('OS-00069'), date '2026-11-05');
+  update public.service_orders set updated_at = timestamptz '2026-11-05 10:00-03' where id = pg_temp.os('OS-00069');
+  v_t := public.os_prontidao(pg_temp.os('OS-00069'), date '2026-11-05')::text;
   p := public._agenda_rodada_fechar();
-  v_res := pg_temp.ok(v_res, 'P10c dentro da rodada da vigia: o Vanderlei parado tem a restrição situacao; depois de uma ação gravada nele na rodada, a prontidão é recalculada (não a lembrada) e a pendência sai — igual à conta fresca',
+  v_res := pg_temp.ok(v_res, 'P10c dentro da rodada da vigia: o Vanderlei parado tem a restrição situacao; a ação gravada nele na rodada não muda a conta (lembrada, igual); a OS mexida a recalcula e a pendência sai — igual à conta fresca',
     exists (select 1 from jsonb_array_elements(e -> 'restricoes') y where y ->> 'tipo' = 'situacao')
-    and not exists (select 1 from jsonb_array_elements(x -> 'restricoes') y where y ->> 'tipo' = 'situacao')
-    and x = public.os_prontidao(pg_temp.os('OS-00069'), date '2026-11-05') and (p ->> 'ligada')::boolean
-    and (p ->> 'calculadas')::int = 2,
+    and x = e
+    and not exists (select 1 from jsonb_array_elements(v_t::jsonb -> 'restricoes') y where y ->> 'tipo' = 'situacao')
+    and v_t::jsonb = public.os_prontidao(pg_temp.os('OS-00069'), date '2026-11-05') and (p ->> 'ligada')::boolean
+    and (p ->> 'calculadas')::int = 2 and (p ->> 'lembradas')::int >= 1,
     p::text || ' | ' || pg_temp.restr(pg_temp.os('OS-00069'), date '2026-11-05'));
 
   perform pg_temp.gravar(v_res);
@@ -515,12 +523,14 @@ begin
     return;
   end if;
   for r in select * from (values
-      ('os_prontidao', 'public.os_prontidao(uuid, date)', v_pr, '20261030100400', 10),
+      -- (10 blocos do P3 + 1 da correção da 7a, 20261031100980: a OS que o gestor pergunta não é "pronta")
+      ('os_prontidao', 'public.os_prontidao(uuid, date)', v_pr, '20261030100400', 11),
       -- (3 blocos do P3 + 1 do 7a P12, 20261031100900: o sinal que não trava; quem recria copia da mais nova)
       ('_agenda_classe_da_os', 'public._agenda_classe_da_os(jsonb, jsonb, date, boolean, boolean)', v_mot2, '20261025100200', 4),
       -- (2 blocos do P3 + 3 do 7a P8, 20261031100700: a zona travada; quem recria copia da mais nova)
       ('agenda_propor', 'public.agenda_propor(text, date, date, uuid[], jsonb, boolean, text, uuid, date, timestamptz)', v_mot3, '20261030100200', 5),
-      ('_agenda_rodada_marca', 'public._agenda_rodada_marca()', v_pr, '20261030100400', 1)
+      -- (correção da 7a, achado 10, 20261031100980: o bloco do P3 saiu — a marca é de novo a de 20261030100400)
+      ('_agenda_rodada_marca', 'public._agenda_rodada_marca()', v_pr, '20261030100400', 0)
     ) t(nome, assinatura, fonte, versao, blocos)
   loop
     select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = r.assinatura::regprocedure;

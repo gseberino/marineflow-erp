@@ -171,7 +171,8 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     casou: '1000',
     // Correção de 29/10 (P2, 20261030100100): agenda_livre_de_verdade reescrita (+1: o mesmo ms do custo, no livre do plano).
     // Correção de 29/10 (revisão do lote, 20261030100500): recriada de novo (+1: a mesma cópia).
-    vezes: 3,
+    // Fase 7a, correção da revisão (20261031100980): recriada de novo, com o teto da equipe e o dono fora da conta (+1: a mesma cópia).
+    vezes: 4,
     porque: 'segundos → milissegundos (o custo da simulação no resultado, ms; a meta < 2 s é do teste); não é texto_max nem peca_embutida_acima',
   },
   {

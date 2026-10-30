@@ -508,10 +508,12 @@ begin
     v_t := (select string_agg(x ->> 'numero', ',' order by o) from jsonb_array_elements(r -> 'lista') with ordinality t(x, o));
     v_res := pg_temp.ok(v_res, 'S3a os 6 orçamentos grandes do real (rascunho ou enviados, R$ 20.000 ou mais, mexidos em 30 dias), do maior para o menor; o ORÇ-00095 (esperando o sinal) e os menores ficam de fora',
       (r ->> 'orcamentos')::int = 6 and v_t = 'ORÇ-00117,ORÇ-00116,ORÇ-00126,ORÇ-00125,ORÇ-00122,ORÇ-00118', v_t);
-    v_res := pg_temp.ok(v_res, 'S3b o texto: "Everton (ORÇ-00117, R$ 120.020): pela estimativa, 28 dias com 2 pessoas; …" (as 55,5 diárias repartidas pela equipe do encaixe, equipe_sugerida); o que cabe diz "cabe a partir de …"',
-      r #>> '{lista,0,texto}' like 'Everton (ORÇ-00117, R$ 120.020): pela estimativa, 28 dias com 2 pessoas; %.'
-      and (r #>> '{lista,0,diarias}')::numeric = 55.50 and (r #>> '{lista,0,pessoas}')::int = 2
-      and r #>> '{lista,2,texto}' = format('MP (ORÇ-00126, R$ 34.480): pela estimativa, 3,5 dias com 2 pessoas; cabe a partir de %s.',
+    -- (correção da 7a, achado 5: com a regra uma_pessoa, as diárias repartidas por equipe_padrao — 1 —, como o gestor marcaria
+    -- depois de aprovado; acima de 8 diárias, o texto diz que ele pergunta os dias antes)
+    v_res := pg_temp.ok(v_res, 'S3b o texto: "Everton (ORÇ-00117, R$ 120.020): pela estimativa, 55,5 dias com 1 pessoa; … Se aprovar, pergunto os dias antes (mais de 8 diárias)." (as 55,5 diárias com equipe_padrao, a regra uma_pessoa: correção da 7a, achado 5); o que cabe diz "cabe a partir de …"',
+      r #>> '{lista,0,texto}' like 'Everton (ORÇ-00117, R$ 120.020): pela estimativa, 55,5 dias com 1 pessoa; %. Se aprovar, pergunto os dias antes (mais de 8 diárias).'
+      and (r #>> '{lista,0,diarias}')::numeric = 55.50 and (r #>> '{lista,0,pessoas}')::int = 1
+      and r #>> '{lista,2,texto}' = format('MP (ORÇ-00126, R$ 34.480): pela estimativa, 7 dias com 1 pessoa; cabe a partir de %s.',
                                             public._dia_curto((r #>> '{lista,2,cabe_de}')::date)),
       r #>> '{lista,0,texto}' || ' | ' || (r #>> '{lista,2,texto}'));
     v_ok := true;
@@ -524,7 +526,7 @@ begin
     v_foco := public._agenda_ver_gestor(c_hoje) ->> 'texto';
     v_res := pg_temp.ok(v_res, 'S3d o diário do gestor (agenda_gestor_dia.orcamentos) = a lista, e o foco *agenda gestor* mostra "Se aprovar:" com o Everton',
       (select g.orcamentos from public.agenda_gestor_dia g where g.dia = c_hoje) = r -> 'lista'
-      and v_foco like E'%\nSe aprovar:\n• Everton (ORÇ-00117, R$ 120.020): pela estimativa, 28 dias com 2 pessoas; %',
+      and v_foco like E'%\nSe aprovar:\n• Everton (ORÇ-00117, R$ 120.020): pela estimativa, 55,5 dias com 1 pessoa; %',
       v_foco);
     -- S3e em teste: a conta da sombra (a variável só dentro do passo); desligado = pulado
     perform pg_temp.modos('sombra');

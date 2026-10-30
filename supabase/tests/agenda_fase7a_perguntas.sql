@@ -124,7 +124,8 @@ declare
   c_prazo  constant timestamptz := timestamptz '2026-10-30 18:00-03';
   c_tique  constant timestamptz := timestamptz '2026-10-30 18:07-03';
   c_nelson constant text := 'Nelson (OS-00112) está como ''aguardando peças'': o serviço já começou? Se você não me disser nada até sex 30/10 às 18:00, conto o serviço inteiro (4 dias, estimativa minha). 1) Não começou: conte tudo (recomendo); 2) Já começou: eu digo quanto falta; 3) Já terminou.';
-  c_gianc  constant text := 'Giancarlo (OS-00130): pelo valor do orçamento são 10 diárias (10 dias com 1 pessoa). É mais de 8 diárias, então pergunto antes. Se você não me disser nada até sex 30/10 às 18:00, marco assim. 1) Marque 10 dias (recomendo); 2) Eu digo os dias.';
+  -- (correção da 7a, achado 20: acima de 8 diárias, sem prazo nem opção padrão — o gestor não marca sozinho; recomenda a 2)
+  c_gianc  constant text := 'Giancarlo (OS-00130): pelo valor do orçamento são 10 diárias (10 dias com 1 pessoa). É mais de 8 diárias: não marco sozinho. Me diga os dias. 1) Marque 10 dias; 2) Eu digo os dias (recomendo).';
   v_carteira text[] := array['OS-00074', 'OS-00069', 'OS-00130', 'OS-00112', 'OS-00104', 'OS-00096', 'OS-00076', 'OS-00032',
                              'OS-00033', 'ORÇ-00083', 'ORÇ-00095'];
   v_adm    uuid;
@@ -192,14 +193,17 @@ begin
     and p ->> 'variante' = 'parada' and p #>> '{opcoes,2,efeito}' = '{"nao_fazer": true}' and p ->> 'curto' = 'parado desde 03/10',
     p ->> 'texto');
   p := public._agenda_gestor_perguntas_da_os(pg_temp.os('OS-00130'), c_hoje, c_agora, true);
-  v_res := pg_temp.ok(v_res, 'Q1d estimativa, grande (Giancarlo: 9,87 diárias, mais de 8): "10 diárias (10 dias com 1 pessoa)", marco assim',
+  v_res := pg_temp.ok(v_res, 'Q1d estimativa, grande (Giancarlo: 9,87 diárias, mais de 8): "10 diárias (10 dias com 1 pessoa)", não marco sozinho — sem prazo nem opção padrão, recomenda a 2 (correção da 7a, achado 20)',
     p ->> 'texto' = c_gianc and p ->> 'chave' = 'estimativa:' || pg_temp.os('OS-00130') || ':grande'
-    and p ->> 'curto' = '10 diárias pela estimativa' and p #>> '{opcoes,0,efeito,dias}' = '10',
+    and p ->> 'curto' = '10 diárias pela estimativa' and p #>> '{opcoes,0,efeito,dias}' = '10'
+    and p -> 'veto_ate' = 'null'::jsonb and p -> 'opcao_padrao' = 'null'::jsonb and p ->> 'recomendacao' = '2',
     p ->> 'texto');
   p := public._agenda_gestor_perguntas_da_os(pg_temp.os('OS-97002'), c_hoje, c_agora, true);
-  v_res := pg_temp.ok(v_res, 'Q1e estimativa, embutida (Sérgio: a linha de serviço pode ter peça junto; com a dupla marcada, 2 dias): o nome do serviço da linha, "Contei tudo como mão de obra"',
-    p ->> 'texto' = 'Sérgio (OS-97002): ''Instalação de banco de baterias de lítio'' pode ter peça junto. Contei tudo como mão de obra: 2 dias. Se você não me disser nada até sex 30/10 às 18:00, marco assim. 1) Marque 2 dias (recomendo); 2) Eu digo os dias e a peça.'
-    and p ->> 'variante' = 'embutida',
+  -- (correção da 7a, achado 21: a peça embutida não segura mais a OS — a estimativa conta tudo como mão de obra e vale —, então o
+  -- Sérgio não é perguntado; a suposição fica dita na prontidão)
+  v_res := pg_temp.ok(v_res, 'Q1e estimativa, embutida (Sérgio: a linha de serviço pode ter peça junto): não pergunta mais — a estimativa conta tudo como mão de obra e vale (correção da 7a, achado 21)',
+    not (p ->> 'perguntou')::boolean and p ->> 'por' = 'nada_a_perguntar' and not (p ? 'chave')
+    and (public._agenda_gestor_estimativa(pg_temp.os('OS-97002'), c_hoje) ->> 'usa')::boolean,
     p ->> 'texto');
   begin
     delete from public.service_order_services s where s.service_order_id = pg_temp.os('OS-97003') and s.name_snapshot !~* 'deslocamento';
@@ -319,8 +323,9 @@ begin
   exception when sqlstate 'P0099' then null;
   end;
   v_res := pg_temp.ok(v_res, 'Q1o a chamada da equipe (§6.3): a semana de 09/11 só com a semente (Roberto seg a sex, João ter a sex) e o Mickael com diária cadastrada que nunca esteve na agenda — sem prazo, sem opções, chave equipe_cadastro:chamada:2026-11-09, uma por semana, só no dia do plano',
-    (p ->> 'criada')::boolean and (p ->> 'semente')::boolean and p ->> 'sumidos' = '1'
-    and x.texto = 'Para marcar a semana de 09/11 eu conto com Roberto (seg a sex) e João (ter a sex), pelo que vieram nas últimas 8 semanas. Mickael tem cadastro de diarista mas não vem desde 18/09: não conto com ele. Se a equipe mudou, me diga quem vem e em que dias.'
+    -- (correção da 7a, achado 4: quem só tem a diária cadastrada — o Mickael — não entra mais na chamada)
+    (p ->> 'criada')::boolean and (p ->> 'semente')::boolean and p ->> 'sumidos' = '0'
+    and x.texto = 'Para marcar a semana de 09/11 eu conto com Roberto (seg a sex) e João (ter a sex), pelo que vieram nas últimas 8 semanas. Se a equipe mudou, me diga quem vem e em que dias.'
     and x.tipo = 'equipe_cadastro' and x.chave = 'equipe_cadastro:chamada:2026-11-09' and x.opcoes = '[]'::jsonb
     and x.veto_ate is null and x.opcao_padrao is null and x.modo = 'ligado' and x.perda_em = date '2026-11-05'
     and x.expira_em = c_agora + interval '7 days'
@@ -344,9 +349,10 @@ begin
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
-  v_res := pg_temp.ok(v_res, 'Q1p com a equipe que o dono declarou: "conto com Alex (seg a sex), como você disse" (e o Mickael, que nunca esteve na agenda); com o Mickael também na agenda, nada a perguntar ("a equipe está dita")',
-    (p ->> 'criada')::boolean and not (p ->> 'semente')::boolean
-    and p ->> 'texto' = 'Para marcar a semana de 09/11 eu conto com Alex (seg a sex), como você disse. Mickael tem cadastro de diarista mas não vem desde 18/09: não conto com ele. Se a equipe mudou, me diga quem vem e em que dias.'
+  -- (correção da 7a, achado 4: com a equipe declarada pelo dono e sem a semente, nada a perguntar — o Mickael, só com a diária
+  -- cadastrada, não faz mais a chamada nascer toda quinta)
+  v_res := pg_temp.ok(v_res, 'Q1p com a equipe que o dono declarou (Alex), nada a perguntar ("a equipe está dita"), com ou sem o Mickael na agenda: quem só tem a diária cadastrada não entra na chamada (correção da 7a, achado 4)',
+    not (p ->> 'criada')::boolean and p ->> 'motivo' = 'a equipe está dita'
     and not (d ->> 'criada')::boolean and d ->> 'motivo' = 'a equipe está dita',
     p::text || ' | ' || d::text);
   begin
@@ -392,8 +398,9 @@ begin
   d := public._agenda_gestor_vetos(c_sex, timestamptz '2026-10-30 17:00-03');
   e := public._agenda_gestor_vetos(c_sex, c_tique);
   select count(*) filter (where q.estado = 'aberta') into v_n from public.agenda_perguntas q where q.id in (v_qn, v_qg);
-  v_res := pg_temp.ok(v_res, 'Q3a antes do prazo, nada; vencido sem o dono ter visto, nada (sem_mostrar 2): as duas continuam abertas',
-    d ->> 'aplicadas' = '0' and d ->> 'sem_mostrar' = '0' and e ->> 'aplicadas' = '0' and e ->> 'sem_mostrar' = '2' and v_n = 2,
+  -- (correção da 7a, achado 20: a do Giancarlo, acima de 8 diárias, não tem prazo — o prazo não a vê; só a do Nelson)
+  v_res := pg_temp.ok(v_res, 'Q3a antes do prazo, nada; vencido sem o dono ter visto, nada (sem_mostrar 1: a do Nelson; a do Giancarlo não tem prazo, correção da 7a, achado 20): as duas continuam abertas',
+    d ->> 'aplicadas' = '0' and d ->> 'sem_mostrar' = '0' and e ->> 'aplicadas' = '0' and e ->> 'sem_mostrar' = '1' and v_n = 2,
     d::text || ' | ' || e::text);
   -- vista depois do prazo também não
   begin
@@ -413,7 +420,7 @@ begin
   exception when sqlstate 'P0099' then null;
   end;
   v_res := pg_temp.ok(v_res, 'Q3b vista só depois do prazo não aplica (sem_mostrar); com *gestor, só propor*, a vista também não (em_teste)',
-    d ->> 'aplicadas' = '0' and d ->> 'sem_mostrar' = '2' and e ->> 'aplicadas' = '0' and e ->> 'em_teste' = '2',
+    d ->> 'aplicadas' = '0' and d ->> 'sem_mostrar' = '1' and e ->> 'aplicadas' = '0' and e ->> 'em_teste' = '1',
     d::text || ' | ' || e::text);
   -- vistas no fechamento de qui 17:30: no tique de sex 18:07 a opção 1 vale
   update public.agenda_perguntas set mostrada_vezes = 1, mostrada_em = timestamptz '2026-10-29 17:30-03', mostrada_via = 'fechamento'
@@ -426,10 +433,11 @@ begin
     from public.os_planejamento pl2 join public.service_orders so on so.id = pl2.service_order_id
    where so.service_order_number in ('OS-00112', 'OS-00130');
   select * into x from public.agenda_perguntas q where q.id = v_qn;
-  v_res := pg_temp.ok(v_res, 'Q3c vistas antes do prazo: no tique de sex 18:07 as duas valem como disse (Nelson 4 dias, Giancarlo 10, fonte orcamento); a pergunta resolvida "sem resposta até sex 30/10 18:00: ficou como eu disse", com a opção 1; as OS vão ao encaixe do tique; o tique seguinte não refaz',
-    e ->> 'aplicadas' = '2' and jsonb_array_length(e -> 'os') = 2 and e -> 'os' @> to_jsonb(pg_temp.os('OS-00112'))
-    and jsonb_array_length(e -> 'acoes') = 2 and d ->> 'aplicadas' = '0'
-    and v_t = 'OS-00112 4 orcamento | OS-00130 10 orcamento'
+  v_res := pg_temp.ok(v_res, 'Q3c vista antes do prazo: no tique de sex 18:07 a do Nelson vale como disse (4 dias, fonte orcamento); a do Giancarlo, sem prazo (correção da 7a, achado 20), não grava nada e continua aberta; a pergunta resolvida "sem resposta até sex 30/10 18:00: ficou como eu disse", com a opção 1; a OS vai ao encaixe do tique; o tique seguinte não refaz',
+    e ->> 'aplicadas' = '1' and jsonb_array_length(e -> 'os') = 1 and e -> 'os' @> to_jsonb(pg_temp.os('OS-00112'))
+    and jsonb_array_length(e -> 'acoes') = 1 and d ->> 'aplicadas' = '0'
+    and v_t = 'OS-00112 4 orcamento'
+    and (select q.estado = 'aberta' from public.agenda_perguntas q where q.id = v_qg)
     and x.estado = 'resolvida' and x.resolvida_motivo = 'sem resposta até sex 30/10 18:00: ficou como eu disse'
     and x.opcao_escolhida = 1 and x.respondida_em is null,
     e::text || ' | ' || v_t || ' | ' || coalesce(x.resolvida_motivo, '-'));
@@ -439,7 +447,7 @@ begin
     ac.texto = 'Sem resposta sobre Nelson até sex 30/10 às 18:00: contei o serviço inteiro, 4 dias (estimativa minha). *desfaz Nelson* volta.'
     and ac.origem = 'vigia' and ac.executada and not ac.critica and ac.dia = c_sex and ac.autor is null
     and ac.desfazivel_ate = c_tique + (select desfazer_validade from public.agenda_config where id)
-    and ac.service_order_id = pg_temp.os('OS-00112') and v_n = v_k + 2,
+    and ac.service_order_id = pg_temp.os('OS-00112') and v_n = v_k + 1,
     coalesce(ac.texto, '-') || ' | ' || coalesce(ac.origem, '-'));
   e := public._agenda_classe_agora(pg_temp.os('OS-00112'), c_sex) - 'pront';
   v_res := pg_temp.ok(v_res, 'Q3e com os dias gravados, o Nelson sai do "já começou?" (a classe deixa de ser situacao)',
@@ -447,16 +455,19 @@ begin
   -- respondida pelo dono (a opção 2, aberta) não vence; o dono que já disse os dias vence o prazo
   begin
     v_q := (public._agenda_gestor_perguntas_da_os(pg_temp.os('OS-97001'), c_hoje, c_agora, false) ->> 'pergunta_id')::uuid;
-    v_q2 := (public._agenda_gestor_perguntas_da_os(pg_temp.os('OS-97002'), c_hoje, c_agora, false) ->> 'pergunta_id')::uuid;
+    -- (correção da 7a, achado 21: o Sérgio, com a peça embutida, não é mais perguntado; a pergunta com prazo é a do MP, sem mão de
+    -- obra separada)
+    v_q2 := (public._agenda_gestor_perguntas_da_os(pg_temp.os('ORÇ-00095'), c_hoje, c_agora, false) ->> 'pergunta_id')::uuid;
     update public.agenda_perguntas set mostrada_vezes = 1, mostrada_em = timestamptz '2026-10-29 17:30-03', mostrada_via = 'fechamento'
      where id in (v_q, v_q2);
     d := public.agenda_decidir(v_q, 2::smallint, v_adm, 'whatsapp', '2', c_hoje, timestamptz '2026-10-29 17:40-03');
-    update public.os_planejamento set dias = 3, estimativa_fonte = 'dono', estimativa_em = timestamptz '2026-10-30 09:00-03'
-     where service_order_id = pg_temp.os('OS-97002');
+    insert into public.os_planejamento (service_order_id, dias, estimativa_fonte, estimativa_em)
+    values (pg_temp.os('ORÇ-00095'), 3, 'dono', timestamptz '2026-10-30 09:00-03')
+    on conflict (service_order_id) do update set dias = 3, estimativa_fonte = 'dono', estimativa_em = excluded.estimativa_em;
     e := public._agenda_gestor_vetos(c_sex, c_tique);
     select string_agg(q.estado || ':' || coalesce(q.resolvida_motivo, '-'), ' | ' order by q.chave) into v_t
       from public.agenda_perguntas q where q.id in (v_q, v_q2);
-    select pl2.dias || ' ' || pl2.estimativa_fonte into v_t2 from public.os_planejamento pl2 where pl2.service_order_id = pg_temp.os('OS-97002');
+    select pl2.dias || ' ' || pl2.estimativa_fonte into v_t2 from public.os_planejamento pl2 where pl2.service_order_id = pg_temp.os('ORÇ-00095');
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
@@ -489,7 +500,10 @@ begin
     ac.antes::text || ' | ' || ac.depois::text);
   begin
     -- sobre os dias do dono e do aceito, nada
-    update public.os_planejamento set dias = 2, estimativa_fonte = 'dono' where service_order_id = pg_temp.os('OS-00130');
+    -- (correção da 7a, achado 20: o Giancarlo não ganhou os 10 dias pelo prazo — a linha pode não existir)
+    insert into public.os_planejamento (service_order_id, dias, estimativa_fonte, estimativa_em)
+    values (pg_temp.os('OS-00130'), 2, 'dono', c_tique)
+    on conflict (service_order_id) do update set dias = 2, estimativa_fonte = 'dono';
     v_a := public._agenda_gestor_gravar_dias(pg_temp.os('OS-00130'), 10, 'teste', null, c_tique);
     select pl2.dias || ' ' || pl2.estimativa_fonte into v_t from public.os_planejamento pl2 where pl2.service_order_id = pg_temp.os('OS-00130');
     update public.os_planejamento set estimativa_fonte = 'aceita' where service_order_id = pg_temp.os('OS-00130');
@@ -533,9 +547,9 @@ begin
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
-  v_res := pg_temp.ok(v_res, 'Q5 a limpeza: o Paulo com os dias ditos ("você respondeu"), o Sérgio fora da carteira ("a OS saiu da carteira"), o Flávio esperando o cliente ("não precisa mais"); com *gestor, só propor*, o motivo não é reavaliado',
-    v_t = 'OS-00104:resolvida:não precisa mais | OS-97001:resolvida:você respondeu | OS-97002:resolvida:a OS saiu da carteira'
-    and v_t2 = 'aberta' and (p ->> 'resolvidas')::int >= 3,
+  v_res := pg_temp.ok(v_res, 'Q5 a limpeza: o Paulo com os dias ditos ("você respondeu"), o Flávio esperando o cliente ("não precisa mais"); o Sérgio, com a peça embutida, nem foi perguntado (correção da 7a, achado 21); com *gestor, só propor*, o motivo não é reavaliado',
+    v_t = 'OS-00104:resolvida:não precisa mais | OS-97001:resolvida:você respondeu' and v_q2 is null
+    and v_t2 = 'aberta' and (p ->> 'resolvidas')::int >= 2,
     coalesce(v_t, '-') || ' | só propor: ' || coalesce(v_t2, '-'));
 
   -- ── Q6. agenda_decidir ──────────────────────────────────────────────────────────────────────────────────
@@ -592,18 +606,20 @@ begin
     and ac.texto = 'Combinado, Paulo: contei 1 dia para terminar (estimativa minha). *desfaz Paulo* volta.'
     and d ->> 'texto' = ac.texto and pl.historico -> (jsonb_array_length(pl.historico) - 1) ->> 'por' = 'dono',
     d::text);
+  -- (correção da 7a, achado 21: a peça embutida do Sérgio não pergunta mais; a opção 2 é provada no grande do Giancarlo, que desde
+  -- o achado 20 não tem prazo e recomenda a 2)
   begin
-    p := public._agenda_gestor_perguntas_da_os(pg_temp.os('OS-97002'), c_hoje, c_agora, false);
+    p := public._agenda_gestor_perguntas_da_os(pg_temp.os('OS-00130'), c_hoje, c_agora, false);
     d := public.agenda_decidir((p ->> 'pergunta_id')::uuid, 2::smallint, v_adm, 'whatsapp', 'eu digo', c_hoje, c_agora);
     select * into x from public.agenda_perguntas q where q.id = (p ->> 'pergunta_id')::uuid;
     e := public.agenda_decidir((p ->> 'pergunta_id')::uuid, 5::smallint, v_adm, 'whatsapp', '5', c_hoje, c_agora);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
-  v_res := pg_temp.ok(v_res, 'Q6c a opção 2: "Me diga os dias (ex.: ''Sérgio 3 dias'')." e a pergunta fica aberta com a escolha (o prazo não vale mais); a opção que não existe lista as opções',
-    (d ->> 'ok')::boolean and (d ->> 'aberta')::boolean and d ->> 'texto' = 'Me diga os dias (ex.: ''Sérgio 3 dias'').'
+  v_res := pg_temp.ok(v_res, 'Q6c a opção 2: "Me diga os dias (ex.: ''Giancarlo 3 dias'')." e a pergunta fica aberta com a escolha; a opção que não existe lista as opções',
+    (d ->> 'ok')::boolean and (d ->> 'aberta')::boolean and d ->> 'texto' = 'Me diga os dias (ex.: ''Giancarlo 3 dias'').'
     and x.estado = 'aberta' and x.opcao_escolhida = 2 and x.resposta = 'eu digo'
-    and not (e ->> 'ok')::boolean and e ->> 'texto' = 'Essa opção não existe. As opções são: 1) Marque 2 dias; 2) Eu digo os dias e a peça.',
+    and not (e ->> 'ok')::boolean and e ->> 'texto' = 'Essa opção não existe. As opções são: 1) Marque 10 dias; 2) Eu digo os dias.',
     d::text || ' | ' || e::text);
   begin
     p := public._agenda_gestor_perguntas_da_os(pg_temp.os('OS-00104'), c_hoje, c_agora, false);

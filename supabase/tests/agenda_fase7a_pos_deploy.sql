@@ -2,28 +2,28 @@
 -- edge functions (ai-agent e erp-mcp com as palavras e o foco *agenda gestor*; ai-daily-briefing com a vaga da agenda no
 -- fechamento) e (passo 3) a migration de dado 20261031100990 — os 5 modos do gestor em teste — fila-do-dono/fase7a-oks.md,
 -- passos 1–3 (e de novo a cada "ligar", passos 4 e 6 a 9). Spec: spec-fase7a.md §8.4 (agenda_fase7a_pos_deploy.sql) e §10 passo 1.
--- bancada: depende de 20261031100950
+-- bancada: depende de 20261031100980
 --
 -- SÓ LEITURA EM PRODUÇÃO: nenhum INSERT, UPDATE ou DELETE (só nas tabelas TEMPORÁRIAS do resultado); agenda_saude e agenda_ver são
 -- STABLE e não gravam; termina em ROLLBACK. Na bancada (que não aplica a 20261031100990 nem tem pg_cron: lá os modos ficam como a
 -- linha está, desligado, e o job só é mostrado) ele passa do mesmo jeito.
 --
---   M  as 13 versões de estrutura da 7a registradas em supabase_migrations.schema_migrations; a de dado (100990, a sombra) é
---      mostrada
+--   M  as 13 versões de estrutura da 7a e a da correção da revisão (100980) registradas em supabase_migrations.schema_migrations;
+--      a de dado (100990, a sombra) é mostrada
 --   C  agenda_config: os 5 modos, a lista das regras, a palavra e os 29 parâmetros do gestor existem; os modos: com a 100990
 --      registrada, sombra (ou ligado, depois dos OKs); sem ela, desligado; a lista só com regras conhecidas; o gestor que marca
 --      ligado tem a data do ligar (marcar_sozinho_desde)
 --   T  as colunas novas de os_planejamento, agenda_alocacoes (com o gatilho da fonte), os_material, agenda_perguntas e
 --      agenda_medidas_os; o diário agenda_gestor_dia: RLS ligada, policies só de leitura e TO authenticated, anon sem nada,
 --      authenticated só lê; não se apaga; as listas fechadas com os tipos do gestor
---   F  as 54 funções novas da 7a existem; nenhuma executável por anon; as portas de cada grupo (as leituras: authenticated e
+--   F  as 59 funções novas da 7a existem (54 dos pacotes, 5 da correção); nenhuma executável por anon; as portas de cada grupo (as leituras: authenticated e
 --      service_role; a rodada, as palavras e as do motor: só service_role; os passos e os gravadores: ninguém); nenhuma função
 --      da agenda para anon; agenda_ver com o foco gestor
---   J  o job agenda-gestor do pg_cron: '7,22,37,52 10-23 * * 1-6', ativo, com as duas instruções (o statement_timeout de
+--   J  o job agenda-gestor do pg_cron: '7,23,37,53 10-23 * * 1-6' (a correção: os minutos ímpares), ativo, com as duas instruções (o statement_timeout de
 --      gestor_tempo_max e a rodada) — sem pg_cron (a bancada), só mostra
 --   S  agenda_saude().gestor: os 12 zeros obrigatórios (zeros_ok); os modos que a saúde mostra são os da linha; nenhum erro
 --      gestor:% em 24 h nem aberto em app_error_logs; a última rodada do gestor (só mostra)
---   L  o foco gestor devolve texto dentro de texto_max e o mesmo texto duas vezes (md5)
+--   L  o foco gestor devolve o conteúdo dentro de texto_max mais o "Como eu conto" (a correção) e o mesmo texto duas vezes (md5)
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -49,7 +49,9 @@ select format('M1 migration %s registrada', v),
        null
   from unnest(array['20261031100000', '20261031100100', '20261031100200', '20261031100300', '20261031100400',
                     '20261031100500', '20261031100600', '20261031100700', '20261031100750', '20261031100800',
-                    '20261031100850', '20261031100900', '20261031100950']) v;
+                    '20261031100850', '20261031100900', '20261031100950',
+                    -- a correção dos achados da revisão da 7a
+                    '20261031100980']) v;
 
 insert into _resultado
 select 'M2 a migration de dado 20261031100990 (os 5 modos do gestor em teste) — só mostra', true,
@@ -170,6 +172,8 @@ insert into _pd_funcoes values
   ('_agenda_gestor_dupla_texto(jsonb)', 'leitura'), ('_agenda_plano_estimativa(jsonb, date)', 'leitura'),
   ('_agenda_os_por_estimativa(uuid, date)', 'leitura'), ('_agenda_os_compra_pendente(uuid, date)', 'leitura'),
   ('_agenda_cliente_estimativa_liberada(text)', 'leitura'), ('_agenda_ficha_liberada(uuid, date, timestamptz)', 'leitura'),
+  -- (a correção da revisão, 20261031100980) o juntar do foco gestor
+  ('_agenda_gestor_juntar(text[], integer, text)', 'leitura'),
   -- a rodada, as palavras e as contas do motor: só o service_role (o job, o ai-agent/erp-mcp e o motor)
   ('agenda_gestor_rodar(date, timestamptz)', 'service_role'), ('agenda_gestor_dito(uuid, boolean, date, timestamptz)', 'service_role'),
   ('agenda_dupla_dita(uuid, text, boolean, date, timestamptz)', 'service_role'), ('_agenda_alocacao_fonte()', 'service_role'),
@@ -191,7 +195,10 @@ insert into _pd_funcoes values
   ('_agenda_gestor_compra_conta(uuid, date)', 'interna'), ('_agenda_compras_da_semana(date)', 'interna'),
   ('_agenda_gestor_compre_ate(date, timestamptz)', 'interna'), ('_agenda_gestor_fichas(date, timestamptz)', 'interna'),
   ('_agenda_gestor_sinal(date, timestamptz)', 'interna'), ('_agenda_gestor_sabado(date, timestamptz)', 'interna'),
-  ('_agenda_gestor_orcamentos(date, timestamptz)', 'interna'), ('_agenda_gestor_bem(date, timestamptz)', 'interna');
+  ('_agenda_gestor_orcamentos(date, timestamptz)', 'interna'), ('_agenda_gestor_bem(date, timestamptz)', 'interna'),
+  -- (a correção da revisão, 20261031100980) o *desfaz* que vale, a conta em pessoa-meio-dia e a memória da duração na rodada
+  ('_agenda_gestor_desfeito(uuid, timestamptz)', 'interna'), ('_agenda_gestor_pessoa_meios(uuid, date, jsonb)', 'interna'),
+  ('_agenda_rodada_duracao_lembrar(text)', 'interna'), ('_agenda_rodada_duracao_guardar(text, bigint, jsonb)', 'interna');
 
 insert into _resultado
 select format('F1 as %s funções novas da 7a existem', count(*)), count(*) filter (where to_regprocedure('public.' || f) is null) = 0,
@@ -245,8 +252,8 @@ begin
   execute $q$select j.schedule, j.command, j.active from cron.job j where j.jobname = 'agenda-gestor' limit 1$q$ into v_job;
   insert into _resultado values ('J1 o job agenda-gestor existe no pg_cron', v_job is not null and v_job.schedule is not null, null);
   insert into _resultado
-  values ('J2 o job agenda-gestor: ''7,22,37,52 10-23 * * 1-6'', ativo, com o statement_timeout de gestor_tempo_max e a rodada (_hoje_brt() e now())',
-          coalesce(v_job.schedule = '7,22,37,52 10-23 * * 1-6' and v_job.active
+  values ('J2 o job agenda-gestor: ''7,23,37,53 10-23 * * 1-6'' (os minutos ímpares: a correção da revisão), ativo, com o statement_timeout de gestor_tempo_max e a rodada (_hoje_brt() e now())',
+          coalesce(v_job.schedule = '7,23,37,53 10-23 * * 1-6' and v_job.active
                    and v_job.command like '%statement_timeout%' and v_job.command like '%gestor_tempo_max%'
                    and v_job.command like '%agenda_gestor_rodar(public._hoje_brt(), now())%', false),
           coalesce(v_job.schedule, '—') || ' ' || coalesce(v_job.active::text, '—'));
@@ -304,9 +311,11 @@ select public.agenda_ver(p_foco => 'gestor') as ges, public.agenda_ver(p_foco =>
        (select c.modo_leitura from public.agenda_config c where c.id) as leitura;
 
 insert into _resultado
-select 'L1 o foco gestor devolve texto dentro de texto_max (com a leitura desligada: "a agenda de produção está desligada")',
+select 'L1 o foco gestor devolve texto dentro de texto_max mais o "Como eu conto" (com a leitura desligada: "a agenda de produção está desligada")',
        case when l.leitura = 'desligado' then l.ges ->> 'rota' = 'desligada'
-            else (l.ges ->> 'ok')::boolean and length(l.ges ->> 'texto') between 1 and l.texto_max end,
+            -- (a correção da revisão: o conteúdo até texto_max e o "Como eu conto", a última linha, depois dele)
+            else (l.ges ->> 'ok')::boolean and length(l.ges ->> 'texto') between 1
+                 and l.texto_max + 1 + length(split_part(l.ges ->> 'texto', E'\n', array_length(string_to_array(l.ges ->> 'texto', E'\n'), 1))) end,
        format('%s caracteres', length(l.ges ->> 'texto'))
   from _pd_leituras l;
 

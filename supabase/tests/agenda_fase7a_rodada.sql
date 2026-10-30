@@ -387,8 +387,9 @@ begin
     perform pg_temp.replay('sombra');
     perform public._agenda_gestor_sombra(c_d29, pg_temp.em(c_d29, '16:52'));
     v_a := public._agenda_linhas_do_fechamento(c_d29);
-    v_res := pg_temp.ok(v_res, 'R3b em teste: a linha gestor com o texto_sombra de hoje, perda 65, ligada (a vigia está ligada: o dono lê); o resto como antes',
-      exists (select 1 from jsonb_array_elements(v_a) x where x ->> 'tipo' = 'gestor' and (x ->> 'perda')::int = 65
+    -- (correção da 7a, achado 14: a linha de teste vai com perda 25, abaixo de toda linha de verdade)
+    v_res := pg_temp.ok(v_res, 'R3b em teste: a linha gestor com o texto_sombra de hoje, perda 25 (correção da 7a, achado 14: abaixo de toda linha de verdade), ligada (a vigia está ligada: o dono lê); o resto como antes',
+      exists (select 1 from jsonb_array_elements(v_a) x where x ->> 'tipo' = 'gestor' and (x ->> 'perda')::int = 25
                 and x ->> 'modo' = 'ligado' and x ->> 'texto' = (select texto_sombra from public.agenda_gestor_dia where dia = c_d29))
       and md5((select jsonb_agg(x order by o) from jsonb_array_elements(v_a) with ordinality t(x, o) where x ->> 'tipo' <> 'gestor')::text)
           = md5(pg_temp.lf_antes(c_d29)::text),
@@ -475,8 +476,10 @@ do $r4$
 declare
   v_res  jsonb := '[]'::jsonb;
   c_d29  constant date := date '2026-10-29';
-  c_sombra constant text := E'O gestor está em teste desde qui 29/10: calcula o que marcaria, mas não muda nada.\nEu marcaria:\n• Lenine: ter 03 a ter 10/11, Roberto e João — 6 dias (estimativa minha). Pode precisar de dupla (banco de baterias): diga *Lenine com dupla*.\n• Vanderlei: qui 12 a ter 24/11, Roberto e João — 7,5 dias (estimativa minha); compre até hoje: 3 itens. Pode precisar de dupla (banco de baterias): diga *Vanderlei com dupla*.\nAntes de marcar eu perguntaria:\n• Giancarlo: 10 diárias pela estimativa.\n• Nelson: já começou?\n• Flávio: já começou?\n• MP: não tem mão de obra separada.\nFora: esperando o cliente: Kalmar (2) e Rodrigo; orçamento sem virar OS: Robson; precisa de você em campo: Rodrigo.\nSe aprovar:\n• Everton (ORÇ-00117, R$ 120.020): pela estimativa, 28 dias com 2 pessoas; não cabe até ter 15/12 com a equipe de agora.\n• Santo (ORÇ-00116, R$ 70.050): pela estimativa, 10,5 dias com 2 pessoas; não cabe até ter 15/12 com a equipe de agora.\n(e mais 5 linhas)';
-  c_ligado constant text := E'Eu marco sozinho desde qui 29/10 e te conto no fechamento; *desfaz <nome>* volta qualquer coisa que eu fiz.\nMarquei nos últimos 7 dias:\n• Lenine: ter 03 a ter 10/11, Roberto e João — 6 dias (estimativa minha). Pode precisar de dupla (banco de baterias): diga *Lenine com dupla*.\n• Vanderlei: qui 12 a ter 24/11, Roberto e João — 7,5 dias (estimativa minha). Pode precisar de dupla (banco de baterias): diga *Vanderlei com dupla*.\nPerguntei antes de marcar:\n• Giancarlo: 10 diárias pela estimativa — sem resposta até sex 30/10 18:00, marco assim.\n• Nelson: já começou? — sem resposta até sex 30/10 18:00, marco assim.\n• Flávio: já começou? — sem resposta até sex 30/10 18:00, marco assim.\n• MP: não tem mão de obra separada — sem resposta até sex 30/10 18:00, marco assim.\nFora: esperando o cliente: Kalmar (2) e Rodrigo; orçamento sem virar OS: Robson; precisa de você em campo: Rodrigo.\nSe aprovar:\n(e mais 7 linhas)';
+  -- (correção da 7a, achado 3: o "Como eu conto" sempre no fim e nenhum título sem linha embaixo; achado 20: o Giancarlo, acima de
+  -- 8 diárias, sem prazo — "espero você" —, vai para o fim da lista do que perguntei)
+  c_sombra constant text := E'O gestor está em teste desde qui 29/10: calcula o que marcaria, mas não muda nada.\nEu marcaria:\n• Lenine: ter 03 a ter 10/11, Roberto e João — 6 dias (estimativa minha). Pode precisar de dupla (banco de baterias): diga *Lenine com dupla*.\n• Vanderlei: qui 12 a ter 24/11, Roberto e João — 7,5 dias (estimativa minha); compre até hoje: 3 itens. Pode precisar de dupla (banco de baterias): diga *Vanderlei com dupla*.\nAntes de marcar eu perguntaria:\n• Giancarlo: 10 diárias pela estimativa.\n• Nelson: já começou?\n• Flávio: já começou?\n• MP: não tem mão de obra separada.\nFora: esperando o cliente: Kalmar (2) e Rodrigo; orçamento sem virar OS: Robson; precisa de você em campo: Rodrigo.\nSe aprovar:\n• Everton (ORÇ-00117, R$ 120.020): pela estimativa, 55,5 dias com 1 pessoa; não cabe até ter 15/12 com a equipe de agora. Se aprovar, pergunto os dias antes (mais de 8 diárias).\n(e mais 3 linhas)\nComo eu conto: estimativa pelo valor do orçamento (R$ 764 de mão de obra por diária, sem deslocamento); 1 pessoa por serviço (dupla quando você marcar); peça sem fornecedor: 7 dias úteis; peça abaixo de R$ 300: separar na véspera; entre decidir e comprar: 1 dia útil (com o serviço a menos de 7 dias úteis, a compra é para hoje); pergunto antes acima de 8 diárias e quando o serviço já começou.';
+  c_ligado constant text := E'Eu marco sozinho desde qui 29/10 e te conto no fechamento; *desfaz <nome>* volta qualquer coisa que eu fiz.\nMarquei nos últimos 7 dias:\n• Lenine: ter 03 a ter 10/11, Roberto e João — 6 dias (estimativa minha). Pode precisar de dupla (banco de baterias): diga *Lenine com dupla*.\n• Vanderlei: qui 12 a ter 24/11, Roberto e João — 7,5 dias (estimativa minha). Pode precisar de dupla (banco de baterias): diga *Vanderlei com dupla*.\nPerguntei antes de marcar:\n• Nelson: já começou? — sem resposta até sex 30/10 18:00, marco assim.\n• Flávio: já começou? — sem resposta até sex 30/10 18:00, marco assim.\n• MP: não tem mão de obra separada — sem resposta até sex 30/10 18:00, marco assim.\n• Giancarlo: 10 diárias pela estimativa — espero você.\nFora: esperando o cliente: Kalmar (2) e Rodrigo; orçamento sem virar OS: Robson; precisa de você em campo: Rodrigo.\n(e mais 5 linhas)\nComo eu conto: estimativa pelo valor do orçamento (R$ 764 de mão de obra por diária, sem deslocamento); 1 pessoa por serviço (dupla quando você marcar); peça sem fornecedor: 7 dias úteis; peça abaixo de R$ 300: separar na véspera; entre decidir e comprar: 1 dia útil (com o serviço a menos de 7 dias úteis, a compra é para hoje); pergunto antes acima de 8 diárias e quando o serviço já começou.';
   -- (7a P12: o MP perguntado — o sinal não segura mais —, e o "Se aprovar:" dos orçamentos grandes, que a rodada das 16:52 grava
   -- no diário; o foco corta em texto_max pela linha inteira)
   c_conto constant text := 'Como eu conto: estimativa pelo valor do orçamento (R$ 764 de mão de obra por diária, sem deslocamento); 1 pessoa por serviço (dupla quando você marcar); peça sem fornecedor: 7 dias úteis; peça abaixo de R$ 300: separar na véspera; entre decidir e comprar: 1 dia útil (com o serviço a menos de 7 dias úteis, a compra é para hoje); pergunto antes acima de 8 diárias e quando o serviço já começou.';
@@ -509,7 +512,8 @@ begin
     perform public.agenda_gestor_rodar(c_d29, pg_temp.em(c_d29, '16:52'));
     r := public.agenda_ver(null, null, null, 'gestor', null, null, false, c_d29);
     v_res := pg_temp.ok(v_res, 'R4c em teste: o estado desde o 1º dia do diário em teste, o "eu marcaria" pela conta das 16:52 (com a nota de dupla), as perguntas que faria e quem fica de fora; cortado em texto_max (1.000) pela linha inteira',
-      r ->> 'texto' = c_sombra and char_length(r ->> 'texto') <= 1000, r ->> 'texto');
+      -- (correção da 7a, achado 3: o conteúdo até texto_max e o "Como eu conto" depois dele)
+      r ->> 'texto' = c_sombra and char_length(r ->> 'texto') <= 1000 + 1 + char_length(c_conto), r ->> 'texto');
 
     -- ligado (o cenário B: o gestor marcou a carteira e perguntou antes)
     perform pg_temp.replay('ligado');
@@ -715,9 +719,10 @@ begin
     perform public.agenda_gestor_rodar(c_d29, pg_temp.em(c_d29, '16:52'));
     perform public.agenda_gestor_rodar(c_d30, pg_temp.em(c_d30, '16:52'));
     g := public.agenda_saude(c_d30, pg_temp.em(c_d30, '17:00')) -> 'gestor';
-    v_res := pg_temp.ok(v_res, 'R7e ligado, com as perguntas das 16:52 e a rodada de sex 30/10 16:52: os zeros todos 0 e 4 perguntas com prazo abertas (com o MP: o sinal não segura mais, 7a P12)',
+    -- (correção da 7a, achado 20: a do Giancarlo, acima de 8 diárias, não tem prazo)
+    v_res := pg_temp.ok(v_res, 'R7e ligado, com as perguntas das 16:52 e a rodada de sex 30/10 16:52: os zeros todos 0 e 3 perguntas com prazo abertas (Nelson, Flávio e MP; a do Giancarlo, acima de 8 diárias, sem prazo: correção da 7a, achado 20)',
       (select bool_and((g ->> zz)::int = 0) from unnest(c_zeros) zz) and (g ->> 'zeros_ok')::boolean
-      and (g #>> '{numeros,perguntas_com_prazo,abertas}')::int = 4, left(g::text, 700));
+      and (g #>> '{numeros,perguntas_com_prazo,abertas}')::int = 3, left(g::text, 700));
 
     v_os := pg_temp.os('OS-00130');
     v_jo := pg_temp.pessoa('João');
@@ -793,15 +798,20 @@ begin
     -- o prazo vencido (as perguntas nasceram na rodada de sex 30/10 16:52: os diários de qui já tinham rodado em teste; o prazo é o
     -- próximo dia útil, ter 03/11 — seg 02 é Finados — às 18:00): o Giancarlo, visto no fechamento de sex, é aplicado às 18:07
     -- (10 dias); o Nelson e o Flávio, nunca vistos, ficam abertos e só se contam (prazo_vencido_sem_mostrar 2, sem derrubar zeros_ok)
+    -- (correção da 7a, achado 20: a do Giancarlo, acima de 8 diárias, não tem prazo nem o que fazer sozinho — fica aberta, esperando
+    -- o dono; a vista antes do prazo é a do Nelson, aplicada: 4 dias)
     update public.agenda_perguntas set mostrada_vezes = 1, mostrada_em = pg_temp.em(c_d30, '17:30'), mostrada_via = 'fechamento'
-     where tipo = 'estimativa' and service_order_id = v_os and estado = 'aberta' and modo = 'ligado';
+     where tipo = 'situacao' and service_order_id = pg_temp.os('OS-00112') and estado = 'aberta' and modo = 'ligado';
     r := public.agenda_gestor_rodar(date '2026-11-03', pg_temp.em(date '2026-11-03', '18:07'));
     g := public.agenda_saude(date '2026-11-03', pg_temp.em(date '2026-11-03', '18:10')) -> 'gestor';
-    v_res := pg_temp.ok(v_res, 'R7g o prazo de ter 03/11 18:00: a rodada das 18:07 aplica a do Giancarlo (vista antes: 10 dias, pelo prazo) e deixa as 3 não vistas abertas (Nelson, Flávio e, desde o 7a P12, o MP); prazo_vencido_sem_mostrar = 3 só se conta (zeros_ok continua)',
-      (r #>> '{contagens,vetos,aplicadas}')::int = 1 and (r #>> '{contagens,vetos,sem_mostrar}')::int = 3
-      and (g ->> 'prazo_vencido_sem_mostrar')::int = 3 and (g ->> 'zeros_ok')::boolean
+    v_res := pg_temp.ok(v_res, 'R7g o prazo de ter 03/11 18:00: a rodada das 18:07 aplica a do Nelson (vista antes: 4 dias, pelo prazo) e deixa as 2 não vistas abertas (Flávio e MP); a do Giancarlo, sem prazo, espera o dono (correção da 7a, achado 20); prazo_vencido_sem_mostrar = 2 só se conta (zeros_ok continua)',
+      (r #>> '{contagens,vetos,aplicadas}')::int = 1 and (r #>> '{contagens,vetos,sem_mostrar}')::int = 2
+      and (g ->> 'prazo_vencido_sem_mostrar')::int = 2 and (g ->> 'zeros_ok')::boolean
       and (g #>> '{numeros,perguntas_com_prazo,pelo_prazo_7d}')::int = 1
-      and (select dias = 10 and estimativa_fonte = 'orcamento' from public.os_planejamento where service_order_id = v_os),
+      and (select dias = 4 and estimativa_fonte = 'orcamento' from public.os_planejamento where service_order_id = pg_temp.os('OS-00112'))
+      and not exists (select 1 from public.os_planejamento where service_order_id = v_os and dias is not null)
+      and exists (select 1 from public.agenda_perguntas q where q.service_order_id = v_os and q.tipo = 'estimativa'
+                    and q.estado = 'aberta' and q.veto_ate is null and q.opcao_padrao is null),
       left(r #>> '{contagens,vetos}', 300) || ' / ' || (g ->> 'prazo_vencido_sem_mostrar'));
 
     -- o erro do fator: só com as medidas que têm fator (a medida por estimativa é válida e não tem fator)

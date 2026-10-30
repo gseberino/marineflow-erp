@@ -601,7 +601,10 @@ begin
   exception when sqlstate 'P0099' then null;
   end;
   v_res := pg_temp.ok(v_res, 'V6a em teste: a revisão inteira seca — o motor com as regras do gestor só ali dentro (Lenine e Vanderlei marcados; Rodrigo, Tânia e Úrsula fora), a pergunta da Úrsula só calculada, nada gravado no plano, nas propostas, nas perguntas nem nas ações; só o diário (sombra.revisao), sem apagar o resto; a variável da simulação desligada no fim; o "eu marcaria" das 16:52 mantém o sombra.revisao',
-    v_b and (r ->> 'simulacao')::boolean and v_t2 = 'OS-00069:marcada OS-00074:marcada OS-00096:fora OS-97003:fora OS-97004:fora'
+    -- (correção da 7a, achado 21: a peça embutida não segura mais — o Sérgio e a Vera também são tentados, e ficam de fora pela
+    -- equipe da sintética)
+    v_b and (r ->> 'simulacao')::boolean
+    and v_t2 = 'OS-00069:marcada OS-00074:marcada OS-00096:fora OS-97002:fora OS-97003:fora OS-97004:fora OS-97005:fora'
     and d ->> 'md5' = 'do-dia' and jsonb_array_length(d #> '{revisao,perguntas}') = 1
     and d #>> '{revisao,perguntas,0,texto}' = c_ursula
     and r2 ? 'revisao' and r2 -> 'revisao' = d -> 'revisao' and r2 ->> 'md5' <> 'do-dia',

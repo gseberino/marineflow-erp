@@ -373,8 +373,10 @@ begin
   values ('situacao', 'situacao:' || pg_temp.os('OS-00112'), pg_temp.os('OS-00112'), array[pg_temp.os('OS-00112')],
           'TESTE AG7A: o Nelson já começou?', 'ligado')
   returning id into v_q;
-  v_res := pg_temp.ok(v_res, 'D3f a pergunta situacao aberta da OS vem em pergunta_id',
-    (public._agenda_os_situacao(pg_temp.os('OS-00112'), c_hoje) ->> 'pergunta_id')::uuid = v_q, null);
+  -- (correção da 7a, achado 10: a situação não lê mais a pergunta aberta — a conta da prontidão não lê agenda_perguntas, e a
+  -- memória da vigia volta à marca de sempre)
+  v_res := pg_temp.ok(v_res, 'D3f a pergunta situacao aberta da OS não entra na situação (correção da 7a, achado 10: sem pergunta_id; a conta da prontidão não lê as perguntas)',
+    not (public._agenda_os_situacao(pg_temp.os('OS-00112'), c_hoje) ? 'pergunta_id') and v_q is not null, null);
   insert into public.os_planejamento (service_order_id, dias, estimativa_fonte, estimativa_em)
   values (pg_temp.os('OS-00112'), 3, 'dono', c_agora)
   on conflict (service_order_id) do update set dias = 3, estimativa_fonte = 'dono', estimativa_em = c_agora;
@@ -417,10 +419,11 @@ begin
   update public.agenda_config set marcar_regras = array_remove(marcar_regras, 'embutida_suposta') where id;
   x := public._agenda_gestor_estimativa(pg_temp.os('OS-97005'), c_hoje);
   update public.agenda_config set marcar_regras = marcar_regras || '{embutida_suposta}'::text[] where id;
-  v_res := pg_temp.ok(v_res, 'D4g embutida: a Vera (OS-97005) pode ter peça junto → pergunta; sem a regra embutida_suposta, usa a estimativa (a prontidão é que segura)',
-    not (e ->> 'usa')::boolean and e ->> 'motivo' = 'embutida' and e ->> 'texto' = 'pode ter peça junto'
-    and jsonb_array_length(e -> 'embutida') > 0 and e ->> 'proposta_dias' = e ->> 'dias'
-    and (x ->> 'usa')::boolean and jsonb_array_length(x -> 'embutida') > 0, e::text || ' | ' || x::text);
+  -- (correção da 7a, achado 21: a peça embutida não segura mais a OS — a estimativa conta tudo como mão de obra e vale)
+  v_res := pg_temp.ok(v_res, 'D4g embutida: a Vera (OS-97005) pode ter peça junto → usa a estimativa (conta tudo como mão de obra, embutida_suposta), sem perguntar antes (correção da 7a, achado 21); sem a regra embutida_suposta, usa sem a marca',
+    (e ->> 'usa')::boolean and e -> 'motivo' = 'null'::jsonb and (e ->> 'embutida_suposta')::boolean
+    and jsonb_array_length(e -> 'embutida') > 0 and e ->> 'dias' = '2'
+    and (x ->> 'usa')::boolean and jsonb_array_length(x -> 'embutida') > 0 and not (x ? 'embutida_suposta'), e::text || ' | ' || x::text);
   e := public._agenda_gestor_estimativa(pg_temp.os('OS-00096'), c_hoje);
   v_res := pg_temp.ok(v_res, 'D4h o diagnóstico usa a estimativa com o texto dele (meio dia de diagnóstico; depois eu reavalio)',
     (e ->> 'usa')::boolean and e ->> 'dias' = '0.5' and e ->> 'texto' = 'meio dia de diagnóstico; depois eu reavalio', e::text);
@@ -577,8 +580,9 @@ begin
   select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = 'public.os_duracao_sugerida(uuid)'::regprocedure;
   v_fonte := pg_temp.corpo(v_os6, 'os_duracao_sugerida');
   select count(*) into v_n from regexp_matches(v_novo, '-- FASE 7: fim', 'g');
-  v_res := pg_temp.ok(v_res, 'D8a os_duracao_sugerida: sem os 5 blocos "-- FASE 7:", é o corpo de 20261029100200 (a mais nova antes da 7a)',
-    v_n = 5 and v_fonte <> '' and pg_temp.sem_fase7(v_novo) = v_fonte,
+  -- (correção da 7a, achado 10: + os 2 blocos da memória da duração na rodada da vigia, 20261031100980)
+  v_res := pg_temp.ok(v_res, 'D8a os_duracao_sugerida: sem os 7 blocos "-- FASE 7:" (5 do P2, 2 da correção), é o corpo de 20261029100200 (a mais nova antes da 7a)',
+    v_n = 7 and v_fonte <> '' and pg_temp.sem_fase7(v_novo) = v_fonte,
     format('blocos %s; fonte %s letras; novo sem os blocos %s letras', v_n, length(v_fonte), length(pg_temp.sem_fase7(v_novo))));
   select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = 'public.agenda_meios_da_os(uuid, date)'::regprocedure;
   v_fonte := pg_temp.corpo(v_mot2, 'agenda_meios_da_os');
