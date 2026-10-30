@@ -903,7 +903,11 @@ insert into _definer_da_agenda values
   -- PÓS-MERGE (C, 20261029110000): tirar do plano a OS que o agrupar (ou o desagrupar) de OS tirou de cena (escreve
   -- agenda_alocacoes, agenda_acoes, agenda_propostas e agenda_rascunho; só o _agrupar_os_agenda e o _desagrupar_os_desfazer,
   -- definer, a chamam; sem grant). agenda_posmerge_agrupar.sql prova as portas.
-  ('_agenda_os_saiu_por_agrupar');
+  ('_agenda_os_saiu_por_agrupar'),
+  -- CORREÇÃO 29/10 (P2, 20261030100100): o serviço novo no encaixe do motor (chama _agenda_encaixar e a grade de agora, que
+  -- são só do service_role; confere quem vê antes de tudo e não grava nada). A agenda_livre_de_verdade, reescrita, continua
+  -- definer (acima); a grade de agora e o texto dos meios-dias são invoker. agenda_correcao_2910_p2.sql prova as portas.
+  ('agenda_encaixe_do_novo');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

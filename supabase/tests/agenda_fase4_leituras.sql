@@ -89,11 +89,19 @@ end $f$;
 -- (Fase 5, P5) o corpo sem os blocos "-- FASE 5: … -- FASE 5: fim" (P5 recriou agenda_ver em 20261028100500).
 -- FASE 6 (P8): tira também os blocos "-- FASE 6:" (agenda_ver foi recriada de novo em 20261029100800, com o bloco do
 -- foco aprendizado fora dos da Fase 5).
+-- CORREÇÃO 29/10 (P2): tira também os blocos "-- CORREÇÃO 29/10 (P2):" (agenda_ver foi recriada de novo em 20261030100100,
+-- com o livre do plano fora dos blocos das fases).
 create function pg_temp.sem_fase5(p_corpo text) returns text[] language plpgsql as $f$
 declare
   v_b text[] := '{}'; v_bloco boolean := false; l text;
+  v_p2 boolean := false;
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
+    if not v_p2 and l ~ '^\s*-- CORREÇÃO 29/10 \(P2\):' and l !~ '^\s*-- CORREÇÃO 29/10 \(P2\): fim' then v_p2 := true; continue; end if;
+    if v_p2 then
+      if l ~ '^\s*-- CORREÇÃO 29/10 \(P2\): fim' then v_p2 := false; end if;
+      continue;
+    end if;
     if not v_bloco and l ~ '^\s*-- FASE [56]:' and l !~ '^\s*-- FASE [56]: fim' then v_bloco := true; continue; end if;
     if v_bloco then
       if l ~ '^\s*-- FASE [56]: fim' then v_bloco := false; end if;

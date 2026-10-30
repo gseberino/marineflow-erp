@@ -96,6 +96,7 @@ end $f$;
 create function pg_temp.sem_fase5(p_corpo text) returns text[] language plpgsql as $f$
 declare
   v_c6 boolean := false;  -- CORREÇÃO FASE 6 (C2): dentro de um bloco da correção da Fase 6
+  v_p2 boolean := false;  -- CORREÇÃO 29/10 (P2): dentro de um bloco da correção de 29/10 (P2)
   v_b text[] := '{}'; v_bloco boolean := false; l text;
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
@@ -107,6 +108,14 @@ begin
       continue;
     end if;
     -- CORREÇÃO FASE 6: fim
+    -- CORREÇÃO 29/10 (P2): os blocos "-- CORREÇÃO 29/10 (P2): … fim" também saem (agenda_ver foi recriada de novo em
+    -- 20261030100100, copiando a mais nova: só acréscimo)
+    if not v_p2 and l ~ '^\s*-- CORREÇÃO 29/10 \(P2\):' and l !~ '^\s*-- CORREÇÃO 29/10 \(P2\): fim' then v_p2 := true; continue; end if;
+    if v_p2 then
+      if l ~ '^\s*-- CORREÇÃO 29/10 \(P2\): fim' then v_p2 := false; end if;
+      continue;
+    end if;
+    -- CORREÇÃO 29/10 (P2): fim
     if not v_bloco and l ~ '^\s*-- FASE [56]:' and l !~ '^\s*-- FASE [56]: fim' then v_bloco := true; continue; end if;
     if v_bloco then
       if l ~ '^\s*-- FASE [56]: fim' then v_bloco := false; end if;

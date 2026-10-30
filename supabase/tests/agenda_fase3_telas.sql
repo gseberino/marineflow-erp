@@ -301,8 +301,10 @@ begin
   perform pg_temp.igual('W10 desligado: só o título',
     (r ->> 'titulo') || ' | ' || (r -> 'dias')::text, 'A agenda automática está desligada: não há plano publicado. | []');
   update public.agenda_config set modo_proposta = 'ligado' where id;
-  perform pg_temp.ok('W11 em ligado, o livre de verdade pela simulação',
-    (public.agenda_tela_semana('2026-11-03', '2026-11-03', '2026-11-03 10:00-03') ->> 'livre_de_verdade') like 'Livre de verdade (pela simulação da agenda):%');
+  -- CORREÇÃO 29/10 (P2, 20261030100100): o livre de verdade é o do plano (a mesma linha da *agenda*: quem ainda pega serviço
+  -- em cada semana, pelo marcado, pelo reservado e pelo teto de cada pessoa), não mais a simulação da carteira inteira
+  perform pg_temp.ok('W11 em ligado, o livre de verdade pelo plano (a mesma linha da *agenda*)',
+    (public.agenda_tela_semana('2026-11-03', '2026-11-03', '2026-11-03 10:00-03') ->> 'livre_de_verdade') like 'Livre de verdade: na semana de %');
   perform pg_temp.igual('W12 o técnico não vê a semana de produção',
     pg_temp.como(c_tec, 'authenticated', $q$select public.agenda_tela_semana('2026-11-03', '2026-11-03', '2026-11-03 10:00-03')::text$q$),
     'erro 42501: A agenda de produção é com o administrador.');

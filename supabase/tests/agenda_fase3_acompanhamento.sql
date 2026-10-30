@@ -494,10 +494,15 @@ begin
   begin
     perform pg_temp.agora(d30, '17:40');
     v_txt := pg_temp.ver('livre', null, d30);
-    v_res := pg_temp.ok(v_res, 'V14 foco livre em ligado: a simulação ("pela simulação", "É simulação: não muda nada.")',
-      v_txt like '%Livre de verdade (pela simulação da agenda): %' and v_txt like '%É simulação: não muda nada.%', v_txt);
+    -- CORREÇÃO 29/10 (P2, 20261030100100): em ligado o livre é UMA resposta, a do plano (quem ainda pega serviço em cada semana,
+    -- o que ocupa a equipe, o que não ocupa), sem a fila em faixa da Fase 1 nem a simulação de antes (agenda_correcao_2910_p2.sql)
+    v_res := pg_temp.ok(v_res, 'V14 foco livre em ligado: o livre do plano (as semanas, o que ocupa a equipe), sem a fila em faixa nem a simulação de antes',
+      v_txt like 'Livre de verdade (pelo plano de agora e pelos dias que cada um vem):' || E'\n' || '• %'
+      and v_txt like '%' || E'\n' || 'Ocupa a equipe: %' and v_txt not like '%Livre ela não está%' and v_txt not like '%pela simulação%', v_txt);
     v_txt := pg_temp.ver(null, 'semana', d30);
-    v_res := pg_temp.ok(v_res, 'V15 a semana em ligado: a frase do livre é a da simulação', v_txt like '%Livre de verdade (pela simulação da agenda): %', v_txt);
+    v_res := pg_temp.ok(v_res, 'V15 a semana em ligado: a linha do livre é a do plano, uma vez só, no lugar da fila em faixa',
+      v_txt like '%' || E'\n' || 'Livre de verdade: na semana de %' and v_txt not like '%Livre ela não está%'
+      and (char_length(v_txt) - char_length(replace(v_txt, 'Livre de verdade', ''))) / char_length('Livre de verdade') = 1, v_txt);
     update public.agenda_config set modo_proposta = 'sombra' where id;
     v_txt := pg_temp.ver('livre', null, d30);
     v_res := pg_temp.ok(v_res, 'V16 foco livre em sombra: a projeção da Fase 1 (sem "pela simulação")',
@@ -519,10 +524,14 @@ begin
       md5((r - 'ms')::text) = md5((r2 - 'ms')::text), r::text);
     v_res := pg_temp.ok(v_res, 'L3 custa menos de 2 s na bancada', clock_timestamp() - v_t0 < interval '4 seconds'
       and (r ->> 'ms')::int < 2000, v_txt || ' / ms=' || (r ->> 'ms'));
-    v_res := pg_temp.ok(v_res, 'L4 a simulação: fonte, a segunda-feira do "melhor", o Nelson fora da conta (a decisão é sua) e o texto',
-      r ->> 'fonte' = 'simulacao' and extract(isodow from (r ->> 'melhor')::date) = 1
-      and r -> 'esperando_voce' @> '[{"numero": "OS-00112"}]'::jsonb
-      and r ->> 'texto' like 'Livre de verdade (pela simulação da agenda): % Fora da conta, esperando a sua decisão: Nelson. É simulação: não muda nada.',
+    -- CORREÇÃO 29/10 (P2, 20261030100100): reescrita — o livre pelo plano e pelo teto de cada pessoa; o Nelson (a decisão
+    -- "não cabe" aberta, sem lugar no plano) não ocupa ninguém e é dito como pronto sem lugar (agenda_correcao_2910_p2.sql)
+    v_res := pg_temp.ok(v_res, 'L4 o livre do plano: fonte (o sinal para quem chama), as 3 semanas, o Nelson fora da conta (sem lugar no plano) e a linha',
+      r ->> 'fonte' = 'simulacao' and r ->> 'base' = 'plano' and jsonb_array_length(r -> 'semanas') = 3
+      and extract(isodow from (r #>> '{semanas,0,seg}')::date) = 1
+      and r #> '{nao_ocupam,prontos}' @> '["OS-00112"]'::jsonb
+      and r ->> 'texto' like 'Livre de verdade: na semana de %; na de %.'
+      and r ->> 'texto_completo' like '%' || E'\n' || 'Pront%sem lugar no plano (não entra% na conta): %Nelson%',
       r::text);
     update public.agenda_config set modo_proposta = 'sombra' where id;
     v_res := pg_temp.ok(v_res, 'L5 fora de ligado: {fonte: projecao} (quem chama usa a frase da Fase 1)',

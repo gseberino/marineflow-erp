@@ -281,8 +281,10 @@ begin
       and x #> '{dados,fila}' = r #> '{dados,fila}' and x #> '{dados,capacidade}' = r #> '{dados,capacidade}'
       and x #> '{dados,livre}' = r #> '{dados,livre}' and x #> '{dados,marcados}' = r #> '{dados,marcados}', null);
     v_t := pg_temp.ver('livre', null, c_hoje);
+    -- CORREÇÃO 29/10 (P2, 20261030100100): em ligado o *livre* é o do plano ("Livre de verdade (pelo plano de agora…"), não
+    -- mais a fila em faixa ("Livre ela não está: …"); continua sem a semana que vem e sem a oferta (agenda_correcao_2910_p2.sql)
     v_res := pg_temp.ok(v_res, 'N5 *livre* (agenda_ver foco livre) não ganha a semana que vem nem a oferta',
-      v_t like 'Livre ela não está:%' and v_t not like '%semana que vem (seg%' and v_t not like '%Para marcar mais%', v_t);
+      v_t like 'Livre de verdade (pelo plano de agora%' and v_t not like '%semana que vem (seg%' and v_t not like '%Para marcar mais%', v_t);
     -- D. determinismo
     v_res := pg_temp.ok(v_res, 'D1 *agenda*, *agenda semana que vem* e *agenda plano* duas vezes: o mesmo texto (md5)',
       md5(pg_temp.ver(null, 'semana', c_hoje) || pg_temp.ver(null, 'proxima_semana', c_hoje) || pg_temp.ver('plano', null, c_hoje))
