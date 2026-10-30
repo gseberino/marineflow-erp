@@ -158,11 +158,11 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_cliente_vigiar); não é texto_max nem peca_embutida_acima',
   },
   // Fase 7a (P7, 20261031100600): a rodada do gestor da agenda grava a rodada como a vigia, a rotina, o material, o cliente e o
-  // aprendizado.
+  // aprendizado. Fase 7a (P10, 20261031100800): recriada (+1: a mesma cópia; o bloco novo chama o compre_ate nos tiques).
   {
     onde: 'agenda_gestor_rodar',
     casou: '1000',
-    vezes: 1,
+    vezes: 2,
     porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_aprender); não é texto_max nem peca_embutida_acima',
   },
   // Fase 3 (P6): o custo da simulação do livre de verdade e a ordem das OS do turno no job do Claude Max.

@@ -2,7 +2,7 @@
 -- (*gestor, só propor*), do pacote P7 (migration 20261031100600). O P8 acrescenta o C (o prazo vence e o encaixe marca), o P10 o
 -- E (compre até) e o P11 o F (cliente). O replay (fixture-replay-2910.sql) com a presença do dono de produção no Lenine e no
 -- Vanderlei (abre e fecha: o replay sozinho dá "sempre", notas do P2).
--- bancada: depende de 20261031100700
+-- bancada: depende de 20261031100800
 --
 --   A  tudo em sombra (o estado depois da migration de dado): (1) a prontidão das 11, os meios, a classe e o motor (a semana e as
 --      11) saem iguais aos de desligado (md5) — o portão é falso fora da simulação; os testes do P2, P3 e P5 provam desligado = as
@@ -20,6 +20,13 @@
 --      nenhuma onda (OS novas não contam); a cobertura das 6 com mão de obra e sem espera do cliente: 3 (a spec dizia 4 de 6, com
 --      os números de antes do P3 e do P5: ver notas-fase77a.md, P8)
 --   D  B + *gestor, só propor*: os modos efetivos voltam a sombra, a regra fecha, a rodada seguinte não aplica nada, o publicado fica
+--   E  (P10) B + o passo compre_ate, dia a dia, sem ninguém comprar: qui 29/10 as 3 linhas do Vanderlei com o "compre até" qui
+--      29/10 (o prazo padrão: 7 dias úteis sem fornecedor) e a pergunta "Compre até hoje: 3 itens de Vanderlei …"; sex 30/10 a vigia
+--      não mexe (comprando hoje ainda chega para qui 12/11) e o gestor só cobra ("Venceu qui 29/10 …"); ter 03/11 a vigia empurra
+--      (o 1º empurrão, pelo material) e o gestor cobra o último dia ("Compre até hoje: … o serviço segue em sex 13/11."); qua 04/11
+--      o 2º atraso já é do dono (a pergunta crítica segundo_atraso da Fase 2): nada automático, a cobrança fecha e o empurrão não
+--      conta. (A spec dizia o 1º empurrão em qua 04/11 e a reserva no 3º vencimento, com 4 e 2 dias úteis; o limite de 2
+--      empurrões automáticos está no C2d de agenda_fase7a_compras.sql.)
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -99,6 +106,7 @@ declare
   v_n     int;
   v_n2    int;
   v_q     boolean;
+  v_e     jsonb := '{}'::jsonb;
   r       jsonb;
 begin
   if coalesce(current_setting('agenda_teste.replay2910', true), '') = '' then
@@ -212,6 +220,64 @@ begin
       and not (v_c -> 'encaixe' ->> 'onda')::boolean and (v_c -> 'encaixe' ->> 'candidatas')::int = 3 and v_n2 = 3
       and jsonb_array_length(v_c -> 'falhas') = 0,
       coalesce(v_t2, '-') || ' | cobertura ' || coalesce(v_n2::text, '-'));
+
+    -- ── E. O "compre até" (P10): ninguém compra os 3 itens do Vanderlei ──
+    begin
+      r := public._agenda_gestor_compre_ate(c_d29, c_a29);
+      v_e := v_e || jsonb_build_object(
+        'e1_linhas', (select count(*) from public.os_material m where m.service_order_id = v_van and m.compre_ate = c_d29
+                       and m.compre_ate_base ->> 'prazo_fonte' = 'padrao' and m.compre_ate_base ->> 'primeiro' = '2026-11-12'),
+        'e1_texto', (select q.texto from public.agenda_perguntas q where q.tipo = 'compre_ate' and q.estado = 'aberta'
+                      and q.service_order_id = v_van));
+      r := public._agenda_vigia_violacoes(c_d29 + 1, pg_temp.em(c_d29 + 1, '08:00'));
+      v_e := v_e || jsonb_build_object('e2_violadas', r -> 'violadas');
+      r := public._agenda_gestor_compre_ate(c_d29 + 1, pg_temp.em(c_d29 + 1, '16:52'));
+      v_e := v_e || jsonb_build_object(
+        'e2_texto', (select q.texto from public.agenda_perguntas q where q.tipo = 'compre_ate' and q.estado = 'aberta'
+                      and q.service_order_id = v_van),
+        'e2_abertas', (select count(*) from public.agenda_perguntas q where q.tipo = 'compre_ate' and q.estado = 'aberta'));
+      r := public._agenda_vigia_violacoes(date '2026-11-03', pg_temp.em(date '2026-11-03', '08:00'));
+      v_e := v_e || jsonb_build_object(
+        'e3_acao', (select a.tipo || ':' || a.origem || ':' || a.motivo from public.agenda_acoes a
+                     where a.service_order_id = v_van and a.dia = date '2026-11-03' and a.executada order by a.criada_em desc limit 1),
+        'e3_plano', (select min(a.dia)::text from public.agenda_alocacoes a where a.service_order_id = v_van
+                      and a.estado in ('publicada', 'fixada') and a.tipo <> 'reserva' and a.dia >= date '2026-11-03'));
+      r := public._agenda_gestor_compre_ate(date '2026-11-03', pg_temp.em(date '2026-11-03', '16:52'));
+      v_e := v_e || jsonb_build_object(
+        'e3_empurrados', r -> 'empurrados',
+        'e3_vezes', (select string_agg(distinct m.empurrada_vezes::text, ',') from public.os_material m
+                      where m.service_order_id = v_van and m.compre_ate is not null),
+        'e3_texto', (select q.texto from public.agenda_perguntas q where q.tipo = 'compre_ate' and q.estado = 'aberta'
+                      and q.service_order_id = v_van));
+      r := public._agenda_vigia_violacoes(date '2026-11-04', pg_temp.em(date '2026-11-04', '08:00'));
+      r := public._agenda_gestor_compre_ate(date '2026-11-04', pg_temp.em(date '2026-11-04', '16:52'));
+      v_e := v_e || jsonb_build_object(
+        'e4_critica', (select q.tipo || ':' || q.estado from public.agenda_perguntas q where q.service_order_id = v_van
+                        and q.critica order by q.criada_em desc limit 1),
+        'e4_compromisso', exists (select 1 from public.agenda_alocacoes a where a.service_order_id = v_van
+                                   and a.estado in ('publicada', 'fixada') and a.tipo <> 'reserva' and a.dia >= date '2026-11-04'),
+        'e4_abertas', (select count(*) from public.agenda_perguntas q where q.tipo = 'compre_ate' and q.estado = 'aberta'),
+        'e4_vezes', (select string_agg(distinct m.empurrada_vezes::text, ',') from public.os_material m
+                      where m.service_order_id = v_van and m.compre_ate is not null));
+      raise exception 'desfaz E' using errcode = 'P0098';
+    exception when sqlstate 'P0098' then null;
+    end;
+    v_res := pg_temp.ok(v_res, 'E1 qui 29/10 16:52 (o passo compre_ate ligado): as 3 linhas críticas do Vanderlei com o "compre até" qui 29/10 pelo prazo padrão (7 dias úteis sem fornecedor, + 1 de folga e 1 de compra interna, antes de qui 12/11) e a pergunta "Compre até hoje: 3 itens de Vanderlei (…) — de quem? Contei 7 dias úteis de entrega. Comprando hoje, o serviço segue em qui 12/11."',
+      (v_e ->> 'e1_linhas')::int = 3
+      and v_e ->> 'e1_texto' = 'Compre até hoje: 3 itens de Vanderlei (Kit Cabos/ Conectores/…, Cabos Elétricos Diversos… e Kit cabos eletricos…) — de quem? Contei 7 dias úteis de entrega. Comprando hoje, o serviço segue em qui 12/11.',
+      v_e::text);
+    v_res := pg_temp.ok(v_res, 'E2 sex 30/10 sem a compra: comprando hoje ainda chega para qui 12/11 — a vigia não mexe e o gestor só cobra ("Venceu qui 29/10 o ''compre até'' de 3 itens de Vanderlei. Comprando hoje ainda chega para qui 12/11."; a de ontem resolvida)',
+      (v_e ->> 'e2_violadas')::int = 0 and (v_e ->> 'e2_abertas')::int = 1
+      and v_e ->> 'e2_texto' = 'Venceu qui 29/10 o ''compre até'' de 3 itens de Vanderlei. Comprando hoje ainda chega para qui 12/11.',
+      v_e::text);
+    v_res := pg_temp.ok(v_res, 'E3 ter 03/11 sem a compra: a vigia empurra o Vanderlei para sex 13/11 pelo material (o 1º empurrão: 1 nos 3 itens) e o gestor cobra o último dia: "Compre até hoje: … Comprando hoje, o serviço segue em sex 13/11."',
+      v_e ->> 'e3_acao' = 'mover:vigia:material, replanejado' and v_e ->> 'e3_plano' = '2026-11-13'
+      and (v_e ->> 'e3_empurrados')::int = 3 and v_e ->> 'e3_vezes' = '1'
+      and v_e ->> 'e3_texto' = 'Compre até hoje: 3 itens de Vanderlei (Kit Cabos/ Conectores/…, Cabos Elétricos Diversos… e Kit cabos eletricos…) — de quem? Contei 7 dias úteis de entrega. Comprando hoje, o serviço segue em sex 13/11.',
+      v_e::text);
+    v_res := pg_temp.ok(v_res, 'E4 qua 04/11 sem a compra: o 2º atraso é do dono (a pergunta crítica segundo_atraso da Fase 2, aberta) — nada automático, o Vanderlei fica sem compromisso, a cobrança fecha e o empurrão do dono não conta (continua 1)',
+      v_e ->> 'e4_critica' = 'segundo_atraso:aberta' and not (v_e ->> 'e4_compromisso')::boolean
+      and (v_e ->> 'e4_abertas')::int = 0 and v_e ->> 'e4_vezes' = '1', v_e::text);
 
     -- ── D. *gestor, só propor* ──
     v_pub := (select md5(string_agg(a.id::text || a.estado, ',' order by a.id)) from public.agenda_alocacoes a);

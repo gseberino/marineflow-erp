@@ -968,7 +968,11 @@ insert into _definer_da_agenda values
   -- FASE 7 (7a P9, 20261031100750): o conserto da escada e o corte do reestimar aplicados (escrevem a proposta e as alocações e
   -- chamam agenda_aplicar; só agenda_replanejar, a revisão e o despacho os chamam; sem grant a ninguém, nem service_role). As
   -- contas, as perguntas da revisão e o passo são invoker. agenda_fase7a_revisao.sql prova as portas.
-  ('_agenda_gestor_reparar'), ('_agenda_gestor_reestimar');
+  ('_agenda_gestor_reparar'), ('_agenda_gestor_reestimar'),
+  -- FASE 7 (7a P10, 20261031100800): o passo compre_ate (escreve o "compre até", os empurrões e a cobrança em os_material e a
+  -- pergunta; só a rodada o chama; sem grant a ninguém, nem service_role). A conta e as compras da semana são invoker.
+  -- agenda_fase7a_compras.sql prova as portas.
+  ('_agenda_gestor_compre_ate');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

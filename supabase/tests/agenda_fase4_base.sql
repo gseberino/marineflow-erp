@@ -147,6 +147,7 @@ end $f$;
 create function pg_temp.sem_fase4(p_corpo text) returns text[] language plpgsql as $f$
 declare
   v_c6 boolean := false;  -- CORREÇÃO FASE 6 (C1): dentro de um bloco da correção da Fase 6
+  v_f7 boolean := false;  -- FASE 7 (7a P10): dentro de um bloco da Fase 7
   v_b text[] := '{}'; v_bloco boolean := false; l text;
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
@@ -159,6 +160,12 @@ begin
       continue;
     end if;
     -- CORREÇÃO FASE 6: fim
+    -- FASE 7 (7a P10): e os blocos "-- FASE 7: … fim" (agenda_rascunho_gravar recriada de novo em 20261031100800: só acréscimo)
+    if not v_f7 and l ~ '^\s*-- FASE 7:' and l !~ '^\s*-- FASE 7: fim' then v_f7 := true; continue; end if;
+    if v_f7 then
+      if l ~ '^\s*-- FASE 7: fim' then v_f7 := false; end if;
+      continue;
+    end if;
     if not v_bloco and l ~ '^\s*-- FASE 4:' and l !~ '^\s*-- FASE 4: fim' then v_bloco := true; continue; end if;
     if v_bloco then
       if l ~ '^\s*-- FASE 4: fim' then v_bloco := false; end if;
