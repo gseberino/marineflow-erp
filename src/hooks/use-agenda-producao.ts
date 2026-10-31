@@ -333,9 +333,30 @@ export interface ClienteDoPlano {
   esperando_voce: { n: number; texto: string | null };
 }
 
+/**
+ * Fase 7b (P5): o bloco "Equipe" do cartão (os_plano_da_os.equipe, migration 20261101100400) — quantas pessoas o serviço pede, a
+ * dupla (a que a tarefa pede, suposição da agenda, ou a que o dono disse), a nota do espaço apertado, os meios-dias do plano em que a
+ * dupla está sem a 2ª pessoa e a dupla dita que espera a 2ª pessoa. O texto vem pronto do banco ("1 pessoa; nos 2 primeiros
+ * meios-dias (ter 10/11) a troca do banco de baterias pede 2 — falta a 2ª pessoa (só Alex está na equipe).").
+ */
+export interface EquipeDoPlano {
+  pessoas: number;
+  dupla: { inicio: number; fim: number; todos: boolean; fonte: 'dono' | 'regra' | 'nenhuma'; texto: string };
+  notas: string[];
+  modo: ModoDaAgenda;
+  falta: { dia: string; turno: 'manha' | 'tarde'; onde: 'inicio' | 'fim' | 'todos' }[];
+  espera: boolean;
+  texto: string;
+}
+
 export interface PlanoDaOsDados {
   /** Fase 5 (P6): ausente antes da migration 20261028100600; null sem o cliente na OS */
   cliente?: ClienteDoPlano | null;
+  /**
+   * Fase 7b (P5): ausente antes da migration 20261101100400; null com a dupla da agenda desligada (modo_dupla) e na OS concluída,
+   * faturada ou cancelada.
+   */
+  equipe?: EquipeDoPlano | null;
   os: string;
   numero: string;
   status: string;

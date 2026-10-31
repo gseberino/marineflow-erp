@@ -24,6 +24,12 @@
 // Fase 4 (P3, 25/10/2026; spec-fase4.md §5.3, §7.1): paraMaterial ganha o aviso (p_aviso: a nota, o Pix ou a mensagem do
 // fornecedor que a agenda perguntou, como o dono disse) e a situação nao_e_de_servico (só com o aviso; a OS e os itens
 // ficam de fora). Sem o aviso, os parâmetros são os da Fase 1 (p_aviso nem vai).
+//
+// Fase 7b (P5, 31/10/2026; spec-fase7b.md §7 e §R4.8): paraPlanejar ganha a dupla dita pelo dono (dupla: nao | inicio | fim | todos;
+// dupla_meios 1 a 20, só com inicio/fim — "dois no primeiro dia" = inicio com 2) e paraDisponibilidade a semana (como o dono disse:
+// "semana que vem", "semana de 16/11"; o banco converte e confere no trecho). Os dois só vão quando ditos: sem eles, a chamada é a de
+// antes (a RPC antiga, antes da migration, continua servindo). "Mateus vem quarta e quinta" (quem vem sob demanda) é vem, sem padrao
+// e sem semana: o banco lê as datas.
 
 export type CanalDaRpc = "whatsapp" | "painel";
 
@@ -104,6 +110,11 @@ export const SITUACOES_DO_MATERIAL = [
 export const SITUACOES_DA_EQUIPE = ["vem", "nao_vem", "so_manha", "so_tarde"] as const;
 export const TURNOS = ["dia", "manha", "tarde"] as const;
 export const PRESENCAS_DO_DONO = ["abre_e_fecha", "sempre", "nunca"] as const;
+/**
+ * (Fase 7b) A dupla que o dono diz de um serviço (os_planejamento.dupla_dita): nao = vai com um só; todos = em dupla o tempo todo;
+ * inicio/fim = em dupla só nos primeiros/últimos meios-dias (com dupla_meios).
+ */
+export const DUPLAS = ["nao", "inicio", "fim", "todos"] as const;
 /** O que o dono desfaz no serviço: espera, "não antes de", prazo do cliente, escopo em aberto e (Fase 2) o pátio. */
 export const LIMPAVEIS = ["espera", "nao_antes", "prazo", "escopo", "patio"] as const;
 /** (Fase 2) O que o motor monta: a semana (= a que ele publica, a seguinte), uma OS ou o replano de algumas. */
@@ -315,6 +326,18 @@ export function paraPlanejar(args: unknown, ctx: ContextoDaRpc): ChamadaDaRpc {
     }
     const dono = umDe(a.dono, "dono", PRESENCAS_DO_DONO, false);
     if (dono) dados.dono = dono;
+    // (Fase 7b, P5) a dupla dita pelo dono: "vai com um só" = nao; "dois o tempo todo" = todos; "dois no primeiro dia" = inicio com
+    // dupla_meios 2 (o banco confere os meios-dias no trecho e, sem eles, pergunta quantos). dupla_meios só com inicio ou fim.
+    const dupla = umDe(a.dupla, "dupla", DUPLAS, false);
+    const duplaMeios = numero(a.dupla_meios, "dupla_meios");
+    if (duplaMeios !== null) {
+      if (dupla !== "inicio" && dupla !== "fim") recusar("'dupla_meios' só vai com dupla inicio ou fim");
+      if (!Number.isInteger(duplaMeios) || duplaMeios < 1 || duplaMeios > 20) {
+        recusar("'dupla_meios' tem de ser os meios-dias que o dono disse (de 1 a 20; \"no primeiro dia\" = 2)");
+      }
+    }
+    if (dupla) dados.dupla = dupla;
+    if (duplaMeios !== null) dados.dupla_meios = duplaMeios;
     for (const campo of ["precisa_ate", "bem_fora", "bem_livre_em", "nao_antes_de", "congelar_ate", "revisar_em"]) {
       const d = dataDita(a[campo], campo);
       if (d) dados[campo] = d;
@@ -347,7 +370,7 @@ export function paraPlanejar(args: unknown, ctx: ContextoDaRpc): ChamadaDaRpc {
       if (limpar.length) dados.limpar = limpar;
     }
     if (Object.keys(dados).length === 0) {
-      recusar("diga o que mudou no serviço (dias, com_quem, dono, precisa_ate, bem_fora, bem_livre_em, nao_antes_de, " +
+      recusar("diga o que mudou no serviço (dias, com_quem, dono, dupla, precisa_ate, bem_fora, bem_livre_em, nao_antes_de, " +
         "escopo_em_aberto, escopo_decidido, congelar_ate, prioridade, sem_material, aceitar_sugestao, adiantavel_patio, " +
         "prometido, servico_cliente ou limpar)");
     }
@@ -412,14 +435,20 @@ export function paraDisponibilidade(args: unknown, ctx: ContextoDaRpc): ChamadaD
     const dias = dataDita(a.dias, "dias");
     if (!dias) recusar("falta 'dias': como o dono disse (\"terça\", \"dia 3\" ou, com padrao, \"segunda a sexta\")");
     const t = trecho(a.trecho);
+    // (Fase 7b, P5) a semana como o dono disse ("semana que vem", "semana de 16/11"): os dias valem só para ela. Só quando dita —
+    // sem ela, a chamada é a de antes (8 argumentos). Com padrao não faz sentido (toda semana × uma semana só).
+    const semana = dataDita(a.semana, "semana");
+    const padrao = booleano(a.padrao, "padrao") ?? false;
+    if (semana && padrao) recusar("'semana' é para uma semana só e 'padrao' é toda semana: passe um dos dois, como o dono disse");
     return comHoje({
       p_autor: ctx.autor,
       p_canal: ctx.canal,
       p_pessoa: pessoa,
       p_situacao: situacao,
       p_dias: dias,
-      p_padrao: booleano(a.padrao, "padrao") ?? false,
+      p_padrao: padrao,
       p_trecho: t,
+      ...(semana ? { p_semana: semana } : {}),
     }, ctx);
   });
 }

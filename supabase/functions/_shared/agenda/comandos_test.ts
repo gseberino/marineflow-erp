@@ -1178,3 +1178,36 @@ Deno.test("Fase 7a (P7) — webhook: *agenda gestor* vai ao assistente com a lei
     }
   }
 });
+
+// Fase 7b (P5; spec-fase7b.md §7 "Palavras: nenhuma nova"): o que o DONO diz dos dias e da dupla não vira comando do secretário,
+// confirmação (sim/ok/1), opção, PDF, comprovante nem resposta à pergunta ativa — vai ao modelo (equipe_disponibilidade,
+// os_planejar). "nenhum", "semana", "seg ter qui" e "sábado" sozinhos também (são resposta da EQUIPE à pergunta da semana, que o
+// whatsapp-webhook lê antes, pelo telefone de quem está na rotina; do dono, são conversa).
+const CONVERSA_F7B = [
+  "semana", "nenhum", "seg ter qui", "sábado", "sabado", "nenhum dia", "igual", "o mesmo",
+  "o Rafael só pode segunda e terça na semana que vem", "o Lenine vai com uma pessoa só", "pro Vanderlei precisa de dois no primeiro dia",
+  "quais dias a equipe pode semana que vem?", "o Rafael saiu", "fico em campo segunda e quarta na semana de 16/11",
+  "o Mateus vem quarta e quinta", "quem eu chamo pra dar conta da semana que vem?", "chama o Vinicius pra quarta",
+  "marca o Rafael no sábado pro Vanderlei", "manda mensagem pro Alex perguntando os dias", "liga a dupla", "liga o sábado",
+  "cadastra o Alex com diária de 150",
+];
+
+Deno.test("Fase 7b (P5) — o que o dono diz dos dias e da dupla vai ao modelo: nenhuma palavra da agenda, do secretário, da confirmação, do menu, do PDF, dos comprovantes nem da pergunta ativa", () => {
+  for (const t of CONVERSA_F7B) {
+    assertEquals(lerComandoDaAgenda(t), null, `agenda: ${t}`);
+    assertEquals(lerComandoDoSecretario(t), null, `secretário: ${t}`);
+    assertEquals(parseConfirmationReply(t), null, `confirmação: ${t}`);
+    assertEquals(parseOptionReply(t, 9), null, `opção: ${t}`);
+    assertEquals(lerPedidoDePdf(t), null, `pdf: ${t}`);
+    assertEquals(lerComando(t), null, `comprovantes: ${t}`);
+    const n = normalizarResposta(t.replace(/[*_~]/g, ""));
+    assertEquals(lerSimNao(n), null, `sim/não: ${t}`);
+    assertEquals(lerNumero(n, 99), null, `número: ${t}`);
+    const trava = travaDaConfirmacao(estadoComCmpNoConfirmar(), t, { pending_confirm_action_id: "pend-1" });
+    assertEquals(trava.travar, false, `trava do CMP: ${t}`);
+  }
+  // e "sim", "ok" e "1" continuam da confirmação (não viraram resposta dos dias)
+  assertEquals(parseConfirmationReply("sim") !== null, true);
+  assertEquals(parseConfirmationReply("ok") !== null, true);
+  for (const t of ["sim", "ok", "1"]) assertEquals(lerComandoDaAgenda(t), null, t);
+});

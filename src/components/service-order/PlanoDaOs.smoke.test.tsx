@@ -6,13 +6,15 @@
 // cliente* / *segura cliente* citada e NENHUM botão de mandar; "em teste" em sombra; some desligado sem nada a mostrar.
 // Fase 6 (P8): a linha "Pelas OS parecidas" em Duração (rótulo acima, o texto do banco); some sem ela (desligado, a OS
 // concluída, o cartão de antes); a presença aprendida pelo texto da presença ("pelo que medi: …").
+// Fase 7b (P5): a linha "Equipe" (rótulo acima, o texto do banco, em âmbar quando falta a 2ª pessoa ou a dupla dita espera, a nota
+// embaixo); "Em teste: eu marcaria …" em sombra; some nula (a dupla da agenda desligada, a OS concluída) e no cartão de antes.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import {
-  CLIENTE_DO_PLANO_DE_EXEMPLO, CLIENTE_DO_PLANO_EM_TESTE, PLANO_DE_EXEMPLO,
+  CLIENTE_DO_PLANO_DE_EXEMPLO, CLIENTE_DO_PLANO_EM_TESTE, EQUIPE_DO_PLANO_DE_EXEMPLO, EQUIPE_DO_PLANO_EM_TESTE, PLANO_DE_EXEMPLO,
 } from '@/components/agenda/producao/dados-de-exemplo';
 
 const h = vi.hoisted(() => ({
@@ -245,5 +247,44 @@ describe('cartão Plano da OS', () => {
     await user.click(await screen.findByRole('button', { name: /Ver o plano/ }));
     expect(screen.queryByTestId('plano-duracao-campo')).not.toBeInTheDocument();
     expect(screen.getByText('faixa 2 a 3,5 dias')).toBeInTheDocument();
+  });
+
+  it('Fase 7b (P5): a linha "Equipe" com o rótulo acima, o texto do banco em âmbar (falta a 2ª pessoa) e a nota embaixo; em teste, o "eu marcaria"', async () => {
+    const user = userEvent.setup();
+    h.rpc.mockResolvedValueOnce({ data: { ...PLANO_DE_EXEMPLO, status: 'scheduled', pode_entregar: false, equipe: EQUIPE_DO_PLANO_DE_EXEMPLO },
+                                  error: null });
+    const a = montar(<PlanoDaOs osId="os-74" status="scheduled" />);
+    await user.click(await screen.findByRole('button', { name: /Ver o plano/ }));
+    const linha = screen.getByTestId('plano-equipe');
+    const rotulo = screen.getByText('Equipe');
+    expect(rotulo.tagName).toBe('DT');
+    expect(rotulo.nextElementSibling?.contains(linha)).toBe(true);
+    expect(linha.textContent).toBe(EQUIPE_DO_PLANO_DE_EXEMPLO.texto);
+    expect(linha.className).toContain('text-amber-700');
+    expect(rotulo.nextElementSibling?.textContent).toContain('Atenção: casa de máquinas — confira se precisa de duas pessoas.');
+    // nenhum botão novo: a dupla o dono diz na conversa (*<nome> com dupla*, "vai com um só")
+    expect(within(rotulo.parentElement as HTMLElement).queryByRole('button')).not.toBeInTheDocument();
+    a.unmount();
+    h.rpc.mockResolvedValueOnce({ data: { ...PLANO_DE_EXEMPLO, status: 'scheduled', pode_entregar: false, equipe: EQUIPE_DO_PLANO_EM_TESTE },
+                                  error: null });
+    montar(<PlanoDaOs osId="os-74" status="scheduled" />);
+    await user.click(await screen.findByRole('button', { name: /Ver o plano/ }));
+    expect(screen.getByTestId('plano-equipe').textContent).toMatch(/^Em teste: eu marcaria 1 pessoa, em dupla nos 2 primeiros meios-dias/);
+    expect(screen.getByTestId('plano-equipe').className).not.toContain('text-amber-700');
+  });
+
+  it('Fase 7b (P5): sem a linha (nula ou o cartão de antes, sem a chave), o cartão fica como era', async () => {
+    const user = userEvent.setup();
+    h.rpc.mockResolvedValueOnce({ data: { ...PLANO_DE_EXEMPLO, equipe: null }, error: null });
+    const a = montar(<PlanoDaOs osId="os-69" status="completed" />);
+    await user.click(await screen.findByRole('button', { name: /Ver o plano/ }));
+    expect(screen.queryByTestId('plano-equipe')).not.toBeInTheDocument();
+    expect(screen.queryByText('Equipe')).not.toBeInTheDocument();
+    a.unmount();
+    h.rpc.mockResolvedValueOnce({ data: PLANO_DE_EXEMPLO, error: null });
+    montar(<PlanoDaOs osId="os-69" status="completed" />);
+    await user.click(await screen.findByRole('button', { name: /Ver o plano/ }));
+    expect(screen.queryByTestId('plano-equipe')).not.toBeInTheDocument();
+    expect(screen.getByText('Você abre e fecha (pela regra)')).toBeInTheDocument();
   });
 });

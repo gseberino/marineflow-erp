@@ -89,6 +89,10 @@ const FASE5 = ler(join(FIXTURES, 'fixture-fase5.sql'));
 const FASE6 = ler(join(FIXTURES, 'fixture-fase6.sql'));
 // (Fase 7a, P7) a carteira REAL de qui 29/10 16:52 (fixture-replay-2910.sql, por cima da fixture-2310)
 const REPLAY2910 = ler(join(FIXTURES, 'fixture-replay-2910.sql'));
+// (Fase 7b, P5) a equipe de verdade de 30/10 e as pessoas da etapa (Mateus sob demanda, Rafael com padrão, Bruno o novato), por cima
+// da sintética da 7a e do replay de 29/10 (a fixture-fase7b executa as duas por dentro: agenda_teste.fase7a e agenda_teste.replay2910)
+const FASE7A = ler(join(FIXTURES, 'fixture-fase7a.sql'));
+const FASE7B = ler(join(FIXTURES, 'fixture-fase7b.sql'));
 /** (Fase 6) os 7 itens do aprendizado (aprendizado_ligados no estado fase6_ligado). */
 const ITENS_DO_APRENDIZADO = ['fator', 'mo', 'presenca', 'fornecedor', 'capacidade_dono', 'aviso_cliente', 'revisao'];
 /** (Fase 5) os 11 tipos da mensagem ao cliente (cliente_tipos_ligados no estado fase5_ligado). */
@@ -708,6 +712,9 @@ export async function bancadaDosEvals(log = () => {}) {
   await db.query(`select set_config('agenda_teste.fase4', $1, false)`, [FASE4]);
   // (Fase 6) fixture-fase6.sql executa a da Fase 5 por dentro (agenda_teste.fase5)
   await db.query(`select set_config('agenda_teste.fase5', $1, false)`, [FASE5]);
+  // (Fase 7b) fixture-fase7b.sql executa a da 7a e o replay de 29/10 por dentro (agenda_teste.fase7a, agenda_teste.replay2910)
+  await db.query(`select set_config('agenda_teste.replay2910', $1, false)`, [REPLAY2910]);
+  await db.query(`select set_config('agenda_teste.fase7a', $1, false)`, [FASE7A]);
   return db;
 }
 
@@ -737,6 +744,7 @@ async function aplicarEstado(db, estado) {
   if (estado.startsWith('fase5')) return void await aplicarEstadoDaFase5(db, estado);
   if (estado.startsWith('fase6')) return void await aplicarEstadoDaFase6(db, estado);
   if (estado.startsWith('fase7a')) return void await aplicarEstadoDaFase7a(db, estado);
+  if (estado.startsWith('fase7b')) return void await aplicarEstadoDaFase7b(db, estado);
   if (estado === 'pos_rodada') return void await db.exec(POS_RODADA);
   if (estado === 'replay_0104') {
     await db.exec(REPLAY_0104);
@@ -895,6 +903,29 @@ async function aplicarEstadoDaFase7a(db, estado) {
       throw new Error(`${estado}: a rodada do gestor de qui 29/10 16:52 não rodou limpa: ${JSON.stringify(r.rows[0].r)}`);
     }
   }
+}
+
+/**
+ * Os estados da Fase 7b (fixture-fase7b.sql: a equipe de verdade de 30/10 — o Alex sem telefone, Roberto, João e Mickael fora — e as
+ * pessoas da etapa: Mateus prestador sob demanda sem linha, Rafael diarista com padrão de seg a sex e na rotina, Bruno o novato; hoje
+ * = qui 05/11; a presença do dono de produção no Lenine e no Vanderlei — abre e fecha), com o gestor da 7a ligado desde qui 29/10
+ * 16:46 (a regra uma_pessoa: 1 pessoa por serviço):
+ *   fase7b         os 5 modos da 7b em teste (como a migration de dado 20261101100900 deixa);
+ *   fase7b_ligado  os 5 ligados (a semana dita no rascunho, a dupla no início ou no fim, as datas de quem vem sob demanda).
+ */
+async function aplicarEstadoDaFase7b(db, estado) {
+  if (!['fase7b', 'fase7b_ligado'].includes(estado)) throw new Error(`estado "${estado}" não existe`);
+  await db.exec(FASE7B);
+  await db.query(`insert into public.os_planejamento (service_order_id, dono_presenca)
+                  select so.id, 'abre_e_fecha' from public.service_orders so where so.service_order_number in ('OS-00074', 'OS-00069')
+                  on conflict (service_order_id) do update set dono_presenca = 'abre_e_fecha'`);
+  CASOS.autor = (await db.query(`select u.id from public.app_users u where u.role = 'admin' and u.active order by u.id limit 1`)).rows[0].id;
+  const modo7b = estado === 'fase7b_ligado' ? 'ligado' : 'sombra';
+  await db.query(`update public.agenda_config set modo_leitura = 'ligado', modo_marcar_sozinho = 'ligado', modo_vaga_fechamento = 'ligado',
+                         modo_encaixe_aprovacao = 'ligado', modo_revisao_diaria = 'ligado', modo_compre_ate = 'ligado',
+                         gestor_so_propor = false, marcar_regras = $2::text[], marcar_sozinho_desde = '2026-10-29 16:46-03',
+                         modo_dias = $1, modo_dupla = $1, modo_sabado = $1, modo_cadastro = $1, modo_chamar = $1 where id`,
+    [modo7b, REGRAS_DO_GESTOR]);
 }
 
 /** Um tique da rotina da equipe (o task-automations a chama logo antes da vigia). */

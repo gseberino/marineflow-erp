@@ -47,6 +47,11 @@
 // sozinho e por quê: _agenda_ver_gestor, migration 20261031100600). Nenhuma ferramenta nova: *gestor, só propor*, *gestor, pode
 // marcar* e *<nome> com dupla* são palavras do dono, lidas antes do modelo; o teto de 113 não muda.
 //
+// Fase 7b (P5, 31/10/2026; spec-fase7b.md §7 e §R4.8): os_planejar ganha a dupla que o dono diz (dupla: nao | inicio | fim | todos;
+// dupla_meios 1 a 20, só com inicio ou fim) e equipe_disponibilidade a semana (os dias valem só para uma semana: "semana que vem",
+// "semana de 16/11"). Quem vem sob demanda ("o Mateus vem quarta e quinta") é vem, sem padrao e sem semana: só nessas datas.
+// Nenhuma ferramenta nova (o teto de 113 continua); o banco confere no trecho e devolve a releitura.
+//
 // Cada execute chama UMA RPC com ctx.sb (painel: o JWT do dono; WhatsApp: service role), p_autor = ctx.userId e
 // p_canal pelo ctx.canal. O mapeamento argumento → parâmetro é o de _shared/agenda/rpc-das-ferramentas.ts (puro), o
 // mesmo dos evals. `if (error) throw`: leitura que falha nunca vira "nada marcado".
@@ -54,6 +59,7 @@ import type { Role, ToolCtx, ToolDef } from "./registry.ts";
 import {
   canalDaRpc,
   type ChamadaDaRpc,
+  DUPLAS,
   ESCOPOS_DA_PROPOSTA,
   EVENTOS_DO_ANDAMENTO,
   FOCOS,
@@ -177,9 +183,10 @@ export const agendaProducaoTools: ToolDef[] = [
     description:
       "Anota num RASCUNHO o que o dono disse de um serviço: quantos dias, quem vai e em que turno, se ele abre e fecha, " +
       "até quando o cliente precisa, quando o barco/motorhome está fora (bem_fora) ou volta (bem_livre_em), \"não antes " +
-      "de\", escopo, espera, prioridade, \"não tem peça a comprar\" (sem_material) ou \"aceito a sua estimativa\" " +
-      "(aceitar_sugestao); o que ele desfaz (\"pode voltar\", \"tira da espera\", \"o cliente não tem mais prazo\") vai em " +
-      "limpar. NÃO grava de fato: devolve a releitura para o dono conferir, e só o *grava* dele grava. Passe " +
+      "de\", escopo, espera, prioridade, \"não tem peça a comprar\" (sem_material), \"aceito a sua estimativa\" " +
+      "(aceitar_sugestao) ou a dupla (dupla: \"vai com um só\" = nao; \"precisa de dois o tempo todo\" = todos; \"dois no " +
+      "primeiro dia\" = inicio com dupla_meios 2; no fim = fim); o que ele desfaz (\"pode voltar\", \"tira da espera\", " +
+      "\"o cliente não tem mais prazo\") vai em limpar. NÃO grava de fato: devolve a releitura para o dono conferir, e só o *grava* dele grava. Passe " +
       "só números e datas que ele disse, como disse (\"dia 3\", \"terça\"), e em trecho as palavras dele. Correção = chame " +
       "de novo para o mesmo serviço. Não agenda OS nem cria tarefa. " +
       "\"Falei pro Flávio que é dia 3\" é prometido = \"dia 3\" (a data que o cliente OUVIU, não a do plano); \"pro " +
@@ -198,6 +205,18 @@ export const agendaProducaoTools: ToolDef[] = [
           },
         },
         dono: { type: "string", enum: [...PRESENCAS_DO_DONO], description: "\"eu abro e fecho\" = abre_e_fecha." },
+        dupla: {
+          type: "string",
+          enum: [...DUPLAS],
+          description: "A dupla que o dono disse: \"vai com um só\" = nao; \"precisa de dois o tempo todo\" = todos; \"dois no " +
+            "primeiro dia\" = inicio (com dupla_meios); \"dois no fim\" = fim. Nunca escolha quem vai.",
+        },
+        dupla_meios: {
+          type: "integer",
+          minimum: 1,
+          maximum: 20,
+          description: "Só com dupla inicio ou fim: em quantos meios-dias (\"no primeiro dia\" = 2). Só o que o dono disse.",
+        },
         precisa_ate: { type: "string", description: "Até quando o cliente precisa, como o dono disse." },
         bem_fora: { type: "string", description: "O barco/motorhome fora (\"de 26 a 30/10\", \"até dia 3\": inclusive)." },
         bem_livre_em: { type: "string", description: "\"Só fica livre dia 3\": o dia em que volta." },
@@ -289,8 +308,10 @@ export const agendaProducaoTools: ToolDef[] = [
       "Anota num RASCUNHO quem vem quando: vem, nao_vem, so_manha ou so_tarde, numa data (\"terça\") ou toda semana " +
       "(padrao = true: \"segunda a sexta\"). pessoa \"eu\" = o dono (\"fico em campo de segunda a sexta\"). É quem VAI vir; o " +
       "dia que já aconteceu sem trabalho (\"não veio hoje\", \"faltou ontem\") não se lança (fica sem diária; na OS do plano, é " +
-      "os_registrar_andamento) e o dia trabalhado é registrar_diaria. NÃO grava de fato nem avisa ninguém: " +
-      "devolve a releitura, e só o *grava* do dono grava.",
+      "os_registrar_andamento) e o dia trabalhado é registrar_diaria. Para uma semana só (\"o Rafael só pode segunda e terça " +
+      "na semana que vem\"), passe semana como o dono disse. Quem ele chama quando precisa (\"o Mateus vem quarta e quinta\") é " +
+      "vem, sem padrao e sem semana: só nessas datas. NÃO grava de fato nem avisa ninguém: devolve a releitura, e só o " +
+      "*grava* do dono grava.",
     input_schema: {
       type: "object",
       properties: {
@@ -298,6 +319,10 @@ export const agendaProducaoTools: ToolDef[] = [
         situacao: { type: "string", enum: [...SITUACOES_DA_EQUIPE] },
         dias: { type: "string", description: "Como o dono disse: \"terça\", \"dia 3\" ou, com padrao, \"segunda a sexta\"." },
         padrao: { type: "boolean", description: "true = toda semana." },
+        semana: {
+          type: "string",
+          description: "Só para uma semana, como o dono disse (\"semana que vem\", \"semana de 16/11\"); sem padrao. Nunca calcule.",
+        },
         trecho: TRECHO,
       },
       required: ["pessoa", "situacao", "dias", "trecho"],

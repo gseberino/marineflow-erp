@@ -5,6 +5,7 @@
 import { assert, assertEquals, assertThrows } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   canalDaRpc,
+  DUPLAS,
   FOCOS,
   INSTRUCAO_CLIENTE,
   paraCliente,
@@ -525,4 +526,64 @@ Deno.test("Fase 5: paraPlanejar leva prometido (como o dono disse; ISO volta) e 
   assertEquals((FOCOS as readonly string[]).includes("clientes"), true);
   const v = paraAgendaVer({ foco: "clientes", os: "Nelson" }, CTX5);
   assertEquals(v.ok && [v.params.p_foco, v.params.p_os], ["clientes", "Nelson"]);
+});
+
+// ───────── Fase 7b (P5): a dupla dita e a semana ─────────
+const CTX7B = { autor: "00000000-0000-4000-8000-000000000001", canal: "whatsapp" as const, hoje: "2026-11-05" };
+
+Deno.test("Fase 7b: paraPlanejar leva a dupla dita (nao, todos, inicio/fim com dupla_meios) só quando dita", () => {
+  assertEquals([...DUPLAS], ["nao", "inicio", "fim", "todos"]);
+  const um = paraPlanejar({ os: "Lenine", dupla: "nao", trecho: "o Lenine vai com uma pessoa só" }, CTX7B);
+  assertEquals(um.ok && um.params.p_dados, { dupla: "nao" });
+  const todos = paraPlanejar({ os: "Lenine", dupla: "todos", trecho: "o Lenine precisa de dois o tempo todo" }, CTX7B);
+  assertEquals(todos.ok && todos.params.p_dados, { dupla: "todos" });
+  const ini = paraPlanejar({ os: "Vanderlei", dupla: "inicio", dupla_meios: 2, trecho: "pro Vanderlei precisa de dois no primeiro dia" }, CTX7B);
+  assertEquals(ini.ok && ini.params.p_dados, { dupla: "inicio", dupla_meios: 2 });
+  assertEquals(ini.ok && [ini.params.p_os, ini.params.p_hoje], ["Vanderlei", "2026-11-05"]);
+  // sem os meios-dias: vai só a dupla (o banco pergunta quantos)
+  const semMeios = paraPlanejar({ os: "Vanderlei", dupla: "fim", trecho: "no fim precisa de dois" }, CTX7B);
+  assertEquals(semMeios.ok && semMeios.params.p_dados, { dupla: "fim" });
+  // a dupla junto do resto do que o dono disse
+  const junto = paraPlanejar({ os: "Lenine", dias: 3, dupla: "todos", trecho: "são 3 dias, os dois o tempo todo" }, CTX7B);
+  assertEquals(junto.ok && junto.params.p_dados, { dias: 3, dupla: "todos" });
+  // sem a dupla, nada da dupla vai (a chamada é a de antes)
+  const antes = paraPlanejar({ os: "Lenine", dias: 3, trecho: "são 3 dias" }, CTX7B);
+  assertEquals(antes.ok && Object.keys(antes.params.p_dados as Record<string, unknown>), ["dias"]);
+});
+
+Deno.test("Fase 7b: paraPlanejar recusa a dupla fora da lista e dupla_meios sem inicio/fim, quebrado ou fora de 1 a 20", () => {
+  assert(erro(paraPlanejar({ os: "Lenine", dupla: "dupla", trecho: "com dupla" }, CTX7B)).includes("aceita só: nao, inicio, fim, todos"));
+  assert(erro(paraPlanejar({ os: "Lenine", dupla: "todos", dupla_meios: 2, trecho: "dois o tempo todo" }, CTX7B)).includes("só vai com dupla inicio ou fim"));
+  assert(erro(paraPlanejar({ os: "Lenine", dupla_meios: 2, trecho: "dois no primeiro dia" }, CTX7B)).includes("só vai com dupla inicio ou fim"));
+  for (const n of [1.5, 21, 0]) {
+    assert(erro(paraPlanejar({ os: "Lenine", dupla: "inicio", dupla_meios: n, trecho: "dois no começo" }, CTX7B)).includes("de 1 a 20"), String(n));
+  }
+});
+
+Deno.test("Fase 7b: paraDisponibilidade leva a semana como o dono disse (só quando dita); quem vem sob demanda é vem sem padrão nem semana", () => {
+  const s = paraDisponibilidade({
+    pessoa: "Rafael", situacao: "vem", dias: "segunda e terça", semana: "semana que vem",
+    trecho: "o Rafael só pode segunda e terça na semana que vem",
+  }, CTX7B);
+  assertEquals(s.ok && s.params, {
+    p_autor: CTX7B.autor, p_canal: "whatsapp", p_pessoa: "Rafael", p_situacao: "vem", p_dias: "segunda e terça", p_padrao: false,
+    p_trecho: "o Rafael só pode segunda e terça na semana que vem", p_semana: "semana que vem", p_hoje: "2026-11-05",
+  });
+  const eu = paraDisponibilidade({
+    pessoa: "eu", situacao: "vem", dias: "segunda e quarta", semana: "semana de 16/11",
+    trecho: "fico em campo segunda e quarta na semana de 16/11",
+  }, CTX7B);
+  assertEquals(eu.ok && [eu.params.p_pessoa, eu.params.p_semana], ["eu", "semana de 16/11"]);
+  // "o Mateus vem quarta e quinta": sem semana, a chamada é a de antes (8 argumentos; o banco lê as datas)
+  const mateus = paraDisponibilidade({ pessoa: "Mateus", situacao: "vem", dias: "quarta e quinta", trecho: "o Mateus vem quarta e quinta" }, CTX7B);
+  assertEquals(mateus.ok && "p_semana" in mateus.params, false);
+  assertEquals(mateus.ok && mateus.params.p_padrao, false);
+});
+
+Deno.test("Fase 7b: paraDisponibilidade recusa a semana calculada (ISO) e a semana junto do padrão (toda semana × uma semana)", () => {
+  assert(erro(paraDisponibilidade({ pessoa: "Rafael", situacao: "vem", dias: "seg", semana: "2026-11-16", trecho: "seg" }, CTX7B))
+    .includes("sem calcular"));
+  assert(erro(paraDisponibilidade({
+    pessoa: "Rafael", situacao: "vem", dias: "seg a sex", semana: "semana que vem", padrao: true, trecho: "seg a sex",
+  }, CTX7B)).includes("passe um dos dois"));
 });

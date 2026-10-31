@@ -115,6 +115,10 @@ NAO_SAO_TOOLS.add("nao_e_de_servico");
 NAO_SAO_TOOLS.add("servico_cliente");
 // Agenda de Produção (correção de 29/10, P1): valor do periodo de agenda_ver ("como você pensou a semana que vem?")
 NAO_SAO_TOOLS.add("proxima_semana");
+// Agenda de Produção (31/10/2026, Fase 7b, P5): argumento de os_planejar ("dois no primeiro dia" = dupla inicio com dupla_meios 2)
+// e valor da situação de equipe_disponibilidade ("fulano saiu" = nao_vem com padrao)
+NAO_SAO_TOOLS.add("dupla_meios");
+NAO_SAO_TOOLS.add("nao_vem");
 
 /** A conversa dos comprovantes ligada (F2): as linhas dos CMPs só entram no prompt assim. */
 const CONVERSA_LIGADA = { comprovante_fluxo: "dono", comprovante_conversa: "on" };
@@ -297,10 +301,14 @@ function secaoDaAgenda(): string {
 // Fase 7a (P7): o gestor da agenda (spec-fase7a.md §7: +1 linha, teto 25) — entrou 1 linha: o que ele marcou, marcaria em teste
 // e perguntou antes é agenda_ver foco gestor; o modelo nunca marca, calcula data nem escolhe técnico; e as palavras do dono
 // (*agenda gestor*, *gestor, só propor*, *gestor, pode marcar*, *<nome> com dupla*) na própria linha. Teto 25.
-Deno.test("agenda de produção: a seção é curta (≤ 25 linhas: custa tokens em toda mensagem) e fica no bloco estável", () => {
+// Fase 7b (P5): os dias de cada pessoa e a dupla (spec-fase7b.md §7 e §R4.8: +2 linhas, teto 27) — entraram 2 linhas: quem a
+// agenda pergunta e quando, a semana dita (equipe_disponibilidade com semana), quem vem sob demanda só nas datas (vem, sem padrao e
+// sem semana), os focos equipe e gestor; e a dupla pela tarefa, o os_planejar dupla com dupla_meios e o ajudante que só o dono chama.
+// Teto 27.
+Deno.test("agenda de produção: a seção é curta (≤ 27 linhas: custa tokens em toda mensagem) e fica no bloco estável", () => {
   const secao = secaoDaAgenda();
   const linhas = secao.split("\n");
-  assertEquals(linhas.length <= 25, true, `a seção tem ${linhas.length} linhas`);
+  assertEquals(linhas.length <= 27, true, `a seção tem ${linhas.length} linhas`);
   // Estável = em cache. O volátil muda a cada turno e não pode carregar a seção.
   const volatil = buildSystemBlocks(CONVERSA_LIGADA, { userName: "Teste", userRole: "admin", channel: "whatsapp" })[1].text;
   assertEquals(volatil.includes(SECAO_AGENDA), false);
@@ -609,8 +617,37 @@ Deno.test("agenda de produção (correção 29/10, P2): o serviço novo depois d
   assertStringIncludes(props.simular.description ?? "", "o 1º dia que cabe pelo plano de agora. Só simula: não marca nem reserva nada.");
   assertEquals(porNome.has("os_planejar"), true);
   assertEquals(secao.includes("`"), false);
-  // (Fase 7a, P7) o teto da seção passou a 25 (a linha do gestor da agenda)
-  assertEquals(secao.split("\n").length <= 25, true);
+  // (Fase 7a, P7) o teto da seção passou a 25 (a linha do gestor da agenda); (Fase 7b, P5) a 27 (os dias de cada pessoa e a dupla)
+  assertEquals(secao.split("\n").length <= 27, true);
+});
+
+// Fase 7b (P5; spec-fase7b.md §7 e §R4.8): as 2 linhas novas ensinam o que as ferramentas têm de verdade — a semana de
+// equipe_disponibilidade, quem vem sob demanda só nas datas (vem, sem padrao e sem semana), os focos equipe e gestor, o os_planejar
+// dupla com os valores do enum e o dupla_meios — e nunca mandam o modelo escolher quem vai nem calcular dias.
+Deno.test("agenda de produção (Fase 7b, P5): os dias de cada pessoa e a dupla, amarrados aos esquemas das ferramentas", () => {
+  const secao = secaoDaAgenda();
+  const dias = secao.split("\n").find((l) => l.startsWith("- Os dias de cada pessoa:"))!;
+  const dupla = secao.split("\n").find((l) => l.startsWith("- Dupla: a agenda supõe 1 pessoa"))!;
+  assertEquals(!!dias && !!dupla, true, "as 2 linhas da 7b sumiram");
+  assertStringIncludes(dias, "a agenda pergunta toda quinta a quem está na rotina com telefone, e ao dono só quando faz diferença");
+  assertStringIncludes(dias, "equipe_disponibilidade com semana como ele disse");
+  assertStringIncludes(dias, "\"o Mateus vem quarta e quinta\" (quem ele chama quando precisa) é vem, sem padrao e sem semana (só nessas datas)");
+  assertStringIncludes(dias, "agenda_ver foco equipe; quem chamar: foco gestor");
+  assertStringIncludes(dias, "Nunca calcule capacidade nem diga dias que o banco não deu.");
+  assertStringIncludes(dupla, "os_planejar dupla: \"vai com um só\" é nao; \"precisa de dois o tempo todo\" é todos; \"dois no primeiro dia\" é inicio com dupla_meios 2");
+  assertStringIncludes(dupla, "a agenda marca com 1 e diz em que dias chamar um ajudante; quem chama é o dono. Nunca escolha quem vai.");
+  // o que as linhas citam existe nos esquemas
+  const disp = porNome.get("equipe_disponibilidade")!;
+  const dp = (disp.input_schema as { properties: Record<string, unknown> }).properties;
+  assertEquals(["semana", "padrao"].every((k) => k in dp), true);
+  const plan = porNome.get("os_planejar")!;
+  const pp = (plan.input_schema as { properties: Record<string, { enum?: string[] }> }).properties;
+  assertEquals(pp.dupla.enum, ["nao", "inicio", "fim", "todos"]);
+  assertEquals("dupla_meios" in pp, true);
+  const ver = porNome.get("agenda_ver")!;
+  const focos = (ver.input_schema as { properties: { foco: { enum: string[] } } }).properties.foco.enum;
+  assertEquals(focos.includes("equipe") && focos.includes("gestor"), true);
+  assertEquals(secao.includes("`"), false);
 });
 
 // PÓS-MERGE (A, 28/10/2026): "faltou" não se lança mais — registrar_diaria recusa a falta (main, Diárias fase 1b). O texto

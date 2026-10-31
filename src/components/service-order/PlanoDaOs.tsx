@@ -11,6 +11,10 @@
  * combinado (agenda_fator_de_campo, o texto do banco; "Em teste: …" em sombra). Só aparece com o aprendizado fora de
  * desligado e na OS que ainda vai ser feita. A presença aprendida já vem no texto da presença ("pelo que medi: …").
  *
+ * Fase 7b (P5): a linha "Equipe" (rótulo acima, largura toda): quantas pessoas e a dupla — a que a tarefa pede (suposição da
+ * agenda) ou a que o dono disse —, a 2ª pessoa que falta no plano e a dupla dita que espera (em âmbar), e a nota do espaço apertado
+ * embaixo. O texto é o do banco ("Em teste: eu marcaria …" em sombra). Some com a dupla da agenda desligada e no cartão de antes.
+ *
  * Fase 5 (P6): o bloco "Cliente" — o que foi dito ao cliente (e se ainda vale), a confirmação e as mensagens desta OS
  * (lista curta, "em teste" quando o modo é sombra). Sem botão de mandar: a aprovação é pela palavra (*manda cliente
  * <nome>* / *segura cliente <nome>*) ou na conversa; a tela só cita a palavra que o banco escreve.
@@ -190,6 +194,19 @@ export function PlanoDaOs({ osId, status, className }: { osId: string; status: s
               )}
             </Dado>
             <Dado rotulo="Presença do dono">{data.presenca_dono.texto}</Dado>
+            {data.equipe && (
+              <Dado rotulo="Equipe" largo>
+                <span
+                  className={cn('block break-words', (data.equipe.falta.length > 0 || data.equipe.espera) && 'text-amber-700 dark:text-amber-400')}
+                  data-testid="plano-equipe"
+                >
+                  {data.equipe.texto}
+                </span>
+                {data.equipe.notas.map((n) => (
+                  <span key={n} className="mt-1 block break-words text-xs text-muted-foreground">{n}</span>
+                ))}
+              </Dado>
+            )}
             <Dado rotulo="Janela do bem">{janela.length > 0 ? janela.join(' · ') : 'Sem restrição'}</Dado>
             <Dado rotulo="Prometido × planejado">{data.prometido_planejado.texto ?? 'Sem data do cliente e sem plano'}</Dado>
           </DadosDaFicha>

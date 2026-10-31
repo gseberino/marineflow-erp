@@ -606,3 +606,36 @@ Deno.test("Fase 7a (P7) — agenda_ver tem o foco gestor (enum e descrição: s�
   }
   assert(!agendaProducaoTools.some((t) => /gestor|dupla/.test(t.name)), "nenhuma ferramenta nova do gestor");
 });
+
+Deno.test("Fase 7b (P5) — os_planejar tem dupla (nao, inicio, fim, todos) e dupla_meios (1 a 20); equipe_disponibilidade tem semana; as descrições ensinam", () => {
+  const plan = porNome("os_planejar");
+  const pp = (plan.input_schema as { properties: Record<string, { enum?: string[]; type?: string; minimum?: number; maximum?: number }> })
+    .properties;
+  assertEquals(pp.dupla.enum, ["nao", "inicio", "fim", "todos"]);
+  assertEquals([pp.dupla_meios.type, pp.dupla_meios.minimum, pp.dupla_meios.maximum], ["integer", 1, 20]);
+  assertStringIncludes(plan.description,
+    "\"vai com um só\" = nao; \"precisa de dois o tempo todo\" = todos; \"dois no primeiro dia\" = inicio com dupla_meios 2");
+  const disp = porNome("equipe_disponibilidade");
+  const dp = disp.input_schema as { properties: Record<string, { type?: string; description?: string }>; required: string[] };
+  assertEquals(dp.properties.semana.type, "string");
+  assertStringIncludes(dp.properties.semana.description ?? "", "Nunca calcule");
+  assert(!dp.required.includes("semana"));
+  assertStringIncludes(disp.description, "passe semana como o dono disse");
+  assertStringIncludes(disp.description, "é vem, sem padrao e sem semana: só nessas datas");
+  // nenhuma ferramenta nova: as 10 de antes (o teto do perfil continua)
+  assertEquals(agendaProducaoTools.length, 10);
+});
+
+Deno.test("Fase 7b (P5) — os_planejar com a dupla e equipe_disponibilidade com a semana chamam o rascunho de sempre; argumento errado não chama nada", async () => {
+  const { sb, chamadas } = sbFalso(() => ({ data: { ok: true, item: {}, releitura: "Lenine: vai em dupla nos 2 primeiros meios-dias." }, error: null }));
+  await porNome("os_planejar").execute({ os: "Lenine", dupla: "inicio", dupla_meios: 2, trecho: "o Lenine precisa de dois no primeiro dia" }, ctx(sb));
+  await porNome("equipe_disponibilidade").execute({
+    pessoa: "Rafael", situacao: "vem", dias: "seg e ter", semana: "semana que vem", trecho: "o Rafael só pode seg e ter na semana que vem",
+  }, ctx(sb));
+  assertEquals(chamadas.map((c) => c.nome), ["agenda_rascunho_planejar", "agenda_rascunho_disponibilidade"]);
+  assertEquals(chamadas[0].params.p_dados, { dupla: "inicio", dupla_meios: 2 });
+  assertEquals(chamadas[1].params.p_semana, "semana que vem");
+  const r = await porNome("os_planejar").execute({ os: "Lenine", dupla: "talvez", trecho: "com dupla" }, ctx(sb)) as Record<string, unknown>;
+  assert(typeof r.error === "string");
+  assertEquals(chamadas.length, 2);
+});

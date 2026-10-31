@@ -1,7 +1,9 @@
 // Dados de exemplo das telas de produção (Fase 3, P7a), no formato que o banco devolve (agenda_tela_semana,
 // agenda_tela_carteira, os_plano_da_os) — tirados da bancada com a carteira sintética da Fase 3 (só primeiros nomes).
 // Servem aos testes de render; nada aqui vai para produção.
-import type { CarteiraDeProducao, ClienteDoPlano, PlanoDaOsDados, SemanaDeProducao } from '@/hooks/use-agenda-producao';
+import type {
+  CarteiraDeProducao, ClienteDoPlano, EquipeDoPlano, PlanoDaOsDados, SemanaDeProducao,
+} from '@/hooks/use-agenda-producao';
 
 export const SEMANA_DE_EXEMPLO: SemanaDeProducao = {
   modo: 'ligado', em_teste: false, de: '2026-11-02', ate: '2026-11-07',
@@ -153,4 +155,27 @@ export const CLIENTE_DO_PLANO_EM_TESTE: ClienteDoPlano = {
     CLIENTE_DO_PLANO_DE_EXEMPLO.mensagens[1],
   ],
   esperando_voce: { n: 0, texto: null },
+};
+
+// Fase 7b (P5): o bloco "Equipe" do cartão como o banco devolve (agenda_fase7b_leituras.sql, L1b e L1i, com a fixture da 7b): o
+// Lenine com só o Alex na equipe (a 2ª pessoa faltando nos 2 primeiros meios-dias), a nota do espaço apertado (a OS do Otávio) e o
+// mesmo Lenine em teste.
+export const EQUIPE_DO_PLANO_DE_EXEMPLO: EquipeDoPlano = {
+  pessoas: 1,
+  dupla: { inicio: 2, fim: 0, todos: false, fonte: 'regra',
+           texto: '1 pessoa; em dupla nos 2 primeiros meios-dias (troca do banco de baterias) — suposição minha.' },
+  notas: ['Atenção: casa de máquinas — confira se precisa de duas pessoas.'],
+  modo: 'ligado',
+  falta: [{ dia: '2026-11-10', turno: 'manha', onde: 'inicio' }, { dia: '2026-11-10', turno: 'tarde', onde: 'inicio' }],
+  espera: false,
+  texto: '1 pessoa; nos 2 primeiros meios-dias (ter 10/11) a troca do banco de baterias pede 2 — falta a 2ª pessoa (só Alex está na equipe).',
+};
+
+export const EQUIPE_DO_PLANO_EM_TESTE: EquipeDoPlano = {
+  ...EQUIPE_DO_PLANO_DE_EXEMPLO,
+  notas: [],
+  modo: 'sombra',
+  falta: [],
+  texto: 'Em teste: eu marcaria 1 pessoa, em dupla nos 2 primeiros meios-dias (troca do banco de baterias). Hoje marco 1 pessoa e ponho a '
+    + '2ª nesses meios-dias quando alguém está livre.',
 };
