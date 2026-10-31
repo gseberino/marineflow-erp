@@ -849,16 +849,24 @@ end
 $copia$;
 
 -- ── G20. As portas ───────────────────────────────────────────────────────────────────────────────────────────────
-with f(sig, vol) as (values
-  ('public._agenda_dias_curtos(smallint[], boolean)', 'i'), ('public._agenda_semana_perguntada(date)', 's'),
-  ('public._agenda_dias_declarados(uuid, date)', 's'), ('public._agenda_chance_de_falta(uuid, date)', 's'),
-  ('public._agenda_semana_dita(text, text, date)', 's'))
+-- FASE 7b: (7b P3, 20261101100200) as 4 leituras que o foco equipe usa (_agenda_ver_equipe, invoker, authenticated e service_role)
+-- ganharam authenticated na migration do P3 (a nota do P2: "uma leitura invoker do painel que as use precisa do grant na migration
+-- dela"); a semana dita continua só do service_role. A coluna p3 diz quais (sem o P3 aplicado, nenhuma tem authenticated).
+-- FASE 7b: fim
+with f(sig, vol, p3) as (values
+  ('public._agenda_dias_curtos(smallint[], boolean)', 'i', true), ('public._agenda_semana_perguntada(date)', 's', true),
+  ('public._agenda_dias_declarados(uuid, date)', 's', true), ('public._agenda_chance_de_falta(uuid, date)', 's', true),
+  ('public._agenda_semana_dita(text, text, date)', 's', false))
 insert into _resultado
-select 'G20a as 5 novas de leitura e de texto: invoker, search_path fixo, a volatilidade da spec; nem anon nem authenticated, só o service_role',
+select 'G20a as 5 novas de leitura e de texto: invoker, search_path fixo, a volatilidade da spec; nunca anon; o service_role; authenticated só nas 4 que o foco equipe lê (com o P3)',
        bool_and(not p.prosecdef and p.provolatile = f.vol and coalesce(array_to_string(p.proconfig, ','), '') like '%search_path=public%'
-                and not has_function_privilege('anon', p.oid, 'execute') and not has_function_privilege('authenticated', p.oid, 'execute')
+                and not has_function_privilege('anon', p.oid, 'execute')
+                and has_function_privilege('authenticated', p.oid, 'execute')
+                    = (f.p3 and to_regprocedure('public.agenda_equipe_semana(date, timestamptz)') is not null)
                 and has_function_privilege('service_role', p.oid, 'execute')) and count(*) = 5,
-       string_agg(f.sig, ', ') filter (where has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute'))
+       string_agg(f.sig, ', ') filter (where has_function_privilege('anon', p.oid, 'execute')
+                                          or has_function_privilege('authenticated', p.oid, 'execute')
+                                             <> (f.p3 and to_regprocedure('public.agenda_equipe_semana(date, timestamptz)') is not null))
   from f join pg_proc p on p.oid = f.sig::regprocedure;
 insert into _resultado
 select 'G20b o gravador da semana: security definer, VOLATILE, search_path fixo, sem grant a ninguém (nem service_role)',

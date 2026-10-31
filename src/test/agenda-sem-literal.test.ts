@@ -169,6 +169,13 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     vezes: 2,
     porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_aprender); não é texto_max nem peca_embutida_acima',
   },
+  // Fase 7b (P3, 20261101100200): a rodada da semana da equipe grava a rodada como a rotina, o aprendizado e o gestor.
+  {
+    onde: 'agenda_equipe_semana',
+    casou: '1000',
+    vezes: 1,
+    porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_rotina_rodar e agenda_gestor_rodar); não é texto_max nem peca_embutida_acima',
+  },
   // Fase 3 (P6): o custo da simulação do livre de verdade e a ordem das OS do turno no job do Claude Max.
   {
     onde: 'agenda_livre_de_verdade',

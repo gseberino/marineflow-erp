@@ -989,7 +989,11 @@ insert into _definer_da_agenda values
   -- FASE 7b: (7b P2, 20261101100100) o gravador da semana presa (escreve agenda_disponibilidade com semana_dita e o padrão; só o
   -- *grava*, a resposta da equipe e o decidir o chamam; sem grant a ninguém, nem service_role). O dia curto, a semana perguntada, os
   -- dias declarados, a chance de falta e a semana dita são invoker. agenda_fase7b_disponibilidade.sql prova as portas.
-  ('_agenda_equipe_dias_gravar');
+  ('_agenda_equipe_dias_gravar'),
+  -- (7b P3, 20261101100200) a rodada da semana da equipe (registra e enfileira a pergunta à equipe, grava as perguntas ao dono, a lista
+  -- da rotina pela regra d14, o resumo da semana e a rodada; só o service_role, pelo task-automations). A leitura da resposta, as
+  -- previstas, o texto e o motivo do dono são invoker. agenda_fase7b_pergunta.sql prova as portas.
+  ('agenda_equipe_semana');
   -- FASE 7b: fim
 
 insert into _resultado

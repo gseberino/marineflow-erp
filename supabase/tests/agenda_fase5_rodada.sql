@@ -169,9 +169,11 @@ begin
     -- recriadas de novo em 20261029100600, só com blocos da Fase 6 fora dos da Fase 5)
     -- FASE 7 (7a P4): e os blocos "-- FASE 7: … fim" (agenda_decidir foi recriada de novo em 20261031100300, com o despacho das
     -- perguntas do gestor fora dos da Fase 5; o Q7a de agenda_fase7a_perguntas.sql confere a cópia)
-    if not v_bloco and l ~ '^\s*-- FASE [567]:' and l !~ '^\s*-- FASE [567]: fim' then v_bloco := true; continue; end if;
+    -- FASE 7b: (7b P3) e os blocos "-- FASE 7b: … fim" (a 20261101100200 recria de novo, só acréscimo): a régua aceita "7b"
+    -- FASE 7b: fim
+    if not v_bloco and l ~ '^\s*-- FASE [567]b?:' and l !~ '^\s*-- FASE [567]b?: fim' then v_bloco := true; continue; end if;
     if v_bloco then
-      if l ~ '^\s*-- FASE [567]: fim' then v_bloco := false; end if;
+      if l ~ '^\s*-- FASE [567]b?: fim' then v_bloco := false; end if;
       continue;
     end if;
     v_b := v_b || l;

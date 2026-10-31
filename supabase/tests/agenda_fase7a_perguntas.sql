@@ -72,9 +72,11 @@ declare
   v_b text[] := '{}'; v_bloco boolean := false; l text;
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
-    if not v_bloco and l ~ '^\s*-- FASE 7:' and l !~ '^\s*-- FASE 7: fim' then v_bloco := true; continue; end if;
+    -- FASE 7b: (7b P3) e os blocos "-- FASE 7b: … fim" (a 20261101100200 recria de novo, só acréscimo): a régua aceita "7b"
+    -- FASE 7b: fim
+    if not v_bloco and l ~ '^\s*-- FASE 7b?:' and l !~ '^\s*-- FASE 7b?: fim' then v_bloco := true; continue; end if;
     if v_bloco then
-      if l ~ '^\s*-- FASE 7: fim' then v_bloco := false; end if;
+      if l ~ '^\s*-- FASE 7b?: fim' then v_bloco := false; end if;
       continue;
     end if;
     v_b := v_b || l;

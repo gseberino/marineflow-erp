@@ -802,10 +802,12 @@ begin
   v_novo := replace(v_novo, E'\r\n', E'\n');
   -- FASE 7 (7a P7): recriada de novo em 20261031100600 (os ramos estimar, dupla e gestor e quem saiu da equipe), com blocos
   -- "-- FASE 7: … -- FASE 7: fim" (um deles dentro do laço, com 4 espaços): saem antes, linha a linha (o fim pelo prefixo)
+  -- FASE 7b: (7b P3) e os blocos "-- FASE 7b: … fim" (a 20261101100200 recria de novo, só acréscimo): a régua é "FASE 7b?"
+  -- FASE 7b: fim
   v_novo := array_to_string(array(
-    select t.l from (select u.l, u.o, u.l ~ '^\s*-- FASE 7: fim' as fim,
-                            sum(case when u.l ~ '^\s*-- FASE 7:' and u.l !~ '^\s*-- FASE 7: fim' then 1
-                                     when u.l ~ '^\s*-- FASE 7: fim' then -1 else 0 end) over (order by u.o) as nivel
+    select t.l from (select u.l, u.o, u.l ~ '^\s*-- FASE 7b?: fim' as fim,
+                            sum(case when u.l ~ '^\s*-- FASE 7b?:' and u.l !~ '^\s*-- FASE 7b?: fim' then 1
+                                     when u.l ~ '^\s*-- FASE 7b?: fim' then -1 else 0 end) over (order by u.o) as nivel
                        from unnest(string_to_array(v_novo, E'\n')) with ordinality u(l, o)) t
      where t.nivel = 0 and not t.fim order by t.o), E'\n');
   -- FASE 7 (7a P7): fim

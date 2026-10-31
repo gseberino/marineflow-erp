@@ -137,9 +137,11 @@ begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
     -- FASE 7 (7a P7): os blocos "-- FASE 7: … -- FASE 7: fim" também saem (a 20261031100600 recria agenda_desfazer e agenda_saude copiando a
     -- definição mais nova: só acréscimo; o R9 de agenda_fase7a_rodada.sql confere a cópia); o fim é lido pelo prefixo
-    if not v_f7 and l ~ '^\s*-- FASE 7:' and l !~ '^\s*-- FASE 7: fim' then v_f7 := true; continue; end if;
+    -- FASE 7b: (7b P3) e os blocos "-- FASE 7b: … fim" (a 20261101100200 recria de novo, só acréscimo): a régua aceita "7b"
+    -- FASE 7b: fim
+    if not v_f7 and l ~ '^\s*-- FASE 7b?:' and l !~ '^\s*-- FASE 7b?: fim' then v_f7 := true; continue; end if;
     if v_f7 then
-      if l ~ '^\s*-- FASE 7: fim' then v_f7 := false; end if;
+      if l ~ '^\s*-- FASE 7b?: fim' then v_f7 := false; end if;
       continue;
     end if;
     -- FASE 7 (7a P7): fim
