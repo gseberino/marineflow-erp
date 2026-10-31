@@ -19,7 +19,8 @@
 --       teste, o de 1 pessoa (12) e a dupla acrescentada (14) também; sem dk, a conta de antes
 --   M4  o novato (_agenda_e_novato) e quem vem sob demanda (_agenda_e_sob_demanda); o Bruno nunca sozinho num meio-dia
 --   M5  o dono técnico: sem dono_como_tecnico, nunca numa vaga; com ele, por último, nos dias de campo dele, e o serviço acaba antes
---   M5b o teto do dono com a linha: em teste e ligado 5 meios-dias de turno por semana; desligado 8; o aprendido acima de 0,50 não passa
+--   M5b o teto do dono com a linha: ligado 5 meios-dias de turno por semana; em teste e desligado 8 (correção da revisão da 7b, achado 14);
+--       ligado, o aprendido acima de 0,50 não passa
 --   M6  o sábado: so_prazo + ligado = Vanderlei com sáb 21/11 de manhã e o texto; em teste nenhuma alocação no sábado e a linha "Em
 --       teste"; nunca e desligado = nada; sem prazo = nada; nunca à tarde, nunca o 1º passo
 --   M7  o validador: a regra 6 com a manhã de sábado oferecida (ligado) e sem ela; o sábado não conta como dia parado (regra 13)
@@ -659,6 +660,10 @@ begin
     -- o aprendido acima de 0,50 (0,70) em uso não passa da metade; o abaixo (0,40) vale
     update public.agenda_config set modo_dias = 'sombra', modo_aprendizado = 'ligado',
            aprendizado_ligados = (select array_agg(distinct x) from unnest(aprendizado_ligados || array['capacidade_dono']) x) where id;
+    -- FASE 7b: (correção da revisão da 7b, achado 14) a meia capacidade (e o aprendido que não passa dela) só com modo_dias ligado:
+    -- em teste o teto do dono é o de antes (a linha de cima, de antes, põe sombra)
+    update public.agenda_config set modo_dias = 'ligado' where id;
+    -- FASE 7b: fim
     insert into public.agenda_aprendizado (item, chave, nivel, padrao, em_uso, n_min, estado, calculado_em, em_uso_desde)
     values ('capacidade_dono', 'dono', 'dono', 0.80, 0.70, 4, 'em_uso', now(), now())
     on conflict (item, chave) do update set em_uso = 0.70, estado = 'em_uso', em_uso_desde = now(), travado_ate = null;
@@ -668,8 +673,10 @@ begin
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
-  v_res := pg_temp.ok(v_res, 'M5b o teto do dono com a linha: com modo_dias em teste ou ligado, meia capacidade (0,50: 5 meios-dias de turno na semana); desligado, o de antes (0,80: 8); o aprendido acima de 0,50 não passa, o abaixo vale',
-    v_t = 'sombra 0.50 5; ligado 0.50 5; desligado 0.80 8; aprendido 0,70: 0.50; aprendido 0,40: 0.40', v_t);
+  -- FASE 7b: (correção da revisão da 7b, achado 14) em teste (sombra) o teto do dono é o de antes (0,80: 8); a meia capacidade só ligado
+  v_res := pg_temp.ok(v_res, 'M5b o teto do dono com a linha: com modo_dias ligado, meia capacidade (0,50: 5 meios-dias de turno na semana); em teste e desligado, o de antes (0,80: 8); ligado, o aprendido acima de 0,50 não passa, o abaixo vale',
+    v_t = 'sombra 0.80 8; ligado 0.50 5; desligado 0.80 8; aprendido 0,70: 0.50; aprendido 0,40: 0.40', v_t);
+  -- FASE 7b: fim
   perform pg_temp.gravar(v_res);
 end
 $m5$;
@@ -790,19 +797,23 @@ declare
   v_novo text;
   v_n    int;
 begin
+  -- FASE 7b: (correção da revisão da 7b) a correção 20261101100800 recria _agenda_carga_da_pessoa (+1 bloco), _agenda_contexto (+1) e
+  -- agenda_propor (+1; os outros 2 ficam dentro de blocos da 7b, com a marca de dentro, e saem junto com eles); os blocos dela de
+  -- fora também são "-- FASE 7b:" (tirados todos, o corpo de antes da 7b)
+  -- FASE 7b: fim
   for f in select * from (values
       ('os_duracao_sugerida', 'public.os_duracao_sugerida(uuid)', 'mig_correcao_fase7a', '20261031100980', 1),
       ('agenda_meios_da_os', 'public.agenda_meios_da_os(uuid, date)', 'mig_correcao2_fase7a', '20261031100985', 3),
       ('_agenda_classe_da_os', 'public._agenda_classe_da_os(jsonb, jsonb, date, boolean, boolean)', 'mig_correcao2_fase7a', '20261031100985', 2),
       ('_agenda_tecnicos_da_grade', 'public._agenda_tecnicos_da_grade(date)', 'mig_correcao2_fase7a', '20261031100985', 1),
-      ('_agenda_carga_da_pessoa', 'public._agenda_carga_da_pessoa(uuid)', 'mig_dono_fase6', '20261029100400', 1),
+      ('_agenda_carga_da_pessoa', 'public._agenda_carga_da_pessoa(uuid)', 'mig_dono_fase6', '20261029100400', 2),
       ('_agenda_gestor_pessoa_meios', 'public._agenda_gestor_pessoa_meios(uuid, date, jsonb)', 'mig_correcao_fase7a', '20261031100980', 1),
-      ('_agenda_contexto', 'public._agenda_contexto(date, date, date, uuid[], uuid[])', 'mig_teto_fase7a', '20261031100400', 5),
+      ('_agenda_contexto', 'public._agenda_contexto(date, date, date, uuid[], uuid[])', 'mig_teto_fase7a', '20261031100400', 6),
       ('_agenda_tentar_bloco', 'public._agenda_tentar_bloco(jsonb, boolean[], integer[], integer[], integer[], integer[], integer[], integer[], integer[], integer[], integer[], jsonb, integer, boolean, integer)', 'mig_teto_fase7a', '20261031100400', 10),
       ('_agenda_melhor', 'public._agenda_melhor(jsonb, jsonb)', 'mig_motor_fase2', '20261025100200', 1),
       ('_agenda_encaixar', 'public._agenda_encaixar(jsonb, jsonb, jsonb)', 'mig_teto_fase7a', '20261031100400', 9),
       ('_agenda_validar_itens', 'public._agenda_validar_itens(jsonb, jsonb, date, timestamptz, boolean, jsonb)', 'mig_sinal_sabado_fase7a', '20261031100900', 4),
-      ('agenda_propor', 'public.agenda_propor(text, date, date, uuid[], jsonb, boolean, text, uuid, date, timestamptz)', 'mig_encaixe_fase7a', '20261031100700', 7),
+      ('agenda_propor', 'public.agenda_propor(text, date, date, uuid[], jsonb, boolean, text, uuid, date, timestamptz)', 'mig_encaixe_fase7a', '20261031100700', 8),
       ('_agenda_gestor_sabado', 'public._agenda_gestor_sabado(date, timestamptz)', 'mig_sinal_sabado_fase7a', '20261031100900', 1))
       as x(nome, sig, mig, versao, blocos) loop
     v_mig := coalesce(current_setting('agenda_teste.' || f.mig, true), '');

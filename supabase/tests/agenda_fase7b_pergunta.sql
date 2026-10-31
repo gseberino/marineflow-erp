@@ -575,8 +575,10 @@ begin
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
-  v_res := pg_temp.ok(v_res, 'Q6b o dono_sem_padrao: a pergunta dias_semana (chave dias_semana:<dono>:2026-11-16, perda_em qui 12/11, 3 opções, recomendo a 2); a opção 2 cria o padrão do dono {1..5} origem dono sem frequência ("Anotei: na semana de 16/11 você fica em campo de seg a sex.") e na quinta seguinte o motivo sumiu',
-    a = format('dias_semana:%s:2026-11-16/ligado/2026-11-12/2/3/["dono_sem_padrao"] | Anotei: na semana de 16/11 você fica em campo de seg a sex. | {1,2,3,4,5}:dono:sem_frequencia | sem_motivo', v_dono)
+  -- FASE 7b: (correção da revisão da 7b, achados 3 e 10) a resposta da opção 2 diz que é toda semana
+  v_res := pg_temp.ok(v_res, 'Q6b o dono_sem_padrao: a pergunta dias_semana (chave dias_semana:<dono>:2026-11-16, perda_em qui 12/11, 3 opções, recomendo a 2); a opção 2 cria o padrão do dono {1..5} origem dono sem frequência ("Anotei: você fica em campo de seg a sex, toda semana a partir de agora. Se mudar, me diga.") e na quinta seguinte o motivo sumiu',
+    a = format('dias_semana:%s:2026-11-16/ligado/2026-11-12/2/3/["dono_sem_padrao"] | Anotei: você fica em campo de seg a sex, toda semana a partir de agora. Se mudar, me diga. | {1,2,3,4,5}:dono:sem_frequencia | sem_motivo', v_dono)
+    -- FASE 7b: fim
     and b like 'Semana de 16/11: conto com Alex de seg a sex (você disse). % de você em campo e eu não sei seus dias: conto que você só abre e fecha. Se mudar algo, me diga (ex.: fico em campo seg a qua; Mateus vem ter e qua). 1) Fica assim; 2) Fico em campo de seg a sex (recomendo); 3) Nenhum dia: só abro e fecho.'
     and b like '%Rodrigo (OS-00096, diagnóstico)%', a || ' / ' || coalesce(b, '-'));
 
@@ -983,8 +985,11 @@ begin
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
-  v_res := pg_temp.ok(v_res, 'Q11b a chamada (inteira), a dias_semana e o telefone (curtos) na mesma linha, pergunta_ids com as 3; o texto_curto só pelo nome; a (e) fica com a de fornecedor',
-    a = '3/ligado/fornecedores_prazo'
+  -- FASE 7b: (correção da revisão da 7b, achado 17) a dias_semana que vai só como "Também: …" não conta como mostrada (fora de
+  -- pergunta_ids): pergunta_ids com a chamada e o telefone
+  v_res := pg_temp.ok(v_res, 'Q11b a chamada (inteira), a dias_semana e o telefone (curtos) na mesma linha, pergunta_ids com a chamada e o telefone (a dias_semana curta não conta como mostrada); o texto_curto só pelo nome; a (e) fica com a de fornecedor',
+    a = '2/ligado/fornecedores_prazo'
+    -- FASE 7b: fim
     and b like 'Agenda: Na agenda conto com Alex: % Também: os dias da semana de 16/11 (responda em *agenda pendências*). Também: o telefone do Alex (sem ele não mando a ficha). || Agenda, equipe: a equipe da agenda está certa?; os dias da semana de 16/11; o telefone do Alex. *agenda pendências* mostra.',
     a || ' / ' || coalesce(b, '-'));
 
@@ -1023,12 +1028,16 @@ declare
   v_novo text;
   v_n    int;
 begin
+  -- FASE 7b: (correção da revisão da 7b) a correção 20261101100800 recria agenda_resposta_da_equipe, agenda_decidir, agenda_desfazer e
+  -- _agenda_linhas_do_fechamento: os blocos dela de fora são "-- FASE 7b:" (agenda_desfazer +3); os de dentro de um bloco da 7b têm a
+  -- marca de dentro e saem junto com ele (não contam aqui)
+  -- FASE 7b: fim
   for f in select * from (values
       ('_agenda_equipe_registrar', 'public._agenda_equipe_registrar(uuid, date, text, text, timestamptz, date, text)', 'mig_equipe_fase3', '20261026100300', 1),
       ('_agenda_rotina_sem_resposta', 'public._agenda_rotina_sem_resposta(date, timestamptz)', 'mig_equipe_fase3', '20261026100300', 1),
       ('agenda_resposta_da_equipe', 'public.agenda_resposta_da_equipe(text, text, text, timestamptz)', 'mig_equipe_fase3', '20261026100300', 4),
       ('agenda_decidir', 'public.agenda_decidir(uuid, smallint, uuid, text, text, date, timestamptz)', 'mig_perguntas_fase7a', '20261031100300', 2),
-      ('agenda_desfazer', 'public.agenda_desfazer(uuid, uuid, text, date, timestamptz)', 'mig_rodada_fase7a', '20261031100600', 2),
+      ('agenda_desfazer', 'public.agenda_desfazer(uuid, uuid, text, date, timestamptz)', 'mig_rodada_fase7a', '20261031100600', 5),
       ('_agenda_ver_equipe', 'public._agenda_ver_equipe(date)', 'mig_acompanhamento_fase3', '20261026100500', 2),
       ('_agenda_linhas_do_fechamento', 'public._agenda_linhas_do_fechamento(date)', 'mig_correcao2_fase7a', '20261031100985', 4),
       ('_agenda_gestor_equipe', 'public._agenda_gestor_equipe(date, timestamptz)', 'mig_correcao_fase7a', '20261031100980', 1))

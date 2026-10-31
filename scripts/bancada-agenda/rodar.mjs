@@ -268,6 +268,13 @@ const FIXTURES_COMO_TEXTO = [
   // agenda_gestor_rodar (mig_compras_fase7a), _agenda_gestor_dia_gravar (mig_base_fase7a), _agenda_ver_gestor (mig_correcao2_fase7a),
   // agenda_livre_de_verdade e _agenda_gestor_corte (mig_correcao_fase7a).
   ['agenda_teste.mig_pergunta_fase7b', '../../supabase/migrations/20261101100200_agenda_fase7b_pergunta_semanal.sql'],
+  // Fase 7b (correção da revisão, 20261101100800): as fontes das recriadas que ainda não estavam acima — o P2 (agenda_rascunho_disponibilidade
+  // e _agenda_equipe_dias_gravar), o P4 (_agenda_carga_da_pessoa, _agenda_contexto e agenda_propor) e o P6 (_agenda_ver_gestor,
+  // agenda_livre_de_verdade, _agenda_quem_chamar e _agenda_gestor_dupla) —, para o X0 de agenda_fase77b_correcao.sql conferir que as
+  // cópias só acrescentam os blocos "-- FASE 7b: (correção da revisão da 7b". A do P3 (mig_pergunta_fase7b) já está acima.
+  ['agenda_teste.mig_disponibilidade_fase7b', '../../supabase/migrations/20261101100100_agenda_fase7b_disponibilidade.sql'],
+  ['agenda_teste.mig_motor_fase7b', '../../supabase/migrations/20261101100300_agenda_fase7b_motor.sql'],
+  ['agenda_teste.mig_quem_chamar_fase7b', '../../supabase/migrations/20261101100500_agenda_fase7b_quem_chamar.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

@@ -498,8 +498,10 @@ begin
     and a -> 'prazo' -> 0 ->> 'fim_com_ajudante' = '2026-11-25' and (a -> 'prazo' -> 0 ->> 'pm')::int = 15
     and jsonb_array_length(a -> 'prazo' -> 0 -> 'meios') = 8 and a -> 'prazo' -> 0 -> 'meios' -> 0 ->> 'dia' = '2026-11-19'
     and pg_temp.linha(a ->> 'texto', '• Vanderlei') = '• Vanderlei (prazo qua 25/11): com Alex sozinho termina qua 02/12; com um ajudante junto dele de qui 19 a qua 25/11 (8 meios-dias), termina no prazo. Se chamar, diga: Vanderlei com dupla; Mateus vem qui 19 a qua 25/11.'
+    -- FASE 7b: (correção da revisão da 7b, achado 25) a parte da pergunta da quinta diz também o que falar
     and exists (select 1 from jsonb_array_elements(a -> 'partes') p where p ->> 'tipo' = 'prazo'
-                   and p ->> 'texto' = 'Vanderlei só cumpre o prazo de qua 25/11 com um ajudante junto de Alex de qui 19 a qua 25/11.')
+                   and p ->> 'texto' = 'Vanderlei só cumpre o prazo de qua 25/11 com um ajudante junto de Alex de qui 19 a qua 25/11. Se chamar, diga: Vanderlei com dupla; Mateus vem qui 19 a qua 25/11.')
+    -- FASE 7b: fim
     and not exists (select 1 from jsonb_array_elements(a #> '{capacidade,sem_lugar}') s where s ->> 'os' = v_van::text),
     concat_ws(' || ', (a -> 'prazo')::text, a ->> 'texto'));
   v_res := pg_temp.ok(v_res, 'C3b2 com o fim de 1 pessoa dentro do prazo (qua 04/12): nada no prazo; com o de 2 pessoas também depois do prazo (sex 20/11): nada no prazo, o Vanderlei fica na capacidade (passa do prazo)',
@@ -902,9 +904,13 @@ begin
   end;
   v_res := pg_temp.ok(v_res, 'C7a o foco *agenda gestor* sem a conta do dia: "Quem chamar: ainda não fiz a conta (faço todo dia útil no fim da tarde)."',
     a like '%' || E'\n' || 'Quem chamar: ainda não fiz a conta (faço todo dia útil no fim da tarde).' || E'\n' || '%', a);
-  v_res := pg_temp.ok(v_res, 'C7b ligado: o bloco "Quem chamar" do diário (o mesmo texto do passo chamar), depois do "Perguntei antes de marcar" e antes do "Fora"; o "Pode precisar de dupla" do Lenine vira a frase da dupla de 1 pessoa, com as datas',
+  -- FASE 7b: (correção da revisão da 7b, achados 1, 9 e 15) o bloco vai no fim que sempre entra: depois do conteúdo da 7a (o "Fora") e
+  -- logo antes do "Como eu conto"
+  v_res := pg_temp.ok(v_res, 'C7b ligado: o bloco "Quem chamar" do diário (o mesmo texto do passo chamar), no fim que sempre entra — depois do "Fora" e logo antes do "Como eu conto"; o "Pode precisar de dupla" do Lenine vira a frase da dupla de 1 pessoa, com as datas',
     position((q ->> 'texto') in b) > 0
-    and position('Quem chamar (só sugiro; quem chama é você):' in b) < coalesce(nullif(position(E'\nFora: ' in b), 0), length(b) + 1)
+    and position(E'\nFora: ' in b) > 0 and position('Quem chamar (só sugiro; quem chama é você):' in b) > position(E'\nFora: ' in b)
+    and position(E'\nComo eu conto: ' in b) > position('Quem chamar (só sugiro; quem chama é você):' in b)
+    -- FASE 7b: fim
     and b not like '%Pode precisar de dupla%'
     and b like '%• Lenine: ter 10 a ter 17/11, Alex — 6 dias (estimativa minha). Nos 2 primeiros meios-dias (ter 10/11, manhã e tarde) a troca do banco de baterias pede 2 pessoas e só Alex está na equipe: se chamar um ajudante, me diga (ex.: Mateus vem ter 10/11).%',
     b);
@@ -1037,8 +1043,12 @@ begin
   for f in select * from (values
       ('agenda_gestor_rodar', 'public.agenda_gestor_rodar(date, timestamptz)', 'mig_compras_fase7a', '20261031100800', 1),
       ('_agenda_gestor_dia_gravar', 'public._agenda_gestor_dia_gravar(date, text, jsonb, timestamptz)', 'mig_base_fase7a', '20261031100000', 1),
-      ('_agenda_ver_gestor', 'public._agenda_ver_gestor(date)', 'mig_correcao2_fase7a', '20261031100985', 5),
-      ('agenda_livre_de_verdade', 'public.agenda_livre_de_verdade(date, timestamptz)', 'mig_correcao_fase7a', '20261031100980', 2),
+      -- FASE 7b: (correção da revisão da 7b) + os 8 blocos da correção 20261101100800 (também "-- FASE 7b:")
+      ('_agenda_ver_gestor', 'public._agenda_ver_gestor(date)', 'mig_correcao2_fase7a', '20261031100985', 13),
+      -- FASE 7b: fim
+      -- FASE 7b: (correção da revisão da 7b) + os 3 blocos da correção 20261101100800 (também "-- FASE 7b:")
+      ('agenda_livre_de_verdade', 'public.agenda_livre_de_verdade(date, timestamptz)', 'mig_correcao_fase7a', '20261031100980', 5),
+      -- FASE 7b: fim
       ('_agenda_dias_semana_motivos', 'public._agenda_dias_semana_motivos(date, date)', 'mig_pergunta_fase7b', '20261101100200', 2),
       ('_agenda_gestor_corte', 'public._agenda_gestor_corte(uuid, date, timestamptz)', 'mig_correcao_fase7a', '20261031100980', 2))
       as x(nome, sig, mig, versao, blocos) loop

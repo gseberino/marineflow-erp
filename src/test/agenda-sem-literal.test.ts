@@ -182,7 +182,9 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
   {
     onde: '_agenda_quem_chamar',
     casou: '1000',
-    vezes: 1,
+    // Fase 7b, correção da revisão (20261101100800): recriada (+1: a mesma cópia; a OS reservada fora do "sem lugar", os meios-dias sem
+    // os do dono, o prazo da dupla dita e o que dizer no prazo).
+    vezes: 2,
     porque: 'segundos → milissegundos (o custo das duas contas do motor no resultado, ms, como agenda_livre_de_verdade); não é texto_max nem peca_embutida_acima',
   },
   // Fase 7b (P5, 20261101100400): a saúde dos dias da equipe (a chave equipe_dias de agenda_saude) nomeia as chaves como os outros
@@ -201,7 +203,8 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     // Correção de 29/10 (revisão do lote, 20261030100500): recriada de novo (+1: a mesma cópia).
     // Fase 7a, correção da revisão (20261031100980): recriada de novo, com o teto da equipe e o dono fora da conta (+1: a mesma cópia).
     // Fase 7b (P6, 20261101100500): recriada de novo, com a linha de quem chamar (+1: a mesma cópia).
-    vezes: 5,
+    // Fase 7b, correção da revisão (20261101100800): recriada de novo, com a linha de quem chamar fora do corte (+1: a mesma cópia).
+    vezes: 6,
     porque: 'segundos → milissegundos (o custo da simulação no resultado, ms; a meta < 2 s é do teste); não é texto_max nem peca_embutida_acima',
   },
   {

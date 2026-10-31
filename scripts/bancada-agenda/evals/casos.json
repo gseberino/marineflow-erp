@@ -3879,7 +3879,7 @@
         "datas_so_do_banco": true,
         "os_so_do_banco": true,
         "banco": {
-          "rascunho_aberto": 0,
+          "rascunho_aberto": 1,
           "diff": []
         },
         "agenda": {
@@ -3906,7 +3906,8 @@
         ],
         "nao_afirma_gravado": true,
         "texto_contem": [
-          "me diga de novo quais dias"
+          "Rafael: não vem de seg a sex",
+          "*grava*"
         ]
       }
     },

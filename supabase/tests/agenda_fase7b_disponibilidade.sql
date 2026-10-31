@@ -393,12 +393,21 @@ begin
       and (select bool_and(d.nota like 'Você disse que %vem (semana de 16/11)') from public.agenda_disponibilidade d where d.payee_id = v_mateus)
       and v ->> 'texto' = 'Anotei: na semana de 16/11 Mateus vem qua e qui.',
       v::text);
+    -- FASE 7b: (correção da revisão da 7b, achados 3 e 10) o padrão do dono só muda pela opção "toda semana" da pergunta dos dias
+    -- (agenda_decidir liga agenda.dias_padrao_do_dono só nessa chamada; aqui, à mão)
+    perform set_config('agenda.dias_padrao_do_dono', 'sim', true);
+    -- FASE 7b: fim
     v := public._agenda_equipe_dias_gravar(v_dono, c_s, '{1,2,3,4,5}', false, 'dono', 'opção 2', c_agora);
-    v_res := pg_temp.ok(v_res, 'G15b o dono sem padrão, "fico em campo de seg a sex": cria o padrão dele (seg a sex, origem dono, sem frequência, "você disse em 05/11")',
+    -- FASE 7b: (correção da revisão da 7b, achados 3 e 10) de volta a vazio
+    perform set_config('agenda.dias_padrao_do_dono', '', true);
+    -- FASE 7b: fim
+    v_res := pg_temp.ok(v_res, 'G15b o dono sem padrão, "fico em campo de seg a sex" (a opção da pergunta dos dias): cria o padrão dele (seg a sex, origem dono, sem frequência, "você disse em 05/11") e diz que é toda semana',
       (v ->> 'padrao_mudou')::boolean and pg_temp.padroes(v_dono) = '{1,2,3,4,5}:dono'
       and exists (select 1 from public.agenda_disponibilidade d where d.payee_id = v_dono and d.substituida_em is null and d.dias_semana is not null
                                                                  and d.frequencia is null and d.nota = 'você disse em 05/11' and d.turno is null)
-      and v ->> 'texto' = 'Anotei: na semana de 16/11 você fica em campo de seg a sex.',
+      -- FASE 7b: (correção da revisão da 7b, achados 3 e 10) a resposta diz que é toda semana
+      and v ->> 'texto' = 'Anotei: você fica em campo de seg a sex, toda semana a partir de agora. Se mudar, me diga.',
+      -- FASE 7b: fim
       v::text);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
@@ -613,7 +622,10 @@ begin
       and pg_temp.semana(v_dono, c_s) = '16/11=disponivel 17/11=so_pontas 18/11=disponivel 19/11=so_pontas'
       and (select bool_and(d.origem = 'dono' and d.nota like 'Você disse que %vem (semana de 16/11)') from public.agenda_disponibilidade d
             where d.payee_id = v_rafael and d.semana_dita = c_s)
-      and pg_temp.padroes(v_rafael) = '{1,2,4}:dono' and pg_temp.padroes(v_dono) = '{1,3}:dono'
+      -- FASE 7b: (correção da revisão da 7b, achados 3 e 10) a semana dita pelo dono no rascunho prende só a semana: os padrões não
+      -- mudam (o do Rafael continua o dele; o dono continua sem padrão)
+      and pg_temp.padroes(v_rafael) = '{1,2,3,4,5}:diarista' and pg_temp.padroes(v_dono) = '-'
+      -- FASE 7b: fim
       and exists (select 1 from public.agenda_perguntas q where q.id = v_q and q.estado = 'resolvida' and q.resolvida_motivo = 'você disse os dias')
       and (select bool_and(d.pergunta_id = v_q) from public.agenda_disponibilidade d where d.payee_id = v_dono and d.semana_dita = c_s)
       and v ->> 'texto' like 'Gravado. Agora:' || E'\n' || '• Rafael, semana de 16/11: vem seg, ter e qui (e não vem qua e sex).%',
@@ -831,7 +843,10 @@ begin
       ('agenda_capacidade', 'public.agenda_capacidade(date, date, date)', 'mig_correcao_equipe', '20261030100600', 6),
       ('agenda_capacidade_semanal', 'public.agenda_capacidade_semanal(date)', 'mig_correcao_equipe', '20261030100600', 2),
       ('agenda_rascunho_disponibilidade', 'public.agenda_rascunho_disponibilidade(uuid, text, text, text, text, boolean, text, date, text)',
-       'mig_rascunho_fase1', '20261024160600', 4),
+       -- FASE 7b: (correção da revisão da 7b) + 2 blocos da correção 20261101100800 (também "-- FASE 7b:"; o 3º fica dentro de um bloco da
+       -- 7b, com a marca de dentro, e sai junto com ele)
+       'mig_rascunho_fase1', '20261024160600', 6),
+      -- FASE 7b: fim
       ('_agenda_aplicar_disponibilidade', 'public._agenda_aplicar_disponibilidade(uuid, jsonb, text, date)', 'mig_rascunho_fase1', '20261024160600', 3),
       ('agenda_rascunho_gravar', 'public.agenda_rascunho_gravar(uuid, date)', 'mig_compras_fase7a', '20261031100800', 1),
       ('agenda_rascunho_planejar', 'public.agenda_rascunho_planejar(uuid, text, text, jsonb, text, date)', 'mig_leituras_fase5', '20261028100500', 3),

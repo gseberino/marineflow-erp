@@ -185,12 +185,13 @@ begin
     v_e := public.agenda_equipe_semana(date '2026-11-05', (timestamp '2026-11-05 16:45') at time zone 'America/Sao_Paulo');
     v_g := public.agenda_gestor_rodar(date '2026-11-05', (timestamp '2026-11-05 16:53') at time zone 'America/Sao_Paulo');
     select d.chamar into v_dia from public.agenda_gestor_dia d where d.dia = date '2026-11-05';
-    -- o *livre* e os motivos da pergunta da quinta (a semana de 16/11) antes de mexer no texto_max
+    -- o *livre* e os motivos da pergunta da quinta (a semana de 16/11)
     v_livre := public.agenda_livre_de_verdade(date '2026-11-05', (timestamp '2026-11-05 17:00') at time zone 'America/Sao_Paulo') ->> 'texto_completo';
     v_mot := public._agenda_dias_semana_motivos(date '2026-11-16', date '2026-11-05') -> 'motivos';
-    -- o foco inteiro: a carteira da fixture enche o foco e o corte do texto_max (no meio) esconderia o bloco; só para ler
-    update public.agenda_config set texto_max = 3000 where id;
+    -- FASE 7b: (correção da revisão da 7b, achado 1) o foco com o texto_max de sempre: o bloco "Quem chamar" vai no fim que sempre
+    -- entra (antes, o corte do meio o escondia, e este teste subia o texto_max a 3000 só para ler)
     v_foco := public._agenda_ver_gestor(date '2026-11-05') ->> 'texto';
+    -- FASE 7b: fim
     select string_agg(format('%s %s %s', q.tipo, q.modo, split_part(q.chave, ':', 2)), '; ' order by q.chave) into v_nq
       from public.agenda_perguntas q where not (q.id = any (v_q0));
     select string_agg(format('%s %s %s %s', py.name, m.tipo, m.modo, m.estado), '; ' order by py.name, m.tipo) into v_nm
