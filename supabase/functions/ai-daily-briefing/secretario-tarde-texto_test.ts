@@ -692,13 +692,90 @@ Deno.test("Correção da 7a: a coleta repassa as pergunta_ids da linha das pergu
   assertEquals("pergunta_ids" in lidas[2], false);
 });
 
-Deno.test("Correção da 7a: com 3 vagas garantidas e o Secretário cheio, as 3 linhas que perdem hoje entram (a ficha, o cliente, a compra)", () => {
+// (Correção 2 da 7a, 20261031100985: a linha das perguntas do gestor com prazo vem com perda 76 — ganha o desempate das que perdem
+// hoje; antes, 75 com o cliente, ela perdia pelo tipo.) Os textos são os de tamanho real da semana simulada (a mensagem ao cliente da
+// véspera com 364 caracteres, a linha das perguntas com a ficha e os 4 prazos com 379): o teste de antes usava "…" e não media o corte.
+const CLIENTE_REAL = "Mensagem para Lenine (véspera, com a pergunta do acesso), sai agora: \"Bom dia, Lenine! Aqui é o Gustavo, da HBR Marine. " +
+  "Amanhã chegamos o dia todo para o serviço no seu motorhome. Para não perdermos a viagem: onde o seu motorhome vai estar, e a " +
+  "chave fica com quem? Pode responder por aqui mesmo, até por áudio.\". *manda cliente Lenine* ou *segura cliente Lenine*.";
+const PERGUNTAS_REAL = "Agenda: Hoje às 19:30 a ficha de amanhã vai para Alex: Lenine, qui 05/11 o dia todo — dia 1 de 6, pela minha " +
+  "estimativa. 1) Mande (recomendo); 2) Segure a ficha: eu não mando e você fala com ele. Também, sem resposta até qua 04/11 18:00: " +
+  "Flávio (OS-00104) 3,5 dias; Nelson (OS-00112) 4 dias; Vanderlei (OS-00069) 7,5 dias; MP (ORÇ-00095) 1 dia. Espero você (não marco " +
+  "sozinho): Giancarlo (OS-00130).";
+const PERGUNTAS_CURTA = "Agenda: Hoje às 19:30 a ficha de amanhã vai para Alex: Lenine, qui 05/11 o dia todo — dia 1 de 6, pela minha " +
+  "estimativa. Para segurar, me diga. Sem resposta até qua 04/11 18:00, conto: Flávio (OS-00104) 3,5 dias; Nelson (OS-00112) 4 dias; " +
+  "Vanderlei (OS-00069) 7,5 dias; MP (ORÇ-00095) 1 dia. Espero você (não marco sozinho): Giancarlo (OS-00130).";
+const COMPRAS_REAL = "Compras: Sem fornecedor (contei 7 dias úteis): 3 itens de Vanderlei — compre até hoje.";
+// o fechamento de produção de qui 29/10 (3 que ficaram, "sem resposta", fornecedores e o escritório: ~900 caracteres sem a agenda)
+const FICARAM_REAL = [
+  linha("A", "OS-00112 Nelson (Santo Inácio 7.8): 4 itens a comprar até seg 26/10", { faco: "te mando a lista do que falta", alternativa: "já comprei", comandoAlternativo: "feito" }),
+  linha("B", "Marcelo Marco Bertoldi (OS-00038): R$ 16.890,00, venceu 13/10 (16 dias); ainda não entrou"),
+  linha("C", "APOLO INDUSTRIA E COMERCIO DE…: R$ 5.237,99, venceu 16/10 (13 dias); ainda não entrou"),
+];
+const ESCRITORIO_REAL = { propostas: { saidas: 107, entradas: 10, transferencias: 1, outras: 0 }, alertas: 33, regras: 0, debitosSemLoja: 8, entradas: null };
+function cheio(linhas: Linha2[], vagas?: number): DadosDaTarde {
+  return dados({
+    hoje: "2026-11-04", ficaram: FICARAM_REAL, fornecedores: ["Mateus Honório", "Benjamin"], escritorio: ESCRITORIO_REAL,
+    semResposta: [{ phone: "5547900000301", nome: "MP MOTOR HOMES", desde: "10:29", acordei: null },
+                  { phone: "5547900000302", nome: "Jorge Girardon", desde: "10:51", acordei: null }],
+    amanha: { dia: "2026-11-05", itens: [], carteira: { semData: 6 },
+              agenda: { ...comLinhas(linhas), ...(vagas === undefined ? {} : { vagas_garantidas: vagas }) } },
+  });
+}
+
+Deno.test("Correção da 7a (e correção 2): com 3 vagas garantidas e o Secretário cheio, as 3 linhas que perdem hoje entram — a compra, as perguntas do gestor (76, antes do cliente) e o cliente", () => {
   const linhas = [
-    l2("pergunta", "Agenda: Hoje às 19:30 a ficha de amanhã vai para Alex: Lenine, qua 04/11 o dia todo.", 75),
-    l2("cliente", "Mensagem para Lenine (véspera), sai amanhã às 09:00: …", 75),
-    l2("compras", "Compras: Sem fornecedor (contei 7 dias úteis): 3 itens de Vanderlei — compre até hoje.", 80),
+    l2("pergunta", PERGUNTAS_REAL, 76),
+    l2("cliente", CLIENTE_REAL, 75),
+    l2("compras", COMPRAS_REAL, 80),
     l2("dia", "Agenda de hoje: nada marcado.", 70),
   ];
   assertEquals(linhasDaAgendaQueCabem(3, { ...comLinhas(linhas), vagas_garantidas: 3 }).map((l) => `${l.tipo} ${l.perda}`),
-               ["compras 80", "cliente 75", "pergunta 75"]);
+               ["compras 80", "pergunta 76", "cliente 75"]);
+});
+
+Deno.test("Correção 2 da 7a: no corte de 1.000, a linha garantida não sai antes do que é do Secretário e não perde hoje — com o fechamento real de 29/10 (3 que ficaram, ~900 caracteres), a das perguntas do gestor entra na forma curta e o escritório, os fornecedores e o 'sem resposta' saem", () => {
+  const perguntas = { ...l2("pergunta", PERGUNTAS_REAL, 76), texto_curto: PERGUNTAS_CURTA };
+  // sem a agenda: o fechamento de produção, perto do limite
+  const so = textoDaTarde(cheio([]));
+  assert((so.texto?.length ?? 0) > 850 && (so.texto?.length ?? 0) <= LIMITE_DA_TARDE, String(so.texto?.length));
+  // com a linha das perguntas e o cliente garantidos (2 vagas): a das perguntas fica (a de maior perda), na forma curta; o cliente
+  // não cabe junto e sai inteiro; as letras do Secretário continuam
+  const t = textoDaTarde(cheio([perguntas, l2("cliente", CLIENTE_REAL, 75)], 2));
+  assert((t.texto?.length ?? 0) <= LIMITE_DA_TARDE, String(t.texto?.length));
+  assertEquals(t.agenda?.linhas?.map((l) => l.tipo), ["pergunta"]);
+  assertStringIncludes(t.texto ?? "", PERGUNTAS_CURTA);
+  assert(!(t.texto ?? "").includes("Escritório:") && !(t.texto ?? "").includes("Fornecedores esperando") && !(t.texto ?? "").includes("Sem resposta desde hoje"));
+  for (const l of ["*A.*", "*B.*", "*C.*"]) assertStringIncludes(t.texto ?? "", l);
+  assertEquals(t.letras.map((l) => l.letra), ["A", "B", "C"]);
+  // como em produção hoje (o Alex sem telefone, sem a ficha na linha), a compra (80) e as perguntas (76): as duas cabem no enxuto
+  const semFicha = { ...l2("pergunta", PERGUNTAS_REAL.replace(/^Agenda: Hoje às 19:30 .*? Também, s/, "Agenda: S"), 76),
+                     texto_curto: PERGUNTAS_CURTA.replace(/^Agenda: Hoje às 19:30 .*? Para segurar, me diga\. /, "Agenda: ") };
+  const t2 = textoDaTarde(cheio([semFicha, l2("compras", COMPRAS_REAL, 80)], 2));
+  assert((t2.texto?.length ?? 0) <= LIMITE_DA_TARDE, String(t2.texto?.length));
+  assertEquals(t2.agenda?.linhas?.map((l) => l.tipo), ["compras", "pergunta"]);
+  assertStringIncludes(t2.texto ?? "", "Agenda: Sem resposta até qua 04/11 18:00, conto: Flávio (OS-00104) 3,5 dias;");
+});
+
+Deno.test("Correção 2 da 7a: sem vaga garantida (o banco antes da 7a, a sombra), o corte é o de antes — as linhas da agenda saem antes do escritório, e a forma curta não é usada", () => {
+  const perguntas = { ...l2("pergunta", PERGUNTAS_REAL, 76), texto_curto: PERGUNTAS_CURTA };
+  const t = textoDaTarde(cheio([perguntas], undefined));
+  assertEquals(t.agenda?.linhas ?? [], []);
+  assertStringIncludes(t.texto ?? "", "Escritório:");
+  assertEquals(t.texto, textoDaTarde(cheio([], undefined)).texto);
+  // 0 que ficaram (vaga comum): a linha cabe inteira, sem a forma curta e com o escritório
+  const t2 = textoDaTarde({ ...cheio([perguntas], undefined), ficaram: [] });
+  assertStringIncludes(t2.texto ?? "", PERGUNTAS_REAL);
+  assertStringIncludes(t2.texto ?? "", "Escritório:");
+});
+
+Deno.test("Correção 2 da 7a: a coleta repassa a forma curta da linha (só string não vazia e mais curta que a inteira)", () => {
+  const lidas = linhasDaAgenda([
+    { tipo: "pergunta", texto: PERGUNTAS_REAL, texto_curto: PERGUNTAS_CURTA, perda: 76, pergunta_id: "q1", pergunta_ids: ["q1", "q2"], acao_ids: [], modo: "ligado" },
+    { tipo: "pergunta", texto: "Agenda: curta.", texto_curto: "Agenda: muito mais longa que a inteira.", perda: 76, pergunta_id: "q3", acao_ids: [], modo: "ligado" },
+    { tipo: "cliente", texto: CLIENTE_REAL, texto_curto: 7, perda: 75, pergunta_id: null, acao_ids: [], modo: "ligado" },
+  ]);
+  assertEquals(lidas[0].texto_curto, PERGUNTAS_CURTA);
+  assertEquals("texto_curto" in lidas[1], false);
+  assertEquals("texto_curto" in lidas[2], false);
 });

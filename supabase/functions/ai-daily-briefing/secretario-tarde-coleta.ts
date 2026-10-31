@@ -436,6 +436,11 @@ export function linhasDaAgenda(v: unknown): LinhaDaAgenda[] {
       ...(Array.isArray(x.pergunta_ids) && x.pergunta_ids.some((a) => typeof a === "string")
         ? { pergunta_ids: x.pergunta_ids.filter((a): a is string => typeof a === "string") }
         : {}),
+      // (correção 2 da 7a, 20261031100985) a forma curta da linha das perguntas do gestor, para o Secretário cheio: só uma string
+      // não vazia, mais curta que a inteira
+      ...(typeof x.texto_curto === "string" && x.texto_curto.trim() && x.texto_curto.trim().length < x.texto.trim().length
+        ? { texto_curto: x.texto_curto.replace(/\s+/g, " ").trim() }
+        : {}),
     });
   }
   return r;

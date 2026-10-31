@@ -141,7 +141,7 @@ export interface LinhaDaAgenda {
   tipo: (typeof TIPOS_DE_LINHA_DA_AGENDA)[number];
   /** o texto pronto do banco ("Agenda, preciso de você. …", "Agenda de hoje: …", "Agenda: publiquei a semana …") */
   texto: string;
-  /** 0–100: o que se perde sem a linha (decisão 100/80/50, compras 80/65/45, cliente 75/40, dia 70, gestor 65, semana 60, ppc 55, diária 50/80, conclusão 45, mudanças 40, pergunta 30, comissão 20) */
+  /** 0–100: o que se perde sem a linha (decisão 100/80/50, compras 80/65/45, as perguntas do gestor com prazo 76 (Fase 7a, correção 2), cliente 75/40, dia 70, gestor 65, semana 60, ppc 55, diária 50/80, conclusão 45, mudanças 40, pergunta 30, comissão 20) */
   perda: number;
   /** a pergunta que a linha mostra (a mostrada_vezes sobe quando o fechamento sai) */
   pergunta_id: string | null;
@@ -151,6 +151,12 @@ export interface LinhaDaAgenda {
    * Ausente nas outras linhas.
    */
   pergunta_ids?: string[];
+  /**
+   * (30/10/2026, Fase 7a, correção 2 da revisão, migration 20261031100985) A mesma linha na forma curta, com as MESMAS perguntas (a
+   * linha das perguntas do gestor: a ficha sem as opções, cada uma pelo prazo e pelo que ele faz sem resposta). O fechamento cheio a
+   * usa antes de tirar a linha garantida (textoDaTarde). Ausente nas outras linhas.
+   */
+  texto_curto?: string;
   /** as ações que a linha conta (ficam contadas quando o fechamento sai) */
   acao_ids: string[];
   modo: "sombra" | "ligado";
@@ -435,7 +441,8 @@ function cabecaDoDia(hoje: string): string {
   return `${nomeDoDia(hoje).toLowerCase()}, ${ddmm(hoje)}`;
 }
 
-function textoDoFechamento(d: DadosDaTarde, curto: boolean, semanaMax: number, linhasMax = Infinity): TextoDaTarde {
+// (Fase 7a, correção 2) curtas: as linhas da agenda que têm a forma curta (texto_curto) vão nela — só no fechamento enxuto
+function textoDoFechamento(d: DadosDaTarde, curto: boolean, semanaMax: number, linhasMax = Infinity, curtas = false): TextoDaTarde {
   const topo = topoDaTarde(d, curto);
   // (24/10/2026, Fase 2, P5) as linhas do plano (decisão, o dia, a semana publicada, o que mudou, uma pergunta), nas vagas
   // de REGRAS.maxManha, da maior perda para a menor: contam como "há algo" (é a agenda falando com o dono)
@@ -460,7 +467,7 @@ function textoDoFechamento(d: DadosDaTarde, curto: boolean, semanaMax: number, l
   const fim = [
     d.amanha ? linhaDeAmanha(d.hoje, d.amanha) : null,
     // (24/10/2026, Fase 2, P5) logo depois do "Amanhã": as linhas do plano (inteiras: o corte tira linha, nunca o meio)
-    ...linhas.map((l) => l.texto),
+    ...linhas.map((l) => (curtas && l.texto_curto ? l.texto_curto : l.texto)),
     // (24/10/2026, P6) logo depois do "Amanhã": a semana que vem (projeção), só na quinta, ligada e com vaga
     ...semana,
     d.fornecedores.length ? `Fornecedores esperando há mais de 1 dia: ${lista(d.fornecedores.map((n) => umaLinha(n, curto ? 18 : 28)))}.` : null,
@@ -537,14 +544,30 @@ function textoDaRevisaoDoMes(d: DadosDaTarde, curto: boolean): TextoDaTarde {
 }
 
 /**
+ * (30/10/2026, Agenda de Produção Fase 7a, correção 2 da revisão) O fechamento sem o que é do Secretário e não perde hoje: os
+ * fornecedores esperando, o escritório (e o lote da papelada) e o "Sem resposta desde hoje". As letras do que ficou de hoje, o
+ * guardado, o "Amanhã" e a pergunta da sexta continuam. Só vale com linha garantida da agenda prestes a sair (textoDaTarde).
+ */
+function semOsExtras(d: DadosDaTarde): DadosDaTarde {
+  return { ...d, fornecedores: [], escritorio: null, lote: null, semResposta: [] };
+}
+
+/**
  * A mensagem da tarde. Passou de 1.000 caracteres: as linhas encurtam (e o vigia/faturamento saem).
  * (24/10/2026, P6) Com a semana que vem da agenda no fechamento, ela é a primeira a ceder: 3 linhas → 1 → nenhuma,
  * antes de qualquer outra linha encurtar (ela é a última das REGRAS.maxManha e está inteira em *agenda semana que
  * vem*). Sem ela, o caminho é o de antes, byte a byte.
+ * (30/10/2026, Agenda de Produção Fase 7a, correção 2 da revisão) As linhas da agenda com vaga garantida (vagas_garantidas: as
+ * que perdem hoje, as primeiras pela perda) não saem antes do que é do Secretário e não perde hoje: com uma delas prestes a sair,
+ * o fechamento tenta antes sem os fornecedores, o escritório (e o lote) e o "Sem resposta desde hoje" (semOsExtras), com as linhas
+ * da agenda na forma curta quando o banco a manda (texto_curto: a das perguntas do gestor, com as mesmas perguntas). Antes, com o
+ * Secretário cheio (3 que ficaram, ~900 caracteres em produção de 20 a 30/10), o corte tirava toda linha da agenda: a pergunta do
+ * gestor nunca era vista, o prazo dela não corria e a ficha do dia marcado pela estimativa ficava segurada. Sem vaga garantida (o
+ * banco antes da 7a, a sombra), o caminho é o de antes, byte a byte.
  */
 export function textoDaTarde(d: DadosDaTarde): TextoDaTarde {
-  const montar = (curto: boolean, semanaMax: number, linhasMax = Infinity) =>
-    d.turno === "fechamento" ? textoDoFechamento(d, curto, semanaMax, linhasMax)
+  const montar = (curto: boolean, semanaMax: number, linhasMax = Infinity, enxuto = false) =>
+    d.turno === "fechamento" ? textoDoFechamento(enxuto ? semOsExtras(d) : d, curto, semanaMax, linhasMax, enxuto)
     : d.turno === "revisao_semana" ? textoDaRevisaoDaSemana(d, curto)
     : textoDaRevisaoDoMes(d, curto);
   // (24/10/2026, Fase 2, P5) com as linhas do plano no fechamento: primeiro cede a semana que vem (projeção), depois as
@@ -552,6 +575,8 @@ export function textoDaTarde(d: DadosDaTarde): TextoDaTarde {
   // Sem linhas do plano (sombra, desligado, Fase 2 não aplicada), o caminho é o de antes, byte a byte.
   const L = linhasDoFechamento(d).length;
   const n = semanaDoFechamento(d).length;
+  // (Fase 7a, correção 2) quantas das L têm vaga garantida: as primeiras (as de maior perda)
+  const G = d.turno === "fechamento" ? Math.min(L, d.amanha?.agenda?.vagas_garantidas ?? 0) : 0;
   for (let l = L; l >= 0; l--) {
     for (const k of l === L ? [...new Set([n, Math.min(n, 1), 0])] : [0]) {
       const longo = montar(false, k, l);
@@ -560,6 +585,11 @@ export function textoDaTarde(d: DadosDaTarde): TextoDaTarde {
     if (l > 0) {
       const curto = montar(true, 0, l);
       if (curto.texto && curto.texto.length <= LIMITE_DA_TARDE) return curto;
+    }
+    // (Fase 7a, correção 2) antes de tirar uma linha garantida, o Secretário encolhe o que é dele e não perde hoje
+    if (l > 0 && l <= G) {
+      const enxuto = montar(true, 0, l, true);
+      if (enxuto.texto && enxuto.texto.length <= LIMITE_DA_TARDE) return enxuto;
     }
   }
   const curto = montar(true, 0, 0);
