@@ -1,7 +1,8 @@
 -- Prova da correção 2 da Agenda de Produção, Fase 7b (migration 20261101100850): o achado 26 da revisão da 7b, que é da 7a. Com a
 -- linha dos dias do dono (seg a sex), a revisão diária da 7a ligada não corta o serviço de presença "o tempo todo" por contar o dono
 -- que vai junto como uma pessoa que trabalha, e o texto do corte nunca diz "o orçamento mudou" com o mesmo número antes e depois.
--- Rodado sem a 20261101100850 (o harness f7b/a26/rodar.mjs --sem-a26), as linhas W0, W1, W2 e W3 reprovam.
+-- Rodado sem a 20261101100850 (o harness f7b/a26/rodar.mjs --sem-a26), as linhas W0, W1, W2, W3b e W5 reprovam; com a versão de
+-- antes da revisão da correção 2 (f7b/a26/c3/migration.antes.sql), W0 (o corte), W2, W3b e W5.
 -- bancada: depende de 20261101100850
 --
 --   W0  as cópias e as portas: as 3 recriadas, tirados os blocos "(correção 2, achado 26 da 7a)", são o corpo da definição de antes
@@ -12,16 +13,24 @@
 --       nada (o que a estimativa pede = o que o plano tem, 12), nenhuma ação reestimar, os 24 meios-dias de turno ficam; com os 5
 --       modos ligados por cima do plano já feito, o mesmo; o foco *agenda gestor* diz "Alex — 6 dias (estimativa minha)"
 --   W2  o orçamento que muda de verdade (a mão de obra do Lenine cai para 2/3 depois de marcado): a revisão corta, com "o orçamento
---       mudou e agora estimo 4 dias (eram 6)", os últimos dias inteiros (o Alex e você juntos) — 2 dias com a 7b desligada; com a 7b
---       em teste, só ter 17/11: a faixa da dupla do 7b P4 (entre o de 1 pessoa, 8, e o com a dupla acrescentada, 2 × 2 + 6 = 10) fica
+--       mudou e agora estimo N dias (eram 6)", os últimos dias inteiros (o Alex e você juntos), e o N é o que fica — 2 dias com a 7b
+--       desligada e com a 7b ligada ("estimo 4 dias": com a 7b ligada o total vem encurtado pela dupla, 6, e o texto dizia "estimo 3
+--       dias" deixando 4 — revisão da correção 2, achado 2); com a 7b em teste, só ter 17/11 ("estimo 5 dias": a faixa da dupla do 7b
+--       P4, entre o de 1 pessoa, 8, e o com a dupla acrescentada, 2 × 2 + 6 = 10, fica; o texto dizia "estimo 4 dias" deixando 5)
 --   W3  a 2ª pessoa de verdade: (a) com a linha do dono e a 7b ligada, o Mateus que o dono chamou para ter 10/11 entra na dupla e a
 --       revisão do dia seguinte corta só ter 17/11, com o texto da dupla ("com Mateus junto em ter 10/11, o serviço acaba antes"), não
---       "o orçamento mudou" (no Lenine você só abre e fecha, como em produção); (b) com a 7b desligada e você junto o tempo todo,
---       alguém a mais no último dia (o plano sem meio-dia além da estimativa): o texto honesto ("o plano tem mais gente do que a minha
---       estimativa (6 dias com 1 pessoa)") e só a sobra sai
+--       "o orçamento mudou" (no Lenine você só abre e fecha, como em produção); (b) com a 7b desligada e com a 7b ligada e você junto
+--       o tempo todo, alguém a mais no último dia (o plano sem meio-dia além da estimativa): o texto honesto ("o plano tem mais gente do
+--       que a minha estimativa (6 dias com 1 pessoa)") e só a sobra sai — com a 7b ligada, o texto dizia "o orçamento mudou e agora
+--       estimo 5 dias (eram 6)" com o orçamento intacto (revisão da correção 2, achado 2)
 --   W4  sem o dono junto, as 3 são as de antes, byte a byte: sem a linha do dono, com a 7a desligada, em teste e ligada e a 7b
 --       desligada, em teste e ligada, o "tem", o corte e o foco de cada OS da carteira = os das definições de antes; com a linha do
 --       dono, só o Lenine muda (o Rodrigo do diagnóstico, OS-00096, e o resto ficam iguais)
+--   W5  a presença mudada depois de marcar (revisão da correção 2, achado 1): o Lenine marcado com o Alex e você nos 6 dias e depois
+--       você diz que lá só abre e fecha (o plano não é refeito; o molde de agora não tem você no turno): com a 7b desligada, em teste e
+--       ligada, a revisão de qui e a de sex não cortam nada (tem 12 = precisa 12: você vai junto, o molde não o conta), nenhuma ação
+--       reestimar, e o foco diz "Alex — 6 dias" — antes, a revisão tirava sex 13, seg 16 e ter 17/11 do Alex e de você, e o Alex
+--       ficava com 3 dias num serviço de 6 ("são as mesmas diárias", falso)
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -87,7 +96,7 @@ declare
 begin
   for f in select * from (values
       ('_agenda_gestor_pessoa_meios', 'public._agenda_gestor_pessoa_meios(uuid, date, jsonb)', 'mig_motor_fase7b', '20261101100300', 3),
-      ('_agenda_gestor_corte', 'public._agenda_gestor_corte(uuid, date, timestamptz)', 'mig_quem_chamar_fase7b', '20261101100500', 4),
+      ('_agenda_gestor_corte', 'public._agenda_gestor_corte(uuid, date, timestamptz)', 'mig_quem_chamar_fase7b', '20261101100500', 5),
       ('_agenda_ver_gestor', 'public._agenda_ver_gestor(date)', 'mig_correcao_fase7b', '20261101100800', 2))
       as x(nome, sig, mig, versao, blocos) loop
     v_mig := coalesce(current_setting('agenda_teste.' || f.mig, true), '');
@@ -274,6 +283,7 @@ declare
   v_reest text;
   v_vivas text;
   v_falso text;
+  v_foco  text;
   v_out   text := '';
   v_bom   boolean := true;
 begin
@@ -282,11 +292,15 @@ begin
     return;
   end if;
   v_len := pg_temp.os('OS-00074');
+  -- (revisão da correção 2, achado 2) o número do texto é o que fica: com a 7b em teste, 5 dias (era "estimo 4 dias" deixando 5); com
+  -- a 7b ligada, o total vem encurtado pela dupla (6) e o texto dizia "estimo 3 dias" deixando 4
   for c in select * from (values
-      ('desligado', 'Lenine (OS-00074): o orçamento mudou e agora estimo 4 dias (eram 6). Tirei seg 16/11 e ter 17/11.',
+      ('desligado', '8', 'Lenine (OS-00074): o orçamento mudou e agora estimo 4 dias (eram 6). Tirei seg 16/11 e ter 17/11.',
        '10/11 m Alex+Gustavo; 10/11 t Alex+Gustavo; 11/11 m Alex+Gustavo; 11/11 t Alex+Gustavo; 12/11 m Alex+Gustavo; 12/11 t Alex+Gustavo; 13/11 m Alex+Gustavo; 13/11 t Alex+Gustavo'),
-      ('sombra', 'Lenine (OS-00074): o orçamento mudou e agora estimo 4 dias (eram 6). Tirei ter 17/11.',
-       '10/11 m Alex+Gustavo; 10/11 t Alex+Gustavo; 11/11 m Alex+Gustavo; 11/11 t Alex+Gustavo; 12/11 m Alex+Gustavo; 12/11 t Alex+Gustavo; 13/11 m Alex+Gustavo; 13/11 t Alex+Gustavo; 16/11 m Alex+Gustavo; 16/11 t Alex+Gustavo')) t(modo, texto, vivas) loop
+      ('sombra', '8', 'Lenine (OS-00074): o orçamento mudou e agora estimo 5 dias (eram 6). Tirei ter 17/11.',
+       '10/11 m Alex+Gustavo; 10/11 t Alex+Gustavo; 11/11 m Alex+Gustavo; 11/11 t Alex+Gustavo; 12/11 m Alex+Gustavo; 12/11 t Alex+Gustavo; 13/11 m Alex+Gustavo; 13/11 t Alex+Gustavo; 16/11 m Alex+Gustavo; 16/11 t Alex+Gustavo'),
+      ('ligado', '6', 'Lenine (OS-00074): o orçamento mudou e agora estimo 4 dias (eram 6). Tirei seg 16/11 e ter 17/11.',
+       '10/11 m Alex+Gustavo; 10/11 t Alex+Gustavo; 11/11 m Alex+Gustavo; 11/11 t Alex+Gustavo; 12/11 m Alex+Gustavo; 12/11 t Alex+Gustavo; 13/11 m Alex+Gustavo; 13/11 t Alex+Gustavo')) t(modo, total, texto, vivas) loop
     begin
       perform pg_temp.linha_do_dono();
       perform pg_temp.modos('ligado', c.modo);
@@ -300,13 +314,16 @@ begin
       v_reest := pg_temp.reestimar(v_len);
       v_vivas := pg_temp.vivas(v_len);
       v_falso := pg_temp.texto_falso();
+      v_foco := pg_temp.foco('Lenine', date '2026-11-06');
       raise exception 'desfaz' using errcode = 'P0099';
     exception when sqlstate 'P0099' then null;
     end;
-    v_bom := v_bom and v_tot = '8' and v_reest = c.texto and v_vivas = c.vivas and v_falso = '';
-    v_out := v_out || format('[%s: total %s; reestimar %s; fica %s] ', c.modo, v_tot, v_reest, v_vivas);
+    -- o foco diz o mesmo número de dias que o texto (o que fica)
+    v_bom := v_bom and v_tot = c.total and v_reest = c.texto and v_vivas = c.vivas and v_falso = ''
+             and v_foco like '• Lenine: ter 10 a %, Alex — ' || (regexp_match(c.texto, 'estimo ([0-9,]+ dias?)'))[1] || ' (estimativa minha).%';
+    v_out := v_out || format('[%s: total %s; reestimar %s; fica %s; foco %s] ', c.modo, v_tot, v_reest, v_vivas, v_foco);
   end loop;
-  v_res := pg_temp.ok(v_res, 'W2 o orçamento do Lenine cai de 6 para 4 dias depois de marcado (a linha do dono, a 7a ligada): a revisão corta com "o orçamento mudou e agora estimo 4 dias (eram 6)" os últimos dias inteiros, o Alex e você juntos — com a 7b desligada, seg 16 e ter 17/11 (a sobra é do técnico; sem a correção, saíam 4 dias); em teste, só ter 17/11 (a faixa da dupla do 7b P4 fica: 10 meios-dias)',
+  v_res := pg_temp.ok(v_res, 'W2 o orçamento do Lenine cai de 6 para 4 dias depois de marcado (a linha do dono, a 7a ligada): a revisão corta com "o orçamento mudou e agora estimo N dias (eram 6)" os últimos dias inteiros, o Alex e você juntos, e o N é o que fica (o foco diz o mesmo) — com a 7b desligada e ligada, seg 16 e ter 17/11, "estimo 4 dias" (a sobra é do técnico; sem a correção, saíam 4 dias; com a 7b ligada, o texto dizia "estimo 3 dias"); em teste, só ter 17/11, "estimo 5 dias" (a faixa da dupla do 7b P4 fica: 10 meios-dias)',
     v_bom, v_out);
   perform pg_temp.gravar(v_res);
 end
@@ -324,6 +341,9 @@ declare
   v_falso text;
   v_a     text;
   v_b     text;
+  c       record;
+  v_bb    text := '';
+  v_bok   boolean := true;
 begin
   if not pg_temp.carregada() then
     insert into _resultado values ('W3 (a 2ª pessoa de verdade)', true, 'PULADO: sem as fixtures da 7b (rode pela bancada)');
@@ -353,25 +373,30 @@ begin
   v_res := pg_temp.ok(v_res, 'W3a a dupla completada da 7b continua (a linha do dono, a 7b ligada, "Mateus vem ter 10/11"): o passo dupla põe o Mateus com o Alex em ter 10/11 e a revisão do dia seguinte corta só ter 17/11, com o texto da dupla, não "o orçamento mudou"',
     v_a = 'Lenine (OS-00074): com Mateus junto em ter 10/11, o serviço acaba antes (são as mesmas diárias). Tirei ter 17/11. # 10/11 m Alex+Mateus; 10/11 t Alex+Mateus; 11/11 m Alex; 11/11 t Alex; 12/11 m Alex; 12/11 t Alex; 13/11 m Alex; 13/11 t Alex; 16/11 m Alex; 16/11 t Alex',
     v_a);
-  -- (b) gente a mais no último dia, com a 7b desligada: o plano não passa da estimativa em meios-dias de calendário
-  begin
-    perform pg_temp.linha_do_dono();
-    perform pg_temp.modos('ligado', 'desligado');
-    perform pg_temp.publicar();
-    insert into public.payees (name, kind, active, phone, created_at, updated_at)
-    values ('Mateus', 'prestador', true, '5547900000011', timestamptz '2026-11-05 16:40-03', timestamptz '2026-11-05 16:40-03')
-    returning id into v_mat;
-    insert into public.agenda_alocacoes (service_order_id, payee_id, dia, turno, presenca, tipo, estado, origem, publicada_em)
-    select v_len, v_mat, date '2026-11-17', t, 'turno', 'execucao', 'publicada', 'dono', pg_temp.em(date '2026-11-05', '16:40')
-      from unnest(array['manha', 'tarde']) t;
-    perform public.agenda_gestor_rodar(date '2026-11-05', pg_temp.em(date '2026-11-05', '16:53'));
-    v_b := concat_ws(' # ', pg_temp.reestimar(v_len), pg_temp.vivas(v_len), nullif(pg_temp.texto_falso(), ''));
-    raise exception 'desfaz' using errcode = 'P0099';
-  exception when sqlstate 'P0099' then null;
-  end;
-  v_res := pg_temp.ok(v_res, 'W3b alguém a mais no último dia do Lenine (a 7b desligada, você junto o tempo todo): o plano não passa da estimativa em meios-dias, e o texto diz isso — "o plano tem mais gente do que a minha estimativa (6 dias com 1 pessoa)" —, nunca "o orçamento mudou e agora estimo 6 dias (eram 6)"; sai só a sobra (o meio-dia com 2 pessoas além de você)',
-    v_b = 'Lenine (OS-00074): o plano tem mais gente do que a minha estimativa (6 dias com 1 pessoa), então o serviço acaba antes (são as mesmas diárias). Tirei ter 17/11 à tarde. # 10/11 m Alex+Gustavo; 10/11 t Alex+Gustavo; 11/11 m Alex+Gustavo; 11/11 t Alex+Gustavo; 12/11 m Alex+Gustavo; 12/11 t Alex+Gustavo; 13/11 m Alex+Gustavo; 13/11 t Alex+Gustavo; 16/11 m Alex+Gustavo; 16/11 t Alex+Gustavo; 17/11 m Alex+Gustavo+Mateus',
-    v_b);
+  -- (b) gente a mais no último dia, com a 7b desligada e com a 7b ligada: o plano não passa da estimativa em meios-dias de calendário
+  -- (revisão da correção 2, achado 2: com a 7b ligada, o total vem encurtado pela dupla, 10, e o texto dizia "o orçamento mudou e agora
+  -- estimo 5 dias (eram 6)" com o orçamento intacto)
+  for c in select * from (values ('desligado'), ('ligado')) x(modo) loop
+    begin
+      perform pg_temp.linha_do_dono();
+      perform pg_temp.modos('ligado', c.modo);
+      perform pg_temp.publicar();
+      insert into public.payees (name, kind, active, phone, created_at, updated_at)
+      values ('Mateus', 'prestador', true, '5547900000011', timestamptz '2026-11-05 16:40-03', timestamptz '2026-11-05 16:40-03')
+      returning id into v_mat;
+      insert into public.agenda_alocacoes (service_order_id, payee_id, dia, turno, presenca, tipo, estado, origem, publicada_em)
+      select v_len, v_mat, date '2026-11-17', t, 'turno', 'execucao', 'publicada', 'dono', pg_temp.em(date '2026-11-05', '16:40')
+        from unnest(array['manha', 'tarde']) t;
+      perform public.agenda_gestor_rodar(date '2026-11-05', pg_temp.em(date '2026-11-05', '16:53'));
+      v_b := concat_ws(' # ', pg_temp.reestimar(v_len), pg_temp.vivas(v_len), nullif(pg_temp.texto_falso(), ''));
+      raise exception 'desfaz' using errcode = 'P0099';
+    exception when sqlstate 'P0099' then null;
+    end;
+    v_bok := v_bok and v_b = 'Lenine (OS-00074): o plano tem mais gente do que a minha estimativa (6 dias com 1 pessoa), então o serviço acaba antes (são as mesmas diárias). Tirei ter 17/11 à tarde. # 10/11 m Alex+Gustavo; 10/11 t Alex+Gustavo; 11/11 m Alex+Gustavo; 11/11 t Alex+Gustavo; 12/11 m Alex+Gustavo; 12/11 t Alex+Gustavo; 13/11 m Alex+Gustavo; 13/11 t Alex+Gustavo; 16/11 m Alex+Gustavo; 16/11 t Alex+Gustavo; 17/11 m Alex+Gustavo+Mateus';
+    v_bb := v_bb || format('[7b %s: %s] ', c.modo, v_b);
+  end loop;
+  v_res := pg_temp.ok(v_res, 'W3b alguém a mais no último dia do Lenine (a 7b desligada e a 7b ligada, você junto o tempo todo): o plano não passa da estimativa em meios-dias, e o texto diz isso — "o plano tem mais gente do que a minha estimativa (6 dias com 1 pessoa)" —, nunca "o orçamento mudou e agora estimo 6 dias (eram 6)" nem, com a 7b ligada, "estimo 5 dias (eram 6)"; sai só a sobra (o meio-dia com 2 pessoas além de você)',
+    v_bok, v_bb);
   perform pg_temp.gravar(v_res);
 end
 $w3$;
@@ -452,6 +477,67 @@ begin
   perform pg_temp.gravar(v_res);
 end
 $w4$;
+
+-- ── W5. A presença mudada depois de marcar (revisão da correção 2, achado 1) ──────────────────────────────────────────
+do $w5$
+declare
+  v_res   jsonb := '[]'::jsonb;
+  v_len   uuid;
+  c       record;
+  v_t0    text;
+  v_t1    text;
+  v_t2    text;
+  v_m     jsonb;
+  v_pm    jsonb;
+  v_foco  text;
+  v_reest text;
+  v_out   text := '';
+  v_bom   boolean := true;
+begin
+  if not pg_temp.carregada() then
+    insert into _resultado values ('W5 (a presença mudada depois de marcar)', true, 'PULADO: sem as fixtures da 7b (rode pela bancada)');
+    return;
+  end if;
+  v_len := pg_temp.os('OS-00074');
+  for c in select * from (values ('desligado'), ('sombra'), ('ligado')) x(modo) loop
+    begin
+      perform pg_temp.linha_do_dono();
+      perform pg_temp.modos('ligado', c.modo);
+      perform pg_temp.publicar();
+      v_t0 := pg_temp.vivas(v_len);
+      -- você diz que no Lenine só abre e fecha (como o *grava* do rascunho planejar: o plano não é refeito)
+      insert into public.os_planejamento (service_order_id, dono_presenca) values (v_len, 'abre_e_fecha')
+      on conflict (service_order_id) do update set dono_presenca = 'abre_e_fecha';
+      -- o tique das 16:45 (a rotina e a vigia) também não refaz
+      perform public.agenda_rotina_rodar(date '2026-11-05', pg_temp.em(date '2026-11-05', '16:45'));
+      perform public.agenda_vigiar(date '2026-11-05', pg_temp.em(date '2026-11-05', '16:45'));
+      perform public.agenda_gestor_rodar(date '2026-11-05', pg_temp.em(date '2026-11-05', '16:53'));
+      v_t1 := pg_temp.vivas(v_len);
+      perform public.agenda_gestor_rodar(date '2026-11-06', pg_temp.em(date '2026-11-06', '16:53'));
+      v_t2 := pg_temp.vivas(v_len);
+      v_m := public.agenda_meios_da_os(v_len, date '2026-11-06');
+      v_pm := public._agenda_gestor_pessoa_meios(v_len, date '2026-11-06', v_m);
+      v_foco := pg_temp.foco('Lenine', date '2026-11-06');
+      v_reest := pg_temp.reestimar(v_len);
+      raise exception 'desfaz' using errcode = 'P0099';
+    exception when sqlstate 'P0099' then null;
+    end;
+    v_bom := v_bom
+      and v_t0 = '10/11 m Alex+Gustavo; 10/11 t Alex+Gustavo; 11/11 m Alex+Gustavo; 11/11 t Alex+Gustavo; 12/11 m Alex+Gustavo; 12/11 t Alex+Gustavo; 13/11 m Alex+Gustavo; 13/11 t Alex+Gustavo; 16/11 m Alex+Gustavo; 16/11 t Alex+Gustavo; 17/11 m Alex+Gustavo; 17/11 t Alex+Gustavo'
+      and v_t1 = v_t0 and v_t2 = v_t0 and v_reest = '-'
+      and v_m -> 'dono_turno' = '{"manha": false, "tarde": false}'::jsonb
+      and v_pm ->> 'tem' = '12' and v_pm ->> 'precisa' = '12'
+      and v_foco like '• Lenine: ter 10 a ter 17/11, Alex — 6 dias (estimativa minha).%';
+    v_out := v_out || format('[7b %s: plano %s; qui %s; sex %s; dono_turno %s; tem %s precisa %s; reestimar %s; foco %s] ', c.modo,
+                             case when v_t0 like '10/11 m Alex+Gustavo%' then 'Alex+você 10–17/11' else v_t0 end,
+                             case when v_t1 = v_t0 then 'igual' else v_t1 end, case when v_t2 = v_t0 then 'igual' else v_t2 end,
+                             v_m -> 'dono_turno', v_pm ->> 'tem', v_pm ->> 'precisa', v_reest, v_foco);
+  end loop;
+  v_res := pg_temp.ok(v_res, 'W5 a presença mudada depois de marcar (a linha do dono, a 7a ligada; a 7b desligada, em teste e ligada): o Lenine marcado com o Alex e você nos 6 dias e depois "lá só abro e fecho" — o molde de agora não tem você no turno, o plano fica: a revisão de qui e a de sex não cortam nada (tem 12 = precisa 12: você vai junto), nenhuma ação reestimar, e o foco diz "Alex — 6 dias"',
+    v_bom, v_out);
+  perform pg_temp.gravar(v_res);
+end
+$w5$;
 
 select teste, ok, detalhe from _resultado order by teste;
 rollback;

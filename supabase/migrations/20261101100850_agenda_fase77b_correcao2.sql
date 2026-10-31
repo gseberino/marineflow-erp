@@ -18,22 +18,38 @@
 -- teste e ligada; com a 7b em teste ou ligada, a conta com o dk somava o dono do mesmo jeito). Em teste (a 7a de hoje), o mesmo corte
 -- ia para o diário do gestor.
 --
+-- O CRITÉRIO (o mesmo nas três): o turno do dono num meio-dia com outra pessoa só conta como uma das pessoas que a estimativa pede
+-- quando o molde (agenda_meios_da_os) o conta como uma delas: o turno inteiro (dono_turno) e, além disso, a equipe dita (ele nela), a
+-- regra uma_pessoa desligada (a de antes da correção 2 da 7a) ou o diagnóstico e o comissionamento (o trabalho é dele). Fora disso,
+-- ele vai junto — com a regra uma_pessoa e a presença o tempo todo (a correção 2 da 7a), e também quando o molde de agora não o tem
+-- no turno (você disse "abre e fecha" depois de marcado com você o tempo todo: o plano não é refeito). Sozinho no meio-dia, ele conta.
+--
 -- O QUE MUDA:
---   1. _agenda_gestor_pessoa_meios (de 20261101100300): com a regra uma_pessoa, a presença o tempo todo fora do diagnóstico e do
---      comissionamento e sem a equipe dita, o tem — e a conta com o dk em teste — não conta o turno do dono nos meios-dias em que ele
---      vai com alguém. Sozinho no meio-dia (o diagnóstico, o que ele fez sem o técnico), conta como antes.
+--   1. _agenda_gestor_pessoa_meios (de 20261101100300): o tem — e a conta com o dk em teste — não conta o turno do dono que vai junto
+--      nos meios-dias em que ele vai com alguém. Sozinho no meio-dia (o diagnóstico, o que ele fez sem o técnico), conta como antes.
 --   2. _agenda_gestor_corte (de 20261101100500): o mesmo dono não conta como pessoa do meio-dia que sai (a estimativa que caiu de 6
---      para 4 dias tira os 2 últimos dias, com o técnico e você, e não 4); e o texto é honesto: com o plano sem meio-dia além do que a
---      estimativa pede, a sobra é de gente a mais, e o texto diz isso ("o plano tem mais gente do que a minha estimativa (6 dias com 1
---      pessoa), então o serviço acaba antes (são as mesmas diárias)"), nunca "o orçamento mudou e agora estimo 6 dias (eram 6)". A
---      dupla completada da 7b continua com o texto dela.
+--      para 4 dias tira os 2 últimos dias, com o técnico e você, e não 4) nem como o "junto" da dupla completada; e o texto é honesto:
+--      com o plano sem meio-dia além da estimativa na forma do plano (sem a dupla por meio-dia, o total; com o dk, o precisa menos os
+--      meios-dias de dupla do molde que o plano já tem com a 2ª pessoa — com a 7b ligada o total vem encurtado pela dupla, e o plano
+--      de 1 pessoa passava dele sem o orçamento mudar), a sobra é de gente a mais, e o texto diz isso ("o plano tem mais gente do que a
+--      minha estimativa (6 dias com 1 pessoa), então o serviço acaba antes (são as mesmas diárias)"), nunca "o orçamento mudou e agora
+--      estimo 6 dias (eram 6)" nem, com a 7b ligada, "estimo 5 dias (eram 6)" com o orçamento intacto. Com o dk e o plano maior, "agora
+--      estimo N" é o que o plano tem depois do corte inteiro (o plano de 1 pessoa cujo orçamento caiu de 6 para 4 dias: "estimo 4
+--      dias", não o total da dupla, 3). A dupla completada da 7b continua com o texto dela.
 --   3. _agenda_ver_gestor (de 20261101100800): no foco *agenda gestor*, o "Marquei nos últimos 7 dias" conta os dias de cada OS sem
 --      o turno do dono que vai junto (o Lenine marcado com o Alex e você nos 6 dias dizia "Alex — 12 dias (estimativa minha)").
 --
--- O QUE NÃO MUDA: sem o dono junto (a 7a desligada ou sem a regra uma_pessoa, a presença abre e fecha, a equipe dita, o diagnóstico e o
--- comissionamento — o Rodrigo OS-00096 e o Vanderlei OS-00069 —, o dono sozinho no meio-dia) e com o plano maior que a estimativa, as
--- três são as de antes, byte a byte; as Fases 1 a 6 não chamam nenhuma das três. Sem a linha do dono, o motor não põe o dono no turno,
--- e nada muda (o W4 do teste prova nos 3 modos da 7b).
+-- O QUE NÃO MUDA: com o dono contado pelo molde (o Rodrigo OS-00096 do diagnóstico e o Vanderlei OS-00069 do comissionamento; a 7a
+-- desligada ou em teste fora da revisão, com a presença o tempo todo), sem ele num meio-dia com outra pessoa (o motor só o põe no turno
+-- quando o molde manda) e, sem o dk, com o plano maior que a estimativa, as três são as de antes, byte a byte; as Fases 1 a 6 não
+-- chamam nenhuma das três. Sem a linha do dono, o motor não põe o dono no turno, e nada muda (o W4 do teste prova nos 3 modos da 7b).
+--
+-- A REVISÃO DESTA CORREÇÃO (3 achados, 31/10): (1) o critério vinha só da regra uma_pessoa com a presença o tempo todo; com a presença
+-- mudada para "abre e fecha" depois de marcado, o dono voltava a contar e a revisão cortava metade dos dias do técnico ("são as mesmas
+-- diárias", falso) — agora o critério é o do molde (acima; o W5 do teste); (2) com a 7b ligada, o texto comparava pelo total encurtado
+-- pela dupla — "o orçamento mudou" com o orçamento intacto e "estimo 3 dias" deixando 4 — (o W2 e o W3b com a 7b ligada); (3) o
+-- roteiro do ligar da 7a (fila-do-dono/fase77a-publicar.md, passo 6) conferia 107 iguais no md5 da 7a, que a 7b muda em 23: fora do
+-- banco (sql/wf7c2_md5_sem7b.sql).
 --
 -- Quem recriar depois uma destas funções copia DESTA migration (spec-fase7b §R4.6, fim).
 --
@@ -52,17 +68,20 @@ as $function$
                     greatest(coalesce((p_meios #>> '{por_turno,manha,desejado}')::int, 0)
                              + case when coalesce((p_meios #>> '{dono_turno,manha}')::boolean, false) then 1 else 0 end, 1)) as pessoas
   )
-  -- FASE 7b: (correção 2, achado 26 da 7a) o dono que vai junto: com a regra uma_pessoa, a presença o tempo todo fora do diagnóstico e
-  -- do comissionamento (que são dele) e sem a equipe dita, a pessoa da estimativa é o técnico e o dono vai junto — o critério da
-  -- correção 2 da 7a em agenda_meios_da_os, lido do molde. Nos meios-dias em que ele vai com alguém, o turno dele não é uma das
-  -- pessoas que a estimativa pede: sem isso, o Lenine marcado com o Alex e você nos 6 dias tinha 24 contra 12, e a revisão cortava
-  -- metade dizendo "o orçamento mudou". Sozinho no meio-dia, ele conta como antes.
+  -- FASE 7b: (correção 2, achado 26 da 7a) o dono que vai junto: o turno dele só é uma das pessoas que a estimativa pede quando o molde
+  -- o conta como uma delas — o turno inteiro (dono_turno) e, além disso, a equipe dita (ele nela), a regra uma_pessoa desligada (a de
+  -- antes da correção 2 da 7a: o dono é uma das pessoas) ou o diagnóstico e o comissionamento (o trabalho é dele). Fora disso, ele vai
+  -- junto: com a regra uma_pessoa e a presença o tempo todo (a correção 2 da 7a em agenda_meios_da_os: a pessoa da estimativa é o
+  -- técnico), e também quando o molde de agora não o tem no turno (a presença mudou para "abre e fecha" depois de marcado com ele o
+  -- tempo todo: o plano não é refeito). Nos meios-dias em que ele vai com alguém, o turno dele não entra: sem isso, o Lenine marcado
+  -- com o Alex e você nos 6 dias tinha 24 contra 12, e a revisão cortava metade dizendo "o orçamento mudou". Sozinho no meio-dia, ele
+  -- conta como antes. O "tem" conta as mesmas pessoas que o "precisa".
   , j as (
     select public._agenda_dono(null) as dono
-     where public._agenda_gestor_regra('uma_pessoa')
-       and not coalesce((p_meios ->> 'equipe_dita')::boolean, true)
-       and (coalesce((p_meios #>> '{dono_turno,manha}')::boolean, false) or coalesce((p_meios #>> '{dono_turno,tarde}')::boolean, false))
-       and coalesce(p_meios ->> 'regra_motivo', '') not in ('diagnóstico', 'comissionamento')
+     where p_meios ? 'dono_turno'
+       and not ((coalesce((p_meios #>> '{dono_turno,manha}')::boolean, false) or coalesce((p_meios #>> '{dono_turno,tarde}')::boolean, false))
+                and (coalesce((p_meios ->> 'equipe_dita')::boolean, true) or not public._agenda_gestor_regra('uma_pessoa')
+                     or coalesce(p_meios ->> 'regra_motivo', '') in ('diagnóstico', 'comissionamento')))
   )
   -- FASE 7b: fim (correção 2)
   select jsonb_build_object(
@@ -111,7 +130,7 @@ as $function$
 $function$;
 
 comment on function public._agenda_gestor_pessoa_meios(uuid, date, jsonb) is
-  'Agenda de Produção (Fase 7a, correção da revisão; achado 16): {pessoas, precisa, tem} da OS em pessoa-meio-dia — precisa = agenda_meios_da_os.total × as pessoas da estimativa (pessoas_sugeridas; com a equipe dita, as da manhã, com o dono quando fica o turno); tem = os meios-dias de turno de cada pessoa no plano vigente, fora a reserva (cumprido e sem registro 1, parcial meio, não cumprido 0, o resto 1). A revisão diária e o corte do gestor comparam por aqui: a dupla dita depois de marcar não vira corte. STABLE, invoker, sem grant. FASE 7b (P4, R4.3(a)6): com a dupla por meio-dia (p_meios com dk), precisa = dupla.pm (ligado: as diárias-pessoa do molde — o bloco de 1 pessoa do Lenine, 12, e o em dupla, 2 × 2 + 8, não cortam nem faltam; a dupla completada depois, 14, corta 2) ou, em teste, greatest(total × pessoas, least(floor(tem), dupla.pm)) (entre o de 1 pessoa, 12, e o com a dupla acrescentada, 14, nada a cortar nem a acrescentar). Sem dk, a de antes, byte a byte. CORREÇÃO 2 DA 7b (achado 26 da revisão da 7b, que é da 7a): com a regra uma_pessoa, a presença o tempo todo fora do diagnóstico e do comissionamento e sem a equipe dita (o dono vai junto: o critério da correção 2 da 7a em agenda_meios_da_os), o tem — e, com o dk em teste, a conta entre o de 1 pessoa e o da dupla — não conta o turno do dono nos meios-dias em que ele vai com alguém (sozinho no meio-dia, conta como antes). Com a linha dos dias do dono, o Lenine marcado com o Alex e você nos 6 dias tinha 24 contra 12 e a revisão cortava metade com "o orçamento mudou e agora estimo 6 dias (eram 6)"; agora tem 12 e nada sai. Sem o dono junto (sem a regra, outra presença, a equipe dita, o diagnóstico, o comissionamento ou o dono sozinho no meio-dia), a de antes, byte a byte.';
+  'Agenda de Produção (Fase 7a, correção da revisão; achado 16): {pessoas, precisa, tem} da OS em pessoa-meio-dia — precisa = agenda_meios_da_os.total × as pessoas da estimativa (pessoas_sugeridas; com a equipe dita, as da manhã, com o dono quando fica o turno); tem = os meios-dias de turno de cada pessoa no plano vigente, fora a reserva (cumprido e sem registro 1, parcial meio, não cumprido 0, o resto 1). A revisão diária e o corte do gestor comparam por aqui: a dupla dita depois de marcar não vira corte. STABLE, invoker, sem grant. FASE 7b (P4, R4.3(a)6): com a dupla por meio-dia (p_meios com dk), precisa = dupla.pm (ligado: as diárias-pessoa do molde — o bloco de 1 pessoa do Lenine, 12, e o em dupla, 2 × 2 + 8, não cortam nem faltam; a dupla completada depois, 14, corta 2) ou, em teste, greatest(total × pessoas, least(floor(tem), dupla.pm)) (entre o de 1 pessoa, 12, e o com a dupla acrescentada, 14, nada a cortar nem a acrescentar). Sem dk, a de antes, byte a byte. CORREÇÃO 2 DA 7b (achado 26 da revisão da 7b, que é da 7a): o tem — e, com o dk em teste, a conta entre o de 1 pessoa e o da dupla — conta o turno do dono nos meios-dias em que ele vai com alguém só quando o molde o conta como uma das pessoas (o turno inteiro e, além disso, a equipe dita, a regra uma_pessoa desligada, o diagnóstico ou o comissionamento); fora disso ele vai junto (com a regra uma_pessoa e a presença o tempo todo, o critério da correção 2 da 7a em agenda_meios_da_os; e também com a presença mudada para "abre e fecha" depois de marcado com ele o tempo todo) e o turno dele não entra (sozinho no meio-dia, conta como antes). Com a linha dos dias do dono, o Lenine marcado com o Alex e você nos 6 dias tinha 24 contra 12 e a revisão cortava metade com "o orçamento mudou e agora estimo 6 dias (eram 6)"; agora tem 12 e nada sai, também depois de você dizer que lá só abre e fecha. Com o dono contado pelo molde, ou sem ele num meio-dia com outra pessoa, a de antes, byte a byte.';
 
 -- _agenda_gestor_corte (de 20261101100500_agenda_fase7b_quem_chamar.sql)
 create or replace function public._agenda_gestor_corte(p_os uuid, p_hoje date, p_agora timestamptz)
@@ -157,8 +176,12 @@ declare
   v_7b_quem  uuid[];
   v_7b_dias  date[];
   -- FASE 7b: fim
-  -- FASE 7b: (correção 2, achado 26 da 7a) o dono que vai junto (o critério de _agenda_gestor_pessoa_meios)
+  -- FASE 7b: (correção 2, achado 26 da 7a) o dono que vai junto (o critério de _agenda_gestor_pessoa_meios) e a estimativa do texto
   v_c2_junto boolean;
+  v_c2_dup   int;
+  v_c2_est   int;
+  v_c2_um    int;
+  v_c2_x     numeric;
   -- FASE 7b: fim (correção 2)
 begin
   if p_os is null or p_hoje is null or p_agora is null then
@@ -185,11 +208,13 @@ begin
   cf := public._agenda_cfg();
   v_cong := public.agenda_somar_du(p_hoje, cf.congelamento_du);
   v_dono := public._agenda_dono(null);
-  -- FASE 7b: (correção 2, achado 26 da 7a) o dono que vai junto, o mesmo critério de _agenda_gestor_pessoa_meios (a regra uma_pessoa, a
-  -- presença o tempo todo fora do diagnóstico e do comissionamento, sem a equipe dita)
-  v_c2_junto := public._agenda_gestor_regra('uma_pessoa') and not coalesce((v_m ->> 'equipe_dita')::boolean, true)
-                and (coalesce((v_m #>> '{dono_turno,manha}')::boolean, false) or coalesce((v_m #>> '{dono_turno,tarde}')::boolean, false))
-                and coalesce(v_m ->> 'regra_motivo', '') not in ('diagnóstico', 'comissionamento');
+  -- FASE 7b: (correção 2, achado 26 da 7a) o dono que vai junto, o mesmo critério de _agenda_gestor_pessoa_meios: ele só é uma das
+  -- pessoas quando o molde o conta (o turno inteiro e, além disso, a equipe dita, a regra uma_pessoa desligada, o diagnóstico ou o
+  -- comissionamento); fora disso, vai junto
+  v_c2_junto := v_m ? 'dono_turno'
+                and not ((coalesce((v_m #>> '{dono_turno,manha}')::boolean, false) or coalesce((v_m #>> '{dono_turno,tarde}')::boolean, false))
+                         and (coalesce((v_m ->> 'equipe_dita')::boolean, true) or not public._agenda_gestor_regra('uma_pessoa')
+                              or coalesce(v_m ->> 'regra_motivo', '') in ('diagnóstico', 'comissionamento')));
   -- FASE 7b: fim (correção 2)
 
   -- do último meio-dia para trás: sai enquanto pode sair
@@ -269,14 +294,54 @@ begin
                       from jsonb_array_elements(v_meios) x group by x ->> 'dia' order by x ->> 'dia');
   v_txt := format('%s: o orçamento mudou e agora estimo %s (eram %s). Tirei %s.', public._agenda_rotulo_da_os(p_os),
                   public._agenda_dias(v_total::numeric / 2), public._agenda_num(v_feito / 2), public._agenda_lista(v_partes));
-  -- FASE 7b: (correção 2, achado 26 da 7a) o texto honesto: com o plano sem meio-dia além do que a estimativa pede (feitos <= total), a
-  -- sobra é de gente a mais em algum meio-dia, não do orçamento — "o orçamento mudou e agora estimo 6 dias (eram 6)" seria falso.
-  -- A dupla completada (logo abaixo) tem o texto dela por cima deste.
-  if v_feito <= v_total then
+  -- FASE 7b: (correção 2, achado 26 da 7a) o texto honesto e o número certo. A estimativa em meios-dias de calendário na forma do
+  -- plano (v_c2_est): sem a dupla por meio-dia (dk), o total; com o dk, o que a estimativa pede em pessoa-meio-dia (o precisa, com 1
+  -- pessoa) menos os meios-dias de dupla do molde (as ni primeiras e as nf últimas de turno da OS, contando as cumpridas; o tempo todo =
+  -- todas) que o plano já tem com a 2ª pessoa (cada um rende 2) — com a 7b ligada o total já vem encurtado pela dupla, e o plano de 1
+  -- pessoa (só o Alex) passava dele sem o orçamento mudar. Com o plano sem meio-dia além disso (feitos <= v_c2_est), a sobra é de
+  -- gente a mais em algum meio-dia, não do orçamento — "o orçamento mudou e agora estimo 6 dias (eram 6)" seria falso —, e o texto diz
+  -- a estimativa com 1 pessoa (com a 7b ligada, as diárias-pessoa: dupla.pm_estimativa). Com o dk e o plano maior, o número é o que o
+  -- plano tem depois do corte inteiro (do fim para trás, as pessoas de cada meio-dia sem o dono que vai junto, sem as travas): o total
+  -- da dupla dizia "estimo 3 dias" num plano de 1 pessoa que ficava com 4. Sem o dk e com o plano maior, o texto de antes. A dupla
+  -- completada (logo abaixo) tem o texto dela por cima deste.
+  v_c2_est := v_total;
+  v_c2_um := v_total;
+  if v_m ? 'dk' and (v_pm ->> 'precisa') is not null then
+    select count(*) filter (where k.tem >= 2 and (coalesce((v_m #>> '{dupla,todos}')::boolean, false)
+                                                   or k.pos <= coalesce((v_m #>> '{dupla,ni}')::int, 0)
+                                                   or k.pos > k.n - coalesce((v_m #>> '{dupla,nf}')::int, 0)))::int
+      into v_c2_dup
+      from (select s.tem, row_number() over (order by s.dia, s.turno) as pos, count(*) over () as n
+              from (select a.dia, a.turno,
+                           count(distinct a.payee_id) filter (where not (v_c2_junto and a.payee_id is not distinct from v_dono)) as tem
+                      from public.agenda_alocacoes a
+                     where a.service_order_id = p_os and a.estado in ('publicada', 'fixada') and a.tipo <> 'reserva'
+                       and a.presenca = 'turno' and a.resultado is distinct from 'nao_cumprido'
+                     group by a.dia, a.turno) s) k;
+    v_c2_est := greatest((v_pm ->> 'precisa')::int / greatest(coalesce((v_pm ->> 'pessoas')::int, 1), 1)
+                         - least(v_c2_dup, case when coalesce((v_m #>> '{dupla,todos}')::boolean, false) then v_total
+                                                else coalesce((v_m #>> '{dupla,ni}')::int, 0) + coalesce((v_m #>> '{dupla,nf}')::int, 0) end), 1);
+    v_c2_um := coalesce((v_m #>> '{dupla,pm_estimativa}')::int, v_total);
+  end if;
+  if v_feito <= v_c2_est then
     v_txt := format('%s: o plano tem mais gente do que a minha estimativa (%s com %s), então o serviço acaba antes (são as mesmas diárias). Tirei %s.',
-                    public._agenda_rotulo_da_os(p_os), public._agenda_dias(v_total::numeric / 2),
+                    public._agenda_rotulo_da_os(p_os), public._agenda_dias(v_c2_um::numeric / 2),
                     case when coalesce((v_pm ->> 'pessoas')::int, 1) = 1 then '1 pessoa' else (v_pm ->> 'pessoas') || ' pessoas' end,
                     public._agenda_lista(v_partes));
+  elsif v_m ? 'dk' then
+    select v_feito - least(count(*), v_n) into v_c2_x
+      from (select sum(h.n) over (order by h.dia desc, h.turno = 'tarde' desc rows between unbounded preceding and current row) as acum
+              from (select a.dia, a.turno,
+                           count(*) filter (where a.presenca = 'turno')
+                           - case when v_c2_junto and count(*) filter (where a.presenca = 'turno') > 1
+                                       and bool_or(a.presenca = 'turno' and a.payee_id = v_dono) then 1 else 0 end as n
+                      from public.agenda_alocacoes a
+                     where a.service_order_id = p_os and a.estado in ('publicada', 'fixada') and a.tipo <> 'reserva'
+                       and a.dia >= p_hoje and a.resultado is null
+                     group by a.dia, a.turno) h) o
+     where o.acum <= v_sobra;
+    v_txt := format('%s: o orçamento mudou e agora estimo %s (eram %s). Tirei %s.', public._agenda_rotulo_da_os(p_os),
+                    public._agenda_dias(v_c2_x / 2), public._agenda_num(v_feito / 2), public._agenda_lista(v_partes));
   end if;
   -- FASE 7b: fim (correção 2)
   -- FASE 7b: (7b P6, R4.3(f)) a sobra que vem da dupla completada depois de marcar (o dono disse os dias do ajudante e o passo dupla
@@ -289,6 +354,9 @@ begin
     v_7b_nf := coalesce((v_m #>> '{dupla,nf}')::int, 0);
     v_7b_todos := coalesce((v_m #>> '{dupla,todos}')::boolean, false);
     v_7b_conta := coalesce((v_m ->> 'dk_dono_conta')::boolean, true);
+    -- (correção 2, achado 26 da 7a) o dono que vai junto (v_c2_junto) não conta na dupla completada
+    v_7b_conta := v_7b_conta and not v_c2_junto;
+    -- (correção 2: fim)
     -- quem vai no serviço (a pessoa com mais meios-dias de turno nele): o "junto" são os outros
     select a.payee_id into v_7b_prin
       from public.agenda_alocacoes a
@@ -334,7 +402,7 @@ end;
 $function$;
 
 comment on function public._agenda_gestor_corte(uuid, date, timestamptz) is
-  'Agenda de Produção (Fase 7a, P9; spec §5.9 item 1 e §6.4): o corte do reestimar, a conta, sem gravar — com o plano (os meios-dias feitos + os de hoje em diante) maior que agenda_meios_da_os.total, os N últimos meios-dias de compromisso saem (N = a sobra inteira), do fim para trás, parando no 1º que não pode sair (o congelado, o que começou, o fixado, o dia já dito à equipe ou ao cliente: esses ficam com o dono); o fechamento do dono que sai volta no novo último meio-dia. Validado pelas 14 regras (_agenda_validar_itens). {os, numero, fonte, total, feitos, sobra, cortar, cortados [{dia, turno}], ficou, itens (cancelar motivo reestimada; criar do fechamento), texto ("Nelson (OS-00112): o orçamento mudou e agora estimo 3 dias (eram 4). Tirei sex 13/11."), motivo?}. STABLE, invoker, sem grant. CORREÇÃO DA 7a (revisão da etapa; achado 16): a sobra é contada em pessoa-meio-dia (_agenda_gestor_pessoa_meios: o que o plano tem — os meios-dias de turno de cada pessoa, os passados pelo resultado — contra o que a estimativa pede — meios-dias × as pessoas dela), não em meio-dia de calendário: *<nome> com dupla* num serviço marcado com 1 pessoa não corta mais metade dos dias (as diárias são as mesmas; a dupla vale para a próxima marcação); o meio-dia de calendário só sai se as pessoas dele cabem na sobra. FASE 7b (P6, R4.3(f)): quando a sobra vem da dupla completada depois de marcar (com o dk do molde, a sobra não passa das pessoas a mais nos meios-dias da dupla: as ni primeiras e as nf últimas de turno da OS, contando as cumpridas; o tempo todo = todas), o texto diz isso — "Lenine (OS-00074): com Mateus junto em ter 10/11, o serviço acaba antes (são as mesmas diárias). Tirei ter 17/11." —, não "o orçamento mudou"; o corte é o mesmo. Sem dk, a de antes, byte a byte. CORREÇÃO 2 DA 7b (achado 26 da revisão da 7b, que é da 7a): o meio-dia em que o dono vai junto com alguém (o critério de _agenda_gestor_pessoa_meios) conta as pessoas sem ele — a estimativa que caiu de 6 para 4 dias tira os 2 últimos dias (o técnico e você), não 4 —; e o texto é honesto: com o plano sem meio-dia além do que a estimativa pede (feitos <= total) a sobra é de gente a mais, e o texto diz "Lenine (OS-00074): o plano tem mais gente do que a minha estimativa (6 dias com 1 pessoa), então o serviço acaba antes (são as mesmas diárias). Tirei ter 17/11." — nunca "o orçamento mudou e agora estimo 6 dias (eram 6)"; a dupla completada continua com o texto dela. Sem o dono junto e com o plano maior que a estimativa, a de antes, byte a byte.';
+  'Agenda de Produção (Fase 7a, P9; spec §5.9 item 1 e §6.4): o corte do reestimar, a conta, sem gravar — com o plano (os meios-dias feitos + os de hoje em diante) maior que agenda_meios_da_os.total, os N últimos meios-dias de compromisso saem (N = a sobra inteira), do fim para trás, parando no 1º que não pode sair (o congelado, o que começou, o fixado, o dia já dito à equipe ou ao cliente: esses ficam com o dono); o fechamento do dono que sai volta no novo último meio-dia. Validado pelas 14 regras (_agenda_validar_itens). {os, numero, fonte, total, feitos, sobra, cortar, cortados [{dia, turno}], ficou, itens (cancelar motivo reestimada; criar do fechamento), texto ("Nelson (OS-00112): o orçamento mudou e agora estimo 3 dias (eram 4). Tirei sex 13/11."), motivo?}. STABLE, invoker, sem grant. CORREÇÃO DA 7a (revisão da etapa; achado 16): a sobra é contada em pessoa-meio-dia (_agenda_gestor_pessoa_meios: o que o plano tem — os meios-dias de turno de cada pessoa, os passados pelo resultado — contra o que a estimativa pede — meios-dias × as pessoas dela), não em meio-dia de calendário: *<nome> com dupla* num serviço marcado com 1 pessoa não corta mais metade dos dias (as diárias são as mesmas; a dupla vale para a próxima marcação); o meio-dia de calendário só sai se as pessoas dele cabem na sobra. FASE 7b (P6, R4.3(f)): quando a sobra vem da dupla completada depois de marcar (com o dk do molde, a sobra não passa das pessoas a mais nos meios-dias da dupla: as ni primeiras e as nf últimas de turno da OS, contando as cumpridas; o tempo todo = todas), o texto diz isso — "Lenine (OS-00074): com Mateus junto em ter 10/11, o serviço acaba antes (são as mesmas diárias). Tirei ter 17/11." —, não "o orçamento mudou"; o corte é o mesmo. Sem dk, a de antes, byte a byte. CORREÇÃO 2 DA 7b (achado 26 da revisão da 7b, que é da 7a): o meio-dia em que o dono vai junto com alguém (o critério de _agenda_gestor_pessoa_meios: ele só é uma das pessoas quando o molde o conta) conta as pessoas sem ele — a estimativa que caiu de 6 para 4 dias tira os 2 últimos dias (o técnico e você), não 4 —, e na dupla completada da 7b ele não é o "junto"; e o texto é honesto: com o plano sem meio-dia além da estimativa na forma do plano (feitos <= total; com o dk, o precisa menos os meios-dias de dupla do molde que o plano já tem com a 2ª pessoa) a sobra é de gente a mais, e o texto diz "Lenine (OS-00074): o plano tem mais gente do que a minha estimativa (6 dias com 1 pessoa), então o serviço acaba antes (são as mesmas diárias). Tirei ter 17/11." — nunca "o orçamento mudou e agora estimo 6 dias (eram 6)"; com o dk e o plano maior, "agora estimo N" é o que o plano tem depois do corte inteiro (com a 7b ligada, o plano de 1 pessoa cujo orçamento caiu de 6 para 4 dias: "estimo 4 dias (eram 6)", não o total da dupla, 3); a dupla completada continua com o texto dela. Sem o dk, com o dono contado pelo molde e o plano maior que a estimativa, a de antes, byte a byte.';
 
 -- _agenda_ver_gestor (de 20261101100800_agenda_fase77b_correcao.sql)
 create or replace function public._agenda_ver_gestor(p_hoje date)
@@ -555,11 +623,13 @@ begin
               order by min(a.dia), a.service_order_id loop
       v_n := v_n + 1;
       -- FASE 7b: (correção 2, achado 26 da 7a) os dias sem o turno do dono que vai junto com alguém (o critério de
-      -- _agenda_gestor_pessoa_meios): o Lenine marcado com o Alex e você nos 6 dias dizia "Alex — 12 dias (estimativa minha)"
+      -- _agenda_gestor_pessoa_meios: ele só é uma das pessoas quando o molde o conta): o Lenine marcado com o Alex e você nos 6 dias
+      -- dizia "Alex — 12 dias (estimativa minha)"
       v_c2_m := public.agenda_meios_da_os(r.os, p_hoje);
-      if public._agenda_gestor_regra('uma_pessoa') and not coalesce((v_c2_m ->> 'equipe_dita')::boolean, true)
-         and (coalesce((v_c2_m #>> '{dono_turno,manha}')::boolean, false) or coalesce((v_c2_m #>> '{dono_turno,tarde}')::boolean, false))
-         and coalesce(v_c2_m ->> 'regra_motivo', '') not in ('diagnóstico', 'comissionamento') then
+      if v_c2_m ? 'dono_turno'
+         and not ((coalesce((v_c2_m #>> '{dono_turno,manha}')::boolean, false) or coalesce((v_c2_m #>> '{dono_turno,tarde}')::boolean, false))
+                  and (coalesce((v_c2_m ->> 'equipe_dita')::boolean, true) or not public._agenda_gestor_regra('uma_pessoa')
+                       or coalesce(v_c2_m ->> 'regra_motivo', '') in ('diagnóstico', 'comissionamento'))) then
         r.meios := r.meios - (select count(*) from jsonb_array_elements(r.alocs) c2a(e)
                                where c2a.e ->> 'presenca' = 'turno' and (c2a.e ->> 'payee_id')::uuid = v_c2_dono
                                  and exists (select 1 from jsonb_array_elements(r.alocs) c2b(e)
@@ -813,7 +883,7 @@ end;
 $function$;
 
 comment on function public._agenda_ver_gestor(date) is
-  'Agenda de Produção (Fase 7a, P7; spec §6.2): o foco gestor de agenda_ver — (1) o estado: "O gestor está em teste desde qui 29/10: calcula o que marcaria, mas não muda nada." / "Eu marco sozinho desde ter 03/11 e te conto no fechamento; *desfaz <nome>* volta qualquer coisa que eu fiz." / "Desde sex 06/11 você pediu *gestor, só propor*: eu só sugiro. *gestor, pode marcar* volta." / desligado; (2) em teste, "Eu marcaria:" pela última conta do diário (agenda_gestor_dia.sombra), um por linha ("• Lenine: ter 03 a ter 10/11, Roberto e João — 6 dias (estimativa minha). Pode precisar de dupla (banco de baterias): diga *Lenine com dupla*."); ligado, "Marquei nos últimos 7 dias:" (as OS com compromisso vigente pela estimativa); (3) "Antes de marcar eu perguntaria:" (teste) ou "Perguntei antes de marcar:" com o prazo ("• Giancarlo: 10 diárias pela estimativa — sem resposta até sex 30/10 18:00, marco assim."); (4) "Fora:" agrupado pelo porquê ("esperando o cliente: Kalmar (2) e Rodrigo; …"; ligado, pela última conta de verdade do motor em 8 dias); (5) "Compras da semana:" e (6) "Se aprovar:" pelo diário (agenda_gestor_dia.compras e .orcamentos, [{texto}], de até 3 dias; o P10 e o P12 gravam); (7) "Como eu conto:" com os parâmetros. {ok, texto (≤ texto_max), dados}. STABLE, invoker. CORREÇÃO DA 7a (revisão da etapa; achado 3): o "Como eu conto" entra sempre, no fim (_agenda_gestor_juntar: o corte é no meio, nunca num título sem linha embaixo, como o "Se aprovar:" vazio); as compras da semana e o "Se aprovar" mostram até 3 cada (o resto: "(e mais 3 orçamentos)", "(e mais N em *agenda compras*)"). CORREÇÃO 2 DA 7a (a 2ª revisão da etapa): (a dupla sem a 2ª pessoa) com menos de 2 técnicos na grade, "Pode precisar de dupla (banco de baterias): hoje só Alex está na equipe: para ir dupla, chame um ajudante e diga *Lenine com dupla*."; (o desfaz) ligado, a OS de fora que o dono desfez vai no grupo "você desfez (me diga os dias para eu marcar de novo)", não em "sem lugar na agenda"; (o número) em "Perguntei antes de marcar", o número da OS junto quando o nome se repete ("Kalmar (OS-00032)"). FASE 7b (P6, R4.4): com modo_chamar fora de desligado, o bloco "Quem chamar" depois de "Perguntei antes de marcar" — o que o passo diário chamar do gestor gravou (agenda_gestor_dia.chamar, a conta mais nova de até 3 dias; "pela conta de …" quando não é de hoje): "Quem chamar (só sugiro; quem chama é você):" e uma linha por sugestão, ou "Quem chamar: ninguém — a equipe de hoje dá conta da carteira que está pronta."; em teste, "Em teste: quem chamar …". Com modo_dupla fora de desligado, o "Pode precisar de dupla (…): … diga *Lenine com dupla*" do 7a vira a frase da dupla de 1 pessoa (R4.3(a)(3)): ligado, com as datas do plano (_agenda_dupla_no_plano: "Nos 2 primeiros meios-dias (ter 10/11, manhã e tarde) a troca do banco de baterias pede 2 pessoas e só Alex está na equipe: se chamar um ajudante, me diga (ex.: Mateus vem ter 10/11)."; com a dupla completa, nada); em teste do gestor, a forma curta sem as datas. Com modo_chamar e modo_dupla desligados, a de antes, byte a byte. CORREÇÃO DA REVISÃO DA 7b (achados 1, 5, 9, 11, 15 e 23): o bloco "Quem chamar" vai para o fim que sempre entra, logo antes do "Como eu conto" (até 700 letras; o conteúdo da 7a continua com o texto_max inteiro) — antes ele ficava no meio e o corte o escondia, ou tomava o lugar do "Fora:" e do "Se aprovar:"; com modo_dupla fora de desligado, a OS em que a dupla é só nota (o espaço confinado) continua com o "Pode precisar de dupla (espaço apertado): … diga *Otávio com dupla* (em dupla o tempo todo)." (com menos de 2 técnicos, "chame um ajudante, me diga os dias dele e diga …"), também ligado (antes sumia); o exemplo da dupla de 1 pessoa diz todos os dias em que falta a 2ª pessoa. CORREÇÃO 2 DA 7b (achado 26 da revisão da 7b, que é da 7a): no "Marquei nos últimos 7 dias", os dias de cada OS não contam o turno do dono nos meios-dias em que ele vai junto com alguém (o critério de _agenda_gestor_pessoa_meios: a regra uma_pessoa, a presença o tempo todo fora do diagnóstico e do comissionamento, sem a equipe dita) — o Lenine marcado com o Alex e você nos 6 dias dizia "Alex — 12 dias (estimativa minha)"; agora "6 dias". Sem o dono junto, a de antes, byte a byte.';
+  'Agenda de Produção (Fase 7a, P7; spec §6.2): o foco gestor de agenda_ver — (1) o estado: "O gestor está em teste desde qui 29/10: calcula o que marcaria, mas não muda nada." / "Eu marco sozinho desde ter 03/11 e te conto no fechamento; *desfaz <nome>* volta qualquer coisa que eu fiz." / "Desde sex 06/11 você pediu *gestor, só propor*: eu só sugiro. *gestor, pode marcar* volta." / desligado; (2) em teste, "Eu marcaria:" pela última conta do diário (agenda_gestor_dia.sombra), um por linha ("• Lenine: ter 03 a ter 10/11, Roberto e João — 6 dias (estimativa minha). Pode precisar de dupla (banco de baterias): diga *Lenine com dupla*."); ligado, "Marquei nos últimos 7 dias:" (as OS com compromisso vigente pela estimativa); (3) "Antes de marcar eu perguntaria:" (teste) ou "Perguntei antes de marcar:" com o prazo ("• Giancarlo: 10 diárias pela estimativa — sem resposta até sex 30/10 18:00, marco assim."); (4) "Fora:" agrupado pelo porquê ("esperando o cliente: Kalmar (2) e Rodrigo; …"; ligado, pela última conta de verdade do motor em 8 dias); (5) "Compras da semana:" e (6) "Se aprovar:" pelo diário (agenda_gestor_dia.compras e .orcamentos, [{texto}], de até 3 dias; o P10 e o P12 gravam); (7) "Como eu conto:" com os parâmetros. {ok, texto (≤ texto_max), dados}. STABLE, invoker. CORREÇÃO DA 7a (revisão da etapa; achado 3): o "Como eu conto" entra sempre, no fim (_agenda_gestor_juntar: o corte é no meio, nunca num título sem linha embaixo, como o "Se aprovar:" vazio); as compras da semana e o "Se aprovar" mostram até 3 cada (o resto: "(e mais 3 orçamentos)", "(e mais N em *agenda compras*)"). CORREÇÃO 2 DA 7a (a 2ª revisão da etapa): (a dupla sem a 2ª pessoa) com menos de 2 técnicos na grade, "Pode precisar de dupla (banco de baterias): hoje só Alex está na equipe: para ir dupla, chame um ajudante e diga *Lenine com dupla*."; (o desfaz) ligado, a OS de fora que o dono desfez vai no grupo "você desfez (me diga os dias para eu marcar de novo)", não em "sem lugar na agenda"; (o número) em "Perguntei antes de marcar", o número da OS junto quando o nome se repete ("Kalmar (OS-00032)"). FASE 7b (P6, R4.4): com modo_chamar fora de desligado, o bloco "Quem chamar" depois de "Perguntei antes de marcar" — o que o passo diário chamar do gestor gravou (agenda_gestor_dia.chamar, a conta mais nova de até 3 dias; "pela conta de …" quando não é de hoje): "Quem chamar (só sugiro; quem chama é você):" e uma linha por sugestão, ou "Quem chamar: ninguém — a equipe de hoje dá conta da carteira que está pronta."; em teste, "Em teste: quem chamar …". Com modo_dupla fora de desligado, o "Pode precisar de dupla (…): … diga *Lenine com dupla*" do 7a vira a frase da dupla de 1 pessoa (R4.3(a)(3)): ligado, com as datas do plano (_agenda_dupla_no_plano: "Nos 2 primeiros meios-dias (ter 10/11, manhã e tarde) a troca do banco de baterias pede 2 pessoas e só Alex está na equipe: se chamar um ajudante, me diga (ex.: Mateus vem ter 10/11)."; com a dupla completa, nada); em teste do gestor, a forma curta sem as datas. Com modo_chamar e modo_dupla desligados, a de antes, byte a byte. CORREÇÃO DA REVISÃO DA 7b (achados 1, 5, 9, 11, 15 e 23): o bloco "Quem chamar" vai para o fim que sempre entra, logo antes do "Como eu conto" (até 700 letras; o conteúdo da 7a continua com o texto_max inteiro) — antes ele ficava no meio e o corte o escondia, ou tomava o lugar do "Fora:" e do "Se aprovar:"; com modo_dupla fora de desligado, a OS em que a dupla é só nota (o espaço confinado) continua com o "Pode precisar de dupla (espaço apertado): … diga *Otávio com dupla* (em dupla o tempo todo)." (com menos de 2 técnicos, "chame um ajudante, me diga os dias dele e diga …"), também ligado (antes sumia); o exemplo da dupla de 1 pessoa diz todos os dias em que falta a 2ª pessoa. CORREÇÃO 2 DA 7b (achado 26 da revisão da 7b, que é da 7a): no "Marquei nos últimos 7 dias", os dias de cada OS não contam o turno do dono nos meios-dias em que ele vai junto com alguém (o critério de _agenda_gestor_pessoa_meios: ele só é uma das pessoas quando o molde o conta — o turno inteiro e, além disso, a equipe dita, a regra uma_pessoa desligada, o diagnóstico ou o comissionamento) — o Lenine marcado com o Alex e você nos 6 dias dizia "Alex — 12 dias (estimativa minha)"; agora "6 dias". Com o dono contado pelo molde, a de antes, byte a byte.';
 
 -- As recriadas mantêm as portas delas (create or replace não muda a ACL; repetidas aqui para a migration se bastar): ninguém chama
 -- direto as duas da revisão (só a revisão e o reestimar do gestor, invoker, por dentro); o foco é leitura do painel e do assistente.
