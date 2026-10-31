@@ -526,7 +526,8 @@ begin
       -- (10 blocos do P3 + 1 da correção da 7a, 20261031100980: a OS que o gestor pergunta não é "pronta")
       ('os_prontidao', 'public.os_prontidao(uuid, date)', v_pr, '20261030100400', 11),
       -- (3 blocos do P3 + 1 do 7a P12, 20261031100900: o sinal que não trava; quem recria copia da mais nova)
-      ('_agenda_classe_da_os', 'public._agenda_classe_da_os(jsonb, jsonb, date, boolean, boolean)', v_mot2, '20261025100200', 4),
+      -- (+ 2 da correção 2 da 7a, 20261031100985: a dupla sem a 2ª pessoa — a variável e a classe 4 dupla)
+      ('_agenda_classe_da_os', 'public._agenda_classe_da_os(jsonb, jsonb, date, boolean, boolean)', v_mot2, '20261025100200', 6),
       -- (2 blocos do P3 + 3 do 7a P8, 20261031100700: a zona travada; quem recria copia da mais nova)
       ('agenda_propor', 'public.agenda_propor(text, date, date, uuid[], jsonb, boolean, text, uuid, date, timestamptz)', v_mot3, '20261030100200', 5),
       -- (correção da 7a, achado 10, 20261031100980: o bloco do P3 saiu — a marca é de novo a de 20261030100400)

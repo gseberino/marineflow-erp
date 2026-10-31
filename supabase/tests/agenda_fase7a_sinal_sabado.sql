@@ -124,7 +124,9 @@ declare
   v_b text[] := '{}'; v_bloco boolean := false; l text;
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
-    if not v_bloco and l ~ '^\s*-- FASE 7: \(7a P12' then v_bloco := true; continue; end if;
+    -- (correção 2 da 7a, 20261031100985: a dupla sem a 2ª pessoa acrescentou 2 blocos "-- FASE 7: (7a correção 2" à
+    -- _agenda_classe_da_os depois do P12; eles saem junto, e o resto continua sendo a cópia do P12 sobre a de antes)
+    if not v_bloco and l ~ '^\s*-- FASE 7: \((7a P12|7a correção 2)' then v_bloco := true; continue; end if;
     if v_bloco then
       if l ~ '^\s*-- FASE 7: fim' then v_bloco := false; end if;
       continue;

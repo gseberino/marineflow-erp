@@ -67,6 +67,9 @@ begin
   insert into public.os_planejamento (service_order_id, dono_presenca)
   select so.id, 'abre_e_fecha' from public.service_orders so where so.service_order_number in ('OS-00074', 'OS-00069')
   on conflict (service_order_id) do update set dono_presenca = 'abre_e_fecha';
+  -- (correção 2 da 7a, a ficha prometida a quem não tem telefone, 20261031100985) o gestor só pergunta a ficha de quem tem
+  -- telefone: no replay o João não tem (o Roberto tem). Este teste é da janela de veto, então o João ganha um.
+  update public.payees set phone = '5547900000004' where name = 'João' and phone is null;
   perform pg_temp.modos('ligado');
   v_p := public.agenda_propor('os', null, null, array[pg_temp.os('OS-00069'), pg_temp.os('OS-00074')], '{}'::jsonb, true, 'vigia',
                               null, date '2026-10-29', timestamptz '2026-10-29 16:52-03');
@@ -366,9 +369,11 @@ begin
         and (select count(*) from public.agenda_perguntas q where q.tipo = 'ficha_estimativa') = 1,
         v_t || ' | ' || coalesce(v_t2, '-'));
       v_lin := public._agenda_linhas_do_fechamento(c_qua);
-      v_res := pg_temp.ok(v_res, 'P3b o fechamento das 17:30: a pergunta da ficha numa linha própria (pergunta, perda 75, com o pergunta_id, de verdade) — à frente do "dia" (70) e da pergunta de fato (30), que não a repete',
+      -- (correção 2 da 7a, 20261031100985, os achados 15/18 de novo: a linha das perguntas do gestor com prazo vai com perda 76 —
+      -- ganha o desempate das que perdem hoje)
+      v_res := pg_temp.ok(v_res, 'P3b o fechamento das 17:30: a pergunta da ficha numa linha própria (pergunta, perda 76, com o pergunta_id, de verdade) — à frente do "dia" (70) e da pergunta de fato (30), que não a repete',
         exists (select 1 from jsonb_array_elements(v_lin) x where x ->> 'pergunta_id' = v_q::text and x ->> 'tipo' = 'pergunta'
-                 and (x ->> 'perda')::int = 75 and x ->> 'modo' = 'ligado' and x ->> 'texto' = 'Agenda: ' || c_perg)
+                 and (x ->> 'perda')::int = 76 and x ->> 'modo' = 'ligado' and x ->> 'texto' = 'Agenda: ' || c_perg)
         and (select count(*) from jsonb_array_elements(v_lin) x where x ->> 'pergunta_id' = v_q::text) = 1,
         (select string_agg(x ->> 'tipo' || ':' || (x ->> 'perda'), ' ') from jsonb_array_elements(v_lin) x));
       -- não mostrada: às 19:30 a ficha fica segurada
@@ -561,7 +566,9 @@ begin
     select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = r.assinatura::regprocedure;
     -- (a correção da 7a, 20261031100980, recriou _agenda_linhas_do_fechamento: a cópia do P11 é conferida no texto da migration
     -- do P11, agenda_teste.mig_protecoes_fase7a)
-    if r.nome = '_agenda_linhas_do_fechamento' and coalesce(current_setting('agenda_teste.mig_protecoes_fase7a', true), '') <> '' then
+    -- (a correção 2 da 7a, 20261031100985, recriou _agenda_rotina_ficha — a ficha de quem não tem telefone —: a mesma régua)
+    if r.nome in ('_agenda_linhas_do_fechamento', '_agenda_rotina_ficha')
+       and coalesce(current_setting('agenda_teste.mig_protecoes_fase7a', true), '') <> '' then
       v_novo := pg_temp.corpo(current_setting('agenda_teste.mig_protecoes_fase7a', true), r.nome);
     end if;
     select count(*) into v_n from regexp_matches(v_novo, '-- FASE 7: \(7a P11', 'g');

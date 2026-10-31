@@ -125,7 +125,8 @@ declare
   c_tique  constant timestamptz := timestamptz '2026-10-30 18:07-03';
   c_nelson constant text := 'Nelson (OS-00112) está como ''aguardando peças'': o serviço já começou? Se você não me disser nada até sex 30/10 às 18:00, conto o serviço inteiro (4 dias, estimativa minha). 1) Não começou: conte tudo (recomendo); 2) Já começou: eu digo quanto falta; 3) Já terminou.';
   -- (correção da 7a, achado 20: acima de 8 diárias, sem prazo nem opção padrão — o gestor não marca sozinho; recomenda a 2)
-  c_gianc  constant text := 'Giancarlo (OS-00130): pelo valor do orçamento são 10 diárias (10 dias com 1 pessoa). É mais de 8 diárias: não marco sozinho. Me diga os dias. 1) Marque 10 dias; 2) Eu digo os dias (recomendo).';
+  -- (correção 2 da 7a, achado 20 de novo, 20261031100985: a 3ª opção "Já terminou (ou já entreguei)" — o Giancarlo foi entregue)
+  c_gianc  constant text := 'Giancarlo (OS-00130): pelo valor do orçamento são 10 diárias (10 dias com 1 pessoa). É mais de 8 diárias: não marco sozinho. Me diga os dias. 1) Marque 10 dias; 2) Eu digo os dias (recomendo); 3) Já terminou (ou já entreguei).';
   v_carteira text[] := array['OS-00074', 'OS-00069', 'OS-00130', 'OS-00112', 'OS-00104', 'OS-00096', 'OS-00076', 'OS-00032',
                              'OS-00033', 'ORÇ-00083', 'ORÇ-00095'];
   v_adm    uuid;
@@ -619,7 +620,8 @@ begin
   v_res := pg_temp.ok(v_res, 'Q6c a opção 2: "Me diga os dias (ex.: ''Giancarlo 3 dias'')." e a pergunta fica aberta com a escolha; a opção que não existe lista as opções',
     (d ->> 'ok')::boolean and (d ->> 'aberta')::boolean and d ->> 'texto' = 'Me diga os dias (ex.: ''Giancarlo 3 dias'').'
     and x.estado = 'aberta' and x.opcao_escolhida = 2 and x.resposta = 'eu digo'
-    and not (e ->> 'ok')::boolean and e ->> 'texto' = 'Essa opção não existe. As opções são: 1) Marque 10 dias; 2) Eu digo os dias.',
+    -- (correção 2 da 7a, achado 20 de novo: a 3ª opção do serviço grande)
+    and not (e ->> 'ok')::boolean and e ->> 'texto' = 'Essa opção não existe. As opções são: 1) Marque 10 dias; 2) Eu digo os dias; 3) Já terminou (ou já entreguei).',
     d::text || ' | ' || e::text);
   begin
     p := public._agenda_gestor_perguntas_da_os(pg_temp.os('OS-00104'), c_hoje, c_agora, false);

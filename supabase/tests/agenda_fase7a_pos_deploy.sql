@@ -2,13 +2,14 @@
 -- edge functions (ai-agent e erp-mcp com as palavras e o foco *agenda gestor*; ai-daily-briefing com a vaga da agenda no
 -- fechamento) e (passo 3) a migration de dado 20261031100990 — os 5 modos do gestor em teste — fila-do-dono/fase7a-oks.md,
 -- passos 1–3 (e de novo a cada "ligar", passos 4 e 6 a 9). Spec: spec-fase7a.md §8.4 (agenda_fase7a_pos_deploy.sql) e §10 passo 1.
--- bancada: depende de 20261031100980
+-- bancada: depende de 20261031100985
 --
 -- SÓ LEITURA EM PRODUÇÃO: nenhum INSERT, UPDATE ou DELETE (só nas tabelas TEMPORÁRIAS do resultado); agenda_saude e agenda_ver são
 -- STABLE e não gravam; termina em ROLLBACK. Na bancada (que não aplica a 20261031100990 nem tem pg_cron: lá os modos ficam como a
 -- linha está, desligado, e o job só é mostrado) ele passa do mesmo jeito.
 --
---   M  as 13 versões de estrutura da 7a e a da correção da revisão (100980) registradas em supabase_migrations.schema_migrations;
+--   M  as 13 versões de estrutura da 7a e as das duas correções da revisão (100980 e 100985) registradas em
+--      supabase_migrations.schema_migrations;
 --      a de dado (100990, a sombra) é mostrada
 --   C  agenda_config: os 5 modos, a lista das regras, a palavra e os 29 parâmetros do gestor existem; os modos: com a 100990
 --      registrada, sombra (ou ligado, depois dos OKs); sem ela, desligado; a lista só com regras conhecidas; o gestor que marca
@@ -16,7 +17,7 @@
 --   T  as colunas novas de os_planejamento, agenda_alocacoes (com o gatilho da fonte), os_material, agenda_perguntas e
 --      agenda_medidas_os; o diário agenda_gestor_dia: RLS ligada, policies só de leitura e TO authenticated, anon sem nada,
 --      authenticated só lê; não se apaga; as listas fechadas com os tipos do gestor
---   F  as 59 funções novas da 7a existem (54 dos pacotes, 5 da correção); nenhuma executável por anon; as portas de cada grupo (as leituras: authenticated e
+--   F  as 63 funções novas da 7a existem (54 dos pacotes, 5 da correção, 4 da correção 2); nenhuma executável por anon; as portas de cada grupo (as leituras: authenticated e
 --      service_role; a rodada, as palavras e as do motor: só service_role; os passos e os gravadores: ninguém); nenhuma função
 --      da agenda para anon; agenda_ver com o foco gestor
 --   J  o job agenda-gestor do pg_cron: '7,23,37,53 10-23 * * 1-6' (a correção: os minutos ímpares), ativo, com as duas instruções (o statement_timeout de
@@ -51,7 +52,9 @@ select format('M1 migration %s registrada', v),
                     '20261031100500', '20261031100600', '20261031100700', '20261031100750', '20261031100800',
                     '20261031100850', '20261031100900', '20261031100950',
                     -- a correção dos achados da revisão da 7a
-                    '20261031100980']) v;
+                    '20261031100980',
+                    -- a correção 2 (o que a 2ª revisão achou)
+                    '20261031100985']) v;
 
 insert into _resultado
 select 'M2 a migration de dado 20261031100990 (os 5 modos do gestor em teste) — só mostra', true,
@@ -198,7 +201,11 @@ insert into _pd_funcoes values
   ('_agenda_gestor_orcamentos(date, timestamptz)', 'interna'), ('_agenda_gestor_bem(date, timestamptz)', 'interna'),
   -- (a correção da revisão, 20261031100980) o *desfaz* que vale, a conta em pessoa-meio-dia e a memória da duração na rodada
   ('_agenda_gestor_desfeito(uuid, timestamptz)', 'interna'), ('_agenda_gestor_pessoa_meios(uuid, date, jsonb)', 'interna'),
-  ('_agenda_rodada_duracao_lembrar(text)', 'interna'), ('_agenda_rodada_duracao_guardar(text, bigint, jsonb)', 'interna');
+  ('_agenda_rodada_duracao_lembrar(text)', 'interna'), ('_agenda_rodada_duracao_guardar(text, bigint, jsonb)', 'interna'),
+  -- (a correção 2, 20261031100985) o telefone da ficha, as OS que saíram pelo material sem a compra (ninguém); os técnicos da
+  -- grade e a frase deles (lidas pela classe da OS e pelo foco: authenticated e service_role)
+  ('_agenda_equipe_tem_telefone(uuid)', 'interna'), ('_agenda_gestor_compra_saiu(date)', 'interna'),
+  ('_agenda_tecnicos_da_grade(date)', 'leitura'), ('_agenda_tecnicos_frase(text[])', 'leitura');
 
 insert into _resultado
 select format('F1 as %s funções novas da 7a existem', count(*)), count(*) filter (where to_regprocedure('public.' || f) is null) = 0,

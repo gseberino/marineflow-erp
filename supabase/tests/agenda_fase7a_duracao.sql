@@ -484,12 +484,15 @@ begin
   -- (f) o portão falso: a de antes, byte a byte (todas as OS; a cópia de 20261025100200 como pg_temp)
   v_dif := null;
   for r in select * from (values (1, 'desligado', 'desligado', false, true), (2, 'sombra sem a simulação', 'sombra', false, true),
-                                 (3, '*gestor, só propor*', 'ligado', true, true), (4, 'sem a regra estimativa', 'ligado', false, false)) t(o, nome, modo, so_propor, com_est)
+                                 (3, '*gestor, só propor*', 'ligado', true, true), (4, 'sem as regras estimativa e uma_pessoa', 'ligado', false, false)) t(o, nome, modo, so_propor, com_est)
            order by o loop
     update public.agenda_config
        set modo_marcar_sozinho = r.modo, gestor_so_propor = r.so_propor,
            marcar_regras = case when r.com_est then marcar_regras || case when 'estimativa' = any (marcar_regras) then '{}'::text[] else '{estimativa}' end
-                                else array_remove(marcar_regras, 'estimativa') end
+                                -- (correção 2 da 7a, 20261031100985: o dono "sempre" não é o técnico — agenda_meios_da_os muda pela
+                                -- regra uma_pessoa, não pela estimativa: o caso 4 tira as duas; com a uma_pessoa, o Y5 de
+                                -- agenda_fase77a_correcao2.sql prova o que muda)
+                                else array_remove(array_remove(marcar_regras, 'estimativa'), 'uma_pessoa') end
      where id;
     select md5(string_agg(public.agenda_meios_da_os(so.id, c_hoje)::text, '|' order by so.id)),
            md5(string_agg(pg_temp.meios_de_antes(so.id, c_hoje)::text, '|' order by so.id))
@@ -499,7 +502,7 @@ begin
   update public.agenda_config set modo_marcar_sozinho = 'ligado', gestor_so_propor = false,
          marcar_regras = '{estimativa,mo_limpa,uma_pessoa,diagnostico,situacao,sem_peca,embutida_suposta,critico_por_valor,prazo_padrao,compra_firme,teto_equipe,zona_travada,onda,escada,sinal_cobrar}'
    where id;
-  v_res := pg_temp.ok(v_res, 'D5f com o portão falso (desligado, sombra sem a simulação, *gestor, só propor*, sem a regra estimativa) os meios-dias das 28 OS são os de antes, byte a byte',
+  v_res := pg_temp.ok(v_res, 'D5f com o portão falso (desligado, sombra sem a simulação, *gestor, só propor*, sem as regras estimativa e uma_pessoa) os meios-dias das 28 OS são os de antes, byte a byte',
     v_dif is null, coalesce(v_dif, '—'));
 
   -- ── D6. A peça embutida: a mesma conta da prontidão ───────────────────────────────────────────────────────
@@ -587,8 +590,9 @@ begin
   select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = 'public.agenda_meios_da_os(uuid, date)'::regprocedure;
   v_fonte := pg_temp.corpo(v_mot2, 'agenda_meios_da_os');
   select count(*) into v_n from regexp_matches(v_novo, '-- FASE 7: fim', 'g');
-  v_res := pg_temp.ok(v_res, 'D8b agenda_meios_da_os: sem os 3 blocos "-- FASE 7:", é o corpo de 20261025100200 (a única antes da 7a)',
-    v_n = 3 and v_fonte <> '' and pg_temp.sem_fase7(v_novo) = v_fonte,
+  -- (correção 2 da 7a, 20261031100985: + 1 bloco — com a regra uma_pessoa, o dono "sempre" não é o técnico)
+  v_res := pg_temp.ok(v_res, 'D8b agenda_meios_da_os: sem os 4 blocos "-- FASE 7:" (3 do P2, 1 da correção 2), é o corpo de 20261025100200 (a única antes da 7a)',
+    v_n = 4 and v_fonte <> '' and pg_temp.sem_fase7(v_novo) = v_fonte,
     format('blocos %s; fonte %s letras; novo sem os blocos %s letras', v_n, length(v_fonte), length(pg_temp.sem_fase7(v_novo))));
 
   perform pg_temp.gravar(v_res);

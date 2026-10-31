@@ -446,17 +446,18 @@ begin
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
-  v_res := pg_temp.ok(v_res, 'Z11a (achados 15 e 18) uma linha só com as perguntas do gestor que esperam o dono: perda 75, a ficha de hoje primeiro e por inteiro, depois as com prazo (Nelson, Flávio, MP) agrupadas pelo prazo, e o Giancarlo (sem prazo) em "Espero você"; pergunta_ids com as 5',
-    jsonb_array_length(v_lin) = 1 and (x ->> 'perda')::int = 75
+  -- (correção 2 da 7a, 20261031100985: perda 76 — ganha o desempate das que perdem hoje —, e o "Espero você" diz o porquê)
+  v_res := pg_temp.ok(v_res, 'Z11a (achados 15 e 18) uma linha só com as perguntas do gestor que esperam o dono: perda 76, a ficha de hoje primeiro e por inteiro, depois as com prazo (Nelson, Flávio, MP) agrupadas pelo prazo, e o Giancarlo (sem prazo) em "Espero você (não marco sozinho)"; pergunta_ids com as 5',
+    jsonb_array_length(v_lin) = 1 and (x ->> 'perda')::int = 76
     and x ->> 'texto' like 'Agenda: Hoje às 19:30 a ficha de amanhã vai para João: Lenine, sex 30/10 o dia todo — dia 1 de 6, pela minha estimativa. 1) Mande (recomendo); 2) Segure a ficha: eu não mando e você fala com ele. Também, sem resposta até sex 30/10 18:00: %'
-    and x ->> 'texto' like '%Nelson (OS-00112) 4 dias%' and x ->> 'texto' like '%Espero você: Giancarlo (OS-00130).'
+    and x ->> 'texto' like '%Nelson (OS-00112) 4 dias%' and x ->> 'texto' like '%Espero você (não marco sozinho): Giancarlo (OS-00130).'
     and cardinality(v_ids) = 5 and char_length(x ->> 'texto') <= 640,
     coalesce(x::text, '-'));
   v_res := pg_temp.ok(v_res, 'Z11b o fechamento que sai conta as 5 como mostradas (o registro com pergunta_ids); o prazo de sex 18:07 aplica as 3 dos dias (Nelson, Flávio e MP) — antes, nenhuma chegava ao dono e nada era aplicado',
     v_n = 5 and (r ->> 'perguntas')::int = 5 and (r2 ->> 'aplicadas')::int = 3 and (r2 ->> 'sem_mostrar')::int = 0
     and r2 -> 'os' @> jsonb_build_array(v_nel, pg_temp.os('OS-00104'), pg_temp.os('ORÇ-00095')),
     format('mostradas %s; registro %s; prazo %s', v_n, r::text, r2::text));
-  v_res := pg_temp.ok(v_res, 'Z11c cada linha ligada que perde hoje tem a sua vaga, até 3: a decisão crítica (100), a compra de hoje (80) e as perguntas do gestor (75) = 3 vagas garantidas',
+  v_res := pg_temp.ok(v_res, 'Z11c cada linha ligada que perde hoje tem a sua vaga, até 3: a decisão crítica (100), a compra de hoje (80) e as perguntas do gestor (76) = 3 vagas garantidas',
     v_n2 = 3, coalesce(v_n2::text, '-'));
 
   -- ── Z12. A dupla dita depois de marcar (achado 16) ──
@@ -616,7 +617,8 @@ begin
   exception when sqlstate 'P0099' then null;
   end;
   v_res := pg_temp.ok(v_res, 'Z19 (achados 9 e 15) a carteira de 29/10, a equipe de 30/10 (o Alex) e o gestor ligado sex 08:00, sem resposta do dono: o fechamento de sex leva as perguntas do gestor numa vaga própria; o prazo de ter 03/11 18:07 aplica Nelson, Flávio e MP; com mão de obra e sem espera do cliente, 3 das 6 com data (Lenine, Vanderlei e Nelson; o Giancarlo espera o dono — mais de 8 diárias —, o Flávio, o compressor, e o Rodrigo-96, os seus dias em campo). Antes da correção, 2 das 6 e nenhuma pergunta vista',
-    exists (select 1 from jsonb_array_elements(v_lin) l where l ->> 'tipo' = 'pergunta' and (l ->> 'perda')::int = 75)
+    -- (correção 2 da 7a, 20261031100985: a linha das perguntas do gestor com prazo vai com perda 76)
+    exists (select 1 from jsonb_array_elements(v_lin) l where l ->> 'tipo' = 'pergunta' and (l ->> 'perda')::int = 76)
     and (x #>> '{contagens,vetos,aplicadas}')::int = 3 and v_t = 'OS-00069,OS-00074,OS-00112',
     coalesce(v_t, '-') || ' | vetos ' || coalesce(x #>> '{contagens,vetos}', '-') || ' | linhas ' || coalesce(left(v_lin::text, 600), '-'));
 
