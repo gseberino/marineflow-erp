@@ -478,8 +478,21 @@ begin
        select unnest(array['os_planejamento_dupla_dita_check', 'os_planejamento_dupla_meios_check',
                            'os_planejamento_dupla_motivo_check', 'dupla_meios_coerente', 'compre_ate_coerente',
                            'os_material_compre_ate_base_check', 'os_material_cobrado_vezes_check',
-                           'os_material_empurrada_vezes_check']))));
+                           'os_material_empurrada_vezes_check']))))
      -- FASE 7: fim
+     -- FASE 7b: os 22 que a Fase 7b pôs em agenda_config e os 3 de agenda_disponibilidade (20261101100000) têm o caso deles em
+     -- agenda_fase7b_base.sql (o B1z cobra os 26 da migration pelo nome). A lista situacao ampliada (+ so_pontas) continua com o
+     -- nome e o caso daqui.
+     and not (c.conname = any (array(
+       select 'agenda_config_' || n || '_check'
+         from unnest(array['modo_dias', 'modo_dupla', 'modo_sabado', 'modo_cadastro', 'modo_chamar', 'equipe_hora_dias',
+                           'equipe_dias_semanas_a_frente', 'equipe_dias_tentar_dias', 'equipe_dias_fechar_antes', 'dono_carga_max',
+                           'dias_semana_motivos', 'dupla_tec_viagem_min', 'dupla_espera_max_du', 'novato_dias', 'novato_diarias',
+                           'falta_semanas', 'falta_dias_min', 'equipe_chamada_dias', 'equipe_chamada_prazo_du',
+                           'equipe_cadastro_abertas_max', 'chamar_min_meios', 'chamar_max_os']) n
+       union all
+       select unnest(array['disp_semana_e_segunda', 'disp_semana_so_excecao', 'disp_so_pontas_excecao']))));
+     -- FASE 7b: fim
   insert into _resultado values ('B todo CHECK das 6 tabelas tem um caso que ele recusa', v_sem_caso is null, v_sem_caso);
 end
 $b$;

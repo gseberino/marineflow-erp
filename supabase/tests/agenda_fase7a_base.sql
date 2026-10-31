@@ -353,7 +353,10 @@ insert into _resultado
 select 'B1y agenda_gestor_dia: todo CHECK da tabela está na lista do B1z (nenhum a mais sem caso)',
        coalesce(bool_and(exists (select 1 from _checks_f7a k where k.nome = c.conname)), false),
        string_agg(c.conname, ', ')
-  from pg_constraint c where c.conrelid = 'public.agenda_gestor_dia'::regclass and c.contype = 'c';
+  from pg_constraint c where c.conrelid = 'public.agenda_gestor_dia'::regclass and c.contype = 'c'
+   -- FASE 7b: o CHECK da coluna chamar (20261101100000) tem o caso dele em agenda_fase7b_base.sql (B1z)
+   and c.conname <> 'agenda_gestor_dia_chamar_check';
+   -- FASE 7b: fim
 
 -- ── B2. RLS e privilégios ───────────────────────────────────────────────────────────────────────────────
 insert into _resultado
@@ -437,7 +440,17 @@ select 'B2f o técnico: o diário volta vazio, gravar e ampliar dão 42501; anon
 -- ── B3. As listas fechadas e o ampliador ────────────────────────────────────────────────────────────────
 insert into _resultado
 select format('B3a %s: as de antes iguais e na mesma ordem, e as novas no fim', t.nome),
-       pg_temp.lista(t.tabela::regclass, t.nome) = t.espera, array_to_string(pg_temp.lista(t.tabela::regclass, t.nome), ',')
+       -- FASE 7b: a 20261101100000 soma dias_semana (pergunta) e equipe_semana (rodada) no fim; as da 7a continuam no lugar
+       -- (agenda_fase7b_base.sql B2a confere a lista inteira)
+       pg_temp.lista(t.tabela::regclass, t.nome)
+         = t.espera || case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                                                                     and a.attname = 'modo_dias' and not a.attisdropped)
+                            then case t.nome when 'agenda_perguntas_tipo_check' then '{dias_semana}'::text[]
+                                             when 'agenda_vigia_rodadas_rotina_check' then '{equipe_semana}'::text[]
+                                             else '{}'::text[] end
+                            else '{}'::text[] end,
+       -- FASE 7b: fim
+       array_to_string(pg_temp.lista(t.tabela::regclass, t.nome), ',')
   from (values
     ('public.agenda_perguntas', 'agenda_perguntas_tipo_check',
      '{nao_cabe,segundo_atraso,atraso_longo,remarcar_confirmado,fixada_pelo_dono,conferencia,chegou,parada,estouro,duracao,material_conferir,padrao_do_dono,diaria,diaria_ligar,equipe_resposta,concluir,entrega,nfe_vincular,pix_material,previsao_fornecedor,fornecedor_cadastro,fornecedores_prazo,cliente_aprovar,cliente_aviso,cliente_resposta,aprendizado,equipe_sem_dias,situacao,estimativa,equipe_cadastro,reavaliar,reestimar,ficha_estimativa,bem_livre,compre_ate,sinal,onda,dia_avisado,dia_prometido,sabado}'::text[]),
@@ -912,11 +925,12 @@ begin
   v_fonte := left(v_fonte, position('$function$' in v_fonte) - 1);
   select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = 'public._agenda_modo_da_pergunta(text, text)'::regprocedure;
   select count(*) into v_n from regexp_matches(v_novo, '-- FASE 7: fim', 'g');
+  -- (FASE 7b: a 20261101100000 recria de novo, com o bloco "-- FASE 7b:", que sai junto: '-- FASE 7b?:')
   select array_to_string(array(
-           select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7:' and l !~ '-- FASE 7: fim' then 1
-                                                when l ~ '-- FASE 7: fim' then -1 else 0 end)
+           select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7b?:' and l !~ '-- FASE 7b?: fim' then 1
+                                                when l ~ '-- FASE 7b?: fim' then -1 else 0 end)
                                        over (order by o rows between unbounded preceding and current row) as dentro,
-                                 l ~ '-- FASE 7: fim' as fecha
+                                 l ~ '-- FASE 7b?: fim' as fecha
                             from unnest(string_to_array(v_novo, E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n') into v_sem;
   -- (o bloco do 7a P1 e, desde a 20261031100850, o do 7a P11, que a recria copiando desta: 2 blocos; sem eles, a de 30/10)

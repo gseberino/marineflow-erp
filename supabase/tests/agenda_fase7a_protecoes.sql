@@ -567,7 +567,8 @@ begin
     -- (a correção da 7a, 20261031100980, recriou _agenda_linhas_do_fechamento: a cópia do P11 é conferida no texto da migration
     -- do P11, agenda_teste.mig_protecoes_fase7a)
     -- (a correção 2 da 7a, 20261031100985, recriou _agenda_rotina_ficha — a ficha de quem não tem telefone —: a mesma régua)
-    if r.nome in ('_agenda_linhas_do_fechamento', '_agenda_rotina_ficha')
+    -- (FASE 7b: a base da 7b, 20261101100000, recriou _agenda_modo_da_pergunta — o modo da pergunta dos dias —: a mesma régua)
+    if r.nome in ('_agenda_linhas_do_fechamento', '_agenda_rotina_ficha', '_agenda_modo_da_pergunta')
        and coalesce(current_setting('agenda_teste.mig_protecoes_fase7a', true), '') <> '' then
       v_novo := pg_temp.corpo(current_setting('agenda_teste.mig_protecoes_fase7a', true), r.nome);
     end if;
@@ -584,7 +585,10 @@ begin
                   'create function pg_temp.modo_antes(');
   begin
     update public.agenda_config set modo_equipe = 'sombra', modo_marcar_sozinho = 'ligado', modo_proposta = 'ligado' where id;
-    select string_agg(t, ',' order by t) filter (where public._agenda_modo_da_pergunta(t, t || ':x') is distinct from pg_temp.modo_antes(t, t || ':x')),
+    -- (FASE 7b: o tipo que nasceu depois do 7a P1 — dias_semana, 20261101100000 — não tem o de antes: fica fora da comparação; o
+    -- agenda_fase7b_base.sql B6d confere o dele)
+    select string_agg(t, ',' order by t) filter (where public._agenda_modo_da_pergunta(t, t || ':x') is distinct from pg_temp.modo_antes(t, t || ':x')
+                                                   and t <> 'dias_semana'),
            count(*)
       into v_a, v_n
       from (select unnest(regexp_matches(pg_get_constraintdef(c.oid), '''([a-z_]+)''', 'g')) as t

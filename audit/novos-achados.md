@@ -3162,3 +3162,57 @@ porque só o dono pode preenchê-las.
   agenda ficou vazia com a saída do Roberto e do João — corrigido no lote de 30/10, `20261030100600`).
 - **Na Fase 7a:** a promoção de reserva (motor de sempre) com a duração da estimativa; o replay de 29/10 (`fixture-replay-2910.sql`)
   devolve as 12 reservas para a prova.
+
+### [NOVO-agenda-52] Mensagem nova à equipe cai no "como foi"
+
+- **Encontrado em:** Agenda de Produção, Fase 7b, conferência da spec (29/10/2026; `20261026100300:1003` em diante; conferido no P1
+  em 31/10 na ponta `a4fcaaa8`).
+- **O quê:** `agenda_resposta_da_equipe` trata como resposta ao "como foi hoje?" toda mensagem que não é ficha nem confirmação. Uma
+  pergunta `dias` (a da semana, tipo criado no P1) como a última mensagem que o sistema começou cairia no ramo do "como foi" e
+  viraria diária.
+- **Na Fase 7b:** qualquer tipo novo à equipe precisa de ramo próprio antes desse. O P3 dá à pergunta da semana o ramo dela, antes
+  do "não vou".
+
+### [NOVO-agenda-53] `_agenda_rotina_sem_resposta` fecha tudo em 14 h
+
+- **Encontrado em:** Agenda de Produção, Fase 7b, conferência da spec (29/10/2026; `20261026100300:2094-2112`).
+- **O quê:** toda mensagem que não é resposta vira `sem_resposta` em `equipe_resposta_validade` (14 h). A pergunta da semana tem
+  prazo de dias (a quinta que planeja a semana perguntada, `equipe_dias_fechar_antes`) e seria fechada no dia seguinte.
+- **Na Fase 7b:** o P3 tira o tipo `dias` desse fechamento; quem fecha a pergunta da semana é o prazo dela.
+
+### [NOVO-agenda-54] "segunda não posso" seria um "não vou" do dia da ficha
+
+- **Encontrado em:** Agenda de Produção, Fase 7b, conferência da spec (29/10/2026; `20261026100300:882-946`).
+- **O quê:** a gramática da equipe lê `não (posso|vou)` como falta no dia da última ficha. Com a pergunta da semana aberta, a frase
+  é sobre a semana perguntada, não sobre amanhã.
+- **Na Fase 7b:** o P3 lê a resposta da semana antes do "não vou"; o que não dá para ler vira "não entendi" (nada de `indisponivel`
+  no dia da ficha).
+
+### [NOVO-agenda-55] O padrão dito pelo diarista não seria trocado pelo do dono
+
+- **Encontrado em:** Agenda de Produção, Fase 7b, conferência da spec (29/10/2026; o *grava* de `agenda_rascunho_gravar`, a troca
+  de padrão de `20261027100300:1891`, hoje em `20261031100800`).
+- **O quê:** o *grava* do padrão dito pelo dono troca só os padrões de origem `historico` e `dono`. Um padrão dito pelo diarista
+  (origem `diarista`, que a pergunta da semana passa a gravar) ficaria vivo junto do novo do dono.
+- **Na Fase 7b:** o P2 faz o *grava* trocar também os padrões `diarista` e `agente` da pessoa (a palavra mais nova vence).
+
+### [NOVO-agenda-56] `technician_count_for_travel` nunca é lido pela agenda
+
+- **Encontrado em:** Agenda de Produção, Fase 7b, conferência da spec (29/10/2026, SELECT `wf7b_03_os_dupla`; o replay de 29/10 o
+  traz).
+- **O quê:** o orçamento diz quantos técnicos vão (`service_orders.technician_count_for_travel`: 1 em 10 das 11 OS da carteira, 2 na
+  Kalmar OS-00033), e nenhuma função da agenda lê a coluna: a OS que o orçamento previu com 2 técnicos é planejada como qualquer
+  outra.
+- **Na Fase 7b:** com `dupla_tec_viagem_min` (2, criado no P1), a OS com o orçamento de 2 técnicos ou mais vai em dupla o tempo todo
+  (suposição; o dono corrige com `os_planejar dupla`). O P4 aplica.
+
+### [NOVO-agenda-57] Mickael tem perfil de diária vigente sem diária desde 18/09
+
+- **Encontrado em:** Agenda de Produção, Fase 7b, conferência da spec (29/10/2026, SELECT `wf7b_01_equipe`; conferido em 31/10 com
+  `wf7b_r4_01_equipe`).
+- **O quê:** o perfil de diária do Mickael está vigente (sem fim) e a última diária é de 18/09. Ele não entra na grade só porque não
+  tem linha de disponibilidade; nada no sistema perguntava se ele saiu. Em 29/10 o dono disse que Roberto, João e Mickael saíram; os
+  três continuam com o perfil vigente em 31/10 (o perfil é do pagamento, não da agenda).
+- **Na Fase 7b:** a agenda não encerra o perfil (é dinheiro, do módulo de diárias) e não usa a diária para decidir quem conta
+  (correção da equipe de 30/10). A chamada da equipe (P3) lista quem o dono declarou e quem saiu da agenda; o Mickael, que nunca teve
+  linha, não aparece.
