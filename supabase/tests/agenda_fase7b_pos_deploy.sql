@@ -12,6 +12,9 @@
 --   M  as 5 versões de estrutura da 7b (P1 a P5) e a do P6 (20261101100500) registradas em supabase_migrations.schema_migrations; a
 --      correção (100800/100850) e a de dado (100900, a sombra) são mostradas. Na bancada, antes de o P6 estar no ramo, as 3 linhas do
 --      P6 (M1b, F1b, F5b) não saem (na bancada nada pode sair PULADO); em produção e na bancada com o P6, saem e têm de passar
+--      (conferência da 7b pronta, 31/10) a correção da revisão da 7b (20261101100800) passou a ser exigida: M1c (registrada) e F5c
+--      (as 13 funções que ela recria estão no banco com o bloco dela — uma migration mais velha reaplicada por cima as voltaria sem a
+--      correção e nada mais acusaria). Na bancada sem a 100800 (o harness --sem-corr), as duas não saem, como as do P6
 --   C  agenda_config: os 5 modos e os 21 parâmetros da 7b (26 colunas), sem equipe_inativo_dias; os modos: com a 100900 registrada,
 --      sombra (ou ligado, depois dos OKs); sem ela, desligado; agenda_gestor_dia.chamar (jsonb, não nulo); agenda_disponibilidade
 --      com semana_dita, mensagem_id e pergunta_id
@@ -42,6 +45,8 @@ set local timezone = 'UTC';
 create temp table _pd on commit drop as
 select exists (select 1 from supabase_migrations.schema_migrations m where m.version = '20261101100900') as sombra,
        exists (select 1 from supabase_migrations.schema_migrations m where m.version = '20261101100500') as p6,
+       -- (conferência da 7b pronta, 31/10) a correção da revisão da 7b
+       exists (select 1 from supabase_migrations.schema_migrations m where m.version = '20261101100800') as corr,
        coalesce(current_setting('agenda_teste.fase7b', true), '') <> '' as bancada;
 
 -- ── M. Versões registradas ──────────────────────────────────────────────────────────────────────────────
@@ -54,6 +59,11 @@ select format('M1 migration %s registrada', v),
 insert into _resultado
 select 'M1b migration 20261101100500 (o P6: quem chamar e a dupla completa) registrada', (select p6 from _pd), null
  where not (select bancada and not p6 from _pd);
+
+-- (conferência da 7b pronta, 31/10) a correção da revisão da 7b é exigida (antes o M2 só a mostrava)
+insert into _resultado
+select 'M1c migration 20261101100800 (a correção da revisão da 7b) registrada', (select corr from _pd), null
+ where not (select bancada and not corr from _pd);
 
 insert into _resultado
 select 'M2 a correção da revisão (20261101100800/100850) e a migration de dado 20261101100900 (os 5 modos em teste) — só mostra', true,
@@ -246,6 +256,23 @@ select 'F5b as 5 recriadas do P6 (e _agenda_dias_semana_motivos com o motivo cha
   from _pd_recriadas r left join pg_proc p on p.oid = to_regprocedure('public.' || r.f)
  where r.pacote = 'P6'
  having not (select bancada and not p6 from _pd);
+
+-- (conferência da 7b pronta, 31/10) as 13 que a correção da revisão (20261101100800) recria estão com o bloco dela; o F5/F5b não
+-- distinguem (as de antes da correção já tinham o "-- FASE 7b"), e o md5 esperado é um arquivo à parte que pode não ser rodado
+insert into _resultado
+select format('F5c as %s recriadas pela correção da revisão da 7b (20261101100800) estão no banco com o bloco dela', count(*)),
+       count(*) filter (where p.oid is null or p.prosrc not like '%correção da revisão da 7b%') = 0,
+       coalesce(string_agg(x.f, ', ') filter (where p.oid is null or p.prosrc not like '%correção da revisão da 7b%'), 'todas')
+  from unnest(array['_agenda_ver_gestor(date)', 'agenda_livre_de_verdade(date, timestamptz)', '_agenda_quem_chamar(date, timestamptz)',
+                    'agenda_rascunho_disponibilidade(uuid, text, text, text, text, boolean, text, date, text)',
+                    '_agenda_equipe_dias_gravar(uuid, date, smallint[], boolean, text, text, timestamptz, uuid, uuid, uuid)',
+                    'agenda_decidir(uuid, smallint, uuid, text, text, date, timestamptz)',
+                    'agenda_resposta_da_equipe(text, text, text, timestamptz)', '_agenda_linhas_do_fechamento(date)',
+                    '_agenda_carga_da_pessoa(uuid)', 'agenda_desfazer(uuid, uuid, text, date, timestamptz)',
+                    '_agenda_gestor_dupla(date, timestamptz)', '_agenda_contexto(date, date, date, uuid[], uuid[])',
+                    'agenda_propor(text, date, date, uuid[], jsonb, boolean, text, uuid, date, timestamptz)']) x(f)
+  left join pg_proc p on p.oid = to_regprocedure('public.' || x.f)
+ having not (select bancada and not corr from _pd);
 
 insert into _resultado
 select 'F6 o rascunho dos dias com a semana (9 argumentos) existe e a assinatura de 8 saiu (o ai-agent chama pelo nome)',
