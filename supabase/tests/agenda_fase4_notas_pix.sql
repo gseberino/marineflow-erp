@@ -118,9 +118,11 @@ begin
     -- CORREÇÃO FASE 6: fim
     -- FASE 7 (7a P10): e os blocos "-- FASE 7: … fim" (_agenda_aplicar_material e agenda_rascunho_gravar recriadas de novo em
     -- 20261031100800: só acréscimo)
-    if not v_f7 and l ~ '^\s*-- FASE 7:' and l !~ '^\s*-- FASE 7: fim' then v_f7 := true; continue; end if;
+    -- FASE 7b: (7b P2) e os blocos "-- FASE 7b: … fim" (a 20261101100100 recria de novo, só acréscimo): a régua é "FASE 7b?"
+    -- FASE 7b: fim
+    if not v_f7 and l ~ '^\s*-- FASE 7b?:' and l !~ '^\s*-- FASE 7b?: fim' then v_f7 := true; continue; end if;
     if v_f7 then
-      if l ~ '^\s*-- FASE 7: fim' then v_f7 := false; end if;
+      if l ~ '^\s*-- FASE 7b?: fim' then v_f7 := false; end if;
       continue;
     end if;
     if not v_bloco and l ~ '^\s*-- FASE 5:' and l !~ '^\s*-- FASE 5: fim' then v_bloco := true; continue; end if;

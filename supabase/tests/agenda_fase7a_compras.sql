@@ -118,8 +118,14 @@ end $f$;
 create function pg_temp.sem_p10(p_corpo text) returns text language plpgsql as $f$
 declare
   v_b text[] := '{}'; v_bloco boolean := false; l text;
+  v_7b boolean := false;  -- FASE 7b: (7b P2) dentro de um bloco da 7b
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
+    -- FASE 7b: (7b P2) agenda_rascunho_gravar recriada de novo em 20261101100100 (só acréscimo): os blocos "-- FASE 7b: … fim" saem
+    if l ~ '^\s*-- FASE 7b: fim' then v_7b := false; continue; end if;
+    if l ~ '^\s*-- FASE 7b:' then v_7b := true; continue; end if;
+    if v_7b then continue; end if;
+    -- FASE 7b: fim
     if not v_bloco and l ~ '^\s*-- FASE 7: \(7a P10' then v_bloco := true; continue; end if;
     if v_bloco then
       if l ~ '^\s*-- FASE 7: fim' then v_bloco := false; end if;

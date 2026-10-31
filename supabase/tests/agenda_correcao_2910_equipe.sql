@@ -113,9 +113,18 @@ create function pg_temp.sem_equipe(p text) returns text language plpgsql immutab
 declare
   v_fora text[] := '{}';
   v_dentro boolean := false;
+  -- FASE 7b: (7b P2) agenda_capacidade e agenda_capacidade_semanal recriadas de novo em 20261101100100 (só acréscimo): os blocos
+  -- "-- FASE 7b: … -- FASE 7b: fim" saem inteiros, antes da régua desta correção
+  v_7b boolean := false;
+  -- FASE 7b: fim
   l text;
 begin
   foreach l in array string_to_array(replace(p, E'\r\n', E'\n'), E'\n') loop
+    -- FASE 7b: (7b P2) os blocos da 7b saem inteiros
+    if l ~ '^\s*-- FASE 7b: fim' then v_7b := false; continue; end if;
+    if l ~ '^\s*-- FASE 7b:' then v_7b := true; continue; end if;
+    if v_7b then continue; end if;
+    -- FASE 7b: fim
     if not v_dentro and l ~ '^\s*-- CORREÇÃO 30/10 \(equipe\):' and l !~ '^\s*-- CORREÇÃO 30/10 \(equipe\): fim' then
       v_dentro := true;
       continue;

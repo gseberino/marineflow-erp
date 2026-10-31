@@ -985,7 +985,12 @@ insert into _definer_da_agenda values
   -- FASE 7 (7a P10, 20261031100800): o passo compre_ate (escreve o "compre até", os empurrões e a cobrança em os_material e a
   -- pergunta; só a rodada o chama; sem grant a ninguém, nem service_role). A conta e as compras da semana são invoker.
   -- agenda_fase7a_compras.sql prova as portas.
-  ('_agenda_gestor_compre_ate');
+  ('_agenda_gestor_compre_ate'),
+  -- FASE 7b: (7b P2, 20261101100100) o gravador da semana presa (escreve agenda_disponibilidade com semana_dita e o padrão; só o
+  -- *grava*, a resposta da equipe e o decidir o chamam; sem grant a ninguém, nem service_role). O dia curto, a semana perguntada, os
+  -- dias declarados, a chance de falta e a semana dita são invoker. agenda_fase7b_disponibilidade.sql prova as portas.
+  ('_agenda_equipe_dias_gravar');
+  -- FASE 7b: fim
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

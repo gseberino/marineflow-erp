@@ -123,7 +123,11 @@ select format('F1 %s existe', f), to_regprocedure('public.' || f) is not null, n
   from unnest(array[
     'agenda_ver(uuid,text,text,text,text,jsonb,boolean,date)',
     'agenda_rascunho_planejar(uuid,text,text,jsonb,text,date)',
-    'agenda_rascunho_disponibilidade(uuid,text,text,text,text,boolean,text,date)',
+    -- FASE 7b: (7b P2) a assinatura ganhou p_semana no fim (drop + create em 20261101100100); antes dela, a de 8 argumentos
+    coalesce(case when to_regprocedure('public.agenda_rascunho_disponibilidade(uuid,text,text,text,text,boolean,text,date,text)') is not null
+                  then 'agenda_rascunho_disponibilidade(uuid,text,text,text,text,boolean,text,date,text)' end,
+             'agenda_rascunho_disponibilidade(uuid,text,text,text,text,boolean,text,date)'),
+    -- FASE 7b: fim
     'agenda_rascunho_ler(uuid,date)',
     'agenda_rascunho_gravar(uuid,date)',
     'agenda_rascunho_descartar(uuid)',

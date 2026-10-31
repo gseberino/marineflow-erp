@@ -149,7 +149,10 @@ insert into _rpcs_p5 values
   -- Fase 4 (P3): a assinatura ganhou p_aviso no fim (drop + create em 20261027100300); antes dela, a de 11 argumentos.
   ((coalesce(to_regprocedure('public.agenda_rascunho_material(uuid, text, text, text[], text, text, text, numeric, boolean, text, date, text)')::text,
              'public.agenda_rascunho_material(uuid, text, text, text[], text, text, text, numeric, boolean, text, date)'))),
-  ('public.agenda_rascunho_disponibilidade(uuid, text, text, text, text, boolean, text, date)'),
+  -- FASE 7b: (7b P2) a assinatura ganhou p_semana no fim (drop + create em 20261101100100); antes dela, a de 8 argumentos.
+  ((coalesce(to_regprocedure('public.agenda_rascunho_disponibilidade(uuid, text, text, text, text, boolean, text, date, text)')::text,
+             'public.agenda_rascunho_disponibilidade(uuid, text, text, text, text, boolean, text, date)'))),
+  -- FASE 7b: fim
   ('public.agenda_rascunho_ler(uuid, date)'), ('public.agenda_rascunho_gravar(uuid, date)'),
   ('public.agenda_rascunho_descartar(uuid)');
 create temp table _internas_p5 (f text) on commit drop;
