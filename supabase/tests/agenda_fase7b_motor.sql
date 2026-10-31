@@ -807,7 +807,9 @@ begin
       ('_agenda_classe_da_os', 'public._agenda_classe_da_os(jsonb, jsonb, date, boolean, boolean)', 'mig_correcao2_fase7a', '20261031100985', 2),
       ('_agenda_tecnicos_da_grade', 'public._agenda_tecnicos_da_grade(date)', 'mig_correcao2_fase7a', '20261031100985', 1),
       ('_agenda_carga_da_pessoa', 'public._agenda_carga_da_pessoa(uuid)', 'mig_dono_fase6', '20261029100400', 2),
-      ('_agenda_gestor_pessoa_meios', 'public._agenda_gestor_pessoa_meios(uuid, date, jsonb)', 'mig_correcao_fase7a', '20261031100980', 1),
+      -- FASE 7b: (correção 2 da 7b, achado 26) + os 2 blocos de cima da 20261101100850 (também "-- FASE 7b:"; o de dentro sai com o do P4)
+      ('_agenda_gestor_pessoa_meios', 'public._agenda_gestor_pessoa_meios(uuid, date, jsonb)', 'mig_correcao_fase7a', '20261031100980', 3),
+      -- FASE 7b: fim
       ('_agenda_contexto', 'public._agenda_contexto(date, date, date, uuid[], uuid[])', 'mig_teto_fase7a', '20261031100400', 6),
       ('_agenda_tentar_bloco', 'public._agenda_tentar_bloco(jsonb, boolean[], integer[], integer[], integer[], integer[], integer[], integer[], integer[], integer[], integer[], jsonb, integer, boolean, integer)', 'mig_teto_fase7a', '20261031100400', 10),
       ('_agenda_melhor', 'public._agenda_melhor(jsonb, jsonb)', 'mig_motor_fase2', '20261025100200', 1),

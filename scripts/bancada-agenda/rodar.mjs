@@ -275,6 +275,11 @@ const FIXTURES_COMO_TEXTO = [
   ['agenda_teste.mig_disponibilidade_fase7b', '../../supabase/migrations/20261101100100_agenda_fase7b_disponibilidade.sql'],
   ['agenda_teste.mig_motor_fase7b', '../../supabase/migrations/20261101100300_agenda_fase7b_motor.sql'],
   ['agenda_teste.mig_quem_chamar_fase7b', '../../supabase/migrations/20261101100500_agenda_fase7b_quem_chamar.sql'],
+  // Fase 7b (correção 2, 20261101100850: o achado 26, da 7a): a fonte de 1 das 3 recriadas que ainda não estava acima — a correção da
+  // revisão 20261101100800 (_agenda_ver_gestor) —, para o W0 de agenda_fase77b_correcao2.sql conferir que a cópia só acrescenta os
+  // blocos "(correção 2, achado 26 da 7a)" e o W4 rodar a de antes como comparação. As outras 2 já estão acima: _agenda_gestor_pessoa_meios
+  // (mig_motor_fase7b) e _agenda_gestor_corte (mig_quem_chamar_fase7b).
+  ['agenda_teste.mig_correcao_fase7b', '../../supabase/migrations/20261101100800_agenda_fase77b_correcao.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

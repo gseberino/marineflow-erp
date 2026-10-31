@@ -1044,13 +1044,17 @@ begin
       ('agenda_gestor_rodar', 'public.agenda_gestor_rodar(date, timestamptz)', 'mig_compras_fase7a', '20261031100800', 1),
       ('_agenda_gestor_dia_gravar', 'public._agenda_gestor_dia_gravar(date, text, jsonb, timestamptz)', 'mig_base_fase7a', '20261031100000', 1),
       -- FASE 7b: (correção da revisão da 7b) + os 8 blocos da correção 20261101100800 (também "-- FASE 7b:")
-      ('_agenda_ver_gestor', 'public._agenda_ver_gestor(date)', 'mig_correcao2_fase7a', '20261031100985', 13),
+      -- FASE 7b: (correção 2 da 7b, achado 26) + os 2 blocos da correção 2 20261101100850 (também "-- FASE 7b:")
+      ('_agenda_ver_gestor', 'public._agenda_ver_gestor(date)', 'mig_correcao2_fase7a', '20261031100985', 13 + 2),
+      -- FASE 7b: fim
       -- FASE 7b: fim
       -- FASE 7b: (correção da revisão da 7b) + os 3 blocos da correção 20261101100800 (também "-- FASE 7b:")
       ('agenda_livre_de_verdade', 'public.agenda_livre_de_verdade(date, timestamptz)', 'mig_correcao_fase7a', '20261031100980', 5),
       -- FASE 7b: fim
       ('_agenda_dias_semana_motivos', 'public._agenda_dias_semana_motivos(date, date)', 'mig_pergunta_fase7b', '20261101100200', 2),
-      ('_agenda_gestor_corte', 'public._agenda_gestor_corte(uuid, date, timestamptz)', 'mig_correcao_fase7a', '20261031100980', 2))
+      -- FASE 7b: (correção 2 da 7b, achado 26) + os 4 blocos da correção 2 20261101100850 (também "-- FASE 7b:")
+      ('_agenda_gestor_corte', 'public._agenda_gestor_corte(uuid, date, timestamptz)', 'mig_correcao_fase7a', '20261031100980', 2 + 4))
+      -- FASE 7b: fim
       as x(nome, sig, mig, versao, blocos) loop
     v_mig := coalesce(current_setting('agenda_teste.' || f.mig, true), '');
     if v_mig = '' then

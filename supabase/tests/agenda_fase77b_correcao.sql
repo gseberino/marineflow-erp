@@ -91,6 +91,17 @@ begin
   end loop;
   return array_to_string(v_out, E'\n');
 end $f$;
+-- (correção 2 da 7b, achado 26) a 20261101100850 recria _agenda_ver_gestor de novo, com os blocos "-- FASE 7b: (correção 2, achado 26
+-- da 7a) … -- FASE 7b: fim (correção 2)": o X0 os tira antes (tirados, o corpo é o desta correção, byte a byte)
+create function pg_temp.sem_c2(p text) returns text language sql immutable as $f$
+  select array_to_string(array(
+           select l from (select l, o, sum(case when l ~ '^\s*-- (FASE 7b: )?\(correção 2, achado 26 da 7a\)' then 1
+                                                when l ~ '^\s*-- (FASE 7b: fim \(correção 2\)|\(correção 2: fim\))' then -1 else 0 end)
+                                       over (order by o rows between unbounded preceding and current row) as dentro,
+                                 l ~ '^\s*-- (FASE 7b: fim \(correção 2\)|\(correção 2: fim\))' as fecha
+                            from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
+            where dentro = 0 and not fecha order by o), E'\n')
+$f$;
 create function pg_temp.carregada() returns boolean language sql stable as $f$
   select coalesce(current_setting('agenda_teste.fase7b', true), '') <> ''
 $f$;
@@ -185,6 +196,7 @@ begin
       continue;
     end if;
     select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = f.sig::regprocedure;
+    v_novo := pg_temp.sem_c2(v_novo);  -- (correção 2 da 7b, achado 26) os blocos da 20261101100850 saem antes
     select count(*) into v_n from unnest(string_to_array(v_novo, E'\n')) l where l ~ '^\s*-- (FASE 7b: )?\(correção da revisão da 7b, achado';
     insert into _resultado values (
       format('X0 %s: sem os %s blocos da correção, é o corpo de %s', f.nome, f.blocos, f.versao),

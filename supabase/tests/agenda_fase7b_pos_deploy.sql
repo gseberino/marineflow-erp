@@ -15,6 +15,9 @@
 --      (conferência da 7b pronta, 31/10) a correção da revisão da 7b (20261101100800) passou a ser exigida: M1c (registrada) e F5c
 --      (as 13 funções que ela recria estão no banco com o bloco dela — uma migration mais velha reaplicada por cima as voltaria sem a
 --      correção e nada mais acusaria). Na bancada sem a 100800 (o harness --sem-corr), as duas não saem, como as do P6
+--      (correção 2 da 7b, 31/10) a correção 2 (20261101100850: o achado 26, da 7a) também é exigida: M1d (registrada) e F5d (as 3
+--      funções que ela recria — _agenda_gestor_pessoa_meios, _agenda_gestor_corte e _agenda_ver_gestor — com o bloco dela). Na
+--      bancada sem a 100850 (o harness f7b/a26/rodar.mjs --sem-a26), as duas não saem
 --   C  agenda_config: os 5 modos e os 21 parâmetros da 7b (26 colunas), sem equipe_inativo_dias; os modos: com a 100900 registrada,
 --      sombra (ou ligado, depois dos OKs); sem ela, desligado; agenda_gestor_dia.chamar (jsonb, não nulo); agenda_disponibilidade
 --      com semana_dita, mensagem_id e pergunta_id
@@ -47,6 +50,8 @@ select exists (select 1 from supabase_migrations.schema_migrations m where m.ver
        exists (select 1 from supabase_migrations.schema_migrations m where m.version = '20261101100500') as p6,
        -- (conferência da 7b pronta, 31/10) a correção da revisão da 7b
        exists (select 1 from supabase_migrations.schema_migrations m where m.version = '20261101100800') as corr,
+       -- (correção 2 da 7b, 31/10) o achado 26 (da 7a)
+       exists (select 1 from supabase_migrations.schema_migrations m where m.version = '20261101100850') as corr2,
        coalesce(current_setting('agenda_teste.fase7b', true), '') <> '' as bancada;
 
 -- ── M. Versões registradas ──────────────────────────────────────────────────────────────────────────────
@@ -64,6 +69,11 @@ select 'M1b migration 20261101100500 (o P6: quem chamar e a dupla completa) regi
 insert into _resultado
 select 'M1c migration 20261101100800 (a correção da revisão da 7b) registrada', (select corr from _pd), null
  where not (select bancada and not corr from _pd);
+
+-- (correção 2 da 7b, 31/10) a correção 2 (o achado 26, da 7a) é exigida, depois da 100800
+insert into _resultado
+select 'M1d migration 20261101100850 (a correção 2: o dono que vai junto não conta como pessoa na revisão) registrada', (select corr2 from _pd), null
+ where not (select bancada and not corr2 from _pd);
 
 insert into _resultado
 select 'M2 a correção da revisão (20261101100800/100850) e a migration de dado 20261101100900 (os 5 modos em teste) — só mostra', true,
@@ -273,6 +283,17 @@ select format('F5c as %s recriadas pela correção da revisão da 7b (2026110110
                     'agenda_propor(text, date, date, uuid[], jsonb, boolean, text, uuid, date, timestamptz)']) x(f)
   left join pg_proc p on p.oid = to_regprocedure('public.' || x.f)
  having not (select bancada and not corr from _pd);
+
+-- (correção 2 da 7b, 31/10) as 3 que a correção 2 (20261101100850) recria estão com o bloco dela (uma migration mais velha reaplicada
+-- depois as voltaria sem a correção: o F5/F5b/F5c não distinguem)
+insert into _resultado
+select format('F5d as %s recriadas pela correção 2 (20261101100850: o achado 26) estão no banco com o bloco dela', count(*)),
+       count(*) filter (where p.oid is null or p.prosrc not like '%correção 2, achado 26 da 7a%') = 0,
+       coalesce(string_agg(x.f, ', ') filter (where p.oid is null or p.prosrc not like '%correção 2, achado 26 da 7a%'), 'todas')
+  from unnest(array['_agenda_gestor_pessoa_meios(uuid, date, jsonb)', '_agenda_gestor_corte(uuid, date, timestamptz)',
+                    '_agenda_ver_gestor(date)']) x(f)
+  left join pg_proc p on p.oid = to_regprocedure('public.' || x.f)
+ having not (select bancada and not corr2 from _pd);
 
 insert into _resultado
 select 'F6 o rascunho dos dias com a semana (9 argumentos) existe e a assinatura de 8 saiu (o ai-agent chama pelo nome)',
