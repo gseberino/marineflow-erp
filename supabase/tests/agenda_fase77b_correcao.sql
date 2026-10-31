@@ -102,6 +102,18 @@ create function pg_temp.sem_c2(p text) returns text language sql immutable as $f
                             from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n')
 $f$;
+-- (correção 3 da 7b) a 20261101100860 recria _agenda_linhas_do_fechamento e _agenda_gestor_dupla de novo, com os blocos "-- FASE 7b:
+-- (correção 3) … -- FASE 7b: fim (correção 3)" e, dentro de um bloco da 7b de antes, "-- (correção 3) … -- (correção 3: fim)": o X0 os
+-- tira antes (tirados, o corpo é o desta correção, byte a byte)
+create function pg_temp.sem_c3(p text) returns text language sql immutable as $f$
+  select array_to_string(array(
+           select l from (select l, o, sum(case when l ~ '^\s*-- (FASE 7b: )?\(correção 3\)' then 1
+                                                when l ~ '^\s*-- (FASE 7b: fim \(correção 3\)|\(correção 3: fim\))' then -1 else 0 end)
+                                       over (order by o rows between unbounded preceding and current row) as dentro,
+                                 l ~ '^\s*-- (FASE 7b: fim \(correção 3\)|\(correção 3: fim\))' as fecha
+                            from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
+            where dentro = 0 and not fecha order by o), E'\n')
+$f$;
 create function pg_temp.carregada() returns boolean language sql stable as $f$
   select coalesce(current_setting('agenda_teste.fase7b', true), '') <> ''
 $f$;
@@ -197,6 +209,7 @@ begin
     end if;
     select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = f.sig::regprocedure;
     v_novo := pg_temp.sem_c2(v_novo);  -- (correção 2 da 7b, achado 26) os blocos da 20261101100850 saem antes
+    v_novo := pg_temp.sem_c3(v_novo);  -- (correção 3 da 7b) e os da 20261101100860
     select count(*) into v_n from unnest(string_to_array(v_novo, E'\n')) l where l ~ '^\s*-- (FASE 7b: )?\(correção da revisão da 7b, achado';
     insert into _resultado values (
       format('X0 %s: sem os %s blocos da correção, é o corpo de %s', f.nome, f.blocos, f.versao),

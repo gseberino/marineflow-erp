@@ -990,7 +990,10 @@ begin
   v_res := pg_temp.ok(v_res, 'Q11b a chamada (inteira), a dias_semana e o telefone (curtos) na mesma linha, pergunta_ids com a chamada e o telefone (a dias_semana curta não conta como mostrada); o texto_curto só pelo nome; a (e) fica com a de fornecedor',
     a = '2/ligado/fornecedores_prazo'
     -- FASE 7b: fim
-    and b like 'Agenda: Na agenda conto com Alex: % Também: os dias da semana de 16/11 (responda em *agenda pendências*). Também: o telefone do Alex (sem ele não mando a ficha). || Agenda, equipe: a equipe da agenda está certa?; os dias da semana de 16/11; o telefone do Alex. *agenda pendências* mostra.',
+    -- FASE 7b: (correção 3 da 7b) a forma curta leva o prazo de quem vence e o "sigo assim" (a chamada contada, com o cadastro ligado;
+    -- os dias da semana, com os dias ligados); o telefone não vence e fica como antes
+    and b like 'Agenda: Na agenda conto com Alex: % Também: os dias da semana de 16/11 (responda em *agenda pendências*). Também: o telefone do Alex (sem ele não mando a ficha). || Agenda, equipe: a equipe da agenda está certa? — sem resposta até ter 10/11 às 18:00, sigo assim; os dias da semana de 16/11 — sem resposta até qui 12/11 às 16:00, sigo assim; o telefone do Alex. *agenda pendências* mostra.',
+    -- FASE 7b: fim
     a || ' / ' || coalesce(b, '-'));
 
   -- sem nenhuma pergunta da equipe aberta, com os modos ligados: a saída de antes, byte a byte

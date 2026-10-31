@@ -1,5 +1,5 @@
 -- Conferência DEPOIS de aplicar a Agenda de Produção, Fase 7b (os pacotes P1 a P6): migrations 20261101100000..100500 (e a correção
--- 100800/100850, se houver), as edge functions (task-automations com o passo 0b1 da semana da equipe; ai-agent e erp-mcp com a dupla
+-- 100800/100850/100860, se houver), as edge functions (task-automations com o passo 0b1 da semana da equipe; ai-agent e erp-mcp com a dupla
 -- e a semana nas ferramentas e as 2 linhas do prompt), o front (o bloco Equipe do cartão da OS) e (passo 3) a migration de dado
 -- 20261101100900 — os 5 modos da 7b em teste — fila-do-dono/fase7b-oks.md, passos 1–3 (e de novo a cada "ligar", passos 4 a 8).
 -- Spec: spec-fase7b.md §8.3 (agenda_fase7b_pos_deploy.sql), §R4.7 e §10 passo 1.
@@ -18,6 +18,12 @@
 --      (correção 2 da 7b, 31/10) a correção 2 (20261101100850: o achado 26, da 7a) também é exigida: M1d (registrada) e F5d (as 3
 --      funções que ela recria — _agenda_gestor_pessoa_meios, _agenda_gestor_corte e _agenda_ver_gestor — com o bloco dela). Na
 --      bancada sem a 100850 (o harness f7b/a26/rodar.mjs --sem-a26), as duas não saem
+--      (correção 3 da 7b, 31/10) a correção 3 (20261101100860: o técnico declarado nunca é novato, a escada da revisão nunca põe sozinho
+--      quem nunca vai sozinho, o prazo na forma curta da linha (n) e a 2ª pessoa da dupla com o dono junto) também é exigida: M1e
+--      (registrada), F1c (as 2 funções novas, _agenda_tecnico_declarado e _agenda_dupla_sem_falta_voce, com as portas: authenticated e
+--      service_role, nunca anon) e F5e (as 5 que ela recria — _agenda_e_novato, _agenda_gestor_reparo, _agenda_linhas_do_fechamento,
+--      _agenda_gestor_dupla e agenda_validar — com o bloco dela). Na bancada sem a 100860 (o harness f7b/c3/rodar.mjs --sem-c3), as 3 não
+--      saem
 --   C  agenda_config: os 5 modos e os 21 parâmetros da 7b (26 colunas), sem equipe_inativo_dias; os modos: com a 100900 registrada,
 --      sombra (ou ligado, depois dos OKs); sem ela, desligado; agenda_gestor_dia.chamar (jsonb, não nulo); agenda_disponibilidade
 --      com semana_dita, mensagem_id e pergunta_id
@@ -52,6 +58,8 @@ select exists (select 1 from supabase_migrations.schema_migrations m where m.ver
        exists (select 1 from supabase_migrations.schema_migrations m where m.version = '20261101100800') as corr,
        -- (correção 2 da 7b, 31/10) o achado 26 (da 7a)
        exists (select 1 from supabase_migrations.schema_migrations m where m.version = '20261101100850') as corr2,
+       -- (correção 3 da 7b, 31/10) o R5.9 da spec da 7c e o W3a
+       exists (select 1 from supabase_migrations.schema_migrations m where m.version = '20261101100860') as corr3,
        coalesce(current_setting('agenda_teste.fase7b', true), '') <> '' as bancada;
 
 -- ── M. Versões registradas ──────────────────────────────────────────────────────────────────────────────
@@ -75,11 +83,16 @@ insert into _resultado
 select 'M1d migration 20261101100850 (a correção 2: o dono que vai junto não conta como pessoa na revisão) registrada', (select corr2 from _pd), null
  where not (select bancada and not corr2 from _pd);
 
+-- (correção 3 da 7b, 31/10) a correção 3 é exigida, depois da 100850
 insert into _resultado
-select 'M2 a correção da revisão (20261101100800/100850) e a migration de dado 20261101100900 (os 5 modos em teste) — só mostra', true,
+select 'M1e migration 20261101100860 (a correção 3: o técnico declarado, a escada, o prazo na forma curta e a dupla com o dono junto) registrada', (select corr3 from _pd), null
+ where not (select bancada and not corr3 from _pd);
+
+insert into _resultado
+select 'M2 a correção da revisão (20261101100800/100850/100860) e a migration de dado 20261101100900 (os 5 modos em teste) — só mostra', true,
        format('correção: %s; dado: %s',
               coalesce((select string_agg(m.version, ', ' order by m.version) from supabase_migrations.schema_migrations m
-                         where m.version in ('20261101100800', '20261101100850')), 'nenhuma'),
+                         where m.version in ('20261101100800', '20261101100850', '20261101100860')), 'nenhuma'),
               case when (select sombra from _pd) then 'registrada (passo 3 feito)' else 'não registrada (antes do passo 3)' end);
 
 -- ── C. A configuração ───────────────────────────────────────────────────────────────────────────────────
@@ -294,6 +307,28 @@ select format('F5d as %s recriadas pela correção 2 (20261101100850: o achado 2
                     '_agenda_ver_gestor(date)']) x(f)
   left join pg_proc p on p.oid = to_regprocedure('public.' || x.f)
  having not (select bancada and not corr2 from _pd);
+
+-- (correção 3 da 7b, 31/10) as 2 novas da correção 3 existem, com as portas (leitura: authenticated e service_role; nunca anon), e as 5
+-- que ela recria estão com o bloco dela (uma migration mais velha reaplicada depois as voltaria sem a correção: o F5/F5c não distinguem)
+insert into _resultado
+select format('F1c as %s funções novas da correção 3 (20261101100860) existem, com authenticated e service_role e nunca anon', count(*)),
+       count(*) filter (where p.oid is null or has_function_privilege('anon', p.oid, 'execute')
+                          or not has_function_privilege('authenticated', p.oid, 'execute')
+                          or not has_function_privilege('service_role', p.oid, 'execute')) = 0,
+       coalesce(string_agg(x.f, ', ') filter (where p.oid is null or has_function_privilege('anon', p.oid, 'execute')
+                                                or not has_function_privilege('authenticated', p.oid, 'execute')
+                                                or not has_function_privilege('service_role', p.oid, 'execute')), 'todas')
+  from unnest(array['_agenda_tecnico_declarado(uuid, date)', '_agenda_dupla_sem_falta_voce(jsonb)']) x(f)
+  left join pg_proc p on p.oid = to_regprocedure('public.' || x.f)
+ having not (select bancada and not corr3 from _pd);
+insert into _resultado
+select format('F5e as %s recriadas pela correção 3 (20261101100860) estão no banco com o bloco dela', count(*)),
+       count(*) filter (where p.oid is null or p.prosrc not like '%(correção 3)%') = 0,
+       coalesce(string_agg(x.f, ', ') filter (where p.oid is null or p.prosrc not like '%(correção 3)%'), 'todas')
+  from unnest(array['_agenda_e_novato(uuid, date)', '_agenda_gestor_reparo(uuid, date, timestamptz)', '_agenda_linhas_do_fechamento(date)',
+                    '_agenda_gestor_dupla(date, timestamptz)', 'agenda_validar(uuid, uuid[], date, timestamptz, uuid)']) x(f)
+  left join pg_proc p on p.oid = to_regprocedure('public.' || x.f)
+ having not (select bancada and not corr3 from _pd);
 
 insert into _resultado
 select 'F6 o rascunho dos dias com a semana (9 argumentos) existe e a assinatura de 8 saiu (o ai-agent chama pelo nome)',
