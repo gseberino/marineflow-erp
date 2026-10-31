@@ -27,6 +27,20 @@ Deno.test("equipe: consumiu = true só quando o banco diz; os parâmetros vão c
   assertEquals(await respostaDaEquipe(admin({ data: null }), { phone: "5547900000001", body: "ok" }), false);
 });
 
+// Fase 7b (P3, migration 20261101100200): a resposta à pergunta dos dias da semana ("seg ter qui", "nenhum", "igual", o "não entendi"
+// que pede de novo) volta do banco com tipo dias e consumiu true — o webhook não a passa à confirmação do cliente nem ao recibo; em
+// teste (modo_dias em sombra) o banco devolve consumiu false e ela segue como sempre.
+Deno.test("equipe: a resposta à pergunta dos dias da semana (tipo dias) é consumida quando o banco diz; em teste, não", async () => {
+  for (const data of [{ consumiu: true, tipo: "dias", leitura: "dias", mudou: true, resposta: "Anotei: na semana de 16/11 você pode seg, ter e qui. Obrigado!" },
+                      { consumiu: true, tipo: "dias", leitura: "igual" },
+                      { consumiu: true, tipo: "dias", leitura: "nao_entendi", vez: 1 }]) {
+    const a = admin({ data });
+    assertEquals(await respostaDaEquipe(a, { phone: "5547900000012", body: "seg ter qui", messageId: "WA-7b" }), true);
+    assertEquals(a.chamadas.map((c) => c.nome), [RPC_RESPOSTA_DA_EQUIPE]);
+  }
+  assertEquals(await respostaDaEquipe(admin({ data: { consumiu: false } }), { phone: "5547900000012", body: "seg ter qui" }), false);
+});
+
 Deno.test("equipe: texto vazio, longo demais ou sem telefone nem vai ao banco", async () => {
   for (const body of ["", "   ", "x".repeat(RESPOSTA_DA_EQUIPE_MAX + 1), null]) {
     const a = admin({ data: { consumiu: true } });

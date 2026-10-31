@@ -7,6 +7,11 @@
 //      a confirmação da manhã e o "como foi hoje?" (só com agenda_config.modo_equipe ligado, na janela e no teto que o
 //      banco confere), remaneja pelo silêncio, lança a diária (modo_diaria) e devolve os acordes. Antes da vigia: a
 //      vigia lê o que ela mudou. Passo à parte: nunca lança (agenda:rotina).
+//   0b1. A rodada da semana da equipe (agenda-equipe-semana.ts, Fase 7b P3): agenda_equipe_semana pergunta os dias da semana a
+//      quem tem dias fixos e telefone (e ao dono só quando faz diferença), faz o fechamento da semana, cuida da chamada da equipe,
+//      do telefone, do contato e da regra d14 (o banco decide o modo, a hora, a janela e o teto; com modo_dias e modo_cadastro
+//      desligados, nada). Depois da rotina (a pergunta conta com a ficha e o "como foi" do dia no teto) e antes do aprendizado.
+//      Passo à parte: nunca lança (agenda:equipe-semana); a função ausente é pulada calada.
 //   0b2. A rodada do aprendizado (agenda-aprender.ts, Fase 6 P8): agenda_aprender roda uma vez por dia, no 1º tique a
 //      partir de agenda_config.aprender_hora (o banco decide; nos outros tiques devolve cedo ou ja_rodou): mede as OS
 //      concluídas SEMPRE e, com modo_aprendizado fora de desligado, calcula o que aprendeu (o uso só com o modo ligado e o
@@ -53,6 +58,7 @@ import { rodarRotinaDaAgenda } from "./agenda-rotina.ts";
 import { vigiarMaterialDaAgenda } from "./agenda-material.ts";
 import { vigiarClienteDaAgenda } from "./agenda-cliente.ts";
 import { aprenderDaAgenda } from "./agenda-aprender.ts";
+import { rodarSemanaDaEquipe } from "./agenda-equipe-semana.ts";
 import { expandOccurrences } from "../_shared/recurrence.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { logEdgeError } from "../_shared/log-error.ts";
@@ -483,6 +489,18 @@ servirComCors(async (req) => {
       agendaRotina = { erro: String((e as any)?.message ?? e) };
     }
 
+    // A rodada da semana da equipe (Fase 7b, P3): depois da rotina (a pergunta da semana conta, no teto de 2 por dia, com a ficha e o
+    // "como foi" que a rotina acabou de registrar) e antes do aprendizado. Chamada a cada tique: o banco decide o modo e a hora (com
+    // modo_dias e modo_cadastro desligados devolve { rodou: false }). Tem o próprio try/catch (rodarSemanaDaEquipe nunca lança:
+    // devolve { erro } e grava em app_error_logs); o de fora é a segunda trava, para nada daqui parar o aprendizado, a vigia e as regras.
+    let agendaEquipeSemana: unknown = null;
+    try {
+      agendaEquipeSemana = await rodarSemanaDaEquipe(db, new Date());
+    } catch (e) {
+      console.error("agenda:equipe-semana:", e);
+      agendaEquipeSemana = { erro: String((e as any)?.message ?? e) };
+    }
+
     // A rodada do aprendizado (Fase 6, P8): depois da rotina (a medida lê a conferência do dia em dia) e antes da vigia (a
     // vigia, o motor e a rodada do cliente leem o que ela aprendeu no mesmo tique). Chamada a cada tique: o banco roda uma vez
     // por dia, a partir de aprender_hora (cedo e ja_rodou são o normal). Tem o próprio try/catch (aprenderDaAgenda nunca
@@ -538,6 +556,7 @@ servirComCors(async (req) => {
 
     const summary = {
       identidade, fios, agenda_material: agendaMaterial, agenda_material_vigia: agendaMaterialVigia, agenda_rotina: agendaRotina,
+      agenda_equipe_semana: agendaEquipeSemana,
       agenda_aprender: agendaAprender, agenda_vigia: agendaVigia, agenda_aviso: agendaAviso, agenda_cliente_vigia: agendaClienteVigia,
       rules, r10, reminders, recurrence,
     };
