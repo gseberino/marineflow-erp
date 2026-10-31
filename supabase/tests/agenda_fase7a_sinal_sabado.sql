@@ -126,9 +126,11 @@ begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
     -- (correção 2 da 7a, 20261031100985: a dupla sem a 2ª pessoa acrescentou 2 blocos "-- FASE 7: (7a correção 2" à
     -- _agenda_classe_da_os depois do P12; eles saem junto, e o resto continua sendo a cópia do P12 sobre a de antes)
-    if not v_bloco and l ~ '^\s*-- FASE 7: \((7a P12|7a correção 2)' then v_bloco := true; continue; end if;
+    -- FASE 7b: (7b P4) e os blocos "-- FASE 7b: … fim" (a 20261101100300 recria o motor de novo, só acréscimo): a régua aceita "7b"
+    -- FASE 7b: fim
+    if not v_bloco and l ~ '^\s*-- FASE 7(: \((7a P12|7a correção 2)|b:)' and l !~ '^\s*-- FASE 7b: fim' then v_bloco := true; continue; end if;
     if v_bloco then
-      if l ~ '^\s*-- FASE 7: fim' then v_bloco := false; end if;
+      if l ~ '^\s*-- FASE 7b?: fim' then v_bloco := false; end if;
       continue;
     end if;
     v_b := v_b || l;

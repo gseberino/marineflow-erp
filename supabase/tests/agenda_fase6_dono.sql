@@ -95,9 +95,11 @@ begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
     -- FASE 7 (7a P5): os blocos "-- FASE 7: … -- FASE 7: fim" também saem (a 20261031100400 recria _agenda_contexto e
     -- _agenda_validar_itens copiando DESTA fase: só acréscimo); o fim é lido pelo prefixo
-    if not v_f7 and l ~ '^\s*-- FASE 7:' and l !~ '^\s*-- FASE 7: fim' then v_f7 := true; continue; end if;
+    -- FASE 7b: (7b P4) e os blocos "-- FASE 7b: … fim" (a 20261101100300 recria o motor de novo, só acréscimo): a régua aceita "7b"
+    -- FASE 7b: fim
+    if not v_f7 and l ~ '^\s*-- FASE 7b?:' and l !~ '^\s*-- FASE 7b?: fim' then v_f7 := true; continue; end if;
     if v_f7 then
-      if l ~ '^\s*-- FASE 7: fim' then v_f7 := false; end if;
+      if l ~ '^\s*-- FASE 7b?: fim' then v_f7 := false; end if;
       continue;
     end if;
     -- FASE 7 (7a P5): fim
@@ -569,7 +571,10 @@ begin
   insert into _resultado
   select 'D5d a regra 6 nova lê _agenda_carga_da_pessoa (3 vezes pela coluna carga) e a de antes fica num "if false"; agenda_validar não foi recriada',
          p.prosrc ~ 'public\._agenda_carga_da_pessoa\(n\.payee_id\) as carga'
-         and (select count(*) from regexp_matches(p.prosrc, 'nov\.carga \*', 'g')) = 3
+         -- FASE 7b: (7b P4) a regra 6 refeita com a manhã de sábado (o bloco da 20261101100300) lê a carga mais 1 vez
+         and (select count(*) from regexp_matches(p.prosrc, 'nov\.carga \*', 'g'))
+             = 3 + case when p.prosrc like '%-- FASE 7b: (7b P4, §5.3, AG7-08) com modo_sabado ligado%' then 1 else 0 end
+         -- FASE 7b: fim
          and p.prosrc ~ E'\n  if false then\n  -- FASE 6: fim\n  v_v := v_v \\|\\| coalesce\\(\\('
          and (select q.prosrc from pg_proc q where q.oid = 'public.agenda_validar(uuid, uuid[], date, timestamptz, uuid)'::regprocedure)
              = pg_temp.corpo(v_motor, 'agenda_validar'),

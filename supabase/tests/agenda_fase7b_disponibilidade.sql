@@ -769,6 +769,11 @@ begin
   begin
     update public.agenda_disponibilidade set substituida_em = timestamptz '2026-11-01 10:00-03'
      where payee_id = 'f7b00000-0000-4000-8000-000000000302' and substituida_em is null and dias_semana is not null;
+    -- FASE 7b: (7b P4, R4.3(c)) com modo_dupla fora de desligado, quem vem sob demanda com algum meio-dia livre no horizonte conta como
+    -- a 2ª pessoa (_agenda_tecnicos_da_grade): "só o Alex na grade" é também sem a data dita do Bruno (ter 10/11)
+    update public.agenda_disponibilidade set substituida_em = timestamptz '2026-11-01 10:00-03'
+     where payee_id = 'f7b00000-0000-4000-8000-000000000303' and substituida_em is null;
+    -- FASE 7b: fim
     v := pg_temp.planejar('{"dupla": "inicio", "dupla_meios": 2}', 'o Lenine precisa de dois no primeiro dia');
     a := v ->> 'releitura';
     v := pg_temp.planejar('{"dupla": "nao"}', 'o Lenine vai com um só');

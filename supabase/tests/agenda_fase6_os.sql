@@ -108,9 +108,11 @@ begin
     -- CORREÇÃO FASE 6: fim
     -- FASE 7 (7a P2): os blocos "-- FASE 7: … -- FASE 7: fim" também saem (20261031100100 recria os_duracao_sugerida copiando
     -- a definição mais nova: só acréscimo); o fim é lido pelo prefixo
-    if not v_f7 and l ~ '^\s*-- FASE 7:' and l !~ '^\s*-- FASE 7: fim' then v_f7 := true; continue; end if;
+    -- FASE 7b: (7b P4) e os blocos "-- FASE 7b: … fim" (a 20261101100300 recria o motor de novo, só acréscimo): a régua aceita "7b"
+    -- FASE 7b: fim
+    if not v_f7 and l ~ '^\s*-- FASE 7b?:' and l !~ '^\s*-- FASE 7b?: fim' then v_f7 := true; continue; end if;
     if v_f7 then
-      if l ~ '^\s*-- FASE 7: fim' then v_f7 := false; end if;
+      if l ~ '^\s*-- FASE 7b?: fim' then v_f7 := false; end if;
       continue;
     end if;
     if not v_bloco and l ~ '^\s*-- FASE 6:' and l !~ '^\s*-- FASE 6: fim' then v_bloco := true; continue; end if;
