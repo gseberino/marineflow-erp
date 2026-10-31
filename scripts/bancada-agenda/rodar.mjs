@@ -242,6 +242,23 @@ const FIXTURES_COMO_TEXTO = [
   // antes). As fontes de antes da 7a já estão acima (mig_motor_fase2, mig_equipe_fase3, mig_correcao_revisao, mig_leituras_fase1) e o
   // Y13 roda a de 20261030100300 (mig_correcao_aviso) como pg_temp.
   ['agenda_teste.mig_correcao2_fase7a', '../../supabase/migrations/20261031100985_agenda_fase77a_correcao2.sql'],
+  // Fase 7b (P1): a equipe de verdade de 30/10 (Roberto, João e Mickael fora; o Alex declarado pelo dono, sem telefone; a reserva do
+  // Lenine solta; a pergunta dos dias do dono do lote aberta) e as pessoas da etapa (Mateus sob demanda sem perfil, Rafael diarista
+  // com padrão e na rotina, Bruno o novato com uma data dita; o dono com a linha seg–sex só com agenda_teste.fase7b_dono = 'campo'),
+  // por cima do replay de 29/10 e da sintética da 7a; e a própria migration da base da 7b (20261101100000), de onde os pacotes
+  // seguintes conferem a cópia de _agenda_modo_da_pergunta (a fonte dela, a 20261031100850, já está acima: mig_protecoes_fase7a).
+  // As fontes da tabela de cópias da 7b (spec-fase7b §R4.6) que ainda não estavam acima: a correção da equipe de 30/10
+  // (agenda_capacidade e agenda_capacidade_semanal, P2), o 7a P10 (agenda_rascunho_gravar, P2; agenda_gestor_rodar, P6) e o 7a P12
+  // (_agenda_validar_itens e _agenda_gestor_sabado, P4). As outras fontes da §R4.6 já estão acima (mig_rascunho_fase1,
+  // mig_leituras_fase5, mig_equipe_fase3, mig_perguntas_fase7a, mig_rodada_fase7a, mig_acompanhamento_fase3, mig_correcao2_fase7a,
+  // mig_correcao_fase7a, mig_dono_fase6, mig_teto_fase7a, mig_motor_fase2, mig_encaixe_fase7a, mig_correcao_textos_fase6,
+  // mig_base_fase7a, mig_protecoes_fase7a). Os pacotes seguintes acrescentam aqui as migrations da própria 7b (mig_*_fase7b) quando
+  // um teste precisar delas como texto.
+  ['agenda_teste.fase7b', 'fixture-fase7b.sql'],
+  ['agenda_teste.mig_tabelas_fase7b', '../../supabase/migrations/20261101100000_agenda_fase7b_tabelas.sql'],
+  ['agenda_teste.mig_correcao_equipe', '../../supabase/migrations/20261030100600_agenda_correcao_equipe.sql'],
+  ['agenda_teste.mig_compras_fase7a', '../../supabase/migrations/20261031100800_agenda_fase7a_compras.sql'],
+  ['agenda_teste.mig_sinal_sabado_fase7a', '../../supabase/migrations/20261031100900_agenda_fase7a_sinal_sabado.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */
