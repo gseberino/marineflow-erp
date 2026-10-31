@@ -156,8 +156,11 @@ insert into _pd_funcoes values
   ('_agenda_equipe_dias_gravar(uuid, date, smallint[], boolean, text, text, timestamptz, uuid, uuid, uuid)', 'interna', 'P2'),
   ('_agenda_dias_semana_motivos(date, date)', 'interna', 'P3'),
   -- o P6 (quem chamar e a dupla completa): as portas são as do P6; aqui só existir e nunca anon
-  ('_agenda_dupla_faltando(uuid, date)', 'p6', 'P6'), ('_agenda_quem_chamar(date, timestamptz)', 'p6', 'P6'),
-  ('_agenda_gestor_chamar(date, timestamptz)', 'p6', 'P6'), ('_agenda_gestor_dupla(date, timestamptz)', 'p6', 'P6');
+  -- FASE 7b (P6): as 5 do P6 (com _agenda_meios_frase, que a spec não nomeava) são peças de dentro: ninguém de fora (nem o
+  -- service_role); só a rodada do gestor (definer) as chama. A porta entra no F3 (interna).
+  ('_agenda_dupla_faltando(uuid, date)', 'interna', 'P6'), ('_agenda_quem_chamar(date, timestamptz)', 'interna', 'P6'),
+  ('_agenda_gestor_chamar(date, timestamptz)', 'interna', 'P6'), ('_agenda_gestor_dupla(date, timestamptz)', 'interna', 'P6'),
+  ('_agenda_meios_frase(jsonb, boolean)', 'interna', 'P6');
 
 insert into _resultado
 select format('F1 as %s funções novas de P2 a P5 existem', count(*)),
@@ -166,7 +169,7 @@ select format('F1 as %s funções novas de P2 a P5 existem', count(*)),
   from _pd_funcoes where pacote <> 'P6';
 
 insert into _resultado
-select 'F1b as 4 funções novas do P6 existem (_agenda_dupla_faltando, _agenda_quem_chamar, _agenda_gestor_chamar, _agenda_gestor_dupla)',
+select 'F1b as 5 funções novas do P6 existem (_agenda_dupla_faltando, _agenda_quem_chamar, _agenda_gestor_chamar, _agenda_gestor_dupla, _agenda_meios_frase)',
        count(*) filter (where to_regprocedure('public.' || f) is null) = 0,
        coalesce(string_agg(f, ', ') filter (where to_regprocedure('public.' || f) is null), 'todas')
   from _pd_funcoes where pacote = 'P6'

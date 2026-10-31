@@ -164,10 +164,11 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
   },
   // Fase 7a (P7, 20261031100600): a rodada do gestor da agenda grava a rodada como a vigia, a rotina, o material, o cliente e o
   // aprendizado. Fase 7a (P10, 20261031100800): recriada (+1: a mesma cópia; o bloco novo chama o compre_ate nos tiques).
+  // Fase 7b (P6, 20261101100500): recriada (+1: a mesma cópia; o bloco novo põe os passos dupla e chamar).
   {
     onde: 'agenda_gestor_rodar',
     casou: '1000',
-    vezes: 2,
+    vezes: 3,
     porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_aprender); não é texto_max nem peca_embutida_acima',
   },
   // Fase 7b (P3, 20261101100200): a rodada da semana da equipe grava a rodada como a rotina, o aprendizado e o gestor.
@@ -176,6 +177,13 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     casou: '1000',
     vezes: 1,
     porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_rotina_rodar e agenda_gestor_rodar); não é texto_max nem peca_embutida_acima',
+  },
+  // Fase 7b (P6, 20261101100500): quem chamar diz quanto a conta custou (as duas voltas do motor), como o livre de verdade.
+  {
+    onde: '_agenda_quem_chamar',
+    casou: '1000',
+    vezes: 1,
+    porque: 'segundos → milissegundos (o custo das duas contas do motor no resultado, ms, como agenda_livre_de_verdade); não é texto_max nem peca_embutida_acima',
   },
   // Fase 7b (P5, 20261101100400): a saúde dos dias da equipe (a chave equipe_dias de agenda_saude) nomeia as chaves como os outros
   // blocos da conferência.
@@ -192,7 +200,8 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     // Correção de 29/10 (P2, 20261030100100): agenda_livre_de_verdade reescrita (+1: o mesmo ms do custo, no livre do plano).
     // Correção de 29/10 (revisão do lote, 20261030100500): recriada de novo (+1: a mesma cópia).
     // Fase 7a, correção da revisão (20261031100980): recriada de novo, com o teto da equipe e o dono fora da conta (+1: a mesma cópia).
-    vezes: 4,
+    // Fase 7b (P6, 20261101100500): recriada de novo, com a linha de quem chamar (+1: a mesma cópia).
+    vezes: 5,
     porque: 'segundos → milissegundos (o custo da simulação no resultado, ms; a meta < 2 s é do teste); não é texto_max nem peca_embutida_acima',
   },
   {

@@ -263,6 +263,11 @@ const FIXTURES_COMO_TEXTO = [
   // que passa a "o tempo todo"; FORA_DA_BANCADA: o agenda_fase7b_sombra.sql a roda numa subtransação). As fontes das 2 recriadas da
   // 20261101100400 já estão acima: os_plano_da_os (mig_correcao_textos_fase6) e agenda_saude (mig_rodada_fase7a).
   ['agenda_teste.mig_sombra_fase7b', '../../supabase/migrations/20261101100900_agenda_fase7b_sombra.sql'],
+  // Fase 7b (P6): a fonte de 1 das 6 recriadas da 20261101100500 que ainda não estava acima — _agenda_dias_semana_motivos (o 7b P3) —,
+  // para o C8 de agenda_fase7b_chamar.sql conferir que a cópia só acrescenta os blocos "-- FASE 7b:". As das outras 5 já estão acima:
+  // agenda_gestor_rodar (mig_compras_fase7a), _agenda_gestor_dia_gravar (mig_base_fase7a), _agenda_ver_gestor (mig_correcao2_fase7a),
+  // agenda_livre_de_verdade e _agenda_gestor_corte (mig_correcao_fase7a).
+  ['agenda_teste.mig_pergunta_fase7b', '../../supabase/migrations/20261101100200_agenda_fase7b_pergunta_semanal.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */
