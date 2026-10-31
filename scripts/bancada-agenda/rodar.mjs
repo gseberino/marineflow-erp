@@ -259,6 +259,10 @@ const FIXTURES_COMO_TEXTO = [
   ['agenda_teste.mig_correcao_equipe', '../../supabase/migrations/20261030100600_agenda_correcao_equipe.sql'],
   ['agenda_teste.mig_compras_fase7a', '../../supabase/migrations/20261031100800_agenda_fase7a_compras.sql'],
   ['agenda_teste.mig_sinal_sabado_fase7a', '../../supabase/migrations/20261031100900_agenda_fase7a_sinal_sabado.sql'],
+  // Fase 7b (P5): a migration de dado 20261101100900 (os 5 modos da 7b em sombra e, no DESFAZER, a dupla dita no início ou no fim
+  // que passa a "o tempo todo"; FORA_DA_BANCADA: o agenda_fase7b_sombra.sql a roda numa subtransação). As fontes das 2 recriadas da
+  // 20261101100400 já estão acima: os_plano_da_os (mig_correcao_textos_fase6) e agenda_saude (mig_rodada_fase7a).
+  ['agenda_teste.mig_sombra_fase7b', '../../supabase/migrations/20261101100900_agenda_fase7b_sombra.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

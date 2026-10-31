@@ -200,7 +200,12 @@ insert into _pd_funcoes values
   ('_agenda_gestor_sinal(date, timestamptz)', 'interna'), ('_agenda_gestor_sabado(date, timestamptz)', 'interna'),
   ('_agenda_gestor_orcamentos(date, timestamptz)', 'interna'), ('_agenda_gestor_bem(date, timestamptz)', 'interna'),
   -- (a correção da revisão, 20261031100980) o *desfaz* que vale, a conta em pessoa-meio-dia e a memória da duração na rodada
-  ('_agenda_gestor_desfeito(uuid, timestamptz)', 'interna'), ('_agenda_gestor_pessoa_meios(uuid, date, jsonb)', 'interna'),
+  -- FASE 7b: (7b P5) a 20261101100400 dá a porta de leitura ao desfeito (o foco *agenda gestor* da correção 2 o lê): com ela
+  -- registrada, authenticated e service_role
+  ('_agenda_gestor_desfeito(uuid, timestamptz)',
+   case when exists (select 1 from supabase_migrations.schema_migrations m where m.version = '20261101100400') then 'leitura' else 'interna' end),
+  -- FASE 7b: fim
+  ('_agenda_gestor_pessoa_meios(uuid, date, jsonb)', 'interna'),
   ('_agenda_rodada_duracao_lembrar(text)', 'interna'), ('_agenda_rodada_duracao_guardar(text, bigint, jsonb)', 'interna'),
   -- (a correção 2, 20261031100985) o telefone da ficha, as OS que saíram pelo material sem a compra (ninguém); os técnicos da
   -- grade e a frase deles (lidas pela classe da OS e pelo foco: authenticated e service_role)

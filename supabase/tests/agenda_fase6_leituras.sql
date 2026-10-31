@@ -127,9 +127,11 @@ begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
     -- FASE 7 (7a P7): os blocos "-- FASE 7: … -- FASE 7: fim" também saem (a 20261031100600 recria agenda_ver copiando a
     -- definição mais nova: só acréscimo; o R9 de agenda_fase7a_rodada.sql confere a cópia); o fim é lido pelo prefixo
-    if not v_f7 and l ~ '^\s*-- FASE 7:' and l !~ '^\s*-- FASE 7: fim' then v_f7 := true; continue; end if;
+    -- FASE 7b: (7b P5) e os blocos "-- FASE 7b: … fim" (a 20261101100400 recria os_plano_da_os de novo, só acréscimo): a régua aceita "7b"
+    -- FASE 7b: fim
+    if not v_f7 and l ~ '^\s*-- FASE 7b?:' and l !~ '^\s*-- FASE 7b?: fim' then v_f7 := true; continue; end if;
     if v_f7 then
-      if l ~ '^\s*-- FASE 7: fim' then v_f7 := false; end if;
+      if l ~ '^\s*-- FASE 7b?: fim' then v_f7 := false; end if;
       continue;
     end if;
     -- FASE 7 (7a P7): fim
@@ -206,8 +208,11 @@ begin
       pg_temp.cartao(c_gia) #> '{duracao,campo}' = 'null'::jsonb and pg_temp.cartao(c_gia) #> '{presenca_dono,aprendida}' = 'null'::jsonb,
       (pg_temp.cartao(c_gia) -> 'duracao')::text);
     -- o resto do cartão, em todas as OS, é o de antes (sem a linha nova e sem a chave nova)
+    -- FASE 7b: (7b P5) o cartão ganhou a chave equipe (nula com modo_dupla desligado, como a linha da bancada): sai da comparação
+    -- (o L1k de agenda_fase7b_leituras.sql prova que ela é nula e que o resto é o de antes)
+    -- FASE 7b: fim
     select count(*), string_agg(so.service_order_number, ', ' order by so.service_order_number) filter (where
-             (pg_temp.cartao(so.id) #- '{duracao,campo}' #- '{presenca_dono,aprendida}')::text
+             ((pg_temp.cartao(so.id) #- '{duracao,campo}' #- '{presenca_dono,aprendida}') - 'equipe')::text
              is distinct from pg_temp.plano_de_antes(so.id, date '2026-10-30')::text)
       into v_n, v_dif
       from public.service_orders so where so.service_order_number like 'OS-%';
@@ -270,8 +275,10 @@ begin
       and r #>> '{presenca_dono,texto}' = 'Você abre e fecha (pela regra)', (r -> 'duracao')::text || (r -> 'presenca_dono')::text);
     v_res := pg_temp.ok(v_res, 'L2c a OS concluída (Ana) não tem a linha do fator (nada a perguntar)',
       pg_temp.cartao(c_ana) #> '{duracao,campo}' = 'null'::jsonb, (pg_temp.cartao(c_ana) -> 'duracao')::text);
+    -- FASE 7b: (7b P5) a chave equipe nova (nula) sai da comparação, como no L2e
+    -- FASE 7b: fim
     select count(*), string_agg(so.service_order_number, ', ' order by so.service_order_number) filter (where
-             (pg_temp.cartao(so.id) #- '{duracao,campo}' #- '{presenca_dono,aprendida}')::text
+             ((pg_temp.cartao(so.id) #- '{duracao,campo}' #- '{presenca_dono,aprendida}') - 'equipe')::text
              is distinct from pg_temp.plano_de_antes(so.id, date '2026-10-30')::text)
       into v_n, v_dif
       from public.service_orders so where so.service_order_number like 'OS-%';
@@ -339,7 +346,9 @@ begin
       (r -> 'duracao')::text || (r -> 'presenca_dono')::text);
     -- o que muda no cartão ligado é só a presença das OS com a aprendida (e a linha nova)
     select string_agg(so.service_order_number, ', ' order by so.service_order_number) filter (where
-             ((pg_temp.cartao(so.id) #- '{duracao,campo}') - 'presenca_dono')::text
+             -- FASE 7b: (7b P5) a chave equipe nova (nula) sai da comparação, como no L2e
+             -- FASE 7b: fim
+             ((pg_temp.cartao(so.id) #- '{duracao,campo}') - 'presenca_dono' - 'equipe')::text
              is distinct from (pg_temp.plano_de_antes(so.id, date '2026-10-30') - 'presenca_dono')::text
              or ((pg_temp.cartao(so.id) #>> '{presenca_dono,aprendida}') is null
                  and ((pg_temp.cartao(so.id) -> 'presenca_dono') - 'aprendida')::text

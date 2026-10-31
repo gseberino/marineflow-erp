@@ -129,7 +129,8 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     // as mesmas 9 e o erros_24h da rodada do aprendizado, contado e posto no bloco aprendizado). Correção C2 da Fase 6
     // (20261029100950): + 10 na recriada (a mesma cópia; as janelas novas do aprendizado vêm de agenda_config). Fase 7a (P7,
     // 20261031100600): + 12 na recriada (a mesma cópia, 10, e o rodadas_24h e o erros_24h da rodada do gestor, no bloco gestor).
-    vezes: 52,
+    // Fase 7b (P5, 20261101100400): + 12 na recriada (a mesma cópia; a chave equipe_dias vem de _agenda_saude_equipe7b).
+    vezes: 64,
     porque: 'nomes das chaves do resultado (rodadas_24h, erros_24h, resposta_24h_pct: a janela de um dia da conferência); não é rascunho_validade',
   },
   // Fase 3 (P4): a rotina da equipe grava a rodada como a vigia.
@@ -175,6 +176,14 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     casou: '1000',
     vezes: 1,
     porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_rotina_rodar e agenda_gestor_rodar); não é texto_max nem peca_embutida_acima',
+  },
+  // Fase 7b (P5, 20261101100400): a saúde dos dias da equipe (a chave equipe_dias de agenda_saude) nomeia as chaves como os outros
+  // blocos da conferência.
+  {
+    onde: '_agenda_saude_equipe7b',
+    casou: '24h',
+    vezes: 2,
+    porque: 'nomes das chaves do resultado (rodadas_24h e erros_24h da rodada da semana da equipe: a janela de um dia da conferência, como os blocos de agenda_saude); não é rascunho_validade',
   },
   // Fase 3 (P6): o custo da simulação do livre de verdade e a ordem das OS do turno no job do Claude Max.
   {

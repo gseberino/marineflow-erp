@@ -121,7 +121,11 @@ end $f$;
 
 -- ── Z0. As portas das 5 funções novas ─────────────────────────────────────────────────────────────────────
 with f(sig, porta) as (values
-  ('public._agenda_gestor_desfeito(uuid, timestamptz)', 'ninguem'),
+  -- FASE 7b: (7b P5) a 20261101100400 dá a porta de leitura ao desfeito (o foco *agenda gestor* da correção 2 o lê e recebia
+  -- "permission denied"): com ela aplicada (_agenda_saude_equipe7b existe), authenticated e service_role
+  ('public._agenda_gestor_desfeito(uuid, timestamptz)',
+   case when to_regprocedure('public._agenda_saude_equipe7b(date, timestamptz)') is not null then 'leitura' else 'ninguem' end),
+  -- FASE 7b: fim
   ('public._agenda_gestor_pessoa_meios(uuid, date, jsonb)', 'ninguem'),
   ('public._agenda_rodada_duracao_lembrar(text)', 'ninguem'),
   ('public._agenda_rodada_duracao_guardar(text, bigint, jsonb)', 'ninguem'),
