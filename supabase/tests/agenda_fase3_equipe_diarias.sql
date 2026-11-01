@@ -1304,6 +1304,16 @@ begin
   v_corpo := substr(v_corpo, position(E'as $function$\n' in v_corpo) + length(E'as $function$'));
   v_corpo := left(v_corpo, position(E'\n$function$;' in v_corpo));
   v_novo := replace(v_novo, E'\r\n', E'\n');
+  -- FASE 7c (P3): os blocos "-- FASE 7c: … -- FASE 7c: fim" também saem (a 20261102100200 recria _agenda_violacoes copiando a definição
+  -- mais nova, a de 20261029100900: só acréscimo, a violação habilidade com modo_habilidade ligado); o fim é lido pelo prefixo. O que
+  -- este J5 prova não muda: fora dos blocos da 7c e da Fase 6, só os da Fase 3 (C1)
+  select string_agg(x.l, E'\n' order by x.o) into v_novo
+    from (select t.l, t.o, sum(case when t.l ~ '^\s*-- FASE 7c:' and t.l !~ '^\s*-- FASE 7c: fim' then 1
+                                    when t.l ~ '^\s*-- FASE 7c: fim' then -1 else 0 end) over (order by t.o) as dentro,
+                 t.l ~ '^\s*-- FASE 7c: fim' as fim
+            from unnest(string_to_array(v_novo, E'\n')) with ordinality t(l, o)) x
+   where x.dentro = 0 and not x.fim;
+  -- FASE 7c (P3): fim
   -- CORREÇÃO FASE 6: (C1) os blocos "-- CORREÇÃO FASE 6: … -- CORREÇÃO FASE 6: fim" também saem (a correção C1 da Fase 6
   -- recria _agenda_violacoes copiando a definição mais nova: só acréscimo); o fim é lido pelo prefixo
   select string_agg(x.l, E'\n' order by x.o) into v_novo

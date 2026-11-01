@@ -297,6 +297,11 @@ const FIXTURES_COMO_TEXTO = [
   // (mig_motor_fase7b), _agenda_so_diaristas e _agenda_alocs_do_bloco (mig_motor_fase2) e _agenda_por_que_nao (mig_teto_fase7a).
   ['agenda_teste.mig_tabelas_fase2', '../../supabase/migrations/20261025100000_agenda_fase2_tabelas.sql'],
   ['agenda_teste.mig_motor_fase7c', '../../supabase/migrations/20261102100100_agenda_fase7c_motor.sql'],
+  // Fase 7c (P3): a própria migration da violação e da escada (20261102100200), de onde o V7/V9 de agenda_fase7c_violacao.sql conferem
+  // que as cópias só acrescentam os blocos "-- FASE 7c:" (e a marca de dentro "-- (7c …" na escada) e o 7d P4 confere a de
+  // _agenda_violacoes. As fontes das 2 recriadas já estão acima: _agenda_violacoes (mig_correcao_calculo_fase6) e _agenda_gestor_reparo
+  // (mig_correcao3_fase7b).
+  ['agenda_teste.mig_violacao_fase7c', '../../supabase/migrations/20261102100200_agenda_fase7c_violacao.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */
