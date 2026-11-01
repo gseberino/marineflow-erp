@@ -5,7 +5,7 @@ import {
   assertFalse,
   assertStringIncludes,
 } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { EvolutionProvider } from "./evolution-provider.ts";
+import { EvolutionProvider, excecaoIncerta, falhaHttpIncerta } from "./evolution-provider.ts";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -86,7 +86,7 @@ Deno.test("sendText: HTTP 500 → ok:false, retryable:true", async () => {
   const result = await withFetch(fetchStub, () =>
     provider.sendText("5547999999999", "Hi"),
   );
-  assertEquals(result, { ok: false, error: "HTTP 500", retryable: true });
+  assertEquals(result, { ok: false, error: "HTTP 500", retryable: true, incerto: false });
 });
 
 Deno.test("sendText: HTTP 401 → ok:false, retryable:false", async () => {
@@ -108,6 +108,37 @@ Deno.test("sendText: network error → ok:false, retryable:true", async () => {
   } finally {
     globalThis.fetch = original;
   }
+});
+
+// Retorno F0a-1 (05/11/2026): falha que não prova que nada saiu fica marcada como incerta.
+Deno.test("sendText: tempo esgotado (504/524/408) é incerto; 500, 502, 530 e 401 não", async () => {
+  for (const status of [504, 524, 408]) {
+    const { fetchStub } = mockFetch({}, status);
+    const r = await withFetch(fetchStub, () => provider.sendText("5547999999999", "Hi"));
+    assertEquals((r as { incerto?: boolean }).incerto, true, String(status));
+  }
+  for (const status of [500, 502, 530, 401]) {
+    const { fetchStub } = mockFetch({}, status);
+    const r = await withFetch(fetchStub, () => provider.sendText("5547999999999", "Hi"));
+    assertEquals((r as { incerto?: boolean }).incerto, false, String(status));
+  }
+  assertEquals(falhaHttpIncerta(200), false);
+});
+
+Deno.test("sendText: exceção sem conexão é certa; conexão perdida no meio é incerta", async () => {
+  const original = globalThis.fetch;
+  try {
+    globalThis.fetch = () => Promise.reject(new Error("error sending request: connection reset by peer"));
+    assertEquals(((await provider.sendText("5547999999999", "Hi")) as { incerto?: boolean }).incerto, true);
+    globalThis.fetch = () => Promise.reject(new Error("ECONNREFUSED"));
+    assertEquals(((await provider.sendText("5547999999999", "Hi")) as { incerto?: boolean }).incerto, false);
+  } finally {
+    globalThis.fetch = original;
+  }
+  assertEquals(excecaoIncerta("error sending request: tcp connect error: Connection refused (os error 111)"), false);
+  assertEquals(excecaoIncerta("dns error: failed to lookup address information"), false);
+  assertEquals(excecaoIncerta("error sending request: operation timed out"), true);
+  assertEquals(excecaoIncerta("connection closed before message completed"), true);
 });
 
 // ─── sendLink ────────────────────────────────────────────────────────────────

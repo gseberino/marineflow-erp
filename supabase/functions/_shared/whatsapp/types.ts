@@ -3,7 +3,8 @@
 
 export type SendResult =
   | { ok: true; providerMessageId: string }
-  | { ok: false; error: string; retryable: boolean };
+  // incerto: a falha não prova que a mensagem não saiu (tempo esgotado, conexão caída no meio).
+  | { ok: false; error: string; retryable: boolean; incerto?: boolean };
 
 // Canonical inbound event — fields actually used by the MarineFlow webhook handler.
 export type IncomingMessageEvent = {

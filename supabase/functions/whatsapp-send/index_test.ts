@@ -35,3 +35,36 @@ Deno.test("sent_by e origem não barram o envio: o esquema aceita qualquer texto
   assertStringIncludes(fonte, "sent_by: z.string().max(64).optional()");
   assertStringIncludes(fonte, "origem: z.string().max(20).optional()");
 });
+
+// Retorno F0a-1 (05/11/2026): o envio automático a quem é de fora passa pelo portão
+// (saida-automatica.ts, testado lá) antes da reserva e do desvio de teste, falhando fechado.
+Deno.test("portão do automático: antes da reserva, pelo destino de verdade, recusa com 422", () => {
+  const portao = fonte.indexOf("if (ehAutomatica(origem, isServiceRoleCall)) {");
+  const desvio = fonte.indexOf("const testNumber = numeroDeTesteAtivo(settingsMap);");
+  const reserva = fonte.indexOf("const reserva = await reservarOuAguardar(");
+  assert(portao > 0 && portao < desvio && desvio < reserva, "portão → desvio de teste → reserva");
+  const bloco = fonte.slice(portao, desvio);
+  assertStringIncludes(bloco, "const destino = normalizePhoneNumber(body.phone);");
+  assertStringIncludes(bloco, '.rpc("canal_bloqueado", { p_fone: destino })');
+  assertStringIncludes(bloco, 'bloqueio: bloqueioErr ? "erro"');
+  assertStringIncludes(bloco, "hora: horaDeBrasilia()");
+  assertStringIncludes(bloco, "recusado: true, codigo: decisao.codigo }, 422)");
+  // A equipe sai do portão; sem saber quem é, segue como de fora.
+  assertStringIncludes(bloco.replace(/\s+/g, " "), 'equipeErr ? "erro" as const');
+  assertStringIncludes(bloco, "automaticaDeFora = daEquipe !== true;");
+});
+
+Deno.test("reserva fechada: banco sem resposta não envia o automático a quem é de fora", () => {
+  const checagem = fonte.indexOf("if (reservaImpedeEnvio(reserva, automaticaDeFora)) {");
+  const nova = fonte.indexOf('if (reserva === "nova") liberarReservaPendente');
+  assert(checagem > 0 && checagem < nova, "a recusa vem antes de a reserva valer como nova");
+  assertStringIncludes(fonte.slice(checagem, nova).replace(/\s+/g, " "), "reserva_indisponivel: true, }, 503);");
+});
+
+Deno.test("falha incerta: a chave não é liberada (sem reenvio automático)", () => {
+  const bloco = fonte.slice(fonte.indexOf("const falhaIncertaMantida"), fonte.indexOf("// Audit log"));
+  assertStringIncludes(bloco, "manterReservaNaFalha(!sendResult.ok ? sendResult.incerto : undefined, automaticaDeFora)");
+  const mantida = bloco.indexOf("else if (falhaIncertaMantida)");
+  const libera = bloco.indexOf("else await liberarEnvio(supabaseAdmin, chave);");
+  assert(mantida > 0 && mantida < libera, "a falha incerta é conferida antes de liberar");
+});

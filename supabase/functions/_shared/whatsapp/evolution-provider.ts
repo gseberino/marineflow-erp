@@ -22,6 +22,22 @@ function typingDelayMs(message: string): number {
   return Math.min(BASE + (message?.length ?? 0) * PER_CHAR, CAP);
 }
 
+// Falha que NÃO prova que a mensagem ficou sem sair (Retorno F0a-1, 05/11/2026): o pedido chegou
+// à Evolution, ou pode ter chegado, e a resposta é que se perdeu. 408/504/524 = tempo esgotado
+// (o túnel desistiu de esperar a Evolution, que pode ter mandado). Os erros vistos em 60 dias
+// (530 e 502 do túnel, "Media upload failed" da Evolution) são certos: nada saiu.
+export function falhaHttpIncerta(status: number): boolean {
+  return status === 408 || status === 504 || status === 524;
+}
+
+// Exceção do fetch: não conectou (DNS, recusa, sem rota) é certa; o resto (tempo esgotado,
+// conexão resetada ou fechada no meio da resposta) é incerto. "connection" sozinho não serve:
+// "connection reset by peer" também tem a palavra.
+export function excecaoIncerta(mensagem: string): boolean {
+  return !/dns error|failed to lookup|name resolution|tcp connect error|connection refused|econnrefused|network is unreachable|no route to host/i
+    .test(mensagem);
+}
+
 // Evolution API returns numeric delivery statuses on messages.update events.
 const EVOLUTION_STATUS_MAP: Record<number, string> = {
   1: "pending",
@@ -121,12 +137,15 @@ export class EvolutionProvider implements WhatsAppProvider {
         ok: false,
         error: errMsg,
         retryable: res.status >= 500,
+        incerto: falhaHttpIncerta(res.status),
       };
     } catch (err) {
+      const mensagem = err instanceof Error ? err.message : String(err);
       return {
         ok: false,
-        error: err instanceof Error ? err.message : String(err),
+        error: mensagem,
         retryable: true,
+        incerto: excecaoIncerta(mensagem),
       };
     }
   }

@@ -22,6 +22,14 @@ import {
   origemDoEnvio,
   quemEnviou,
 } from "../_shared/whatsapp/registro-do-envio.ts";
+import {
+  decidirSaidaAutomatica,
+  ehAutomatica,
+  ehDaEquipe,
+  horaDeBrasilia,
+  manterReservaNaFalha,
+  reservaImpedeEnvio,
+} from "../_shared/whatsapp/saida-automatica.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -119,6 +127,45 @@ servirComCors(async (req) => {
     const faltando = campoObrigatorioFaltando(body);
     if (faltando) return jr({ error: faltando }, 400);
 
+    // Retorno F0a-1 (05/11/2026): o envio automático a quem é de fora passa pelo portão de
+    // _shared/whatsapp/saida-automatica.ts — "Cliente Final", opt-out, lista de bloqueio e janela
+    // de 8h–20h, falhando FECHADO. Antes da reserva: a recusa não prende a chave. Confere o
+    // destino de verdade, não o número de teste.
+    const origem = origemDoEnvio(body.origem, isServiceRoleCall);
+    let automaticaDeFora = false;
+    if (ehAutomatica(origem, isServiceRoleCall)) {
+      const destino = normalizePhoneNumber(body.phone);
+      const { data: equipe, error: equipeErr } = await supabaseAdmin
+        .from("app_users")
+        .select("phone_normalized")
+        .eq("active", true)
+        .not("phone_normalized", "is", null);
+      const daEquipe = equipeErr
+        ? "erro" as const
+        : ehDaEquipe(destino, ((equipe ?? []) as Array<{ phone_normalized: string | null }>).map((u) => u.phone_normalized));
+      automaticaDeFora = daEquipe !== true;
+      if (automaticaDeFora) {
+        const { data: motivo, error: bloqueioErr } = await supabaseAdmin.rpc("canal_bloqueado", { p_fone: destino });
+        const decisao = decidirSaidaAutomatica({
+          daEquipe,
+          bloqueio: bloqueioErr ? "erro" : (typeof motivo === "string" ? motivo : null),
+          hora: horaDeBrasilia(),
+        });
+        if (!decisao.pode) {
+          console.warn(`[whatsapp-send] ${decisao.mensagem} (contexto: ${body.context ?? "nenhum"})`);
+          await supabaseAdmin.from("audit_log").insert({
+            table_name: body.receivable_id ? "receivables" : "service_orders",
+            record_id: body.receivable_id || body.service_order_id || "00000000-0000-0000-0000-000000000000",
+            action: "whatsapp_send_api",
+            changed_by: callerIdentity,
+            new_value: { kind: body.kind, context: body.context || null, phone: destino, recusado: decisao.codigo },
+            reason: decisao.mensagem,
+          }).then(() => {}, () => {});
+          return jr({ error: decisao.mensagem, recusado: true, codigo: decisao.codigo }, 422);
+        }
+      }
+    }
+
     // Desvio do modo de teste: a MESMA regra das tools do assistente (marcar-enviado.ts), que
     // decidem por ela a chave anti-duplicado e o "foi para o número de teste".
     const testNumber = numeroDeTesteAtivo(settingsMap);
@@ -137,7 +184,8 @@ servirComCors(async (req) => {
 
     // Reserva a chave ANTES de chamar o provedor. Já reservada: "já enviado" só se a outra
     // tentativa CONCLUIU; sem desfecho, responde que não confirmou (reservarOuAguardar).
-    // Banco indisponível para a reserva: segue e envia (duplicado raro < cobrança que não sai).
+    // Banco indisponível para a reserva: o que o dono pede segue e envia (duplicado raro <
+    // cobrança que não sai); o automático a quem é de fora NÃO envia (F0a-1).
     const chave = body.dedupe_key || null;
     if (chave) {
       const reserva = await reservarOuAguardar(supabaseAdmin, chave, { phone: phoneClean, contexto: body.context });
@@ -153,6 +201,13 @@ servirComCors(async (req) => {
           error: "A tentativa anterior desta mesma mensagem ainda não confirmou se saiu. Confira no WhatsApp antes de mandar de novo.",
           em_andamento: true,
         }, 409);
+      }
+      if (reservaImpedeEnvio(reserva, automaticaDeFora)) {
+        console.warn(`[whatsapp-send] reserva indisponível, envio automático não feito: ${chave}`);
+        return jr({
+          error: "Envio automático não feito: não deu para reservar a chave anti-duplicado (banco sem resposta).",
+          reserva_indisponivel: true,
+        }, 503);
       }
       if (reserva === "nova") liberarReservaPendente = () => liberarEnvio(supabaseAdmin, chave);
     }
@@ -194,8 +249,12 @@ servirComCors(async (req) => {
     // abaixo). Uma exceção depois disto NÃO pode liberar — a mensagem pode já ter saído.
     liberarReservaPendente = null;
     const success = sendResult.ok;
+    // Falha incerta (pode ter saído) no automático a quem é de fora: a chave fica reservada e a
+    // próxima tentativa ouve "em andamento", sem reenvio automático (F0a-1).
+    const falhaIncertaMantida = manterReservaNaFalha(!sendResult.ok ? sendResult.incerto : undefined, automaticaDeFora);
     if (chave) {
       if (success) await concluirEnvio(supabaseAdmin, chave, sendResult.providerMessageId || null);
+      else if (falhaIncertaMantida) console.warn(`[whatsapp-send] falha incerta, chave mantida sem reenvio: ${chave}`);
       else await liberarEnvio(supabaseAdmin, chave);
     }
 
@@ -226,7 +285,7 @@ servirComCors(async (req) => {
 
     if (!success) {
       return jr(
-        { error: !sendResult.ok ? sendResult.error : "send failed" },
+        { error: !sendResult.ok ? sendResult.error : "send failed", ...(falhaIncertaMantida ? { incerto: true } : {}) },
         502,
       );
     }
@@ -257,7 +316,7 @@ servirComCors(async (req) => {
           phoneClean,
           sendResult.providerMessageId || null,
           quemEnviou(body.sent_by, isServiceRoleCall, usuarioDoJwt),
-          origemDoEnvio(body.origem, isServiceRoleCall),
+          origem,
           body.context || null,
           anterior,
         );
