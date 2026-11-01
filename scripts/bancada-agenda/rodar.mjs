@@ -322,6 +322,10 @@ const FIXTURES_COMO_TEXTO = [
   // mig_conversa_fase7c e mig_rodada_fase7c.
   ['agenda_teste.fase7c_tarefas', 'fixture-fase7c-tarefas.sql'],
   ['agenda_teste.mig_tarefas_fase7c', '../../supabase/migrations/20261102100550_agenda_fase7c_tarefas.sql'],
+  // Fase 7c (P7): a migration de dado 20261102100600 (os 4 modos da 7c — modo_habilidade, modo_lider, modo_habilidade_propor e
+  // modo_tarefas — de desligado a sombra, e o DESFAZER do cabeçalho; FORA_DA_BANCADA: o agenda_fase7c_sombra.sql a roda numa
+  // subtransação).
+  ['agenda_teste.mig_sombra_fase7c', '../../supabase/migrations/20261102100600_agenda_fase7c_sombra.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */
