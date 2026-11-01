@@ -454,7 +454,15 @@ select format('B3a %s: as de antes iguais e na mesma ordem, e as novas no fim', 
                                                                      and a.attname = 'modo_habilidade' and not a.attisdropped)
                                  and t.nome in ('agenda_perguntas_tipo_check', 'agenda_acoes_tipo_check', 'agenda_vigia_rodadas_rotina_check',
                                                 'agenda_alocacoes_cancelada_motivo_check')
-                            then '{habilidade}'::text[] else '{}'::text[] end,
+                            then '{habilidade}'::text[] else '{}'::text[] end
+         -- (7c P8) a 20261102100550 soma tarefa (pergunta e ação), etapa (rascunho) e tarefas (rodada) no fim de 4 listas
+         -- (agenda_fase7c_tarefas.sql T1e confere que as de antes ficam)
+                    || case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                                                                    and a.attname = 'modo_tarefas' and not a.attisdropped)
+                           then case t.nome when 'agenda_perguntas_tipo_check' then '{tarefa}'::text[] when 'agenda_acoes_tipo_check' then '{tarefa}'::text[]
+                                            when 'agenda_rascunho_tipo_check' then '{etapa}'::text[]
+                                            when 'agenda_vigia_rodadas_rotina_check' then '{tarefas}'::text[] else '{}'::text[] end
+                           else '{}'::text[] end,
          -- FASE 7c: fim
        -- FASE 7b: fim
        array_to_string(pg_temp.lista(t.tabela::regclass, t.nome), ',')

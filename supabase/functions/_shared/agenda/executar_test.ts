@@ -829,3 +829,20 @@ Deno.test("Fase 7c (P4) — executar: o texto do foco habilidades vem do banco; 
   const so = cliente({ [RPC_AGENDA_VER]: { error: { message: "Quem faz o quê é com o administrador ou o financeiro.", code: "42501" } } });
   assertEquals((await executarComandoDaAgenda(so, ver, { autor: AUTOR })).texto, TEXTO_SO_ADMIN);
 });
+
+// ─── Fase 7c (P8, spec-fase7c.md §16.6.9, §16.7): as etapas de um serviço ────────────────────────────────────────────────
+// Nenhuma palavra nova e nada novo aqui: servico_etapa só deixa rascunho (roda direto pela rede, como as outras de rascunho), e o
+// *grava* é o de sempre — o "Gravado. Agora:" com as frases das etapas vem do banco (agenda_rascunho_gravar), sem o TS ler nada.
+Deno.test("Fase 7c (P8) — o *grava* das etapas é o de sempre: uma RPC, o texto do banco, sem servico_etapa no caminho", async () => {
+  const texto = "Gravado. Agora:\n• Lenine: \"Instalação de porta fusíveis - distribuição de energia 12v\" feita.\n" +
+    "• Flávio: entrou \"Trocar a bomba d'água\", antes de testar e entregar.";
+  const c = cliente({ agenda_rascunho_gravar: { data: { ok: true, gravados: 2, texto } } });
+  assertEquals(await executarComandoDaAgenda(c, lerComandoDaAgenda("grava")!, { autor: AUTOR }), { ok: true, texto });
+  assertEquals(c.chamadas.map((x) => x.nome), ["agenda_rascunho_gravar"]);
+  // as frases das etapas não são comando: vão ao modelo
+  for (const f of ["o que falta no Lenine?", "o que o Alex faz amanhã?", "no Lenine os porta-fusíveis já estão instalados"]) {
+    assertEquals(lerComandoDaAgenda(f), null, f);
+  }
+  const fonte = await Deno.readTextFile(new URL("./executar.ts", import.meta.url));
+  assertEquals(fonte.includes("agenda_rascunho_etapa"), false);
+});

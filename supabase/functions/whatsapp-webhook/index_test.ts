@@ -409,6 +409,22 @@ Deno.test("equipe P4: a RPC com erro não derruba nada — segue como hoje e reg
   assertEquals([logs[0].p_context, logs[0].p_action], ["whatsapp-webhook", "agenda:equipe"]);
 });
 
+// Fase 7c (P8): "ok, faltou a 2" e "faltou o painel" (a resposta ao "como foi" com as etapas), consumidas pela agenda, não chegam à
+// confirmação do cliente nem à conferência do recibo — o mesmo caminho do P4; não consumidas (sombra), seguem como sempre.
+Deno.test("equipe P8: \"ok, faltou a 2\" e \"faltou o painel\", consumidas pela agenda, pulam a confirmação do cliente e a conferência do recibo", async () => {
+  for (const [texto, id] of [["ok, faltou a 2", "WAID-EQUIPE-P8-1"], ["faltou o painel", "WAID-EQUIPE-P8-2"]]) {
+    const falso = await rodarTecnico({ equipe: { consumiu: true, tipo: "como_foi", tarefas: { pendentes: 1, entendeu: true } } }, texto, id);
+    assertEquals(falso.conta("/rest/v1/rpc/agenda_resposta_da_equipe", "POST"), 1, texto);
+    const corpo = falso.corpos("/rest/v1/rpc/agenda_resposta_da_equipe")[0];
+    assertEquals([corpo.p_body, corpo.p_message_id], [texto, id]);
+    assertEquals(falso.conta("/rest/v1/rpc/registrar_confirmacao_do_cliente"), 0, texto);
+    assertEquals(falso.conta("/rest/v1/rpc/registrar_conferencia_do_freelancer"), 0, texto);
+  }
+  const sombra = await rodarTecnico({ equipe: { consumiu: false } }, "ok, faltou a 2", "WAID-EQUIPE-P8-3");
+  assertEquals(sombra.conta("/rest/v1/rpc/registrar_confirmacao_do_cliente"), 1);
+  assertEquals(sombra.conta("/rest/v1/rpc/registrar_conferencia_do_freelancer"), 1);
+});
+
 Deno.test("equipe P4: no código, a resposta da equipe vem antes do bloco de 60 caracteres e o condiciona", async () => {
   const fonte = (await Deno.readTextFile(new URL("./index.ts", import.meta.url))).replace(/\r\n/g, "\n");
   const bloco = fonte.slice(fonte.indexOf("if (!event.fromMe && body) {"), fonte.indexOf("if (leadId) {"));

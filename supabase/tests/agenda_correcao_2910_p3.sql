@@ -438,7 +438,10 @@ begin
                                                              and a.attname = 'modo_dias' and not a.attisdropped) then 1 else 0 end
             -- FASE 7c: o tipo habilidade (20261102100000), com o modo dele (modo_habilidade_propor / modo_habilidade)
             + case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
-                                                             and a.attname = 'modo_habilidade' and not a.attisdropped) then 1 else 0 end,
+                                                             and a.attname = 'modo_habilidade' and not a.attisdropped) then 1 else 0 end
+            -- (7c P8) o tipo tarefa (20261102100550), com o modo dele (modo_tarefas) em _agenda_modo_da_pergunta
+            + case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                                                             and a.attname = 'modo_tarefas' and not a.attisdropped) then 1 else 0 end,
             -- FASE 7c: fim
     v_t);
   v_res := pg_temp.igual(v_res, 'S5 (c) o modo de cada grupo: crítica do plano, vigia, chegou? do fornecedor, material, diária, equipe, cliente, aprendizado',

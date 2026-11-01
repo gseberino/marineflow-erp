@@ -133,7 +133,12 @@ end $f$;
 
 -- ── Y0. As portas das 4 funções novas ─────────────────────────────────────────────────────────────────────
 with f(sig, porta) as (values
-  ('public._agenda_equipe_tem_telefone(uuid)', 'ninguem'),
+  ('public._agenda_equipe_tem_telefone(uuid)',
+   -- FASE 7c: (7c P8, 20261102100550; spec-fase7c R5.2-1, R5.10-13) a régua do telefone ganha authenticated e service_role (a linha (o)
+   -- do fechamento, lida pelo painel, usa a mesma régua do registro) e continua sem anon; agenda_fase7c_tarefas.sql (T2b) prova
+   case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                                                             and a.attname = 'modo_tarefas' and not a.attisdropped) then 'leitura' else 'ninguem' end),
+   -- FASE 7c: fim
   ('public._agenda_gestor_compra_saiu(date)', 'ninguem'),
   ('public._agenda_tecnicos_da_grade(date)', 'leitura'),
   ('public._agenda_tecnicos_frase(text[])', 'leitura'))

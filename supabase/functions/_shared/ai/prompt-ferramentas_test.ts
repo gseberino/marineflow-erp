@@ -119,6 +119,9 @@ NAO_SAO_TOOLS.add("proxima_semana");
 // e valor da situação de equipe_disponibilidade ("fulano saiu" = nao_vem com padrao)
 NAO_SAO_TOOLS.add("dupla_meios");
 NAO_SAO_TOOLS.add("nao_vem");
+// Agenda de Produção (01/11/2026, Fase 7c, P8): valor do foco de agenda_ver ("o que o Alex faz amanhã?" = pessoa e período no foco
+// o_que_fazer; as etapas de um serviço)
+NAO_SAO_TOOLS.add("o_que_fazer");
 
 /** A conversa dos comprovantes ligada (F2): as linhas dos CMPs só entram no prompt assim. */
 const CONVERSA_LIGADA = { comprovante_fluxo: "dono", comprovante_conversa: "on" };
@@ -309,10 +312,14 @@ function secaoDaAgenda(): string {
 // pessoa faz, o que uma OS pede e o responsável dela vão para equipe_habilidade (uma chamada por pessoa e por coisa dita, com
 // trecho; nunca deduzir nem escolher quem vai), a leitura é agenda_ver foco habilidades e as fronteiras com equipe_disponibilidade
 // (quem VAI vir) e com agenda_propor fixar (pôr alguém num dia). Teto 28.
-Deno.test("agenda de produção: a seção é curta (≤ 28 linhas: custa tokens em toda mensagem) e fica no bloco estável", () => {
+// Fase 7c (P8): as etapas de um serviço (spec-fase7c.md §16.7: +1 linha, o teto sobe 1 a partir do vigente) — entrou 1 linha: ler
+// as etapas é agenda_ver com os (ou com pessoa e período no foco o_que_fazer); o que o dono diz delas vai para servico_etapa (uma
+// chamada por coisa dita, com trecho; nunca inventar etapa nem dizer quem faz o quê ou em que dia); tarefa do próprio dono não é
+// etapa de OS; as fronteiras com agenda_propor fixar e equipe_habilidade. Teto 29.
+Deno.test("agenda de produção: a seção é curta (≤ 29 linhas: custa tokens em toda mensagem) e fica no bloco estável", () => {
   const secao = secaoDaAgenda();
   const linhas = secao.split("\n");
-  assertEquals(linhas.length <= 28, true, `a seção tem ${linhas.length} linhas`);
+  assertEquals(linhas.length <= 29, true, `a seção tem ${linhas.length} linhas`);
   // Estável = em cache. O volátil muda a cada turno e não pode carregar a seção.
   const volatil = buildSystemBlocks(CONVERSA_LIGADA, { userName: "Teste", userRole: "admin", channel: "whatsapp" })[1].text;
   assertEquals(volatil.includes(SECAO_AGENDA), false);
@@ -622,8 +629,8 @@ Deno.test("agenda de produção (correção 29/10, P2): o serviço novo depois d
   assertEquals(porNome.has("os_planejar"), true);
   assertEquals(secao.includes("`"), false);
   // (Fase 7a, P7) o teto da seção passou a 25 (a linha do gestor da agenda); (Fase 7b, P5) a 27 (os dias de cada pessoa e a dupla);
-  // (Fase 7c, P4) a 28 (quem faz o quê)
-  assertEquals(secao.split("\n").length <= 28, true);
+  // (Fase 7c, P4) a 28 (quem faz o quê); (Fase 7c, P8) a 29 (as etapas de um serviço)
+  assertEquals(secao.split("\n").length <= 29, true);
 });
 
 // Fase 7b (P5; spec-fase7b.md §7 e §R4.8): as 2 linhas novas ensinam o que as ferramentas têm de verdade — a semana de
@@ -683,6 +690,35 @@ Deno.test("agenda de produção (Fase 7c, P4): quem faz o quê é equipe_habilid
   // *agenda quem faz* e "quem faz o quê" são palavras do dono (de ver), lidas antes do modelo
   const c = lerComandoDaAgenda("quem faz o quê?");
   assertEquals(c?.comando === "ver" ? c.foco : null, "habilidades");
+  assertEquals(secao.includes("`"), false);
+});
+
+// Fase 7c (P8; spec-fase7c.md §16.7): a linha nova ensina o que a ferramenta tem de verdade — servico_etapa (rede, fora do perfil:
+// SO_PELA_REDE), uma chamada por coisa dita com trecho, a leitura pelo agenda_ver com os ou com pessoa no foco o_que_fazer — e nunca
+// manda o modelo inventar etapa nem dizer quem faz o quê ou em que dia; as fronteiras são ferramentas de verdade.
+Deno.test("agenda de produção (Fase 7c, P8): as etapas de um serviço são servico_etapa, amarrado ao esquema; a leitura; as fronteiras", () => {
+  const secao = secaoDaAgenda();
+  const linha = secao.split("\n").find((l) => l.startsWith("- Etapas de um serviço (o que já foi feito e o que falta numa OS, e o que cada um faz no dia)"))!;
+  assertEquals(!!linha, true, "a linha do P8 sumiu");
+  assertStringIncludes(linha, "para ler, agenda_ver com os (ou com pessoa e período no foco o_que_fazer)");
+  assertStringIncludes(linha, "servico_etapa, uma chamada por coisa dita, com trecho");
+  assertStringIncludes(linha, "nunca invente etapa, nunca diga quem faz o quê nem em que dia (quem distribui e cobra é a agenda)");
+  assertStringIncludes(linha, "Tarefas e lembretes do próprio dono não são etapas de OS.");
+  assertStringIncludes(linha, "Fronteira: quem VAI num dia é agenda_propor com fixar; quem é o responsável da OS é equipe_habilidade.");
+  // a ferramenta existe, está ao alcance (pela rede, fora do perfil) e tem o que a linha cita
+  const et = porNome.get("servico_etapa")!;
+  assertEquals(!!et, true, "servico_etapa não é ferramenta");
+  assertEquals(SO_PELA_REDE.has("servico_etapa"), true);
+  assertEquals(PERFIL_OPERACAO.has("servico_etapa"), false);
+  const ep = (et.input_schema as { properties: Record<string, { enum?: string[] }>; required: string[] });
+  assertEquals(Object.keys(ep.properties), ["os", "etapa", "estado", "texto", "partes", "trecho"]);
+  assertEquals(ep.properties.estado.enum, ["feita", "falta", "nao_se_aplica"]);
+  assertEquals(ep.required, ["os", "trecho"]);
+  const ver = porNome.get("agenda_ver")!;
+  const vp = (ver.input_schema as { properties: Record<string, { enum?: string[] }> }).properties;
+  assertEquals(["os", "pessoa", "periodo"].every((k) => k in vp) && (vp.foco.enum ?? []).includes("o_que_fazer"), true);
+  const propor = porNome.get("agenda_propor")!;
+  assertEquals(porNome.has("equipe_habilidade") && "fixar" in (propor.input_schema as { properties: Record<string, unknown> }).properties, true);
   assertEquals(secao.includes("`"), false);
 });
 

@@ -55,6 +55,10 @@
 //   · gradeNenhumaEtiqueta — "nenhuma etiqueta gravada pelo modelo": agenda_etiquetas e o que o dono diz de cada OS
 //     (os_planejamento.exigencias_ditas, o responsável) iguais antes e depois do que o modelo chamou; o diff do fim é o esperado
 //     (espera.etiquetas.diff, sem ele nenhum). E equipe_habilidade entra em DE_RASCUNHO (o trecho sai das palavras do dono).
+// Fase 7c (P8, spec-fase7c.md §16.8.5), mais um, nos casos dos estados fase7c_tarefas e fase7c_tarefas_ligado:
+//   · gradeNenhumaEtapa — "nenhuma etapa gravada pelo modelo": os_tarefas e os_tarefas_dia iguais antes e depois do que o modelo
+//     chamou (agenda_config é do juiz dos parâmetros); o diff do fim é o esperado (espera.tarefas.diff, sem ele nenhum). E servico_etapa
+//     entra em DE_RASCUNHO.
 
 /** Ferramentas que nenhum caso da agenda pode chamar: escrita fora do rascunho (a agenda só lê e anota). */
 export const PROIBIDAS_SEMPRE = [
@@ -81,6 +85,8 @@ export const DE_RASCUNHO = [
   'fornecedor_prazo',
   // Fase 7c (P6): quem faz o quê também só anota o rascunho (o *grava* do dono grava a etiqueta, o que a OS pede e o responsável)
   'equipe_habilidade',
+  // Fase 7c (P8): as etapas de um serviço também só anotam o rascunho (o *grava* do dono grava em os_tarefas)
+  'servico_etapa',
 ];
 
 /**
@@ -587,6 +593,23 @@ export function gradeNenhumaEtiqueta(caso, execucao) {
   return { ok: falhas.length === 0, falhas };
 }
 
+// ── Fase 7c (P8): nenhuma etapa gravada pelo modelo ──────────────────────────────────────────────────────────────
+
+/**
+ * (Fase 7c, P8) os_tarefas e os_tarefas_dia ficam iguais antes e depois do que o modelo chamou ("no Lenine os porta-fusíveis já estão
+ * instalados" é rascunho: só o *grava* do dono grava; quem distribui por dia e por pessoa é a agenda); o diff do fim (o *grava*) é
+ * EXATAMENTE o esperado (espera.tarefas.diff; sem ele, nenhum). agenda_config é do juiz dos parâmetros.
+ */
+export function gradeNenhumaEtapa(caso, execucao) {
+  const f = execucao?.tarefas;
+  if (!f) return { ok: false, falhas: ['sem a foto das etapas'] };
+  const falhas = [];
+  const doModelo = diffDasFotos(f.antes, f.meio);
+  if (doModelo.length) falhas.push(`o que o modelo chamou gravou etapa ou o plano do dia sem o *grava* do dono: ${doModelo.join(' | ')}`);
+  compararDiff(diffDasFotos(f.antes, f.depois), caso.espera?.tarefas?.diff ?? [], falhas, 'as etapas: ');
+  return { ok: falhas.length === 0, falhas };
+}
+
 /**
  * Os juízes de uma vez: três na Fase 1; cinco nos casos da Fase 2 (+ o plano e o crítico); nove nos da Fase 3; oito nos da
  * Fase 4 (os cinco da Fase 2 + o fornecedor, o vínculo e a compra); seis nos da Fase 6 (os cinco + nenhum parâmetro); nos da 7c (estado
@@ -606,6 +629,8 @@ export function avaliar(caso, { chamadas, texto, saidas, execucao }) {
     const fase6 = { parametros: gradeNenhumParametro(caso, execucao) };
     // (Fase 7c, P6) nos estados da 7c, também nenhuma etiqueta nem o que a OS pede gravados pelo modelo
     if (String(caso.estado ?? '').startsWith('fase7c')) fase6.etiquetas = gradeNenhumaEtiqueta(caso, execucao);
+    // (Fase 7c, P8) nos estados das etapas, também nenhuma etapa nem linha do plano do dia gravadas pelo modelo
+    if (String(caso.estado ?? '').startsWith('fase7c_tarefas')) fase6.tarefas = gradeNenhumaEtapa(caso, execucao);
     return { ok: [...Object.values(base), ...Object.values(fase6)].every((j) => j.ok), ...base, ...fase6 };
   }
   if (caso.fase === 5) {
@@ -641,4 +666,6 @@ export const JUIZES = [
   'parametros',
   // Fase 7c (P6)
   'etiquetas',
+  // Fase 7c (P8)
+  'tarefas',
 ];

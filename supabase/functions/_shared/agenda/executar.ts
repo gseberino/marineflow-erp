@@ -13,8 +13,8 @@
 // Nunca lança: erro vira uma frase ao dono e uma linha em app_error_logs (context 'agenda', action 'comando:<x>').
 //
 // O *grava* só existe aqui (e no painel, pela mesma camada): o modelo não tem ferramenta para gravar. Por isso as
-// ferramentas de rascunho (os_planejar, material_informar, equipe_disponibilidade; desde a Fase 7c, P4, equipe_habilidade) podem
-// rodar direto pela rede.
+// ferramentas de rascunho (os_planejar, material_informar, equipe_disponibilidade; desde a Fase 7c, P4, equipe_habilidade; desde o
+// P8, servico_etapa) podem rodar direto pela rede.
 //
 // Fase 2 (P5, 24/10/2026; spec-fase2.md §11): *dia feito*, *dia não* + motivo, *dia parcial* + motivo, *choveu* e
 // *desfaz* executam direto (agenda_conferir_dia, agenda_choveu, agenda_desfazer_dito): são a ordem exata do dono, e o

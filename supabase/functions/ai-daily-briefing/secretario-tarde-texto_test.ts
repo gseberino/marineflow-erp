@@ -827,3 +827,46 @@ Deno.test("Fase 7c (P5): com o Secretário cheio, a linha da equipe com quem faz
   assertStringIncludes(t2.texto ?? "", EQUIPE_HAB_REAL);
   assertEquals(t2.agenda?.linhas?.map((l) => l.pergunta_id), ["q-hab"]);
 });
+
+// (Agenda de Produção, Fase 7c, P8, migration 20261102100550; spec-fase7c R5.2-2(b)) A linha (o) "Etapas" (tipo dia), a quem não recebe
+// pelo WhatsApp (o Alex, sem telefone): o que hoje devia ficar pronto e o que fazer amanhã, sem números; perda 75 na véspera do último
+// dia de uma OS. Os textos são os que o banco devolve na fixture (supabase/tests/agenda_fase7c_tarefas.sql, T19a e T19b: qua 04/11, o
+// Lenine). O desempate é o de sempre (a perda, depois o tipo: cliente < dia < pergunta): com a compra (80), as perguntas do gestor (76)
+// e a (o), quem fica de fora é a (n) da equipe (75, pergunta), não a (o); ela volta no dia seguinte com a mesma perda (nunca vista). Com
+// o Secretário cheio, a (o) entra na forma curta. Sem mudar o TS.
+const ETAPAS_REAL = "Etapas (Alex não tem telefone: quem passa e confere é você). Hoje no Lenine devia ficar pronto: Passagem e crimpagem de " +
+  "cabos de bateria. Se faltou alguma, me diga qual (ex.: no Lenine falta \"passagem e crimpagem de cabos de bateria\"). Amanhã (qui " +
+  "05/11), Alex no Lenine: Terminar: Substituição baterias - chumbo para litio; Testar e conferir antes de entregar (Elétrico DC). É o " +
+  "último dia: tem que ficar tudo pronto.";
+const ETAPAS_CURTA = "Etapas: amanhã é o último dia do Lenine (Alex, 2 etapas); hoje, 1 para conferir. Pergunte o que o Alex faz amanhã.";
+
+Deno.test("Fase 7c (P8): a linha (o) das etapas (dia, 75) ganha o desempate da (n) da equipe (pergunta, 75); com o Secretário cheio entra na forma curta, dentro de 1.000; sem pergunta, nada vai ao registro por ela", () => {
+  const etapas = { ...l2("dia", ETAPAS_REAL, 75, "ligado", { pergunta_id: null }), texto_curto: ETAPAS_CURTA };
+  const equipe = { ...l2("pergunta", EQUIPE_HAB_REAL, 75, "ligado", { pergunta_id: "q-hab", pergunta_ids: ["q-hab"] }),
+                   texto_curto: EQUIPE_HAB_CURTA };
+  const gestor = { ...l2("pergunta", PERGUNTAS_REAL.replace(/^Agenda: Hoje às 19:30 .*? Também, s/, "Agenda: S"), 76, "ligado",
+                         { pergunta_id: "q-gestor", pergunta_ids: ["q-gestor", "q-nelson"] }),
+                   texto_curto: PERGUNTAS_CURTA.replace(/^Agenda: Hoje às 19:30 .*? Para segurar, me diga\. /, "Agenda: ") };
+  assertEquals(ETAPAS_REAL.length <= 480 && ETAPAS_CURTA.length < ETAPAS_REAL.length, true);
+  // o desempate: com as 3 vagas garantidas (3 que ficaram) e as 4 que perdem hoje, sai a (n) da equipe (pergunta), não a (o) (dia)
+  assertEquals(linhasDaAgendaQueCabem(3, { ...comLinhas([equipe, etapas, l2("compras", COMPRAS_REAL, 80), gestor]), vagas_garantidas: 3 })
+                 .map((l) => `${l.tipo} ${l.perda}`), ["compras 80", "pergunta 76", "dia 75"]);
+  // com o fechamento real de 29/10 (3 que ficaram, ~900 caracteres) e a compra: as duas entram, a (o) na forma curta
+  const t = textoDaTarde(cheio([etapas, l2("compras", COMPRAS_REAL, 80)], 2));
+  assert((t.texto?.length ?? 0) <= LIMITE_DA_TARDE, String(t.texto?.length));
+  assertEquals(t.agenda?.linhas?.map((l) => `${l.tipo} ${l.perda}`), ["compras 80", "dia 75"]);
+  assertStringIncludes(t.texto ?? "", ETAPAS_CURTA);
+  assert(!(t.texto ?? "").includes(ETAPAS_REAL));
+  assertEquals(t.letras.map((l) => l.letra), ["A", "B", "C"]);
+  // a (o) e a (n) da equipe com 2 vagas: a (o) fica (o tipo dia ganha o desempate dos 75); a da equipe não vai ao registro hoje
+  const t2 = textoDaTarde(cheio([equipe, etapas], 1));
+  assert((t2.texto?.length ?? 0) <= LIMITE_DA_TARDE, String(t2.texto?.length));
+  assertEquals(t2.agenda?.linhas?.map((l) => `${l.tipo} ${l.perda}`), ["dia 75"]);
+  assertEquals(t2.agenda?.linhas?.some((l) => l.pergunta_id === "q-hab" || l.pergunta_ids?.includes("q-hab")), false);
+  // com vaga comum (0 que ficaram), a (o) vai inteira
+  const t3 = textoDaTarde({ ...cheio([etapas], 1), ficaram: [] });
+  assertStringIncludes(t3.texto ?? "", ETAPAS_REAL);
+  // em teste (modo sombra) a (o) não chega ao texto do dono
+  const t4 = textoDaTarde({ ...cheio([{ ...etapas, modo: "sombra" as const, texto: "Em teste: " + ETAPAS_REAL }], 1), ficaram: [] });
+  assert(!(t4.texto ?? "").includes("Etapas ("));
+});

@@ -163,9 +163,18 @@ begin
   v_da_mig := pg_temp.corpo(v_esta, '_agenda_linhas_do_fechamento');
   select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = 'public._agenda_linhas_do_fechamento(date)'::regprocedure;
   v_res := pg_temp.ok(v_res, 'R9 _agenda_linhas_do_fechamento viva e a da migration: tirados os 4 blocos "-- FASE 7c:" e as 3 marcas de dentro "-- (7c …" (só inserções), são o corpo da 20261101100860, byte a byte',
-    v_fonte <> '' and pg_temp.sem_7c(v_novo) = v_fonte and pg_temp.sem_7c(v_da_mig) = v_fonte and v_novo = v_da_mig
-    and (select count(*) from regexp_matches(v_novo, '-- FASE 7c: fim', 'g')) = 4
-    and (select count(*) from regexp_matches(v_novo, '-- \(7c: fim\)', 'g')) = 3,
+    v_fonte <> '' and pg_temp.sem_7c(v_novo) = v_fonte and pg_temp.sem_7c(v_da_mig) = v_fonte
+    -- FASE 7c: (7c P8, 20261102100550) o P8 recria o fechamento (+ 4 blocos e 2 marcas: as perguntas das etapas na (n), a (e) e a linha
+    -- (o)): a viva é a do P8, com 8 blocos e 5 marcas; tirados todos os da 7c, a 20261101100860 (agenda_fase7c_tarefas.sql T18 confere)
+    and (v_novo = v_da_mig
+         or (exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass and a.attname = 'modo_tarefas'
+                     and not a.attisdropped)
+             and v_novo = pg_temp.corpo(coalesce(current_setting('agenda_teste.mig_tarefas_fase7c', true), ''), '_agenda_linhas_do_fechamento')))
+    and (select count(*) from regexp_matches(v_novo, '-- FASE 7c: fim', 'g')) = 4 + case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass and a.attname = 'modo_tarefas'
+                     and not a.attisdropped) then 4 else 0 end
+    and (select count(*) from regexp_matches(v_novo, '-- \(7c: fim\)', 'g')) = 3 + case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass and a.attname = 'modo_tarefas'
+                     and not a.attisdropped) then 2 else 0 end,
+    -- FASE 7c: fim
     format('fonte %s letras; viva sem a 7c %s; blocos %s; marcas %s', length(v_fonte), length(pg_temp.sem_7c(v_novo)),
            (select count(*) from regexp_matches(v_novo, '-- FASE 7c: fim', 'g')),
            (select count(*) from regexp_matches(v_novo, '-- \(7c: fim\)', 'g'))));

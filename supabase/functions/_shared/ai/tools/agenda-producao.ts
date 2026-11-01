@@ -58,6 +58,12 @@
 // *grava* do dono grava (agenda_etiquetas, os_planejamento). Nunca escolhe quem vai (quem escala é a agenda). Fora da vista como as
 // outras escritas da agenda (pela ferramenta_extra, d14): o teto de 113 não muda. agenda_ver ganha o foco habilidades (o do P6).
 //
+// Fase 7c (P8, 01/11/2026; spec-fase7c.md §16.7): servico_etapa — o que o dono diz das etapas de uma OS ("no Lenine os porta-fusíveis
+// já estão instalados", "acrescenta no Flávio: trocar a bomba d'água", "divide a instalação do Vanderlei em 3") vira RASCUNHO
+// (agenda_rascunho_etapa, migration 20261102100550), com a releitura pronta; só o *grava* do dono grava (os_tarefas). Nunca põe etapa
+// em pessoa nem em dia (quem distribui e cobra é a agenda). Fora da vista como as outras escritas da agenda (pela ferramenta_extra,
+// d14): o teto de 113 não muda. Para ler as etapas: agenda_ver com os (a linha "Etapas") ou com pessoa e período.
+//
 // Cada execute chama UMA RPC com ctx.sb (painel: o JWT do dono; WhatsApp: service role), p_autor = ctx.userId e
 // p_canal pelo ctx.canal. O mapeamento argumento → parâmetro é o de _shared/agenda/rpc-das-ferramentas.ts (puro), o
 // mesmo dos evals. `if (error) throw`: leitura que falha nunca vira "nada marcado".
@@ -67,6 +73,7 @@ import {
   type ChamadaDaRpc,
   DUPLAS,
   ESCOPOS_DA_PROPOSTA,
+  ESTADO_DA_ETAPA,
   EVENTOS_DO_ANDAMENTO,
   EXIGENCIAS,
   FOCOS,
@@ -81,6 +88,7 @@ import {
   paraCliente,
   paraDesfazer,
   paraDisponibilidade,
+  paraEtapa,
   paraFornecedor,
   paraHabilidade,
   paraMaterial,
@@ -569,6 +577,54 @@ export const agendaProducaoTools: ToolDef[] = [
     async execute(args, ctx) {
       if (ctx.userRole !== "admin") return SO_O_ADMINISTRADOR;
       const chamada = paraHabilidade(args, contexto(ctx));
+      if (!chamada.ok) return { error: chamada.error };
+      return resultadoDoRascunho(await chamar(ctx, chamada), chamada.rpc);
+    },
+  },
+  // ── Fase 7c (P8): as etapas de um serviço (rascunho + *grava*) ──
+  {
+    name: "servico_etapa",
+    description:
+      "Anota num RASCUNHO o que o dono disse das etapas de um serviço (OS): que uma etapa está feita, ainda falta ou não vai ser " +
+      "feita (os + etapa + estado), que entra uma etapa nova (os + texto, com as palavras dele) ou que uma etapa deve ser dividida " +
+      "(os + etapa + partes: o texto de cada parte, tirado do serviço, do roteiro, do material da OS ou do que ele disse). Uma " +
+      "chamada por coisa dita, com trecho = as palavras dele. NÃO distribui etapa por pessoa nem por dia, não muda a ordem e não " +
+      "manda nada à equipe (quem distribui e cobra é a agenda); não grava: devolve a releitura, e só o *grava* do dono grava.",
+    input_schema: {
+      type: "object",
+      properties: {
+        os: OS_DITA,
+        etapa: {
+          type: "string",
+          description:
+            "A etapa como o dono falou (\"os porta-fusíveis\", \"a passagem dos cabos\"), pelas palavras: nunca o número da lista nem o " +
+            "id. Com estado ou com partes.",
+        },
+        estado: {
+          type: "string",
+          enum: [...ESTADO_DA_ETAPA],
+          description: "feita (já está feita), falta (ainda falta) ou nao_se_aplica (não vai ser feita). Com etapa.",
+        },
+        texto: {
+          type: "string",
+          description: "A etapa nova, com as palavras do dono (\"Trocar a bomba d'água\"), até 60 letras. Sem etapa.",
+        },
+        partes: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Dividir a etapa: de 2 a 6 partes, cada uma de 3 a 60 letras e com palavra do serviço, do roteiro, do material da OS " +
+            "ou do que o dono disse (leia antes com agenda_ver com os). Com etapa.",
+        },
+        trecho: TRECHO,
+      },
+      required: ["os", "trecho"],
+    },
+    risk: "low",
+    roles: SO_ADMIN,
+    async execute(args, ctx) {
+      if (ctx.userRole !== "admin") return SO_O_ADMINISTRADOR;
+      const chamada = paraEtapa(args, contexto(ctx));
       if (!chamada.ok) return { error: chamada.error };
       return resultadoDoRascunho(await chamar(ctx, chamada), chamada.rpc);
     },

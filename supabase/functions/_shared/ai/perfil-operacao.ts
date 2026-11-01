@@ -355,6 +355,10 @@ export const SO_PELA_REDE: ReadonlySet<string> = new Set([
   //   *grava* do dono. Mesmo teto (113, d14): fica na rede e roda direto (ESCRITAS_VERIFICADAS_DA_REDE). O prompt a ensina
   //   (AGENDA DE PRODUÇÃO). —
   "equipe_habilidade",
+  // — Agenda de Produção, Fase 7c (01/11/2026, P8): o que o dono diz das etapas de uma OS (feita, falta, não vai ser feita, uma
+  //   nova, dividir). Só deixa o rascunho com a releitura; quem grava em os_tarefas é o *grava* do dono. Mesmo teto (113, d14):
+  //   fica na rede e roda direto (ESCRITAS_VERIFICADAS_DA_REDE). O prompt a ensina (AGENDA DE PRODUÇÃO). —
+  "servico_etapa",
   // — Agenda de Produção, Fase 5 (27/10/2026, P5): a mensagem-modelo ao cliente que o dono pede ("avisa o Nelson que a peça
   //   chegou"). Só registra a mensagem ESPERANDO o dono (o texto é do banco); a fila só recebe depois do *manda cliente*,
   //   comando lido antes do modelo. Mesmo teto (113, d14): fica na rede e roda direto (ESCRITAS_VERIFICADAS_DA_REDE). O
@@ -675,6 +679,12 @@ export const ESCRITAS_VERIFICADAS_DA_REDE: Readonly<Record<string, string>> = {
     "só grava o rascunho da releitura (agenda_rascunho, pela RPC agenda_rascunho_habilidade, que confere o cargo e a palavra no " +
     "trecho); agenda_etiquetas e os_planejamento só mudam pelo *grava* do dono (agenda_rascunho_gravar), que o modelo não " +
     "alcança; não manda mensagem a ninguém",
+  // 01/11/2026 (Agenda de Produção, Fase 7c, P8): pela rede, o que o dono disse das etapas viraria uma pendência e depois o *grava*
+  // (dois portões para a mesma coisa). Lido o execute: uma RPC só, nenhuma tabela.
+  servico_etapa:
+    "só grava o rascunho da releitura (agenda_rascunho, pela RPC agenda_rascunho_etapa, que confere o cargo, a etapa e as " +
+    "palavras no trecho); os_tarefas só muda pelo *grava* do dono (agenda_rascunho_gravar), que o modelo não alcança; não " +
+    "manda mensagem a ninguém",
   // 27/10/2026 (Agenda de Produção, Fase 5, P5): pela rede, preparar viraria uma pendência e depois o *manda cliente* (dois
   // portões para a mesma coisa). Lido o execute: uma RPC só, nenhuma tabela, nenhum texto livre (só o tipo e a OS).
   cliente_avisar:

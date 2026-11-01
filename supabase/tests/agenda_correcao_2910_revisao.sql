@@ -708,6 +708,9 @@ select 'C3 a lista fechada dos tipos de pergunta: as 26 de antes e equipe_sem_di
            -- FASE 7c: o tipo habilidade (20261102100000)
            + case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
                                                             and a.attname = 'modo_habilidade' and not a.attisdropped) then 1 else 0 end
+           -- (7c P8) o tipo tarefa (20261102100550)
+           + case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                                                            and a.attname = 'modo_tarefas' and not a.attisdropped) then 1 else 0 end
            -- FASE 7c: fim
        and pg_get_constraintdef((select c.oid from pg_constraint c where c.conname = 'agenda_perguntas_tipo_check')) like '%''equipe_sem_dias''%'
        and pg_temp.erro_de($q$insert into public.agenda_perguntas (tipo, chave, texto, modo) values ('outro', 'outro:t', 'Pergunta?', 'sombra')$q$) = '23514',

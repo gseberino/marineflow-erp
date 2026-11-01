@@ -41,6 +41,24 @@ Deno.test("equipe: a resposta à pergunta dos dias da semana (tipo dias) é cons
   assertEquals(await respostaDaEquipe(admin({ data: { consumiu: false } }), { phone: "5547900000012", body: "seg ter qui" }), false);
 });
 
+// Fase 7c (P8, migration 20261102100550): a resposta ao "como foi" com a lista do que devia ficar pronto ("ok, faltou a 2", "faltou o
+// painel") volta do banco com tarefas e consumiu true — passa como true. A leitura das etapas é uma só, no banco (o corpus fica no T9
+// de agenda_fase7c_tarefas.sql): o TS não lê o texto nem as etapas.
+Deno.test("equipe: a resposta ao \"como foi\" com as etapas (tarefas) é consumida quando o banco diz; o TS não lê o texto", async () => {
+  for (const [body, data] of [
+    ["ok, faltou a 2", { consumiu: true, tipo: "como_foi", tarefas: { feitas: 1, pendentes: 1, entendeu: true } }],
+    ["faltou o painel", { consumiu: true, tipo: "como_foi", tarefas: { feitas: 0, pendentes: 1, entendeu: true } }],
+    ["1 e 3", { consumiu: true, tipo: "equipe_resposta", tarefas: { entendeu: false } }],
+  ] as const) {
+    const a = admin({ data });
+    assertEquals(await respostaDaEquipe(a, { phone: "5547900000031", body, messageId: "WA-P8" }), true, body);
+    assertEquals(a.chamadas.map((c) => c.nome), [RPC_RESPOSTA_DA_EQUIPE]);
+  }
+  assertEquals(await respostaDaEquipe(admin({ data: { consumiu: false, tarefas: { entendeu: true } } }), { phone: "5547900000031", body: "ok, faltou a 2" }), false);
+  const fonte = await Deno.readTextFile(new URL("./resposta-da-equipe.ts", import.meta.url));
+  assertEquals(/tarefas|faltou|etapa/.test(fonte.replace(/\/\/.*$/gm, "")), false);
+});
+
 Deno.test("equipe: texto vazio, longo demais ou sem telefone nem vai ao banco", async () => {
   for (const body of ["", "   ", "x".repeat(RESPOSTA_DA_EQUIPE_MAX + 1), null]) {
     const a = admin({ data: { consumiu: true } });

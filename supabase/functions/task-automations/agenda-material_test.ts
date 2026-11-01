@@ -141,7 +141,7 @@ Deno.test("motor: a vigia do material roda depois do material e antes da rotina 
   const fonte = (await Deno.readTextFile(new URL("./index.ts", import.meta.url))).replace(/\r\n/g, "\n");
   const material = fonte.indexOf("agendaMaterial = await sincronizarMaterialDaAgenda(db);");
   const passo = fonte.indexOf("agendaMaterialVigia = await vigiarMaterialDaAgenda(db, new Date());");
-  const rotina = fonte.indexOf("agendaRotina = await rodarRotinaDaAgenda(db, new Date());");
+  const rotina = fonte.indexOf("agendaRotina = await rodarRotinaDaAgenda(db, agoraDaRotina);");
   const vigia = fonte.indexOf("agendaVigia = await vigiarAgenda(db, agoraDaVigia);");
   assertEquals(material > 0 && passo > material && rotina > passo && vigia > rotina, true);
   const bloco = fonte.slice(fonte.lastIndexOf("let agendaMaterialVigia", passo), rotina);

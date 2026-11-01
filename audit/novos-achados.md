@@ -3251,3 +3251,45 @@ porque só o dono pode preenchê-las.
 - **O quê:** última diária em 29/09, perfil sem fim, nenhuma linha de disponibilidade: ele não está na grade.
 - **Na Fase 7c:** a população de `agenda_habilidades` e da proposta é a grade (`agenda_capacidade`), não "quem tem perfil vigente":
   nenhuma etiqueta é proposta para ele. Encerrar a vigência é do módulo de diárias (dinheiro), não da agenda.
+
+### [NOVO-agenda-84] O roteiro é raro e está parado
+
+- **Encontrado em:** Agenda de Produção, Fase 7c, P8 (as tarefas do dia; a pesquisa da spec, 29/10/2026, `sql/wf7cp8_02`).
+- **O quê:** são 255 passos em 8 OS, criados de 31/07 a 14/08, todos `pending`, nenhum com pessoa (`assigned_user_id`). Na carteira há só
+  3 OS com roteiro (86 passos). Ninguém nunca marcou um passo; o roteiro está escondido desde 05/10 (`roteiro_execucao_visivel`).
+- **No P8:** o roteiro só ESTRUTURA as etapas (cada bloco de linha é uma etapa; o fechamento é a etapa final; a abertura fica fora) e,
+  quando todos os passos de um bloco estiverem `done`, a etapa conta como feita (via `roteiro`). A etapa leva só o nome: os passos não
+  vão à equipe. Mostrar o roteiro ao técnico continua decisão do dono.
+
+### [NOVO-agenda-85] O roteiro compõe bloco para linha que não é serviço
+
+- **Encontrado em:** Agenda de Produção, Fase 7c, P8 (a pesquisa da spec, 29/10/2026).
+- **O quê:** na OS-00076, o "Deslocamento técnico" ganhou 5 passos de manutenção, e o "Conector de cabo de dados Starlink" (material)
+  ganhou 6 de reparo: o compositor do roteiro não separa mão de obra de material nem de deslocamento.
+- **No P8:** as etapas aplicam a régua da mão de obra também ao roteiro (`os_tarefas_fonte`: material de texto livre, `mo_fora_regex` e
+  logística ficam fora, com o motivo em `fora`); a OS 196 da fixture prova (1 etapa + o final). Corrigir o compositor fica fora da agenda.
+
+### [NOVO-agenda-86] A ordem das linhas não é a do serviço
+
+- **Encontrado em:** Agenda de Produção, Fase 7c, P8 (a pesquisa da spec, 29/10/2026).
+- **O quê:** o roteiro segue o `created_at` das linhas. Na OS-00069, "Testes e comissionamento" (bloco 3) vem antes de "Configuração" (4)
+  e de "Instalação do novo sistema" (5); as 5 linhas têm o mesmo `created_at` e desempatam pelo id.
+- **No P8:** a ordem das etapas é pela fase (diagnosticar → desmontar → executar → configurar → testar → entregar, pelas palavras de
+  `agenda_config.tarefas_fases`, a resposta AG7-10a do dono) e, dentro da fase, a do roteiro ou do orçamento: o Vanderlei (a OS 194 da
+  fixture) instala antes de testar.
+
+### [NOVO-agenda-87] A descrição da linha está vazia nas 46 linhas da carteira
+
+- **Encontrado em:** Agenda de Produção, Fase 7c, P8 (a pesquisa da spec, 29/10/2026, `sql/wf7cp8_03`).
+- **O quê:** o texto da etapa só pode vir do nome da linha, que vai de 14 a 108 letras; 3 estão em caixa alta (o Lenine), 2 terminam com
+  "(…)" e 1 começa com "Mão de obra - ".
+- **No P8:** `_agenda_tarefa_texto` limpa o nome (caixa, "Serviço de", "Mão de obra - ", o "(…)", até `tarefas_texto_max` por palavra
+  inteira); as 45 linhas reais da carteira estão no T4 de `agenda_fase7c_tarefas.sql`, byte a byte.
+
+### [NOVO-agenda-88] O kit do orçamento conta como material
+
+- **Encontrado em:** Agenda de Produção, Fase 7c, P8 (a pesquisa da spec, 29/10/2026).
+- **O quê:** na ORÇ-00095, os 6 "Kit N — …" caem no predicado de material de texto livre (unidade `unit`, sem catálogo). A OS fica só
+  com "Desmontagem do Gerador (cortesia)", e `os_duracao_sugerida` diz "sem base".
+- **No P8:** as etapas seguem o mesmo predicado (uma régua só, `free_text_is_material`); o dono acrescenta a etapa numa frase
+  (`servico_etapa`, a etapa nova com as palavras dele). Mudar o predicado do kit é do orçamento, não da agenda.

@@ -114,6 +114,7 @@ export const TITULOS_DAS_ACOES_DIRETAS: Record<string, string> = {
   schedule_self_reminder: "Lembrete para você",
   send_document_pdf_to_self: "Mandar PDF do orçamento/OS para você",
   send_fiscal_pdf_to_self: "Mandar PDF da nota fiscal para você",
+  servico_etapa: "Anotar etapa do serviço",
   set_service_order_charges: "Definir imposto e comissão do orçamento/OS",
   size_dc_cable: "Dimensionar cabo DC",
   sugerir_conciliacao: "Sugerir conciliação",

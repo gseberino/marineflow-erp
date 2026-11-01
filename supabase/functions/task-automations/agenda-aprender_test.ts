@@ -131,7 +131,7 @@ Deno.test("aprender: o TS não lê o modo, não escreve em tabela e não manda n
 // O motor (index.ts sobe o servidor ao ser importado): pelo texto da fonte.
 Deno.test("motor: a rodada do aprendizado roda depois da rotina e antes da vigia, com try/catch próprio, e vai ao resumo", async () => {
   const fonte = (await Deno.readTextFile(new URL("./index.ts", import.meta.url))).replace(/\r\n/g, "\n");
-  const rotina = fonte.indexOf("agendaRotina = await rodarRotinaDaAgenda(db, new Date());");
+  const rotina = fonte.indexOf("agendaRotina = await rodarRotinaDaAgenda(db, agoraDaRotina);");
   const aprender = fonte.indexOf("agendaAprender = await aprenderDaAgenda(db, new Date());");
   const vigia = fonte.indexOf("agendaVigia = await vigiarAgenda(db, agoraDaVigia);");
   const cliente = fonte.indexOf("agendaClienteVigia = await vigiarClienteDaAgenda(db, new Date());");

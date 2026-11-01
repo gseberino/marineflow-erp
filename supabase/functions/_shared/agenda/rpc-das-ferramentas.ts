@@ -36,6 +36,13 @@
 // O_QUE_FAZ); (b) os + exige + meios; (c) os + lider (a pessoa ou "ninguém"); (d) confirmar —; mais de uma é recusa. Também exige o
 // trecho (o banco confere nele o que a pessoa faz e o que a OS pede) e só deixa rascunho; pessoa e OS como o dono disse, nunca o id.
 // FOCOS ganha habilidades (o foco do P6; *agenda quem faz* e "quem faz o quê" chegam por ele).
+//
+// Fase 7c (P8, 01/11/2026; spec-fase7c.md §16.5.6, §16.7): paraEtapa (agenda_rascunho_etapa: o que o dono disse das etapas de uma OS).
+// Uma forma por chamada — (a) etapa + estado (feita, falta, nao_se_aplica); (b) texto (a etapa nova, com as palavras dele); (c) etapa
+// + partes (dividir: 2 a 6, cada uma de 3 a 60 letras, todas diferentes) —; mais de uma é recusa (UMA_ETAPA_POR_VEZ, a frase do
+// banco). A OS como o dono disse e o trecho são obrigatórios (o banco confere nele a palavra do estado, as do texto e a base de cada
+// parte) e só deixa rascunho. A etapa vai como o dono falou: o banco casa SÓ pelas palavras (o número da lista não vale: ele pergunta
+// pelo nome).
 
 export type CanalDaRpc = "whatsapp" | "painel";
 
@@ -117,6 +124,13 @@ export const MEIOS = ["todos", "ultimo", "nao"] as const;
 /** (Fase 7c, P4) A recusa de mais de uma coisa numa chamada (a mesma frase do banco, 22023). */
 export const UMA_COISA_POR_VEZ =
   "Diga uma coisa por vez: o que a pessoa faz, o que a OS pede, quem é o responsável ou que está certo.";
+/** (Fase 7c, P8) servico_etapa → agenda_rascunho_etapa (migration 20261102100550): só deixa rascunho. */
+export const RPC_ETAPA = "agenda_rascunho_etapa";
+/** (Fase 7c, P8) O que o dono diz de uma etapa: feita, ainda falta, ou não vai ser feita. */
+export const ESTADO_DA_ETAPA = ["feita", "falta", "nao_se_aplica"] as const;
+/** (Fase 7c, P8) A recusa de mais de uma coisa numa chamada (a mesma frase do banco, 22023). */
+export const UMA_ETAPA_POR_VEZ =
+  "Diga uma coisa por vez: uma etapa feita ou que falta, uma etapa nova ou dividir uma etapa.";
 /** (Fase 5, P5) cliente_avisar → agenda_cliente_preparar (migration 20261028100500): prepara, nunca envia. */
 export const RPC_CLIENTE_PREPARAR = "agenda_cliente_preparar";
 /**
@@ -711,6 +725,57 @@ export function paraHabilidade(args: unknown, ctx: ContextoDaRpc): ChamadaDaRpc 
       p_meios: meios,
       p_lider: lider,
       p_confirmar: confirmar,
+      p_trecho: t,
+    }, ctx);
+  });
+}
+
+// ── Fase 7c (P8): as etapas de um serviço ───────────────────────────────────────────────────────────────
+
+/** As partes de uma etapa a dividir: 2 a 6 textos de 3 a 60 letras, todos diferentes (sem contar maiúscula nem acento). */
+function partesDaEtapa(v: unknown): string[] | null {
+  if (v === undefined || v === null) return null;
+  if (!Array.isArray(v)) recusar("'partes' tem de ser a lista do texto de cada parte (2 a 6)");
+  const lista = (v as unknown[]).map((x, i) => texto(x, `partes[${i}]`, 60)).filter((x): x is string => !!x);
+  if (lista.length < 2 || lista.length > 6) recusar("'partes' tem de ter de 2 a 6 partes");
+  if (lista.some((x) => x.length < 3)) recusar("cada parte tem de ter de 3 a 60 letras");
+  const chave = (x: string) => x.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  if (new Set(lista.map(chave)).size !== lista.length) recusar("as partes têm de ser diferentes");
+  return lista;
+}
+
+/**
+ * servico_etapa → agenda_rascunho_etapa: UMA forma por chamada — (a) etapa + estado; (b) texto (a etapa nova); (c) etapa + partes
+ * (dividir) — e o trecho. Mais de uma é recusa (UMA_ETAPA_POR_VEZ); a forma pela metade diz o que falta. A OS e a etapa como o dono
+ * disse, nunca o id; o banco casa a etapa só pelas palavras.
+ */
+export function paraEtapa(args: unknown, ctx: ContextoDaRpc): ChamadaDaRpc {
+  return mapear(RPC_ETAPA, () => {
+    const a = objeto(args);
+    const os = referenciaDaOs(a.os, true);
+    const etapa = texto(a.etapa, "etapa", 120);
+    if (etapa && UUID.test(etapa)) recusar("'etapa' é o nome da etapa como o dono falou, não o id");
+    const estado = umDe(a.estado, "estado", ESTADO_DA_ETAPA, false);
+    const nova = texto(a.texto, "texto", 60);
+    const partes = partesDaEtapa(a.partes);
+    const formas = [estado !== null, nova !== null, partes !== null].filter(Boolean).length;
+    if (formas > 1) recusar(UMA_ETAPA_POR_VEZ);
+    if (formas === 0) {
+      recusar(etapa
+        ? `com 'etapa', diga o estado (${ESTADO_DA_ETAPA.join(", ")}) ou as partes (dividir)`
+        : "diga que uma etapa está feita, falta ou não vai ser feita (etapa e estado), a etapa nova (texto) ou como dividir uma etapa (etapa e partes)");
+    }
+    if ((estado !== null || partes !== null) && !etapa) recusar("falta 'etapa': o nome da etapa como o dono falou");
+    if (nova !== null && etapa) recusar("'etapa' não vai com 'texto': a etapa nova é o texto, com as palavras do dono");
+    const t = trecho(a.trecho);
+    return comHoje({
+      p_autor: ctx.autor,
+      p_canal: ctx.canal,
+      p_os: os,
+      p_etapa: etapa,
+      p_estado: estado,
+      p_texto: nova,
+      p_partes: partes,
       p_trecho: t,
     }, ctx);
   });

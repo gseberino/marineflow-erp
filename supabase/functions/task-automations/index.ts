@@ -3,6 +3,11 @@
 //   0. Conferência do material da Agenda de Produção (material-da-agenda.ts, Fase 1 P2): guarda em
 //      os_material o que o estoque e as OCs dizem de cada item de compra da carteira, antes de a R16 ler
 //      a conta. Passo à parte: erro vai para app_error_logs (agenda:material) e não derruba o resto.
+//   0a. A rodada das etapas (agenda-tarefas.ts, Fase 7c P8): agenda_tarefas_rodar sincroniza as etapas das OS com o orçamento e o
+//      roteiro, congela o que cada um faz no dia (amanhã às 19:30, hoje no 1º tique), confere o dia e faz as exceções ao dono (o banco
+//      decide o modo; com modo_tarefas desligado devolve { rodou: false }). Depois do material e ANTES da rotina, com o MESMO instante
+//      dela: a ficha e o "como foi" do mesmo tique já leem o plano congelado. Nada sai daqui. Passo à parte: nunca lança
+//      (agenda:tarefas); a função ausente é pulada calada.
 //   0b. A rotina da equipe e da diária (agenda-rotina.ts, Fase 3 P4): agenda_rotina_rodar manda a ficha da véspera,
 //      a confirmação da manhã e o "como foi hoje?" (só com agenda_config.modo_equipe ligado, na janela e no teto que o
 //      banco confere), remaneja pelo silêncio, lança a diária (modo_diaria) e devolve os acordes. Antes da vigia: a
@@ -65,6 +70,7 @@ import { vigiarClienteDaAgenda } from "./agenda-cliente.ts";
 import { aprenderDaAgenda } from "./agenda-aprender.ts";
 import { rodarSemanaDaEquipe } from "./agenda-equipe-semana.ts";
 import { habilidadeDaAgenda } from "./agenda-habilidade.ts";
+import { tarefasDaAgenda } from "./agenda-tarefas.ts";
 import { expandOccurrences } from "../_shared/recurrence.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { logEdgeError } from "../_shared/log-error.ts";
@@ -484,12 +490,27 @@ servirComCors(async (req) => {
       agendaMaterialVigia = { erro: String((e as any)?.message ?? e) };
     }
 
+    // (Fase 7c, P8) a rodada das etapas e a rotina com o MESMO instante: o congelar das 19:30 vem antes da ficha do mesmo tique.
+    const agoraDaRotina = new Date();
+
+    // A rodada das etapas (Fase 7c, P8): depois do material e antes da rotina (a ficha das 19:30 e o "como foi" das 17:00 levam o que
+    // cada um faz no dia, já congelado neste tique). Chamada a cada tique: o banco decide o modo (com modo_tarefas desligado devolve
+    // { rodou: false }). Tem o próprio try/catch (tarefasDaAgenda nunca lança: devolve { erro } e grava em app_error_logs); o de fora é
+    // a segunda trava, para nada daqui parar a rotina, a vigia e as regras.
+    let agendaTarefas: unknown = null;
+    try {
+      agendaTarefas = await tarefasDaAgenda(db, agoraDaRotina);
+    } catch (e) {
+      console.error("agenda:tarefas:", e);
+      agendaTarefas = { erro: String((e as any)?.message ?? e) };
+    }
+
     // A rotina da equipe e da diária (Fase 3, P4): logo antes da vigia (o "não vou" e o silêncio replanejam, e a vigia
     // lê o plano já mudado). Tem o próprio try/catch (rodarRotinaDaAgenda nunca lança: devolve { erro } e grava em
     // app_error_logs); o de fora é a segunda trava, para nada daqui parar a vigia e as regras.
     let agendaRotina: unknown = null;
     try {
-      agendaRotina = await rodarRotinaDaAgenda(db, new Date());
+      agendaRotina = await rodarRotinaDaAgenda(db, agoraDaRotina);
     } catch (e) {
       console.error("agenda:rotina:", e);
       agendaRotina = { erro: String((e as any)?.message ?? e) };
@@ -574,7 +595,7 @@ servirComCors(async (req) => {
 
     const summary = {
       identidade, fios, agenda_material: agendaMaterial, agenda_material_vigia: agendaMaterialVigia, agenda_rotina: agendaRotina,
-      agenda_equipe_semana: agendaEquipeSemana,
+      agenda_tarefas: agendaTarefas, agenda_equipe_semana: agendaEquipeSemana,
       agenda_aprender: agendaAprender, agenda_habilidade: agendaHabilidade, agenda_vigia: agendaVigia, agenda_aviso: agendaAviso, agenda_cliente_vigia: agendaClienteVigia,
       rules, r10, reminders, recurrence,
     };

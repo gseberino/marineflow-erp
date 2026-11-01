@@ -505,7 +505,16 @@ begin
                            'habilidade_conferir_semanas', 'lider_espera_max_du']) n
        union all
        select unnest(array['os_planejamento_exigencias_ditas_check', 'os_planejamento_lider_coerente',
-                           'os_planejamento_exigencias_trecho_check', 'os_planejamento_lider_trecho_check']))));
+                           'os_planejamento_exigencias_trecho_check', 'os_planejamento_lider_trecho_check']))))
+     -- (7c P8) os 10 que o P8 pôs em agenda_config e o da assinatura em os_planejamento (20261102100550) têm o caso deles em
+     -- agenda_fase7c_tarefas.sql (T1c, T1d e T1g)
+     and not (c.conname = any (array(
+       select 'agenda_config_' || n || '_check'
+         from unnest(array['modo_tarefas', 'tarefas_linhas_max', 'tarefas_texto_max', 'tarefas_fases', 'tarefas_horas_min',
+                           'tarefas_pendente_meios', 'tarefas_pendente_alerta', 'tarefas_sem_registro_du', 'tarefas_hora',
+                           'tarefas_resposta_vale_dia']) n
+       union all
+       select 'os_planejamento_tarefas_assinatura_check')));
      -- FASE 7c: fim
   insert into _resultado values ('B todo CHECK das 6 tabelas tem um caso que ele recusa', v_sem_caso is null, v_sem_caso);
 end
@@ -1022,7 +1031,16 @@ insert into _definer_da_agenda values
   ('_agenda_habilidade_perguntas_os'), ('agenda_habilidade_medidas'),
   -- (7c P6, 20261102100500) o foco habilidades (só lê: o responsável e as avaliações do publicado, que não têm grant a ninguém; confere
   -- dentro quem vê — o admin/financeiro logado ou o service_role —, como as medidas). agenda_fase7c_leituras.sql prova as portas.
-  ('_agenda_ver_habilidades');
+  ('_agenda_ver_habilidades'),
+  -- (7c P8, 20261102100550) as tarefas do dia — a rodada das etapas (só o service_role, pelo task-automations) e os passos dela
+  -- (sincronizar, congelar, registrar, conferir e as exceções: escrevem os_tarefas, os_tarefas_dia, os_planejamento, agenda_perguntas e
+  -- agenda_acoes; sem grant a ninguém, nem service_role: só as definer da agenda os chamam), a RPC da ferramenta servico_etapa (confere o
+  -- administrador e escreve o rascunho; authenticated e service_role) e o *grava* da linha (só o agenda_rascunho_gravar a chama), e as
+  -- leituras com porta (o dia da pessoa e as medidas: leem o planejar e as peças sem grant; conferem dentro quem vê — o admin/financeiro
+  -- logado ou o service_role). As réguas do texto e da fase e a lista do dia são invoker. agenda_fase7c_tarefas.sql prova as portas.
+  ('agenda_tarefas_rodar'), ('_agenda_tarefas_sincronizar'), ('_agenda_tarefas_congelar'), ('_agenda_tarefas_registrar'),
+  ('_agenda_tarefas_conferir'), ('_agenda_tarefas_excecoes'), ('agenda_rascunho_etapa'), ('_agenda_aplicar_etapa'),
+  ('_agenda_tarefas_da_pessoa'), ('agenda_tarefas_medidas');
   -- FASE 7c: fim
 
 insert into _resultado

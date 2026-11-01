@@ -314,6 +314,14 @@ const FIXTURES_COMO_TEXTO = [
   // só acrescentam o bloco "-- FASE 7c:" e o 7d P8 copia agenda_ver (a cadeia do fase7-registro §2). As fontes delas já estão acima:
   // agenda_ver (mig_rodada_fase7a), _agenda_linha_da_semana (mig_leituras_fase2) e os 3 textos do fora (mig_correcao2_fase7a).
   ['agenda_teste.mig_leituras_fase7c', '../../supabase/migrations/20261102100500_agenda_fase7c_leituras.sql'],
+  // Fase 7c (P8): a fixture das etapas (por cima da da 7c: o catálogo do roteiro, o Alex com perfil, etiqueta, telefone e rotina — sem
+  // telefone com agenda_teste.fase7c_tarefas_variante = 'alex_sem_telefone' —, o Mateus ajudante, as OS 97191 a 97196 com as linhas reais
+  // e os roteiros) e a própria migration das etapas (20261102100550), de onde o T18 de agenda_fase7c_tarefas.sql confere que as 9
+  // recriadas só acrescentam os blocos "-- FASE 7c: (7c P8" (e o 7d P8 e o 7f P5 conferem as cópias da ficha e da resposta da equipe).
+  // As fontes das 9 já estão acima: mig_base_fase7c, mig_equipe_fase3, mig_correcao_fase7b, mig_leituras_fase1, mig_leituras_fase2,
+  // mig_conversa_fase7c e mig_rodada_fase7c.
+  ['agenda_teste.fase7c_tarefas', 'fixture-fase7c-tarefas.sql'],
+  ['agenda_teste.mig_tarefas_fase7c', '../../supabase/migrations/20261102100550_agenda_fase7c_tarefas.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

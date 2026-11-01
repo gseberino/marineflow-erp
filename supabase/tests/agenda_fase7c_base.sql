@@ -564,7 +564,16 @@ select 'B2c as portas: as 2 leituras do painel, os 2 textos que elas chamam, o v
 -- ── B3. As listas fechadas ──────────────────────────────────────────────────────────────────────────────
 insert into _resultado
 select format('B3a %s: as de antes iguais e na mesma ordem, e habilidade no fim', t.nome),
-       pg_temp.lista(t.tabela::regclass, t.nome) = t.espera || '{habilidade}'::text[],
+       pg_temp.lista(t.tabela::regclass, t.nome) = t.espera || '{habilidade}'::text[]
+         -- FASE 7c: (7c P8) a 20261102100550 soma tarefa (pergunta e ação), etapa (rascunho) e tarefas (rodada) no fim de 4 listas,
+         -- depois de habilidade (agenda_fase7c_tarefas.sql T1e confere que as de antes ficam)
+         || case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                                                         and a.attname = 'modo_tarefas' and not a.attisdropped)
+                then case t.nome when 'agenda_perguntas_tipo_check' then '{tarefa}'::text[] when 'agenda_acoes_tipo_check' then '{tarefa}'::text[]
+                                 when 'agenda_rascunho_tipo_check' then '{etapa}'::text[]
+                                 when 'agenda_vigia_rodadas_rotina_check' then '{tarefas}'::text[] else '{}'::text[] end
+                else '{}'::text[] end,
+         -- FASE 7c: fim
        array_to_string(pg_temp.lista(t.tabela::regclass, t.nome), ',')
   from (values
     ('public.agenda_perguntas', 'agenda_perguntas_tipo_check',
@@ -881,13 +890,27 @@ begin
       into v_a, v_n
       from unnest(pg_temp.lista('public.agenda_perguntas'::regclass, 'agenda_perguntas_tipo_check')) t;
     v_res := pg_temp.ok(v_res, format('B11c o modo de cada tipo é o de antes (a definição de 20261101100000), menos habilidade (nova) — o gestor %s, a 7c %s/%s', r.m, r.m2, r.m),
-      v_a = 'habilidade' and v_n = 42, coalesce(v_a, '-') || ' de ' || v_n);
+      -- FASE 7c: (7c P8, 20261102100550) e menos tarefa (nova, do modo_tarefas): 43 tipos
+      v_a = case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass and a.attname = 'modo_tarefas'
+                     and not a.attisdropped) then 'habilidade,tarefa' else 'habilidade' end
+      and v_n = 42 + case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass and a.attname = 'modo_tarefas'
+                     and not a.attisdropped) then 1 else 0 end,
+      -- FASE 7c: fim
+      coalesce(v_a, '-') || ' de ' || v_n);
   end loop;
   -- a cópia: o corpo vivo = o desta migration; sem o bloco "-- FASE 7c:" é o de 20261101100000
   select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = 'public._agenda_modo_da_pergunta(text, text)'::regprocedure;
   select count(*) into v_n from regexp_matches(v_novo, '-- FASE 7c: fim', 'g');
   v_res := pg_temp.ok(v_res, 'B11d a cópia de _agenda_modo_da_pergunta: o corpo vivo é o desta migration; sem o bloco "-- FASE 7c:" (1), é o corpo de 20261101100000 (a mais nova antes da 7c)',
-    v_n = 1 and v_novo = pg_temp.corpo(v_esta, '_agenda_modo_da_pergunta')
+    -- FASE 7c: (7c P8, 20261102100550) o P8 recria a função (+ o bloco do tipo tarefa): a viva é a do P8, com 2 blocos "-- FASE 7c:";
+    -- tirados os dois, a de 20261101100000 (agenda_fase7c_tarefas.sql T18 confere a do P8 contra esta)
+    v_n = 1 + case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass and a.attname = 'modo_tarefas'
+                     and not a.attisdropped) then 1 else 0 end
+    and (v_novo = pg_temp.corpo(v_esta, '_agenda_modo_da_pergunta')
+         or (exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass and a.attname = 'modo_tarefas'
+                     and not a.attisdropped)
+             and v_novo = pg_temp.corpo(coalesce(current_setting('agenda_teste.mig_tarefas_fase7c', true), ''), '_agenda_modo_da_pergunta')))
+    -- FASE 7c: fim
     and pg_temp.corpo(v_mig, '_agenda_modo_da_pergunta') <> ''
     and pg_temp.sem_7c(v_novo) = pg_temp.corpo(v_mig, '_agenda_modo_da_pergunta'),
     format('blocos %s; fonte %s letras; novo sem o bloco %s letras', v_n, length(pg_temp.corpo(v_mig, '_agenda_modo_da_pergunta')),

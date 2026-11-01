@@ -36,8 +36,8 @@ function sbFalso(resposta: (c: Chamada) => { data: unknown; error: unknown }) {
 const ctx = (sb: unknown, extra: Record<string, unknown> = {}) =>
   ({ sb, admin: sb, userId: ADMIN, userRole: "admin", jwt: "", appOrigin: "", settings: {}, ...extra }) as never;
 
-// (Fase 7c, P4) eram 10; + equipe_habilidade = 11
-Deno.test("as 11 estão em allTools, risco low, só admin", () => {
+// (Fase 7c, P4) eram 10; + equipe_habilidade = 11; (Fase 7c, P8) + servico_etapa = 12
+Deno.test("as 12 estão em allTools, risco low, só admin", () => {
   for (const nome of [
     "agenda_ver", "os_planejar", "material_informar", "equipe_disponibilidade",
     "agenda_propor", "agenda_aplicar", "agenda_desfazer", "os_registrar_andamento",
@@ -47,6 +47,8 @@ Deno.test("as 11 estão em allTools, risco low, só admin", () => {
     "cliente_avisar",
     // Fase 7c (P4)
     "equipe_habilidade",
+    // Fase 7c (P8)
+    "servico_etapa",
   ]) {
     const t = allTools.find((x) => x.name === nome);
     assert(t, `${nome} fora de allTools`);
@@ -111,6 +113,8 @@ Deno.test("erro do banco LANÇA nas dez (nunca vira agenda vazia nem 'anotado')"
     cliente_avisar: { os: "Nelson", tipo: "material_chegou", trecho: "avisa o Nelson que a peça chegou" },
     // Fase 7c (P4)
     equipe_habilidade: { pessoa: "Roberto", o_que_faz: "instala_sozinho", trecho: "o Roberto instala sozinho" },
+    // Fase 7c (P8)
+    servico_etapa: { os: "Lenine", etapa: "porta fusíveis", estado: "feita", trecho: "no Lenine os porta-fusíveis já estão instalados" },
   };
   for (const t of agendaProducaoTools) {
     const { sb } = sbFalso(() => ({ data: null, error: { message: "permission denied", code: "42501" } }));
@@ -628,8 +632,8 @@ Deno.test("Fase 7b (P5) — os_planejar tem dupla (nao, inicio, fim, todos) e du
   assertStringIncludes(disp.description, "passe semana como o dono disse");
   assertStringIncludes(disp.description, "é vem, sem padrao e sem semana: só nessas datas");
   // nenhuma ferramenta nova: as 10 de antes (o teto do perfil continua)
-  // FASE 7c: (7c P4) + equipe_habilidade (pela rede, fora do perfil: o teto continua): 11
-  assertEquals(agendaProducaoTools.length, 11);
+  // FASE 7c: (7c P4) + equipe_habilidade (pela rede, fora do perfil: o teto continua): 11; (7c P8) + servico_etapa (idem): 12
+  assertEquals(agendaProducaoTools.length, 12);
 });
 
 Deno.test("Fase 7b (P5) — os_planejar com a dupla e equipe_disponibilidade com a semana chamam o rascunho de sempre; argumento errado não chama nada", async () => {
@@ -724,4 +728,85 @@ Deno.test("Fase 7c (P4) — equipe_habilidade: o esquema (os 14 o_que_faz, exige
   assert(foco.includes("habilidades"));
   assertStringIncludes(ver.description, "quem faz o quê na equipe e o que cada OS pede (foco habilidades:");
   assertStringIncludes(ver.description, "o que a agenda teria mudado em teste e as medidas; só lê)");
+});
+
+// ───────── Fase 7c (P8, spec-fase7c.md §16.5.6, §16.7): servico_etapa (rascunho + *grava*) ─────────
+Deno.test("Fase 7c (P8) — servico_etapa chama agenda_rascunho_etapa (a forma dita, p_autor, p_canal) e devolve a releitura", async () => {
+  const casos: Array<[Record<string, unknown>, Record<string, unknown>]> = [
+    [{ os: "Lenine", etapa: "porta fusíveis", estado: "feita", trecho: "no Lenine os porta-fusíveis já estão instalados" },
+      { p_os: "Lenine", p_etapa: "porta fusíveis", p_estado: "feita", p_texto: null, p_partes: null }],
+    [{ os: "Flávio", texto: "Trocar a bomba d'água", trecho: "acrescenta no Flávio: trocar a bomba d'água" },
+      { p_os: "Flávio", p_etapa: null, p_estado: null, p_texto: "Trocar a bomba d'água", p_partes: null }],
+    [{ os: "Vanderlei", etapa: "instalação do novo sistema", partes: ["Fixar o banco de baterias", "Passar os cabos", "Montar o quadro"],
+       trecho: "divide a instalação do Vanderlei em 3: fixar o banco de baterias, passar os cabos e montar o quadro" },
+      { p_os: "Vanderlei", p_etapa: "instalação do novo sistema", p_estado: null, p_texto: null,
+        p_partes: ["Fixar o banco de baterias", "Passar os cabos", "Montar o quadro"] }],
+  ];
+  for (const [args, esperado] of casos) {
+    for (const [canal, c] of [["panel", "painel"], [undefined, "whatsapp"]] as const) {
+      const { sb, chamadas } = sbFalso(() => ({
+        data: { ok: true, item: "Lenine: porta-fusíveis feita",
+                releitura: "Entendi assim, confere?\n• Lenine (OS-97192): \"Instalação de porta fusíveis - distribuição de energia 12v\" já está feita.\nResponda *grava* ou corrija o que estiver errado." },
+        error: null,
+      }));
+      const r = await porNome("servico_etapa").execute(args, ctx(sb, canal ? { canal } : {})) as Record<string, unknown>;
+      assertEquals(chamadas.map((x) => x.nome), ["agenda_rascunho_etapa"]);
+      assertEquals(chamadas[0].params, { p_autor: ADMIN, p_canal: c, ...esperado, p_trecho: args.trecho });
+      assertEquals(r.ok, true);
+      assertStringIncludes(String(r.texto), "Entendi assim, confere?");
+      assertEquals(r.instrucao, "Nada foi gravado: mostre a releitura ao dono. Só o *grava* dele grava.");
+    }
+  }
+  // a pergunta do banco (o número da lista, a etapa ambígua) passa adiante, sem id
+  const { sb } = sbFalso(() => ({
+    data: { ok: false, motivo: "so_numero",
+            pergunta: "Me diga pelo nome: no Lenine faltam Substituição baterias - chumbo para litio e Passagem e crimpagem de cabos de bateria.",
+            texto: "Me diga pelo nome: no Lenine faltam Substituição baterias - chumbo para litio e Passagem e crimpagem de cabos de bateria.",
+            opcoes: [] },
+    error: null,
+  }));
+  const p = await porNome("servico_etapa").execute({ os: "Lenine", etapa: "2", estado: "falta", trecho: "no Lenine falta a 2" }, ctx(sb)) as
+    Record<string, unknown>;
+  assertEquals(p.ok, false);
+  assertStringIncludes(String(p.pergunta ?? p.texto), "Me diga pelo nome");
+});
+
+Deno.test("Fase 7c (P8) — servico_etapa: duas formas, a forma pela metade, sem a OS, o id, as partes fora da regra e o estado fora da lista voltam como { error }; nada é chamado; só o admin", async () => {
+  for (const args of [
+    { os: "Lenine", etapa: "cabos", estado: "feita", partes: ["Passar os cabos", "Crimpar os cabos"], trecho: "x" },
+    { os: "Flávio", etapa: "bomba", texto: "Trocar a bomba d'água", trecho: "x" },
+    { os: "Lenine", estado: "feita", trecho: "x" },
+    { os: "Lenine", etapa: "cabos", trecho: "x" },
+    { etapa: "cabos", estado: "feita", trecho: "x" },
+    { os: "aa000000-0000-4000-8000-000000000002", etapa: "cabos", estado: "feita", trecho: "x" },
+    { os: "Lenine", etapa: "aa000000-0000-4000-8000-000000000002", estado: "feita", trecho: "x" },
+    { os: "Lenine", etapa: "cabos", partes: ["Passar os cabos"], trecho: "x" },
+    { os: "Lenine", etapa: "cabos", partes: ["Passar os cabos", "passar os cabos"], trecho: "x" },
+    { os: "Lenine", etapa: "cabos", partes: ["Passar os cabos", "ok"], trecho: "x" },
+    { os: "Lenine", etapa: "cabos", estado: "pronta", trecho: "x" },
+    { os: "Lenine", etapa: "cabos", estado: "feita" },
+  ]) {
+    const { sb, chamadas } = sbFalso(() => ({ data: { ok: true, item: "x", releitura: "x" }, error: null }));
+    const r = await porNome("servico_etapa").execute(args, ctx(sb)) as Record<string, unknown>;
+    assertEquals(chamadas.length, 0, JSON.stringify(args));
+    assert(typeof r.error === "string" && r.error.endsWith("Nada foi chamado."), JSON.stringify(args));
+  }
+  const { sb, chamadas } = sbFalso(() => ({ data: { ok: true, item: "x", releitura: "x" }, error: null }));
+  const r = await porNome("servico_etapa").execute({ os: "Lenine", etapa: "cabos", estado: "feita", trecho: "x" },
+    ctx(sb, { userRole: "technician" })) as Record<string, unknown>;
+  assertEquals([chamadas.length, r.error], [0, "Só o administrador mexe na agenda de produção."]);
+});
+
+Deno.test("Fase 7c (P8) — servico_etapa: o esquema (os e trecho obrigatórios; o estado em 3; as partes em lista) e a descrição dizem o que NÃO faz", () => {
+  const t = porNome("servico_etapa");
+  assertEquals([t.risk, t.roles], ["low", ["admin"]]);
+  const props = (t.input_schema as { properties: Record<string, { enum?: string[]; type?: string }> }).properties;
+  assertEquals(Object.keys(props).sort(), ["estado", "etapa", "os", "partes", "texto", "trecho"]);
+  assertEquals(props.estado.enum, ["feita", "falta", "nao_se_aplica"]);
+  assertEquals(props.partes.type, "array");
+  assertEquals(t.input_schema.required, ["os", "trecho"]);
+  assertStringIncludes(t.description, "Anota num RASCUNHO o que o dono disse das etapas de um serviço (OS)");
+  assertStringIncludes(t.description, "Uma chamada por coisa dita, com trecho = as palavras dele.");
+  assertStringIncludes(t.description, "NÃO distribui etapa por pessoa nem por dia, não muda a ordem e não manda nada à equipe");
+  assertStringIncludes(t.description, "só o *grava* do dono grava");
 });

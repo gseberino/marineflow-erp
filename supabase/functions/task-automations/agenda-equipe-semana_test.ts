@@ -115,7 +115,7 @@ Deno.test("semana da equipe: o TS não lê o modo, não escreve em tabela e não
 // O motor (index.ts sobe o servidor ao ser importado): pelo texto da fonte.
 Deno.test("motor: a rodada da semana da equipe (0b1) roda depois da rotina (0b) e antes do aprendizado (0b2), com try/catch próprio, e vai ao resumo", async () => {
   const fonte = (await Deno.readTextFile(new URL("./index.ts", import.meta.url))).replace(/\r\n/g, "\n");
-  const rotina = fonte.indexOf("agendaRotina = await rodarRotinaDaAgenda(db, new Date());");
+  const rotina = fonte.indexOf("agendaRotina = await rodarRotinaDaAgenda(db, agoraDaRotina);");
   const semana = fonte.indexOf("agendaEquipeSemana = await rodarSemanaDaEquipe(db, new Date());");
   const aprender = fonte.indexOf("agendaAprender = await aprenderDaAgenda(db, new Date());");
   const vigia = fonte.indexOf("agendaVigia = await vigiarAgenda(db, agoraDaVigia);");

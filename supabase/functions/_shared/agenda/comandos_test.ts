@@ -1287,3 +1287,36 @@ Deno.test("Fase 7c (P4) — webhook: *agenda quem faz* vai ao assistente só com
     assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(modo, "ligado"), "agenda quem faz"), false, modo);
   }
 });
+
+// ─── Fase 7c (P8, spec-fase7c.md §16.7 "Palavras: nenhuma nova"): as etapas de um serviço ──────────────────────────────────
+// "o que falta no Lenine", "o que já foi feito no Flávio" e "o que o Alex faz amanhã" vão ao modelo (agenda_ver com os, ou com pessoa
+// e período); o que o dono diz das etapas vai ao modelo (servico_etapa, que só deixa rascunho). Nenhuma é palavra da agenda, do
+// secretário, da confirmação (sim/ok/1), do menu, do PDF, dos comprovantes nem da pergunta ativa.
+const CONVERSA_F7C_P8 = [
+  "o que falta no Lenine?", "o que falta no Lenine", "o que já foi feito no Flávio?", "o que ja foi feito no Flavio",
+  "o que o Alex faz amanhã?", "o que o Alex faz amanhã", "no Lenine os porta-fusíveis já estão instalados",
+  "no Lenine ainda falta a passagem dos cabos", "acrescenta no Flávio: trocar a bomba d'água",
+  "divide a instalação do Vanderlei em etapas", "divide a instalação do Vanderlei em 3: fixar o banco, passar os cabos e montar o quadro",
+  "no Lenine falta a 2", "no Lenine a substituição das baterias não vai ser feita", "põe o Mateus para fazer as baterias do Lenine amanhã",
+  "etapas do Lenine", "quais etapas faltam no Vanderlei?", "o Lenine está com tudo feito?", "liga as etapas", "o que fazer amanhã no Flávio",
+];
+
+Deno.test("Fase 7c (P8) — o que o dono diz e pergunta das etapas vai ao modelo: nenhuma palavra da agenda, do secretário, da confirmação, do menu, do PDF, dos comprovantes nem da pergunta ativa", () => {
+  for (const t of CONVERSA_F7C_P8) {
+    assertEquals(lerComandoDaAgenda(t), null, `agenda: ${t}`);
+    assertEquals(lerComandoDoSecretario(t), null, `secretário: ${t}`);
+    assertEquals(parseConfirmationReply(t), null, `confirmação: ${t}`);
+    assertEquals(parseOptionReply(t, 9), null, `opção: ${t}`);
+    assertEquals(lerPedidoDePdf(t), null, `pdf: ${t}`);
+    assertEquals(lerComando(t), null, `comprovantes: ${t}`);
+    const n = normalizarResposta(t.replace(/[*_~]/g, ""));
+    assertEquals(lerSimNao(n), null, `sim/não: ${t}`);
+    assertEquals(lerNumero(n, 99), null, `número: ${t}`);
+    assertEquals(pareceRespostaCurta(t), false, `resposta curta: ${t}`);
+    const trava = travaDaConfirmacao(estadoComCmpNoConfirmar(), t, { pending_confirm_action_id: "pend-1" });
+    assertEquals(trava.travar, false, `trava do CMP: ${t}`);
+  }
+  // nenhuma frase fixa nova: a tabela das palavras é a de antes, e "sim", "ok" e "1" continuam da confirmação
+  for (const f of frasesDaAgenda()) assert(!/etapa/.test(f), f);
+  for (const t of ["sim", "ok", "1", "não", "2"]) assertEquals(lerComandoDaAgenda(t), null, t);
+});

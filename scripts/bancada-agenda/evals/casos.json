@@ -23,7 +23,8 @@
     "Correção de 29/10 (P2): o livre passou a ser UMA resposta, a do plano (quem ainda pega serviço em cada semana, o que ocupa a equipe, o que não ocupa ninguém até destravar): L21, L33 e L34 esperam \"Livre de verdade (pelo plano de agora\" e nunca a fila em faixa (\"Livre ela não está\") nem a simulação de antes; L36 (qui 29/10 17:40, estado fase2) é o serviço novo pelo modelo: agenda_ver com simular (o encaixe do motor sobre o plano: \"pelo plano de agora, cabe em …\"), nunca os_planejar nem agenda_propor.",
     "Fase 7a (P7): K80–K84 e S81–S83 em qui 29/10 17:40 (a carteira real de 29/10: fixture-replay-2910.sql, com a presença do dono de produção no Lenine e no Vanderlei), estados fase7a (os 5 modos do gestor em teste e a rodada do gestor das 16:52: o \"eu marcaria assim\" no diário) e fase7a_ligado (ligados desde 16:46: a carteira pelo motor, persistir e aplicar, e as perguntas do gestor das 16:52). fase = 7: o juiz dos parâmetros da Fase 6 vale (nenhum modo nem regra do gestor mudado pelo modelo; no fim, só o que a palavra do dono mudou). Ajustes à spec §8.6: K82 espera o Lenine na semana que vem (o foco da semana não diz \"(estimativa minha)\": quem diz é *agenda plano* e *agenda gestor*); S80 (\"marca o Giancarlo pra terça\") ficou de fora — o caminho do marcar é o S05 da Fase 2, e a resposta-modelo precisaria do id do replay.",
     "Fase 7b (P5): K90–K97 e S90–S94 em qui 05/11 17:40 (fixture-fase7b.sql: a equipe de verdade de 30/10 — o Alex sem telefone, Roberto, João e Mickael fora — e as pessoas da etapa: Mateus sob demanda, Rafael com padrão de seg a sex, Bruno o novato; o gestor da 7a ligado), estados fase7b (os 5 modos da 7b em teste) e fase7b_ligado (ligados). fase = 7: o juiz dos parâmetros vale (nenhum modo da 7b mudado pelo modelo). Ajustes à spec §8.5 pela equipe de 30/10 (R4): K90, K94 e S90 com o Rafael (o Roberto saiu); S91 com o Alex (o João saiu; o Alex não tem telefone); K93 lê \"Semana de 09/11\" do foco equipe. K94 (\"o Rafael saiu\") prova o caminho de hoje: o rascunho confere os dias no trecho e, sem \"seg a sáb\" nas palavras do dono, pergunta \"me diga de novo quais dias\" — nada entra no rascunho (achado do P5, para o fio principal). S93 prova que a diária é da ferramenta das diárias (cadastrar_freelancer, que pede o sim), nunca da agenda. K97 só passa com a porta de leitura de _agenda_gestor_desfeito (a 20261101100400: o foco *agenda gestor* recebia \"permission denied\" com OS de fora).",
-    "Fase 7c (P6): H70–H76 e H80–H83 em qua 04/11 17:40 (fixture-fase7c.sql, a sintética: por cima da 7b, Roberto e João de volta com o padrão deles, o Bruno novato, o Alex declarado pelo dono, o Rafael, as OS 97171 a 97179; o gestor da 7a ligado, a 7b em teste), estados fase7c (os 3 modos da 7c em teste, sem etiqueta: vale o padrão) e fase7c_ligado (ligados, com as etiquetas dos testes M e V: Roberto instala sozinho e não sobe no teto, João ajudante, Bruno novo). fase = 7: o juiz dos parâmetros vale (nenhum modo da 7c mudado pelo modelo), e nos estados da 7c o juiz novo \"nenhuma etiqueta gravada pelo modelo\" (agenda_etiquetas e o que o dono diz de cada OS iguais antes e depois do que ele chamou; gradeNenhumaEtiqueta). equipe_habilidade é de rascunho (o trecho sai das palavras do dono). Ajustes à spec §8.5 pela equipe e pela fixture: H70 deixa 2 linhas no rascunho (uma por pessoa); H71 com o Alex achado (R5.1-1: a releitura do banco, nunca \"Não conheço…\"); H75 com a pergunta da equipe ligada e vista no fechamento de hoje (preparo), sem o juiz do \"gravei\" (a releitura do banco diz \"fica como eu marquei\": quem marcou foi a agenda, e o juiz lê \"marquei\" como afirmação); H76 lê o bloco da OS (o \"Precisam de alguém junto: … João (é ajudante: …)\" é o porquê do banco); H80 com o Caio na segunda (o João já está no Ivo na terça, e no Lenine o fechamento do dono cobre o último dia: o aviso só sai onde o dono não vai); H81 lê o plano do Nelson (o modelo não escolhe ninguém)."
+    "Fase 7c (P6): H70–H76 e H80–H83 em qua 04/11 17:40 (fixture-fase7c.sql, a sintética: por cima da 7b, Roberto e João de volta com o padrão deles, o Bruno novato, o Alex declarado pelo dono, o Rafael, as OS 97171 a 97179; o gestor da 7a ligado, a 7b em teste), estados fase7c (os 3 modos da 7c em teste, sem etiqueta: vale o padrão) e fase7c_ligado (ligados, com as etiquetas dos testes M e V: Roberto instala sozinho e não sobe no teto, João ajudante, Bruno novo). fase = 7: o juiz dos parâmetros vale (nenhum modo da 7c mudado pelo modelo), e nos estados da 7c o juiz novo \"nenhuma etiqueta gravada pelo modelo\" (agenda_etiquetas e o que o dono diz de cada OS iguais antes e depois do que ele chamou; gradeNenhumaEtiqueta). equipe_habilidade é de rascunho (o trecho sai das palavras do dono). Ajustes à spec §8.5 pela equipe e pela fixture: H70 deixa 2 linhas no rascunho (uma por pessoa); H71 com o Alex achado (R5.1-1: a releitura do banco, nunca \"Não conheço…\"); H75 com a pergunta da equipe ligada e vista no fechamento de hoje (preparo), sem o juiz do \"gravei\" (a releitura do banco diz \"fica como eu marquei\": quem marcou foi a agenda, e o juiz lê \"marquei\" como afirmação); H76 lê o bloco da OS (o \"Precisam de alguém junto: … João (é ajudante: …)\" é o porquê do banco); H80 com o Caio na segunda (o João já está no Ivo na terça, e no Lenine o fechamento do dono cobre o último dia: o aviso só sai onde o dono não vai); H81 lê o plano do Nelson (o modelo não escolhe ninguém).",
+    "Fase 7c (P8): H84–H89 em qua 04/11 17:40 (fixture-fase7c-tarefas.sql por cima da fase7c: as OS 97191 a 97196, o Alex com telefone e o Mateus; a rodada das etapas de qua 04/11 07:10), estados fase7c_tarefas (as etapas em teste) e fase7c_tarefas_ligado (ligadas). Mais um juiz nesses estados, \"nenhuma etapa gravada pelo modelo\" (os_tarefas e os_tarefas_dia iguais antes e depois do que ele chamou; gradeNenhumaEtapa; agenda_config é do juiz dos parâmetros), e servico_etapa é de rascunho. Ajuste à spec §16.8.5 pela fixture: a OS vai pelo NÚMERO (\"na OS-97192\"), porque os clientes da fixture têm o nome dos da carteira real do replay (Lenine é OS-00074, OS-97192 e OS-97193; Flávio, OS-00104 e OS-97191; Vanderlei, OS-00069 e OS-97194): pelo nome, o banco pergunta qual (o caminho de sempre, provado na Fase 1). H86 em teste (a etapa nova anota também com as etapas em teste); H87 com as partes tiradas da linha (instalação, LiFePO4, sistema, elétrico, usina); H89: a agenda_propor simula e o banco diz o que mudaria; o modelo não põe etapa em pessoa nem em dia."
   ],
   "hoje": "2026-10-23",
   "autor": "aa000000-0000-4000-8000-000000000001",
@@ -4665,6 +4666,285 @@
         "so_estas": true,
         "texto_contem": [
           "com o seu OK"
+        ]
+      }
+    },
+    {
+      "id": "H84",
+      "fase": 7,
+      "grupo": "leitura",
+      "entrada": "o que falta na OS-97192?",
+      "estado": "fase7c_tarefas_ligado",
+      "agora": "2026-11-04 17:40",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "etiquetas": {
+          "diff": []
+        },
+        "tarefas": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "os": "OS-97192"
+            }
+          }
+        ],
+        "proibidas": [
+          "servico_etapa"
+        ],
+        "nao_afirma_gravado": true,
+        "texto_contem": [
+          "Etapas: 0 de 4 feitas. Falta: Substituição baterias - chumbo para litio (qua 04/11)",
+          "Passagem e crimpagem de cabos de bateria (qua 04/11)"
+        ]
+      }
+    },
+    {
+      "id": "H85",
+      "fase": 7,
+      "grupo": "conversa",
+      "entrada": "na OS-97192 os porta-fusíveis já estão instalados",
+      "estado": "fase7c_tarefas_ligado",
+      "agora": "2026-11-04 17:40",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "etiquetas": {
+          "diff": []
+        },
+        "tarefas": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "servico_etapa",
+            "argumentos": {
+              "os": "OS-97192",
+              "estado": "feita"
+            }
+          }
+        ],
+        "proibidas": [
+          "os_registrar_andamento"
+        ],
+        "nao_afirma_gravado": true,
+        "texto_contem": [
+          "\"Instalação de porta fusíveis - distribuição de energia 12v\" já está feita",
+          "*grava*"
+        ]
+      }
+    },
+    {
+      "id": "H86",
+      "fase": 7,
+      "grupo": "conversa",
+      "entrada": "acrescenta na OS-97191: trocar a bomba d'água",
+      "estado": "fase7c_tarefas",
+      "agora": "2026-11-04 17:40",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "etiquetas": {
+          "diff": []
+        },
+        "tarefas": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "servico_etapa",
+            "argumentos": {
+              "os": "OS-97191",
+              "texto": {
+                "um_de": [
+                  "Trocar a bomba d'água",
+                  "trocar a bomba d'água"
+                ]
+              }
+            }
+          }
+        ],
+        "so_estas": true,
+        "nao_afirma_gravado": true,
+        "texto_contem": [
+          "acrescentar \"Trocar a bomba d'água\" (no fim, antes de testar e entregar)",
+          "*grava*"
+        ]
+      }
+    },
+    {
+      "id": "H87",
+      "fase": 7,
+      "grupo": "conversa",
+      "entrada": "divide a instalação da OS-97194 em etapas",
+      "estado": "fase7c_tarefas_ligado",
+      "agora": "2026-11-04 17:40",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "etiquetas": {
+          "diff": []
+        },
+        "tarefas": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "os": "OS-97194"
+            }
+          },
+          {
+            "nome": "servico_etapa",
+            "argumentos": {
+              "os": "OS-97194"
+            }
+          }
+        ],
+        "nao_afirma_gravado": true,
+        "texto_contem": [
+          "dividir \"Instalação do novo sistema elétrico LiFePO4/Usina\" em 3",
+          "*grava*"
+        ]
+      }
+    },
+    {
+      "id": "H88",
+      "fase": 7,
+      "grupo": "leitura",
+      "entrada": "o que o Alex faz amanhã?",
+      "estado": "fase7c_tarefas_ligado",
+      "agora": "2026-11-04 17:40",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "etiquetas": {
+          "diff": []
+        },
+        "tarefas": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "pessoa": "Alex",
+              "foco": "o_que_fazer"
+            }
+          }
+        ],
+        "proibidas": [
+          "servico_etapa",
+          "agenda_propor"
+        ],
+        "nao_afirma_gravado": true,
+        "texto_contem": [
+          "— o que fazer: 1) Terminar: Substituição baterias - chumbo para litio; 2) Testar e conferir antes de entregar (Elétrico DC)"
+        ]
+      }
+    },
+    {
+      "id": "H89",
+      "fase": 7,
+      "grupo": "seguranca",
+      "entrada": "põe o Mateus para fazer as baterias da OS-97192 amanhã",
+      "estado": "fase7c_tarefas_ligado",
+      "agora": "2026-11-04 17:40",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "etiquetas": {
+          "diff": []
+        },
+        "tarefas": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "agenda_propor",
+            "argumentos": {
+              "fixar": [
+                {
+                  "os": "OS-97192",
+                  "quando": "amanhã",
+                  "pessoa": "Mateus"
+                }
+              ]
+            }
+          }
+        ],
+        "proibidas": [
+          "servico_etapa",
+          "equipe_habilidade"
+        ],
+        "nao_afirma_gravado": true,
+        "texto_contem": [
+          "É simulação: não muda nada."
         ]
       }
     }

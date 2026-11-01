@@ -331,7 +331,15 @@ select format('B2a %s: as de antes iguais e na mesma ordem, e as novas no fim', 
                                                           and a.attname = 'modo_habilidade' and not a.attisdropped)
                       and t.nome in ('agenda_perguntas_tipo_check', 'agenda_acoes_tipo_check', 'agenda_vigia_rodadas_rotina_check',
                                      'agenda_alocacoes_cancelada_motivo_check')
-                 then '{habilidade}'::text[] else '{}'::text[] end,
+                 then '{habilidade}'::text[] else '{}'::text[] end
+         -- (7c P8) a 20261102100550 soma tarefa (pergunta e ação), etapa (rascunho) e tarefas (rodada) no fim de 4 listas
+         -- (agenda_fase7c_tarefas.sql T1e confere que as de antes ficam)
+         || case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                                                         and a.attname = 'modo_tarefas' and not a.attisdropped)
+                then case t.nome when 'agenda_perguntas_tipo_check' then '{tarefa}'::text[] when 'agenda_acoes_tipo_check' then '{tarefa}'::text[]
+                                 when 'agenda_rascunho_tipo_check' then '{etapa}'::text[]
+                                 when 'agenda_vigia_rodadas_rotina_check' then '{tarefas}'::text[] else '{}'::text[] end
+                else '{}'::text[] end,
          -- FASE 7c: fim
        array_to_string(pg_temp.lista(t.tabela::regclass, t.nome), ',')
   from (values
@@ -561,7 +569,12 @@ begin
     v_res := pg_temp.ok(v_res, format('B6d com modo_cadastro desligado, o modo de cada tipo é o de antes (a definição de 20261031100850), menos dias_semana (nova) — o gestor %s, só propor %s', r.m, r.sp),
       -- FASE 7c: a 20261102100000 soma o tipo habilidade (o agenda_fase7c_base.sql B11c confere o modo dele)
       v_a = 'dias_semana' || case when to_regclass('public.agenda_etiquetas') is null then '' else ',habilidade' end
-      and v_n = 41 + case when to_regclass('public.agenda_etiquetas') is null then 0 else 1 end,
+            -- (7c P8) e o tipo tarefa (20261102100550; o agenda_fase7c_tarefas.sql T18 confere a cópia e o modo dele)
+            || case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                                       and a.attname = 'modo_tarefas' and not a.attisdropped) then ',tarefa' else '' end
+      and v_n = 41 + case when to_regclass('public.agenda_etiquetas') is null then 0 else 1 end
+              + case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                                       and a.attname = 'modo_tarefas' and not a.attisdropped) then 1 else 0 end,
       -- FASE 7c: fim
       coalesce(v_a, '-') || ' de ' || v_n);
   end loop;

@@ -189,6 +189,40 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     vezes: 1,
     porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_aprender e agenda_equipe_semana); não é texto_max nem peca_embutida_acima',
   },
+  // Fase 7c (P8, 20261102100550): a rodada das etapas grava a rodada como a de quem faz o quê; a ordem e a conta do plano do dia têm
+  // as constantes de estrutura delas, uma vez cada, com nome (o que é parâmetro vem de agenda_config: tarefas_*, jornada_horas,
+  // equipe_hora_como_foi).
+  {
+    onde: 'agenda_tarefas_rodar',
+    casou: '1000',
+    vezes: 1,
+    porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_habilidade); não é texto_max nem peca_embutida_acima',
+  },
+  ...(['_agenda_tarefas_sincronizar', '_agenda_aplicar_etapa'] as const).map((onde) => ({
+    onde,
+    casou: '0.001',
+    vezes: 1,
+    porque: 'c_casa: a menor casa de os_tarefas.ordem (numeric(8,3)), para a etapa nova entrar antes da vizinha quando o meio entre as duas não cabe nas 3 casas; não é parâmetro do dono',
+  })),
+  {
+    onde: '_agenda_tarefas_planejar',
+    casou: '0.25',
+    // as duas regras casam a mesma constante (o valor de frequencia_minima e o decimal fora dos estruturais)
+    vezes: 2,
+    porque: 'c_resto: a etapa começada pede ao menos ¼ de meio-dia (spec-fase7c §16.3.6, "max(meios − Σ fração congelada, 0,25)"); não é frequencia_minima',
+  },
+  {
+    onde: '_agenda_tarefas_planejar',
+    casou: '0.001',
+    vezes: 1,
+    porque: 'c_resid: o resíduo das frações do plano (3 casas, as de os_tarefas_dia.fracao) não é etapa a fazer; não é parâmetro do dono',
+  },
+  {
+    onde: '_agenda_tarefas_planejar',
+    casou: '0.01',
+    vezes: 1,
+    porque: 'c_folga: a sobra de um meio-dia abaixo de um centésimo não leva outra etapa (a régua do arredondamento); não é parâmetro do dono',
+  },
   // Fase 7b (P6, 20261101100500): quem chamar diz quanto a conta custou (as duas voltas do motor), como o livre de verdade.
   {
     onde: '_agenda_quem_chamar',

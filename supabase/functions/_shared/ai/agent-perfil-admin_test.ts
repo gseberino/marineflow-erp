@@ -287,9 +287,11 @@ Deno.test("agenda de produção (Fase 4): técnico e financeiro não alcançam f
 });
 
 // ───────── Agenda de Produção, Fase 7c (P4, 01/11/2026; spec-fase7c.md §7; decisão d14 do dono) ─────────
+// (P8, 01/11/2026; spec-fase7c.md §16.7) + servico_etapa: as mesmas 3 provas (fora da vista, roda direto, só admin).
 
 const DA_FASE_7C: Record<string, Record<string, unknown>> = {
   equipe_habilidade: { pessoa: "Roberto", o_que_faz: "instala_sozinho", trecho: "o Roberto instala sozinho" },
+  servico_etapa: { os: "Lenine", etapa: "porta fusíveis", estado: "feita", trecho: "no Lenine os porta-fusíveis já estão instalados" },
 };
 
 Deno.test("agenda de produção (Fase 7c): equipe_habilidade fora da vista, ao alcance da ferramenta_extra, e o teto de 113 continua", async () => {

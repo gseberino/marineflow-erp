@@ -186,6 +186,10 @@ export const TABELAS = [
   // as pendências, as sugestões de agenda e as missões de acompanhamento. Só a tabela (sem gatilho nem FK do snapshot).
   'audit_log', 'bank_charges', 'anotacoes_do_extrato', 'invoices', 'service_order_signatures', 'whatsapp_scheduled_sends',
   'service_order_photos', 'service_order_steps', 'time_entries', 'entity_open_loops', 'agenda_suggestions', 'ai_followup_missions',
+  // Fase 7c (P8): o catálogo do roteiro que as etapas da OS leem — os blocos de abertura e fechamento por sistema (a etapa final da OS
+  // sem roteiro sai dos blocos fechamento de seguranca_da_via), os sistemas (o rótulo "Elétrico DC") e os verbos (o "intervém no
+  // sistema" de seguranca_da_via). Vazios na bancada: a fixture-fase7c-tarefas.sql semeia o que os testes do P8 usam.
+  'service_step_blocks', 'service_systems', 'service_verbs',
 ];
 
 /**
@@ -286,6 +290,10 @@ export const FUNCOES = [
   '_autor_do_financeiro', '_rotulo_jornada',
   // PÓS-MERGE (C): os totais da OS pelo banco (o agrupar confere o total da nova e recalcula as originais no desagrupar).
   'calc_so_totals', 'recalc_so_totals',
+  // Fase 7c (P8): o texto da linha sem a caixa alta (frase_legivel), o rótulo do sistema (service_system_label) e os blocos de segurança
+  // da via sem roteiro (seguranca_da_via: a etapa final da OS sem roteiro), com o corpo do snapshot (a mais nova de cada uma: 20260731210000,
+  // 20260802100000 e 20261005110000, iguais ao snapshot).
+  'frase_legivel', 'service_system_label', 'seguranca_da_via',
 ];
 
 let snapshot;

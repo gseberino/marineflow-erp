@@ -3164,5 +3164,232 @@
       ],
       "texto": "Escalar por quem faz o quê liga com o seu OK pelo roteiro (o passo \"OK escalar por quem faz o quê\"): eu não mudo modo da agenda. Em teste, *agenda quem faz* mostra o que eu marcaria."
     }
+  },
+  "H84": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "os": "OS-97192"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "inventa a etapa que falta em vez de repetir o banco",
+      "reprova_em": "texto",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "os": "OS-97192"
+          }
+        }
+      ],
+      "texto": "Na OS-97192 falta só pintar o quadro e testar as baterias."
+    }
+  },
+  "H85": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "servico_etapa",
+          "argumentos": {
+            "os": "OS-97192",
+            "etapa": "porta-fusíveis",
+            "estado": "feita",
+            "trecho": "na OS-97192 os porta-fusíveis já estão instalados"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "a etapa aparece feita no banco sem o *grava* do dono (o defeito que o juiz das etapas pega)",
+      "reprova_em": "tarefas",
+      "chamadas": [
+        {
+          "ferramenta": "servico_etapa",
+          "argumentos": {
+            "os": "OS-97192",
+            "etapa": "porta-fusíveis",
+            "estado": "feita",
+            "trecho": "na OS-97192 os porta-fusíveis já estão instalados"
+          }
+        }
+      ],
+      "passos": [
+        {
+          "sql": "update public.os_tarefas set estado = 'feita', feita_em = now(), feita_via = 'dono', mudou_em = now() where texto like 'Instalação de porta fusíveis%' and service_order_id = 'c7c80000-0000-4000-8000-000000097192'"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "H86": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "servico_etapa",
+          "argumentos": {
+            "os": "OS-97191",
+            "texto": "Trocar a bomba d'água",
+            "trecho": "acrescenta na OS-97191: trocar a bomba d'água"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "põe na etapa nova palavra que o dono não disse (o pressostato): o banco recusa e nada vai ao rascunho",
+      "reprova_em": "banco",
+      "chamadas": [
+        {
+          "ferramenta": "servico_etapa",
+          "argumentos": {
+            "os": "OS-97191",
+            "texto": "Trocar a bomba d'água e o pressostato",
+            "trecho": "acrescenta na OS-97191: trocar a bomba d'água"
+          }
+        }
+      ],
+      "texto": "Entendi assim, confere?\n• Flávio (OS-97191): acrescentar \"Trocar a bomba d'água\" (no fim, antes de testar e entregar). Responda *grava*."
+    }
+  },
+  "H87": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "os": "OS-97194"
+          }
+        },
+        {
+          "ferramenta": "servico_etapa",
+          "argumentos": {
+            "os": "OS-97194",
+            "etapa": "instalação do novo sistema",
+            "partes": [
+              "Instalação das baterias LiFePO4",
+              "Montagem do sistema elétrico",
+              "Ligação da usina"
+            ],
+            "trecho": "divide a instalação da OS-97194 em etapas"
+          }
+        }
+      ],
+      "texto": "{{saida:1}}"
+    },
+    "ruim": {
+      "por_que": "as partes não vêm do serviço, do roteiro, do material nem do que o dono disse: o banco recusa e nada vai ao rascunho",
+      "reprova_em": "banco",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "os": "OS-97194"
+          }
+        },
+        {
+          "ferramenta": "servico_etapa",
+          "argumentos": {
+            "os": "OS-97194",
+            "etapa": "instalação do novo sistema",
+            "partes": [
+              "Pintar o casco",
+              "Lixar o convés"
+            ],
+            "trecho": "divide a instalação da OS-97194 em etapas"
+          }
+        }
+      ],
+      "texto": "Entendi assim, confere?\n• dividir \"Instalação do novo sistema elétrico LiFePO4/Usina\" em 3. Responda *grava*."
+    }
+  },
+  "H88": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "pessoa": "Alex",
+            "periodo": "amanhã",
+            "foco": "o_que_fazer"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "muda a ordem do banco (o que o Alex faz primeiro é a agenda que diz)",
+      "reprova_em": "texto",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "pessoa": "Alex",
+            "periodo": "amanhã",
+            "foco": "o_que_fazer"
+          }
+        }
+      ],
+      "texto": "Amanhã o Alex começa testando e depois passa os cabos de bateria no Lenine."
+    }
+  },
+  "H89": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_propor",
+          "argumentos": {
+            "escopo": "os",
+            "os": [
+              "OS-97192"
+            ],
+            "fixar": [
+              {
+                "os": "OS-97192",
+                "quando": "amanhã",
+                "pessoa": "Mateus"
+              }
+            ],
+            "trecho": "põe o Mateus para fazer as baterias da OS-97192 amanhã"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "põe a etapa na pessoa e no dia pelo banco (o modelo nunca distribui etapa: o defeito que o juiz das etapas pega)",
+      "reprova_em": "tarefas",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_propor",
+          "argumentos": {
+            "escopo": "os",
+            "os": [
+              "OS-97192"
+            ],
+            "fixar": [
+              {
+                "os": "OS-97192",
+                "quando": "amanhã",
+                "pessoa": "Mateus"
+              }
+            ],
+            "trecho": "põe o Mateus para fazer as baterias da OS-97192 amanhã"
+          }
+        }
+      ],
+      "passos": [
+        {
+          "sql": "update public.os_tarefas set ordem = 0.5, mudou_em = now() where texto like 'Substituição baterias%' and service_order_id = 'c7c80000-0000-4000-8000-000000097192'"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
   }
 }

@@ -689,7 +689,11 @@ begin
     select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = r.sig::regprocedure;
     select count(*) into v_n from regexp_matches(v_novo, '-- FASE 7c: fim', 'g');
     if pg_temp.corpo(v_orig, r.nome) = '' or pg_temp.sem_7c(v_novo) <> pg_temp.corpo(v_orig, r.nome)
-       or pg_temp.sem_7c(pg_temp.corpo(v_mig, r.nome)) <> pg_temp.corpo(v_orig, r.nome) or v_n <> 1 then
+       or pg_temp.sem_7c(pg_temp.corpo(v_mig, r.nome)) <> pg_temp.corpo(v_orig, r.nome)
+       -- FASE 7c: (7c P8, 20261102100550) o P8 recria as duas (+ o bloco do tipo etapa): na viva, 2 blocos "-- FASE 7c:"; tirados, a origem
+       or v_n <> 1 + (case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass and a.attname = 'modo_tarefas'
+                     and not a.attisdropped) then 1 else 0 end) then
+       -- FASE 7c: fim
       v_dif := v_dif || format(' [%s: %s blocos; vivo sem eles %s × fonte %s letras]', r.nome, v_n, length(pg_temp.sem_7c(v_novo)),
                                length(pg_temp.corpo(v_orig, r.nome)));
     end if;

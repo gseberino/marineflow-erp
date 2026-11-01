@@ -64,7 +64,7 @@ Deno.test("R10: sai só com a ficha da agenda ligada (modo_equipe = 'ligado'); s
 Deno.test("motor: a rotina roda antes da vigia, com try/catch próprio; a R10 lê os modos da equipe antes de enviar", async () => {
   const fonte = (await Deno.readTextFile(new URL("./index.ts", import.meta.url))).replace(/\r\n/g, "\n");
   const material = fonte.indexOf("agendaMaterial = await sincronizarMaterialDaAgenda(db);");
-  const rotina = fonte.indexOf("agendaRotina = await rodarRotinaDaAgenda(db, new Date());");
+  const rotina = fonte.indexOf("agendaRotina = await rodarRotinaDaAgenda(db, agoraDaRotina);");
   const vigia = fonte.indexOf("agendaVigia = await vigiarAgenda(db, agoraDaVigia);");
   assertEquals(material > 0 && rotina > material && vigia > rotina, true);
   const bloco = fonte.slice(fonte.lastIndexOf("let agendaRotina", rotina), vigia);

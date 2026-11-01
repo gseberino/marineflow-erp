@@ -209,7 +209,13 @@ insert into _pd_funcoes values
   ('_agenda_rodada_duracao_lembrar(text)', 'interna'), ('_agenda_rodada_duracao_guardar(text, bigint, jsonb)', 'interna'),
   -- (a correção 2, 20261031100985) o telefone da ficha, as OS que saíram pelo material sem a compra (ninguém); os técnicos da
   -- grade e a frase deles (lidas pela classe da OS e pelo foco: authenticated e service_role)
-  ('_agenda_equipe_tem_telefone(uuid)', 'interna'), ('_agenda_gestor_compra_saiu(date)', 'interna'),
+  -- FASE 7c: (7c P8, 20261102100550; spec-fase7c R5.2-1, R5.10-13) a régua do telefone ganha authenticated e service_role (a linha (o)
+  -- do fechamento, lida pelo painel, usa a mesma régua do registro); continua sem anon (o F2)
+  ('_agenda_equipe_tem_telefone(uuid)',
+   case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                                                     and a.attname = 'modo_tarefas' and not a.attisdropped) then 'leitura' else 'interna' end),
+  -- FASE 7c: fim
+  ('_agenda_gestor_compra_saiu(date)', 'interna'),
   ('_agenda_tecnicos_da_grade(date)', 'leitura'), ('_agenda_tecnicos_frase(text[])', 'leitura');
 
 insert into _resultado
