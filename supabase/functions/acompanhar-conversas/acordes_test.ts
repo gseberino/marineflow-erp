@@ -31,6 +31,8 @@ function banco(tabelas: Record<string, Linha[]>, opcoes: { esperando?: Linha[]; 
         select: () => q,
         eq: (c: string, v: unknown) => ((linhas = linhas.filter((l) => l[c] === v)), q),
         in: (c: string, vs: unknown[]) => ((linhas = linhas.filter((l) => vs.includes(l[c]))), q),
+        // (Retorno F0b) .not("saida_humana", "is", false): tira só a saída automática
+        not: (c: string, op: string, v: unknown) => ((linhas = linhas.filter((l) => !(op === "is" && l[c] === v))), q),
         gte: (c: string, v: string) => ((linhas = linhas.filter((l) => Date.parse(l[c]) >= Date.parse(v))), q),
         order: () => q,
         limit: () => q,
@@ -97,6 +99,18 @@ Deno.test("Miguel 07/10 09:45 (antes da conferência do dono: 09:45 pede cartão
   // nada além do portão: nenhuma fila, nenhuma pendência
   assert(!b.lidas.includes("whatsapp_send_queue") && !b.lidas.includes("ai_operator_pending_actions"));
   assert(b.rpcs.every((x) => ["whatsapp_esperando_resposta", "aviso_registrar"].includes(x.nome)));
+});
+
+// Retorno F0b (06/11/2026): um lembrete automático (saida_humana = false) depois da mensagem do cliente não é resposta
+// do dono — o acorde sai igual. A mesma saída feita pelo dono (true) é resposta e cala o acorde.
+Deno.test("saída automática depois da mensagem do cliente não cala o acorde; a do dono cala", async () => {
+  const automatica = { direction: "outbound", phone_normalized: MIGUEL, occurred_at: br("07", "09:20"), body: "Lembramos que…", client_id: "c-miguel", saida_humana: false };
+  const comAutomatica = banco({ whatsapp_messages: [...MENSAGENS, automatica], service_orders: [], payment_condition_presets: [], avisos_do_dono: [] }, { esperando: ESPERANDO_MIGUEL });
+  const r1 = await vigiarAcordes(comAutomatica.admin, { agora: new Date(br("07", "09:45")), dono: DONO, portao: SOMBRA, settings: {}, internos: new Set([DONO.phone]), conversaLigada: false });
+  assertEquals(r1.disparos, 1);
+  const doDono = banco({ whatsapp_messages: [...MENSAGENS, { ...automatica, saida_humana: true }], service_orders: [], payment_condition_presets: [], avisos_do_dono: [] }, { esperando: ESPERANDO_MIGUEL });
+  const r2 = await vigiarAcordes(doDono.admin, { agora: new Date(br("07", "09:45")), dono: DONO, portao: SOMBRA, settings: {}, internos: new Set([DONO.phone]), conversaLigada: false });
+  assertEquals(r2.disparos, 0);
 });
 
 Deno.test("D11 na coleta: a mesma mensagem que já acordou hoje não é fato novo", async () => {

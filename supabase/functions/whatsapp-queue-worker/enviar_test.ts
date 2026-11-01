@@ -405,7 +405,8 @@ Deno.test("index.ts: o lote vai pelo enviarLote, sem outro sendText", async () =
   assertEquals(fonte.includes('import { enviarLote, travarLote } from "./enviar.ts";'), true);
   // (C1, item 10) a trava conferida: o lote do envio é o que travarLote devolveu, nunca o batch lido
   const trava = fonte.indexOf("await travarLote(admin, batch, nowIso)");
-  const envio = fonte.indexOf("await enviarLote(admin, provider, lote, { delayMs })");
+  // (Retorno F0b) com o gravador da conversa
+  const envio = fonte.indexOf("await enviarLote(admin, provider, lote, { delayMs, registrar: criarRegistroNaConversa(admin) })");
   assertEquals(trava > 0 && envio > trava, true);
   assertEquals(fonte.includes("enviarLote(admin, provider, batch"), false);
   assertEquals(fonte.includes('.update({ status: "sending"'), false);

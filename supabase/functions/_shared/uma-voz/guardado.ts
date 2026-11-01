@@ -328,7 +328,7 @@ export async function quaisSeResolveram(admin: Db, avisos: AvisoGuardado[]): Pro
       const desde = avisos.map((a) => Date.parse(a.registrado_em)).filter((t) => !Number.isNaN(t))
         .reduce((m, t) => Math.min(m, t), Date.now()) - 3 * 86_400_000;
       const { data, error } = await admin.from("whatsapp_messages").select("phone_normalized, occurred_at")
-        .eq("direction", "outbound").in("phone_normalized", [...porFone.keys()]).gte("occurred_at", new Date(desde).toISOString())
+        .eq("direction", "outbound").not("saida_humana", "is", false).in("phone_normalized", [...porFone.keys()]).gte("occurred_at", new Date(desde).toISOString())
         .order("occurred_at", { ascending: false }).limit(500);
       if (error) throw error;
       const ultima = new Map<string, number>();

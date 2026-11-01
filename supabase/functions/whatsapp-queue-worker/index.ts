@@ -14,6 +14,7 @@ import { createWhatsAppProvider } from "../_shared/whatsapp/factory.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 import { enviarLote, travarLote } from "./enviar.ts";
+import { criarRegistroNaConversa } from "./conversa.ts";
 
 // O tipo de createClient sem o esquema gerado não casa com o cliente criado aqui (TS2345).
 // deno-lint-ignore no-explicit-any
@@ -112,7 +113,8 @@ servirComCors(async (req) => {
     const provider = createWhatsAppProvider();
     // O laço do envio mora em enviar.ts (Agenda de Produção, Fase 3, P7b): o mesmo de antes para toda origem, e a janela
     // da agenda conferida na hora para as linhas da agenda (NOVO-agenda-26; a resposta direta, NOVO-agenda-28).
-    const results = await enviarLote(admin, provider, lote, { delayMs });
+    // Retorno F0b (06/11/2026): o que sai entra na conversa (conversa.ts), menos as linhas da agenda.
+    const results = await enviarLote(admin, provider, lote, { delayMs, registrar: criarRegistroNaConversa(admin) });
 
     return jr({
       ok: true,

@@ -125,10 +125,31 @@ begin
   exception when check_violation then null;
   end;
 
-  -- 12. Só o servidor chama quem_escreve.
+  -- 12. Humano × automático pela origem (plano B.7). As linhas reais do whatsapp-send (todas do
+  --     assistente ou da tela, com sent_by) são do dono; a caixa do app e o eco do celular também.
+  if exists (select 1 from public.whatsapp_messages w
+              where w.raw_payload ->> 'via' = 'whatsapp-send' and w.raw_payload ->> 'origem' in ('assistente', 'tela')
+                and public._saida_e_humana(w.direction, w.raw_payload, w.sent_by) is not true) then
+    raise exception '12: linha real do assistente ou da tela lida como automática';
+  end if;
+  if public._saida_e_humana('outbound', null, gen_random_uuid()) is not true
+     or public._saida_e_humana('outbound', '{"data": {"key": {"fromMe": true}}}', null) is not true
+     or public._saida_e_humana('outbound', '{"via": "whatsapp-send", "origem": "sistema"}', null) is not false
+     or public._saida_e_humana('outbound', '{"via": "whatsapp-send", "origem": "sistema"}', gen_random_uuid()) is not true
+     or public._saida_e_humana('outbound', '{"via": "whatsapp-queue-worker", "origem": "fila:ai_agent"}', null) is not false
+     or public._saida_e_humana('outbound', '{"via": "outra-coisa"}', gen_random_uuid()) is not false
+     or public._saida_e_humana('inbound', '{"data": {}}', null) is not null then
+    raise exception '12b: _saida_e_humana classificou errado';
+  end if;
+  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, delivery_status, raw_payload)
+    values ('outbound', '5547900008001', 'text', 'teste F0b', 'sent', '{"via": "whatsapp-send", "origem": "sistema"}')
+    returning saida_humana into v_msg;
+  if v_msg.saida_humana is not false then raise exception '12c: o gatilho não gravou saida_humana'; end if;
+
+  -- 13. Só o servidor chama quem_escreve.
   if has_function_privilege('anon', 'public.quem_escreve(text)', 'execute')
      or has_function_privilege('authenticated', 'public.quem_escreve(text)', 'execute') then
-    raise exception '12: quem_escreve aberta a anon/authenticated';
+    raise exception '13: quem_escreve aberta a anon/authenticated';
   end if;
 
   raise notice 'retorno_f0b_quem_escreve: OK';

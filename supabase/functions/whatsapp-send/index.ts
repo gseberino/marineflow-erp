@@ -323,7 +323,9 @@ servirComCors(async (req) => {
         const { error: regErr } = await supabaseAdmin.from("whatsapp_messages").insert(linha);
         if (regErr && regErr.code !== "23505") {
           console.warn(`[whatsapp-send] envio saiu, mas não entrou na conversa: ${regErr.code ?? ""} ${regErr.message}`);
-        } else if (!regErr) {
+        } else if (!regErr && !ehAutomatica(origem, isServiceRoleCall)) {
+          // Só a saída do dono move a "última enviada" do contato: o lembrete automático não é
+          // resposta (Retorno F0b; a mesma regra de _saida_e_humana).
           await supabaseAdmin
             .from("whatsapp_leads")
             .update({ last_outbound_at: new Date().toISOString() })

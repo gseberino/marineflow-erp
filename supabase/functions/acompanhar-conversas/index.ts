@@ -83,7 +83,7 @@ async function estadoDaConversa(admin: Db, a: Pick<Acompanhamento, "phone_normal
     // A última sozinha não basta: o Miguel disse "fechando com outra empresa" e depois "Sim, já fechei".
     admin.from("whatsapp_messages").select("body, occurred_at").eq("phone_normalized", phone).eq("direction", "inbound")
       .order("occurred_at", { ascending: false }).limit(ULTIMAS_RECEBIDAS),
-    admin.from("whatsapp_messages").select("occurred_at").eq("phone_normalized", phone).eq("direction", "outbound")
+    admin.from("whatsapp_messages").select("occurred_at").eq("phone_normalized", phone).eq("direction", "outbound").not("saida_humana", "is", false)
       .order("occurred_at", { ascending: false }).limit(1),
   ]);
   const recebidas = (rec ?? []) as Array<{ body: string | null; occurred_at: string }>;
@@ -98,7 +98,11 @@ async function estadoDaConversa(admin: Db, a: Pick<Acompanhamento, "phone_normal
   };
 }
 
-/** 1. Promessas do dono desde o cursor. */
+/**
+ * 1. Promessas do dono desde o cursor. Só a saída do DONO (saida_humana, a regra única de _saida_e_humana — Retorno
+ * F0b, 06/11/2026): o que o sistema manda (lembrete, fila, agenda) nunca vira promessa dele nem "ele respondeu".
+ * Nula = gravada antes da coluna existir, lida como antes.
+ */
 async function detectarPromessas(admin: Db, dono: { id: string }, internos: Set<string>, settings: Record<string, string>, agora: Date) {
   if ((settings.acompanhar_promessas || "on").trim().toLowerCase() === "off") return { lidas: 0, criadas: 0 };
   const cursor = settings.acompanhar_cursor && !Number.isNaN(Date.parse(settings.acompanhar_cursor))
@@ -106,7 +110,7 @@ async function detectarPromessas(admin: Db, dono: { id: string }, internos: Set<
     : new Date(agora.getTime() - 30 * 60_000).toISOString();
   const { data: msgs, error } = await admin.from("whatsapp_messages")
     .select("id, phone_normalized, body, occurred_at")
-    .eq("direction", "outbound").gt("occurred_at", cursor).order("occurred_at", { ascending: true }).limit(200);
+    .eq("direction", "outbound").not("saida_humana", "is", false).gt("occurred_at", cursor).order("occurred_at", { ascending: true }).limit(200);
   if (error) throw error;
   let criadas = 0;
   let ate = cursor;

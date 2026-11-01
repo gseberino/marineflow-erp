@@ -29,12 +29,27 @@
 -- 4. whatsapp_blocked_numbers.tipo: 'spam' (o que existe hoje) ou 'opt_out' (a pessoa pediu
 --    PARAR). Hoje são 0 linhas. canal_bloqueado (F0a) já barra os dois no envio automático.
 --
+-- 5. _saida_e_humana(direção, raw_payload, sent_by): a regra ÚNICA que separa o que o dono mandou
+--    do que o sistema mandou, pela ORIGEM gravada (plano B.7):
+--    - humano: o eco do celular do dono (webhook: raw_payload com "data" e sem "via"); o
+--      whatsapp-send com origem "assistente" ou "tela"; a caixa do app (whatsapp-send-text: sem
+--      raw_payload);
+--    - automático: o whatsapp-send com origem "sistema" sem sent_by; a fila ("fila:<fonte>"); e
+--      qualquer origem desconhecida (na dúvida, não conta como resposta do dono).
+--    A regra antiga ("humano = sem via e sem sent_by") desfaria o registro de 15/10: o que o dono
+--    aprova pelo assistente sai com via e sent_by. Gravada em whatsapp_messages.saida_humana pelo
+--    mesmo gatilho, para quem lê pela API (o detector de promessas) e para as medidas.
+--
 -- Sem dado: colunas novas nulas, nenhuma linha reescrita. Reverter: drop trigger, drop das
 -- funções e das colunas.
 
 alter table public.whatsapp_messages
   add column if not exists hora_real timestamptz,
-  add column if not exists quem_sombra jsonb;
+  add column if not exists quem_sombra jsonb,
+  add column if not exists saida_humana boolean;
+
+comment on column public.whatsapp_messages.saida_humana is
+  'Retorno F0b: _saida_e_humana() na gravação, só nas enviadas (true = o dono; false = sistema). Nula nas recebidas e nas gravadas antes de 06/11/2026.';
 
 comment on column public.whatsapp_messages.hora_real is
   'Retorno F0b: hora em que a mensagem foi mandada (messageTimestamp); nula quando o webhook não trouxe número. occurred_at segue sendo a hora de gravação.';
@@ -140,6 +155,27 @@ revoke all on function public.quem_escreve(text) from public, anon, authenticate
 grant execute on function public.quem_escreve(text) to service_role;
 revoke all on function public._ddd_do_telefone(text) from public, anon;
 
+create or replace function public._saida_e_humana(p_direcao text, p_raw jsonb, p_sent_by uuid)
+returns boolean
+language sql
+immutable
+set search_path = public
+as $$
+  select case
+    when p_direcao is distinct from 'outbound' then null
+    when p_raw is null or jsonb_typeof(p_raw) <> 'object' then true
+    when p_raw ? 'data' and not (p_raw ? 'via') then true
+    when p_raw ->> 'via' = 'whatsapp-send' then
+      p_raw ->> 'origem' in ('assistente', 'tela') or (p_raw ->> 'origem' = 'sistema' and p_sent_by is not null)
+    else false
+  end;
+$$;
+
+comment on function public._saida_e_humana(text, jsonb, uuid) is
+  'Retorno F0b (plano B.7): a enviada é do dono (true) ou do sistema (false), pela origem gravada; nula na recebida.';
+
+revoke all on function public._saida_e_humana(text, jsonb, uuid) from public, anon;
+
 create or replace function public._whatsapp_mensagem_hora_e_quem()
 returns trigger
 language plpgsql
@@ -159,6 +195,10 @@ begin
     elsif new.raw_payload is null or jsonb_typeof(new.raw_payload) <> 'object' or not (new.raw_payload ? 'data') then
       new.hora_real := now();
     end if;
+  end if;
+
+  if new.direction = 'outbound' then
+    new.saida_humana := public._saida_e_humana(new.direction, new.raw_payload, new.sent_by);
   end if;
 
   if new.direction = 'inbound' and new.quem_sombra is null then

@@ -77,6 +77,8 @@ export interface OpcoesDoLote {
   agora?: () => Date;
   /** a pausa (os testes passam a deles) */
   dormir?: (ms: number) => Promise<void>;
+  /** (Retorno F0b) grava na conversa o que saiu (conversa.ts); falha aqui nunca muda o desfecho do envio */
+  registrar?: (item: ItemDaFila, providerMessageId: string | null) => Promise<void>;
 }
 
 const dormirDeVerdade = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -185,6 +187,7 @@ export async function enviarLote(
           attempts: (item.attempts || 0) + 1,
         }).eq("id", item.id);
         results.push({ id: item.id, ok: true });
+        if (opcoes.registrar) await opcoes.registrar(item, result.providerMessageId || null).catch(() => {});
       } else {
         const newAttempts = (item.attempts || 0) + 1;
         const giveUp = newAttempts >= (item.max_attempts || 3);

@@ -163,6 +163,7 @@ servirComCors(async (req) => {
         .select("id", { count: "exact", head: true })
         .eq("phone_normalized", phone)
         .eq("direction", "outbound")
+        .not("saida_humana", "is", false) // Retorno F0b: a automática não é resposta (_saida_e_humana)
         .gt("occurred_at", info.at);
       if ((count || 0) > 0) continue; // já respondido
 

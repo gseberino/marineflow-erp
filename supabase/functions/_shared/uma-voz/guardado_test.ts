@@ -136,7 +136,7 @@ function banco(o: { saidas?: Array<{ phone_normalized: string; occurred_at: stri
     from(t: string) {
       const q = {
         select() { return q; }, eq() { return q; }, in() { return t === "issued_fiscal_documents" ? Promise.resolve({ data: o.notas ?? [], error: null }) : q; },
-        gte() { return q; }, order() { return q; },
+        gte() { return q; }, order() { return q; }, not() { return q; },
         limit() { return Promise.resolve(o.erro ? { data: null, error: { message: "x" } } : { data: o.saidas ?? [], error: null }); },
       };
       return q;

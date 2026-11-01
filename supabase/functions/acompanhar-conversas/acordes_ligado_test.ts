@@ -35,6 +35,8 @@ function banco(tabelas: Record<string, Linha[]>, opcoes: { esperando?: Linha[]; 
         select: () => q,
         eq: (c: string, v: unknown) => ((linhas = linhas.filter((l) => l[c] === v)), q),
         in: (c: string, vs: unknown[]) => ((linhas = linhas.filter((l) => vs.includes(l[c]))), q),
+        // (Retorno F0b) .not("saida_humana", "is", false): tira só a saída automática
+        not: (c: string, op: string, v: unknown) => ((linhas = linhas.filter((l) => !(op === "is" && l[c] === v))), q),
         gte: (c: string, v: string) => ((linhas = linhas.filter((l) => Date.parse(l[c]) >= Date.parse(v))), q),
         order: () => q,
         limit: () => q,

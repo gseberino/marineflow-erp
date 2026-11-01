@@ -255,7 +255,7 @@ export async function coletar(admin: Admin, p: {
       admin.from("audit_log").select("record_id, changed_at, new_value, reason")
         .eq("table_name", "service_orders").eq("action", "whatsapp_send_api").in("record_id", rascunhos.map((q) => q.id)).limit(1000),
       admin.from("whatsapp_messages").select("phone_normalized, body, occurred_at")
-        .eq("direction", "outbound").gte("occurred_at", desde45).or("body.ilike.*ORÇ-*,body.ilike.*ORC-*").limit(2000),
+        .eq("direction", "outbound").not("saida_humana", "is", false).gte("occurred_at", desde45).or("body.ilike.*ORÇ-*,body.ilike.*ORC-*").limit(2000),
       admin.from("app_users").select("phone_normalized").not("phone_normalized", "is", null).limit(200),
     ]);
     const envios = new Map<string, string>(); // id do orçamento → último envio
@@ -412,7 +412,7 @@ export async function coletar(admin: Admin, p: {
   if (fones.length) {
     try {
       const env = ou(await admin.from("whatsapp_messages").select("phone_normalized, occurred_at")
-        .eq("direction", "outbound").in("phone_normalized", fones).gte("occurred_at", seteDias).limit(3000), "enviadas") as Array<Record<string, unknown>>;
+        .eq("direction", "outbound").not("saida_humana", "is", false).in("phone_normalized", fones).gte("occurred_at", seteDias).limit(3000), "enviadas") as Array<Record<string, unknown>>;
       for (const m of env) {
         const s = diasSeus.get(String(m.phone_normalized)) ?? new Set<string>();
         s.add(diaBR(new Date(String(m.occurred_at))));

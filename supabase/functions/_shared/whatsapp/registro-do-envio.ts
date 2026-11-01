@@ -102,3 +102,41 @@ export function linhaDaMensagemEnviada(
     raw_payload: { origem, contexto, via: "whatsapp-send" },
   };
 }
+
+// ═══ A FILA TAMBÉM GRAVA (Retorno rápido, F0b, 06/11/2026) ═══
+//
+// O worker da fila (whatsapp_send_queue) manda direto ao provedor e não gravava nada na conversa:
+// 0 de 116 envios em 31/10. A linha leva origem "fila:<fonte>" e via "whatsapp-queue-worker", e
+// _saida_e_humana (SQL) a lê como automática: nunca conta como resposta do dono nem vira promessa.
+//
+// As linhas da AGENDA ficam de fora por enquanto: _agenda_cliente_outra_conversa conta toda enviada
+// como "o dono conversou com o cliente" (só desconta as da agenda-cliente pelo id do provedor).
+// Entram quando a sessão da agenda passar a usar _saida_e_humana (pedido 1 do plano).
+
+/** A linha da fila entra na conversa? Não a da agenda (ver acima) nem a conversa com o assistente. */
+export function filaGravaNaConversa(p: { fonte: string | null | undefined; telefone: string; telefonesDoAssistente: Array<string | null | undefined> }): boolean {
+  if (String(p.fonte ?? "").startsWith("agenda-")) return false;
+  return !p.telefonesDoAssistente.some((t) => mesmoTelefone(t, p.telefone));
+}
+
+/** A linha de whatsapp_messages de um envio da fila que saiu. */
+export function linhaDaMensagemDaFila(
+  item: { id: string; phone_normalized: string; message: string; source?: string | null },
+  providerMessageId: string | null,
+  anterior?: VinculoDaConversa | null,
+) {
+  return {
+    direction: "outbound" as const,
+    phone_normalized: item.phone_normalized,
+    message_type: "text",
+    body: String(item.message ?? "").slice(0, 4000),
+    wa_message_id: providerMessageId || null,
+    delivery_status: "sent" as const,
+    sent_by: null,
+    client_id: anterior?.client_id ?? null,
+    lead_id: anterior?.lead_id ?? null,
+    supplier_id: anterior?.supplier_id ?? null,
+    service_order_id: null,
+    raw_payload: { origem: `fila:${item.source || "manual"}`, contexto: null, via: "whatsapp-queue-worker", fila_id: item.id },
+  };
+}

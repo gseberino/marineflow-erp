@@ -274,7 +274,7 @@ export async function vigiarAcordes(admin: Db, p: {
         .eq("direction", "inbound").in("phone_normalized", fones).gte("occurred_at", inicioDoDia)
         .order("occurred_at", { ascending: true }).limit(1000),
       admin.from("whatsapp_messages").select("phone_normalized, occurred_at")
-        .eq("direction", "outbound").in("phone_normalized", fones).gte("occurred_at", seteDias).limit(3000),
+        .eq("direction", "outbound").not("saida_humana", "is", false).in("phone_normalized", fones).gte("occurred_at", seteDias).limit(3000),
     ]);
     if (rec.error) throw rec.error;
     if (env.error) throw env.error;
