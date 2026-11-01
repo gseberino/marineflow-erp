@@ -491,8 +491,22 @@ begin
                            'falta_semanas', 'falta_dias_min', 'equipe_chamada_dias', 'equipe_chamada_prazo_du',
                            'equipe_cadastro_abertas_max', 'chamar_min_meios', 'chamar_max_os']) n
        union all
-       select unnest(array['disp_semana_e_segunda', 'disp_semana_so_excecao', 'disp_so_pontas_excecao']))));
+       select unnest(array['disp_semana_e_segunda', 'disp_semana_so_excecao', 'disp_so_pontas_excecao']))))
      -- FASE 7b: fim
+     -- FASE 7c: os 18 que a Fase 7c pôs em agenda_config e os 4 de os_planejamento (20261102100000) têm o caso deles em
+     -- agenda_fase7c_base.sql (o B1z cobra os da migration pelo nome). A lista do rascunho ampliada (+ habilidade) continua com o
+     -- nome e o caso daqui.
+     and not (c.conname = any (array(
+       select 'agenda_config_' || n || '_check'
+         from unnest(array['modo_habilidade', 'modo_lider', 'modo_habilidade_propor', 'habilidade_padrao', 'habilidade_dono',
+                           'habilidade_nivel_energizado', 'habilidade_nivel_comissionar', 'habilidade_nivel_diagnostico',
+                           'habilidade_nivel_altura', 'habilidade_nivel_par', 'habilidade_regras', 'habilidade_palavras',
+                           'habilidade_janela_dias', 'habilidade_instala_dias', 'habilidade_instala_diarias', 'habilidade_hora',
+                           'habilidade_conferir_semanas', 'lider_espera_max_du']) n
+       union all
+       select unnest(array['os_planejamento_exigencias_ditas_check', 'os_planejamento_lider_coerente',
+                           'os_planejamento_exigencias_trecho_check', 'os_planejamento_lider_trecho_check']))));
+     -- FASE 7c: fim
   insert into _resultado values ('B todo CHECK das 6 tabelas tem um caso que ele recusa', v_sem_caso is null, v_sem_caso);
 end
 $b$;

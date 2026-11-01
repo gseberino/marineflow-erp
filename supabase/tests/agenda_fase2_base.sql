@@ -408,8 +408,13 @@ begin
      -- FASE 7: os 3 que a Fase 7a pôs em agenda_alocacoes e agenda_perguntas (20261031100000: a fonte da duração, a opção
      -- padrão só com prazo e a crítica sem prazo) têm o caso deles em agenda_fase7a_base.sql (B1z, que cobra pelo nome). As
      -- listas que a 7a ampliou (tipo da pergunta e da ação, motivo do cancelamento) continuam com o nome e o caso daqui.
-     and not (c.conname = any (array['agenda_alocacoes_duracao_fonte_check', 'veto_padrao_tem_prazo', 'veto_nao_critica']));
+     and not (c.conname = any (array['agenda_alocacoes_duracao_fonte_check', 'veto_padrao_tem_prazo', 'veto_nao_critica']))
      -- FASE 7: fim
+     -- FASE 7c: os 2 que a Fase 7c pôs em agenda_alocacoes (20261102100000: o critério e o detalhe dele) têm o caso deles em
+     -- agenda_fase7c_base.sql (B1z, que cobra pelo nome). As listas que a 7c ampliou (tipo da pergunta e da ação, motivo do
+     -- cancelamento) continuam com o nome e o caso daqui.
+     and not (c.conname = any (array['agenda_alocacoes_criterio_check', 'agenda_alocacoes_criterio_detalhe_check']));
+     -- FASE 7c: fim
   insert into _resultado values ('B todo CHECK e EXCLUDE da Fase 2 tem um caso que ele recusa', v_sem_caso is null, v_sem_caso);
 end
 $b$;

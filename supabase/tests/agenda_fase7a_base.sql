@@ -448,7 +448,14 @@ select format('B3a %s: as de antes iguais e na mesma ordem, e as novas no fim', 
                             then case t.nome when 'agenda_perguntas_tipo_check' then '{dias_semana}'::text[]
                                              when 'agenda_vigia_rodadas_rotina_check' then '{equipe_semana}'::text[]
                                              else '{}'::text[] end
-                            else '{}'::text[] end,
+                            else '{}'::text[] end
+         -- FASE 7c: a 20261102100000 soma habilidade no fim de 4 destas (agenda_fase7c_base.sql B3a confere a lista inteira)
+                    || case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                                                                     and a.attname = 'modo_habilidade' and not a.attisdropped)
+                                 and t.nome in ('agenda_perguntas_tipo_check', 'agenda_acoes_tipo_check', 'agenda_vigia_rodadas_rotina_check',
+                                                'agenda_alocacoes_cancelada_motivo_check')
+                            then '{habilidade}'::text[] else '{}'::text[] end,
+         -- FASE 7c: fim
        -- FASE 7b: fim
        array_to_string(pg_temp.lista(t.tabela::regclass, t.nome), ',')
   from (values
@@ -925,12 +932,13 @@ begin
   v_fonte := left(v_fonte, position('$function$' in v_fonte) - 1);
   select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = 'public._agenda_modo_da_pergunta(text, text)'::regprocedure;
   select count(*) into v_n from regexp_matches(v_novo, '-- FASE 7: fim', 'g');
-  -- (FASE 7b: a 20261101100000 recria de novo, com o bloco "-- FASE 7b:", que sai junto: '-- FASE 7b?:')
+  -- (FASE 7b: a 20261101100000 recria de novo, com o bloco "-- FASE 7b:", que sai junto: '-- FASE 7b?:'. FASE 7c: e a
+  -- 20261102100000, com o bloco "-- FASE 7c:", que também sai: '-- FASE 7[bc]?:')
   select array_to_string(array(
-           select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7b?:' and l !~ '-- FASE 7b?: fim' then 1
-                                                when l ~ '-- FASE 7b?: fim' then -1 else 0 end)
+           select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7[bc]?:' and l !~ '-- FASE 7[bc]?: fim' then 1
+                                                when l ~ '-- FASE 7[bc]?: fim' then -1 else 0 end)
                                        over (order by o rows between unbounded preceding and current row) as dentro,
-                                 l ~ '-- FASE 7b?: fim' as fecha
+                                 l ~ '-- FASE 7[bc]?: fim' as fecha
                             from unnest(string_to_array(v_novo, E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n') into v_sem;
   -- (o bloco do 7a P1 e, desde a 20261031100850, o do 7a P11, que a recria copiando desta: 2 blocos; sem eles, a de 30/10)

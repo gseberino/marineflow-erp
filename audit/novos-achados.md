@@ -3216,3 +3216,38 @@ porque só o dono pode preenchê-las.
 - **Na Fase 7b:** a agenda não encerra o perfil (é dinheiro, do módulo de diárias) e não usa a diária para decidir quem conta
   (correção da equipe de 30/10). A chamada da equipe (P3) lista quem o dono declarou e quem saiu da agenda; o Mickael, que nunca teve
   linha, não aparece.
+
+### [NOVO-agenda-58] O "quem fez" do histórico não existe
+
+- **Encontrado em:** Agenda de Produção, Fase 7c, conferência da spec (29/10/2026, SELECT `wf7c_04_historico`; o NOVO-7c-1 da spec).
+- **O quê:** `work_shift_os` tinha 0 linhas e nenhuma diária tinha `service_order_id`; `service_order_steps.assigned_user_id` não
+  aparece em nenhum passo; `service_order_services.technician_user_id`, nas 8 linhas que o têm, aponta para um login sem pessoa. As 12
+  alocações da agenda eram todas reserva. Não há de onde tirar quem trabalhou em qual OS.
+- **Na Fase 7c:** a proposta do que cada um faz (P5) sai do tempo de casa e das diárias, e do técnico que o dono declarou (R5.1-6). O
+  responsável que fez (`_agenda_lider_da_os`, P1) lê os meios-dias cumpridos da agenda e as diárias ligadas por `work_shift_os` (a
+  conferência do dia da Fase 3 grava): começa a existir com a agenda em uso.
+
+### [NOVO-agenda-59] O sistema da linha quase vazio
+
+- **Encontrado em:** Agenda de Produção, Fase 7c, conferência da spec (29/10/2026, SELECT `wf7c_02_sistemas`; o NOVO-7c-2 da spec).
+- **O quê:** 229 linhas de serviço não têm `service_system` (17 na carteira). `service_type = 'commissioning'` não aparece na
+  carteira: o comissionamento só é achado pela palavra da linha.
+- **Na Fase 7c:** as regras de palavra de `habilidade_regras` (P1) são necessárias, não um enfeite; casam no início de palavra (o
+  "refrigerador" do Flávio não é "gerador"). O replay de 29/10 não trouxe o sistema e o verbo do catálogo de serviços: a fixture da 7c
+  os põe nas linhas com os valores de produção (`wf7c_05`).
+
+### [NOVO-agenda-60] O Alex não tinha como receber etiqueta — RESOLVIDO na correção da equipe de 30/10
+
+- **Encontrado em:** Agenda de Produção, Fase 7c, conferência da spec (29/10/2026; o NOVO-7c-3 da spec).
+- **O quê:** o Alex trabalha (WhatsApp de 23 e 27/10), mas não tinha `work_profiles` nem disponibilidade, e `agenda_resolver_pessoa`
+  só achava quem tinha perfil vigente: "o Alex é novo" voltava "Não conheço ninguém chamado Alex na equipe".
+- **Resolvido:** a correção da equipe de 30/10 (`20261030100600`) acha quem o dono declarou (o contato e a linha de origem dono); a
+  correção 3 da 7b (`20261101100860`) e a 7c P1 fazem do técnico declarado nunca novato (R5.1-5).
+
+### [NOVO-agenda-61] O Mickael tem perfil vigente e nenhuma disponibilidade
+
+- **Encontrado em:** Agenda de Produção, Fase 7c, conferência da spec (29/10/2026; o NOVO-7c-4 da spec; o mesmo fato do
+  NOVO-agenda-57, visto pela 7c).
+- **O quê:** última diária em 29/09, perfil sem fim, nenhuma linha de disponibilidade: ele não está na grade.
+- **Na Fase 7c:** a população de `agenda_habilidades` e da proposta é a grade (`agenda_capacidade`), não "quem tem perfil vigente":
+  nenhuma etiqueta é proposta para ele. Encerrar a vigência é do módulo de diárias (dinheiro), não da agenda.

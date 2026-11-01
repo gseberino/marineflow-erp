@@ -280,6 +280,16 @@ const FIXTURES_COMO_TEXTO = [
   // blocos "(correção 2, achado 26 da 7a)" e o W4 rodar a de antes como comparação. As outras 2 já estão acima: _agenda_gestor_pessoa_meios
   // (mig_motor_fase7b) e _agenda_gestor_corte (mig_quem_chamar_fase7b).
   ['agenda_teste.mig_correcao_fase7b', '../../supabase/migrations/20261101100800_agenda_fase77b_correcao.sql'],
+  // Fase 7c (P1): a fixture da etapa (por cima da da 7b: as linhas reais com o sistema e o verbo do catálogo; na sintética, Roberto e
+  // João de volta com o padrão deles, o padrão do Bruno, as OS 171 a 179 da §8.2; as etiquetas dos testes M e V com
+  // agenda_teste.fase7c_etiquetas = 'mv'; as variantes do novato com agenda_teste.fase7c_variante); a correção 3 da 7b (20261101100860:
+  // a origem de _agenda_e_novato e _agenda_tecnico_declarado, recriadas no P1) e a própria base da 7c (20261102100000), de onde os
+  // pacotes seguintes conferem as cópias (_agenda_modo_da_pergunta no P8; _agenda_e_novato de quem recriar depois). A fonte de
+  // _agenda_modo_da_pergunta (a 20261101100000) já está acima: mig_tabelas_fase7b. Os pacotes seguintes acrescentam aqui as
+  // migrations de onde copiam (spec-fase7c §R5.4) como mig_*_fase7c / mig_*_fase7b; as que já estão acima não se repetem.
+  ['agenda_teste.fase7c', 'fixture-fase7c.sql'],
+  ['agenda_teste.mig_correcao3_fase7b', '../../supabase/migrations/20261101100860_agenda_fase77b_correcao3.sql'],
+  ['agenda_teste.mig_base_fase7c', '../../supabase/migrations/20261102100000_agenda_fase7c_base.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

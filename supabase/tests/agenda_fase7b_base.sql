@@ -325,7 +325,15 @@ select 'B1z os 26 CHECKs desta migration existem e todos têm caso (nenhum ficou
 -- ── B2. As listas fechadas ──────────────────────────────────────────────────────────────────────────────
 insert into _resultado
 select format('B2a %s: as de antes iguais e na mesma ordem, e as novas no fim', t.nome),
-       pg_temp.lista(t.tabela::regclass, t.nome) = t.espera, array_to_string(pg_temp.lista(t.tabela::regclass, t.nome), ',')
+       pg_temp.lista(t.tabela::regclass, t.nome) = t.espera
+         -- FASE 7c: a 20261102100000 soma habilidade no fim de 4 destas (agenda_fase7c_base.sql B3a confere a lista inteira)
+         || case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                                                          and a.attname = 'modo_habilidade' and not a.attisdropped)
+                      and t.nome in ('agenda_perguntas_tipo_check', 'agenda_acoes_tipo_check', 'agenda_vigia_rodadas_rotina_check',
+                                     'agenda_alocacoes_cancelada_motivo_check')
+                 then '{habilidade}'::text[] else '{}'::text[] end,
+         -- FASE 7c: fim
+       array_to_string(pg_temp.lista(t.tabela::regclass, t.nome), ',')
   from (values
     ('public.agenda_disponibilidade', 'agenda_disponibilidade_situacao_check', '{disponivel,indisponivel,confirmada,so_pontas}'::text[]),
     ('public.agenda_equipe_mensagens', 'agenda_equipe_mensagens_tipo_check', '{ficha,confirmar,como_foi,resposta,dias}'::text[]),
@@ -551,7 +559,11 @@ begin
       into v_a, v_n
       from unnest(pg_temp.lista('public.agenda_perguntas'::regclass, 'agenda_perguntas_tipo_check')) t;
     v_res := pg_temp.ok(v_res, format('B6d com modo_cadastro desligado, o modo de cada tipo é o de antes (a definição de 20261031100850), menos dias_semana (nova) — o gestor %s, só propor %s', r.m, r.sp),
-      v_a = 'dias_semana' and v_n = 41, coalesce(v_a, '-') || ' de ' || v_n);
+      -- FASE 7c: a 20261102100000 soma o tipo habilidade (o agenda_fase7c_base.sql B11c confere o modo dele)
+      v_a = 'dias_semana' || case when to_regclass('public.agenda_etiquetas') is null then '' else ',habilidade' end
+      and v_n = 41 + case when to_regclass('public.agenda_etiquetas') is null then 0 else 1 end,
+      -- FASE 7c: fim
+      coalesce(v_a, '-') || ' de ' || v_n);
   end loop;
   update public.agenda_config
      set modo_marcar_sozinho = cf.modo_marcar_sozinho, modo_revisao_diaria = cf.modo_revisao_diaria, modo_compre_ate = cf.modo_compre_ate,
@@ -560,6 +572,15 @@ begin
 
   -- a cópia: o corpo vivo = o desta migration, e sem o bloco "-- FASE 7b:" é o de 20261031100850
   select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = 'public._agenda_modo_da_pergunta(text, text)'::regprocedure;
+  -- FASE 7c: a 20261102100000 recria de novo com o bloco "-- FASE 7c:" (só acréscimo): ele sai antes da régua da cópia da 7b
+  v_novo := array_to_string(array(
+              select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7c:' and l !~ '^\s*-- FASE 7c: fim' then 1
+                                                   when l ~ '^\s*-- FASE 7c: fim' then -1 else 0 end)
+                                          over (order by o rows between unbounded preceding and current row) as dentro,
+                                    l ~ '^\s*-- FASE 7c: fim' as fecha
+                               from unnest(string_to_array(v_novo, E'\n')) with ordinality u(l, o)) x
+               where dentro = 0 and not fecha order by o), E'\n');
+  -- FASE 7c: fim
   select count(*) into v_n from regexp_matches(v_novo, '-- FASE 7b: fim', 'g');
   v_res := pg_temp.ok(v_res, 'B6e a cópia de _agenda_modo_da_pergunta: o corpo vivo é o desta migration; sem o bloco "-- FASE 7b:" (1), é o corpo de 20261031100850 (a mais nova antes da 7b)',
     v_n = 1 and v_novo = pg_temp.corpo(v_esta, '_agenda_modo_da_pergunta')

@@ -420,7 +420,12 @@ begin
             + case when to_regprocedure('public._agenda_gestor_regra(text)') is null then 0 else 13 end
             -- FASE 7b: o tipo dias_semana (20261101100000), com o modo dele (modo_dias) em _agenda_modo_da_pergunta
             + case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
-                                                             and a.attname = 'modo_dias' and not a.attisdropped) then 1 else 0 end, v_t);
+                                                             and a.attname = 'modo_dias' and not a.attisdropped) then 1 else 0 end
+            -- FASE 7c: o tipo habilidade (20261102100000), com o modo dele (modo_habilidade_propor / modo_habilidade)
+            + case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                                                             and a.attname = 'modo_habilidade' and not a.attisdropped) then 1 else 0 end,
+            -- FASE 7c: fim
+    v_t);
   v_res := pg_temp.igual(v_res, 'S5 (c) o modo de cada grupo: crítica do plano, vigia, chegou? do fornecedor, material, diária, equipe, cliente, aprendizado',
     (select string_agg(public._agenda_modo_da_pergunta(t, c), ',' order by o)
        from unnest(array['nao_cabe', 'material_conferir', 'chegou', 'chegou', 'fornecedores_prazo', 'diaria', 'concluir', 'cliente_aviso', 'aprendizado'],

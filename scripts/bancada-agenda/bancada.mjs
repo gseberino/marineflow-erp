@@ -76,6 +76,10 @@ export const FORA_DA_BANCADA = new Set([
   // modo_sabado, modo_cadastro, modo_chamar) em sombra. O teste dela a roda numa subtransação; na bancada cada teste liga o modo que
   // precisa.
   '20261101100900_agenda_fase7b_sombra.sql',
+  // Fase 7c (P7; o nome é o da spec-fase7c §R5.5 e do fase7-registro §3, fixado no P1): os 4 modos da etapa (modo_habilidade,
+  // modo_lider, modo_habilidade_propor e modo_tarefas) em sombra. O teste dela a roda numa subtransação; na bancada cada teste liga o
+  // modo que precisa.
+  '20261102100600_agenda_fase7c_sombra.sql',
   // Merge do main (28/10/2026): migrations de OUTRAS sessões, já aplicadas em produção, que caíram depois de PRIMEIRA
   // pela data. Mexem em diárias (conta corrente, recibo, lote, anotação × CPF) e no agrupar OS — tabelas que a bancada
   // não modela (anotacoes_do_extrato, orcamento_agrupamentos, os_agrupamento_movidos…) e funções que a agenda não chama
