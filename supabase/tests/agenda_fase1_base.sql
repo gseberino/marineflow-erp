@@ -1019,7 +1019,10 @@ insert into _definer_da_agenda values
   -- avaliações do publicado, que não têm grant a ninguém; conferem dentro quem vê: o admin/financeiro logado ou o service_role). O texto da
   -- pergunta é invoker. agenda_fase7c_rodada.sql prova as portas.
   ('agenda_habilidade'), ('_agenda_habilidade_propor'), ('_agenda_habilidade_vetos'), ('_agenda_habilidade_conferir'),
-  ('_agenda_habilidade_perguntas_os'), ('agenda_habilidade_medidas');
+  ('_agenda_habilidade_perguntas_os'), ('agenda_habilidade_medidas'),
+  -- (7c P6, 20261102100500) o foco habilidades (só lê: o responsável e as avaliações do publicado, que não têm grant a ninguém; confere
+  -- dentro quem vê — o admin/financeiro logado ou o service_role —, como as medidas). agenda_fase7c_leituras.sql prova as portas.
+  ('_agenda_ver_habilidades');
   -- FASE 7c: fim
 
 insert into _resultado

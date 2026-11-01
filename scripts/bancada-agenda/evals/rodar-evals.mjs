@@ -53,7 +53,7 @@ import { criarBancada, ler, RAIZ } from '../bancada.mjs';
 import {
   avaliar, datasDe, diffDasFotos, gradeAgenda, gradeBanco, gradeConclusao, gradeDiaria, gradeEquipe, gradeFerramentas,
   gradeMensagemSoDoModelo, gradeNadaAoCliente, gradeNadaAoFornecedor, gradeNadaCritico, gradeNadaPago, gradeNenhumaCompra,
-  gradeNenhumParametro, gradePrometidoSoComGrava, gradeTexto, gradeVinculoSoComGrava, JUIZES,
+  gradeNenhumaEtiqueta, gradeNenhumParametro, gradePrometidoSoComGrava, gradeTexto, gradeVinculoSoComGrava, JUIZES,
   montarTexto, numerosDeOsDe,
 } from './graders.mjs';
 
@@ -93,6 +93,10 @@ const REPLAY2910 = ler(join(FIXTURES, 'fixture-replay-2910.sql'));
 // da sintética da 7a e do replay de 29/10 (a fixture-fase7b executa as duas por dentro: agenda_teste.fase7a e agenda_teste.replay2910)
 const FASE7A = ler(join(FIXTURES, 'fixture-fase7a.sql'));
 const FASE7B = ler(join(FIXTURES, 'fixture-fase7b.sql'));
+// (Fase 7c, P6) quem faz o quê: por cima da 7b, Roberto e João de volta com o padrão deles, o Bruno com o padrão dito por ele, as OS 97171
+// a 97179 e, com agenda_teste.fase7c_etiquetas = 'mv', as etiquetas dos testes M e V (a fixture-fase7c executa a da 7b por dentro:
+// agenda_teste.fase7b)
+const FASE7C = ler(join(FIXTURES, 'fixture-fase7c.sql'));
 /** (Fase 6) os 7 itens do aprendizado (aprendizado_ligados no estado fase6_ligado). */
 const ITENS_DO_APRENDIZADO = ['fator', 'mo', 'presenca', 'fornecedor', 'capacidade_dono', 'aviso_cliente', 'revisao'];
 /** (Fase 5) os 11 tipos da mensagem ao cliente (cliente_tipos_ligados no estado fase5_ligado). */
@@ -594,6 +598,30 @@ export async function fotoDaFase6(db) {
   };
 }
 
+/**
+ * (Fase 7c, P6) As etiquetas e o que o dono diz de cada OS (gradeNenhumaEtiqueta), em linhas legíveis: cada etiqueta por pessoa,
+ * etiqueta e origem (o nível e o estado: a proposta que vira "vale" sem o *grava* do dono aparece) e, por OS, o que ela pede dito pelo
+ * dono (os_planejamento.exigencias_ditas) e o responsável (lider_payee_id pelo nome, lider_em gravado). agenda_config fica na foto dos
+ * parâmetros (gradeNenhumParametro, o juiz da Fase 6/7).
+ */
+export async function fotoDaFase7c(db) {
+  const et = (await db.query(`
+    select public._agenda_nome_curto(p.name) as pessoa, e.etiqueta, e.origem, e.estado,
+           string_agg(e.nivel::text, ',' order by e.nivel) as nivel, count(*) as n
+      from public.agenda_etiquetas e join public.payees p on p.id = e.payee_id
+     group by 1, 2, 3, 4`)).rows;
+  const pl = (await db.query(`
+    select so.service_order_number as os, p.exigencias_ditas::text as exigencias, public._agenda_nome_curto(l.name) as lider,
+           (p.lider_em is not null)::text as lider_em
+      from public.os_planejamento p join public.service_orders so on so.id = p.service_order_id
+      left join public.payees l on l.id = p.lider_payee_id
+     where p.exigencias_ditas is not null or p.lider_payee_id is not null or p.lider_em is not null`)).rows;
+  return {
+    etiquetas: porChave(et, (l) => `${l.pessoa} ${l.etiqueta} ${l.origem} ${l.estado}`, (l) => ({ nivel: l.nivel, n: String(l.n) }), 'etiquetas'),
+    planejamento: porChave(pl, (l) => l.os, (l) => ({ exigencias: l.exigencias, lider: l.lider, lider_em: l.lider_em }), 'planejamento'),
+  };
+}
+
 /** O que a foto não mostra, por parte (espera.<parte>.consultas), e a saúde da diária no estado final. */
 async function consultasDaFase3(db, caso, relogio) {
   const consultas = {};
@@ -715,6 +743,8 @@ export async function bancadaDosEvals(log = () => {}) {
   // (Fase 7b) fixture-fase7b.sql executa a da 7a e o replay de 29/10 por dentro (agenda_teste.fase7a, agenda_teste.replay2910)
   await db.query(`select set_config('agenda_teste.replay2910', $1, false)`, [REPLAY2910]);
   await db.query(`select set_config('agenda_teste.fase7a', $1, false)`, [FASE7A]);
+  // (Fase 7c, P6) fixture-fase7c.sql executa a da 7b por dentro (agenda_teste.fase7b)
+  await db.query(`select set_config('agenda_teste.fase7b', $1, false)`, [FASE7B]);
   return db;
 }
 
@@ -745,6 +775,7 @@ async function aplicarEstado(db, estado) {
   if (estado.startsWith('fase6')) return void await aplicarEstadoDaFase6(db, estado);
   if (estado.startsWith('fase7a')) return void await aplicarEstadoDaFase7a(db, estado);
   if (estado.startsWith('fase7b')) return void await aplicarEstadoDaFase7b(db, estado);
+  if (estado.startsWith('fase7c')) return void await aplicarEstadoDaFase7c(db, estado);
   if (estado === 'pos_rodada') return void await db.exec(POS_RODADA);
   if (estado === 'replay_0104') {
     await db.exec(REPLAY_0104);
@@ -928,6 +959,33 @@ async function aplicarEstadoDaFase7b(db, estado) {
     [modo7b, REGRAS_DO_GESTOR]);
 }
 
+/**
+ * (Fase 7c, P6) Os estados da 7c (fixture-fase7c.sql, a sintética: por cima da 7b, Roberto e João de volta com o padrão deles — o
+ * Roberto com 32 diárias, o João com 15 —, o Bruno novato com o padrão dito por ele, Alex declarado pelo dono, Rafael, as OS 97171 a 97179;
+ * hoje = qua 04/11; a presença do dono de produção no Lenine e no Vanderlei — abre e fecha), com o gestor da 7a ligado e a 7b em teste
+ * (como a migration de dado 20261101100900 deixa):
+ *   fase7c         os 3 modos da 7c em teste (como a migration de dado 20261102100600 deixa), sem etiqueta nenhuma (vale o padrão);
+ *   fase7c_ligado  os 3 ligados, com as etiquetas dos testes M e V (Roberto instala sozinho e não sobe no teto; João ajudante; Bruno novo).
+ */
+async function aplicarEstadoDaFase7c(db, estado) {
+  if (!['fase7c', 'fase7c_ligado'].includes(estado)) throw new Error(`estado "${estado}" não existe`);
+  const ligado = estado === 'fase7c_ligado';
+  await db.query(`select set_config('agenda_teste.fase7c_etiquetas', $1, true)`, [ligado ? 'mv' : '']);
+  await db.exec(FASE7C);
+  await db.query(`select set_config('agenda_teste.fase7c_etiquetas', '', true)`);
+  await db.query(`insert into public.os_planejamento (service_order_id, dono_presenca)
+                  select so.id, 'abre_e_fecha' from public.service_orders so where so.service_order_number in ('OS-00074', 'OS-00069')
+                  on conflict (service_order_id) do update set dono_presenca = 'abre_e_fecha'`);
+  CASOS.autor = (await db.query(`select u.id from public.app_users u where u.role = 'admin' and u.active order by u.id limit 1`)).rows[0].id;
+  const modo7c = ligado ? 'ligado' : 'sombra';
+  await db.query(`update public.agenda_config set modo_leitura = 'ligado', modo_marcar_sozinho = 'ligado', modo_vaga_fechamento = 'ligado',
+                         modo_encaixe_aprovacao = 'ligado', modo_revisao_diaria = 'ligado', modo_compre_ate = 'ligado',
+                         gestor_so_propor = false, marcar_regras = $2::text[], marcar_sozinho_desde = '2026-10-29 16:46-03',
+                         modo_dias = 'sombra', modo_dupla = 'sombra', modo_sabado = 'sombra', modo_cadastro = 'sombra', modo_chamar = 'sombra',
+                         modo_habilidade = $1, modo_lider = $1, modo_habilidade_propor = $1 where id`,
+    [modo7c, REGRAS_DO_GESTOR]);
+}
+
 /** Um tique da rotina da equipe (o task-automations a chama logo antes da vigia). */
 async function rotina(db, quando) {
   const r = await rpc(db, 'agenda_rotina_rodar', {}, relogioDe(null, quando));
@@ -954,6 +1012,8 @@ async function fotosDoCaso(db, caso) {
     fase5: caso.fase === 5 ? await fotoDaFase5(db) : null,
     // (Fase 7a) a mesma foto dos parâmetros (agenda_config inteira e o aprendizado): o modelo não muda modo nem regra do gestor
     fase6: caso.fase === 6 || caso.fase === 7 ? await fotoDaFase6(db) : null,
+    // (Fase 7c, P6) as etiquetas e o que o dono diz de cada OS: o modelo não grava nenhuma (só o *grava* do dono)
+    fase7c: String(caso.estado ?? '').startsWith('fase7c') ? await fotoDaFase7c(db) : null,
   };
 }
 
@@ -1101,6 +1161,9 @@ export async function terminarCaso(db, caso, inicio, passos = []) {
     }
     if (caso.fase === 6 || caso.fase === 7) {
       execucao.fase6 = { antes: inicio.antes.fase6, meio: meio.fase6, depois: depois.fase6 };
+    }
+    if (String(caso.estado ?? '').startsWith('fase7c')) {
+      execucao.fase7c = { antes: inicio.antes.fase7c, meio: meio.fase7c, depois: depois.fase7c };
     }
     if ((caso.fase ?? 1) >= 2) {
       const consultasDaAgenda = [];
@@ -1318,6 +1381,8 @@ export function controlesDosJuizes() {
     ...controlesDaFase5(),
     // Fase 6: o juiz novo sabe reprovar
     ...controlesDaFase6(),
+    // Fase 7c (P6): o juiz das etiquetas sabe reprovar
+    ...controlesDaFase7c(),
     ['diff do plano: linha nova, linha que sumiu e campo que mudou',
       JSON.stringify(diffDasFotos({ os: { 'OS-00069': { status: 'scheduled' } } }, { os: { 'OS-00069': { status: 'in_progress' } } }))
         === JSON.stringify(['~ os OS-00069: status scheduled → in_progress'])],
@@ -1406,6 +1471,29 @@ function controlesDaFase6() {
         f6(foto('1.50', 'sombra'), foto('1.50', 'travado'))).ok
       && gradeNenhumParametro(caso6, f6(foto('1.50', 'sombra'), foto('1.50', 'sombra'))).ok],
     ['Fase 6 sem a foto: o juiz reprova', !gradeNenhumParametro(caso6, {}).ok],
+  ];
+}
+
+/**
+ * (Fase 7c, P6) O controle do juiz das etiquetas: reprova a etiqueta, o que a OS pede e o responsável que o modelo gravou (mesmo voltando
+ * no fim) e o diff do fim que não é o esperado; o esperado passa; igual passa; sem a foto, reprova.
+ */
+function controlesDaFase7c() {
+  const caso7c = { fase: 7, estado: 'fase7c', entrada: 'o João instala sozinho', espera: {} };
+  const foto = (estado, exig = null) => ({
+    etiquetas: { 'João instala gestor': { nivel: '2', estado } },
+    planejamento: { 'OS-00074': { exigencias: exig, lider: null, lider_em: 'false' } },
+  });
+  const f7c = (meio, depois) => ({ fase7c: { antes: foto('proposta'), meio, depois } });
+  return [
+    ['nenhuma etiqueta pelo modelo: a etiqueta que o modelo fez valer reprova (mesmo voltando no fim); o que a OS pede gravado pelo modelo reprova; o diff do fim sem o esperado reprova; o esperado passa; igual passa',
+      !gradeNenhumaEtiqueta(caso7c, f7c(foto('vale'), foto('proposta'))).ok
+      && !gradeNenhumaEtiqueta(caso7c, f7c(foto('proposta', '{"altura": "nao"}'), foto('proposta', '{"altura": "nao"}'))).ok
+      && !gradeNenhumaEtiqueta(caso7c, f7c(foto('proposta'), foto('vale'))).ok
+      && gradeNenhumaEtiqueta({ ...caso7c, espera: { etiquetas: { diff: ['~ etiquetas João instala gestor: estado proposta → vale'] } } },
+        f7c(foto('proposta'), foto('vale'))).ok
+      && gradeNenhumaEtiqueta(caso7c, f7c(foto('proposta'), foto('proposta'))).ok],
+    ['Fase 7c sem a foto: o juiz das etiquetas reprova', !gradeNenhumaEtiqueta(caso7c, {}).ok],
   ];
 }
 

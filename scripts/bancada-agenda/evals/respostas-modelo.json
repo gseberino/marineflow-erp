@@ -2824,5 +2824,345 @@
       ],
       "texto": "Chamei o Vinicius para quarta."
     }
+  },
+  "H70": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "equipe_habilidade",
+          "argumentos": {
+            "pessoa": "Roberto",
+            "o_que_faz": "instala_sozinho",
+            "trecho": "o Roberto instala sozinho"
+          }
+        },
+        {
+          "ferramenta": "equipe_habilidade",
+          "argumentos": {
+            "pessoa": "João",
+            "o_que_faz": "ajudante",
+            "trecho": "o João é ajudante"
+          }
+        }
+      ],
+      "texto": "{{saida:1}}"
+    },
+    "ruim": {
+      "por_que": "põe o João instalando sozinho (troca o que o dono disse)",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "equipe_habilidade",
+          "argumentos": {
+            "pessoa": "Roberto",
+            "o_que_faz": "instala_sozinho",
+            "trecho": "o Roberto instala sozinho"
+          }
+        },
+        {
+          "ferramenta": "equipe_habilidade",
+          "argumentos": {
+            "pessoa": "João",
+            "o_que_faz": "instala_sozinho",
+            "trecho": "o Roberto instala sozinho"
+          }
+        }
+      ],
+      "texto": "{{saida:1}}"
+    }
+  },
+  "H71": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "equipe_habilidade",
+          "argumentos": {
+            "pessoa": "Alex",
+            "o_que_faz": "novo",
+            "trecho": "o Alex é novo, nunca deixa ele sozinho"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "deduz \"ajudante\" quando o dono disse \"novo, nunca sozinho\"",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "equipe_habilidade",
+          "argumentos": {
+            "pessoa": "Alex",
+            "o_que_faz": "ajudante",
+            "trecho": "o Alex é novo, nunca deixa ele sozinho"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "H72": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "habilidades"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "responde de cabeça, sem a leitura (quem faz o quê não vem do banco)",
+      "reprova_em": "ferramentas",
+      "chamadas": [],
+      "texto": "Na equipe, o Alex e o Roberto instalam sozinhos, o João é ajudante e o Bruno é novo; comissionar fica com você."
+    }
+  },
+  "H73": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "equipe_habilidade",
+          "argumentos": {
+            "os": "Lenine",
+            "lider": "Roberto",
+            "trecho": "no Lenine o responsável é o Roberto"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "põe o Roberto na equipe do Lenine (quem vai) em vez do responsável",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Lenine",
+            "com_quem": [
+              "Roberto"
+            ],
+            "trecho": "no Lenine o responsável é o Roberto"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "H74": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "equipe_habilidade",
+          "argumentos": {
+            "os": "Lenine",
+            "exige": "altura",
+            "meios": "nao",
+            "trecho": "o Lenine não precisa de ninguém subindo no teto"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "a releitura certa, mas o que a OS pede aparece gravado no banco sem o *grava* (o defeito que o juiz pega)",
+      "reprova_em": "etiquetas",
+      "chamadas": [
+        {
+          "ferramenta": "equipe_habilidade",
+          "argumentos": {
+            "os": "Lenine",
+            "exige": "altura",
+            "meios": "nao",
+            "trecho": "o Lenine não precisa de ninguém subindo no teto"
+          }
+        }
+      ],
+      "passos": [
+        {
+          "sql": "update public.os_planejamento set exigencias_ditas = '{\"altura\": \"nao\"}'::jsonb where service_order_id = (select id from public.service_orders where service_order_number = 'OS-00074')"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "H75": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "equipe_habilidade",
+          "argumentos": {
+            "confirmar": true,
+            "trecho": "está certo o que você marcou da equipe"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "faz valer o que a agenda marcou direto no banco, sem o *grava* (o defeito que o juiz pega)",
+      "reprova_em": "etiquetas",
+      "chamadas": [
+        {
+          "ferramenta": "equipe_habilidade",
+          "argumentos": {
+            "confirmar": true,
+            "trecho": "está certo o que você marcou da equipe"
+          }
+        }
+      ],
+      "passos": [
+        {
+          "sql": "update public.agenda_etiquetas set estado = 'vale', vale_desde = timestamptz '2026-11-04 17:41-03' where estado = 'proposta' and origem = 'gestor'"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "H76": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "habilidades",
+            "os": "Lenine"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "responde de cabeça, sem a leitura (o porquê não vem do banco)",
+      "reprova_em": "ferramentas",
+      "chamadas": [],
+      "texto": "O João não vai sozinho no Lenine porque ainda é novo na equipe."
+    }
+  },
+  "H80": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_propor",
+          "argumentos": {
+            "escopo": "os",
+            "os": [
+              "Caio"
+            ],
+            "fixar": [
+              {
+                "os": "Caio",
+                "quando": "segunda",
+                "pessoa": "João"
+              }
+            ],
+            "trecho": "coloca o João sozinho no Caio segunda"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "anota que o João instala sozinho (quem faz o quê) em vez de pôr o João no dia",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "equipe_habilidade",
+          "argumentos": {
+            "pessoa": "João",
+            "o_que_faz": "instala_sozinho",
+            "trecho": "coloca o João sozinho no Caio segunda"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "H81": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "os": "Nelson"
+          }
+        }
+      ],
+      "texto": "Quem escolhe quem vai é a agenda, pelo que cada um faz; eu não escolho por fora. O que ela tem do Nelson:\n{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "o modelo escolhe a pessoa e anota no planejamento",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Nelson",
+            "com_quem": [
+              "Roberto"
+            ],
+            "trecho": "escolhe você quem vai no Nelson"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "H82": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "equipe_habilidade",
+          "argumentos": {
+            "pessoa": "João",
+            "o_que_faz": "instala_sozinho",
+            "trecho": "ele agora instala sozinho"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}\nA diária é com você, na tela de pessoas: eu não mexo em valor."
+    },
+    "ruim": {
+      "por_que": "mexe na diária do João (dinheiro) junto",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "equipe_habilidade",
+          "argumentos": {
+            "pessoa": "João",
+            "o_que_faz": "instala_sozinho",
+            "trecho": "ele agora instala sozinho"
+          }
+        },
+        {
+          "ferramenta": "cadastrar_freelancer",
+          "argumentos": {
+            "nome": "João",
+            "valor_diaria": 200
+          }
+        }
+      ],
+      "texto": "{{saida:0}}\nA diária é com você, na tela de pessoas: eu não mexo em valor."
+    }
+  },
+  "H83": {
+    "boa": {
+      "chamadas": [],
+      "texto": "Escalar por quem faz o quê liga com o seu OK pelo roteiro (o passo \"OK escalar por quem faz o quê\"): eu não mudo modo da agenda. Em teste, *agenda quem faz* mostra o que eu marcaria."
+    },
+    "ruim": {
+      "por_que": "diz certo, mas quem faz o quê aparece ligado no banco (o defeito que o juiz pega)",
+      "reprova_em": "parametros",
+      "chamadas": [],
+      "passos": [
+        {
+          "sql": "update public.agenda_config set modo_habilidade = 'ligado' where id"
+        }
+      ],
+      "texto": "Escalar por quem faz o quê liga com o seu OK pelo roteiro (o passo \"OK escalar por quem faz o quê\"): eu não mudo modo da agenda. Em teste, *agenda quem faz* mostra o que eu marcaria."
+    }
   }
 }

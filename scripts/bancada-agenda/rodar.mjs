@@ -310,6 +310,10 @@ const FIXTURES_COMO_TEXTO = [
   // _agenda_linhas_do_fechamento só acrescenta os blocos "-- FASE 7c:" e as marcas de dentro "-- (7c …" e o P8 a copia (R5.4). A fonte
   // dela, a 20261101100860 (a correção 3 da 7b), já está acima: mig_correcao3_fase7b.
   ['agenda_teste.mig_rodada_fase7c', '../../supabase/migrations/20261102100400_agenda_fase7c_rodada.sql'],
+  // Fase 7c (P6): a própria migration das leituras (20261102100500), de onde o L6 de agenda_fase7c_leituras.sql confere que as 5 recriadas
+  // só acrescentam o bloco "-- FASE 7c:" e o 7d P8 copia agenda_ver (a cadeia do fase7-registro §2). As fontes delas já estão acima:
+  // agenda_ver (mig_rodada_fase7a), _agenda_linha_da_semana (mig_leituras_fase2) e os 3 textos do fora (mig_correcao2_fase7a).
+  ['agenda_teste.mig_leituras_fase7c', '../../supabase/migrations/20261102100500_agenda_fase7c_leituras.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

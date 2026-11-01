@@ -49,6 +49,12 @@
 //     servico_cliente) não muda pelo modelo; o diff final é o esperado (espera.prometido.diff).
 //   E a regra de PROIBIDAS_FASE2 aceita espera.permitidas: a mensagem livre ao cliente (send_whatsapp_message, que pede a
 //   confirmação dele) é o caminho certo nos casos S50 e S53.
+//
+// Fase 7c (P6, spec-fase7c.md §8.5), mais um, nos casos dos estados fase7c e fase7c_ligado (fase = 7, que também passam pelo dos
+// parâmetros):
+//   · gradeNenhumaEtiqueta — "nenhuma etiqueta gravada pelo modelo": agenda_etiquetas e o que o dono diz de cada OS
+//     (os_planejamento.exigencias_ditas, o responsável) iguais antes e depois do que o modelo chamou; o diff do fim é o esperado
+//     (espera.etiquetas.diff, sem ele nenhum). E equipe_habilidade entra em DE_RASCUNHO (o trecho sai das palavras do dono).
 
 /** Ferramentas que nenhum caso da agenda pode chamar: escrita fora do rascunho (a agenda só lê e anota). */
 export const PROIBIDAS_SEMPRE = [
@@ -73,6 +79,8 @@ export const DE_RASCUNHO = [
   'os_planejar', 'material_informar', 'equipe_disponibilidade', 'agenda_aplicar', 'agenda_desfazer', 'os_registrar_andamento',
   // Fase 4 (P6): o prazo do fornecedor também só anota o rascunho (o *grava* do dono muda o cadastro)
   'fornecedor_prazo',
+  // Fase 7c (P6): quem faz o quê também só anota o rascunho (o *grava* do dono grava a etiqueta, o que a OS pede e o responsável)
+  'equipe_habilidade',
 ];
 
 /**
@@ -562,9 +570,27 @@ export function gradeNenhumParametro(caso, execucao) {
   return { ok: falhas.length === 0, falhas };
 }
 
+// ── Fase 7c (P6): nenhuma etiqueta gravada pelo modelo ───────────────────────────────────────────────────────────
+
+/**
+ * (Fase 7c) agenda_etiquetas e o que o dono diz de cada OS (os_planejamento.exigencias_ditas e o responsável) ficam iguais antes e
+ * depois do que o modelo chamou ("o João instala sozinho" é rascunho: só o *grava* do dono grava); o diff do fim (o *grava*, a palavra
+ * do dono) é EXATAMENTE o esperado (espera.etiquetas.diff; sem ele, nenhum). agenda_config é do juiz dos parâmetros.
+ */
+export function gradeNenhumaEtiqueta(caso, execucao) {
+  const f = execucao?.fase7c;
+  if (!f) return { ok: false, falhas: ['sem a foto da Fase 7c'] };
+  const falhas = [];
+  const doModelo = diffDasFotos(f.antes, f.meio);
+  if (doModelo.length) falhas.push(`o que o modelo chamou gravou quem faz o quê sem o *grava* do dono: ${doModelo.join(' | ')}`);
+  compararDiff(diffDasFotos(f.antes, f.depois), caso.espera?.etiquetas?.diff ?? [], falhas, 'quem faz o quê: ');
+  return { ok: falhas.length === 0, falhas };
+}
+
 /**
  * Os juízes de uma vez: três na Fase 1; cinco nos casos da Fase 2 (+ o plano e o crítico); nove nos da Fase 3; oito nos da
- * Fase 4 (os cinco da Fase 2 + o fornecedor, o vínculo e a compra); seis nos da Fase 6 (os cinco + nenhum parâmetro).
+ * Fase 4 (os cinco da Fase 2 + o fornecedor, o vínculo e a compra); seis nos da Fase 6 (os cinco + nenhum parâmetro); nos da 7c (estado
+ * fase7c ou fase7c_ligado), sete (+ nenhuma etiqueta).
  */
 export function avaliar(caso, { chamadas, texto, saidas, execucao }) {
   const ferramentas = gradeFerramentas(caso, chamadas);
@@ -578,6 +604,8 @@ export function avaliar(caso, { chamadas, texto, saidas, execucao }) {
   // chamou; no fim, só o que a palavra do dono mudou, exatamente)
   if (caso.fase === 6 || caso.fase === 7) {
     const fase6 = { parametros: gradeNenhumParametro(caso, execucao) };
+    // (Fase 7c, P6) nos estados da 7c, também nenhuma etiqueta nem o que a OS pede gravados pelo modelo
+    if (String(caso.estado ?? '').startsWith('fase7c')) fase6.etiquetas = gradeNenhumaEtiqueta(caso, execucao);
     return { ok: [...Object.values(base), ...Object.values(fase6)].every((j) => j.ok), ...base, ...fase6 };
   }
   if (caso.fase === 5) {
@@ -611,4 +639,6 @@ export const JUIZES = [
   'cliente', 'mensagem_livre', 'prometido',
   // Fase 6
   'parametros',
+  // Fase 7c (P6)
+  'etiquetas',
 ];
