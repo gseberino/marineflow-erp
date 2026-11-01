@@ -17,15 +17,19 @@
 --      técnico, a agenda inteira parava (na bancada, a carteira de 4 OS marcadas com o Alex passava a 0). Agora não é novato quem o dono
 --      declarou técnico — _agenda_tecnico_declarado (nova): tem ou teve, VIVA OU SUBSTITUÍDA, uma linha de origem dono com dias_semana,
 --      disponível ou confirmada, e o cadastro de novato_dias ou mais antes da 1ª dela. "Substituída" importa: quando o próprio Alex
---      responder os dias, _agenda_equipe_dias_gravar troca o padrão do dono por um de origem diarista. Quem não é declarado continua
---      novato como hoje (o Mateus cadastrado agora com "toda terça" dita pelo dono; o Bruno da fixture).
+--      responder os dias, _agenda_equipe_dias_gravar troca o padrão do dono por um de origem diarista. Quem não é declarado fica como
+--      antes: novato só com o perfil de diária (o Mateus cadastrado agora com "toda terça" dita pelo dono e um perfil de hoje; o Bruno
+--      da fixture). Sem perfil de diária, o Mateus com um dia fixo ("toda terça") não é novato nem vem sob demanda: conta como técnico,
+--      no motor e na escada (o limite da 7b; o "ajudante nunca sozinho" do AG7-03 é da 7c, a etiqueta). Sem perfil, só as datas ditas
+--      ("Mateus vem qua e qui": vem sob demanda) o fazem nunca sozinho (revisão da correção 3; notas-fase77b.md, CORREÇÃO 3).
 --   2. A ESCADA DA REVISÃO DA 7a NUNCA PÕE SOZINHO QUEM NUNCA VAI SOZINHO. _agenda_gestor_reparo (de 20261031100750, a única) punha no
 --      degrau 1 "outro diarista livre no mesmo dia e turno" sem olhar o novato nem quem vem sob demanda, e _agenda_gestor_reparar grava
---      direto (o validador não confere companhia): a falta do Alex num meio-dia com o Mateus dito livre punha o Mateus sozinho. Agora,
---      com modo_dupla fora de desligado, quem nunca fica sozinho só entra no degrau 1 e no meio-dia que fica com outra pessoa que pode
---      ficar sozinha ou com o dono no turno, e nunca nos degraus 2 e 3. Só tira candidato: sem nenhum, a escada não conserta a OS (tudo
---      ou nada) e o motor replaneja. Com modo_dupla desligado, a escada de antes, byte a byte. É uma exceção deliberada ao "byte a byte
---      em teste" (como as do R4 da 7b): só tira candidato.
+--      direto (o validador não confere companhia): a falta do Alex num meio-dia com o Mateus dito livre numa data punha o Mateus
+--      sozinho. Agora, com modo_dupla fora de desligado, quem nunca fica sozinho (o novato e quem vem sob demanda da 7b: a régua do
+--      motor) só entra no degrau 1 e no meio-dia que fica com outra pessoa que pode ficar sozinha ou com o dono no turno, e nunca nos
+--      degraus 2 e 3. Só tira candidato: sem nenhum, a escada não conserta a OS (tudo ou nada) e o motor replaneja. Com modo_dupla
+--      desligado, a escada de antes, byte a byte. É uma exceção deliberada ao "byte a byte em teste" (como as do R4 da 7b): só tira
+--      candidato. Quem o motor deixa ir sozinho a escada também deixa (o Mateus com dia fixo e sem perfil, acima).
 --   3. O PRAZO NA FORMA CURTA DA LINHA (n). _agenda_linhas_do_fechamento (de 20261101100800): o texto_curto "Agenda, equipe: a equipe da
 --      agenda está certa? *agenda pendências* mostra." contava como vista a chamada (o registro conta todas as pergunta_ids), sem dizer o
 --      prazo nem o que acontece sem resposta, e a chamada vencia em 3 dias úteis sem o dono ter lido o "sigo assim". Agora cada pergunta
@@ -138,7 +142,7 @@ as $function$
 $function$;
 
 comment on function public._agenda_e_novato(uuid, date) is
-  'Agenda de Produção (Fase 7b, P4; spec §5.3, AG7-04/AG7-10): true para quem tem perfil de diária vigente em p_dia, a 1ª vigência há menos de novato_dias e menos de novato_diarias diárias (a soma das frações lançadas até p_dia). O dono nunca. O motor (_agenda_contexto, com modo_dupla fora de desligado) nunca o deixa sozinho num meio-dia. É a regra única do novato (o 7c a usa). STABLE, invoker. CORREÇÃO 3 DA 7b (o R5.9 da spec da 7c; o (a) do R5.1-5 sem a etiqueta): nunca é novato quem o dono declarou técnico (_agenda_tecnico_declarado: tem ou teve, viva ou substituída, uma linha de origem dono com dias_semana, disponível ou confirmada, e o cadastro de novato_dias ou mais antes da 1ª delas) — o perfil de diária do Alex, cadastrado depois, não o faz novato, nem depois de ele responder os próprios dias (o padrão do dono substituído por um de origem diarista). Quem não é declarado (o Mateus cadastrado agora com "toda terça", o Bruno da fixture), como antes.';
+  'Agenda de Produção (Fase 7b, P4; spec §5.3, AG7-04/AG7-10): true para quem tem perfil de diária vigente em p_dia, a 1ª vigência há menos de novato_dias e menos de novato_diarias diárias (a soma das frações lançadas até p_dia). O dono nunca. O motor (_agenda_contexto, com modo_dupla fora de desligado) nunca o deixa sozinho num meio-dia. É a regra única do novato (o 7c a usa). STABLE, invoker. CORREÇÃO 3 DA 7b (o R5.9 da spec da 7c; o (a) do R5.1-5 sem a etiqueta): nunca é novato quem o dono declarou técnico (_agenda_tecnico_declarado: tem ou teve, viva ou substituída, uma linha de origem dono com dias_semana, disponível ou confirmada, e o cadastro de novato_dias ou mais antes da 1ª delas) — o perfil de diária do Alex, cadastrado depois, não o faz novato, nem depois de ele responder os próprios dias (o padrão do dono substituído por um de origem diarista). Quem não é declarado, como antes: novato só com o perfil de diária (o Mateus cadastrado agora com "toda terça" e um perfil de hoje; o Bruno da fixture); sem perfil, o Mateus com um dia fixo não é novato nem vem sob demanda e conta como técnico (o limite da 7b; o ajudante nunca sozinho é da 7c, a etiqueta).';
 
 -- _agenda_gestor_reparo (de 20261031100750_agenda_fase7a_revisao.sql)
 create or replace function public._agenda_gestor_reparo(p_os uuid, p_hoje date, p_agora timestamptz)

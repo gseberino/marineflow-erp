@@ -1,6 +1,6 @@
 -- Prova da correção 3 da Agenda de Produção, Fase 7b (migration 20261101100860): o R5.9 da spec da 7c ("para o fio principal") e o
--- W3a da correção 2. Rodado sem a 20261101100860 (o harness f7b/c3/rodar.mjs --sem-c3), 18 das 26 linhas reprovam (C0, C0b, C1, C2a,
--- C2b, C3a, C3b, C4a e C4b); passam só as que provam o byte a byte (C2c, C2d, C2e, C3c, C3d, C4c, C9a e C9b).
+-- W3a da correção 2. Rodado sem a 20261101100860 (o harness f7b/c3/rodar.mjs --sem-c3), 18 das 27 linhas reprovam (C0, C0b, C1, C2a,
+-- C2b, C3a, C3b, C4a e C4b); passam só as que provam o byte a byte (C2c, C2d, C2e, C2f, C3c, C3d, C4c, C9a e C9b).
 -- bancada: depende de 20261101100860
 --
 --   C0  as cópias e as portas: as 5 recriadas, tirados os blocos "(correção 3)", são o corpo da definição mais nova (100300, 100750,
@@ -15,7 +15,9 @@
 --       semana (degrau 3); o Mateus só noutro dia da semana — nem no degrau 3: sem conserto (a OS vai ao motor); (b) com o Mateus livre
 --       no meio-dia e na véspera: sem conserto, nenhuma ação reparar, e o motor não deixa o Mateus sozinho; (c) com a dupla desligada, a
 --       escada de antes, byte a byte (o Mateus sozinho, como antes); (d) o Mateus junto de outra pessoa que pode ficar sozinha no mesmo
---       meio-dia (o Rafael sai, o Alex fica) entra, byte a byte o de antes; (e) com outro técnico livre, o degrau 1 de antes, byte a byte
+--       meio-dia (o Rafael sai, o Alex fica) entra, byte a byte o de antes; (e) com outro técnico livre, o degrau 1 de antes, byte a byte;
+--       (f) o limite da 7b (a revisão da correção 3): o Mateus SEM perfil de diária com "toda terça" dita pelo dono (um dia fixo) não é
+--       novato nem vem sob demanda — conta como técnico: a escada o põe como antes, byte a byte, e o motor também (o roteiro pede as datas)
 --   C3  o prazo na forma curta da linha (n): (a) a chamada com o cadastro ligado: o texto_curto diz "— sem resposta até ter 10/11 às 18:00,
 --       sigo assim" e, depois do registro e da rodada seguinte, o veto_ate gravado é ter 10/11 18:00; (b) com a pergunta dos dias da semana
 --       (os dias ligados): "— sem resposta até qui 12/11 às 16:00, sigo assim", e ela vence exatamente então (15:59 aberta, 16:00
@@ -410,6 +412,7 @@ declare
   d      text;
   e      text;
   f      text;
+  g      text := '';
 begin
   if not pg_temp.carregada() then
     insert into _resultado values ('C2 (a escada)', true, 'PULADO: sem as fixtures da 7b e as migrations como texto (rode pela bancada)');
@@ -518,6 +521,50 @@ begin
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
+  -- (f) o limite da 7b (a revisão da correção 3): o Mateus cadastrado agora, SEM perfil de diária, com "toda terça" dita pelo dono (o
+  -- padrão de origem dono que o *grava* escreve: o C1d) — um dia fixo, não as datas — não é novato nem vem sob demanda: conta como
+  -- técnico. A escada o põe como antes, byte a byte, e o motor também (a mesma régua). O roteiro pede ao dono as datas (C2a e C2b);
+  -- o "ajudante nunca sozinho" com dia fixo é da 7c (a etiqueta).
+  for r in select * from (values (1, 'sombra'), (2, 'ligado')) t(o, dupla) order by o loop
+    begin
+      perform pg_temp.modos7a('ligado');
+      update public.agenda_config set modo_dupla = r.dupla where id;
+      v_mat := pg_temp.c3_mateus();
+      insert into public.agenda_disponibilidade (payee_id, dias_semana, turno, situacao, origem, nota, criado_em)
+      values (v_mat, '{2}', null, 'disponivel', 'dono', 'Você disse: toda terça', timestamptz '2026-11-05 10:00-03');
+      v_os := pg_temp.c3_os('97301', 'Caio', 0.5);
+      perform pg_temp.c3_aloc(v_os, v_alex, date '2026-11-17', 'manha');
+      perform pg_temp.c3_fora(v_alex, date '2026-11-16', date '2026-11-20');
+      x := public._agenda_gestor_reparo(v_os, c_d, c_t);
+      y := pg_temp.reparo_antes(v_os, c_d, c_t);
+      g := g || format('[%s: novato %s, sob demanda %s, declarado %s | escada %s | igual %s', r.dupla,
+                       public._agenda_e_novato(v_mat, date '2026-11-17'), public._agenda_e_sob_demanda(v_mat, date '2026-11-17'),
+                       case when pg_temp.declarado(v_mat, date '2026-11-17') then 'sim' else 'não' end, pg_temp.esc(x), x = y);
+      raise exception 'desfaz' using errcode = 'P0099';
+    exception when sqlstate 'P0099' then null;
+    end;
+    -- o motor com o Caio sem marcação e o Alex fora de seg 09 a sex 27/11: quem ele marca em cada meio-dia de turno
+    begin
+      perform pg_temp.modos7a('ligado');
+      update public.agenda_config set modo_dupla = r.dupla where id;
+      v_mat := pg_temp.c3_mateus();
+      insert into public.agenda_disponibilidade (payee_id, dias_semana, turno, situacao, origem, nota, criado_em)
+      values (v_mat, '{2}', null, 'disponivel', 'dono', 'Você disse: toda terça', timestamptz '2026-11-05 10:00-03');
+      v_os := pg_temp.c3_os('97301', 'Caio', 0.5);
+      perform pg_temp.c3_fora(v_alex, date '2026-11-09', date '2026-11-27');
+      x := public.agenda_propor('os', null, null, array[v_os], '{}'::jsonb, false, 'vigia', null, c_d, pg_temp.em(c_d, '16:45'));
+      g := g || format(' | motor %s]',
+                       coalesce((select string_agg(format('%s %s %s', coalesce(public._agenda_nome_curto(py.name), '?'),
+                                                          to_char((al ->> 'dia')::date, 'DD/MM'), left(al ->> 'turno', 1)), ', '
+                                                   order by al ->> 'dia', al ->> 'turno', py.name)
+                                   from jsonb_array_elements(coalesce(x -> 'itens', '[]'::jsonb)) i
+                                   cross join lateral jsonb_array_elements(coalesce(i -> 'alocacoes', '[]'::jsonb)) al
+                                   left join public.payees py on py.id = (al ->> 'payee_id')::uuid
+                                  where i ->> 'op' = 'criar' and al ->> 'presenca' = 'turno'), '-'));
+      raise exception 'desfaz' using errcode = 'P0099';
+    exception when sqlstate 'P0099' then null;
+    end;
+  end loop;
   v_res := pg_temp.ok(v_res, 'C2a com a dupla em teste e ligada, o Mateus (dito numa data: vem sob demanda) não entra sozinho em nenhum degrau — o Alex fora qua 18/11 inteira: nem no degrau 1 nem no 2, o Alex vai a ter 17/11 (degrau 3; antes o Mateus no degrau 1); o Mateus só em ter 17/11: nem no degrau 3, sem conserto (antes o Mateus em ter 17/11)',
     a = '[sombra: true/dia/-/Alex 17/11 m (dia) | antes true/pessoa/-/Mateus 18/11 m (pessoa)]'
         || '[sombra só ter 17: false/-/sem_lugar/- | antes true/dia/-/Mateus 17/11 m (dia)]'
@@ -533,6 +580,9 @@ begin
     d = 'true/pessoa/-/Mateus 18/11 m (pessoa) | igual t', d);
   v_res := pg_temp.ok(v_res, 'C2e com outro técnico livre (o Alex), o degrau 1 de antes, byte a byte',
     e = 'true/pessoa/-/Alex 18/11 m (pessoa) | igual t', e);
+  v_res := pg_temp.ok(v_res, 'C2f o limite da 7b (a revisão da correção 3): o Mateus cadastrado agora SEM perfil de diária e com "toda terça" dita pelo dono (um dia fixo, não as datas) não é novato, nem vem sob demanda, nem é técnico declarado: conta como técnico — a escada o põe sozinho como antes, byte a byte (degrau 1, ter 17/11), como o motor (ter 10/11, com o Alex fora), com a dupla em teste e ligada. Por isso o roteiro pede ao dono as datas (C2a e C2b); a 7c fecha o dia fixo com a etiqueta ajudante',
+    g = '[sombra: novato f, sob demanda f, declarado não | escada true/pessoa/-/Mateus 17/11 m (pessoa) | igual t | motor Mateus 10/11 m]'
+        || '[ligado: novato f, sob demanda f, declarado não | escada true/pessoa/-/Mateus 17/11 m (pessoa) | igual t | motor Mateus 10/11 m]', g);
   perform pg_temp.gravar(v_res);
 end
 $c2$;
