@@ -97,6 +97,25 @@ begin
   end loop;
   return array_to_string(v_out, E'\n');
 end $f$;
+-- FASE 7c: (correção da revisão, 20261102100580) o texto sem os blocos da correção ("-- FASE 7c: (7c correção … -- FASE 7c: fim") e
+-- sem as marcas dela ("-- (7c correção … -- (7c: fim)"), para o T18b comparar a viva com a desta migration.
+create function pg_temp.sem_corr(p text) returns text language plpgsql immutable as $f$
+declare
+  v_out text[] := '{}';
+  l     text;
+  v_b   boolean := false;
+  v_m   boolean := false;
+begin
+  foreach l in array string_to_array(replace(p, E'\r\n', E'\n'), E'\n') loop
+    if not v_b and not v_m and l ~ '^\s*-- FASE 7c: \(7c correção' then v_b := true; continue; end if;
+    if not v_b and not v_m and l ~ '^\s*-- \(7c correção' then v_m := true; continue; end if;
+    if v_b then if l ~ '^\s*-- FASE 7c: fim' then v_b := false; end if; continue; end if;
+    if v_m then if l ~ '^\s*-- \(7c: fim\)' then v_m := false; end if; continue; end if;
+    v_out := v_out || l;
+  end loop;
+  return array_to_string(v_out, E'\n');
+end $f$;
+-- FASE 7c: fim
 -- p_sql (que devolve um valor) como o papel p_papel com o login p_uid: o resultado em texto, ou 'erro <estado>: <mensagem>'.
 create function pg_temp.como(p_uid uuid, p_papel text, p_sql text) returns text language plpgsql as $f$
 declare
@@ -738,8 +757,12 @@ begin
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
-  v_res := pg_temp.ok(v_res, 'T6a Lenine (192): a manhã do Mateus (ajudante) leva a porta-fusíveis e começa a passagem, nunca o lítio (220 V); a tarde do Alex termina a passagem (a começada vem antes) e começa o lítio; a quinta termina o lítio e a final; quem responde é quem está no meio-dia',
-    t1 = '04m[Mateus]:Inst ct,Pass c|04t[Alex]:Pass t,Subs c|05m[Alex]:Subs t,Test ct|05t[Alex]: # Mateus,Alex,Alex,Alex', t1);
+  -- FASE 7c: (correção da revisão, 20261102100580, achado 1) AG7-10c ("Sim, o responsável da OS"): quem responde pelas etapas é só o
+  -- responsável da OS na equipe do meio-dia; a manhã do Mateus (ajudante, sem o Alex) fica com a conferência do dono (você), e o
+  -- Mateus só recebe a lista. Antes, "quem responde é quem está no meio-dia" (o §16.3.6 itens 2 a 4 da spec) dava a vez ao ajudante.
+  v_res := pg_temp.ok(v_res, 'T6a Lenine (192): a manhã do Mateus (ajudante) leva a porta-fusíveis e começa a passagem, nunca o lítio (220 V); a tarde do Alex termina a passagem (a começada vem antes) e começa o lítio; a quinta termina o lítio e a final; quem responde é o responsável da OS (o Alex) e, na manhã só do Mateus, você',
+    t1 = '04m[Mateus]:Inst ct,Pass c|04t[Alex]:Pass t,Subs c|05m[Alex]:Subs t,Test ct|05t[Alex]: # você,Alex,Alex,Alex', t1);
+  -- FASE 7c: fim
   v_res := pg_temp.ok(v_res, 'T6b as etapas somam a duração do plano (1,5 dia = 3 meios-dias; o arredondamento de cada fração em 3 casas)',
     abs(split_part(t2, ' ', 1)::numeric - split_part(t2, ' ', 2)::numeric) <= 0.01, t2);
   v_res := pg_temp.ok(v_res, 'T6c Vanderlei (194): configurar e testar (comissionar) só no meio-dia do fechamento do dono; a manhã de quarta fica com a instalação',
@@ -1096,7 +1119,10 @@ begin
   v_res := pg_temp.ok(v_res, 'T10i "faltou umas coisas" (falou de falta sem dizer qual): a pergunta equipe_resposta ao dono (§16.6.4) e nada muda nas etapas',
     t_umas like 'Pass:-,Subs:-,Test:- # equipe_resposta:%:2026-11-05:tarefas | O Alex respondeu "faltou umas coisas" ao "como foi" do Lenine (qui 05/11), e não entendi o que faltou. Me diga qual (ex.: "no Lenine falta passagem e crimpagem de cabos de bateria").',
     t_umas);
-  v_res := pg_temp.ok(v_res, 'T10j o "ok" do Mateus responde a dele (a porta-fusíveis da manhã) e não a do Alex', t_mat = 'Inst:feita/equipe,Pass:-', t_mat);
+  -- FASE 7c: (correção da revisão, 20261102100580, achado 1) AG7-10c: o ajudante só recebe a lista — o "ok" do Mateus não anota etapa
+  -- (nem a dele, nem a do Alex); a manhã dele fica com a conferência do dono. Antes, o ok dele anotava a porta-fusíveis como feita.
+  v_res := pg_temp.ok(v_res, 'T10j o "ok" do Mateus (ajudante) não anota etapa nenhuma: quem confere a manhã dele é você (AG7-10c)', t_mat = 'Inst:-,Pass:-', t_mat);
+  -- FASE 7c: fim
   v_res := pg_temp.ok(v_res, 'T10k o "como foi" que não tem mais a lista de agora: o número não vale (só as palavras); "ok, faltou a 2" vira a pergunta ao dono, nada pendente',
     t_conf like 'Pass:-,Troc:-,Test:- # equipe_resposta:%:2026-11-05:tarefas', t_conf);
   perform pg_temp.gravar(v_res);
@@ -1682,8 +1708,12 @@ begin
       v_dif := concat_ws(', ', v_dif, f.nome);
     end if;
     if (select count(*) from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = f.nome) <> 1
-       or (select replace(p.prosrc, E'\r\n', E'\n') from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = f.nome)
+       -- FASE 7c: (correção da revisão, 20261102100580) a viva sem os blocos e as marcas da correção (ela recria 2 das 9 só com
+       -- acréscimos: agenda_dia_da_pessoa e _agenda_linhas_do_fechamento; o K0 de agenda_fase77c_correcao.sql confere)
+       or pg_temp.sem_corr((select replace(p.prosrc, E'\r\n', E'\n') from pg_proc p
+                             where p.pronamespace = 'public'::regnamespace and p.proname = f.nome))
           is distinct from pg_temp.corpo(v_mig, f.nome) then
+       -- FASE 7c: fim
       v_viva := concat_ws(', ', v_viva, f.nome);
     end if;
   end loop;

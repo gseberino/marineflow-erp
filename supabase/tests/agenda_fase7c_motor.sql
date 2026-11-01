@@ -971,7 +971,11 @@ begin
       ('_agenda_alocacoes_imutavel', 'public._agenda_alocacoes_imutavel()', 'mig_tabelas_fase2', 1)) t(nome, sig, fonte, blocos)
   loop
     select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = r.sig::regprocedure;
+    -- FASE 7c: (correção da revisão, 20261102100580) a correção recria agenda_propor só com acréscimos (2 blocos "-- FASE 7c: (7c
+    -- correção …"; o K0 de agenda_fase77c_correcao.sql confere): os blocos do P2 se contam sem eles (o sem_7c já os tira junto)
     select count(*) into v_n from regexp_matches(v_novo, '-- FASE 7c: fim', 'g');
+    v_n := v_n - (select count(*) from regexp_matches(v_novo, '\n\s*-- FASE 7c: \(7c correção', 'g'));
+    -- FASE 7c: fim
     if pg_temp.corpo(current_setting('agenda_teste.' || r.fonte), r.nome) = ''
        or pg_temp.sem_7c(v_novo) <> pg_temp.corpo(current_setting('agenda_teste.' || r.fonte), r.nome)
        or pg_temp.sem_7c(pg_temp.corpo(v_mig, r.nome)) <> pg_temp.corpo(current_setting('agenda_teste.' || r.fonte), r.nome)

@@ -3293,3 +3293,13 @@ porque só o dono pode preenchê-las.
   com "Desmontagem do Gerador (cortesia)", e `os_duracao_sugerida` diz "sem base".
 - **No P8:** as etapas seguem o mesmo predicado (uma régua só, `free_text_is_material`); o dono acrescenta a etapa numa frase
   (`servico_etapa`, a etapa nova com as palavras dele). Mudar o predicado do kit é do orçamento, não da agenda.
+
+### [NOVO-agenda-89] Com a linha do dono, o fechamento fica uma semana depois do último dia de serviço
+
+- **Encontrado em:** Agenda de Produção, revisão da etapa 7c (dom 01/11/2026; a sonda da semana real com a linha dos dias do dono e a 7b
+  ligada: `scratchpad/agenda-pesquisa/f7c/rev-obj/sem-real-B-antes-campo.out` e `sem-real-B-ligado-campo.out`).
+- **O quê:** a Vera (OS-97005, da fixture da 7a) sai "ter 24/11 m Alex+Gustavo(abertura), ter 24/11 t Alex, qui 26/11 m Alex, qui 26/11 t
+  Alex, qui 03/12 t Gustavo(fechamento)": o fechamento do dono cai uma semana depois do último meio-dia de serviço do técnico. Igual com e
+  sem a 7c (as duas sondas dão o mesmo), então é do motor da 7a/7b (a presença do dono pelos dias dele), não da 7c.
+- **Na 7c:** nada (fora do escopo da etapa; a correção da revisão `20261102100580` não mexe no motor de presença). Fica para o fio principal
+  conferir com a linha do dono gravada (o AG7-37) antes de ligar os dias da 7b.

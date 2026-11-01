@@ -870,3 +870,59 @@ Deno.test("Fase 7c (P8): a linha (o) das etapas (dia, 75) ganha o desempate da (
   const t4 = textoDaTarde({ ...cheio([{ ...etapas, modo: "sombra" as const, texto: "Em teste: " + ETAPAS_REAL }], 1), ficaram: [] });
   assert(!(t4.texto ?? "").includes("Etapas ("));
 });
+
+// (Agenda de Produção, Fase 7c, correção da revisão, migration 20261102100580; achados 8 e 2) Sem mudar o TS. (8) Com uma linha da 7c ligada
+// que perde hoje (a (o) "Etapas" ou a (n) com quem faz o quê), o banco manda também a forma curta da linha do cliente (75, a mensagem que
+// espera *manda cliente*): o Secretário cheio só encolhe as linhas que têm forma curta, e sem ela a do cliente (até 600 letras) tirava a (o)
+// e a (n) (a semana real da revisão). Os textos são os que o banco devolve (supabase/tests/agenda_fase77c_correcao.sql, K8; a (o) e a (n)
+// da semana real). (2) A (n) com quem faz o quê nunca vista há 2 dias úteis vem com perda 77 (K2): com a compra (80) e as perguntas do
+// gestor (76), as três não cabem nem na forma curta, e antes a (n) saía todo dia — agora, nesse dia, saem a compra e a (n) (a das perguntas
+// do gestor espera um dia; o banco não sobe a (n) quando ela vence hoje).
+const CLIENTE_VERA = "Mensagem para Vera (véspera, com a pergunta do acesso), sai ter 10/11 às 09:00: \"Bom dia, Vera! Aqui é o Gustavo, da HBR " +
+  "Marine. Amanhã chegamos o dia todo para o serviço no seu motorhome. Para não perdermos a viagem: onde o seu motorhome vai estar, e a " +
+  "chave fica com quem? Pode responder por aqui mesmo, até por áudio.\". *manda cliente Vera* ou *segura cliente Vera*.";
+const CLIENTE_VERA_CURTA = "Mensagem para Vera (véspera, com a pergunta do acesso) espera *manda cliente Vera* (sai ter 10/11 às 09:00); " +
+  "*agenda clientes* mostra.";
+const ETAPAS_VESPERA = "Etapas (Alex não tem telefone: quem passa e confere é você). Amanhã (ter 10/11), Alex no Úrsula: Terminar: Reparo do " +
+  "sistema elétrico. É o último dia: tem que ficar tudo pronto.";
+const ETAPAS_VESPERA_CURTA = "Etapas: amanhã é o último dia do Úrsula (Alex, 1 etapa). Pergunte o que o Alex faz amanhã.";
+
+Deno.test("Fase 7c (correção, achado 8): com a linha da 7c ligada, a do cliente (75) vem com a forma curta e, com o Secretário cheio, o cliente, a (o) e a (n) cabem nas três vagas em até 1.000; sem a forma curta do cliente, só ele entrava", () => {
+  const etapas = { ...l2("dia", ETAPAS_VESPERA, 75, "ligado", { pergunta_id: null }), texto_curto: ETAPAS_VESPERA_CURTA };
+  const equipe = { ...l2("pergunta", EQUIPE_HAB_REAL, 75, "ligado", { pergunta_id: "q-hab", pergunta_ids: ["q-hab"] }),
+                   texto_curto: EQUIPE_HAB_CURTA };
+  const cliente = l2("cliente", CLIENTE_VERA, 75, "ligado", { pergunta_id: "q-cli" });
+  // o defeito (a linha do cliente sem forma curta): só a do cliente entra
+  const antes = textoDaTarde(cheio([cliente, etapas, equipe], 3));
+  assertEquals(antes.agenda?.linhas?.map((l) => `${l.tipo} ${l.perda}`), ["cliente 75"]);
+  // com a forma curta que o banco manda: as três entram, na forma curta, dentro de 1.000, e a (n) vai ao registro
+  assertEquals(CLIENTE_VERA_CURTA.length < CLIENTE_VERA.length, true);
+  const t = textoDaTarde(cheio([{ ...cliente, texto_curto: CLIENTE_VERA_CURTA }, etapas, equipe], 3));
+  assert((t.texto?.length ?? 0) <= LIMITE_DA_TARDE, String(t.texto?.length));
+  assertEquals(t.agenda?.linhas?.map((l) => `${l.tipo} ${l.perda}`), ["cliente 75", "dia 75", "pergunta 75"]);
+  for (const s of [CLIENTE_VERA_CURTA, ETAPAS_VESPERA_CURTA, EQUIPE_HAB_CURTA]) assertStringIncludes(t.texto ?? "", s);
+  assertEquals(t.agenda?.linhas?.find((l) => l.pergunta_id === "q-hab")?.pergunta_ids, ["q-hab"]);
+  assertEquals(t.letras.map((l) => l.letra), ["A", "B", "C"]);
+  // com vaga comum (0 que ficaram), a do cliente vai inteira (a forma curta só no enxuto)
+  const t2 = textoDaTarde({ ...cheio([{ ...cliente, texto_curto: CLIENTE_VERA_CURTA }], 1), ficaram: [] });
+  assertStringIncludes(t2.texto ?? "", CLIENTE_VERA);
+});
+
+Deno.test("Fase 7c (correção, achado 2): a (n) de quem faz o quê nunca vista há 2 dias úteis (77) entra com a compra (80) no Secretário cheio, e as perguntas do gestor (76) esperam um dia; com 75, saía a (n) — todo dia", () => {
+  const gestor = { ...l2("pergunta", PERGUNTAS_REAL.replace(/^Agenda: Hoje às 19:30 .*? Também, s/, "Agenda: S"), 76, "ligado",
+                         { pergunta_id: "q-gestor", pergunta_ids: ["q-gestor", "q-nelson"] }),
+                   texto_curto: PERGUNTAS_CURTA.replace(/^Agenda: Hoje às 19:30 .*? Para segurar, me diga\. /, "Agenda: ") };
+  const equipe = (perda: number) => ({ ...l2("pergunta", EQUIPE_HAB_REAL, perda, "ligado", { pergunta_id: "q-hab", pergunta_ids: ["q-hab"] }),
+                                       texto_curto: EQUIPE_HAB_CURTA });
+  const compra = l2("compras", COMPRAS_REAL, 80);
+  // 75 (o dia em que nasce e o seguinte): sai a (n), como antes (o P5)
+  const t1 = textoDaTarde(cheio([equipe(75), compra, gestor], 3));
+  assertEquals(t1.agenda?.linhas?.map((l) => `${l.tipo} ${l.perda}`), ["compras 80", "pergunta 76"]);
+  // 77 (2 dias úteis sem ser vista): entram a compra e a (n), na forma curta, e ela vai ao registro
+  const t2 = textoDaTarde(cheio([equipe(77), compra, gestor], 3));
+  assert((t2.texto?.length ?? 0) <= LIMITE_DA_TARDE, String(t2.texto?.length));
+  assertEquals(t2.agenda?.linhas?.map((l) => `${l.tipo} ${l.perda}`), ["compras 80", "pergunta 77"]);
+  assertStringIncludes(t2.texto ?? "", EQUIPE_HAB_CURTA);
+  assertEquals(t2.agenda?.linhas?.find((l) => l.pergunta_id === "q-hab")?.pergunta_ids, ["q-hab"]);
+  assertEquals(t2.letras.map((l) => l.letra), ["A", "B", "C"]);
+});

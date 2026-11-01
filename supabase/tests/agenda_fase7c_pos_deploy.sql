@@ -4,7 +4,7 @@
 -- migration de dado 20261102100600 — os 4 modos da 7c em teste — fila-do-dono/fase77c-publicar.md, passos 2–5 (e de novo a cada "ligar",
 -- passos 6 e 7).
 -- Spec: spec-fase7c.md §10 passo 1, §16.10 passo 1, §16.9 ("O que o P8 muda no P7"), R5.5 (o pós-deploy) e R5.7-9.
--- bancada: depende de 20261102100550
+-- bancada: depende de 20261102100580
 --
 -- SÓ LEITURA EM PRODUÇÃO: nenhum INSERT, UPDATE ou DELETE (só nas tabelas TEMPORÁRIAS do resultado); agenda_ver, agenda_habilidade_medidas,
 -- agenda_tarefas_medidas e _agenda_linhas_do_fechamento são STABLE e não gravam; agenda_tarefas_rodar só é chamada com modo_tarefas
@@ -53,12 +53,24 @@ create temp table _pd on commit drop as
 select exists (select 1 from supabase_migrations.schema_migrations m where m.version = '20261102100600') as sombra,
        coalesce(current_setting('agenda_teste.fase7c', true), '') <> '' as bancada;
 
--- A correção da revisão da 7c (spec R5.5: 20261102100580, entre o P8 e o dado; uma 2ª, 20261102100590). Hoje não há nenhuma: a tabela
--- fica vazia e o M1c/F5c não saem. QUEM CRIAR A CORREÇÃO acrescenta uma linha por migration — a versão, o que ela conserta, o texto que só
+-- A correção da revisão da 7c (spec R5.5: 20261102100580, entre o P8 e o dado; uma 2ª, 20261102100590). Hoje há uma, a 20261102100580
+-- (a linha abaixo); sem linha, o M1c/F5c não saem. QUEM CRIAR OUTRA CORREÇÃO acrescenta uma linha por migration — a versão, o que ela conserta, o texto que só
 -- os blocos dela têm (a marca, ex.: '(correção da revisão da 7c') e as assinaturas das funções que ela recria (como to_regprocedure as lê) —
 -- e passa a exigi-la também no publicar/exec/ligar-fase7c*.sql:
 --   insert into _pd_correcoes values ('20261102100580', '<o que conserta>', '<a marca>', array['<função(args)>', …]);
 create temp table _pd_correcoes (versao text primary key, nome text not null, marca text not null, funcoes text[] not null) on commit drop;
+-- FASE 7c: (correção da revisão, 20261102100580) a correção existe: 10 funções recriadas (a pergunta por OS a cada tique, a forma curta do
+-- cliente e a (n) que não fica de fora para sempre, a chamada da 7b na vez dela, a pergunta refeita, a troca do responsável no texto, quem
+-- responde pelas etapas, a OS começada antes das etapas, o prazo vencido, o dia da pessoa em teste e o exemplo do foco). A marca é a dos
+-- blocos e das marcas dela ("-- FASE 7c: (7c correção, achado N)" / "-- (7c correção, achado N)"). Daqui em diante o M1c e o F5c a exigem.
+insert into _pd_correcoes values
+  ('20261102100580', 'a correção da revisão da 7c', '(7c correção',
+   array['_agenda_tarefas_planejar(uuid, date, text)', 'os_tarefas_da_os(uuid, date)', 'agenda_dia_da_pessoa(uuid, date, date)',
+         '_agenda_linhas_do_fechamento(date)', '_agenda_habilidade_perguntas_os(date, timestamptz)', 'agenda_habilidade(date, timestamptz)',
+         '_agenda_habilidade_pergunta_texto(date, uuid[])', '_agenda_habilidade_propor(date, timestamptz)',
+         '_agenda_ver_habilidades(date, timestamptz, uuid)',
+         'agenda_propor(text, date, date, uuid[], jsonb, boolean, text, uuid, date, timestamptz)']);
+-- FASE 7c: fim
 
 -- ── M. Versões registradas ──────────────────────────────────────────────────────────────────────────────
 insert into _resultado
