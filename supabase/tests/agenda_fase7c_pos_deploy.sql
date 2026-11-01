@@ -33,9 +33,9 @@
 --      (md5); as medidas de quem faz o quê e das etapas respondem; com modo_tarefas desligado a rodada das etapas devolve {rodou: false};
 --      o fechamento de hoje responde, com toda linha em até 480 letras e, com modo_tarefas desligado, sem a linha das etapas
 --   O md5 de cada função que a 7c cria ou recria fica no molde da 7b (sql/wf7c_md5_esperado.sql do scratchpad, gerado da bancada na ponta
---   por f7c/p7/md5-gerar.mjs; refazer depois de cada correção): rodar junto com este, depois do passo 2. Com a 7c publicada, o md5 da 7b
---   (sql/wf7b_md5_esperado.sql) e o da 7a (sql/wf7c2_md5_sem7b.sql) dão "diferentes" nas que a 7c recria: valem sql/wf7b_md5_sem7c.sql e
---   sql/wf7c2_md5_sem7b7c.sql (os mesmos sem elas).
+--   por f7c/p7/md5-gerar.mjs — com a correção da revisão, a cópia dele f7c/corr/md5-gerar.mjs; refazer depois de cada correção): rodar
+--   junto com este, depois do passo 2. Com a 7c publicada, o md5 da 7b (sql/wf7b_md5_esperado.sql) e o da 7a (sql/wf7c2_md5_sem7b.sql)
+--   dão "diferentes" nas que a 7c recria: valem sql/wf7c_md5_7b_sem7c.sql e sql/wf7c_md5_7a_sem7b7c.sql (os mesmos sem elas).
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
