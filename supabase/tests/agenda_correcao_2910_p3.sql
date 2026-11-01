@@ -144,9 +144,11 @@ begin
     -- também saem: a cópia continua conferida contra a fonte do lote.
     -- FASE 7b: (7b P4) e os blocos "-- FASE 7b: … fim" (a 20261101100300 recria o motor de novo, só acréscimo): a régua aceita "7b"
     -- FASE 7b: fim
-    if not v_f7 and l ~ '^\s*-- FASE 7b?:' and l !~ '^\s*-- FASE 7b?: fim' then v_f7 := true; continue; end if;
+    -- FASE 7c: (7c P2) e os blocos "-- FASE 7c: … fim" (a 20261102100100 recria o motor de novo, só acréscimo): a régua aceita "7c"
+    -- FASE 7c: fim
+    if not v_f7 and l ~ '^\s*-- FASE 7[bc]?:' and l !~ '^\s*-- FASE 7[bc]?: fim' then v_f7 := true; continue; end if;
     if v_f7 then
-      if l ~ '^\s*-- FASE 7b?: fim' then v_f7 := false; end if;
+      if l ~ '^\s*-- FASE 7[bc]?: fim' then v_f7 := false; end if;
       continue;
     end if;
     -- FASE 7 (7a P3): fim
@@ -174,6 +176,19 @@ begin
   end loop;
   return array_to_string(v_fora, E'\n');
 end $f$;
+-- FASE 7c: (7c P2) o motor da 7c grava em cada alocação do item o critério que decidiu a pessoa (criterio e criterio_detalhe, em qualquer
+-- modo: a medida do 7g); a régua de antes compara sem eles (a projeção da spec-fase7c §3.8 d8). O resto do item e da proposta, byte a byte.
+create function pg_temp.sem_criterio(p jsonb) returns jsonb language sql immutable as $f$
+  select case when jsonb_typeof(p -> 'itens') <> 'array' then p
+              else jsonb_set(p, '{itens}', coalesce((
+                     select jsonb_agg(case when jsonb_typeof(i -> 'alocacoes') = 'array'
+                                           then jsonb_set(i, '{alocacoes}', coalesce((
+                                                  select jsonb_agg(a - 'criterio' - 'criterio_detalhe' order by o)
+                                                    from jsonb_array_elements(i -> 'alocacoes') with ordinality u(a, o)), '[]'::jsonb))
+                                           else i end order by k)
+                       from jsonb_array_elements(p -> 'itens') with ordinality t(i, k)), '[]'::jsonb)) end
+$f$;
+-- FASE 7c: fim
 
 -- A definição de ANTES de agenda_propor (20261029100900), rodada como pg_temp: a régua do que não muda. Ela chama o
 -- _agenda_encaixar de agora, que sem res_propria (a de antes não passa) é o de antes.
@@ -490,14 +505,16 @@ begin
     -- sem reserva no que entra (o Lenine e o Giancarlo, que ficaria com a vaga da reserva, tirados): a agenda_propor é a de
     -- antes, byte a byte
     x := jsonb_build_object('tirar', jsonb_build_array(c_lenine, (select id from public.service_orders where service_order_number = 'OS-00100')));
-    r := public.agenda_propor('semana', null, null, null, x, false, 'motor', null, c_hoje, (c_hoje + time '16:00') at time zone 'America/Sao_Paulo');
+    -- FASE 7c: (7c P2) a de agora sem o critério das alocações (pg_temp.sem_criterio): o resto, byte a byte
+    -- FASE 7c: fim
+    r := pg_temp.sem_criterio(public.agenda_propor('semana', null, null, null, x, false, 'motor', null, c_hoje, (c_hoje + time '16:00') at time zone 'America/Sao_Paulo'));
     x := pg_temp.propor_antes('semana', null, null, null, x, false, 'motor', null, c_hoje, (c_hoje + time '16:00') at time zone 'America/Sao_Paulo');
     v_res := pg_temp.ok(v_res, 'N1 sem reserva no que entra, a semana é a de antes, byte a byte (o resumo "N serviços marcados" de sempre)',
       r = x and not exists (select 1 from jsonb_array_elements(r -> 'itens') i where i ->> 'tipo' = 'reserva'),
       md5(r::text) || ' × ' || md5(x::text) || ' | ' || (r #>> '{textos,resumo}'));
     -- com a reserva do Lenine: só o resumo, o título e o texto mudam (o encaixe, as reservas, o que fica de fora e a carga, iguais)
-    r := public.agenda_propor('semana', null, null, null, '{}'::jsonb, false, 'motor', null, c_hoje,
-                              (c_hoje + time '16:00') at time zone 'America/Sao_Paulo');
+    r := pg_temp.sem_criterio(public.agenda_propor('semana', null, null, null, '{}'::jsonb, false, 'motor', null, c_hoje,
+                              (c_hoje + time '16:00') at time zone 'America/Sao_Paulo'));
     x := pg_temp.propor_antes('semana', null, null, null, '{}'::jsonb, false, 'motor', null, c_hoje,
                               (c_hoje + time '16:00') at time zone 'America/Sao_Paulo');
     v_res := pg_temp.ok(v_res, 'N2 com reserva, só o resumo, o título e o texto mudam; o de antes dizia "1 serviço marcado"',
@@ -508,8 +525,8 @@ begin
       (r -> 'textos')::text);
     -- fora de ligado: a semana (com a reserva do Lenine que entra) é a de antes, byte a byte
     perform pg_temp.modos('sombra', 'sombra');
-    r := public.agenda_propor('semana', null, null, null, '{}'::jsonb, false, 'motor', null, c_hoje,
-                              (c_hoje + time '16:00') at time zone 'America/Sao_Paulo');
+    r := pg_temp.sem_criterio(public.agenda_propor('semana', null, null, null, '{}'::jsonb, false, 'motor', null, c_hoje,
+                              (c_hoje + time '16:00') at time zone 'America/Sao_Paulo'));
     x := pg_temp.propor_antes('semana', null, null, null, '{}'::jsonb, false, 'motor', null, c_hoje,
                               (c_hoje + time '16:00') at time zone 'America/Sao_Paulo');
     v_res := pg_temp.ok(v_res, 'N3 em teste (sombra), a semana com a reserva é a de antes, byte a byte (o resumo e o título só mudam em ligado)',

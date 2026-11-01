@@ -87,6 +87,29 @@ create function pg_temp.sem_7b(p text) returns text language sql immutable as $f
                             from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n')
 $f$;
+-- FASE 7c: (7c P2) a 20261102100100 recria o motor de novo, com os blocos "-- FASE 7c: … -- FASE 7c: fim" (no nível de fora, só
+-- acréscimo): o M8 os tira antes; e o motor da 7c grava em cada alocação do item o critério que decidiu a pessoa (criterio e
+-- criterio_detalhe, em qualquer modo) e o contexto ganha hab, habf e custo: o M9 compara sem eles (a projeção da spec-fase7c §3.8 d8)
+create function pg_temp.sem_7c(p text) returns text language sql immutable as $f$
+  select array_to_string(array(
+           select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7c:' and l !~ '-- FASE 7c: fim' then 1
+                                                when l ~ '^\s*-- FASE 7c: fim' then -1 else 0 end)
+                                       over (order by o rows between unbounded preceding and current row) as dentro,
+                                 l ~ '^\s*-- FASE 7c: fim' as fecha
+                            from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
+            where dentro = 0 and not fecha order by o), E'\n')
+$f$;
+create function pg_temp.sem_criterio(p jsonb) returns jsonb language sql immutable as $f$
+  select case when jsonb_typeof(p -> 'itens') <> 'array' then p
+              else jsonb_set(p, '{itens}', coalesce((
+                     select jsonb_agg(case when jsonb_typeof(i -> 'alocacoes') = 'array'
+                                           then jsonb_set(i, '{alocacoes}', coalesce((
+                                                  select jsonb_agg(a - 'criterio' - 'criterio_detalhe' order by o)
+                                                    from jsonb_array_elements(i -> 'alocacoes') with ordinality u(a, o)), '[]'::jsonb))
+                                           else i end order by k)
+                       from jsonb_array_elements(p -> 'itens') with ordinality t(i, k)), '[]'::jsonb)) end
+$f$;
+-- FASE 7c: fim
 -- p_sql (que devolve um valor) como o papel p_papel: o resultado em texto, ou 'erro <estado>: <mensagem>'.
 create function pg_temp.como(p_papel text, p_sql text) returns text language plpgsql as $f$
 declare
@@ -824,6 +847,7 @@ begin
       continue;
     end if;
     select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = f.sig::regprocedure;
+    v_novo := pg_temp.sem_7c(v_novo);  -- FASE 7c: (7c P2) os blocos da 20261102100100 saem antes
     select count(*) into v_n from regexp_matches(v_novo, '-- FASE 7b: fim', 'g');
     insert into _resultado values (
       format('M8 %s: sem os %s blocos "-- FASE 7b:", é o corpo de %s', f.nome, f.blocos, f.versao),
@@ -839,11 +863,13 @@ declare
   v_cart uuid[] := array(select k.service_order_id from public.os_carteira(date '2026-11-05') k order by 1);
   v      text;
 begin
-  select md5(public.agenda_propor('semana', null, null, null, '{}'::jsonb, false, 'motor', null, date '2026-11-05',
-                                  pg_temp.em(date '2026-11-05', '16:45'))::text)
-         || md5(public.agenda_propor('os', null, null, v_cart, '{}'::jsonb, false, 'vigia', null, date '2026-11-05',
-                                     pg_temp.em(date '2026-11-05', '16:45'))::text)
-         || md5(public._agenda_contexto(date '2026-11-02', date '2026-11-22', date '2026-11-05')::text)
+  -- FASE 7c: (7c P2) sem o critério das alocações e sem hab/habf/custo no contexto (pg_temp.sem_criterio, acima)
+  -- FASE 7c: fim
+  select md5(pg_temp.sem_criterio(public.agenda_propor('semana', null, null, null, '{}'::jsonb, false, 'motor', null, date '2026-11-05',
+                                  pg_temp.em(date '2026-11-05', '16:45')))::text)
+         || md5(pg_temp.sem_criterio(public.agenda_propor('os', null, null, v_cart, '{}'::jsonb, false, 'vigia', null, date '2026-11-05',
+                                     pg_temp.em(date '2026-11-05', '16:45')))::text)
+         || md5((public._agenda_contexto(date '2026-11-02', date '2026-11-22', date '2026-11-05') - 'hab' - 'habf' - 'custo')::text)
          || md5(coalesce((select jsonb_agg(public.agenda_meios_da_os(x, date '2026-11-05') order by x) from unnest(v_cart) x), '[]'::jsonb)::text)
          || md5(coalesce((select jsonb_agg(public._agenda_classe_agora(x, date '2026-11-05') - 'pront' order by x) from unnest(v_cart) x), '[]'::jsonb)::text)
          || md5(public._agenda_carga_da_pessoa(public._agenda_dono(null))::text)

@@ -77,15 +77,35 @@ begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
     -- FASE 7b: (7b P4) e os blocos "-- FASE 7b: … fim" (a 20261101100300 recria o motor de novo, só acréscimo): a régua aceita "7b"
     -- FASE 7b: fim
-    if not v_bloco and l ~ '^\s*-- FASE 7b?:' and l !~ '^\s*-- FASE 7b?: fim' then v_bloco := true; continue; end if;
+    -- FASE 7c: (7c P2) e os blocos "-- FASE 7c: … fim" (a 20261102100100 recria o motor de novo, só acréscimo): a régua aceita "7c"
+    -- FASE 7c: fim
+    if not v_bloco and l ~ '^\s*-- FASE 7[bc]?:' and l !~ '^\s*-- FASE 7[bc]?: fim' then v_bloco := true; continue; end if;
     if v_bloco then
-      if l ~ '^\s*-- FASE 7b?: fim' then v_bloco := false; end if;
+      if l ~ '^\s*-- FASE 7[bc]?: fim' then v_bloco := false; end if;
       continue;
     end if;
     v_b := v_b || l;
   end loop;
   return array_to_string(v_b, E'\n');
 end $f$;
+-- FASE 7c: (7c P2) o motor da 7c grava em cada alocação do item o critério que decidiu a pessoa (criterio e criterio_detalhe, em qualquer
+-- modo) e o contexto ganha hab, habf e custo (o que cada pessoa faz): as réguas de antes (T5) comparam sem eles (a projeção da
+-- spec-fase7c §3.8 d8); o resto, byte a byte.
+create function pg_temp.sem_criterio(p jsonb) returns jsonb language sql immutable as $f$
+  select case when jsonb_typeof(p -> 'itens') <> 'array' then p
+              else jsonb_set(p, '{itens}', coalesce((
+                     select jsonb_agg(case when jsonb_typeof(i -> 'alocacoes') = 'array'
+                                           then jsonb_set(i, '{alocacoes}', coalesce((
+                                                  select jsonb_agg(a - 'criterio' - 'criterio_detalhe' order by o)
+                                                    from jsonb_array_elements(i -> 'alocacoes') with ordinality u(a, o)), '[]'::jsonb))
+                                           else i end order by k)
+                       from jsonb_array_elements(p -> 'itens') with ordinality t(i, k)), '[]'::jsonb)) end
+$f$;
+create function pg_temp.contexto_sem_7c(p_d_ini date, p_d_fim date, p_hoje date, p_ignorar uuid[] default '{}'::uuid[],
+                                        p_fila uuid[] default '{}'::uuid[]) returns jsonb language sql stable as $f$
+  select public._agenda_contexto(p_d_ini, p_d_fim, p_hoje, p_ignorar, p_fila) - 'hab' - 'habf' - 'custo'
+$f$;
+-- FASE 7c: fim
 
 -- As células "criar" de uma OS numa proposta: "23/11 manha Roberto turno | …".
 create function pg_temp.cel(p_r jsonb, p_numero text) returns text language sql immutable as $f$
@@ -110,8 +130,10 @@ $f$;
 -- O motor sem gravar nada, como a vigia o chama.
 create function pg_temp.propor(p_escopo text, p_os uuid[] default null, p_restr jsonb default '{}'::jsonb) returns jsonb
 language sql as $f$
-  select public.agenda_propor(p_escopo, null, null, p_os, p_restr, false, 'motor', null, date '2026-10-29',
-                              timestamptz '2026-10-29 16:52-03')
+  -- FASE 7c: (7c P2) sem o critério das alocações (pg_temp.sem_criterio, acima)
+  -- FASE 7c: fim
+  select pg_temp.sem_criterio(public.agenda_propor(p_escopo, null, null, p_os, p_restr, false, 'motor', null, date '2026-10-29',
+                              timestamptz '2026-10-29 16:52-03'))
 $f$;
 
 -- O cenário da semana de 23/11, por cima do replay e da sintética: o Roberto vem só na seg 23/11 (exceção "vem" no dia e "não vem"
@@ -388,8 +410,8 @@ begin
        order by o
     loop
       update public.agenda_config set modo_marcar_sozinho = m.modo, gestor_so_propor = m.so_propor, marcar_regras = m.regras where id;
-      select string_agg(md5(public._agenda_contexto(s::date, s::date + 6, c_hoje)::text)
-                        || md5(public._agenda_contexto(s::date, s::date + 13, c_hoje, '{}'::uuid[], array[c_zeca, c_ivo])::text), '' order by s)
+      select string_agg(md5(pg_temp.contexto_sem_7c(s::date, s::date + 6, c_hoje)::text)
+                        || md5(pg_temp.contexto_sem_7c(s::date, s::date + 13, c_hoje, '{}'::uuid[], array[c_zeca, c_ivo])::text), '' order by s)
              || md5(pg_temp.propor('semana')::text) || md5(pg_temp.propor('os', v_cart)::text)
              || md5(pg_temp.propor('os', array[c_zeca, c_ivo], pg_temp.depois_de_23())::text)
              || md5(public._agenda_validar_itens(v_itx || v_ity, '{}'::jsonb, c_hoje, c_agora, true)::text)
@@ -409,8 +431,8 @@ begin
                       where pronamespace = 'public'::regnamespace
                         and proname in ('_agenda_contexto', '_agenda_validar_itens', '_agenda_tentar_bloco', '_agenda_por_que_nao',
                                         '_agenda_encaixar'));
-        select string_agg(md5(public._agenda_contexto(s::date, s::date + 6, c_hoje)::text)
-                          || md5(public._agenda_contexto(s::date, s::date + 13, c_hoje, '{}'::uuid[], array[c_zeca, c_ivo])::text), '' order by s)
+        select string_agg(md5(pg_temp.contexto_sem_7c(s::date, s::date + 6, c_hoje)::text)
+                          || md5(pg_temp.contexto_sem_7c(s::date, s::date + 13, c_hoje, '{}'::uuid[], array[c_zeca, c_ivo])::text), '' order by s)
                || md5(pg_temp.propor('semana')::text) || md5(pg_temp.propor('os', v_cart)::text)
                || md5(pg_temp.propor('os', array[c_zeca, c_ivo], pg_temp.depois_de_23())::text)
                || md5(public._agenda_validar_itens(v_itx || v_ity, '{}'::jsonb, c_hoje, c_agora, true)::text)
@@ -428,7 +450,7 @@ begin
       v_dif is null, coalesce(v_dif, '—'));
     -- o controle: com o portão, as mesmas contas acusam a diferença
     perform pg_temp.portao(true);
-    v_novo := md5(public._agenda_contexto(date '2026-11-23', date '2026-11-29', c_hoje)::text)
+    v_novo := md5(pg_temp.contexto_sem_7c(date '2026-11-23', date '2026-11-29', c_hoje)::text)
               || md5(pg_temp.propor('os', array[c_zeca, c_ivo], pg_temp.depois_de_23())::text);
     begin
       execute pg_temp.inteira(v_dono6, '_agenda_contexto');
@@ -436,7 +458,7 @@ begin
       execute pg_temp.inteira(v_mot2, '_agenda_tentar_bloco');
       execute pg_temp.inteira(v_mot2, '_agenda_por_que_nao');
       execute pg_temp.inteira(v_mot3, '_agenda_encaixar');
-      v_antes := md5(public._agenda_contexto(date '2026-11-23', date '2026-11-29', c_hoje)::text)
+      v_antes := md5(pg_temp.contexto_sem_7c(date '2026-11-23', date '2026-11-29', c_hoje)::text)
                  || md5(pg_temp.propor('os', array[c_zeca, c_ivo], pg_temp.depois_de_23())::text);
       raise exception 'desfaz' using errcode = 'P0098';
     exception when sqlstate 'P0098' then null;

@@ -97,9 +97,11 @@ begin
     -- _agenda_validar_itens copiando DESTA fase: só acréscimo); o fim é lido pelo prefixo
     -- FASE 7b: (7b P4) e os blocos "-- FASE 7b: … fim" (a 20261101100300 recria o motor de novo, só acréscimo): a régua aceita "7b"
     -- FASE 7b: fim
-    if not v_f7 and l ~ '^\s*-- FASE 7b?:' and l !~ '^\s*-- FASE 7b?: fim' then v_f7 := true; continue; end if;
+    -- FASE 7c: (7c P2) e os blocos "-- FASE 7c: … fim" (a 20261102100100 recria o motor de novo, só acréscimo): a régua aceita "7c"
+    -- FASE 7c: fim
+    if not v_f7 and l ~ '^\s*-- FASE 7[bc]?:' and l !~ '^\s*-- FASE 7[bc]?: fim' then v_f7 := true; continue; end if;
     if v_f7 then
-      if l ~ '^\s*-- FASE 7b?: fim' then v_f7 := false; end if;
+      if l ~ '^\s*-- FASE 7[bc]?: fim' then v_f7 := false; end if;
       continue;
     end if;
     -- FASE 7 (7a P5): fim
@@ -135,11 +137,31 @@ create function pg_temp.semanas(p_a jsonb) returns text language sql immutable a
     from jsonb_array_elements(p_a) e
 $f$;
 
+-- FASE 7c: (7c P2) o motor da 7c grava em cada alocação do item o critério que decidiu a pessoa (criterio e criterio_detalhe, em qualquer
+-- modo) e o contexto ganha hab, habf e custo (o que cada pessoa faz): as réguas desta fase comparam sem eles (a projeção da
+-- spec-fase7c §3.8 d8); o resto, byte a byte.
+create function pg_temp.sem_criterio(p jsonb) returns jsonb language sql immutable as $f$
+  select case when jsonb_typeof(p -> 'itens') <> 'array' then p
+              else jsonb_set(p, '{itens}', coalesce((
+                     select jsonb_agg(case when jsonb_typeof(i -> 'alocacoes') = 'array'
+                                           then jsonb_set(i, '{alocacoes}', coalesce((
+                                                  select jsonb_agg(a - 'criterio' - 'criterio_detalhe' order by o)
+                                                    from jsonb_array_elements(i -> 'alocacoes') with ordinality u(a, o)), '[]'::jsonb))
+                                           else i end order by k)
+                       from jsonb_array_elements(p -> 'itens') with ordinality t(i, k)), '[]'::jsonb)) end
+$f$;
+create function pg_temp.contexto_sem_7c(p_d_ini date, p_d_fim date, p_hoje date, p_ignorar uuid[] default '{}'::uuid[],
+                                        p_fila uuid[] default '{}'::uuid[]) returns jsonb language sql stable as $f$
+  select public._agenda_contexto(p_d_ini, p_d_fim, p_hoje, p_ignorar, p_fila) - 'hab' - 'habf' - 'custo'
+$f$;
+-- FASE 7c: fim
 -- O motor de sex 30/10 às 16:30, sem gravar.
 create function pg_temp.propor(p_escopo text, p_os uuid[] default null, p_restr jsonb default '{}'::jsonb) returns jsonb
 language sql as $f$
-  select public.agenda_propor(p_escopo, null, null, p_os, p_restr, false, 'motor', null, date '2026-10-30',
-                              timestamptz '2026-10-30 16:30-03')
+  -- FASE 7c: (7c P2) sem o critério das alocações (pg_temp.sem_criterio, acima)
+  -- FASE 7c: fim
+  select pg_temp.sem_criterio(public.agenda_propor(p_escopo, null, null, p_os, p_restr, false, 'motor', null, date '2026-10-30',
+                              timestamptz '2026-10-30 16:30-03'))
 $f$;
 -- As células "criar" de uma OS numa proposta: "05/11 manha Gustavo turno | …".
 create function pg_temp.celulas(p_r jsonb, p_numero text) returns text language sql immutable as $f$
@@ -635,13 +657,13 @@ begin
 
       -- o contexto: cada semana de 31/08 a 14/12 (seg a sáb) e de duas em duas, e uma com a fila e o ignorar
       select count(*), string_agg(to_char(s::date, 'DD/MM'), ', ') filter (where
-               public._agenda_contexto(s::date, s::date + 5, c_hoje)::text is distinct from pg_temp.contexto_de_antes(s::date, s::date + 5, c_hoje)::text
-               or public._agenda_contexto(s::date, s::date + 12, c_hoje)::text is distinct from pg_temp.contexto_de_antes(s::date, s::date + 12, c_hoje)::text)
+               pg_temp.contexto_sem_7c(s::date, s::date + 5, c_hoje)::text is distinct from pg_temp.contexto_de_antes(s::date, s::date + 5, c_hoje)::text
+               or pg_temp.contexto_sem_7c(s::date, s::date + 12, c_hoje)::text is distinct from pg_temp.contexto_de_antes(s::date, s::date + 12, c_hoje)::text)
         into v_n, v_dif
         from generate_series(date '2026-08-31', date '2026-12-14', interval '7 days') s;
       v_res := pg_temp.ok(v_res, format('D6a%s %s: o contexto do motor de %s semanas (de 31/08 a 14/12, uma e duas semanas) é o de antes, byte a byte', v_modo.k, v_modo.nome, v_n),
         v_dif is null and v_n = 16
-        and public._agenda_contexto(date '2026-11-02', date '2026-11-21', c_hoje,
+        and pg_temp.contexto_sem_7c(date '2026-11-02', date '2026-11-21', c_hoje,
               array(select a.id from public.agenda_alocacoes a where a.service_order_id = v_104 and a.estado = 'publicada'), v_cart)::text
             = pg_temp.contexto_de_antes(date '2026-11-02', date '2026-11-21', c_hoje,
               array(select a.id from public.agenda_alocacoes a where a.service_order_id = v_104 and a.estado = 'publicada'), v_cart)::text,
@@ -697,7 +719,7 @@ begin
     exception when sqlstate 'P0098' then null;
     end;
     v_res := pg_temp.ok(v_res, 'D6d o controle, com 0,56 em uso: o contexto da semana de 02/11, o validador dos 8 meios-dias seus e o motor da OS só sua deixam de ser os de antes',
-      public._agenda_contexto(date '2026-11-02', date '2026-11-07', c_hoje)::text
+      pg_temp.contexto_sem_7c(date '2026-11-02', date '2026-11-07', c_hoje)::text
         is distinct from pg_temp.contexto_de_antes(date '2026-11-02', date '2026-11-07', c_hoje)::text
       and public._agenda_validar_itens(pg_temp.itens(v_104, c_dono, 'Gustavo', 8), '{}'::jsonb, c_hoje, c_agora, false)::text
         is distinct from pg_temp.validar_de_antes(pg_temp.itens(v_104, c_dono, 'Gustavo', 8), '{}'::jsonb, c_hoje, c_agora, false)::text

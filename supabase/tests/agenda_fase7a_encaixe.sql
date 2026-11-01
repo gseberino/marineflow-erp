@@ -92,15 +92,30 @@ begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
     -- FASE 7b: (7b P4) e os blocos "-- FASE 7b: … fim" (a 20261101100300 recria o motor de novo, só acréscimo): a régua aceita "7b"
     -- FASE 7b: fim
-    if not v_bloco and l ~ '^\s*-- FASE 7(: \(7a P(8|9|11|12)|b:)' and l !~ '^\s*-- FASE 7b: fim' then v_bloco := true; continue; end if;
+    -- FASE 7c: (7c P2) e os blocos "-- FASE 7c: … fim" (a 20261102100100 recria o motor de novo, só acréscimo): a régua aceita "7c"
+    -- FASE 7c: fim
+    if not v_bloco and l ~ '^\s*-- FASE 7(: \(7a P(8|9|11|12)|b:|c:)' and l !~ '^\s*-- FASE 7[bc]: fim' then v_bloco := true; continue; end if;
     if v_bloco then
-      if l ~ '^\s*-- FASE 7b?: fim' then v_bloco := false; end if;
+      if l ~ '^\s*-- FASE 7[bc]?: fim' then v_bloco := false; end if;
       continue;
     end if;
     v_b := v_b || l;
   end loop;
   return array_to_string(v_b, E'\n');
 end $f$;
+-- FASE 7c: (7c P2) o motor da 7c grava em cada alocação do item o critério que decidiu a pessoa (criterio e criterio_detalhe, em qualquer
+-- modo: a medida do 7g); a régua de antes compara sem eles (a projeção da spec-fase7c §3.8 d8). O resto, byte a byte.
+create function pg_temp.sem_criterio(p jsonb) returns jsonb language sql immutable as $f$
+  select case when jsonb_typeof(p -> 'itens') <> 'array' then p
+              else jsonb_set(p, '{itens}', coalesce((
+                     select jsonb_agg(case when jsonb_typeof(i -> 'alocacoes') = 'array'
+                                           then jsonb_set(i, '{alocacoes}', coalesce((
+                                                  select jsonb_agg(a - 'criterio' - 'criterio_detalhe' order by o)
+                                                    from jsonb_array_elements(i -> 'alocacoes') with ordinality u(a, o)), '[]'::jsonb))
+                                           else i end order by k)
+                       from jsonb_array_elements(p -> 'itens') with ordinality t(i, k)), '[]'::jsonb)) end
+$f$;
+-- FASE 7c: fim
 
 -- ── E0. As portas e o que é (sem fixture) ───────────────────────────────────────────────────────────────
 with f(assinatura, quem, definer, vol) as (values
@@ -658,7 +673,9 @@ begin
     select count(*) into v_n from public.agenda_acoes x
      where public._agenda_criticidade_da_acao(x.id) is distinct from pg_temp.crit_acao_antes(x.id);
     if v_n > 0 then v_dif := concat_ws('; ', v_dif, r.nome || ' (ação): ' || v_n); end if;
-    if md5((public.agenda_propor('replano', null, null, v_tres, '{}'::jsonb, false, 'vigia', null, c_sex, c_sexa) - 'proposta_id')::text)
+    -- FASE 7c: (7c P2) a de agora sem o critério das alocações (pg_temp.sem_criterio)
+    -- FASE 7c: fim
+    if md5((pg_temp.sem_criterio(public.agenda_propor('replano', null, null, v_tres, '{}'::jsonb, false, 'vigia', null, c_sex, c_sexa)) - 'proposta_id')::text)
        <> md5((pg_temp.propor_antes('replano', null, null, v_tres, '{}'::jsonb, false, 'vigia', null, c_sex, c_sexa) - 'proposta_id')::text) then
       v_dif := concat_ws('; ', v_dif, r.nome || ' (motor)');
     end if;

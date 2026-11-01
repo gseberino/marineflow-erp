@@ -290,6 +290,13 @@ const FIXTURES_COMO_TEXTO = [
   ['agenda_teste.fase7c', 'fixture-fase7c.sql'],
   ['agenda_teste.mig_correcao3_fase7b', '../../supabase/migrations/20261101100860_agenda_fase77b_correcao3.sql'],
   ['agenda_teste.mig_base_fase7c', '../../supabase/migrations/20261102100000_agenda_fase7c_base.sql'],
+  // Fase 7c (P2): a fonte de 1 das 8 recriadas da 20261102100100 que ainda não estava acima — _agenda_alocacoes_imutavel (a 20261025100000
+  // da Fase 2) —, para o M14 de agenda_fase7c_motor.sql conferir que as cópias só acrescentam os blocos "-- FASE 7c:" e o M1 rodar o
+  // motor de antes no lugar; e a própria migration do motor da 7c (20261102100100), de onde o P3 e o 7d P4 conferem as cópias. As fontes
+  // das outras 7 já estão acima: _agenda_contexto e agenda_propor (mig_correcao_fase7b), _agenda_tentar_bloco e _agenda_encaixar
+  // (mig_motor_fase7b), _agenda_so_diaristas e _agenda_alocs_do_bloco (mig_motor_fase2) e _agenda_por_que_nao (mig_teto_fase7a).
+  ['agenda_teste.mig_tabelas_fase2', '../../supabase/migrations/20261025100000_agenda_fase2_tabelas.sql'],
+  ['agenda_teste.mig_motor_fase7c', '../../supabase/migrations/20261102100100_agenda_fase7c_motor.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */
