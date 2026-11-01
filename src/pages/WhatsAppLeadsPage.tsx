@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { AcoesDaLinha } from '@/components/AcoesDaLinha';
+import { useConfirmacao } from '@/components/Confirmacao';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -639,15 +640,28 @@ function LeadsView() {
 }
 
 // =============== BLOCKLIST ===============
-function BlocklistView() {
+export function BlocklistView() {
   const { data: blocked, isLoading } = useBlockedNumbers();
   const addMut = useAddBlockedNumber();
   const removeMut = useRemoveBlockedNumber();
   const [phone, setPhone] = useState('');
   const [reason, setReason] = useState('');
+  // Retorno F0b (06/11/2026): o número que pediu PARAR (tipo opt_out) aparece como tal, e desbloquear
+  // pede confirmação — ele voltaria a receber as mensagens automáticas que pediu para não receber.
+  const { pedir, dialogo } = useConfirmacao();
+  const desbloquear = (b: { id: string; tipo?: string | null; phone_normalized: string }) => {
+    if (b.tipo !== 'opt_out') { removeMut.mutate(b.id); return; }
+    pedir({
+      titulo: 'Desbloquear quem pediu para parar?',
+      descricao: `${formatPhone(b.phone_normalized)} pediu para não receber mensagens automáticas. Desbloqueado, volta a receber lembretes e avisos automáticos.`,
+      confirmar: 'Desbloquear mesmo assim',
+      acao: () => removeMut.mutate(b.id),
+    });
+  };
 
   return (
     <div className="space-y-4">
+      {dialogo}
       <div className="rounded-xl border bg-card p-4">
         <p className="text-sm font-medium mb-2">Adicionar número à blocklist</p>
         <p className="text-xs text-muted-foreground mb-3">Mensagens vindas destes números serão ignoradas (não criam leads nem notificam).</p>
@@ -670,10 +684,13 @@ function BlocklistView() {
             {blocked.map((b: any) => (
               <div key={b.id} className="p-3 flex items-center justify-between gap-2">
                 <div className="min-w-0">
-                  <p className="font-medium text-sm">{formatPhone(b.phone_normalized)}</p>
+                  <div className="font-medium text-sm flex flex-wrap items-center gap-2">
+                    {formatPhone(b.phone_normalized)}
+                    {b.tipo === 'opt_out' && <Badge variant="secondary" className="text-[10px]">Pediu para parar</Badge>}
+                  </div>
                   {b.reason && <p className="text-xs text-muted-foreground truncate">{b.reason}</p>}
                 </div>
-                <Button size="sm" variant="ghost" onClick={() => removeMut.mutate(b.id)} className="text-destructive">
+                <Button size="sm" variant="ghost" onClick={() => desbloquear(b)} className="text-destructive">
                   <ShieldOff className="h-3.5 w-3.5 mr-1" />Desbloquear
                 </Button>
               </div>
