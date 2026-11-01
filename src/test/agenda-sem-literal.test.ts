@@ -182,6 +182,13 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     vezes: 1,
     porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_rotina_rodar e agenda_gestor_rodar); não é texto_max nem peca_embutida_acima',
   },
+  // Fase 7c (P5, 20261102100400): a rodada de quem faz o quê grava a rodada como o aprendizado e a semana da equipe.
+  {
+    onde: 'agenda_habilidade',
+    casou: '1000',
+    vezes: 1,
+    porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_aprender e agenda_equipe_semana); não é texto_max nem peca_embutida_acima',
+  },
   // Fase 7b (P6, 20261101100500): quem chamar diz quanto a conta custou (as duas voltas do motor), como o livre de verdade.
   {
     onde: '_agenda_quem_chamar',

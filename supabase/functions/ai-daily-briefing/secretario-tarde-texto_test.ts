@@ -779,3 +779,51 @@ Deno.test("Correção 2 da 7a: a coleta repassa a forma curta da linha (só stri
   assertEquals("texto_curto" in lidas[1], false);
   assertEquals("texto_curto" in lidas[2], false);
 });
+
+// (Agenda de Produção, Fase 7c, P5, migration 20261102100400; spec-fase7c R5.1-6, R5.10-6/-7) A linha (n) "a equipe" passa a levar a
+// pergunta de quem faz o quê (perda 75 enquanto nunca foi vista). Os textos são os que o banco devolve com a equipe real (o Alex e o dono:
+// supabase/tests/agenda_fase7c_rodada.sql, R1real e R2g): a inteira com o texto do R5.1-6 e a forma curta, que diz o que foi marcado e o
+// prazo — o registro não sabe qual forma saiu e conta a pergunta como vista. Com o fechamento real de 29/10 (3 que ficaram, ~900
+// caracteres) e uma das outras duas que perdem hoje (compras 80 ou as perguntas do gestor 76), a da equipe entra na forma curta, dentro
+// de 1.000, e vai ao registro com as pergunta_ids dela. Com as três (compras, o gestor e a equipe), não cabem nem na forma curta (as duas
+// primeiras já somam ~920): sai a de menor perda, a da equipe, inteira, e ela não vai ao registro — o prazo dela não corre e ela volta no
+// dia seguinte com a mesma perda (nunca vista; spec-fase7c R5.2-2(b)). Sem mudar o TS.
+const EQUIPE_HAB_REAL = "Agenda: Para não mandar ninguém sozinho em serviço de risco, marquei quem faz o quê: Alex instala sozinho, também com " +
+  "220 V ou banco de bateria, e sobe no teto (você disse que ele vem todo dia útil). Comissionar Victron fica com você. Se você não " +
+  "responder até as 18:00 do próximo dia útil depois de ver esta pergunta, fica assim. Para corrigir, me diga numa frase (ex.: \"o Alex " +
+  "não sobe no teto\" ou \"o Alex é ajudante\").";
+const EQUIPE_HAB_CURTA = "Agenda, equipe: quem faz o quê — marquei: Alex instala sozinho; sem resposta até qui 05/11 às 18:00, fica assim. " +
+  "*agenda pendências* mostra.";
+
+Deno.test("Fase 7c (P5): com o Secretário cheio, a linha da equipe com quem faz o quê (75) entra na forma curta, com o que foi marcado e o prazo, dentro de 1.000 e com as pergunta_ids dela no registro — junto da compra (80) ou das perguntas do gestor (76); com as três, ela sai inteira e não é registrada (o prazo não corre)", () => {
+  const gestor = { ...l2("pergunta", PERGUNTAS_REAL.replace(/^Agenda: Hoje às 19:30 .*? Também, s/, "Agenda: S"), 76, "ligado",
+                         { pergunta_id: "q-gestor", pergunta_ids: ["q-gestor", "q-nelson"] }),
+                   texto_curto: PERGUNTAS_CURTA.replace(/^Agenda: Hoje às 19:30 .*? Para segurar, me diga\. /, "Agenda: ") };
+  const equipe = { ...l2("pergunta", EQUIPE_HAB_REAL, 75, "ligado", { pergunta_id: "q-hab", pergunta_ids: ["q-hab"] }),
+                   texto_curto: EQUIPE_HAB_CURTA };
+  // a compra e a equipe; as perguntas do gestor e a equipe: as duas entram, a da equipe na forma curta
+  for (const [outra, esperado] of [[l2("compras", COMPRAS_REAL, 80), ["compras 80", "pergunta 75"]],
+                                    [gestor, ["pergunta 76", "pergunta 75"]]] as const) {
+    const t = textoDaTarde(cheio([equipe, outra], 2));
+    assert((t.texto?.length ?? 0) <= LIMITE_DA_TARDE, String(t.texto?.length));
+    assertEquals(t.agenda?.linhas?.map((l) => `${l.tipo} ${l.perda}`), [...esperado]);
+    assertStringIncludes(t.texto ?? "", EQUIPE_HAB_CURTA);
+    assert(!(t.texto ?? "").includes(EQUIPE_HAB_REAL));
+    // o registro (registrarAgendaDoFechamento) recebe a pergunta da equipe: a forma curta dela também diz o prazo
+    const eq = t.agenda?.linhas?.find((l) => l.pergunta_id === "q-hab");
+    assertEquals(eq?.pergunta_ids, ["q-hab"]);
+    // as letras do Secretário continuam
+    assertEquals(t.letras.map((l) => l.letra), ["A", "B", "C"]);
+  }
+  // as três que perdem hoje: a compra e as perguntas do gestor ficam (na forma curta); a da equipe, a de menor perda, sai inteira e não
+  // vai ao registro — ela não conta como vista, o prazo não começa e ela volta amanhã com a mesma perda
+  const t3 = textoDaTarde(cheio([equipe, l2("compras", COMPRAS_REAL, 80), gestor], 3));
+  assert((t3.texto?.length ?? 0) <= LIMITE_DA_TARDE, String(t3.texto?.length));
+  assertEquals(t3.agenda?.linhas?.map((l) => `${l.tipo} ${l.perda}`), ["compras 80", "pergunta 76"]);
+  assert(!(t3.texto ?? "").includes("quem faz o quê"));
+  assertEquals(t3.agenda?.linhas?.some((l) => l.pergunta_id === "q-hab" || l.pergunta_ids?.includes("q-hab")), false);
+  // com vaga comum (0 que ficaram), a linha da equipe vai inteira, com o texto do R5.1-6
+  const t2 = textoDaTarde({ ...cheio([equipe], 1), ficaram: [] });
+  assertStringIncludes(t2.texto ?? "", EQUIPE_HAB_REAL);
+  assertEquals(t2.agenda?.linhas?.map((l) => l.pergunta_id), ["q-hab"]);
+});

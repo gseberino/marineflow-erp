@@ -115,13 +115,16 @@ create function pg_temp.sem_c3(p text) returns text language sql immutable as $f
             where dentro = 0 and not fecha order by o), E'\n')
 $f$;
 -- FASE 7c: (7c P2) a 20261102100100 recria _agenda_contexto e agenda_propor de novo, com os blocos "-- FASE 7c: … -- FASE 7c: fim" (no
--- nível de fora, só acréscimo): o X0 os tira antes (tirados, o corpo é o desta correção, byte a byte)
+-- nível de fora, só acréscimo): o X0 os tira antes (tirados, o corpo é o desta correção, byte a byte). (7c P5) A 20261102100400 recria
+-- _agenda_linhas_do_fechamento de novo, com blocos de fora e, dentro do bloco da 7b da linha (n), as marcas de dentro "-- (7c … -- (7c:
+-- fim)": saem também.
 create function pg_temp.sem_7c(p text) returns text language sql immutable as $f$
   select array_to_string(array(
-           select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7c:' and l !~ '-- FASE 7c: fim' then 1
-                                                when l ~ '^\s*-- FASE 7c: fim' then -1 else 0 end)
+           select l from (select l, o, sum(case when (l ~ '^\s*-- FASE 7c:' and l !~ '-- FASE 7c: fim')
+                                                     or (l ~ '^\s*-- \(7c ' and l !~ '^\s*-- \(7c: fim\)') then 1
+                                                when l ~ '^\s*-- (FASE 7c: fim|\(7c: fim\))' then -1 else 0 end)
                                        over (order by o rows between unbounded preceding and current row) as dentro,
-                                 l ~ '^\s*-- FASE 7c: fim' as fecha
+                                 l ~ '^\s*-- (FASE 7c: fim|\(7c: fim\))' as fecha
                             from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n')
 $f$;

@@ -75,15 +75,17 @@ end $f$;
 -- O texto sem os blocos desta correção: "-- FASE 7b: (correção 3) … -- FASE 7b: fim (correção 3)" e, dentro de um bloco da 7b de
 -- antes, "-- (correção 3) … -- (correção 3: fim)" (as linhas de abrir e de fechar saem junto). (FASE 7c: e os blocos "-- FASE 7c: …
 -- -- FASE 7c: fim" de uma recriação depois desta — a 20261102100000 recria _agenda_e_novato, só acréscimo —: a cópia continua
--- conferida contra a fonte desta correção)
+-- conferida contra a fonte desta correção). (FASE 7c (P5): e as marcas de dentro "-- (7c … -- (7c: fim)" que a 20261102100400 põe
+-- dentro do bloco da 7b da linha (n) de _agenda_linhas_do_fechamento — só acréscimo)
 create function pg_temp.sem_c3(p text) returns text language sql immutable as $f$
   select array_to_string(array(
            select l from (select l, o, sum(case when l ~ '^\s*-- (FASE 7b: )?\(correção 3\)'
-                                                     or (l ~ '^\s*-- FASE 7c:' and l !~ '^\s*-- FASE 7c: fim') then 1
-                                                when l ~ '^\s*-- (FASE 7b: fim \(correção 3\)|\(correção 3: fim\)|FASE 7c: fim)' then -1
+                                                     or (l ~ '^\s*-- FASE 7c:' and l !~ '^\s*-- FASE 7c: fim')
+                                                     or (l ~ '^\s*-- \(7c ' and l !~ '^\s*-- \(7c: fim\)') then 1
+                                                when l ~ '^\s*-- (FASE 7b: fim \(correção 3\)|\(correção 3: fim\)|FASE 7c: fim|\(7c: fim\))' then -1
                                                 else 0 end)
                                        over (order by o rows between unbounded preceding and current row) as dentro,
-                                 l ~ '^\s*-- (FASE 7b: fim \(correção 3\)|\(correção 3: fim\)|FASE 7c: fim)' as fecha
+                                 l ~ '^\s*-- (FASE 7b: fim \(correção 3\)|\(correção 3: fim\)|FASE 7c: fim|\(7c: fim\))' as fecha
                             from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n')
 $f$;

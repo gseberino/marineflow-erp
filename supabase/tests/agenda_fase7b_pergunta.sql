@@ -78,6 +78,20 @@ create function pg_temp.sem_7b(p text) returns text language sql immutable as $f
                             from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n')
 $f$;
+-- FASE 7c: (7c P5) a 20261102100400 recria _agenda_linhas_do_fechamento de novo, com blocos "-- FASE 7c: … -- FASE 7c: fim" de fora e,
+-- dentro do bloco da 7b da linha (n), as marcas de dentro "-- (7c … -- (7c: fim)" (só acréscimo): o Q12 os tira antes (tirados, o corpo é
+-- o da 7b, byte a byte)
+create function pg_temp.sem_7c(p text) returns text language sql immutable as $f$
+  select array_to_string(array(
+           select l from (select l, o, sum(case when (l ~ '^\s*-- FASE 7c:' and l !~ '^\s*-- FASE 7c: fim')
+                                                     or (l ~ '^\s*-- \(7c ' and l !~ '^\s*-- \(7c: fim\)') then 1
+                                                when l ~ '^\s*-- (FASE 7c: fim|\(7c: fim\))' then -1 else 0 end)
+                                       over (order by o rows between unbounded preceding and current row) as dentro,
+                                 l ~ '^\s*-- (FASE 7c: fim|\(7c: fim\))' as fecha
+                            from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
+            where dentro = 0 and not fecha order by o), E'\n')
+$f$;
+-- FASE 7c: fim
 -- p_sql (que devolve um valor) como o papel p_papel: o resultado em texto, ou 'erro <estado>: <mensagem>'.
 create function pg_temp.como(p_papel text, p_sql text) returns text language plpgsql as $f$
 declare
@@ -1051,6 +1065,7 @@ begin
       continue;
     end if;
     select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = f.sig::regprocedure;
+    v_novo := pg_temp.sem_7c(v_novo);  -- FASE 7c: (7c P5) os blocos e as marcas da 20261102100400 saem antes
     select count(*) into v_n from regexp_matches(v_novo, '-- FASE 7b: fim', 'g');
     insert into _resultado values (
       format('Q12 %s: sem os %s blocos "-- FASE 7b:", é o corpo de %s', f.nome, f.blocos, f.versao),

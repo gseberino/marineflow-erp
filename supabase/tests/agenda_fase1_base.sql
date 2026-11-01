@@ -1013,7 +1013,13 @@ insert into _definer_da_agenda values
   -- authenticated, o painel, e service_role, o WhatsApp, como as outras RPCs de rascunho) e o *grava* da linha (escreve agenda_etiquetas,
   -- os_planejamento e a pergunta habilidade:equipe; só o agenda_rascunho_gravar a chama; sem grant a ninguém, nem service_role). A frase
   -- da releitura é invoker. agenda_fase7c_conversa.sql prova as portas.
-  ('agenda_rascunho_habilidade'), ('_agenda_aplicar_habilidade');
+  ('agenda_rascunho_habilidade'), ('_agenda_aplicar_habilidade'),
+  -- (7c P5, 20261102100400) a rodada de quem faz o quê (só o service_role, pelo task-automations) e os quatro passos dela (escrevem
+  -- agenda_etiquetas, agenda_perguntas e agenda_acoes; sem grant a ninguém, nem service_role: só a rodada os chama), e as medidas (leem as
+  -- avaliações do publicado, que não têm grant a ninguém; conferem dentro quem vê: o admin/financeiro logado ou o service_role). O texto da
+  -- pergunta é invoker. agenda_fase7c_rodada.sql prova as portas.
+  ('agenda_habilidade'), ('_agenda_habilidade_propor'), ('_agenda_habilidade_vetos'), ('_agenda_habilidade_conferir'),
+  ('_agenda_habilidade_perguntas_os'), ('agenda_habilidade_medidas');
   -- FASE 7c: fim
 
 insert into _resultado
