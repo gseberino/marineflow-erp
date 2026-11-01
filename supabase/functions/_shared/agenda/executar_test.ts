@@ -805,3 +805,27 @@ Deno.test("Fase 7a (P7) — camada: o gestor e a dupla só com a agenda automát
   for (const t of ["gestor, só propor?", "Lenine com dupla?"]) assertEquals(await camadaDaAgenda(t, deps({ modo: "ligado" }).d), null, t);
   assertEquals((await camadaDaAgenda("o que você marcaria?", deps({ modo: "ligado" }).d))?.comando, { comando: "ver", periodo: null, foco: "gestor", pessoa: null });
 });
+
+// ─── Fase 7c (P4, spec-fase7c.md §7): *agenda quem faz* e "quem faz o quê" ──────────────────────────────────────────
+
+Deno.test("Fase 7c (P4) — chamadaDoComando: *agenda quem faz* e \"quem faz o quê\" → agenda_ver foco habilidades (o mesmo mapeamento da ferramenta)", () => {
+  const base = { p_autor: AUTOR, p_os: null, p_simular: null, p_simular_aprovacao: false, p_pessoa: null };
+  for (const t of ["agenda quem faz", "Agenda quem faz?", "quem faz o quê?", "Quem faz o que"]) {
+    assertEquals(chamadaDoComando(lerComandoDaAgenda(t) as ComandoDaAgenda, AUTOR),
+                 { rpc: RPC_AGENDA_VER, params: { ...base, p_periodo: null, p_foco: "habilidades" } }, t);
+  }
+  assertEquals(chamadaDoComando(lerComandoDaAgenda("quem faz o quê") as ComandoDaAgenda, AUTOR, "2026-11-04"),
+               { rpc: RPC_AGENDA_VER, params: { ...base, p_periodo: null, p_foco: "habilidades", p_hoje: "2026-11-04" } });
+});
+
+Deno.test("Fase 7c (P4) — executar: o texto do foco habilidades vem do banco; erro = frase + log; o técnico = a frase do administrador", async () => {
+  const ver = lerComandoDaAgenda("agenda quem faz") as ComandoDaAgenda;
+  const ok = cliente({ [RPC_AGENDA_VER]: { data: { ok: true, texto: "Quem faz o quê (em teste: ainda escalo como antes):" } } });
+  assertEquals(await executarComandoDaAgenda(ok, ver, { autor: AUTOR }),
+               { ok: true, texto: "Quem faz o quê (em teste: ainda escalo como antes):" });
+  const erro = cliente({ [RPC_AGENDA_VER]: { error: { message: "rede", code: "XX000" } } });
+  const r = await executarComandoDaAgenda(erro, ver, { autor: AUTOR });
+  assertEquals([r.ok, r.texto, erro.logs().length], [false, TEXTO_SEM_AGENDA, 1]);
+  const so = cliente({ [RPC_AGENDA_VER]: { error: { message: "Quem faz o quê é com o administrador ou o financeiro.", code: "42501" } } });
+  assertEquals((await executarComandoDaAgenda(so, ver, { autor: AUTOR })).texto, TEXTO_SO_ADMIN);
+});

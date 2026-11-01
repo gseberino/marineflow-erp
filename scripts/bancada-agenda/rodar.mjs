@@ -302,6 +302,10 @@ const FIXTURES_COMO_TEXTO = [
   // _agenda_violacoes. As fontes das 2 recriadas já estão acima: _agenda_violacoes (mig_correcao_calculo_fase6) e _agenda_gestor_reparo
   // (mig_correcao3_fase7b).
   ['agenda_teste.mig_violacao_fase7c', '../../supabase/migrations/20261102100200_agenda_fase7c_violacao.sql'],
+  // Fase 7c (P4): a própria migration da conversa (20261102100300), de onde o C6 de agenda_fase7c_conversa.sql confere que as cópias de
+  // _agenda_rascunho_frase e agenda_rascunho_gravar só acrescentam o bloco "-- FASE 7c:" e o P8 copia as duas (R5.4). A fonte delas, a
+  // 20261101100100 (a 7b P2), já está acima: mig_disponibilidade_fase7b.
+  ['agenda_teste.mig_conversa_fase7c', '../../supabase/migrations/20261102100300_agenda_fase7c_conversa.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

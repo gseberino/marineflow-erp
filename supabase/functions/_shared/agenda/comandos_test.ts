@@ -1211,3 +1211,79 @@ Deno.test("Fase 7b (P5) — o que o dono diz dos dias e da dupla vai ao modelo: 
   assertEquals(parseConfirmationReply("ok") !== null, true);
   for (const t of ["sim", "ok", "1"]) assertEquals(lerComandoDaAgenda(t), null, t);
 });
+
+// ─── Fase 7c (P4, spec-fase7c.md §7): *agenda quem faz* e "quem faz o quê" ────────────────────────────────────────────
+// De VER (valem com "?"; a normalização tira o acento: "quem faz o quê" = "quem faz o que"). "quem faz" não é nome de cliente, pessoa,
+// bem nem fornecedor (0 de 561 clientes em 01/11/2026, sql/wf7c_p4_01_quem_faz) nem palavra de outra ferramenta. O que o dono diz de
+// alguém ("o Roberto instala sozinho", "o João é ajudante") é conversa: vai ao modelo (equipe_habilidade).
+
+const verHabilidades: ComandoDaAgenda = { comando: "ver", periodo: null, foco: "habilidades", pessoa: null };
+
+const TABELA_F7C: Array<[string, ComandoDaAgenda]> = [
+  ["agenda quem faz", verHabilidades],
+  ["Agenda quem faz?", verHabilidades],
+  ["*agenda quem faz*", verHabilidades],
+  ["quem faz o que", verHabilidades],
+  ["Quem faz o quê?", verHabilidades],
+  ["quem faz o quê", verHabilidades],
+  ["*Quem faz o quê?*", verHabilidades],
+  ["🎤 Quem faz o quê.", verHabilidades],
+];
+
+Deno.test("Fase 7c (P4) — lerComandoDaAgenda: *agenda quem faz* e \"quem faz o quê\" (de ver: foco habilidades)", () => {
+  for (const [texto, esperado] of TABELA_F7C) assertEquals(lerComandoDaAgenda(texto), esperado, texto);
+  for (const f of ["agenda quem faz", "quem faz o que"]) assert(frasesDaAgenda().includes(f), `fora da tabela: ${f}`);
+});
+
+// O que o dono diz de quem faz o quê, a pergunta sobre uma OS e o que mexe NÃO são palavra: vão ao modelo.
+const CONVERSA_F7C = [
+  "quem faz", "quem faz?", "faz o que", "agenda quem faz o que", "quem faz o que no Lenine?", "quem faz o serviço do Lenine",
+  "quem faz isso", "o que o Roberto faz?", "quem faz o que amanhã", "o Roberto instala sozinho", "o João é ajudante",
+  "o Alex é novo, nunca deixa ele sozinho", "o Roberto não sobe no teto", "no Lenine o responsável é o Roberto",
+  "o Lenine não precisa de ninguém subindo no teto", "está certo o que você marcou da equipe", "liga o quem faz o quê",
+  "por que o João não vai sozinho no Lenine?", "habilidades", "agenda habilidades", "o Mateus é ajudante",
+];
+
+Deno.test("Fase 7c (P4) — o que o dono diz de quem faz o quê vai ao modelo (equipe_habilidade), não é palavra", () => {
+  for (const t of CONVERSA_F7C) assertEquals(lerComandoDaAgenda(t), null, t);
+});
+
+Deno.test("Fase 7c (P4) — as palavras novas e a conversa não são do secretário, da confirmação, do menu, do PDF, dos comprovantes nem da pergunta ativa", () => {
+  const formas = TABELA_F7C.map(([t]) => t);
+  for (const t of [...formas, ...formas.map((x) => `*${x.replace(/^\*|\*$/g, "")}*`), ...CONVERSA_F7C]) {
+    assertEquals(lerComandoDoSecretario(t), null, `secretário: ${t}`);
+    assertEquals(parseConfirmationReply(t), null, `confirmação: ${t}`);
+    assertEquals(parseOptionReply(t, 9), null, `opção: ${t}`);
+    assertEquals(lerPedidoDePdf(t), null, `pdf: ${t}`);
+    assertEquals(lerComando(t), null, `comprovantes: ${t}`);
+    const n = normalizarResposta(t.replace(/[*_~]/g, ""));
+    assertEquals(lerSimNao(n), null, `sim/não: ${t}`);
+    assertEquals(lerNumero(n, 99), null, `número: ${t}`);
+    assertEquals(pareceRespostaCurta(t), false, `resposta curta: ${t}`);
+    const trava = travaDaConfirmacao(estadoComCmpNoConfirmar(), t, { pending_confirm_action_id: "pend-1" });
+    assertEquals(trava.travar, false, `trava do CMP: ${t}`);
+  }
+  // nenhuma frase fixa de antes passa a ser lida como habilidades, e "sim", "ok" e "1" continuam da confirmação
+  const novas = new Set(["agenda quem faz", "quem faz o que"]);
+  for (const f of frasesDaAgenda().filter((x) => !novas.has(x))) {
+    const c = lerComandoDaAgenda(f);
+    assert(!(c?.comando === "ver" && c.foco === "habilidades"), f);
+  }
+  for (const t of ["sim", "ok", "1", "não", "2"]) assertEquals(lerComandoDaAgenda(t), null, t);
+  // as palavras de antes continuam lidas como eram
+  assertEquals(lerComandoDaAgenda("agenda gestor"), { comando: "ver", periodo: null, foco: "gestor", pessoa: null });
+  assertEquals(lerComandoDaAgenda("agenda equipe"), { comando: "ver", periodo: null, foco: "equipe", pessoa: null });
+});
+
+Deno.test("Fase 7c (P4) — webhook: *agenda quem faz* vai ao assistente só com a leitura fora de desligado (como as de ver)", async () => {
+  for (const modo of ["sombra", "ligado"]) {
+    for (const t of ["agenda quem faz", "quem faz o quê?"]) {
+      assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(modo), t), true, `${modo}: ${t}`);
+      // de ver: não depende da agenda automática
+      assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(modo, "desligado"), t), true, `${modo} sem a automática: ${t}`);
+    }
+  }
+  for (const modo of ["desligado", "erro", "sem_tabela"]) {
+    assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(modo, "ligado"), "agenda quem faz"), false, modo);
+  }
+});

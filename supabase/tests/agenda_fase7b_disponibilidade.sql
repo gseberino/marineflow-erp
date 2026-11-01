@@ -75,12 +75,15 @@ begin
   return left(v, position(E'\n$function$;' in v) + length(E'\n$function$;') - 1);
 end $f$;
 -- O texto sem os blocos "-- FASE 7b: … -- FASE 7b: fim" (as linhas de abrir e de fechar saem junto).
+-- FASE 7c: (7c P4) e sem os blocos "-- FASE 7c: … fim": _agenda_rascunho_frase e agenda_rascunho_gravar foram recriadas de novo em
+-- 20261102100300 (só acréscimo; o G19 confere a cópia da 7b nelas). A régua passa a "FASE 7[bc]"; a contagem dos blocos da 7b não muda.
+-- FASE 7c: fim
 create function pg_temp.sem_7b(p text) returns text language sql immutable as $f$
   select array_to_string(array(
-           select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7b:' and l !~ '-- FASE 7b: fim' then 1
-                                                when l ~ '^\s*-- FASE 7b: fim' then -1 else 0 end)
+           select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7[bc]:' and l !~ '-- FASE 7[bc]: fim' then 1
+                                                when l ~ '^\s*-- FASE 7[bc]: fim' then -1 else 0 end)
                                        over (order by o rows between unbounded preceding and current row) as dentro,
-                                 l ~ '^\s*-- FASE 7b: fim' as fecha
+                                 l ~ '^\s*-- FASE 7[bc]: fim' as fecha
                             from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n')
 $f$;

@@ -52,6 +52,12 @@
 // "semana de 16/11"). Quem vem sob demanda ("o Mateus vem quarta e quinta") é vem, sem padrao e sem semana: só nessas datas.
 // Nenhuma ferramenta nova (o teto de 113 continua); o banco confere no trecho e devolve a releitura.
 //
+// Fase 7c (P4, 01/11/2026; spec-fase7c.md §5.4, §7): equipe_habilidade — quem faz o quê na equipe ("o Roberto instala sozinho",
+// "o João é ajudante"), o que uma OS pede ("o Lenine não precisa de ninguém subindo no teto"), quem é o responsável dela ou o "está
+// certo" do que a agenda marcou vira RASCUNHO (agenda_rascunho_habilidade, migration 20261102100300), com a releitura pronta; só o
+// *grava* do dono grava (agenda_etiquetas, os_planejamento). Nunca escolhe quem vai (quem escala é a agenda). Fora da vista como as
+// outras escritas da agenda (pela ferramenta_extra, d14): o teto de 113 não muda. agenda_ver ganha o foco habilidades (o do P6).
+//
 // Cada execute chama UMA RPC com ctx.sb (painel: o JWT do dono; WhatsApp: service role), p_autor = ctx.userId e
 // p_canal pelo ctx.canal. O mapeamento argumento → parâmetro é o de _shared/agenda/rpc-das-ferramentas.ts (puro), o
 // mesmo dos evals. `if (error) throw`: leitura que falha nunca vira "nada marcado".
@@ -62,10 +68,13 @@ import {
   DUPLAS,
   ESCOPOS_DA_PROPOSTA,
   EVENTOS_DO_ANDAMENTO,
+  EXIGENCIAS,
   FOCOS,
   LIMPAVEIS,
+  MEIOS,
   MODALIDADES_DO_FORNECEDOR,
   MOTIVOS_DO_ANDAMENTO,
+  O_QUE_FAZ,
   paraAgendaVer,
   paraAndamento,
   paraAplicar,
@@ -73,6 +82,7 @@ import {
   paraDesfazer,
   paraDisponibilidade,
   paraFornecedor,
+  paraHabilidade,
   paraMaterial,
   paraPlanejar,
   paraPropor,
@@ -137,6 +147,8 @@ export const agendaProducaoTools: ToolDef[] = [
       "e mudar é decisão do dono pelas perguntas da agenda), " +
       "o que o gestor da agenda marcou ou marcaria sozinho e por quê (foco gestor: pela estimativa do orçamento, o que ele " +
       "perguntou antes de marcar e o que fica de fora; só lê), " +
+      "quem faz o quê na equipe e o que cada OS pede (foco habilidades: o que cada um faz, o responsável de cada OS, o que a " +
+      "agenda teria mudado em teste e as medidas; só lê), " +
       "o dia de alguém da equipe (pessoa + periodo), uma OS (os), " +
       "\"se o cliente aprovar hoje, quando dá\" (os + simular_aprovacao) ou um serviço que ainda não existe (simular). " +
       "Datas, dias livres, capacidade e duração vêm SÓ daqui: repita o texto, sem calcular nem mudar número, data ou nome. " +
@@ -504,6 +516,59 @@ export const agendaProducaoTools: ToolDef[] = [
     async execute(args, ctx) {
       if (ctx.userRole !== "admin") return SO_O_ADMINISTRADOR;
       const chamada = paraFornecedor(args, contexto(ctx));
+      if (!chamada.ok) return { error: chamada.error };
+      return resultadoDoRascunho(await chamar(ctx, chamada), chamada.rpc);
+    },
+  },
+  // ── Fase 7c (P4): quem faz o quê (rascunho + *grava*) ──
+  {
+    name: "equipe_habilidade",
+    description:
+      "Anota num RASCUNHO quem faz o quê na equipe (o_que_faz: instala_sozinho, ajudante, novo, comissiona, sobe_no_teto, " +
+      "nao_sobe_no_teto…), o que uma OS pede (os + exige + meios: todos, ultimo ou nao) ou quem é o responsável de uma OS (os + " +
+      "lider), ou que o dono confirma o que a agenda marcou (confirmar). Uma chamada por pessoa e por coisa dita, com trecho = as " +
+      "palavras dele. NÃO escolhe quem vai a um serviço (quem escala é a agenda) e não grava: devolve a releitura, e só o *grava* do " +
+      "dono grava.",
+    input_schema: {
+      type: "object",
+      properties: {
+        pessoa: { type: "string", description: "\"eu\" ou o nome (Roberto), como o dono falou. Só com o_que_faz." },
+        o_que_faz: {
+          type: "string",
+          enum: [...O_QUE_FAZ],
+          description:
+            "instala_com_alguem (instala só com alguém junto), instala_sozinho, instala_e_ensina, novo (nunca vai sozinho), ajudante " +
+            "(não vai sozinho em serviço de risco), quase_instala, nao_comissiona, acompanha_comissionamento, diagnostica (faz " +
+            "diagnóstico sozinho), comissiona (comissiona Victron sozinho), nao_sobe_no_teto, sobe_acompanhado, sobe_no_teto, " +
+            "sobe_e_orienta. Só o que o dono disse; nunca deduza.",
+        },
+        os: OS_DITA,
+        exige: {
+          type: "string",
+          enum: [...EXIGENCIAS],
+          description:
+            "O que a OS pede: energizado (220 V, 127 V ou banco de bateria), comissionamento (comissionar Victron), altura (subir no " +
+            "teto) ou diagnostico. Com os e meios.",
+        },
+        meios: {
+          type: "string",
+          enum: [...MEIOS],
+          description: "todos (em todos os dias), ultimo (só no último dia) ou nao (\"não precisa de ninguém subindo no teto\").",
+        },
+        lider: {
+          type: "string",
+          description: "O responsável da OS, como o dono disse (\"Roberto\"), ou \"ninguém\" (fica sem responsável fixo). Com os.",
+        },
+        confirmar: { type: "boolean", description: "true = o dono disse que está certo o que a agenda marcou da equipe." },
+        trecho: TRECHO,
+      },
+      required: ["trecho"],
+    },
+    risk: "low",
+    roles: SO_ADMIN,
+    async execute(args, ctx) {
+      if (ctx.userRole !== "admin") return SO_O_ADMINISTRADOR;
+      const chamada = paraHabilidade(args, contexto(ctx));
       if (!chamada.ok) return { error: chamada.error };
       return resultadoDoRascunho(await chamar(ctx, chamada), chamada.rpc);
     },

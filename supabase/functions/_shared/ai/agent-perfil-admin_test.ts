@@ -285,3 +285,46 @@ Deno.test("agenda de produção (Fase 4): técnico e financeiro não alcançam f
     for (const n of Object.keys(DA_FASE_4)) assertEquals(nomes.includes(n), false, `${n} ao alcance de ${cargo}`);
   }
 });
+
+// ───────── Agenda de Produção, Fase 7c (P4, 01/11/2026; spec-fase7c.md §7; decisão d14 do dono) ─────────
+
+const DA_FASE_7C: Record<string, Record<string, unknown>> = {
+  equipe_habilidade: { pessoa: "Roberto", o_que_faz: "instala_sozinho", trecho: "o Roberto instala sozinho" },
+};
+
+Deno.test("agenda de produção (Fase 7c): equipe_habilidade fora da vista, ao alcance da ferramenta_extra, e o teto de 113 continua", async () => {
+  for (const n of Object.keys(DA_FASE_7C)) {
+    assertEquals(PERFIL_ADMIN.has(n), false, `${n} à vista: só agenda_ver fica no perfil (d14)`);
+    assertEquals(PERFIL_OPERACAO.has(n), false, `${n} no perfil de operação: as listas não se cruzam (fica na rede)`);
+  }
+  zerarCacheDoPerfilDeTools();
+  const { p } = params("admin_enxuto", "admin", porCargo("admin"));
+  const r = await prepararFerramentasDoTurno(p as any);
+  const visiveis = r.tools.map((t) => t.name);
+  assert(visiveis.length <= 113, `admin vê ${visiveis.length}`);
+  for (const n of Object.keys(DA_FASE_7C)) {
+    assertEquals(visiveis.includes(n), false, `${n} está à vista`);
+    assert(r.alcancaveisPelaRede[n], `${n} devia estar ao alcance da ferramenta_extra`);
+  }
+  const enumDaExtra = (r.toolsByName[NOME_DA_FERRAMENTA_EXTRA].input_schema as any).properties.nome.enum as string[];
+  for (const n of Object.keys(DA_FASE_7C)) assert(enumDaExtra.includes(n), `${n} fora do enum da ferramenta_extra`);
+});
+
+Deno.test("agenda de produção (Fase 7c): equipe_habilidade roda DIRETO pela ferramenta_extra (sem pendência: quem grava é o *grava*)", async () => {
+  for (const [n, argumentos] of Object.entries(DA_FASE_7C)) {
+    execucoes.length = 0;
+    const { amb, pendingRows, auditRows } = await ambienteDoAdmin({ [n]: comExecuteFalso });
+    const r = await executarChamadaDeTool({ name: NOME_DA_FERRAMENTA_EXTRA, input: { nome: n, argumentos } }, amb);
+    assertEquals(execucoes, [n], `${n} não rodou direto`);
+    assertEquals(r.toolResult, { ok: true });
+    assertEquals(pendingRows.length, 0, `${n} virou pendência`);
+    assert(auditRows.some((a) => a.event_type === `fora_do_perfil:${n}`));
+  }
+});
+
+Deno.test("agenda de produção (Fase 7c): técnico e financeiro não alcançam equipe_habilidade (só admin, pelos roles)", async () => {
+  for (const cargo of ["technician", "financial"] as Role[]) {
+    const nomes = porCargo(cargo).map((t) => t.name);
+    for (const n of Object.keys(DA_FASE_7C)) assertEquals(nomes.includes(n), false, `${n} ao alcance de ${cargo}`);
+  }
+});

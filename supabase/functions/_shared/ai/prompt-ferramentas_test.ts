@@ -305,10 +305,14 @@ function secaoDaAgenda(): string {
 // agenda pergunta e quando, a semana dita (equipe_disponibilidade com semana), quem vem sob demanda só nas datas (vem, sem padrao e
 // sem semana), os focos equipe e gestor; e a dupla pela tarefa, o os_planejar dupla com dupla_meios e o ajudante que só o dono chama.
 // Teto 27.
-Deno.test("agenda de produção: a seção é curta (≤ 27 linhas: custa tokens em toda mensagem) e fica no bloco estável", () => {
+// Fase 7c (P4): quem faz o quê (spec-fase7c.md §7: +1 linha, o teto sobe 1 a partir do vigente) — entrou 1 linha: o que cada
+// pessoa faz, o que uma OS pede e o responsável dela vão para equipe_habilidade (uma chamada por pessoa e por coisa dita, com
+// trecho; nunca deduzir nem escolher quem vai), a leitura é agenda_ver foco habilidades e as fronteiras com equipe_disponibilidade
+// (quem VAI vir) e com agenda_propor fixar (pôr alguém num dia). Teto 28.
+Deno.test("agenda de produção: a seção é curta (≤ 28 linhas: custa tokens em toda mensagem) e fica no bloco estável", () => {
   const secao = secaoDaAgenda();
   const linhas = secao.split("\n");
-  assertEquals(linhas.length <= 27, true, `a seção tem ${linhas.length} linhas`);
+  assertEquals(linhas.length <= 28, true, `a seção tem ${linhas.length} linhas`);
   // Estável = em cache. O volátil muda a cada turno e não pode carregar a seção.
   const volatil = buildSystemBlocks(CONVERSA_LIGADA, { userName: "Teste", userRole: "admin", channel: "whatsapp" })[1].text;
   assertEquals(volatil.includes(SECAO_AGENDA), false);
@@ -617,8 +621,9 @@ Deno.test("agenda de produção (correção 29/10, P2): o serviço novo depois d
   assertStringIncludes(props.simular.description ?? "", "o 1º dia que cabe pelo plano de agora. Só simula: não marca nem reserva nada.");
   assertEquals(porNome.has("os_planejar"), true);
   assertEquals(secao.includes("`"), false);
-  // (Fase 7a, P7) o teto da seção passou a 25 (a linha do gestor da agenda); (Fase 7b, P5) a 27 (os dias de cada pessoa e a dupla)
-  assertEquals(secao.split("\n").length <= 27, true);
+  // (Fase 7a, P7) o teto da seção passou a 25 (a linha do gestor da agenda); (Fase 7b, P5) a 27 (os dias de cada pessoa e a dupla);
+  // (Fase 7c, P4) a 28 (quem faz o quê)
+  assertEquals(secao.split("\n").length <= 28, true);
 });
 
 // Fase 7b (P5; spec-fase7b.md §7 e §R4.8): as 2 linhas novas ensinam o que as ferramentas têm de verdade — a semana de
@@ -647,6 +652,37 @@ Deno.test("agenda de produção (Fase 7b, P5): os dias de cada pessoa e a dupla,
   const ver = porNome.get("agenda_ver")!;
   const focos = (ver.input_schema as { properties: { foco: { enum: string[] } } }).properties.foco.enum;
   assertEquals(focos.includes("equipe") && focos.includes("gestor"), true);
+  assertEquals(secao.includes("`"), false);
+});
+
+// Fase 7c (P4; spec-fase7c.md §7): a linha nova ensina o que a ferramenta tem de verdade — equipe_habilidade (rede, fora do perfil:
+// SO_PELA_REDE), uma chamada por pessoa e por coisa dita com trecho, o foco habilidades — e nunca manda o modelo deduzir o que a pessoa
+// faz nem escolher quem vai; as fronteiras são ferramentas de verdade (equipe_disponibilidade, agenda_propor com fixar).
+Deno.test("agenda de produção (Fase 7c, P4): quem faz o quê é equipe_habilidade, amarrado ao esquema; o foco habilidades; as fronteiras", () => {
+  const secao = secaoDaAgenda();
+  const linha = secao.split("\n").find((l) => l.startsWith("- Quem faz o quê (instala sozinho, é ajudante, é novo, comissiona Victron, sobe no teto)"))!;
+  assertEquals(!!linha, true, "a linha da 7c sumiu");
+  assertStringIncludes(linha, "o que uma OS pede e quem é o responsável dela: equipe_habilidade, uma chamada por pessoa e por coisa dita, com trecho");
+  assertStringIncludes(linha, "nunca deduza o que a pessoa faz nem escolha quem vai (quem escala é a agenda)");
+  assertStringIncludes(linha, "Para ler: agenda_ver foco habilidades.");
+  assertStringIncludes(linha, "Fronteiras: quem VAI vir num dia é equipe_disponibilidade; pôr alguém num dia é agenda_propor com fixar.");
+  // a ferramenta existe, está ao alcance (pela rede, fora do perfil) e tem o que a linha cita
+  const hab = porNome.get("equipe_habilidade")!;
+  assertEquals(!!hab, true, "equipe_habilidade não é ferramenta");
+  assertEquals(SO_PELA_REDE.has("equipe_habilidade"), true);
+  assertEquals(PERFIL_OPERACAO.has("equipe_habilidade"), false);
+  const hp = (hab.input_schema as { properties: Record<string, unknown>; required: string[] });
+  assertEquals(["pessoa", "o_que_faz", "os", "exige", "meios", "lider", "confirmar", "trecho"].every((k) => k in hp.properties), true);
+  assertEquals(hp.required, ["trecho"]);
+  const ver = porNome.get("agenda_ver")!;
+  const focos = (ver.input_schema as { properties: { foco: { enum: string[] } } }).properties.foco.enum;
+  assertEquals(focos.includes("habilidades"), true);
+  const propor = porNome.get("agenda_propor")!;
+  assertEquals("fixar" in (propor.input_schema as { properties: Record<string, unknown> }).properties, true);
+  assertEquals(porNome.has("equipe_disponibilidade"), true);
+  // *agenda quem faz* e "quem faz o quê" são palavras do dono (de ver), lidas antes do modelo
+  const c = lerComandoDaAgenda("quem faz o quê?");
+  assertEquals(c?.comando === "ver" ? c.foco : null, "habilidades");
   assertEquals(secao.includes("`"), false);
 });
 

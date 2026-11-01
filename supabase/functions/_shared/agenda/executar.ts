@@ -13,7 +13,8 @@
 // Nunca lança: erro vira uma frase ao dono e uma linha em app_error_logs (context 'agenda', action 'comando:<x>').
 //
 // O *grava* só existe aqui (e no painel, pela mesma camada): o modelo não tem ferramenta para gravar. Por isso as
-// ferramentas de rascunho (os_planejar, material_informar, equipe_disponibilidade) podem rodar direto pela rede.
+// ferramentas de rascunho (os_planejar, material_informar, equipe_disponibilidade; desde a Fase 7c, P4, equipe_habilidade) podem
+// rodar direto pela rede.
 //
 // Fase 2 (P5, 24/10/2026; spec-fase2.md §11): *dia feito*, *dia não* + motivo, *dia parcial* + motivo, *choveu* e
 // *desfaz* executam direto (agenda_conferir_dia, agenda_choveu, agenda_desfazer_dito): são a ordem exata do dono, e o
@@ -48,6 +49,10 @@
 // (agenda_dupla_dita: a dupla da OS, que a próxima marcação usa). As duas funções pedem o dia e a hora (p_hoje, p_agora): vão daqui
 // (o dia de Brasília e o instante de agora; nos testes, os que o teste passa). *agenda gestor* é agenda_ver foco gestor. Como o
 // *desfaz*, só com a agenda automática fora de 'desligado'. O nome da dupla que não acha OS (nao_achei) segue ao modelo.
+//
+// Fase 7c (P4, 01/11/2026; spec-fase7c.md §7): *agenda quem faz* e "quem faz o quê" são agenda_ver foco habilidades, pelo mesmo
+// caminho das de ver da Fase 1 (só com modo_leitura fora de 'desligado'). Nenhuma age: o que o dono diz de quem faz o quê vai ao
+// modelo (equipe_habilidade, que só deixa o rascunho) e só o *grava* grava. Nada novo aqui além do foco que o mapeamento aceita.
 
 import { diaBR } from "../agenda-dia.ts";
 import { logEdgeError } from "../log-error.ts";

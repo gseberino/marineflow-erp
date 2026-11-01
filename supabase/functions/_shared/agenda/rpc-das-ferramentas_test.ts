@@ -36,6 +36,13 @@ import {
   resultadoDoRascunho,
   SINONIMOS_DO_ANDAMENTO,
   UNIDADES_DO_PRAZO,
+  // Fase 7c (P4)
+  EXIGENCIAS,
+  MEIOS,
+  O_QUE_FAZ,
+  paraHabilidade,
+  RPC_HABILIDADE,
+  UMA_COISA_POR_VEZ,
 } from "./rpc-das-ferramentas.ts";
 
 const CTX = { autor: "aa000000-0000-4000-8000-000000000001", canal: "whatsapp" as const };
@@ -586,4 +593,74 @@ Deno.test("Fase 7b: paraDisponibilidade recusa a semana calculada (ISO) e a sema
   assert(erro(paraDisponibilidade({
     pessoa: "Rafael", situacao: "vem", dias: "seg a sex", semana: "semana que vem", padrao: true, trecho: "seg a sex",
   }, CTX7B)).includes("passe um dos dois"));
+});
+
+// ─── Fase 7c (P4, spec-fase7c.md §5.4, §7): paraHabilidade (quem faz o quê, o que a OS pede, o responsável, o "está certo") ───
+const CTX7C = { autor: "00000000-0000-4000-8000-000000000001", canal: "whatsapp" as const, hoje: "2026-11-04" };
+const NADA7C = { p_pessoa: null, p_o_que_faz: null, p_os: null, p_exige: null, p_meios: null, p_lider: null, p_confirmar: false };
+
+Deno.test("Fase 7c (P4): paraHabilidade — as 4 formas (pessoa + o_que_faz; os + exige + meios; os + lider; confirmar), com o trecho e nulos no que não veio", () => {
+  const base = { p_autor: CTX7C.autor, p_canal: "whatsapp", p_hoje: "2026-11-04" };
+  const a = params(paraHabilidade({ pessoa: "Roberto", o_que_faz: "instala_sozinho", trecho: "o Roberto instala sozinho" }, CTX7C));
+  assertEquals(a.rpc, "agenda_rascunho_habilidade");
+  assertEquals(a.params, { ...base, ...NADA7C, p_pessoa: "Roberto", p_o_que_faz: "instala_sozinho", p_trecho: "o Roberto instala sozinho" });
+  assertEquals(params(paraHabilidade({ os: "Lenine", exige: "altura", meios: "nao", trecho: "o Lenine não precisa de ninguém no teto" }, CTX7C))
+    .params, { ...base, ...NADA7C, p_os: "Lenine", p_exige: "altura", p_meios: "nao", p_trecho: "o Lenine não precisa de ninguém no teto" });
+  assertEquals(params(paraHabilidade({ os: "OS-00074", lider: "Roberto", trecho: "no Lenine o responsável é o Roberto" }, CTX7C)).params,
+    { ...base, ...NADA7C, p_os: "OS-00074", p_lider: "Roberto", p_trecho: "no Lenine o responsável é o Roberto" });
+  // "ninguém" é o responsável que sai (o banco limpa); o confirmar é o "está certo"
+  assertEquals(params(paraHabilidade({ os: "Lenine", lider: "ninguém", trecho: "o Lenine fica sem responsável" }, CTX7C)).params.p_lider,
+    "ninguém");
+  assertEquals(params(paraHabilidade({ confirmar: true, trecho: "está certo o que você marcou" }, CTX7C)).params,
+    { ...base, ...NADA7C, p_confirmar: true, p_trecho: "está certo o que você marcou" });
+  // o dono ("eu") e o painel
+  assertEquals(params(paraHabilidade({ pessoa: "eu", o_que_faz: "nao_sobe_no_teto", trecho: "eu não subo no teto" },
+    { ...CTX7C, canal: "painel" })).params.p_canal, "painel");
+  // o confirmar false não conta como forma
+  assertEquals(params(paraHabilidade({ pessoa: "João", o_que_faz: "ajudante", confirmar: false, trecho: "o João é ajudante" }, CTX7C))
+    .params.p_confirmar, false);
+});
+
+Deno.test("Fase 7c (P4): paraHabilidade recusa duas formas, a forma pela metade, o id, os valores fora da lista e sem trecho (nada chamado)", () => {
+  const umaCoisa = "Diga uma coisa por vez: o que a pessoa faz, o que a OS pede, quem é o responsável ou que está certo.";
+  for (const args of [
+    { pessoa: "Roberto", o_que_faz: "instala_sozinho", os: "Lenine", exige: "altura", meios: "todos", trecho: "x" },
+    { os: "Lenine", exige: "altura", meios: "todos", lider: "Roberto", trecho: "x" },
+    { pessoa: "Roberto", o_que_faz: "instala_sozinho", confirmar: true, trecho: "x" },
+    { os: "Lenine", lider: "Roberto", confirmar: true, trecho: "x" },
+  ]) {
+    assertEquals(erro(paraHabilidade(args, CTX7C)), `${umaCoisa}. Nada foi chamado.`, JSON.stringify(args));
+  }
+  assert(erro(paraHabilidade({ pessoa: "Roberto", trecho: "x" }, CTX7C)).startsWith("falta 'o_que_faz'"));
+  assert(erro(paraHabilidade({ o_que_faz: "ajudante", trecho: "x" }, CTX7C)).startsWith("falta 'pessoa'"));
+  assert(erro(paraHabilidade({ pessoa: "Roberto", o_que_faz: "ajudante", os: "Lenine", trecho: "x" }, CTX7C)).includes("vale para todo serviço"));
+  assert(erro(paraHabilidade({ exige: "altura", meios: "todos", trecho: "x" }, CTX7C)).startsWith("falta 'os'"));
+  assert(erro(paraHabilidade({ os: "Lenine", exige: "altura", trecho: "x" }, CTX7C)).startsWith("falta 'meios'"));
+  assert(erro(paraHabilidade({ os: "Lenine", meios: "todos", trecho: "x" }, CTX7C)).startsWith("falta 'exige'"));
+  assert(erro(paraHabilidade({ lider: "Roberto", trecho: "x" }, CTX7C)).startsWith("falta 'os'"));
+  assert(erro(paraHabilidade({ confirmar: true, os: "Lenine", trecho: "x" }, CTX7C)).includes("sem 'os'"));
+  assert(erro(paraHabilidade({ os: "Lenine", trecho: "x" }, CTX7C)).includes("diga o que ela pede"));
+  assert(erro(paraHabilidade({ trecho: "x" }, CTX7C)).startsWith("diga o que a pessoa faz"));
+  assert(erro(paraHabilidade({ pessoa: "Roberto", o_que_faz: "instala_sozinho" }, CTX7C)).startsWith("falta 'trecho'"));
+  assert(erro(paraHabilidade({ pessoa: UUID_QUALQUER, o_que_faz: "ajudante", trecho: "x" }, CTX7C)).includes("não o id"));
+  assert(erro(paraHabilidade({ os: "Lenine", lider: UUID_QUALQUER, trecho: "x" }, CTX7C)).includes("não o id"));
+  assert(erro(paraHabilidade({ os: UUID_QUALQUER, exige: "altura", meios: "todos", trecho: "x" }, CTX7C)).includes("não o id"));
+  assert(erro(paraHabilidade({ pessoa: "Roberto", o_que_faz: "pilota_barco", trecho: "x" }, CTX7C)).includes("'o_que_faz' aceita só"));
+  assert(erro(paraHabilidade({ os: "Lenine", exige: "solda", meios: "todos", trecho: "x" }, CTX7C)).includes("'exige' aceita só"));
+  assert(erro(paraHabilidade({ os: "Lenine", exige: "altura", meios: "metade", trecho: "x" }, CTX7C)).includes("'meios' aceita só"));
+  assert(erro(paraHabilidade({ confirmar: "sim", trecho: "x" }, CTX7C)).includes("true ou false"));
+});
+
+Deno.test("Fase 7c (P4): os valores são os do banco (§3.2 e o CHECK de exigencias_ditas); agenda_ver aceita o foco habilidades", () => {
+  assertEquals([...O_QUE_FAZ], [
+    "instala_com_alguem", "instala_sozinho", "instala_e_ensina", "novo", "ajudante", "quase_instala", "nao_comissiona",
+    "acompanha_comissionamento", "diagnostica", "comissiona", "nao_sobe_no_teto", "sobe_acompanhado", "sobe_no_teto", "sobe_e_orienta",
+  ]);
+  assertEquals([...EXIGENCIAS], ["energizado", "comissionamento", "altura", "diagnostico"]);
+  assertEquals([...MEIOS], ["todos", "ultimo", "nao"]);
+  assertEquals(RPC_HABILIDADE, "agenda_rascunho_habilidade");
+  assertEquals(UMA_COISA_POR_VEZ, "Diga uma coisa por vez: o que a pessoa faz, o que a OS pede, quem é o responsável ou que está certo.");
+  assertEquals((FOCOS as readonly string[]).includes("habilidades"), true);
+  const v = paraAgendaVer({ foco: "habilidades", os: "Lenine" }, CTX7C);
+  assertEquals(v.ok && [v.params.p_foco, v.params.p_os], ["habilidades", "Lenine"]);
 });

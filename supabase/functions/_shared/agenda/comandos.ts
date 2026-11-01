@@ -99,6 +99,14 @@
 //   meio: a tabela tem as duas formas. "gestor" e "dupla" não são nome de cliente nem palavra de outra ferramenta
 //   (comandos_test.ts). Gestor e dupla só com a agenda automática fora de 'desligado' (ehPalavraDaFase2), como o *desfaz*.
 //
+// Fase 7c (P4, 01/11/2026; spec-fase7c.md §7) — quem faz o quê na equipe:
+//   agenda quem faz · quem faz o que · quem faz o quê     → foco habilidades (o que cada um faz, o que cada OS pede, o responsável,
+//                                                          o que a agenda teria mudado em teste e as medidas; o foco é do P6)
+//   De VER (vale com "?"); com a leitura fora de desligado, como as da Fase 1. A normalização tira o acento ("quê" = "que"). "quem faz"
+//   não é nome de cliente, pessoa, bem nem fornecedor (0 de 561 clientes em 01/11/2026, sql/wf7c_p4_01_quem_faz) nem palavra de outra
+//   ferramenta (comandos_test.ts). O que o dono diz de alguém ("o Roberto instala sozinho") é conversa: vai ao modelo
+//   (equipe_habilidade).
+//
 // Correção de 29/10 (P1) — as frases naturais do dono que caíam no modelo sem roteiro (todas de VER, valem com "?"):
 //   quando tenho agenda livre · quando eu tenho agenda livre · tenho agenda livre · eu tenho agenda livre
 //   quando estou livre · quando eu estou livre · tem vaga na agenda · quando tem vaga na agenda      → livre (como *livre*)
@@ -141,7 +149,9 @@ export type FocoDoComando =
   // (Fase 6, P8) o que a agenda aprendeu com o que aconteceu
   | "aprendizado"
   // (Fase 7a, P7) o que o gestor da agenda marcou ou marcaria sozinho e por quê
-  | "gestor";
+  | "gestor"
+  // (Fase 7c, P4) quem faz o quê na equipe e o que cada OS pede
+  | "habilidades";
 export type ResultadoDoDia = "cumprido" | "parcial" | "nao_cumprido";
 
 export type ComandoDaAgenda =
@@ -233,6 +243,8 @@ frases(
   ["gestor, pode marcar", "gestor pode marcar", "gestor volta a marcar", "gestor, volta a marcar"],
   { comando: "gestor", so_propor: false },
 );
+// Fase 7c (P4): quem faz o quê na equipe (de ver; "quem faz o quê" chega sem o acento)
+frases(["agenda quem faz", "quem faz o que"], ver(null, "habilidades"));
 // Correção de 29/10 (P1): as frases naturais do dono (a mesma leitura da palavra curta; "quando tem vaga" sozinho é conversa)
 frases(
   [

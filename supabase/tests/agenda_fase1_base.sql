@@ -1007,8 +1007,14 @@ insert into _definer_da_agenda values
   -- (7b P3, 20261101100200) a rodada da semana da equipe (registra e enfileira a pergunta à equipe, grava as perguntas ao dono, a lista
   -- da rotina pela regra d14, o resumo da semana e a rodada; só o service_role, pelo task-automations). A leitura da resposta, as
   -- previstas, o texto e o motivo do dono são invoker. agenda_fase7b_pergunta.sql prova as portas.
-  ('agenda_equipe_semana');
+  ('agenda_equipe_semana'),
   -- FASE 7b: fim
+  -- FASE 7c: (7c P4, 20261102100300) a conversa — a RPC da ferramenta equipe_habilidade (confere o administrador e escreve o rascunho;
+  -- authenticated, o painel, e service_role, o WhatsApp, como as outras RPCs de rascunho) e o *grava* da linha (escreve agenda_etiquetas,
+  -- os_planejamento e a pergunta habilidade:equipe; só o agenda_rascunho_gravar a chama; sem grant a ninguém, nem service_role). A frase
+  -- da releitura é invoker. agenda_fase7c_conversa.sql prova as portas.
+  ('agenda_rascunho_habilidade'), ('_agenda_aplicar_habilidade');
+  -- FASE 7c: fim
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

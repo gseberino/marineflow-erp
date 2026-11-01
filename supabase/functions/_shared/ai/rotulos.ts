@@ -93,6 +93,7 @@ export const TITULOS_DAS_ACOES_DIRETAS: Record<string, string> = {
   enviar_extrato_freelancer: "Mandar extrato do freelancer para você",
   enviar_relatorio_pdf: "Mandar relatório em PDF para você",
   equipe_disponibilidade: "Anotar disponibilidade da equipe",
+  equipe_habilidade: "Anotar quem faz o quê",
   fornecedor_prazo: "Anotar prazo do fornecedor",
   gastos_por_categoria: "Gastos por categoria",
   identify_contact: "Identificar contato",

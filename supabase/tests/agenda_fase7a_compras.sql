@@ -122,8 +122,10 @@ declare
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
     -- FASE 7b: (7b P2) agenda_rascunho_gravar recriada de novo em 20261101100100 (só acréscimo): os blocos "-- FASE 7b: … fim" saem
-    if l ~ '^\s*-- FASE 7b: fim' then v_7b := false; continue; end if;
-    if l ~ '^\s*-- FASE 7b:' then v_7b := true; continue; end if;
+    -- FASE 7c: (7c P4) e os blocos "-- FASE 7c: … fim" (recriada de novo em 20261102100300, só acréscimo): a régua passa a "FASE 7[bc]"
+    -- FASE 7c: fim
+    if l ~ '^\s*-- FASE 7[bc]: fim' then v_7b := false; continue; end if;
+    if l ~ '^\s*-- FASE 7[bc]:' then v_7b := true; continue; end if;
     if v_7b then continue; end if;
     -- FASE 7b: fim
     if not v_bloco and l ~ '^\s*-- FASE 7: \(7a P10' then v_bloco := true; continue; end if;

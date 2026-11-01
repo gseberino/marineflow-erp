@@ -30,6 +30,12 @@
 // "semana que vem", "semana de 16/11"; o banco converte e confere no trecho). Os dois só vão quando ditos: sem eles, a chamada é a de
 // antes (a RPC antiga, antes da migration, continua servindo). "Mateus vem quarta e quinta" (quem vem sob demanda) é vem, sem padrao
 // e sem semana: o banco lê as datas.
+//
+// Fase 7c (P4, 01/11/2026; spec-fase7c.md §5.4, §7): paraHabilidade (agenda_rascunho_habilidade: quem faz o quê na equipe, o que uma
+// OS pede, o responsável dela ou o "está certo" do que a agenda marcou). Uma forma por chamada — (a) pessoa + o_que_faz (os 14 de
+// O_QUE_FAZ); (b) os + exige + meios; (c) os + lider (a pessoa ou "ninguém"); (d) confirmar —; mais de uma é recusa. Também exige o
+// trecho (o banco confere nele o que a pessoa faz e o que a OS pede) e só deixa rascunho; pessoa e OS como o dono disse, nunca o id.
+// FOCOS ganha habilidades (o foco do P6; *agenda quem faz* e "quem faz o quê" chegam por ele).
 
 export type CanalDaRpc = "whatsapp" | "painel";
 
@@ -88,7 +94,29 @@ export const FOCOS = [
   // (Fase 7a, P7) o que o gestor da agenda marcou ou marcaria sozinho e por quê, o que perguntou antes, o que fica de fora e como
   // ele conta (_agenda_ver_gestor, 20261031100600)
   "gestor",
+  // (Fase 7c, P4; o foco é do P6, 20261102100500) quem faz o quê na equipe e o que cada OS pede: o que cada um faz, o responsável de
+  // cada OS, o que a agenda teria mudado em teste e as medidas (_agenda_ver_habilidades)
+  "habilidades",
 ] as const;
+/** (Fase 7c, P4) equipe_habilidade → agenda_rascunho_habilidade (migration 20261102100300): só deixa rascunho. */
+export const RPC_HABILIDADE = "agenda_rascunho_habilidade";
+/**
+ * (Fase 7c, P4; spec-fase7c §3.2) O que a pessoa faz, na palavra do dono → a etiqueta e o nível no banco: instala 1–3
+ * (instala_com_alguem, instala_sozinho, instala_e_ensina), ajudante 1–3 (novo, ajudante, quase_instala), comissiona 0–3
+ * (nao_comissiona, acompanha_comissionamento, diagnostica, comissiona) e altura 0–3 (nao_sobe_no_teto, sobe_acompanhado, sobe_no_teto,
+ * sobe_e_orienta).
+ */
+export const O_QUE_FAZ = [
+  "instala_com_alguem", "instala_sozinho", "instala_e_ensina", "novo", "ajudante", "quase_instala", "nao_comissiona",
+  "acompanha_comissionamento", "diagnostica", "comissiona", "nao_sobe_no_teto", "sobe_acompanhado", "sobe_no_teto", "sobe_e_orienta",
+] as const;
+/** (Fase 7c, P4) O que uma OS pede (os_planejamento.exigencias_ditas): 220 V ou banco de bateria, comissionar, subir no teto, diagnóstico. */
+export const EXIGENCIAS = ["energizado", "comissionamento", "altura", "diagnostico"] as const;
+/** (Fase 7c, P4) Em que meios-dias a OS pede: todos, só o último, ou não pede (nao tira o que as regras acham). */
+export const MEIOS = ["todos", "ultimo", "nao"] as const;
+/** (Fase 7c, P4) A recusa de mais de uma coisa numa chamada (a mesma frase do banco, 22023). */
+export const UMA_COISA_POR_VEZ =
+  "Diga uma coisa por vez: o que a pessoa faz, o que a OS pede, quem é o responsável ou que está certo.";
 /** (Fase 5, P5) cliente_avisar → agenda_cliente_preparar (migration 20261028100500): prepara, nunca envia. */
 export const RPC_CLIENTE_PREPARAR = "agenda_cliente_preparar";
 /**
@@ -630,6 +658,59 @@ export function paraFornecedor(args: unknown, ctx: ContextoDaRpc): ChamadaDaRpc 
       p_prazo: prazo,
       p_unidade: unidade,
       p_mesmo_que: mesmoQue,
+      p_trecho: t,
+    }, ctx);
+  });
+}
+
+// ── Fase 7c (P4): quem faz o quê ────────────────────────────────────────────────────────────────────────
+
+/**
+ * equipe_habilidade → agenda_rascunho_habilidade: UMA forma por chamada — (a) pessoa + o_que_faz; (b) os + exige + meios; (c) os +
+ * lider (a pessoa como o dono disse, ou "ninguém"); (d) confirmar (o "está certo" do que a agenda marcou) — e o trecho. Mais de uma é
+ * recusa (UMA_COISA_POR_VEZ); a forma pela metade diz o que falta. Nunca id: a pessoa, o responsável e a OS como o dono disse.
+ */
+export function paraHabilidade(args: unknown, ctx: ContextoDaRpc): ChamadaDaRpc {
+  return mapear(RPC_HABILIDADE, () => {
+    const a = objeto(args);
+    const pessoa = referenciaDaPessoa(a.pessoa, "pessoa", false);
+    const oQueFaz = umDe(a.o_que_faz, "o_que_faz", O_QUE_FAZ, false);
+    const exige = umDe(a.exige, "exige", EXIGENCIAS, false);
+    const meios = umDe(a.meios, "meios", MEIOS, false);
+    const lider = referenciaDaPessoa(a.lider, "lider", false);
+    const confirmar = booleano(a.confirmar, "confirmar") ?? false;
+    const formas = [pessoa !== null || oQueFaz !== null, exige !== null || meios !== null, lider !== null, confirmar]
+      .filter(Boolean).length;
+    if (formas > 1) recusar(UMA_COISA_POR_VEZ);
+    const os = referenciaDaOs(a.os, false);
+    if (formas === 0) {
+      recusar(os
+        ? "com 'os', diga o que ela pede (exige e meios) ou quem é o responsável (lider)"
+        : "diga o que a pessoa faz (pessoa e o_que_faz), o que a OS pede (os, exige e meios), quem é o responsável (os e lider) ou que está certo (confirmar)");
+    }
+    if (pessoa !== null || oQueFaz !== null) {
+      if (!pessoa) recusar("falta 'pessoa': \"eu\" ou o nome (Roberto)");
+      if (!oQueFaz) recusar(`falta 'o_que_faz' (${O_QUE_FAZ.join(", ")})`);
+      if (os) recusar("'os' não vai com pessoa e o_que_faz: o que a pessoa faz vale para todo serviço");
+    }
+    if (exige !== null || meios !== null) {
+      if (!os) recusar("falta 'os': o número (OS-00112) ou o nome do cliente, como o dono falou");
+      if (!exige) recusar(`falta 'exige' (${EXIGENCIAS.join(", ")})`);
+      if (!meios) recusar(`falta 'meios' (${MEIOS.join(", ")})`);
+    }
+    if (lider !== null && !os) recusar("falta 'os': de qual serviço é o responsável (o número ou o nome do cliente)");
+    if (confirmar && os) recusar("'confirmar' é o \"está certo\" do que a agenda marcou da equipe: sem 'os'");
+    const t = trecho(a.trecho);
+    return comHoje({
+      p_autor: ctx.autor,
+      p_canal: ctx.canal,
+      p_pessoa: pessoa,
+      p_o_que_faz: oQueFaz,
+      p_os: os,
+      p_exige: exige,
+      p_meios: meios,
+      p_lider: lider,
+      p_confirmar: confirmar,
       p_trecho: t,
     }, ctx);
   });

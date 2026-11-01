@@ -120,9 +120,12 @@ begin
     -- 20261031100800: só acréscimo)
     -- FASE 7b: (7b P2) e os blocos "-- FASE 7b: … fim" (a 20261101100100 recria de novo, só acréscimo): a régua é "FASE 7b?"
     -- FASE 7b: fim
-    if not v_f7 and l ~ '^\s*-- FASE 7b?:' and l !~ '^\s*-- FASE 7b?: fim' then v_f7 := true; continue; end if;
+    -- FASE 7c: (7c P4) e os blocos "-- FASE 7c: … fim" (_agenda_rascunho_frase e agenda_rascunho_gravar recriadas de novo em
+    -- 20261102100300, só acréscimo): a régua passa a "FASE 7[bc]?"
+    -- FASE 7c: fim
+    if not v_f7 and l ~ '^\s*-- FASE 7[bc]?:' and l !~ '^\s*-- FASE 7[bc]?: fim' then v_f7 := true; continue; end if;
     if v_f7 then
-      if l ~ '^\s*-- FASE 7b?: fim' then v_f7 := false; end if;
+      if l ~ '^\s*-- FASE 7[bc]?: fim' then v_f7 := false; end if;
       continue;
     end if;
     if not v_bloco and l ~ '^\s*-- FASE 5:' and l !~ '^\s*-- FASE 5: fim' then v_bloco := true; continue; end if;
