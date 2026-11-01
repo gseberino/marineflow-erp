@@ -1,10 +1,12 @@
 import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
+  dddDoTelefone,
   decidirSaidaAutomatica,
   ehAutomatica,
   ehDaEquipe,
   horaDeBrasilia,
   manterReservaNaFalha,
+  proximaAberturaDaJanela,
   reservaImpedeEnvio,
 } from "./saida-automatica.ts";
 
@@ -16,9 +18,15 @@ Deno.test("automático é só a chamada de sistema com origem sistema", () => {
   assert(!ehAutomatica("sistema", false));
 });
 
-Deno.test("equipe: compara pela chave do telefone, com e sem 55", () => {
+Deno.test("equipe: compara pela chave do telefone, com e sem 55, e exige o mesmo DDD", () => {
   assert(ehDaEquipe("5547999990001", ["47999990001"]));
+  assert(ehDaEquipe("554799990001", ["5547999990001"]), "com e sem o 9");
   assert(!ehDaEquipe("5547999990002", ["47999990001", null, undefined]));
+  // os mesmos 8 dígitos, de outro DDD: não é o dono
+  assert(!ehDaEquipe("5511999990001", ["5547999990001"]));
+  assertEquals(dddDoTelefone("5547999990001"), "47");
+  assertEquals(dddDoTelefone("(47) 3333-0001"), "47");
+  assertEquals(dddDoTelefone("99999-0001"), null);
 });
 
 Deno.test("hora de Brasília: a hora certa, e null quando não dá para saber", () => {
@@ -26,6 +34,15 @@ Deno.test("hora de Brasília: a hora certa, e null quando não dá para saber", 
   assertEquals(horaDeBrasilia(new Date("2026-11-05T02:59:00Z")), 23);
   assertEquals(horaDeBrasilia(new Date("2026-11-05T03:00:00Z")), 0);
   assertEquals(horaDeBrasilia(new Date("data inválida")), null);
+});
+
+Deno.test("próxima abertura da janela: hoje às 8h antes das 8h; amanhã às 8h depois", () => {
+  // 06:30 de Brasília (09:30 UTC) → hoje 08:00 (11:00 UTC)
+  assertEquals(proximaAberturaDaJanela(new Date("2026-11-05T09:30:00Z")).toISOString(), "2026-11-05T11:00:00.000Z");
+  // 21:10 de Brasília (00:10 UTC do dia seguinte) → amanhã 08:00
+  assertEquals(proximaAberturaDaJanela(new Date("2026-11-06T00:10:00Z")).toISOString(), "2026-11-06T11:00:00.000Z");
+  // 20:00 de Brasília → amanhã 08:00
+  assertEquals(proximaAberturaDaJanela(new Date("2026-11-05T23:00:00Z")).toISOString(), "2026-11-06T11:00:00.000Z");
 });
 
 Deno.test("portão: a equipe passa sempre, mesmo com checagem falhando", () => {

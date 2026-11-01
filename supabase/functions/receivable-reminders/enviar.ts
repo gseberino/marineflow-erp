@@ -35,10 +35,12 @@ export function diasEntre(de: string, ate: string): number {
 /**
  * Vencimentos que este dia útil lembra: os que cairiam hoje e os que cairiam nos dias sem envio
  * desde o último dia útil (domingo, feriado). Sem dia pulado, é só o vencimento de hoje + N, como
- * antes. Ex.: N = 3, segunda depois de sábado útil → quarta e quinta.
+ * antes. Ex.: N = 3, segunda depois de sábado útil → quarta e quinta. Nunca antes de hoje: com mais
+ * dias pulados que N (recesso, N pequeno), o que já venceu não ganha "vence hoje" com data passada.
  */
 export function vencimentosDoDia(hoje: string, ultimoDiaUtil: string, diasAntes: number): { de: string; ate: string } {
-  return { de: somarDias(ultimoDiaUtil, diasAntes + 1), ate: somarDias(hoje, diasAntes) };
+  const de = somarDias(ultimoDiaUtil, diasAntes + 1);
+  return { de: de < hoje ? hoje : de, ate: somarDias(hoje, diasAntes) };
 }
 
 /** "vence *hoje*", "vence *amanhã*" ou "vence em *N dias*". */

@@ -63,19 +63,7 @@ alter table public.whatsapp_blocked_numbers
 alter table public.whatsapp_blocked_numbers
   add constraint whatsapp_blocked_numbers_tipo_check check (tipo in ('spam', 'opt_out'));
 
--- DDD de um telefone brasileiro: com 55 (12–13 dígitos) ou sem (10–11). Só 8–9 dígitos: nulo.
-create or replace function public._ddd_do_telefone(p_fone text)
-returns text
-language sql
-immutable
-set search_path = public
-as $$
-  select case
-    when d ~ '^55[0-9]{10,11}$' then substr(d, 3, 2)
-    when d ~ '^[0-9]{10,11}$' then substr(d, 1, 2)
-  end
-  from (select regexp_replace(coalesce(p_fone, ''), '\D', '', 'g') as d) x;
-$$;
+-- _ddd_do_telefone e _mesmo_telefone vêm da F0a-1 (20261105100000).
 
 create or replace function public.quem_escreve(p_fone text)
 returns jsonb
@@ -97,10 +85,11 @@ begin
     return jsonb_build_object('papel', 'sem_numero', 'versao', 1);
   end if;
 
+  -- Equipe pelo mesmo telefone (8 dígitos e o mesmo DDD): um estranho com os 8 dígitos do dono não vira equipe.
   select exists (select 1 from public.app_users u
-                  where u.active and v_chave in (public._agenda_chave_telefone(u.phone_normalized), public._agenda_chave_telefone(u.phone)))
+                  where u.active and (public._mesmo_telefone(p_fone, u.phone_normalized) or public._mesmo_telefone(p_fone, u.phone)))
       or exists (select 1 from public.payees p
-                  where p.active and public._agenda_chave_telefone(p.phone) = v_chave)
+                  where p.active and public._mesmo_telefone(p_fone, p.phone))
     into v_equipe;
   if v_equipe then
     return jsonb_build_object('papel', 'equipe', 'chave', v_chave, 'ddd', v_ddd, 'versao', 1);
@@ -153,7 +142,6 @@ comment on function public.quem_escreve(text) is
 
 revoke all on function public.quem_escreve(text) from public, anon, authenticated;
 grant execute on function public.quem_escreve(text) to service_role;
-revoke all on function public._ddd_do_telefone(text) from public, anon;
 
 create or replace function public._saida_e_humana(p_direcao text, p_raw jsonb, p_sent_by uuid)
 returns boolean

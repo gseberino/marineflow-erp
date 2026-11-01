@@ -5,6 +5,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { chaveDeEnvio, diaLocal } from "../_shared/whatsapp/idempotencia.ts";
+import { proximaAberturaDaJanela } from "../_shared/whatsapp/saida-automatica.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
 const corsHeaders = {
@@ -159,6 +160,23 @@ servirComCors(async (req) => {
         });
         const body = await res.json().catch(() => ({}));
         const ok = res.ok && !(body as any).error;
+
+        // Retorno F0a-1 (05/11/2026): o agendamento sai como envio automático, e o whatsapp-send
+        // recusa (422) fora das 8h–20h de Brasília, a quem pediu para não receber e o "Cliente
+        // Final". Fora do horário, espera a próxima abertura sem gastar tentativa (a recorrência
+        // segue quando sair); as outras recusas não mudam repetindo: falha na hora, com o motivo.
+        if (res.status === 422 && (body as any).recusado === true) {
+          failed++;
+          const foraDoHorario = (body as any).codigo === "fora_de_horario";
+          await admin
+            .from("whatsapp_scheduled_sends")
+            .update(foraDoHorario
+              ? { status: "pending", attempt_count: job.attempt_count || 0, last_error: (body as any).error,
+                  next_run_at: proximaAberturaDaJanela().toISOString() }
+              : { status: "failed", last_error: (body as any).error, last_response: body })
+            .eq("id", job.id);
+          continue;
+        }
 
         if (!ok) throw new Error((body as any).error || `HTTP ${res.status}`);
 

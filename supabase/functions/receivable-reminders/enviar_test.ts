@@ -109,6 +109,13 @@ Deno.test("dia útil: segunda depois do domingo cobre o vencimento que caiu no d
   assertEquals(vencimentosDoDia("2026-11-09", "2026-11-06", 3), { de: "2026-11-10", ate: "2026-11-12" });
 });
 
+Deno.test("dia útil: mais dias pulados que N nunca volta antes de hoje (nada de 'vence hoje' com data passada)", () => {
+  // recesso: último útil 18/12, hoje 05/01, N = 3 → de 05/01 (não 22/12) a 08/01
+  assertEquals(vencimentosDoDia("2027-01-05", "2026-12-18", 3), { de: "2027-01-05", ate: "2027-01-08" });
+  // N = 1, segunda depois de sexta útil: de segunda (não domingo) a terça
+  assertEquals(vencimentosDoDia("2026-11-09", "2026-11-06", 1), { de: "2026-11-09", ate: "2026-11-10" });
+});
+
 Deno.test("prazo: hoje, amanhã ou N dias, pelo vencimento de verdade", () => {
   assertEquals(textoDoPrazo(diasEntre("2026-11-09", "2026-11-12")), "vence em *3 dias*");
   assertEquals(textoDoPrazo(diasEntre("2026-11-09", "2026-11-11")), "vence em *2 dias*");

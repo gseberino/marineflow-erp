@@ -74,12 +74,10 @@ servirComCors(async (req) => {
       console.log(`[receivable-reminders] ${hoje} não é dia útil: nenhum lembrete hoje.`);
       return jr({ ok: true, sent: 0, skipped: 0, errors: 0, dia_util: false, hoje });
     }
-    // O último dia útil antes de hoje. Duas semanas sem nenhum é dado errado: não envia, em vez
-    // de lembrar de uma vez 15 dias de vencimentos.
+    // O último dia útil antes de hoje, procurado por até duas semanas (recesso mais longo: a janela
+    // começa em hoje — vencimentosDoDia nunca volta antes de hoje).
     let ultimoDiaUtil = somarDias(hoje, -1);
-    let voltas = 0;
-    while (!(await ehDiaUtil(ultimoDiaUtil))) {
-      if (++voltas > 14) throw new Error(`nenhum dia útil nas duas semanas antes de ${hoje}`);
+    for (let voltas = 0; !(await ehDiaUtil(ultimoDiaUtil)) && voltas < 14; voltas++) {
       ultimoDiaUtil = somarDias(ultimoDiaUtil, -1);
     }
 

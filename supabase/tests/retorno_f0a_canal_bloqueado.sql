@@ -62,7 +62,46 @@ begin
   if public.canal_bloqueado(v_dono) is not null then
     raise exception '6: o número da equipe foi bloqueado';
   end if;
+  -- 6b. Um estranho com os mesmos 8 dígitos do dono, de outro DDD, não é isento.
+  if public.canal_bloqueado('55' || case when public._ddd_do_telefone(v_dono) = '11' then '21' else '11' end
+                            || substr(regexp_replace(v_dono, '\D', '', 'g'), 5)) is distinct from 'cliente_final' then
+    raise exception '6b: estranho com os 8 dígitos do dono foi isento';
+  end if;
   update public.clients set phone = '5547900007001' where id = v_generico;
+
+  -- 7a. As origens de uma linha que respondem a quem pediu: o Cliente Final é recusado com 23514/sem_telefone.
+  --     (A agenda-cliente recebe o mesmo; a linha só nasce pelo _agenda_cliente_enfileirar — o gatilho da agenda barra
+  --     o insert direto com 42501 —, que faz do 23514/sem_telefone a recusa "sem_telefone" da mensagem.)
+  declare
+    v_fonte text;
+    v_det text;
+  begin
+    foreach v_fonte in array array['on-my-way', 'quote_request'] loop
+      v_det := null;
+      begin
+        insert into public.whatsapp_send_queue (phone_normalized, message, source) values ('5547900007001', 'teste F0a', v_fonte);
+      exception when sqlstate '23514' then
+        get stacked diagnostics v_det = pg_exception_detail;
+      end;
+      if v_det is distinct from 'sem_telefone' then
+        raise exception '7a: % ao Cliente Final não foi recusada com 23514/sem_telefone (detail %)', v_fonte, v_det;
+      end if;
+    end loop;
+  end;
+
+  -- 7c. Opt-out: a origem automática nasce cancelada; o que alguém pediu (ai_agent) segue; a agenda-equipe não passa aqui.
+  update public.clients set opt_out_whatsapp = true where id = v_cliente;
+  insert into public.whatsapp_send_queue (phone_normalized, message, source)
+    values ('5547900007003', 'teste F0a', 'ai_followup') returning status, failed_reason into v_status, v_motivo;
+  if v_status is distinct from 'cancelled' or v_motivo not like 'Recusado:%não receber%' then
+    raise exception '7c: automática a quem pediu para não receber ficou %, %', v_status, v_motivo;
+  end if;
+  insert into public.whatsapp_send_queue (phone_normalized, message, source)
+    values ('5547900007003', 'teste F0a', 'ai_agent') returning status into v_status;
+  if v_status is distinct from 'pending' then
+    raise exception '7c: envio pedido pelo dono a quem pediu opt-out ficou %', v_status;
+  end if;
+  update public.clients set opt_out_whatsapp = false where id = v_cliente;
 
   -- 7. Fila: para o Cliente Final nasce cancelada, com o motivo; para outro número, pendente.
   insert into public.whatsapp_send_queue (phone_normalized, message, source)

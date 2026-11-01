@@ -27,9 +27,26 @@ export function ehAutomatica(origem: OrigemDoEnvio, chamadaDeSistema: boolean): 
   return chamadaDeSistema && origem === "sistema";
 }
 
-/** O destino é alguém da equipe? */
+/** DDD de um telefone brasileiro (com 55: 12–13 dígitos; sem: 10–11), ou null. O mesmo de _ddd_do_telefone (SQL). */
+export function dddDoTelefone(telefone: string | null | undefined): string | null {
+  const d = String(telefone ?? "").replace(/\D/g, "");
+  if (/^55\d{10,11}$/.test(d)) return d.slice(2, 4);
+  if (/^\d{10,11}$/.test(d)) return d.slice(0, 2);
+  return null;
+}
+
+/**
+ * O destino é alguém da equipe? Pela chave do telefone E pelo mesmo DDD quando os dois têm: isentar
+ * é mais perigoso que bloquear, e um estranho com os mesmos 8 dígitos do dono, de outro DDD, não
+ * escapa do portão (o mesmo de _mesmo_telefone, SQL).
+ */
 export function ehDaEquipe(telefone: string, telefonesDaEquipe: Array<string | null | undefined>): boolean {
-  return telefonesDaEquipe.some((t) => mesmoTelefone(t, telefone));
+  const ddd = dddDoTelefone(telefone);
+  return telefonesDaEquipe.some((t) => {
+    if (!mesmoTelefone(t, telefone)) return false;
+    const outro = dddDoTelefone(t);
+    return ddd === null || outro === null || ddd === outro;
+  });
 }
 
 /** Hora de Brasília (0–23), ou null quando não deu para saber. Nunca um valor "neutro". */
@@ -45,6 +62,21 @@ export function horaDeBrasilia(agora: Date = new Date()): number | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * A próxima abertura da janela (08:00 de Brasília): hoje, se ainda não deu 8h; senão amanhã. Para o
+ * que foi recusado como fora_de_horario esperar, em vez de gastar tentativa. Brasília é UTC−3 fixo
+ * (sem horário de verão desde 2019).
+ */
+export function proximaAberturaDaJanela(agora: Date = new Date()): Date {
+  const dia = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(agora);
+  const hora = horaDeBrasilia(agora) ?? JANELA_FIM;
+  const abertura = new Date(`${dia}T${String(JANELA_INICIO).padStart(2, "0")}:00:00-03:00`);
+  if (hora >= JANELA_INICIO) abertura.setUTCDate(abertura.getUTCDate() + 1);
+  return abertura;
 }
 
 export type DecisaoDaSaida =
