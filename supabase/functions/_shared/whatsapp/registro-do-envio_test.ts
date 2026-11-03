@@ -1,8 +1,17 @@
 // O envio do whatsapp-send entra na conversa (15/10/2026). Os casos são os de produção: em 07/10 o
 // assistente mandou 3 mensagens ao Miguel (08:54, 13:45 e 14:58) e nenhuma ficou em
 // whatsapp_messages — daí o "nada foi enviado" e o "esperando resposta" errado.
-import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { deveRegistrarEnvio, linhaDaMensagemEnviada, origemDoEnvio, quemEnviou, textoDoEnvio } from "./registro-do-envio.ts";
+import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import {
+  deveRegistrarEnvio,
+  ehOrigemDoRetorno,
+  idDaSaidaDoRetorno,
+  linhaDaMensagemEnviada,
+  ORIGENS_DO_RETORNO,
+  origemDoEnvio,
+  quemEnviou,
+  textoDoEnvio,
+} from "./registro-do-envio.ts";
 
 const DONO = "6f1c1f0e-1111-4c4c-9a9a-0a0a0a0a0a0a";
 const MIGUEL = "351966776422";
@@ -56,4 +65,74 @@ Deno.test("quem mandou: o usuário do JWT manda sobre o corpo; chamada de sistem
   assertEquals(origemDoEnvio("assistente", false), "assistente");
   assertEquals(origemDoEnvio(undefined, false), "tela");
   assertEquals(origemDoEnvio("qualquer", true), "sistema");
+});
+
+// ═══ Retorno F1 (16/11/2026): o recibo, a coleta e o adiamento do retorno saem pelo whatsapp-send
+// com origem retorno_* e contexto "retorno:<id da saída>".
+
+const SAIDA = "3f2b9c1e-7a4d-4e8b-9c0f-12ab34cd56ef";
+
+Deno.test("origem do retorno: aceita só em chamada de sistema; com JWT de usuário vira tela", () => {
+  assertEquals([...ORIGENS_DO_RETORNO], ["retorno_recibo", "retorno_coleta", "retorno_adiamento"]);
+  for (const o of ORIGENS_DO_RETORNO) {
+    assertEquals(origemDoEnvio(o, true), o, o);
+    assertEquals(origemDoEnvio(o, false), "tela", `${o} com JWT`);
+    assertEquals(ehOrigemDoRetorno(o), true, o);
+    // Cabe no esquema do whatsapp-send (origem ≤ 20 caracteres).
+    assert(o.length <= 20, o);
+  }
+  // As de hoje não mudam, e nenhuma delas é do retorno.
+  assertEquals(origemDoEnvio("sistema", true), "sistema");
+  assertEquals(origemDoEnvio("assistente", true), "assistente");
+  assertEquals(origemDoEnvio(undefined, true), "sistema");
+  for (const o of ["assistente", "tela", "sistema", "retorno", "RETORNO_RECIBO", "retorno_modelo", "", null, undefined, 1]) {
+    assertEquals(ehOrigemDoRetorno(o), false, String(o));
+  }
+  // Origem do retorno com outra grafia não é do retorno: cai na regra de sempre.
+  assertEquals(origemDoEnvio("Retorno_Recibo", true), "sistema");
+});
+
+Deno.test("via retorno só para as origens do retorno, com sent_by nulo; as outras seguem com via whatsapp-send", () => {
+  const recibo = linhaDaMensagemEnviada(
+    { kind: "text", message: "Oi, Lenine! Recebi sua mensagem." },
+    MIGUEL,
+    "3EB0RETORNO",
+    DONO,
+    "retorno_recibo",
+    `retorno:${SAIDA}`,
+    { client_id: CLIENTE, lead_id: null, supplier_id: null },
+  );
+  assertEquals(recibo.raw_payload, { origem: "retorno_recibo", contexto: `retorno:${SAIDA}`, via: "retorno" });
+  assertEquals(recibo.sent_by, null, "o retorno não é ninguém da equipe, mesmo com sent_by no corpo");
+  assertEquals([recibo.direction, recibo.client_id, recibo.wa_message_id], ["outbound", CLIENTE, "3EB0RETORNO"]);
+  for (const o of ORIGENS_DO_RETORNO) {
+    const l = linhaDaMensagemEnviada({ kind: "text", message: "x" }, MIGUEL, null, null, o, `retorno:${SAIDA}`);
+    assertEquals(l.raw_payload.via, "retorno", o);
+  }
+  for (const o of ["assistente", "tela", "sistema"] as const) {
+    const l = linhaDaMensagemEnviada({ kind: "text", message: "x" }, MIGUEL, null, DONO, o, null);
+    assertEquals(l.raw_payload.via, "whatsapp-send", o);
+    assertEquals(l.sent_by, DONO, o);
+  }
+});
+
+Deno.test("idDaSaidaDoRetorno: contexto bom dá o id; sem prefixo, uuid curto ou outro formato dá null", () => {
+  const contexto = `retorno:${SAIDA}`;
+  assertEquals(idDaSaidaDoRetorno(contexto), SAIDA);
+  // Cabe no esquema do whatsapp-send (context ≤ 64 caracteres).
+  assert(contexto.length <= 64);
+  assertEquals(idDaSaidaDoRetorno(SAIDA), null, "sem prefixo");
+  assertEquals(idDaSaidaDoRetorno("retorno:3f2b9c1e-7a4d-4e8b-9c0f-12ab34cd56e"), null, "uuid curto");
+  assertEquals(idDaSaidaDoRetorno(`retorno:${SAIDA}0`), null, "uuid comprido");
+  assertEquals(idDaSaidaDoRetorno(`retorno:${SAIDA}:recibo`), null, "a dedupe_key não é contexto");
+  assertEquals(idDaSaidaDoRetorno(` retorno:${SAIDA}`), null, "espaço antes");
+  assertEquals(idDaSaidaDoRetorno(`Retorno:${SAIDA}`), null, "prefixo com maiúscula");
+  assertEquals(idDaSaidaDoRetorno(`retorno:${SAIDA.toUpperCase()}`), null, "uuid em maiúsculas");
+  assertEquals(idDaSaidaDoRetorno("retorno:------------------------------------"), null, "36 traços");
+  assertEquals(idDaSaidaDoRetorno("retorno:3f2b9c1e7a4d4e8b9c0f12ab34cd56ef----"), null, "traços fora do lugar");
+  assertEquals(idDaSaidaDoRetorno("retorno:"), null);
+  assertEquals(idDaSaidaDoRetorno("comprovante"), null);
+  assertEquals(idDaSaidaDoRetorno(undefined), null);
+  assertEquals(idDaSaidaDoRetorno(null), null);
+  assertEquals(idDaSaidaDoRetorno(42), null);
 });

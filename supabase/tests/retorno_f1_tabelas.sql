@@ -202,18 +202,18 @@ begin
   -- ── 3 a 6: arranjo com mensagens e linhas sintéticas, desfeito no fim do sub-bloco ──────────────────
   begin
     insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, delivery_status)
-      values ('inbound', '5547900009061', 'text', 'teste F1 tabelas 1', 'received') returning id into v_m1;
+      values ('inbound', '5547900009001', 'text', 'teste F1 tabelas 1', 'received') returning id into v_m1;
     insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, delivery_status)
-      values ('inbound', '5547900009061', 'text', 'teste F1 tabelas 2', 'received') returning id into v_m2;
+      values ('inbound', '5547900009001', 'text', 'teste F1 tabelas 2', 'received') returning id into v_m2;
     insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, delivery_status)
-      values ('inbound', '5547900009061', 'text', 'teste F1 tabelas 3', 'received') returning id into v_m3;
+      values ('inbound', '5547900009001', 'text', 'teste F1 tabelas 3', 'received') returning id into v_m3;
     insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, delivery_status)
-      values ('inbound', '5547900009062', 'text', 'teste F1 tabelas 4', 'received') returning id into v_m4;
+      values ('inbound', '5547900009002', 'text', 'teste F1 tabelas 4', 'received') returning id into v_m4;
 
     -- 3. Coerência de retorno_saidas: cada linha quebra UMA regra só.
     v_ins_saida := $q$insert into public.retorno_saidas (emissor, fila_id, tipo, chave, phone_normalized, modo, estado,
                         motivo, texto, enviada_em, enviar_em, dedupe_key)
-                      values (%L, %L, %L, '00009061', '5547900009061', 'sombra', %L, %L, %L, %L, '2026-12-01 10:00-03', %L)$q$;
+                      values (%L, %L, %L, '00009001', '5547900009001', 'sombra', %L, %L, %L, %L, '2026-12-01 10:00-03', %L)$q$;
     v := pg_temp.retorno_f1_tabelas_erro(format(v_ins_saida, 'retorno', null, 'recibo_cliente', 'enviada', null,
                                                 'Recebi sua mensagem.', null, 'teste-f1-tabelas:3a'));
     if v is distinct from '23514:retorno_saidas_enviada' then
@@ -277,8 +277,8 @@ begin
     end if;
     -- dedupe_key repetida: 23505.
     v := pg_temp.retorno_f1_tabelas_erro($q$insert into public.retorno_saidas (tipo, chave, phone_normalized, modo, enviar_em, dedupe_key)
-                                            values ('recibo_cliente', '00009061', '5547900009061', 'sombra', '2026-12-01 10:00-03', 'teste-f1-tabelas:dup'),
-                                                   ('adiamento', '00009061', '5547900009061', 'sombra', '2026-12-01 18:30-03', 'teste-f1-tabelas:dup')$q$);
+                                            values ('recibo_cliente', '00009001', '5547900009001', 'sombra', '2026-12-01 10:00-03', 'teste-f1-tabelas:dup'),
+                                                   ('adiamento', '00009001', '5547900009001', 'sombra', '2026-12-01 18:30-03', 'teste-f1-tabelas:dup')$q$);
     if v is distinct from '23505:retorno_saidas_dedupe_key_key' then
       raise exception '3m: dedupe_key repetida passou (%)', v;
     end if;
@@ -287,47 +287,47 @@ begin
     v_ins_abertura := $q$insert into public.retorno_aberturas (chave, phone_normalized, papel, quem, primeira_msg_id,
                            aberta_em, gravada_em, ultima_em, ultima_gravada_em, nivel, motivo, modo, estado, fechada_em,
                            fechada_motivo, cumprida_em, cumprida_por)
-                         values (%L, '5547900009061', 'cliente', '{"papel": "cliente"}', %L, '2026-12-01 09:00-03',
+                         values (%L, '5547900009001', 'cliente', '{"papel": "cliente"}', %L, '2026-12-01 09:00-03',
                            '2026-12-01 09:00-03', '2026-12-01 09:00-03', '2026-12-01 09:00-03', %L, %L, 'sombra', %L, %L,
                            %L, %L, %L)$q$;
     insert into public.retorno_aberturas (chave, phone_normalized, papel, quem, primeira_msg_id, aberta_em, gravada_em,
                                           ultima_em, ultima_gravada_em, nivel, modo)
-      values ('00009061', '5547900009061', 'cliente', '{"papel": "cliente"}', v_m1, '2026-12-01 09:00-03',
+      values ('00009001', '5547900009001', 'cliente', '{"papel": "cliente"}', v_m1, '2026-12-01 09:00-03',
               '2026-12-01 09:00-03', '2026-12-01 09:00-03', '2026-12-01 09:00-03', 'recibo', 'sombra')
       returning id into v_a1;
-    v := pg_temp.retorno_f1_tabelas_erro(format(v_ins_abertura, '00009061', v_m2, 'recibo', null, 'aberta', null, null, null, null));
+    v := pg_temp.retorno_f1_tabelas_erro(format(v_ins_abertura, '00009001', v_m2, 'recibo', null, 'aberta', null, null, null, null));
     if v is distinct from '23505:retorno_aberturas_uma_viva' then
       raise exception '4a: duas aberturas vivas na mesma chave (%)', v;
     end if;
-    v := pg_temp.retorno_f1_tabelas_erro(format(v_ins_abertura, '00009061', v_m2, 'recibo', null, 'vencida', null, null, null, null));
+    v := pg_temp.retorno_f1_tabelas_erro(format(v_ins_abertura, '00009001', v_m2, 'recibo', null, 'vencida', null, null, null, null));
     if v is distinct from '23505:retorno_aberturas_uma_viva' then
       raise exception '4b: uma aberta e uma vencida na mesma chave (%)', v;
     end if;
     -- Fechadas não contam: duas fechadas e uma aberta na mesma chave convivem.
-    execute format(v_ins_abertura, '00009061', v_m2, 'recibo', null, 'fechada', '2026-12-01 10:00-03', 'conteudo',
+    execute format(v_ins_abertura, '00009001', v_m2, 'recibo', null, 'fechada', '2026-12-01 10:00-03', 'conteudo',
                    '2026-12-01 10:00-03', 'celular');
-    execute format(v_ins_abertura, '00009061', v_m3, 'nada', 'robo', 'fechada', '2026-12-01 13:00-03', 'nada', null, null);
-    if (select count(*) from public.retorno_aberturas where chave = '00009061' and primeira_msg_id in (v_m1, v_m2, v_m3)) <> 3 then
+    execute format(v_ins_abertura, '00009001', v_m3, 'nada', 'robo', 'fechada', '2026-12-01 13:00-03', 'nada', null, null);
+    if (select count(*) from public.retorno_aberturas where chave = '00009001' and primeira_msg_id in (v_m1, v_m2, v_m3)) <> 3 then
       raise exception '4c: a fechada e a aberta na mesma chave não conviveram';
     end if;
-    v := pg_temp.retorno_f1_tabelas_erro(format(v_ins_abertura, '00009062', v_m1, 'recibo', null, 'aberta', null, null, null, null));
+    v := pg_temp.retorno_f1_tabelas_erro(format(v_ins_abertura, '00009002', v_m1, 'recibo', null, 'aberta', null, null, null, null));
     if v is distinct from '23505:retorno_aberturas_primeira_msg_id_key' then
       raise exception '4d: a mesma mensagem abriu dois casos (%)', v;
     end if;
     -- Coerência do caso.
-    v := pg_temp.retorno_f1_tabelas_erro(format(v_ins_abertura, '00009062', v_m4, 'recibo', null, 'fechada', null, 'conteudo', null, null));
+    v := pg_temp.retorno_f1_tabelas_erro(format(v_ins_abertura, '00009002', v_m4, 'recibo', null, 'fechada', null, 'conteudo', null, null));
     if v is distinct from '23514:retorno_aberturas_fechada' then
       raise exception '4e: fechada sem fechada_em passou (%)', v;
     end if;
-    v := pg_temp.retorno_f1_tabelas_erro(format(v_ins_abertura, '00009062', v_m4, 'nada', null, 'aberta', null, null, null, null));
+    v := pg_temp.retorno_f1_tabelas_erro(format(v_ins_abertura, '00009002', v_m4, 'nada', null, 'aberta', null, null, null, null));
     if v is distinct from '23514:retorno_aberturas_motivo' then
       raise exception '4f: nível nada sem motivo passou (%)', v;
     end if;
-    v := pg_temp.retorno_f1_tabelas_erro(format(v_ins_abertura, '00009062', v_m4, 'recibo', 'robo', 'aberta', null, null, null, null));
+    v := pg_temp.retorno_f1_tabelas_erro(format(v_ins_abertura, '00009002', v_m4, 'recibo', 'robo', 'aberta', null, null, null, null));
     if v is distinct from '23514:retorno_aberturas_motivo' then
       raise exception '4g: recibo com motivo de nada passou (%)', v;
     end if;
-    v := pg_temp.retorno_f1_tabelas_erro(format(v_ins_abertura, '00009062', v_m4, 'recibo', null, 'aberta', null, null,
+    v := pg_temp.retorno_f1_tabelas_erro(format(v_ins_abertura, '00009002', v_m4, 'recibo', null, 'aberta', null, null,
                                                 '2026-12-01 10:00-03', null));
     if v is distinct from '23514:retorno_aberturas_cumprida' then
       raise exception '4h: cumprida sem cumprida_por passou (%)', v;
@@ -368,9 +368,9 @@ begin
 
     -- 6. RLS e grants das tabelas novas, cada uma com pelo menos uma linha para a RLS ter o que esconder.
     insert into public.retorno_mensagens (whatsapp_message_id, abertura_id, chave, recebida_em, gravada_em, corpo_hash, pede_resposta)
-      values (v_m1, v_a1, '00009061', '2026-12-01 09:00-03', '2026-12-01 09:00-03', md5('teste F1 tabelas 1'), true);
+      values (v_m1, v_a1, '00009001', '2026-12-01 09:00-03', '2026-12-01 09:00-03', md5('teste F1 tabelas 1'), true);
     insert into public.retorno_saidas (abertura_id, tipo, chave, phone_normalized, modo, enviar_em, dedupe_key)
-      values (v_a1, 'recibo_cliente', '00009061', '5547900009061', 'sombra', '2026-12-01 09:02-03', 'teste-f1-tabelas:6');
+      values (v_a1, 'recibo_cliente', '00009001', '5547900009001', 'sombra', '2026-12-01 09:02-03', 'teste-f1-tabelas:6');
     insert into public.retorno_silencios (dia, desde, detectado_em, saidas_humanas, caiu_avisado)
       values ('2026-12-01', '2026-12-01 12:00-03', '2026-12-01 15:00-03', 0, false);
     insert into public.retorno_alongamentos (faixa, de, para, casos, pct)
@@ -510,11 +510,11 @@ begin
   if v is distinct from 'erro 42501' then
     raise exception '7e: authenticated chamou retorno_abrir (%)', v;
   end if;
-  v := pg_temp.retorno_f1_tabelas_como('anon', null, $q$select public.retorno_identificar('5547900009061')::text$q$);
+  v := pg_temp.retorno_f1_tabelas_como('anon', null, $q$select public.retorno_identificar('5547900009001')::text$q$);
   if v is distinct from 'erro 42501' then
     raise exception '7f: anon chamou retorno_identificar (%)', v;
   end if;
-  v := pg_temp.retorno_f1_tabelas_como('authenticated', c_sem_cargo, $q$select public.retorno_identificar('5547900009061')::text$q$);
+  v := pg_temp.retorno_f1_tabelas_como('authenticated', c_sem_cargo, $q$select public.retorno_identificar('5547900009001')::text$q$);
   if v is distinct from 'erro 42501' then
     raise exception '7g: authenticated chamou retorno_identificar (%)', v;
   end if;

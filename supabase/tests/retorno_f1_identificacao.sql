@@ -5,7 +5,7 @@
 -- (genérico) nunca são devolvidos. Erro de quem_escreve sobe (o webhook cai no ILIKE).
 -- Arranjo de retorno_f0b_quem_escreve.sql, com cadastros SINTÉTICOS (nenhum cadastro real é alterado).
 -- Run (só pela bancada, de madrugada): npx supabase@2.111.0 db query --linked -f supabase/tests/retorno_f1_identificacao.sql
--- Termina em ROLLBACK: nada fica gravado. Telefones de teste 554790000915x; o arranjo inteiro é desfeito
+-- Termina em ROLLBACK: nada fica gravado. Telefones de teste 55479000091xx; o arranjo inteiro é desfeito
 -- dentro do arquivo (sub-bloco que termina em 'desfaz'), inclusive a função renomeada do caso 2a.
 begin;
 create temp table if not exists _bancada (arquivo text, ok boolean, numeros jsonb, em timestamptz default clock_timestamp());
@@ -48,36 +48,36 @@ begin
   begin
     -- Cadastros sintéticos: cada número de teste tem só os cadastros abaixo.
     insert into public.clients (type, name, whatsapp)
-      values ('individual', 'Teste F1 identificação um', '(47) 90000-9151') returning id into v_c_um;
+      values ('individual', 'Teste F1 identificação um', '(47) 90000-9101') returning id into v_c_um;
     insert into public.clients (type, name, phone)
-      values ('individual', 'Teste F1 identificação A', '47 90000-9152') returning id into v_c_a;
+      values ('individual', 'Teste F1 identificação A', '47 90000-9102') returning id into v_c_a;
     insert into public.clients (type, name, whatsapp)
-      values ('company', 'Teste F1 identificação B', '(47) 90000-9152') returning id into v_c_b;
+      values ('company', 'Teste F1 identificação B', '(47) 90000-9102') returning id into v_c_b;
     insert into public.payees (name, phone)
-      values ('Teste F1 identificação equipe', '(47) 90000-9153') returning id into v_payee;
+      values ('Teste F1 identificação equipe', '(47) 90000-9103') returning id into v_payee;
     insert into public.clients (type, name, whatsapp)
-      values ('individual', 'Teste F1 identificação da equipe', '(47) 90000-9153') returning id into v_c_equipe;
+      values ('individual', 'Teste F1 identificação da equipe', '(47) 90000-9103') returning id into v_c_equipe;
     insert into public.clients (type, name, whatsapp, phone, active)
-      values ('individual', 'Teste F1 identificação inativo', '(47) 90000-9155', '(47) 90000-9157', false)
+      values ('individual', 'Teste F1 identificação inativo', '(47) 90000-9105', '(47) 90000-9107', false)
       returning id into v_c_inativo;
     insert into public.clients (type, name, whatsapp, phone, generico)
-      values ('individual', 'Teste F1 identificação Cliente Final', '(47) 90000-9156', '(47) 90000-9157', true)
+      values ('individual', 'Teste F1 identificação Cliente Final', '(47) 90000-9106', '(47) 90000-9107', true)
       returning id into v_c_generico;
     insert into public.clients (type, name, whatsapp)
-      values ('individual', 'Teste F1 identificação misto', '(47) 90000-9157') returning id into v_c_misto;
+      values ('individual', 'Teste F1 identificação misto', '(47) 90000-9107') returning id into v_c_misto;
     insert into public.suppliers (name, phone, active)
-      values ('Teste F1 identificação fornecedor', '(47) 90000-9158', true) returning id into v_forn;
+      values ('Teste F1 identificação fornecedor', '(47) 90000-9108', true) returning id into v_forn;
     insert into public.clients (type, name, whatsapp)
-      values ('individual', 'Teste F1 identificação outro DDD', '(11) 90000-9159') returning id into v_c_ddd;
+      values ('individual', 'Teste F1 identificação outro DDD', '(11) 90000-9109') returning id into v_c_ddd;
 
     -- 1. Desligada: {"nova": false}, mesmo para um cliente conhecido.
     update public.retorno_config set identificacao_nova = false where id;
-    r_desligada := public.retorno_identificar('5547900009151');
+    r_desligada := public.retorno_identificar('5547900009101');
 
     -- 1b. Sem a linha de configuração: também {"nova": false} (falha fecha).
     begin
       delete from public.retorno_config;
-      r_sem_linha := public.retorno_identificar('5547900009151');
+      r_sem_linha := public.retorno_identificar('5547900009101');
       raise exception 'desfaz' using errcode = 'P0001';
     exception when sqlstate 'P0001' then
       if sqlerrm <> 'desfaz' then raise; end if;
@@ -90,7 +90,7 @@ begin
     --     com a função renomeada, a chamada a quem_escreve não acha a função (42883).
     begin
       alter function public.quem_escreve(text) rename to quem_escreve_f1_fora;
-      perform public.retorno_identificar('5547900009151');
+      perform public.retorno_identificar('5547900009101');
       r_erro := 'não subiu';
       raise exception 'desfaz' using errcode = 'P0001';
     exception
@@ -100,15 +100,15 @@ begin
         r_erro := sqlstate;
     end;
 
-    r_um := public.retorno_identificar('5547900009151');
-    r_dois := public.retorno_identificar('5547900009152');
-    r_equipe := public.retorno_identificar('5547900009153');
-    r_novo := public.retorno_identificar('5547900009154');
-    r_inativo := public.retorno_identificar('5547900009155');
-    r_generico := public.retorno_identificar('5547900009156');
-    r_misto := public.retorno_identificar('5547900009157');
-    r_forn := public.retorno_identificar('5547900009158');
-    r_ddd := public.retorno_identificar('5547900009159');
+    r_um := public.retorno_identificar('5547900009101');
+    r_dois := public.retorno_identificar('5547900009102');
+    r_equipe := public.retorno_identificar('5547900009103');
+    r_novo := public.retorno_identificar('5547900009104');
+    r_inativo := public.retorno_identificar('5547900009105');
+    r_generico := public.retorno_identificar('5547900009106');
+    r_misto := public.retorno_identificar('5547900009107');
+    r_forn := public.retorno_identificar('5547900009108');
+    r_ddd := public.retorno_identificar('5547900009109');
     r_sem_numero := public.retorno_identificar(null);
 
     v_chegou := true;

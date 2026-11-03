@@ -142,9 +142,11 @@ export function linhaDeLogoAbaixo(sel: Selecao, comNomes = true): string | null 
   return `${quem}${resto > 0 ? `, mais ${plural(resto, "assunto", "assuntos")}` : ""}. *lista*`;
 }
 
-function abertura(hoje: string, n: number): string {
+function abertura(hoje: string, n: number, clientesEsperando = false): string {
   const dia = `${nomeDoDia(hoje)}, ${ddmm(hoje)}`;
-  if (!n) return `Bom dia! ${dia}. Nada precisa de você hoje.`;
+  // (01/11/2026, retorno F1, P14, correção) com "Clientes esperando" logo abaixo, a manhã sem item não diz "Nada precisa
+  // de você hoje" (há cliente esperando resposta, às vezes com a promessa vencida)
+  if (!n) return clientesEsperando ? `Bom dia! ${dia}.` : `Bom dia! ${dia}. Nada precisa de você hoje.`;
   return `Bom dia! ${dia}. Hoje ${n === 1 ? "1 coisa pede" : `${n} coisas pedem`} você.`;
 }
 
@@ -166,27 +168,38 @@ export function textoDaManha(p: {
    * com a voz única em sombra as fontes ainda avisam o dono por conta própria. Ausente/vazio = o texto de antes.
    */
   guardado?: PlanoDoGuardado | null;
+  /**
+   * (01/11/2026, retorno F1, P14) As linhas do retorno (retorno.ts, linhasDaManha): "Clientes esperando" NUNCA sai (sustenta
+   * o "hoje até as 10h" prometido ao cliente; vale mesmo passando da meta) e "Para conferir" é a primeira a sair. Ausente
+   * ou as duas nulas = o texto de antes, byte a byte.
+   */
+  retorno?: { esperando: string | null; conferir: string | null } | null;
 }): string {
   if (p.tipoDoDia !== "util") return linhaDeFolgaComGuardado(p.tipoDoDia, p.feriado, p.guardado);
-  const cabeca = [abertura(p.hoje, p.selecao.manha.length)];
+  const cabeca = [abertura(p.hoje, p.selecao.manha.length, !!p.retorno?.esperando)];
   const naRua = linhaNaRua(p.naRua, p.selecao);
   if (naRua) cabeca.push(naRua);
   const itens = p.selecao.manha.map(linhaDoItem);
-  const montar = (hojeCurta: boolean, comNomes: boolean, guardadoCurto = false) => {
+  const conferir = p.retorno?.conferir ?? null;
+  const montar = (hojeCurta: boolean, comNomes: boolean, guardadoCurto = false, comConferir = true) => {
     const fim = [linhaDeHoje(p.deHoje, hojeCurta), linhaDeLogoAbaixo(p.selecao, comNomes)].filter((l): l is string => !!l);
     // o guardado entra logo depois da abertura (e do "Na rua"): é o que o portão segurou para não interromper
     const guardado = p.guardado ? blocoDaManha(p.guardado, guardadoCurto) : null;
-    return [...cabeca, ...(guardado ? [guardado] : []), ...(itens.length ? ["", ...itens] : []), "", ...fim].join("\n");
+    // (P14) o retorno vem antes do guardado: "Clientes esperando" em toda combinação; "Para conferir" só enquanto couber
+    const retorno = [p.retorno?.esperando ?? null, comConferir ? conferir : null].filter((l): l is string => !!l);
+    return [...cabeca, ...retorno, ...(guardado ? [guardado] : []), ...(itens.length ? ["", ...itens] : []), "", ...fim].join("\n");
   };
   // o "logo abaixo" com nomes (o filtro à vista) vale mais que o detalhe da agenda e da promessa; o guardado encurta
-  // por último (uma linha e "e mais N")
-  for (const [curta, nomes, gCurto] of [
-    [false, true, false], [true, true, false], [false, false, false], [true, false, false], [true, false, true],
-  ] as const) {
-    const t = montar(curta, nomes, gCurto);
-    if (t.length <= META_DE_CARACTERES) return t;
+  // por último (uma linha e "e mais N"). (P14) Com "Para conferir", o laço roda primeiro com ela e, se nada couber, sem ela.
+  for (const comConferir of conferir ? [true, false] : [true]) {
+    for (const [curta, nomes, gCurto] of [
+      [false, true, false], [true, true, false], [false, false, false], [true, false, false], [true, false, true],
+    ] as const) {
+      const t = montar(curta, nomes, gCurto, comConferir);
+      if (t.length <= META_DE_CARACTERES) return t;
+    }
   }
-  return montar(true, false, true);
+  return montar(true, false, true, false);
 }
 
 /**

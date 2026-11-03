@@ -14,12 +14,45 @@
 // Fica de fora (deveRegistrarEnvio): o envio desviado pelo modo de teste (não foi ao contato) e o
 // envio a quem conversa com o assistente (app_users com o canal ligado) — a conversa do dono com o
 // assistente não é conversa com cliente.
+//
+// ═══ AS ORIGENS DO RETORNO (Retorno rápido, F1, 16/11/2026) ═══
+//
+// O recibo, a coleta e o adiamento que o retorno manda ao cliente (edge retorno-recibos) saem pelo
+// whatsapp-send com origem retorno_recibo, retorno_coleta ou retorno_adiamento e o contexto
+// "retorno:<id da saída>". Três regras:
+//  - só valem em chamada de sistema (service-role): com o JWT de um usuário viram "tela", e
+//    ninguém logado finge ser o retorno para pular o portão da tela ou ganhar o portão do banco;
+//  - a linha da conversa leva via "retorno" (plano B.7): _saida_e_humana (F0b) lê todo via que não
+//    é "whatsapp-send" como AUTOMÁTICO, e o recibo nunca conta como "o dono respondeu";
+//  - sent_by fica nulo: o retorno não é ninguém da equipe, mesmo que o corpo mande um id.
+// Quem lê via hoje: só _saida_e_humana e retorno_medidas_base (que conta o automático pelo
+// audit_log, gravado em todo envio).
+//
+// Reverter: tirar OrigemDoRetorno de OrigemDoEnvio, ORIGENS_DO_RETORNO, ehOrigemDoRetorno,
+// idDaSaidaDoRetorno e os dois ternários de linhaDaMensagemEnviada (sent_by e via).
 import { mesmoTelefone } from "../ai/phone.ts";
 
-export type OrigemDoEnvio = "assistente" | "tela" | "sistema";
+export type OrigemDoRetorno = "retorno_recibo" | "retorno_coleta" | "retorno_adiamento";
+export type OrigemDoEnvio = "assistente" | "tela" | "sistema" | OrigemDoRetorno;
 const ORIGENS: ReadonlyArray<OrigemDoEnvio> = ["assistente", "tela", "sistema"];
+export const ORIGENS_DO_RETORNO: ReadonlyArray<OrigemDoRetorno> = ["retorno_recibo", "retorno_coleta", "retorno_adiamento"];
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// "retorno:<uuid da saída>", como a edge retorno-recibos monta (o uuid do banco é sempre minúsculo).
+const CONTEXTO_DO_RETORNO = /^retorno:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
+
+/** A origem é uma das do retorno (recibo, coleta, adiamento)? */
+export function ehOrigemDoRetorno(o: unknown): o is OrigemDoRetorno {
+  return typeof o === "string" && (ORIGENS_DO_RETORNO as readonly string[]).includes(o);
+}
+
+/** O id da saída do retorno no contexto "retorno:<uuid>", ou null (sem prefixo, uuid torto, não texto). */
+export function idDaSaidaDoRetorno(contexto: unknown): string | null {
+  if (typeof contexto !== "string") return null;
+  const m = CONTEXTO_DO_RETORNO.exec(contexto);
+  return m ? m[1] : null;
+}
 
 /** O corpo do whatsapp-send no que importa para a linha da conversa. */
 export interface PedidoDeEnvio {
@@ -48,8 +81,12 @@ export function quemEnviou(doCorpo: unknown, chamadaDeSistema: boolean, usuarioD
   return typeof doCorpo === "string" && UUID.test(doCorpo) ? doCorpo : null;
 }
 
-/** De onde saiu. Sem origem válida: "tela" quando há usuário logado, "sistema" quando não. */
+/**
+ * De onde saiu. Sem origem válida: "tela" quando há usuário logado, "sistema" quando não. As
+ * origens do retorno só valem em chamada de sistema; com JWT de usuário viram "tela".
+ */
 export function origemDoEnvio(doCorpo: unknown, chamadaDeSistema: boolean): OrigemDoEnvio {
+  if (ehOrigemDoRetorno(doCorpo)) return chamadaDeSistema ? doCorpo : "tela";
   if (typeof doCorpo === "string" && (ORIGENS as readonly string[]).includes(doCorpo)) return doCorpo as OrigemDoEnvio;
   return chamadaDeSistema ? "sistema" : "tela";
 }
@@ -92,14 +129,16 @@ export function linhaDaMensagemEnviada(
     body: textoDoEnvio(pedido).slice(0, 4000),
     wa_message_id: providerMessageId || null,
     delivery_status: "sent" as const,
-    sent_by: sentBy,
+    // O retorno não é ninguém da equipe: sent_by nulo, mesmo que o corpo traga um id.
+    sent_by: ehOrigemDoRetorno(origem) ? null : sentBy,
     // O "esperando resposta" pega o cliente da ÚLTIMA mensagem do número: sem copiar o vínculo, a
     // saída deixaria a conversa sem cliente.
     client_id: anterior?.client_id ?? null,
     lead_id: anterior?.lead_id ?? null,
     supplier_id: anterior?.supplier_id ?? null,
     service_order_id: pedido.service_order_id && UUID.test(pedido.service_order_id) ? pedido.service_order_id : null,
-    raw_payload: { origem, contexto, via: "whatsapp-send" },
+    // via "retorno" só para as origens do retorno: _saida_e_humana lê como automático (F1, B.7).
+    raw_payload: { origem, contexto, via: ehOrigemDoRetorno(origem) ? "retorno" : "whatsapp-send" },
   };
 }
 

@@ -12,18 +12,23 @@ import { concluirEnvio, liberarEnvio, reservarOuAguardar } from "../_shared/what
 import {
   campoObrigatorioFaltando,
   decidirMarcarEnviado,
+  desviadoPorTeste,
+  modoDeTesteSemNumero,
   numeroDeTesteAtivo,
   urlDeDocumentoPermitida,
 } from "../_shared/whatsapp/marcar-enviado.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 import {
   deveRegistrarEnvio,
+  ehOrigemDoRetorno,
+  idDaSaidaDoRetorno,
   linhaDaMensagemEnviada,
   origemDoEnvio,
   quemEnviou,
 } from "../_shared/whatsapp/registro-do-envio.ts";
 import {
   decidirSaidaAutomatica,
+  decidirSaidaDoRetorno,
   ehAutomatica,
   ehDaEquipe,
   horaDeBrasilia,
@@ -104,8 +109,9 @@ servirComCors(async (req) => {
       usuarioDoJwt = userData.user.id;
     }
 
-    // Load app settings for test mode
-    const { data: settings } = await supabaseAdmin.from("app_settings").select("key, value");
+    // Load app settings for test mode. O erro da leitura só pesa no retorno (F1, ramo abaixo): sem
+    // saber se o modo de teste está ligado, o recibo não sai. Os outros envios seguem como antes.
+    const { data: settings, error: settingsErr } = await supabaseAdmin.from("app_settings").select("key, value");
     const settingsMap = Object.fromEntries((settings || []).map((s: any) => [s.key, s.value]));
 
     if (!Deno.env.get("EVOLUTION_API_URL") || !Deno.env.get("EVOLUTION_API_KEY") || !Deno.env.get("EVOLUTION_INSTANCE")) {
@@ -133,7 +139,60 @@ servirComCors(async (req) => {
     // destino de verdade, não o número de teste.
     const origem = origemDoEnvio(body.origem, isServiceRoleCall);
     let automaticaDeFora = false;
-    if (ehAutomatica(origem, isServiceRoleCall)) {
+    // Retorno F1 (16/11/2026): o recibo, a coleta e o adiamento ao cliente (origem retorno_*, só em
+    // chamada de sistema; com JWT a origem vira "tela"). O portão deles é o banco:
+    // retorno_saida_autorizada confere, agora, a saída "enviando", o modo do caso, o telefone, o
+    // bloqueio e a janela do retorno — a janela fixa de 8h–20h do ramo de baixo não vale para eles.
+    // Falha fechada: sem a saída no contexto, sem chave, fora de texto, com app_settings sem
+    // resposta, no modo de teste LIGADO (com número de teste o recibo iria a ele e contaria como
+    // enviado; sem número iria ao cliente de verdade, o que a tela e o assistente já recusam,
+    // modoDeTesteSemNumero) ou com a checagem fora do ar, NÃO envia. E fica como o automático a
+    // quem é de fora: reserva fechada e falha incerta mantida (F0a-1).
+    // Reverter: apagar este ramo (o "else if" do automático volta a ser "if"), o settingsErr da
+    // leitura de app_settings e o !ehOrigemDoRetorno da "última enviada", mais abaixo.
+    if (ehOrigemDoRetorno(origem)) {
+      const saidaId = idDaSaidaDoRetorno(body.context);
+      if (!saidaId || !body.dedupe_key || body.kind !== "text") {
+        return jr({
+          error: 'Envio do retorno recusado: precisa de context "retorno:<id da saída>", dedupe_key e kind "text".',
+          recusado: true,
+          codigo: "retorno_sem_saida",
+        }, 422);
+      }
+      if (settingsErr) {
+        return jr({
+          error: "Envio do retorno recusado: não deu para ler o modo de teste (app_settings sem resposta).",
+          recusado: true,
+          codigo: "checagem_indisponivel",
+        }, 422);
+      }
+      if (desviadoPorTeste(settingsMap) || modoDeTesteSemNumero(settingsMap)) {
+        return jr({
+          error: "Envio do retorno recusado: o modo de teste está ligado (com ou sem número de teste) e o retorno não sai nele.",
+          recusado: true,
+          codigo: "modo_de_teste",
+        }, 422);
+      }
+      const destino = normalizePhoneNumber(body.phone);
+      // Erro do banco ou exceção na chamada = "erro" (checagem indisponível): recusa, nunca envia.
+      const autorizacao = await supabaseAdmin
+        .rpc("retorno_saida_autorizada", { p_saida: saidaId, p_fone: destino })
+        .then((r) => (r.error ? "erro" as const : r.data), () => "erro" as const);
+      const decisao = decidirSaidaDoRetorno(autorizacao);
+      if (!decisao.pode) {
+        console.warn(`[whatsapp-send] ${decisao.mensagem} (contexto: ${body.context ?? "nenhum"})`);
+        await supabaseAdmin.from("audit_log").insert({
+          table_name: body.receivable_id ? "receivables" : "service_orders",
+          record_id: body.receivable_id || body.service_order_id || "00000000-0000-0000-0000-000000000000",
+          action: "whatsapp_send_api",
+          changed_by: callerIdentity,
+          new_value: { kind: body.kind, context: body.context || null, origem, phone: destino, recusado: decisao.codigo },
+          reason: decisao.mensagem,
+        }).then(() => {}, () => {});
+        return jr({ error: decisao.mensagem, recusado: true, codigo: decisao.codigo }, 422);
+      }
+      automaticaDeFora = true;
+    } else if (ehAutomatica(origem, isServiceRoleCall)) {
       const destino = normalizePhoneNumber(body.phone);
       const { data: equipe, error: equipeErr } = await supabaseAdmin
         .from("app_users")
@@ -323,9 +382,9 @@ servirComCors(async (req) => {
         const { error: regErr } = await supabaseAdmin.from("whatsapp_messages").insert(linha);
         if (regErr && regErr.code !== "23505") {
           console.warn(`[whatsapp-send] envio saiu, mas não entrou na conversa: ${regErr.code ?? ""} ${regErr.message}`);
-        } else if (!regErr && !ehAutomatica(origem, isServiceRoleCall)) {
-          // Só a saída do dono move a "última enviada" do contato: o lembrete automático não é
-          // resposta (Retorno F0b; a mesma regra de _saida_e_humana).
+        } else if (!regErr && !ehAutomatica(origem, isServiceRoleCall) && !ehOrigemDoRetorno(origem)) {
+          // Só a saída do dono move a "última enviada" do contato: o lembrete automático e o
+          // recibo do retorno não são resposta (Retorno F0b e F1; a mesma regra de _saida_e_humana).
           await supabaseAdmin
             .from("whatsapp_leads")
             .update({ last_outbound_at: new Date().toISOString() })

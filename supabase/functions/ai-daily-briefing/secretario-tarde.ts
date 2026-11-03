@@ -64,6 +64,7 @@ import { linhasDoHistorico } from "./historico.ts";
 import type { LoteMontado } from "../_shared/papelada/lote.ts";
 import { CHAVE_DA_PAPELADA, lerFormatoDaPapelada, linhaDoLote } from "../_shared/papelada/texto.ts";
 import { contarRegrasGuardadas, montarLoteDaSemana, registrarLote } from "./secretario-papelada.ts";
+import { lerRetorno, linhasDoFechamento, type RetornoDoFechamento } from "./retorno.ts";
 
 // deno-lint-ignore no-explicit-any
 type Admin = any;
@@ -111,6 +112,8 @@ export interface LidoDaTarde {
   escritorio: DadosDoEscritorio | null;
   panorama: Panorama | null;
   mesQueFechou: { conta: ContaDoMes; faturamento: string | null } | null;
+  /** (01/11/2026, retorno F1, P14) retorno_resumo_do_dia ('fechamento'), nos três turnos da tarde; ausente ou null = a tarde de antes */
+  retorno?: RetornoDoFechamento | null;
 }
 
 export interface TardeMontada {
@@ -188,6 +191,10 @@ export function montarTardeDosDados(p: {
     })
     : null;
   const planoDaTarde = plano && turno !== "fechamento" ? { ...plano, escritorio: [], doEscritorio: [] } : plano;
+  // (01/11/2026, retorno F1, P14) "Ainda esperando hoje" nos três turnos (correção: no 1º dia útil da semana e do mês as
+  // 17:30 são a revisão, e é ela que cumpre o "hoje até as 19h"); o resumo do retorno, só no fechamento
+  const doRetorno = lido.retorno ? linhasDoFechamento(lido.retorno, agora) : null;
+  const retorno = doRetorno && turno !== "fechamento" ? { ...doRetorno, resumo: null } : doRetorno;
   const dadosDoTexto = {
     hoje, turno, ficaram, amanha: lido.amanha, fornecedores, escritorio: lido.escritorio,
     parados, panorama: lido.panorama, antigas,
@@ -195,6 +202,7 @@ export function montarTardeDosDados(p: {
     pergunta: p.pergunta,
     guardado: planoDaTarde, semResposta, semRespostaMax: portao.regras.sem_resposta_hoje_max,
     ...(p.lote ? { lote: p.lote } : {}),
+    ...(retorno && (retorno.esperando || retorno.resumo) ? { retorno } : {}),
   };
   const t = textoDaTarde(dadosDoTexto);
   const e = lido.escritorio;
@@ -306,6 +314,9 @@ export async function lerTudoDaTarde(admin: Admin, p: {
     escritorio: p.turno === "fechamento" ? await contarEscritorio(admin, p.hoje) : null,
     panorama: p.turno === "revisao_semana" ? await lerPanorama(admin, p.hoje, regras.vigia_so_mes_recente) : null,
     mesQueFechou: p.turno === "revisao_mes" ? await lerMesQueFechou(admin, p.hoje) : null,
+    // (01/11/2026, retorno F1, P14) nos três turnos (correção: a revisão também é as 17:30 que cumpre o "hoje até as 19h");
+    // lerRetorno nunca lança (erro = null = a tarde de antes)
+    retorno: await lerRetorno(admin, "fechamento", p.agora),
   };
 }
 

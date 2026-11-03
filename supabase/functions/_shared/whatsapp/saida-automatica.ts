@@ -16,13 +16,28 @@
 //
 // As guardas de _shared/ai/comms ficam como estão até a 7b da agenda estar verde (aquela pasta
 // vai junto com o ai-agent); a janela é a mesma delas, 08:00–19:59 de Brasília.
+//
+// ═══ O RETORNO TEM PORTÃO PRÓPRIO (Retorno rápido, F1, 16/11/2026) ═══
+//
+// As origens retorno_* (recibo, coleta, adiamento ao cliente) não passam por decidirSaidaAutomatica:
+// quem decide é o banco, por retorno_saida_autorizada(saída, fone), que confere no instante do envio
+// o estado da saída, o modo do caso, o telefone, o bloqueio e a janela do retorno (K3: 07:00–21:59
+// para a resposta imediata; o adiamento tem a dele). A janela fixa de 8h–20h daqui recusaria o
+// recibo das 07:10 que o banco autorizou.
+// decidirSaidaDoRetorno só traduz a resposta do banco, falhando FECHADO: erro, resposta nula ou
+// "pode" que não é booleano = não envia.
+//
+// Reverter: apagar decidirSaidaDoRetorno e as três mensagens do retorno em MENSAGENS.
 import { mesmoTelefone } from "../ai/phone.ts";
 import type { OrigemDoEnvio } from "./registro-do-envio.ts";
 
 export const JANELA_INICIO = 8;
 export const JANELA_FIM = 20;
 
-/** O envio é automático? Só a chamada de sistema que não diz ter vindo do assistente ou da tela. */
+/**
+ * O envio é automático? Só a chamada de sistema que não diz ter vindo do assistente ou da tela. As
+ * origens do retorno (retorno_*) ficam fora: têm portão próprio (decidirSaidaDoRetorno).
+ */
 export function ehAutomatica(origem: OrigemDoEnvio, chamadaDeSistema: boolean): boolean {
   return chamadaDeSistema && origem === "sistema";
 }
@@ -89,6 +104,10 @@ const MENSAGENS: Record<string, string> = {
   opt_out: "o contato pediu para não receber mensagens automáticas.",
   checagem_indisponivel: "não deu para conferir se o número pode receber (banco sem resposta).",
   hora_indisponivel: "não deu para conferir a hora de Brasília.",
+  // Retorno (F1): motivos de retorno_saida_autorizada sem texto próprio caem na mensagem genérica.
+  retorno_nao_autorizado: "o banco não autorizou esta saída do retorno.",
+  fora_da_janela: "fora da janela de horário do retorno.",
+  erro: "a conferência da saída do retorno deu erro no banco.",
 };
 
 function recusa(codigo: string, detalhe?: string): DecisaoDaSaida {
@@ -113,6 +132,20 @@ export function decidirSaidaAutomatica(p: {
     return recusa("fora_de_horario", `fora do horário (${p.hora}h; a janela é das ${JANELA_INICIO}h às ${JANELA_FIM}h de Brasília).`);
   }
   return { pode: true };
+}
+
+/**
+ * Pode sair a saída do retorno? `aut` é a resposta de retorno_saida_autorizada ({pode, motivo}), ou
+ * "erro" quando a chamada falhou. Só `pode === true` envia; resposta nula, sem objeto ou com "pode"
+ * que não é booleano recusa como checagem_indisponivel; `pode` falso recusa com o motivo do banco.
+ */
+export function decidirSaidaDoRetorno(aut: { pode?: unknown; motivo?: unknown } | null | "erro"): DecisaoDaSaida {
+  if (aut === "erro" || aut === null || typeof aut !== "object" || Array.isArray(aut) || typeof aut.pode !== "boolean") {
+    return recusa("checagem_indisponivel");
+  }
+  if (aut.pode === true) return { pode: true };
+  const motivo = typeof aut.motivo === "string" && aut.motivo.trim() !== "" ? aut.motivo.trim() : "retorno_nao_autorizado";
+  return recusa(motivo);
 }
 
 /**

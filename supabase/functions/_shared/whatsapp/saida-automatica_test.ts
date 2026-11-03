@@ -2,6 +2,7 @@ import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.t
 import {
   dddDoTelefone,
   decidirSaidaAutomatica,
+  decidirSaidaDoRetorno,
   ehAutomatica,
   ehDaEquipe,
   horaDeBrasilia,
@@ -16,6 +17,11 @@ Deno.test("automático é só a chamada de sistema com origem sistema", () => {
   assert(!ehAutomatica("tela", true));
   // Com o JWT de um usuário a origem nunca é "sistema" (origemDoEnvio), mas a regra não depende disso.
   assert(!ehAutomatica("sistema", false));
+  // As origens do retorno (F1) ficam fora, mesmo em chamada de sistema: têm portão próprio
+  // (decidirSaidaDoRetorno), como diz a JSDoc de ehAutomatica.
+  for (const origem of ["retorno_recibo", "retorno_coleta", "retorno_adiamento"] as const) {
+    assert(!ehAutomatica(origem, true), origem);
+  }
 });
 
 Deno.test("equipe: compara pela chave do telefone, com e sem 55, e exige o mesmo DDD", () => {
@@ -92,4 +98,56 @@ Deno.test("falha incerta mantém a reserva só no automático a quem é de fora"
   assert(!manterReservaNaFalha(false, true));
   assert(!manterReservaNaFalha(undefined, true));
   assert(!manterReservaNaFalha(true, false));
+});
+
+// ═══ Retorno F1 (16/11/2026): o portão do retorno é retorno_saida_autorizada (banco); aqui só a
+// tradução da resposta, falhando fechado.
+
+Deno.test("retorno: chamada que falhou, resposta nula ou sem \"pode\" booleano recusa como checagem_indisponivel", () => {
+  type Aut = Parameters<typeof decidirSaidaDoRetorno>[0];
+  const casos: Array<[string, Aut]> = [
+    ["erro", "erro"],
+    ["null", null],
+    ["{}", {}],
+    ['{pode: "true"}', { pode: "true" }],
+    ["{pode: 1}", { pode: 1 }],
+    ["{pode: null}", { pode: null }],
+    ["lista", [] as unknown as Aut],
+    ["texto", "true" as unknown as Aut],
+  ];
+  for (const [nome, aut] of casos) {
+    const d = decidirSaidaDoRetorno(aut);
+    assert(!d.pode && d.codigo === "checagem_indisponivel", nome);
+    assert(!d.pode && d.mensagem === "Envio automático recusado: não deu para conferir se o número pode receber (banco sem resposta).", nome);
+  }
+});
+
+Deno.test("retorno: pode false recusa com o motivo do banco (opt-out com a mensagem dele)", () => {
+  const opt = decidirSaidaDoRetorno({ pode: false, motivo: "opt_out" });
+  assertEquals(opt, {
+    pode: false,
+    codigo: "opt_out",
+    mensagem: "Envio automático recusado: o contato pediu para não receber mensagens automáticas.",
+  });
+  // Sem motivo (nulo, vazio ou não texto): retorno_nao_autorizado.
+  for (const motivo of [undefined, null, "", "   ", 42]) {
+    const d = decidirSaidaDoRetorno({ pode: false, motivo });
+    assert(!d.pode && d.codigo === "retorno_nao_autorizado", String(motivo));
+  }
+  // A exceção dentro de retorno_saida_autorizada volta como motivo "erro".
+  const erro = decidirSaidaDoRetorno({ pode: false, motivo: "erro" });
+  assert(!erro.pode && erro.codigo === "erro" && erro.mensagem.includes("deu erro no banco"));
+  // Motivo que não tem texto próprio fica com o genérico, sem perder o código.
+  const tipo = decidirSaidaDoRetorno({ pode: false, motivo: "tipo_desligado" });
+  assert(!tipo.pode && tipo.codigo === "tipo_desligado" && tipo.mensagem.includes("(tipo_desligado)"));
+});
+
+Deno.test("retorno: só pode === true envia, e a janela fixa de 8h–20h não vale para ele", () => {
+  assertEquals(decidirSaidaDoRetorno({ pode: true }), { pode: true });
+  assertEquals(decidirSaidaDoRetorno({ pode: true, motivo: null }), { pode: true });
+  // 07h: o automático de hoje recusa; o retorno autorizado pelo banco (janela K3, 07:00–21:59) sai,
+  // porque decidirSaidaDoRetorno não recebe hora nenhuma: a janela é só a do banco.
+  const automatico = decidirSaidaAutomatica({ daEquipe: false, bloqueio: null, hora: 7 });
+  assert(!automatico.pode && automatico.codigo === "fora_de_horario");
+  assertEquals(decidirSaidaDoRetorno.length, 1, "a decisão do retorno só recebe a resposta do banco");
 });

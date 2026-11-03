@@ -421,6 +421,16 @@ export interface DadosDaTarde {
   lote?: LoteParaTexto | null;
   /** (Fase 7f, P3) o nível de corte do bloco nesta montagem (textoComOBloco); ausente = o que o banco mandou */
   nivelDoBloco?: number;
+  /**
+   * (01/11/2026, retorno F1, P14) As linhas do retorno na tarde (retorno.ts, linhasDoFechamento). "Ainda esperando hoje"
+   * vai logo depois da abertura e NUNCA sai (sustenta o "hoje até as 19h" prometido ao cliente): nem semOsExtras, nem as
+   * vagas garantidas da agenda, nem o corte duro a tiram; e conta como "há algo". O resumo é extra (antes da pergunta da
+   * semana), só no fechamento, e o primeiro a sair. Ausente = a tarde de antes, byte a byte.
+   * (correção) Também nas revisões: no 1º dia útil da semana e do mês, são elas as 17:30 que cumprem o "hoje até as 19h".
+   * `fixa = false` (sombra, ou ninguém na linha ouviu promessa): a linha não sustenta nada e é extra, a segunda a sair;
+   * ausente = fixa.
+   */
+  retorno?: { esperando: string | null; resumo: string | null; fixa?: boolean } | null;
 }
 
 /** A linha do escritório da tarde: a do lote (no dia dele) ou a de sempre; o guardado do escritório vai à parte. */
@@ -548,14 +558,18 @@ function textoDoFechamento(d: DadosDaTarde, curto: boolean, semanaMax: number, l
   // (16/10/2026) guardado (fora o do escritório), quem está sem resposta desde hoje e a conta a pagar de amanhã contam
   // como "há algo": sem isso, "só se houver algo" viraria descarte do guardado (spec uma voz §6.3-1)
   // (23/10/2026) a carteira sem data NÃO conta: ela existe quase todo dia, e o fechamento passaria a sair sempre
+  // (P14) quem espera o retorno com prazo hoje: nunca sai e conta como "há algo" (o resumo, não)
+  const esperando = d.retorno?.esperando ?? null;
   const temAlgo = d.ficaram.length > 0 || (d.amanha?.itens.length ?? 0) > 0 || (d.amanha?.pagar?.n ?? 0) > 0 ||
-    d.fornecedores.length > 0 || d.pergunta || topo.length > 0 || semanaToda.length > 0 || linhasContam(d, linhasTodas);
+    d.fornecedores.length > 0 || d.pergunta || topo.length > 0 || semanaToda.length > 0 || linhasContam(d, linhasTodas) ||
+    !!esperando;
   if (!temAlgo) return comAAgenda({ texto: null, letras: [] }, d, 0);
   const proxima = proximaRevisaoDaSemana(d.hoje);
   const abertura = d.ficaram.length
     ? `Fechamento de ${cabecaDoDia(d.hoje)}. ${d.ficaram.length === 1 ? "Ficou 1" : `Ficaram ${d.ficaram.length}`} de hoje` +
       `${proxima ? `; sem resposta, ${d.ficaram.length === 1 ? "vai" : "vão"} para a revisão de ${proxima}` : ""}.`
-    : `Fechamento de ${cabecaDoDia(d.hoje)}: nada ficou de hoje.`;
+    // (P14, correção) com "Ainda esperando hoje" logo abaixo, "nada ficou de hoje" não fica sozinho
+    : `Fechamento de ${cabecaDoDia(d.hoje)}: nada ficou de hoje${esperando ? ", fora quem espera resposta" : ""}.`;
   const itens = d.ficaram.map((l) => linhaQueFicou(l, curto ? 90 : 150));
   const fim = [
     amanhaDaTarde(d),
@@ -565,10 +579,11 @@ function textoDoFechamento(d: DadosDaTarde, curto: boolean, semanaMax: number, l
     ...semana,
     d.fornecedores.length ? `Fornecedores esperando há mais de 1 dia: ${lista(d.fornecedores.map((n) => umaLinha(n, curto ? 18 : 28)))}.` : null,
     ...linhasDoEscritorioDaTarde(d),
+    d.retorno?.resumo ?? null,
     d.pergunta ? PERGUNTA_DA_SEMANA : null,
   ].filter((l): l is string => !!l);
   return comAAgenda(
-    { texto: [abertura, ...topo, ...(itens.length ? ["", ...itens] : []), "", ...fim].join("\n"), letras: d.ficaram },
+    { texto: [abertura, ...(esperando ? [esperando] : []), ...topo, ...(itens.length ? ["", ...itens] : []), "", ...fim].join("\n"), letras: d.ficaram },
     d,
     semana.length,
     linhas,
@@ -604,7 +619,10 @@ function textoDaRevisaoDaSemana(d: DadosDaTarde, curto: boolean, linhasMax = Inf
     curto ? null : linhaDoVigia(p?.vigia ?? null),
     p?.semana ? linhaDaSemana(p.semana) : null,
   ].filter((l): l is string => !!l);
-  const blocos = [abertura, ...topoDaTarde(d, curto), ...(itens.length ? ["", ...itens, ...comoResponder] : []), ...(panorama.length ? ["", ...panorama] : [])];
+  // (01/11/2026, retorno F1, P14, correção) "Ainda esperando hoje" logo depois da abertura: às segundas é a revisão que
+  // cumpre o "hoje até as 19h" (o resumo do retorno é só do fechamento)
+  const esperando = d.retorno?.esperando ?? null;
+  const blocos = [abertura, ...(esperando ? [esperando] : []), ...topoDaTarde(d, curto), ...(itens.length ? ["", ...itens, ...comoResponder] : []), ...(panorama.length ? ["", ...panorama] : [])];
   // (Passo 5) a linha do lote, no último dia útil da semana que caiu numa revisão
   const lote = d.lote ? linhaDoLote(d.lote) : null;
   if (lote) blocos.push("", lote);
@@ -621,7 +639,10 @@ function textoDaRevisaoDoMes(d: DadosDaTarde, curto: boolean, linhasMax = Infini
     d.faturamento && !curto ? d.faturamento : null,
   ].filter((l): l is string => !!l);
   const abertura = `Revisão do mês, ${cabecaDoDia(d.hoje)}.${linhasDoMes.length ? ` ${linhasDoMes[0]}` : ""}`;
-  const blocos = [abertura, ...linhasDoMes.slice(1), ...topoDaTarde(d, curto)];
+  // (01/11/2026, retorno F1, P14, correção) "Ainda esperando hoje" logo depois da abertura: no 1º dia útil do mês é a revisão
+  // que cumpre o "hoje até as 19h" (o resumo do retorno é só do fechamento)
+  const esperando = d.retorno?.esperando ?? null;
+  const blocos = [abertura, ...(esperando ? [esperando] : []), ...linhasDoMes.slice(1), ...topoDaTarde(d, curto)];
   if (a && a.n > 0) {
     blocos.push("", `${a.n === 1 ? "1 cobrança vencida" : `${a.n} cobranças vencidas`} há 30 dias ou mais, ${brl(a.total)}. Cobrar, negociar ou dar baixa?`);
     blocos.push(...a.linhas.map((l) => linhaDaRevisao(l, curto ? 85 : 140)));
@@ -651,7 +672,8 @@ function textoDaRevisaoDoMes(d: DadosDaTarde, curto: boolean, linhasMax = Infini
  * (05/11/2026) Na revisão, o panorama (o mês, o vigia, a semana) e o faturamento também cedem: nenhum deles perde hoje.
  */
 function semOsExtras(d: DadosDaTarde): DadosDaTarde {
-  return { ...d, fornecedores: [], escritorio: null, lote: null, semResposta: [], panorama: null, faturamento: null };
+  // (P14) o resumo do retorno também sai; "Ainda esperando hoje" fica
+  return { ...d, fornecedores: [], escritorio: null, lote: null, semResposta: [], panorama: null, faturamento: null, retorno: d.retorno && { ...d.retorno, resumo: null } };
 }
 
 /**
@@ -705,6 +727,21 @@ export function textoDaTarde(d: DadosDaTarde, semExtras: (d: DadosDaTarde) => Da
   // Sem linhas do plano (sombra, desligado, Fase 2 não aplicada), o caminho é o de antes, byte a byte.
   const L = linhasDoFechamento(d).length;
   const n = semanaDoFechamento(d).length;
+  // (01/11/2026, retorno F1, P14) o resumo do retorno é o primeiro a sair: só fica se o fechamento inteiro couber com ele;
+  // senão, o caminho de sempre sem ele
+  if (d.turno === "fechamento" && d.retorno?.resumo) {
+    const inteiro = montar(false, n, L);
+    if (!inteiro.texto || inteiro.texto.length <= LIMITE_DA_TARDE) return inteiro;
+    return textoDaTarde({ ...d, retorno: { ...d.retorno, resumo: null } }, semExtras);
+  }
+  // (P14, correção) a linha de quem espera que NÃO sustenta promessa (sombra, ou ninguém nela ouviu: fixa = false) é extra,
+  // a segunda a sair: só fica se a tarde inteira couber com ela; senão, a tarde de antes. Sem isto, 5 casos em sombra
+  // empurravam o fechamento de 04/11 para o corte duro, que passava no meio da linha do escritório
+  if (d.retorno?.esperando && d.retorno.fixa === false) {
+    const inteiro = montar(false, n, L);
+    if (!inteiro.texto || inteiro.texto.length <= LIMITE_DA_TARDE) return inteiro;
+    return textoDaTarde({ ...d, retorno: { ...d.retorno, esperando: null } }, semExtras);
+  }
   // (Fase 7a, correção 2) quantas das L têm vaga garantida: as primeiras (as de maior perda)
   const G = Math.min(L, d.amanha?.agenda?.vagas_garantidas ?? 0);
   const bloco = blocoLigado(d.amanha?.agenda);
@@ -725,8 +762,10 @@ export function textoDaTarde(d: DadosDaTarde, semExtras: (d: DadosDaTarde) => Da
     }
   }
   const curto = montar(true, 0, 0);
-  if (curto.texto && curto.texto.length > LIMITE_DA_TARDE) {
-    return { ...curto, texto: `${curto.texto.slice(0, LIMITE_DA_TARDE - 1).trimEnd()}…` };
-  }
-  return curto;
+  if (!curto.texto || curto.texto.length <= LIMITE_DA_TARDE) return curto;
+  // (P14, correção) com a linha que sustenta promessa, nunca o corte duro (ele comia o fim do texto e as linhas com letra,
+  // que continuavam gravadas em letras): o enxuto, também sem linha da agenda; e, se nem assim couber, ele inteiro, acima do
+  // limite (como a manhã acima da meta). O teto da linha (retorno.ts) deixa o texto abaixo dos 4.000 do banco
+  if (d.retorno?.esperando) return montar(true, 0, 0, true);
+  return { ...curto, texto: `${curto.texto.slice(0, LIMITE_DA_TARDE - 1).trimEnd()}…` };
 }
