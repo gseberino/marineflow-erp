@@ -187,7 +187,8 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     onde: 'agenda_habilidade',
     casou: '1000',
     // Fase 7c, correção da revisão (20261102100580): recriada (+1: a mesma cópia; a pergunta por OS a cada tique).
-    vezes: 2,
+    // Fase 7c, correção 2 da revisão (20261102100590): recriada (+1: a mesma cópia; a pergunta ligada que sobra depois do DESFAZER).
+    vezes: 3,
     porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_aprender e agenda_equipe_semana); não é texto_max nem peca_embutida_acima',
   },
   // Fase 7c (P8, 20261102100550): a rodada das etapas grava a rodada como a de quem faz o quê; a ordem e a conta do plano do dia têm
@@ -199,10 +200,12 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     vezes: 1,
     porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_habilidade); não é texto_max nem peca_embutida_acima',
   },
-  ...(['_agenda_tarefas_sincronizar', '_agenda_aplicar_etapa'] as const).map((onde) => ({
+  // Fase 7c, correção 2 da revisão (20261102100590): _agenda_tarefas_sincronizar recriada (+1: a mesma cópia; o carimbo da linha nova
+  // de os_planejamento).
+  ...([['_agenda_tarefas_sincronizar', 2], ['_agenda_aplicar_etapa', 1]] as const).map(([onde, vezes]) => ({
     onde,
     casou: '0.001',
-    vezes: 1,
+    vezes,
     porque: 'c_casa: a menor casa de os_tarefas.ordem (numeric(8,3)), para a etapa nova entrar antes da vizinha quando o meio entre as duas não cabe nas 3 casas; não é parâmetro do dono',
   })),
   {
@@ -210,21 +213,24 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     casou: '0.25',
     // as duas regras casam a mesma constante (o valor de frequencia_minima e o decimal fora dos estruturais)
     // Fase 7c, correção da revisão (20261102100580): recriada (+2: a mesma cópia; quem responde e a OS começada antes das etapas).
-    vezes: 4,
+    // Fase 7c, correção 2 da revisão (20261102100590): recriada (+2: a mesma cópia; a duração do plano).
+    vezes: 6,
     porque: 'c_resto: a etapa começada pede ao menos ¼ de meio-dia (spec-fase7c §16.3.6, "max(meios − Σ fração congelada, 0,25)"); não é frequencia_minima',
   },
   {
     onde: '_agenda_tarefas_planejar',
     casou: '0.001',
     // Fase 7c, correção da revisão (20261102100580): recriada (+1: a mesma cópia).
-    vezes: 2,
+    // Fase 7c, correção 2 da revisão (20261102100590): recriada (+1: a mesma cópia).
+    vezes: 3,
     porque: 'c_resid: o resíduo das frações do plano (3 casas, as de os_tarefas_dia.fracao) não é etapa a fazer; não é parâmetro do dono',
   },
   {
     onde: '_agenda_tarefas_planejar',
     casou: '0.01',
     // Fase 7c, correção da revisão (20261102100580): recriada (+1: a mesma cópia).
-    vezes: 2,
+    // Fase 7c, correção 2 da revisão (20261102100590): recriada (+1: a mesma cópia).
+    vezes: 3,
     porque: 'c_folga: a sobra de um meio-dia abaixo de um centésimo não leva outra etapa (a régua do arredondamento); não é parâmetro do dono',
   },
   // Fase 7b (P6, 20261101100500): quem chamar diz quanto a conta custou (as duas voltas do motor), como o livre de verdade.

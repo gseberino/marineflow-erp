@@ -326,6 +326,10 @@ const FIXTURES_COMO_TEXTO = [
   // que as 10 recriadas só acrescentam os blocos "-- FASE 7c: (7c correção" e as marcas "-- (7c correção" (as fontes já estão acima:
   // mig_tarefas_fase7c, mig_rodada_fase7c, mig_leituras_fase7c e mig_motor_fase7c); quem recriar depois uma delas copia desta.
   ['agenda_teste.mig_correcao_fase7c', '../../supabase/migrations/20261102100580_agenda_fase77c_correcao.sql'],
+  // Fase 7c (correção 2 da revisão): a própria migration da correção 2 (20261102100590), de onde o C0 de agenda_fase77c_correcao2.sql
+  // confere que as 6 recriadas só acrescentam os blocos "-- FASE 7c: (7c correção 2" e as marcas "-- (7c correção 2" (as fontes já estão
+  // acima: mig_correcao_fase7c, mig_tarefas_fase7c e mig_correcao_fase7b); quem recriar depois uma delas copia desta.
+  ['agenda_teste.mig_correcao2_fase7c', '../../supabase/migrations/20261102100590_agenda_fase77c_correcao2.sql'],
   // Fase 7c (P7): a migration de dado 20261102100600 (os 4 modos da 7c — modo_habilidade, modo_lider, modo_habilidade_propor e
   // modo_tarefas — de desligado a sombra, e o DESFAZER do cabeçalho; FORA_DA_BANCADA: o agenda_fase7c_sombra.sql a roda numa
   // subtransação).

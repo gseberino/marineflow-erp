@@ -20,7 +20,8 @@
 --       primeiro (conta como vista) e a chamada fica para o dia dela; com a chamada perdendo hoje, a de antes
 --   K8  (achado 8) com a linha da 7c ligada, a mensagem ao cliente (75) ganha a forma curta; sem a 7c ligada, a de antes
 --   K2  (achado 2) a (n) com quem faz o quê nunca vista há 2 dias úteis sobe a 77; com 1 dia, 75; com a pergunta do gestor que vence hoje
---       (76), não sobe
+--       (76), não sobe. (Correção 2, achado 1: sem a pergunta do gestor de 76 para ceder, volta a 75 — o K2a; o C1 da correção 2 prova a
+--       subida com a de 76 e com a mensagem ao cliente.)
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -71,6 +72,28 @@ begin
   end loop;
   return array_to_string(v_out, E'\n');
 end $f$;
+
+-- FASE 7c: (correção 2 da revisão, 20261102100590) o texto sem os blocos e as marcas da correção 2 ("-- FASE 7c: (7c correção 2, …" /
+-- "-- (7c correção 2, …"), para o K0c comparar a viva com a desta migration: a 100590 recria 4 das 10 (_agenda_tarefas_planejar,
+-- _agenda_linhas_do_fechamento, agenda_habilidade e _agenda_ver_habilidades) só com acréscimos; o C0 de agenda_fase77c_correcao2.sql
+-- confere as cópias dela.
+create function pg_temp.sem_corr2(p text) returns text language plpgsql immutable as $f$
+declare
+  v_out text[] := '{}';
+  l     text;
+  v_b   boolean := false;
+  v_m   boolean := false;
+begin
+  foreach l in array string_to_array(replace(p, E'\r\n', E'\n'), E'\n') loop
+    if not v_b and not v_m and l ~ '^\s*-- FASE 7c: \(7c correção 2,' then v_b := true; continue; end if;
+    if not v_b and not v_m and l ~ '^\s*-- \(7c correção 2,' then v_m := true; continue; end if;
+    if v_b then if l ~ '^\s*-- FASE 7c: fim' then v_b := false; end if; continue; end if;
+    if v_m then if l ~ '^\s*-- \(7c: fim\)' then v_m := false; end if; continue; end if;
+    v_out := v_out || l;
+  end loop;
+  return array_to_string(v_out, E'\n');
+end $f$;
+-- FASE 7c: fim
 
 -- ── K0. As cópias e as portas (as portas sem fixture) ──────────────────────────────────────────────────────────────────────────
 do $k0$
@@ -123,7 +146,9 @@ begin
     end if;
     select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = f.nome;
     if (select count(*) from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = f.nome) <> 1
-       or v_novo is distinct from pg_temp.corpo(v_mig, f.nome) then
+       -- FASE 7c: (correção 2 da revisão, 20261102100590) a viva sem os blocos e as marcas da correção 2
+       or pg_temp.sem_corr2(v_novo) is distinct from pg_temp.corpo(v_mig, f.nome) then
+       -- FASE 7c: fim
       v_viva := concat_ws(', ', v_viva, f.nome);
     end if;
   end loop;
@@ -621,7 +646,11 @@ begin
   v_res := pg_temp.ok(v_res, 'K14a a chamada já vista e fora do dia dela, quem faz o quê nunca vista: a de quem faz o quê vai primeiro, inteira, e conta; a chamada fica fora da linha (não gasta a vez dela)',
     t1 like '75 true false | Agenda: Para não mandar ninguém sozinho em serviço de risco% | false', t1);
   v_res := pg_temp.ok(v_res, 'K14b no dia em que a chamada vence, a de antes: a chamada primeiro (e conta)', t2 like '75 true | Agenda: Na agenda conto com%', t2);
-  v_res := pg_temp.ok(v_res, 'K14c a chamada nunca vista (perde hoje): a de antes — a chamada primeiro, quem faz o quê como "Também", sem contar', t3 = '75 true false | true', t3);
+  -- FASE 7c: (correção 2 da revisão, 20261102100590, achado 11) a de quem faz o quê da equipe, ligada, que vai como "Também" atrás da
+  -- chamada leva o que foi marcado e o prazo e conta como vista (fica em pergunta_ids). Antes, "sem contar": na semana real ela nunca era
+  -- vista (a chamada e depois o telefone do Alex iam sempre primeiro). A chamada continua primeiro.
+  v_res := pg_temp.ok(v_res, 'K14c a chamada nunca vista (perde hoje): a chamada primeiro, quem faz o quê como "Também" com o prazo, e conta (correção 2, achado 11)', t3 = '75 true true | true', t3);
+  -- FASE 7c: fim
   perform pg_temp.gravar(v_res);
 end
 $k14$;
@@ -718,8 +747,12 @@ begin
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
-  v_res := pg_temp.ok(v_res, 'K2a a (n) com quem faz o quê nunca vista: 75 no dia em que nasce e no seguinte (1 dia útil), 77 depois de 2 dias úteis sem ser vista',
-    t1 = '75' and t2 = '75' and t3 = '77', concat_ws(' ', t1, t2, t3));
+  -- FASE 7c: (correção 2 da revisão, 20261102100590, achado 1) a subida a 77 só vale com a pergunta do gestor de 76 para ceder (o caso de
+  -- 3 linhas da correção, provado no C1 de agenda_fase77c_correcao2.sql); aqui não há a de 76, e a (n) a 77 só passaria à frente de outra
+  -- de 75 (a mensagem ao cliente, que a guarda não protegia): ela volta a 75. Antes, 77 depois de 2 dias úteis.
+  v_res := pg_temp.ok(v_res, 'K2a a (n) com quem faz o quê nunca vista: 75 no dia em que nasce, no seguinte (1 dia útil) e depois de 2 dias úteis sem a pergunta do gestor de 76 para ceder (correção 2, achado 1)',
+    t1 = '75' and t2 = '75' and t3 = '75', concat_ws(' ', t1, t2, t3));
+  -- FASE 7c: fim
   v_res := pg_temp.ok(v_res, 'K2b com a pergunta do gestor que vence hoje (76), a (n) não sobe (fica 75: não tira quem perde hoje)', t4 = '76,75', t4);
   perform pg_temp.gravar(v_res);
 end

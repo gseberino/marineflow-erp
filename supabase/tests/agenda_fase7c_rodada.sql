@@ -582,10 +582,15 @@ begin
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
-  v_res := pg_temp.ok(v_res, 'R2i como "Também" (o telefone do Alex na frente): fica fora de pergunta_ids, a forma curta diz o que foi marcado sem prazo, e o registro não a conta como vista (só o telefone)',
-    t3 = '75 | t | t | t | Agenda, equipe: o telefone do Alex; quem faz o quê — marquei: Alex instala sozinho, Roberto instala sozinho, João é ajudante, Rafael é ajudante e Bruno é novo. *agenda pendências* mostra.'
-    and t4 = 'equipe_cadastro 1, habilidade 0',
+  -- FASE 7c: (correção 2 da revisão, 20261102100590, achado 11) a de quem faz o quê da equipe, ligada, que vai como "Também" leva o que foi
+  -- marcado E o prazo — na inteira e na curta, como a forma curta que já contava — e conta como vista (fica em pergunta_ids; o registro a
+  -- conta). Antes ela saía de pergunta_ids e não contava: na semana real a chamada e depois o telefone do Alex iam sempre primeiro, e o
+  -- prazo nunca começava. O telefone continua primeiro.
+  v_res := pg_temp.ok(v_res, 'R2i como "Também" (o telefone do Alex na frente): com o prazo, fica em pergunta_ids, a forma curta diz o que foi marcado e o prazo, e o registro a conta como vista (correção 2, achado 11)',
+    t3 like '75 | t | f | f | Agenda, equipe: o telefone do Alex; quem faz o quê — marquei: Alex instala sozinho, Roberto instala sozinho, João é ajudante, Rafael é ajudante e Bruno é novo; sem resposta até qui 05/11 às 18:00, fica assim. *agenda pendências* mostra.'
+    and t4 = 'equipe_cadastro 1, habilidade 1',
     t3 || ' || ' || t4);
+  -- FASE 7c: fim
 
   -- (j) o portão separado: a 7b desligada e a 7c em teste — a chamada da 7a fica na pergunta de fato (e), e as ligadas são as de antes
   begin

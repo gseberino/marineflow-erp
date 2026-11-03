@@ -4,7 +4,7 @@
 -- migration de dado 20261102100600 — os 4 modos da 7c em teste — fila-do-dono/fase77c-publicar.md, passos 2–5 (e de novo a cada "ligar",
 -- passos 6 e 7).
 -- Spec: spec-fase7c.md §10 passo 1, §16.10 passo 1, §16.9 ("O que o P8 muda no P7"), R5.5 (o pós-deploy) e R5.7-9.
--- bancada: depende de 20261102100580
+-- bancada: depende de 20261102100590
 --
 -- SÓ LEITURA EM PRODUÇÃO: nenhum INSERT, UPDATE ou DELETE (só nas tabelas TEMPORÁRIAS do resultado); agenda_ver, agenda_habilidade_medidas,
 -- agenda_tarefas_medidas e _agenda_linhas_do_fechamento são STABLE e não gravam; agenda_tarefas_rodar só é chamada com modo_tarefas
@@ -31,9 +31,11 @@
 --      task-automations); a última rodada de quem faz o quê e a das etapas (só mostra)
 --   L  o foco *agenda quem faz* devolve o texto (com a leitura desligada: "a agenda de produção está desligada") e o mesmo texto duas vezes
 --      (md5); as medidas de quem faz o quê e das etapas respondem; com modo_tarefas desligado a rodada das etapas devolve {rodou: false};
---      o fechamento de hoje responde, com toda linha em até 480 letras e, com modo_tarefas desligado, sem a linha das etapas
+--      o fechamento de hoje responde, com toda linha em até 480 letras (a do cliente e a de perguntas, até 600) e, com modo_tarefas
+--      desligado, sem a linha das etapas
 --   O md5 de cada função que a 7c cria ou recria fica no molde da 7b (sql/wf7c_md5_esperado.sql do scratchpad, gerado da bancada na ponta
---   por f7c/p7/md5-gerar.mjs — com a correção da revisão, a cópia dele f7c/corr/md5-gerar.mjs; refazer depois de cada correção): rodar
+--   por f7c/p7/md5-gerar.mjs — com a correção da revisão, a cópia dele f7c/corr/md5-gerar.mjs; com a correção 2, f7c/rev2/corr2/md5-gerar.mjs;
+--   refazer depois de cada correção): rodar
 --   junto com este, depois do passo 2. Com a 7c publicada, o md5 da 7b (sql/wf7b_md5_esperado.sql) e o da 7a (sql/wf7c2_md5_sem7b.sql)
 --   dão "diferentes" nas que a 7c recria: valem sql/wf7c_md5_7b_sem7c.sql e sql/wf7c_md5_7a_sem7b7c.sql (os mesmos sem elas).
 --
@@ -70,6 +72,18 @@ insert into _pd_correcoes values
          '_agenda_habilidade_pergunta_texto(date, uuid[])', '_agenda_habilidade_propor(date, timestamptz)',
          '_agenda_ver_habilidades(date, timestamptz, uuid)',
          'agenda_propor(text, date, date, uuid[], jsonb, boolean, text, uuid, date, timestamptz)']);
+-- FASE 7c: fim
+-- FASE 7c: (correção 2 da revisão, 20261102100590) a correção 2 existe: 6 funções recriadas (as linhas de 75 que sobem juntas e a cobrança
+-- do último dia depois de um dia de revisão, as etapas pela duração do plano, o carimbo da linha de os_planejamento que a rodada das
+-- etapas cria, a pergunta ligada que sobra depois do DESFAZER, o foco logo depois do ligar e o novato, as datas com o mês só na última).
+-- A marca é a dos blocos e das marcas dela ("-- FASE 7c: (7c correção 2, achado N)" / "-- (7c correção 2, achado N)"); a da 100580,
+-- "(7c correção", também casa com estas, e por isso a 100590 tem a dela. Daqui em diante o M1c e o F5c a exigem.
+insert into _pd_correcoes values
+  ('20261102100590', 'a correção 2 da revisão da 7c', '(7c correção 2,',
+   array['_agenda_linhas_do_fechamento(date)', '_agenda_tarefas_planejar(uuid, date, text)',
+         '_agenda_tarefas_sincronizar(uuid, date, timestamptz)', 'agenda_habilidade(date, timestamptz)',
+         '_agenda_ver_habilidades(date, timestamptz, uuid)',
+         'agenda_rascunho_disponibilidade(uuid, text, text, text, text, boolean, text, date, text)']);
 -- FASE 7c: fim
 
 -- ── M. Versões registradas ──────────────────────────────────────────────────────────────────────────────
@@ -438,8 +452,12 @@ select 'L4 a rodada das etapas: com modo_tarefas desligado (antes do dado), agen
   from public.agenda_config c where c.id;
 
 insert into _resultado
-select 'L5 o fechamento de hoje (_agenda_linhas_do_fechamento) responde, toda linha em até 480 letras e, com modo_tarefas desligado, sem a linha das etapas',
-       coalesce(bool_and(length(l ->> 'texto') <= 480), true)
+-- FASE 7c: (correção 2 da revisão, 20261102100590) a mensagem ao cliente (c_max_cliente de _agenda_cliente_fechamento) e a linha de
+-- perguntas (c_max_perg) vão até 600 letras — a coleta aceita 640 (LINHA_DA_AGENDA_MAX) —; as outras, até 480. Antes, 480 para todas: com
+-- 2 mensagens ao cliente esperando *manda cliente* e nomes longos, o L5 reprovava sem defeito e parava o ligar.
+select 'L5 o fechamento de hoje (_agenda_linhas_do_fechamento) responde, toda linha em até 480 letras (a do cliente e a de perguntas, até 600) e, com modo_tarefas desligado, sem a linha das etapas',
+       coalesce(bool_and(length(l ->> 'texto') <= case when l ->> 'tipo' in ('cliente', 'pergunta') then 600 else 480 end), true)
+-- FASE 7c: fim
        and (c.modo_tarefas <> 'desligado' or coalesce(bool_and(l ->> 'texto' not like 'Etapas%' and l ->> 'texto' not like 'Em teste: Etapas%'), true)),
        format('%s linhas: %s', count(l), coalesce(string_agg((l ->> 'tipo') || ' ' || (l ->> 'perda') || ' ' || (l ->> 'modo'), '; '), '—'))
   from public.agenda_config c
