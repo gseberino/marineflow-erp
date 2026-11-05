@@ -14,7 +14,7 @@
 --      dele … cedo" do fim do dia —, primeiro os vencidos, depois por prazo; SEM PRAZO HOJE vêm até 3, por
 --      abertura, e o resto conta em esperando_mais. "Para conferir" traz o que pede decisão do dono e não tem
 --      recibo (PARAR por extenso, opt-out que voltou a escrever, recibo cancelado por atraso de mais de 24 h),
---      até 3, um por número (o mais recente), e o resto em conferir_mais;
+--      até 3, um por número e motivo (o mais recente), e o resto em conferir_mais;
 --    - 'fechamento': {modo, esperando (os com prazo hoje, todos), recebidos, no_prazo, adiados (dos casos abertos
 --      hoje), sem_palavra, na_queda, sombra {teria_mandado, por_papel, respondeu_antes}, alongadas (só na sexta:
 --      os alongamentos dos últimos 7 dias)};
@@ -28,13 +28,27 @@
 --      a promessa guardada em dados.prazo pelo retorno_pegar; ela conta como "prazo hoje" e vai em prometido_ate.
 --      Sem isso, o "hoje até as 10h" que o cliente vai ouvir às 08:10 cairia entre os "sem prazo" (até 3), e a
 --      linha que sustenta a promessa seria cortada;
---    - sem_palavra e na_queda contam as promessas (o prazo de pé: segundo_prazo, senão prometido_ate) que venceram
---      desde a mesma hora do dia útil anterior até agora, sem resposta de conteúdo até o prazo e sem o fim do dia
---      decidido. Cada vencimento entra uma vez num fechamento de dia útil, inclusive o das 19h (depois do
---      fechamento das 17:30) e o de sexta, que a segunda conta. na_queda = as que tiveram o fim do dia recusado por
---      so_reativo (o disjuntor: o canal estava fora); sem_palavra = as outras. A meta de sem_palavra é 0;
+--    - "Para conferir", a janela: a spec diz "aberto nas últimas 24 h", mas o caso vive até 3 dias úteis e o
+--      _retorno_triar marca parar_largo em QUALQUER mensagem dele. No parar_largo e no opt_out vale a ÚLTIMA mensagem
+--      do caso: pela 1ª, o pedido feito no 2º dia do caso nunca chegaria ao dono, e este é o único canal dele (P5,
+--      regra 3). E o início da janela é o menor entre 24 h atrás e a mesma hora da manhã anterior que leu o retorno:
+--      domingo e feriado não leem (secretario.ts, tipoDoDia; sábado lê), e com 24 h fixas o que entra entre sáb 07:30
+--      e dom 07:30 (48 h com feriado na segunda) nunca apareceria;
+--    - "Para conferir", a repetição: a spec não pede um item por número. Os casos repetidos do mesmo número e do mesmo
+--      motivo viram um item (o mais recente); motivo diferente é outra decisão do dono e nunca some;
+--    - sem_palavra e na_queda contam as promessas (o prazo de pé: segundo_prazo, senão prometido_ate) dos casos que
+--      seguem em recibo ou passagem, que venceram desde a mesma hora do último FECHAMENTO até agora, sem resposta de
+--      conteúdo até o prazo e sem o fim do dia decidido. O nível é o filtro do relógio do vigia: o caso que virou
+--      'nada' depois do recibo (PARAR, vendedor, agenda, promessa do dono) calou de propósito e nunca ganha fim do
+--      dia. O calendário é o da tarde do Secretário (_retorno_turno_da_tarde, espelho de turnoDaTarde), não o
+--      agenda_dia_util: só o turno fechamento mostra esses números (secretario-tarde.ts), e o 1º dia útil da semana e
+--      o do mês são revisão. Assim cada vencimento entra uma vez num fechamento mostrado, inclusive o das 19h (depois
+--      do fechamento das 17:30) e os de sex 19h e seg 10h, que a terça conta. na_queda = as que tiveram o fim do dia
+--      recusado por so_reativo (o disjuntor: o canal estava fora); sem_palavra = as outras. A meta de sem_palavra é 0;
 --    - "Ninguém olha o futuro" também aqui: só casos gravados até p_agora, saídas decididas até p_agora e
---      alongamentos registrados até p_agora; a resposta de conteúdo e o fecho depois de p_agora não contam.
+--      alongamentos registrados até p_agora; a resposta de conteúdo e o fecho depois de p_agora não contam;
+--    - o papel cliente_ambiguo pode ter um cadastro só (DDD diferente ou cadastro sem DDD, quem_escreve): aí
+--      "(número de 1 clientes)" seria errado, e o rótulo sai "(número de cliente a confirmar)", sem nome nenhum.
 --
 -- 2. View retorno_calibracao: por faixa, os casos com recibo (sombra, enviada ou incerta) e prazo já decidido
 --    (cumprido no prazo, ou o prazo passou): casos, no_prazo (resposta de conteúdo até o prometido, A.2),
@@ -59,15 +73,17 @@
 --    próxima 04:00 de Brasília (os passos diários do vigia).
 --
 -- Auxiliares internas: _retorno_rotulo(caso, agora) (a regra do rótulo, uma fonte só para o resumo e a lista da
--- sombra) e _retorno_instante(texto) (o instante guardado em jsonb, ou nulo se ilegível: um dados.prazo torto
--- nunca derruba o resumo da manhã). SECURITY DEFINER com search_path (a que lê tabela), revoke de public, anon e
--- authenticated, sem grant. retorno_resumo_do_dia: SECURITY DEFINER, só o service_role. As views: security_invoker,
--- sem leitura de anon e authenticated, select só do service_role.
+-- sombra), _retorno_instante(texto) (o instante guardado em jsonb, ou nulo se ilegível: um dados.prazo torto
+-- nunca derruba o resumo da manhã) e _retorno_dia_de_tarde(dia), _retorno_revisao_do_mes(dia) e
+-- _retorno_turno_da_tarde(dia) (o espelho de _shared/secretario/turno.ts). SECURITY DEFINER com search_path (a que lê
+-- tabela), revoke de public, anon e authenticated, sem grant. retorno_resumo_do_dia: SECURITY DEFINER, só o
+-- service_role. As views: security_invoker, sem leitura de anon e authenticated, select só do service_role.
 --
 -- Sem dado: só funções e views novas; nenhuma linha muda.
 -- Reverter (antes da migration do cron, 20261116101100, que não usa nada daqui): drop view
 -- public.retorno_sombra_lista, public.retorno_calibracao; drop function public.retorno_resumo_do_dia(text, timestamptz),
--- public._retorno_proximo_evento(timestamptz), public._retorno_rotulo(uuid, timestamptz), public._retorno_instante(text).
+-- public._retorno_proximo_evento(timestamptz), public._retorno_rotulo(uuid, timestamptz), public._retorno_instante(text),
+-- public._retorno_turno_da_tarde(date), public._retorno_revisao_do_mes(date), public._retorno_dia_de_tarde(date).
 -- Sem deploy: o Secretário trata a função ausente ou com erro como "sem retorno" (ai-daily-briefing/retorno.ts), e
 -- update public.retorno_config set modo = 'desligado' deixa na manhã só quem já ouviu a promessa.
 
@@ -152,6 +168,69 @@ comment on function public._retorno_rotulo(uuid, timestamptz) is
 
 revoke all on function public._retorno_rotulo(uuid, timestamptz) from public, anon, authenticated;
 
+-- ── 2b. O calendário da tarde do Secretário ──────────────────────────────────────────────────────────
+-- O espelho de ehDiaUtilDaTarde, diaDaRevisaoDoMes e turnoDaTarde (_shared/secretario/turno.ts). Não é o
+-- agenda_dia_util: o dia que o dono marca indisponível tem tarde normal. agenda_feriado é a lista de feriadoDoDia.
+
+create or replace function public._retorno_dia_de_tarde(p_dia date)
+returns boolean
+language sql
+immutable
+set search_path = public
+as $$
+  select extract(isodow from p_dia) between 1 and 5 and public.agenda_feriado(p_dia) is null;
+$$;
+
+comment on function public._retorno_dia_de_tarde(date) is
+  'Retorno F1 (P9): o dia tem tarde do Secretário: segunda a sexta, sem feriado (ehDiaUtilDaTarde, _shared/secretario/turno.ts).';
+
+revoke all on function public._retorno_dia_de_tarde(date) from public, anon, authenticated;
+
+create or replace function public._retorno_revisao_do_mes(p_dia date)
+returns date
+language sql
+immutable
+set search_path = public
+as $$
+  select min(x.d)
+    from (select p_dia - (extract(day from p_dia)::integer - 1) + g as d from generate_series(0, 9) as g) x
+   where public._retorno_dia_de_tarde(x.d);
+$$;
+
+comment on function public._retorno_revisao_do_mes(date) is
+  'Retorno F1 (P9): o 1º dia com tarde do mês de p_dia, o da revisão do mês (diaDaRevisaoDoMes, _shared/secretario/turno.ts).';
+
+revoke all on function public._retorno_revisao_do_mes(date) from public, anon, authenticated;
+
+create or replace function public._retorno_turno_da_tarde(p_dia date)
+returns text
+language plpgsql
+immutable
+set search_path = public
+as $$
+declare
+  v_revisao_semana date;
+begin
+  if not coalesce(public._retorno_dia_de_tarde(p_dia), false) then
+    return null;
+  end if;
+  if p_dia = public._retorno_revisao_do_mes(p_dia) then
+    return 'revisao_mes';
+  end if;
+  -- o 1º dia com tarde da semana que não seja o da revisão do mês dele (a semana pode cruzar dois meses)
+  select min(x.d) into v_revisao_semana
+    from (select p_dia - (extract(isodow from p_dia)::integer - 1) + g as d from generate_series(0, 4) as g) x
+   where public._retorno_dia_de_tarde(x.d)
+     and x.d <> public._retorno_revisao_do_mes(x.d);
+  return case when p_dia = v_revisao_semana then 'revisao_semana' else 'fechamento' end;
+end;
+$$;
+
+comment on function public._retorno_turno_da_tarde(date) is
+  'Retorno F1 (P9): o turno da tarde do Secretário no dia: revisao_mes, revisao_semana, fechamento, ou nulo em sábado, domingo e feriado (turnoDaTarde, _shared/secretario/turno.ts). Só o turno fechamento mostra sem_palavra e na_queda.';
+
+revoke all on function public._retorno_turno_da_tarde(date) from public, anon, authenticated;
+
 -- ── 3. O resumo do dia (C-RESUMO) ────────────────────────────────────────────────────────────────────
 
 create or replace function public.retorno_resumo_do_dia(p_turno text, p_agora timestamptz default now())
@@ -179,6 +258,8 @@ declare
   v_sem_total integer;
   v_conferir jsonb;
   v_conferir_total integer;
+  v_manha_antes date;
+  v_desde_conferir timestamptz;
   v_dia_antes date;
   v_desde_venc timestamptz;
   v_recebidos integer;
@@ -258,14 +339,25 @@ begin
     from numerados n;
 
   if p_turno = 'manha' then
-    -- "Para conferir": o que pede decisão do dono e não tem recibo, um item por número (o mais recente).
+    -- "Para conferir" cobre desde a mesma hora da manhã anterior que leu o retorno (domingo e feriado não leem), e
+    -- nunca menos de 24 h: o que entra entre as duas manhãs tem de chegar ao dono.
+    select max(x.d) into v_manha_antes
+      from (select v_hoje - g as d from generate_series(1, 10) as g) x
+     where extract(isodow from x.d) <> 7
+       and public.agenda_feriado(x.d) is null;
+    v_desde_conferir := least(v_agora - interval '24 hours',
+                              (coalesce(v_manha_antes, v_hoje - 1) + (v_agora at time zone c_fuso)::time) at time zone c_fuso);
+
+    -- "Para conferir": o que pede decisão do dono e não tem recibo, um item por número e motivo (o mais recente). No
+    -- parar_largo e no opt_out vale a última mensagem do caso: o pedido pode vir em qualquer mensagem dele.
     with c as (
-      select a.id, a.chave, a.phone_normalized, a.motivo as motivo, a.aberta_em as desde, a.gravada_em as quando
+      select a.id, a.chave, a.phone_normalized, a.motivo as motivo, a.aberta_em as desde,
+             least(a.ultima_gravada_em, v_agora) as quando
         from public.retorno_aberturas a
        where a.nivel = 'nada'
          and a.motivo in ('parar_largo', 'opt_out')
          and a.gravada_em <= v_agora
-         and a.gravada_em > v_agora - interval '24 hours'
+         and least(a.ultima_gravada_em, v_agora) > v_desde_conferir
       union all
       select a.id, a.chave, a.phone_normalized, 'atraso_longo', a.aberta_em, s.decidida_em
         from public.retorno_saidas s
@@ -274,11 +366,11 @@ begin
          and s.motivo = 'atraso_longo'
          and s.tipo = any (c_primeiras)
          and s.decidida_em <= v_agora
-         and s.decidida_em > v_agora - interval '24 hours'
-    ), um_por_numero as (
-      select distinct on (c.chave) c.* from c order by c.chave, c.quando desc, c.id
+         and s.decidida_em > v_desde_conferir
+    ), um_por_motivo as (
+      select distinct on (c.chave, c.motivo) c.* from c order by c.chave, c.motivo, c.quando desc, c.id
     ), numerados as (
-      select u.*, row_number() over (order by u.desde, u.id) as n from um_por_numero u
+      select u.*, row_number() over (order by u.desde, u.id) as n from um_por_motivo u
     )
     select coalesce(jsonb_agg(jsonb_build_object('phone', n.phone_normalized,
                                                  'rotulo', public._retorno_rotulo(n.id, v_agora),
@@ -309,10 +401,11 @@ begin
      and a.aberta_em >= v_ini_hoje
      and a.aberta_em < v_fim_hoje;
 
-  -- As promessas que venceram sem palavra, desde a mesma hora do dia útil anterior (o fechamento anterior).
+  -- As promessas que venceram sem palavra, desde a mesma hora do último fechamento (a revisão da semana e a do mês não
+  -- mostram esses números: o que venceu no dia delas fica para o fechamento seguinte).
   select max(x.d) into v_dia_antes
     from (select v_hoje - g as d from generate_series(1, 10) as g) x
-   where public.agenda_dia_util(x.d);
+   where public._retorno_turno_da_tarde(x.d) = 'fechamento';
   v_desde_venc := (coalesce(v_dia_antes, v_hoje - 1) + (v_agora at time zone c_fuso)::time) at time zone c_fuso;
 
   select count(*) filter (where not q.queda), count(*) filter (where q.queda)
@@ -324,7 +417,8 @@ begin
                             and f.motivo = 'so_reativo'
                             and f.decidida_em <= v_agora) as queda
             from public.retorno_aberturas a
-           where a.recibo_em is not null
+           where a.nivel in ('recibo', 'passagem')      -- o filtro do relógio do vigia: o 'nada' calou de propósito
+             and a.recibo_em is not null
              and a.recibo_em <= v_agora
              and a.prometido_ate is not null
              and a.gravada_em <= v_agora

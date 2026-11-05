@@ -7,24 +7,31 @@
 --   1. manhã (ter 10/11 07:30), quem espera: o cliente vencido ontem (topo_dia = hoje), o número novo prometido hoje até
 --      10h com coleta.nome mas a coleta 2 só em sombra ("número novo"), o recibo da noite ainda agendado com a promessa
 --      guardada, o ambíguo e 5 sem prazo hoje → os 4 com prazo hoje vêm TODOS e em ordem (vencido, depois por prazo), dos
---      sem prazo vêm 3 com esperando_mais = 2; os cumpridos, o caso 'nada' e o caso do futuro ficam fora;
+--      sem prazo vêm 3 com esperando_mais = 2; os cumpridos, o caso 'nada' e o caso do futuro ficam fora; com a coleta 2
+--      enviada, o rótulo é o nome dito, só a partir de quando ela saiu; um dados.prazo ilegível não derruba a manhã;
 --   2. manhã, "Para conferir": um parar_largo (o mais recente do número), um opt_out e um recibo cancelado por
 --      atraso_longo, até 3, e o 4º em conferir_mais; o de mais de 24 h, o cancelado por outro motivo e o do futuro ficam
 --      fora;
+--  2b. "Para conferir", a janela e a repetição: vale a última mensagem do caso, não a 1ª; o que entra de sáb a dom chega
+--      na manhã de segunda e não repete na de terça; o de domingo com feriado na segunda chega na manhã de terça; o que
+--      a manhã de sábado mostrou a de segunda não repete; o mesmo número com dois motivos traz os dois;
 --   3. fechamento (ter 10/11 17:30): esperando = os prometidos até 19h sem conteúdo e os vencidos (todos); recebidos, no
 --      prazo e adiados dos abertos hoje; sem_palavra × na_queda (o fim do dia recusado por so_reativo conta à parte; o
---      que teve o fim do dia não conta); 2 em sombra por papel (fora o acorde, a de ontem e a do futuro) e 1
---      cancelada/respondida_pelo_dono; "ouviu" e o segundo prazo do adiado;
+--      que teve o fim do dia não conta; o caso que virou 'nada' depois do recibo não conta em nenhum dos dois; a terça
+--      conta desde o fechamento de sexta, porque a segunda é revisão: os vencimentos de sex 19h e de seg 10h e 19h, mesmo
+--      já fechados; o que venceu antes do fechamento de sexta já contou; a quarta não repete o que a terça contou); o
+--      turno da tarde do banco igual ao turnoDaTarde; 2 em sombra por papel (fora o acorde, a de ontem e a do futuro) e
+--      1 cancelada/respondida_pelo_dono; "ouviu" e o segundo prazo do adiado;
 --   4. alongadas só numa sexta (os 7 dias, fora o antigo e o do futuro); turno desconhecido = {"erro": "turno"}; sem a
 --      linha de configuração, modo 'desligado';
 --   5. retorno_calibracao: as faixas com wilson_inferior entre 0 e 1 (pela diferença antes e depois do arranjo; com a
 --      faixa vazia antes, os valores exatos: 80%, Wilson 0,3755, mediana 150 min, p80 18:00);
 --   6. retorno_sombra_lista: o trecho (140 caracteres da 1ª mensagem), o rótulo e o que entra (sombra e enviada, fora
---      acorde); 42501 para anon e authenticated nas duas views e no resumo;
+--      acorde); 42501 para anon e authenticated nas duas views e no resumo, e o service_role lê os três;
 --   7. _retorno_proximo_evento: a agendada, o acorde e o adiamento do relógio, a próxima 04:00, e o caso do futuro não
 --      conta.
 -- Em toda seção, nenhum campo do resumo traz o corpo de uma mensagem (as sintéticas têm a marca CORPO-SECRETO-F1R).
--- Cadastros e mensagens SINTÉTICOS de 55479000088xx; datas de 05 a 13/11/2026 (Brasília, sem horário de verão), ANTES
+-- Cadastros e mensagens SINTÉTICOS de 55479000088xx; datas de 29/10 a 13/11/2026 (Brasília, sem horário de verão), ANTES
 -- do deploy de 16/11 de propósito: o resumo só enxerga o que foi gravado até p_agora, e as linhas reais do retorno (que
 -- só nascem a partir de 16/11) ficam fora sem que nada real seja tocado. A calibração (view, sem p_agora) é conferida
 -- pela DIFERENÇA antes e depois do arranjo, com casos de outubro de 2026.
@@ -182,7 +189,10 @@ begin
       from (values ('public.retorno_resumo_do_dia(text, timestamptz)', 's', true, true),
                    ('public._retorno_rotulo(uuid, timestamptz)', 's', true, false),
                    ('public._retorno_proximo_evento(timestamptz)', 's', true, false),
-                   ('public._retorno_instante(text)', 's', false, false)) x(assinatura, vol, definer, publica)
+                   ('public._retorno_instante(text)', 's', false, false),
+                   ('public._retorno_dia_de_tarde(date)', 'i', false, false),
+                   ('public._retorno_revisao_do_mes(date)', 'i', false, false),
+                   ('public._retorno_turno_da_tarde(date)', 'i', false, false)) x(assinatura, vol, definer, publica)
       left join pg_proc p on p.oid = to_regprocedure(x.assinatura)
   loop
     if v_f.oid is null then
@@ -354,6 +364,24 @@ begin
     if strpos(v_r::text, 'CORPO-SECRETO') > 0 or strpos(v_r::text, 'Marcela') > 0 then
       raise exception '1g: a manhã trouxe texto do cliente: %', v_r;
     end if;
+    -- 1h. Com a coleta 2 enviada às 07:00, o rótulo é o nome dito, só a partir de quando ela saiu (o futuro não conta).
+    perform pg_temp.retorno_f1_resumo_saida(v_nn, 'coleta_numero_novo', 'enviada', c_ter + interval '7 hours');
+    if public._retorno_rotulo(v_nn, c_manha) is distinct from 'Marcela'
+       or public._retorno_rotulo(v_nn, c_ter + interval '6 hours') is distinct from 'número novo' then
+      raise exception '1h: o nome dito só depois da coleta 2 enviada: % e %', public._retorno_rotulo(v_nn, c_manha),
+        public._retorno_rotulo(v_nn, c_ter + interval '6 hours');
+    end if;
+    -- 1i. Um dados.prazo ilegível nunca derruba a manhã: o caso só passa aos sem prazo (os 5 + ele: 3 nomeados e 3 a mais).
+    update public.retorno_saidas
+       set dados = jsonb_set(dados, '{prazo,prometido_ate}', '"amanhã cedo"')
+     where abertura_id = v_p;
+    v_r2 := public.retorno_resumo_do_dia('manha', c_manha);
+    if public._retorno_instante('amanhã cedo') is not null or public._retorno_instante(' ') is not null
+       or public._retorno_instante('2026-11-10 10:00:00-03') is distinct from c_ter + interval '10 hours'
+       or pg_temp.retorno_f1_resumo_item(v_r2 -> 'esperando', '5547900008805') is not null
+       or (v_r2 -> 'esperando_mais') is distinct from '3'::jsonb then
+      raise exception '1i: o dados.prazo ilegível: %', v_r2;
+    end if;
     v_n := v_n + 1;
     v_secoes := v_secoes + 1;
     raise exception 'desfaz' using errcode = 'P0001';
@@ -373,7 +401,7 @@ begin
     perform pg_temp.retorno_f1_resumo_caso('5547900008821', 'cliente', c_seg + interval '20 hours', 'nada', 'parar_largo', v_cl);
     -- C2: número novo com opt-out que voltou a escrever
     perform pg_temp.retorno_f1_resumo_caso('5547900008822', 'numero_novo', c_ter + interval '6 hours', 'nada', 'opt_out');
-    -- C3: mensagem de sex 07/11 10:00 gravada só seg 09/11 22:00 (atraso de 60 h): o recibo foi cancelado por atraso_longo
+    -- C3: mensagem de sáb 07/11 10:00 gravada só seg 09/11 22:00 (atraso de 60 h): o recibo foi cancelado por atraso_longo
     v_cl := pg_temp.retorno_f1_resumo_cliente('Sergio Atraso Teste', '(47) 90000-8823');
     v_caso := pg_temp.retorno_f1_resumo_caso('5547900008823', 'cliente', c_seg - interval '2 days' + interval '10 hours',
                                              'recibo', null, v_cl, '{}'::uuid[], c_seg + interval '22 hours');
@@ -423,6 +451,79 @@ begin
     end if;
     if strpos(v_r::text, 'CORPO-SECRETO') > 0 then
       raise exception '2d: a manhã trouxe texto do cliente: %', v_r;
+    end if;
+    v_n := v_n + 1;
+    v_secoes := v_secoes + 1;
+    raise exception 'desfaz' using errcode = 'P0001';
+  exception when sqlstate 'P0001' then
+    if sqlerrm <> 'desfaz' then raise; end if;
+  end;
+
+  -- ── 2b. "Para conferir": a janela e a repetição ──────────────────────────────────────────────────────
+  begin
+    update public.retorno_config set modo = 'sombra', tipos_ligados = '{}' where id;
+    -- D1: caso aberto seg 09:00, e o pedido de parar veio na última mensagem, ter 08:00. Na manhã de qua o caso tem 46 h,
+    -- mas o pedido tem 23 h 30: aparece, com o desde da abertura
+    v_caso := pg_temp.retorno_f1_resumo_caso('5547900008881', 'cliente', c_seg + interval '9 hours', 'nada', 'parar_largo');
+    update public.retorno_aberturas
+       set ultima_em = c_ter + interval '8 hours', ultima_gravada_em = c_ter + interval '8 hours'
+     where id = v_caso;
+    -- D2: caso parado desde seg 10:00: na manhã de qua já saiu da janela
+    perform pg_temp.retorno_f1_resumo_caso('5547900008882', 'cliente', c_seg + interval '10 hours', 'nada', 'parar_largo');
+    -- E1: parar_largo de sáb 10:00, depois da manhã de sábado; domingo não lê: só a manhã de segunda pode mostrar
+    perform pg_temp.retorno_f1_resumo_caso('5547900008883', 'cliente', '2026-11-07 10:00:00-03', 'nada', 'parar_largo');
+    -- E2: opt_out de sáb 07:00: a manhã de sábado mostra, e a de segunda não repete
+    perform pg_temp.retorno_f1_resumo_caso('5547900008884', 'numero_novo', '2026-11-07 07:00:00-03', 'nada', 'opt_out');
+    -- G: atraso_longo de dom 01/11 10:00, e seg 02/11 é Finados: só a manhã de ter 03/11 pode mostrar
+    v_caso := pg_temp.retorno_f1_resumo_caso('5547900008886', 'cliente', '2026-10-29 10:00:00-03', 'recibo', null, null,
+                                             '{}'::uuid[], '2026-11-01 09:58:00-03');
+    perform pg_temp.retorno_f1_resumo_saida(v_caso, 'recibo_cliente', 'cancelada', '2026-11-01 10:00:00-03', 'atraso_longo');
+    -- H: o mesmo número com dois motivos: recibo cancelado por atraso_longo qua 22:02 e parar_largo qui 06:00
+    v_caso := pg_temp.retorno_f1_resumo_caso('5547900008885', 'cliente', c_seg + interval '10 hours', 'recibo', null, null,
+                                             '{}'::uuid[], c_ter + interval '1 day 22 hours');
+    perform pg_temp.retorno_f1_resumo_saida(v_caso, 'recibo_cliente', 'cancelada', c_ter + interval '1 day 22 hours 2 minutes',
+                                            'atraso_longo');
+    update public.retorno_aberturas
+       set estado = 'fechada', fechada_em = c_ter + interval '1 day 22 hours 3 minutes', fechada_motivo = 'expirou'
+     where id = v_caso;
+    perform pg_temp.retorno_f1_resumo_caso('5547900008885', 'cliente', c_ter + interval '2 days 6 hours', 'nada', 'parar_largo');
+
+    v_r := public.retorno_resumo_do_dia('manha', c_ter + interval '1 day 7 hours 30 minutes');
+    v_e := pg_temp.retorno_f1_resumo_item(v_r -> 'conferir', '5547900008881');
+    if pg_temp.retorno_f1_resumo_fones(v_r -> 'conferir') is distinct from array['5547900008881']
+       or v_e ->> 'motivo' is distinct from 'parar_largo'
+       or (v_e ->> 'desde')::timestamptz is distinct from c_seg + interval '9 hours' then
+      raise exception '2e: na manhã de qua, vale a última mensagem do caso (D1 dentro, D2 fora): %', v_r -> 'conferir';
+    end if;
+    v_r := public.retorno_resumo_do_dia('manha', '2026-11-07 07:30:00-03');
+    if pg_temp.retorno_f1_resumo_fones(v_r -> 'conferir') is distinct from array['5547900008884'] then
+      raise exception '2f: a manhã de sábado lê o retorno (o opt_out das 07:00 entra): %', v_r -> 'conferir';
+    end if;
+    v_r := public.retorno_resumo_do_dia('manha', c_seg + interval '7 hours 30 minutes');
+    if pg_temp.retorno_f1_resumo_fones(v_r -> 'conferir') is distinct from array['5547900008883'] then
+      raise exception '2g: a manhã de segunda cobre desde a de sábado (o de sáb 10:00 entra; o de sáb 07:00 já foi mostrado): %',
+        v_r -> 'conferir';
+    end if;
+    v_r := public.retorno_resumo_do_dia('manha', c_manha);
+    if pg_temp.retorno_f1_resumo_item(v_r -> 'conferir', '5547900008883') is not null then
+      raise exception '2h: a manhã de terça repetiu o que a de segunda mostrou: %', v_r -> 'conferir';
+    end if;
+    v_r := public.retorno_resumo_do_dia('manha', '2026-11-03 07:30:00-03');
+    if pg_temp.retorno_f1_resumo_fones(v_r -> 'conferir') is distinct from array['5547900008886'] then
+      raise exception '2i: depois do domingo e do feriado, a manhã cobre desde a de sábado (o atraso_longo de dom entra): %',
+        v_r -> 'conferir';
+    end if;
+    v_r := public.retorno_resumo_do_dia('manha', '2026-11-04 07:30:00-03');
+    if v_r -> 'conferir' is distinct from '[]'::jsonb then
+      raise exception '2j: a manhã de 04/11 repetiu o que a de 03/11 mostrou: %', v_r -> 'conferir';
+    end if;
+    v_r := public.retorno_resumo_do_dia('manha', c_ter + interval '2 days 7 hours 30 minutes');
+    if pg_temp.retorno_f1_resumo_fones(v_r -> 'conferir') is distinct from array['5547900008885', '5547900008885']
+       or (select array_agg(x.e ->> 'motivo' order by x.n)
+             from jsonb_array_elements(v_r -> 'conferir') with ordinality as x(e, n))
+          is distinct from array['atraso_longo', 'parar_largo']
+       or (v_r -> 'conferir_mais') is distinct from '0'::jsonb then
+      raise exception '2k: o mesmo número com dois motivos traz os dois: %', v_r;
     end if;
     v_n := v_n + 1;
     v_secoes := v_secoes + 1;
@@ -507,6 +608,47 @@ begin
        set recibo_em = c_ter + interval '17 hours 47 minutes', prometido_ate = c_ter + interval '19 hours', faixa = 'meio'
      where id = v_caso;
     perform pg_temp.retorno_f1_resumo_saida(v_caso, 'recibo_cliente', 'sombra', c_ter + interval '17 hours 47 minutes');
+    -- F11: venceu seg 10h; seg 09/11 é revisão da semana, que não mostra sem_palavra: a terça conta
+    v_caso := pg_temp.retorno_f1_resumo_caso('5547900008841', 'cliente', c_seg + interval '8 hours');
+    update public.retorno_aberturas
+       set recibo_em = c_seg + interval '8 hours 2 minutes', prometido_ate = c_seg + interval '10 hours', faixa = 'manha_cedo',
+           estado = 'fechada', fechada_em = c_ter + interval '5 hours', fechada_motivo = 'expirou'
+     where id = v_caso;
+    -- F12: venceu seg 19h: cai neste, mesmo já fechado (e fica fora de quem espera)
+    v_caso := pg_temp.retorno_f1_resumo_caso('5547900008842', 'cliente', c_seg + interval '13 hours');
+    update public.retorno_aberturas
+       set recibo_em = c_seg + interval '13 hours 2 minutes', prometido_ate = c_seg + interval '19 hours', faixa = 'meio',
+           estado = 'fechada', fechada_em = c_ter + interval '5 hours', fechada_motivo = 'expirou'
+     where id = v_caso;
+    -- F13: recibo em sombra seg 09:02 prometendo 19h, PARAR às 11:00 e fechado como 'nada' às 15:00: calou de propósito,
+    -- nunca ganha fim do dia e não conta em sem_palavra
+    v_caso := pg_temp.retorno_f1_resumo_caso('5547900008843', 'cliente', c_seg + interval '9 hours', 'nada', 'parar');
+    update public.retorno_aberturas
+       set recibo_em = c_seg + interval '9 hours 2 minutes', prometido_ate = c_seg + interval '19 hours', faixa = 'manha_cedo',
+           estado = 'fechada', fechada_em = c_seg + interval '15 hours', fechada_motivo = 'nada'
+     where id = v_caso;
+    perform pg_temp.retorno_f1_resumo_saida(v_caso, 'recibo_cliente', 'sombra', c_seg + interval '9 hours 2 minutes');
+    -- F14: o fim do dia recusado por so_reativo às 18:30 e, depois, o PARAR por extenso: também calou, e não conta em na_queda
+    v_caso := pg_temp.retorno_f1_resumo_caso('5547900008844', 'cliente', c_seg + interval '13 hours 10 minutes', 'nada', 'parar_largo');
+    update public.retorno_aberturas
+       set recibo_em = c_seg + interval '13 hours 12 minutes', prometido_ate = c_seg + interval '19 hours', faixa = 'meio',
+           estado = 'fechada', fechada_em = c_ter + interval '1 hour', fechada_motivo = 'nada'
+     where id = v_caso;
+    perform pg_temp.retorno_f1_resumo_saida(v_caso, 'fim_do_dia', 'recusada', c_seg + interval '18 hours 30 minutes', 'so_reativo');
+    -- F15: venceu sex 06/11 19h, depois do fechamento de sexta: a terça conta (a segunda é revisão)
+    v_caso := pg_temp.retorno_f1_resumo_caso('5547900008845', 'cliente', c_seg - interval '3 days' + interval '13 hours');
+    update public.retorno_aberturas
+       set recibo_em = c_seg - interval '3 days' + interval '13 hours 2 minutes',
+           prometido_ate = c_seg - interval '3 days' + interval '19 hours', faixa = 'meio',
+           estado = 'fechada', fechada_em = c_ter + interval '5 hours', fechada_motivo = 'expirou'
+     where id = v_caso;
+    -- F16: venceu sex 06/11 10h, antes do fechamento de sexta (17:30): já contou naquele e não conta de novo
+    v_caso := pg_temp.retorno_f1_resumo_caso('5547900008846', 'cliente', c_seg - interval '3 days' + interval '8 hours');
+    update public.retorno_aberturas
+       set recibo_em = c_seg - interval '3 days' + interval '8 hours 2 minutes',
+           prometido_ate = c_seg - interval '3 days' + interval '10 hours', faixa = 'manha_cedo',
+           estado = 'fechada', fechada_em = c_ter + interval '5 hours', fechada_motivo = 'expirou'
+     where id = v_caso;
 
     v_r := public.retorno_resumo_do_dia('fechamento', c_fecha);
     if pg_temp.retorno_f1_resumo_chaves(v_r) is distinct from
@@ -542,8 +684,10 @@ begin
        or (v_r -> 'adiados') is distinct from '1'::jsonb then
       raise exception '3d: recebidos/no_prazo/adiados = %/%/% (esperado 7/1/1)', v_r -> 'recebidos', v_r -> 'no_prazo', v_r -> 'adiados';
     end if;
-    if (v_r -> 'sem_palavra') is distinct from '1'::jsonb or (v_r -> 'na_queda') is distinct from '1'::jsonb then
-      raise exception '3e: sem_palavra/na_queda = %/% (esperado 1/1: o fim do dia recusado por so_reativo conta à parte)',
+    -- F4, F11, F12 e F15: seg 09/11 é revisão, e o fechamento anterior é o de sex 06/11. Fora: F16 (venceu antes dele), F6
+    -- (teve palavra) e os 'nada' F13 e F14. F5 conta à parte.
+    if (v_r -> 'sem_palavra') is distinct from '4'::jsonb or (v_r -> 'na_queda') is distinct from '1'::jsonb then
+      raise exception '3e: sem_palavra/na_queda = %/% (esperado 4/1: desde o fechamento de sexta, sem os ''nada'', e o fim do dia recusado por so_reativo à parte)',
         v_r -> 'sem_palavra', v_r -> 'na_queda';
     end if;
     if v_r -> 'sombra' is distinct from
@@ -556,6 +700,27 @@ begin
     if strpos(v_r::text, 'CORPO-SECRETO') > 0 or strpos(v_r::text, 'Teste F1 resumo:') > 0 then
       raise exception '3h: o fechamento trouxe texto de mensagem: %', v_r;
     end if;
+    -- 3i. O fechamento de qua conta desde o de ter: só os quatro que venceram às 19h (F1, F2, F3 e F10), nada repetido.
+    v_r2 := public.retorno_resumo_do_dia('fechamento', c_ter + interval '1 day 17 hours 30 minutes');
+    if (v_r2 -> 'sem_palavra') is distinct from '4'::jsonb or (v_r2 -> 'na_queda') is distinct from '0'::jsonb then
+      raise exception '3i: a quarta repetiu o que a terça contou: sem_palavra/na_queda = %/% (esperado 4/0)',
+        v_r2 -> 'sem_palavra', v_r2 -> 'na_queda';
+    end if;
+    -- 3j. O turno da tarde do banco é o do Secretário (turnoDaTarde): os valores vêm de _shared/secretario/turno.ts.
+    for v_f in
+      select x.dia, x.turno, public._retorno_turno_da_tarde(x.dia) as calculado
+        from (values ('2026-06-15'::date, null::text), ('2026-06-16', 'revisao_semana'),
+                     ('2026-10-30', 'fechamento'), ('2026-10-31', null), ('2026-11-02', null),
+                     ('2026-11-03', 'revisao_mes'), ('2026-11-04', 'revisao_semana'), ('2026-11-05', 'fechamento'),
+                     ('2026-11-08', null), ('2026-11-09', 'revisao_semana'), ('2026-11-10', 'fechamento'),
+                     ('2026-11-20', null), ('2026-11-30', 'revisao_semana'), ('2026-12-01', 'revisao_mes'),
+                     ('2026-12-02', 'fechamento'), ('2027-02-01', 'revisao_mes'), ('2027-02-02', 'revisao_semana'),
+                     ('2027-02-03', 'fechamento')) x(dia, turno)
+    loop
+      if v_f.calculado is distinct from v_f.turno then
+        raise exception '3j: _retorno_turno_da_tarde(%) = % (o turnoDaTarde dá %)', v_f.dia, v_f.calculado, v_f.turno;
+      end if;
+    end loop;
     v_n := v_n + 1;
     v_secoes := v_secoes + 1;
     raise exception 'desfaz' using errcode = 'P0001';
@@ -712,6 +877,20 @@ begin
         raise exception '6c: % leu (%): %', v_f.papel, v_f.consulta, v_x;
       end if;
     end loop;
+    -- E o service_role lê os três: a view chama o _retorno_rotulo como quem lê, e o execute vem dos privilégios padrão.
+    -- count(rotulo), não count(*): a view é achatada, e sem usar a coluna a função sai do plano e o execute não é conferido.
+    v_x := pg_temp.retorno_f1_resumo_como('service_role', 'select count(rotulo)::text from public.retorno_sombra_lista');
+    if v_x is null or v_x like 'erro%' or v_x::integer < 3 then
+      raise exception '6d: o service_role não leu a lista da sombra: %', v_x;
+    end if;
+    v_x := pg_temp.retorno_f1_resumo_como('service_role', 'select count(*)::text from public.retorno_calibracao');
+    if v_x is null or v_x like 'erro%' then
+      raise exception '6d: o service_role não leu a calibração: %', v_x;
+    end if;
+    v_x := pg_temp.retorno_f1_resumo_como('service_role', 'select public.retorno_resumo_do_dia(''manha'')::text');
+    if v_x is null or v_x like 'erro%' then
+      raise exception '6d: o service_role não leu o resumo: %', v_x;
+    end if;
     v_n := v_n + 1;
     v_secoes := v_secoes + 1;
     raise exception 'desfaz' using errcode = 'P0001';
@@ -760,8 +939,8 @@ begin
     if sqlerrm <> 'desfaz' then raise; end if;
   end;
 
-  if v_secoes <> 7 then
-    raise exception '0f: o arranjo não chegou ao fim (% de 7 seções)', v_secoes;
+  if v_secoes <> 8 then
+    raise exception '0f: o arranjo não chegou ao fim (% de 8 seções)', v_secoes;
   end if;
   if exists (select 1 from public.retorno_aberturas a where a.chave like '000088%')
      or exists (select 1 from public.retorno_saidas s where s.chave like '000088%')

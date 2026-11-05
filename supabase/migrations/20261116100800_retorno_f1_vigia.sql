@@ -368,7 +368,7 @@ begin
            set so_reativo = false, so_reativo_motivo = null, so_reativo_desde = null
          where c.id;
         v_disjuntor := 'desligou';
-        perform public._retorno_log('disjuntor', 'retorno: so_reativo desligado (a conexão voltou)', 'info',
+        perform public._retorno_log('disjuntor', 'retorno: so_reativo desligado (a conexão voltou)', 'warn',
                                     jsonb_build_object('desde', v_desde));
       end if;
     end if;
@@ -990,7 +990,7 @@ begin
           insert into public.retorno_alongamentos (faixa, de, para, casos, pct, em)
           values (r.faixa, v_atual, v_prox, least(r.casos, 32767), round(r.no_prazo::numeric / r.casos, 4), v_agora);
           v_alongadas := v_alongadas || r.faixa;
-          perform public._retorno_log('alongamento', 'retorno: promessa da faixa alongada', 'info',
+          perform public._retorno_log('alongamento', 'retorno: promessa da faixa alongada', 'warn',
                                       jsonb_build_object('faixa', r.faixa, 'de', v_atual, 'para', v_prox,
                                                          'casos', r.casos, 'no_prazo', r.no_prazo));
         end loop;

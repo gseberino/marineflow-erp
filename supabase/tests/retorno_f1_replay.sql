@@ -18,13 +18,26 @@ set local lock_timeout = '3s'; set local statement_timeout = '90s';
 --    o body vira '[audio]' dentro da transação (o rollback desfaz; whatsapp_messages não tem gatilho de UPDATE). O
 --    evento "transcrição" devolve o body real em occurred_at + 1 min (a transcrição em linha do webhook). Sem isso o
 --    replay leria o texto já transcrito e superestimaria a revocação.
+--    A promessa do dono como ela estava (seção 2.2 da spec): a regra 12 do _retorno_triar exige status 'ativo', que é o
+--    status de HOJE, e toda promessa vencida já está encerrada ('avisado', logo depois do lembrar_em). Com a regra 12
+--    morta, quem tinha promessa ganharia recibo simulado, o que incharia o "teria mandado" e os recibos perto de
+--    resposta humana, dois números do portão. Por isso, dentro da transação (o rollback desfaz; a tabela não tem gatilho
+--    e o índice único só vale para o modo 'acompanhar'), as promessas que valeram em algum ponto da janela voltam a
+--    'ativo': o created_at e o lembrar_em delimitam a validade, e o _retorno_triar os confere contra a hora do replay.
+--    A que caiu antes do prazo (pedido do dono; nenhuma até 04/11/2026) fica encerrada: não se sabe até quando valeu.
+--    A contagem vai em promessas_reativadas.
 -- 3. Viagem no tempo por eventos, a partir de t = AQUECER. Em cada volta: (1) devolve os bodies cuja transcrição vence
 --    até t; (2) retorno_abrir(id, false, occurred_at) para as recebidas com occurred_at em (t anterior, t], em ordem;
 --    (3) retorno_vigia(t); (4) retorno_pegar(t) até devolver nulo sem nada vencido, registrando cada item com
 --    retorno_registrar_decisao(id, 'sombra', {"validador": null}, t); (5) o próximo t é o menor entre a próxima
---    recebida, a próxima transcrição, _retorno_proximo_evento(t) e t + 60 min. Como toda leitura respeita
---    occurred_at <= agora, a resposta que o dono deu depois do enviar_em não cancela o recibo, e a que deu antes
---    cancela.
+--    recebida, a próxima transcrição, a próxima saída humana, _retorno_proximo_evento(t) e t + 60 min. Como toda
+--    leitura respeita occurred_at <= agora, a resposta que o dono deu depois do enviar_em não cancela o recibo, e a que
+--    deu antes cancela.
+--    Desvio da spec (fidelidade, levado à coordenação): a spec não põe a saída humana entre os eventos. Em produção o
+--    vigia roda a cada minuto e fecha o caso logo depois da resposta de conteúdo; sem esse evento, ele só veria a
+--    resposta na volta seguinte, e como o retorno_abrir vem antes do vigia, a recebida que chega até 60 min depois
+--    estenderia o caso já respondido e fecharia junto com ele. A pergunta nova ficaria sem recibo, e o replay
+--    subestimaria o "teria mandado" e a revocação, que são medidas do portão.
 --    O disjuntor pela conexão (vigia, passo 2) lê whatsapp_conexao_vigia, que é o estado de HOJE, não o da janela:
 --    se ele ligar o so_reativo pela conexão, o arquivo o desliga de novo e conta em disjuntor_anulado (limitação).
 -- 4. Números (para _bancada.numeros, sem texto de cliente nem telefone): casos por papel e nível; "teria mandado"
@@ -32,7 +45,8 @@ set local lock_timeout = '3s'; set local statement_timeout = '90s';
 --    menos de 10 min de uma resposta humana (contagem e total); por lote (r1sql/r17-lotes.sql: minutos com ≥ 5
 --    linhas gravadas com mais de 2 min de atraso), os textos de volta e os textos a quem já tinha sido respondido; e
 --    recibos_numero_novo = [{cid: left(md5(phone), 6), metade}] (0 = ajuste, 1 = teste) para a revocação, que o
---    script agrega com os rótulos de retorno-rapido/sql/fi.
+--    script agrega com os rótulos de retorno-rapido/sql/fi; e erros_logados (o que foi ao app_error_logs nesta
+--    execução, por ação/nível, sem a mensagem).
 --    "Recibos" aqui = recibo_cliente, recibo_ambiguo, recibo_numero_novo e saudacao_numero_novo (a 1ª mensagem
 --    automática do caso).
 -- 5. Falhas na própria janela (raise exception, com a contagem e os cid/caso, nunca telefone nem texto):
@@ -44,20 +58,26 @@ set local lock_timeout = '3s'; set local statement_timeout = '90s';
 --      modelo fixo (o texto que o _retorno_texto daria com os mesmos dados);
 --    - olhar o futuro: saída cancelada por respondida_pelo_dono sem resposta humana gravada até a hora da cancela.
 --    Também falham os erros do próprio replay (retorno_abrir com ok = false, retorno_vigia com passo em erro,
---    retorno_registrar_decisao recusada).
+--    retorno_registrar_decisao recusada) e a saída recusada/erro: em produção o retorno_pegar engole a exceção para a
+--    fila não travar, mas no replay ela é defeito e não pode passar calada pelo portão. A recusada/texto (22023, dado
+--    fora da lista fechada) é a falha fecha esperada: só conta em recusadas_por_motivo.
 -- 6. A agregação das janelas (lotes ≤ 10 textos e 0 a quem já tinha sido respondido; recibos perto de resposta humana
 --    ≤ 10%; revocação ≥ 80% na metade de teste) é do script (P15). A precisão (≥ 95%) o dono confere na
 --    retorno_sombra_lista.
 -- Limitações (vão no relatório): quem_escreve e canal_bloqueado usam os cadastros e a lista de bloqueio de hoje; a
 -- transcrição é simulada em 1 min; o estado da conexão é o de hoje (o disjuntor é anulado); os leitores de
--- confirmação, conferência e revisão entram como não consumidos (p_consumida = false; a agenda é lida da tabela).
--- Termina em ROLLBACK: nada fica gravado (nem os bodies trocados, nem os casos, nem as coletas nos leads).
+-- confirmação, conferência e revisão entram como não consumidos (p_consumida = false; a agenda é lida da tabela); o
+-- PARAR anterior à F0b não tem opt-out gravado na hora (o gatilho não existia): no replay ele cai em parar_largo, e a
+-- saída 'parar' (a confirmação) não aparece nos números.
+-- Termina em ROLLBACK: nada fica gravado (nem os bodies trocados, nem as promessas reativadas, nem os casos, nem as
+-- coletas nos leads).
 begin;
 set local lock_timeout = '3s';
 set local statement_timeout = '90s';
 create temp table if not exists _bancada (arquivo text, ok boolean, numeros jsonb, em timestamptz default clock_timestamp());
 create temp table if not exists _corpos (id uuid primary key, corpo text, volta_em timestamptz not null,
                                          devolvido boolean not null default false);
+create temp table if not exists _humanas (em timestamptz primary key);   -- as saídas humanas da janela, como eventos
 
 -- O texto que o modelo fixo daria com os mesmos dados; nulo se o _retorno_texto recusa.
 create or replace function pg_temp.retorno_f1_replay_modelo(p_tipo text, p_variante text, p_dados jsonb)
@@ -99,6 +119,7 @@ declare
   v_pegas integer := 0;
   v_audios integer := 0;
   v_devolvidos integer := 0;
+  v_promessas integer := 0;
   v_n integer;
   v_disjuntor integer := 0;
   v_n_erros integer := 0;
@@ -107,6 +128,7 @@ declare
   v_teria jsonb;
   v_canceladas jsonb;
   v_recusadas jsonb;
+  v_logados jsonb;
   v_acordes jsonb;
   v_perto integer;
   v_recibos integer;
@@ -158,6 +180,16 @@ begin
          erros_seguidos = 0, fora_ate = null, segura_recibos = false, segura_tudo_ate = null, proximo_envio_em = null
    where id;
 
+  -- A promessa do dono como ela estava: a que valeu em algum ponto da janela volta a 'ativo' (o rollback desfaz).
+  update public.whatsapp_acompanhamentos w
+     set status = 'ativo'
+   where w.modo = 'promessa'
+     and w.status <> 'ativo'
+     and w.created_at < v_fim
+     and w.lembrar_em > v_aquecer
+     and w.updated_at >= w.lembrar_em;
+  get diagnostics v_promessas = row_count;
+
   -- ── 2. O áudio como ele chegou ───────────────────────────────────────────────────────────────────────
   delete from _corpos;
   insert into _corpos (id, corpo, volta_em)
@@ -175,6 +207,15 @@ begin
   get diagnostics v_audios = row_count;
 
   -- ── 3. A viagem no tempo, por eventos ────────────────────────────────────────────────────────────────
+  delete from _humanas;
+  insert into _humanas (em)
+  select distinct o.occurred_at
+    from public.whatsapp_messages o
+   where o.direction = 'outbound'
+     and o.occurred_at >= v_aquecer
+     and o.occurred_at < v_fim
+     and coalesce(o.saida_humana, public._saida_e_humana(o.direction, o.raw_payload, o.sent_by));
+
   v_t_antes := v_aquecer - interval '1 microsecond';
   v_t := v_aquecer;
   while v_t < v_fim loop
@@ -268,6 +309,7 @@ begin
                  and not coalesce(w.is_broadcast, false)
                  and strpos(w.phone_normalized, '@') = 0),
              (select min(c.volta_em) from _corpos c where not c.devolvido and c.volta_em > v_t),
+             (select min(h.em) from _humanas h where h.em > v_t),
              public._retorno_proximo_evento(v_t),
              v_t + interval '60 minutes')
       into v_prox;
@@ -334,6 +376,28 @@ begin
             from public.retorno_saidas s
            where s.emissor = 'retorno' and s.estado = 'recusada'
              and s.decidida_em >= v_inicio and s.decidida_em < v_fim
+           group by 1) x;
+
+  -- a exceção que o retorno_pegar engole (recusada/erro) é defeito aqui, com ou sem aquecimento: vai com o sqlstate
+  for v_m in
+    select s.tipo, s.dados -> 'erro' ->> 'sqlstate' as sqlstate
+      from public.retorno_saidas s
+     where s.emissor = 'retorno' and s.estado = 'recusada' and s.motivo = 'erro'
+     order by s.decidida_em, s.id
+  loop
+    v_n_erros := v_n_erros + 1;
+    if jsonb_array_length(v_erros) < 5 then
+      v_erros := v_erros || jsonb_build_array(jsonb_build_object('onde', 'saida', 'tipo', v_m.tipo, 'sqlstate', v_m.sqlstate));
+    end if;
+  end loop;
+
+  -- o que foi ao app_error_logs nesta execução (o upsert por fingerprint grava last_seen_at = now()), sem a mensagem
+  select coalesce(jsonb_object_agg(x.acao, x.n), '{}'::jsonb)
+    into v_logados
+    from (select coalesce(l.action, '?') || '/' || coalesce(l.level, '?') as acao, count(*)::integer as n
+            from public.app_error_logs l
+           where l.context = 'retorno'
+             and l.last_seen_at >= now()
            group by 1) x;
 
   -- os acordes simulados ("eu teria acordado o Gustavo")
@@ -524,12 +588,14 @@ begin
     'recebidas_janela', v_recebidas_janela,
     'audios_trocados', v_audios,
     'transcricoes_devolvidas', v_devolvidos,
+    'promessas_reativadas', v_promessas,
     'saidas_decididas', v_pegas,
     'disjuntor_anulado', v_disjuntor,
     'casos', v_casos,
     'teria_mandado', v_teria,
     'canceladas_por_motivo', v_canceladas,
     'recusadas_por_motivo', v_recusadas,
+    'erros_logados', v_logados,
     'acordes', v_acordes,
     'recibos_perto_de_resposta_humana', jsonb_build_object('perto', v_perto, 'total', v_recibos),
     'lotes', v_lotes,
