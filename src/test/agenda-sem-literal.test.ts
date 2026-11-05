@@ -67,6 +67,11 @@
 //     única "a equipe atende", o responsável e as avaliações do publicado; e os pacotes seguintes da etapa, pelo prefixo: o motor, a
 //     violação, a conversa, a rodada, as leituras e as tarefas do dia). Os DEFAULTs novos de agenda_config (os 3 interruptores e os
 //     17 parâmetros: os níveis, as regras e as palavras, 90 e 60 dias, 20 diárias, 16:10…) ficam em 20261102100000, fora de função.
+//   · (Fase 7d, P1) também as funções das migrations 2026110710* (a base da 7d: o histórico dos locais, a regra do conferido, o modo com
+//     o freio e o modo das 3 perguntas novas; e os pacotes seguintes da etapa, pelo prefixo: o feriado do município, as leituras do local,
+//     o motor, o combinar, o M11, o rascunho e as leituras ao dono). Os DEFAULTs novos de agenda_config (os 6 interruptores e os 24
+//     parâmetros com o código AG7: 365 dias, 2 e 1 dias úteis, 45 e 120 minutos, 1,30, 60 km/h, 16:15…) ficam em 20261107100000, fora de
+//     função. O prefixo é o da 7d depois do mapa de 05/11 (spec-fase7d R6.2): 20261103* ficaria atrás do que já está em produção.
 // Os inteiros pequenos (0, 1, 2, 7: meios-dias por dia, dias da semana…) e os limites de tamanho de texto dos CHECKs
 // são estrutura e não entram na regra.
 import { describe, expect, it } from 'vitest';

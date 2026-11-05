@@ -514,8 +514,28 @@ begin
                            'tarefas_pendente_meios', 'tarefas_pendente_alerta', 'tarefas_sem_registro_du', 'tarefas_hora',
                            'tarefas_resposta_vale_dia']) n
        union all
-       select 'os_planejamento_tarefas_assinatura_check')));
+       select 'os_planejamento_tarefas_assinatura_check')))
      -- FASE 7c: fim
+     -- FASE 7d: os 30 que a Fase 7d pôs em agenda_config e os 11 de os_planejamento (20261107100000) têm o caso deles em
+     -- agenda_fase7d_base.sql (B1e cobra os da migration pelo nome; B1h, os do planejamento). A lista cliente_tipos_ligados ampliada continua
+     -- com o nome e o caso de antes.
+     and not (c.conname = any (array(
+       select 'agenda_config_' || n || '_check'
+         from unnest(array['modo_local_calendario', 'modo_local_autorizacao', 'modo_bem', 'modo_patio', 'modo_viagem',
+                           'modo_mesmo_local', 'local_conferencia_validade_dias', 'autorizacao_antecedencia_du',
+                           'acesso_urgente_du', 'marina_reserva_antecedencia_du', 'garagem_reserva_min_meios',
+                           'horario_tolerancia_min', 'patio_entrada_antecedencia_du', 'patio_retirada_du', 'patio_tentativas',
+                           'temporada_meses', 'viagem_uf_bate_volta', 'deslocamento_regional_max_min',
+                           'deslocamento_bate_volta_max_min', 'deslocamento_fator_estrada', 'deslocamento_kmh',
+                           'bate_volta_meios_dia', 'pernoite_ida_meios', 'viagem_km_bate_volta', 'viagem_km_pernoite',
+                           'onde_fica_janela_dias', 'onde_fica_antes_dias', 'local_hora', 'bem_agua_palavras', 'bem_seco_palavras']) n
+       union all
+       select unnest(array['local_coerente', 'situacao_coerente', 'entrada_coerente', 'entrada_antes_saida',
+                           'os_planejamento_local_fonte_check', 'os_planejamento_bem_situacao_check',
+                           'os_planejamento_bem_situacao_fonte_check', 'os_planejamento_bem_exige_check',
+                           'os_planejamento_descer_quem_check', 'os_planejamento_entrada_fonte_check',
+                           'os_planejamento_viagem_check']))));
+     -- FASE 7d: fim
   insert into _resultado values ('B todo CHECK das 6 tabelas tem um caso que ele recusa', v_sem_caso is null, v_sem_caso);
 end
 $b$;
@@ -1042,6 +1062,10 @@ insert into _definer_da_agenda values
   ('_agenda_tarefas_conferir'), ('_agenda_tarefas_excecoes'), ('agenda_rascunho_etapa'), ('_agenda_aplicar_etapa'),
   ('_agenda_tarefas_da_pessoa'), ('agenda_tarefas_medidas');
   -- FASE 7c: fim
+  -- FASE 7d: (7d P1, 20261107100000) nenhuma definer nova: o conferido e o modo são invoker, sob a RLS de agenda_locais e a porta de
+  -- agenda_config, e o gatilho do histórico só mexe na própria linha. A escrita dos locais é das definer dos pacotes seguintes, que entram
+  -- aqui. agenda_fase7d_base.sql prova as portas.
+  -- FASE 7d: fim
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

@@ -587,9 +587,10 @@ begin
     update public.agenda_config set modo_equipe = 'sombra', modo_marcar_sozinho = 'ligado', modo_proposta = 'ligado' where id;
     -- (FASE 7b: o tipo que nasceu depois do 7a P1 — dias_semana, 20261101100000 — não tem o de antes: fica fora da comparação; o
     -- agenda_fase7b_base.sql B6d confere o dele. FASE 7c: o mesmo com habilidade, 20261102100000; o agenda_fase7c_base.sql B11c
-    -- confere o dele; e com tarefa, 20261102100550 (7c P8); o agenda_fase7c_tarefas.sql T18 confere a cópia)
+    -- confere o dele; e com tarefa, 20261102100550 (7c P8); o agenda_fase7c_tarefas.sql T18 confere a cópia. FASE 7d: e com local, combinar
+    -- e acesso, 20261107100000; o agenda_fase7d_base.sql B6i confere o deles)
     select string_agg(t, ',' order by t) filter (where public._agenda_modo_da_pergunta(t, t || ':x') is distinct from pg_temp.modo_antes(t, t || ':x')
-                                                   and t not in ('dias_semana', 'habilidade', 'tarefa')),
+                                                   and t not in ('dias_semana', 'habilidade', 'tarefa', 'local', 'combinar', 'acesso')),
            count(*)
       into v_a, v_n
       from (select unnest(regexp_matches(pg_get_constraintdef(c.oid), '''([a-z_]+)''', 'g')) as t

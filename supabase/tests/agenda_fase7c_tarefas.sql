@@ -99,6 +99,18 @@ begin
 end $f$;
 -- FASE 7c: (correção da revisão, 20261102100580) o texto sem os blocos da correção ("-- FASE 7c: (7c correção … -- FASE 7c: fim") e
 -- sem as marcas dela ("-- (7c correção … -- (7c: fim)"), para o T18b comparar a viva com a desta migration.
+-- FASE 7d: (7d P1) o texto sem os blocos "-- FASE 7d: … -- FASE 7d: fim": a 20261107100000 recria _agenda_modo_da_pergunta de novo (só
+-- acréscimo), e o T18b compara a viva com a desta migration
+create function pg_temp.sem_7d(p text) returns text language sql immutable as $f$
+  select array_to_string(array(
+           select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7d:' and l !~ '^\s*-- FASE 7d: fim' then 1
+                                                when l ~ '^\s*-- FASE 7d: fim' then -1 else 0 end)
+                                       over (order by o rows between unbounded preceding and current row) as dentro,
+                                 l ~ '^\s*-- FASE 7d: fim' as fecha
+                            from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
+            where dentro = 0 and not fecha order by o), E'\n')
+$f$;
+-- FASE 7d: fim
 create function pg_temp.sem_corr(p text) returns text language plpgsql immutable as $f$
 declare
   v_out text[] := '{}';
@@ -1710,8 +1722,8 @@ begin
     if (select count(*) from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = f.nome) <> 1
        -- FASE 7c: (correção da revisão, 20261102100580) a viva sem os blocos e as marcas da correção (ela recria 2 das 9 só com
        -- acréscimos: agenda_dia_da_pessoa e _agenda_linhas_do_fechamento; o K0 de agenda_fase77c_correcao.sql confere)
-       or pg_temp.sem_corr((select replace(p.prosrc, E'\r\n', E'\n') from pg_proc p
-                             where p.pronamespace = 'public'::regnamespace and p.proname = f.nome))
+       or pg_temp.sem_corr(pg_temp.sem_7d((select replace(p.prosrc, E'\r\n', E'\n') from pg_proc p
+                                           where p.pronamespace = 'public'::regnamespace and p.proname = f.nome)))
           is distinct from pg_temp.corpo(v_mig, f.nome) then
        -- FASE 7c: fim
       v_viva := concat_ws(', ', v_viva, f.nome);

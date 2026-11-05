@@ -462,8 +462,17 @@ select format('B3a %s: as de antes iguais e na mesma ordem, e as novas no fim', 
                            then case t.nome when 'agenda_perguntas_tipo_check' then '{tarefa}'::text[] when 'agenda_acoes_tipo_check' then '{tarefa}'::text[]
                                             when 'agenda_rascunho_tipo_check' then '{etapa}'::text[]
                                             when 'agenda_vigia_rodadas_rotina_check' then '{tarefas}'::text[] else '{}'::text[] end
-                           else '{}'::text[] end,
+                           else '{}'::text[] end
          -- FASE 7c: fim
+         -- FASE 7d: a 20261107100000 soma local (e combinar e acesso, na pergunta) no fim de 4 destas (agenda_fase7d_base.sql B3 confere)
+                    || case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                                                 and a.attname = 'modo_bem' and not a.attisdropped)
+                            then case t.nome when 'agenda_perguntas_tipo_check' then '{local,combinar,acesso}'::text[]
+                                             when 'agenda_acoes_tipo_check' then '{local}'::text[]
+                                             when 'agenda_vigia_rodadas_rotina_check' then '{local}'::text[]
+                                             when 'agenda_alocacoes_cancelada_motivo_check' then '{local}'::text[] else '{}'::text[] end
+                            else '{}'::text[] end,
+         -- FASE 7d: fim
        -- FASE 7b: fim
        array_to_string(pg_temp.lista(t.tabela::regclass, t.nome), ',')
   from (values
@@ -487,7 +496,11 @@ insert into _resultado
 select 'B3b agenda_perguntas.critica: gerada (stored), com onda, dia_avisado, dia_prometido e sabado e as 8 de antes, nesta ordem (o 7d e o 7g copiam esta expressão)',
        a.attgenerated = 's'
        and (select array_agg(m[1] order by o) from regexp_matches(pg_get_expr(d.adbin, d.adrelid), '''([^'']*)''', 'g') with ordinality t(m, o))
-           = '{nao_cabe,segundo_atraso,atraso_longo,remarcar_confirmado,fixada_pelo_dono,diaria,cliente_aviso,aprendizado,onda,dia_avisado,dia_prometido,sabado}',
+           = '{nao_cabe,segundo_atraso,atraso_longo,remarcar_confirmado,fixada_pelo_dono,diaria,cliente_aviso,aprendizado,onda,dia_avisado,dia_prometido,sabado}'::text[]
+             -- FASE 7d: a 20261107100000 soma acesso no fim (agenda_fase7d_base.sql B3f confere a lista inteira)
+             || case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                             and a.attname = 'modo_bem' and not a.attisdropped) then '{acesso}'::text[] else '{}'::text[] end,
+             -- FASE 7d: fim
        pg_get_expr(d.adbin, d.adrelid)
   from pg_attribute a join pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
  where a.attrelid = 'public.agenda_perguntas'::regclass and a.attname = 'critica';
@@ -943,10 +956,10 @@ begin
   -- (FASE 7b: a 20261101100000 recria de novo, com o bloco "-- FASE 7b:", que sai junto: '-- FASE 7b?:'. FASE 7c: e a
   -- 20261102100000, com o bloco "-- FASE 7c:", que também sai: '-- FASE 7[bc]?:')
   select array_to_string(array(
-           select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7[bc]?:' and l !~ '-- FASE 7[bc]?: fim' then 1
-                                                when l ~ '-- FASE 7[bc]?: fim' then -1 else 0 end)
+           select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7[bcd]?:' and l !~ '-- FASE 7[bcd]?: fim' then 1
+                                                when l ~ '-- FASE 7[bcd]?: fim' then -1 else 0 end)
                                        over (order by o rows between unbounded preceding and current row) as dentro,
-                                 l ~ '-- FASE 7[bc]?: fim' as fecha
+                                 l ~ '-- FASE 7[bcd]?: fim' as fecha
                             from unnest(string_to_array(v_novo, E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n') into v_sem;
   -- (o bloco do 7a P1 e, desde a 20261031100850, o do 7a P11, que a recria copiando desta: 2 blocos; sem eles, a de 30/10)

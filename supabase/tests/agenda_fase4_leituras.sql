@@ -102,9 +102,9 @@ begin
     -- definição mais nova: só acréscimo; o R9 de agenda_fase7a_rodada.sql confere a cópia); o fim é lido pelo prefixo
     -- FASE 7c (P6): e os blocos "-- FASE 7c: … fim" (a 20261102100500 recria agenda_ver de novo, só acréscimo: o foco habilidades; o L6
     -- de agenda_fase7c_leituras.sql confere a cópia): a régua aceita "7c"
-    if not v_f7 and l ~ '^\s*-- FASE 7c?:' and l !~ '^\s*-- FASE 7c?: fim' then v_f7 := true; continue; end if;
+    if not v_f7 and l ~ '^\s*-- FASE 7[cd]?:' and l !~ '^\s*-- FASE 7[cd]?: fim' then v_f7 := true; continue; end if;
     if v_f7 then
-      if l ~ '^\s*-- FASE 7c?: fim' then v_f7 := false; end if;
+      if l ~ '^\s*-- FASE 7[cd]?: fim' then v_f7 := false; end if;
       continue;
     end if;
     -- FASE 7 (7a P7): fim

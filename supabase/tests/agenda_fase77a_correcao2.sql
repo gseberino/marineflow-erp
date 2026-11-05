@@ -121,9 +121,9 @@ begin
     -- FASE 7c: (7c P5) e os blocos "-- FASE 7c: … fim" (a 20261102100400 recria _agenda_linhas_do_fechamento de novo, só acréscimo; as
     -- marcas de dentro "-- (7c …" ficam dentro de um bloco da 7b e saem junto com ele): a régua aceita "7c"
     -- FASE 7c: fim
-    if not v_bloco and l ~ '^\s*-- FASE 7[bc]?:' and l !~ '^\s*-- FASE 7[bc]?: fim' then v_bloco := true; continue; end if;
+    if not v_bloco and l ~ '^\s*-- FASE 7[bcd]?:' and l !~ '^\s*-- FASE 7[bcd]?: fim' then v_bloco := true; continue; end if;
     if v_bloco then
-      if l ~ '^\s*-- FASE 7[bc]?: fim' then v_bloco := false; end if;
+      if l ~ '^\s*-- FASE 7[bcd]?: fim' then v_bloco := false; end if;
       continue;
     end if;
     v_b := v_b || l;

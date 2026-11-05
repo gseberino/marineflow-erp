@@ -169,11 +169,11 @@ begin
     -- FASE 7: os blocos "-- FASE 7:" de uma recriação depois do lote (a 20261031100000 recria _agenda_modo_da_pergunta) também
     -- saem: a cópia continua conferida contra a fonte do lote. (FASE 7b: também os "-- FASE 7b:" — a 20261101100000 recria
     -- _agenda_modo_da_pergunta de novo. FASE 7c: e os "-- FASE 7c:" — a 20261102100000 a recria mais uma vez, só acréscimo.)
-    if not v_dentro and l ~ '^\s*-- FASE 7[bc]?:' and l !~ '^\s*-- FASE 7[bc]?: fim' then
+    if not v_dentro and l ~ '^\s*-- FASE 7[bcd]?:' and l !~ '^\s*-- FASE 7[bcd]?: fim' then
       v_dentro := true;
       continue;
     end if;
-    if v_dentro and l ~ '^\s*-- FASE 7[bc]?: fim' then
+    if v_dentro and l ~ '^\s*-- FASE 7[bcd]?: fim' then
       v_dentro := false;
       continue;
     end if;
@@ -712,6 +712,10 @@ select 'C3 a lista fechada dos tipos de pergunta: as 26 de antes e equipe_sem_di
            + case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
                                                             and a.attname = 'modo_tarefas' and not a.attisdropped) then 1 else 0 end
            -- FASE 7c: fim
+           -- FASE 7d: os tipos local, combinar e acesso (20261107100000)
+           + case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                                                            and a.attname = 'modo_bem' and not a.attisdropped) then 3 else 0 end
+           -- FASE 7d: fim
        and pg_get_constraintdef((select c.oid from pg_constraint c where c.conname = 'agenda_perguntas_tipo_check')) like '%''equipe_sem_dias''%'
        and pg_temp.erro_de($q$insert into public.agenda_perguntas (tipo, chave, texto, modo) values ('outro', 'outro:t', 'Pergunta?', 'sombra')$q$) = '23514',
        null;

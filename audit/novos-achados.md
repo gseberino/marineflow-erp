@@ -3252,6 +3252,37 @@ porque só o dono pode preenchê-las.
 - **Na Fase 7c:** a população de `agenda_habilidades` e da proposta é a grade (`agenda_capacidade`), não "quem tem perfil vigente":
   nenhuma etiqueta é proposta para ele. Encerrar a vigência é do módulo de diárias (dinheiro), não da agenda.
 
+### [NOVO-agenda-62] `anon` tem INSERT, UPDATE e DELETE em `marinas` e `vessels`
+
+- **Encontrado em:** Agenda de Produção, Fase 7d, conferência da spec (29/10/2026, `sql/wf7d_12`; o NOVO-7d-1 da spec). Conferido de novo em
+  05/11 (`sql/wf7dd_p1_anon`): `has_table_privilege` dá `insert`, `update` e `delete` verdadeiros nas duas; `select`, falso.
+- **O quê:** a RLS segura (a policy de anon é só SELECT por token), mas é o padrão "revoke de public não fecha anon".
+- **Na Fase 7d:** nada: fora do escopo da etapa. A 7d não confia em `marinas` (a regra mora em `agenda_locais`, que só função escreve).
+- **Recomendação:** `revoke insert, update, delete on marinas, vessels from anon`.
+
+### [NOVO-agenda-63] A OS e o barco discordam do lugar
+
+- **Encontrado em:** Agenda de Produção, Fase 7d, conferência da spec (29/10/2026, `sql/wf7d_04`; o NOVO-7d-2 da spec).
+- **O quê:** na OS-00032 (Kalmar), a OS diz Marina Itajaí e o barco diz Kalmar Estaleiro.
+- **Na Fase 7d:** a cadeia de `_agenda_local_resolvido` (spec §3.1, item 3) escolhe a OS e mostra "o barco está cadastrado na Kalmar Estaleiro"
+  como nota (P3). Corrigir o cadastro é do dono.
+
+### [NOVO-agenda-64] `travel_distance_km` não é a distância do lugar
+
+- **Encontrado em:** Agenda de Produção, Fase 7d, conferência da spec (29/10/2026, `sql/wf7d_13`; o NOVO-7d-3 da spec).
+- **O quê:** é o total cobrado: na Ponta do Poço aparecem 203, 406 e 812 km (812 = 4 × 203).
+- **Na Fase 7d:** entra só como último recurso da cadeia da viagem, sem local, e com os limites altos (`viagem_km_bate_volta` 120,
+  `viagem_km_pernoite` 300).
+
+### [NOVO-agenda-65] 8 de 11 OS da carteira não têm lugar nenhum
+
+- **Encontrado em:** Agenda de Produção, Fase 7d, conferência da spec (29/10/2026, `sql/wf7d_04`, `sql/wf7d_18`; o NOVO-7d-4 da spec).
+  Refeito em 05/11 (`sql/rec7d_carteira`): continuam 3 pela OS e 8 motorhomes sem local.
+- **O quê:** são motorhomes sem marina, e o cliente sem cidade em 6 deles: 3 de 9 clientes da carteira têm cidade, contra 493 de 561 no
+  cadastro inteiro.
+- **Na Fase 7d:** com a resposta AG7-18, essas 8 caem por suposição no local `patio_hbr`, a MP Motorhomes; somadas à OS da MP, são 9 das 11 no
+  mesmo lugar (R6.6). A suposição fica gravada e aparece ao dono; o M11 pergunta, mas só para OS aprovada a partir de `onde_fica_desde`.
+
 ### [NOVO-agenda-84] O roteiro é raro e está parado
 
 - **Encontrado em:** Agenda de Produção, Fase 7c, P8 (as tarefas do dia; a pesquisa da spec, 29/10/2026, `sql/wf7cp8_02`).
@@ -3303,3 +3334,11 @@ porque só o dono pode preenchê-las.
   sem a 7c (as duas sondas dão o mesmo), então é do motor da 7a/7b (a presença do dono pelos dias dele), não da 7c.
 - **Na 7c:** nada (fora do escopo da etapa; a correção da revisão `20261102100580` não mexe no motor de presença). Fica para o fio principal
   conferir com a linha do dono gravada (o AG7-37) antes de ligar os dias da 7b.
+
+### [NOVO-agenda-90] As etapas do dia não distinguem os meios-dias de estrada
+
+- **Encontrado em:** Agenda de Produção, conferência da spec da 7d (05/11/2026, R6.9-4).
+- **O quê:** `_agenda_tarefas_planejar` (7c P8) distribui as etapas pelos meios-dias do plano. Com `modo_viagem` ligado, a OS de viagem ganha
+  meios-dias de estrada como meios-dias da própria OS (spec §3.3 d10), e a etapa pode cair num deles: a ficha diria o que fazer num dia de
+  estrada.
+- **Na Fase 7d:** sem conserto. Hoje nenhuma OS é de viagem e a 7c está em teste. O OK de `modo_viagem` avisa disso (R6.11).

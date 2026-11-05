@@ -146,9 +146,9 @@ begin
     -- FASE 7b: fim
     -- FASE 7c: (7c P2) e os blocos "-- FASE 7c: … fim" (a 20261102100100 recria o motor de novo, só acréscimo): a régua aceita "7c"
     -- FASE 7c: fim
-    if not v_f7 and l ~ '^\s*-- FASE 7[bc]?:' and l !~ '^\s*-- FASE 7[bc]?: fim' then v_f7 := true; continue; end if;
+    if not v_f7 and l ~ '^\s*-- FASE 7[bcd]?:' and l !~ '^\s*-- FASE 7[bcd]?: fim' then v_f7 := true; continue; end if;
     if v_f7 then
-      if l ~ '^\s*-- FASE 7[bc]?: fim' then v_f7 := false; end if;
+      if l ~ '^\s*-- FASE 7[bcd]?: fim' then v_f7 := false; end if;
       continue;
     end if;
     -- FASE 7 (7a P3): fim
@@ -441,8 +441,12 @@ begin
                                                              and a.attname = 'modo_habilidade' and not a.attisdropped) then 1 else 0 end
             -- (7c P8) o tipo tarefa (20261102100550), com o modo dele (modo_tarefas) em _agenda_modo_da_pergunta
             + case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
-                                                             and a.attname = 'modo_tarefas' and not a.attisdropped) then 1 else 0 end,
+                                                             and a.attname = 'modo_tarefas' and not a.attisdropped) then 1 else 0 end
             -- FASE 7c: fim
+            -- FASE 7d: os tipos local, combinar e acesso (20261107100000), com o modo deles em _agenda_modo_da_pergunta
+            + case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                                                             and a.attname = 'modo_bem' and not a.attisdropped) then 3 else 0 end,
+            -- FASE 7d: fim
     v_t);
   v_res := pg_temp.igual(v_res, 'S5 (c) o modo de cada grupo: crítica do plano, vigia, chegou? do fornecedor, material, diária, equipe, cliente, aprendizado',
     (select string_agg(public._agenda_modo_da_pergunta(t, c), ',' order by o)

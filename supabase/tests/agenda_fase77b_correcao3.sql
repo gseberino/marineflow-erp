@@ -80,12 +80,12 @@ end $f$;
 create function pg_temp.sem_c3(p text) returns text language sql immutable as $f$
   select array_to_string(array(
            select l from (select l, o, sum(case when l ~ '^\s*-- (FASE 7b: )?\(correção 3\)'
-                                                     or (l ~ '^\s*-- FASE 7c:' and l !~ '^\s*-- FASE 7c: fim')
-                                                     or (l ~ '^\s*-- \(7c ' and l !~ '^\s*-- \(7c: fim\)') then 1
-                                                when l ~ '^\s*-- (FASE 7b: fim \(correção 3\)|\(correção 3: fim\)|FASE 7c: fim|\(7c: fim\))' then -1
+                                                     or (l ~ '^\s*-- FASE 7[cd]:' and l !~ '^\s*-- FASE 7[cd]: fim')
+                                                     or (l ~ '^\s*-- \(7[cd] ' and l !~ '^\s*-- \(7[cd]: fim\)') then 1
+                                                when l ~ '^\s*-- (FASE 7b: fim \(correção 3\)|\(correção 3: fim\)|FASE 7[cd]: fim|\(7[cd]: fim\))' then -1
                                                 else 0 end)
                                        over (order by o rows between unbounded preceding and current row) as dentro,
-                                 l ~ '^\s*-- (FASE 7b: fim \(correção 3\)|\(correção 3: fim\)|FASE 7c: fim|\(7c: fim\))' as fecha
+                                 l ~ '^\s*-- (FASE 7b: fim \(correção 3\)|\(correção 3: fim\)|FASE 7[cd]: fim|\(7[cd]: fim\))' as fecha
                             from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n')
 $f$;

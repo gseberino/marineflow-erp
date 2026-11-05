@@ -339,8 +339,17 @@ select format('B2a %s: as de antes iguais e na mesma ordem, e as novas no fim', 
                 then case t.nome when 'agenda_perguntas_tipo_check' then '{tarefa}'::text[] when 'agenda_acoes_tipo_check' then '{tarefa}'::text[]
                                  when 'agenda_rascunho_tipo_check' then '{etapa}'::text[]
                                  when 'agenda_vigia_rodadas_rotina_check' then '{tarefas}'::text[] else '{}'::text[] end
-                else '{}'::text[] end,
+                else '{}'::text[] end
          -- FASE 7c: fim
+         -- FASE 7d: a 20261107100000 soma local (e combinar e acesso, na pergunta) no fim de 4 destas (agenda_fase7d_base.sql B3 confere)
+         || case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                                      and a.attname = 'modo_bem' and not a.attisdropped)
+                 then case t.nome when 'agenda_perguntas_tipo_check' then '{local,combinar,acesso}'::text[]
+                                  when 'agenda_acoes_tipo_check' then '{local}'::text[]
+                                  when 'agenda_vigia_rodadas_rotina_check' then '{local}'::text[]
+                                  when 'agenda_alocacoes_cancelada_motivo_check' then '{local}'::text[] else '{}'::text[] end
+                 else '{}'::text[] end,
+         -- FASE 7d: fim
        array_to_string(pg_temp.lista(t.tabela::regclass, t.nome), ',')
   from (values
     ('public.agenda_disponibilidade', 'agenda_disponibilidade_situacao_check', '{disponivel,indisponivel,confirmada,so_pontas}'::text[]),
@@ -361,7 +370,11 @@ insert into _resultado
 select 'B2b agenda_perguntas.critica: a expressão da 7a, igual (dias_semana não é crítica: as 8 de antes e as 4 da 7a, nesta ordem)',
        a.attgenerated = 's'
        and (select array_agg(m[1] order by o) from regexp_matches(pg_get_expr(d.adbin, d.adrelid), '''([^'']*)''', 'g') with ordinality t(m, o))
-           = '{nao_cabe,segundo_atraso,atraso_longo,remarcar_confirmado,fixada_pelo_dono,diaria,cliente_aviso,aprendizado,onda,dia_avisado,dia_prometido,sabado}',
+           = '{nao_cabe,segundo_atraso,atraso_longo,remarcar_confirmado,fixada_pelo_dono,diaria,cliente_aviso,aprendizado,onda,dia_avisado,dia_prometido,sabado}'::text[]
+             -- FASE 7d: a 20261107100000 soma acesso no fim (agenda_fase7d_base.sql B3f confere a lista inteira)
+             || case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                             and a.attname = 'modo_bem' and not a.attisdropped) then '{acesso}'::text[] else '{}'::text[] end,
+             -- FASE 7d: fim
        pg_get_expr(d.adbin, d.adrelid)
   from pg_attribute a join pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
  where a.attrelid = 'public.agenda_perguntas'::regclass and a.attname = 'critica';
@@ -562,8 +575,11 @@ begin
        set modo_marcar_sozinho = r.m, modo_revisao_diaria = r.m2, modo_compre_ate = r.m, gestor_so_propor = r.sp, modo_dias = r.m2,
            modo_cadastro = 'desligado'
      where id;
-    select string_agg(t, ',' order by t) filter (where public._agenda_modo_da_pergunta(t, t || ':x') is distinct from pg_temp.modo_antes(t, t || ':x')),
-           count(*)
+    -- FASE 7d: local, combinar e acesso (20261107100000) não têm o de antes: ficam fora da comparação (o agenda_fase7d_base.sql B6i confere)
+    select string_agg(t, ',' order by t) filter (where public._agenda_modo_da_pergunta(t, t || ':x') is distinct from pg_temp.modo_antes(t, t || ':x')
+                                                   and t not in ('local', 'combinar', 'acesso')),
+           count(*) filter (where t not in ('local', 'combinar', 'acesso'))
+    -- FASE 7d: fim
       into v_a, v_n
       from unnest(pg_temp.lista('public.agenda_perguntas'::regclass, 'agenda_perguntas_tipo_check')) t;
     v_res := pg_temp.ok(v_res, format('B6d com modo_cadastro desligado, o modo de cada tipo é o de antes (a definição de 20261031100850), menos dias_semana (nova) — o gestor %s, só propor %s', r.m, r.sp),
@@ -587,10 +603,10 @@ begin
   select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = 'public._agenda_modo_da_pergunta(text, text)'::regprocedure;
   -- FASE 7c: a 20261102100000 recria de novo com o bloco "-- FASE 7c:" (só acréscimo): ele sai antes da régua da cópia da 7b
   v_novo := array_to_string(array(
-              select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7c:' and l !~ '^\s*-- FASE 7c: fim' then 1
-                                                   when l ~ '^\s*-- FASE 7c: fim' then -1 else 0 end)
+              select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7[cd]:' and l !~ '^\s*-- FASE 7[cd]: fim' then 1
+                                                   when l ~ '^\s*-- FASE 7[cd]: fim' then -1 else 0 end)
                                           over (order by o rows between unbounded preceding and current row) as dentro,
-                                    l ~ '^\s*-- FASE 7c: fim' as fecha
+                                    l ~ '^\s*-- FASE 7[cd]: fim' as fecha
                                from unnest(string_to_array(v_novo, E'\n')) with ordinality u(l, o)) x
                where dentro = 0 and not fecha order by o), E'\n');
   -- FASE 7c: fim

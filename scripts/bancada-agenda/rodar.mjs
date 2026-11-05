@@ -334,6 +334,11 @@ const FIXTURES_COMO_TEXTO = [
   // modo_tarefas — de desligado a sombra, e o DESFAZER do cabeçalho; FORA_DA_BANCADA: o agenda_fase7c_sombra.sql a roda numa
   // subtransação).
   ['agenda_teste.mig_sombra_fase7c', '../../supabase/migrations/20261102100600_agenda_fase7c_sombra.sql'],
+  // Fase 7d (P1): a fixture da etapa (por cima da da 7c: os 5 locais, com a MP como o pátio; os cenários J, julho de 2027, e D, dezembro de
+  // 2026; spec-fase7d §8.2 com o R6.10) e a própria base da 7d (20261107100000), de onde o B6j de agenda_fase7d_base.sql confere a cópia de
+  // _agenda_modo_da_pergunta (a fonte dela, mig_tarefas_fase7c, já está acima).
+  ['agenda_teste.fase7d', 'fixture-fase7d.sql'],
+  ['agenda_teste.mig_tabelas_fase7d', '../../supabase/migrations/20261107100000_agenda_fase7d_tabelas.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */
