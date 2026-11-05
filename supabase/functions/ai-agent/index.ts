@@ -8,6 +8,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { prepararFerramentasDoTurno, runAgentLoop, textoDoSim, type Proposal } from "../_shared/ai/agent.ts";
 import { erroParaODono, respostaDoTurnoNoWhatsApp, textoAcimaDoCartao } from "../_shared/ai/whatsapp-resposta.ts";
+import { registrarFalhaDoAssistente } from "../_shared/ai/falhas-do-assistente.ts";
+import { logEdgeError } from "../_shared/log-error.ts";
 // aprovação em lote, Fase 1 (29/10/2026): o que o sistema diz do turno — decisão na conversa, desfecho real, conferido
 // das gravações diretas e a guarda da reserva do Claude Max.
 import {
@@ -879,6 +881,8 @@ async function turnoDoModeloNoWhatsApp(turno: TurnoDoModelo): Promise<Response> 
         return jr({ ok: true, session_id: sessionId, claude_max: jobId });
       } catch (e) {
         console.error("[ai-agent][whatsapp] não consegui enfileirar no Claude Max; turno pelo OpenRouter:", e);
+        // Só aviso: a reserva ainda pode responder. Não conta para o aviso do vigia.
+        await logEdgeError(admin, { context: "ai-agent", action: "enfileirar_max", level: "warn", message: "Não enfileirou no Claude Max; turno pelo OpenRouter", error: e });
       }
     } else {
       console.log("[ai-agent][whatsapp] Claude Max fora do ar (gateway sem sinal ou em pausa); turno pelo OpenRouter");
@@ -887,6 +891,7 @@ async function turnoDoModeloNoWhatsApp(turno: TurnoDoModelo): Promise<Response> 
 
   // ---- OpenRouter (loop aqui na edge) ----
   const result = await runAgentLoop(loopParams);
+  if (result.error) await registrarFalhaDoAssistente(admin, { onde: "turno_whatsapp", mensagem: `Turno do WhatsApp sem resposta: ${result.error}` });
   // (Fase 3, P6) a carona da agenda: no fim da resposta ao dono sobre UMA OS, no máximo uma pergunta aberta dela
   // (agenda_carona decide; nunca com cartão de sim, opções ou fluxo). Entra também no histórico (aplicarCarona).
   if (appUser.role === "admin") {
@@ -1015,6 +1020,7 @@ async function handleEntregaDoMax(body: Record<string, any>): Promise<Response> 
 
   console.warn(`[ai-agent][max] turno ${jobId} não veio do Max (${job.error_code ?? job.status}); ${reservaLigada(settings) ? "refazendo pelo OpenRouter" : "avisando o usuário"}`);
   if (!reservaLigada(settings) || !texto) {
+    await registrarFalhaDoAssistente(admin, { onde: "max_sem_reserva", mensagem: `Turno do Claude Max sem resposta e sem reserva: ${job.error_code ?? job.status}` });
     await queueWhatsAppReply(
       admin,
       phoneNormalized,
@@ -1022,6 +1028,8 @@ async function handleEntregaDoMax(body: Record<string, any>): Promise<Response> 
     );
     return jr({ ok: true, entregue: "aviso" });
   }
+  // Só aviso: a reserva ainda pode responder. Se ela falhar também, o turno abaixo registra a falha.
+  await logEdgeError(admin, { context: "ai-agent", action: "max_falhou", level: "warn", message: `Turno do Claude Max falhou (${job.error_code ?? job.status}); refazendo pelo OpenRouter` });
   const toolCtx = { sb: admin, admin, userId: appUser.id, userRole: (appUser.role as Role) || "unknown", jwt: "", appOrigin: settings.app_public_url || "", settings };
   return await turnoDoModeloNoWhatsApp({
     admin, sessionId, phoneNormalized, appUser, settings, toolCtx, metadata, effectiveText: texto, permitirMax: false,
@@ -1205,6 +1213,18 @@ async function turnoDoPainelPeloMax(p: {
       return jr({ message: { role: "assistant", content: conferido }, options: interrupcao.options, tool_events: [], session_id: p.loopParams.sessionId });
     }
     return jr({ message, tool_events: [], session_id: p.loopParams.sessionId });
+  }
+}
+
+/** A exceção que subiu até o handler. Sem o `admin` do turno, e nunca lança: o log não pode trocar o 500 por outro erro. */
+async function registrarFalhaDoHandler(e: unknown): Promise<void> {
+  try {
+    const admin = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    await registrarFalhaDoAssistente(admin, { onde: "handler", mensagem: `Falha geral do ai-agent: ${(e as Error)?.message ?? "erro desconhecido"}`, erro: e });
+  } catch {
+    /* silencioso de propósito */
   }
 }
 
@@ -1578,6 +1598,7 @@ servirComCors(async (req) => {
     }
 
     if (result.error) {
+      await registrarFalhaDoAssistente(admin, { onde: "turno_painel", mensagem: `Turno do painel sem resposta: ${result.error}` });
       return jr({ error: [result.error, conferido].filter(Boolean).join("\n\n"), session_id: resolvedSessionId }, result.errorStatus ?? 500);
     }
 
@@ -1611,6 +1632,7 @@ servirComCors(async (req) => {
     return jr({ message: final, tool_events: result.toolEvents, session_id: resolvedSessionId });
   } catch (e: any) {
     console.error("ai-agent error", e);
+    await registrarFalhaDoHandler(e);
     return jr({ error: e?.message || "internal error" }, 500);
   }
 });

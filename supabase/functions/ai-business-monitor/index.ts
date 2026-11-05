@@ -35,10 +35,11 @@ import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 import {
   diaDoAviso, inicioDoDiaBR, inicioDoMesBR, manhaSemLinha, podeAvisarAgora, type ResumoNaFila, resumoDeHojeCobre,
-  telefonesSemResumo, tentativasAteAs20h, TEXTO_MANHA_QUEBROU, TEXTO_RESUMO_NAO_CHEGOU,
+  telefonesSemResumo, tentativasAteAs20h, TEXTO_MANHA_QUEBROU, TEXTO_RESUMO_NAO_CHEGOU, textoDoAssistenteFalhando,
 } from "./horario.ts";
+import { falhasNaUltimaHora, LIMITE_DE_FALHAS_NA_HORA } from "../_shared/ai/falhas-do-assistente.ts";
 import type { AvisoDaFonte } from "../_shared/uma-voz/portao.ts";
-import { avisoDaNfe, avisoDoCertificado, avisoDoConsentimento, avisoDoVigia, avisoResumoNaoChegou } from "../_shared/uma-voz/fontes.ts";
+import { avisoDaNfe, avisoDoAssistenteFalhando, avisoDoCertificado, avisoDoConsentimento, avisoDoVigia, avisoResumoNaoChegou } from "../_shared/uma-voz/fontes.ts";
 import { textoDaNfe, textoDoCertificado } from "../_shared/uma-voz/acorde.ts";
 import {
   enfileirarAcorde, falaPeloPortao, lerDonoDaVoz, lerPortao, perguntarAoPortao, registrarNoPortao, registrarParaTodos,
@@ -333,8 +334,39 @@ servirComCors(async (req) => {
       console.warn("[ai-business-monitor] aviso de resumo que não chegou falhou:", (e as Error)?.message ?? e);
     }
 
+    // (7) O assistente que continua falhando (Retorno F0a-2, 05/11/2026): as falhas do ai-agent iam só para o console e,
+    // com a reserva sem crédito desde 28/10, ninguém soube. Vai ao dono, um aviso por dia, pelo portão. Leitura que
+    // falhou (null) não conclui nada, e a chave do dia só se gasta com o limite atingido. Falha aqui não derruba os outros sinais.
+    let assistenteFalhando: { falhas: number; acordes: number; guardados: number } | null = null;
+    try {
+      const falhas = await falhasNaUltimaHora(admin, now);
+      if (dono && falhas !== null && falhas >= LIMITE_DE_FALHAS_NA_HORA && await claim(`assistente_falhando:${todayISO}`, { falhas })) {
+        const texto = textoDoAssistenteFalhando(falhas);
+        const aviso = avisoDoAssistenteFalhando(todayISO, texto, falhas);
+        if (falaPeloPortao(portao, dono, dono.phone)) {
+          const r = await falarAoDono(admin, {
+            phone: dono.phone, sinais: [{ texto, avisos: [aviso] }], mensagem: (linhas) => linhas.join("\n"), agora: now,
+          });
+          assistenteFalhando = { falhas, acordes: r.acordes, guardados: r.guardados };
+        } else {
+          const { error: nErr } = await admin.from("whatsapp_send_queue").insert({
+            phone_normalized: dono.phone, message: texto, source: "assistente_falhando", priority: 2,
+            max_attempts: tentativasAteAs20h(now),
+          });
+          if (nErr) throw nErr;
+          await registrarNoPortao(admin, portao.modo === "sombra" ? "sombra" : null, dono.phone, aviso, now);
+          assistenteFalhando = { falhas, acordes: 1, guardados: 0 };
+        }
+      }
+    } catch (e) {
+      console.warn("[ai-business-monitor] aviso do assistente falhando falhou:", (e as Error)?.message ?? e);
+    }
+
     if (alerts.length === 0) {
-      return jr({ ok: true, queued: 0, resumo_nao_chegou: resumoNaoChegou, ...(resumoGuardado ? { resumo_guardado: resumoGuardado } : {}), note: "sem sinais novos hoje" });
+      return jr({
+        ok: true, queued: 0, resumo_nao_chegou: resumoNaoChegou, ...(resumoGuardado ? { resumo_guardado: resumoGuardado } : {}),
+        ...(assistenteFalhando ? { assistente_falhando: assistenteFalhando } : {}), note: "sem sinais novos hoje",
+      });
     }
 
     const mensagemCom = (linhas: string[]) =>
@@ -359,6 +391,7 @@ servirComCors(async (req) => {
     return jr({
       ok: true, queued: enfileirados, signals: alerts.length, resumo_nao_chegou: resumoNaoChegou, no_portao: noPortao,
       ...(resumoGuardado ? { resumo_guardado: resumoGuardado } : {}), ...(doDono ? { dono_pelo_portao: doDono } : {}),
+      ...(assistenteFalhando ? { assistente_falhando: assistenteFalhando } : {}),
     });
   } catch (e: any) {
     console.error("[ai-business-monitor] fatal", e);

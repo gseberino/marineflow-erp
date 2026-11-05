@@ -24,6 +24,14 @@ const SALDO = "🏦 Extrato de C6: o saldo do banco (R$ 1.234,56) não bate com 
 const PROMESSA = '🤖 Lembrete de promessa (detectado numa mensagem sua): você escreveu a Eng. Rafael B. (Dometic) (+55 (47) 90000-0000): "Claro, te passo agora!". Leia a conversa…';
 const ACOMP = '🤖 Acompanhamento (pedido seu): Miguel (+351900000422) está esperando resposta. Última mensagem dele, há 2h: "…"';
 
+// Retorno F0a-2 (05/11/2026): guardado até o fechamento, o aviso sai com o próprio texto, e não como "a manhã não chegou".
+Deno.test("linha do assistente falhando: o texto dele, sem virar a manhã que não chegou", () => {
+  const texto = "⚠️ Seu assistente do WhatsApp falhou 3 vezes na última hora e pode estar sem responder.";
+  const linha = linhaDoGuardado(aviso({ fonte: "vigia_negocio", assunto: "assistente", destino: "acorde", texto, dados: { falhas: 3 } }), HOJE);
+  assert(linha.includes("assistente do WhatsApp falhou 3 vezes"), linha);
+  assert(!linha.includes("manhã"), linha);
+});
+
 Deno.test("linhas: cada fonte, com os dados novos e com o texto antigo", () => {
   assertEquals(linhaDoGuardado(aviso({ fonte: "acompanhar", assunto: "contato:351900000422", dados: { contato: "Miguel", mensagem_em: "2026-10-15T12:02:00Z" } }), HOJE),
     "Miguel escreveu às 09:02 e espera resposta");

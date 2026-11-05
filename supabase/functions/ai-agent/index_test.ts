@@ -345,3 +345,27 @@ Deno.test("lote F1: no painel, a frase do assistente acima do cartão (OpenRoute
   assertStringIncludes(fonte, "textoAcimaDoCartao(result.message.content, 2000)");
   assertStringIncludes(fonte, "textoAcimaDoCartao(resposta, 2000)");
 });
+
+// Retorno F0a-2 (05/11/2026): as falhas do assistente ficavam só no console (0 linhas de ai-agent em app_error_logs em 05/11).
+// O que se protege: todo turno que termina sem resposta conta para o aviso do vigia; o Max que falha com a reserva ligada é
+// só aviso, porque a reserva ainda pode responder; o log nunca troca o 500 do handler por outro erro.
+Deno.test("F0a-2: turno sem resposta entra na conta, nos quatro caminhos", () => {
+  assertStringIncludes(fonte, 'registrarFalhaDoAssistente(admin, { onde: "turno_whatsapp"');
+  assertStringIncludes(fonte, 'registrarFalhaDoAssistente(admin, { onde: "turno_painel"');
+  assertStringIncludes(fonte, 'registrarFalhaDoAssistente(admin, { onde: "max_sem_reserva"');
+  assertStringIncludes(fonte, 'registrarFalhaDoAssistente(admin, { onde: "handler"');
+});
+
+Deno.test("F0a-2: o Max que falha com a reserva ligada é só aviso e não conta", () => {
+  const ini = fonte.indexOf('onde: "max_sem_reserva"');
+  const trecho = fonte.slice(ini, fonte.indexOf("turnoDoModeloNoWhatsApp({", ini));
+  assertStringIncludes(trecho, 'action: "max_falhou", level: "warn"');
+  assert(trecho.indexOf('return jr({ ok: true, entregue: "aviso" })') < trecho.indexOf('action: "max_falhou"'), "o aviso é do caminho que segue pela reserva");
+});
+
+Deno.test("F0a-2: o log do handler vem antes do 500 e não pode lançar", () => {
+  assert(fonte.indexOf("await registrarFalhaDoHandler(e);") < fonte.indexOf('return jr({ error: e?.message || "internal error" }, 500);'), "log antes do 500");
+  const fn = fonte.slice(fonte.indexOf("async function registrarFalhaDoHandler"), fonte.indexOf("// ---------------- HANDLER"));
+  assertStringIncludes(fn, "try {");
+  assertStringIncludes(fn, "} catch {");
+});

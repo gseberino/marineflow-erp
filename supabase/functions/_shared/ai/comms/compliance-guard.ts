@@ -27,14 +27,28 @@ export interface Violacao {
 const H_INICIO = 8; // 08:00
 const H_FIM = 20; // até 19:59
 
-function horaAgoraBrasilia(): number {
+/**
+ * Retorno F0a-2 (05/11/2026): o telefone do cadastro genérico "Cliente Final" é de um terceiro que ninguém
+ * identificou. Nada que leve dado de um cliente vai para lá, nem a pedido do dono: o resumo do "sim" já avisa.
+ */
+export const RECUSA_CLIENTE_FINAL =
+  'Este é o cadastro genérico "Cliente Final": o telefone dele é de um terceiro. Nada foi enviado. Ligue o documento ao cliente de verdade e peça de novo.';
+
+// Retorno F0a-2 (05/11/2026): hora que não se sabe é null, nunca um valor "neutro". Antes virava 12h,
+// e a trava de horário passava calada justamente quando não dava para conferir.
+function horaAgoraBrasilia(): number | null {
   try {
     const s = new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo", hour: "2-digit", hour12: false });
-    const h = parseInt(s.match(/\d{1,2}/)?.[0] || "12", 10);
-    return isNaN(h) ? 12 : h % 24;
+    const h = parseInt(s.match(/\d{1,2}/)?.[0] ?? "", 10);
+    return isNaN(h) ? null : h % 24;
   } catch {
-    return 12; // fail-safe neutro (dentro do horário)
+    return null;
   }
+}
+
+/** A mensagem vai a quem é de fora (cliente ou fornecedor, pelo WhatsApp)? */
+export function ehDeFora(ctx: Pick<ComplianceCtx, "canal" | "audiencia">): boolean {
+  return ctx.canal === "whatsapp" && (ctx.audiencia === "cliente" || ctx.audiencia === "fornecedor");
 }
 
 /**
@@ -42,11 +56,14 @@ function horaAgoraBrasilia(): number {
  * O chamador que receber uma violação deve ABORTAR o envio e explicar.
  */
 export function checarConformidade(ctx: ComplianceCtx): Violacao | null {
-  const externo = ctx.canal === "whatsapp" && (ctx.audiencia === "cliente" || ctx.audiencia === "fornecedor");
+  const externo = ehDeFora(ctx);
 
   // 1) Horário permitido — não perturbar cliente/fornecedor fora de 8h–20h (Brasília).
   if (externo) {
     const h = ctx.horaBrasilia ?? horaAgoraBrasilia();
+    if (h === null) {
+      return { codigo: "hora_indisponivel", motivo: `Não deu para conferir a hora de Brasília: nada foi enviado a ${ctx.audiencia}. Tente de novo em instantes.` };
+    }
     if (h < H_INICIO || h >= H_FIM) {
       return { codigo: "fora_de_horario", motivo: `Envio a ${ctx.audiencia} fora do horário permitido (${h}h; janela ${H_INICIO}–${H_FIM}h). Agende para o próximo horário comercial.` };
     }

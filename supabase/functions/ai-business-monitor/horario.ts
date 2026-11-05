@@ -56,6 +56,14 @@ export const TEXTO_RESUMO_NAO_CHEGOU =
 export const TEXTO_MANHA_QUEBROU =
   "☀️ O resumo das 07:30 de hoje não chegou: deu um erro ao montá-lo. Escreva *como estão as coisas?* que eu mostro o principal agora.";
 
+/**
+ * (Retorno F0a-2, 05/11/2026) O assistente que continua falhando. Não diz a causa: o vigia só sabe que falhou. O PC
+ * e o limite do Claude são os dois motivos que o dono consegue conferir sozinho.
+ */
+export function textoDoAssistenteFalhando(falhas: number): string {
+  return `⚠️ Seu assistente do WhatsApp falhou ${falhas} vezes na última hora e pode estar sem responder. Confira se o PC está ligado e se o limite do Claude acabou.`;
+}
+
 /** A partir de quando "nenhuma linha da manhã na fila" conta como "a manhã não chegou" (a 1ª rodada do vigia é 08:05). */
 export const MANHA_SEM_LINHA_DESDE_MIN = 8 * 60;
 

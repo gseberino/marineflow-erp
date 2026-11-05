@@ -42,6 +42,7 @@ const CLIENTE = {
   whatsapp: "5547999990000",
   phone: "4733331234",
   opt_out_whatsapp: false,
+  generico: false,
 };
 
 const ORC = {
@@ -328,6 +329,25 @@ Deno.test("opt-out continua valendo no PDF", async () => {
   const r = await executar(amb, { service_order_id: ORC.id });
   assertStringIncludes(r.error, "opt-out");
   assertEquals(amb.chamadas.pdf.length + amb.chamadas.envio.length, 0);
+});
+
+// Retorno F0a-2 (05/11/2026): o telefone do cadastro genérico é de um terceiro, e o PDF leva preço e PIX.
+Deno.test("Cliente Final: a ordem não vai ao telefone do cadastro genérico, em nenhum formato", async () => {
+  for (const formato of [undefined, "pdf_e_link", "pdf", "link", "resumo"]) {
+    const amb = montarAmbiente({ cliente: { generico: true } });
+    const r = await executar(amb, { service_order_id: ORC.id, ...(formato ? { formato } : {}) });
+    assertStringIncludes(r.error, "Cliente Final", `formato ${formato}`);
+    assertEquals(r.nada_enviado, true, `formato ${formato}`);
+    assertEquals(amb.chamadas.pdf.length + amb.chamadas.envio.length, 0, `formato ${formato}`);
+  }
+});
+
+Deno.test("Cliente Final: o resumo do sim já avisa que o envio será recusado", async () => {
+  const amb = montarAmbiente({ cliente: { generico: true } });
+  const resumo = await resumirEnvioAoCliente(amb.admin, { service_order_id: ORC.id });
+  assertStringIncludes(String(resumo), "Cliente Final");
+  const normal = await resumirEnvioAoCliente(montarAmbiente().admin, { service_order_id: ORC.id });
+  assert(!String(normal).includes("Cliente Final"), "cliente comum sem o aviso");
 });
 
 Deno.test("ordem cancelada é recusada nos dois formatos, antes de gerar qualquer coisa", async () => {

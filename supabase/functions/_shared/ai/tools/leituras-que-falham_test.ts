@@ -171,3 +171,44 @@ Deno.test("send_collection_reminder: com Pix do cliente esperando no Extrato, n�
     globalThis.fetch = original;
   }
 });
+
+// Retorno F0a-2 (05/11/2026): o telefone do cadastro genérico é de um terceiro. Cobrar lá expõe a dívida a quem não deve.
+Deno.test("send_collection_reminder: 'Cliente Final' sem contato próprio não recebe a cobrança", async () => {
+  const db = bancoFalso({
+    collections: [{ id: "col", amount: 500, due_date: "2026-09-10", client_id: "c" }],
+    clients: [{ id: "c", name: "Cliente Final", whatsapp: "5547999990000", phone: null, opt_out_whatsapp: false, generico: true }],
+    app_settings: [], finance_review_queue: [],
+  });
+  const original = globalThis.fetch;
+  let enviou = false;
+  globalThis.fetch = (() => { enviou = true; return Promise.resolve(new Response("{}")); }) as typeof fetch;
+  try {
+    const r = await ferramenta(whatsappTools, "send_collection_reminder").execute({ collection_id: "col" }, contexto(db));
+    assertEquals(/Cliente Final/.test(r.error), true);
+    assertEquals(r.nada_enviado, true);
+    assertEquals(enviou, false);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+Deno.test("send_collection_reminder: a cobrança com contato próprio não é barrada pelo cadastro genérico", async () => {
+  const db = bancoFalso({
+    collections: [{ id: "col", amount: 500, due_date: "2026-09-10", contact_whatsapp: "5547988887777", client_id: "c" }],
+    clients: [{ id: "c", name: "Cliente Final", whatsapp: "5547999990000", phone: null, opt_out_whatsapp: false, generico: true }],
+    app_settings: [], finance_review_queue: [],
+  });
+  const original = globalThis.fetch;
+  let destino = "";
+  globalThis.fetch = ((_url: string, init?: RequestInit) => {
+    destino = String(JSON.parse(String(init?.body ?? "{}")).phone ?? "");
+    return Promise.resolve(new Response("{}"));
+  }) as typeof fetch;
+  try {
+    // O banco falso não grava o histórico da cobrança, que vem depois do envio: aqui importa só para onde saiu.
+    await ferramenta(whatsappTools, "send_collection_reminder").execute({ collection_id: "col" }, contexto(db)).catch(() => null);
+    assertEquals(destino, "5547988887777");
+  } finally {
+    globalThis.fetch = original;
+  }
+});

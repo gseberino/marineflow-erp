@@ -254,3 +254,13 @@ Deno.test("ao cliente nunca roda sozinho, mesmo com autonomia gravada", () => {
   assert(NEVER_AUTONOMOUS.has("send_fiscal_pdf_to_client"));
   assertEquals(notaFiscalPdfTools.find((t) => t.name === "send_fiscal_pdf_to_client")!.risk, "high");
 });
+
+// Retorno F0a-2 (05/11/2026): a nota leva nome, documento e valores. O telefone do cadastro genérico é de um terceiro.
+Deno.test("'Cliente Final': a nota não vai ao telefone do cadastro genérico", async () => {
+  const amb = ambiente();
+  amb.tabelas.clients.push({ id: "c-final", name: "Cliente Final", display_name: null, whatsapp: "47966665555", phone: null, opt_out_whatsapp: false, generico: true });
+  amb.tabelas.issued_fiscal_documents.push(nota({ id: "n-final", number: 41, origin_id: null, origin_type: "manual", client_id: "c-final" }));
+  const { r, envios } = await rodar("send_fiscal_pdf_to_client", { nota: "41" }, amb);
+  assertStringIncludes(r.error, "Cliente Final");
+  assertEquals(envios.length, 0);
+});

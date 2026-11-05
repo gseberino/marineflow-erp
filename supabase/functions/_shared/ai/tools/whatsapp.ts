@@ -9,6 +9,7 @@ import {
   type ToolDef,
 } from "./registry.ts";
 import { chaveDeEnvio, diaLocal, hashCurto, liberarEnvio } from "../../whatsapp/idempotencia.ts";
+import { RECUSA_CLIENTE_FINAL } from "../comms/compliance-guard.ts";
 import { guardaDeEnvio } from "../comms/send-guard.ts";
 import { registrarEnvio } from "../comms/send-log.ts";
 import { documentTypeFor } from "../../pdf/document-type.ts";
@@ -440,7 +441,7 @@ export async function resumirEnvioAoCliente(
   const { data: so } = await buscarOrdemParaEnvio(admin, args?.service_order_id);
   if (!so) return null;
   const { data: c } = so.client_id
-    ? await admin.from("clients").select("name, display_name, whatsapp, phone, opt_out_whatsapp").eq("id", so.client_id).maybeSingle()
+    ? await admin.from("clients").select("name, display_name, whatsapp, phone, opt_out_whatsapp, generico").eq("id", so.client_id).maybeSingle()
     : { data: null };
   const formato = formatoDoEnvio(args as { formato?: unknown });
   const rotulo = documentTypeFor(so.status) === "quote" ? "Orçamento" : "Ordem de Serviço";
@@ -503,6 +504,7 @@ export async function resumirEnvioAoCliente(
     linhas.push("⚠️ Este orçamento está marcado como RECUSADO no funil.");
   }
   if (c?.opt_out_whatsapp) linhas.push("⚠️ O cliente pediu para não receber WhatsApp (opt-out) — o envio será recusado.");
+  if (c?.generico) linhas.push('⚠️ É o cadastro genérico "Cliente Final", com o telefone de um terceiro — o envio será recusado.');
   return linhas.join("\n");
 }
 
@@ -779,10 +781,12 @@ export const whatsappTools: ToolDef[] = [
       // Perfil do contato: nome usado (display_name) e opt-out.
       let c: any = null;
       if (col.client_id) {
-        const r = await sb.from("clients").select("whatsapp, phone, name, display_name, opt_out_whatsapp").eq("id", col.client_id).maybeSingle();
+        const r = await sb.from("clients").select("whatsapp, phone, name, display_name, opt_out_whatsapp, generico").eq("id", col.client_id).maybeSingle();
         c = r.data;
       }
       if (c?.opt_out_whatsapp) return { error: "Este cliente pediu para não receber mensagens no WhatsApp (opt-out). Cobre por outro canal." };
+      // A cobrança pode ter contato próprio; só recusa quando o destino seria o telefone do cadastro genérico.
+      if (c?.generico && !col.contact_whatsapp && !col.phone) return { error: RECUSA_CLIENTE_FINAL, nada_enviado: true };
       const phone = col.contact_whatsapp || col.phone || c?.whatsapp || c?.phone;
       if (!phone) return { error: "Sem telefone para enviar o lembrete." };
       const fmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(col.amount);
@@ -857,8 +861,9 @@ export const whatsappTools: ToolDef[] = [
       if (!so.share_token) return { error: `A ${so.service_order_number} não possui link público ainda. Abra a OS no app, clique em "Compartilhar" para gerar o link, e tente novamente.` };
       // Destino: SÓ o cadastro do cliente da ordem. Nenhum telefone dos argumentos é lido —
       // é o que garante que o arquivo com preço e PIX vai para quem é dono do orçamento.
-      const { data: c } = await admin.from("clients").select("whatsapp, phone, name, display_name, opt_out_whatsapp").eq("id", so.client_id).maybeSingle();
+      const { data: c } = await admin.from("clients").select("whatsapp, phone, name, display_name, opt_out_whatsapp, generico").eq("id", so.client_id).maybeSingle();
       if (c?.opt_out_whatsapp) return { error: "Este cliente pediu para não receber mensagens no WhatsApp (opt-out)." };
+      if (c?.generico) return { error: RECUSA_CLIENTE_FINAL, nada_enviado: true };
       const phone = c?.whatsapp || c?.phone;
       if (!phone) return { error: "Cliente sem WhatsApp/telefone cadastrado." };
       const origin = appOrigin || settings.app_public_url || "https://marineflow-erp.vercel.app";

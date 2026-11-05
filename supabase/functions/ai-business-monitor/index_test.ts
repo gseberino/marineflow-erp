@@ -101,3 +101,23 @@ Deno.test("P4.2: NF-e por nota só com portao.modo; o texto da fila não muda; c
   const fn = fonte.slice(ini, fonte.indexOf("servirComCors(", ini));
   assert(!/\.(insert|update|upsert|delete)\(/.test(fn), "a leitura das notas só lê");
 });
+
+// Retorno F0a-2 (05/11/2026). O que se protege: a leitura que falhou (null) não conclui nada; a chave do dia só se gasta
+// com o limite atingido e depois de saber quem é o dono; com a voz ligada, o dono ouve pelo portão; falha aqui não derruba
+// os outros sinais; o aviso vem antes da volta "sem sinais novos", senão só sairia em hora com outro alerta.
+Deno.test("assistente falhando: limite antes do claim, portão com a voz ligada, sem derrubar os outros sinais", () => {
+  const ini = fonte.indexOf("// (7) O assistente que continua falhando");
+  assert(ini > 0, "falta o bloco");
+  const bloco = fonte.slice(ini, fonte.indexOf("if (alerts.length === 0)", ini));
+  assertStringIncludes(bloco, "const falhas = await falhasNaUltimaHora(admin, now);");
+  assertStringIncludes(bloco, "dono && falhas !== null && falhas >= LIMITE_DE_FALHAS_NA_HORA && await claim(`assistente_falhando:${todayISO}`");
+  assertStringIncludes(bloco, "falaPeloPortao(portao, dono, dono.phone)");
+  assertStringIncludes(bloco, "await falarAoDono(admin");
+  assertStringIncludes(bloco, "max_attempts: tentativasAteAs20h(now)");
+  assert(bloco.includes("} catch (e) {"), "a falha fica presa no bloco");
+  assert(fonte.indexOf("if (!podeAvisarAgora(now))") < ini, "o corte de horário vem antes");
+});
+
+Deno.test("assistente falhando: as duas voltas do vigia contam o aviso", () => {
+  assert(fonte.split("assistente_falhando: assistenteFalhando").length - 1 === 2, "falta em uma das voltas");
+});

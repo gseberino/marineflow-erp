@@ -5,7 +5,7 @@
 // leva a referência do freio (acomp:<id>:<última recebida>).
 import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
-  avisoDaAgenda, avisoDaNfe, avisoDaVoltaDoWhatsApp, avisoDoAcompanhamento, avisoDoCertificado, avisoDoConsentimento, avisoDoEmail, avisoDoLeadDoSite,
+  avisoDaAgenda, avisoDaNfe, avisoDaVoltaDoWhatsApp, avisoDoAcompanhamento, avisoDoAssistenteFalhando, avisoDoCertificado, avisoDoConsentimento, avisoDoEmail, avisoDoLeadDoSite,
   avisoDosLembretesDeRevisao, avisoDosSaldos, avisoDoVigia, avisoResumoNaoChegou, DESTINO_DO_VIGIA, pedeHojeOuUrgente,
   referenciaDoAcompanhamento,
 } from "./fontes.ts";
@@ -39,6 +39,12 @@ Deno.test("consentimento do banco: ≤ 7 dias na linha Hoje (todo dia); 8–30 n
   assertEquals(avisoDoConsentimento("c1", 5, DIA, "t").chave, "consent:c1:2026-10-21");
   assertEquals(avisoDoConsentimento("c1", 20, DIA, "t").destino, "escritorio");
   assertEquals(avisoDoConsentimento("c1", 20, DIA, "t").chave, "consent:c1:2026-10-19");
+});
+
+// Retorno F0a-2 (05/11/2026): assunto próprio. Com "sistema", o guardado leria o aviso como "a manhã não chegou".
+Deno.test("assistente falhando: acorde, um por dia, fora do assunto sistema", () => {
+  const a = avisoDoAssistenteFalhando(DIA, "t", 4);
+  assertEquals([a.fonte, a.chave, a.assunto, a.destino, a.dados], ["vigia_negocio", `assistente_falhando:${DIA}`, "assistente", "acorde", { falhas: 4 }]);
 });
 
 Deno.test("sistema: a manhã que não chegou e a volta longa do WhatsApp são o MESMO assunto (um acorde por dia)", () => {

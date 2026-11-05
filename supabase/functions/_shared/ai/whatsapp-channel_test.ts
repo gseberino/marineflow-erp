@@ -527,6 +527,16 @@ Deno.test("queueWhatsAppReply: erro do envio ou da rede cai na fila e devolve nu
   }
 });
 
+// Retorno F0a-2 (05/11/2026): a fila envia direto pelo provedor, sem portão. O que o whatsapp-send recusou não vai para lá.
+Deno.test("queueWhatsAppReply: recusa do portão não cai na fila", async () => {
+  for (const codigo of ["fora_de_horario", "cliente_final", "opt_out", "checagem_indisponivel"]) {
+    const { admin, fila } = bancoDaFila();
+    const resposta = () => Promise.resolve(new Response(JSON.stringify({ error: "recusado", recusado: true, codigo }), { status: 422 }));
+    assertEquals(await comFetch(resposta, () => queueWhatsAppReply(admin, TELEFONE_DO_DONO, "oi")), null, codigo);
+    assertEquals(fila, [], codigo);
+  }
+});
+
 // ─── Registro único de pergunta ativa (F2 dos comprovantes, 11/10/2026) ──────────────────
 // O dono recebe no mesmo WhatsApp o menu dos comprovantes, a pendência do assistente e o "posso
 // mandar?" dos lembretes. Um "sim"/"1" só vai para UM deles. As funções do registro

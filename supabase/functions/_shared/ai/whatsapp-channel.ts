@@ -332,6 +332,12 @@ export async function queueWhatsAppReply(admin: any, phoneNormalized: string, me
       const id = body?.["messageId"];
       return typeof id === "string" && id ? id : null;
     }
+    // Retorno F0a-2 (05/11/2026): recusa do portão não é falha de entrega. A fila envia direto pelo provedor, sem
+    // passar pelo portão do whatsapp-send: mandar a recusa para a fila faria sair o que acabou de ser barrado.
+    if (body?.["recusado"] === true) {
+      console.warn(`[ai-agent][whatsapp] resposta recusada pelo portão (${String(body?.["codigo"] ?? "sem código")}); fica fora da fila`);
+      return null;
+    }
   } catch (_e) {
     // rede/timeout — cai para a fila abaixo
   }

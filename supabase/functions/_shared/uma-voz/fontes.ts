@@ -79,6 +79,15 @@ export function avisoResumoNaoChegou(dia: string, texto: string, motivo: "whatsa
   return { fonte: "vigia_negocio", chave: `sistema:resumo_nao_chegou:${dia}`, assunto: "sistema", destino: "acorde", texto, dados: { motivo } };
 }
 
+/**
+ * O assistente que continua falhando (Retorno F0a-2, 05/11/2026): acorde, um por dia. O assunto é próprio, e não
+ * "sistema": o guardado lê todo aviso "sistema" do vigia como "a manhã de dd/mm não chegou" (guardado.ts), e este
+ * sairia no fechamento com o texto errado. Aqui ele cai no caminho de sempre, que mostra o próprio texto.
+ */
+export function avisoDoAssistenteFalhando(dia: string, texto: string, falhas: number): AvisoDaFonte {
+  return { fonte: "vigia_negocio", chave: `assistente_falhando:${dia}`, assunto: "assistente", destino: "acorde", texto, dados: { falhas } };
+}
+
 // ── saldos a cobrar (balance-reminders) ─────────────────────────────────────────────────────────
 
 /** O resumo de saldos das 08:30 acaba: a manhã cobre (cobrança grande, marcos), 30 dias vai à revisão. */

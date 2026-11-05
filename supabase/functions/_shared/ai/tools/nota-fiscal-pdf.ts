@@ -31,6 +31,7 @@ import { enviarDocumentoWhatsapp, mascararTelefone } from "./whatsapp.ts";
 import { localizarOrdem } from "./documentos-pdf.ts";
 import { escolherPorNome } from "./caixa.ts";
 import { telefoneLegivel, telefoneParaEnvio } from "./agendamento.ts";
+import { RECUSA_CLIENTE_FINAL } from "../comms/compliance-guard.ts";
 import { guardaDeEnvio } from "../comms/send-guard.ts";
 import { registrarEnvio } from "../comms/send-log.ts";
 import { chaveDeEnvio, diaLocal, hashCurto, liberarEnvio } from "../../whatsapp/idempotencia.ts";
@@ -237,9 +238,10 @@ export async function localizarNota(admin: any, args: Record<string, unknown>): 
 // deno-lint-ignore no-explicit-any
 async function clienteDaNota(admin: any, nota: Nota) {
   if (!nota.client_id) return { erro: `A ${rotuloDaNota(nota)} não tem cliente cadastrado vinculado — não há para quem mandar.` };
-  const { data: c, error } = await admin.from("clients").select("name, display_name, whatsapp, phone, opt_out_whatsapp").eq("id", nota.client_id).maybeSingle();
+  const { data: c, error } = await admin.from("clients").select("name, display_name, whatsapp, phone, opt_out_whatsapp, generico").eq("id", nota.client_id).maybeSingle();
   if (error) return { erro: `A consulta do cliente falhou (${error.message}). Tente de novo.` };
   if (!c) return { erro: "O cliente da nota não existe mais no cadastro." };
+  if (c.generico) return { erro: RECUSA_CLIENTE_FINAL };
   const telefone = telefoneParaEnvio(c.whatsapp || c.phone);
   return { cliente: c as { name: string; display_name: string | null; opt_out_whatsapp: boolean | null }, telefone };
 }
