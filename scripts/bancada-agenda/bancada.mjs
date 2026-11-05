@@ -80,6 +80,18 @@ export const FORA_DA_BANCADA = new Set([
   // modo_lider, modo_habilidade_propor e modo_tarefas) em sombra. O teste dela a roda numa subtransação; na bancada cada teste liga o
   // modo que precisa.
   '20261102100600_agenda_fase7c_sombra.sql',
+  // Fase 7d (P8; o nome é o da spec-fase7d §5.9, R6.2, fixado no P1): a semente dos locais, o onde_fica_desde e os 6 modos da etapa
+  // em sombra. O teste dela (agenda_fase7d_semente.sql) a roda numa subtransação; na bancada cada teste liga o modo que precisa.
+  '20261107100900_agenda_fase7d_semente.sql',
+  // Retorno rápido ao cliente F0 (rebase de 05/11; spec-fase7d R6.0): as 5 migrations de OUTRA sessão, já aplicadas em produção, com data
+  // depois de PRIMEIRA. Nenhuma recria função da agenda nem mexe em lista fechada dela (só whatsapp_messages, whatsapp_blocked_numbers e
+  // gatilhos em whatsapp_send_queue e whatsapp_messages), e a bancada não modela o que elas atravessam: _texto_simples (20261007150000),
+  // whatsapp_leads, vessel_contacts, clients.generico e o pg_cron. Sem isto a bancada para na 20261106100100, a 1ª que a compila.
+  '20261105100000_retorno_f0a_canal_bloqueado.sql',
+  '20261106100000_retorno_f0b_quem_escreve.sql',
+  '20261106100100_retorno_f0b_parar.sql',
+  '20261106100200_retorno_f0b_esperando.sql',
+  '20261106100300_retorno_f0b_medidas.sql',
   // Merge do main (28/10/2026): migrations de OUTRAS sessões, já aplicadas em produção, que caíram depois de PRIMEIRA
   // pela data. Mexem em diárias (conta corrente, recibo, lote, anotação × CPF) e no agrupar OS — tabelas que a bancada
   // não modela (anotacoes_do_extrato, orcamento_agrupamentos, os_agrupamento_movidos…) e funções que a agenda não chama
