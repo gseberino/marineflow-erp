@@ -394,10 +394,14 @@ export interface TextoDaTarde {
   agenda?: { cauda: boolean; semana: number; linhas?: LinhaDaAgenda[] };
 }
 
-/** (Fase 2, P5) As linhas do plano que vão no fechamento (só o turno do fechamento, só as ligadas, nas vagas). */
+/**
+ * (Fase 2, P5) As linhas do plano que vão na tarde (só as ligadas, nas vagas).
+ * (05/11/2026) Também nos dias de revisão: toda segunda (ou terça, depois de feriado) a tarde é a revisão da semana, e o 1º dia
+ * útil do mês é a do mês. Sem as linhas, a pergunta do gestor que vencia naquele dia nunca era vista (o prazo só corre depois de
+ * mostrada) e a véspera da OS passava calada: na semana de 02/11 foram dois dias seguidos sem a agenda (ter e qua).
+ */
 function linhasDoFechamento(d: DadosDaTarde): LinhaDaAgenda[] {
-  if (d.turno !== "fechamento") return [];
-  return linhasDaAgendaQueCabem(d.ficaram.length, d.amanha?.agenda);
+  return linhasDaAgendaQueCabem(d.turno === "fechamento" ? d.ficaram.length : 0, d.amanha?.agenda);
 }
 
 /**
@@ -490,7 +494,7 @@ function exemploDeResposta(ls: LinhaComLetra[]): string {
 /** Quantos parados a revisão mostra (decisão do dono, 15/10/2026: "até 5"). */
 export const MAX_PARADOS = 5;
 
-function textoDaRevisaoDaSemana(d: DadosDaTarde, curto: boolean): TextoDaTarde {
+function textoDaRevisaoDaSemana(d: DadosDaTarde, curto: boolean, linhasMax = Infinity, curtas = false): TextoDaTarde {
   const ps = d.parados.slice(0, MAX_PARADOS);
   const resto = d.parados.length - ps.length;
   const abertura = `Revisão da semana, ${cabecaDoDia(d.hoje)}. ` +
@@ -501,9 +505,12 @@ function textoDaRevisaoDaSemana(d: DadosDaTarde, curto: boolean): TextoDaTarde {
     ? [`Responda tudo numa mensagem, ex.: *${exemploDeResposta(ps)}* (semana = faço esta semana; 15 dias = lembro depois). As letras valem até meia-noite.`]
     : [];
   const p = d.panorama;
+  // (05/11/2026) as linhas do plano, como no fechamento: logo depois do "Amanhã", inteiras
+  const linhas = linhasDoFechamento(d).slice(0, linhasMax);
   const panorama = [
     // (16/10/2026) o "Amanhã" do fechamento também na revisão de segunda (a terça: OS marcada, tarefa, compra, a pagar)
     d.amanha ? linhaDeAmanha(d.hoje, d.amanha) : null,
+    ...linhas.map((l) => (curtas && l.texto_curto ? l.texto_curto : l.texto)),
     p?.mes ? linhaDoMesAteAqui(p.mes) : null,
     curto ? null : linhaDoVigia(p?.vigia ?? null),
     p?.semana ? linhaDaSemana(p.semana) : null,
@@ -515,10 +522,10 @@ function textoDaRevisaoDaSemana(d: DadosDaTarde, curto: boolean): TextoDaTarde {
   if (d.pergunta) blocos.push("", PERGUNTA_DA_SEMANA);
   // (24/10/2026, P6) a revisão de segunda também traz o "Amanhã": com a agenda ligada, a cauda dela (a semana que vem,
   // nunca: ela é do fechamento de quinta)
-  return comAAgenda({ texto: blocos.join("\n"), letras: ps }, d, 0);
+  return comAAgenda({ texto: blocos.join("\n"), letras: ps }, d, 0, linhas);
 }
 
-function textoDaRevisaoDoMes(d: DadosDaTarde, curto: boolean): TextoDaTarde {
+function textoDaRevisaoDoMes(d: DadosDaTarde, curto: boolean, linhasMax = Infinity, curtas = false): TextoDaTarde {
   const a = d.antigas;
   const linhasDoMes = [
     d.mesQueFechou ? linhaDoMesQueFechou(d.mesQueFechou) : null,
@@ -537,19 +544,25 @@ function textoDaRevisaoDoMes(d: DadosDaTarde, curto: boolean): TextoDaTarde {
   } else {
     blocos.push("", "Nenhuma cobrança vencida há 30 dias ou mais.");
   }
+  // (05/11/2026) as linhas do plano, depois das cobranças. Esta revisão não tem o "Amanhã", então nunca há cauda
+  const linhas = linhasDoFechamento(d).slice(0, linhasMax);
+  if (linhas.length) blocos.push("", ...linhas.map((l) => (curtas && l.texto_curto ? l.texto_curto : l.texto)));
   const lote = d.lote ? linhaDoLote(d.lote) : null;
   if (lote) blocos.push("", lote);
   if (d.pergunta) blocos.push("", PERGUNTA_DA_SEMANA);
-  return { texto: blocos.join("\n"), letras: a?.linhas ?? [] };
+  const t: TextoDaTarde = { texto: blocos.join("\n"), letras: a?.linhas ?? [] };
+  const ag = d.amanha?.agenda;
+  return ag ? { ...t, agenda: { cauda: false, semana: 0, ...(ag.linhas ? { linhas } : {}) } } : t;
 }
 
 /**
  * (30/10/2026, Agenda de Produção Fase 7a, correção 2 da revisão) O fechamento sem o que é do Secretário e não perde hoje: os
  * fornecedores esperando, o escritório (e o lote da papelada) e o "Sem resposta desde hoje". As letras do que ficou de hoje, o
  * guardado, o "Amanhã" e a pergunta da sexta continuam. Só vale com linha garantida da agenda prestes a sair (textoDaTarde).
+ * (05/11/2026) Na revisão, o panorama (o mês, o vigia, a semana) e o faturamento também cedem: nenhum deles perde hoje.
  */
 function semOsExtras(d: DadosDaTarde): DadosDaTarde {
-  return { ...d, fornecedores: [], escritorio: null, lote: null, semResposta: [] };
+  return { ...d, fornecedores: [], escritorio: null, lote: null, semResposta: [], panorama: null, faturamento: null };
 }
 
 /**
@@ -566,17 +579,19 @@ function semOsExtras(d: DadosDaTarde): DadosDaTarde {
  * banco antes da 7a, a sombra), o caminho é o de antes, byte a byte.
  */
 export function textoDaTarde(d: DadosDaTarde): TextoDaTarde {
-  const montar = (curto: boolean, semanaMax: number, linhasMax = Infinity, enxuto = false) =>
-    d.turno === "fechamento" ? textoDoFechamento(enxuto ? semOsExtras(d) : d, curto, semanaMax, linhasMax, enxuto)
-    : d.turno === "revisao_semana" ? textoDaRevisaoDaSemana(d, curto)
-    : textoDaRevisaoDoMes(d, curto);
+  const montar = (curto: boolean, semanaMax: number, linhasMax = Infinity, enxuto = false) => {
+    const dd = enxuto ? semOsExtras(d) : d;
+    return d.turno === "fechamento" ? textoDoFechamento(dd, curto, semanaMax, linhasMax, enxuto)
+      : d.turno === "revisao_semana" ? textoDaRevisaoDaSemana(dd, curto, linhasMax, enxuto)
+      : textoDaRevisaoDoMes(dd, curto, linhasMax, enxuto);
+  };
   // (24/10/2026, Fase 2, P5) com as linhas do plano no fechamento: primeiro cede a semana que vem (projeção), depois as
   // outras linhas encurtam (curto), e só então sai a linha do plano de menor perda — uma inteira por vez, nunca o meio.
   // Sem linhas do plano (sombra, desligado, Fase 2 não aplicada), o caminho é o de antes, byte a byte.
   const L = linhasDoFechamento(d).length;
   const n = semanaDoFechamento(d).length;
   // (Fase 7a, correção 2) quantas das L têm vaga garantida: as primeiras (as de maior perda)
-  const G = d.turno === "fechamento" ? Math.min(L, d.amanha?.agenda?.vagas_garantidas ?? 0) : 0;
+  const G = Math.min(L, d.amanha?.agenda?.vagas_garantidas ?? 0);
   for (let l = L; l >= 0; l--) {
     for (const k of l === L ? [...new Set([n, Math.min(n, 1), 0])] : [0]) {
       const longo = montar(false, k, l);

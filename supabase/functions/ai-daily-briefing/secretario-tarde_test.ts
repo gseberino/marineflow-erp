@@ -456,10 +456,11 @@ Deno.test("agenda que estoura o tempo (57014): o fechamento sai sem ela e o erro
   assertEquals(antes.chamadas.some((c) => c.nome === "log_app_error"), false);
 });
 
-Deno.test("agenda: só o fechamento e a revisão da semana leem a agenda (o 'Amanhã'); a revisão do mês não", async () => {
+Deno.test("agenda: os três turnos leem a agenda; a revisão do mês não mostra o 'Amanhã', mas leva as linhas", async () => {
   const f = falsoAdmin(banco(), { ...RPCS, agenda_textos_do_fechamento: daAgenda("ligado") });
-  await rodarTurnoDaTarde(f.admin, { agora: AS_1730, pedido: "revisao_mes", dry: true });
-  assert(!f.chamadas.some((c) => c.nome === "agenda_textos_do_fechamento"), "a revisão do mês não tem 'Amanhã'");
+  const m = await rodarTurnoDaTarde(f.admin, { agora: AS_1730, pedido: "revisao_mes", dry: true });
+  assert(f.chamadas.some((c) => c.nome === "agenda_textos_do_fechamento"), "sem ler a agenda, as linhas somem no dia da revisão do mês");
+  assert(!String(m.corpo.texto).includes(CAUDA_DO_BANCO), "a revisão do mês não tem 'Amanhã'");
   const rs = falsoAdmin(banco(), { ...RPCS, agenda_textos_do_fechamento: daAgenda("ligado") });
   const r = await rodarTurnoDaTarde(rs.admin, { agora: AS_1730, pedido: "revisao_semana", dry: true });
   assert(rs.chamadas.some((c) => c.nome === "agenda_textos_do_fechamento"));

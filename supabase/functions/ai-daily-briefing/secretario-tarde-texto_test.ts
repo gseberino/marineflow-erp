@@ -487,10 +487,58 @@ Deno.test("Fase 2: na sombra (as linhas com modo 'sombra', ou a agenda em sombra
     assertEquals(textoDaTarde(quinta(extra, comLinhas(emSombra(QUATRO)))).texto, antes, JSON.stringify(extra));
     assertEquals(textoDaTarde(quinta(extra, comLinhas(emSombra(QUATRO), "sombra"))).texto, antes, JSON.stringify(extra));
   }
-  // a revisão da semana e a do mês não levam as linhas do plano
+  // (05/11/2026) em sombra, a revisão da semana e a do mês continuam sem as linhas do plano, byte a byte
   const rs = (ag: AgendaDoFechamento | null) =>
     textoDaTarde(dados({ hoje: "2026-10-19", turno: "revisao_semana", amanha: { dia: "2026-10-20", itens: [], carteira: { semData: 6 }, agenda: ag } })).texto;
-  assertEquals(rs(comLinhas(QUATRO)), rs(null));
+  assertEquals(rs(comLinhas(emSombra(QUATRO), "sombra")), rs(null));
+  const rm = (ag: AgendaDoFechamento | null) =>
+    textoDaTarde(dados({ hoje: "2026-11-03", turno: "revisao_mes", amanha: { dia: "2026-11-04", itens: [], carteira: { semData: 6 }, agenda: ag } })).texto;
+  assertEquals(rm(comLinhas(emSombra(QUATRO), "sombra")), rm(null));
+});
+
+// (05/11/2026) Nos dias de revisão a agenda fala. O que se protege: a pergunta que vence hoje e a véspera da OS não ficam mudas toda
+// segunda; as linhas ligadas saem nas mesmas vagas do fechamento, inteiras, dentro de 1.000 letras, e o que saiu vai para o registro.
+const AMANHA_REV = (ag: AgendaDoFechamento) => ({ dia: "2026-10-20", itens: [], carteira: { semData: 6 }, agenda: ag });
+Deno.test("revisão da semana: as linhas ligadas saem logo depois do 'Amanhã' e entram no registro", () => {
+  const t = textoDaTarde(dados({ hoje: "2026-10-19", turno: "revisao_semana", amanha: AMANHA_REV(comLinhas(QUATRO)) }));
+  const ls = t.texto!.split("\n");
+  const i = ls.findIndex((x) => x.startsWith("Amanhã"));
+  assert(i > 0, t.texto!);
+  const esperadas = linhasDaAgendaQueCabem(0, comLinhas(QUATRO));
+  assert(esperadas.length > 0);
+  assertEquals(ls.slice(i + 1, i + 1 + esperadas.length), esperadas.map((l) => l.texto));
+  assertEquals(t.agenda!.linhas, esperadas);
+  assert(t.texto!.length <= LIMITE_DA_TARDE, `${t.texto!.length}`);
+});
+Deno.test("revisão do mês: as linhas ligadas saem depois das cobranças, sem cauda, e sem a agenda nada muda", () => {
+  const base = { hoje: "2026-11-03", turno: "revisao_mes" as const, antigas: { n: 0, total: 0, fora: { n: 0, total: 0 }, linhas: [] } };
+  const t = textoDaTarde(dados({ ...base, amanha: AMANHA_REV(comLinhas(QUATRO)) }));
+  const esperadas = linhasDaAgendaQueCabem(0, comLinhas(QUATRO));
+  for (const l of esperadas) assertStringIncludes(t.texto!, l.texto);
+  assert(t.texto!.indexOf("Nenhuma cobrança vencida") < t.texto!.indexOf(esperadas[0].texto), t.texto!);
+  assert(!t.texto!.includes("Amanhã"), "a revisão do mês não tem o 'Amanhã'");
+  assertEquals(t.agenda, { cauda: false, semana: 0, linhas: esperadas });
+  assertEquals(textoDaTarde(dados({ ...base, amanha: null })).agenda, undefined);
+});
+Deno.test("revisão cheia: a linha que perde hoje fica; o panorama cede antes dela, e nunca passa de 1.000 letras", () => {
+  const LONGA = `Agenda: ${"pergunta do gestor que vence hoje ".repeat(10)}.`;
+  const CURTA = "Agenda: pergunta do gestor que vence hoje.";
+  const garantida: AgendaDoFechamento = {
+    modo: "ligado", cauda: null, semana: [], vagas_garantidas: 1,
+    linhas: [{ tipo: "pergunta", texto: LONGA, texto_curto: CURTA, perda: 90, pergunta_id: "q", acao_ids: [], modo: "ligado" }],
+  } as unknown as AgendaDoFechamento;
+  const parados = ["B", "C", "D", "E", "F"].map((l) => linha(l, `${l} ${"z".repeat(95)}`, { parte: "parado" } as Partial<LinhaComLetra>));
+  const panorama = { mes: { mes: "2026-10", receita: 1000, saidas: 400, pendentes: { n: 0, soma: 0 } }, vigia: null, semana: null } as unknown as DadosDaTarde["panorama"];
+  const cheio = dados({ hoje: "2026-10-19", turno: "revisao_semana", parados, panorama, amanha: AMANHA_REV(garantida) });
+  const t = textoDaTarde(cheio);
+  assert(t.texto!.length <= LIMITE_DA_TARDE, `${t.texto!.length}`);
+  assertEquals(t.agenda!.linhas!.length, 1, t.texto!);
+  assertStringIncludes(t.texto!, CURTA);
+  assert(!t.texto!.includes("Mês até aqui"), "o panorama cede antes da linha que perde hoje");
+  // sem a linha da agenda, a revisão continua com o panorama: quem cede é só o que estava no caminho dela
+  const sem = textoDaTarde({ ...cheio, amanha: null });
+  assertStringIncludes(sem.texto!, "Mês até aqui");
+  assert(t.texto!.includes(CURTA) || t.texto!.includes(LONGA), t.texto!);
 });
 
 Deno.test("Fase 2: no corte de 1.000 a linha do plano de menor perda sai inteira (nunca no meio); as outras encurtam antes", () => {

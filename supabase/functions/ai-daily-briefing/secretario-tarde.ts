@@ -272,10 +272,9 @@ export async function lerTudoDaTarde(admin: Admin, p: {
   const lido = await coletar(admin, { agora: p.agora, hoje: p.hoje, dono: p.dono, modo: p.modo, doResumo: { esperando, recebidas, cfg: p.cfg } });
   // (16/10/2026) a revisão de segunda também traz o "Amanhã" (com o a pagar do F3), como o fechamento
   // (24/10/2026, Fase 2, P5) com a agenda automática ligada, o "Amanhã" lê o plano (as OS e as compras)
-  const amanha = p.turno === "fechamento" || p.turno === "revisao_semana"
-    ? await lerAmanha(admin, p.dono, p.hoje, proximoDiaComManha(p.hoje), lido.coleta.oss, regras.amanha_a_pagar,
-      lido.modos?.proposta === "ligado")
-    : null;
+  // (05/11/2026) a revisão do mês também lê: ela não mostra o "Amanhã", mas leva as linhas da agenda
+  const amanha = await lerAmanha(admin, p.dono, p.hoje, proximoDiaComManha(p.hoje), lido.coleta.oss, regras.amanha_a_pagar,
+    lido.modos?.proposta === "ligado");
   // (24/10/2026, Agenda de Produção Fase 1, P6) o que a agenda diria do mesmo dia; sem ela (desligada, erro, ainda não
   // aplicada), o "Amanhã" é o da Fase 0
   if (amanha) {
