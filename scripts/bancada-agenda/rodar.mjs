@@ -342,6 +342,9 @@ const FIXTURES_COMO_TEXTO = [
   // Fase 7d (P2): a própria migration do feriado do município (20261107100100), para o F6a de agenda_fase7d_feriados.sql conferir pelo
   // texto que ela só cria as 2 funções novas. A fonte de agenda_feriado (mig_calendario_fase1, o F4b) já está acima.
   ['agenda_teste.mig_feriados_fase7d', '../../supabase/migrations/20261107100100_agenda_fase7d_feriados.sql'],
+  // Fase 7d (P3): a própria migration das leituras do local (20261107100200), para o L7 de agenda_fase7d_local.sql conferir pelo texto que ela só
+  // cria as 8 funções novas. A fonte de _agenda_local_da_os e _agenda_bem_da_os (mig_equipe_fase3, o L7e) já está acima.
+  ['agenda_teste.mig_local_fase7d', '../../supabase/migrations/20261107100200_agenda_fase7d_local.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */
