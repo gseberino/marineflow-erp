@@ -118,6 +118,19 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     vezes: 1,
     porque: 'o nome do feriado municipal de 15/06 (aniversário de Itajaí), o mesmo de _shared/secretario/feriados.ts; não é municipios_locais',
   },
+  // Fase 7d (P2, spec-fase7d R6.2): o nome do feriado do município do local tem 2 palavras que casam com a regra, e cada uma conta.
+  {
+    onde: 'agenda_feriado_municipal',
+    casou: 'Balneário',
+    vezes: 1,
+    porque: 'o nome do feriado de 20/07 (aniversário de Balneário Camboriú), o mesmo de _shared/secretario/feriados.ts; não é municipios_locais',
+  },
+  {
+    onde: 'agenda_feriado_municipal',
+    casou: 'Camboriú',
+    vezes: 1,
+    porque: 'o mesmo nome do feriado de 20/07 (aniversário de Balneário Camboriú); não é municipios_locais',
+  },
   // Fase 2 (P6): as migrations 2026102510* entraram na varredura.
   {
     onde: 'agenda_vigiar',
@@ -363,7 +376,7 @@ export function corposDasFuncoes(sql: string, arquivo: string): Trecho[] {
 
 function funcoesDasMigrations(): Trecho[] {
   return fs.readdirSync(MIGRATIONS)
-    .filter((f) => /^(2026102416|2026102510|2026102610|2026102710|2026102810|2026102910|2026103010|2026103110|2026110110|2026110210)\d{4}_.+\.sql$/.test(f))
+    .filter((f) => /^(2026102416|2026102510|2026102610|2026102710|2026102810|2026102910|2026103010|2026103110|2026110110|2026110210|2026110710)\d{4}_.+\.sql$/.test(f))
     .sort()
     .flatMap((f) => corposDasFuncoes(fs.readFileSync(path.join(MIGRATIONS, f), 'utf8').replace(/\r\n/g, '\n'), f));
 }

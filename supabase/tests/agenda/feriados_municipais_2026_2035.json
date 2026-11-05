@@ -1,0 +1,20 @@
+{
+  "gerado_de": "supabase/functions/_shared/secretario/feriados.ts",
+  "de": "2026-01-01",
+  "ate": "2035-12-31",
+  "dias": 3652,
+  "municipios": {
+    "balneario camboriu": {
+      "2026-07-20": "aniversário de Balneário Camboriú",
+      "2027-07-20": "aniversário de Balneário Camboriú",
+      "2028-07-20": "aniversário de Balneário Camboriú",
+      "2029-07-20": "aniversário de Balneário Camboriú",
+      "2030-07-20": "aniversário de Balneário Camboriú",
+      "2031-07-20": "aniversário de Balneário Camboriú",
+      "2032-07-20": "aniversário de Balneário Camboriú",
+      "2033-07-20": "aniversário de Balneário Camboriú",
+      "2034-07-20": "aniversário de Balneário Camboriú",
+      "2035-07-20": "aniversário de Balneário Camboriú"
+    }
+  }
+}

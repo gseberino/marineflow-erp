@@ -339,6 +339,9 @@ const FIXTURES_COMO_TEXTO = [
   // _agenda_modo_da_pergunta (a fonte dela, mig_tarefas_fase7c, já está acima).
   ['agenda_teste.fase7d', 'fixture-fase7d.sql'],
   ['agenda_teste.mig_tabelas_fase7d', '../../supabase/migrations/20261107100000_agenda_fase7d_tabelas.sql'],
+  // Fase 7d (P2): a própria migration do feriado do município (20261107100100), para o F6a de agenda_fase7d_feriados.sql conferir pelo
+  // texto que ela só cria as 2 funções novas. A fonte de agenda_feriado (mig_calendario_fase1, o F4b) já está acima.
+  ['agenda_teste.mig_feriados_fase7d', '../../supabase/migrations/20261107100100_agenda_fase7d_feriados.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */
@@ -395,6 +398,8 @@ console.log(`bancada até ${ate ?? migrations.at(-1)?.slice(0, 14)} (${migration
 
 const feriados = ler(join(RAIZ, 'supabase', 'tests', 'agenda', 'feriados_2026_2035.json'));
 await db.query(`select set_config('agenda_teste.feriados', $1, false)`, [feriados]);
+const feriadosMunicipais = ler(join(RAIZ, 'supabase', 'tests', 'agenda', 'feriados_municipais_2026_2035.json'));
+await db.query(`select set_config('agenda_teste.feriados_municipais', $1, false)`, [feriadosMunicipais]);
 for (const [nome, arquivo] of FIXTURES_COMO_TEXTO) {
   const caminho = join(RAIZ, 'scripts', 'bancada-agenda', arquivo);
   if (!existsSync(caminho)) {
