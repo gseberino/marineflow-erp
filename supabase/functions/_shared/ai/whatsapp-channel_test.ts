@@ -234,6 +234,17 @@ Deno.test("parseConfirmationReply: reconhece rejeição", () => {
   assertEquals(parseConfirmationReply("cancelar"), { decision: "reject" });
 });
 
+Deno.test("parseConfirmationReply: '1' e '2' só valem sozinhos", () => {
+  for (const t of ["2 dias", "2 baterias", "2 peças", "2 B", "2 sim", "1 sim", "1 ok", "1 s", "1 não entendi", "1 mas sem o link"]) {
+    assertEquals(parseConfirmationReply(t), null, t);
+  }
+  assertEquals(parseConfirmationReply("  1  "), { decision: "approve", pin: undefined });
+  assertEquals(parseConfirmationReply("  2  "), { decision: "reject" });
+  // As palavras seguem como eram: só o número ficou mais estreito.
+  assertEquals(parseConfirmationReply("sim por favor"), { decision: "approve", pin: undefined });
+  assertEquals(parseConfirmationReply("não quero"), { decision: "reject" });
+});
+
 Deno.test("parseConfirmationReply: texto comum não é confirmação", () => {
   assertEquals(parseConfirmationReply("quantas OS abertas temos?"), null);
   assertEquals(parseConfirmationReply(""), null);

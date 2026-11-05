@@ -47,6 +47,9 @@ export type ConfirmationReply =
 export function parseConfirmationReply(text: string): ConfirmationReply | null {
   const parts = text.trim().toLowerCase().split(/\s+/);
   const first = parts[0] || "";
+  // Retorno (05/11/2026): "1" e "2" são resposta só sozinhos. Antes valia a 1ª palavra: com uma pendência aberta,
+  // "2 baterias" a rejeitava, e o "2 B" do cartão da F2 rejeitaria o cartão inteiro.
+  if ((first === "1" || first === "2") && parts.length > 1) return null;
   if (APPROVE_WORDS.includes(first)) {
     const pinCandidate = parts[1];
     const pin = pinCandidate && /^\d{3,8}$/.test(pinCandidate) ? pinCandidate : undefined;
