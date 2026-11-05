@@ -345,6 +345,12 @@ const FIXTURES_COMO_TEXTO = [
   // Fase 7d (P3): a própria migration das leituras do local (20261107100200), para o L7 de agenda_fase7d_local.sql conferir pelo texto que ela só
   // cria as 8 funções novas. A fonte de _agenda_local_da_os e _agenda_bem_da_os (mig_equipe_fase3, o L7e) já está acima.
   ['agenda_teste.mig_local_fase7d', '../../supabase/migrations/20261107100200_agenda_fase7d_local.sql'],
+  // Fase 7d (P4): a própria migration do motor (20261107100300), para o M9 de agenda_fase7d_motor.sql conferir que as 11 recriadas só mudam nos
+  // blocos "-- FASE 7d:". As fontes delas já estão acima: mig_motor_fase7c, mig_correcao_fase7c, mig_violacao_fase7c, mig_motor_fase7b,
+  // mig_correcao2_fase7b e mig_motor_fase2.
+  // A fonte de _agenda_gestor_pessoa_meios (a correção 2 da 7b) ainda não estava: o M1 roda a de antes no lugar.
+  ['agenda_teste.mig_correcao2_fase7b', '../../supabase/migrations/20261101100850_agenda_fase77b_correcao2.sql'],
+  ['agenda_teste.mig_motor_fase7d', '../../supabase/migrations/20261107100300_agenda_fase7d_motor.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

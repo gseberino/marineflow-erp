@@ -86,6 +86,19 @@ create function pg_temp.sem_c2(p text) returns text language sql immutable as $f
             where dentro = 0 and not fecha order by o), E'\n')
 $f$;
 
+-- FASE 7d: (7d P4) o texto sem os blocos "-- FASE 7d: … -- FASE 7d: fim": a 20261107100300 recria esta função de novo (só acréscimo), e a régua daqui
+-- é de um bloco específico; ela sai antes, na viva (molde: B11d de agenda_fase7c_base.sql)
+create function pg_temp.sem_7d(p text) returns text language sql immutable as $f$
+  select array_to_string(array(
+           select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7d:' and l !~ '^\s*-- FASE 7d: fim' then 1
+                                                when l ~ '^\s*-- FASE 7d: fim' then -1 else 0 end)
+                                       over (order by o rows between unbounded preceding and current row) as dentro,
+                                 l ~ '^\s*-- FASE 7d: fim' as fecha
+                            from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
+            where dentro = 0 and not fecha order by o), E'\n')
+$f$;
+-- FASE 7d: fim
+
 -- ── W0. As cópias e as portas ──────────────────────────────────────────────────────────────────────────────────
 do $copia$
 declare
@@ -108,8 +121,8 @@ begin
     select count(*) into v_n from unnest(string_to_array(v_novo, E'\n')) l where l ~ '^\s*-- (FASE 7b: )?\(correção 2, achado 26 da 7a\)';
     insert into _resultado values (
       format('W0 %s: sem os %s blocos da correção 2, é o corpo de %s', f.nome, f.blocos, f.versao),
-      pg_temp.corpo(v_mig, f.nome) <> '' and pg_temp.sem_c2(v_novo) = pg_temp.corpo(v_mig, f.nome) and v_n = f.blocos,
-      format('blocos %s; fonte %s letras; novo sem os blocos %s letras', v_n, length(pg_temp.corpo(v_mig, f.nome)), length(pg_temp.sem_c2(v_novo))));
+      pg_temp.corpo(v_mig, f.nome) <> '' and pg_temp.sem_c2(pg_temp.sem_7d(v_novo)) = pg_temp.corpo(v_mig, f.nome) and v_n = f.blocos,
+      format('blocos %s; fonte %s letras; novo sem os blocos %s letras', v_n, length(pg_temp.corpo(v_mig, f.nome)), length(pg_temp.sem_c2(pg_temp.sem_7d(v_novo)))));
   end loop;
 end
 $copia$;

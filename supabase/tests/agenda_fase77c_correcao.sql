@@ -95,6 +95,19 @@ begin
 end $f$;
 -- FASE 7c: fim
 
+-- FASE 7d: (7d P4) o texto sem os blocos "-- FASE 7d: … -- FASE 7d: fim": a 20261107100300 recria esta função de novo (só acréscimo), e a régua daqui
+-- é de um bloco específico; ela sai antes, na viva (molde: B11d de agenda_fase7c_base.sql)
+create function pg_temp.sem_7d(p text) returns text language sql immutable as $f$
+  select array_to_string(array(
+           select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7d:' and l !~ '^\s*-- FASE 7d: fim' then 1
+                                                when l ~ '^\s*-- FASE 7d: fim' then -1 else 0 end)
+                                       over (order by o rows between unbounded preceding and current row) as dentro,
+                                 l ~ '^\s*-- FASE 7d: fim' as fecha
+                            from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
+            where dentro = 0 and not fecha order by o), E'\n')
+$f$;
+-- FASE 7d: fim
+
 -- ── K0. As cópias e as portas (as portas sem fixture) ──────────────────────────────────────────────────────────────────────────
 do $k0$
 declare
@@ -147,7 +160,7 @@ begin
     select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = f.nome;
     if (select count(*) from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = f.nome) <> 1
        -- FASE 7c: (correção 2 da revisão, 20261102100590) a viva sem os blocos e as marcas da correção 2
-       or pg_temp.sem_corr2(v_novo) is distinct from pg_temp.corpo(v_mig, f.nome) then
+       or pg_temp.sem_corr2(pg_temp.sem_7d(v_novo)) is distinct from pg_temp.corpo(v_mig, f.nome) then
        -- FASE 7c: fim
       v_viva := concat_ws(', ', v_viva, f.nome);
     end if;
