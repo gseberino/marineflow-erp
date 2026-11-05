@@ -245,6 +245,21 @@ Deno.test("parseConfirmationReply: '1' e '2' só valem sozinhos", () => {
   assertEquals(parseConfirmationReply("não quero"), { decision: "reject" });
 });
 
+// PIN inventado. Antes de valer só "1" e "2" sozinhos, "1 <PIN>" aprovava: isso não pode mudar nem ir ao modelo.
+Deno.test("parseConfirmationReply: '1 <PIN>' segue aprovando; o resto com número sai para a guarda do turno", () => {
+  assertEquals(parseConfirmationReply("1 7391"), { decision: "approve", pin: "7391" });
+  for (const t of ["2 7391", "2 b 7391", "1 a 7391", "1 7391 mas sem o link"]) {
+    assertEquals(parseConfirmationReply(t), null, t);
+  }
+});
+
+Deno.test("parseConfirmationReply: 'Sim, <PIN>' com pontuação é aprovação com PIN", () => {
+  for (const t of ["Sim, 7391.", "🎤 Sim, 7391.", "sim: 7391"]) {
+    assertEquals(parseConfirmationReply(t), { decision: "approve", pin: "7391" }, t);
+  }
+  assertEquals(parseConfirmationReply("sim, mas 7391"), null);
+});
+
 Deno.test("parseConfirmationReply: texto comum não é confirmação", () => {
   assertEquals(parseConfirmationReply("quantas OS abertas temos?"), null);
   assertEquals(parseConfirmationReply(""), null);

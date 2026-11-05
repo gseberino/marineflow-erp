@@ -73,7 +73,7 @@ import {
   resolveOptionAsUserText,
   resolveOrCreateWhatsAppSession,
 } from "../_shared/ai/whatsapp-channel.ts";
-import { verifyPin } from "../_shared/ai/whatsapp-pin.ts";
+import { pinNoTexto, verifyPin } from "../_shared/ai/whatsapp-pin.ts";
 import { aplicarCarona, caronaDoTurno, comCarona, osDoJob, osDoTurno } from "../_shared/agenda/carona.ts";
 import { STATUS_INJETAVEL, colunaDaEntidade } from "../_shared/ai/memory-scope.ts";
 import { podarHistoricoParaLLM } from "../_shared/ai/context-pruning.ts";
@@ -651,6 +651,14 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
     return jr({ ok: true });
   }
 
+  // ---- Última barreira antes do modelo (Retorno, 05/11/2026): PIN solto na frase ("2 B <PIN>", "manda <PIN>") ----
+  // Passando adiante, o PIN iria ao modelo e ao histórico. Sem gravar o texto na conversa e sem contar tentativa.
+  if (await pinNoTexto(text, appUser.ai_whatsapp_pin_hash)) {
+    await admin.from("ai_operator_sessions").update({ last_activity_at: new Date().toISOString() }).eq("id", sessionId);
+    await queueWhatsAppReply(admin, phoneNormalized, PIN_NA_MENSAGEM);
+    return jr({ ok: true });
+  }
+
   // ---- Camada determinística (custo $0): número de uma lista de opções pendente ----
   let effectiveText = text;
   const pendingOptions = metadata.pending_options as Array<{ label: string; value: string }> | undefined;
@@ -1215,6 +1223,9 @@ async function turnoDoPainelPeloMax(p: {
     return jr({ message, tool_events: [], session_id: p.loopParams.sessionId });
   }
 }
+
+const PIN_NA_MENSAGEM =
+  "Parece que o seu PIN foi junto na mensagem, então não li o resto e nada foi executado. Para aprovar um pedido, mande *sim <PIN>* sozinho. Apague essa mensagem do chat.";
 
 /** A exceção que subiu até o handler. Sem o `admin` do turno, e nunca lança: o log não pode trocar o 500 por outro erro. */
 async function registrarFalhaDoHandler(e: unknown): Promise<void> {

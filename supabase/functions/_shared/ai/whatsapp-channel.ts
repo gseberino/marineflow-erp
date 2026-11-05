@@ -5,6 +5,7 @@
 import { conversaDosComprovantesLigada, lerModoDoComprovante } from "../comprovantes/modo.ts";
 import { donoDoWhatsApp } from "../whatsapp/dono.ts";
 import { mesmoAssunto } from "./assunto.ts";
+import { normalizarSimComPin } from "./whatsapp-pin.ts";
 import {
   encerrarPerguntasExternas,
   lerEstadoDoTelefone,
@@ -45,11 +46,13 @@ export type ConfirmationReply =
  * normalizada, esta conferência da sobra tem de ir junto.
  */
 export function parseConfirmationReply(text: string): ConfirmationReply | null {
-  const parts = text.trim().toLowerCase().split(/\s+/);
+  const parts = normalizarSimComPin(text).trim().toLowerCase().split(/\s+/);
   const first = parts[0] || "";
   // Retorno (05/11/2026): "1" e "2" são resposta só sozinhos. Antes valia a 1ª palavra: com uma pendência aberta,
-  // "2 baterias" a rejeitava, e o "2 B" do cartão da F2 rejeitaria o cartão inteiro.
-  if ((first === "1" || first === "2") && parts.length > 1) return null;
+  // "2 baterias" a rejeitava, e o "2 B" do cartão da F2 rejeitaria o cartão inteiro. "1 <PIN>" segue aprovando. Quem sai
+  // daqui com número no texto ("2 7391") é barrado em pinNoTexto, no turno, antes do modelo.
+  const umComPin = first === "1" && parts.length === 2 && /^\d{3,8}$/.test(parts[1]);
+  if ((first === "1" || first === "2") && parts.length > 1 && !umComPin) return null;
   if (APPROVE_WORDS.includes(first)) {
     const pinCandidate = parts[1];
     const pin = pinCandidate && /^\d{3,8}$/.test(pinCandidate) ? pinCandidate : undefined;

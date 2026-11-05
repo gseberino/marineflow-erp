@@ -369,3 +369,17 @@ Deno.test("F0a-2: o log do handler vem antes do 500 e não pode lançar", () => 
   assertStringIncludes(fn, "try {");
   assertStringIncludes(fn, "} catch {");
 });
+
+// Retorno (05/11/2026): a guarda do PIN. O que se protege: ela vem depois do bloco de confirmação (senão *sim <PIN>* com
+// pendência nunca aprovaria) e antes de tudo o que leva o texto ao modelo; não grava o texto na conversa.
+Deno.test("guarda do PIN: depois da confirmação, antes do modelo e sem gravar o texto", () => {
+  const guarda = fonte.indexOf("if (await pinNoTexto(text, appUser.ai_whatsapp_pin_hash)) {");
+  assert(guarda > 0, "falta a guarda");
+  assert(fonte.indexOf("const confirmation = parseConfirmationReply(text);") < guarda, "depois da confirmação");
+  assert(guarda < fonte.indexOf("let effectiveText = text;"), "antes de o texto seguir adiante");
+  const bloco = fonte.slice(guarda, fonte.indexOf("let effectiveText = text;"));
+  assertStringIncludes(bloco, "queueWhatsAppReply(admin, phoneNormalized, PIN_NA_MENSAGEM)");
+  assert(!bloco.includes("gravarDecisaoNaConversa"), "o texto não entra na conversa");
+  assert(!bloco.includes("ai_operator_messages"), "o texto não entra na conversa");
+  assert(!bloco.includes("pin_attempts"), "não conta como tentativa errada");
+});

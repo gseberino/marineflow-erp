@@ -28,3 +28,34 @@ export async function verifyPin(pin: string, stored: string | null | undefined):
   const candidate = await sha256Hex(`${salt}:${pin}`);
   return candidate === hash;
 }
+
+// O áudio transcrito e a pontuação do celular trazem "Sim, 7391." e "🎤 Sim. 7391". Sem isto, a 1ª palavra ("sim,")
+// não é aprovação e a frase ia ao modelo com o PIN. Só a forma exata: "sim, mas 7391" e "sim 7391 reais" ficam como estão.
+const SIM_COM_PIN = /^\s*🎤?\s*"?\s*sim[\s,.;:!-]+(\d{3,8})[\s.!"]*$/iu;
+
+/** "Sim, 7391." e "🎤 Sim. 7391" viram "sim 7391". O resto volta igual. */
+export function normalizarSimComPin(texto: string): string {
+  const m = SIM_COM_PIN.exec(texto);
+  return m ? `sim ${m[1]}` : texto;
+}
+
+const MAX_CANDIDATOS = 30;
+
+/** Os números do texto com tamanho de PIN, inteiros ou com os dígitos separados ("7 3 9 1"). */
+function candidatosAPin(texto: string): string[] {
+  const inteiros = texto.match(/(?<!\d)\d{3,8}(?!\d)/g) ?? [];
+  const separados = (texto.match(/(?<!\d)\d(?:[\s.-]\d){2,7}(?!\d)/g) ?? []).map((t) => t.replace(/\D/g, ""));
+  return [...new Set([...inteiros, ...separados])].slice(0, MAX_CANDIDATOS);
+}
+
+/**
+ * Há um PIN válido solto no texto? Retorno (05/11/2026): é a última barreira antes do modelo, depois do bloco de
+ * confirmação. Nunca conta como tentativa errada: quem chama só deixa de repassar o texto.
+ */
+export async function pinNoTexto(texto: string, stored: string | null | undefined): Promise<boolean> {
+  if (!stored) return false;
+  for (const candidato of candidatosAPin(texto)) {
+    if (await verifyPin(candidato, stored)) return true;
+  }
+  return false;
+}
