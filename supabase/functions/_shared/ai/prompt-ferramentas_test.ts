@@ -120,6 +120,8 @@ NAO_SAO_TOOLS.add("proxima_semana");
 NAO_SAO_TOOLS.add("dupla_meios");
 // Agenda de Produção (06/11/2026, Fase 7d, P8): argumentos de os_planejar (o local, o bem e as datas ditas)
 for (const campo of ["bem_onde", "bem_exige", "descer_quem", "chega_em", "sai_em"]) NAO_SAO_TOOLS.add(campo);
+// Fase 7d (correção, Onda 2): "até dia 13" separa os 4 campos que serviam
+for (const campo of ["bem_fora", "congelar_ate", "precisa_ate"]) NAO_SAO_TOOLS.add(campo);
 NAO_SAO_TOOLS.add("nao_vem");
 // Agenda de Produção (01/11/2026, Fase 7c, P8): valor do foco de agenda_ver ("o que o Alex faz amanhã?" = pessoa e período no foco
 // o_que_fazer; as etapas de um serviço)
@@ -707,7 +709,9 @@ Deno.test("agenda de produção (Fase 7d, P8): o local é os_planejar, amarrado 
   // 1. as 2 linhas da §7, como a spec dá
   assertStringIncludes(secao, "Onde é o serviço, se o barco está na água ou em seco, quem desce, quando o motorhome chega ou sai, se é viagem e quem está autorizado na marina: os_planejar (local, bem_onde, bem_exige, descer_quem, chega_em, sai_em, viagem, autorizados), só com o que o dono disse e as palavras dele.");
   assertStringIncludes(secao, "Para ver: agenda_ver foco locais");
-  assertStringIncludes(secao, "Regra de marina ou de pátio (horário, sábado, autorização, seguro, tomada, vagas) não muda pela conversa: diga que fica anotado para o dono confirmar. Nunca invente local, regra, feriado nem tempo de viagem.");
+  // (correção O11 = C3 = R2) "fica anotado" saiu: nada guarda o que ele disser da regra, e a frase era dita ao próprio dono
+  assertStringIncludes(secao, "Regra de marina ou de pátio (horário, sábado, autorização, seguro, tomada, vagas) não muda pela conversa, e nada guarda o que ele disser dela: diga que por aqui você não muda a regra do local, que vale o que está no cadastro e que o ajuste é feito com o OK dele, fora da conversa. Nunca diga \"anotado\" nem \"fica registrado\". Nunca invente local, regra, feriado nem tempo de viagem.");
+  assertEquals(secao.includes("fica anotado"), false);
   // 2. os campos ensinados existem no esquema (tool registrada não é tool ensinada, e o contrário também)
   const planejar = porNome.get("os_planejar")!.input_schema as { properties: Record<string, any> };
   for (const c of ["local", "bem_onde", "bem_exige", "descer_quem", "chega_em", "sai_em", "viagem", "autorizados"]) {
@@ -718,10 +722,20 @@ Deno.test("agenda de produção (Fase 7d, P8): o local é os_planejar, amarrado 
   assertStringIncludes(secao, "autorizados é a lista INTEIRA (\"o João também\" = quem já estava + o João");
   assertStringIncludes(secao, "chega_em e sai_em como ele disse (\"dia 5\")");
   // 4. a pergunta de onde fica: com opções, como as decisões; sem, os_planejar
-  assertStringIncludes(secao, "A pergunta de onde fica que tem opções se responde como as decisões (agenda_aplicar); a que pede \"me diga onde é\" é os_planejar.");
+  assertStringIncludes(secao, "A pergunta de onde fica que tem opções se responde como as decisões (agenda_aplicar); a que pede \"me diga onde é\" e a de quem respondeu sem dizer onde são os_planejar.");
   // 5. a resposta só com número (P6b): opcao sem decisao, o número e não o texto, o trecho literal, a volta como veio; a nota por número
   assertStringIncludes(secao, "Só um número (\"1\", \"a 2\") é opcao, sem decisao: decisao só com a que ele disse; opcao é sempre o número, não o texto da opção; trecho = as palavras dele, sem completar; se voltar \"Qual decisão? …\", mande como veio.");
-  assertStringIncludes(secao, "Número dito à nota ou ao Pix (\"na nota, a 2\"): a OS daquela opção, em material_informar com o aviso; a última opção (\"nenhum\") é nao_e_de_servico.");
+  assertStringIncludes(secao, "Número dito à nota ou ao Pix (\"na nota, a 2\"): as notas abertas estão em agenda_ver foco compras, e as opções de cada uma, na pergunta dela em agenda_ver foco decisoes; com 2 notas abertas, ou sem as opções no texto, pergunte qual, sem adivinhar; depois, a OS daquela opção, em material_informar com o aviso; a última opção (\"nenhum\") é nao_e_de_servico.");
+  // (correção, Onda 2) o lugar novo, a data com o verbo, "até dia 13", a lista, e as linhas do entregue param de competir
+  assertStringIncludes(secao, "Lugar fora do cadastro vai em local como ele disse: a releitura avisa que é lugar novo, e você não diz \"não achei\"");
+  assertStringIncludes(secao, "\"outro lugar\" vai como local \"outro lugar em Itajaí\"");
+  assertStringIncludes(secao, "com o verbo dele no trecho (\"chegou dia 5\"): quem decide o mês é o banco");
+  assertStringIncludes(secao, "\"Até dia 13\": sobre o bem na HBR ou no pátio é sai_em; prazo do cliente é precisa_ate; o bem indisponível é bem_fora; congelar_ate só com \"não mexe até\".");
+  for (const c of ["sai_em", "precisa_ate", "bem_fora", "congelar_ate"]) assertEquals(c in planejar.properties, true, c);
+  assertEquals(String(planejar.properties.bem_fora.description).includes("até dia 3"), false, "o exemplo ambíguo saiu");
+  assertStringIncludes(secao, "leia antes em agenda_ver foco locais com os; sem conseguir ler, pergunte quem mais está");
+  assertStringIncludes(secao, "Serviço que terminou ou foi entregue não é resposta a decisão, mesmo com pergunta aberta dele: é a linha de baixo.");
+  assertStringIncludes(secao, "é evento concluiu ou entregou, com a OS no plano ou fora dele: é o mesmo caminho do *entreguei*, nunca agenda_aplicar");
   // 6. a descrição da ferramenta diz o mesmo
   const aplicar = porNome.get("agenda_aplicar")!;
   assertStringIncludes(aplicar.description, "só um número = opcao, sem decisao");

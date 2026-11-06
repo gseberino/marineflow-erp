@@ -245,7 +245,7 @@ export const agendaProducaoTools: ToolDef[] = [
           description: "Só com dupla inicio ou fim: em quantos meios-dias (\"no primeiro dia\" = 2). Só o que o dono disse.",
         },
         precisa_ate: { type: "string", description: "Até quando o cliente precisa, como o dono disse." },
-        bem_fora: { type: "string", description: "O barco/motorhome fora (\"de 26 a 30/10\", \"até dia 3\": inclusive)." },
+        bem_fora: { type: "string", description: "O barco/motorhome fora, indisponível para o serviço (\"de 26 a 30/10\", inclusive). Sobre o bem que está no pátio até uma data, é sai_em." },
         bem_livre_em: { type: "string", description: "\"Só fica livre dia 3\": o dia em que volta." },
         nao_antes_de: { type: "string" },
         nao_antes_motivo: { type: "string" },

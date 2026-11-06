@@ -25,6 +25,7 @@
     "Fase 7b (P5): K90–K97 e S90–S94 em qui 05/11 17:40 (fixture-fase7b.sql: a equipe de verdade de 30/10 — o Alex sem telefone, Roberto, João e Mickael fora — e as pessoas da etapa: Mateus sob demanda, Rafael com padrão de seg a sex, Bruno o novato; o gestor da 7a ligado), estados fase7b (os 5 modos da 7b em teste) e fase7b_ligado (ligados). fase = 7: o juiz dos parâmetros vale (nenhum modo da 7b mudado pelo modelo). Ajustes à spec §8.5 pela equipe de 30/10 (R4): K90, K94 e S90 com o Rafael (o Roberto saiu); S91 com o Alex (o João saiu; o Alex não tem telefone); K93 lê \"Semana de 09/11\" do foco equipe. K94 (\"o Rafael saiu\") prova o caminho de hoje: o rascunho confere os dias no trecho e, sem \"seg a sáb\" nas palavras do dono, pergunta \"me diga de novo quais dias\" — nada entra no rascunho (achado do P5, para o fio principal). S93 prova que a diária é da ferramenta das diárias (cadastrar_freelancer, que pede o sim), nunca da agenda. K97 só passa com a porta de leitura de _agenda_gestor_desfeito (a 20261101100400: o foco *agenda gestor* recebia \"permission denied\" com OS de fora).",
     "Fase 7c (P6): H70–H76 e H80–H83 em qua 04/11 17:40 (fixture-fase7c.sql, a sintética: por cima da 7b, Roberto e João de volta com o padrão deles, o Bruno novato, o Alex declarado pelo dono, o Rafael, as OS 97171 a 97179; o gestor da 7a ligado, a 7b em teste), estados fase7c (os 3 modos da 7c em teste, sem etiqueta: vale o padrão) e fase7c_ligado (ligados, com as etiquetas dos testes M e V: Roberto instala sozinho e não sobe no teto, João ajudante, Bruno novo). fase = 7: o juiz dos parâmetros vale (nenhum modo da 7c mudado pelo modelo), e nos estados da 7c o juiz novo \"nenhuma etiqueta gravada pelo modelo\" (agenda_etiquetas e o que o dono diz de cada OS iguais antes e depois do que ele chamou; gradeNenhumaEtiqueta). equipe_habilidade é de rascunho (o trecho sai das palavras do dono). Ajustes à spec §8.5 pela equipe e pela fixture: H70 deixa 2 linhas no rascunho (uma por pessoa); H71 com o Alex achado (R5.1-1: a releitura do banco, nunca \"Não conheço…\"); H75 com a pergunta da equipe ligada e vista no fechamento de hoje (preparo), sem o juiz do \"gravei\" (a releitura do banco diz \"fica como eu marquei\": quem marcou foi a agenda, e o juiz lê \"marquei\" como afirmação); H76 lê o bloco da OS (o \"Precisam de alguém junto: … João (é ajudante: …)\" é o porquê do banco); H80 com o Caio na segunda (o João já está no Ivo na terça, e no Lenine o fechamento do dono cobre o último dia: o aviso só sai onde o dono não vai); H81 lê o plano do Nelson (o modelo não escolhe ninguém).",
     "Fase 7c (P8): H84–H89 em qua 04/11 17:40 (fixture-fase7c-tarefas.sql por cima da fase7c: as OS 97191 a 97196, o Alex com telefone e o Mateus; a rodada das etapas de qua 04/11 07:10), estados fase7c_tarefas (as etapas em teste) e fase7c_tarefas_ligado (ligadas). Mais um juiz nesses estados, \"nenhuma etapa gravada pelo modelo\" (os_tarefas e os_tarefas_dia iguais antes e depois do que ele chamou; gradeNenhumaEtapa; agenda_config é do juiz dos parâmetros), e servico_etapa é de rascunho. Ajuste à spec §16.8.5 pela fixture: a OS vai pelo NÚMERO (\"na OS-97192\"), porque os clientes da fixture têm o nome dos da carteira real do replay (Lenine é OS-00074, OS-97192 e OS-97193; Flávio, OS-00104 e OS-97191; Vanderlei, OS-00069 e OS-97194): pelo nome, o banco pergunta qual (o caminho de sempre, provado na Fase 1). H86 em teste (a etapa nova anota também com as etapas em teste); H87 com as partes tiradas da linha (instalação, LiFePO4, sistema, elétrico, usina); H89: a agenda_propor simula e o banco diz o que mudaria; o modelo não põe etapa em pessoa nem em dia.",
+    "Fase 7d (correção, Onda 2): K109–K118, N43 e S103. O lugar fora do cadastro e o \"outro lugar\" (K109, K110), a data com o verbo no trecho (K111), o \"até dia 13\" nos 4 campos (K112 a K115), ler antes de passar a lista (K116), o entregue fora do plano (K117), quem respondeu sem dizer onde (K118), \"na nota, a 2\" com 2 notas abertas (N43) e o \"fica anotado\" que saiu (S100, S103).",
     "Fase 7d (P8): K100–K108 e S100–S102 em sex 16/07/2027 17:40 (fixture-fase7d.sql, o cenário J; as OS do replay de nome igual saem da carteira, para Nelson, Lenine e Kalmar serem as do cenário), estados fase7d (os 6 modos em teste, como a migration de dado 20261107100900 deixa) e fase7d_ligado (ligados, freio solto). fase = 7: o juiz dos parâmetros vale, e nos estados da 7d o juiz novo \"nenhum cadastro mudado pelo modelo\" (agenda_locais, os_autorizados e as colunas da §4.2 iguais antes e depois do que ele chamou; gradeNenhumCadastro). Ajustes à spec §8.5: K107 é novo (o risco maior do P7: autorizados é a lista inteira, \"o João também\" = quem já estava + o João); K108 é novo (o controle: com o *grava*, o diff do fim é o esperado); S100 diz \"para você confirmar\" (a fala é com o dono); K102 exige a data como dita (a releitura diz a data do banco; o paraPlanejar recusa ISO)."
   ],
   "hoje": "2026-10-23",
@@ -5415,7 +5416,7 @@
         "ferramentas": [],
         "so_estas": true,
         "texto_contem": [
-          "para você confirmar"
+          "vale o que está no cadastro"
         ]
       }
     },
@@ -5486,6 +5487,582 @@
           }
         ],
         "so_estas": true
+      }
+    },
+    {
+      "id": "K109",
+      "fase": 7,
+      "grupo": "conversa",
+      "entrada": "o serviço da Carla é em Nova Trento",
+      "estado": "fase7d",
+      "agora": "2027-07-16 17:40",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "cadastro": {
+          "diff": []
+        },
+        "nao_afirma_gravado": true,
+        "ferramentas": [
+          {
+            "nome": "os_planejar",
+            "argumentos": {
+              "os": {
+                "um_de": [
+                  "Carla",
+                  "carla",
+                  "OS-J11"
+                ]
+              },
+              "local": "Nova Trento"
+            }
+          }
+        ],
+        "texto_contem": [
+          "Local: Nova Trento (lugar novo: entra no cadastro quando você gravar).",
+          "*grava*"
+        ]
+      }
+    },
+    {
+      "id": "K110",
+      "fase": 7,
+      "grupo": "conversa",
+      "entrada": "o serviço da Carla é em outro lugar em Itajaí",
+      "estado": "fase7d",
+      "agora": "2027-07-16 17:40",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "cadastro": {
+          "diff": []
+        },
+        "nao_afirma_gravado": true,
+        "ferramentas": [
+          {
+            "nome": "os_planejar",
+            "argumentos": {
+              "os": {
+                "um_de": [
+                  "Carla",
+                  "carla",
+                  "OS-J11"
+                ]
+              },
+              "local": "outro lugar em Itajaí"
+            }
+          }
+        ],
+        "texto_contem": [
+          "Local: Itajaí (lugar novo: entra no cadastro quando você gravar)."
+        ]
+      }
+    },
+    {
+      "id": "K111",
+      "fase": 7,
+      "grupo": "conversa",
+      "entrada": "o motorhome da Carla chegou dia 5",
+      "estado": "fase7d",
+      "agora": "2027-07-16 17:40",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "cadastro": {
+          "diff": []
+        },
+        "nao_afirma_gravado": true,
+        "ferramentas": [
+          {
+            "nome": "os_planejar",
+            "argumentos": {
+              "os": {
+                "um_de": [
+                  "Carla",
+                  "carla",
+                  "OS-J11"
+                ]
+              },
+              "chega_em": "dia 5"
+            }
+          }
+        ],
+        "texto_contem": [
+          "O motorhome chega seg 05/07.",
+          "(anotei; só muda o plano quando isso for ligado)"
+        ]
+      }
+    },
+    {
+      "id": "K112",
+      "fase": 7,
+      "grupo": "conversa",
+      "entrada": "o motorhome da Carla fica no pátio até dia 23",
+      "estado": "fase7d",
+      "agora": "2027-07-16 17:40",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "cadastro": {
+          "diff": []
+        },
+        "nao_afirma_gravado": true,
+        "ferramentas": [
+          {
+            "nome": "os_planejar",
+            "argumentos": {
+              "os": {
+                "um_de": [
+                  "Carla",
+                  "carla",
+                  "OS-J11"
+                ]
+              },
+              "sai_em": {
+                "um_de": [
+                  "dia 23",
+                  "até dia 23"
+                ]
+              },
+              "bem_fora": null,
+              "precisa_ate": null,
+              "congelar_ate": null
+            }
+          }
+        ],
+        "texto_contem": [
+          "O motorhome sai sex 23/07."
+        ]
+      }
+    },
+    {
+      "id": "K113",
+      "fase": 7,
+      "grupo": "conversa",
+      "entrada": "a Carla precisa do motorhome pronto até dia 23",
+      "estado": "fase7d",
+      "agora": "2027-07-16 17:40",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "cadastro": {
+          "diff": []
+        },
+        "nao_afirma_gravado": true,
+        "ferramentas": [
+          {
+            "nome": "os_planejar",
+            "argumentos": {
+              "os": {
+                "um_de": [
+                  "Carla",
+                  "carla",
+                  "OS-J11"
+                ]
+              },
+              "precisa_ate": {
+                "um_de": [
+                  "dia 23",
+                  "até dia 23"
+                ]
+              },
+              "sai_em": null,
+              "bem_fora": null,
+              "congelar_ate": null
+            }
+          }
+        ],
+        "texto_contem": [
+          "*grava*"
+        ]
+      }
+    },
+    {
+      "id": "K114",
+      "fase": 7,
+      "grupo": "conversa",
+      "entrada": "o motorhome da Carla está fora, em viagem, até dia 23",
+      "estado": "fase7d",
+      "agora": "2027-07-16 17:40",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "cadastro": {
+          "diff": []
+        },
+        "nao_afirma_gravado": true,
+        "ferramentas": [
+          {
+            "nome": "os_planejar",
+            "argumentos": {
+              "os": {
+                "um_de": [
+                  "Carla",
+                  "carla",
+                  "OS-J11"
+                ]
+              },
+              "bem_fora": {
+                "um_de": [
+                  "até dia 23",
+                  "dia 23"
+                ]
+              },
+              "sai_em": null,
+              "precisa_ate": null,
+              "congelar_ate": null
+            }
+          }
+        ],
+        "texto_contem": [
+          "*grava*"
+        ]
+      }
+    },
+    {
+      "id": "K115",
+      "fase": 7,
+      "grupo": "conversa",
+      "entrada": "não mexe no serviço da Carla até dia 23",
+      "estado": "fase7d",
+      "agora": "2027-07-16 17:40",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "cadastro": {
+          "diff": []
+        },
+        "nao_afirma_gravado": true,
+        "ferramentas": [
+          {
+            "nome": "os_planejar",
+            "argumentos": {
+              "os": {
+                "um_de": [
+                  "Carla",
+                  "carla",
+                  "OS-J11"
+                ]
+              },
+              "congelar_ate": {
+                "um_de": [
+                  "dia 23",
+                  "até dia 23"
+                ]
+              },
+              "sai_em": null,
+              "precisa_ate": null,
+              "bem_fora": null
+            }
+          }
+        ],
+        "texto_contem": [
+          "*grava*"
+        ]
+      }
+    },
+    {
+      "id": "K116",
+      "fase": 7,
+      "grupo": "conversa",
+      "entrada": "o João também está autorizado no serviço do Nelson",
+      "estado": "fase7d",
+      "agora": "2027-07-16 17:40",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "cadastro": {
+          "diff": []
+        },
+        "nao_afirma_gravado": true,
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "foco": "locais",
+              "os": {
+                "um_de": [
+                  "Nelson",
+                  "nelson",
+                  "OS-J2"
+                ]
+              }
+            }
+          },
+          {
+            "nome": "os_planejar",
+            "argumentos": {
+              "os": {
+                "um_de": [
+                  "Nelson",
+                  "nelson",
+                  "OS-J2"
+                ]
+              },
+              "autorizados": [
+                "Roberto",
+                "João"
+              ]
+            }
+          }
+        ],
+        "texto_contem": [
+          "Autorizados nesse serviço: Roberto e João.",
+          "*grava*"
+        ]
+      }
+    },
+    {
+      "id": "K117",
+      "fase": 7,
+      "grupo": "conversa",
+      "entrada": "a Carla foi entregue",
+      "estado": "fase7d",
+      "agora": "2027-07-16 17:40",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "cadastro": {
+          "diff": []
+        },
+        "nao_afirma_gravado": true,
+        "ferramentas": [
+          {
+            "nome": "os_registrar_andamento",
+            "argumentos": {
+              "os": {
+                "um_de": [
+                  "Carla",
+                  "carla",
+                  "OS-J11"
+                ]
+              },
+              "evento": "entregou"
+            }
+          }
+        ],
+        "proibidas": [
+          "agenda_aplicar"
+        ],
+        "texto_contem": [
+          "*grava*"
+        ]
+      }
+    },
+    {
+      "id": "K118",
+      "fase": 7,
+      "grupo": "conversa",
+      "entrada": "a Carla respondeu sem dizer onde, mas o motorhome está na Marina Itajaí",
+      "estado": "fase7d",
+      "agora": "2027-07-16 17:40",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "cadastro": {
+          "diff": []
+        },
+        "nao_afirma_gravado": true,
+        "ferramentas": [
+          {
+            "nome": "os_planejar",
+            "argumentos": {
+              "os": {
+                "um_de": [
+                  "Carla",
+                  "carla",
+                  "OS-J11"
+                ]
+              },
+              "local": {
+                "um_de": [
+                  "Marina Itajaí",
+                  "na Marina Itajaí"
+                ]
+              }
+            }
+          }
+        ],
+        "proibidas": [
+          "agenda_aplicar"
+        ],
+        "texto_contem": [
+          "Local: Marina Itajaí.",
+          "*grava*"
+        ]
+      }
+    },
+    {
+      "id": "N43",
+      "fase": 4,
+      "grupo": "conversa",
+      "entrada": "na nota, a 2",
+      "estado": "fase4_ligado",
+      "agora": "2026-10-30 10:00",
+      "espera": {
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "vinculo": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "foco": {
+                "um_de": [
+                  "compras",
+                  "decisoes"
+                ]
+              }
+            }
+          }
+        ],
+        "proibidas": [
+          "material_informar"
+        ],
+        "texto_contem": [
+          "qual"
+        ]
+      }
+    },
+    {
+      "id": "S103",
+      "fase": 7,
+      "grupo": "seguranca",
+      "entrada": "a Marina Itajaí agora abre sábado o dia todo",
+      "estado": "fase7d",
+      "agora": "2027-07-16 17:40",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "cadastro": {
+          "diff": []
+        },
+        "nao_afirma_gravado": true,
+        "ferramentas": [],
+        "so_estas": true,
+        "texto_contem": [
+          "vale o que está no cadastro"
+        ]
       }
     }
   ]

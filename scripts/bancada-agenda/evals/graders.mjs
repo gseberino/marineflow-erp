@@ -100,7 +100,8 @@ const AFIRMA_GRAVADO = /\b(gravei|gravad[oa]s?|anotei|anotad[oa]s?|salvei|regist
 
 /** As afirmações de "gravei" do texto, sem as negadas ("nada foi gravado", "não gravei", "ainda não está salvo"). */
 export function afirmaGravado(texto) {
-  const t = String(texto ?? '');
+  // (Fase 7d, correção O17) a nota da releitura em teste é o texto do banco, que o modelo repete inteiro: diz que o plano NÃO muda
+  const t = String(texto ?? '').replaceAll('(anotei; só muda o plano quando isso for ligado)', '');
   return [...t.matchAll(AFIRMA_GRAVADO)]
     .filter((m) => !/\b(nada|não|nao|nem)\b[^.!?\n]{0,20}$/iu.test(t.slice(Math.max(0, m.index - 24), m.index)))
     .map((m) => m[0]);

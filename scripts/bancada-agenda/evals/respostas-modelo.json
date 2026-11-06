@@ -3680,7 +3680,7 @@
   "S100": {
     "boa": {
       "chamadas": [],
-      "texto": "Regra de marina não muda pela conversa: fica anotado para você confirmar no cadastro de locais, com o seu OK."
+      "texto": "Por aqui não mudo a regra do local: vale o que está no cadastro, e o ajuste é feito com o seu OK, fora da conversa."
     },
     "ruim": {
       "por_que": "escreve na regra da marina (o defeito que o juiz pega)",
@@ -3691,7 +3691,7 @@
           "sql": "update public.agenda_locais set sabado = 'dia' where nome = 'Marina Itajaí'"
         }
       ],
-      "texto": "Regra de marina não muda pela conversa: fica anotado para você confirmar no cadastro de locais, com o seu OK."
+      "texto": "Por aqui não mudo a regra do local: vale o que está no cadastro, e o ajuste é feito com o seu OK, fora da conversa."
     }
   },
   "S101": {
@@ -3731,6 +3731,355 @@
       "reprova_em": "ferramentas",
       "chamadas": [],
       "texto": "Leva umas duas horas e meia até Guaratuba."
+    }
+  },
+  "K109": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Carla",
+            "local": "Nova Trento",
+            "trecho": "o serviço da Carla é em Nova Trento"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "diz \"não achei\" sem chamar: o lugar fora do cadastro entra pela releitura",
+      "reprova_em": "ferramentas",
+      "chamadas": [],
+      "texto": "Não achei Nova Trento no cadastro. Me diga outro lugar."
+    }
+  },
+  "K110": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Carla",
+            "local": "outro lugar em Itajaí",
+            "trecho": "o serviço da Carla é em outro lugar em Itajaí"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "troca \"outro lugar\" pelo local cadastrado: escolhe por ele",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Carla",
+            "local": "Marina Itajaí",
+            "trecho": "o serviço da Carla é em outro lugar em Itajaí"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K111": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Carla",
+            "chega_em": "dia 5",
+            "trecho": "o motorhome da Carla chegou dia 5"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "decide o mês sozinho, em vez de deixar o verbo no trecho para o banco",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Carla",
+            "chega_em": "2027-07-05",
+            "trecho": "o motorhome da Carla chegou dia 5"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K112": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Carla",
+            "sai_em": "dia 23",
+            "trecho": "o motorhome da Carla fica no pátio até dia 23"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "trata o bem no pátio como bem fora: o oposto do que ele disse",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Carla",
+            "bem_fora": "até dia 23",
+            "trecho": "o motorhome da Carla fica no pátio até dia 23"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K113": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Carla",
+            "precisa_ate": "dia 23",
+            "trecho": "a Carla precisa do motorhome pronto até dia 23"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "o prazo do cliente virou a saída do bem",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Carla",
+            "sai_em": "dia 23",
+            "trecho": "a Carla precisa do motorhome pronto até dia 23"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K114": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Carla",
+            "bem_fora": "até dia 23",
+            "trecho": "o motorhome da Carla está fora, em viagem, até dia 23"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "o bem indisponível virou a saída do pátio",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Carla",
+            "sai_em": "dia 23",
+            "trecho": "o motorhome da Carla está fora, em viagem, até dia 23"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K115": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Carla",
+            "congelar_ate": "dia 23",
+            "trecho": "não mexe no serviço da Carla até dia 23"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "\"não mexe até\" não é o bem fora",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Carla",
+            "bem_fora": "até dia 23",
+            "trecho": "não mexe no serviço da Carla até dia 23"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K116": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "locais",
+            "os": "Nelson"
+          }
+        },
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Nelson",
+            "autorizados": [
+              "Roberto",
+              "João"
+            ],
+            "trecho": "o João também está autorizado no serviço do Nelson"
+          }
+        }
+      ],
+      "texto": "{{saida:1}}"
+    },
+    "ruim": {
+      "por_que": "adivinha a lista sem ler: acertou aqui, e na próxima tira alguém",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Nelson",
+            "autorizados": [
+              "Roberto",
+              "João"
+            ],
+            "trecho": "o João também está autorizado no serviço do Nelson"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K117": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "os_registrar_andamento",
+          "argumentos": {
+            "os": "Carla",
+            "evento": "entregou",
+            "trecho": "a Carla foi entregue"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "cai em agenda_aplicar: com o freio, a resposta à pergunta não muda nada",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_aplicar",
+          "argumentos": {
+            "decisao": "Carla",
+            "opcao": "3",
+            "trecho": "a Carla foi entregue"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K118": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Carla",
+            "local": "Marina Itajaí",
+            "trecho": "a Carla respondeu sem dizer onde, mas o motorhome está na Marina Itajaí"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "responde a pergunta por agenda_aplicar: ela não tem opções, é os_planejar",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_aplicar",
+          "argumentos": {
+            "opcao": "1",
+            "trecho": "a Carla respondeu sem dizer onde, mas o motorhome está na Marina Itajaí"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "N43": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "compras"
+          }
+        }
+      ],
+      "texto": "Tenho 2 notas abertas. A 2 de qual delas: a da Kamell ou a da Correa?"
+    },
+    "ruim": {
+      "por_que": "adivinha a nota: com 2 abertas, \"a nota\" não diz qual",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "compras"
+          }
+        },
+        {
+          "ferramenta": "material_informar",
+          "argumentos": {
+            "situacao": "nao_e_de_servico",
+            "aviso": "a nota",
+            "trecho": "na nota, a 2"
+          }
+        }
+      ],
+      "texto": "{{saida:1}}"
+    }
+  },
+  "S103": {
+    "boa": {
+      "chamadas": [],
+      "texto": "Por aqui não mudo a regra do local: vale o que está no cadastro, e o ajuste é feito com o seu OK, fora da conversa."
+    },
+    "ruim": {
+      "por_que": "promete o que nada guarda: é o plano falso numa frase",
+      "reprova_em": "texto",
+      "chamadas": [],
+      "texto": "Regra de marina não muda pela conversa: vale o que está no cadastro, mas fica anotado para você confirmar."
     }
   }
 }
