@@ -1859,14 +1859,12 @@ begin
     and o_qua ->> 'texto_curto' = 'Etapas: amanhã é o último dia do Lenine (Alex, 2 etapas); hoje, 1 para conferir. Pergunte o que o Alex faz amanhã.'
     and char_length(o_qua ->> 'texto') <= 480,
     format('%s %s %s', o_qua ->> 'perda', o_qua ->> 'modo', o_qua ->> 'texto_curto'));
-  -- FASE 7c: (correção 2 da revisão, 20261102100590, achado 13) qua 04/11 é dia de revisão da tarde (seg 02/11 é Finados: ter 03/11 é a
-  -- revisão do mês e qua 04/11 a da semana, turnoDaTarde), quando o Secretário não traz as linhas da agenda: a linha de ter 03/11 já cobra
-  -- o último dia do Lenine (qui 05/11), com perda 75 — inteira, com o porquê quando cabe nas 480 letras, sem ele quando não (aqui não
-  -- cabe). Amanhã (qua) continua sem "É o último dia" e sem pendente dita (a etapa de risco sozinha não sobe a perda); antes, 70 e a
-  -- cobrança nunca chegava.
-  v_res := pg_temp.ok(v_res, 'T19c ter 03/11 (amanhã não é o último dia de nenhuma OS e não volta pendente dita, mas é dia de revisão): a cobrança do último dia do Lenine (qui 05/11) já hoje, inteira, perda 75 (correção 2, achado 13)',
-    (o_ter ->> 'perda')::int = 75 and o_ter ->> 'texto' like 'Etapas (Alex não tem telefone: quem passa e confere é você). Hoje no Flávio devia ficar pronto: %'
-    and o_ter ->> 'texto' ~ ' Qui 05/11 é o último dia do Lenine \(Alex\): tem que ficar tudo pronto( — aviso hoje porque qua 04/11 é dia de revisão)?\.$'
+  -- FASE 7c: (correção 2 da revisão, 20261102100590, achado 13; a cobrança saiu na 7d P5, R6.12) qua 04/11 é dia de revisão da tarde, e com 62d1fd95 as linhas saem
+  -- nesse dia: a linha de ter 03/11 não cobra mais o último dia do Lenine (qui 05/11); ela sai na própria qua 04/11. Amanhã (qua) continua sem "É o último dia" e sem
+  -- pendente dita (a etapa de risco sozinha não sobe a perda): 70.
+  v_res := pg_temp.ok(v_res, 'T19c ter 03/11 (amanhã não é o último dia de nenhuma OS e não volta pendente dita): perda 70, sem a cobrança antecipada do último dia do Lenine (7d P5, R6.12: ela sai na própria véspera)',
+    (o_ter ->> 'perda')::int = 70 and o_ter ->> 'texto' like 'Etapas (Alex não tem telefone: quem passa e confere é você). Hoje no Flávio devia ficar pronto: %'
+    and o_ter ->> 'texto' !~ 'Qui 05/11 é o último dia do Lenine' and o_ter ->> 'texto' !~ 'é dia de revisão'
     and char_length(o_ter ->> 'texto') <= 480
     and o_ter ->> 'texto' not like '%Amanhã (qua 04/11), Alex no Lenine: %É o último dia%',
     format('%s · %s', o_ter ->> 'perda', o_ter ->> 'texto'));

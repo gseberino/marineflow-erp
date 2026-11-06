@@ -3342,3 +3342,15 @@ porque só o dono pode preenchê-las.
   meios-dias de estrada como meios-dias da própria OS (spec §3.3 d10), e a etapa pode cair num deles: a ficha diria o que fazer num dia de
   estrada.
 - **Na Fase 7d:** sem conserto. Hoje nenhuma OS é de viagem e a 7c está em teste. O OK de `modo_viagem` avisa disso (R6.11).
+### [NOVO-agenda-91] Pergunta com opções e sem ser crítica não tem caminho de resposta pela conversa
+
+- **Encontrado em:** Agenda de Produção, Fase 7d, P5 (05/11/2026), lendo o caminho de `agenda_decidir`.
+- **O quê:** quem chega a `agenda_decidir` pela conversa e pela tela é `agenda_rascunho_aplicar`, que acha a pergunta em `agenda_decisoes_abertas`, e essa lista só leva
+  `critica`. O `agenda_ver` foco decisões mostra as outras como "Também quero saber: …", sem número. Quem tem opções e não é crítica (`dias_semana`, a `equipe_cadastro` de
+  contato e de chamada, a `situacao` e a `estimativa`) pede "responda 1 ou 2 em *agenda pendências*", e a resposta dá "Não tenho decisão da agenda esperando você agora".
+  Os testes da 7a e da 7b chamam `agenda_decidir` direto, e por isso nunca viram. As perguntas com outra saída (os dias ditos no `os_planejar`, a frase da disponibilidade)
+  chegam ao dono por ela.
+- **Na Fase 7d:** a `combinar` entrou em `agenda_decisoes_abertas` (`20261107100400`), porque sem isso ela nasceria sem resposta. Os tipos da 7a e da 7b ficam como estão:
+  o conserto é uma linha, mas muda o que o dono já vê hoje, e não é do pacote. Confirmado rodando só para a `combinar` (C3v); nos outros tipos, por leitura.
+- **Cuidado:** a lista numera por `perda_em`: ao entrar um tipo novo, "Decisão 1" passa a poder ser outra.
+

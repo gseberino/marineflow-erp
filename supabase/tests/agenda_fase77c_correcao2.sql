@@ -15,7 +15,8 @@
 --       não muda
 --   C4  (achado 12) com a dupla inferida da 7b ligada e o motor marcando 1 pessoa (o bloco de 1 pessoa), as etapas somam a duração do plano
 --       (12 meios-dias, não 10): o último dia tem o que fazer; com a dupla desligada, a de antes
---   C5  (achados 13 e 15) na véspera de um dia de revisão da tarde, a linha (o) já cobra o último dia que cai depois dele (perda 75), e a
+--   C5  (achados 13 e 15; o achado 13 saiu na 7d P5, R6.12) na véspera de um dia de revisão da tarde, a linha (o) não cobra mais o último dia que cai depois
+--       dele: com as linhas nos dias de revisão (62d1fd95), a cobrança sai no próprio dia; o C5d mostra que isso é tudo o que mudou. E a
 --       forma curta diz o dia ("ter 03/11"), não "amanhã"
 --   C6b (achado 3) com a escalação em teste e a dupla da 7b ligada, a linha de quem tem perfil novo e a palavra do dono valendo diz que
 --       ela já vale (o novato da 7b)
@@ -84,6 +85,38 @@ begin
   return array_to_string(v_out, E'\n');
 end $f$;
 
+-- FASE 7d: (7d P5) _agenda_linhas_do_fechamento passou a viver na 7d: a viva, sem os blocos "-- FASE 7d:" e as marcas "-- (7d …", é a desta migration
+create function pg_temp.sem_7d(p text) returns text language plpgsql immutable as $f$
+declare
+  v_fora   text[] := '{}';
+  v_dentro int := 0;
+  l        text;
+begin
+  foreach l in array string_to_array(replace(p, E'\r\n', E'\n'), E'\n') loop
+    if v_dentro = 0 and l ~ '^\s*-- FASE 7d:' and l !~ '^\s*-- FASE 7d: fim' then
+      v_dentro := 1;
+      continue;
+    end if;
+    if v_dentro = 1 and l ~ '^\s*-- FASE 7d: fim' then
+      v_dentro := 0;
+      continue;
+    end if;
+    if v_dentro = 0 and l ~ '^\s*-- \(7d ' then
+      v_dentro := 2;
+      continue;
+    end if;
+    if v_dentro = 2 and l ~ '^\s*-- \(7d: fim\)' then
+      v_dentro := 0;
+      continue;
+    end if;
+    if v_dentro = 0 then
+      v_fora := v_fora || l;
+    end if;
+  end loop;
+  return array_to_string(v_fora, E'\n');
+end $f$;
+-- FASE 7d: fim
+
 -- ── C0. As cópias e as portas (as portas sem fixture) ──────────────────────────────────────────────────────────────────────────
 do $c0$
 declare
@@ -134,7 +167,7 @@ begin
     end if;
     select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = f.nome;
     if (select count(*) from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = f.nome) <> 1
-       or v_novo is distinct from pg_temp.corpo(v_mig, f.nome) then
+       or pg_temp.sem_7d(v_novo) is distinct from pg_temp.corpo(v_mig, f.nome) then
       v_viva := concat_ws(', ', v_viva, f.nome);
     end if;
   end loop;
@@ -496,6 +529,10 @@ declare
   o2     jsonb;
   v_joao uuid;
   t1 text; t2 text;
+  -- FASE 7d: (7d P5, R6.12) o antes × depois do remendo
+  n_1 jsonb; n_2 jsonb; n_3 jsonb; a_1 jsonb; a_2 jsonb; a_3 jsonb;
+  o_n jsonb; o_a jsonb;
+  -- FASE 7d: fim
 begin
   if not pg_temp.carregada() then
     insert into _resultado values ('C5 a véspera do dia de revisão', true, 'PULADO: sem as fixtures (rode pela bancada)');
@@ -525,13 +562,52 @@ begin
     o2 := (select x from jsonb_array_elements(public._agenda_linhas_do_fechamento(date '2026-11-04')) x
             where x ->> 'tipo' = 'dia' and x ->> 'texto' like 'Etapas (%');
     t2 := format('%s · %s', o2 ->> 'perda', o2 ->> 'texto_curto');
+    -- FASE 7d: (7d P5, R6.12) a linha nova e a de antes da 7d (a 100590) nos mesmos dias: sex 30/10 (véspera de 2 dias de revisão), ter 03/11 (dia de revisão) e qua 04/11
+    perform set_config('agenda.hoje', '2026-10-30', true);
+    n_1 := public._agenda_linhas_do_fechamento(date '2026-10-30');
+    perform set_config('agenda.hoje', '2026-11-03', true);
+    n_2 := public._agenda_linhas_do_fechamento(date '2026-11-03');
+    perform set_config('agenda.hoje', '2026-11-04', true);
+    n_3 := public._agenda_linhas_do_fechamento(date '2026-11-04');
+    if coalesce(current_setting('agenda_teste.mig_correcao2_fase7c', true), '') <> '' then
+      execute 'create or replace function public._agenda_linhas_do_fechamento(p_hoje date) returns jsonb language plpgsql stable set search_path to ''public'' as $x$'
+              || pg_temp.corpo(current_setting('agenda_teste.mig_correcao2_fase7c'), '_agenda_linhas_do_fechamento') || '$x$';
+      perform set_config('agenda.hoje', '2026-10-30', true);
+      a_1 := public._agenda_linhas_do_fechamento(date '2026-10-30');
+      perform set_config('agenda.hoje', '2026-11-03', true);
+      a_2 := public._agenda_linhas_do_fechamento(date '2026-11-03');
+      perform set_config('agenda.hoje', '2026-11-04', true);
+      a_3 := public._agenda_linhas_do_fechamento(date '2026-11-04');
+    end if;
+    -- FASE 7d: fim
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
-  v_res := pg_temp.ok(v_res, 'C5a sex 30/10, véspera de 2 dias de revisão: a linha (o) já cobra o último dia do Lenine (qui 05/11), perda 75 (achado 13; antes, 70 e a cobrança nunca chegava)',
-    t1 like '75 · Etapas (Alex não tem telefone: quem passa e confere é você). Ter 03/11, Alex no Flávio: % Qui 05/11 é o último dia do Lenine (Alex): tem que ficar tudo pronto — aviso hoje porque qua 04/11 é dia de revisão. · %', t1);
-  v_res := pg_temp.ok(v_res, 'C5b a forma curta diz o dia, não "amanhã", e leva o último dia depois da revisão (achado 15)',
-    t1 like '% · Etapas: ter 03/11, Alex no Flávio (%); qui 05/11 é o último dia do Lenine (Alex). Pergunte o que o Alex faz na ter 03/11.', t1);
+  -- FASE 7d: (7d P5, R6.12) deliberado: o remendo do achado 13 saiu. Na sexta, a (o) fica como era antes dele: perda 70 e sem a cobrança; a véspera do último dia
+  -- sai no próprio dia de revisão, porque com 62d1fd95 as linhas saem nesse dia. A parte do achado 15 (o dia, não "amanhã") fica.
+  v_res := pg_temp.ok(v_res, 'C5a sex 30/10, véspera de 2 dias de revisão: a linha (o) NÃO cobra mais o último dia do Lenine (qui 05/11): perda 70, sem "aviso hoje porque" (7d P5, R6.12)',
+    t1 like '70 · Etapas (Alex não tem telefone: quem passa e confere é você). Ter 03/11, Alex no Flávio: % · %' and t1 not like '%é dia de revisão%' and t1 not like '%Qui 05/11 é o último dia%', t1);
+  v_res := pg_temp.ok(v_res, 'C5b a forma curta diz o dia, não "amanhã" (achado 15, que fica), e não leva mais o último dia depois da revisão (7d P5, R6.12)',
+    t1 like '% · Etapas: ter 03/11, Alex no Flávio (%). Pergunte o que o Alex faz na ter 03/11.' and t1 not like '%qui 05/11 é o último dia do Lenine%', t1);
+  -- O antes × depois: o remendo muda uma coisa só. Fora da linha (o), as linhas são iguais; na (o) da sexta, sai só a frase da cobrança, a parte do texto curto e a perda
+  if a_1 is not null then
+    o_n := (select x from jsonb_array_elements(n_1) x where x ->> 'texto' like 'Etapas (%');
+    o_a := (select x from jsonb_array_elements(a_1) x where x ->> 'texto' like 'Etapas (%');
+    v_res := pg_temp.ok(v_res, 'C5d antes × depois em sex 30/10: fora da linha (o), as linhas são as mesmas, byte a byte',
+      (select jsonb_agg(x order by x ->> 'tipo', x ->> 'texto') from jsonb_array_elements(n_1) x where x ->> 'texto' not like 'Etapas (%')
+      is not distinct from (select jsonb_agg(x order by x ->> 'tipo', x ->> 'texto') from jsonb_array_elements(a_1) x where x ->> 'texto' not like 'Etapas (%'), null);
+    v_res := pg_temp.ok(v_res, 'C5e antes × depois da linha (o) em sex 30/10: o texto de antes é o de agora mais a frase da cobrança; a perda foi de 75 a 70; a forma curta perde só o último dia',
+      o_a ->> 'texto' = (o_n ->> 'texto') || ' Qui 05/11 é o último dia do Lenine (Alex): tem que ficar tudo pronto — aviso hoje porque qua 04/11 é dia de revisão.'
+      and (o_a ->> 'perda')::int = 75 and (o_n ->> 'perda')::int = 70
+      and replace(o_a ->> 'texto_curto', '; qui 05/11 é o último dia do Lenine (Alex)', '') = o_n ->> 'texto_curto',
+      format('antes: %s · %s · %s | depois: %s · %s · %s', o_a ->> 'perda', right(o_a ->> 'texto', 170), o_a ->> 'texto_curto', o_n ->> 'perda', right(o_n ->> 'texto', 170), o_n ->> 'texto_curto'));
+    v_res := pg_temp.ok(v_res, 'C5f antes × depois em qua 04/11 (a véspera de verdade, sem revisão no meio): nada muda',
+      n_3 = a_3 and exists (select 1 from jsonb_array_elements(n_3) x where x ->> 'texto' like 'Etapas (%' and (x ->> 'perda')::int = 75), null);
+    v_res := pg_temp.ok(v_res, 'C5g o que muda de ter 03/11 é só a linha (o) (a cobrança de qua 04/11, dia de revisão também)',
+      (select jsonb_agg(x order by x ->> 'tipo', x ->> 'texto') from jsonb_array_elements(n_2) x where x ->> 'texto' not like 'Etapas (%')
+      is not distinct from (select jsonb_agg(x order by x ->> 'tipo', x ->> 'texto') from jsonb_array_elements(a_2) x where x ->> 'texto' not like 'Etapas (%'), null);
+  end if;
+  -- FASE 7d: fim
   v_res := pg_temp.ok(v_res, 'C5c com amanhã sendo amanhã e sem revisão no meio, a forma curta de antes ("amanhã")',
     t2 like '75 · Etapas: amanhã é o último dia do Lenine (Alex, %. Pergunte o que o Alex faz amanhã.', t2);
   perform pg_temp.gravar(v_res);

@@ -171,9 +171,11 @@ begin
     -- perguntas do gestor fora dos da Fase 5; o Q7a de agenda_fase7a_perguntas.sql confere a cópia)
     -- FASE 7b: (7b P3) e os blocos "-- FASE 7b: … fim" (a 20261101100200 recria de novo, só acréscimo): a régua aceita "7b"
     -- FASE 7b: fim
-    if not v_bloco and l ~ '^\s*-- FASE [567]b?:' and l !~ '^\s*-- FASE [567]b?: fim' then v_bloco := true; continue; end if;
+    -- FASE 7d: (7d P5) e os blocos da 7d (20261107100400 recria agenda_decidir, só acréscimo)
+    -- FASE 7d: fim
+    if not v_bloco and l ~ '^\s*-- FASE [567][bcd]?:' and l !~ '^\s*-- FASE [567][bcd]?: fim' then v_bloco := true; continue; end if;
     if v_bloco then
-      if l ~ '^\s*-- FASE [567]b?: fim' then v_bloco := false; end if;
+      if l ~ '^\s*-- FASE [567][bcd]?: fim' then v_bloco := false; end if;
       continue;
     end if;
     v_b := v_b || l;

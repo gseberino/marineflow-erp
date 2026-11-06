@@ -84,6 +84,37 @@ create function pg_temp.sem_7c(p text) returns text language sql immutable as $f
                             from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n')
 $f$;
+-- FASE 7d: (7d P5) _agenda_linhas_do_fechamento passou a viver na 7d: a viva, sem os blocos "-- FASE 7d:" e as marcas "-- (7d …", para as contas de cópia daqui
+create function pg_temp.sem_7d(p text) returns text language plpgsql immutable as $f$
+declare
+  v_fora   text[] := '{}';
+  v_dentro int := 0;
+  l        text;
+begin
+  foreach l in array string_to_array(replace(p, E'\r\n', E'\n'), E'\n') loop
+    if v_dentro = 0 and l ~ '^\s*-- FASE 7d:' and l !~ '^\s*-- FASE 7d: fim' then
+      v_dentro := 1;
+      continue;
+    end if;
+    if v_dentro = 1 and l ~ '^\s*-- FASE 7d: fim' then
+      v_dentro := 0;
+      continue;
+    end if;
+    if v_dentro = 0 and l ~ '^\s*-- \(7d ' then
+      v_dentro := 2;
+      continue;
+    end if;
+    if v_dentro = 2 and l ~ '^\s*-- \(7d: fim\)' then
+      v_dentro := 0;
+      continue;
+    end if;
+    if v_dentro = 0 then
+      v_fora := v_fora || l;
+    end if;
+  end loop;
+  return array_to_string(v_fora, E'\n');
+end $f$;
+-- FASE 7d: fim
 -- FASE 7c: (correção da revisão, 20261102100580) o texto sem os blocos ("-- FASE 7c: (7c correção … -- FASE 7c: fim") e as marcas
 -- ("-- (7c correção … -- (7c: fim)") da correção, para o R9 conferir a viva contra a do P8
 create function pg_temp.sem_corr(p text) returns text language plpgsql immutable as $f$
@@ -183,7 +214,7 @@ begin
   select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = 'public._agenda_linhas_do_fechamento(date)'::regprocedure;
   -- FASE 7c: (correção da revisão, 20261102100580) a correção recria o fechamento só com acréscimos (1 bloco no declare, 1 antes do
   -- return e 2 marcas na linha (n): o K0 de agenda_fase77c_correcao.sql confere): a viva sem eles é a do P8
-  v_novo := pg_temp.sem_corr(v_novo);
+  v_novo := pg_temp.sem_corr(pg_temp.sem_7d(v_novo));
   -- FASE 7c: fim
   v_res := pg_temp.ok(v_res, 'R9 _agenda_linhas_do_fechamento viva e a da migration: tirados os 4 blocos "-- FASE 7c:" e as 3 marcas de dentro "-- (7c …" (só inserções), são o corpo da 20261101100860, byte a byte',
     v_fonte <> '' and pg_temp.sem_7c(v_novo) = v_fonte and pg_temp.sem_7c(v_da_mig) = v_fonte

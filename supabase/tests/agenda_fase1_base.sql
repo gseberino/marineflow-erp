@@ -1066,6 +1066,10 @@ insert into _definer_da_agenda values
   -- agenda_config, e o gatilho do histórico só mexe na própria linha. A escrita dos locais é das definer dos pacotes seguintes, que entram
   -- aqui. agenda_fase7d_base.sql prova as portas.
   -- FASE 7d: fim
+  -- FASE 7d: (7d P5, 20261107100400) a rodada do local e a resposta do dono escrevem nas perguntas, nas ações e em os_planejamento;
+  -- agenda_fase7d_combinar.sql prova as portas.
+insert into _definer_da_agenda values ('agenda_local_vigiar'), ('_agenda_local_combinar'), ('_agenda_local_decidir');
+  -- FASE 7d: fim
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

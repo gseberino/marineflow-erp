@@ -351,6 +351,9 @@ const FIXTURES_COMO_TEXTO = [
   // A fonte de _agenda_gestor_pessoa_meios (a correção 2 da 7b) ainda não estava: o M1 roda a de antes no lugar.
   ['agenda_teste.mig_correcao2_fase7b', '../../supabase/migrations/20261101100850_agenda_fase77b_correcao2.sql'],
   ['agenda_teste.mig_motor_fase7d', '../../supabase/migrations/20261107100300_agenda_fase7d_motor.sql'],
+  // Fase 7d (P5): a própria migration do combinar (20261107100400), para o C9 de agenda_fase7d_combinar.sql conferir que as recriadas só mudam nos
+  // blocos "-- FASE 7d:". As fontes já estão acima: mig_correcao_fase7b, mig_correcao2_fase7c, mig_rascunho_fase2 e mig_acompanhamento_fase3.
+  ['agenda_teste.mig_combinar_fase7d', '../../supabase/migrations/20261107100400_agenda_fase7d_combinar.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

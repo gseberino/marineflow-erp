@@ -212,6 +212,13 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
   // Fase 7c (P8, 20261102100550): a rodada das etapas grava a rodada como a de quem faz o quê; a ordem e a conta do plano do dia têm
   // as constantes de estrutura delas, uma vez cada, com nome (o que é parâmetro vem de agenda_config: tarefas_*, jornada_horas,
   // equipe_hora_como_foi).
+  // Fase 7d (P5): a rodada do local, o mesmo molde.
+  {
+    onde: 'agenda_local_vigiar',
+    casou: '1000',
+    vezes: 1,
+    porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_habilidade); não é texto_max nem peca_embutida_acima',
+  },
   {
     onde: 'agenda_tarefas_rodar',
     casou: '1000',
@@ -418,6 +425,8 @@ function tsDaAgenda(): Trecho[] {
     path.join(FUNCOES, 'task-automations', 'agenda-cliente.ts'),
     // Fase 6 (P8): o passo da rodada do aprendizado no motor de 15 min.
     path.join(FUNCOES, 'task-automations', 'agenda-aprender.ts'),
+    // Fase 7d (P5): o passo da rodada do local no motor de 15 min.
+    path.join(FUNCOES, 'task-automations', 'agenda-local.ts'),
     // Correção de 29/10 (P4): o passo do aviso do gestor ao dono no motor de 15 min (o montador, _shared/agenda/
     // aviso-do-gestor.ts, já entra pela pasta).
     path.join(FUNCOES, 'task-automations', 'agenda-aviso.ts'),
