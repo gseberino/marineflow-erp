@@ -1115,13 +1115,16 @@ begin
     v_n := pg_temp.nfe(pg_temp.os('OS-00069'));
     v_t := pg_temp.pendencias(c_g, '17:40');
     v_res := pg_temp.ok(v_res, 'R8a a estimativa real é a do gerador, byte a byte', (select q.texto from public.agenda_perguntas q where q.id = v_e) = c_est, null);
+    -- (correção da 7d, Onda 2, O8) o foco passou a 1.800 letras: a nota sai inteira, com as opções, e não mais "(e mais 1 linha)"
     v_res := pg_temp.ok(v_res, 'R8b *agenda pendências* com as 3: a estimativa é a 1, a chamada é a 2, a nota segue sem número, byte a byte',
       v_t = '2 decisões esperam você na agenda:' || E'\n' || 'Decisão 1: ' || c_est || E'\n' || 'Decisão 2: ' || c_cha || E'\n'
-            || 'Para responder, diga a decisão e a opção (por exemplo, "na decisão 1, a opção 2"). Eu não escolho por você.' || E'\n' || '(e mais 1 linha)', v_t);
-    v_res := pg_temp.ok(v_res, 'R8c a nota foi cortada pelo teto de 1.000 letras, como antes do pacote: ela continua nos dados e na resposta ao "1"',
+            || 'Para responder, diga a decisão e a opção (por exemplo, "na decisão 1, a opção 2"). Eu não escolho por você.' || E'\n' || 'Também quero saber: ' || c_nfe, v_t);
+    v_res := pg_temp.ok(v_res, 'R8c a nota continua nos dados, como "outras"',
       (public._agenda_ver_decisoes(c_g, pg_temp.em(c_g, '17:40')) #>> '{dados,outras}')::int = 1, null);
     r := pg_temp.responde(null, '1', '1', c_g, '17:41');
-    v_res := pg_temp.ok(v_res, 'R8d "1" sozinho com as 3: pergunta qual, e a nota vem junto', r ->> 'motivo' = 'decisao_ambigua' and r ->> 'texto' like '%' || c_nfe and pg_temp.rascunhos() = 0, r::text);
+    -- (correção da 7d, Onda 2, O8) só o título da nota: as opções aninhadas saíram do "Qual decisão?"
+    v_res := pg_temp.ok(v_res, 'R8d "1" sozinho com as 3: pergunta qual, e a nota vem junto, só com o título', r ->> 'motivo' = 'decisao_ambigua'
+      and r ->> 'texto' like '%Sem número, responda com as suas palavras: Chegou por e-mail a nota 495411%' and r ->> 'texto' not like '%1) Vanderlei%' and pg_temp.rascunhos() = 0, r::text);
     r := pg_temp.responde('2', '1', 'decisão 2, opção 1', c_g, '17:41');
     r2 := pg_temp.grava(c_g);
     v_res := pg_temp.ok(v_res, 'R8e a chamada, opção 1: sigo com a equipe', r2 ->> 'texto' like '%Anotei: sigo com a equipe que tenho.%' and pg_temp.est(v_c) = 'respondida:1:whatsapp' and pg_temp.est(v_e) = 'aberta:-:-', r2::text);

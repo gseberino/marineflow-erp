@@ -258,8 +258,10 @@ begin
       ('agenda_propor', 'mig_motor_fase7d'), ('agenda_resposta_do_cliente', 'mig_cliente_fase7d'), ('_agenda_cliente_revalidar', 'mig_cliente_fase7d'),
       ('agenda_rascunho_planejar', 'mig_rascunho_fase7d'), ('_agenda_aplicar_planejar', 'mig_rascunho_fase7d'), ('agenda_rascunho_aplicar', 'mig_leituras_fase7d')) t(nome, fonte) loop
     select replace(p.prosrc, E'\r\n', E'\n') into v_viva from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = c.nome;
+    -- (correção da 7d, Onda 2) agenda_rascunho_planejar e agenda_rascunho_aplicar passaram a viver na 20261107100850: a viva é a da migration mais nova que a define
     insert into _resultado values ('T0d ' || c.nome || ': a viva é a da migration; sem os blocos, a origem, byte a byte',
-      v_viva = pg_temp.corpo(v_mig, c.nome) and pg_temp.sem_7d(v_viva) = pg_temp.sem_7d(pg_temp.corpo(current_setting('agenda_teste.' || c.fonte), c.nome)), null);
+      v_viva = coalesce(nullif(pg_temp.corpo(coalesce(current_setting('agenda_teste.mig_correcao2_fase7d', true), ''), c.nome), ''), pg_temp.corpo(v_mig, c.nome))
+      and pg_temp.sem_7d(v_viva) = pg_temp.sem_7d(pg_temp.corpo(current_setting('agenda_teste.' || c.fonte), c.nome)), null);
   end loop;
   insert into _resultado values ('T0e a sessão do retorno: agenda_data_dita, _agenda_chave_telefone, agenda_dia_util, agenda_somar_du, agenda_feriado, _agenda_cliente_dia e _agenda_nome_curto ficam de fora',
     v_mig !~ 'function public\.(agenda_data_dita|_agenda_chave_telefone|agenda_dia_util|agenda_somar_du|agenda_feriado|_agenda_cliente_dia|_agenda_nome_curto)\(', null);
@@ -801,7 +803,7 @@ begin
   begin
     perform pg_temp.base('sombra');
     r := pg_temp.plan('OS-J11', '{"chega_em": "dia 5", "sai_em": "dia 13"}'::jsonb, 'o motorhome chega dia 5 e ele busca dia 13', date '2026-11-06');
-    v_res := pg_temp.ok(v_res, 'O7d a data aparece na releitura, por extenso, antes do *grava*', r ->> 'item' like '%O motorhome chega qui 05/11 e sai sex 13/11.', r::text);
+    v_res := pg_temp.ok(v_res, 'O7d a data aparece na releitura, por extenso, antes do *grava*', r ->> 'item' like '%O motorhome chega qui 05/11 e sai sex 13/11. %', r::text);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
             when others then v_res := pg_temp.ok(v_res, 'O7d quebrou', false, sqlerrm);

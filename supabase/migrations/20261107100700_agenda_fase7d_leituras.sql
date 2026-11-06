@@ -23,8 +23,9 @@
 --      palavras" recusava "lança meia pro Roberto" e "na decisão do aviso do Nelson, pode mandar": o dono respondeu, e o modelo achou os números pela lista, como o prompt manda. A régua fica
 --      para o número solto; quando as palavras dizem a pergunta e a opção, ela não se aplica. "pode ser" continua perguntando. Vale na hora em que entra, sem modo, como a 20261107100550.
 --
--- SOMBRA: com os 6 modos desligados, tudo é o de antes (o bloco local nulo, a ficha igual). Em sombra, a ficha é a de antes, porque quem a muda é o modo ligado (o texto novo à equipe
--- espera o "OK ligar o preparo do acesso", R6.11); o foco, o cartão e a saúde são leituras do dono, a pedido. Nenhuma função daqui está no caminho da vigia, e nada novo sai a ninguém
+-- SOMBRA: com os 6 modos desligados, o bloco local é nulo. A FICHA MUDA COM O LOCAL DITO, SEM MODO (correção C4): _agenda_local_da_os lê o que o dono gravou em qualquer modo, e a ficha passa a dizer
+-- o lugar dele; é de propósito, para o dono e a equipe lerem o mesmo lugar, e está no roteiro. O que espera o modo é a frase do acesso (o texto novo à equipe espera o "OK ligar o preparo do
+-- acesso", R6.11); o foco, o cartão e a saúde são leituras do dono, a pedido. Nenhuma função daqui está no caminho da vigia, e nada novo sai a ninguém
 -- (R6.8). Texto novo à equipe: 1, atrás do modo. Ao cliente: nenhum.
 --
 -- O QUE NÃO MUDA: _agenda_mudancas (R6.3-6: a ação local só entra com origem vigia, e só em teste); _agenda_rotina_ficha; os `_agenda_vigia_*`; texto_confirmar; _agenda_chave_telefone,

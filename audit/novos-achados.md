@@ -7,14 +7,22 @@
 - **Na Fase 7d:** o M11 cede. Ele roda depois de `confirmar` e, com mensagem do cliente no dia (mesmo ainda não enfileirada), o teto da semana cheio ou outro M11 em
   `cliente_mesmo_tipo_horas`, não registra e tenta no tique seguinte (K2z1 a K2z7). **Sobra:** o M11 que saiu de manhã ainda toma o dia de uma confirmação que só nasce à tarde
   (o material chegou depois): ela é recusada por `teto_dia`, e a véspera segue. Sem conserto na 7d.
-### [NOVO-agenda-93] O que o dono diz no `os_planejar` e a agenda ainda não usa — o item 2 CONSERTADO na correção da 7d (Onda 1, O3)
+### [NOVO-agenda-93] O que o dono diz no `os_planejar` e a agenda ainda não usa — CONSERTADO na correção da 7d (item 2 na Onda 1, O3; item 1 na Onda 2, O17)
 
 - **Encontrado em:** Agenda de Produção, Fase 7d, P7 (06/11/2026), escrevendo a releitura da §6.2 e o teste de sombra.
 - **O quê:** duas coisas, as duas de spec, nenhuma de código.
   1. **A releitura promete em teste.** "Viagem com pernoite: a equipe vai e volta junta, em dias seguidos." sai igual com `modo_viagem` em sombra, e o motor ignora a viagem até o modo ligar. O mesmo vale para "Local: …" com `modo_mesmo_local` e o calendário em sombra. O dono lê que entendi; não lê que ainda não muda o plano.
   2. **"Na casa do cliente" não vira dado.** A §5.7 manda o local ficar nulo, com a nota no trecho: a cadeia volta a supor (motorhome = pátio), o foco do P8 vai mostrar a suposição e o M11 ainda perguntaria onde fica.
 - **Na Fase 7d:** sem conserto. Mudar (1) é texto novo ao dono, fora da §6.2; mudar (2) pede um local de tipo `casa_cliente` por OS ou uma coluna nova. O *ligar* de cada modo resolve o (1) sozinho.
+- **Consertado o (1) (correção da 7d, Onda 2, O17, migration `20261107100850`, ainda não aplicada):** em teste, a releitura de viagem, pátio e acesso acrescenta " (anotei; só muda o plano quando isso for ligado)", pelo `_agenda_local_modo`. A ação do *grava* e o *desfaz* dizem o fato.
 - **Consertado o (2) (correção da 7d, Onda 1, O3, migration `20261107100800`, ainda não aplicada):** "na casa do cliente" vira 1 linha de `agenda_locais` por cliente (`client_id`), tipo `casa_cliente`, nome "casa de {nome curto}". Sai o `trecho`. O (1) segue como está.
+
+### [NOVO-agenda-96] `dados` de `agenda_ver` não chega ao modelo, e `mostrada_em` não vê a conversa (Fase 7d, correção, Onda 2)
+
+- **Encontrado em:** Agenda de Produção, Fase 7d, Onda 2 (06/11/2026), ao fazer o O8 e o R1.
+- **`dados`:** `resultadoDaLeitura` (`_shared/agenda/rpc-das-ferramentas.ts`) devolve ao modelo só `texto`, de propósito ("nunca os dados grandes"). `dados.abertas` de `_agenda_ver_decisoes` serve à tela e aos testes; o modelo só lê o que coube no texto. Por isso as perguntas com opções vêm primeiro no foco: a nota por número ("na nota, a 2") não pode ser o que o corte tira. Sobrando o corte, o prompt manda perguntar, nunca adivinhar.
+- **`mostrada_em`:** anda a cada mostra no fechamento e na carona; no aviso do gestor anda no tique seguinte (até 15 min depois de sair); em *agenda pendências*, em `agenda_ver` pelo modelo e na resposta "Qual decisão?", nunca. Medir a pergunta pela conversa mudaria `mostrada_vezes`, que conta prazo e o teto do fechamento. A trava do "1" lê as 3 fontes (a pergunta, a fila e a conversa) e fica de pé sem mexer nisso.
+- **Fica aberto:** `mostrada_em` continua sem ver a conversa. Quem usar para "o dono já viu" precisa saber disso.
 
 ### [NOVO-agenda-95] Revisão da 7d, o que fica de fora de propósito (decisão do fio, 06/11/2026)
 
