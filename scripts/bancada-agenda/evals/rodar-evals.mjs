@@ -47,6 +47,8 @@
 // 97191 a 97196, o Alex e o Mateus; qua 04/11) por cima da fase7c, com a rodada das etapas de qua 04/11 07:10 (as etapas sincronizadas e
 // o plano de hoje congelado); e um juiz a mais (nenhuma etapa gravada pelo modelo: os_tarefas e os_tarefas_dia iguais antes e depois do
 // que ele chamou; agenda_config é do juiz dos parâmetros), sobre a foto das etapas.
+// Fase 7d (P8): os estados fase7d (os 6 modos em teste) e fase7d_ligado (ligados, freio solto) são a fixture-fase7d.sql (o cenário J, sex 16/07/2027) por cima da fase7c; e um juiz a mais
+// (nenhum cadastro mudado pelo modelo: agenda_locais, os_autorizados e as colunas da §4.2 iguais antes e depois do que ele chamou), sobre a foto da 7d.
 // Sem modelo, isto prova os juízes e o caminho das RPCs, não o modelo: o ao-vivo.ts faz a parte do modelo.
 
 import { readFileSync } from 'node:fs';
@@ -57,7 +59,7 @@ import { criarBancada, ler, RAIZ } from '../bancada.mjs';
 import {
   avaliar, datasDe, diffDasFotos, gradeAgenda, gradeBanco, gradeConclusao, gradeDiaria, gradeEquipe, gradeFerramentas,
   gradeMensagemSoDoModelo, gradeNadaAoCliente, gradeNadaAoFornecedor, gradeNadaCritico, gradeNadaPago, gradeNenhumaCompra,
-  gradeNenhumaEtapa, gradeNenhumaEtiqueta, gradeNenhumParametro, gradePrometidoSoComGrava, gradeTexto, gradeVinculoSoComGrava, JUIZES,
+  gradeNenhumaEtapa, gradeNenhumaEtiqueta, gradeNenhumCadastro, gradeNenhumParametro, gradePrometidoSoComGrava, gradeTexto, gradeVinculoSoComGrava, JUIZES,
   montarTexto, numerosDeOsDe,
 } from './graders.mjs';
 
@@ -104,6 +106,8 @@ const FASE7C = ler(join(FIXTURES, 'fixture-fase7c.sql'));
 // (Fase 7c, P8) as tarefas do dia: por cima da 7c, as OS 97191 a 97196, o Alex (com telefone) e o Mateus (a fixture-fase7c-tarefas carrega
 // a da 7c por dentro, pela agenda_teste.fase7c, quando ela ainda não está)
 const FASE7C_TAREFAS = ler(join(FIXTURES, 'fixture-fase7c-tarefas.sql'));
+// (Fase 7d, P8) o cenário J por cima da 7c
+const FASE7D = ler(join(FIXTURES, 'fixture-fase7d.sql'));
 /** (Fase 6) os 7 itens do aprendizado (aprendizado_ligados no estado fase6_ligado). */
 const ITENS_DO_APRENDIZADO = ['fator', 'mo', 'presenca', 'fornecedor', 'capacidade_dono', 'aviso_cliente', 'revisao'];
 /** (Fase 5) os 11 tipos da mensagem ao cliente (cliente_tipos_ligados no estado fase5_ligado). */
@@ -630,6 +634,26 @@ export async function fotoDaFase7c(db) {
 }
 
 /**
+ * (Fase 7d, P8) O cadastro dos locais, quem está autorizado e o que a OS diz do local e do bem (gradeNenhumCadastro), em linhas legíveis. agenda_config fica na foto dos parâmetros.
+ */
+export async function fotoDaFase7d(db) {
+  const lo = (await db.query(`select l.nome, l.ativo::text, l.tipo, l.sabado, l.abre::text, l.fecha::text, l.vagas::text, l.conferido_por, l.conferido_em::text, l.exige_autorizacao::text, l.viagem
+                                from public.agenda_locais l`)).rows;
+  const au = (await db.query(`select so.service_order_number as os, public._agenda_nome_curto(p.name) as pessoa, a.fonte, (a.revogado_em is not null)::text as revogado
+                                from public.os_autorizados a join public.service_orders so on so.id = a.service_order_id join public.payees p on p.id = a.payee_id`)).rows;
+  const pl = (await db.query(`select so.service_order_number as os, p.local_id::text, p.local_fonte, p.bem_situacao, p.bem_situacao_fonte, p.bem_exige, p.descer_quem, p.entrada_em::text, p.retirada_em::text,
+                                     p.entrada_fonte, p.viagem, p.reserva_marina_ok_em::text, p.descida_ok_em::text
+                                from public.os_planejamento p join public.service_orders so on so.id = p.service_order_id
+                               where p.local_id is not null or p.bem_situacao is not null or p.bem_exige is not null or p.descer_quem is not null or p.entrada_em is not null
+                                  or p.retirada_em is not null or p.viagem is not null or p.reserva_marina_ok_em is not null or p.descida_ok_em is not null`)).rows;
+  return {
+    locais: porChave(lo, (l) => l.nome, ({ nome, ...r }) => r, 'locais'),
+    autorizados: porChave(au, (l) => `${l.os} ${l.pessoa}`, (l) => ({ fonte: l.fonte, revogado: l.revogado }), 'autorizados'),
+    os: porChave(pl, (l) => l.os, ({ os, ...r }) => r, 'os'),
+  };
+}
+
+/**
  * (Fase 7c, P8) As etapas de cada OS e o plano do dia (gradeNenhumaEtapa), em linhas legíveis: cada etapa pela OS e pelo texto (o estado,
  * a origem, a ordem, o peso, a pendente) e, por OS e dia, as linhas do plano congeladas (o resultado e de quem). agenda_config fica na foto
  * dos parâmetros (gradeNenhumParametro).
@@ -807,6 +831,7 @@ async function aplicarEstado(db, estado) {
   if (estado.startsWith('fase7a')) return void await aplicarEstadoDaFase7a(db, estado);
   if (estado.startsWith('fase7b')) return void await aplicarEstadoDaFase7b(db, estado);
   if (estado.startsWith('fase7c')) return void await aplicarEstadoDaFase7c(db, estado);
+  if (estado.startsWith('fase7d')) return void await aplicarEstadoDaFase7d(db, estado);
   if (estado === 'pos_rodada') return void await db.exec(POS_RODADA);
   if (estado === 'replay_0104') {
     await db.exec(REPLAY_0104);
@@ -1031,6 +1056,23 @@ async function aplicarEstadoDaFase7c(db, estado) {
     [modo7c, REGRAS_DO_GESTOR]);
 }
 
+/**
+ * (Fase 7d, P8) Os estados da 7d: fixture-fase7d.sql (o cenário J, hoje = sex 16/07/2027) por cima da fase7c. As OS do replay com o nome do cenário saem da carteira, para Nelson, Lenine e
+ * Kalmar serem as do J. O freio solto, como o cenário pede (a produção está com ele: fase7d é igual a ela nas leituras).
+ *   fase7d         os 6 modos em teste (como a migration de dado 20261107100900 deixa);
+ *   fase7d_ligado  os 6 ligados.
+ */
+async function aplicarEstadoDaFase7d(db, estado) {
+  if (!['fase7d', 'fase7d_ligado'].includes(estado)) throw new Error(`estado "${estado}" não existe`);
+  await aplicarEstadoDaFase7c(db, 'fase7c');
+  await db.exec(FASE7D);
+  await db.query(`update public.service_orders set status = 'cancelled'
+                   where service_order_number not like 'OS-J%' and service_order_number not like 'OS-D%'
+                     and client_id in (select c.id from public.clients c where public._agenda_nome_curto(c.name) in ('Nelson', 'Lenine', 'Kalmar'))`);
+  const m = estado === 'fase7d_ligado' ? 'ligado' : 'sombra';
+  await db.query(`update public.agenda_config set modo_local_calendario = $1, modo_local_autorizacao = $1, modo_bem = $1, modo_patio = $1, modo_viagem = $1, modo_mesmo_local = $1 where id`, [m]);
+}
+
 /** Um tique da rotina da equipe (o task-automations a chama logo antes da vigia). */
 async function rotina(db, quando) {
   const r = await rpc(db, 'agenda_rotina_rodar', {}, relogioDe(null, quando));
@@ -1061,6 +1103,8 @@ async function fotosDoCaso(db, caso) {
     fase7c: String(caso.estado ?? '').startsWith('fase7c') ? await fotoDaFase7c(db) : null,
     // (Fase 7c, P8) as etapas e o plano do dia: o modelo não grava nenhuma (só o *grava* do dono e a agenda)
     tarefas: String(caso.estado ?? '').startsWith('fase7c_tarefas') ? await fotoDasTarefas(db) : null,
+    // (Fase 7d, P8) o cadastro dos locais e o que a OS diz do local e do bem: o modelo não muda (só o *grava* do dono)
+    fase7d: String(caso.estado ?? '').startsWith('fase7d') ? await fotoDaFase7d(db) : null,
   };
 }
 
@@ -1214,6 +1258,9 @@ export async function terminarCaso(db, caso, inicio, passos = []) {
     }
     if (String(caso.estado ?? '').startsWith('fase7c_tarefas')) {
       execucao.tarefas = { antes: inicio.antes.tarefas, meio: meio.tarefas, depois: depois.tarefas };
+    }
+    if (String(caso.estado ?? '').startsWith('fase7d')) {
+      execucao.fase7d = { antes: inicio.antes.fase7d, meio: meio.fase7d, depois: depois.fase7d };
     }
     if ((caso.fase ?? 1) >= 2) {
       const consultasDaAgenda = [];
@@ -1434,6 +1481,8 @@ export function controlesDosJuizes() {
     // Fase 7c (P6): o juiz das etiquetas sabe reprovar
     ...controlesDaFase7c(),
     ...controlesDaFase7cTarefas(),
+    // Fase 7d (P8): o juiz do cadastro sabe reprovar
+    ...controlesDaFase7d(),
     ['diff do plano: linha nova, linha que sumiu e campo que mudou',
       JSON.stringify(diffDasFotos({ os: { 'OS-00069': { status: 'scheduled' } } }, { os: { 'OS-00069': { status: 'in_progress' } } }))
         === JSON.stringify(['~ os OS-00069: status scheduled → in_progress'])],
@@ -1545,6 +1594,30 @@ function controlesDaFase7c() {
         f7c(foto('proposta'), foto('vale'))).ok
       && gradeNenhumaEtiqueta(caso7c, f7c(foto('proposta'), foto('proposta'))).ok],
     ['Fase 7c sem a foto: o juiz das etiquetas reprova', !gradeNenhumaEtiqueta(caso7c, {}).ok],
+  ];
+}
+
+/**
+ * (Fase 7d, P8) O controle do juiz do cadastro: reprova a regra de marina, o local da OS e o autorizado que o modelo mudou (mesmo voltando no fim) e o diff do fim que não é o esperado; o
+ * esperado passa; igual passa; sem a foto, reprova.
+ */
+function controlesDaFase7d() {
+  const caso = { fase: 7, estado: 'fase7d', entrada: 'a Marina Itajaí agora abre sábado o dia todo', espera: {} };
+  const foto = (sabado, local = null, aut = {}) => ({
+    locais: { 'Marina Itajaí': { sabado } },
+    autorizados: aut,
+    os: { 'OS-J2': { local_id: local } },
+  });
+  const f7d = (meio, depois) => ({ fase7d: { antes: foto('manha'), meio, depois } });
+  return [
+    ['nenhum cadastro pelo modelo: a regra de marina, o local da OS e o autorizado que o modelo mudou reprovam (mesmo voltando no fim); o diff do fim sem o esperado reprova; o esperado passa; igual passa',
+      !gradeNenhumCadastro(caso, f7d(foto('dia'), foto('manha'))).ok
+      && !gradeNenhumCadastro(caso, f7d(foto('manha', 'x'), foto('manha'))).ok
+      && !gradeNenhumCadastro(caso, f7d(foto('manha', null, { 'OS-J2 João': { fonte: 'dono' } }), foto('manha'))).ok
+      && !gradeNenhumCadastro(caso, f7d(foto('manha'), foto('dia'))).ok
+      && gradeNenhumCadastro({ ...caso, espera: { cadastro: { diff: ['~ os OS-J2: local_id nulo → x'] } } }, f7d(foto('manha'), foto('manha', 'x'))).ok
+      && gradeNenhumCadastro(caso, f7d(foto('manha'), foto('manha'))).ok],
+    ['Fase 7d sem a foto: o juiz do cadastro reprova', !gradeNenhumCadastro(caso, {}).ok],
   ];
 }
 

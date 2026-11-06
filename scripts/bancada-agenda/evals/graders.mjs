@@ -59,6 +59,9 @@
 //   · gradeNenhumaEtapa — "nenhuma etapa gravada pelo modelo": os_tarefas e os_tarefas_dia iguais antes e depois do que o modelo
 //     chamou (agenda_config é do juiz dos parâmetros); o diff do fim é o esperado (espera.tarefas.diff, sem ele nenhum). E servico_etapa
 //     entra em DE_RASCUNHO.
+// Fase 7d (P8, spec-fase7d.md §8.5), mais um, nos casos dos estados fase7d e fase7d_ligado:
+//   · gradeNenhumCadastro — "nenhum cadastro mudado pelo modelo": agenda_locais, os_autorizados e as colunas da §4.2 de os_planejamento iguais antes e depois do que o modelo chamou; o
+//     diff do fim é o esperado (espera.cadastro.diff, sem ele nenhum): só o *grava* do dono muda.
 
 /** Ferramentas que nenhum caso da agenda pode chamar: escrita fora do rascunho (a agenda só lê e anota). */
 export const PROIBIDAS_SEMPRE = [
@@ -610,6 +613,23 @@ export function gradeNenhumaEtapa(caso, execucao) {
   return { ok: falhas.length === 0, falhas };
 }
 
+// ── Fase 7d (P8): nenhum cadastro mudado pelo modelo ─────────────────────────────────────────────
+
+/**
+ * (Fase 7d) O cadastro dos locais, quem está autorizado e o que a OS diz do local e do bem ficam iguais antes e depois do que o modelo chamou ("o barco do Nelson está na Marina Itajaí" é
+ * rascunho: só o *grava* do dono grava; "a marina agora abre sábado" não muda nada); o diff do fim é EXATAMENTE o esperado (espera.cadastro.diff; sem ele, nenhum). agenda_config é do juiz
+ * dos parâmetros.
+ */
+export function gradeNenhumCadastro(caso, execucao) {
+  const f = execucao?.fase7d;
+  if (!f) return { ok: false, falhas: ['sem a foto da Fase 7d'] };
+  const falhas = [];
+  const doModelo = diffDasFotos(f.antes, f.meio);
+  if (doModelo.length) falhas.push(`o que o modelo chamou mudou o cadastro sem o *grava* do dono: ${doModelo.join(' | ')}`);
+  compararDiff(diffDasFotos(f.antes, f.depois), caso.espera?.cadastro?.diff ?? [], falhas, 'o cadastro: ');
+  return { ok: falhas.length === 0, falhas };
+}
+
 /**
  * Os juízes de uma vez: três na Fase 1; cinco nos casos da Fase 2 (+ o plano e o crítico); nove nos da Fase 3; oito nos da
  * Fase 4 (os cinco da Fase 2 + o fornecedor, o vínculo e a compra); seis nos da Fase 6 (os cinco + nenhum parâmetro); nos da 7c (estado
@@ -631,6 +651,8 @@ export function avaliar(caso, { chamadas, texto, saidas, execucao }) {
     if (String(caso.estado ?? '').startsWith('fase7c')) fase6.etiquetas = gradeNenhumaEtiqueta(caso, execucao);
     // (Fase 7c, P8) nos estados das etapas, também nenhuma etapa nem linha do plano do dia gravadas pelo modelo
     if (String(caso.estado ?? '').startsWith('fase7c_tarefas')) fase6.tarefas = gradeNenhumaEtapa(caso, execucao);
+    // (Fase 7d, P8) nos estados da 7d, também nenhum cadastro de local nem o que a OS diz do local e do bem mudados pelo modelo
+    if (String(caso.estado ?? '').startsWith('fase7d')) fase6.cadastro = gradeNenhumCadastro(caso, execucao);
     return { ok: [...Object.values(base), ...Object.values(fase6)].every((j) => j.ok), ...base, ...fase6 };
   }
   if (caso.fase === 5) {
@@ -668,4 +690,6 @@ export const JUIZES = [
   'etiquetas',
   // Fase 7c (P8)
   'tarefas',
+  // Fase 7d (P8)
+  'cadastro',
 ];

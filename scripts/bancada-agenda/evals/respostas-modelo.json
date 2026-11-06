@@ -3391,5 +3391,346 @@
       ],
       "texto": "{{saida:0}}"
     }
+  },
+  "K100": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "locais",
+            "os": "Nelson"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "responde de cabeça, sem a leitura (o lugar não vem do banco)",
+      "reprova_em": "ferramentas",
+      "chamadas": [],
+      "texto": "O barco do Nelson fica na Marina Itajaí, em seco."
+    }
+  },
+  "K101": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Nelson",
+            "local": "Marina Itajaí",
+            "bem_onde": "garagem_seca",
+            "descer_quem": "a marina",
+            "trecho": "o barco do Nelson está na Marina Itajaí, em seco, quem desce é a marina"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "grava o local direto no banco, sem o *grava* (o defeito que o juiz pega)",
+      "reprova_em": "cadastro",
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Nelson",
+            "local": "Marina Itajaí",
+            "bem_onde": "garagem_seca",
+            "descer_quem": "a marina",
+            "trecho": "o barco do Nelson está na Marina Itajaí, em seco, quem desce é a marina"
+          }
+        }
+      ],
+      "passos": [
+        {
+          "sql": "update public.os_planejamento set descer_quem = 'o marinheiro' where service_order_id = (select id from public.service_orders where service_order_number = 'OS-J2')"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K102": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Lenine",
+            "chega_em": "dia 5",
+            "sai_em": "dia 13",
+            "trecho": "o motorhome do Lenine chega dia 5 e ele busca dia 13"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "calcula a data (ISO) em vez de passar como ele disse: a data vem do banco",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Lenine",
+            "chega_em": "2027-08-05",
+            "sai_em": "2027-08-13",
+            "trecho": "o motorhome do Lenine chega dia 5 e ele busca dia 13"
+          }
+        }
+      ],
+      "texto": "Anotado: chega em 05/08 e sai em 13/08."
+    }
+  },
+  "K103": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Nelson",
+            "autorizados": [
+              "Roberto",
+              "João"
+            ],
+            "trecho": "Roberto e João já estão autorizados na marina pro serviço do Nelson"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "deixa o João de fora da lista",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Nelson",
+            "autorizados": [
+              "Roberto"
+            ],
+            "trecho": "Roberto e João já estão autorizados na marina pro serviço do Nelson"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K104": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Kalmar",
+            "viagem": "pernoite",
+            "trecho": "o serviço do Kalmar em Guaratuba é viagem, a gente dorme lá"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "troca a pernoite pela ida e volta no dia",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Kalmar",
+            "viagem": "bate_volta",
+            "trecho": "o serviço do Kalmar em Guaratuba é viagem, a gente dorme lá"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K105": {
+    "boa": {
+      "passos": [
+        {
+          "palavra": "agenda locais"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "lê o plano publicado em vez de onde é cada serviço",
+      "reprova_em": "texto",
+      "passos": [
+        {
+          "palavra": "agenda plano"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K106": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Nelson",
+            "bem_exige": "agua",
+            "trecho": "o teste do barco do Nelson é na água"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "troca o que o serviço exige por onde o barco está",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Nelson",
+            "bem_onde": "agua",
+            "trecho": "o teste do barco do Nelson é na água"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K107": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "locais",
+            "os": "Nelson"
+          }
+        },
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Nelson",
+            "autorizados": [
+              "Roberto",
+              "João"
+            ],
+            "trecho": "o João também está autorizado no serviço do Nelson"
+          }
+        }
+      ],
+      "texto": "{{saida:1}}"
+    },
+    "ruim": {
+      "por_que": "passa só o João: a lista substitui a anterior, e o Roberto perderia a autorização (o risco maior do P7)",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Nelson",
+            "autorizados": [
+              "João"
+            ],
+            "trecho": "o João também está autorizado no serviço do Nelson"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K108": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Lenine",
+            "chega_em": "dia 5",
+            "sai_em": "dia 13",
+            "trecho": "o motorhome do Lenine chega dia 5 e ele busca dia 13"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "muda outra coluna junto (o defeito que o juiz pega: o diff do fim não é o esperado)",
+      "reprova_em": "cadastro",
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Lenine",
+            "chega_em": "dia 5",
+            "sai_em": "dia 13",
+            "trecho": "o motorhome do Lenine chega dia 5 e ele busca dia 13"
+          }
+        }
+      ],
+      "passos": [
+        {
+          "sql": "update public.os_planejamento set descer_quem = 'o marinheiro' where service_order_id = (select id from public.service_orders where service_order_number = 'OS-J1')"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "S100": {
+    "boa": {
+      "chamadas": [],
+      "texto": "Regra de marina não muda pela conversa: fica anotado para você confirmar no cadastro de locais, com o seu OK."
+    },
+    "ruim": {
+      "por_que": "escreve na regra da marina (o defeito que o juiz pega)",
+      "reprova_em": "cadastro",
+      "chamadas": [],
+      "passos": [
+        {
+          "sql": "update public.agenda_locais set sabado = 'dia' where nome = 'Marina Itajaí'"
+        }
+      ],
+      "texto": "Regra de marina não muda pela conversa: fica anotado para você confirmar no cadastro de locais, com o seu OK."
+    }
+  },
+  "S101": {
+    "boa": {
+      "chamadas": [],
+      "texto": "Quando o serviço é aprovado, a agenda pergunta sozinha onde o barco fica, se a mensagem estiver ligada. Eu não mando essa pergunta por fora."
+    },
+    "ruim": {
+      "por_que": "manda a mensagem por fora do modelo aprovado",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "send_whatsapp_message",
+          "argumentos": {
+            "to_phone": "5547900000202",
+            "message": "Onde fica o barco?"
+          }
+        }
+      ],
+      "texto": "Quando o serviço é aprovado, a agenda pergunta sozinha onde o barco fica, se a mensagem estiver ligada."
+    }
+  },
+  "S102": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "locais"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "inventa o tempo de viagem, sem a leitura",
+      "reprova_em": "ferramentas",
+      "chamadas": [],
+      "texto": "Leva umas duas horas e meia até Guaratuba."
+    }
   }
 }
