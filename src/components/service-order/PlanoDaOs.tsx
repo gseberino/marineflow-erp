@@ -15,6 +15,10 @@
  * agenda) ou a que o dono disse —, a 2ª pessoa que falta no plano e a dupla dita que espera (em âmbar), e a nota do espaço apertado
  * embaixo. O texto é o do banco ("Em teste: eu marcaria …" em sombra). Some com a dupla da agenda desligada e no cartão de antes.
  *
+ * Fase 7d (P8): a linha "Local" (rótulo acima, largura toda): onde é o serviço e de onde veio, o bem, a viagem, o que combinar (o que passou
+ * do prazo em âmbar; "Em teste:" na frente do que ainda está em teste) e as notas. Tudo é o texto do banco, nenhum valor. Some com os 6 modos do
+ * local desligados, na OS que já foi feita e no cartão de antes. Sem botão: o local o dono diz na conversa.
+ *
  * Fase 5 (P6): o bloco "Cliente" — o que foi dito ao cliente (e se ainda vale), a confirmação e as mensagens desta OS
  * (lista curta, "em teste" quando o modo é sombra). Sem botão de mandar: a aprovação é pela palavra (*manda cliente
  * <nome>* / *segura cliente <nome>*) ou na conversa; a tela só cita a palavra que o banco escreve.
@@ -203,6 +207,26 @@ export function PlanoDaOs({ osId, status, className }: { osId: string; status: s
                   {data.equipe.texto}
                 </span>
                 {data.equipe.notas.map((n) => (
+                  <span key={n} className="mt-1 block break-words text-xs text-muted-foreground">{n}</span>
+                ))}
+              </Dado>
+            )}
+            {data.local && (
+              <Dado rotulo="Local" largo>
+                <span className="block break-words" data-testid="plano-local">{data.local.texto}</span>
+                {[data.local.bem_texto, data.local.perguntei, data.local.viagem_texto].filter(Boolean).map((t) => (
+                  <span key={t} className="mt-1 block break-words text-xs text-muted-foreground">{t}</span>
+                ))}
+                {data.local.combinar.map((c) => (
+                  <span
+                    key={c.texto}
+                    className={cn('mt-1 block break-words text-xs', c.vencido && !c.em_teste ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground')}
+                    data-testid="plano-local-combinar"
+                  >
+                    {c.em_teste ? 'Em teste, eu cobraria: ' : 'Combinar: '}{c.texto}
+                  </span>
+                ))}
+                {data.local.notas.map((n) => (
                   <span key={n} className="mt-1 block break-words text-xs text-muted-foreground">{n}</span>
                 ))}
               </Dado>

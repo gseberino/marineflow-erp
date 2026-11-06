@@ -118,6 +118,8 @@ NAO_SAO_TOOLS.add("proxima_semana");
 // Agenda de Produção (31/10/2026, Fase 7b, P5): argumento de os_planejar ("dois no primeiro dia" = dupla inicio com dupla_meios 2)
 // e valor da situação de equipe_disponibilidade ("fulano saiu" = nao_vem com padrao)
 NAO_SAO_TOOLS.add("dupla_meios");
+// Agenda de Produção (06/11/2026, Fase 7d, P8): argumentos de os_planejar (o local, o bem e as datas ditas)
+for (const campo of ["bem_onde", "bem_exige", "descer_quem", "chega_em", "sai_em"]) NAO_SAO_TOOLS.add(campo);
 NAO_SAO_TOOLS.add("nao_vem");
 // Agenda de Produção (01/11/2026, Fase 7c, P8): valor do foco de agenda_ver ("o que o Alex faz amanhã?" = pessoa e período no foco
 // o_que_fazer; as etapas de um serviço)
@@ -316,10 +318,13 @@ function secaoDaAgenda(): string {
 // as etapas é agenda_ver com os (ou com pessoa e período no foco o_que_fazer); o que o dono diz delas vai para servico_etapa (uma
 // chamada por coisa dita, com trecho; nunca inventar etapa nem dizer quem faz o quê ou em que dia); tarefa do próprio dono não é
 // etapa de OS; as fronteiras com agenda_propor fixar e equipe_habilidade. Teto 29.
-Deno.test("agenda de produção: a seção é curta (≤ 29 linhas: custa tokens em toda mensagem) e fica no bloco estável", () => {
+// Fase 7d (P8): o local, o bem e a viagem (spec-fase7d.md §7 e R6.3-8: +2 linhas, o teto sobe 2 a partir do vigente) — entraram 2 linhas: o que o dono diz do local, do bem,
+// da viagem e dos autorizados é os_planejar (a lista inteira de autorizados, as datas como ele disse, o foco locais e a pergunta de onde fica), e regra de marina não muda
+// pela conversa, nem se inventa local, regra, feriado ou tempo de viagem. A resposta só com número (P6b) e a nota por número entraram nas 2 linhas que já existiam. Teto 31.
+Deno.test("agenda de produção: a seção é curta (≤ 31 linhas: custa tokens em toda mensagem) e fica no bloco estável", () => {
   const secao = secaoDaAgenda();
   const linhas = secao.split("\n");
-  assertEquals(linhas.length <= 29, true, `a seção tem ${linhas.length} linhas`);
+  assertEquals(linhas.length <= 31, true, `a seção tem ${linhas.length} linhas`);
   // Estável = em cache. O volátil muda a cada turno e não pode carregar a seção.
   const volatil = buildSystemBlocks(CONVERSA_LIGADA, { userName: "Teste", userRole: "admin", channel: "whatsapp" })[1].text;
   assertEquals(volatil.includes(SECAO_AGENDA), false);
@@ -629,8 +634,9 @@ Deno.test("agenda de produção (correção 29/10, P2): o serviço novo depois d
   assertEquals(porNome.has("os_planejar"), true);
   assertEquals(secao.includes("`"), false);
   // (Fase 7a, P7) o teto da seção passou a 25 (a linha do gestor da agenda); (Fase 7b, P5) a 27 (os dias de cada pessoa e a dupla);
-  // (Fase 7c, P4) a 28 (quem faz o quê); (Fase 7c, P8) a 29 (as etapas de um serviço)
-  assertEquals(secao.split("\n").length <= 29, true);
+  // (Fase 7c, P4) a 28 (quem faz o quê); (Fase 7c, P8) a 29 (as etapas de um serviço);
+  // (Fase 7d, P8) a 31 (o local e a regra de marina)
+  assertEquals(secao.split("\n").length <= 31, true);
 });
 
 // Fase 7b (P5; spec-fase7b.md §7 e §R4.8): as 2 linhas novas ensinam o que as ferramentas têm de verdade — a semana de
@@ -696,6 +702,32 @@ Deno.test("agenda de produção (Fase 7c, P4): quem faz o quê é equipe_habilid
 // Fase 7c (P8; spec-fase7c.md §16.7): a linha nova ensina o que a ferramenta tem de verdade — servico_etapa (rede, fora do perfil:
 // SO_PELA_REDE), uma chamada por coisa dita com trecho, a leitura pelo agenda_ver com os ou com pessoa no foco o_que_fazer — e nunca
 // manda o modelo inventar etapa nem dizer quem faz o quê ou em que dia; as fronteiras são ferramentas de verdade.
+Deno.test("agenda de produção (Fase 7d, P8): o local é os_planejar, amarrado ao esquema; regra de marina não muda pela conversa; a resposta só com número", () => {
+  const secao = secaoDaAgenda();
+  // 1. as 2 linhas da §7, como a spec dá
+  assertStringIncludes(secao, "Onde é o serviço, se o barco está na água ou em seco, quem desce, quando o motorhome chega ou sai, se é viagem e quem está autorizado na marina: os_planejar (local, bem_onde, bem_exige, descer_quem, chega_em, sai_em, viagem, autorizados), só com o que o dono disse e as palavras dele.");
+  assertStringIncludes(secao, "Para ver: agenda_ver foco locais");
+  assertStringIncludes(secao, "Regra de marina ou de pátio (horário, sábado, autorização, seguro, tomada, vagas) não muda pela conversa: diga que fica anotado para o dono confirmar. Nunca invente local, regra, feriado nem tempo de viagem.");
+  // 2. os campos ensinados existem no esquema (tool registrada não é tool ensinada, e o contrário também)
+  const planejar = porNome.get("os_planejar")!.input_schema as { properties: Record<string, any> };
+  for (const c of ["local", "bem_onde", "bem_exige", "descer_quem", "chega_em", "sai_em", "viagem", "autorizados"]) {
+    assertEquals(c in planejar.properties, true, c);
+  }
+  assertEquals(planejar.properties.limpar.items.enum.includes("autorizados"), true);
+  // 3. o maior risco do P7: autorizados é a lista inteira; a data vai como ele disse
+  assertStringIncludes(secao, "autorizados é a lista INTEIRA (\"o João também\" = quem já estava + o João");
+  assertStringIncludes(secao, "chega_em e sai_em como ele disse (\"dia 5\")");
+  // 4. a pergunta de onde fica: com opções, como as decisões; sem, os_planejar
+  assertStringIncludes(secao, "A pergunta de onde fica que tem opções se responde como as decisões (agenda_aplicar); a que pede \"me diga onde é\" é os_planejar.");
+  // 5. a resposta só com número (P6b): opcao sem decisao, o número e não o texto, o trecho literal, a volta como veio; a nota por número
+  assertStringIncludes(secao, "Só um número (\"1\", \"a 2\") é opcao, sem decisao: decisao só com a que ele disse; opcao é sempre o número, não o texto da opção; trecho = as palavras dele, sem completar; se voltar \"Qual decisão? …\", mande como veio.");
+  assertStringIncludes(secao, "Número dito à nota ou ao Pix (\"na nota, a 2\"): a OS daquela opção, em material_informar com o aviso; a última opção (\"nenhum\") é nao_e_de_servico.");
+  // 6. a descrição da ferramenta diz o mesmo
+  const aplicar = porNome.get("agenda_aplicar")!;
+  assertStringIncludes(aplicar.description, "só um número = opcao, sem decisao");
+  assertEquals(aplicar.description.includes("crítica"), false);
+});
+
 Deno.test("agenda de produção (Fase 7c, P8): as etapas de um serviço são servico_etapa, amarrado ao esquema; a leitura; as fronteiras", () => {
   const secao = secaoDaAgenda();
   const linha = secao.split("\n").find((l) => l.startsWith("- Etapas de um serviço (o que já foi feito e o que falta numa OS, e o que cada um faz no dia)"))!;

@@ -107,6 +107,12 @@
 //   ferramenta (comandos_test.ts). O que o dono diz de alguém ("o Roberto instala sozinho") é conversa: vai ao modelo
 //   (equipe_habilidade).
 //
+// Fase 7d (P8, 06/11/2026; spec-fase7d.md §7) — onde é cada serviço:
+//   agenda locais                               → foco locais (onde é cada serviço, o bem, a viagem, o que combinar e as regras dos locais)
+//   De VER (vale com "?"); com a leitura fora de desligado, como as da Fase 1. "locais" sozinho e "os locais" são conversa (vão ao modelo). "locais" não é nome de
+//   cliente, pessoa, bem nem fornecedor (sql/wf7dd_p8_locais) nem palavra de outra ferramenta (comandos_test.ts). O que o dono diz do local ("o barco do Nelson está na
+//   Marina Itajaí") é conversa: vai ao modelo (os_planejar).
+//
 // Correção de 29/10 (P1) — as frases naturais do dono que caíam no modelo sem roteiro (todas de VER, valem com "?"):
 //   quando tenho agenda livre · quando eu tenho agenda livre · tenho agenda livre · eu tenho agenda livre
 //   quando estou livre · quando eu estou livre · tem vaga na agenda · quando tem vaga na agenda      → livre (como *livre*)
@@ -151,7 +157,9 @@ export type FocoDoComando =
   // (Fase 7a, P7) o que o gestor da agenda marcou ou marcaria sozinho e por quê
   | "gestor"
   // (Fase 7c, P4) quem faz o quê na equipe e o que cada OS pede
-  | "habilidades";
+  | "habilidades"
+  // (Fase 7d, P8) onde é cada serviço e o que combinar
+  | "locais";
 export type ResultadoDoDia = "cumprido" | "parcial" | "nao_cumprido";
 
 export type ComandoDaAgenda =
@@ -245,6 +253,8 @@ frases(
 );
 // Fase 7c (P4): quem faz o quê na equipe (de ver; "quem faz o quê" chega sem o acento)
 frases(["agenda quem faz", "quem faz o que"], ver(null, "habilidades"));
+// Fase 7d (P8): onde é cada serviço (de ver)
+frases(["agenda locais"], ver(null, "locais"));
 // Correção de 29/10 (P1): as frases naturais do dono (a mesma leitura da palavra curta; "quando tem vaga" sozinho é conversa)
 frases(
   [

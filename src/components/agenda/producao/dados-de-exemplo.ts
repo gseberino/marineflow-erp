@@ -2,7 +2,7 @@
 // agenda_tela_carteira, os_plano_da_os) — tirados da bancada com a carteira sintética da Fase 3 (só primeiros nomes).
 // Servem aos testes de render; nada aqui vai para produção.
 import type {
-  CarteiraDeProducao, ClienteDoPlano, EquipeDoPlano, PlanoDaOsDados, SemanaDeProducao,
+  CarteiraDeProducao, ClienteDoPlano, EquipeDoPlano, LocalDoPlano, PlanoDaOsDados, SemanaDeProducao,
 } from '@/hooks/use-agenda-producao';
 
 export const SEMANA_DE_EXEMPLO: SemanaDeProducao = {
@@ -169,6 +169,25 @@ export const EQUIPE_DO_PLANO_DE_EXEMPLO: EquipeDoPlano = {
   falta: [{ dia: '2026-11-10', turno: 'manha', onde: 'inicio' }, { dia: '2026-11-10', turno: 'tarde', onde: 'inicio' }],
   espera: false,
   texto: '1 pessoa; nos 2 primeiros meios-dias (ter 10/11) a troca do banco de baterias pede 2 — falta a 2ª pessoa (só Alex está na equipe).',
+};
+
+// Fase 7d (P8): o bloco "Local" do cartão como o banco devolve (agenda_fase7d_leituras.sql, V2, com a fixture da 7d): o Nelson, com o acesso ligado e o prazo vencido, e
+// o que ainda está em teste.
+export const LOCAL_DO_PLANO_DE_EXEMPLO: LocalDoPlano = {
+  texto: 'Marina Itajaí (pela OS)',
+  fonte: 'os',
+  suposicao: false,
+  tipo: 'marina',
+  nome: 'Marina Itajaí',
+  vagas: null,
+  viagem_texto: null,
+  bem_texto: 'O barco: em seco (garagem), quem desce: a marina; o teste final é na água.',
+  perguntei: null,
+  combinar: [
+    { texto: 'o acesso de João para ter 20/07, até hoje (sex 16/07)', ate: '2027-07-16', vencido: true, em_teste: false },
+    { texto: 'a descida para o teste na água em ter 20/07', ate: '2027-07-16', vencido: false, em_teste: true },
+  ],
+  notas: ['Autorizados nesse serviço: Roberto.'],
 };
 
 export const EQUIPE_DO_PLANO_EM_TESTE: EquipeDoPlano = {

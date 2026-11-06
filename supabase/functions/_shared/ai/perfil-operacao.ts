@@ -658,7 +658,7 @@ export const ESCRITAS_VERIFICADAS_DA_REDE: Readonly<Record<string, string>> = {
     "dono depois da releitura de agenda_aplicar; não muda alocação vigente, status nem data de OS e não manda mensagem",
   agenda_aplicar:
     "só grava o rascunho da releitura (agenda_rascunho, pela RPC agenda_rascunho_aplicar, que confere o cargo e recalcula o " +
-    "efeito); publicar a proposta ou responder a decisão crítica só acontece pelo *grava* do dono, comando lido antes do " +
+    "efeito); publicar a proposta ou responder a decisão da agenda só acontece pelo *grava* do dono, comando lido antes do " +
     "modelo (agenda_rascunho_gravar), que o modelo não alcança; sem a opção dita o banco devolve a pergunta",
   agenda_desfazer:
     "só grava o rascunho da releitura (agenda_rascunho, pela RPC agenda_rascunho_desfazer); o desfazer só acontece pelo " +

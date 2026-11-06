@@ -160,6 +160,7 @@ export const agendaProducaoTools: ToolDef[] = [
       "perguntou antes de marcar e o que fica de fora; só lê), " +
       "quem faz o quê na equipe e o que cada OS pede (foco habilidades: o que cada um faz, o responsável de cada OS, o que a " +
       "agenda teria mudado em teste e as medidas; só lê), " +
+      "onde é cada serviço, o que combinar com o cliente e a marina e as regras dos locais (foco locais; com os, só daquela OS; só lê), " +
       "o dia de alguém da equipe (pessoa + periodo), uma OS (os), " +
       "\"se o cliente aprovar hoje, quando dá\" (os + simular_aprovacao) ou um serviço que ainda não existe (simular). " +
       "Datas, dias livres, capacidade e duração vêm SÓ daqui: repita o texto, sem calcular nem mudar número, data ou nome. " +
@@ -441,8 +442,8 @@ export const agendaProducaoTools: ToolDef[] = [
     description:
       "Anota num RASCUNHO um pedido do dono à agenda: publicar a proposta em aberto (\"pode publicar\", \"publica só o " +
       "Lenine e o Flávio\": proposta = \"a última\" ou o nº, os = as OS ditas) OU responder uma decisão que a agenda pediu " +
-      "(decisao = o nº que agenda_ver foco decisoes mostrou, ou o nome da OS; opcao = o nº ou o nome da OS que o dono " +
-      "escolheu). NÃO grava: devolve a releitura do efeito, e só o *grava* do dono publica ou decide. Nunca escolha a " +
+      "(decisao = o nº que agenda_ver foco decisoes mostrou, ou o nome da OS, só a que ele disse; opcao = o nº ou o nome da OS que o dono " +
+      "escolheu, nunca o texto da opção; só um número = opcao, sem decisao). NÃO grava: devolve a releitura do efeito, e só o *grava* do dono publica ou decide. Nunca escolha a " +
       "opção pelo dono: sem opcao dita, a pergunta volta como está. Marcar uma OS num dia (\"marca o Lenine pra quinta\") " +
       "é schedule_service_order com quando.",
     input_schema: {

@@ -349,6 +349,25 @@ export interface EquipeDoPlano {
   texto: string;
 }
 
+/**
+ * Fase 7d (P8): o bloco "Local" do cartão (os_plano_da_os.local, migration 20261107100700) — onde é o serviço e de onde veio, o bem, a
+ * viagem, o que combinar e as notas. Os textos vêm prontos do banco ("MP Motorhomes, em Balneário Camboriú (pela OS)"); nenhum valor.
+ */
+export interface LocalDoPlano {
+  texto: string;
+  fonte: 'dono' | 'cliente' | 'os' | 'bem' | 'patio' | 'cidade' | 'nenhum';
+  suposicao: boolean;
+  tipo: string | null;
+  nome: string | null;
+  vagas: number | null;
+  viagem_texto: string | null;
+  bem_texto: string | null;
+  /** "Perguntei ao cliente em 15/07.", só com a mensagem que saiu de verdade */
+  perguntei: string | null;
+  combinar: { texto: string; ate: string; vencido: boolean; em_teste: boolean }[];
+  notas: string[];
+}
+
 export interface PlanoDaOsDados {
   /** Fase 5 (P6): ausente antes da migration 20261028100600; null sem o cliente na OS */
   cliente?: ClienteDoPlano | null;
@@ -357,6 +376,8 @@ export interface PlanoDaOsDados {
    * faturada ou cancelada.
    */
   equipe?: EquipeDoPlano | null;
+  /** Fase 7d (P8): ausente antes da migration 20261107100700; null com os 6 modos do local desligados e na OS concluída, faturada ou cancelada. */
+  local?: LocalDoPlano | null;
   os: string;
   numero: string;
   status: string;

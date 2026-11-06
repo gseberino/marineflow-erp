@@ -726,6 +726,8 @@ Deno.test("Fase 7c (P4) — equipe_habilidade: o esquema (os 14 o_que_faz, exige
   const ver = porNome("agenda_ver");
   const foco = (ver.input_schema as { properties: { foco: { enum: string[] } } }).properties.foco.enum;
   assert(foco.includes("habilidades"));
+  assert(foco.includes("locais"));
+  assertStringIncludes(ver.description, "onde é cada serviço, o que combinar com o cliente e a marina e as regras dos locais (foco locais");
   assertStringIncludes(ver.description, "quem faz o quê na equipe e o que cada OS pede (foco habilidades:");
   assertStringIncludes(ver.description, "o que a agenda teria mudado em teste e as medidas; só lê)");
 });

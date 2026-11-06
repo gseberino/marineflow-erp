@@ -104,6 +104,8 @@ export const FOCOS = [
   // (Fase 7c, P4; o foco é do P6, 20261102100500) quem faz o quê na equipe e o que cada OS pede: o que cada um faz, o responsável de
   // cada OS, o que a agenda teria mudado em teste e as medidas (_agenda_ver_habilidades)
   "habilidades",
+  // (Fase 7d, P8) onde é cada serviço, o bem, a viagem, o que combinar com o cliente e a marina e as regras dos locais (_agenda_ver_locais, 20261107100700)
+  "locais",
 ] as const;
 /** (Fase 7c, P4) equipe_habilidade → agenda_rascunho_habilidade (migration 20261102100300): só deixa rascunho. */
 export const RPC_HABILIDADE = "agenda_rascunho_habilidade";

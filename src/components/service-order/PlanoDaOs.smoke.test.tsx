@@ -14,7 +14,7 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import {
-  CLIENTE_DO_PLANO_DE_EXEMPLO, CLIENTE_DO_PLANO_EM_TESTE, EQUIPE_DO_PLANO_DE_EXEMPLO, EQUIPE_DO_PLANO_EM_TESTE, PLANO_DE_EXEMPLO,
+  CLIENTE_DO_PLANO_DE_EXEMPLO, CLIENTE_DO_PLANO_EM_TESTE, EQUIPE_DO_PLANO_DE_EXEMPLO, EQUIPE_DO_PLANO_EM_TESTE, LOCAL_DO_PLANO_DE_EXEMPLO, PLANO_DE_EXEMPLO,
 } from '@/components/agenda/producao/dados-de-exemplo';
 
 const h = vi.hoisted(() => ({
@@ -271,6 +271,43 @@ describe('cartão Plano da OS', () => {
     await user.click(await screen.findByRole('button', { name: /Ver o plano/ }));
     expect(screen.getByTestId('plano-equipe').textContent).toMatch(/^Em teste: eu marcaria 1 pessoa, em dupla nos 2 primeiros meios-dias/);
     expect(screen.getByTestId('plano-equipe').className).not.toContain('text-amber-700');
+  });
+
+  it('Fase 7d (P8): a linha "Local" com o rótulo acima, o texto do banco, o bem, o que combinar (o vencido em âmbar, o de teste com o "eu cobraria") e as notas; sem botão', async () => {
+    const user = userEvent.setup();
+    h.rpc.mockResolvedValueOnce({ data: { ...PLANO_DE_EXEMPLO, status: 'scheduled', pode_entregar: false, local: LOCAL_DO_PLANO_DE_EXEMPLO }, error: null });
+    montar(<PlanoDaOs osId="os-2" status="scheduled" />);
+    await user.click(await screen.findByRole('button', { name: /Ver o plano/ }));
+    const linha = screen.getByTestId('plano-local');
+    const rotulo = screen.getByText('Local');
+    expect(rotulo.tagName).toBe('DT');
+    expect(rotulo.nextElementSibling?.contains(linha)).toBe(true);
+    expect(linha.textContent).toBe('Marina Itajaí (pela OS)');
+    expect(rotulo.nextElementSibling?.textContent).toContain('O barco: em seco (garagem), quem desce: a marina; o teste final é na água.');
+    expect(rotulo.nextElementSibling?.textContent).toContain('Autorizados nesse serviço: Roberto.');
+    const combinar = screen.getAllByTestId('plano-local-combinar');
+    expect(combinar.map((c) => c.textContent)).toEqual([
+      'Combinar: o acesso de João para ter 20/07, até hoje (sex 16/07)',
+      'Em teste, eu cobraria: a descida para o teste na água em ter 20/07',
+    ]);
+    expect(combinar[0].className).toContain('text-amber-700');
+    expect(combinar[1].className).not.toContain('text-amber-700');
+    // nenhum botão novo: o local o dono diz na conversa
+    expect(within(rotulo.parentElement as HTMLElement).queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('Fase 7d (P8): sem a linha (nula ou o cartão de antes, sem a chave), o cartão fica como era', async () => {
+    const user = userEvent.setup();
+    h.rpc.mockResolvedValueOnce({ data: { ...PLANO_DE_EXEMPLO, local: null }, error: null });
+    const a = montar(<PlanoDaOs osId="os-69" status="completed" />);
+    await user.click(await screen.findByRole('button', { name: /Ver o plano/ }));
+    expect(screen.queryByTestId('plano-local')).not.toBeInTheDocument();
+    expect(screen.queryByText('Local')).not.toBeInTheDocument();
+    a.unmount();
+    h.rpc.mockResolvedValueOnce({ data: PLANO_DE_EXEMPLO, error: null });
+    montar(<PlanoDaOs osId="os-69" status="completed" />);
+    await user.click(await screen.findByRole('button', { name: /Ver o plano/ }));
+    expect(screen.queryByTestId('plano-local')).not.toBeInTheDocument();
   });
 
   it('Fase 7b (P5): sem a linha (nula ou o cartão de antes, sem a chave), o cartão fica como era', async () => {

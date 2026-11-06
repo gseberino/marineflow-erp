@@ -1288,6 +1288,75 @@ Deno.test("Fase 7c (P4) — webhook: *agenda quem faz* vai ao assistente só com
   }
 });
 
+// ─── Fase 7d (P8, spec-fase7d.md §7): *agenda locais* ─────────────────────────────────────────────────────────────────────
+// De VER (vale com "?"). "locais" não é nome de cliente, pessoa, bem nem fornecedor (sql/wf7dd_p8_locais, 06/11/2026) nem palavra de outra ferramenta. O que o dono diz do
+// local é conversa: vai ao modelo (os_planejar).
+
+const verLocais: ComandoDaAgenda = { comando: "ver", periodo: null, foco: "locais", pessoa: null };
+
+const TABELA_F7D: Array<[string, ComandoDaAgenda]> = [
+  ["agenda locais", verLocais],
+  ["Agenda locais", verLocais],
+  ["agenda locais?", verLocais],
+  ["*agenda locais*", verLocais],
+  ["🎤 Agenda locais.", verLocais],
+];
+
+Deno.test("Fase 7d (P8) — lerComandoDaAgenda: *agenda locais* (de ver: foco locais)", () => {
+  for (const [texto, esperado] of TABELA_F7D) assertEquals(lerComandoDaAgenda(texto), esperado, texto);
+  assert(frasesDaAgenda().includes("agenda locais"));
+});
+
+// A conversa do local, do bem e da viagem (os evals K100 a K106 e S100 a S102, e as vizinhas) NÃO é palavra: vai ao modelo.
+const CONVERSA_F7D = [
+  "locais", "os locais", "quais locais", "agenda dos locais", "agenda local", "agenda locais do Nelson", "onde fica o barco do Nelson?",
+  "o barco do Nelson está na Marina Itajaí, em seco, quem desce é a marina", "o motorhome do Lenine chega dia 5 e ele busca dia 13",
+  "Roberto e João já estão autorizados na marina pro serviço do Nelson", "o serviço do Kalmar em Guaratuba é viagem, a gente dorme lá",
+  "o teste do barco do Nelson é na água", "a Marina Itajaí agora abre sábado o dia todo", "manda pro Nelson perguntando onde fica o barco",
+  "quanto tempo leva até Guaratuba?", "cliente local", "no local", "a marina", "o pátio", "na casa do cliente", "na marina itajai, fica na garagem",
+];
+
+Deno.test("Fase 7d (P8) — o que o dono diz do local vai ao modelo (os_planejar), não é palavra", () => {
+  for (const t of CONVERSA_F7D) assertEquals(lerComandoDaAgenda(t), null, t);
+});
+
+Deno.test("Fase 7d (P8) — a palavra nova e a conversa não são do secretário, da confirmação, do menu, do PDF, dos comprovantes nem da pergunta ativa", () => {
+  const formas = TABELA_F7D.map(([t]) => t);
+  for (const t of [...formas, ...CONVERSA_F7D]) {
+    assertEquals(lerComandoDoSecretario(t), null, `secretário: ${t}`);
+    assertEquals(parseConfirmationReply(t), null, `confirmação: ${t}`);
+    assertEquals(parseOptionReply(t, 9), null, `opção: ${t}`);
+    assertEquals(lerPedidoDePdf(t), null, `pdf: ${t}`);
+    assertEquals(lerComando(t), null, `comprovantes: ${t}`);
+    const n = normalizarResposta(t.replace(/[*_~]/g, ""));
+    assertEquals(lerSimNao(n), null, `sim/não: ${t}`);
+    assertEquals(lerNumero(n, 99), null, `número: ${t}`);
+    assertEquals(pareceRespostaCurta(t), false, `resposta curta: ${t}`);
+    const trava = travaDaConfirmacao(estadoComCmpNoConfirmar(), t, { pending_confirm_action_id: "pend-1" });
+    assertEquals(trava.travar, false, `trava do CMP: ${t}`);
+  }
+  // nenhuma frase fixa de antes passa a ser lida como locais, e "sim", "ok" e "1" continuam da confirmação; as frases do lote de 30/10 continuam onde estavam
+  for (const f of frasesDaAgenda().filter((x) => x !== "agenda locais")) {
+    const c = lerComandoDaAgenda(f);
+    assert(!(c?.comando === "ver" && c.foco === "locais"), f);
+  }
+  for (const t of ["sim", "ok", "1", "não", "2"]) assertEquals(lerComandoDaAgenda(t), null, t);
+  assertEquals(lerComandoDaAgenda("tem vaga na agenda"), { comando: "ver", periodo: null, foco: "livre", pessoa: null });
+  assertEquals(lerComandoDaAgenda("o que tem agendado"), { comando: "ver", periodo: null, foco: "plano", pessoa: null });
+  assertEquals(lerComandoDaAgenda("agenda quem faz"), { comando: "ver", periodo: null, foco: "habilidades", pessoa: null });
+});
+
+Deno.test("Fase 7d (P8) — webhook: *agenda locais* vai ao assistente só com a leitura fora de desligado (como as de ver)", async () => {
+  for (const modo of ["sombra", "ligado"]) {
+    assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(modo), "agenda locais"), true, modo);
+    // de ver: não depende da agenda automática
+    assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(modo, "desligado"), "agenda locais"), true, `${modo} sem a automática`);
+  }
+  for (const modo of ["desligado", "erro", "sem_tabela"]) {
+    assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(modo, "ligado"), "agenda locais"), false, modo);
+  }
+});
+
 // ─── Fase 7c (P8, spec-fase7c.md §16.7 "Palavras: nenhuma nova"): as etapas de um serviço ──────────────────────────────────
 // "o que falta no Lenine", "o que já foi feito no Flávio" e "o que o Alex faz amanhã" vão ao modelo (agenda_ver com os, ou com pessoa
 // e período); o que o dono diz das etapas vai ao modelo (servico_etapa, que só deixa rascunho). Nenhuma é palavra da agenda, do

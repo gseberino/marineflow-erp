@@ -656,6 +656,14 @@ Deno.test("Fase 7c (P4): paraHabilidade recusa duas formas, a forma pela metade,
   assert(erro(paraHabilidade({ confirmar: "sim", trecho: "x" }, CTX7C)).includes("true ou false"));
 });
 
+Deno.test("Fase 7d (P8): agenda_ver aceita o foco locais, com e sem a OS", () => {
+  assertEquals((FOCOS as readonly string[]).includes("locais"), true);
+  const v = paraAgendaVer({ foco: "locais", os: "Nelson" }, CTX7C);
+  assertEquals(v.ok && [v.params.p_foco, v.params.p_os], ["locais", "Nelson"]);
+  const s = paraAgendaVer({ foco: "locais" }, CTX7C);
+  assertEquals(s.ok && s.params.p_foco, "locais");
+});
+
 Deno.test("Fase 7c (P4): os valores são os do banco (§3.2 e o CHECK de exigencias_ditas); agenda_ver aceita o foco habilidades", () => {
   assertEquals([...O_QUE_FAZ], [
     "instala_com_alguem", "instala_sozinho", "instala_e_ensina", "novo", "ajudante", "quase_instala", "nao_comissiona",
