@@ -142,8 +142,18 @@ declare
   -- _pedir_confirmacao: spec-fase6 §3.1, item 11); um bloco da Fase 6 dentro de um da correção sai junto com ele
   v_f6 boolean := false;
   -- FASE 6: fim
+  -- FASE 7d: (7d P6) os blocos da 7d também saem
+  v_f7d boolean := false;
+  -- FASE 7d: fim
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
+    -- FASE 7d: (7d P6) os blocos "-- FASE 7d: … -- FASE 7d: fim" também saem (a 20261107100500 recria a função copiando a definição mais nova: só acréscimo)
+    if not v_bloco and not v_f7d and l ~ '^\s*-- FASE 7d:' and l !~ '^\s*-- FASE 7d: fim' then v_f7d := true; continue; end if;
+    if v_f7d then
+      if l ~ '^\s*-- FASE 7d: fim' then v_f7d := false; end if;
+      continue;
+    end if;
+    -- FASE 7d: fim
     -- FASE 6: (P7) fora de um bloco da correção, o bloco da Fase 6 sai inteiro (o fim é lido pelo prefixo)
     if not v_bloco and not v_f6 and l ~ '^\s*-- FASE 6:' and l !~ '^\s*-- FASE 6: fim' then v_f6 := true; continue; end if;
     if v_f6 then

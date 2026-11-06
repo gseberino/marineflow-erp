@@ -1,3 +1,12 @@
+### [NOVO-agenda-92] O teto de mensagens ao cliente recusa de vez: quem perde o dia não volta
+
+- **Encontrado em:** Agenda de Produção, Fase 7d, P6 (05/11/2026), lendo por que o M11 disputa o dia com a confirmação. A spec dizia "o registrar já resolve".
+- **O quê:** `_agenda_cliente_enfileirar` recusa por `teto_dia` ou `teto_semana` com `estado = 'recusada'`, e a chave da mensagem continua de pé (`ja_existe`): a confirmação
+  (chave do dia) não volta, e o M11 (chave `unica`) também não. Só o aviso de atraso e a mudança no dia têm saída (a pergunta `cliente_aviso`). É de antes da 7d, e o registrar não
+  olha o teto.
+- **Na Fase 7d:** o M11 cede. Ele roda depois de `confirmar` e, com mensagem do cliente no dia (mesmo ainda não enfileirada), o teto da semana cheio ou outro M11 em
+  `cliente_mesmo_tipo_horas`, não registra e tenta no tique seguinte (K2z1 a K2z7). **Sobra:** o M11 que saiu de manhã ainda toma o dia de uma confirmação que só nasce à tarde
+  (o material chegou depois): ela é recusada por `teto_dia`, e a véspera segue. Sem conserto na 7d.
 # Novos achados encontrados durante a Fase 2
 
 Itens fora do escopo da tarefa em execução, registrados conforme a regra 5 da fila.

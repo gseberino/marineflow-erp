@@ -1069,6 +1069,8 @@ insert into _definer_da_agenda values
   -- FASE 7d: (7d P5, 20261107100400) a rodada do local e a resposta do dono escrevem nas perguntas, nas ações e em os_planejamento;
   -- agenda_fase7d_combinar.sql prova as portas.
 insert into _definer_da_agenda values ('agenda_local_vigiar'), ('_agenda_local_combinar'), ('_agenda_local_decidir');
+  -- FASE 7d: (7d P6, 20261107100500) o passo do M11: a spec o pede definer, e só agenda_cliente_vigiar o chama
+insert into _definer_da_agenda values ('_agenda_cliente_onde_fica');
   -- FASE 7d: fim
 
 insert into _resultado

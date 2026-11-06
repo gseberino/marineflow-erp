@@ -131,6 +131,13 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     vezes: 1,
     porque: 'o mesmo nome do feriado de 20/07 (aniversário de Balneário Camboriú); não é municipios_locais',
   },
+  // Fase 7d (P6): o exemplo do texto ao dono (spec-fase7d §6.3), na pergunta local sem leitura.
+  {
+    onde: '_agenda_cliente_anotar_onde',
+    casou: 'Itajaí',
+    vezes: 1,
+    porque: 'o exemplo literal da §6.3 ("o barco de Nelson está na Marina Itajaí, em seco"), ao dono; não é municipios_locais',
+  },
   // Fase 2 (P6): as migrations 2026102510* entraram na varredura.
   {
     onde: 'agenda_vigiar',
@@ -173,7 +180,8 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
   {
     onde: 'agenda_cliente_vigiar',
     casou: '1000',
-    vezes: 1,
+    // Fase 7d (P6, 20261107100500): recriada (+1: a mesma duração da rodada).
+    vezes: 2,
     porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_vigiar, agenda_rotina_rodar e agenda_material_vigiar); não é texto_max nem peca_embutida_acima',
   },
   // Fase 6 (P6): a rodada do aprendizado grava a rodada como a vigia, a rotina, o material e o cliente.
@@ -306,7 +314,8 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
   // o corpo do botão foi para _pedir_confirmacao (a cópia de 100200, com o mesmo nome); a casca nova não tem nenhum.
   // Correção C2 da Fase 5 (20261028100800): revalidar e enfileirar recriados de novo (+1 cada: a mesma cópia).
   // Fase 6 (P7, 20261029100700): _pedir_confirmacao recriado (+1: a cópia leva o mesmo nome do motivo; o texto do botão sem "ele").
-  ...([['_agenda_cliente_revalidar', 3], ['_agenda_cliente_enfileirar', 3], ['pedir_confirmacao_do_agendamento', 1],
+  // Fase 7d (P6, 20261107100500): revalidar recriado (+1: a mesma cópia).
+  ...([['_agenda_cliente_revalidar', 4], ['_agenda_cliente_enfileirar', 3], ['pedir_confirmacao_do_agendamento', 1],
         ['_pedir_confirmacao', 2]] as const).map(([onde, vezes]) => ({
     onde,
     casou: '24h',

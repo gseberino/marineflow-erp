@@ -1102,7 +1102,8 @@ begin
     insert into public.agenda_perguntas (tipo, chave, service_order_id, texto, opcoes, modo)
     values ('local', 'local:teste', pg_temp.os('OS-J2'), 'Teste?', '[{"n":1,"texto":"a"},{"n":2,"texto":"b"}]', 'ligado') returning * into q;
     r := pg_temp.decidir(q.id, 1, date '2027-07-16');
-    v_res := pg_temp.ok(v_res, 'C3t agenda_decidir manda o tipo local a _agenda_local_decidir, que recusa até o P6', not (r ->> 'ok')::boolean and r ->> 'texto' = 'Essa pergunta não é do que combinar.', r::text);
+    -- (7d P6) o tipo local entrou: a opção sem efeito só responde (agenda_fase7d_cliente.sql, K5, prova o resto)
+    v_res := pg_temp.ok(v_res, 'C3t agenda_decidir manda o tipo local a _agenda_local_decidir', (r ->> 'ok')::boolean and r ->> 'texto' = 'Certo, não gravei. Quando souber, me diga onde é.', r::text);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;

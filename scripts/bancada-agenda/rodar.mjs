@@ -354,6 +354,12 @@ const FIXTURES_COMO_TEXTO = [
   // Fase 7d (P5): a própria migration do combinar (20261107100400), para o C9 de agenda_fase7d_combinar.sql conferir que as recriadas só mudam nos
   // blocos "-- FASE 7d:". As fontes já estão acima: mig_correcao_fase7b, mig_correcao2_fase7c, mig_rascunho_fase2 e mig_acompanhamento_fase3.
   ['agenda_teste.mig_combinar_fase7d', '../../supabase/migrations/20261107100400_agenda_fase7d_combinar.sql'],
+  // Fase 7d (P6): a própria migration do M11 (20261107100500), para o K7 de agenda_fase7d_cliente.sql conferir que as recriadas só mudam nos blocos
+  // "-- FASE 7d:". As fontes já estão acima: mig_correcao_rodada_fase5, mig_envio_fase5, mig_rodada_fase5, mig_combinar_fase7d e a do acabamento, abaixo.
+  // A do retorno F0a (20261105100000, fora da bancada) vai como texto: o K8 a roda dentro da transação do teste, por baixo do M11 (R6.0).
+  ['agenda_teste.mig_acabamento_fase6', '../../supabase/migrations/20261029100700_agenda_fase6_acabamento.sql'],
+  ['agenda_teste.mig_cliente_fase7d', '../../supabase/migrations/20261107100500_agenda_fase7d_cliente.sql'],
+  ['agenda_teste.mig_retorno_f0a', '../../supabase/migrations/20261105100000_retorno_f0a_canal_bloqueado.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

@@ -808,7 +808,12 @@ begin
     values (c_cli, c_barco, 'onde_fica', 'rodada', 'sombra', 'em teste', now(), now(), 'livre', 'registrada', 'teste:p3:1');
     v_d := coalesce(v_d, pg_temp.dif(public._agenda_estado_do_bem(c_barco, date '2026-12-01'),
       jsonb_build_object('suposicoes', jsonb_build_array('supus o barco livre nos dias úteis (temporada: ainda não sei os dias de uso)'))));
+    -- (7d P6, R6.9-5) "perguntei" só com o M11 que levava o {uso}: sem ele, a mensagem saiu e não perguntou
     update public.agenda_cliente_mensagens set estado = 'enviada', enviada_em = now() where dedupe_key = 'teste:p3:1';
+    v_d := coalesce(v_d, pg_temp.dif(public._agenda_estado_do_bem(c_barco, date '2026-12-01'),
+      jsonb_build_object('suposicoes', jsonb_build_array('supus o barco livre nos dias úteis (temporada: ainda não sei os dias de uso)'))));
+    insert into public.agenda_cliente_mensagens (client_id, service_order_id, tipo, origem, modo, texto, base, enviar_em, valida_ate, aprovacao, estado, dedupe_key, enviada_em)
+    values (c_cli, c_barco, 'onde_fica', 'rodada', 'ligado', 'com o uso', '{"dados": {"uso": true}}', now(), now(), 'livre', 'enviada', 'teste:p3:2', now());
     v_d := coalesce(v_d, pg_temp.dif(public._agenda_estado_do_bem(c_barco, date '2026-12-01'),
       jsonb_build_object('suposicoes', jsonb_build_array('supus o barco livre nos dias úteis (temporada: perguntei ao cliente os dias de uso)'))));
     raise exception 'desfaz' using errcode = 'P0099';
