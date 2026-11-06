@@ -459,7 +459,7 @@ $o16$;
 do $o17$
 declare
   v_res  jsonb := '[]'::jsonb;
-  c_nota constant text := ' (anotei; só muda o plano quando isso for ligado)';
+  c_nota constant text := ' Só muda o plano quando isso for ligado.';
   r      jsonb;
   v_t    text;
 begin
@@ -490,9 +490,9 @@ begin
     v_t := pg_temp.plan('OS-J2', '{"viagem": "bate_volta"}'::jsonb, 'é ida e volta no dia') ->> 'releitura';
     v_res := pg_temp.ok(v_res, 'O17f ida e volta', v_t like '%Viagem: ida e volta no mesmo dia.' || c_nota || '%', v_t);
     v_t := pg_temp.plan('OS-J5', '{"viagem": "regional"}'::jsonb, 'é aqui na região') ->> 'item';
-    v_res := pg_temp.ok(v_res, 'O17f2 "sem viagem" não leva a nota: nada vai mudar o plano', v_t like '%Sem viagem (aqui na região).%' and v_t not like '%anotei;%', v_t);
+    v_res := pg_temp.ok(v_res, 'O17f2 "sem viagem" não leva a nota: nada vai mudar o plano', v_t like '%Sem viagem (aqui na região).%' and v_t not like '%Só muda o plano%', v_t);
     v_t := pg_temp.plan('OS-J2', '{"viagem": "regional"}'::jsonb, 'não, é aqui na região') ->> 'item';
-    v_res := pg_temp.ok(v_res, 'O17f3 quem disse ida e volta e corrigiu para a região: a nota sai', v_t like '%Sem viagem (aqui na região).%' and v_t not like '%anotei;%', v_t);
+    v_res := pg_temp.ok(v_res, 'O17f3 quem disse ida e volta e corrigiu para a região: a nota sai', v_t like '%Sem viagem (aqui na região).%' and v_t not like '%Só muda o plano%', v_t);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
             when others then v_res := pg_temp.ok(v_res, 'O17d quebrou', false, sqlerrm);
@@ -500,7 +500,7 @@ begin
   begin
     perform pg_temp.base('sombra');
     v_t := pg_temp.plan('OS-J2', '{"local": "Marina Itajaí", "bem_onde": "seco", "descer_quem": "a marina", "bem_exige": "agua"}'::jsonb, 'na Marina Itajaí, em seco, a marina desce, o teste é na água') ->> 'releitura';
-    v_res := pg_temp.ok(v_res, 'O17g local e bem não levam a nota: só viagem, pátio e acesso', v_t like '%Local: Marina Itajaí.%' and v_t not like '%anotei;%', v_t);
+    v_res := pg_temp.ok(v_res, 'O17g local e bem não levam a nota: só viagem, pátio e acesso', v_t like '%Local: Marina Itajaí.%' and v_t not like '%Só muda o plano%', v_t);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
             when others then v_res := pg_temp.ok(v_res, 'O17g quebrou', false, sqlerrm);
@@ -511,7 +511,7 @@ begin
     insert into public.os_planejamento (service_order_id, viagem) values (pg_temp.os('OS-J2'), 'pernoite')
     on conflict (service_order_id) do update set viagem = 'pernoite';
     v_t := pg_temp.plan('OS-J2', '{"limpar": ["viagem"]}'::jsonb, 'tira a viagem') ->> 'releitura';
-    v_res := pg_temp.ok(v_res, 'O17h tirar a viagem não leva a nota', v_t like '%Tirei a viagem que eu tinha (volto a supor).%' and v_t not like '%anotei;%', v_t);
+    v_res := pg_temp.ok(v_res, 'O17h tirar a viagem não leva a nota', v_t like '%Tirei a viagem que eu tinha (volto a supor).%' and v_t not like '%Só muda o plano%', v_t);
     v_res := pg_temp.ok(v_res, 'O17h2 nem a chave', not (pg_temp.rascunho('OS-J2') ? 'em_teste_viagem'), pg_temp.rascunho('OS-J2')::text);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
@@ -534,7 +534,7 @@ begin
     perform pg_temp.modo_de('modo_viagem', 'ligado');
     perform pg_temp.modo_de('modo_local_autorizacao', 'ligado');
     v_t := pg_temp.plan('OS-J1', '{"chega_em": "dia 20", "autorizados": ["Alex"], "viagem": "pernoite"}'::jsonb, 'chega dia 20, o Alex autorizado, e a gente dorme lá') ->> 'releitura';
-    v_res := pg_temp.ok(v_res, 'O17k viagem e acesso ligados: a nota fica só no pátio', v_t like '%O motorhome chega ter 20/07.' || c_nota || '%' and (select count(*) from regexp_matches(v_t, 'anotei;', 'g')) = 1, v_t);
+    v_res := pg_temp.ok(v_res, 'O17k viagem e acesso ligados: a nota fica só no pátio', v_t like '%O motorhome chega ter 20/07.' || c_nota || '%' and (select count(*) from regexp_matches(v_t, 'Só muda o plano', 'g')) = 1, v_t);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
             when others then v_res := pg_temp.ok(v_res, 'O17k quebrou', false, sqlerrm);
@@ -561,7 +561,7 @@ begin
     perform pg_temp.base('sombra');
     perform pg_temp.plan('OS-J1', '{"chega_em": "dia 20"}'::jsonb, 'chega dia 20');
     v_t := pg_temp.plan('OS-J1', '{"viagem": "pernoite"}'::jsonb, 'a gente dorme lá') ->> 'releitura';
-    v_res := pg_temp.ok(v_res, 'O17n 2 frases da mesma OS: as 2 notas', (select count(*) from regexp_matches(v_t, 'anotei;', 'g')) = 2, v_t);
+    v_res := pg_temp.ok(v_res, 'O17n 2 frases da mesma OS: as 2 notas', (select count(*) from regexp_matches(v_t, 'Só muda o plano', 'g')) = 2, v_t);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
             when others then v_res := pg_temp.ok(v_res, 'O17n quebrou', false, sqlerrm);
@@ -572,10 +572,10 @@ begin
     perform pg_temp.plan('OS-J2', '{"viagem": "pernoite"}'::jsonb, 'o serviço do Nelson é viagem, a gente dorme lá');
     r := pg_temp.grava();
     v_t := (select a.texto from public.agenda_acoes a where a.tipo = 'local' and a.origem = 'dono' and a.service_order_id = pg_temp.os('OS-J2') order by a.criada_em desc limit 1);
-    v_res := pg_temp.ok(v_res, 'O17o a ação do *grava* diz o fato, sem a nota', v_t like '%Viagem com pernoite%' and v_t not like '%anotei;%', v_t);
+    v_res := pg_temp.ok(v_res, 'O17o a ação do *grava* diz o fato, sem a nota', v_t like '%Viagem com pernoite%' and v_t not like '%Só muda o plano%', v_t);
     v_res := pg_temp.ok(v_res, 'O17p o dado gravou, com o modo em sombra', (select pl.viagem from public.os_planejamento pl where pl.service_order_id = pg_temp.os('OS-J2')) = 'pernoite', r::text);
     r := pg_temp.desfaz('OS-J2');
-    v_res := pg_temp.ok(v_res, 'O17q o *desfaz* diz o fato', (r ->> 'releitura') like '%Viagem com pernoite%' and (r ->> 'releitura') not like '%anotei;%', r::text);
+    v_res := pg_temp.ok(v_res, 'O17q o *desfaz* diz o fato', (r ->> 'releitura') like '%Viagem com pernoite%' and (r ->> 'releitura') not like '%Só muda o plano%', r::text);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
             when others then v_res := pg_temp.ok(v_res, 'O17o quebrou', false, sqlerrm);

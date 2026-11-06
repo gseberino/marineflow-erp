@@ -459,7 +459,7 @@ begin
                                                    'viagem', 'regional', 'autorizados', jsonb_build_array('Roberto', 'João')),
                       'a lancha do Beto está na Marina Itajaí, na garagem, quem desce é a marina, o teste é na água, Roberto e João estão autorizados');
     v_res := pg_temp.ok(v_res, 'R2a os campos do barco → a releitura da §6.2, byte a byte, uma linha por campo, na ordem',
-      (r ->> 'ok')::boolean and r ->> 'releitura' = E'Entendi assim, confere?\n• Beto (OS-J12): Local: Marina Itajaí.\nO barco: em seco (garagem).\nQuem desce: a marina.\nO teste final é na água.\nSem viagem (aqui na região).\nAutorizados nesse serviço: Roberto e João. (anotei; só muda o plano quando isso for ligado).\nResponda *grava* ou corrija o que estiver errado.', r::text);
+      (r ->> 'ok')::boolean and r ->> 'releitura' = E'Entendi assim, confere?\n• Beto (OS-J12): Local: Marina Itajaí.\nO barco: em seco (garagem).\nQuem desce: a marina.\nO teste final é na água.\nSem viagem (aqui na região).\nAutorizados nesse serviço: Roberto e João. Só muda o plano quando isso for ligado.\nResponda *grava* ou corrija o que estiver errado.', r::text);
     pl := pg_temp.pl('OS-J12');
     v_res := pg_temp.ok(v_res, 'R2b nada gravado antes do *grava*', pl.local_id is null and pl.bem_situacao is null and pl.descer_quem is null and pg_temp.vig('OS-J12') = '', to_jsonb(pl)::text);
     r2 := pg_temp.grava();
@@ -499,7 +499,7 @@ begin
     perform pg_temp.base('sombra');
     -- Carla, motorhome sem local
     r := pg_temp.plan('OS-J11', '{"chega_em": "dia 20", "sai_em": "dia 28"}'::jsonb, 'o motorhome da Carla chega dia 20 e sai dia 28');
-    v_res := pg_temp.ok(v_res, 'R2j a chegada e a saída: "O motorhome chega … e sai …", as datas pelo banco', (r ->> 'releitura') like E'%• Carla (OS-J11): O motorhome chega ter 20/07 e sai qua 28/07. (anotei; só muda o plano quando isso for ligado).\n%', r::text);
+    v_res := pg_temp.ok(v_res, 'R2j a chegada e a saída: "O motorhome chega … e sai …", as datas pelo banco', (r ->> 'releitura') like E'%• Carla (OS-J11): O motorhome chega ter 20/07 e sai qua 28/07. Só muda o plano quando isso for ligado.\n%', r::text);
     perform pg_temp.grava();
     pl := pg_temp.pl('OS-J11');
     v_res := pg_temp.ok(v_res, 'R2k entrada_em, retirada_em e entrada_fonte = dono', pl.entrada_em = date '2027-07-20' and pl.retirada_em = date '2027-07-28' and pl.entrada_fonte = 'dono', to_jsonb(pl)::text);
@@ -546,7 +546,7 @@ begin
     r := pg_temp.plan('OS-J12', '{"limpar": ["viagem"]}'::jsonb, 'não é viagem');
     v_res := pg_temp.ok(v_res, 'R2u limpar na mesma releitura apaga o que estava (a viagem)', (r ->> 'releitura') like '%: Tirei a viagem que eu tinha (volto a supor).%' and (r ->> 'releitura') not like '%pernoite%', r::text);
     r := pg_temp.plan('OS-J12', '{"local": "casa do cliente"}'::jsonb, 'o barco está na casa do cliente');
-    v_res := pg_temp.ok(v_res, 'R2v casa do cliente: "(anotei)"', (r ->> 'releitura') like '%Local: na casa do cliente (anotei).%', r::text);
+    v_res := pg_temp.ok(v_res, 'R2v casa do cliente: a releitura não diz que anotou', (r ->> 'releitura') like '%Local: na casa do cliente.%', r::text);
     r := pg_temp.plan('OS-J12', '{"autorizados": ["eu", "Roberto"]}'::jsonb, 'eu e o Roberto');
     v_res := pg_temp.ok(v_res, 'R2w "eu" = o dono: "você"', (r ->> 'releitura') like '%Autorizados nesse serviço: você e Roberto.%', r::text);
     r := pg_temp.plan('OS-J12', '{"bem_onde": "agua"}'::jsonb, 'está na água');

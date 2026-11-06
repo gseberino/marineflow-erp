@@ -11,7 +11,7 @@
 --       com várias abertas: "Qual decisão?" só com os títulos numerados (_agenda_titulo_da_pergunta). A régua do "1" não muda.
 --   O9  a opção "Já terminou" com *gestor, só propor*: a recusa aponta o caminho que funciona, *entreguei {nome}*. As outras opções, a recusa de sempre.
 --   O16 a releitura de autorizados marca quem saiu da equipe (_agenda_saiu_da_equipe), sem recusar.
---   O17 (C8) em teste, a releitura de viagem, pátio e acesso acrescenta " (anotei; só muda o plano quando isso for ligado)", enquanto o assunto não estiver ligado por _agenda_local_modo. Só a
+--   O17 (C8) em teste, a releitura de viagem, pátio e acesso acrescenta " Só muda o plano quando isso for ligado.", enquanto o assunto não estiver ligado por _agenda_local_modo. Só a
 --       releitura: a ação do *grava* e o *desfaz* dizem o fato.
 --
 -- O R1 (a trava do "1" com pendência do assistente) não tem banco: é _shared/ai/whatsapp-channel.ts e a chamada em ai-agent/index.ts. O resto da Onda 2 é prompt, evals e papéis.
@@ -435,12 +435,12 @@ declare
   v_ent date := (p_d ->> 'entrada_em')::date;
   v_sai date := (p_d ->> 'retirada_em')::date;
   -- (correção O17) só a releitura leva a nota (a chave releitura vem de _agenda_rascunho_frase): a ação do *grava* e o *desfaz* dizem o fato. As chaves em_teste_* vêm do rascunho, por _agenda_local_modo
-  c_nota constant text := ' (anotei; só muda o plano quando isso for ligado)';
+  c_nota constant text := ' Só muda o plano quando isso for ligado.';
   v_nota boolean := coalesce((p_d ->> 'releitura')::boolean, false);
 begin
   if p_d ? 'local_id' then
     -- (correção O2, O3) antes do local_id: depois do *grava* a casa também tem local_id. O lugar novo só existe até o *grava*
-    v := v || case when coalesce((p_d ->> 'local_casa')::boolean, false) then 'Local: na casa do cliente (anotei).'
+    v := v || case when coalesce((p_d ->> 'local_casa')::boolean, false) then 'Local: na casa do cliente.'
                    when p_d ->> 'local_novo' is not null then format('Local: %s (lugar novo: entra no cadastro quando você gravar).', p_d ->> 'local_novo')
                    when p_d ->> 'local_id' is not null then format('Local: %s.', p_d ->> 'local_nome')
                    else 'Tirei o local que eu tinha (volto a supor).' end;

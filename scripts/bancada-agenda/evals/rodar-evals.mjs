@@ -1405,8 +1405,8 @@ export function controlesDosJuizes() {
     ['banco: diff igual passa', gradeBanco({ espera: { banco: { diff: [] } } }, { antes: foto('falta'), meio: foto('falta'), depois: foto('falta') }).ok],
     ['texto: "Nada foi gravado ainda" e "não gravei" passam', gradeTexto(caso, 'Nada foi gravado ainda; não gravei nada.', []).ok],
     ['texto: "Gravado." e "anotei" reprovam', !gradeTexto(caso, 'Gravado. Anotei o painel.', []).ok],
-    // (Fase 7d, correção O17) só a nota exata do banco passa: "anotei" solto, ou com outra frase, continua reprovando
-    ['texto: a nota da releitura em teste passa; "anotei; pode deixar" reprova', gradeTexto(caso, 'Viagem com pernoite. (anotei; só muda o plano quando isso for ligado). Responda *grava*.', []).ok
+    // (Fase 7d, correção O17) a nota da releitura em teste não diz que anotou: "anotei" continua reprovando
+    ['texto: a nota da releitura em teste passa; "anotei; pode deixar" reprova', gradeTexto(caso, 'Viagem com pernoite. Só muda o plano quando isso for ligado. Responda *grava*.', []).ok
       && !gradeTexto(caso, 'Viagem com pernoite. (anotei; pode deixar).', []).ok],
     ['texto (Fase 2): "publiquei", "desfiz" e "decidi" reprovam; "não publiquei nada" passa',
       !gradeTexto(caso, 'Publiquei a semana.', []).ok && !gradeTexto(caso, 'Desfiz o Nelson.', []).ok

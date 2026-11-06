@@ -14,7 +14,7 @@
   1. **A releitura promete em teste.** "Viagem com pernoite: a equipe vai e volta junta, em dias seguidos." sai igual com `modo_viagem` em sombra, e o motor ignora a viagem até o modo ligar. O mesmo vale para "Local: …" com `modo_mesmo_local` e o calendário em sombra. O dono lê que entendi; não lê que ainda não muda o plano.
   2. **"Na casa do cliente" não vira dado.** A §5.7 manda o local ficar nulo, com a nota no trecho: a cadeia volta a supor (motorhome = pátio), o foco do P8 vai mostrar a suposição e o M11 ainda perguntaria onde fica.
 - **Na Fase 7d:** sem conserto. Mudar (1) é texto novo ao dono, fora da §6.2; mudar (2) pede um local de tipo `casa_cliente` por OS ou uma coluna nova. O *ligar* de cada modo resolve o (1) sozinho.
-- **Consertado o (1) (correção da 7d, Onda 2, O17, migration `20261107100850`, ainda não aplicada):** em teste, a releitura de viagem, pátio e acesso acrescenta " (anotei; só muda o plano quando isso for ligado)", pelo `_agenda_local_modo`. A ação do *grava* e o *desfaz* dizem o fato.
+- **Consertado o (1) (correção da 7d, Onda 2, O17, migration `20261107100850`, ainda não aplicada):** em teste, a releitura de viagem, pátio e acesso acrescenta " Só muda o plano quando isso for ligado.", pelo `_agenda_local_modo`. A ação do *grava* e o *desfaz* dizem o fato.
 - **Consertado o (2) (correção da 7d, Onda 1, O3, migration `20261107100800`, ainda não aplicada):** "na casa do cliente" vira 1 linha de `agenda_locais` por cliente (`client_id`), tipo `casa_cliente`, nome "casa de {nome curto}". Sai o `trecho`. O (1) segue como está.
 
 ### [NOVO-agenda-96] `dados` de `agenda_ver` não chega ao modelo, e `mostrada_em` não vê a conversa (Fase 7d, correção, Onda 2)
