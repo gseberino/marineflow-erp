@@ -1283,7 +1283,10 @@ begin
     execute v_mig;
     v_res := pg_temp.ok(v_res, 'C7c a semente de novo reativa os locais', (select count(*) from public.agenda_locais l where l.ativo and l.marina_id is not null) = v_n, (select count(*)::text from public.agenda_locais l where l.ativo));
     v_res := pg_temp.ok(v_res, 'C7d a MP volta a ser o pátio da HBR ativo', exists (select 1 from public.agenda_locais l where l.ativo and l.tipo = 'patio_hbr'), null);
-    -- Idempotente: de novo não mexe (nem a hora)
+    -- Idempotente: de novo não mexe (nem a hora: now() não anda dentro da transação, então a hora é envelhecida antes, sem o gatilho que a põe)
+    alter table public.agenda_locais disable trigger agenda_locais_historico;
+    update public.agenda_locais set atualizado_em = timestamptz '2026-01-01 10:00-03';
+    alter table public.agenda_locais enable trigger agenda_locais_historico;
     v_foto := (select md5(string_agg(to_jsonb(l)::text, '|' order by l.nome)) from public.agenda_locais l);
     execute v_mig;
     v_res := pg_temp.ok(v_res, 'C7e de novo não muda nada', (select md5(string_agg(to_jsonb(l)::text, '|' order by l.nome)) from public.agenda_locais l) = v_foto, null);
