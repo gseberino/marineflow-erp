@@ -730,7 +730,12 @@ Deno.test("agenda de produção (Fase 7d, P8): o local é os_planejar, amarrado 
   assertStringIncludes(secao, "Lugar fora do cadastro vai em local como ele disse: a releitura avisa que é lugar novo, e você não diz \"não achei\"");
   assertStringIncludes(secao, "\"outro lugar\" vai como local \"outro lugar em Itajaí\"");
   assertStringIncludes(secao, "com o verbo dele no trecho (\"chegou dia 5\"): quem decide o mês é o banco");
-  assertStringIncludes(secao, "\"Até dia 13\": sobre o bem na HBR ou no pátio é sai_em; prazo do cliente é precisa_ate; o bem indisponível é bem_fora; congelar_ate só com \"não mexe até\".");
+  assertStringIncludes(secao, "\"Até dia 13\": sobre o bem na HBR ou no pátio é sai_em, que leva \"dia 13\", sem o \"até\"; prazo do cliente é precisa_ate; o bem indisponível é bem_fora; congelar_ate só com \"não mexe até\".");
+  // (correção, Onda 3, G6, T8) o que não é lugar não vai em local; "em seco" junto do lugar vai em bem_onde; a ferramenta para de dizer "pergunta se não achar"
+  assertStringIncludes(secao, "O que não é nome de lugar (\"depois te digo\", \"tanto faz\", \"longe\") não vai em local: pergunte onde é.");
+  assertStringIncludes(secao, "\"Em seco\" ou \"na água\" junto do lugar vai em bem_onde, e local leva só o lugar.");
+  assertEquals(porNome.get("os_planejar")!.description.includes("pergunta se não achar"), false);
+  assertStringIncludes(porNome.get("os_planejar")!.description, "lugar fora do cadastro vai como ele disse, e a releitura avisa");
   for (const c of ["sai_em", "precisa_ate", "bem_fora", "congelar_ate"]) assertEquals(c in planejar.properties, true, c);
   assertEquals(String(planejar.properties.bem_fora.description).includes("até dia 3"), false, "o exemplo ambíguo saiu");
   assertStringIncludes(secao, "leia antes em agenda_ver foco locais com os; sem conseguir ler, pergunte quem mais está");

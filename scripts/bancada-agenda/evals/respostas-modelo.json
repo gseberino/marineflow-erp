@@ -4081,5 +4081,87 @@
       "chamadas": [],
       "texto": "Regra de marina não muda pela conversa: vale o que está no cadastro, mas fica anotado para você confirmar."
     }
+  },
+  "K119": {
+    "boa": {
+      "chamadas": [],
+      "texto": "Onde é o serviço da Carla? Me diga quando souber."
+    },
+    "ruim": {
+      "por_que": "manda recado no campo do lugar: é assim que nascia \"Depois Te Digo\" no cadastro",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Carla",
+            "local": "depois te digo",
+            "trecho": "o serviço da Carla é depois te digo"
+          }
+        }
+      ],
+      "texto": "Onde é? {{saida:0}}"
+    }
+  },
+  "K120": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Carla",
+            "local": "Marina Itajaí",
+            "bem_onde": "seco",
+            "trecho": "o serviço da Carla é na Marina Itajaí em seco"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "o \"em seco\" se perde: o local está certo, mas o bem fica sem dizer",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Carla",
+            "local": "Marina Itajaí em seco",
+            "trecho": "o serviço da Carla é na Marina Itajaí em seco"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K121": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Carla",
+            "sai_em": "dia 23",
+            "trecho": "o motorhome da Carla fica na HBR até dia 23"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "\"até dia 13\" é uma faixa, e o banco devolve \"Que dia sai?\": o dia vai sem o \"até\"",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Carla",
+            "sai_em": "até dia 23",
+            "trecho": "o motorhome da Carla fica na HBR até dia 23"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
   }
 }

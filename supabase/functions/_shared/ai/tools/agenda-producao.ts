@@ -217,7 +217,7 @@ export const agendaProducaoTools: ToolDef[] = [
       "cliente, o serviço é a instalação do compressor\" é servico_cliente. Nada vai ao cliente por aqui. " +
       "Onde é e como está o bem, só o que ele disse e com as palavras dele: local, bem_onde, bem_exige (\"o teste é na água\"), " +
       "descer_quem, chega_em e sai_em (motorhome), viagem e autorizados (quem está autorizado na marina; \"eu\" = o dono). O " +
-      "banco resolve o local e as pessoas, e pergunta se não achar. Regra de marina ou de pátio não muda por aqui.",
+      "banco resolve o local e as pessoas: com mais de um, pergunta qual; lugar fora do cadastro vai como ele disse, e a releitura avisa. Regra de marina ou de pátio não muda por aqui.",
     input_schema: {
       type: "object",
       properties: {
