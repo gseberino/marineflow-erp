@@ -366,6 +366,12 @@ const FIXTURES_COMO_TEXTO = [
   // Fase 7d (P7): a própria migration do rascunho (20261107100600), para o R0 de agenda_fase7d_rascunho.sql conferir as 5 recriadas. As fontes já estão acima:
   // mig_tarefas_fase7c, mig_disponibilidade_fase7b e mig_cliente_fase7d.
   ['agenda_teste.mig_rascunho_fase7d', '../../supabase/migrations/20261107100600_agenda_fase7d_rascunho.sql'],
+  // Fase 7d (P8): a própria migration das leituras (20261107100700), para o V6 de agenda_fase7d_leituras.sql conferir as recriadas, com a fonte de os_plano_da_os e agenda_saude (a 7b),
+  // que ainda não estava (as outras já estão acima: mig_leituras_fase7c, mig_tarefas_fase7c, mig_equipe_fase3 e mig_acabamento_fase6). E o dado 20261107100900 (a semente; FORA_DA_BANCADA:
+  // o agenda_fase7d_semente.sql o roda na transação do teste).
+  ['agenda_teste.mig_leituras_fase7b', '../../supabase/migrations/20261101100400_agenda_fase7b_leituras.sql'],
+  ['agenda_teste.mig_leituras_fase7d', '../../supabase/migrations/20261107100700_agenda_fase7d_leituras.sql'],
+  ['agenda_teste.mig_semente_fase7d', '../../supabase/migrations/20261107100900_agenda_fase7d_semente.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

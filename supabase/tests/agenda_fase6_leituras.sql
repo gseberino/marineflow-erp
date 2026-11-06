@@ -214,7 +214,7 @@ begin
     -- (o L1k de agenda_fase7b_leituras.sql prova que ela é nula e que o resto é o de antes)
     -- FASE 7b: fim
     select count(*), string_agg(so.service_order_number, ', ' order by so.service_order_number) filter (where
-             ((pg_temp.cartao(so.id) #- '{duracao,campo}' #- '{presenca_dono,aprendida}') - 'equipe')::text
+             ((pg_temp.cartao(so.id) #- '{duracao,campo}' #- '{presenca_dono,aprendida}') - 'equipe' - 'local')::text
              is distinct from pg_temp.plano_de_antes(so.id, date '2026-10-30')::text)
       into v_n, v_dif
       from public.service_orders so where so.service_order_number like 'OS-%';
@@ -280,7 +280,7 @@ begin
     -- FASE 7b: (7b P5) a chave equipe nova (nula) sai da comparação, como no L2e
     -- FASE 7b: fim
     select count(*), string_agg(so.service_order_number, ', ' order by so.service_order_number) filter (where
-             ((pg_temp.cartao(so.id) #- '{duracao,campo}' #- '{presenca_dono,aprendida}') - 'equipe')::text
+             ((pg_temp.cartao(so.id) #- '{duracao,campo}' #- '{presenca_dono,aprendida}') - 'equipe' - 'local')::text
              is distinct from pg_temp.plano_de_antes(so.id, date '2026-10-30')::text)
       into v_n, v_dif
       from public.service_orders so where so.service_order_number like 'OS-%';
@@ -350,7 +350,7 @@ begin
     select string_agg(so.service_order_number, ', ' order by so.service_order_number) filter (where
              -- FASE 7b: (7b P5) a chave equipe nova (nula) sai da comparação, como no L2e
              -- FASE 7b: fim
-             ((pg_temp.cartao(so.id) #- '{duracao,campo}') - 'presenca_dono' - 'equipe')::text
+             ((pg_temp.cartao(so.id) #- '{duracao,campo}') - 'presenca_dono' - 'equipe' - 'local')::text
              is distinct from (pg_temp.plano_de_antes(so.id, date '2026-10-30') - 'presenca_dono')::text
              or ((pg_temp.cartao(so.id) #>> '{presenca_dono,aprendida}') is null
                  and ((pg_temp.cartao(so.id) -> 'presenca_dono') - 'aprendida')::text

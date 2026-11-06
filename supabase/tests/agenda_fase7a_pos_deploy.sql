@@ -329,11 +329,15 @@ select public.agenda_ver(p_foco => 'gestor') as ges, public.agenda_ver(p_foco =>
        (select c.modo_leitura from public.agenda_config c where c.id) as leitura;
 
 insert into _resultado
-select 'L1 o foco gestor devolve texto dentro de texto_max mais o "Como eu conto" (com a leitura desligada: "a agenda de produção está desligada")',
+select 'L1 o foco gestor devolve texto dentro de texto_max, mais o bloco "Quem chamar" (até 700 letras) e o "Como eu conto" (com a leitura desligada: "a agenda de produção está desligada")',
        case when l.leitura = 'desligado' then l.ges ->> 'rota' = 'desligada'
             -- (a correção da revisão: o conteúdo até texto_max e o "Como eu conto", a última linha, depois dele)
+            -- (7d P8, R6.12) e, antes do "Como eu conto", o bloco "Quem chamar": a correção da 7b o pôs depois do corte de propósito, até 700 letras (20261101100850; achados 1, 9 e 15)
             else (l.ges ->> 'ok')::boolean and length(l.ges ->> 'texto') between 1
-                 and l.texto_max + 1 + length(split_part(l.ges ->> 'texto', E'\n', array_length(string_to_array(l.ges ->> 'texto', E'\n'), 1))) end,
+                 and l.texto_max + 1 + length(split_part(l.ges ->> 'texto', E'\n', array_length(string_to_array(l.ges ->> 'texto', E'\n'), 1)))
+                     + case when l.ges ->> 'texto' ~ '(Em teste: q|Q)uem chamar' then 1 + 700 else 0 end
+                 and coalesce(length(substring(l.ges ->> 'texto' from '(?:Em teste: q|Q)uem chamar.*$')) - 1
+                              - length(split_part(l.ges ->> 'texto', E'\n', array_length(string_to_array(l.ges ->> 'texto', E'\n'), 1))), 0) <= 700 end,
        format('%s caracteres', length(l.ges ->> 'texto'))
   from _pd_leituras l;
 

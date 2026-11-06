@@ -15,6 +15,13 @@
   2. **"Na casa do cliente" não vira dado.** A §5.7 manda o local ficar nulo, com a nota no trecho: a cadeia volta a supor (motorhome = pátio), o foco do P8 vai mostrar a suposição e o M11 ainda perguntaria onde fica.
 - **Na Fase 7d:** sem conserto. Mudar (1) é texto novo ao dono, fora da §6.2; mudar (2) pede um local de tipo `casa_cliente` por OS ou uma coluna nova. O *ligar* de cada modo resolve o (1) sozinho.
 
+### [NOVO-agenda-94] A régua do "1" recusava a resposta em palavras, e só os evals viram — CONSERTADO no P8 da 7d
+
+- **Encontrado em:** Agenda de Produção, Fase 7d, P8 (06/11/2026), na 1ª rodada dos evals depois do P6b (casos S24 e K57).
+- **O quê:** com mais de uma pergunta esperando, o P6b exigia que o dono dissesse a decisão e a opção pelo número. "lança meia pro Roberto" e "na decisão do aviso do Nelson, pode mandar" são respostas: o modelo acha os números pela lista, como o prompt manda, e a régua recusava. A bancada passava o número junto com a frase e não via.
+- **Conserto:** `_agenda_disse_em_palavras` (`20261107100700`): as palavras identificam a pergunta, entre as que esperam, e falam da opção. Radical de 4 letras, sem as que não dizem nada. Quem escolhe é o dono, a releitura diz qual, e só o *grava* grava. "pode ser", "1" e "já combinei" com 2 perguntas iguais continuam perguntando (V8 de `agenda_fase7d_leituras.sql`).
+- **Vale ao entrar:** não depende de modo. É mudança de propósito na hora da migration, com o aviso no roteiro.
+
 # Novos achados encontrados durante a Fase 2
 
 Itens fora do escopo da tarefa em execução, registrados conforme a regra 5 da fila.

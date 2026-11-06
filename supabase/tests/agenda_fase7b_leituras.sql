@@ -68,6 +68,17 @@ create function pg_temp.sem_7b(p text) returns text language sql immutable as $f
                             from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n')
 $f$;
+-- (7d P8) a função passou a viver na 7d: antes de comparar com a etapa dela, tiram-se os blocos "-- FASE 7d:" e as marcas "-- (7d … -- (7d: fim)"
+create function pg_temp.sem_7d(p text) returns text language sql immutable as $f$
+  select array_to_string(array(
+           select l from (select l, o, sum(case when (l ~ '^\s*-- FASE 7d:' and l !~ '^\s*-- FASE 7d: fim')
+                                                     or (l ~ '^\s*-- \(7d ' and l !~ '^\s*-- \(7d: fim\)') then 1
+                                                when l ~ '^\s*-- (FASE 7d: fim|\(7d: fim\))' then -1 else 0 end)
+                                       over (order by o rows between unbounded preceding and current row) as dentro,
+                                 l ~ '^\s*-- (FASE 7d: fim|\(7d: fim\))' as fecha
+                            from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
+            where dentro = 0 and not fecha order by o), E'\n')
+$f$;
 -- p_sql (que devolve um valor) como o papel p_papel: o resultado em texto, ou 'erro <estado>: <mensagem>'.
 create function pg_temp.como(p_papel text, p_sql text, p_sub uuid default null) returns text language plpgsql as $f$
 declare
@@ -357,7 +368,7 @@ begin
     perform pg_temp.modos7b('desligado');
     select count(*), string_agg(so.service_order_number, ', ' order by so.service_order_number) filter (where
              pg_temp.cartao(so.id) -> 'equipe' <> 'null'::jsonb
-             or (pg_temp.cartao(so.id) - 'equipe')::text is distinct from pg_temp.plano_de_antes(so.id, date '2026-11-05')::text)
+             or (pg_temp.cartao(so.id) - 'equipe' - 'local')::text is distinct from pg_temp.plano_de_antes(so.id, date '2026-11-05')::text)
       into v_n, v_dif
       from public.service_orders so where so.service_order_number like 'OS-%';
     raise exception 'desfaz' using errcode = 'P0099';
@@ -432,7 +443,7 @@ begin
   exception when sqlstate 'P0099' then null;
   end;
   v_res := pg_temp.ok(v_res, 'L2a desligado: a saúde de antes, byte a byte (fora a chave equipe_dias); equipe_dias com os 11 zeros em 0, zeros_ok, os modos desligados e o ok de antes',
-    (s - 'equipe_dias')::text = s0::text
+    (s - 'equipe_dias' - 'local')::text = s0::text
     and (select bool_and((s -> 'equipe_dias' ->> z)::int = 0) from unnest(c_zeros) z)
     and (s #>> '{equipe_dias,zeros_ok}')::boolean and s #>> '{equipe_dias,modos,dupla}' = 'desligado' and s ->> 'ok' = s0 ->> 'ok',
     left((s -> 'equipe_dias')::text, 600));
@@ -609,10 +620,10 @@ begin
       continue;
     end if;
     v_res := pg_temp.ok(v_res, format('L5 a cópia de %s só acrescenta %s bloco(s) da 7b (o resto é o corpo da origem, byte a byte)', r.nome, r.blocos),
-      (select pg_temp.sem_7b(p.prosrc) = pg_temp.corpo(v_src, r.nome)
+      (select pg_temp.sem_7b(pg_temp.sem_7d(p.prosrc)) = pg_temp.corpo(v_src, r.nome)
               and (select count(*) from regexp_matches(p.prosrc, '-- FASE 7b( \(P5\))?: fim', 'g')) = r.blocos
          from pg_proc p where p.oid = r.sig::regprocedure),
-      (select format('%s × %s linhas; %s blocos', cardinality(string_to_array(pg_temp.sem_7b(p.prosrc), E'\n')),
+      (select format('%s × %s linhas; %s blocos', cardinality(string_to_array(pg_temp.sem_7b(pg_temp.sem_7d(p.prosrc)), E'\n')),
                      cardinality(string_to_array(pg_temp.corpo(v_src, r.nome), E'\n')),
                      (select count(*) from regexp_matches(p.prosrc, '-- FASE 7b( \(P5\))?: fim', 'g')))
          from pg_proc p where p.oid = r.sig::regprocedure));

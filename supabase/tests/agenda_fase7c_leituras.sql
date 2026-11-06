@@ -78,6 +78,17 @@ create function pg_temp.sem_7c(p text) returns text language sql immutable as $f
                             from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n')
 $f$;
+-- (7d P8) a função passou a viver na 7d: antes de comparar com a etapa dela, tiram-se os blocos "-- FASE 7d:" e as marcas "-- (7d … -- (7d: fim)"
+create function pg_temp.sem_7d(p text) returns text language sql immutable as $f$
+  select array_to_string(array(
+           select l from (select l, o, sum(case when (l ~ '^\s*-- FASE 7d:' and l !~ '^\s*-- FASE 7d: fim')
+                                                     or (l ~ '^\s*-- \(7d ' and l !~ '^\s*-- \(7d: fim\)') then 1
+                                                when l ~ '^\s*-- (FASE 7d: fim|\(7d: fim\))' then -1 else 0 end)
+                                       over (order by o rows between unbounded preceding and current row) as dentro,
+                                 l ~ '^\s*-- (FASE 7d: fim|\(7d: fim\))' as fecha
+                            from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
+            where dentro = 0 and not fecha order by o), E'\n')
+$f$;
 -- p_sql (que devolve um valor) como o papel p_papel com o login p_uid: o resultado em texto, ou 'erro <estado>: <mensagem>'.
 create function pg_temp.como(p_uid uuid, p_papel text, p_sql text) returns text language plpgsql as $f$
 declare
@@ -229,7 +240,7 @@ begin
     select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = r.assinatura::regprocedure;
     v_fonte := pg_temp.corpo(current_setting(r.guc), r.nome);
     if v_fonte = '' or pg_temp.sem_7c(v_novo) <> v_fonte or pg_temp.sem_7c(pg_temp.corpo(v_esta, r.nome)) <> v_fonte
-       or v_novo <> pg_temp.corpo(v_esta, r.nome)
+       or pg_temp.sem_7d(v_novo) <> pg_temp.corpo(v_esta, r.nome)
        or (select count(*) from regexp_matches(v_novo, '-- FASE 7c: fim', 'g')) <> 1 then
       v_dif := concat_ws(', ', v_dif, r.nome);
     end if;

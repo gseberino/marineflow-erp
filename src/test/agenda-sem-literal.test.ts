@@ -159,7 +159,8 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     // (20261029100950): + 10 na recriada (a mesma cópia; as janelas novas do aprendizado vêm de agenda_config). Fase 7a (P7,
     // 20261031100600): + 12 na recriada (a mesma cópia, 10, e o rodadas_24h e o erros_24h da rodada do gestor, no bloco gestor).
     // Fase 7b (P5, 20261101100400): + 12 na recriada (a mesma cópia; a chave equipe_dias vem de _agenda_saude_equipe7b).
-    vezes: 64,
+    // Fase 7d (P8, 20261107100700): + 12 na recriada (a mesma cópia; a chave local vem de _agenda_saude_local).
+    vezes: 76,
     porque: 'nomes das chaves do resultado (rodadas_24h, erros_24h, resposta_24h_pct: a janela de um dia da conferência); não é rascunho_validade',
   },
   // Fase 3 (P4): a rotina da equipe grava a rodada como a vigia.
@@ -216,6 +217,13 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     // Fase 7c, correção 2 da revisão (20261102100590): recriada (+1: a mesma cópia; a pergunta ligada que sobra depois do DESFAZER).
     vezes: 3,
     porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_aprender e agenda_equipe_semana); não é texto_max nem peca_embutida_acima',
+  },
+  // Fase 7d (P8, 20261107100700): a saúde do local (a chave local de agenda_saude) nomeia as chaves como os outros blocos.
+  {
+    onde: '_agenda_saude_local',
+    casou: '24h',
+    vezes: 2,
+    porque: 'nomes das chaves do resultado (rodadas_24h e erros_24h da rodada do local: a janela de um dia da conferência, como os blocos de agenda_saude); não é rascunho_validade',
   },
   // Fase 7c (P8, 20261102100550): a rodada das etapas grava a rodada como a de quem faz o quê; a ordem e a conta do plano do dia têm
   // as constantes de estrutura delas, uma vez cada, com nome (o que é parâmetro vem de agenda_config: tarefas_*, jornada_horas,

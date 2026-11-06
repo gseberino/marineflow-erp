@@ -1071,6 +1071,8 @@ insert into _definer_da_agenda values
 insert into _definer_da_agenda values ('agenda_local_vigiar'), ('_agenda_local_combinar'), ('_agenda_local_decidir');
   -- FASE 7d: (7d P6, 20261107100500) o passo do M11: a spec o pede definer, e só agenda_cliente_vigiar o chama
 insert into _definer_da_agenda values ('_agenda_cliente_onde_fica');
+  -- FASE 7d: (7d P8, 20261107100700) o foco locais e a saúde do local leem o combinar e os conflitos, que são só do service_role; a porta está dentro
+insert into _definer_da_agenda values ('_agenda_ver_locais'), ('_agenda_saude_local');
   -- FASE 7d: fim
 
 insert into _resultado
