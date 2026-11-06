@@ -6,7 +6,7 @@
 -- SÓ LEITURA EM PRODUÇÃO: nenhum INSERT, UPDATE ou DELETE (só nas tabelas TEMPORÁRIAS do resultado); agenda_saude, agenda_ver e as leituras do local são STABLE; termina em ROLLBACK.
 -- Na bancada (que não aplica a 20261107100900: lá os modos ficam como a linha está, desligado) ele passa do mesmo jeito.
 --
---   M  as 11 versões de estrutura registradas (com as correções das Ondas 1 e 2, 20261107100800 e 20261107100850); o dado (100900) é mostrado
+--   M  as 12 versões de estrutura registradas (com as correções das Ondas 1, 2 e 3, 20261107100800, 20261107100850 e 20261107100860); o dado (100900) é mostrado
 --   C  agenda_config: as 31 colunas da 7d; os 6 modos: com a 100900 registrada, sombra (ou ligado, depois dos OKs); sem ela, desligado; o DEFAULT é sombra; onde_fica_desde: gravada com o
 --      dado, nula sem ele; cliente_tipos_ligados aceita onde_fica; os_planejamento com as 14 colunas
 --   T  as 2 tabelas com RLS, só a política de leitura TO authenticated e o anon sem privilégio; o um pátio só; os gatilhos; as listas fechadas com o que a 7d somou; critica com acesso;
@@ -34,7 +34,7 @@ select exists (select 1 from supabase_migrations.schema_migrations m where m.ver
 -- ── M. As migrations ──────────────────────────────────────────────────────────────────────────────
 insert into _resultado
 select format('M1 migration %s registrada', v), exists (select 1 from supabase_migrations.schema_migrations m where m.version = v), null
-  from unnest(array['20261107100000', '20261107100100', '20261107100200', '20261107100300', '20261107100400', '20261107100500', '20261107100550', '20261107100600', '20261107100700', '20261107100800', '20261107100850']) v;
+  from unnest(array['20261107100000', '20261107100100', '20261107100200', '20261107100300', '20261107100400', '20261107100500', '20261107100550', '20261107100600', '20261107100700', '20261107100800', '20261107100850', '20261107100860']) v;
 insert into _resultado
 select 'M2 a migration de dado 20261107100900 (a semente e os 6 modos em teste) — só mostra', true,
        case when (select dado from _pd) then 'registrada (passo 3 feito)' else 'não registrada (antes do passo 3)' end;
@@ -149,6 +149,10 @@ select 'F1c as 2 funções da correção da Onda 2 existem', count(*) = 2, null
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
  where n.nspname = 'public' and p.proname in ('_agenda_titulo_da_pergunta', '_agenda_saiu_da_equipe');
 insert into _resultado
+select 'F1d as 4 funções da correção da Onda 3 existem', count(*) = 4, null
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'public' and p.proname in ('_agenda_uf_dita', '_agenda_local_sem_uf', '_agenda_local_recolher', '_agenda_data_no_passado');
+insert into _resultado
 select format('F1 as %s funções novas da 7d existem', count(*)), count(*) filter (where p.oid is null) = 0,
        coalesce('faltam: ' || string_agg(n, ', ') filter (where p.oid is null), null)
   from unnest(array[
@@ -180,7 +184,8 @@ select 'F2 nenhuma função da 7d é executável por anon', count(*) filter (whe
   '_agenda_linhas_do_fechamento', '_agenda_local_da_os', '_agenda_melhor', '_agenda_modo_da_pergunta', '_agenda_por_que_nao', '_agenda_rascunho_frase',
   '_agenda_tentar_bloco', '_agenda_validar_itens', '_agenda_ver_clientes', '_agenda_ver_decisoes', '_agenda_violacoes', 'agenda_cliente_vigiar',
   'agenda_decidir', 'agenda_decisoes_abertas', 'agenda_desfazer', 'agenda_equipe_ficha', 'agenda_propor', 'agenda_rascunho_aplicar',
-  'agenda_rascunho_planejar', 'agenda_resposta_do_cliente', 'agenda_saude', 'os_plano_da_os', 'agenda_ver']);
+  'agenda_rascunho_planejar', 'agenda_resposta_do_cliente', 'agenda_saude', 'os_plano_da_os', 'agenda_ver',
+  '_agenda_uf_dita', '_agenda_local_sem_uf', '_agenda_local_recolher', '_agenda_data_no_passado']);
 insert into _resultado
 select format('F3 as %s recriadas estão no banco com o bloco do pacote mais novo que as recria (a versão certa)', count(*)),
        count(*) filter (where p.oid is null or p.prosrc not like '%(7d ' || r.pacote || '%') = 0,

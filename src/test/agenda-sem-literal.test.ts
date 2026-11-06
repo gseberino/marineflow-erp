@@ -131,12 +131,25 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     vezes: 1,
     porque: 'o mesmo nome do feriado de 20/07 (aniversário de Balneário Camboriú); não é municipios_locais',
   },
+  // Fase 7d (correção, Onda 3, G6): "Balneário" e "BC" são a cidade: o nome dela, no lugar novo "outro lugar em BC".
+  {
+    onde: '_agenda_local_novo',
+    casou: 'Balneário',
+    vezes: 1,
+    porque: 'o nome da cidade que o dono disse pelo apelido ("outro lugar em BC"); não é municipios_locais',
+  },
+  {
+    onde: '_agenda_local_novo',
+    casou: 'Camboriú',
+    vezes: 1,
+    porque: 'o mesmo nome da cidade; não é municipios_locais',
+  },
   // Fase 7d (P6): o exemplo do texto ao dono (spec-fase7d §6.3), na pergunta local sem leitura.
   {
     onde: '_agenda_cliente_anotar_onde',
     casou: 'Itajaí',
-    // Fase 7d (correção, Onda 1, 20261107100800): recriada (+2: o exemplo de lugar da O19, nas 2 perguntas).
-    vezes: 3,
+    // Fase 7d (correção, Onda 1, 20261107100800): recriada (+2: o exemplo de lugar da O19, nas 2 perguntas). Onda 3 (20261107100860): recriada (+2).
+    vezes: 5,
     porque: 'o exemplo literal ao dono (§6.3; na correção O19, "o serviço do {nome} é na Marina Itajaí"); não é municipios_locais',
   },
   // Fase 2 (P6): as migrations 2026102510* entraram na varredura.

@@ -376,6 +376,8 @@ const FIXTURES_COMO_TEXTO = [
   ['agenda_teste.mig_correcao_fase7d', '../../supabase/migrations/20261107100800_agenda_fase7d_correcao.sql'],
   // Fase 7d (correção, Onda 2): a própria migration (20261107100850), para o T0 de agenda_fase7d_correcao2.sql conferir as cópias.
   ['agenda_teste.mig_correcao2_fase7d', '../../supabase/migrations/20261107100850_agenda_fase7d_correcao2.sql'],
+  // Fase 7d (correção, Onda 3): a própria migration (20261107100860), para o T0 de agenda_fase7d_correcao3.sql conferir as cópias.
+  ['agenda_teste.mig_correcao3_fase7d', '../../supabase/migrations/20261107100860_agenda_fase7d_correcao3.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

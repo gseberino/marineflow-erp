@@ -177,8 +177,10 @@ begin
       ('_agenda_ver_decisoes', 'mig_responder_fase7d'), ('agenda_rascunho_aplicar', 'mig_correcao_fase7d'), ('agenda_rascunho_planejar', 'mig_correcao_fase7d'),
       ('_agenda_rascunho_frase', 'mig_rascunho_fase7d')) t(nome, fonte) loop
     select replace(p.prosrc, E'\r\n', E'\n') into v_viva from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = c.nome;
+    -- (correção da 7d, Onda 3) _agenda_ver_decisoes e agenda_rascunho_planejar passaram a viver na 20261107100860: a viva é a da migration mais nova que a define
     insert into _resultado values ('T0d ' || c.nome || ': a viva é a da migration; sem os blocos, a origem, byte a byte',
-      v_viva = pg_temp.corpo(v_mig, c.nome) and pg_temp.sem_7d(v_viva) = pg_temp.sem_7d(pg_temp.corpo(current_setting('agenda_teste.' || c.fonte), c.nome)), null);
+      v_viva = coalesce(nullif(pg_temp.corpo(coalesce(current_setting('agenda_teste.mig_correcao3_fase7d', true), ''), c.nome), ''), pg_temp.corpo(v_mig, c.nome))
+      and pg_temp.sem_7d(v_viva) = pg_temp.sem_7d(pg_temp.corpo(current_setting('agenda_teste.' || c.fonte), c.nome)), null);
   end loop;
   insert into _resultado values ('T0e a sessão do retorno e os focos: agenda_data_dita, _agenda_chave_telefone, agenda_dia_util, agenda_somar_du, agenda_feriado, _agenda_cliente_dia, _agenda_nome_curto, _agenda_juntar e _agenda_corta ficam de fora',
     v_mig !~ 'function public\.(agenda_data_dita|_agenda_chave_telefone|agenda_dia_util|agenda_somar_du|agenda_feriado|_agenda_cliente_dia|_agenda_nome_curto|_agenda_juntar|_agenda_corta)\(', null);
@@ -256,10 +258,11 @@ begin
     perform pg_temp.perg('nfe_vincular', 'o8:nota', 'Chegou a nota 111. É de qual serviço? 1) Vanderlei: Porta Fusível…; 2) nenhum (estoque ou escritório). Me diga o número ou o nome.', c_opsn);
     v := pg_temp.ver();
     v_t := v ->> 'texto';
-    v_res := pg_temp.ok(v_res, 'O8d acima das 1.800: corta com "(e mais N linhas)" e diz os focos por assunto, no teto',
-      char_length(v_t) <= 1800 and v_t ~ E'\\(e mais \\d+ linhas\\)\nPara ver por assunto: \\*agenda compras\\*, \\*agenda clientes\\* ou \\*agenda gestor\\*\\.$', right(v_t, 200));
+    -- (correção da 7d, Onda 3, T4) o corte não esconde: a última linha diz o que ficou de fora, e sai o ponteiro para os focos, onde as perguntas não estão
+    v_res := pg_temp.ok(v_res, 'O8d acima das 1.800: a última linha diz o que ficou de fora, no teto',
+      char_length(v_t) <= 1800 and v_t ~ E'\nTambém esperam: Sem número \\d+; .*Sem número 16\\.$' and v_t not like '%por assunto%', right(v_t, 200));
     v_res := pg_temp.ok(v_res, 'O8e dados leva todas as abertas, mesmo as cortadas', jsonb_array_length(v #> '{dados,abertas}') = 17 and (v #>> '{dados,outras}')::int = 17
-      and v_t not like '%Sem número 16.%' and (v #> '{dados,abertas}')::text like '%Sem número 16.%', null);
+      and v_t not like '%Sem número 16. Uma pergunta%' and (v #> '{dados,abertas}')::text like '%Sem número 16. Uma pergunta%', null);
     v_res := pg_temp.ok(v_res, 'O8f quem tem opções vem antes das sem opções: a nota não é a que o corte tira',
       v_t like '%Também quero saber: Chegou a nota 111.%' and position('Chegou a nota 111' in v_t) < position('Sem número 1.' in v_t) and v #>> '{dados,abertas,0,tipo}' = 'nfe_vincular', v_t);
     v_res := pg_temp.ok(v_res, 'O8g o resto fica na ordem de antes', position('Sem número 1.' in v_t) < position('Sem número 2.' in v_t), null);
@@ -280,12 +283,12 @@ begin
     update public.agenda_perguntas set estado = 'resolvida', resolvida_motivo = 'teste' where chave = 'o8:c';
     perform pg_temp.perg('bem_livre', 'o8:d', repeat('y', 579), '[]'::jsonb, null, date '2027-07-03');
     v_t := pg_temp.ver() ->> 'texto';
-    v_res := pg_temp.ok(v_res, 'O8i 1.801 cortam, e a linha dos focos entra no teto', v_t like '%(e mais 1 linha)%por assunto%' and char_length(v_t) <= 1800, char_length(v_t)::text);
+    v_res := pg_temp.ok(v_res, 'O8i 1.801 cortam, e a linha do que ficou de fora entra no teto', v_t like '%Também esperam: yyy%' and v_t not like '%(e mais%' and char_length(v_t) <= 1800, char_length(v_t)::text);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
             when others then v_res := pg_temp.ok(v_res, 'O8h quebrou', false, sqlerrm);
   end;
-  -- A linha dos focos conta no teto: 3 linhas que caberiam sozinhas saem para ela entrar
+  -- A última linha conta no teto: linhas que caberiam sozinhas saem para ela entrar
   begin
     perform pg_temp.base('sombra');
     perform pg_temp.limpa();
@@ -293,7 +296,7 @@ begin
       perform pg_temp.perg('bem_livre', 'o8:n:' || k, repeat(k::text, 560), '[]'::jsonb, null, date '2027-07-01' + k);
     end loop;
     v_t := pg_temp.ver() ->> 'texto';
-    v_res := pg_temp.ok(v_res, 'O8n a linha dos focos entra no teto, e tira linha se precisar', char_length(v_t) <= 1800 and v_t like '%(e mais 2 linhas)%por assunto%', char_length(v_t)::text);
+    v_res := pg_temp.ok(v_res, 'O8n a última linha entra no teto, e tira linha se precisar', char_length(v_t) <= 1800 and v_t ~ E'\nTambém esperam: 3+…; 4+…\\.$', right(v_t, 200));
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
             when others then v_res := pg_temp.ok(v_res, 'O8n quebrou', false, sqlerrm);

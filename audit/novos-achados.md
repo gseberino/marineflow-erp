@@ -20,9 +20,19 @@
 ### [NOVO-agenda-96] `dados` de `agenda_ver` não chega ao modelo, e `mostrada_em` não vê a conversa (Fase 7d, correção, Onda 2)
 
 - **Encontrado em:** Agenda de Produção, Fase 7d, Onda 2 (06/11/2026), ao fazer o O8 e o R1.
-- **`dados`:** `resultadoDaLeitura` (`_shared/agenda/rpc-das-ferramentas.ts`) devolve ao modelo só `texto`, de propósito ("nunca os dados grandes"). `dados.abertas` de `_agenda_ver_decisoes` serve à tela e aos testes; o modelo só lê o que coube no texto. Por isso as perguntas com opções vêm primeiro no foco: a nota por número ("na nota, a 2") não pode ser o que o corte tira. Sobrando o corte, o prompt manda perguntar, nunca adivinhar.
+- **`dados`:** `resultadoDaLeitura` (`_shared/agenda/rpc-das-ferramentas.ts`) devolve ao modelo só `texto`, de propósito ("nunca os dados grandes"). `dados.abertas` de `_agenda_ver_decisoes` só os testes leem: a tela não chama `agenda_ver`; o modelo só lê o que coube no texto. Desde a Onda 3 (T4), o que não coube aparece no texto, pelo título. Por isso as perguntas com opções vêm primeiro no foco: a nota por número ("na nota, a 2") não pode ser o que o corte tira. Sobrando o corte, o prompt manda perguntar, nunca adivinhar.
 - **`mostrada_em`:** anda a cada mostra no fechamento e na carona; no aviso do gestor anda no tique seguinte (até 15 min depois de sair); em *agenda pendências*, em `agenda_ver` pelo modelo e na resposta "Qual decisão?", nunca. Medir a pergunta pela conversa mudaria `mostrada_vezes`, que conta prazo e o teto do fechamento. A trava do "1" lê as 3 fontes (a pergunta, a fila e a conversa) e fica de pé sem mexer nisso.
 - **Fica aberto:** `mostrada_em` continua sem ver a conversa. Quem usar para "o dono já viu" precisa saber disso.
+
+### [NOVO-agenda-97] 2ª revisão da 7d, o que fica de fora de propósito (decisão do fio, 06/11/2026)
+
+- **G13:** `Marquei nos últimos 7 dias: nada.` em *agenda gestor*, com serviço marcado pelo motor. A linha é de antes da 7d; a causa não foi apurada. O roteiro manda ler *agenda plano*.
+- **G14:** depois do *entreguei*, a mensagem de pós-serviço (Fase 5) nasce 3 dias úteis depois, para serviços que o dono disse terem acabado há semanas. Ela espera o OK dele; o roteiro avisa.
+- **"(pela OS)" sob "Já ditos":** em *agenda locais*, o local que veio da OS aparece em "Já ditos", e o dono não disse. É só rótulo.
+- **T12:** `_agenda_patio_frase` é IMMUTABLE e chama `_agenda_local_no`, agora STABLE. Sem efeito: ela só olha `like 'no %'`, e o ramo novo devolve "em ". Nenhum índice, coluna gerada ou CHECK usa a função. Vale acertar a volatilidade quando alguém recriar.
+- **Lugar novo com recado no começo:** "Água Verde", "Garagem do Zé", "Fora da Barra" são recusados: a palavra conta no começo do texto, como a decisão pede. O dono diz de outro jeito ("Bairro Água Verde").
+- **São Paulo e Rio de Janeiro** são recusados como estado. "na cidade de São Paulo" passa.
+- **Autorizados presos ao local (G6):** a linha nova com autorizados vivos não sai na correção; `_agenda_local_recolher` conta `os_autorizados`, como o *desfaz*.
 
 ### [NOVO-agenda-95] Revisão da 7d, o que fica de fora de propósito (decisão do fio, 06/11/2026)
 
