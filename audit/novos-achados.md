@@ -3351,7 +3351,7 @@ porque só o dono pode preenchê-las.
   meios-dias de estrada como meios-dias da própria OS (spec §3.3 d10), e a etapa pode cair num deles: a ficha diria o que fazer num dia de
   estrada.
 - **Na Fase 7d:** sem conserto. Hoje nenhuma OS é de viagem e a 7c está em teste. O OK de `modo_viagem` avisa disso (R6.11).
-### [NOVO-agenda-91] Pergunta com opções e sem ser crítica não tem caminho de resposta pela conversa
+### [NOVO-agenda-91] Pergunta com opções e sem ser crítica não tem caminho de resposta pela conversa — CONSERTADO EM PARTE no P6b da 7d; sobram `nfe_vincular` e `previsao_fornecedor`
 
 - **Encontrado em:** Agenda de Produção, Fase 7d, P5 (05/11/2026), lendo o caminho de `agenda_decidir`.
 - **O quê:** quem chega a `agenda_decidir` pela conversa e pela tela é `agenda_rascunho_aplicar`, que acha a pergunta em `agenda_decisoes_abertas`, e essa lista só leva
@@ -3361,5 +3361,15 @@ porque só o dono pode preenchê-las.
   chegam ao dono por ela.
 - **Na Fase 7d:** a `combinar` entrou em `agenda_decisoes_abertas` (`20261107100400`), porque sem isso ela nasceria sem resposta. Os tipos da 7a e da 7b ficam como estão:
   o conserto é uma linha, mas muda o que o dono já vê hoje, e não é do pacote. Confirmado rodando só para a `combinar` (C3v); nos outros tipos, por leitura.
-- **Cuidado:** a lista numera por `perda_em`: ao entrar um tipo novo, "Decisão 1" passa a poder ser outra.
+- **Cuidado:** a lista numerava por `perda_em`: ao entrar um tipo novo, "Decisão 1" passaria a poder ser outra. Desde o P6b as críticas vêm primeiro.
+- **Consertado em parte (Fase 7d, P6b, 06/11/2026, migration `20261107100550`, ainda não aplicada):** `agenda_decisoes_abertas` passa a levar `situacao`, `estimativa`, `reavaliar`,
+  `reestimar`, `ficha_estimativa`, `dias_semana`, `equipe_cadastro` (chamada e contato) e `diaria_ligar`, depois das críticas, e elas saem de "Também quero saber".
+  `agenda_rascunho_aplicar` pergunta qual quando há mais de uma esperando, confere a decisão e a opção nas palavras do dono, e a releitura diz de qual pergunta é a opção.
+  Prova pelo caminho real: `supabase/tests/agenda_fase7d_responder.sql`. Inventário: `notas-fase7d.md`, seção P6b.
+- **Sobra, sem conserto:** `nfe_vincular` e `previsao_fornecedor` nascem com opções e dizem "Me diga o número ou o nome", mas `agenda_decidir` não as decide ("Essa pergunta não é de
+  decisão."). Elas seguem sem número, em "Também quero saber". O caminho delas é `material_informar` com o `aviso` (a nota ou a mensagem, com a OS), que funciona pelo nome. O
+  número não tem caminho no banco: "1" recebe "Essa pergunta não tem número de decisão: me responda com as suas palavras." e a pergunta. Em produção hoje: 1 `nfe_vincular` aberta. Saídas:
+  um ramo em `agenda_decidir` que grave pelo caminho do aviso, ou o modelo mapear a opção para a OS dela (é o que o P8 ensina), ou trocar o texto para "Me diga o nome". Nenhuma é do P6b.
+- **Com *gestor, só propor*:** `situacao`, `estimativa`, `reavaliar` e `reestimar` têm número e a resposta é recusada, como já era em `agenda_decidir` (hoje a `estimativa` do Giancarlo). Quem
+  responde ouve o porquê na hora. Volta a responder quando o freio soltar.
 

@@ -360,6 +360,9 @@ const FIXTURES_COMO_TEXTO = [
   ['agenda_teste.mig_acabamento_fase6', '../../supabase/migrations/20261029100700_agenda_fase6_acabamento.sql'],
   ['agenda_teste.mig_cliente_fase7d', '../../supabase/migrations/20261107100500_agenda_fase7d_cliente.sql'],
   ['agenda_teste.mig_retorno_f0a', '../../supabase/migrations/20261105100000_retorno_f0a_canal_bloqueado.sql'],
+  // Fase 7d (P6b): a própria migration do conserto do NOVO-agenda-91 (20261107100550), para o R0 de agenda_fase7d_responder.sql conferir as 3 recriadas. As fontes já
+  // estão acima: mig_rascunho_fase2 e mig_cliente_fase7d.
+  ['agenda_teste.mig_responder_fase7d', '../../supabase/migrations/20261107100550_agenda_fase7d_responder.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */
