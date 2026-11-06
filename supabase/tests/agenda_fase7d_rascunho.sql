@@ -152,7 +152,8 @@ begin
     select p.prosrc into v_viva from pg_proc p where p.oid = c.assinatura::regprocedure;
     v_orig := pg_temp.corpo(current_setting('agenda_teste.' || c.fonte), c.nome);
     insert into _resultado values ('R0g ' || c.nome || ': viva = a da migration; tirados os blocos da 7d, é a origem da R6.1, byte a byte',
-      v_orig <> '' and v_viva = pg_temp.corpo(v_mig, c.nome) and pg_temp.sem_7d(v_viva) = pg_temp.sem_7d(v_orig), null);
+      -- (correção da 7d, Onda 1) 3 destas passaram a viver na 20261107100800: a viva e a desta migration são comparadas sem os blocos
+      v_orig <> '' and pg_temp.sem_7d(v_viva) = pg_temp.sem_7d(pg_temp.corpo(v_mig, c.nome)) and pg_temp.sem_7d(v_viva) = pg_temp.sem_7d(v_orig), null);
   end loop;
   insert into _resultado values ('R0h a migration não escreve dado: só funções, comentários, revoke e grant',
     regexp_replace(v_mig, '\$function\$.*?\$function\$', '', 'g') !~* '^\s*(insert|update|delete|alter|drop|truncate)\s', null);
@@ -353,8 +354,10 @@ begin
         -- a cidade não identifica: 2 locais nela é pergunta (a Marina Itajaí não ganha por ter a cidade no nome)
         ('Itajaí', 'ambiguo', 'Kalmar Estaleiro|Marina Itajaí'), ('em Balneário Camboriú', 'ambiguo', 'MP Motorhomes|Tedesco Marina Garden Plaza'),
         ('Guaratuba', 'ambiguo', 'Iate Clube Caiobá|Marina do Sol'),
-        -- não achei: um local só na cidade não é o local; palavra que ninguém explica; o que não é local; a marina de teste, fora da semente; Camboriú é outro município
-        ('Florianópolis', 'nao_achei', null), ('Pontal do Paraná', 'nao_achei', null), ('Penha', 'nao_achei', null), ('Camboriú', 'nao_achei', null),
+        -- (correção O2) a cidade com 1 local também pergunta, com a saída "outro lugar em {cidade}": não é o local, mas é cidade com local cadastrado
+        ('Florianópolis', 'ambiguo', 'Veleiros da Ilha'), ('Pontal do Paraná', 'ambiguo', 'Ponta do Poço Marina Clube'),
+        -- não achei: cidade sem local; palavra que ninguém explica; o que não é local; a marina de teste, fora da semente; Camboriú é outro município
+        ('Penha', 'nao_achei', null), ('Camboriú', 'nao_achei', null),
         ('marina do joão', 'nao_achei', null), ('marina nova', 'nao_achei', null), ('pátio do João', 'nao_achei', null), ('oficina do Zé', 'nao_achei', null),
         ('pátio do cliente', 'nao_achei', null), ('estaleiro do Zé', 'nao_achei', null), ('Marina Teste Auditoria', 'nao_achei', null), ('garagem', 'nao_achei', null),
         ('marinas', 'nao_achei', null), ('casa', 'nao_achei', null), ('casa do Nelson', 'nao_achei', null), ('casa do delegado', 'nao_achei', null),
@@ -593,10 +596,12 @@ begin
     perform pg_temp.plan('OS-J14', '{"local": "na casa do cliente"}'::jsonb, 'o barco ficou lá com ele');
     r2 := pg_temp.grava();
     pl := pg_temp.pl('OS-J14');
-    v_res := pg_temp.ok(v_res, 'R2al casa do cliente: o local fica nulo, sobrepõe o que havia, e a nota vai ao trecho', (r2 ->> 'ok')::boolean and pl.local_id is null and pl.local_fonte is null and pl.trecho = 'na casa do cliente: o barco ficou lá com ele', to_jsonb(pl)::text);
+    -- (correção O3) a casa virou local: o trecho guarda só o que ele disse
+    v_res := pg_temp.ok(v_res, 'R2al casa do cliente: vira a linha de agenda_locais, sobrepõe o que havia (correção O3)', (r2 ->> 'ok')::boolean and pl.local_fonte = 'dono'
+                        and (select l.tipo from public.agenda_locais l where l.id = pl.local_id) = 'casa_cliente' and pl.trecho = 'o barco ficou lá com ele', to_jsonb(pl)::text);
     perform pg_temp.plan('OS-J10', '{"local": "casa do cliente"}'::jsonb, 'está na casa do cliente');
     perform pg_temp.grava();
-    v_res := pg_temp.ok(v_res, 'R2am a nota não repete o que o dono já disse', (pg_temp.pl('OS-J10')).trecho = 'está na casa do cliente', (pg_temp.pl('OS-J10')).trecho);
+    v_res := pg_temp.ok(v_res, 'R2am o trecho é o que o dono disse', (pg_temp.pl('OS-J10')).trecho = 'está na casa do cliente', (pg_temp.pl('OS-J10')).trecho);
     -- quem já tinha linha: a palavra do dono vale inteira
     insert into public.os_autorizados (service_order_id, payee_id, local_id, valido_ate, fonte, trecho)
     values (pg_temp.os('OS-J13'), pg_temp.pessoa('Roberto'), pg_temp.local('Tedesco Marina Garden Plaza'), date '2027-08-01', 'cliente', 'o cliente disse');
@@ -632,8 +637,13 @@ begin
     v_res := pg_temp.ok(v_res, 'R3a local ambíguo: a pergunta dela, com as opções; nada no rascunho',
       not (r ->> 'ok')::boolean and r ->> 'motivo' = 'local_ambiguo' and r ->> 'texto' like 'Qual deles: Marina do Sol (Guaratuba),%' and jsonb_array_length(r -> 'opcoes') = 4 and r -> 'opcoes' ->> 0 = 'Marina do Sol' and pg_temp.abertos() = 0, r::text);
     r := pg_temp.plan('OS-J12', '{"local": "marina do joão"}'::jsonb, 'na marina do joão');
-    v_res := pg_temp.ok(v_res, 'R3b local que não existe: o texto dela, com a lista; nada no rascunho',
-      not (r ->> 'ok')::boolean and r ->> 'motivo' = 'local_nao_achei' and r ->> 'texto' like 'Não achei "marina do joão" no cadastro.%' and pg_temp.abertos() = 0, r::text);
+    -- (correção O2) o lugar fora do cadastro entra na releitura; a recusa é do que não é nome: dia 5, número, vazio, mais de 60 letras (agenda_fase7d_correcao.sql)
+    v_res := pg_temp.ok(v_res, 'R3b local que não existe e é nome plausível: entra na releitura (correção O2)',
+      (r ->> 'ok')::boolean and r ->> 'item' like '%Local: Marina do João (lugar novo: entra no cadastro quando você gravar).%' and pg_temp.abertos() = 1, r::text);
+    update public.agenda_rascunho set estado = 'substituido' where estado = 'aberto';
+    r := pg_temp.plan('OS-J12', '{"local": "dia 5"}'::jsonb, 'é dia 5');
+    v_res := pg_temp.ok(v_res, 'R3b2 o que não é nome: a recusa que explica; nada no rascunho (correção O2)',
+      not (r ->> 'ok')::boolean and r ->> 'motivo' = 'local_data' and r ->> 'texto' like '"dia 5" parece uma data%' and pg_temp.abertos() = 0, r::text);
     r := pg_temp.plan('OS-J12', '{"local": "pátio da Kalmar"}'::jsonb, 'no pátio da Kalmar');
     v_res := pg_temp.ok(v_res, 'R3c "pátio da Kalmar" não vira o pátio da HBR', not (r ->> 'ok')::boolean and r ->> 'motivo' = 'local_ambiguo' and pg_temp.abertos() = 0, r::text);
     r := pg_temp.plan('OS-J12', '{"autorizados": ["Zé Ninguém"]}'::jsonb, 'o Zé Ninguém está autorizado');
@@ -641,10 +651,11 @@ begin
       not (r ->> 'ok')::boolean and r ->> 'motivo' = 'pessoa_nao_achei' and r ->> 'texto' = 'Não conheço ninguém chamado Zé Ninguém na equipe.' and pg_temp.abertos() = 0, r::text);
     r := pg_temp.plan('OS-J12', '{"autorizados": ["Roberto", "Zé Ninguém"]}'::jsonb, 'Roberto e Zé Ninguém');
     v_res := pg_temp.ok(v_res, 'R3e uma pessoa que não existe na lista recusa a lista inteira', not (r ->> 'ok')::boolean and r ->> 'motivo' = 'pessoa_nao_achei' and pg_temp.abertos() = 0, r::text);
-    r := pg_temp.plan('OS-J11', '{"chega_em": "dia 28", "sai_em": "dia 20"}'::jsonb, 'chega dia 28 e sai dia 20');
+    -- (correção O7b) com o mês dito: sem ele, a chegada cai no mês da saída ou no anterior
+    r := pg_temp.plan('OS-J11', '{"chega_em": "28/07", "sai_em": "20/07"}'::jsonb, 'chega 28/07 e sai 20/07');
     v_res := pg_temp.ok(v_res, 'R3f chega > sai: recusa com as duas datas; nada no rascunho',
       not (r ->> 'ok')::boolean and r ->> 'motivo' = 'chega_depois_de_sai' and r ->> 'texto' = 'Não anotei: a saída (ter 20/07) tem de ser depois da chegada (qua 28/07). Me diga as datas certas.' and pg_temp.abertos() = 0, r::text);
-    r := pg_temp.plan('OS-J11', '{"chega_em": "dia 20", "sai_em": "dia 20"}'::jsonb, 'chega dia 20 e sai dia 20');
+    r := pg_temp.plan('OS-J11', '{"chega_em": "20/07", "sai_em": "20/07"}'::jsonb, 'chega 20/07 e sai 20/07');
     v_res := pg_temp.ok(v_res, 'R3g chega = sai: recusa (entrada_antes_saida é estrito)', not (r ->> 'ok')::boolean and r ->> 'motivo' = 'chega_depois_de_sai' and pg_temp.abertos() = 0, r::text);
     -- contra o que está gravado
     perform pg_temp.plan('OS-J11', '{"chega_em": "dia 20"}'::jsonb, 'chega dia 20');

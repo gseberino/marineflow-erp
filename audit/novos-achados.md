@@ -7,13 +7,21 @@
 - **Na Fase 7d:** o M11 cede. Ele roda depois de `confirmar` e, com mensagem do cliente no dia (mesmo ainda não enfileirada), o teto da semana cheio ou outro M11 em
   `cliente_mesmo_tipo_horas`, não registra e tenta no tique seguinte (K2z1 a K2z7). **Sobra:** o M11 que saiu de manhã ainda toma o dia de uma confirmação que só nasce à tarde
   (o material chegou depois): ela é recusada por `teto_dia`, e a véspera segue. Sem conserto na 7d.
-### [NOVO-agenda-93] O que o dono diz no `os_planejar` e a agenda ainda não usa
+### [NOVO-agenda-93] O que o dono diz no `os_planejar` e a agenda ainda não usa — o item 2 CONSERTADO na correção da 7d (Onda 1, O3)
 
 - **Encontrado em:** Agenda de Produção, Fase 7d, P7 (06/11/2026), escrevendo a releitura da §6.2 e o teste de sombra.
 - **O quê:** duas coisas, as duas de spec, nenhuma de código.
   1. **A releitura promete em teste.** "Viagem com pernoite: a equipe vai e volta junta, em dias seguidos." sai igual com `modo_viagem` em sombra, e o motor ignora a viagem até o modo ligar. O mesmo vale para "Local: …" com `modo_mesmo_local` e o calendário em sombra. O dono lê que entendi; não lê que ainda não muda o plano.
   2. **"Na casa do cliente" não vira dado.** A §5.7 manda o local ficar nulo, com a nota no trecho: a cadeia volta a supor (motorhome = pátio), o foco do P8 vai mostrar a suposição e o M11 ainda perguntaria onde fica.
 - **Na Fase 7d:** sem conserto. Mudar (1) é texto novo ao dono, fora da §6.2; mudar (2) pede um local de tipo `casa_cliente` por OS ou uma coluna nova. O *ligar* de cada modo resolve o (1) sozinho.
+- **Consertado o (2) (correção da 7d, Onda 1, O3, migration `20261107100800`, ainda não aplicada):** "na casa do cliente" vira 1 linha de `agenda_locais` por cliente (`client_id`), tipo `casa_cliente`, nome "casa de {nome curto}". Sai o `trecho`. O (1) segue como está.
+
+### [NOVO-agenda-95] Revisão da 7d, o que fica de fora de propósito (decisão do fio, 06/11/2026)
+
+- **O20:** orçamento não tem cartão (`PlanoDaOs.tsx`: `draft`): ORÇ-00083 e ORÇ-00095 não mostram a linha Local. O foco por OS mostra.
+- **O22:** `agenda_saude` ficou 39% mais lenta em sombra (`_agenda_saude_local`). Nenhuma edge chama; 983 ms → ~1,3 s em produção, longe dos 8 s.
+- **"Não gravo, eu te digo como é" com pendência do assistente aberta:** a 1ª palavra "não" rejeita a pendência. Efeito pequeno e raro: a ação não executa.
+- **O entrada do pátio com viagem dita e local suposto (correção O14):** o calendário trata como lugar desconhecido, mas `_agenda_combinar_da_os` ainda cobra a entrada no pátio, porque a cadeia segue dizendo pátio. A decisão O14 fala só do calendário. Vale olhar quando `modo_viagem` e `modo_patio` ligarem juntos.
 
 ### [NOVO-agenda-94] A régua do "1" recusava a resposta em palavras, e só os evals viram — CONSERTADO no P8 da 7d
 

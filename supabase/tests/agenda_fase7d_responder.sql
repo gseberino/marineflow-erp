@@ -691,7 +691,7 @@ begin
     v_res := pg_temp.ok(v_res, 'R3c em *agenda pendências*, a mesma ordem: 5 decisões, a crítica é a 1, e a crítica sem as opções no texto fica byte a byte',
       v_t like '5 decisões esperam você na agenda:%Decisão 1: Não cabe o Nelson.%Decisão 3: Pergunta A?%' and v_t like E'%Decisão 2: Dia avisado do Flávio (OS-00104).\n%', v_t);
     r := pg_temp.responde('1', '2', 'decisão 1, opção 2', c_d);
-    v_res := pg_temp.ok(v_res, 'R3d a releitura da crítica é a de sempre, sem "na pergunta"', r ->> 'releitura' like E'Entendi assim, confere?\n• Decisão: Atrasa o Vanderlei.\n%' and pg_temp.rasc_q() = c_1, r::text);
+    v_res := pg_temp.ok(v_res, 'R3d a releitura da crítica diz qual é (correção O18)', r ->> 'releitura' like E'Entendi assim, confere?\n• Decisão: na pergunta "%": Atrasa o Vanderlei.\n%' and pg_temp.rasc_q() = c_1, r::text);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
@@ -774,7 +774,7 @@ begin
       jsonb_build_array(jsonb_build_object('n', 1, 'texto', 'Atrasa o Giancarlo', 'os', pg_temp.os('OS-00130')), jsonb_build_object('n', 2, 'texto', 'Atrasa o Nelson', 'os', pg_temp.os('OS-00112'))),
       null, date '2026-11-10', 'ligado', 1::smallint);
     r := pg_temp.responde('1', 'Giancarlo', 'pode atrasar', c_g);
-    v_res := pg_temp.ok(v_res, 'R4t "pode atrasar o Giancarlo": a opção pelo nome vale, mesmo com 2 abertas e sem número nas palavras', (r ->> 'ok')::boolean and pg_temp.rasc_q() = v_c and r ->> 'releitura' like E'%• Decisão: Atrasa o Giancarlo.\n%', r::text);
+    v_res := pg_temp.ok(v_res, 'R4t "pode atrasar o Giancarlo": a opção pelo nome vale, mesmo com 2 abertas e sem número nas palavras', (r ->> 'ok')::boolean and pg_temp.rasc_q() = v_c and r ->> 'releitura' like E'%• Decisão: na pergunta "%": Atrasa o Giancarlo.\n%', r::text);
     perform public.agenda_rascunho_descartar(pg_temp.adm());
     r := pg_temp.responde(null, 'Giancarlo', 'pode atrasar', c_g);
     v_res := pg_temp.ok(v_res, 'R4u a opção pelo nome, sem dizer a decisão e com 2 abertas: pergunta qual, nada no rascunho, como sempre foi', r ->> 'motivo' = 'decisao_ambigua' and pg_temp.rascunhos() = 0, r::text);
@@ -1024,7 +1024,7 @@ begin
     r := pg_temp.responde(null, '1', '1', c_g);
     r2 := pg_temp.grava(c_g);
     v_res := pg_temp.ok(v_res, 'R6i a crítica com o freio é a de antes: o rascunho nasce, o *grava* não passa, o plano fica igual',
-      (r ->> 'ok')::boolean and r ->> 'releitura' like E'%• Decisão: Tudo.\n%' and not (r2 ->> 'ok')::boolean and pg_temp.plano() = v_pl, r2::text);
+      (r ->> 'ok')::boolean and r ->> 'releitura' like E'%• Decisão: na pergunta "Muita mudança%": Tudo.\n%' and not (r2 ->> 'ok')::boolean and pg_temp.plano() = v_pl, r2::text);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;

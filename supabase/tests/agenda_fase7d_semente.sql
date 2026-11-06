@@ -161,7 +161,8 @@ begin
                         and public.agenda_resolver_local('com vocês', date '2026-11-07') ->> 'nome' = 'MP Motorhomes' and public.agenda_resolver_local('caioba', date '2026-11-07') ->> 'nome' = 'Iate Clube Caiobá', null);
     v_t := public.agenda_ver(null, null, null, 'locais', null, null, false, date '2030-01-07') ->> 'texto';
     v_res := pg_temp.ok(v_res, 'S5b o foco com a semente: 8 no cadastro, nenhum conferido, as 2 notas de pesquisa',
-                        v_t = 'Nenhum serviço marcado nas próximas 3 semanas. Locais: 8 no cadastro; nenhum conferido por você. Só como nota: Marina Itajaí pede autorização, pede seguro, no sábado só abre de manhã e tem garagem seca (pesquisa); Tedesco Marina Garden Plaza tem garagem seca (pesquisa).', v_t);
+                        -- (correção O1) o foco geral mostra as OS abertas; o que importa aqui é o cadastro
+                        v_t ~ 'Locais: 8 no cadastro; nenhum conferido por você\. Só como nota: Marina Itajaí pede autorização, pede seguro, no sábado só abre de manhã e tem garagem seca \(pesquisa\); Tedesco Marina Garden Plaza tem garagem seca \(pesquisa\)\.', v_t);
     update public.agenda_config set onde_fica_desde = date '2026-11-07' where id;
     v_j := public._agenda_saude_local(date '2026-11-07', timestamptz '2026-11-07 16:20-03');
     v_res := pg_temp.ok(v_res, 'S5c a saúde em teste: os zeros', (v_j ->> 'zeros_ok')::boolean and v_j #>> '{modos,mesmo_local}' = 'sombra', v_j::text);

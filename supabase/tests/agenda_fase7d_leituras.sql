@@ -95,6 +95,14 @@ $f$;
 create function pg_temp.foco(p_hoje date, p_os uuid default null) returns text language sql stable as $f$
   select public._agenda_ver_locais(p_hoje, p_os) ->> 'texto'
 $f$;
+-- (correção O1) O foco por OS das que têm plano nas próximas 3 semanas, uma linha por OS: o texto longo saiu do foco geral, e estes testes são do texto longo
+create function pg_temp.focos(p_hoje date) returns text language sql stable as $f$
+  select string_agg(public._agenda_ver_locais(p_hoje, x.os) ->> 'texto', E'\n' order by x.ini, public._agenda_rotulo_da_os(x.os), x.os)
+    from (select a.service_order_id as os, min(a.dia) as ini
+            from public.agenda_alocacoes a join public.os_carteira(p_hoje) k on k.service_order_id = a.service_order_id
+           where a.estado in ('publicada', 'fixada') and a.dia between p_hoje and p_hoje + 21
+           group by 1) x
+$f$;
 -- Uma alocação publicada, com o que o teste precisa.
 create function pg_temp.aloc(p_os uuid, p_payee uuid, p_dia date, p_turno text) returns void language sql as $f$
   insert into public.agenda_alocacoes (id, service_order_id, payee_id, dia, turno, presenca, tipo, estado, origem, publicada_em)
@@ -189,24 +197,24 @@ begin
   -- ── V1. O foco locais ──
   -- Em teste: o "Combinar" vira "Em teste, eu cobraria"; a linha do que eu faria; os 6 modos em sombra
   perform pg_temp.modos('sombra');
-  v_t := pg_temp.foco(d_hoje);
-  v_res := pg_temp.igual(v_res, 'V1a o foco em teste, byte a byte (§6.2): a OS que começa primeiro antes, o cadastro, o "Em teste"', v_t, $t$Onde é cada serviço (próximas 3 semanas):
-- Júlio (OS-J13): não sei onde é o serviço.
-- Lenine (OS-J1): MP Motorhomes, em Balneário Camboriú (pela OS). Em teste, eu cobraria: a entrada do motorhome no pátio para ter 20/07, até sex 16/07.
-- Nelson (OS-J2): Marina Itajaí (pela OS). O barco: em seco (garagem), quem desce: a marina; o teste final é na água. Em teste, eu cobraria: o acesso de João para ter 20/07, até hoje (sex 16/07); a vaga de serviço com a marina, até sex 16/07; a descida para o teste na água em ter 20/07. Autorizados nesse serviço: Roberto. Supus o teste final na água (pela linha de serviço).
-- Beto (OS-J12): Marina Itajaí (pela OS). Em teste, eu cobraria: o acesso de Rafael para seg 26/07, até qui 22/07.
-Locais: 5 no cadastro; 1 conferido por você (Marina Itajaí, em 01/07). Só como nota: Tedesco Marina Garden Plaza tem garagem seca (pesquisa).
-Em teste: com o calendário do local ligado, eu não marcaria ter 20/07 para Lenine (feriado em Balneário Camboriú).$t$);
+  v_t := pg_temp.focos(d_hoje);
+  v_res := pg_temp.igual(v_res, 'V1a o foco de cada OS, em teste, byte a byte (§6.2): a OS que começa primeiro antes, o "Em teste" dela', v_t, $t$Júlio (OS-J13): não sei onde é o serviço.
+Lenine (OS-J1): MP Motorhomes, em Balneário Camboriú (pela OS). Em teste, eu cobraria: a entrada do motorhome no pátio para ter 20/07, até sex 16/07.
+Em teste: com o calendário do local ligado, eu não marcaria ter 20/07 para Lenine (feriado em Balneário Camboriú).
+Nelson (OS-J2): Marina Itajaí (pela OS). O barco: em seco (garagem), quem desce: a marina; o teste final é na água. Em teste, eu cobraria: o acesso de João para ter 20/07, até hoje (sex 16/07); a vaga de serviço com a marina, até sex 16/07; a descida para o teste na água em ter 20/07. Autorizados nesse serviço: Roberto. Supus o teste final na água (pela linha de serviço).
+Beto (OS-J12): Marina Itajaí (pela OS). Em teste, eu cobraria: o acesso de Rafael para seg 26/07, até qui 22/07.$t$);
   v_j := public._agenda_ver_locais(d_hoje);
-  v_res := pg_temp.ok(v_res, 'V1b a saída: ok, linhas (uma por OS, com o rótulo e o bloco), cadastro e em_teste', (v_j ->> 'ok')::boolean and jsonb_array_length(v_j -> 'linhas') = 4
-                      and v_j -> 'linhas' -> 1 ->> 'rotulo' = 'Lenine (OS-J1)' and v_j -> 'linhas' -> 1 -> 'local' ->> 'fonte' = 'os'
+  -- (correção O1) uma linha por OS da carteira, com plano ou sem
+  v_res := pg_temp.ok(v_res, 'V1b a saída: ok, linhas (uma por OS aberta, com o rótulo e o local), cadastro e em_teste', (v_j ->> 'ok')::boolean
+                      and jsonb_array_length(v_j -> 'linhas') = (select count(*) from public.os_carteira(d_hoje))
+                      and (select e -> 'local' ->> 'fonte' from jsonb_array_elements(v_j -> 'linhas') e where e ->> 'rotulo' = 'Lenine (OS-J1)') = 'os'
                       and (v_j -> 'cadastro' ->> 'locais')::int = 5 and (v_j -> 'cadastro' ->> 'conferidos')::int = 1
                       and jsonb_array_length(v_j -> 'em_teste') = 1, v_j::text);
 
   -- O freio: ligado + freio = em teste, byte a byte (R6.7b)
   perform pg_temp.modos('ligado');
   update public.agenda_config set gestor_so_propor = true where id;
-  v_res := pg_temp.igual(v_res, 'V1c os 6 ligados com *gestor, só propor*: o texto de em teste, byte a byte (R6.7b)', pg_temp.foco(d_hoje), v_t);
+  v_res := pg_temp.igual(v_res, 'V1c os 6 ligados com *gestor, só propor*: o texto de em teste, byte a byte (R6.7b)', pg_temp.focos(d_hoje), v_t);
   update public.agenda_config set gestor_so_propor = false where id;
 
   -- O resto do V1 olha o texto inteiro: o corte tem o caso dele (V1at)
@@ -217,53 +225,51 @@ Em teste: com o calendário do local ligado, eu não marcaria ter 20/07 para Len
   perform pg_temp.aloc(pg_temp.os('OS-J6'), v_rafael, date '2027-07-21', 'tarde');
   perform pg_temp.aloc(pg_temp.os('OS-J3'), v_alex, date '2027-07-22', 'manha');
   perform pg_temp.m11(pg_temp.os('OS-J3'), timestamptz '2027-07-15 10:00-03');
-  v_t := pg_temp.foco(d_hoje);
-  v_res := pg_temp.igual(v_res, 'V1d os 6 ligados, byte a byte: "Combinar:", o "Perguntei" do M11 que saiu, a viagem, sem nenhum "Em teste"', v_t, $t$Onde é cada serviço (próximas 3 semanas):
-- Júlio (OS-J13): não sei onde é o serviço.
-- Lenine (OS-J1): MP Motorhomes, em Balneário Camboriú (pela OS). Combinar: a entrada do motorhome no pátio para ter 20/07, até sex 16/07.
-- Nelson (OS-J2): Marina Itajaí (pela OS). O barco: em seco (garagem), quem desce: a marina; o teste final é na água. Combinar: o acesso de João para ter 20/07, até hoje (sex 16/07); a vaga de serviço com a marina, até sex 16/07; a descida para o teste na água em ter 20/07. Autorizados nesse serviço: Roberto. Supus o teste final na água (pela linha de serviço).
-- Kalmar (OS-J6): Iate Clube Caiobá, em Guaratuba (PR). Viagem com pernoite (suposição: outro estado): a equipe vai e volta junta, em dias seguidos; a ida e a volta ocupam 1 meio-dia cada. Combinar: o acesso de Rafael para qua 21/07, até seg 19/07.
-- Vanderlei (OS-J3): MP Motorhomes (suposição: motorhome vem ao pátio). Perguntei ao cliente em 15/07. Combinar: a entrada do motorhome no pátio para qui 22/07, até ter 20/07.
-- Beto (OS-J12): Marina Itajaí (pela OS). Combinar: o acesso de Rafael para seg 26/07, até qui 22/07.
-Locais: 5 no cadastro; 1 conferido por você (Marina Itajaí, em 01/07). Só como nota: Tedesco Marina Garden Plaza tem garagem seca (pesquisa).$t$);
+  v_t := pg_temp.focos(d_hoje);
+  v_res := pg_temp.igual(v_res, 'V1d os 6 ligados, byte a byte: "Combinar:", o "Perguntei" do M11 que saiu, a viagem, sem nenhum "Em teste"', v_t, $t$Júlio (OS-J13): não sei onde é o serviço.
+Lenine (OS-J1): MP Motorhomes, em Balneário Camboriú (pela OS). Combinar: a entrada do motorhome no pátio para ter 20/07, até sex 16/07.
+Nelson (OS-J2): Marina Itajaí (pela OS). O barco: em seco (garagem), quem desce: a marina; o teste final é na água. Combinar: o acesso de João para ter 20/07, até hoje (sex 16/07); a vaga de serviço com a marina, até sex 16/07; a descida para o teste na água em ter 20/07. Autorizados nesse serviço: Roberto. Supus o teste final na água (pela linha de serviço).
+Kalmar (OS-J6): Iate Clube Caiobá, em Guaratuba (PR). Viagem com pernoite (suposição: outro estado): a equipe vai e volta junta, em dias seguidos; a ida e a volta ocupam 1 meio-dia cada. Combinar: o acesso de Rafael para qua 21/07, até seg 19/07.
+Vanderlei (OS-J3): MP Motorhomes (suposição: motorhome vem ao pátio). Perguntei ao cliente em 15/07. Combinar: a entrada do motorhome no pátio para qui 22/07, até ter 20/07.
+Beto (OS-J12): Marina Itajaí (pela OS). Combinar: o acesso de Rafael para seg 26/07, até qui 22/07.$t$);
 
   -- O M11 que não saiu de verdade não diz "perguntei" (a lição do plano falso)
   update public.agenda_cliente_mensagens set estado = 'recusada', recusa_motivo = 'teto_dia', enviada_em = null where service_order_id = pg_temp.os('OS-J3') and tipo = 'onde_fica';
-  v_res := pg_temp.ok(v_res, 'V1e o M11 recusado não vira "Perguntei"', pg_temp.foco(d_hoje) !~ 'Perguntei', null);
+  v_res := pg_temp.ok(v_res, 'V1e o M11 recusado não vira "Perguntei"', pg_temp.focos(d_hoje) !~ 'Perguntei', null);
   update public.agenda_cliente_mensagens set estado = 'enviada', recusa_motivo = null, enviada_em = timestamptz '2027-07-15 10:00-03' where service_order_id = pg_temp.os('OS-J3') and tipo = 'onde_fica';
   begin
     perform pg_temp.m11(pg_temp.os('OS-J13'), timestamptz '2027-07-15 10:00-03', 'enviada', 'sombra');
     v_res := pg_temp.ok(v_res, 'V1e2 o M11 em teste não vira "Perguntei"', pg_temp.foco(d_hoje, pg_temp.os('OS-J13')) !~ 'Perguntei', null);
     perform pg_temp.m11(pg_temp.os('OS-J3'), timestamptz '2027-07-12 10:00-03', 'enviada', 'ligado', ':velha');
-    v_res := pg_temp.ok(v_res, 'V1e3 dois M11 da mesma OS: a data do mais novo', pg_temp.foco(d_hoje) ~ 'Perguntei ao cliente em 15/07\.', null);
+    v_res := pg_temp.ok(v_res, 'V1e3 dois M11 da mesma OS: a data do mais novo', pg_temp.focos(d_hoje) ~ 'Perguntei ao cliente em 15/07\.', null);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
   -- Dito o local, o "Perguntei" sai: a pergunta já foi respondida
   update public.os_planejamento set local_id = (select id from public.agenda_locais where nome = 'Veleiros da Ilha'), local_fonte = 'cliente', local_em = now()
    where service_order_id = pg_temp.os('OS-J3');
-  v_t2 := pg_temp.foco(d_hoje);
+  v_t2 := pg_temp.focos(d_hoje);
   v_res := pg_temp.ok(v_res, 'V1f o local dito pelo cliente: "(o cliente disse)" e sem "Perguntei"', v_t2 ~ 'Vanderlei \(OS-J3\): Veleiros da Ilha, em Florianópolis \(o cliente disse\)' and v_t2 !~ 'Perguntei', v_t2);
   update public.os_planejamento set local_id = null, local_fonte = null, local_em = null where service_order_id = pg_temp.os('OS-J3');
 
   -- Cada modo sozinho: o que ele mostra some com ele
   update public.agenda_config set modo_bem = 'desligado' where id;
-  v_t2 := pg_temp.foco(d_hoje);
+  v_t2 := pg_temp.focos(d_hoje);
   v_res := pg_temp.ok(v_res, 'V1g sem modo_bem: nem o estado do bem, nem a vaga, nem a descida, nem a suposição do bem', v_t2 !~ 'O barco:' and v_t2 !~ 'a vaga de serviço' and v_t2 !~ 'a descida' and v_t2 !~ 'Supus o teste' and v_t2 ~ 'o acesso de João', v_t2);
   update public.agenda_config set modo_bem = 'ligado', modo_viagem = 'desligado' where id;
-  v_t2 := pg_temp.foco(d_hoje);
+  v_t2 := pg_temp.focos(d_hoje);
   v_res := pg_temp.ok(v_res, 'V1h sem modo_viagem: a linha da viagem some', v_t2 !~ 'Viagem' and v_t2 ~ 'Kalmar \(OS-J6\): Iate Clube Caiobá', v_t2);
   update public.agenda_config set modo_viagem = 'sombra' where id;
-  v_t2 := pg_temp.foco(d_hoje);
+  v_t2 := pg_temp.focos(d_hoje);
   v_res := pg_temp.ok(v_res, 'V1i modo_viagem em teste: "Em teste: viagem com pernoite…"', v_t2 ~ 'Em teste: viagem com pernoite \(suposição: outro estado\)', v_t2);
   update public.agenda_config set modo_viagem = 'ligado', modo_patio = 'desligado' where id;
-  v_t2 := pg_temp.foco(d_hoje);
+  v_t2 := pg_temp.focos(d_hoje);
   v_res := pg_temp.ok(v_res, 'V1j sem modo_patio: a entrada some', v_t2 !~ 'a entrada do motorhome', v_t2);
   update public.agenda_config set modo_patio = 'ligado', modo_local_autorizacao = 'desligado' where id;
-  v_t2 := pg_temp.foco(d_hoje);
+  v_t2 := pg_temp.focos(d_hoje);
   v_res := pg_temp.ok(v_res, 'V1k sem o preparo do acesso: nem o acesso nem os autorizados', v_t2 !~ 'o acesso de' and v_t2 !~ 'Autorizados', v_t2);
   update public.agenda_config set modo_local_autorizacao = 'sombra' where id;
-  v_t2 := pg_temp.foco(d_hoje);
+  v_t2 := pg_temp.focos(d_hoje);
   v_res := pg_temp.ok(v_res, 'V1l um modo ligado e outro em teste, na mesma linha: "Combinar:" e "Em teste, eu cobraria:"',
                       v_t2 ~ 'Combinar: a vaga de serviço com a marina, até sex 16/07; a descida para o teste na água em ter 20/07\. Em teste, eu cobraria: o acesso de João', v_t2);
   update public.agenda_config set modo_local_autorizacao = 'ligado' where id;
@@ -279,19 +285,21 @@ Locais: 5 no cadastro; 1 conferido por você (Marina Itajaí, em 01/07). Só com
   perform pg_temp.modos('ligado');
 
   -- O vazio: nenhum serviço; a conferência vencida vira nota
-  v_res := pg_temp.igual(v_res, 'V1o o vazio, byte a byte: e a conferência vencida (mais de 1 ano) não conta', pg_temp.foco(date '2030-01-07'),
-    'Nenhum serviço marcado nas próximas 3 semanas. Locais: 5 no cadastro; nenhum conferido por você. Só como nota: Marina Itajaí pede autorização, no sábado só abre de manhã e tem garagem seca (a conferir de novo); Tedesco Marina Garden Plaza tem garagem seca (pesquisa).');
+  -- (correção O1) a carteira não fica vazia em 2030: o vazio de verdade é o S da correção; aqui, a conferência vencida
+  v_t2 := pg_temp.foco(date '2030-01-07');
+  v_res := pg_temp.ok(v_res, 'V1o a conferência vencida (mais de 1 ano) não conta', v_t2 ~ 'Locais: 5 no cadastro; nenhum conferido por você\. Só como nota: Marina Itajaí pede autorização, no sábado só abre de manhã e tem garagem seca \(a conferir de novo\); Tedesco Marina Garden Plaza tem garagem seca \(pesquisa\)\.', v_t2);
 
   -- No dia, não há mais o que combinar (a régua de _agenda_local_combinar)
   v_res := pg_temp.ok(v_res, 'V1o2 no próprio dia, nada a combinar', pg_temp.foco(date '2027-07-20', pg_temp.os('OS-J1')) !~ 'Combinar', null);
-  -- Quem entra: só a OS com plano publicado ou fixado nas próximas 3 semanas
+  -- (correção O1) Quem entra: todas as OS abertas, com plano ou sem. O foco por OS das 3 semanas segue só o dos testes acima
   begin
+    v_res := pg_temp.ok(v_res, 'V1o3 sem plano, entra', pg_temp.foco(d_hoje) ~ 'OS-J14', null);
     perform pg_temp.aloc(pg_temp.os('OS-J14'), v_rafael, date '2027-08-09', 'manha');
-    v_res := pg_temp.ok(v_res, 'V1o3 o plano que começa depois das 3 semanas não entra', pg_temp.foco(d_hoje) !~ 'OS-J14', null);
+    v_res := pg_temp.ok(v_res, 'V1o3a o plano que começa depois das 3 semanas entra também', pg_temp.foco(d_hoje) ~ 'OS-J14', null);
     perform pg_temp.aloc(pg_temp.os('OS-J14'), v_rafael, date '2027-07-20', 'manha');
     v_res := pg_temp.ok(v_res, 'V1o3b dentro das 3 semanas, entra (o controle)', pg_temp.foco(d_hoje) ~ 'OS-J14', null);
     update public.agenda_alocacoes set estado = 'cancelada', cancelada_em = now(), cancelada_motivo = 'replanejado' where service_order_id = pg_temp.os('OS-J14');
-    v_res := pg_temp.ok(v_res, 'V1o4 a alocação cancelada não entra', pg_temp.foco(d_hoje) !~ 'OS-J14', null);
+    v_res := pg_temp.ok(v_res, 'V1o4 a alocação cancelada não tira a OS', pg_temp.foco(d_hoje) ~ 'OS-J14', null);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
@@ -308,7 +316,8 @@ Locais: 5 no cadastro; 1 conferido por você (Marina Itajaí, em 01/07). Só com
   v_res := pg_temp.ok(v_res, 'V1r a nota do barco cadastrado noutro lugar (NOVO-agenda-63): com a maiúscula e o ponto', v_t ~ ' O barco está cadastrado na Tedesco Marina Garden Plaza\.$', v_t);
   update public.os_planejamento set trecho = 'o serviço do Júlio é na casa do cliente' where service_order_id = pg_temp.os('OS-J13');
   v_t := pg_temp.foco(d_hoje, pg_temp.os('OS-J13'));
-  v_res := pg_temp.ok(v_res, 'V1s "na casa do cliente" (NOVO-agenda-93): o que ele disse, ao lado do que a agenda ainda supõe', v_t = 'Júlio (OS-J13): não sei onde é o serviço. Você disse: na casa do cliente (anotei).', v_t);
+  -- (correção O3) a casa virou local: o trecho não é mais lido
+  v_res := pg_temp.ok(v_res, 'V1s "na casa do cliente" no trecho velho não vale: o foco lê o local (correção O3)', v_t = 'Júlio (OS-J13): não sei onde é o serviço.', v_t);
   update public.os_planejamento set trecho = 'na casa de máquinas do barco' where service_order_id = pg_temp.os('OS-J13');
   v_res := pg_temp.ok(v_res, 'V1t "casa de máquinas" não é a casa do cliente', pg_temp.foco(d_hoje, pg_temp.os('OS-J13')) !~ 'casa do cliente', null);
   update public.os_planejamento set trecho = 'é na casa dele', local_id = (select id from public.agenda_locais where nome = 'Veleiros da Ilha'), local_fonte = 'dono', local_em = now() where service_order_id = pg_temp.os('OS-J13');
@@ -405,7 +414,7 @@ Locais: 5 no cadastro; 1 conferido por você (Marina Itajaí, em 01/07). Só com
   update public.agenda_locais set tem_garagem_seca = true where nome = 'Nota 3';
   v_t := pg_temp.foco(d_hoje);
   v_res := pg_temp.ok(v_res, 'V1al as notas: as frases de cada regra, até 3, e "e mais N"',
-                      v_t ~ 'Só como nota: Nota 1 pede seguro e não abre no sábado \(pesquisa\); Tedesco Marina Garden Plaza tem garagem seca \(pesquisa\); Nota 2 abre no sábado \(pesquisa\); e mais 1\.', v_t);
+                      v_t ~ 'Só como nota: Nota 1 pede seguro e não abre no sábado \(pesquisa\); Tedesco Marina Garden Plaza tem garagem seca \(pesquisa\); Nota 2 abre no sábado \(pesquisa\) \(e mais 1\)\.', v_t);
   update public.agenda_locais set ativo = false where nome like 'Nota %';
   update public.agenda_locais set conferido_em = null, conferido_por = null where nome = 'Veleiros da Ilha';
   update public.agenda_locais set conferido_em = null, conferido_por = null where nome = 'Iate Clube Caiobá';
@@ -470,8 +479,9 @@ Locais: 5 no cadastro; 1 conferido por você (Marina Itajaí, em 01/07). Só com
   update public.agenda_config set texto_max = 1000 where id;
   perform pg_temp.modos('ligado');
   v_t := pg_temp.foco(d_hoje);
-  v_res := pg_temp.ok(v_res, 'V1at o corte tira as linhas de OS do fim e fica o cadastro: "- e mais N serviços.", até texto_max',
-                      char_length(v_t) <= 1000 and v_t ~ E'\n- e mais [0-9]+ serviços?\\.\nLocais: 5 no cadastro' and v_t ~ '^Onde é cada serviço', v_t);
+  -- (correção O1) o corte: as notas, depois as ditas, por último as supostas, com "(e mais N)" (a ordem é provada em agenda_fase7d_correcao.sql)
+  v_res := pg_temp.ok(v_res, 'V1at o corte tira as linhas de OS do fim e fica o cadastro: "(e mais N)", até texto_max',
+                      char_length(v_t) <= 1000 and v_t ~ E'\n\\(e mais [0-9]+\\)\n' and v_t ~ E'\nLocais: 5 no cadastro' and v_t ~ '^Onde é cada serviço', v_t);
   update public.agenda_config set texto_max = 400 where id;
   perform pg_temp.modos('sombra');
   v_t := pg_temp.foco(date '2027-07-19');
@@ -483,7 +493,7 @@ Locais: 5 no cadastro; 1 conferido por você (Marina Itajaí, em 01/07). Só com
   v_j := public.os_plano_da_os(pg_temp.os('OS-J2'), d_hoje);
   v_k := v_j -> 'local';
   v_res := pg_temp.igual(v_res, 'V2a o bloco local do cartão (§5.8), byte a byte', v_k::text,
-    '{"nome": "Marina Itajaí", "tipo": "marina", "fonte": "os", "notas": ["Autorizados nesse serviço: Roberto.", "Supus o teste final na água (pela linha de serviço)."], "texto": "Marina Itajaí (pela OS)", "vagas": null, "combinar": [{"ate": "2027-07-16", "texto": "o acesso de João para ter 20/07, até hoje (sex 16/07)", "vencido": true, "em_teste": false}, {"ate": "2027-07-16", "texto": "a vaga de serviço com a marina, até sex 16/07", "vencido": false, "em_teste": false}, {"ate": "2027-07-16", "texto": "a descida para o teste na água em ter 20/07", "vencido": false, "em_teste": false}], "bem_texto": "O barco: em seco (garagem), quem desce: a marina; o teste final é na água.", "perguntei": null, "suposicao": false, "viagem_texto": null}');
+    '{"nome": "Marina Itajaí", "tipo": "marina", "fonte": "os", "notas": ["Autorizados nesse serviço: Roberto.", "Supus o teste final na água (pela linha de serviço)."], "texto": "Marina Itajaí (pela OS)", "vagas": null, "combinar": [{"ate": "2027-07-16", "texto": "o acesso de João para ter 20/07, até hoje (sex 16/07)", "vencido": true, "em_teste": false}, {"ate": "2027-07-16", "texto": "a vaga de serviço com a marina, até sex 16/07", "vencido": true, "em_teste": false}, {"ate": "2027-07-16", "texto": "a descida para o teste na água em ter 20/07", "vencido": true, "em_teste": false}], "bem_texto": "O barco: em seco (garagem), quem desce: a marina; o teste final é na água.", "perguntei": null, "suposicao": false, "viagem_texto": null}');
   update public.os_planejamento set acesso_ok_em = pg_temp.em(d_hoje, '09:00') where service_order_id = pg_temp.os('OS-J2');
   v_k := public.os_plano_da_os(pg_temp.os('OS-J2'), d_hoje) -> 'local';
   v_res := pg_temp.ok(v_res, 'V2b o que ficou combinado sai da lista', jsonb_array_length(v_k -> 'combinar') = 2 and (v_k -> 'combinar')::text !~ 'o acesso', v_k::text);

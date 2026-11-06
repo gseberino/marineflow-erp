@@ -680,8 +680,8 @@ begin
       and (e -> 'pessoas' ->> 0)::uuid = pg_temp.pessoa('João') and (e ->> 'nominal')::boolean and not (e ->> 'combinado')::boolean
       and (e ->> 'vencido')::boolean and e ->> 'modo' = 'sombra' and e ->> 'texto' = 'o acesso de João para ter 20/07, até hoje (sex 16/07)', e::text);
     e := pg_temp.item('OS-J2', 'reserva_marina', c_hoje);
-    v_res := pg_temp.ok(v_res, 'C1b reserva_marina: garagem seca dita; ate = marina_reserva_antecedencia_du; o vencido em ate < hoje (no próprio ate, não)',
-      e ->> 'para' = '2027-07-20' and e ->> 'ate' = '2027-07-16' and e ->> 'quem' = 'marina' and not (e ->> 'vencido')::boolean
+    v_res := pg_temp.ok(v_res, 'C1b reserva_marina: garagem seca dita; ate = marina_reserva_antecedencia_du; o vencido em ate <= hoje (correção O10: no próprio ate, sim)',
+      e ->> 'para' = '2027-07-20' and e ->> 'ate' = '2027-07-16' and e ->> 'quem' = 'marina' and (e ->> 'vencido')::boolean
       and e ->> 'texto' = 'a vaga de serviço com a marina, até sex 16/07', e::text);
     e := pg_temp.item('OS-J2', 'descida', c_hoje);
     v_res := pg_temp.ok(v_res, 'C1c descida: exige água (a palavra "Teste de mar") e em seco; para = o último dia; quem = descer_quem',
@@ -813,7 +813,8 @@ begin
     perform pg_temp.base('sombra');
     r := pg_temp.combinar(date '2027-07-16');
     select count(*) into v_n from public.agenda_perguntas x where x.tipo in ('combinar', 'acesso');
-    select * into a from public.agenda_acoes x where x.tipo = 'local' and x.service_order_id = pg_temp.os('OS-J2');
+    -- (correção O10) a vaga e a descida nascem no prazo, como o acesso: a OS-J2 tem as 3; o caso aqui é o do acesso
+    select * into a from public.agenda_acoes x where x.tipo = 'local' and x.service_order_id = pg_temp.os('OS-J2') and x.depois ->> 'chave' like 'combinar:acesso:%';
     v_res := pg_temp.ok(v_res, 'C2a em sombra, nenhuma pergunta: a ação local com executada = false, origem vigia, o texto com "o acesso" (R6.5) e a chave',
       v_n = 0 and not a.executada and a.origem = 'vigia' and a.desfazivel_ate is null and a.contada_em is not null
       and a.texto = 'Em teste: eu cobraria o acesso de João na Marina Itajaí até sex 16/07.'
@@ -1184,7 +1185,18 @@ begin
     perform pg_temp.combinar(c_hoje);
     q := pg_temp.q(pg_temp.chave('reserva_marina', 'OS-J2', c_para));
     perform public._agenda_local_resolver(c_para, pg_temp.em(c_para, '10:00'));
-    v_res := pg_temp.ok(v_res, 'C4b no dia, a combinar segue aberta (a perda é no fim do dia)', (select x.estado from public.agenda_perguntas x where x.id = q.id) = 'aberta', null);
+    -- (correção O4) no 1º dia o serviço começou: a pergunta do preparo fecha, com o motivo verdadeiro. Antes ela ficava aberta até o fim do dia
+    q := (select x from public.agenda_perguntas x where x.id = q.id);
+    v_res := pg_temp.ok(v_res, 'C4b no dia, a combinar fecha: o serviço começou (correção O4)', q.estado = 'resolvida' and q.resolvida_motivo = 'o serviço já começou', q.resolvida_motivo);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  begin
+    perform pg_temp.base('sombra');
+    perform pg_temp.modo('modo_bem', 'ligado');
+    perform pg_temp.combinar(c_hoje);
+    q := pg_temp.q(pg_temp.chave('reserva_marina', 'OS-J2', c_para));
+    -- sem ninguém rodar no dia: o resolvedor do dia seguinte
     perform public._agenda_local_resolver(c_para + 1, pg_temp.em(c_para + 1, '00:05'));
     q := (select x from public.agenda_perguntas x where x.id = q.id);
     v_res := pg_temp.ok(v_res, 'C4c o dia passou: resolvida, "o dia passou"', q.estado = 'resolvida' and q.resolvida_motivo = 'o dia passou', q.estado);

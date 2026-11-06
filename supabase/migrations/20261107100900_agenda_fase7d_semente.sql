@@ -8,7 +8,7 @@
 -- NÃO APLICADA. Este arquivo existe para revisão. Aplica DEPOIS das migrations de estrutura da 7d (20261107100000 .. 100700) e das funções de borda (R6.11, passos 1 a 3).
 --
 -- O QUE FAZ:
---   1. agenda_locais: uma linha por marina ativa, menos as de nome com "teste" (on conflict (marina_id) do nothing). Hoje são 8. Tipo: Kalmar Estaleiro = estaleiro; MP Motorhomes =
+--   1. agenda_locais: uma linha por marina ativa, menos as de nome com "teste" (on conflict (marina_id): a que o DESFAZER inativou volta a ativa; a ativa não muda). Hoje são 8. Tipo: Kalmar Estaleiro = estaleiro; MP Motorhomes =
 --      patio_hbr, com deslocamento_min 0, vagas nulo (só conta) e a nota do dono; o resto = marina. Os apelidos da §6.5. Nenhum pátio em Itajaí (AG7-18).
 --   2. A Marina Itajaí como NOTA (conferido_por = pesquisa): o regimento de 2024. A Tedesco com a garagem seca, também pesquisa. Nada disso é regra: só com conferido_por dono ou
 --      marina (AG7-14). O feriado do município é fato público e vale com o modo ligado, sem conferir. As outras ficam só com o cadastro.
@@ -33,7 +33,7 @@
 -- PROVA DEPOIS (só leitura): o SELECT do fim deste arquivo; supabase/tests/agenda_fase7d_pos_deploy.sql (M2 "registrada", C2 com os 6 em sombra); na 1ª rodada depois das 16:15,
 -- agenda_saude() -> 'local' sem erro.
 --
--- IDEMPOTENTE: rodar de novo não muda nada (o insert é on conflict do nothing; o update só pega desligado e onde_fica_desde nula). A bancada NÃO aplica este arquivo
+-- IDEMPOTENTE: rodar de novo não muda nada (o insert só reativa o que estiver inativo; o update só pega desligado e onde_fica_desde nula). Depois do DESFAZER, rodar de novo traz os locais de volta. A bancada NÃO aplica este arquivo
 -- (scripts/bancada-agenda/bancada.mjs, FORA_DA_BANCADA): supabase/tests/agenda_fase7d_semente.sql o roda numa subtransação desfeita.
 --
 -- DESFAZER (só se o dono pedir; nada é apagado: as linhas nunca se apagam). É UM comando só (do "with" ao ";"). Só volta o que está em sombra e diz quais ficaram ligados: para parar um
@@ -47,12 +47,12 @@
 --     returning modo_local_calendario, modo_local_autorizacao, modo_bem, modo_patio, modo_viagem, modo_mesmo_local
 --   ), locais as (
 --     update public.agenda_locais l set ativo = false, atualizado_por = null
---      where l.ativo and l.conferido_por is distinct from 'dono' and l.conferido_por is distinct from 'marina'
+--      where l.ativo and l.marina_id is not null and l.conferido_por is distinct from 'dono' and l.conferido_por is distinct from 'marina'
 --     returning 1
 --   )
 --   select (select count(*) from locais) as locais_inativos, (select to_jsonb(m) from modos m) as modos;
 -- DESFAZER-FIM
--- (O local que o dono ou a marina conferiu fica ativo: a palavra dele não se desfaz por aqui. Para tirar um: update public.agenda_locais set ativo = false where id = …)
+-- (O local que o dono ou a marina conferiu fica ativo, e o lugar novo e a casa do cliente que o dono criou pela conversa não são da semente: a palavra dele não se desfaz por aqui. Para tirar um: update public.agenda_locais set ativo = false where id = …)
 
 -- 1 e 2. Os locais: a semente da §5.9, com os apelidos da §6.5. Só pesquisa em conferido_por: nunca vira regra sozinha (AG7-14).
 insert into public.agenda_locais (marina_id, nome, apelidos, tipo, municipio, uf, latitude, longitude, deslocamento_min, nota_dono, abre, fecha, sabado, feriado,
@@ -85,7 +85,8 @@ select m.id, m.name, coalesce(a.apelidos, '{}'), coalesce(a.tipo, 'marina'), btr
   ) as r(nome, abre, fecha, sabado, feriado, exige_autorizacao, autorizacao_texto, seguro_exigido, seguro_texto, taxa_texto, tomada_max_w, tem_garagem_seca, box_max_min, fonte_texto)
     on r.nome = m.name
  where m.active and m.name !~* 'teste' and nullif(btrim(m.city), '') is not null
-on conflict (marina_id) do nothing;
+-- (correção C7) a linha que o DESFAZER inativou volta; a ativa não muda (nem a hora)
+on conflict (marina_id) do update set ativo = true, atualizado_por = null where not public.agenda_locais.ativo;
 
 -- 3 e 4. A trava do M11 (só se nula) e os 6 modos (cada um só se estiver desligado).
 update public.agenda_config

@@ -135,8 +135,9 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
   {
     onde: '_agenda_cliente_anotar_onde',
     casou: 'Itajaí',
-    vezes: 1,
-    porque: 'o exemplo literal da §6.3 ("o barco de Nelson está na Marina Itajaí, em seco"), ao dono; não é municipios_locais',
+    // Fase 7d (correção, Onda 1, 20261107100800): recriada (+2: o exemplo de lugar da O19, nas 2 perguntas).
+    vezes: 3,
+    porque: 'o exemplo literal ao dono (§6.3; na correção O19, "o serviço do {nome} é na Marina Itajaí"); não é municipios_locais',
   },
   // Fase 2 (P6): as migrations 2026102510* entraram na varredura.
   {
@@ -232,7 +233,8 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
   {
     onde: 'agenda_local_vigiar',
     casou: '1000',
-    vezes: 1,
+    // Fase 7d (correção, Onda 1, 20261107100800): recriada (+1: a mesma duração da rodada).
+    vezes: 2,
     porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_habilidade); não é texto_max nem peca_embutida_acima',
   },
   {
@@ -323,7 +325,8 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
   // Correção C2 da Fase 5 (20261028100800): revalidar e enfileirar recriados de novo (+1 cada: a mesma cópia).
   // Fase 6 (P7, 20261029100700): _pedir_confirmacao recriado (+1: a cópia leva o mesmo nome do motivo; o texto do botão sem "ele").
   // Fase 7d (P6, 20261107100500): revalidar recriado (+1: a mesma cópia).
-  ...([['_agenda_cliente_revalidar', 4], ['_agenda_cliente_enfileirar', 3], ['pedir_confirmacao_do_agendamento', 1],
+  // Fase 7d (correção, Onda 1, 20261107100800): revalidar recriado (+1: a mesma cópia).
+  ...([['_agenda_cliente_revalidar', 5], ['_agenda_cliente_enfileirar', 3], ['pedir_confirmacao_do_agendamento', 1],
         ['_pedir_confirmacao', 2]] as const).map(([onde, vezes]) => ({
     onde,
     casou: '24h',

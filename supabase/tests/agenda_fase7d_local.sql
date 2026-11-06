@@ -104,7 +104,7 @@ $carga$;
 -- ── L0. As portas ──────────────────────────────────────────────────────────────────────────────────
 -- Sem o coalesce, o null do proconfig some no bool_and (notas do P2): a função sem search_path passaria.
 with f(sig, vol) as (values
-  ('public._agenda_local_no(text)', 'i'),
+  ('public._agenda_local_no(text)', 's'),   -- (correção O2) lê o tipo do local: a linha do tipo outro é "em"
   ('public._agenda_viagem_por_municipio(text, text)', 's'),
   ('public._agenda_local_resolvido(uuid, date)', 's'),
   ('public._agenda_local_deslocamento(uuid)', 's'),
@@ -113,7 +113,7 @@ with f(sig, vol) as (values
   ('public._agenda_local_mascara(uuid, date, date, date, jsonb)', 's'),
   ('public._agenda_autorizacao_da_os(uuid, date, jsonb)', 's'))
 insert into _resultado
-select 'L0a as 8 funções: STABLE (a preposição, IMMUTABLE), invoker, search_path fixo; revoke de public e de anon; authenticated e service_role executam',
+select 'L0a as 8 funções: STABLE, invoker, search_path fixo; revoke de public e de anon; authenticated e service_role executam',
        count(p.oid) = 8
        and bool_and(not p.prosecdef and p.provolatile = f.vol
                     and coalesce(array_to_string(p.proconfig, ','), '') = 'search_path=public'

@@ -318,7 +318,7 @@ begin
     r2 := public.agenda_rascunho_aplicar(c_admin, 'whatsapp', null, null, 'Elisa', 'Antônio', 'pode atrasar o Antônio', d29,
                                          pg_temp.em(d29, '17:01'));
     v_res := pg_temp.ok(v_res, 'D4 "pode atrasar o Antônio" (a decisão pelo nome da OS, a opção pelo nome de quem atrasa): a releitura; a pergunta continua aberta',
-      (r2 ->> 'ok')::boolean and r2 ->> 'releitura' like E'Entendi assim, confere?\n• Decisão: Antônio (OS-00201) passa para % (sem data dita pelo cliente).\n%'
+      (r2 ->> 'ok')::boolean and r2 ->> 'releitura' like E'Entendi assim, confere?\n• Decisão: na pergunta "%": Antônio (OS-00201) passa para % (sem data dita pelo cliente).\n%'
       and (select estado from public.agenda_perguntas where id = v_id) = 'aberta' and pg_temp.foto() = v_foto
       and (select (dados ->> 'opcao')::int from public.agenda_rascunho where chave = 'decisao:' || v_id and estado = 'aberto') = 2,
       r2::text);

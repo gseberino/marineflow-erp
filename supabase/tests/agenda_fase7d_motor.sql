@@ -1224,7 +1224,8 @@ begin
     if pg_temp.sem_7d(pg_temp.corpo(v_mig, f.nome)) is distinct from pg_temp.corpo(current_setting(f.fonte), f.nome) then
       v_dif := concat_ws('; ', v_dif, f.nome || ': a migration, tirados os blocos, não é a origem');
     end if;
-    if v_viv is distinct from pg_temp.corpo(v_mig, f.nome) then
+    -- (correção da 7d, Onda 1) agenda_propor passou a viver na 20261107100800: a viva e a desta migration são comparadas sem os blocos
+    if pg_temp.sem_7d(v_viv) is distinct from pg_temp.sem_7d(pg_temp.corpo(v_mig, f.nome)) then
       v_dif := concat_ws('; ', v_dif, f.nome || ': a viva não é a da migration');
     end if;
     v_n := v_n + (select count(*)::int from regexp_matches(pg_temp.corpo(v_mig, f.nome), '-- FASE 7d: fim|-- \(7d: fim\)', 'g'));

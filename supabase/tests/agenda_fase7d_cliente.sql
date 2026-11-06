@@ -912,7 +912,7 @@ begin
     r := pg_temp.resp('OS-J12', 'na marina do joão', 'outro', v_agora);
     select * into q from public.agenda_perguntas x where x.chave = 'local:' || pg_temp.os('OS-J12');
     v_res := pg_temp.ok(v_res, 'K4w sem leitura: o texto da §6.3, só a opção 2, sem recomendação',
-      q.texto = 'Beto respondeu onde fica a lancha: "na marina do joão". Não achei esse lugar no cadastro. Me diga onde é, por exemplo: "o barco de Beto está na Marina Itajaí, em seco".'
+      q.texto = 'Beto respondeu onde fica a lancha: "na marina do joão". Não achei esse lugar no cadastro. Me diga onde é, por exemplo: "o serviço do Beto é na Marina Itajaí".'
       and jsonb_array_length(q.opcoes) = 1 and (q.opcoes -> 0 ->> 'n')::int = 2 and q.recomendacao is null, q.texto);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
@@ -920,9 +920,10 @@ begin
   begin
     perform pg_temp.prepara(date '2027-06-01');
     m := pg_temp.mandado('OS-J11');
-    r := pg_temp.resp('OS-J11', 'não sei ainda', 'outro', v_agora);
+    r := pg_temp.resp('OS-J11', 'está no sítio do meu irmão', 'outro', v_agora);
     select * into q from public.agenda_perguntas x where x.chave = 'local:' || pg_temp.os('OS-J11');
-    v_res := pg_temp.ok(v_res, 'K4x sem leitura, no motorhome: o exemplo é o do motorhome', q.texto like 'Carla respondeu onde fica o motorhome: "não sei ainda". Não achei esse lugar no cadastro. Me diga onde é, por exemplo: "o motorhome de Carla chega dia 5".', q.texto);
+    -- (correção O19) o mesmo exemplo no motorhome: lugar, não data
+    v_res := pg_temp.ok(v_res, 'K4x sem leitura, no motorhome: o exemplo é de lugar (correção O19)', q.texto like 'Carla respondeu onde fica o motorhome: "está no sítio do meu irmão". Não achei esse lugar no cadastro. Me diga onde é, por exemplo: "o serviço do Carla é na Marina Itajaí".', q.texto);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
@@ -959,7 +960,7 @@ begin
     exception when sqlstate 'P0099' then null;
     end;
   end loop;
-  for v_tr in select * from (values ('K4z5', 'pergunta', 'onde vocês ficam?'), ('K4z6', 'confirma', 'sim'), ('K4z7', 'data', 'na marina, dia 20')) t(id, intencao, frase) loop
+  for v_tr in select * from (values ('K4z5', 'pergunta', 'pode ficar na marina?'), ('K4z6', 'confirma', 'fica no pátio'), ('K4z7', 'data', 'na marina, dia 20')) t(id, intencao, frase) loop
     begin
       perform pg_temp.prepara(date '2027-06-01');
       m := pg_temp.mandado('OS-J11');
