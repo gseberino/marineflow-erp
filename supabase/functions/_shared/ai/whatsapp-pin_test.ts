@@ -55,3 +55,16 @@ Deno.test("verifyPin: valor vazio/nulo nunca verifica true", async () => {
   assertEquals(await verifyPin("4321", ""), false);
   assertEquals(await verifyPin("4321", "malformado-sem-dois-pontos"), false);
 });
+
+// P16: o gatilho _whatsapp_mascarar_pin faz a mesma conta em SQL. Os 3 pares estão também em supabase/tests/pin_mascarar.sql:
+// se a conta mudar aqui sem mudar lá, a máscara para de achar o PIN, calada.
+Deno.test("verifyPin: o hash é o mesmo que o gatilho da máscara calcula em SQL", async () => {
+  const pares = [
+    ["sal-a", "7391", "00fe044f96335b6e8cc5890a19455da862d3380e679be60a7a75722a957b33af"],
+    ["3f0c2f5e-0000-4000-8000-000000000001", "004821", "01325accc9677860a5f56b2c53656b688c0c032183edcf277650631440aecb4a"],
+    ["x", "123", "96d83a375baee82501356c68b3c0bf2133f902e74776e517d205f4e9da5a41ec"],
+  ];
+  for (const [salt, pin, hash] of pares) {
+    assertEquals(await verifyPin(pin, `${salt}:${hash}`), true);
+  }
+});
