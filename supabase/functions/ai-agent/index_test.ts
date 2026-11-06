@@ -393,6 +393,9 @@ Deno.test("trava do 1 da agenda: depois da trava do comprovante, antes da confir
   assert(chamada < turno.indexOf("const confirmation = parseConfirmationReply(text);"), "antes da confirmação");
   const bloco = turno.slice(chamada, turno.indexOf("const confirmation = parseConfirmationReply(text);"));
   assertStringIncludes(bloco, "await queueWhatsAppReply(admin, phoneNormalized, travaDaAgenda);");
+  // correção T3: entra na conversa antes de sair, senão o "está certo" seguinte não tem a que se referir
+  const naConversa = bloco.indexOf("await gravarDecisaoNaConversa(admin, { sessionId, resposta: text, texto: travaDaAgenda });");
+  assert(naConversa > 0 && naConversa < bloco.indexOf("await queueWhatsAppReply(admin, phoneNormalized, travaDaAgenda);"), "grava na conversa antes do envio");
   assertStringIncludes(bloco, 'return jr({ ok: true, travado: "agenda" });');
   assert(!bloco.includes("resolveWhatsAppConfirmation"), "não decide a pendência");
   assert(!bloco.includes("ai_operator_sessions"), "não mexe na sessão");

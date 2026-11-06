@@ -25,6 +25,7 @@ import {
   textoDaPendenciaReapresentada,
   textoDaTravaDaAgenda,
   textoDaTravaDoComprovante,
+  textoDoNumeroNaAgenda,
 } from "./whatsapp-channel.ts";
 
 // ─── Pendência que atravessa a troca de conversa (27/09/2026) ────────────────────────────
@@ -1048,10 +1049,74 @@ Deno.test("trava do 1: sem pendência, ou com outro texto, nenhuma leitura no tu
   assertEquals(lidas, [], "nenhuma leitura");
 });
 
-Deno.test("trava do 1: citar uma mensagem já diz a que se refere: segue como hoje, sem ler o banco", async () => {
-  const { admin, lidas } = bancoDaTrava({ perguntas: [mostradaDepois] });
-  assertEquals(await trava(admin, "1", { citado: "WA-CITADA" }), null);
-  assertEquals(lidas, []);
+// A trava com citação (correção T1): o "1" que cita a mensagem da agenda aprovava o pedido sem PIN; nada lia a citação.
+const daAgendaNaFila = (source = "agenda-dono") => ({ id: "fila-1", source, zapi_message_id: "WA-CITADA", status: "sent", phone_normalized: DONO_DA_TRAVA, created_at: ANTES_DO_PEDIDO });
+
+Deno.test("trava do 1: citando a mensagem da agenda, trava; o texto é o da decisão; só id e source da fila", async () => {
+  for (const source of ["agenda-dono", "ai_briefing_tarde"]) {
+    const b = bancoDaTrava({ perguntas: [mostradaAntes], fila: [daAgendaNaFila(source)] });
+    assertEquals(
+      await trava(b.admin, "1", { citado: "WA-CITADA" }),
+      'Esse "1" é para a agenda: diga com as palavras (por exemplo, "está certo"). O pedido "Lançar a despesa" continua esperando o seu *sim*.',
+      source,
+    );
+    assertEquals(b.colunas.whatsapp_send_queue, "id, source", "nunca o corpo");
+  }
+});
+
+Deno.test("trava do 1: com citação, o '2' também; risco alto pede o PIN; sem opções, sem exemplo", async () => {
+  const dois = await trava(bancoDaTrava({ perguntas: [mostradaAntes], fila: [daAgendaNaFila()] }).admin, "2", { citado: "WA-CITADA" });
+  assertStringIncludes(String(dois), 'Esse "2" é para a agenda:');
+  const alto = await trava(bancoDaTrava({ pendencia: { risk_level: "high" }, perguntas: [mostradaAntes], fila: [daAgendaNaFila()] }).admin, "1", { citado: "WA-CITADA" });
+  assertStringIncludes(String(alto), "continua esperando o seu *sim <SEU PIN>*.");
+  assertEquals(
+    await trava(bancoDaTrava({ perguntas: [], fila: [daAgendaNaFila()] }).admin, "1", { citado: "WA-CITADA" }),
+    'Esse "1" é para a agenda: diga com as palavras. O pedido "Lançar a despesa" continua esperando o seu *sim*.',
+    "a citação basta: a mensagem da agenda pode não ter pergunta aberta",
+  );
+  assertEquals(textoDoNumeroNaAgenda({ numero: "1", titulo: "X", exemplo: null }), 'Esse "1" é para a agenda: diga com as palavras. O pedido "X" continua esperando o seu *sim*.');
+});
+
+Deno.test("trava do 1: citou outra coisa, ou a mensagem não é da agenda: segue como hoje", async () => {
+  const outra = { ...daAgendaNaFila(), zapi_message_id: "WA-OUTRA" };
+  assertEquals(await trava(bancoDaTrava({ perguntas: [mostradaDepois], fila: [outra] }).admin, "1", { citado: "WA-CITADA" }), null, "outro id");
+  assertEquals(await trava(bancoDaTrava({ perguntas: [mostradaDepois] }).admin, "1", { citado: "WA-CITADA" }), null, "não achou");
+  assertEquals(await trava(bancoDaTrava({ perguntas: [mostradaDepois], fila: [daAgendaNaFila("ai_briefing")] }).admin, "1", { citado: "WA-CITADA" }), null, "a manhã não leva pergunta numerada");
+  const b = bancoDaTrava({ perguntas: [mostradaDepois] });
+  await trava(b.admin, "1", { citado: "WA-CITADA" });
+  assertEquals(b.lidas, ["ai_operator_pending_actions", "whatsapp_send_queue"], "citou outra coisa: nada de perguntas nem conversa");
+});
+
+Deno.test("trava do 1: com citação, o resto vale igual: pedido decidido, outra pessoa, erro de leitura, texto que não é número", async () => {
+  const pronto = { perguntas: [mostradaAntes], fila: [daAgendaNaFila()] };
+  assertEquals(await trava(bancoDaTrava({ ...pronto, pendencia: { status: "executed" } }).admin, "1", { citado: "WA-CITADA" }), null);
+  assertEquals(await trava(bancoDaTrava({ ...pronto, pendencia: null }).admin, "1", { citado: "WA-CITADA" }), null);
+  assertEquals(await trava(bancoDaTrava({ ...pronto, donoFone: "5547999999999" }).admin, "1", { citado: "WA-CITADA" }), null);
+  const antes = console.error;
+  const logs: unknown[][] = [];
+  console.error = (...x: unknown[]) => { logs.push(x); };
+  try {
+    assertEquals(await trava(bancoDaTrava({ ...pronto, falha: "whatsapp_send_queue" }).admin, "1", { citado: "WA-CITADA" }), null);
+  } finally {
+    console.error = antes;
+  }
+  assertEquals(logs.length, 1, "a leitura que falha fica no log");
+  const b = bancoDaTrava(pronto);
+  assertEquals(await trava(b.admin, "sim", { citado: "WA-CITADA" }), null);
+  assertEquals(b.lidas, []);
+});
+
+// A pendência vencida, ainda não varrida (correção T9): a trava dizia que o pedido "espera o seu sim", e pendenciaQueSegueEsperando já sabia que não.
+Deno.test("trava do 1: pedido vencido não espera mais: segue como hoje, com e sem citação", async () => {
+  const venceu = new Date(Date.now() - 60_000).toISOString();
+  const vale = new Date(Date.now() + 60_000).toISOString();
+  assertEquals(await trava(bancoDaTrava({ pendencia: { expires_at: venceu }, perguntas: [mostradaDepois] }).admin), null);
+  assertEquals(await trava(bancoDaTrava({ pendencia: { expires_at: venceu }, perguntas: [mostradaDepois], fila: [daAgendaNaFila()] }).admin, "1", { citado: "WA-CITADA" }), null);
+  assert(await trava(bancoDaTrava({ pendencia: { expires_at: vale }, perguntas: [mostradaDepois] }).admin));
+  assert(await trava(bancoDaTrava({ pendencia: { expires_at: null }, perguntas: [mostradaDepois] }).admin));
+  const b = bancoDaTrava({ perguntas: [mostradaDepois] });
+  await trava(b.admin);
+  assertStringIncludes(b.colunas.ai_operator_pending_actions, "expires_at");
 });
 
 Deno.test("trava do 1: erro de leitura segue como hoje, sem travar, e loga", async () => {
@@ -1136,6 +1201,12 @@ Deno.test("trava do 1: *agenda pendências* e a pergunta do modelo não gravam a
       "2 decisões esperam você na agenda:\nDecisão 1: Giancarlo …",
       "Qual decisão? 1) Giancarlo; 2) Na agenda conto com Alex.",
       "Lenine: já combinou? 1) Já combinei; 2) Ainda não.",
+      // Em lista (correção T2), como o modelo conta: linhas seguidas, com "1." ou "1)"
+      "Duas decisões:\n1. Giancarlo: são 10 diárias?\n2. Alex: conto com ele?",
+      "1. Giancarlo\n2. Alex",
+      "1) Foram 10 diárias\n2) Foram 8",
+      "Opções:\n  1. Está certo\n  2. Mudou\n",
+      "1. Está certo\n\n2. Mudou",
     ]
   ) {
     assert(await trava(bancoDaTrava({ perguntas: [mostradaAntes], mensagens: [fala(c)] }).admin), c);
@@ -1143,7 +1214,11 @@ Deno.test("trava do 1: *agenda pendências* e a pergunta do modelo não gravam a
   for (
     const m of [
       fala("Posso lançar a despesa de R$ 90?"), // a conversa de sempre
-      fala("Lançar:\n1) gasolina\n2) pedágio"), // lista do assistente, uma por linha, não é pergunta da agenda
+      fala("Em 2 dias sai 1. Falta 2."), // números soltos na frase não são lista
+      fala("1. Giancarlo"), // um item só
+      fala("2. Giancarlo\n1. Alex"), // a ordem não é a de uma lista
+      fala("1. Giancarlo\nE o Alex:\n2. ele"), // não são linhas seguidas
+      fala("11. Giancarlo\n2. Alex"),
       fala("Decisão 1: …", { created_at: ANTES_DO_PEDIDO }), // antes do pedido
       fala("Decisão 1: …", { session_id: "outra" }),
       fala("Decisão 1: …", { role: "user" }),

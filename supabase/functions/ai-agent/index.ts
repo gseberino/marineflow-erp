@@ -593,6 +593,8 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
   const travaDaAgenda = await textoDaTravaDaAgenda(admin, { sessionId, phone: phoneNormalized, texto: text, citado, metadata });
   if (travaDaAgenda) {
     console.log(`[ai-agent][whatsapp] trava do 1 da agenda: sessao=${sessionId} mensagem=${messageId ?? "-"}`);
+    // Na conversa (correção T3): o "está certo" que vier depois tem a que se referir.
+    await gravarDecisaoNaConversa(admin, { sessionId, resposta: text, texto: travaDaAgenda });
     await queueWhatsAppReply(admin, phoneNormalized, travaDaAgenda);
     return jr({ ok: true, travado: "agenda" });
   }
