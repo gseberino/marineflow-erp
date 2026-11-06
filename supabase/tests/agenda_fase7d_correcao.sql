@@ -622,7 +622,6 @@ begin
                         and exists (select 1 from public.whatsapp_send_queue q where q.source = 'agenda-equipe' and q.source_ref_id = m.id), to_jsonb(m)::text);
     r := public._agenda_local_avisar_acesso(v_h, pg_temp.em(v_h, '19:50'));
     v_res := pg_temp.ok(v_res, 'O5e uma vez só por pessoa e dia', (r ->> 'avisos')::int = 0 and (select count(*) from public.agenda_equipe_mensagens x where x.payee_id = v_rob and x.dedupe_key like '%:acesso:%') = 1, r::text);
-    -- A vigia chama: fora da rodada do dia
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
             when others then v_res := pg_temp.ok(v_res, 'O5 quebrou', false, sqlerrm);
@@ -1260,6 +1259,7 @@ declare
   v_mig text := coalesce(current_setting('agenda_teste.mig_semente_fase7d', true), '');
   v_n   int;
   v_id  uuid;
+  v_foto text;
 begin
   if not pg_temp.carregada() or v_mig = '' then
     insert into _resultado values ('C7', true, 'PULADO: sem as fixtures e a semente como texto (rode pela bancada)');
@@ -1267,7 +1267,6 @@ begin
   end if;
   begin
     update public.agenda_config set modo_local_calendario = 'desligado', modo_local_autorizacao = 'desligado', modo_bem = 'desligado', modo_patio = 'desligado', modo_viagem = 'desligado', modo_mesmo_local = 'desligado', onde_fica_desde = null where id;
-    delete from public.agenda_perguntas where false;
     alter table public.agenda_locais disable trigger agenda_locais_nao_apaga;
     update public.os_planejamento set local_id = null, local_fonte = null, local_em = null where local_id is not null;
     update public.os_autorizados set local_id = null where local_id is not null;
@@ -1284,8 +1283,10 @@ begin
     execute v_mig;
     v_res := pg_temp.ok(v_res, 'C7c a semente de novo reativa os locais', (select count(*) from public.agenda_locais l where l.ativo and l.marina_id is not null) = v_n, (select count(*)::text from public.agenda_locais l where l.ativo));
     v_res := pg_temp.ok(v_res, 'C7d a MP volta a ser o pátio da HBR ativo', exists (select 1 from public.agenda_locais l where l.ativo and l.tipo = 'patio_hbr'), null);
-    -- Idempotente: de novo não mexe
-    v_res := pg_temp.ok(v_res, 'C7e de novo não muda nada', (select md5(string_agg(to_jsonb(l)::text, '|' order by l.nome)) from public.agenda_locais l) is not null, null);
+    -- Idempotente: de novo não mexe (nem a hora)
+    v_foto := (select md5(string_agg(to_jsonb(l)::text, '|' order by l.nome)) from public.agenda_locais l);
+    execute v_mig;
+    v_res := pg_temp.ok(v_res, 'C7e de novo não muda nada', (select md5(string_agg(to_jsonb(l)::text, '|' order by l.nome)) from public.agenda_locais l) = v_foto, null);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
             when others then v_res := pg_temp.ok(v_res, 'C7 quebrou', false, sqlerrm);
