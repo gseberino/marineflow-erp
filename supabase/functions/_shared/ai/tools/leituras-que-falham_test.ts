@@ -3,6 +3,7 @@
 // fato: OS sem peças, fornecedor "sem resposta", cliente "nunca cobrado" (cobrar duas vezes), item
 // "sem resultado" (valor provisório para produto que existe). E list_low_stock falhava SEMPRE.
 import { assertEquals, assertRejects } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { FakeTime } from "https://deno.land/std@0.224.0/testing/time.ts";
 import { orContem } from "../filtro-or.ts";
 import { productTools } from "./products.ts";
 import { serviceOrderTools } from "./service-orders.ts";
@@ -204,11 +205,14 @@ Deno.test("send_collection_reminder: a cobrança com contato próprio não é ba
     destino = String(JSON.parse(String(init?.body ?? "{}")).phone ?? "");
     return Promise.resolve(new Response("{}"));
   }) as typeof fetch;
+  // 11h em Brasília: fora da janela a guarda barra o envio, e o teste só passaria em horário comercial.
+  const relogio = new FakeTime(new Date("2026-11-05T14:00:00.000Z"));
   try {
     // O banco falso não grava o histórico da cobrança, que vem depois do envio: aqui importa só para onde saiu.
     await ferramenta(whatsappTools, "send_collection_reminder").execute({ collection_id: "col" }, contexto(db)).catch(() => null);
     assertEquals(destino, "5547988887777");
   } finally {
+    relogio.restore();
     globalThis.fetch = original;
   }
 });
