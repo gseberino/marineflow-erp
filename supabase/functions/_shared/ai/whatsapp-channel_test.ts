@@ -1077,14 +1077,43 @@ Deno.test("trava do 1: com citação, o '2' também; risco alto pede o PIN; sem 
   assertEquals(textoDoNumeroNaAgenda({ numero: "1", titulo: "X", exemplo: null }), 'Esse "1" é para a agenda: diga com as palavras. O pedido "X" continua esperando o seu *sim*.');
 });
 
-Deno.test("trava do 1: citou outra coisa, ou a mensagem não é da agenda: segue como hoje", async () => {
+// A citação que a fila não conhece (correção B1): *agenda pendências* e a resposta do assistente saem direto, sem fila, e citando-as o "1" aprovava o pedido: a proteção era menor que sem citar. Em toda a
+// história do dono, 15 de 16 citações não acham a fila. O falso positivo custa 1 mensagem; o falso negativo aprova um pedido.
+const DUVIDA_DO_1 = 'Fiquei em dúvida: esse "1" é para o pedido "Lançar a despesa", que espera o seu sim, ou para a agenda? Para aprovar o pedido, mande *sim*. Para a agenda, diga com as palavras (por exemplo, "está certo").';
+
+Deno.test("trava do 1: citação que a fila não conhece cai na régua sem citação, com a pergunta de volta, não com o texto de 'é para a agenda'", async () => {
   const outra = { ...daAgendaNaFila(), zapi_message_id: "WA-OUTRA" };
-  assertEquals(await trava(bancoDaTrava({ perguntas: [mostradaDepois], fila: [outra] }).admin, "1", { citado: "WA-CITADA" }), null, "outro id");
-  assertEquals(await trava(bancoDaTrava({ perguntas: [mostradaDepois] }).admin, "1", { citado: "WA-CITADA" }), null, "não achou");
-  assertEquals(await trava(bancoDaTrava({ perguntas: [mostradaDepois], fila: [daAgendaNaFila("ai_briefing")] }).admin, "1", { citado: "WA-CITADA" }), null, "a manhã não leva pergunta numerada");
+  assertEquals(await trava(bancoDaTrava({ perguntas: [mostradaDepois], fila: [outra] }).admin, "1", { citado: "WA-CITADA" }), DUVIDA_DO_1, "outro id");
+  assertEquals(await trava(bancoDaTrava({ perguntas: [mostradaDepois] }).admin, "1", { citado: "WA-CITADA" }), DUVIDA_DO_1, "não achou");
+  assertEquals(await trava(bancoDaTrava({ perguntas: [mostradaDepois], fila: [daAgendaNaFila("ai_briefing")] }).admin, "1", { citado: "WA-CITADA" }), DUVIDA_DO_1, "outra fonte");
+});
+
+Deno.test("trava do 1: citando *agenda pendências*, que não passa pela fila, a mesma mensagem é achada na conversa: o '1' não aprova o pedido", async () => {
+  const pendencias = { content: "Decisão 1: Nelson já autorizou? 1) Sim; 2) Não.", created_at: DEPOIS_DO_PEDIDO, role: "assistant", session_id: "sess-1" };
+  const r = await trava(bancoDaTrava({ perguntas: [mostradaAntes], mensagens: [pendencias] }).admin, "1", { citado: "WA-CITADA" });
+  assertEquals(r, DUVIDA_DO_1);
+  const dois = await trava(bancoDaTrava({ perguntas: [mostradaAntes], mensagens: [pendencias] }).admin, "2", { citado: "WA-CITADA" });
+  assertStringIncludes(String(dois), "Para recusar o pedido, mande *não*.");
+  assertEquals(await trava(bancoDaTrava({ perguntas: [mostradaAntes], mensagens: [pendencias] }).admin, "1"), DUVIDA_DO_1, "citar não protege menos que não citar");
+});
+
+Deno.test("trava do 1: citação que a fila não conhece, e a régua inteira diz que o 1 é do pedido: segue como hoje", async () => {
+  const b = bancoDaTrava({ perguntas: [mostradaAntes] });
+  assertEquals(await trava(b.admin, "1", { citado: "WA-CITADA" }), null);
+  assertEquals(b.lidas, ["ai_operator_pending_actions", "whatsapp_send_queue", "agenda_perguntas", "whatsapp_send_queue", "ai_operator_messages"], "a régua inteira, mais a leitura da citação");
+  assertEquals(await trava(bancoDaTrava({ perguntas: [] }).admin, "1", { citado: "WA-CITADA" }), null, "sem pergunta numerada e sem citação da agenda");
+  const naConversa = { content: "Decisão 1: Nelson já autorizou? 1) Sim; 2) Não.", created_at: DEPOIS_DO_PEDIDO, role: "assistant", session_id: "sess-1" };
+  const semPergunta = bancoDaTrava({ perguntas: [], mensagens: [naConversa] });
+  assertEquals(await trava(semPergunta.admin, "1", { citado: "WA-CITADA" }), null, "sem pergunta aberta, a conversa não trava: a mesma guarda de quem não citou");
+  assertEquals(semPergunta.lidas, ["ai_operator_pending_actions", "whatsapp_send_queue", "agenda_perguntas"]);
+  assertEquals(await trava(bancoDaTrava({ perguntas: [mostradaDepois], donoFone: "5547999999999" }).admin, "1", { citado: "WA-CITADA" }), null, "outra pessoa");
+});
+
+Deno.test("trava do 1: a leitura da fila por zapi_message_id é só de quem citou", async () => {
   const b = bancoDaTrava({ perguntas: [mostradaDepois] });
-  await trava(b.admin, "1", { citado: "WA-CITADA" });
-  assertEquals(b.lidas, ["ai_operator_pending_actions", "whatsapp_send_queue"], "citou outra coisa: nada de perguntas nem conversa");
+  await trava(b.admin);
+  assertEquals(b.lidas.filter((x) => x === "whatsapp_send_queue").length, 0, "sem citação, com a pergunta mostrada depois, nenhuma leitura da fila");
+  assertEquals(b.lidas, ["ai_operator_pending_actions", "agenda_perguntas", "app_users"]);
 });
 
 Deno.test("trava do 1: com citação, o resto vale igual: pedido decidido, outra pessoa, erro de leitura, texto que não é número", async () => {
@@ -1097,10 +1126,12 @@ Deno.test("trava do 1: com citação, o resto vale igual: pedido decidido, outra
   console.error = (...x: unknown[]) => { logs.push(x); };
   try {
     assertEquals(await trava(bancoDaTrava({ ...pronto, falha: "whatsapp_send_queue" }).admin, "1", { citado: "WA-CITADA" }), null);
+    // (correção B1) a citação que não leu não vira "não achou": com a pergunta mostrada depois do pedido, a régua travaria
+    assertEquals(await trava(bancoDaTrava({ perguntas: [mostradaDepois], falha: "whatsapp_send_queue" }).admin, "1", { citado: "WA-CITADA" }), null);
   } finally {
     console.error = antes;
   }
-  assertEquals(logs.length, 1, "a leitura que falha fica no log");
+  assertEquals(logs.length, 2, "a leitura que falha fica no log");
   const b = bancoDaTrava(pronto);
   assertEquals(await trava(b.admin, "sim", { citado: "WA-CITADA" }), null);
   assertEquals(b.lidas, []);
