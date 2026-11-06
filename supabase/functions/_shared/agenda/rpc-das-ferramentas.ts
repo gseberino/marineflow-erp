@@ -157,8 +157,17 @@ export const PRESENCAS_DO_DONO = ["abre_e_fecha", "sempre", "nunca"] as const;
  * inicio/fim = em dupla só nos primeiros/últimos meios-dias (com dupla_meios).
  */
 export const DUPLAS = ["nao", "inicio", "fim", "todos"] as const;
-/** O que o dono desfaz no serviço: espera, "não antes de", prazo do cliente, escopo em aberto e (Fase 2) o pátio. */
-export const LIMPAVEIS = ["espera", "nao_antes", "prazo", "escopo", "patio"] as const;
+/** (Fase 7d, P7) Onde o bem está, na palavra do dono (os_planejamento.bem_situacao). */
+export const BEM_ONDE = ["agua", "seco", "garagem_seca", "patio", "com_cliente"] as const;
+/** (Fase 7d, P7) O que o serviço pede do bem (os_planejamento.bem_exige): "o teste é na água" = agua. */
+export const BEM_EXIGE = ["agua", "seco", "tanto_faz"] as const;
+/** (Fase 7d, P7) A viagem que o dono diz (os_planejamento.viagem): regional = aqui na região; bate_volta = ida e volta no dia; pernoite = dorme lá. */
+export const VIAGENS = ["regional", "bate_volta", "pernoite"] as const;
+/**
+ * O que o dono desfaz no serviço: espera, "não antes de", prazo do cliente, escopo em aberto e (Fase 2) o pátio. (Fase 7d, P7) Mais o
+ * local dito, a data de chegada, a de saída, a viagem dita e a lista de autorizados.
+ */
+export const LIMPAVEIS = ["espera", "nao_antes", "prazo", "escopo", "patio", "local", "entrada", "retirada", "viagem", "autorizados"] as const;
 /** (Fase 2) O que o motor monta: a semana (= a que ele publica, a seguinte), uma OS ou o replano de algumas. */
 export const ESCOPOS_DA_PROPOSTA = ["semana", "proxima_semana", "os", "replano"] as const;
 /**
@@ -392,6 +401,29 @@ export function paraPlanejar(args: unknown, ctx: ContextoDaRpc): ChamadaDaRpc {
     // banco confere no trecho e converte) e como o cliente chama o serviço (o banco aceita até 40 caracteres, sem valor)
     const prometido = dataDita(a.prometido, "prometido");
     if (prometido) dados.prometido = prometido;
+    // (Fase 7d, P7) onde é o serviço e como está o bem, como o dono disse: o local, as datas e as pessoas quem entende é o banco
+    // (agenda_resolver_local, agenda_data_dita, o resolvedor de pessoa). Aqui nada é calculado nem resolvido.
+    const local = texto(a.local, "local", 120);
+    if (local) dados.local = local;
+    const bemOnde = umDe(a.bem_onde, "bem_onde", BEM_ONDE, false);
+    if (bemOnde) dados.bem_onde = bemOnde;
+    const bemExige = umDe(a.bem_exige, "bem_exige", BEM_EXIGE, false);
+    if (bemExige) dados.bem_exige = bemExige;
+    const descerQuem = texto(a.descer_quem, "descer_quem", 80);
+    if (descerQuem) dados.descer_quem = descerQuem;
+    for (const campo of ["chega_em", "sai_em"]) {
+      const d = dataDita(a[campo], campo);
+      if (d) dados[campo] = d;
+    }
+    const viagem = umDe(a.viagem, "viagem", VIAGENS, false);
+    if (viagem) dados.viagem = viagem;
+    if (a.autorizados !== undefined && a.autorizados !== null) {
+      const bruto = typeof a.autorizados === "string" ? [a.autorizados] : a.autorizados;
+      if (!Array.isArray(bruto) || bruto.length === 0 || bruto.length > 8) {
+        recusar("'autorizados' tem de ser a lista de nomes que o dono disse (\"eu\" = ele); para tirar a lista, limpar autorizados");
+      }
+      dados.autorizados = (bruto as unknown[]).map((p, i) => referenciaDaPessoa(p, `autorizados[${i}]`, true));
+    }
     const servicoCliente = texto(a.servico_cliente, "servico_cliente", 80);
     if (servicoCliente) dados.servico_cliente = servicoCliente;
     const prioridade = numero(a.prioridade, "prioridade");
@@ -414,7 +446,7 @@ export function paraPlanejar(args: unknown, ctx: ContextoDaRpc): ChamadaDaRpc {
     if (Object.keys(dados).length === 0) {
       recusar("diga o que mudou no serviço (dias, com_quem, dono, dupla, precisa_ate, bem_fora, bem_livre_em, nao_antes_de, " +
         "escopo_em_aberto, escopo_decidido, congelar_ate, prioridade, sem_material, aceitar_sugestao, adiantavel_patio, " +
-        "prometido, servico_cliente ou limpar)");
+        "prometido, servico_cliente, local, bem_onde, bem_exige, descer_quem, chega_em, sai_em, viagem, autorizados ou limpar)");
     }
     return comHoje({ p_autor: ctx.autor, p_canal: ctx.canal, p_os: os, p_dados: dados, p_trecho: t }, ctx);
   });

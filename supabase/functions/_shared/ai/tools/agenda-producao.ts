@@ -69,6 +69,8 @@
 // mesmo dos evals. `if (error) throw`: leitura que falha nunca vira "nada marcado".
 import type { Role, ToolCtx, ToolDef } from "./registry.ts";
 import {
+  BEM_EXIGE,
+  BEM_ONDE,
   canalDaRpc,
   type ChamadaDaRpc,
   DUPLAS,
@@ -104,6 +106,7 @@ import {
   TIPOS_DA_MENSAGEM_AO_CLIENTE,
   TURNOS,
   UNIDADES_DO_PRAZO,
+  VIAGENS,
 } from "../../agenda/rpc-das-ferramentas.ts";
 
 const SO_ADMIN: Role[] = ["admin"];
@@ -210,7 +213,10 @@ export const agendaProducaoTools: ToolDef[] = [
       "só números e datas que ele disse, como disse (\"dia 3\", \"terça\"), e em trecho as palavras dele. Correção = chame " +
       "de novo para o mesmo serviço. Não agenda OS nem cria tarefa. " +
       "\"Falei pro Flávio que é dia 3\" é prometido = \"dia 3\" (a data que o cliente OUVIU, não a do plano); \"pro " +
-      "cliente, o serviço é a instalação do compressor\" é servico_cliente. Nada vai ao cliente por aqui.",
+      "cliente, o serviço é a instalação do compressor\" é servico_cliente. Nada vai ao cliente por aqui. " +
+      "Onde é e como está o bem, só o que ele disse e com as palavras dele: local, bem_onde, bem_exige (\"o teste é na água\"), " +
+      "descer_quem, chega_em e sai_em (motorhome), viagem e autorizados (quem está autorizado na marina; \"eu\" = o dono). O " +
+      "banco resolve o local e as pessoas, e pergunta se não achar. Regra de marina ou de pátio não muda por aqui.",
     input_schema: {
       type: "object",
       properties: {
@@ -261,12 +267,40 @@ export const agendaProducaoTools: ToolDef[] = [
           type: "string",
           description: "Como o cliente chama o serviço, nas palavras do dono (\"a instalação do compressor\"; até 40 letras, sem valor).",
         },
+        local: {
+          type: "string",
+          description: "Onde é o serviço, como o dono disse (o nome da marina, \"no pátio\", \"na casa do cliente\"). Nunca invente: o banco procura no cadastro.",
+        },
+        bem_onde: {
+          type: "string",
+          enum: [...BEM_ONDE],
+          description: "Onde o barco ou o motorhome está: agua; seco; garagem_seca (garagem da marina); patio; com_cliente. Só o que o dono disse.",
+        },
+        bem_exige: {
+          type: "string",
+          enum: [...BEM_EXIGE],
+          description: "O que o serviço pede: agua (\"o teste é na água\"); seco; tanto_faz. Só o que o dono disse.",
+        },
+        descer_quem: { type: "string", description: "Quem desce o barco, como o dono disse (\"a marina\", \"o marinheiro\"; até 80 letras)." },
+        chega_em: { type: "string", description: "Quando o bem chega ao pátio, como o dono disse (\"dia 5\", \"terça\"). Nunca calcule." },
+        sai_em: { type: "string", description: "Quando o bem sai, como o dono disse (\"dia 13\"). Nunca calcule." },
+        viagem: {
+          type: "string",
+          enum: [...VIAGENS],
+          description: "A viagem que o dono disse: regional (aqui na região); bate_volta (ida e volta no dia); pernoite (\"a gente dorme lá\"). Nunca estime.",
+        },
+        autorizados: {
+          type: "array",
+          items: { type: "string" },
+          description: "Quem está autorizado no local, a lista inteira que o dono disse (\"eu\" = o dono). Substitui a anterior.",
+        },
         limpar: {
           type: "array",
           items: { type: "string", enum: [...LIMPAVEIS] },
           description:
             "O que o dono desfez: espera (\"pode voltar\", \"tira da espera\"), nao_antes (\"não tem mais data mínima\"), " +
-            "prazo (\"o cliente não tem mais prazo\"), escopo (\"o escopo está resolvido\"), patio (\"no pátio não dá para adiantar nada\").",
+            "prazo (\"o cliente não tem mais prazo\"), escopo (\"o escopo está resolvido\"), patio (\"no pátio não dá para adiantar nada\"), " +
+            "local (\"esquece o local que eu disse\"), entrada e retirada (as datas de chegada e saída), viagem, autorizados (\"tira os autorizados\").",
         },
         trecho: TRECHO,
       },

@@ -810,3 +810,38 @@ Deno.test("Fase 7c (P8) — servico_etapa: o esquema (os e trecho obrigatórios;
   assertStringIncludes(t.description, "NÃO distribui etapa por pessoa nem por dia, não muda a ordem e não manda nada à equipe");
   assertStringIncludes(t.description, "só o *grava* do dono grava");
 });
+
+Deno.test("Fase 7d (P7) — os_planejar: os 8 campos no esquema, sem id nem data calculada, com as listas do banco; o limpar novo; continua pedindo só os e trecho", () => {
+  const t = porNome("os_planejar");
+  const props = (t.input_schema as { properties: Record<string, { enum?: string[]; type?: string; items?: { enum?: string[]; type?: string }; description?: string }> }).properties;
+  for (const campo of ["local", "bem_onde", "bem_exige", "descer_quem", "chega_em", "sai_em", "viagem", "autorizados"]) {
+    assert(props[campo], `${campo} fora do esquema`);
+    assert((props[campo].description ?? "").length > 0, `${campo} sem descrição`);
+  }
+  assertEquals(props.bem_onde.enum, ["agua", "seco", "garagem_seca", "patio", "com_cliente"]);
+  assertEquals(props.bem_exige.enum, ["agua", "seco", "tanto_faz"]);
+  assertEquals(props.viagem.enum, ["regional", "bate_volta", "pernoite"]);
+  assertEquals([props.autorizados.type, props.autorizados.items?.type], ["array", "string"]);
+  assertEquals(props.limpar.items?.enum, ["espera", "nao_antes", "prazo", "escopo", "patio", "local", "entrada", "retirada", "viagem", "autorizados"]);
+  assertEquals(t.input_schema.required, ["os", "trecho"]);
+  assertStringIncludes(t.description, "só o que ele disse e com as palavras dele");
+  assertStringIncludes(t.description, "Regra de marina ou de pátio não muda por aqui.");
+  assertStringIncludes(props.chega_em.description ?? "", "Nunca calcule.");
+  assertStringIncludes(props.local.description ?? "", "Nunca invente");
+});
+
+Deno.test("Fase 7d (P7) — os_planejar: uma RPC só, com o que o dono disse como veio, e a recusa do banco (local ambíguo) volta como pergunta", async () => {
+  const { sb, chamadas } = sbFalso(() => ({ data: { ok: true, item: "x", releitura: "Entendi assim, confere?" }, error: null }));
+  await porNome("os_planejar").execute(
+    { os: "Nelson", local: "Marina Itajaí", chega_em: "dia 5", autorizados: ["eu"], trecho: "na Marina Itajaí, chega dia 5, eu autorizado" }, ctx(sb));
+  assertEquals(chamadas.length, 1);
+  assertEquals(chamadas[0].nome, "agenda_rascunho_planejar");
+  assertEquals(chamadas[0].params.p_dados, { local: "Marina Itajaí", chega_em: "dia 5", autorizados: ["eu"] });
+  const { sb: sb2 } = sbFalso(() => ({
+    data: { ok: false, motivo: "local_ambiguo", pergunta: "Qual deles: Kalmar Estaleiro (Itajaí) ou Marina Itajaí (Itajaí)?", opcoes: ["Kalmar Estaleiro", "Marina Itajaí"] },
+    error: null,
+  }));
+  const r = await porNome("os_planejar").execute({ os: "Nelson", local: "Itajaí", trecho: "em Itajaí" }, ctx(sb2)) as Record<string, unknown>;
+  assertEquals(r.pergunta, "Qual deles: Kalmar Estaleiro (Itajaí) ou Marina Itajaí (Itajaí)?");
+  assertEquals(JSON.stringify(r).includes("gravado"), false);
+});

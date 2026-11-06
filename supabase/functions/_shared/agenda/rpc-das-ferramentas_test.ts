@@ -43,6 +43,11 @@ import {
   paraHabilidade,
   RPC_HABILIDADE,
   UMA_COISA_POR_VEZ,
+  // Fase 7d (P7)
+  BEM_EXIGE,
+  BEM_ONDE,
+  LIMPAVEIS,
+  VIAGENS,
 } from "./rpc-das-ferramentas.ts";
 
 const CTX = { autor: "aa000000-0000-4000-8000-000000000001", canal: "whatsapp" as const };
@@ -663,4 +668,72 @@ Deno.test("Fase 7c (P4): os valores são os do banco (§3.2 e o CHECK de exigenc
   assertEquals((FOCOS as readonly string[]).includes("habilidades"), true);
   const v = paraAgendaVer({ foco: "habilidades", os: "Lenine" }, CTX7C);
   assertEquals(v.ok && [v.params.p_foco, v.params.p_os], ["habilidades", "Lenine"]);
+});
+
+// ─── Fase 7d (P7): o que o dono diz do local e do bem. O paraPlanejar passa como veio: o local, as datas e as pessoas quem entende é o banco ─────
+const CTX7D = { autor: "aa000000-0000-4000-8000-000000000001", canal: "whatsapp" as const };
+
+Deno.test("Fase 7d (P7): paraPlanejar passa os 8 campos como vieram, sem calcular nem resolver nada", () => {
+  const c = paraPlanejar({
+    os: "Nelson", local: "Marina Itajaí", bem_onde: "garagem_seca", bem_exige: "agua", descer_quem: "a marina", chega_em: "dia 5", sai_em: "dia 13",
+    viagem: "pernoite", autorizados: ["Roberto", "eu"], trecho: "o barco do Nelson está na Marina Itajaí",
+  }, CTX7D);
+  assertEquals(c.ok && c.rpc, "agenda_rascunho_planejar");
+  assertEquals(c.ok && c.params.p_dados, {
+    local: "Marina Itajaí", bem_onde: "garagem_seca", bem_exige: "agua", descer_quem: "a marina", chega_em: "dia 5", sai_em: "dia 13",
+    viagem: "pernoite", autorizados: ["Roberto", "eu"],
+  });
+});
+
+Deno.test("Fase 7d (P7): cada campo sozinho vale como o que mudou; os que não vieram não vão em p_dados", () => {
+  for (const [campo, valor] of [
+    ["local", "no pátio"], ["bem_onde", "agua"], ["bem_exige", "tanto_faz"], ["descer_quem", "o marinheiro"], ["chega_em", "terça"], ["sai_em", "amanhã"],
+    ["viagem", "regional"],
+  ] as const) {
+    const c = paraPlanejar({ os: "Lenine", [campo]: valor, trecho: "o dono disse" }, CTX7D);
+    assertEquals(c.ok && c.params.p_dados, { [campo]: valor }, campo);
+  }
+  const a = paraPlanejar({ os: "Lenine", autorizados: "João", trecho: "o João está autorizado" }, CTX7D);
+  assertEquals(a.ok && a.params.p_dados, { autorizados: ["João"] }, "uma pessoa dita em texto vira a lista");
+  const nulos = paraPlanejar({ os: "Lenine", dias: 2, local: null, bem_onde: null, autorizados: null, chega_em: "", trecho: "são 2 dias" }, CTX7D);
+  assertEquals(nulos.ok && nulos.params.p_dados, { dias: 2 });
+});
+
+Deno.test("Fase 7d (P7): a data é a palavra do dono: a calculada volta ao modelo, e nem 'até dia 13' é mexida aqui", () => {
+  assert(erro(paraPlanejar({ os: "Lenine", chega_em: "2026-11-05", trecho: "chega dia 5" }, CTX7D)).includes("sem calcular"));
+  assert(erro(paraPlanejar({ os: "Lenine", sai_em: "2026-11-13T00:00:00", trecho: "sai dia 13" }, CTX7D)).includes("sem calcular"));
+  const c = paraPlanejar({ os: "Lenine", sai_em: "até dia 13", trecho: "sai até dia 13" }, CTX7D);
+  assertEquals(c.ok && c.params.p_dados, { sai_em: "até dia 13" });
+});
+
+Deno.test("Fase 7d (P7): enum fora da lista, id e tipo errado voltam ao modelo; nada é chamado", () => {
+  assert(erro(paraPlanejar({ os: "Lenine", bem_onde: "garagem", trecho: "x" }, CTX7D)).includes("'bem_onde' aceita só: agua, seco, garagem_seca, patio, com_cliente"));
+  assert(erro(paraPlanejar({ os: "Lenine", bem_exige: "molhado", trecho: "x" }, CTX7D)).includes("'bem_exige' aceita só: agua, seco, tanto_faz"));
+  assert(erro(paraPlanejar({ os: "Lenine", viagem: "longe", trecho: "x" }, CTX7D)).includes("'viagem' aceita só: regional, bate_volta, pernoite"));
+  assert(erro(paraPlanejar({ os: "Lenine", local: 5.5e400, trecho: "x" }, CTX7D)).includes("'local' tem de ser texto"));
+  assert(erro(paraPlanejar({ os: "Lenine", local: { nome: "x" }, trecho: "x" }, CTX7D)).includes("'local' tem de ser texto"));
+  assert(erro(paraPlanejar({ os: "Lenine", local: "x".repeat(121), trecho: "x" }, CTX7D)).includes("passa de 120"));
+  assert(erro(paraPlanejar({ os: "Lenine", descer_quem: "x".repeat(81), trecho: "x" }, CTX7D)).includes("passa de 80"));
+  assert(erro(paraPlanejar({ os: "Lenine", autorizados: [UUID_QUALQUER], trecho: "x" }, CTX7D)).includes("não o id"));
+  assert(erro(paraPlanejar({ os: "Lenine", autorizados: [], trecho: "x" }, CTX7D)).includes("limpar autorizados"));
+  assert(erro(paraPlanejar({ os: "Lenine", autorizados: { pessoa: "x" }, trecho: "x" }, CTX7D)).includes("'autorizados' tem de ser a lista"));
+  assert(erro(paraPlanejar({ os: "Lenine", autorizados: Array(9).fill("Roberto"), trecho: "x" }, CTX7D)).includes("'autorizados' tem de ser a lista"));
+  assert(erro(paraPlanejar({ os: "Lenine", autorizados: [""], trecho: "x" }, CTX7D)).includes("falta 'autorizados[0]'"));
+});
+
+Deno.test("Fase 7d (P7): limpar ganha local, entrada, retirada, viagem e autorizados; a mensagem de 'diga o que mudou' cita os campos novos", () => {
+  assertEquals([...LIMPAVEIS], ["espera", "nao_antes", "prazo", "escopo", "patio", "local", "entrada", "retirada", "viagem", "autorizados"]);
+  for (const l of ["local", "entrada", "retirada", "viagem", "autorizados"]) {
+    const c = paraPlanejar({ os: "Lenine", limpar: [l], trecho: "tira isso" }, CTX7D);
+    assertEquals(c.ok && c.params.p_dados, { limpar: [l] }, l);
+  }
+  const todos = paraPlanejar({ os: "Lenine", limpar: [...LIMPAVEIS], trecho: "tira tudo" }, CTX7D);
+  assertEquals(todos.ok && (todos.params.p_dados as { limpar: string[] }).limpar.length, 10, "a lista inteira cabe");
+  assert(erro(paraPlanejar({ os: "Lenine", trecho: "nada" }, CTX7D)).includes("local, bem_onde, bem_exige, descer_quem, chega_em, sai_em, viagem, autorizados"));
+});
+
+Deno.test("Fase 7d (P7): as listas são as do banco (os CHECKs de os_planejamento)", () => {
+  assertEquals([...BEM_ONDE], ["agua", "seco", "garagem_seca", "patio", "com_cliente"]);
+  assertEquals([...BEM_EXIGE], ["agua", "seco", "tanto_faz"]);
+  assertEquals([...VIAGENS], ["regional", "bate_volta", "pernoite"]);
 });

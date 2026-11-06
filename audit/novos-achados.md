@@ -7,6 +7,14 @@
 - **Na Fase 7d:** o M11 cede. Ele roda depois de `confirmar` e, com mensagem do cliente no dia (mesmo ainda não enfileirada), o teto da semana cheio ou outro M11 em
   `cliente_mesmo_tipo_horas`, não registra e tenta no tique seguinte (K2z1 a K2z7). **Sobra:** o M11 que saiu de manhã ainda toma o dia de uma confirmação que só nasce à tarde
   (o material chegou depois): ela é recusada por `teto_dia`, e a véspera segue. Sem conserto na 7d.
+### [NOVO-agenda-93] O que o dono diz no `os_planejar` e a agenda ainda não usa
+
+- **Encontrado em:** Agenda de Produção, Fase 7d, P7 (06/11/2026), escrevendo a releitura da §6.2 e o teste de sombra.
+- **O quê:** duas coisas, as duas de spec, nenhuma de código.
+  1. **A releitura promete em teste.** "Viagem com pernoite: a equipe vai e volta junta, em dias seguidos." sai igual com `modo_viagem` em sombra, e o motor ignora a viagem até o modo ligar. O mesmo vale para "Local: …" com `modo_mesmo_local` e o calendário em sombra. O dono lê que entendi; não lê que ainda não muda o plano.
+  2. **"Na casa do cliente" não vira dado.** A §5.7 manda o local ficar nulo, com a nota no trecho: a cadeia volta a supor (motorhome = pátio), o foco do P8 vai mostrar a suposição e o M11 ainda perguntaria onde fica.
+- **Na Fase 7d:** sem conserto. Mudar (1) é texto novo ao dono, fora da §6.2; mudar (2) pede um local de tipo `casa_cliente` por OS ou uma coluna nova. O *ligar* de cada modo resolve o (1) sozinho.
+
 # Novos achados encontrados durante a Fase 2
 
 Itens fora do escopo da tarefa em execução, registrados conforme a regra 5 da fila.
