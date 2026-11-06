@@ -24,6 +24,18 @@
 - **`mostrada_em`:** anda a cada mostra no fechamento e na carona; no aviso do gestor anda no tique seguinte (até 15 min depois de sair); em *agenda pendências*, em `agenda_ver` pelo modelo e na resposta "Qual decisão?", nunca. Medir a pergunta pela conversa mudaria `mostrada_vezes`, que conta prazo e o teto do fechamento. A trava do "1" lê as 3 fontes (a pergunta, a fila e a conversa) e fica de pé sem mexer nisso.
 - **Fica aberto:** `mostrada_em` continua sem ver a conversa. Quem usar para "o dono já viu" precisa saber disso.
 
+### [NOVO-agenda-99] 3ª revisão da 7d, o que fica de fora de propósito (decisão do fio, 06/11/2026; Onda 4, migration `20261107100870`)
+
+- **A ordem das travas entre *grava* e *desfaz*:** `agenda_local_criar` → `agenda_plano` num *grava* com lugar novo + pedido no mesmo rascunho, e `agenda_plano` → `agenda_local_criar` em `agenda_desfazer` → `_agenda_desfazer_local`. Os 2 lados são do dono, em milissegundos, e a vigia fica fora do ciclo. Se acontecer, o Postgres aborta um, e o *grava* tem `exception when others`. Pegar `agenda_plano` antes no *grava* faria ele esperar o tique inteiro. Corrida não provável no PGlite.
+- **"na cidade de São Paulo" e "no Rio":** criam `Cidade de São Paulo` e `Rio`, sem município nem UF, e contam como região. Com o M2 o texto não sugere mais esse caminho, e `lugar novo:` não muda isso (a linha fica sem cidade). "em São Paulo" e "São Paulo, SP" dão pernoite.
+- **As frases de data com vírgula:** "chegou, acho que dia 5", "chegou aqui na terça, dia 3", "chegou faz uns dias, dia 2" e "quem trouxe foi o filho, dia 5", ditas em 06/11, caem no mês seguinte (antes da `20261107100860`, no certo). A vírgula corta a oração, e tem de cortar: "chegou, o do Nelson dia 20" é futuro. A data aparece por extenso antes do *grava*, e só vale com o pátio ligado. Matriz: `f7d/corr4/depois/i2-datas.out`.
+- **M8 pelo caminho da pergunta `local`:** `_agenda_local_decidir` ainda grava `local_id` de linha inativa e diz "Gravei o que Rodrigo disse…", e a cadeia segue supondo. Só existe com o M11: está na lista do "OK mandar a pergunta onde fica".
+- **M10, o 3º ponto:** depois de "na casa dele em Bombinhas", *desfaz* e "na casa dele", a releitura vem sem cidade, e a cadeia diz `em Bombinhas`. O *desfaz* não volta a cidade da linha da casa.
+- **O prefixo só vale no começo do texto:** "é lugar novo: X" não é a saída: vira a linha `Lugar Novo: X`, com a releitura mostrando. O texto da recusa pede a frase certa, e o prompt manda passar inteira.
+- **"Marina Itajaí ou Tedesco" deixa de perguntar qual:** o " ou " tira o "contém" (M6), e a frase vira `Não entendi o lugar` + a saída, em vez de `Qual deles: Marina Itajaí (Itajaí) ou Tedesco Marina Garden Plaza (Balneário Camboriú)?`. É o que a decisão pede ("com ' ou ' no texto, o contém não vale"). Perde a pergunta boa só com os 2 nomes inteiros.
+- **O *desfaz* pelo modelo com o marco vencido:** a releitura mostra o *desfaz*, e o *grava* volta `Não gravei nada. A agenda mudou desde a releitura: Não dá para voltar os dias do Lenine…`. Nada muda, e a frase diz o motivo, mas "a agenda mudou" não é verdade. Recusar na releitura seria mais um ponto de cópia da regra.
+- **O corte de 300 letras da linha do rascunho:** a frase do M1 entra depois do texto da ação. Um cancelar com muitos dias soltos pode empurrar a frase para depois do corte de `_agenda_rascunho_salvar`. Nas ações reais vistas, o texto tem cerca de 100 letras.
+
 ### [NOVO-agenda-98] Mensagem ao cliente de OS concluída perde a pergunta do OK: *manda* e *segura* não acham nada, e ela vence sem sair
 
 - **Encontrado em:** Agenda de Produção, Fase 7d, Onda 3 (06/11/2026), rodando a tabela do dono na carteira de agora. É da Fase 5, sem relação com a 7d.
@@ -38,8 +50,8 @@
 - **G14:** depois do *entreguei*, a mensagem de pós-serviço (Fase 5) nasce 3 dias úteis depois, para serviços que o dono disse terem acabado há semanas. Ela espera o OK dele; o roteiro avisa.
 - **"(pela OS)" sob "Já ditos":** em *agenda locais*, o local que veio da OS aparece em "Já ditos", e o dono não disse. É só rótulo.
 - **T12:** `_agenda_patio_frase` é IMMUTABLE e chama `_agenda_local_no`, agora STABLE. Sem efeito: ela só olha `like 'no %'`, e o ramo novo devolve "em ". Nenhum índice, coluna gerada ou CHECK usa a função. Vale acertar a volatilidade quando alguém recriar.
-- **Lugar novo com recado no começo:** "Água Verde", "Garagem do Zé", "Fora da Barra" são recusados: a palavra conta no começo do texto, como a decisão pede. O dono diz de outro jeito ("Bairro Água Verde").
-- **São Paulo e Rio de Janeiro** são recusados como estado. "na cidade de São Paulo" passa.
+- **Lugar novo com recado no começo:** "Água Verde", "Garagem do Zé", "Fora da Barra" são recusados: a palavra conta no começo do texto, como a decisão pede. **Saída na Onda 4 (M5):** a recusa diz `lugar novo: <o texto>`.
+- **São Paulo e Rio de Janeiro** eram recusados como estado. **Consertado na Onda 4 (M2):** seguem como lugar novo, com a cidade dos clientes.
 - **Autorizados presos ao local (G6):** a linha nova com autorizados vivos não sai na correção; `_agenda_local_recolher` conta `os_autorizados`, como o *desfaz*.
 
 ### [NOVO-agenda-95] Revisão da 7d, o que fica de fora de propósito (decisão do fio, 06/11/2026)
