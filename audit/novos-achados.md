@@ -24,6 +24,14 @@
 - **`mostrada_em`:** anda a cada mostra no fechamento e na carona; no aviso do gestor anda no tique seguinte (até 15 min depois de sair); em *agenda pendências*, em `agenda_ver` pelo modelo e na resposta "Qual decisão?", nunca. Medir a pergunta pela conversa mudaria `mostrada_vezes`, que conta prazo e o teto do fechamento. A trava do "1" lê as 3 fontes (a pergunta, a fila e a conversa) e fica de pé sem mexer nisso.
 - **Fica aberto:** `mostrada_em` continua sem ver a conversa. Quem usar para "o dono já viu" precisa saber disso.
 
+### [NOVO-agenda-98] Mensagem ao cliente de OS concluída perde a pergunta do OK: *manda* e *segura* não acham nada, e ela vence sem sair
+
+- **Encontrado em:** Agenda de Produção, Fase 7d, Onda 3 (06/11/2026), rodando a tabela do dono na carteira de agora. É da Fase 5, sem relação com a 7d.
+- **O quê:** `pronto` e `pos_servico` nascem `aguardando_dono`, com a pergunta `cliente_aprovar`. A OS já saiu da carteira, e `_agenda_vigia_limpeza` fecha a pergunta no tique seguinte, com o motivo "a OS saiu da carteira". Depois disso, *manda cliente X* e *segura cliente X* respondem "Essa pergunta já foi respondida ou resolvida.", e a mensagem fica em *agenda clientes* até vencer (`recusada`, `vencida`).
+- **Em produção, hoje:** a OS-00104 está assim: mensagem `pronto` `aguardando_dono`, pergunta `resolvida` com esse motivo (`sql/wf7dd_c3_flavio`, `wf7dd_c3_flavio2`). Na semana simulada, a `pronto` e as 4 `pos_servico` venceram sem sair.
+- **Efeito:** é o lado seguro: nada sai ao cliente. Mas enquanto a mensagem pede aprovação, o dono não tem como aprovar `pronto` nem `pos_servico`, e o texto diz que tem.
+- **Na Fase 7d:** sem conserto. O lugar é a limpeza da vigia, e a 7d não toca em nenhum `_agenda_vigia_*` (R6.8). O roteiro diz a verdade ao dono. Saída: a limpeza poupar `cliente_aprovar` enquanto a mensagem estiver `aguardando_dono`.
+
 ### [NOVO-agenda-97] 2ª revisão da 7d, o que fica de fora de propósito (decisão do fio, 06/11/2026)
 
 - **G13:** `Marquei nos últimos 7 dias: nada.` em *agenda gestor*, com serviço marcado pelo motor. A linha é de antes da 7d; a causa não foi apurada. O roteiro manda ler *agenda plano*.
