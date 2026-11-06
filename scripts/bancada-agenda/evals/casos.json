@@ -6189,6 +6189,50 @@
           "O motorhome sai sex 23/07."
         ]
       }
+    },
+    {
+      "id": "K122",
+      "fase": 7,
+      "grupo": "conversa",
+      "entrada": "o serviço da Carla é lugar novo: Água Verde",
+      "estado": "fase7d",
+      "agora": "2027-07-16 17:40",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "cadastro": {
+          "diff": []
+        },
+        "nao_afirma_gravado": true,
+        "ferramentas": [
+          {
+            "nome": "os_planejar",
+            "argumentos": {
+              "os": {
+                "um_de": [
+                  "Carla",
+                  "carla",
+                  "OS-J11"
+                ]
+              },
+              "local": "lugar novo: Água Verde"
+            }
+          }
+        ],
+        "texto_contem": [
+          "Local: Água Verde (lugar novo"
+        ]
+      }
     }
   ]
 }

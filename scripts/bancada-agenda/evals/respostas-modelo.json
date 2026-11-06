@@ -4163,5 +4163,35 @@
       ],
       "texto": "{{saida:0}}"
     }
+  },
+  "K122": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Carla",
+            "local": "lugar novo: Água Verde",
+            "trecho": "o serviço da Carla é lugar novo: Água Verde"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "tira o prefixo, e o banco recusa de novo: a saída das recusas só vale com \"lugar novo:\" em local",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Carla",
+            "local": "Água Verde",
+            "trecho": "o serviço da Carla é lugar novo: Água Verde"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
   }
 }

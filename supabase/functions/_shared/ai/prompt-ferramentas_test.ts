@@ -729,6 +729,8 @@ Deno.test("agenda de produção (Fase 7d, P8): o local é os_planejar, amarrado 
   // (correção, Onda 2) o lugar novo, a data com o verbo, "até dia 13", a lista, e as linhas do entregue param de competir
   assertStringIncludes(secao, "Lugar fora do cadastro vai em local como ele disse: a releitura avisa que é lugar novo, e você não diz \"não achei\"");
   assertStringIncludes(secao, "\"outro lugar\" vai como local \"outro lugar em Itajaí\"");
+  // (correção, Onda 4, M5) a saída das recusas: o prefixo é do banco, e o modelo não o tira
+  assertStringIncludes(secao, "\"lugar novo: X\" vai em local inteiro");
   assertStringIncludes(secao, "com o verbo dele no trecho (\"chegou dia 5\"): quem decide o mês é o banco");
   assertStringIncludes(secao, "\"Até dia 13\": sobre o bem na HBR ou no pátio é sai_em, que leva \"dia 13\", sem o \"até\"; prazo do cliente é precisa_ate; o bem indisponível é bem_fora; congelar_ate só com \"não mexe até\".");
   // (correção, Onda 3, G6, T8) o que não é lugar não vai em local; "em seco" junto do lugar vai em bem_onde; a ferramenta para de dizer "pergunta se não achar"
