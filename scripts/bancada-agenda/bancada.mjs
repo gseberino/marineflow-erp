@@ -92,6 +92,9 @@ export const FORA_DA_BANCADA = new Set([
   '20261106100100_retorno_f0b_parar.sql',
   '20261106100200_retorno_f0b_esperando.sql',
   '20261106100300_retorno_f0b_medidas.sql',
+  // Retorno F0a-2 (rebase de 06/11): o gatilho que mascara o PIN em whatsapp_messages, de OUTRA sessão e já em produção. Só atravessa
+  // app_users e whatsapp_messages, e a 7d não lê essa tabela. O dado das linhas antigas é outra migration, com OK próprio.
+  '20261106100400_pin_mascarar_chegada.sql',
   // Merge do main (28/10/2026): migrations de OUTRAS sessões, já aplicadas em produção, que caíram depois de PRIMEIRA
   // pela data. Mexem em diárias (conta corrente, recibo, lote, anotação × CPF) e no agrupar OS — tabelas que a bancada
   // não modela (anotacoes_do_extrato, orcamento_agrupamentos, os_agrupamento_movidos…) e funções que a agenda não chama
