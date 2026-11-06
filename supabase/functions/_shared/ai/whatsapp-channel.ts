@@ -613,6 +613,86 @@ export async function textoDaTravaDoComprovante(
   return t.travar ? t.texto : null;
 }
 
+// A trava do "1" da agenda (Fase 7d, correção R1, 06/11/2026). Por onde a pergunta numerada chega ao dono: o fechamento e a carona gravam mostrada_em na hora, a cada mostra; o aviso do gestor grava
+// no tique seguinte (até 15 min depois de sair), daí a fila; *agenda pendências* e o modelo não gravam nada (agenda_ver só lê), daí a conversa. O resumo da manhã e o monitor não levam pergunta numerada.
+const FONTES_DA_AGENDA_NA_FILA = ["agenda-dono", "ai_briefing_tarde"];
+const AGENDA_NUMERADA_NA_CONVERSA = /Decisão \d+:|(^|\s)1\) [^\n]*;\s2\) /;
+const EXEMPLO_MAX = 30;
+
+/** "1" ou "2" sozinhos. "1 <PIN>", "sim", "não", "2 B" e "1." não: seguem como hoje. */
+export function numeroSozinho(texto: string): "1" | "2" | null {
+  const t = texto.trim();
+  return t === "1" || t === "2" ? t : null;
+}
+
+/**
+ * O exemplo em palavras, da 1ª opção da pergunta: "Está certo (recomendo)" vira "está certo". Sem exemplo quando não cabe
+ * (longa, cortada, com nome e peça) e quando ele mesmo decidiria o pedido: "Não gravo, eu te digo como é" rejeitaria a pendência.
+ */
+export function exemploDaOpcao(opcoes: unknown): string | null {
+  const lista = Array.isArray(opcoes) ? opcoes as Array<{ n?: unknown; texto?: unknown }> : [];
+  const primeira = lista.find((o) => Number(o?.n) === 1) ?? lista[0];
+  const texto = String(primeira?.texto ?? "").replace(/\s*\([^()]*\)\s*$/, "").trim();
+  if (!texto || texto.length > EXEMPLO_MAX || /[:…]/.test(texto)) return null;
+  const exemplo = texto.charAt(0).toLowerCase() + texto.slice(1);
+  return parseConfirmationReply(exemplo) ? null : exemplo;
+}
+
+/** A pergunta de volta: nada foi executado nem rejeitado. No "2", o caminho do pedido é recusar; com risco alto, o sim leva o PIN. */
+export function textoDaDuvidaDaAgenda(p: { numero: "1" | "2"; titulo: string; risco?: string | null; exemplo: string | null }): string {
+  const pedido = p.numero === "2"
+    ? "Para recusar o pedido, mande *não*."
+    : `Para aprovar o pedido, mande ${p.risco === "high" ? "*sim <SEU PIN>*" : "*sim*"}.`;
+  const agenda = p.exemplo ? `Para a agenda, diga com as palavras (por exemplo, "${p.exemplo}").` : "Para a agenda, diga com as palavras.";
+  return `Fiquei em dúvida: esse "${p.numero}" é para o pedido "${p.titulo}", que espera o seu sim, ou para a agenda? ${pedido} ${agenda}`;
+}
+
+/**
+ * A trava do "1" da agenda (correção R1): com um pedido do assistente esperando, "1" ou "2" sozinhos depois de uma pergunta numerada
+ * da agenda mostrada ao dono DEPOIS de o pedido nascer. Devolve a pergunta de volta (nada é executado, rejeitado nem consumido) ou
+ * null para seguir como hoje. Só lê o banco com pendência E o texto sendo "1" ou "2" sozinho; citar uma mensagem já diz a que se
+ * refere. Da fila só id, source, status e created_at, nunca o corpo. Erro de leitura: segue como hoje, sem travar, e loga.
+ */
+export async function textoDaTravaDaAgenda(
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  p: { sessionId: string; phone: string; texto: string; citado: string | null; metadata: Record<string, unknown> },
+): Promise<string | null> {
+  const numero = numeroSozinho(p.texto);
+  const pendenciaId = p.metadata.pending_confirm_action_id;
+  if (!numero || !pendenciaId || p.citado) return null;
+  try {
+    const pend = await admin.from("ai_operator_pending_actions").select("title, status, risk_level, created_at").eq("id", pendenciaId).maybeSingle();
+    if (pend.error) throw pend.error;
+    if (pend.data?.status !== "pending" || !pend.data.created_at) return null;
+    const desde = String(pend.data.created_at);
+    const perg = await admin.from("agenda_perguntas").select("opcoes, mostrada_em, expira_em").eq("estado", "aberta").eq("modo", "ligado")
+      .order("mostrada_em", { ascending: false, nullsFirst: false });
+    if (perg.error) throw perg.error;
+    const agora = Date.now();
+    const numeradas = ((perg.data ?? []) as Array<{ opcoes: unknown; mostrada_em: string | null; expira_em: string | null }>)
+      .filter((q) => Array.isArray(q.opcoes) && q.opcoes.length > 0 && (!q.expira_em || Date.parse(q.expira_em) > agora));
+    if (numeradas.length === 0) return null;
+    if (!numeradas.some((q) => q.mostrada_em && Date.parse(q.mostrada_em) > Date.parse(desde))) {
+      const fila = await admin.from("whatsapp_send_queue").select("id, source, status, created_at").eq("phone_normalized", p.phone)
+        .in("source", FONTES_DA_AGENDA_NA_FILA).eq("status", "sent").gt("created_at", desde).limit(1);
+      if (fila.error) throw fila.error;
+      if (!fila.data?.length) {
+        const conversa = await admin.from("ai_operator_messages").select("content").eq("session_id", p.sessionId).eq("role", "assistant")
+          .gt("created_at", desde).order("created_at", { ascending: false }).limit(5);
+        if (conversa.error) throw conversa.error;
+        if (!((conversa.data ?? []) as Array<{ content: string | null }>).some((m) => AGENDA_NUMERADA_NA_CONVERSA.test(m.content ?? ""))) return null;
+      }
+    }
+    const dono = await donoDoWhatsApp(admin);
+    if (dono?.phone !== p.phone) return null;
+    return textoDaDuvidaDaAgenda({ numero, titulo: String(pend.data.title ?? ""), risco: pend.data.risk_level, exemplo: exemploDaOpcao(numeradas[0].opcoes) });
+  } catch (e) {
+    console.error("[ai-agent][whatsapp] trava do 1 da agenda: leitura falhou, sigo sem travar:", e);
+    return null;
+  }
+}
+
 /**
  * Antes de perguntar algo ao dono por conta própria (lembretes de revisão, campanha,
  * acompanhar-conversas): ele já tem uma pergunta aberta? Com a conversa ligada, o registro

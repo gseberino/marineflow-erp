@@ -10,8 +10,10 @@ import {
   destinoDoSimComPendencia,
   donoOcupadoParaPerguntar,
   enviarComRegistro,
+  exemploDaOpcao,
   formatOptionsAsNumberedText,
   notaDeConfirmacao,
+  numeroSozinho,
   parseConfirmationReply,
   parseOptionReply,
   pendenciaParaHerdar,
@@ -19,7 +21,9 @@ import {
   registroDoTurno,
   resolveOptionAsUserText,
   resolveOrCreateWhatsAppSession,
+  textoDaDuvidaDaAgenda,
   textoDaPendenciaReapresentada,
+  textoDaTravaDaAgenda,
   textoDaTravaDoComprovante,
 } from "./whatsapp-channel.ts";
 
@@ -955,4 +959,233 @@ Deno.test("revisão de 29/10: sem conseguir ler a pendência nova, a anterior é
   assertEquals(gravado.update, undefined, "nada é cancelado");
   assertEquals(depois.pendencias_guardadas, ["velha"]);
   assertStringIncludes(aviso, "continua esperando");
+});
+
+// ─── A trava do "1" da agenda (Fase 7d, correção R1, 06/11/2026) ─────────────────────────────────────────────────────────
+// Com um pedido do assistente esperando, "1" sozinho aprovava sem PIN e "2" rejeitava, mesmo quando era a resposta a uma pergunta
+// numerada da agenda que chegou depois do pedido. Nada é executado, rejeitado nem consumido: a trava só pergunta a qual se refere.
+
+const DONO_DA_TRAVA = "5547900000001";
+const PEDIDO_EM = "2026-11-06T12:00:00.000Z";
+const DEPOIS_DO_PEDIDO = "2026-11-06T12:30:00.000Z";
+const ANTES_DO_PEDIDO = "2026-11-06T11:30:00.000Z";
+const OPCOES = [{ n: 1, texto: "Está certo (recomendo)" }, { n: 2, texto: "Mudou" }];
+
+/** O banco da trava: guarda o que foi lido e o que foi pedido, e aplica de verdade os filtros de quem usa. */
+function bancoDaTrava(o: {
+  pendencia?: Record<string, unknown> | null;
+  perguntas?: Record<string, unknown>[];
+  fila?: Record<string, unknown>[];
+  mensagens?: Record<string, unknown>[];
+  donoFone?: string | null;
+  falha?: string;
+} = {}) {
+  const lidas: string[] = [];
+  const colunas: Record<string, string> = {};
+  const tabelas: Record<string, Record<string, unknown>[]> = {
+    ai_operator_pending_actions: o.pendencia === null
+      ? []
+      : [{ id: "pend-1", title: "Lançar a despesa", status: "pending", risk_level: "medium", created_at: PEDIDO_EM, ...(o.pendencia ?? {}) }],
+    agenda_perguntas: o.perguntas ?? [],
+    whatsapp_send_queue: o.fila ?? [],
+    ai_operator_messages: o.mensagens ?? [],
+    app_users: o.donoFone === null ? [] : [{ id: "dono", phone_normalized: o.donoFone ?? DONO_DA_TRAVA, role: "admin", active: true, ai_whatsapp_enabled: true }],
+  };
+  const admin = {
+    from(tabela: string) {
+      lidas.push(tabela);
+      let linhas = [...(tabelas[tabela] ?? [])];
+      const resposta = () => tabela === o.falha ? { data: null, error: { message: "timeout" } } : { data: linhas, error: null };
+      const q: any = {
+        select: (c: string) => { colunas[tabela] = c; return q; },
+        eq: (c: string, v: unknown) => { if (c in (linhas[0] ?? {})) linhas = linhas.filter((l) => l[c] === v); return q; },
+        in: (c: string, v: unknown[]) => { linhas = linhas.filter((l) => v.includes(l[c])); return q; },
+        gt: (c: string, v: string) => { linhas = linhas.filter((l) => Date.parse(String(l[c])) > Date.parse(v)); return q; },
+        not: () => q,
+        order: () => q,
+        limit: () => q,
+        maybeSingle: () => Promise.resolve(tabela === o.falha ? { data: null, error: { message: "timeout" } } : { data: linhas[0] ?? null, error: null }),
+        then: (ok: (r: unknown) => unknown) => Promise.resolve(resposta()).then(ok),
+      };
+      return q;
+    },
+  };
+  return { admin, lidas, colunas };
+}
+const trava = (admin: unknown, texto = "1", extra: Record<string, unknown> = {}) =>
+  textoDaTravaDaAgenda(admin, {
+    sessionId: "sess-1", phone: DONO_DA_TRAVA, texto, citado: null, metadata: { pending_confirm_action_id: "pend-1" }, ...extra,
+  });
+const mostradaDepois = { opcoes: OPCOES, mostrada_em: DEPOIS_DO_PEDIDO, expira_em: null, estado: "aberta", modo: "ligado" };
+const mostradaAntes = { ...mostradaDepois, mostrada_em: ANTES_DO_PEDIDO };
+
+Deno.test("trava do 1: '1' sozinho, com a pergunta numerada mostrada depois do pedido, pergunta a qual se refere; o texto é o da decisão", async () => {
+  const { admin } = bancoDaTrava({ perguntas: [mostradaDepois] });
+  assertEquals(
+    await trava(admin),
+    'Fiquei em dúvida: esse "1" é para o pedido "Lançar a despesa", que espera o seu sim, ou para a agenda? Para aprovar o pedido, mande *sim*. Para a agenda, diga com as palavras (por exemplo, "está certo").',
+  );
+});
+
+Deno.test("trava do 1: '2' sozinho também: ele rejeitaria; o caminho do pedido é o *não*", async () => {
+  const t = await trava(bancoDaTrava({ perguntas: [mostradaDepois] }).admin, " 2 ");
+  assertStringIncludes(String(t), 'esse "2" é para o pedido');
+  assertStringIncludes(String(t), "Para recusar o pedido, mande *não*.");
+});
+
+Deno.test("trava do 1: a pergunta mostrada ANTES do pedido não trava: o 1 é do pedido", async () => {
+  const { admin, lidas } = bancoDaTrava({ perguntas: [mostradaAntes] });
+  assertEquals(await trava(admin), null);
+  assertEquals(lidas, ["ai_operator_pending_actions", "agenda_perguntas", "whatsapp_send_queue", "ai_operator_messages"]);
+});
+
+Deno.test("trava do 1: sem pendência, ou com outro texto, nenhuma leitura no turno", async () => {
+  const { admin, lidas } = bancoDaTrava({ perguntas: [mostradaDepois] });
+  assertEquals(await trava(admin, "1", { metadata: {} }), null);
+  for (const t of ["1 7391", "2 7391", "sim", "sim 7391", "não", "nao", "ok", "2 B", "1.", "1)", "12", "a 1", "na decisão 1, a opção 2", "está certo", ""]) {
+    assertEquals(await trava(admin, t), null, t);
+  }
+  assertEquals(lidas, [], "nenhuma leitura");
+});
+
+Deno.test("trava do 1: citar uma mensagem já diz a que se refere: segue como hoje, sem ler o banco", async () => {
+  const { admin, lidas } = bancoDaTrava({ perguntas: [mostradaDepois] });
+  assertEquals(await trava(admin, "1", { citado: "WA-CITADA" }), null);
+  assertEquals(lidas, []);
+});
+
+Deno.test("trava do 1: erro de leitura segue como hoje, sem travar, e loga", async () => {
+  for (const falha of ["ai_operator_pending_actions", "agenda_perguntas", "whatsapp_send_queue", "ai_operator_messages", "app_users"]) {
+    const { admin } = bancoDaTrava({
+      falha,
+      perguntas: [falha === "whatsapp_send_queue" || falha === "ai_operator_messages" ? mostradaAntes : mostradaDepois],
+      mensagens: [],
+    });
+    const original = console.error;
+    let logou = 0;
+    console.error = () => { logou++; };
+    try {
+      assertEquals(await trava(admin), null, falha);
+    } finally {
+      console.error = original;
+    }
+    assertEquals(logou, 1, `loga: ${falha}`);
+  }
+});
+
+Deno.test("trava do 1: leitura que lança também segue como hoje", async () => {
+  const admin = { from() { throw new Error("rede"); } };
+  const original = console.error;
+  let logou = false;
+  console.error = () => { logou = true; };
+  try {
+    assertEquals(await trava(admin), null);
+  } finally {
+    console.error = original;
+  }
+  assert(logou, "loga");
+});
+
+Deno.test("trava do 1: pedido que já foi decidido, que não existe ou sem data: segue como hoje", async () => {
+  assertEquals(await trava(bancoDaTrava({ pendencia: { status: "executed" }, perguntas: [mostradaDepois] }).admin), null);
+  assertEquals(await trava(bancoDaTrava({ pendencia: null, perguntas: [mostradaDepois] }).admin), null);
+  assertEquals(await trava(bancoDaTrava({ pendencia: { created_at: null }, perguntas: [mostradaDepois] }).admin), null);
+});
+
+Deno.test("trava do 1: só pergunta aberta com opções: sem opções, vencida ou nenhuma não é ambígua", async () => {
+  const fila = [{ id: "f1", source: "agenda-dono", status: "sent", created_at: DEPOIS_DO_PEDIDO, phone_normalized: DONO_DA_TRAVA }];
+  const original = console.error;
+  let logou = 0;
+  console.error = () => { logou++; };
+  try {
+    assertEquals(await trava(bancoDaTrava({ perguntas: [{ ...mostradaDepois, opcoes: [] }], fila }).admin), null);
+    assertEquals(await trava(bancoDaTrava({ perguntas: [{ ...mostradaDepois, opcoes: null }], fila }).admin), null);
+    assertEquals(await trava(bancoDaTrava({ perguntas: [{ ...mostradaDepois, expira_em: "2020-01-01T00:00:00Z" }], fila }).admin), null);
+    assertEquals(await trava(bancoDaTrava({ perguntas: [], fila }).admin), null);
+  } finally {
+    console.error = original;
+  }
+  assertEquals(logou, 0, "não é falha: é não ter o que travar");
+  assert(await trava(bancoDaTrava({ perguntas: [{ ...mostradaDepois, expira_em: "2999-01-01T00:00:00Z" }] }).admin));
+});
+
+Deno.test("trava do 1: o aviso que saiu e ainda não foi conferido: a fila diz, e só com id, source, status e created_at", async () => {
+  const linha = { id: "f1", source: "agenda-dono", status: "sent", created_at: DEPOIS_DO_PEDIDO, phone_normalized: DONO_DA_TRAVA };
+  const { admin, colunas } = bancoDaTrava({ perguntas: [mostradaAntes], fila: [linha] });
+  assert(await trava(admin));
+  assertEquals(colunas.whatsapp_send_queue, "id, source, status, created_at");
+  assert(await trava(bancoDaTrava({ perguntas: [mostradaAntes], fila: [{ ...linha, source: "ai_briefing_tarde" }] }).admin), "o fechamento");
+});
+
+Deno.test("trava do 1: a fila só vale para o aviso e o fechamento, ao dono, enviados depois do pedido", async () => {
+  const linha = { id: "f1", source: "agenda-dono", status: "sent", created_at: DEPOIS_DO_PEDIDO, phone_normalized: DONO_DA_TRAVA };
+  for (
+    const f of [
+      { source: "ai_briefing" }, { source: "ai_monitor" }, { source: "me_acorde" }, { status: "pending" }, { status: "failed" },
+      { created_at: ANTES_DO_PEDIDO }, { phone_normalized: "5547999999999" },
+    ]
+  ) {
+    assertEquals(await trava(bancoDaTrava({ perguntas: [mostradaAntes], fila: [{ ...linha, ...f }] }).admin), null, JSON.stringify(f));
+  }
+});
+
+Deno.test("trava do 1: *agenda pendências* e a pergunta do modelo não gravam a mostra: a conversa diz", async () => {
+  const fala = (content: string, extra: Record<string, unknown> = {}) => ({ session_id: "sess-1", role: "assistant", content, created_at: DEPOIS_DO_PEDIDO, ...extra });
+  for (
+    const c of [
+      "2 decisões esperam você na agenda:\nDecisão 1: Giancarlo …",
+      "Qual decisão? 1) Giancarlo; 2) Na agenda conto com Alex.",
+      "Lenine: já combinou? 1) Já combinei; 2) Ainda não.",
+    ]
+  ) {
+    assert(await trava(bancoDaTrava({ perguntas: [mostradaAntes], mensagens: [fala(c)] }).admin), c);
+  }
+  for (
+    const m of [
+      fala("Posso lançar a despesa de R$ 90?"), // a conversa de sempre
+      fala("Lançar:\n1) gasolina\n2) pedágio"), // lista do assistente, uma por linha, não é pergunta da agenda
+      fala("Decisão 1: …", { created_at: ANTES_DO_PEDIDO }), // antes do pedido
+      fala("Decisão 1: …", { session_id: "outra" }),
+      fala("Decisão 1: …", { role: "user" }),
+    ]
+  ) {
+    assertEquals(await trava(bancoDaTrava({ perguntas: [mostradaAntes], mensagens: [m] }).admin), null, JSON.stringify(m));
+  }
+});
+
+Deno.test("trava do 1: pendência de outra pessoa da empresa não trava: a pergunta da agenda é ao dono", async () => {
+  assertEquals(await trava(bancoDaTrava({ perguntas: [mostradaDepois], donoFone: "5547999999999" }).admin), null);
+  assertEquals(await trava(bancoDaTrava({ perguntas: [mostradaDepois], donoFone: null }).admin), null);
+});
+
+Deno.test("trava do 1: risco alto: o sim leva o PIN", async () => {
+  const t = await trava(bancoDaTrava({ pendencia: { risk_level: "high" }, perguntas: [mostradaDepois] }).admin);
+  assertStringIncludes(String(t), "Para aprovar o pedido, mande *sim <SEU PIN>*.");
+});
+
+Deno.test("trava do 1: o exemplo vem da 1ª opção da pergunta mais recente, se couber; senão, sem exemplo", async () => {
+  assertEquals(exemploDaOpcao(OPCOES), "está certo");
+  assertEquals(exemploDaOpcao([{ n: 2, texto: "Mudou" }, { n: 1, texto: "Já está (anoto)" }]), "já está");
+  assertEquals(exemploDaOpcao([{ n: 1, texto: "Vanderlei: Porta Fusível MIDI…" }]), null, "cortada, com nome e peça");
+  assertEquals(exemploDaOpcao([{ n: 1, texto: "x".repeat(31) }]), null, "não cabe");
+  assertEquals(exemploDaOpcao([{ n: 1, texto: "x".repeat(30) }]), "x".repeat(30), "cabe");
+  assertEquals(exemploDaOpcao([{ n: 1, texto: "Não gravo, eu te digo como é" }]), null, "o próprio exemplo rejeitaria o pedido");
+  assertEquals(exemploDaOpcao([{ n: 1, texto: "Sim" }]), null);
+  assertEquals(exemploDaOpcao([]), null);
+  assertEquals(exemploDaOpcao(null), null);
+  assertEquals(
+    textoDaDuvidaDaAgenda({ numero: "1", titulo: "X", exemplo: null }),
+    'Fiquei em dúvida: esse "1" é para o pedido "X", que espera o seu sim, ou para a agenda? Para aprovar o pedido, mande *sim*. Para a agenda, diga com as palavras.',
+  );
+  const longa = { ...mostradaDepois, opcoes: [{ n: 1, texto: "Vanderlei: Porta Fusível MIDI…" }] };
+  assertStringIncludes(String(await trava(bancoDaTrava({ perguntas: [longa] }).admin)), "diga com as palavras.");
+});
+
+Deno.test("trava do 1: numeroSozinho só aceita 1 e 2, e o que ela deixa passar a confirmação lê como antes", () => {
+  assertEquals(numeroSozinho("1"), "1");
+  assertEquals(numeroSozinho(" 2\n"), "2");
+  for (const t of ["3", "0", "1 2", "1 7391", "11", "sim", ""]) assertEquals(numeroSozinho(t), null, t);
+  assertEquals(parseConfirmationReply("1")?.decision, "approve");
+  assertEquals(parseConfirmationReply("2")?.decision, "reject");
+  assertEquals(parseConfirmationReply("1 7391"), { decision: "approve", pin: "7391" });
 });

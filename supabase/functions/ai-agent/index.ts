@@ -61,6 +61,7 @@ import {
   pendenciaQueSegueEsperando,
   cancelarPendenciaSubstituida,
   registroDoTurno,
+  textoDaTravaDaAgenda,
   textoDaTravaDoComprovante,
   formatOptionsAsNumberedText,
   notaDeConfirmacao,
@@ -584,6 +585,16 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
     console.log(`[ai-agent][whatsapp] trava do comprovante: sessao=${sessionId} mensagem=${messageId ?? "-"}`);
     await queueWhatsAppReply(admin, phoneNormalized, trava);
     return jr({ ok: true, travado: "comprovante" });
+  }
+
+  // ---- Trava do "1" da agenda (Fase 7d, correção R1, 06/11/2026) ----
+  // "1" ou "2" sozinhos com um pedido esperando e uma pergunta numerada da agenda mostrada depois dele: pergunta a qual se refere. Nada é
+  // executado, rejeitado nem consumido. Sem pendência, ou com outro texto, nenhuma leitura.
+  const travaDaAgenda = await textoDaTravaDaAgenda(admin, { sessionId, phone: phoneNormalized, texto: text, citado, metadata });
+  if (travaDaAgenda) {
+    console.log(`[ai-agent][whatsapp] trava do 1 da agenda: sessao=${sessionId} mensagem=${messageId ?? "-"}`);
+    await queueWhatsAppReply(admin, phoneNormalized, travaDaAgenda);
+    return jr({ ok: true, travado: "agenda" });
   }
 
   // ---- Camada determinística (custo $0): confirmação de pendência ----

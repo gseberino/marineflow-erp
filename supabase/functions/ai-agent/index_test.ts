@@ -383,3 +383,19 @@ Deno.test("guarda do PIN: depois da confirmação, antes do modelo e sem gravar 
   assert(!bloco.includes("ai_operator_messages"), "o texto não entra na conversa");
   assert(!bloco.includes("pin_attempts"), "não conta como tentativa errada");
 });
+
+// Fase 7d, correção R1 (06/11/2026): a trava do "1" da agenda. O que se protege: ela vem depois da trava do comprovante e antes da confirmação (senão o "1" aprova o
+// pedido sem PIN e o "2" o rejeita); responde e volta sem mexer na pendência nem na sessão.
+Deno.test("trava do 1 da agenda: depois da trava do comprovante, antes da confirmação; responde e volta sem tocar na pendência", () => {
+  const chamada = turno.indexOf("await textoDaTravaDaAgenda(admin, { sessionId, phone: phoneNormalized, texto: text, citado, metadata });");
+  assert(chamada > 0, "falta a trava");
+  assert(turno.indexOf("textoDaTravaDoComprovante(") < chamada, "depois da trava do comprovante");
+  assert(chamada < turno.indexOf("const confirmation = parseConfirmationReply(text);"), "antes da confirmação");
+  const bloco = turno.slice(chamada, turno.indexOf("const confirmation = parseConfirmationReply(text);"));
+  assertStringIncludes(bloco, "await queueWhatsAppReply(admin, phoneNormalized, travaDaAgenda);");
+  assertStringIncludes(bloco, 'return jr({ ok: true, travado: "agenda" });');
+  assert(!bloco.includes("resolveWhatsAppConfirmation"), "não decide a pendência");
+  assert(!bloco.includes("ai_operator_sessions"), "não mexe na sessão");
+  assert(!bloco.includes("metadata."), "não consome nada");
+  assertEquals((fonte.match(/textoDaTravaDaAgenda\(/g) ?? []).length, 1, "só no turno do WhatsApp");
+});
