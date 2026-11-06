@@ -628,6 +628,10 @@ begin
     perform pg_temp.grava(date '2027-07-16', '17:10');
     select * into l from public.agenda_locais x where x.id = (pg_temp.pl('OS-J3')).local_id;
     v_res := pg_temp.ok(v_res, 'G6j2 dizer outra cidade troca a da linha, sem cidade no cliente', l.municipio = 'Navegantes', to_jsonb(l)::text);
+    perform pg_temp.plan('OS-J5', '{"local": "na casa dele"}', 'é na casa dele');
+    perform pg_temp.grava(date '2027-07-16', '17:20');
+    select * into l from public.agenda_locais x where x.id = (pg_temp.pl('OS-J3')).local_id;
+    v_res := pg_temp.ok(v_res, 'G6j3 dizer só "na casa dele" não apaga a cidade da linha', l.municipio = 'Navegantes', to_jsonb(l)::text);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
             when others then v_res := pg_temp.ok(v_res, 'G6g quebrou', false, sqlerrm);
@@ -926,13 +930,13 @@ begin
     return;
   end if;
   -- Município conhecido: é sinal de lugar
-  for c in select * from (values ('está em Navegantes'), ('em Penha'), ('fica em Bombinhas'), ('tá em Nova Trento agora'), ('no Porto Belo')) t(frase) loop
+  for c in select * from (values ('está em Navegantes'), ('em Penha'), ('fica em Bombinhas'), ('tá em Nova Trento agora'), ('no Rio do Sul'), ('na Penha')) t(frase) loop
     begin
       perform pg_temp.base('sombra');
       perform pg_temp.prepara();
       perform pg_temp.cidade('OS-J7', 'Bombinhas');
       perform pg_temp.cidade('OS-J8', 'Nova Trento');
-      perform pg_temp.cidade('OS-J9', 'Porto Belo');
+      perform pg_temp.cidade('OS-J9', 'Rio do Sul');
       perform pg_temp.mandado('OS-J11');
       r := pg_temp.resp('OS-J11', c.frase, 'outro');
       select * into q from public.agenda_perguntas x where x.tipo = 'local' and x.service_order_id = pg_temp.os('OS-J11') and x.estado = 'aberta';
