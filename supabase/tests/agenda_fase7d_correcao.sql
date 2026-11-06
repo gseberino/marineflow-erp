@@ -260,7 +260,8 @@ begin
     select replace(p.prosrc, E'\r\n', E'\n') into v_viva from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = c.nome;
     -- (correção da 7d, Ondas 2 e 3) agenda_rascunho_planejar, agenda_rascunho_aplicar e _agenda_aplicar_planejar passaram a viver nas seguintes: a viva é a da migration mais nova que a define
     insert into _resultado values ('T0d ' || c.nome || ': a viva é a da migration; sem os blocos, a origem, byte a byte',
-      v_viva = coalesce(nullif(pg_temp.corpo(coalesce(current_setting('agenda_teste.mig_correcao3_fase7d', true), ''), c.nome), ''),
+      v_viva = coalesce(nullif(pg_temp.corpo(coalesce(current_setting('agenda_teste.mig_correcao4_fase7d', true), ''), c.nome), ''),
+                        nullif(pg_temp.corpo(coalesce(current_setting('agenda_teste.mig_correcao3_fase7d', true), ''), c.nome), ''),
                         nullif(pg_temp.corpo(coalesce(current_setting('agenda_teste.mig_correcao2_fase7d', true), ''), c.nome), ''), pg_temp.corpo(v_mig, c.nome))
       and pg_temp.sem_7d(v_viva) = pg_temp.sem_7d(pg_temp.corpo(current_setting('agenda_teste.' || c.fonte), c.nome)), null);
   end loop;

@@ -6,7 +6,7 @@
 -- SÓ LEITURA EM PRODUÇÃO: nenhum INSERT, UPDATE ou DELETE (só nas tabelas TEMPORÁRIAS do resultado); agenda_saude, agenda_ver e as leituras do local são STABLE; termina em ROLLBACK.
 -- Na bancada (que não aplica a 20261107100900: lá os modos ficam como a linha está, desligado) ele passa do mesmo jeito.
 --
---   M  as 12 versões de estrutura registradas (com as correções das Ondas 1, 2 e 3, 20261107100800, 20261107100850 e 20261107100860); o dado (100900) é mostrado
+--   M  as 13 versões de estrutura registradas (com as correções das Ondas 1 a 4, 20261107100800, 20261107100850, 20261107100860 e 20261107100870); o dado (100900) é mostrado
 --   C  agenda_config: as 31 colunas da 7d; os 6 modos: com a 100900 registrada, sombra (ou ligado, depois dos OKs); sem ela, desligado; o DEFAULT é sombra; onde_fica_desde: gravada com o
 --      dado, nula sem ele; cliente_tipos_ligados aceita onde_fica; os_planejamento com as 14 colunas
 --   T  as 2 tabelas com RLS, só a política de leitura TO authenticated e o anon sem privilégio; o um pátio só; os gatilhos; as listas fechadas com o que a 7d somou; critica com acesso;
@@ -34,7 +34,7 @@ select exists (select 1 from supabase_migrations.schema_migrations m where m.ver
 -- ── M. As migrations ──────────────────────────────────────────────────────────────────────────────
 insert into _resultado
 select format('M1 migration %s registrada', v), exists (select 1 from supabase_migrations.schema_migrations m where m.version = v), null
-  from unnest(array['20261107100000', '20261107100100', '20261107100200', '20261107100300', '20261107100400', '20261107100500', '20261107100550', '20261107100600', '20261107100700', '20261107100800', '20261107100850', '20261107100860']) v;
+  from unnest(array['20261107100000', '20261107100100', '20261107100200', '20261107100300', '20261107100400', '20261107100500', '20261107100550', '20261107100600', '20261107100700', '20261107100800', '20261107100850', '20261107100860', '20261107100870']) v;
 insert into _resultado
 select 'M2 a migration de dado 20261107100900 (a semente e os 6 modos em teste) — só mostra', true,
        case when (select dado from _pd) then 'registrada (passo 3 feito)' else 'não registrada (antes do passo 3)' end;
@@ -153,6 +153,10 @@ select 'F1d as 4 funções da correção da Onda 3 existem', count(*) = 4, null
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
  where n.nspname = 'public' and p.proname in ('_agenda_uf_dita', '_agenda_local_sem_uf', '_agenda_local_recolher', '_agenda_data_no_passado');
 insert into _resultado
+select 'F1e a função da correção da Onda 4 existe', count(*) = 1, null
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'public' and p.proname = '_agenda_local_forcado';
+insert into _resultado
 select format('F1 as %s funções novas da 7d existem', count(*)), count(*) filter (where p.oid is null) = 0,
        coalesce('faltam: ' || string_agg(n, ', ') filter (where p.oid is null), null)
   from unnest(array[
@@ -185,12 +189,19 @@ select 'F2 nenhuma função da 7d é executável por anon', count(*) filter (whe
   '_agenda_tentar_bloco', '_agenda_validar_itens', '_agenda_ver_clientes', '_agenda_ver_decisoes', '_agenda_violacoes', 'agenda_cliente_vigiar',
   'agenda_decidir', 'agenda_decisoes_abertas', 'agenda_desfazer', 'agenda_equipe_ficha', 'agenda_propor', 'agenda_rascunho_aplicar',
   'agenda_rascunho_planejar', 'agenda_resposta_do_cliente', 'agenda_saude', 'os_plano_da_os', 'agenda_ver',
-  '_agenda_uf_dita', '_agenda_local_sem_uf', '_agenda_local_recolher', '_agenda_data_no_passado']);
+  '_agenda_uf_dita', '_agenda_local_sem_uf', '_agenda_local_recolher', '_agenda_data_no_passado', '_agenda_local_forcado', 'agenda_rascunho_desfazer']);
 insert into _resultado
 select format('F3 as %s recriadas estão no banco com o bloco do pacote mais novo que as recria (a versão certa)', count(*)),
        count(*) filter (where p.oid is null or p.prosrc not like '%(7d ' || r.pacote || '%') = 0,
        coalesce(string_agg(r.f || ' (' || r.pacote || ')', ', ') filter (where p.oid is null or p.prosrc not like '%(7d ' || r.pacote || '%'), 'todas')
   from _pd_recriadas r
+  left join lateral (select x.oid, x.prosrc from pg_proc x where x.pronamespace = 'public'::regnamespace and x.proname = r.f limit 1) p on true;
+insert into _resultado
+select format('F3b as %s da Onda 4 estão no banco com a marca dela (uma migration mais velha reaplicada as voltaria)', count(*)),
+       count(*) filter (where p.oid is null or p.prosrc not like '%(correção ' || r.marca || ')%') = 0,
+       coalesce(string_agg(r.f || ' (' || r.marca || ')', ', ') filter (where p.oid is null or p.prosrc not like '%(correção ' || r.marca || ')%'), 'todas')
+  from (values ('_agenda_local_novo', 'M4'), ('_agenda_municipio_conhecido', 'M10'), ('_agenda_local_da_casa', 'M10'), ('agenda_resolver_local', 'M6'), ('_agenda_data_no_passado', 'M7'),
+               ('agenda_desfazer', 'M9'), ('agenda_rascunho_desfazer', 'M1'), ('_agenda_aplicar_planejar', 'M8'), ('agenda_rascunho_planejar', 'M5')) r(f, marca)
   left join lateral (select x.oid, x.prosrc from pg_proc x where x.pronamespace = 'public'::regnamespace and x.proname = r.f limit 1) p on true;
 
 -- ── S. Sem erro ───────────────────────────────────────────────────────────────────────────────────

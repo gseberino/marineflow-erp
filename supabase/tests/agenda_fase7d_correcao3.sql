@@ -291,8 +291,9 @@ begin
       ('_agenda_ver_decisoes', 'mig_correcao2_fase7d'), ('agenda_rascunho_planejar', 'mig_correcao2_fase7d'), ('_agenda_aplicar_planejar', 'mig_correcao_fase7d'),
       ('agenda_desfazer', 'mig_combinar_fase7d')) t(nome, fonte) loop
     select replace(p.prosrc, E'\r\n', E'\n') into v_viva from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = c.nome;
+    -- (correção da 7d, Onda 4) agenda_rascunho_planejar, _agenda_aplicar_planejar e agenda_desfazer passaram a viver na 20261107100870: a viva é a da migration mais nova que a define
     insert into _resultado values ('T0d ' || c.nome || ': a viva é a da migration; sem os blocos, a origem, byte a byte',
-      v_viva = pg_temp.corpo(v_mig, c.nome) and pg_temp.sem_7d(v_viva) = pg_temp.sem_7d(pg_temp.corpo(current_setting('agenda_teste.' || c.fonte), c.nome)), null);
+      v_viva = coalesce(nullif(pg_temp.corpo(coalesce(current_setting('agenda_teste.mig_correcao4_fase7d', true), ''), c.nome), ''), pg_temp.corpo(v_mig, c.nome)) and pg_temp.sem_7d(v_viva) = pg_temp.sem_7d(pg_temp.corpo(current_setting('agenda_teste.' || c.fonte), c.nome)), null);
   end loop;
   insert into _resultado values ('T0e a sessão do retorno, a data dita e o dinheiro ficam de fora: agenda_data_dita, _agenda_data_um, _agenda_data_conferida, _agenda_chave_telefone, agenda_dia_util, agenda_somar_du, agenda_feriado, _agenda_cliente_dia, _agenda_nome_curto, _agenda_desfazer_marco, os_registrar_marco',
     v_mig !~ 'function public\.(agenda_data_dita|_agenda_data_um|_agenda_data_conferida|_agenda_chave_telefone|agenda_dia_util|agenda_somar_du|agenda_feriado|_agenda_cliente_dia|_agenda_nome_curto|_agenda_desfazer_marco|os_registrar_marco|handle_quote_deposit_payment)\(', null);
@@ -513,7 +514,7 @@ begin
       -- Estado
       ('em Santa Catarina', '"Santa Catarina" é um estado: me diga a cidade ou o nome do lugar.'), ('no Paraná', '"Paraná" é um estado: me diga a cidade ou o nome do lugar.'),
       ('em SC', '"SC" é um estado: me diga a cidade ou o nome do lugar.'), ('SC', '"SC" é um estado: me diga a cidade ou o nome do lugar.'), ('PR', '"PR" é um estado: me diga a cidade ou o nome do lugar.'),
-      ('no Rio Grande do Sul', '"Rio Grande do Sul" é um estado: me diga a cidade ou o nome do lugar.'), ('São Paulo', '"São Paulo" é um estado: me diga a cidade ou o nome do lugar.'),
+      ('no Rio Grande do Sul', '"Rio Grande do Sul" é um estado: me diga a cidade ou o nome do lugar.'), ('São Paulo', 'novo:São Paulo'),
       ('Água Verde', c_nao), ('Garagem do Zé', c_nao),
       -- Data
       ('semana que vem', '"semana que vem" parece uma data, não um lugar: me diga o nome do lugar (por exemplo, "Nova Trento").'), ('mês que vem', '"mês que vem" parece uma data, não um lugar: me diga o nome do lugar (por exemplo, "Nova Trento").'),
@@ -524,7 +525,7 @@ begin
       ('Tedesco em seco', 'local:Tedesco Marina Garden Plaza'), ('Garden Plaza, hangar 2', 'local:Tedesco Marina Garden Plaza'), ('MP em Balneário', 'local:MP Motorhomes'), ('MP em BC', 'local:MP Motorhomes'), ('na MP em seco', 'local:MP Motorhomes'),
       ('pátio da HBR em Balneário', 'local:MP Motorhomes'), ('Marina Itajaí, SC', 'local:Marina Itajaí'), ('Veleiros da Ilha em seco', 'local:Veleiros da Ilha'),
       -- Com 2 nomes, e a cidade
-      ('Marina Itajaí ou Tedesco', 'qual'), ('Balneário', 'qual'), ('em BC', 'qual'), ('BC', 'qual'), ('Balneário, SC', 'qual'), ('em Itajaí', 'qual'), ('na marina', 'qual'),
+      ('Marina Itajaí ou Tedesco', c_nao), ('Balneário', 'qual'), ('em BC', 'qual'), ('BC', 'qual'), ('Balneário, SC', 'qual'), ('em Itajaí', 'qual'), ('na marina', 'qual'),
       -- Continua passando: o lugar novo de verdade, e a palavra do recado fora do começo
       ('Praia de Fora', 'novo:Praia de Fora'), ('Nova Trento', 'novo:Nova Trento'), ('Nova Trento, SC', 'novo:Nova Trento'), ('Nova Trento/SC', 'novo:Nova Trento'), ('Nova Trento SC', 'novo:Nova Trento'), ('nova trento sc', 'novo:Nova Trento'),
       ('Nova Trento - SC', 'novo:Nova Trento'), ('Curitiba, PR', 'novo:Curitiba'), ('Porto de Itajaí', 'novo:Porto de Itajaí'), ('Rua 1500, 200', 'novo:Rua 1500, 200'), ('na oficina do João', 'novo:Oficina do João'),
@@ -536,7 +537,9 @@ begin
       ('marina itajai', 'local:Marina Itajaí'), ('MP', 'local:MP Motorhomes'), ('pátio', 'local:MP Motorhomes'), ('na oficina', 'local:MP Motorhomes'), ('na hbr', 'local:MP Motorhomes'), ('com vocês', 'local:MP Motorhomes')
       ) t(frase, espera) loop
       v_v := pg_temp.virou('OS-J3', c.frase);
-      v_res := pg_temp.ok(v_res, format('G6a "%s"', c.frase), v_v = c.espera, v_v);
+      -- (correção da 7d, Onda 4, M5) as 3 recusas dizem a saída; o texto dela é o que o dono disse. A prova da saída: agenda_fase7d_correcao4.sql
+      v_res := pg_temp.ok(v_res, format('G6a "%s"', c.frase),
+                          v_v = c.espera || case when c.espera ~ '^(Não entendi|"[^"]*" (parece uma data|é um estado))' then format(' Se é mesmo um lugar, diga "lugar novo: %s".', c.frase) else '' end, v_v);
     end loop;
     v_v := pg_temp.virou('OS-J3', 'pátio da Tedesco');
     v_res := pg_temp.ok(v_res, 'G6a2 "pátio da Tedesco": cada palavra é de um local: pergunta, nunca escolho sozinho', v_v = 'qual', v_v);
@@ -1043,7 +1046,7 @@ begin
   exception when sqlstate 'P0099' then null;
             when others then v_res := pg_temp.ok(v_res, 'G5a quebrou', false, sqlerrm);
   end;
-  -- A entrega que já passou do prazo do *desfaz*: o cancelar segue como hoje, sozinho
+  -- A entrega que já passou do prazo do *desfaz*: (correção da 7d, Onda 4, M9) o plano não volta, porque a OS segue concluída; o laço de voltar e sair a cada tique acabou
   begin
     perform pg_temp.base('sombra');
     perform set_config('agenda.hoje', v_h::text, true);
@@ -1054,7 +1057,7 @@ begin
     update public.agenda_acoes set desfazivel_ate = pg_temp.em(v_h, '14:01') where service_order_id = pg_temp.os('OS-J1') and tipo in ('entregar', 'concluir');
     set local session_replication_role = origin;
     r := public.agenda_desfazer(v_ac, pg_temp.adm(), 'dono', v_h, pg_temp.em(v_h, '14:20'));
-    v_res := pg_temp.ok(v_res, 'G5i a entrega fora do prazo não volta: o *desfaz* do cancelar é o de hoje', coalesce((r ->> 'ok')::boolean, false) and r ->> 'texto' not like '%sem a entrega%'
+    v_res := pg_temp.ok(v_res, 'G5i a entrega fora do prazo não volta: nada muda, e o *desfaz* diz por quê', not coalesce((r ->> 'ok')::boolean, false) and r ->> 'texto' = 'Não dá para voltar os dias do Lenine: ele segue concluído. Reabra a OS primeiro.'
                         and (select so.status from public.service_orders so where so.id = pg_temp.os('OS-J1')) = 'completed', r::text);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;

@@ -131,17 +131,17 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     vezes: 1,
     porque: 'o mesmo nome do feriado de 20/07 (aniversário de Balneário Camboriú); não é municipios_locais',
   },
-  // Fase 7d (correção, Onda 3, G6): "Balneário" e "BC" são a cidade: o nome dela, no lugar novo "outro lugar em BC".
+  // Fase 7d (correção, Onda 3, G6): "Balneário" e "BC" são a cidade: o nome dela, no lugar novo "outro lugar em BC". Onda 4 (20261107100870): recriada (+1).
   {
     onde: '_agenda_local_novo',
     casou: 'Balneário',
-    vezes: 1,
+    vezes: 2,
     porque: 'o nome da cidade que o dono disse pelo apelido ("outro lugar em BC"); não é municipios_locais',
   },
   {
     onde: '_agenda_local_novo',
     casou: 'Camboriú',
-    vezes: 1,
+    vezes: 2,
     porque: 'o mesmo nome da cidade; não é municipios_locais',
   },
   // Fase 7d (P6): o exemplo do texto ao dono (spec-fase7d §6.3), na pergunta local sem leitura.
