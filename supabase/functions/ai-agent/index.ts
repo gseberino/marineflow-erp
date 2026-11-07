@@ -70,11 +70,13 @@ import {
   textoDaPendenciaReapresentada,
   textoDaProximaPendencia,
   parseOptionReply,
+  ponteiroEhDoCartao,
   queueWhatsAppReply,
   resolveOptionAsUserText,
   resolveOrCreateWhatsAppSession,
 } from "../_shared/ai/whatsapp-channel.ts";
 import { pinNoTexto, verifyPin } from "../_shared/ai/whatsapp-pin.ts";
+import { camadaDoRetorno, type CartaoVivo, type DependenciasDaCamada, ponteiroDoCartao } from "../_shared/retorno/camada.ts";
 import { aplicarCarona, caronaDoTurno, comCarona, osDoJob, osDoTurno } from "../_shared/agenda/carona.ts";
 import { STATUS_INJETAVEL, colunaDaEntidade } from "../_shared/ai/memory-scope.ts";
 import { podarHistoricoParaLLM } from "../_shared/ai/context-pruning.ts";
@@ -528,6 +530,61 @@ async function notifyAdminsPinFailure(admin: any, pending: { title: string }): P
   }
 }
 
+/** Retorno F2 (P3): o que a camada do retorno precisa do turno. A camada não grava metadata: quem grava é a confirmação. */
+function depsDoRetorno(
+  admin: any,
+  c: { appUser: any; phone: string; sessionId: string; toolCtx: any; texto: string; settings: Record<string, string> },
+): DependenciasDaCamada {
+  const metadataAtual = async (): Promise<Record<string, any>> => {
+    const { data } = await admin.from("ai_operator_sessions").select("metadata").eq("id", c.sessionId).maybeSingle();
+    return (data?.metadata as Record<string, any>) || {};
+  };
+  return {
+    ehDoDono: async () => {
+      const dono = await donoDoWhatsApp(admin);
+      return !!dono && dono.id === c.appUser.id && dono.phone === c.phone;
+    },
+    rpc: (fn, args) => admin.rpc(fn, { ...args, p_autor: c.appUser.id }),
+    cartaoVivo: async () => {
+      const { data, error } = await admin.rpc("retorno_cartao_vivo");
+      if (error) throw error;
+      return (data as CartaoVivo | null) ?? null;
+    },
+    ponteiro: async () => ((await metadataAtual()).pending_confirm_action_id as string | null) ?? null,
+    tituloDoPonteiro: async () => {
+      const id = (await metadataAtual()).pending_confirm_action_id;
+      if (!id) return null;
+      const { data } = await admin.from("ai_operator_pending_actions").select("title").eq("id", id).maybeSingle();
+      return data?.title ?? null;
+    },
+    // O PIN tem um caminho só: tentativas contadas, 3 erros rejeitam, e a decisão entra na conversa com o PIN mascarado.
+    confirmar: async (pin) => {
+      const metadata = await metadataAtual();
+      const resolved = await resolveWhatsAppConfirmation(admin, metadata, c.appUser, c.toolCtx, { decision: "approve", pin });
+      await admin.from("ai_operator_sessions").update({ metadata: resolved.metadata, last_activity_at: new Date().toISOString() }).eq("id", c.sessionId);
+      await gravarDecisaoNaConversa(admin, { sessionId: c.sessionId, resposta: c.texto, texto: resolved.message });
+      await enviarComRegistro(
+        admin, c.phone, resolved.message,
+        registroDoTurno(metadata, resolved.metadata, c.sessionId, resolved.titulo),
+        { ligada: conversaDosComprovantesLigada(c.settings) },
+      );
+    },
+  };
+}
+
+/** O par da conversa: só rótulos e contagens, nunca o que o cliente escreveu. */
+async function gravarParDoRetorno(admin: any, sessionId: string, par: { user: string; assistant: string }): Promise<void> {
+  try {
+    const { error } = await admin.from("ai_operator_messages").insert([
+      { session_id: sessionId, role: "user", content: par.user, source: "whatsapp" },
+      { session_id: sessionId, role: "assistant", content: par.assistant, source: "whatsapp" },
+    ]);
+    if (error) throw error;
+  } catch (e) {
+    console.error("[ai-agent][whatsapp] retorno: falha ao gravar o histórico:", e);
+  }
+}
+
 async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise<Response> {
   const expectedSecret = Deno.env.get("AI_INTERNAL_SECRET");
   if (!expectedSecret || internalSecret !== expectedSecret) return jr({ error: "Não autorizado" }, 401);
@@ -574,6 +631,23 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
   // Sem JWT de usuário neste canal — sb e admin são o mesmo client service-role.
   const toolCtx = { sb: admin, admin, userId: appUserId, userRole: (appUser.role as Role) || "unknown", jwt: "", appOrigin: settings.app_public_url || "", settings };
 
+  // ---- Camada determinística (custo $0): o vocabulário do retorno rápido (F2) ----
+  // ANTES da trava e da confirmação: "não 2" rejeitaria o cartão inteiro, e "1 A sim <PIN>" levaria o PIN ao modelo.
+  const depsRetorno = depsDoRetorno(admin, { appUser, phone: phoneNormalized, sessionId, toolCtx, texto: text, settings });
+  const doRetorno = await camadaDoRetorno(text, depsRetorno);
+  if (doRetorno) {
+    if (!doRetorno.jaEnviado) {
+      if (doRetorno.noHistorico) await gravarParDoRetorno(admin, sessionId, doRetorno.noHistorico);
+      const waId = await queueWhatsAppReply(admin, phoneNormalized, doRetorno.texto);
+      if (doRetorno.cartaoId) await admin.rpc("retorno_cartao_enviado", { p_cartao: doRetorno.cartaoId, p_ok: true, p_wa_id: waId });
+      // só a atividade: a metadata lida no começo do turno é velha, e o SQL acabou de gravar o ponteiro por merge
+      await admin.from("ai_operator_sessions").update({ last_activity_at: new Date().toISOString() }).eq("id", sessionId);
+    }
+    return jr({ ok: true, retorno: doRetorno.comando });
+  }
+  const reposto = await ponteiroDoCartao(text, metadata, depsRetorno, (t) => parseConfirmationReply(t) !== null);
+  if (reposto) Object.assign(metadata, reposto);
+
   // ---- Trava dos comprovantes (F2, 11/10/2026) ----
   // "sim"/"1" com uma pendência do assistente esperando, mas a pergunta aberta mais nova é a de um
   // comprovante (ou empata em < 2 min): era a resposta ao menu do CMP. Nada é aprovado e nenhuma
@@ -600,7 +674,8 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
   }
 
   // ---- Camada determinística (custo $0): confirmação de pendência ----
-  const confirmation = parseConfirmationReply(text);
+  // Retorno F2 (P3.3): com o cartão no ponteiro, "não entendi" é conversa, não recusa.
+  const confirmation = parseConfirmationReply(text, (await ponteiroEhDoCartao(admin, metadata)) ? { naoSoSozinho: true } : undefined);
   if (metadata.pending_confirm_action_id) {
     // "sim + número + texto" (11/10/2026): barrado como ajuste só quando o número É o PIN (o PIN não
     // pode ir ao modelo); "sim 235 reais" com 235 que não é o PIN é conversa e vai ao modelo.

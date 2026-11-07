@@ -26,6 +26,7 @@ import { interromperPergunta, lerEstadoDoTelefone } from "../_shared/whatsapp/pe
 import { lerComandoDoSecretario } from "../_shared/secretario/comandos.ts";
 import { formatoDoResumoNoBanco } from "../_shared/secretario/formato.ts";
 import { ehComandoDaAgendaLigada } from "../_shared/agenda/executar.ts";
+import { ehPalavraDoRetornoLigada } from "../_shared/retorno/camada.ts";
 import { respostaDaEquipe } from "../_shared/agenda/resposta-da-equipe.ts";
 import { respostaDoCliente } from "../_shared/agenda/resposta-do-cliente.ts";
 import { ehPedidoDeParar } from "../_shared/whatsapp/parar.ts";
@@ -454,7 +455,8 @@ export async function handler(req: Request): Promise<Response> {
                   // texto é uma palavra da agenda
                   comandoDoSecretario: async (t) =>
                     (lerComandoDoSecretario(t) !== null && (await formatoDoResumoNoBanco(admin)) === "novo") ||
-                    (await ehComandoDaAgendaLigada(admin, t)),
+                    (await ehComandoDaAgendaLigada(admin, t)) ||
+                    (await ehPalavraDoRetornoLigada(admin, t)),
                 },
               );
             } catch (e) {

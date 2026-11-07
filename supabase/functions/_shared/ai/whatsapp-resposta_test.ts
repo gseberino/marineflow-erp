@@ -77,6 +77,16 @@ Deno.test("texto com pendência VIVA: guarda a referência e lembra dela (05/10/
   assertEquals(nova.metadata.pending_confirm_action_id, "p2");
 });
 
+Deno.test("Retorno F2 (P3.4): com o cartão no ponteiro, sem o lembrete e com o ponteiro mantido; outra pendência, como sempre", () => {
+  const cartao = { title: "Cartão do retorno", risk_level: "high", action_name: "retorno_executar_cartao" };
+  const comCartao = respostaDoTurnoNoWhatsApp({ texto: "ok" }, antes, cartao);
+  assertEquals(comCartao.replyText, "ok");
+  assertEquals(comCartao.metadata.pending_confirm_action_id, "velha");
+  const outra = respostaDoTurnoNoWhatsApp({ texto: "ok" }, antes, { title: "Enviar PDF", risk_level: "high", action_name: "send_quote_pdf" });
+  assertEquals(outra.replyText.includes("⏳"), true);
+  assertEquals(outra.metadata.pendencia_herdada, true);
+});
+
 Deno.test("fluxo (11/10/2026): o fluxo de comprovantes já falou — nada a enviar e as referências de pendência/opções intocadas", () => {
   const r = respostaDoTurnoNoWhatsApp({ texto: "Anotei! Agora responda 8.", fluxo: { codigo: "CMP-00001" } }, antes);
   assertEquals(r.replyText, "");

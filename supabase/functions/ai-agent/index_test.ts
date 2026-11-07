@@ -14,7 +14,7 @@ Deno.test("a camada do secretário fica depois da trava e da confirmação e ant
   const camada = turno.indexOf("comandos do resumo da manhã (secretário");
   assert(camada > 0, "camada ausente");
   assert(turno.indexOf("textoDaTravaDoComprovante(") < camada, "depois da trava do comprovante");
-  assert(turno.indexOf("const confirmation = parseConfirmationReply(text);") < camada, "depois da confirmação");
+  assert(turno.indexOf("const confirmation = parseConfirmationReply(text") < camada, "depois da confirmação");
   assert(turno.indexOf("parseOptionReply(text, pendingOptions.length)") < camada, "depois da lista de opções");
   assert(camada < turno.indexOf("lerPedidoDePdf(effectiveText)"), "antes do atalho do PDF (o rascunho abre por ele)");
   assert(camada < turno.indexOf("return await turnoDoModeloNoWhatsApp("), "antes do modelo");
@@ -80,7 +80,7 @@ Deno.test("agenda (WhatsApp): depois do secretário, da confirmação e da lista
   assert(camadaWa > 0, "camada da agenda ausente");
   assert(turno.indexOf("comandos do resumo da manhã (secretário") < camadaWa, "depois do secretário");
   assert(turno.indexOf("textoDaTravaDoComprovante(") < camadaWa, "depois da trava do comprovante");
-  assert(turno.indexOf("const confirmation = parseConfirmationReply(text);") < camadaWa, "depois da confirmação");
+  assert(turno.indexOf("const confirmation = parseConfirmationReply(text") < camadaWa, "depois da confirmação");
   assert(turno.indexOf("parseOptionReply(text, pendingOptions.length)") < camadaWa, "depois da lista de opções");
   assert(camadaWa < turno.indexOf("lerPedidoDePdf(effectiveText)"), "antes do atalho do PDF");
   assert(camadaWa < turno.indexOf("return await turnoDoModeloNoWhatsApp("), "antes do modelo");
@@ -273,7 +273,7 @@ Deno.test("carona: uma vez por turno (um caminho cada) e nunca na camada das pal
 });
 
 // ─── Aprovação em lote, Fase 1 (29/10/2026): a fiação no turno ─────────────────────────────────────────────────────────
-const confirmacao = turno.slice(turno.indexOf("const confirmation = parseConfirmationReply(text);"), turno.indexOf("parseOptionReply(text, pendingOptions.length)"));
+const confirmacao = turno.slice(turno.indexOf("const confirmation = parseConfirmationReply(text"), turno.indexOf("parseOptionReply(text, pendingOptions.length)"));
 
 Deno.test("lote F1: toda resposta da camada de confirmação do WhatsApp entra na conversa (PIN mascarado) antes de sair", () => {
   // as quatro saídas: ajuste junto, herdada reapresentada, decisão, e "sim <PIN>" sem nada esperando
@@ -375,7 +375,7 @@ Deno.test("F0a-2: o log do handler vem antes do 500 e não pode lançar", () => 
 Deno.test("guarda do PIN: depois da confirmação, antes do modelo e sem gravar o texto", () => {
   const guarda = fonte.indexOf("if (await pinNoTexto(text, appUser.ai_whatsapp_pin_hash)) {");
   assert(guarda > 0, "falta a guarda");
-  assert(fonte.indexOf("const confirmation = parseConfirmationReply(text);") < guarda, "depois da confirmação");
+  assert(fonte.indexOf("const confirmation = parseConfirmationReply(text") < guarda, "depois da confirmação");
   assert(guarda < fonte.indexOf("let effectiveText = text;"), "antes de o texto seguir adiante");
   const bloco = fonte.slice(guarda, fonte.indexOf("let effectiveText = text;"));
   assertStringIncludes(bloco, "queueWhatsAppReply(admin, phoneNormalized, PIN_NA_MENSAGEM)");

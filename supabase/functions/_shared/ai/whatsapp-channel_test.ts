@@ -225,7 +225,7 @@ Deno.test("parseConfirmationReply: PIN com ajuste junto é marcado (o PIN não p
 
 Deno.test("ai-agent: PIN com ajuste junto é tratado antes de resolveWhatsAppConfirmation", () => {
   const src = Deno.readTextFileSync(new URL("../../ai-agent/index.ts", import.meta.url));
-  const camada = src.indexOf("const confirmation = parseConfirmationReply(text)");
+  const camada = src.indexOf("const confirmation = parseConfirmationReply(text");
   // 11/10/2026: a decisão passou para destinoDoSimComPendencia (o PIN conferido no hash decide)
   const ajuste = src.indexOf("destinoDoSimComPendencia(", camada);
   const resolve = src.indexOf("await resolveWhatsAppConfirmation(", camada);
@@ -839,11 +839,11 @@ const fonte = (rel: string) => Deno.readTextFileSync(new URL(rel, import.meta.ur
 Deno.test("ai-agent: a trava vem antes da camada do sim/não; toda resposta de turno passa pelo registro", () => {
   const src = fonte("../../ai-agent/index.ts");
   const trava = src.indexOf("textoDaTravaDoComprovante(admin");
-  const camada = src.indexOf("const confirmation = parseConfirmationReply(text)");
+  const camada = src.indexOf("const confirmation = parseConfirmationReply(text");
   assert(trava > 0 && camada > trava, "a trava tem de vir antes de parseConfirmationReply");
   assertStringIncludes(src, "body.citado");
   assertStringIncludes(src, "body.message_id");
-  assertEquals((src.match(/enviarComRegistro\(/g) ?? []).length, 3, "decisão do sim/não, turno do OpenRouter e entrega do Max");
+  assertEquals((src.match(/enviarComRegistro\(/g) ?? []).length, 4, "decisão do sim/não, confirmação do cartão do retorno, turno do OpenRouter e entrega do Max");
   assertEquals(/queueWhatsAppReply\(admin, phoneNormalized, (replyText|resolved\.message)/.test(src), false, "resposta de turno saindo sem o registro");
 });
 
@@ -920,7 +920,7 @@ Deno.test("destinoDoSimComPendencia: 'sim + número + texto' só é barrado quan
 
 Deno.test("ai-agent: o destino do sim com pendência é decidido (com o PIN conferido no hash) antes de resolveWhatsAppConfirmation", () => {
   const src = fonte("../../ai-agent/index.ts");
-  const camada = src.indexOf("const confirmation = parseConfirmationReply(text)");
+  const camada = src.indexOf("const confirmation = parseConfirmationReply(text");
   const pin = src.indexOf("await verifyPin(confirmation.pin", camada);
   const destino = src.indexOf("destinoDoSimComPendencia(", camada);
   const resolve = src.indexOf("await resolveWhatsAppConfirmation(", camada);

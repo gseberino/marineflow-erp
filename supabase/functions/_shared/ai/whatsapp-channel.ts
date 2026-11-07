@@ -197,17 +197,33 @@ export async function pendenciaQueSegueEsperando(
   admin: any,
   metadata: Record<string, unknown> | null | undefined,
   agora: Date = new Date(),
-): Promise<{ title: string; risk_level: string | null } | null> {
+): Promise<{ title: string; risk_level: string | null; action_name: string | null } | null> {
   const id = metadata?.pending_confirm_action_id;
   if (typeof id !== "string" || !id) return null;
   const { data: pendencia } = await admin
     .from("ai_operator_pending_actions")
-    .select("status, expires_at, title, risk_level")
+    .select("status, expires_at, title, risk_level, action_name")
     .eq("id", id)
     .maybeSingle();
   if (!pendencia || pendencia.status !== "pending") return null;
   if (pendencia.expires_at && new Date(pendencia.expires_at).getTime() <= agora.getTime()) return null;
-  return { title: String(pendencia.title || "ação pendente"), risk_level: pendencia.risk_level ?? null };
+  return { title: String(pendencia.title || "ação pendente"), risk_level: pendencia.risk_level ?? null, action_name: pendencia.action_name ?? null };
+}
+
+/** Retorno F2 (P3.3): o ponteiro da sessão é o do cartão? Só lê com ponteiro; erro = não. */
+export async function ponteiroEhDoCartao(
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  metadata: Record<string, unknown> | null | undefined,
+): Promise<boolean> {
+  const id = metadata?.pending_confirm_action_id;
+  if (typeof id !== "string" || !id) return false;
+  try {
+    const { data } = await admin.from("ai_operator_pending_actions").select("action_name").eq("id", id).maybeSingle();
+    return data?.action_name === "retorno_executar_cartao";
+  } catch {
+    return false;
+  }
 }
 
 /**

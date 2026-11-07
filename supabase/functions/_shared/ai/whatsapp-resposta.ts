@@ -70,7 +70,7 @@ export function respostaDoTurnoNoWhatsApp(
   d: DesfechoDoTurno,
   metadata: Record<string, any>,
   /** A pendência desta conversa que ainda espera resposta (pendenciaQueSegueEsperando). */
-  pendenciaViva: { title: string; risk_level?: string | null } | null = null,
+  pendenciaViva: { title: string; risk_level?: string | null; action_name?: string | null } | null = null,
 ): { replyText: string; metadata: Record<string, any> } {
   // O turno passou pelo modelo: a pendência herdada (se havia) deixou de valer aqui — os ramos
   // abaixo zeram ou trocam pending_confirm_action_id, e a marca de herança vai junto.
@@ -109,6 +109,10 @@ export function respostaDoTurnoNoWhatsApp(
     // ou o resumo): texto vazio não é enviado (enviarComRegistro). As referências de pendência e de
     // opções ficam como estavam — este turno não decidiu nenhuma delas.
     replyText = "";
+  } else if (pendenciaViva?.action_name === "retorno_executar_cartao" && metadata.pending_confirm_action_id) {
+    // Retorno F2 (P3.4): o cartão vive 24 h. O "⏳" em todo turno seria um toque escondido em toda conversa. O ponteiro fica
+    // como está: cair no último ramo o zeraria, e o *sim <PIN>* do cartão não acharia mais a pendência. A carona avisa.
+    replyText = juntar(d.aviso, textoOuOk, d.conferido);
   } else if (pendenciaViva && metadata.pending_confirm_action_id) {
     // Conversa no meio de uma pendência viva (05/10/2026): a referência fica, e o dono vê que ela
     // ainda espera. Como na pendência herdada: "não" cancela, "sim <PIN>" aprova, e "sim" sem PIN
