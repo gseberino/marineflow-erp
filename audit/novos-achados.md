@@ -3512,3 +3512,21 @@ porque só o dono pode preenchê-las.
 - **Onde:** `_agenda_local_criar`.
 - **Efeito:** "Sítio do Zé, PR", *desfaz*, "lugar novo: Sítio do Zé, RS" reativa com PR, sem avisar. Só pesa com a viagem ligada: está na lista de "OK ligar a viagem".
 - **Origem:** mesma leitura.
+
+### [NOVO-agenda-108] *desfaz* com mais de uma mudança não alcança a que não tem OS
+- **Onde:** `agenda_acao_desfazivel` (`20261029100950:306`). A lista "Qual? … Diga *desfaz* e o nome." traz a ação sem OS pelo próprio texto, e nenhum nome a resolve: `agenda_resolver_os` só acha OS.
+- **Efeito:** com a ação `assumir` de uma pergunta sem OS (`padrao_do_dono`, `fornecedores_prazo`) e outra mudança desfazível, a pergunta só volta por *desfaz a última*, se ela for a última. Sozinha, *desfaz* a reabre direto. Nada grava errado, e o dono ainda pode responder com as palavras dele: o dado não depende da pergunta aberta. A mesma coisa vale para as ações `gestor` e `equipe`, de antes da 7f.
+- **Na Fase 7f (P2):** sem conserto. A R8.5-10 fixa o texto "*desfaz* mostra a lista" e não recria `agenda_acao_desfazivel`. Saída para quem for mexer: acrescentar à lista um número por item, ou um nome guardado em `antes.rotulo`. O dono é avisado em `fase7f-oks.md`.
+- **Origem:** Fase 7f, P2 (07/11/2026), levando a frase da §6.3 até o estado depois (P7b).
+
+### [NOVO-agenda-109] A spec e a ordem do fio discordam sobre a crítica que vence
+- **Onde:** spec-fase7f §3.2, §5.2, §8.3 (P4, "a crítica de Giancarlo"), `fase7-registro.md` l. 225 e 536, e a resposta AG7-15. O fio mandou no P2 (07/11): "crítica nunca vence sozinha".
+- **Efeito:** valeu a ordem do fio, que também é o lado seguro. `_agenda_pergunta_espera` devolve `critica` e `agenda_decidir` recusa o canal `prazo` em crítica. Por isso `nao_cabe`, `atraso_longo`, `segundo_atraso` e `fixada_pelo_dono` seguem em `veto_tipos` sem efeito, e nenhum tipo não crítico com efeito `opcao` está na lista padrão: o caminho `opcao` só se alcança ampliando `veto_tipos`. O `ok_marcacao` da 7g, descrito como "crítica, com prazo pelo 7f", não vence do jeito que está.
+- **Na Fase 7f (P2):** decisão do dono em `fase7f-oks.md`, item 1. Para voltar ao que a spec dizia: tirar as 3 linhas de `critica` em `_agenda_pergunta_espera` e o `v_q.critica` da porta de `agenda_decidir`, e dar autor à decisão: pelo caminho crítico, `agenda_propor` com `p_autor` nulo cai em "Só o administrador mexe na agenda" (`_autor_da_agenda`), e a §5.2 passava nulo. A recusa e o prometido já estão provados; o caminho crítico inteiro, não.
+- **Origem:** Fase 7f, P2.
+
+### [NOVO-agenda-110] Soltar o freio fecha de uma vez o que venceu durante ele
+- **Onde:** `_agenda_gestor_vetos`, bloco da 7f (`20261109100100`).
+- **Efeito:** com `gestor_so_propor` ligado nada vence, e `veto_teria_em` marca. No 1º tique depois de soltar, toda pergunta com `veto_ate` vencido e mostrada antes dele fecha, cada uma com a sua ação e o seu *desfaz*. Só pega quem teve o prazo escrito: a linha só escreve prazo com o freio solto, então isso exige freio ligado depois de mostrar. Efeito `nada`: nenhuma muda a agenda.
+- **Na Fase 7f (P2):** sem conserto, e dito ao dono em `fase7f-oks.md`, item 5. Prova: P6e.
+- **Origem:** Fase 7f, P2.
