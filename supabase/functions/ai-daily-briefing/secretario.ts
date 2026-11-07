@@ -19,7 +19,7 @@ import {
 import type { ModoDoPortao, RegrasDaVozUnica } from "../_shared/uma-voz/portao.ts";
 import { lerPortao, type PortaoDaRodada } from "../_shared/uma-voz/registrar.ts";
 import { type DadosDeHoje, type DadosDoEscritorio, linhaDoItem, type NaRua, textoDaManha, textoDoEscritorio } from "./secretario-texto.ts";
-import { lerRetorno, linhasDaManha, type RetornoDaManha } from "./retorno.ts";
+import { type ExtraDaManha, lerExtra, lerRetorno, linhasDaManha, type RetornoDaManha } from "./retorno.ts";
 
 // deno-lint-ignore no-explicit-any
 type Admin = any;
@@ -149,6 +149,8 @@ export function montarDosDados(p: {
   guardado?: GuardadoLido | null;
   /** (01/11/2026, retorno F1, P14) retorno_resumo_do_dia da manhã (retorno.ts); ausente ou null = o texto de antes */
   retorno?: RetornoDaManha | null;
+  /** (F2, P12) retorno_resumo_extra ('manha'); ausente ou null = o texto de antes */
+  retornoExtra?: ExtraDaManha | null;
 }): ManhaNova {
   const tipo = tipoDoDia(p.hoje);
   const opcoes = p.opcoes ?? OPCOES_PADRAO;
@@ -164,7 +166,7 @@ export function montarDosDados(p: {
     })
     : null;
   // (P14) "Clientes esperando" e "Para conferir": os sem prazo que já têm letra na manhã não repetem
-  const retorno = p.retorno ? linhasDaManha(p.retorno, fonesDaManha(selecao), p.agora) : null;
+  const retorno = p.retorno ? linhasDaManha(p.retorno, fonesDaManha(selecao), p.agora, p.retornoExtra ?? null) : null;
   const texto = textoDaManha({
     hoje: p.hoje, tipoDoDia: tipo, feriado: feriadoDoDia(p.hoje), selecao, naRua: p.naRua, deHoje: p.deHoje, guardado: plano, retorno,
   });
@@ -241,9 +243,10 @@ export async function montarManhaNova(admin: Admin, p: {
   // (01/11/2026, retorno F1, P14) quem espera resposta do retorno; lerRetorno nunca lança (erro = null = o texto de antes).
   // Domingo e feriado a manhã é uma linha só (nada a ler)
   const retorno = tipoDoDia(p.hoje) === "util" ? await lerRetorno(admin, "manha", p.agora) : null;
+  const retornoExtra = tipoDoDia(p.hoje) === "util" ? await lerExtra(admin, "manha", p.agora) : null;
   return montarDosDados({
     hoje: p.hoje, agora: p.agora, ...lido, escritorio: p.escritorio,
-    opcoes: { semanaVoltaComFatoNovo: portao.regras.semana_volta_com_fato_novo }, guardado, retorno,
+    opcoes: { semanaVoltaComFatoNovo: portao.regras.semana_volta_com_fato_novo }, guardado, retorno, retornoExtra,
   });
 }
 

@@ -428,9 +428,9 @@ function linhaComTeto(
  * (correção) Desligado: só quem já ouviu a promessa (ninguém mais o avisa), e sem "Para conferir". Nulo ou nada a dizer = null.
  */
 export function linhasDaManha(
-  r: RetornoDaManha | null, jaNaLista: Set<string>, agora: Date,
+  r: RetornoDaManha | null, jaNaLista: Set<string>, agora: Date, extra: ExtraDaManha | null = null,
 ): { esperando: string | null; conferir: string | null } {
-  if (!r) return { esperando: null, conferir: null };
+  if (!r) return { esperando: null, conferir: linhaDeContatos(extra) };
   const sombra = r.modo === "sombra";
   const desligado = r.modo === "desligado";
   const todos = desligado ? r.esperando.filter((e) => e.ouviu === true) : r.esperando;
@@ -461,7 +461,9 @@ export function linhasDaManha(
     ? "Clientes esperando (em teste, nada foi prometido):"
     : desligado ? "Clientes esperando (retorno desligado):" : "Clientes esperando:";
   const esperando = linhaComTeto(cabeca, [...comPrazo, ...semPrazoNomeados].map((e) => ({ longo: forma(e), curto: e.rotulo })), cauda);
-  return { esperando, conferir: desligado ? null : linhaDeConferir(r, agora) };
+  // (F2, P12) a palavra no fim de "Clientes esperando"; os contatos junto de "Para conferir", os primeiros a sair
+  const conferir = [desligado ? null : linhaDeConferir(r, agora), linhaDeContatos(extra)].filter((l): l is string => !!l);
+  return { esperando: esperando && extra?.palavra ? `${esperando} · *retorno*` : esperando, conferir: conferir.length ? conferir.join("\n") : null };
 }
 
 function porQueConferir(c: ConferirDoRetorno, agora: Date): string {
@@ -493,8 +495,8 @@ function linhaDeConferir(r: RetornoDaManha, agora: Date): string | null {
  * (correção) Desligado: só quem já ouviu a promessa, e sem resumo. Nulo ou nada a dizer = null.
  */
 export function linhasDoFechamento(
-  r: RetornoDoFechamento | null, agora: Date,
-): { esperando: string | null; resumo: string | null; fixa: boolean } {
+  r: RetornoDoFechamento | null, agora: Date, extra: ExtraDoFechamento | null = null,
+): { esperando: string | null; resumo: string | null; fixa: boolean; mandei?: string | null; extras?: string[] } {
   if (!r) return { esperando: null, resumo: null, fixa: false };
   const sombra = r.modo === "sombra";
   const desligado = r.modo === "desligado";
@@ -507,7 +509,10 @@ export function linhasDoFechamento(
   const esperando = linhaComTeto(cabeca, itens.map((e) => ({ longo: forma(e), curto: e.rotulo })),
     (fora, nomeados) => (fora > 0 ? [nomeados ? `e mais ${fora}` : plural(fora, "contato", "contatos")] : []));
   const fixa = !!esperando && !sombra && itens.some((e) => e.ouviu === true);
-  return { esperando, resumo: desligado ? null : linhaDoResumo(r, agora), fixa };
+  const resumo = desligado ? null : linhaDoResumo(r, agora);
+  const base = { esperando, resumo: resumo && sombra && extra?.palavra ? `${resumo} · *ver retorno*` : resumo, fixa };
+  if (!extra) return base;
+  return { ...base, mandei: linhaDoMandei(extra), extras: linhasDoExtra(extra) };
 }
 
 /**
@@ -595,4 +600,125 @@ function linhaDoResumo(r: RetornoDoFechamento, agora: Date): string | null {
   // o banco só manda as alongadas na sexta; aqui também se confere (a frase é da semana)
   if (r.alongadas.length && diaDaSemana(diaBR(agora)) === 5) frases.push(...r.alongadas.map(linhaDoAlongamento));
   return frases.length ? frases.join(" ") : null;
+}
+
+// ─── O que a F2 acrescenta (P12): retorno_resumo_extra ───────────────────────────────────────────────────────────────
+
+export interface ExtraDaManha {
+  palavra: boolean;
+  contatos: { vendedores: number; conhecidos: number };
+}
+export interface MandeiSozinho {
+  letra: string;
+  rotulo: string;
+  tipo_curto: string;
+  saida_id: string;
+}
+export interface SemanaDoRetorno {
+  recibos: number;
+  recibo_12min: number;
+  hora_cumprida: number;
+  hora_casos: number;
+  vencida_sem_aviso: number;
+  insistencia: number;
+  toques: number;
+  dias_uteis: number;
+}
+export interface ExtraDoFechamento {
+  palavra: boolean;
+  mandei: MandeiSozinho[];
+  mandei_mais: number;
+  promovidos: string[];
+  rebaixados: Array<{ tipo_curto: string; motivo: string }>;
+  suspensos: string[];
+  semana: SemanaDoRetorno | null;
+}
+
+/** Abaixo disto, os números sem percentual. */
+const MINIMO_PARA_PERCENTUAL = 20;
+
+const POR_QUE_REBAIXOU: Record<string, string> = {
+  errado: "você marcou errado",
+  queixa: "houve queixa",
+  opt_out: "pediu para parar",
+  validador: "o validador barrou 3 vezes",
+};
+
+export async function lerExtra(admin: Admin, turno: "manha", agora: Date): Promise<ExtraDaManha | null>;
+export async function lerExtra(admin: Admin, turno: "fechamento", agora: Date): Promise<ExtraDoFechamento | null>;
+export async function lerExtra(admin: Admin, turno: "manha" | "fechamento", agora: Date): Promise<ExtraDaManha | ExtraDoFechamento | null> {
+  try {
+    const { data, error } = await admin.rpc("retorno_resumo_extra", { p_turno: turno, p_agora: agora.toISOString() });
+    if (error) throw error;
+    const o = objeto(data);
+    if (!o) return null;
+    if (turno === "manha") {
+      const c = objeto(o.contatos);
+      return { palavra: o.palavra === true, contatos: { vendedores: contagem(c?.vendedores), conhecidos: contagem(c?.conhecidos) } };
+    }
+    return {
+      palavra: o.palavra === true,
+      mandei: (listaOuVazia(o.mandei) ?? []).flatMap((x) => {
+        const m = objeto(x);
+        return m && typeof m.letra === "string"
+          ? [{ letra: m.letra, rotulo: limparRotulo(m.rotulo), tipo_curto: textoOu(m.tipo_curto, ""), saida_id: textoOu(m.saida_id, "") }]
+          : [];
+      }),
+      mandei_mais: contagem(o.mandei_mais),
+      promovidos: (listaOuVazia(o.promovidos) ?? []).filter((x): x is string => typeof x === "string"),
+      rebaixados: (listaOuVazia(o.rebaixados) ?? []).flatMap((x) => {
+        const m = objeto(x);
+        return m ? [{ tipo_curto: textoOu(m.tipo_curto, ""), motivo: textoOu(m.motivo, "") }] : [];
+      }),
+      suspensos: (listaOuVazia(o.suspensos) ?? []).filter((x): x is string => typeof x === "string"),
+      semana: objeto(o.semana) as unknown as SemanaDoRetorno | null,
+    };
+  } catch (e) {
+    const codigo = String((e as { code?: unknown })?.code ?? (e as Error)?.name ?? "erro");
+    console.warn(JSON.stringify({ fn: "ai-daily-briefing", retorno: "extra_falhou", turno, codigo }));
+    return null;
+  }
+}
+
+/** "Sem recibo ontem: 3 vendedores · 2 contatos conhecidos." Nada a contar = null. */
+export function linhaDeContatos(e: ExtraDaManha | null): string | null {
+  if (!e) return null;
+  const { vendedores, conhecidos } = e.contatos;
+  const partes = [
+    vendedores > 0 ? plural(vendedores, "vendedor", "vendedores") : null,
+    conhecidos > 0 ? plural(conhecidos, "contato conhecido", "contatos conhecidos") : null,
+  ].filter((p): p is string => !!p);
+  return partes.length ? `Sem recibo ontem: ${partes.join(" · ")}.` : null;
+}
+
+/** A prestação de contas: nunca sai. A letra do fim é a da última nomeada. */
+export function linhaDoMandei(e: ExtraDoFechamento | null): string | null {
+  if (!e || e.mandei.length === 0) return null;
+  const itens = e.mandei.map((m) => `${m.letra}) '${m.tipo_curto}' ao ${m.rotulo}`);
+  if (e.mandei_mais > 0) itens.push(`e mais ${e.mandei_mais}`);
+  return `Mandei sozinho hoje: ${itens.join(" · ")} · *errado ${e.mandei[e.mandei.length - 1].letra}*`;
+}
+
+function linhaDaSemana(s: SemanaDoRetorno): string {
+  const fracao = (a: number, b: number) => b >= MINIMO_PARA_PERCENTUAL ? `${Math.round((100 * a) / b)}%` : `${a} de ${b}`;
+  const recibo = s.recibos >= MINIMO_PARA_PERCENTUAL
+    ? `recibo em até 12 min ${fracao(s.recibo_12min, s.recibos)} (de ${s.recibos})`
+    : `recibo em até 12 min ${s.recibo_12min} de ${s.recibos}`;
+  const media = s.dias_uteis > 0 ? (s.toques / s.dias_uteis).toFixed(1).replace(".", ",") : "0";
+  return `Retorno da semana: ${recibo} · hora cumprida ${fracao(s.hora_cumprida, s.hora_casos)} · ` +
+    `${s.vencida_sem_aviso} vencida sem aviso · insistência ${fracao(s.insistencia, s.recibos)} · ` +
+    `você deu ${s.toques} toques novos (${media} por dia)`;
+}
+
+/** No máximo uma: semana > rebaixado > promovido > fadiga. */
+export function linhasDoExtra(e: ExtraDoFechamento | null): string[] {
+  if (!e) return [];
+  if (e.semana) return [linhaDaSemana(e.semana)];
+  const r = e.rebaixados[0];
+  if (r) return [`'${r.tipo_curto}' voltou ao cartão: ${POR_QUE_REBAIXOU[r.motivo] ?? "foi rebaixado"}.`];
+  const p = e.promovidos[0];
+  if (p) return [`A partir de amanhã, '${p}' sai sozinho. *errado <letra>* volta ao cartão.`];
+  const f = e.suspensos[0];
+  if (f) return [`Aprovações rápidas demais: '${f}' não promove por 7 dias.`];
+  return [];
 }

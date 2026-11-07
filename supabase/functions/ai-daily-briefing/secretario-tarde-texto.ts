@@ -430,7 +430,7 @@ export interface DadosDaTarde {
    * `fixa = false` (sombra, ou ninguém na linha ouviu promessa): a linha não sustenta nada e é extra, a segunda a sair;
    * ausente = fixa.
    */
-  retorno?: { esperando: string | null; resumo: string | null; fixa?: boolean } | null;
+  retorno?: { esperando: string | null; resumo: string | null; fixa?: boolean; mandei?: string | null; extras?: string[] } | null;
 }
 
 /** A linha do escritório da tarde: a do lote (no dia dele) ou a de sempre; o guardado do escritório vai à parte. */
@@ -560,7 +560,9 @@ function textoDoFechamento(d: DadosDaTarde, curto: boolean, semanaMax: number, l
   // (23/10/2026) a carteira sem data NÃO conta: ela existe quase todo dia, e o fechamento passaria a sair sempre
   // (P14) quem espera o retorno com prazo hoje: nunca sai e conta como "há algo" (o resumo, não)
   const esperando = d.retorno?.esperando ?? null;
-  const temAlgo = d.ficaram.length > 0 || (d.amanha?.itens.length ?? 0) > 0 || (d.amanha?.pagar?.n ?? 0) > 0 ||
+  // (F2, P12) "Mandei sozinho hoje": a prestação de contas, junto de quem espera. Nunca sai e conta como "há algo"
+  const mandei = d.retorno?.mandei ?? null;
+  const temAlgo = !!mandei || d.ficaram.length > 0 || (d.amanha?.itens.length ?? 0) > 0 || (d.amanha?.pagar?.n ?? 0) > 0 ||
     d.fornecedores.length > 0 || d.pergunta || topo.length > 0 || semanaToda.length > 0 || linhasContam(d, linhasTodas) ||
     !!esperando;
   if (!temAlgo) return comAAgenda({ texto: null, letras: [] }, d, 0);
@@ -580,10 +582,11 @@ function textoDoFechamento(d: DadosDaTarde, curto: boolean, semanaMax: number, l
     d.fornecedores.length ? `Fornecedores esperando há mais de 1 dia: ${lista(d.fornecedores.map((n) => umaLinha(n, curto ? 18 : 28)))}.` : null,
     ...linhasDoEscritorioDaTarde(d),
     d.retorno?.resumo ?? null,
+    ...(d.retorno?.extras ?? []),
     d.pergunta ? PERGUNTA_DA_SEMANA : null,
   ].filter((l): l is string => !!l);
   return comAAgenda(
-    { texto: [abertura, ...(esperando ? [esperando] : []), ...topo, ...(itens.length ? ["", ...itens] : []), "", ...fim].join("\n"), letras: d.ficaram },
+    { texto: [abertura, ...(esperando ? [esperando] : []), ...(mandei ? [mandei] : []), ...topo, ...(itens.length ? ["", ...itens] : []), "", ...fim].join("\n"), letras: d.ficaram },
     d,
     semana.length,
     linhas,
@@ -622,7 +625,8 @@ function textoDaRevisaoDaSemana(d: DadosDaTarde, curto: boolean, linhasMax = Inf
   // (01/11/2026, retorno F1, P14, correção) "Ainda esperando hoje" logo depois da abertura: às segundas é a revisão que
   // cumpre o "hoje até as 19h" (o resumo do retorno é só do fechamento)
   const esperando = d.retorno?.esperando ?? null;
-  const blocos = [abertura, ...(esperando ? [esperando] : []), ...topoDaTarde(d, curto), ...(itens.length ? ["", ...itens, ...comoResponder] : []), ...(panorama.length ? ["", ...panorama] : [])];
+  const mandei = d.retorno?.mandei ?? null;
+  const blocos = [abertura, ...(esperando ? [esperando] : []), ...(mandei ? [mandei] : []), ...topoDaTarde(d, curto), ...(itens.length ? ["", ...itens, ...comoResponder] : []), ...(panorama.length ? ["", ...panorama] : [])];
   // (Passo 5) a linha do lote, no último dia útil da semana que caiu numa revisão
   const lote = d.lote ? linhaDoLote(d.lote) : null;
   if (lote) blocos.push("", lote);
@@ -642,7 +646,8 @@ function textoDaRevisaoDoMes(d: DadosDaTarde, curto: boolean, linhasMax = Infini
   // (01/11/2026, retorno F1, P14, correção) "Ainda esperando hoje" logo depois da abertura: no 1º dia útil do mês é a revisão
   // que cumpre o "hoje até as 19h" (o resumo do retorno é só do fechamento)
   const esperando = d.retorno?.esperando ?? null;
-  const blocos = [abertura, ...(esperando ? [esperando] : []), ...linhasDoMes.slice(1), ...topoDaTarde(d, curto)];
+  const mandei = d.retorno?.mandei ?? null;
+  const blocos = [abertura, ...(esperando ? [esperando] : []), ...(mandei ? [mandei] : []), ...linhasDoMes.slice(1), ...topoDaTarde(d, curto)];
   if (a && a.n > 0) {
     blocos.push("", `${a.n === 1 ? "1 cobrança vencida" : `${a.n} cobranças vencidas`} há 30 dias ou mais, ${brl(a.total)}. Cobrar, negociar ou dar baixa?`);
     blocos.push(...a.linhas.map((l) => linhaDaRevisao(l, curto ? 85 : 140)));
@@ -673,7 +678,7 @@ function textoDaRevisaoDoMes(d: DadosDaTarde, curto: boolean, linhasMax = Infini
  */
 function semOsExtras(d: DadosDaTarde): DadosDaTarde {
   // (P14) o resumo do retorno também sai; "Ainda esperando hoje" fica
-  return { ...d, fornecedores: [], escritorio: null, lote: null, semResposta: [], panorama: null, faturamento: null, retorno: d.retorno && { ...d.retorno, resumo: null } };
+  return { ...d, fornecedores: [], escritorio: null, lote: null, semResposta: [], panorama: null, faturamento: null, retorno: d.retorno && { ...d.retorno, resumo: null, extras: [] } };
 }
 
 /**
@@ -729,10 +734,10 @@ export function textoDaTarde(d: DadosDaTarde, semExtras: (d: DadosDaTarde) => Da
   const n = semanaDoFechamento(d).length;
   // (01/11/2026, retorno F1, P14) o resumo do retorno é o primeiro a sair: só fica se o fechamento inteiro couber com ele;
   // senão, o caminho de sempre sem ele
-  if (d.turno === "fechamento" && d.retorno?.resumo) {
+  if (d.turno === "fechamento" && (d.retorno?.resumo || d.retorno?.extras?.length)) {
     const inteiro = montar(false, n, L);
     if (!inteiro.texto || inteiro.texto.length <= LIMITE_DA_TARDE) return inteiro;
-    return textoDaTarde({ ...d, retorno: { ...d.retorno, resumo: null } }, semExtras);
+    return textoDaTarde({ ...d, retorno: { ...d.retorno!, resumo: null, extras: [] } }, semExtras);
   }
   // (P14, correção) a linha de quem espera que NÃO sustenta promessa (sombra, ou ninguém nela ouviu: fixa = false) é extra,
   // a segunda a sair: só fica se a tarde inteira couber com ela; senão, a tarde de antes. Sem isto, 5 casos em sombra

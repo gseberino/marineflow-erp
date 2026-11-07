@@ -8,8 +8,13 @@ import { assert, assertEquals, assertStringIncludes } from "https://deno.land/st
 import {
   type ConferirDoRetorno,
   type EsperandoDoRetorno,
+  type ExtraDoFechamento,
+  lerExtra,
   lerRetorno,
   linhasDaManha,
+  linhaDeContatos,
+  linhaDoMandei,
+  linhasDoExtra,
   linhasDoFechamento,
   type RetornoDaManha,
   type RetornoDoFechamento,
@@ -896,4 +901,60 @@ Deno.test("rodarTurnoDaTarde: o fechamento e a revisão de segunda leem retorno_
   const textoRev = String(rev.corpo.texto);
   assertEquals(textoRev.split("\n")[1], "Ainda esperando hoje: Paulo (prometi até 19h).", textoRev);
   assert(!textoRev.includes("Retorno hoje"), textoRev);
+});
+
+// ─── O que a F2 acrescenta (P12.4) ───────────────────────────────────────────────────────────────────────────────────
+
+const MANDEI: ExtraDoFechamento = {
+  palavra: true, mandei_mais: 1, promovidos: [], rebaixados: [], suspensos: [], semana: null,
+  mandei: [
+    { letra: "Z", rotulo: "Rodrigo", tipo_curto: "aguardando peça", saida_id: "s1" },
+    { letra: "Y", rotulo: "Paulo", tipo_curto: "pronto", saida_id: "s2" },
+  ],
+};
+
+Deno.test("F2: a linha do Mandei sozinho, com a letra da última nomeada", () => {
+  assertEquals(linhaDoMandei(MANDEI), "Mandei sozinho hoje: Z) 'aguardando peça' ao Rodrigo · Y) 'pronto' ao Paulo · e mais 1 · *errado Y*");
+  assertEquals(linhaDoMandei({ ...MANDEI, mandei: [] }), null);
+  assertEquals(linhaDoMandei(null), null);
+});
+
+Deno.test("F2: os contatos sem recibo", () => {
+  assertEquals(linhaDeContatos({ palavra: true, contatos: { vendedores: 3, conhecidos: 2 } }), "Sem recibo ontem: 3 vendedores · 2 contatos conhecidos.");
+  assertEquals(linhaDeContatos({ palavra: true, contatos: { vendedores: 1, conhecidos: 0 } }), "Sem recibo ontem: 1 vendedor.");
+  assertEquals(linhaDeContatos({ palavra: true, contatos: { vendedores: 0, conhecidos: 0 } }), null);
+});
+
+Deno.test("F2: uma extra só, na ordem semana, rebaixado, promovido, fadiga", () => {
+  const vazio = { ...MANDEI, mandei: [], mandei_mais: 0 };
+  assertEquals(linhasDoExtra(vazio), []);
+  assertEquals(linhasDoExtra({ ...vazio, suspensos: ["pronto"] }), ["Aprovações rápidas demais: 'pronto' não promove por 7 dias."]);
+  assertEquals(linhasDoExtra({ ...vazio, suspensos: ["pronto"], promovidos: ["aguardando peça"] }),
+    ["A partir de amanhã, 'aguardando peça' sai sozinho. *errado <letra>* volta ao cartão."]);
+  assertEquals(linhasDoExtra({ ...vazio, promovidos: ["x"], rebaixados: [{ tipo_curto: "pronto", motivo: "errado" }] }),
+    ["'pronto' voltou ao cartão: você marcou errado."]);
+  const semana = { recibos: 31, recibo_12min: 30, hora_cumprida: 21, hora_casos: 25, vencida_sem_aviso: 0, insistencia: 3, toques: 11, dias_uteis: 5 };
+  assertEquals(linhasDoExtra({ ...vazio, rebaixados: [{ tipo_curto: "pronto", motivo: "errado" }], semana }),
+    ["Retorno da semana: recibo em até 12 min 97% (de 31) · hora cumprida 84% · 0 vencida sem aviso · insistência 10% · você deu 11 toques novos (2,2 por dia)"]);
+  assertEquals(linhasDoExtra({ ...vazio, semana: { ...semana, recibos: 16, recibo_12min: 15, hora_casos: 10, hora_cumprida: 9 } })[0].startsWith("Retorno da semana: recibo em até 12 min 15 de 16 · hora cumprida 9 de 10"), true);
+});
+
+Deno.test("F2: a palavra *retorno* só com a chave ligada; sem extra, igual à F1 byte a byte", () => {
+  const r: RetornoDaManha = { modo: "ligado", esperando_mais: 0, conferir: [], conferir_mais: 0,
+    esperando: [{ phone: "5547900009101", rotulo: "Lenine", desde: "2026-11-24T12:00:00Z", prometido_ate: null, venceu: false, com_prazo_hoje: true }] };
+  const agora = new Date("2026-11-24T13:00:00Z");
+  const sem = linhasDaManha(r, new Set(), agora);
+  assertEquals(linhasDaManha(r, new Set(), agora, null), sem);
+  const com = linhasDaManha(r, new Set(), agora, { palavra: true, contatos: { vendedores: 1, conhecidos: 0 } });
+  assertEquals(com.esperando, `${sem.esperando} · *retorno*`);
+  assertEquals(com.conferir, "Sem recibo ontem: 1 vendedor.");
+  assertEquals(linhasDaManha(r, new Set(), agora, { palavra: false, contatos: { vendedores: 0, conhecidos: 0 } }).esperando, sem.esperando);
+});
+
+Deno.test("F2: lerExtra falha fechado e nunca lança", async () => {
+  const ausente = { rpc: () => Promise.resolve({ data: null, error: { code: "PGRST202" } }) };
+  assertEquals(await lerExtra(ausente, "fechamento", new Date()), null);
+  assertEquals(await lerExtra({ rpc: () => Promise.reject(new Error("x")) }, "manha", new Date()), null);
+  const certo = { rpc: () => Promise.resolve({ data: { palavra: true, contatos: { vendedores: 2 } }, error: null }) };
+  assertEquals(await lerExtra(certo, "manha", new Date()), { palavra: true, contatos: { vendedores: 2, conhecidos: 0 } });
 });
