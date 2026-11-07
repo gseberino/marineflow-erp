@@ -20,6 +20,12 @@ import {
 const APPROVE_WORDS = ["sim", "s", "ok", "confirmar", "1"];
 const REJECT_WORDS = ["não", "nao", "n", "cancelar", "2"];
 
+// Depois do "não", com o cartão no ponteiro, só isto mantém a recusa: o resto é conversa.
+const CORTESIA_DO_NAO = new Set([
+  "nao", "n", "não", "cancelar", "cancela", "cancele", "por", "favor", "pf", "pfv", "obrigado", "obrigada", "obg", "valeu", "vlw",
+  "agora", "manda", "mande", "mandar", "envia", "envie", "enviar", "pode",
+]);
+
 // O que pode vir depois do "sim" sem mudar o pedido ("sim por favor", "sim pode mandar").
 // Só afirmação pura: "sim pode seguir", "sim tá certo", "sim isso mesmo" aprovavam antes e seguem
 // aprovando. Fica de fora o que junta pedido ("e", "tudo", "também"): "sim e manda" é outra coisa.
@@ -45,7 +51,16 @@ export type ConfirmationReply =
  * já não é palavra de aprovação e segue ao modelo; se um dia a pontuação da 1ª palavra for
  * normalizada, esta conferência da sobra tem de ir junto.
  */
-export function parseConfirmationReply(text: string): ConfirmationReply | null {
+export function parseConfirmationReply(text: string, opcoes?: { naoSoSozinho?: boolean }): ConfirmationReply | null {
+  // Retorno F2 (P3.3): com o cartão no ponteiro, "não" só recusa sozinho ou com cortesia. O cartão vive 24 h e chega sem
+  // o dono pedir: um "não entendi" que era conversa não pode recusá-lo. As outras pendências foram pedidas segundos antes
+  // e seguem como sempre. O "2" fica de fora: ele só vale sozinho, pela regra logo abaixo.
+  if (opcoes?.naoSoSozinho) {
+    const palavras = text.trim().toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter(Boolean);
+    if (palavras[0] !== "2" && REJECT_WORDS.includes(palavras[0] ?? "")) {
+      return palavras.slice(1).every((p) => CORTESIA_DO_NAO.has(p)) ? { decision: "reject" } : null;
+    }
+  }
   const parts = normalizarSimComPin(text).trim().toLowerCase().split(/\s+/);
   const first = parts[0] || "";
   // Retorno (05/11/2026): "1" e "2" são resposta só sozinhos. Antes valia a 1ª palavra: com uma pendência aberta,
