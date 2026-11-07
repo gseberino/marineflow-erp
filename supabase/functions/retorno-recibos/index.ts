@@ -23,7 +23,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
-import { envioPeloWhatsappSend, rodada } from "./rodada.ts";
+import { envioAoDonoPeloWhatsappSend, envioPeloWhatsappSend, rodada, rodadaDoCartao } from "./rodada.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -45,6 +45,12 @@ servirComCors(async (req) => {
 
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
   const enviarPeloWhatsappSend = envioPeloWhatsappSend(SUPABASE_URL, SERVICE_ROLE);
+  // F2: o cartão do meio-dia e do acorde, antes dos recibos. Nunca lança nem segura a rodada.
+  const cartao = await rodadaDoCartao(admin, {
+    agora: () => new Date(),
+    enviarAoDono: envioAoDonoPeloWhatsappSend(SUPABASE_URL, SERVICE_ROLE),
+  });
+  if (cartao.erro) console.error("[retorno-recibos] cartão:", cartao.erro);
   const resumo = await rodada(admin, {
     agora: () => new Date(),
     enviar: enviarPeloWhatsappSend,

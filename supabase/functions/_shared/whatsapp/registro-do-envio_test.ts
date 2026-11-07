@@ -73,7 +73,7 @@ Deno.test("quem mandou: o usuário do JWT manda sobre o corpo; chamada de sistem
 const SAIDA = "3f2b9c1e-7a4d-4e8b-9c0f-12ab34cd56ef";
 
 Deno.test("origem do retorno: aceita só em chamada de sistema; com JWT de usuário vira tela", () => {
-  assertEquals([...ORIGENS_DO_RETORNO], ["retorno_recibo", "retorno_coleta", "retorno_adiamento"]);
+  assertEquals([...ORIGENS_DO_RETORNO], ["retorno_recibo", "retorno_coleta", "retorno_adiamento", "retorno_modelo"]);
   for (const o of ORIGENS_DO_RETORNO) {
     assertEquals(origemDoEnvio(o, true), o, o);
     assertEquals(origemDoEnvio(o, false), "tela", `${o} com JWT`);
@@ -85,7 +85,7 @@ Deno.test("origem do retorno: aceita só em chamada de sistema; com JWT de usuá
   assertEquals(origemDoEnvio("sistema", true), "sistema");
   assertEquals(origemDoEnvio("assistente", true), "assistente");
   assertEquals(origemDoEnvio(undefined, true), "sistema");
-  for (const o of ["assistente", "tela", "sistema", "retorno", "RETORNO_RECIBO", "retorno_modelo", "", null, undefined, 1]) {
+  for (const o of ["assistente", "tela", "sistema", "retorno", "RETORNO_RECIBO", "retorno_outro", "", null, undefined, 1]) {
     assertEquals(ehOrigemDoRetorno(o), false, String(o));
   }
   // Origem do retorno com outra grafia não é do retorno: cai na regra de sempre.

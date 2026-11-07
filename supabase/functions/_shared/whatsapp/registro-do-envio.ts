@@ -32,10 +32,10 @@
 // idDaSaidaDoRetorno e os dois ternários de linhaDaMensagemEnviada (sent_by e via).
 import { mesmoTelefone } from "../ai/phone.ts";
 
-export type OrigemDoRetorno = "retorno_recibo" | "retorno_coleta" | "retorno_adiamento";
+export type OrigemDoRetorno = "retorno_recibo" | "retorno_coleta" | "retorno_adiamento" | "retorno_modelo";
 export type OrigemDoEnvio = "assistente" | "tela" | "sistema" | OrigemDoRetorno;
 const ORIGENS: ReadonlyArray<OrigemDoEnvio> = ["assistente", "tela", "sistema"];
-export const ORIGENS_DO_RETORNO: ReadonlyArray<OrigemDoRetorno> = ["retorno_recibo", "retorno_coleta", "retorno_adiamento"];
+export const ORIGENS_DO_RETORNO: ReadonlyArray<OrigemDoRetorno> = ["retorno_recibo", "retorno_coleta", "retorno_adiamento", "retorno_modelo"];
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

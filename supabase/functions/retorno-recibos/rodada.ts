@@ -50,6 +50,9 @@ import { type ContextoDoValidador, type RegraDoValidador, validarSaida } from ".
 export const RPC_PEGAR = "retorno_pegar";
 export const RPC_DECISAO = "retorno_registrar_decisao";
 export const RPC_LOG = "log_app_error";
+export const RPC_CARTAO_DEVIDO = "retorno_cartao_devido";
+export const RPC_CARTAO_ABRIR = "retorno_cartao_abrir";
+export const RPC_CARTAO_ENVIADO = "retorno_cartao_enviado";
 
 /** Tempo máximo de uma chamada ao whatsapp-send. Esgotado = incerta (pode ter saído). */
 export const TEMPO_DO_ENVIO_MS = 25_000;
@@ -98,6 +101,18 @@ export interface DependenciasDaRodada {
 
 export type EstadoDoEnvio = "enviada" | "incerta" | "recusada" | "reagendar";
 
+/** O cartão ao dono (F2, P10.4): sem origem, é chamada de sistema, e o dono é da equipe. */
+export interface EnvioAoDono {
+  phone: string;
+  message: string;
+  dedupe_key: string;
+}
+
+export interface ResumoDoCartao {
+  acao: string | null;
+  erro?: string;
+}
+
 /** O item que retorno_pegar devolve (contrato C-PEGAR). A rodada o lê como dado não confiável. */
 export interface ItemDoRetorno {
   saida_id: string;
@@ -105,7 +120,7 @@ export interface ItemDoRetorno {
   dedupe_key: string;
   tipo: string;
   variante: string | null;
-  origem: "retorno_recibo" | "retorno_coleta" | "retorno_adiamento";
+  origem: "retorno_recibo" | "retorno_coleta" | "retorno_adiamento" | "retorno_modelo";
   classe: string;
   modo: "sombra" | "ligado";
   phone: string;
@@ -113,7 +128,7 @@ export interface ItemDoRetorno {
   validador: ContextoDoValidador;
 }
 
-const ORIGENS_DO_RETORNO: ReadonlySet<string> = new Set(["retorno_recibo", "retorno_coleta", "retorno_adiamento"]);
+const ORIGENS_DO_RETORNO: ReadonlySet<string> = new Set(["retorno_recibo", "retorno_coleta", "retorno_adiamento", "retorno_modelo"]);
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -387,4 +402,84 @@ export async function rodada(db: Db, deps: DependenciasDaRodada): Promise<Resumo
     resumo.erro = codigoDoErro(e);
   }
   return resumo;
+}
+
+// ─── rodadaDoCartao (F2, P10.4): o cartão do meio-dia e do acorde ────────────────────────────────────────────────────
+
+/** O envio ao dono: o mesmo POST, sem origem e sem contexto. */
+export function envioAoDonoPeloWhatsappSend(
+  supabaseUrl: string,
+  chaveDeServico: string,
+  buscar: typeof fetch = fetch,
+  tempoMs: number = TEMPO_DO_ENVIO_MS,
+): (e: EnvioAoDono) => Promise<RespostaDoEnvio> {
+  const url = supabaseUrl.replace(/\/+$/, "") + "/functions/v1/whatsapp-send";
+  return async (e: EnvioAoDono): Promise<RespostaDoEnvio> => {
+    let res: Response;
+    try {
+      res = await buscar(url, {
+        method: "POST",
+        headers: { Authorization: "Bearer " + chaveDeServico, "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: e.phone, kind: "text", message: e.message, dedupe_key: e.dedupe_key }),
+        signal: AbortSignal.timeout(tempoMs),
+      });
+    } catch {
+      return { status: 0, body: null, erroDeRede: true };
+    }
+    let body: Record<string, unknown> | null = null;
+    try {
+      const lido: unknown = await res.json();
+      body = ehObjeto(lido) ? lido : null;
+    } catch {
+      body = null;
+    }
+    return { status: res.status, body };
+  };
+}
+
+/** O dia local de Brasília (sem horário de verão desde 2019). */
+function diaDeBrasilia(agora: Date): string {
+  return new Date(agora.getTime() - 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+/**
+ * Antes da rodada dos recibos, e nunca lança. retorno_cartao_devido diz se há cartão a abrir; ocupado, ja_vivo e vazio o
+ * banco já resolveu, e aqui só se anota. Cartão ou lista vão ao dono, e o resultado volta a retorno_cartao_enviado.
+ */
+export async function rodadaDoCartao(
+  db: Db,
+  deps: { agora: () => Date; enviarAoDono: (e: EnvioAoDono) => Promise<RespostaDoEnvio> },
+): Promise<ResumoDoCartao> {
+  try {
+    const agora = deps.agora();
+    const pAgora = agora.toISOString();
+    const devido = await db.rpc(RPC_CARTAO_DEVIDO, { p_agora: pAgora });
+    if (devido.error) return { acao: null, erro: codigoDoErro(devido.error) };
+    if (!ehObjeto(devido.data)) return { acao: null };
+    const gatilho = devido.data.gatilho;
+    if (typeof gatilho !== "string") return { acao: null, erro: "devido_ilegivel" };
+
+    const aberto = await db.rpc(RPC_CARTAO_ABRIR, {
+      p_gatilho: gatilho,
+      p_agora: pAgora,
+      p_aviso: typeof devido.data.aviso_id === "string" ? devido.data.aviso_id : null,
+    });
+    if (aberto.error) return { acao: null, erro: codigoDoErro(aberto.error) };
+    if (!ehObjeto(aberto.data)) return { acao: null, erro: "abrir_ilegivel" };
+    const acao = typeof aberto.data.acao === "string" ? aberto.data.acao : null;
+    if (acao !== "cartao" && acao !== "lista") return { acao };
+
+    const { cartao_id: cartao, phone, texto } = aberto.data;
+    if (typeof cartao !== "string" || typeof phone !== "string" || typeof texto !== "string") {
+      return { acao, erro: "abrir_incompleto" };
+    }
+    const dedupe = gatilho === "meio_dia" ? `retorno-cartao:meio_dia:${diaDeBrasilia(agora)}` : `retorno-cartao:${cartao}`;
+    const r = await deps.enviarAoDono({ phone, message: texto, dedupe_key: dedupe });
+    const ok = r.status >= 200 && r.status < 300 && r.body?.success === true;
+    const waId = ok && typeof r.body?.messageId === "string" ? r.body.messageId : null;
+    await db.rpc(RPC_CARTAO_ENVIADO, { p_cartao: cartao, p_ok: ok, p_wa_id: waId, p_agora: pAgora });
+    return ok ? { acao } : { acao, erro: "envio_falhou" };
+  } catch (e) {
+    return { acao: null, erro: codigoDoErro(e) };
+  }
 }

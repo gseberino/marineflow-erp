@@ -20,12 +20,17 @@ import {
   type Db,
   type DependenciasDaRodada,
   type Envio,
+  type EnvioAoDono,
   envioPeloWhatsappSend,
   estadoDoEnvio,
   type EstadoDoEnvio,
   type RespostaDoBanco,
   type RespostaDoEnvio,
   rodada,
+  rodadaDoCartao,
+  RPC_CARTAO_ABRIR,
+  RPC_CARTAO_DEVIDO,
+  RPC_CARTAO_ENVIADO,
   RPC_DECISAO,
   RPC_LOG,
   RPC_PEGAR,
@@ -623,4 +628,95 @@ Deno.test("envioPeloWhatsappSend: rede caída e tempo esgotado viram erroDeRede 
   const r = await envioPeloWhatsappSend("https://exemplo.supabase.co", "k", lento, 10)(ENVIO);
   assertEquals(r, { status: 0, body: null, erroDeRede: true });
   assertEquals(estadoDoEnvio(r).estado, "incerta");
+});
+
+// ─── rodadaDoCartao (F2, P10.5) ───────────────────────────────────────────────────────────────────────────────────────
+
+function bancoDoCartao(respostas: Record<string, RespostaDoBanco>) {
+  const chamadas: Array<{ fn: string; args: Record<string, unknown> }> = [];
+  const db: Db = {
+    rpc: (fn, args) => {
+      chamadas.push({ fn, args });
+      return Promise.resolve(respostas[fn] ?? { data: null, error: null });
+    },
+  };
+  return { db, chamadas };
+}
+
+const RELOGIO = () => new Date("2026-11-24T15:30:00.000Z");
+const CARTAO_ABERTO = { data: { acao: "cartao", cartao_id: SAIDA(7), phone: FONE(7), texto: "Retorno · 1 esperando" }, error: null };
+
+Deno.test("rodadaDoCartao: nada devido, nada acontece", async () => {
+  const { db, chamadas } = bancoDoCartao({});
+  let envios = 0;
+  const r = await rodadaDoCartao(db, { agora: RELOGIO, enviarAoDono: () => { envios++; return Promise.resolve({ status: 200, body: null }); } });
+  assertEquals(r, { acao: null });
+  assertEquals(chamadas.map((c) => c.fn), [RPC_CARTAO_DEVIDO]);
+  assertEquals(envios, 0);
+});
+
+Deno.test("rodadaDoCartao: devido, abre, envia e registra, com a chave do dia no meio-dia", async () => {
+  const { db, chamadas } = bancoDoCartao({
+    [RPC_CARTAO_DEVIDO]: { data: { gatilho: "meio_dia" }, error: null },
+    [RPC_CARTAO_ABRIR]: CARTAO_ABERTO,
+  });
+  const enviados: EnvioAoDono[] = [];
+  const r = await rodadaDoCartao(db, {
+    agora: RELOGIO,
+    enviarAoDono: (e) => { enviados.push(e); return Promise.resolve({ status: 200, body: { success: true, messageId: "wa-9" } }); },
+  });
+  assertEquals(r, { acao: "cartao" });
+  assertEquals(enviados, [{ phone: FONE(7), message: "Retorno · 1 esperando", dedupe_key: "retorno-cartao:meio_dia:2026-11-24" }]);
+  assertEquals(chamadas.map((c) => c.fn), [RPC_CARTAO_DEVIDO, RPC_CARTAO_ABRIR, RPC_CARTAO_ENVIADO]);
+  assertEquals(chamadas[2].args.p_ok, true);
+  assertEquals(chamadas[2].args.p_wa_id, "wa-9");
+});
+
+Deno.test("rodadaDoCartao: o acorde usa a chave do cartão e passa o aviso", async () => {
+  const { db, chamadas } = bancoDoCartao({
+    [RPC_CARTAO_DEVIDO]: { data: { gatilho: "acorde", aviso_id: "a-1" }, error: null },
+    [RPC_CARTAO_ABRIR]: CARTAO_ABERTO,
+  });
+  const enviados: EnvioAoDono[] = [];
+  await rodadaDoCartao(db, {
+    agora: RELOGIO,
+    enviarAoDono: (e) => { enviados.push(e); return Promise.resolve({ status: 200, body: { success: true } }); },
+  });
+  assertEquals(enviados[0].dedupe_key, `retorno-cartao:${SAIDA(7)}`);
+  assertEquals(chamadas[1].args.p_aviso, "a-1");
+});
+
+Deno.test("rodadaDoCartao: ocupado, ja_vivo e vazio não enviam", async () => {
+  for (const acao of ["ocupado", "ja_vivo", "vazio"]) {
+    const { db, chamadas } = bancoDoCartao({
+      [RPC_CARTAO_DEVIDO]: { data: { gatilho: "acorde" }, error: null },
+      [RPC_CARTAO_ABRIR]: { data: { acao }, error: null },
+    });
+    let envios = 0;
+    assertEquals(await rodadaDoCartao(db, { agora: RELOGIO, enviarAoDono: () => { envios++; return Promise.resolve({ status: 200, body: null }); } }), { acao });
+    assertEquals(envios, 0, acao);
+    assertEquals(chamadas.length, 2, acao);
+  }
+});
+
+Deno.test("rodadaDoCartao: envio que falha registra p_ok falso; exceção e erro do banco não derrubam", async () => {
+  const { db, chamadas } = bancoDoCartao({
+    [RPC_CARTAO_DEVIDO]: { data: { gatilho: "meio_dia" }, error: null },
+    [RPC_CARTAO_ABRIR]: CARTAO_ABERTO,
+  });
+  const r = await rodadaDoCartao(db, { agora: RELOGIO, enviarAoDono: () => Promise.resolve({ status: 500, body: null }) });
+  assertEquals(r, { acao: "cartao", erro: "envio_falhou" });
+  assertEquals(chamadas[2].args.p_ok, false);
+  const quebra: Db = { rpc: () => { throw new Error("rede"); } };
+  assertEquals((await rodadaDoCartao(quebra, { agora: RELOGIO, enviarAoDono: () => Promise.resolve({ status: 200, body: null }) })).acao, null);
+  const erro = bancoDoCartao({ [RPC_CARTAO_DEVIDO]: { data: null, error: { code: "PGRST202" } } });
+  assertEquals(await rodadaDoCartao(erro.db, { agora: RELOGIO, enviarAoDono: () => Promise.resolve({ status: 200, body: null }) }), { acao: null, erro: "PGRST202" });
+});
+
+Deno.test("as duas listas de origens do retorno são iguais", async () => {
+  const { ORIGENS_DO_RETORNO } = await import("../_shared/whatsapp/registro-do-envio.ts");
+  const fonte = await Deno.readTextFile(new URL("./rodada.ts", import.meta.url));
+  const lista = /const ORIGENS_DO_RETORNO: ReadonlySet<string> = new Set\(\[([^\]]*)\]\)/.exec(fonte);
+  assert(lista, "a lista sumiu de rodada.ts");
+  assertEquals([...lista[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]), [...ORIGENS_DO_RETORNO]);
 });
