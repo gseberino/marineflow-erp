@@ -253,6 +253,13 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     vezes: 2,
     porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_habilidade); não é texto_max nem peca_embutida_acima',
   },
+  // Fase 7f (P2): a rodada comunicar, o mesmo molde.
+  {
+    onde: 'agenda_comunicar_rodar',
+    casou: '1000',
+    vezes: 1,
+    porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_habilidade); não é texto_max nem peca_embutida_acima',
+  },
   {
     onde: 'agenda_tarefas_rodar',
     casou: '1000',

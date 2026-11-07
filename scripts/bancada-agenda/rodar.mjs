@@ -385,6 +385,9 @@ const FIXTURES_COMO_TEXTO = [
   // mig_base_fase7a, já está acima).
   ['agenda_teste.fase7f', 'fixture-fase7f.sql'],
   ['agenda_teste.mig_base_fase7f', '../../supabase/migrations/20261109100000_agenda_fase7f_base.sql'],
+  // Fase 7f (P2): a própria migration das perguntas (20261109100100), para o P9 de agenda_fase7f_perguntas.sql conferir as cópias. As fontes já estão acima: mig_correcao_fase7a,
+  // mig_combinar_fase7d e mig_correcao4_fase7d.
+  ['agenda_teste.mig_perguntas_fase7f', '../../supabase/migrations/20261109100100_agenda_fase7f_perguntas.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

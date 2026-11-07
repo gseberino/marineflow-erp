@@ -1147,6 +1147,7 @@ begin
      and p.proname not in ('_agenda_classe_da_saida', '_agenda_fala_modo', '_agenda_padrao_da_pergunta', '_agenda_perguntas_antes', '_agenda_perguntas_padrao', '_agenda_zona')
      and p.prosrc ~ '_agenda_(classe_da_saida|fala_modo|zona)\(|padrao_chave|padrao_efeito|veto_espera|veto_teria_em|assumida_por|assumida_em|modo_bloco_agenda|modo_lote_dono|modo_veto|modo_equipe_previsto|modo_equipe_convite|modo_cliente_camadas|veto_tipos|comunicar_tempo_max'
      -- (quem vier depois nesta etapa entra aqui)
+     and p.proname not in ('_agenda_comunicar_teto', '_agenda_pergunta_assumir', '_agenda_pergunta_espera', '_agenda_pergunta_frases', '_agenda_pergunta_linha', 'agenda_comunicar_rodar', 'agenda_perguntas_em_ordem')  -- P2
      and not exists (select 1 from regexp_matches(coalesce(p.prosrc, ''), '-- FASE 7f:') x);
   v_res := pg_temp.ok(v_res, 'B10c nenhuma função de antes lê as colunas nem chama as funções novas: o gatilho é a única porta', v_dif is null, v_dif);
   v_res := pg_temp.ok(v_res, 'B10d sem dado: nenhuma ação assumir, rodada comunicar, mensagem previsto, mudanca, convite nem semana; ninguém assumida',
@@ -1247,7 +1248,7 @@ begin
   v_res := pg_temp.ok(v_res, 'B11a as 8 abertas da §8.2, todas ligadas: só elas estão abertas',
     (select count(*) = 8 and bool_and(q.modo = 'ligado') from public.agenda_perguntas q where q.estado = 'aberta'),
     (select string_agg(q.tipo, ',' order by q.criada_em) from public.agenda_perguntas q where q.estado = 'aberta'));
-  v_res := pg_temp.ok(v_res, 'B11b só padrao_do_dono, duracao, material_conferir, fornecedores_prazo, parada e a do Giancarlo podem vencer; Flávio espera o cliente, a diária o dinheiro',
+  v_res := pg_temp.ok(v_res, 'B11b só padrao_do_dono, duracao, material_conferir, fornecedores_prazo, parada e a do Giancarlo nascem sem espera; Flávio espera o cliente, a diária o dinheiro',
     (select string_agg(q.tipo || ':' || coalesce(q.veto_espera, '-'), ',' order by q.criada_em) from public.agenda_perguntas q where q.estado = 'aberta')
     = 'padrao_do_dono:-,duracao:-,material_conferir:-,fornecedores_prazo:-,parada:-,nao_cabe:cliente,nao_cabe:-,diaria:dinheiro',
     (select string_agg(q.tipo || ':' || coalesce(q.veto_espera, '-'), ',' order by q.criada_em) from public.agenda_perguntas q where q.estado = 'aberta'));

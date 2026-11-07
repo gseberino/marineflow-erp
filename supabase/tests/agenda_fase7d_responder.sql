@@ -118,8 +118,9 @@ select 'R0c as recriadas mantêm o que eram: a lista e o foco invoker e stable; 
        null;
 
 insert into _resultado
-select 'R0d a lista não entrou em caminho de tique: só agenda_rascunho_aplicar, _agenda_ver_decisoes e agenda_tela_semana a chamam',
-       array_agg(p.proname::text order by p.proname::text) = array['_agenda_ver_decisoes', 'agenda_rascunho_aplicar', 'agenda_tela_semana'],
+select 'R0d a lista não entrou em caminho de tique: só agenda_rascunho_aplicar, _agenda_ver_decisoes e agenda_tela_semana a chamam (e a linha da pergunta da 7f, que imprime o n e não roda no tique)',
+       array_agg(p.proname::text order by p.proname::text) in (array['_agenda_ver_decisoes', 'agenda_rascunho_aplicar', 'agenda_tela_semana'],
+                                                               array['_agenda_pergunta_linha', '_agenda_ver_decisoes', 'agenda_rascunho_aplicar', 'agenda_tela_semana']),
        array_to_string(array_agg(p.proname::text order by p.proname::text), ', ')
   from pg_proc p
  where p.pronamespace = 'public'::regnamespace and p.prosrc like '%agenda_decisoes_abertas(%' and p.proname <> 'agenda_decisoes_abertas';

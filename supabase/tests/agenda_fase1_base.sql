@@ -1086,6 +1086,8 @@ insert into _definer_da_agenda values ('_agenda_ver_locais'), ('_agenda_saude_lo
   -- FASE 7d: fim
   -- FASE 7f: (7f P1, 20261109100000) o gatilho do padrão da pergunta: quem insere pode ser o service_role, e a função do padrão não tem grant; agenda_fase7f_base.sql B2g prova
 insert into _definer_da_agenda values ('_agenda_perguntas_padrao');
+-- Fase 7f (P2): as duas portas das perguntas: as funções sem grant, que elas chamam, não têm outro caminho (spec-fase7f §5.2).
+insert into _definer_da_agenda values ('agenda_perguntas_em_ordem'), ('agenda_comunicar_rodar');
   -- FASE 7f: fim
 
 insert into _resultado
