@@ -73,10 +73,10 @@ set search_path = public
 as $$
   select case p_tipo
     when 'modelo_aguarda_peca' then 'aguardando peça'
-    when 'modelo_peca_chegou' then 'a peça chegou'
+    when 'modelo_peca_chegou' then 'peça chegou'
     when 'modelo_pronto' then 'pronto'
-    when 'modelo_em_servico' then 'em serviço hoje'
-    when 'modelo_liberado' then 'liberado para retirada'
+    when 'modelo_em_servico' then 'em serviço'
+    when 'modelo_liberado' then 'liberado'
     when 'modelo_retirada_nao' then 'retirada ainda não'
   end;
 $$;
