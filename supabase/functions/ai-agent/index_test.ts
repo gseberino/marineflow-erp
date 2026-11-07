@@ -390,8 +390,8 @@ Deno.test("trava do 1 da agenda: depois da trava do comprovante, antes da confir
   const chamada = turno.indexOf("await textoDaTravaDaAgenda(admin, { sessionId, phone: phoneNormalized, texto: text, citado, metadata });");
   assert(chamada > 0, "falta a trava");
   assert(turno.indexOf("textoDaTravaDoComprovante(") < chamada, "depois da trava do comprovante");
-  assert(chamada < turno.indexOf("const confirmation = parseConfirmationReply(text);"), "antes da confirmação");
-  const bloco = turno.slice(chamada, turno.indexOf("const confirmation = parseConfirmationReply(text);"));
+  assert(chamada < turno.indexOf("const confirmation = parseConfirmationReply(text"), "antes da confirmação");
+  const bloco = turno.slice(chamada, turno.indexOf("const confirmation = parseConfirmationReply(text"));
   assertStringIncludes(bloco, "await queueWhatsAppReply(admin, phoneNormalized, travaDaAgenda);");
   // correção T3: entra na conversa antes de sair, senão o "está certo" seguinte não tem a que se referir
   const naConversa = bloco.indexOf("await gravarDecisaoNaConversa(admin, { sessionId, resposta: text, texto: travaDaAgenda });");
