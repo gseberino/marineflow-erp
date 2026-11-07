@@ -77,7 +77,8 @@ import {
 } from "../_shared/ai/whatsapp-channel.ts";
 import { pinNoTexto, verifyPin } from "../_shared/ai/whatsapp-pin.ts";
 import { camadaDoRetorno, type CartaoVivo, type DependenciasDaCamada, ponteiroDoCartao } from "../_shared/retorno/camada.ts";
-import { aplicarCarona, caronaDoTurno, comCarona, osDoJob, osDoTurno } from "../_shared/agenda/carona.ts";
+import { aplicarCarona, caronaDoTurno, comCarona, juntarCarona, osDoJob, osDoTurno } from "../_shared/agenda/carona.ts";
+import { caronaDoRetorno } from "../_shared/whatsapp/retorno-carona.ts";
 import { STATUS_INJETAVEL, colunaDaEntidade } from "../_shared/ai/memory-scope.ts";
 import { podarHistoricoParaLLM } from "../_shared/ai/context-pruning.ts";
 import { filtrarPorCanal } from "../_shared/ai/channel-scope.ts";
@@ -991,7 +992,8 @@ async function turnoDoModeloNoWhatsApp(turno: TurnoDoModelo): Promise<Response> 
   // (Fase 3, P6) a carona da agenda: no fim da resposta ao dono sobre UMA OS, no máximo uma pergunta aberta dela
   // (agenda_carona decide; nunca com cartão de sim, opções ou fluxo). Entra também no histórico (aplicarCarona).
   if (appUser.role === "admin") {
-    const carona = await caronaDoTurno(admin, appUser.id, osDoTurno(result.toolEvents), result, { canal: "whatsapp" });
+    const carona = (await caronaDoTurno(admin, appUser.id, osDoTurno(result.toolEvents), result, { canal: "whatsapp" }))
+      ?? (await caronaDoRetorno(admin, appUser.id, result));
     if (carona) aplicarCarona(result, carona);
   }
   // Conferido pelo sistema (29/10/2026): as gravações diretas do turno que falharam — na conversa (o modelo lê na
@@ -1091,9 +1093,14 @@ async function handleEntregaDoMax(body: Record<string, any>): Promise<Response> 
     // o aviso do turno que caiu no meio vai no topo, também sobre o cartão ou a lista que ficaram
     const aviso = parouNoMeio ? avisoDoTurnoInterrompido(job.error_code) : "";
     // (Fase 3, P6) a carona da agenda, pelas OS que as ferramentas do turno tocaram (o erp-mcp guardou no job)
-    const resposta = appUser.role === "admin" && job.status === "completed"
+    const comAgenda = appUser.role === "admin" && job.status === "completed"
       ? await comCarona(admin, appUser.id, osDoJob(job.metadata), respostaDoMax, interrupcao, { canal: "whatsapp" })
       : respostaDoMax;
+    // Retorno F2 (P11): a da agenda tem prioridade; só sem ela, a carona do retorno.
+    const doRetornoNoMax = appUser.role === "admin" && job.status === "completed" && comAgenda === respostaDoMax
+      ? await caronaDoRetorno(admin, appUser.id, interrupcao)
+      : null;
+    const resposta = doRetornoNoMax ? juntarCarona(comAgenda, doRetornoNoMax) : comAgenda;
     // Conferido pelo sistema (29/10/2026): as falhas das gravações diretas do job, pela auditoria com turno = job.
     const conferido = reciboDasGravacoes(await falhasDaAuditoria(admin, sessionId, jobId));
     await gravarTurnoDoMax(admin, sessionId, texto, [aviso, resposta, conferido].filter(Boolean).join("\n\n"), job, "whatsapp");
