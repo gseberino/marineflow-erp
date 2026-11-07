@@ -1,5 +1,5 @@
 -- Retorno F2 (P1): configuração, checks, tabelas e coluna nova. Roda só pela bancada, depois das migrations da F1 e da F2.
--- Termina em ROLLBACK: nada fica gravado. Telefones de teste 55479000091xx; frases inventadas.
+-- Termina em ROLLBACK, e o bloco se desfaz sozinho. Telefones de teste 55479000091xx; frases inventadas.
 begin;
 create temp table if not exists _bancada (arquivo text, ok boolean, numeros jsonb, em timestamptz default clock_timestamp());
 
@@ -56,6 +56,7 @@ declare
   v_vivo uuid;
   v_n integer;
 begin
+  begin
   -- 1. Os padrões e os 5 tipos.
   select * into v_cfg from public.retorno_config;
   if v_cfg.cartao_ligado or v_cfg.carona_ligada or v_cfg.variantes_ligadas then
@@ -211,6 +212,12 @@ begin
     raise exception '8: anon lê a marca do libera';
   end if;
 
+  raise exception 'retorno_f2_desfaz' using errcode = 'P0001';
+  exception when others then
+    if sqlstate <> 'P0001' or sqlerrm <> 'retorno_f2_desfaz' then
+      raise;
+    end if;
+  end;
   insert into _bancada (arquivo, ok, numeros) values ('retorno_f2_base', true, '{}');
 end
 $base$;

@@ -9,12 +9,18 @@ returns uuid language sql as $f$
 $f$;
 
 create or replace function pg_temp.f2f_os(p_num text, p_cliente uuid, p_status text, p_criada timestamptz default '2026-10-01 12:00-03')
-returns uuid language sql as $f$
-  insert into public.service_orders (service_order_number, client_id, status, quote_status, service_type, created_at, updated_at,
+returns uuid language plpgsql as $f$
+declare
+  v_barco uuid;
+  v_id uuid;
+begin
+  insert into public.vessels (client_id, name, asset_type) values (p_cliente, 'Barco de Teste', 'Motorhome') returning id into v_barco;
+  insert into public.service_orders (service_order_number, client_id, vessel_id, status, quote_status, service_type, created_at, updated_at,
                                      converted_to_os_at, grand_total)
-  values (p_num, p_cliente, p_status, 'approved', 'repair', p_criada, p_criada, p_criada, 100)
-  returning id
-$f$;
+  values (p_num, p_cliente, v_barco, p_status, 'approved', 'repair', p_criada, p_criada, p_criada, 100)
+  returning id into v_id;
+  return v_id;
+end $f$;
 
 create or replace function pg_temp.f2f_concluir(p_os uuid, p_em timestamptz, p_origem text default 'dono')
 returns uuid language sql as $f$
@@ -109,6 +115,7 @@ begin
 
     -- 1. OS concluída por lote, sem a palavra: pronto nulo, concluida_sem_palavra preenchido.
     v_os := pg_temp.f2f_os('OS-09601', v_cl, 'completed', '2026-10-20 12:00-03');
+    update public.service_orders set check_out_at = '2026-10-20 12:00-03' where id = v_os;
     v_r := public.retorno_fatos_do_contato(c_fone, c_agora);
     if v_r ->> 'papel' <> 'cliente' or (v_r ->> 'client_id')::uuid is distinct from v_cl or jsonb_array_length(v_r -> 'os') <> 1 then
       raise exception '1a: contato (%)', v_r;
@@ -119,7 +126,7 @@ begin
     end if;
 
     -- 2. A palavra: 47 h conta, 49 h não; desfeita não; pela tela não.
-    update public.service_orders set updated_at = '2026-09-01 12:00-03' where id = v_os;
+    update public.service_orders set check_out_at = '2026-09-01 12:00-03' where id = v_os;
     v_ac := pg_temp.f2f_concluir(v_os, c_agora - interval '47 hours');
     v_f := public.retorno_fatos_do_contato(c_fone, c_agora) -> 'os' -> 0 -> 'fatos';
     if v_f -> 'pronto' ->> 'fonte' is distinct from 'dono' or (v_f -> 'pronto' ->> 'idade_h')::integer <> 47 then
@@ -132,16 +139,16 @@ begin
     if jsonb_array_length(public.retorno_fatos_do_contato(c_fone, c_agora) -> 'os') <> 0 then
       raise exception '2c: pronto desfeito';
     end if;
-    update public.agenda_acoes set origem = 'tela', desfeita_em = null, desfeita_pela = null where id = v_ac;
+    -- agenda_acoes só cresce: cada caso é uma linha nova.
+    perform pg_temp.f2f_concluir(v_os, c_agora - interval '1 hour', 'tela');
     if jsonb_array_length(public.retorno_fatos_do_contato(c_fone, c_agora) -> 'os') <> 0 then
       raise exception '2d: pronto pela tela';
     end if;
     -- Ninguém olha o futuro.
-    update public.agenda_acoes set origem = 'dono', criada_em = c_agora + interval '1 hour' where id = v_ac;
+    perform pg_temp.f2f_concluir(v_os, c_agora + interval '1 hour', 'dono');
     if jsonb_array_length(public.retorno_fatos_do_contato(c_fone, c_agora) -> 'os') <> 0 then
       raise exception '2e: palavra do futuro';
     end if;
-    delete from public.agenda_acoes where id = v_ac;
 
     -- 3. Em serviço: check-in de 23 h conta, de 25 h não.
     update public.service_orders set status = 'in_progress', check_in_at = c_agora - interval '23 hours' where id = v_os;
@@ -158,8 +165,8 @@ begin
     if v_payee is null then
       insert into public.payees (name) values ('Tecnico Fato Teste') returning id into v_payee;
     end if;
-    insert into public.agenda_alocacoes (service_order_id, payee_id, dia, estado, tipo)
-    values (v_os, v_payee, c_hoje, 'publicada', 'normal');
+    insert into public.agenda_alocacoes (service_order_id, payee_id, dia, turno, estado, tipo)
+    values (v_os, v_payee, c_hoje, 'manha', 'publicada', 'execucao');
     if public.retorno_fatos_do_contato(c_fone, c_agora) -> 'os' -> 0 -> 'fatos' -> 'em_servico' <> 'null'::jsonb then
       raise exception '3c: alocação sem confirmação';
     end if;
@@ -173,7 +180,7 @@ begin
     if public.retorno_fatos_do_contato(c_fone, c_agora) -> 'os' -> 0 -> 'fatos' -> 'em_servico' <> 'null'::jsonb then
       raise exception '3e: confirmação substituída';
     end if;
-    delete from public.agenda_alocacoes where service_order_id = v_os;
+    update public.agenda_alocacoes set estado = 'cancelada', cancelada_em = c_agora where service_order_id = v_os;
 
     -- 4. Peça: estoque não conta; nota de 7 dias conta, de 8 não; faltam_outras.
     v_m := pg_temp.f2f_material(v_os, 'na_mao', true, 'estoque', c_hoje - 1);
@@ -236,11 +243,13 @@ begin
     if jsonb_array_length(public.retorno_fatos_do_contato(c_fone, c_agora) -> 'os') <> 0 then
       raise exception '7b: liberada há 15 dias';
     end if;
-    update public.service_orders set liberado_retirada_em = c_agora - interval '1 day', delivered_at = c_agora - interval '1 hour' where id = v_os2;
+    perform set_config('agenda.porta', 'on', true);
+    update public.service_orders set liberado_retirada_em = c_agora - interval '1 day', check_out_at = c_agora - interval '2 hours', delivered_at = c_agora - interval '1 hour' where id = v_os2;
     if jsonb_array_length(public.retorno_fatos_do_contato(c_fone, c_agora) -> 'os') <> 0 then
       raise exception '7c: entregue segue liberada';
     end if;
-    update public.service_orders set delivered_at = null, liberado_retirada_em = null, status = 'in_progress' where id = v_os2;
+    update public.service_orders set delivered_at = null, check_out_at = null, liberado_retirada_em = null, status = 'in_progress' where id = v_os2;
+    perform set_config('agenda.porta', 'off', true);
 
     -- 8. Regras do modelo, uma a uma. v_os2 é a OS viva.
     insert into public.os_material (service_order_id, origem, descricao, quantidade_necessaria, quantidade_na_mao, critico, situacao, fonte, atualizado_em)
@@ -300,12 +309,12 @@ begin
     end if;
     -- a agenda já disse; o modelo já saiu
     v_m := pg_temp.f2f_material(v_os2, 'falta', true, 'dono');
-    insert into public.agenda_cliente_mensagens (client_id, service_order_id, tipo, modelo, modo, texto, base, enviar_em, estado, enviada_em, dedupe_key)
-    values (v_cl, v_os2, 'pode_atrasar', 'M', 'ligado', 'texto do teste', '{}', c_agora - interval '2 hours', 'enviada', c_agora - interval '2 hours', 'teste-f2-fatos:1');
+    insert into public.agenda_cliente_mensagens (client_id, service_order_id, tipo, origem, modo, texto, base, enviar_em, valida_ate, aprovacao, estado, enviada_em, dedupe_key)
+    values (v_cl, v_os2, 'pode_atrasar', 'rodada', 'ligado', 'texto do teste', '{}', c_agora - interval '2 hours', c_agora + interval '1 day', 'livre', 'enviada', c_agora - interval '2 hours', 'teste-f2-fatos:1');
     if public._retorno_modelo_do_caso(v_caso, c_agora) ->> 'motivo' is distinct from 'agenda_ja_disse' then
       raise exception '8m: agenda já disse (%)', public._retorno_modelo_do_caso(v_caso, c_agora);
     end if;
-    delete from public.agenda_cliente_mensagens where service_order_id = v_os2;
+    update public.agenda_cliente_mensagens set enviada_em = c_agora - interval '2 days' where service_order_id = v_os2;
     insert into public.retorno_saidas (abertura_id, tipo, origem, classe, chave, phone_normalized, modo, estado, decidida_em, enviada_em, enviar_em, texto, dedupe_key)
     values (v_caso, 'modelo_aguarda_peca', 'retorno_modelo', 'resposta_imediata', public._agenda_chave_telefone(c_fone), c_fone, 'ligado', 'enviada',
             c_agora - interval '2 hours', c_agora - interval '2 hours', c_agora - interval '2 hours', 'Texto do modelo.', 'teste-f2-fatos:2');

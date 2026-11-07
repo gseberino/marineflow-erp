@@ -12,6 +12,10 @@
 -- já vejo" de antes é justamente o que deixa o caso esperando conteúdo, e por isso ele entra no cartão. A regra 3 só roda no *sim*:
 -- remontar o item a cada minuto custaria a leitura de fatos inteira.
 --
+-- Desvio da spec, achado na bancada de 07/11: _retorno_resposta_humana devolve a PRIMEIRA saída humana depois da abertura. Com um
+-- "ok, já vejo" antes do cartão, a resposta de verdade depois dele não aparecia, e o modelo sairia por cima dela. A regra 2 usa
+-- _retorno_resposta_depois, que olha só o que veio depois do instante dado. A função da F1 não muda.
+--
 -- Decisão de leitura, com o motivo: {prazo} e {fato} usam os dados de retorno_fatos_do_contato. A previsão aparece só aqui,
 -- ao dono; o modelo nunca a recebe.
 --
@@ -610,6 +614,31 @@ comment on function public.retorno_cartao_enviado(uuid, boolean, text, timestamp
 revoke all on function public.retorno_cartao_enviado(uuid, boolean, text, timestamptz) from public, anon, authenticated;
 grant execute on function public.retorno_cartao_enviado(uuid, boolean, text, timestamptz) to service_role;
 
+-- A 1ª saída humana à chave depois de p_desde, gravada até p_agora, com a mesma régua de _retorno_resposta_humana.
+create or replace function public._retorno_resposta_depois(p_abertura uuid, p_desde timestamptz, p_agora timestamptz)
+returns timestamptz
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select min(h.real)
+    from (select public._retorno_hora_real(o) as real, o.occurred_at
+            from public.retorno_aberturas a
+            join public.whatsapp_messages o on public._agenda_chave_telefone(o.phone_normalized) = a.chave
+           where a.id = p_abertura
+             and o.direction = 'outbound'
+             and o.occurred_at <= p_agora
+             and o.occurred_at > p_desde - interval '10 minutes'
+             and coalesce(o.saida_humana, public._saida_e_humana(o.direction, o.raw_payload, o.sent_by))) h
+   where h.real > p_desde or h.occurred_at > p_desde;
+$$;
+
+comment on function public._retorno_resposta_depois(uuid, timestamptz, timestamptz) is
+  'Retorno F2 (P7B.3): a 1ª saída humana à chave depois de p_desde, gravada até p_agora. _retorno_resposta_humana só devolve a primeira depois da abertura, e um "ok" antes do cartão esconderia a resposta de verdade.';
+
+revoke all on function public._retorno_resposta_depois(uuid, timestamptz, timestamptz) from public, anon, authenticated;
+
 create or replace function public._retorno_item_conferir(p_item uuid, p_agora timestamptz, p_executar boolean default false)
 returns jsonb
 language plpgsql
@@ -622,7 +651,6 @@ declare
   v_i public.retorno_cartao_itens;
   v_c public.retorno_cartoes;
   v_ab public.retorno_aberturas;
-  v_rh jsonb;
   v_resp timestamptz;
   v_quem jsonb;
 begin
@@ -637,9 +665,10 @@ begin
     return jsonb_build_object('ok', false, 'motivo', 'caso_fechado', 'texto', format('o %s já estava resolvido; não mandei', v_i.n));
   end if;
 
-  v_rh := public._retorno_resposta_humana(v_ab.id, p_agora);
-  v_resp := (v_rh ->> 'respondida_em')::timestamptz;
-  if v_resp is not null and v_c.enviado_em is not null and v_resp > v_c.enviado_em then
+  if v_c.enviado_em is not null then
+    v_resp := public._retorno_resposta_depois(v_ab.id, v_c.enviado_em, p_agora);
+  end if;
+  if v_resp is not null then
     return jsonb_build_object('ok', false, 'motivo', 'respondida_pelo_dono',
       'texto', format('o %s caiu: você já respondeu às %s; não mandei', v_i.n, to_char(v_resp at time zone c_fuso, 'HH24:MI')));
   end if;

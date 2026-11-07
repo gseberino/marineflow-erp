@@ -141,12 +141,13 @@ begin
   end if;
 
   -- ── 2. Os checks de retorno_config ───────────────────────────────────────────────────────────────────
+  -- Com a F2 no banco, urgente e acorde entram na lista, e o check do grupo recusa cada um sozinho.
   v := pg_temp.retorno_f1_tabelas_erro($q$update public.retorno_config set tipos_ligados = '{urgente}'$q$);
-  if v is distinct from '23514:retorno_config_tipos_ligados_check' then
+  if v is null or v not in ('23514:retorno_config_tipos_ligados_check', '23514:retorno_config_grupo_acorde') then
     raise exception '2a: tipos_ligados aceitou urgente (%)', v;
   end if;
   v := pg_temp.retorno_f1_tabelas_erro($q$update public.retorno_config set tipos_ligados = '{acorde}'$q$);
-  if v is distinct from '23514:retorno_config_tipos_ligados_check' then
+  if v is null or v not in ('23514:retorno_config_tipos_ligados_check', '23514:retorno_config_grupo_acorde') then
     raise exception '2b: tipos_ligados aceitou acorde (%)', v;
   end if;
   v := pg_temp.retorno_f1_tabelas_erro($q$update public.retorno_config set fila_modo = 'x'$q$);

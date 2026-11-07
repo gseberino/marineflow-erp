@@ -38,6 +38,7 @@ declare
   v_caso uuid;
   v_cartao uuid;
   v_pend uuid;
+  v_pend2 uuid;
   v_ses uuid;
   v_item uuid;
   v_n integer;
@@ -134,14 +135,14 @@ begin
     end if;
     -- "ok, já vejo" ANTES do cartão não derruba
     insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, delivery_status, raw_payload, hora_real, occurred_at, sent_by)
-    select 'outbound', a.phone_normalized, 'text', 'ok', 'sent', '{"via": "celular"}'::jsonb, c_agora - interval '5 minutes', c_agora - interval '5 minutes', null
+    select 'outbound', a.phone_normalized, 'text', 'ok', 'sent', '{"data": {}}'::jsonb, c_agora - interval '5 minutes', c_agora - interval '5 minutes', null
       from public.retorno_aberturas a where a.id = v_caso;
     if (public._retorno_item_conferir(v_item, c_agora + interval '5 minutes', false) ->> 'ok')::boolean is distinct from true then
       raise exception '10b: eco de antes do cartão derrubou';
     end if;
     -- depois do cartão derruba, e o eco do futuro não
     insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, delivery_status, raw_payload, hora_real, occurred_at, sent_by)
-    select 'outbound', a.phone_normalized, 'text', 'já resolvi', 'sent', '{"via": "celular"}'::jsonb, c_agora + interval '10 minutes', c_agora + interval '10 minutes', null
+    select 'outbound', a.phone_normalized, 'text', 'já resolvi', 'sent', '{"data": {}}'::jsonb, c_agora + interval '10 minutes', c_agora + interval '10 minutes', null
       from public.retorno_aberturas a where a.id = v_caso;
     if (public._retorno_item_conferir(v_item, c_agora + interval '5 minutes', false) ->> 'ok')::boolean is distinct from true then
       raise exception '10c: eco do futuro derrubou';
@@ -182,8 +183,11 @@ begin
 
     -- 3. Ocupado: pergunta aberta dá lista com C12, e o registro não é substituído.
     delete from public.retorno_cartao_itens i where i.cartao_id = v_cartao;
+    insert into public.ai_operator_pending_actions (session_id, action_name, risk_level, title, summary, payload, status, expires_at)
+    values (v_ses, 'outra_acao', 'high', 'Outra coisa', 'Outra coisa', '{}', 'pending', c_agora + interval '10 days')
+    returning id into v_pend2;
     insert into public.whatsapp_perguntas (phone_normalized, origem, tipo, referencia_id, referencia_codigo, expira_em)
-    values (v_phone, 'assistente', 'confirmacao', gen_random_uuid(), 'outra coisa', c_agora + interval '10 days');
+    values (v_phone, 'assistente', 'confirmacao', v_pend2, 'outra coisa', c_agora + interval '10 days');
     v_r := public.retorno_cartao_abrir('puxar', c_agora + interval '13 minutes');
     if v_r ->> 'acao' <> 'lista' or v_r ->> 'texto' not like '%Tem um pedido aberto antes deste: responda a ele e mande *retorno* de novo.' then
       raise exception '3a: ocupado (%)', v_r;
@@ -191,6 +195,7 @@ begin
     if not exists (select 1 from public.whatsapp_perguntas w where w.phone_normalized = v_phone and w.status = 'aberta' and w.referencia_codigo = 'outra coisa') then
       raise exception '3b: substituiu a pergunta aberta';
     end if;
+    update public.ai_operator_pending_actions set status = 'expired' where id = v_pend2;
     update public.whatsapp_perguntas set status = 'cancelada', fechada_em = now(), motivo = 'teste' where phone_normalized = v_phone and status = 'aberta';
 
     -- 5. Modelo: o texto do cartão, literal, com hash não nulo.

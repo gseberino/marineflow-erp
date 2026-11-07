@@ -12,8 +12,9 @@
 -- como "não há peça".
 --
 -- Desvios da spec, com o motivo:
--- - a lista positiva ganhou service_orders.merged_into_id, created_at e updated_at, e os_material.atualizado_em. O banco não
---   guarda a data da conclusão (service_orders não tem completed_at) nem a data da falta: as duas saem daí, como "desde";
+-- - a lista positiva ganhou service_orders.merged_into_id e created_at, e os_material.atualizado_em. O banco não tem completed_at:
+--   a conclusão é check_out_at, preenchido nas 22 OS concluídas em 07/11 (updated_at não serve: o gatilho o reescreve a cada
+--   edição). OS concluída sem check_out_at não entra: falha fecha. A data da falta sai de atualizado_em;
 -- - a OS concluída sem palavra entra em "os" só com o cliente sem OS viva, e só a mais recente de até 28 dias. A spec pede o
 --   fato, mas não diz qual OS; sem esse corte, todo cliente antigo teria várias OS, e o modelo nunca caberia (regra 7).
 --
@@ -24,7 +25,7 @@
 
 -- lista positiva: início
 -- service_orders: id, service_order_number, client_id, vessel_id, status, check_in_at, check_out_at, delivered_at,
---                 liberado_retirada_em, merged_into_id, created_at, updated_at
+--                 liberado_retirada_em, merged_into_id, created_at
 -- vessels: name, asset_type
 -- os_material: id, descricao, situacao, critico, chegou_em, fonte, previsao_ate, previsao_fonte, comprado_em, atualizado_em
 -- agenda_acoes: tipo, origem, executada, desfeita_em, criada_em
@@ -85,7 +86,7 @@ begin
   for r in
     with base as (
       select so.id, so.service_order_number, so.vessel_id, so.status, so.check_in_at, so.delivered_at, so.liberado_retirada_em,
-             coalesce(so.check_out_at, so.updated_at) as concluida_desde,
+             so.check_out_at as concluida_desde,
              v.name as bem,
              k.service_order_id is not null as na_carteira,
              p.criada_em as palavra_em,
@@ -129,10 +130,8 @@ begin
        order by m.concluida_desde desc, m.id
        limit 1
     )
-    select * from vivas
-    union all
-    select * from sem_palavra
-    order by service_order_number collate "C", id
+    select x.* from (select * from vivas union all select * from sem_palavra) x
+    order by x.service_order_number collate "C", x.id
   loop
     v_pronto := null;
     v_sem_palavra := null;
@@ -187,7 +186,7 @@ begin
        and m.situacao = 'na_mao'
        and m.fonte in ('dono', 'nfe', 'oc', 'fornecedor')
        and m.chegou_em <= v_hoje
-       and m.chegou_em >= (v_agora - v_cfg.fato_peca_idade at time zone c_fuso)::date;
+       and m.chegou_em >= ((v_agora - v_cfg.fato_peca_idade) at time zone c_fuso)::date;
     if v_n > 0 then
       v_chegou := jsonb_build_object('valor', true, 'fonte', v_fonte, 'em', v_em, 'linhas', v_n, 'faltam_outras', v_faltam);
     end if;

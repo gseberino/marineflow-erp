@@ -25,13 +25,21 @@ end $f$;
 
 create or replace function pg_temp.retorno_f2_pal_os(p_num text, p_cliente uuid, p_barco uuid, p_status text)
 returns uuid
-language sql as $f$
+language plpgsql as $f$
+declare
+  v_barco uuid := p_barco;
+  v_id uuid;
+begin
+  if v_barco is null then
+    insert into public.vessels (client_id, name, asset_type) values (p_cliente, 'Barco de Teste', 'Lancha') returning id into v_barco;
+  end if;
   insert into public.service_orders (service_order_number, client_id, vessel_id, status, quote_status, service_type, created_at, updated_at,
                                      converted_to_os_at, grand_total)
-  values (p_num, p_cliente, p_barco, p_status, 'approved', 'repair', timestamptz '2026-10-28 12:00-03', timestamptz '2026-10-28 12:00-03',
+  values (p_num, p_cliente, v_barco, p_status, 'approved', 'repair', timestamptz '2026-10-28 12:00-03', timestamptz '2026-10-28 12:00-03',
           timestamptz '2026-10-28 12:00-03', 100)
-  returning id
-$f$;
+  returning id into v_id;
+  return v_id;
+end $f$;
 
 do $palavras$
 declare
@@ -119,7 +127,7 @@ begin
     if v_cfg.segura_tudo_ate is not null or v_cfg.segura_recibos then
       raise exception '4b: solta tudo não limpou';
     end if;
-    v_cl := (select id from (insert into public.clients (type, name, whatsapp) values ('individual', 'Zebedeu Liberato Teste', '(47) 90000-9201') returning id) x);
+    insert into public.clients (type, name, whatsapp) values ('individual', 'Zebedeu Liberato Teste', '(47) 90000-9201') returning id into v_cl;
     v_caso := pg_temp.retorno_f2_pal_caso('5547900009201', 'cliente', c_agora - interval '1 hour', v_cl);
     insert into public.retorno_saidas (abertura_id, tipo, chave, phone_normalized, modo, enviar_em, dados, dedupe_key)
     values (v_caso, 'recibo_cliente', public._agenda_chave_telefone('5547900009201'), '5547900009201', 'sombra', c_agora + interval '20 hours',
@@ -248,7 +256,7 @@ begin
       raise exception '8c: pessoal com 2 casos (%)', v_r;
     end if;
     update public.retorno_saidas set enviar_em = c_agora + interval '1 hour', dados = '{}' where id = v_saida;
-    v_r := public.retorno_dito('{"comando": "pessoal", "n": 1}', v_dono, c_agora);
+    v_r := public.retorno_dito('{"comando": "pessoal", "n": 2}', v_dono, c_agora);
     if v_r ->> 'texto' is distinct from 'Zebedeu: anotado como pessoal. Esse número nunca mais recebe automático, e cancelei o que estava agendado. *pessoal não* desfaz.' then
       raise exception '8d: R11 (%)', v_r;
     end if;

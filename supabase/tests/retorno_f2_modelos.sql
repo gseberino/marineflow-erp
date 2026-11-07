@@ -21,6 +21,7 @@ declare
   v_msg uuid;
   v_caso uuid;
   v_os uuid;
+  v_barco uuid;
   r record;
 begin
   begin
@@ -137,8 +138,9 @@ begin
     values (public._agenda_chave_telefone('5547900009701'), '5547900009701', '47', 'cliente', '{"papel": "cliente"}', v_cl, v_msg, v_msg,
             c_agora - interval '1 hour', c_agora - interval '1 hour', c_agora - interval '1 hour', c_agora - interval '1 hour', 'recibo', 'recibo_cliente', 'aberta', 'sombra')
     returning id into v_caso;
-    insert into public.service_orders (service_order_number, client_id, status, quote_status, service_type, created_at, updated_at, grand_total)
-    values ('ORÇ-09701', v_cl, 'draft', 'draft', 'repair', c_agora - interval '13 days', c_agora - interval '13 days', 100)
+    insert into public.vessels (client_id, name, asset_type) values (v_cl, 'Barco de Teste', 'Lancha') returning id into v_barco;
+    insert into public.service_orders (service_order_number, client_id, vessel_id, status, quote_status, service_type, created_at, updated_at, grand_total)
+    values ('ORÇ-09701', v_cl, v_barco, 'draft', 'draft', 'repair', c_agora - interval '13 days', c_agora - interval '13 days', 100)
     returning id into v_os;
     if not public._retorno_tem_orcamento(v_caso, c_agora) then
       raise exception '5a: rascunho de 13 dias';
