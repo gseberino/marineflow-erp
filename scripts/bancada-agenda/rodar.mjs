@@ -380,6 +380,11 @@ const FIXTURES_COMO_TEXTO = [
   ['agenda_teste.mig_correcao3_fase7d', '../../supabase/migrations/20261107100860_agenda_fase7d_correcao3.sql'],
   // Fase 7d (correção, Onda 4): a própria migration (20261107100870), para o T0 de agenda_fase7d_correcao4.sql conferir as cópias.
   ['agenda_teste.mig_correcao4_fase7d', '../../supabase/migrations/20261107100870_agenda_fase7d_correcao4.sql'],
+  // Fase 7f (P1): a fixture da etapa (por cima da da 7d: os dois relógios de novembro, as 8 perguntas com o tamanho real, as ações, a equipe e o cliente; spec-fase7f §8.2 com
+  // o R8.12-8) e a própria base da 7f (20261109100000), de onde o B4 de agenda_fase7f_base.sql roda o backfill e confere a cópia de _agenda_perguntas_antes (a fonte dela,
+  // mig_base_fase7a, já está acima).
+  ['agenda_teste.fase7f', 'fixture-fase7f.sql'],
+  ['agenda_teste.mig_base_fase7f', '../../supabase/migrations/20261109100000_agenda_fase7f_base.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

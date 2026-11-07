@@ -17,6 +17,24 @@
 - **Consertado o (1) (correção da 7d, Onda 2, O17, migration `20261107100850`, ainda não aplicada):** em teste, a releitura de viagem, pátio e acesso acrescenta " Só muda o plano quando isso for ligado.", pelo `_agenda_local_modo`. A ação do *grava* e o *desfaz* dizem o fato.
 - **Consertado o (2) (correção da 7d, Onda 1, O3, migration `20261107100800`, ainda não aplicada):** "na casa do cliente" vira 1 linha de `agenda_locais` por cliente (`client_id`), tipo `casa_cliente`, nome "casa de {nome curto}". Sai o `trecho`. O (1) segue como está.
 
+### [NOVO-agenda-100] A agenda não cabe no fechamento
+
+- **Encontrado em:** Agenda de Produção, Fase 7f, R8.4 e R8.9 (06/11/2026, `sql/wf7fr_10`, `wf7fr_16`).
+- **O quê:** a agenda tinha 8 linhas em 06/11 e mostrou 1; 7 em 05/11 e mostrou 1; 4 em 04/11 e mostrou 0. As linhas reais têm de 253 a 449 letras: uma só toma a vaga, e o resto some sem aviso. 13 das 22 perguntas ligadas nunca foram mostradas.
+- **Na Fase 7f (P3):** o bloco do fechamento, nos 3 turnos, com a linha da pergunta pelo título.
+
+### [NOVO-agenda-101] O aviso repete as mesmas perguntas
+
+- **Encontrado em:** Agenda de Produção, Fase 7f, R8.5-14 (06/11/2026, `sql/wf7fr_17`).
+- **O quê:** `agenda_aprontar` sai 1 vez por dia dentro do aviso desde 30/10: 15 mostras de 7 perguntas em 5 avisos, uma delas em 4. `perguntas_vezes_max` (2) só vale no fechamento.
+- **Na Fase 7f (P4):** com o lote ligado, isso para. Com o lote desligado, continua.
+
+### [NOVO-agenda-102] `_agenda_dia_avisado` lê `now()`, não o relógio de quem pergunta
+
+- **Encontrado em:** Agenda de Produção, Fase 7f, P1 (06/11/2026), escrevendo `_agenda_zona`.
+- **O quê:** `_agenda_dia_avisado(p_payee, p_os, p_dia)` chama `_agenda_cliente_ouviu(p_os, p_dia, now())`. A assinatura não tem `p_agora`, então `_agenda_zona` herda o relógio de verdade mesmo numa simulação com outro `p_agora`. Em produção os 2 são o mesmo instante, e o efeito é nulo; só um replay com relógio fixado vê a diferença, e só para mensagem em sombra com `enviar_em` entre os 2 instantes.
+- **Na Fase 7f:** sem conserto: `_agenda_dia_avisado` é da 7a e a zona a chama sem repetir a regra. `_agenda_classe_da_saida` passa `p_agora` ao `_agenda_cliente_ouviu` direto.
+
 ### [NOVO-agenda-96] `dados` de `agenda_ver` não chega ao modelo, e `mostrada_em` não vê a conversa (Fase 7d, correção, Onda 2)
 
 - **Encontrado em:** Agenda de Produção, Fase 7d, Onda 2 (06/11/2026), ao fazer o O8 e o R1.
@@ -3352,6 +3370,42 @@ porque só o dono pode preenchê-las.
   cadastro inteiro.
 - **Na Fase 7d:** com a resposta AG7-18, essas 8 caem por suposição no local `patio_hbr`, a MP Motorhomes; somadas à OS da MP, são 9 das 11 no
   mesmo lugar (R6.6). A suposição fica gravada e aparece ao dono; o M11 pergunta, mas só para OS aprovada a partir de `onde_fica_desde`.
+
+### [NOVO-agenda-73] A pergunta não crítica não tem onde guardar o padrão
+
+- **Encontrado em:** Agenda de Produção, Fase 7f, conferência da spec (29/10/2026, `sql/wf7f_02`), refeito em 06/11 (R8.9).
+- **O quê:** das 9 perguntas abertas ligadas de 06/11, 3 têm `opcoes` e 6 são texto aberto ("tem peça a comprar?"). Sem opções não há o que aplicar, e o que o gestor assume sem resposta só existia dentro do texto.
+- **Na Fase 7f (P1):** o padrão vira coluna com lista fechada (`padrao_chave`, `padrao_efeito`), preenchida por gatilho em toda pergunta nova, e o texto de cada chave sai de uma função só (`_agenda_pergunta_linha`, P2).
+
+### [NOVO-agenda-74] O fechamento já roda no limite sem a agenda
+
+- **Encontrado em:** Agenda de Produção, Fase 7f, conferência da spec (29/10/2026, `sql/wf7f_04`), refeito em 06/11 (R8.9).
+- **O quê:** nas 15 tardes de 22 dias, o texto teve de 742 a 1.000 letras, e 2 dos 6 últimos bateram em 1.000. Sem as linhas da agenda, o Secretário teve 702, 314, 1.000, 949, 1.000 e 904 letras nos últimos 6 envios: um bloco de 520 só caberia em 1 de 6.
+- **Na Fase 7f:** o bloco cede por dentro e conta como linha garantida, com `semOsExtras` antes de cortar (R8.4, P3). O detalhe está no NOVO-agenda-100.
+
+### [NOVO-agenda-75] O dia de amanhã apareceria duas vezes
+
+- **Encontrado em:** Agenda de Produção, Fase 7f, conferência da spec (29/10/2026).
+- **O quê:** `lerAmanha` lê as OS e as compras do plano, e a cauda da agenda repete o mesmo dia. Com o veredito do bloco dizendo o amanhã, o "Amanhã" do Secretário repetiria.
+- **Na Fase 7f (P3):** com o bloco ligado, o "Amanhã" fica só com o que é do Secretário.
+
+### [NOVO-agenda-76] A mudança à equipe nunca foi feita
+
+- **Encontrado em:** Agenda de Produção, Fase 7f, conferência da spec (29/10/2026).
+- **O quê:** `_agenda_texto_do_acorde` manda o DONO avisar o técnico ("a mensagem de mudança à equipe é da Fase 5"), e nenhuma fase a fez. Hoje quem trabalha na OS só fica sabendo de uma mudança pelo dono. Em 06/11 isso não atinge ninguém: 0 mensagens à equipe entregues na história, 0 telefones.
+- **Na Fase 7f (P5, por último):** a mensagem de mudança, atrás de `modo_equipe_previsto`, com `_agenda_fala_modo`.
+
+### [NOVO-agenda-77] "confirmar" é tratado como dia firme em pelo menos 3 lugares
+
+- **Encontrado em:** Agenda de Produção, Fase 7f, conferência da spec (29/10/2026).
+- **O quê:** `_agenda_cliente_ouviu`, a substituição da véspera em `_agenda_cliente_confirmar` e a resposta `confirma`. Uma "semana prevista" como variante de `confirmar` vazaria para os três.
+- **Na Fase 7f:** tipo novo `semana`, M12, fora da lista de `_agenda_cliente_ouviu` (P1 cria o tipo; P6 cria a mensagem).
+
+### [NOVO-agenda-78] O relógio do prazo não pode partir da criação
+
+- **Encontrado em:** Agenda de Produção, Fase 7f, conferência da spec (29/10/2026), refeito em 06/11 (R8.9).
+- **O quê:** a regra já vale na 7a: `_agenda_gestor_vetos` só aplica pergunta mostrada antes do prazo, e 13 das 22 perguntas ligadas nunca foram mostradas. Um prazo contado da criação decidiria pelo dono algo que ele nunca viu.
+- **Na Fase 7f:** o relógio só anda com a pergunta mostrada com o prazo escrito; `_agenda_perguntas_antes` (P1) só deixa o prazo mudar de valor na pergunta nunca mostrada antes dele, na mesma escrita que a mostra.
 
 ### [NOVO-agenda-84] O roteiro é raro e está parado
 

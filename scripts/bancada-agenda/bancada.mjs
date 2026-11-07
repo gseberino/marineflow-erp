@@ -83,6 +83,8 @@ export const FORA_DA_BANCADA = new Set([
   // Fase 7d (P8; o nome é o da spec-fase7d §5.9, R6.2, fixado no P1): a semente dos locais, o onde_fica_desde e os 6 modos da etapa
   // em sombra. O teste dela (agenda_fase7d_semente.sql) a roda numa subtransação; na bancada cada teste liga o modo que precisa.
   '20261107100900_agenda_fase7d_semente.sql',
+  // Fase 7f (P1): os 6 modos de desligado para sombra (o P8 cria; o nome fica fixado aqui, R8.2). Na bancada cada teste liga o modo que precisa.
+  '20261109100900_agenda_fase7f_sombra.sql',
   // Retorno rápido ao cliente F0 (rebase de 05/11; spec-fase7d R6.0): as 5 migrations de OUTRA sessão, já aplicadas em produção, com data
   // depois de PRIMEIRA. Nenhuma recria função da agenda nem mexe em lista fechada dela (só whatsapp_messages, whatsapp_blocked_numbers e
   // gatilhos em whatsapp_send_queue e whatsapp_messages), e a bancada não modela o que elas atravessam: _texto_simples (20261007150000),

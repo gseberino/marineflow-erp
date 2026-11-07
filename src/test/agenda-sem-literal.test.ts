@@ -72,6 +72,9 @@
 //     o motor, o combinar, o M11, o rascunho e as leituras ao dono). Os DEFAULTs novos de agenda_config (os 6 interruptores e os 24
 //     parâmetros com o código AG7: 365 dias, 2 e 1 dias úteis, 45 e 120 minutos, 1,30, 60 km/h, 16:15…) ficam em 20261107100000, fora de
 //     função. O prefixo é o da 7d depois do mapa de 05/11 (spec-fase7d R6.2): 20261103* ficaria atrás do que já está em produção.
+//   · (Fase 7f, P1) também as funções das migrations 2026110910* (a base da 7f: o modo com o freio, o padrão da pergunta, a zona e a classe; e os pacotes seguintes da
+//     etapa, pelo prefixo). Os DEFAULTs novos de agenda_config (os 6 interruptores e os 15 parâmetros: 520 letras, 3 decisões, 5 perguntas, 72 horas, 15 segundos…) ficam em
+//     20261109100000, fora de função.
 // Os inteiros pequenos (0, 1, 2, 7: meios-dias por dia, dias da semana…) e os limites de tamanho de texto dos CHECKs
 // são estrutura e não entram na regra.
 import { describe, expect, it } from 'vitest';
@@ -416,7 +419,7 @@ export function corposDasFuncoes(sql: string, arquivo: string): Trecho[] {
 
 function funcoesDasMigrations(): Trecho[] {
   return fs.readdirSync(MIGRATIONS)
-    .filter((f) => /^(2026102416|2026102510|2026102610|2026102710|2026102810|2026102910|2026103010|2026103110|2026110110|2026110210|2026110710)\d{4}_.+\.sql$/.test(f))
+    .filter((f) => /^(2026102416|2026102510|2026102610|2026102710|2026102810|2026102910|2026103010|2026103110|2026110110|2026110210|2026110710|2026110910)\d{4}_.+\.sql$/.test(f))
     .sort()
     .flatMap((f) => corposDasFuncoes(fs.readFileSync(path.join(MIGRATIONS, f), 'utf8').replace(/\r\n/g, '\n'), f));
 }
