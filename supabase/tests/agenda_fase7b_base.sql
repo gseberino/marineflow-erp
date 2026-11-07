@@ -348,8 +348,16 @@ select format('B2a %s: as de antes iguais e na mesma ordem, e as novas no fim', 
                                   when 'agenda_acoes_tipo_check' then '{local}'::text[]
                                   when 'agenda_vigia_rodadas_rotina_check' then '{local}'::text[]
                                   when 'agenda_alocacoes_cancelada_motivo_check' then '{local}'::text[] else '{}'::text[] end
-                 else '{}'::text[] end,
+                 else '{}'::text[] end
          -- FASE 7d: fim
+         -- FASE 7f: a 20261109100000 soma assumir (ação), comunicar (rodada) e previsto, mudanca e convite (equipe) no fim (agenda_fase7f_base.sql B6 confere)
+                    || case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                                         and a.attname = 'modo_bloco_agenda' and not a.attisdropped)
+                            then case t.nome when 'agenda_acoes_tipo_check' then '{assumir}'::text[]
+                                             when 'agenda_vigia_rodadas_rotina_check' then '{comunicar}'::text[]
+                                             when 'agenda_equipe_mensagens_tipo_check' then '{previsto,mudanca,convite}'::text[] else '{}'::text[] end
+                            else '{}'::text[] end,
+         -- FASE 7f: fim
        array_to_string(pg_temp.lista(t.tabela::regclass, t.nome), ',')
   from (values
     ('public.agenda_disponibilidade', 'agenda_disponibilidade_situacao_check', '{disponivel,indisponivel,confirmada,so_pontas}'::text[]),
@@ -603,10 +611,10 @@ begin
   select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = 'public._agenda_modo_da_pergunta(text, text)'::regprocedure;
   -- FASE 7c: a 20261102100000 recria de novo com o bloco "-- FASE 7c:" (só acréscimo): ele sai antes da régua da cópia da 7b
   v_novo := array_to_string(array(
-              select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7[cd]:' and l !~ '^\s*-- FASE 7[cd]: fim' then 1
-                                                   when l ~ '^\s*-- FASE 7[cd]: fim' then -1 else 0 end)
+              select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7[cdf]:' and l !~ '^\s*-- FASE 7[cdf]: fim' then 1
+                                                   when l ~ '^\s*-- FASE 7[cdf]: fim' then -1 else 0 end)
                                           over (order by o rows between unbounded preceding and current row) as dentro,
-                                    l ~ '^\s*-- FASE 7[cd]: fim' as fecha
+                                    l ~ '^\s*-- FASE 7[cdf]: fim' as fecha
                                from unnest(string_to_array(v_novo, E'\n')) with ordinality u(l, o)) x
                where dentro = 0 and not fecha order by o), E'\n');
   -- FASE 7c: fim

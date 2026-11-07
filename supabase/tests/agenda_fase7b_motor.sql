@@ -92,10 +92,10 @@ $f$;
 -- criterio_detalhe, em qualquer modo) e o contexto ganha hab, habf e custo: o M9 compara sem eles (a projeção da spec-fase7c §3.8 d8)
 create function pg_temp.sem_7c(p text) returns text language sql immutable as $f$
   select array_to_string(array(
-           select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7[cd]:' and l !~ '-- FASE 7[cd]: fim' then 1
-                                                when l ~ '^\s*-- FASE 7[cd]: fim' then -1 else 0 end)
+           select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7[cdf]:' and l !~ '-- FASE 7[cdf]: fim' then 1
+                                                when l ~ '^\s*-- FASE 7[cdf]: fim' then -1 else 0 end)
                                        over (order by o rows between unbounded preceding and current row) as dentro,
-                                 l ~ '^\s*-- FASE 7[cd]: fim' as fecha
+                                 l ~ '^\s*-- FASE 7[cdf]: fim' as fecha
                             from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n')
 $f$;

@@ -103,10 +103,10 @@ end $f$;
 -- acréscimo), e o T18b compara a viva com a desta migration
 create function pg_temp.sem_7d(p text) returns text language sql immutable as $f$
   select array_to_string(array(
-           select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7d:' and l !~ '^\s*-- FASE 7d: fim' then 1
-                                                when l ~ '^\s*-- FASE 7d: fim' then -1 else 0 end)
+           select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7[df]:' and l !~ '^\s*-- FASE 7[df]: fim' then 1
+                                                when l ~ '^\s*-- FASE 7[df]: fim' then -1 else 0 end)
                                        over (order by o rows between unbounded preceding and current row) as dentro,
-                                 l ~ '^\s*-- FASE 7d: fim' as fecha
+                                 l ~ '^\s*-- FASE 7[df]: fim' as fecha
                             from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n')
 $f$;

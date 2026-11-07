@@ -74,9 +74,9 @@ begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
     -- FASE 7b: (7b P3) e os blocos "-- FASE 7b: … fim" (a 20261101100200 recria de novo, só acréscimo): a régua aceita "7b"
     -- FASE 7b: fim
-    if not v_bloco and l ~ '^\s*-- FASE 7[bd]?:' and l !~ '^\s*-- FASE 7[bd]?: fim' then v_bloco := true; continue; end if;
+    if not v_bloco and l ~ '^\s*-- FASE 7[bdf]?:' and l !~ '^\s*-- FASE 7[bdf]?: fim' then v_bloco := true; continue; end if;
     if v_bloco then
-      if l ~ '^\s*-- FASE 7[bd]?: fim' then v_bloco := false; end if;
+      if l ~ '^\s*-- FASE 7[bdf]?: fim' then v_bloco := false; end if;
       continue;
     end if;
     v_b := v_b || l;
@@ -483,9 +483,15 @@ begin
       '[{"n": 1, "texto": "Faço tudo"}, {"n": 2, "texto": "Não mudo nada"}]'::jsonb, 1::smallint, c_prazo, 1::smallint,
       'ligado', c_agora);
     v_n := 0;
+    -- FASE 7f: a 20261109100000 tira veto_nao_critica de propósito (AG7-15): a crítica entra, e sai daqui para não mudar os passos seguintes
+    raise exception using errcode = 'P0001', message = '__desfaz__';
+    -- FASE 7f: fim
   exception when sqlstate '23514' then v_n := 1;
+            when sqlstate 'P0001' then null;
   end;
-  v_res := pg_temp.ok(v_res, 'Q3g pergunta crítica nunca tem prazo: o CHECK veto_nao_critica recusa (23514)', v_n = 1, v_n::text);
+  v_res := pg_temp.ok(v_res, 'Q3g pergunta crítica com prazo: até a 7f, o CHECK veto_nao_critica recusa (23514); depois dela, passa, e quem filtra é a rodada',
+    v_n = case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                     and a.attname = 'modo_bloco_agenda' and not a.attisdropped) then 0 else 1 end, v_n::text);
 
   -- ── Q4. _agenda_gestor_gravar_dias ──────────────────────────────────────────────────────────────────────
   select * into pl from public.os_planejamento where service_order_id = pg_temp.os('OS-00112');

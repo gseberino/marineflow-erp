@@ -139,9 +139,9 @@ begin
     -- definição mais nova: só acréscimo; o R9 de agenda_fase7a_rodada.sql confere a cópia); o fim é lido pelo prefixo
     -- FASE 7b: (7b P3) e os blocos "-- FASE 7b: … fim" (a 20261101100200 recria de novo, só acréscimo): a régua aceita "7b"
     -- FASE 7b: fim
-    if not v_f7 and l ~ '^\s*-- FASE 7[bd]?:' and l !~ '^\s*-- FASE 7[bd]?: fim' then v_f7 := true; continue; end if;
+    if not v_f7 and l ~ '^\s*-- FASE 7[bdf]?:' and l !~ '^\s*-- FASE 7[bdf]?: fim' then v_f7 := true; continue; end if;
     if v_f7 then
-      if l ~ '^\s*-- FASE 7[bd]?: fim' then v_f7 := false; end if;
+      if l ~ '^\s*-- FASE 7[bdf]?: fim' then v_f7 := false; end if;
       continue;
     end if;
     -- FASE 7 (7a P7): fim

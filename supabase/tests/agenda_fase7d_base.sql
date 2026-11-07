@@ -119,10 +119,10 @@ end $f$;
 -- O texto sem os blocos "-- FASE 7d: … -- FASE 7d: fim" (as linhas de abrir e de fechar saem junto).
 create function pg_temp.sem_7d(p text) returns text language sql immutable as $f$
   select array_to_string(array(
-           select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7d:' and l !~ '^\s*-- FASE 7d: fim' then 1
-                                                when l ~ '^\s*-- FASE 7d: fim' then -1 else 0 end)
+           select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7[df]:' and l !~ '^\s*-- FASE 7[df]: fim' then 1
+                                                when l ~ '^\s*-- FASE 7[df]: fim' then -1 else 0 end)
                                        over (order by o rows between unbounded preceding and current row) as dentro,
-                                 l ~ '^\s*-- FASE 7d: fim' as fecha
+                                 l ~ '^\s*-- FASE 7[df]: fim' as fecha
                             from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n')
 $f$;
@@ -249,7 +249,9 @@ begin
     ('bem_agua_palavras = ''(casco''', 'agenda_config_bem_agua_palavras_check'),
     ('bem_seco_palavras = ''ab''', 'agenda_config_bem_seco_palavras_check'),
     ('bem_seco_palavras = ''[casco''', 'agenda_config_bem_seco_palavras_check'),
-    ('cliente_tipos_ligados = ''{semana}''', 'agenda_config_cliente_tipos_ligados_check')
+    -- FASE 7f: o caso era semana, o tipo que ainda não existia na 7d; a 20261109100000 o põe na lista
+    ('cliente_tipos_ligados = ''{cobranca}''', 'agenda_config_cliente_tipos_ligados_check')
+    -- FASE 7f: fim
   ) t(sets, nome) loop
     v_n := v_n + 1;
     v_cob := v_cob || r.nome;
@@ -561,9 +563,13 @@ begin
   v_res := pg_temp.ok(v_res, 'B3g modelo: onde_fica = M11 pelo SET EXPRESSION; os 11 de antes iguais; o resto no else', v_dif is null, v_dif);
 
   -- as constraints que dependem de critica continuam lá, com o mesmo nome, e valem para o tipo novo
-  v_res := pg_temp.ok(v_res, 'B3h critica_tem_opcoes, critica_decidida e veto_nao_critica de pé depois do SET EXPRESSION',
+  -- FASE 7f: a 20261109100000 tira veto_nao_critica de propósito (AG7-15)
+  v_res := pg_temp.ok(v_res, 'B3h critica_tem_opcoes, critica_decidida e, até a 7f, veto_nao_critica de pé depois do SET EXPRESSION',
     (select count(*) from pg_constraint where conrelid = 'public.agenda_perguntas'::regclass
-      and conname in ('critica_tem_opcoes', 'critica_decidida', 'veto_nao_critica')) = 3, null);
+      and conname in ('critica_tem_opcoes', 'critica_decidida', 'veto_nao_critica'))
+    = case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                     and a.attname = 'modo_bloco_agenda' and not a.attisdropped) then 2 else 3 end, null);
+  -- FASE 7f: fim
 
   v_res := pg_temp.ok(v_res, 'B3i cliente_tipos_ligados: a lista do CHECK aceita onde_fica, e a forma continua "<@" (o ampliador não serve, R6.4)',
     (select pg_get_constraintdef(c.oid) like '%<@%''onde_fica''%' from pg_constraint c

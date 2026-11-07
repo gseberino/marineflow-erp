@@ -125,9 +125,9 @@ declare
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
     -- FASE 7d: (7d P6) os blocos "-- FASE 7d: … -- FASE 7d: fim" também saem (a 20261107100500 recria a função copiando a definição mais nova: só acréscimo)
-    if not v_bloco and not v_f7d and l ~ '^\s*-- FASE 7d:' and l !~ '^\s*-- FASE 7d: fim' then v_f7d := true; continue; end if;
+    if not v_bloco and not v_f7d and l ~ '^\s*-- FASE 7[df]:' and l !~ '^\s*-- FASE 7[df]: fim' then v_f7d := true; continue; end if;
     if v_f7d then
-      if l ~ '^\s*-- FASE 7d: fim' then v_f7d := false; end if;
+      if l ~ '^\s*-- FASE 7[df]: fim' then v_f7d := false; end if;
       continue;
     end if;
     -- FASE 7d: fim

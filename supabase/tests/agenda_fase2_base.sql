@@ -242,7 +242,13 @@ begin
   for r in
     select * from (values
       -- agenda_config: os 10 parâmetros novos pelos limites
-      ('agenda_config_hora_do_plano_check', 'plano às 18:00', $q$update public.agenda_config set hora_do_plano = '18:00'$q$),
+      -- FASE 7f: dono_semana_hora (16:50) não pode ficar antes de hora_do_plano, e o CHECK dela vem primeiro: as 2 na mesma escrita, para a recusa continuar sendo a do plano
+      ('agenda_config_hora_do_plano_check', 'plano às 18:00',
+       case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                 and a.attname = 'modo_bloco_agenda' and not a.attisdropped)
+            then $q$update public.agenda_config set hora_do_plano = '18:00', dono_semana_hora = '18:00'$q$
+            else $q$update public.agenda_config set hora_do_plano = '18:00'$q$ end),
+      -- FASE 7f: fim
       ('agenda_config_presenca_curta_check', 'presença curta de 3 h', $q$update public.agenda_config set presenca_curta = '3 hours'$q$),
       ('agenda_config_desfazer_validade_check', 'desfazer por 30 min', $q$update public.agenda_config set desfazer_validade = '30 minutes'$q$),
       ('agenda_config_interrupcoes_max_check', '3 interrupções', $q$update public.agenda_config set interrupcoes_max = 3$q$),
@@ -413,8 +419,14 @@ begin
      -- FASE 7c: os 2 que a Fase 7c pôs em agenda_alocacoes (20261102100000: o critério e o detalhe dele) têm o caso deles em
      -- agenda_fase7c_base.sql (B1z, que cobra pelo nome). As listas que a 7c ampliou (tipo da pergunta e da ação, motivo do
      -- cancelamento) continuam com o nome e o caso daqui.
-     and not (c.conname = any (array['agenda_alocacoes_criterio_check', 'agenda_alocacoes_criterio_detalhe_check']));
+     and not (c.conname = any (array['agenda_alocacoes_criterio_check', 'agenda_alocacoes_criterio_detalhe_check']))
      -- FASE 7c: fim
+     -- FASE 7f: os 8 que a Fase 7f pôs em agenda_perguntas (20261109100000) têm o caso deles em agenda_fase7f_base.sql (B1m a B1q). As listas que a 7f ampliou (tipo da ação,
+     -- respondida_via) continuam com o nome e o caso daqui.
+     and not (c.conname = any (array['agenda_perguntas_padrao_chave_check', 'agenda_perguntas_padrao_efeito_check', 'agenda_perguntas_veto_espera_check',
+                                     'agenda_perguntas_destrava_check', 'agenda_perguntas_assumida_por_check', 'pergunta_padrao_coerente',
+                                     'pergunta_assumida_coerente', 'pergunta_assumida_fechada']));
+     -- FASE 7f: fim
   insert into _resultado values ('B todo CHECK e EXCLUDE da Fase 2 tem um caso que ele recusa', v_sem_caso is null, v_sem_caso);
 end
 $b$;

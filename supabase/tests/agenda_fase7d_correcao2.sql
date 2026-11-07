@@ -39,6 +39,18 @@ begin
   return left(v, position('$function$' in v) - 1);
 end $f$;
 -- O texto sem os blocos "-- FASE 7d: … -- FASE 7d: fim" e sem as marcas "-- (7d … -- (7d: fim)".
+-- FASE 7f: o texto sem os blocos "-- FASE 7f: … -- FASE 7f: fim" e sem as marcas "-- (7f … -- (7f: fim)": quem recria uma destas na 7f só acrescenta, e a viva continua sendo a desta migration
+create function pg_temp.sem_7f(p text) returns text language sql immutable as $f$
+  select array_to_string(array(
+           select l from (select l, o, sum(case when (l ~ '^\s*-- FASE 7f:' and l !~ '^\s*-- FASE 7f: fim')
+                                                     or (l ~ '^\s*-- \(7f ' and l !~ '^\s*-- \(7f: fim\)') then 1
+                                                when l ~ '^\s*-- (FASE 7f: fim|\(7f: fim\))' then -1 else 0 end)
+                                       over (order by o rows between unbounded preceding and current row) as dentro,
+                                 l ~ '^\s*-- (FASE 7f: fim|\(7f: fim\))' as fecha
+                            from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
+            where dentro = 0 and not fecha order by o), E'\n')
+$f$;
+-- FASE 7f: fim
 create function pg_temp.sem_7d(p text) returns text language plpgsql immutable as $f$
 declare
   v_fora   text[] := '{}';
@@ -46,10 +58,10 @@ declare
   l        text;
 begin
   foreach l in array string_to_array(replace(p, E'\r\n', E'\n'), E'\n') loop
-    if v_dentro = 0 and l ~ '^\s*-- FASE 7d:' and l !~ '^\s*-- FASE 7d: fim' then v_dentro := 1; continue; end if;
-    if v_dentro = 1 and l ~ '^\s*-- FASE 7d: fim' then v_dentro := 0; continue; end if;
-    if v_dentro = 0 and l ~ '^\s*-- \(7d ' then v_dentro := 2; continue; end if;
-    if v_dentro = 2 and l ~ '^\s*-- \(7d: fim\)' then v_dentro := 0; continue; end if;
+    if v_dentro = 0 and l ~ '^\s*-- FASE 7[df]:' and l !~ '^\s*-- FASE 7[df]: fim' then v_dentro := 1; continue; end if;
+    if v_dentro = 1 and l ~ '^\s*-- FASE 7[df]: fim' then v_dentro := 0; continue; end if;
+    if v_dentro = 0 and l ~ '^\s*-- \(7[df] ' then v_dentro := 2; continue; end if;
+    if v_dentro = 2 and l ~ '^\s*-- \(7[df]: fim\)' then v_dentro := 0; continue; end if;
     if v_dentro = 0 then v_fora := v_fora || l; end if;
   end loop;
   return array_to_string(v_fora, E'\n');
@@ -177,6 +189,7 @@ begin
       ('_agenda_ver_decisoes', 'mig_responder_fase7d'), ('agenda_rascunho_aplicar', 'mig_correcao_fase7d'), ('agenda_rascunho_planejar', 'mig_correcao_fase7d'),
       ('_agenda_rascunho_frase', 'mig_rascunho_fase7d')) t(nome, fonte) loop
     select replace(p.prosrc, E'\r\n', E'\n') into v_viva from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = c.nome;
+    v_viva := pg_temp.sem_7f(v_viva);  -- FASE 7f: a régua (R8.13)
     -- (correção da 7d, Onda 3) _agenda_ver_decisoes e agenda_rascunho_planejar passaram a viver na 20261107100860: a viva é a da migration mais nova que a define
     insert into _resultado values ('T0d ' || c.nome || ': a viva é a da migration; sem os blocos, a origem, byte a byte',
       v_viva = coalesce(nullif(pg_temp.corpo(coalesce(current_setting('agenda_teste.mig_correcao4_fase7d', true), ''), c.nome), ''),

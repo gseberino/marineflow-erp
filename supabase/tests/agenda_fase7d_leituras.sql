@@ -55,13 +55,25 @@ begin
   return left(v, position(E'\n$function$;' in v) + length(E'\n$function$;') - 1);
 end $f$;
 -- O texto sem os blocos "-- FASE 7d: … -- FASE 7d: fim" e sem as marcas "-- (7d … -- (7d: fim)".
+-- FASE 7f: o texto sem os blocos "-- FASE 7f: … -- FASE 7f: fim" e sem as marcas "-- (7f … -- (7f: fim)": quem recria uma destas na 7f só acrescenta, e a viva continua sendo a desta migration
+create function pg_temp.sem_7f(p text) returns text language sql immutable as $f$
+  select array_to_string(array(
+           select l from (select l, o, sum(case when (l ~ '^\s*-- FASE 7f:' and l !~ '^\s*-- FASE 7f: fim')
+                                                     or (l ~ '^\s*-- \(7f ' and l !~ '^\s*-- \(7f: fim\)') then 1
+                                                when l ~ '^\s*-- (FASE 7f: fim|\(7f: fim\))' then -1 else 0 end)
+                                       over (order by o rows between unbounded preceding and current row) as dentro,
+                                 l ~ '^\s*-- (FASE 7f: fim|\(7f: fim\))' as fecha
+                            from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
+            where dentro = 0 and not fecha order by o), E'\n')
+$f$;
+-- FASE 7f: fim
 create function pg_temp.sem_7d(p text) returns text language sql immutable as $f$
   select array_to_string(array(
-           select l from (select l, o, sum(case when (l ~ '^\s*-- FASE 7d:' and l !~ '^\s*-- FASE 7d: fim')
-                                                     or (l ~ '^\s*-- \(7d ' and l !~ '^\s*-- \(7d: fim\)') then 1
-                                                when l ~ '^\s*-- (FASE 7d: fim|\(7d: fim\))' then -1 else 0 end)
+           select l from (select l, o, sum(case when (l ~ '^\s*-- FASE 7[df]:' and l !~ '^\s*-- FASE 7[df]: fim')
+                                                     or (l ~ '^\s*-- \(7[df] ' and l !~ '^\s*-- \(7[df]: fim\)') then 1
+                                                when l ~ '^\s*-- (FASE 7[df]: fim|\(7[df]: fim\))' then -1 else 0 end)
                                        over (order by o rows between unbounded preceding and current row) as dentro,
-                                 l ~ '^\s*-- (FASE 7d: fim|\(7d: fim\))' as fecha
+                                 l ~ '^\s*-- (FASE 7[df]: fim|\(7[df]: fim\))' as fecha
                             from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n')
 $f$;
@@ -859,7 +871,7 @@ Beto (OS-J12): Marina Itajaí (pela OS). Combinar: o acesso de Rafael para seg 2
   select string_agg(p.proname, ', ') into v_t
     from pg_proc p
    where p.pronamespace = 'public'::regnamespace and p.proname in ('agenda_ver', 'os_plano_da_os', 'agenda_saude', 'agenda_equipe_ficha', '_agenda_cliente_da_os', '_agenda_local_da_os')
-     and replace(p.prosrc, E'\r\n', E'\n') is distinct from pg_temp.corpo(v_mig, p.proname);
+     and pg_temp.sem_7f(p.prosrc) is distinct from pg_temp.corpo(v_mig, p.proname);
   v_res := pg_temp.ok(v_res, 'V6c no banco está a desta migration', v_t is null, v_t);
   v_t := regexp_replace(pg_temp.sem_7d(pg_temp.corpo(v_mig, '_agenda_local_da_os')), '\s+', ' ', 'g');
   v_res := pg_temp.ok(v_res, 'V6d _agenda_local_da_os: tirado o bloco, o select da Fase 3 (só o espaço mudou)', replace(v_t, 'coalesce( ', 'coalesce(') = regexp_replace(pg_temp.corpo(current_setting('agenda_teste.mig_equipe_fase3'), '_agenda_local_da_os'), '\s+', ' ', 'g'), v_t);

@@ -122,11 +122,11 @@ declare
   l        text;
 begin
   foreach l in array string_to_array(replace(p, E'\r\n', E'\n'), E'\n') loop
-    if not v_dentro and l ~ '^\s*-- FASE 7[cd]:' and l !~ '^\s*-- FASE 7[cd]: fim' then
+    if not v_dentro and l ~ '^\s*-- FASE 7[cdf]:' and l !~ '^\s*-- FASE 7[cdf]: fim' then
       v_dentro := true;
       continue;
     end if;
-    if v_dentro and l ~ '^\s*-- FASE 7[cd]: fim' then
+    if v_dentro and l ~ '^\s*-- FASE 7[cdf]: fim' then
       v_dentro := false;
       continue;
     end if;
@@ -144,10 +144,10 @@ end $f$;
 -- FASE 7d: o texto sem os blocos "-- FASE 7d: … -- FASE 7d: fim" (para o B11d comparar a viva com as da 7c, na mesma régua de antes)
 create function pg_temp.sem_7d(p text) returns text language sql immutable as $f$
   select array_to_string(array(
-           select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7d:' and l !~ '^\s*-- FASE 7d: fim' then 1
-                                                when l ~ '^\s*-- FASE 7d: fim' then -1 else 0 end)
+           select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7[df]:' and l !~ '^\s*-- FASE 7[df]: fim' then 1
+                                                when l ~ '^\s*-- FASE 7[df]: fim' then -1 else 0 end)
                                        over (order by o rows between unbounded preceding and current row) as dentro,
-                                 l ~ '^\s*-- FASE 7d: fim' as fecha
+                                 l ~ '^\s*-- FASE 7[df]: fim' as fecha
                             from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n')
 $f$;
@@ -593,8 +593,16 @@ select format('B3a %s: as de antes iguais e na mesma ordem, e habilidade no fim'
                                   when 'agenda_acoes_tipo_check' then '{local}'::text[]
                                   when 'agenda_vigia_rodadas_rotina_check' then '{local}'::text[]
                                   when 'agenda_alocacoes_cancelada_motivo_check' then '{local}'::text[] else '{}'::text[] end
-                 else '{}'::text[] end,
+                 else '{}'::text[] end
          -- FASE 7d: fim
+         -- FASE 7f: a 20261109100000 soma assumir (ação), comunicar (rodada) e previsto, mudanca e convite (equipe) no fim (agenda_fase7f_base.sql B6 confere)
+                    || case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                                         and a.attname = 'modo_bloco_agenda' and not a.attisdropped)
+                            then case t.nome when 'agenda_acoes_tipo_check' then '{assumir}'::text[]
+                                             when 'agenda_vigia_rodadas_rotina_check' then '{comunicar}'::text[]
+                                             when 'agenda_equipe_mensagens_tipo_check' then '{previsto,mudanca,convite}'::text[] else '{}'::text[] end
+                            else '{}'::text[] end,
+         -- FASE 7f: fim
        array_to_string(pg_temp.lista(t.tabela::regclass, t.nome), ',')
   from (values
     ('public.agenda_perguntas', 'agenda_perguntas_tipo_check',

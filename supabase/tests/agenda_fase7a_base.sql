@@ -287,7 +287,11 @@ insert into _casos values
    $q$update public.os_material set compre_ate = '2026-10-29', compre_ate_base = '{"primeiro": "2026-11-10", "folga": 1, "prazo": 7, "prazo_fonte": "padrao", "interno": 1}', compre_ate_em = now(), cobrado_em = now(), cobrado_vezes = 2, empurrada_vezes = 1, defeito_em = now() where id = 'd7a00000-0000-4000-8000-0000000000e5'$q$, 'aceitou'),
   -- agenda_perguntas
   ('pergunta', 'opção padrão sem o prazo', pg_temp.mais('perg', 'opcoes, recomendacao, opcao_padrao', $v$'[{"n":1},{"n":2}]', 1, 1$v$), 'veto_padrao_tem_prazo'),
-  ('pergunta', 'prazo em pergunta crítica (a onda)', $q$insert into public.agenda_perguntas (tipo, chave, texto, modo, opcoes, recomendacao, veto_ate) values ('onda', 'onda:teste-ag7a', 'Pergunta de teste.', 'ligado', '[{"n":1},{"n":2},{"n":3}]', 1, now() + interval '1 day')$q$, 'veto_nao_critica'),
+  ('pergunta', 'prazo em pergunta crítica (a onda)', $q$insert into public.agenda_perguntas (tipo, chave, texto, modo, opcoes, recomendacao, veto_ate) values ('onda', 'onda:teste-ag7a', 'Pergunta de teste.', 'ligado', '[{"n":1},{"n":2},{"n":3}]', 1, now() + interval '1 day')$q$,
+   -- FASE 7f: a 20261109100000 tira veto_nao_critica de propósito (AG7-15): a crítica pode vencer quando o tipo está em veto_tipos; agenda_fase7f_base.sql B1l e B1r provam
+   case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+             and a.attname = 'modo_bloco_agenda' and not a.attisdropped) then 'aceitou' else 'veto_nao_critica' end),
+   -- FASE 7f: fim
   ('pergunta', 'tipo que não existe ("equipe": é equipe_cadastro)', $q$insert into public.agenda_perguntas (tipo, chave, texto, modo) values ('equipe', 'equipe:teste-ag7a', 'Pergunta de teste.', 'ligado')$q$, 'agenda_perguntas_tipo_check'),
   ('pergunta', 'a pergunta do gestor com o prazo e a opção padrão', pg_temp.mais('perg', 'opcoes, recomendacao, veto_ate, opcao_padrao', $v$'[{"n":1},{"n":2},{"n":3}]', 1, now() + interval '1 day', 1$v$), 'aceitou'),
   ('pergunta', 'prazo sem opção padrão (a chamada do 7b, a proposta do 7c)', pg_temp.mais('perg', 'veto_ate', $v$now() + interval '1 day'$v$), 'aceitou'),
@@ -341,8 +345,14 @@ select t::regclass, n from (values
 insert into _resultado
 select 'B1z os 56 CHECKs desta migration existem e todos têm caso (nenhum ficou sem prova)',
        count(*) = 56 and bool_and(exists (select 1 from pg_constraint c where c.conrelid = k.tabela and c.conname = k.nome
-                                                                       and c.contype = 'c'))
-       and bool_and(exists (select 1 from _casos x where x.espera = k.nome)),
+                                                                       and c.contype = 'c')
+                                  -- FASE 7f: a 20261109100000 tira veto_nao_critica de propósito; o caso dela no B1 vira "aceitou"
+                                  or (k.nome = 'veto_nao_critica' and exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                                                                     and a.attname = 'modo_bloco_agenda' and not a.attisdropped)))
+       and bool_and(exists (select 1 from _casos x where x.espera = k.nome)
+                    or (k.nome = 'veto_nao_critica' and exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                                                        and a.attname = 'modo_bloco_agenda' and not a.attisdropped))),
+                                  -- FASE 7f: fim
        format('%s; sem constraint: %s; sem caso: %s', count(*),
               coalesce(string_agg(k.nome, ', ') filter (where not exists (select 1 from pg_constraint c
                          where c.conrelid = k.tabela and c.conname = k.nome)), '—'),
@@ -471,8 +481,16 @@ select format('B3a %s: as de antes iguais e na mesma ordem, e as novas no fim', 
                                              when 'agenda_acoes_tipo_check' then '{local}'::text[]
                                              when 'agenda_vigia_rodadas_rotina_check' then '{local}'::text[]
                                              when 'agenda_alocacoes_cancelada_motivo_check' then '{local}'::text[] else '{}'::text[] end
-                            else '{}'::text[] end,
+                            else '{}'::text[] end
          -- FASE 7d: fim
+         -- FASE 7f: a 20261109100000 soma assumir (ação), comunicar (rodada) e previsto, mudanca e convite (equipe) no fim (agenda_fase7f_base.sql B6 confere)
+                    || case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                                         and a.attname = 'modo_bloco_agenda' and not a.attisdropped)
+                            then case t.nome when 'agenda_acoes_tipo_check' then '{assumir}'::text[]
+                                             when 'agenda_vigia_rodadas_rotina_check' then '{comunicar}'::text[]
+                                             when 'agenda_equipe_mensagens_tipo_check' then '{previsto,mudanca,convite}'::text[] else '{}'::text[] end
+                            else '{}'::text[] end,
+         -- FASE 7f: fim
        -- FASE 7b: fim
        array_to_string(pg_temp.lista(t.tabela::regclass, t.nome), ',')
   from (values
@@ -921,10 +939,10 @@ begin
     v_res := pg_temp.ok(v_res, 'B8c _agenda_perguntas_antes: sem os 2 blocos "-- FASE 7:", é o corpo de 20261026100000 (a mais nova antes da 7a)',
       v_n = 2 and v_fonte <> ''
       and array_to_string(array(
-            select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7:' and l !~ '-- FASE 7: fim' then 1
-                                                 when l ~ '-- FASE 7: fim' then -1 else 0 end)
+            select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7f?:' and l !~ '-- FASE 7f?: fim' then 1
+                                                 when l ~ '-- FASE 7f?: fim' then -1 else 0 end)
                                         over (order by o rows between unbounded preceding and current row) as dentro,
-                                  l ~ '-- FASE 7: fim' as fecha
+                                  l ~ '-- FASE 7f?: fim' as fecha
                              from unnest(string_to_array(v_novo, E'\n')) with ordinality u(l, o)) x
              where dentro = 0 and not fecha order by o), E'\n') = v_fonte,
       format('blocos %s; fonte %s letras; novo %s letras', v_n, length(v_fonte), length(v_novo)));
@@ -956,10 +974,10 @@ begin
   -- (FASE 7b: a 20261101100000 recria de novo, com o bloco "-- FASE 7b:", que sai junto: '-- FASE 7b?:'. FASE 7c: e a
   -- 20261102100000, com o bloco "-- FASE 7c:", que também sai: '-- FASE 7[bc]?:')
   select array_to_string(array(
-           select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7[bcd]?:' and l !~ '-- FASE 7[bcd]?: fim' then 1
-                                                when l ~ '-- FASE 7[bcd]?: fim' then -1 else 0 end)
+           select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7[bcdf]?:' and l !~ '-- FASE 7[bcdf]?: fim' then 1
+                                                when l ~ '-- FASE 7[bcdf]?: fim' then -1 else 0 end)
                                        over (order by o rows between unbounded preceding and current row) as dentro,
-                                 l ~ '-- FASE 7[bcd]?: fim' as fecha
+                                 l ~ '-- FASE 7[bcdf]?: fim' as fecha
                             from unnest(string_to_array(v_novo, E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n') into v_sem;
   -- (o bloco do 7a P1 e, desde a 20261031100850, o do 7a P11, que a recria copiando desta: 2 blocos; sem eles, a de 30/10)

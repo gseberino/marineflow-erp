@@ -426,7 +426,11 @@ select format('A12 FK %s: on delete %s', x.nome, x.acao),
 insert into _resultado
 select 'A13 os índices: o turno da alocação, uma mensagem por pessoa/dia/tipo/modo (fora as respostas) e a do envio',
        count(*) = 3
-       and bool_or(i.indexname = 'agenda_equipe_uma_por_dia' and i.indexdef like 'CREATE UNIQUE INDEX %(payee_id, dia, tipo, modo) WHERE (tipo <> ''resposta''::text)')
+       -- FASE 7f: a 20261109100000 tira mudanca do índice (agenda_fase7f_base.sql B1t e B1u provam); o resto do que ele prova continua
+       and bool_or(i.indexname = 'agenda_equipe_uma_por_dia'
+                   and (i.indexdef like 'CREATE UNIQUE INDEX %(payee_id, dia, tipo, modo) WHERE (tipo <> ''resposta''::text)'
+                        or i.indexdef like 'CREATE UNIQUE INDEX %(payee_id, dia, tipo, modo) WHERE (tipo <> ALL (ARRAY[''resposta''::text, ''mudanca''::text]))'))
+       -- FASE 7f: fim
        and bool_or(i.indexname = 'agenda_alocacoes_turno' and i.indexdef like '%(work_shift_id) WHERE (work_shift_id IS NOT NULL)'),
        string_agg(i.indexname, ', ' order by i.indexname)
   from pg_indexes i

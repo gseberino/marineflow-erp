@@ -265,8 +265,12 @@ select 'B1z todo CHECK novo de agenda_config tem caso (nenhum ficou sem prova)',
  where c.conrelid = 'public.agenda_config'::regclass and c.contype = 'c'
    and c.conname ~ '^agenda_config_(modo_cliente|cliente_)'
    -- FASE 6: o mínimo da pontualidade com o cliente (20261029100000) tem o caso dele em agenda_fase6_base.sql (B1z)
-   and c.conname <> 'agenda_config_cliente_n_min_check';
+   and c.conname <> 'agenda_config_cliente_n_min_check'
    -- FASE 6: fim
+   -- FASE 7f: os 4 da Fase 7f (20261109100000) têm o caso deles em agenda_fase7f_base.sql (B1i e B1j)
+   and c.conname <> all (array['agenda_config_modo_cliente_camadas_check', 'agenda_config_cliente_camadas_para_check', 'agenda_config_cliente_dia_exato_du_check',
+                               'agenda_config_cliente_semana_du_check']);
+   -- FASE 7f: fim
 
 insert into _resultado
 select 'B1z os 3 CHECKs nomeados de os_planejamento e os 3 de coluna têm caso',

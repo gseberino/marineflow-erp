@@ -61,19 +61,19 @@ declare
   l        text;
 begin
   foreach l in array string_to_array(replace(p, E'\r\n', E'\n'), E'\n') loop
-    if v_dentro = 0 and l ~ '^\s*-- FASE 7d:' and l !~ '^\s*-- FASE 7d: fim' then
+    if v_dentro = 0 and l ~ '^\s*-- FASE 7[df]:' and l !~ '^\s*-- FASE 7[df]: fim' then
       v_dentro := 1;
       continue;
     end if;
-    if v_dentro = 1 and l ~ '^\s*-- FASE 7d: fim' then
+    if v_dentro = 1 and l ~ '^\s*-- FASE 7[df]: fim' then
       v_dentro := 0;
       continue;
     end if;
-    if v_dentro = 0 and l ~ '^\s*-- \(7d ' then
+    if v_dentro = 0 and l ~ '^\s*-- \(7[df] ' then
       v_dentro := 2;
       continue;
     end if;
-    if v_dentro = 2 and l ~ '^\s*-- \(7d: fim\)' then
+    if v_dentro = 2 and l ~ '^\s*-- \(7[df]: fim\)' then
       v_dentro := 0;
       continue;
     end if;

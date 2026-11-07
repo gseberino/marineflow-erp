@@ -534,8 +534,18 @@ begin
                            'os_planejamento_local_fonte_check', 'os_planejamento_bem_situacao_check',
                            'os_planejamento_bem_situacao_fonte_check', 'os_planejamento_bem_exige_check',
                            'os_planejamento_descer_quem_check', 'os_planejamento_entrada_fonte_check',
-                           'os_planejamento_viagem_check']))));
+                           'os_planejamento_viagem_check']))))
      -- FASE 7d: fim
+     -- FASE 7f: os 20 que a Fase 7f pôs em agenda_config (20261109100000) têm o caso deles em agenda_fase7f_base.sql (B1f, B1i e B1j cobram pelo nome). A lista cliente_tipos_ligados
+     -- ampliada continua com o nome e o caso de antes.
+     and not (c.conname = any (array(
+       select 'agenda_config_' || n || '_check'
+         from unnest(array['modo_bloco_agenda', 'modo_veto', 'modo_lote_dono', 'modo_equipe_previsto', 'modo_equipe_convite',
+                           'modo_cliente_camadas', 'bloco_max_chars', 'bloco_decisoes_max', 'bloco_mudancas_max',
+                           'bloco_compras_max', 'bloco_compras_du', 'veto_tipos', 'perguntas_abertas_max', 'dono_semana_aviso',
+                           'dono_semana_hora', 'equipe_convite_antecedencia_h', 'cliente_dia_exato_du', 'cliente_semana_du',
+                           'cliente_camadas_para', 'comunicar_tempo_max']) n)));
+     -- FASE 7f: fim
   insert into _resultado values ('B todo CHECK das 6 tabelas tem um caso que ele recusa', v_sem_caso is null, v_sem_caso);
 end
 $b$;
@@ -1074,6 +1084,9 @@ insert into _definer_da_agenda values ('_agenda_cliente_onde_fica');
   -- FASE 7d: (7d P8, 20261107100700) o foco locais e a saúde do local leem o combinar e os conflitos, que são só do service_role; a porta está dentro
 insert into _definer_da_agenda values ('_agenda_ver_locais'), ('_agenda_saude_local');
   -- FASE 7d: fim
+  -- FASE 7f: (7f P1, 20261109100000) o gatilho do padrão da pergunta: quem insere pode ser o service_role, e a função do padrão não tem grant; agenda_fase7f_base.sql B2g prova
+insert into _definer_da_agenda values ('_agenda_perguntas_padrao');
+  -- FASE 7f: fim
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',
