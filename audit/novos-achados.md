@@ -3488,3 +3488,27 @@ porque só o dono pode preenchê-las.
 - **Com *gestor, só propor*:** `situacao`, `estimativa`, `reavaliar` e `reestimar` têm número e a resposta é recusada, como já era em `agenda_decidir` (hoje a `estimativa` do Giancarlo). Quem
   responde ouve o porquê na hora. Volta a responder quando o freio soltar.
 
+### [NOVO-agenda-103] `lugar novo:` com nome curto passa no rascunho e cai no CHECK no *grava*
+- **Onde:** `20261107100870`, l. 104: a régua de 2 letras só vale sem o prefixo.
+- **Efeito:** `lugar novo: B`, `lugar novo: 1` e `lugar novo: a, SC` param no CHECK de `agenda_locais.nome` e seguram os outros itens até corrigir ou *descarta*. Nada grava errado.
+- **Origem:** leitura independente do SQL da Onda 4 da 7d, 06/11/2026 (`f7d/rev4/achados.md`). Não travou publicar em teste.
+
+### [NOVO-agenda-104] " que " depois da data vira passado em frases sem vírgula
+- **Onde:** `_agenda_data_no_passado` (M7, Onda 4 da 7d).
+- **Efeito:** "chega dia 20 que ele já está de volta", "entra dia 20 que veio na proposta assim" e "ele busca dia 20 que o João saiu de férias" dão 20/10 em vez de 20/11. A data sai por extenso antes do *grava*.
+- **Origem:** mesma leitura. Efeito do que a decisão pediu.
+
+### [NOVO-agenda-105] Lugar com "em seco", doca ou rampa vira linha nova ou recusa
+- **Onde:** M6, Onda 4 da 7d.
+- **Efeito:** "na marina Tedesco em seco", "doca da Kalmar" e "rampa da Tedesco" viram linha nova; "em seco na Marina Itajaí" e "na água na Marina Itajaí" viram recusa. O prompt manda separar "em seco" para `bem_onde`; a releitura mostra e a correção recolhe a linha.
+- **Origem:** mesma leitura.
+
+### [NOVO-agenda-106] O laço do *desfaz* só fechou para OS `completed`
+- **Onde:** M9, Onda 4 da 7d.
+- **Efeito:** OS `invoiced` (7 na bancada) ou `cancelled` (32) volta os dias com "como estava", e o tique seguinte tira de novo. Cada volta pede 1 *desfaz* do dono. Não mexe em dinheiro, e o código anterior já fazia igual.
+- **Origem:** mesma leitura.
+
+### [NOVO-agenda-107] Lugar `outro` não corrige a UF pela conversa
+- **Onde:** `_agenda_local_criar`.
+- **Efeito:** "Sítio do Zé, PR", *desfaz*, "lugar novo: Sítio do Zé, RS" reativa com PR, sem avisar. Só pesa com a viagem ligada: está na lista de "OK ligar a viagem".
+- **Origem:** mesma leitura.
