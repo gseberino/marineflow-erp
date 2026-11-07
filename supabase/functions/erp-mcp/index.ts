@@ -74,7 +74,12 @@ export async function handler(req: Request): Promise<Response> {
   const sessionId = String(input.sessao ?? meta.session_id ?? "");
   // Mesmo contexto do canal WhatsApp em ai-agent: sem JWT de usuário, client service-role (no painel
   // só o admin chega aqui pelo Max — ver provedorDoTurno).
-  const toolCtx = { sb: admin, admin, userId: usuario.id, userRole: cargo, jwt: "", appOrigin: settings.app_public_url || "", settings, canal };
+  // Retorno F2 (P9): a marca de quem leu um caso do cartão vale para o turno do Max também.
+  const { data: sessao } = sessionId
+    ? await admin.from("ai_operator_sessions").select("metadata").eq("id", sessionId).maybeSingle()
+    : { data: null };
+  const toolCtx = { sb: admin, admin, userId: usuario.id, userRole: cargo, jwt: "", appOrigin: settings.app_public_url || "", settings, canal,
+    sessaoAmarrada: (sessao?.metadata as Record<string, unknown> | null)?.retorno_amarrada === true };
 
   // O turno é o job (aprovação em lote, 29/10/2026): cada linha de auditoria leva o id dele, e a entrega confere por ali o
   // que o turno gravou e o que falhou.

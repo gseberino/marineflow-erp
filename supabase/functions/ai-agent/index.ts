@@ -79,6 +79,7 @@ import { pinNoTexto, verifyPin } from "../_shared/ai/whatsapp-pin.ts";
 import { camadaDoRetorno, type CartaoVivo, type DependenciasDaCamada, ponteiroDoCartao } from "../_shared/retorno/camada.ts";
 import { aplicarCarona, caronaDoTurno, comCarona, juntarCarona, osDoJob, osDoTurno } from "../_shared/agenda/carona.ts";
 import { caronaDoRetorno } from "../_shared/whatsapp/retorno-carona.ts";
+import { omitirResultadosDoRetorno } from "../_shared/ai/tools/retorno.ts";
 import { STATUS_INJETAVEL, colunaDaEntidade } from "../_shared/ai/memory-scope.ts";
 import { podarHistoricoParaLLM } from "../_shared/ai/context-pruning.ts";
 import { filtrarPorCanal } from "../_shared/ai/channel-scope.ts";
@@ -630,7 +631,7 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
   });
 
   // Sem JWT de usuário neste canal — sb e admin são o mesmo client service-role.
-  const toolCtx = { sb: admin, admin, userId: appUserId, userRole: (appUser.role as Role) || "unknown", jwt: "", appOrigin: settings.app_public_url || "", settings };
+  const toolCtx = { sb: admin, admin, userId: appUserId, userRole: (appUser.role as Role) || "unknown", jwt: "", appOrigin: settings.app_public_url || "", settings, sessaoAmarrada: metadata.retorno_amarrada === true };
 
   // ---- Camada determinística (custo $0): o vocabulário do retorno rápido (F2) ----
   // ANTES da trava e da confirmação: "não 2" rejeitaria o cartão inteiro, e "1 A sim <PIN>" levaria o PIN ao modelo.
@@ -1005,7 +1006,7 @@ async function turnoDoModeloNoWhatsApp(turno: TurnoDoModelo): Promise<Response> 
     const newNativeSlice = result.messages.slice(alreadyPersistedCount);
     const newRows = fromAnthropicMessages(newNativeSlice);
     if (newRows.length > 0) {
-      const rowsToInsert = buildMessageRows(sessionId, newRows, result.usage, MODEL_AGENT, "whatsapp");
+      const rowsToInsert = omitirResultadosDoRetorno(buildMessageRows(sessionId, newRows, result.usage, MODEL_AGENT, "whatsapp"));
       await admin.from("ai_operator_messages").insert(rowsToInsert);
     }
   } catch (persistErr) {

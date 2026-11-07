@@ -3,6 +3,7 @@ import {
   resumirAcerto, resumirCadastro, resumirDiaria, resumirDivisaoDoPagamento, resumirEnvioAoFreelancer, resumirPagamento,
 } from "./tools/diarias.ts";
 import { resumirEnvioAoCliente } from "./tools/whatsapp.ts";
+import { resumirRespostaDoCaso, riscoDoEnvioLivre } from "./tools/retorno.ts";
 import { resumirAgendamento } from "./tools/agendamento.ts";
 import { resumirMensagem } from "./tools/resposta.ts";
 // fiscal e compras (07/10/2026): resumos da confirmação (nota ao cliente, receber e excluir OC).
@@ -469,6 +470,8 @@ RESUMO_QUE_RESOLVE.add("aprovar_propostas_de_lancamento");
 // aprovação em lote (29/10/2026): serviço com o nome de um que já está no catálogo — o resumo diz desde quando, numa linha
 // "⚠️": é recusa, não pendência (o dono aprovaria um segundo "Realocação do banco de baterias").
 RESUMO_QUE_RESOLVE.add("create_service");
+// Retorno F2 (P9): sem cartão, sem o caso ou com o canal bloqueado, recusa em vez de pedir o "sim".
+RESUMO_QUE_RESOLVE.add("retorno_responder_caso");
 
 export function resumoQueRecusa(toolName: string, resumo: string): { error: string; nada_registrado: true } | null {
   const t = resumo.trim();
@@ -637,6 +640,10 @@ export async function buildPendingSummary(
       const r = await resumirLembreteDeRevisao(admin, toolName, args);
       if (r) return r;
     } catch { /* cai no resumo genérico */ }
+  }
+  // Retorno F2 (P9): o "sim" é sobre o destino, preso ao caso, e o texto exato.
+  if (toolName === "retorno_responder_caso") {
+    return await resumirRespostaDoCaso(admin, args, quem.userId ?? "");
   }
   if (toolName === "delete_purchase_order") {
     try {
@@ -840,7 +847,8 @@ async function writeAudit(
         channel: amb.channel ?? "panel",
         risk: entry.risk,
         args: entry.args,
-        result_summary: summarizeForAudit(entry.result),
+        // Retorno F2: o que o cliente escreveu não fica na auditoria.
+        result_summary: entry.eventType.includes("retorno_ler_caso") ? { omitido: true } : summarizeForAudit(entry.result),
         ...(entry.autonomous ? { autonomous: true } : {}),
         ...(amb.turno ? { turno: amb.turno.id } : {}),
         ...(entry.detalhe ?? {}),
@@ -1115,7 +1123,9 @@ export async function executarChamadaDeTool(
   // declarada low E leitura ou escrita de sugestão/análise (ESCRITAS_VERIFICADAS_DA_REDE).
   // Escrita low fora dessa lista, ou declarada acima de low e rebaixada pelo computeRisk, pede
   // confirmação. Só sobe o risco, nunca rebaixa.
-  const effectiveRisk = foraDoPerfil && riscoDaTool === "low" && !rodaDiretoPelaRede(foraDoPerfil) ? "medium" : riscoDaTool;
+  const riscoSemAmarra = foraDoPerfil && riscoDaTool === "low" && !rodaDiretoPelaRede(foraDoPerfil) ? "medium" : riscoDaTool;
+  // Retorno F2 (P9): depois de o modelo ler um caso do cartão, o envio livre pede PIN e mostra o número.
+  const effectiveRisk = riscoDoEnvioLivre(tc.name, riscoSemAmarra, amb.toolCtx.sessaoAmarrada);
 
   // Autonomia concedida pelo dono para ESTA ação (Onda 2). Ações de dinheiro/destrutivas
   // nunca entram aqui — ver NEVER_AUTONOMOUS. Pela rede também não: a autonomia foi dada

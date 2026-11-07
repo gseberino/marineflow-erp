@@ -61,6 +61,8 @@ const SEMPRE_NO_PERFIL_ANTIGO = [
 const ACRESCENTADAS = ["link_contact_to_entity", "update_supplier", "update_service", "registrar_diaria", "consultar_freelancer", "cadastrar_freelancer", "registrar_pagamento_freelancer", "enviar_extrato_freelancer", "fechar_acerto_freelancer", "reabrir_acerto_freelancer", "enviar_acerto_ao_freelancer", "ajustar_lancamento_ao_valor_do_banco", "aplicar_pix_em_contas", "desfazer_aplicacao_de_pix", "definir_condicao_pagamento", "acompanhar_conversa", "listar_acompanhamentos", "parar_acompanhamento", "atualizar_extrato", "enviar_relatorio_pdf", "analise_do_negocio", "listar_emails", "ler_email", "rascunhar_resposta_email"];
 // cadastros (07/10/2026): editar marina e os contatos da embarcação.
 ACRESCENTADAS.push("update_marina", "add_vessel_contact", "update_vessel_contact");
+// Retorno F2 (P9): o ditado por áudio do cartão.
+ACRESCENTADAS.push("retorno_ler_caso", "retorno_responder_caso");
 // diárias (11/10/2026, resposta 4 do dono): dividir o Pix do banco entre diárias e o reembolso de despesas pagas pelo técnico.
 ACRESCENTADAS.push("dividir_pagamento_freelancer");
 // operacional (07/10/2026): via do técnico e caixa de sugestões da agenda.

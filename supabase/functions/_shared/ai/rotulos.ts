@@ -9,6 +9,7 @@
 /** Título das ações que a rede do admin enxuto transforma em cartão e que não tinham título em português. */
 export const TITULOS_DA_REDE_DO_ADMIN: Record<string, string> = {
   add_service_order_expense: "Lançar despesa na OS",
+  retorno_ler_caso: "Ler o caso do cartão",
   retorno_executar_cartao: "Cartão do retorno",
   retorno_responder_caso: "Responder o caso do cartão",
   add_service_order_step: "Acrescentar passo ao roteiro da OS",
@@ -132,6 +133,7 @@ export const TITULOS_DAS_ACOES_DIRETAS: Record<string, string> = {
 
 /** Rótulo dos campos que aparecem no resumo genérico ("- Rótulo: valor") das ações que podem virar cartão. */
 export const ROTULOS_DOS_CAMPOS: Record<string, string> = {
+  n: "Caso",
   acao: "Ação",
   accepted: "Aceito",
   access_notes: "Notas de acesso",

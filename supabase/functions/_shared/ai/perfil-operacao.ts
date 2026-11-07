@@ -25,6 +25,9 @@
 
 /** Ferramentas do perfil de operação. Agrupadas por assunto só para leitura. */
 export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
+  // — O ditado do retorno rápido (F2): o dono dita a resposta de um caso do cartão —
+  "retorno_ler_caso",
+  "retorno_responder_caso",
   // — Montar e editar orçamento/OS (o grosso do uso real) —
   "create_quote_from_items",
   "create_service_order",

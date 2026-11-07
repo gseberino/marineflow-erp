@@ -540,3 +540,142 @@ $$;
 
 revoke all on function public.retorno_ver_caso(integer, uuid, timestamptz) from public, anon, authenticated;
 grant execute on function public.retorno_ver_caso(integer, uuid, timestamptz) to service_role;
+
+-- ── P9: o ditado amarrado ao caso ──────────────────────────────────────────────────────────────────────────────────
+
+-- O destino do caso n do cartão vivo. O telefone sai daqui, nunca de argumento do modelo.
+create or replace function public.retorno_destino_do_item(p_n integer, p_autor uuid, p_agora timestamptz default now())
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_agora timestamptz := coalesce(p_agora, now());
+  v_vivo jsonb;
+  v_i public.retorno_cartao_itens;
+  v_ab public.retorno_aberturas;
+  v_conf jsonb;
+begin
+  if p_autor is null or p_autor is distinct from (select d.id from public._comprovante_dono() d) then
+    return jsonb_build_object('erro', 'Só o dono responde o caso.');
+  end if;
+  v_vivo := public.retorno_cartao_vivo(v_agora);
+  if v_vivo is null or v_vivo ->> 'estado' <> 'vivo' then
+    return jsonb_build_object('erro', 'Não há cartão aberto.');
+  end if;
+  select * into v_i from public.retorno_cartao_itens i
+   where i.cartao_id = (v_vivo ->> 'id')::uuid and i.n = p_n and i.estado = 'vivo';
+  if not found then
+    return jsonb_build_object('erro', format('O cartão não tem o caso %s.', p_n));
+  end if;
+  select * into v_ab from public.retorno_aberturas a where a.id = v_i.abertura_id;
+  v_conf := public._retorno_item_conferir(v_i.id, v_agora, false);
+  return jsonb_build_object('item_id', v_i.id, 'abertura_id', v_ab.id, 'phone', v_ab.phone_normalized,
+                            'rotulo', public._retorno_rotulo(v_ab.id, v_agora),
+                            'ok', (v_conf ->> 'ok')::boolean, 'texto', v_conf ->> 'texto');
+end;
+$$;
+
+comment on function public.retorno_destino_do_item(integer, uuid, timestamptz) is
+  'Retorno F2 (P9): o destino do caso n do cartão vivo: item, caso, telefone, rótulo e se ele ainda pode receber. Só o dono.';
+
+revoke all on function public.retorno_destino_do_item(integer, uuid, timestamptz) from public, anon, authenticated;
+grant execute on function public.retorno_destino_do_item(integer, uuid, timestamptz) to service_role;
+
+-- O que o modelo lê do caso. Grava a amarração na sessão do dono, e a marca retorno_amarrada sobe o risco do envio livre.
+create or replace function public.retorno_ver_caso_para_modelo(p_n integer, p_autor uuid, p_agora timestamptz default now())
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  c_fuso constant text := 'America/Sao_Paulo';
+  v_agora timestamptz := coalesce(p_agora, now());
+  v_d jsonb;
+  v_i public.retorno_cartao_itens;
+  v_c public.retorno_cartoes;
+  v_ab public.retorno_aberturas;
+  v_fatos jsonb;
+  v_os jsonb;
+  v_f jsonb;
+  v_vessel uuid;
+  v_recebidas jsonb;
+begin
+  v_d := public.retorno_destino_do_item(p_n, p_autor, v_agora);
+  if v_d ? 'erro' then
+    return v_d;
+  end if;
+  select * into v_i from public.retorno_cartao_itens i where i.id = (v_d ->> 'item_id')::uuid;
+  select * into v_c from public.retorno_cartoes c where c.id = v_i.cartao_id;
+  select * into v_ab from public.retorno_aberturas a where a.id = v_i.abertura_id;
+
+  if v_ab.papel = 'cliente' then
+    begin
+      v_fatos := public.retorno_fatos_do_contato(v_ab.phone_normalized, v_agora);
+      if jsonb_array_length(v_fatos -> 'os') = 1 then
+        v_os := v_fatos -> 'os' -> 0;
+        -- A previsão nunca vai ao modelo, nem a lista de peças: só o que dá para afirmar.
+        v_f := jsonb_build_object('pronto', v_os -> 'fatos' -> 'pronto' <> 'null'::jsonb,
+                                  'em_servico', v_os -> 'fatos' -> 'em_servico' <> 'null'::jsonb,
+                                  'peca_chegou', v_os -> 'fatos' -> 'peca_chegou' <> 'null'::jsonb,
+                                  'aguarda_peca', v_os -> 'fatos' -> 'aguarda_peca' <> 'null'::jsonb,
+                                  'liberado', v_os -> 'fatos' -> 'liberado' <> 'null'::jsonb);
+      end if;
+    exception when others then
+      v_f := null;   -- sem fato, nunca "não há peça"
+    end;
+  end if;
+
+  select coalesce(jsonb_agg(jsonb_build_object('hora', x.hora, 'texto', x.corpo) order by x.recebida_em, x.id), '[]'::jsonb)
+    into v_recebidas
+    from (select m.recebida_em, m.whatsapp_message_id as id, to_char(m.recebida_em at time zone c_fuso, 'HH24:MI') as hora, left(w.body, 500) as corpo
+            from public.retorno_mensagens m
+            join public.whatsapp_messages w on w.id = m.whatsapp_message_id
+           where m.abertura_id = v_ab.id and m.recebida_em <= v_agora
+           order by m.recebida_em desc, m.whatsapp_message_id desc
+           limit 5) x;
+
+  -- A amarração: com caso ambíguo, só a marca, porque o texto de terceiro entrou do mesmo jeito.
+  if v_ab.papel = 'cliente' and v_os is not null then
+    select so.vessel_id into v_vessel from public.service_orders so where so.id = (v_os ->> 'id')::uuid;
+    update public.ai_operator_sessions s
+       set client_id = v_ab.client_id, vessel_id = v_vessel, service_order_id = (v_os ->> 'id')::uuid,
+           metadata = coalesce(s.metadata, '{}'::jsonb) || '{"retorno_amarrada": true}'::jsonb
+     where s.id = v_c.sessao_id;
+  else
+    update public.ai_operator_sessions s
+       set metadata = coalesce(s.metadata, '{}'::jsonb) || '{"retorno_amarrada": true}'::jsonb
+     where s.id = v_c.sessao_id;
+  end if;
+
+  return jsonb_build_object('n', p_n, 'rotulo', v_d ->> 'rotulo', 'os', v_os ->> 'numero', 'recebidas', v_recebidas, 'fatos', coalesce(v_f, '{}'::jsonb));
+end;
+$$;
+
+comment on function public.retorno_ver_caso_para_modelo(integer, uuid, timestamptz) is
+  'Retorno F2 (C-LER): as últimas 5 recebidas do caso e os fatos que dá para afirmar, sem previsão. Amarra a sessão do dono ao caso; o ambíguo só marca.';
+
+revoke all on function public.retorno_ver_caso_para_modelo(integer, uuid, timestamptz) from public, anon, authenticated;
+grant execute on function public.retorno_ver_caso_para_modelo(integer, uuid, timestamptz) to service_role;
+
+-- O ditado do assistente saiu: registra no item e fecha o caso.
+create or replace function public.retorno_caso_respondido(p_item uuid, p_texto text, p_wa_id text default null, p_agora timestamptz default now())
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_agora timestamptz := coalesce(p_agora, now());
+begin
+  update public.retorno_cartao_itens i
+     set texto_ditado = left(p_texto, 1000), ditado_via = 'assistente', estado = 'feito', decidido_em = v_agora
+   where i.id = p_item;
+  return public.retorno_item_enviado(p_item, true, p_wa_id, v_agora);
+end;
+$$;
+
+revoke all on function public.retorno_caso_respondido(uuid, text, text, timestamptz) from public, anon, authenticated;
+grant execute on function public.retorno_caso_respondido(uuid, text, text, timestamptz) to service_role;

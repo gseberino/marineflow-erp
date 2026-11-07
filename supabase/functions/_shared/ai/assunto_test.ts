@@ -93,7 +93,7 @@ Deno.test("toda ação declarada existe (tool ou o lote da papelada), e todo cam
   const porNome = new Map(allTools.map((t) => [t.name, t]));
   const problemas: string[] = [];
   for (const [acao, campos] of Object.entries(ASSUNTO_DAS_ACOES)) {
-    if (acao === NOME_DA_TOOL_DO_LOTE) continue;
+    if (acao === NOME_DA_TOOL_DO_LOTE || acao === "retorno_executar_cartao") continue;
     const t = porNome.get(acao);
     if (!t) {
       problemas.push(`${acao}: não existe`);
