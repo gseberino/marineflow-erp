@@ -46,6 +46,9 @@ export const ASSUNTO_DAS_ACOES: Readonly<Record<string, readonly string[]>> = {
   registrar_pagamento_freelancer: ["freelancer", "data"],
   // o lote semanal da papelada (secretário): um lote novo substitui o anterior
   aprovar_lote_da_papelada: [],
+  // o cartão do retorno: um cartão novo substitui o anterior; a resposta ditada é por caso
+  retorno_executar_cartao: [],
+  retorno_responder_caso: ["n"],
 };
 
 function valorDoAssunto(campo: string, v: unknown): string | null {

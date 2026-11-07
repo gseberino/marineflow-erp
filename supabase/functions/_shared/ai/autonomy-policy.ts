@@ -17,6 +17,7 @@ import type { RiskLevel } from "./tools/registry.ts";
  * nas ações reversíveis; aqui a confirmação humana é permanente por decisão de projeto.
  */
 export const NEVER_AUTONOMOUS = new Set<string>([
+  "retorno_responder_caso",
   "register_payment",
   "register_deposit_and_convert",
   "receive_purchase_order",

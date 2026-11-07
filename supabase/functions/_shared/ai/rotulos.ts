@@ -9,6 +9,8 @@
 /** Título das ações que a rede do admin enxuto transforma em cartão e que não tinham título em português. */
 export const TITULOS_DA_REDE_DO_ADMIN: Record<string, string> = {
   add_service_order_expense: "Lançar despesa na OS",
+  retorno_executar_cartao: "Cartão do retorno",
+  retorno_responder_caso: "Responder o caso do cartão",
   add_service_order_step: "Acrescentar passo ao roteiro da OS",
   add_vessel_contact: "Adicionar contato da embarcação ou veículo",
   agent_health_report: "Relatório de saúde do assistente",

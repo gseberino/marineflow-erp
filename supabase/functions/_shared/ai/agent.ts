@@ -814,6 +814,8 @@ export function textoDoSim(titulo: string, resultado: unknown): string {
     const grava = /\*grava\*/.test(releitura) ? "" : "\nPara gravar, mande só *grava*.";
     return `📝 ${titulo}: ainda não mudou nada na agenda.\n${releitura}${grava}`;
   }
+  // Retorno F2: "executado" seria falso com as mensagens ainda na fila; o aviso diz o que vai sair.
+  if (r.so_texto === true && typeof r.aviso === "string" && r.aviso.trim()) return r.aviso.trim();
   return `✅ ${titulo} — executado.${ressalvaDoResultado(resultado)}`;
 }
 
