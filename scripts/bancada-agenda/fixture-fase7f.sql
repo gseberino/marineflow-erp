@@ -30,7 +30,7 @@
 --   fornecedores_prazo (Correa)          sem OS, nunca mostrada
 --   parada (Vanderlei)                   mostrada sem prazo: carona de seg 09/11; não liga o relógio
 --   nao_cabe (Flávio)                    crítica, prometido firme: espera o cliente
---   nao_cabe (Giancarlo)                 crítica, recomendação 1, sem veto_espera: tem o que a regra da spec pedia, e nunca vence sozinha (P2)
+--   nao_cabe (Giancarlo)                 crítica, recomendação 1: pode vencer
 --   diaria (Roberto)                     crítica, dinheiro: nunca vence
 -- São 8 abertas, não contando conferencia: a spec conta 7 + a diária. O teto de 5 deixa 3 acima enquanto a diária estiver aberta.
 --

@@ -3519,11 +3519,13 @@ porque só o dono pode preenchê-las.
 - **Na Fase 7f (P2):** sem conserto. A R8.5-10 fixa o texto "*desfaz* mostra a lista" e não recria `agenda_acao_desfazivel`. Saída para quem for mexer: acrescentar à lista um número por item, ou um nome guardado em `antes.rotulo`. O dono é avisado em `fase7f-oks.md`.
 - **Origem:** Fase 7f, P2 (07/11/2026), levando a frase da §6.3 até o estado depois (P7b).
 
-### [NOVO-agenda-109] A spec e a ordem do fio discordam sobre a crítica que vence
-- **Onde:** spec-fase7f §3.2, §5.2, §8.3 (P4, "a crítica de Giancarlo"), `fase7-registro.md` l. 225 e 536, e a resposta AG7-15. O fio mandou no P2 (07/11): "crítica nunca vence sozinha".
-- **Efeito:** valeu a ordem do fio, que também é o lado seguro. `_agenda_pergunta_espera` devolve `critica` e `agenda_decidir` recusa o canal `prazo` em crítica. Por isso `nao_cabe`, `atraso_longo`, `segundo_atraso` e `fixada_pelo_dono` seguem em `veto_tipos` sem efeito, e nenhum tipo não crítico com efeito `opcao` está na lista padrão: o caminho `opcao` só se alcança ampliando `veto_tipos`. O `ok_marcacao` da 7g, descrito como "crítica, com prazo pelo 7f", não vence do jeito que está.
-- **Na Fase 7f (P2):** decisão do dono em `fase7f-oks.md`, item 1. Para voltar ao que a spec dizia: tirar as 3 linhas de `critica` em `_agenda_pergunta_espera` e o `v_q.critica` da porta de `agenda_decidir`, e dar autor à decisão: pelo caminho crítico, `agenda_propor` com `p_autor` nulo cai em "Só o administrador mexe na agenda" (`_autor_da_agenda`), e a §5.2 passava nulo. A recusa e o prometido já estão provados; o caminho crítico inteiro, não.
-- **Origem:** Fase 7f, P2.
+### [NOVO-agenda-109] A crítica que vence pelo prazo ia entrar como decisão do dono — FECHADO no P2b
+- **Onde:** `agenda_decidir` (`20261109100100`). A §5.2 chamava o canal `prazo` pelo caminho de sempre: `agenda_propor` e `agenda_aplicar` com `dono` e `p_autor` nulo.
+- **O que aconteceu:** o 1º P2 construiu "crítica nunca vence sozinha", por um pedido que contrariava a resposta do dono em `ag7-veto` ("Sim, sem resposta fica como ele propôs", 30/10). O P2 apontou a divergência, e o P2b desfez. Na mesma leitura, o 1º P2 atribuiu a `agenda_propor` o erro de `_autor_da_agenda`: estava errado, ele vinha de `_agenda_decidir_diaria`, numa diária. `agenda_propor` e `agenda_aplicar` aceitam autor nulo.
+- **O defeito de verdade:** com `dono`, a ação nascia com origem `dono`, fora do *o que mudou* e do aviso, que só contam motor e vigia; a duração sugerida virava `aceita`; o dia pedido virava fixado por ele. Ninguém saberia da mudança, e ela pareceria dele.
+- **Como ficou:** pelo canal `prazo`, `agenda_decidir` propõe e aplica com origem `vigia` e sem autor, como as rodadas automáticas, sem tocar em `agenda_propor` nem `agenda_aplicar`. `respondida_por` nulo. O canal recusa autor. A ação sai crítica, com `pergunta_id`, desfazível. Nunca vencem: efeito opcao com prometido, ou com dia que o cliente ou a equipe já sabem (relidos na hora), `remarcar_confirmado`, diária, aprendizado, `cliente_*`, tipo fora de `veto_tipos`, modo fora de ligado, freio ligado.
+- **Prova:** `agenda_fase7f_perguntas.sql`, P4f, P4g, P4n, P10h4 a P10h6. O `ok_marcacao` da 7g segue o mesmo caminho (`spec-fase7g.md` §5.5).
+- **Origem:** Fase 7f, P2 e P2b (07/11/2026).
 
 ### [NOVO-agenda-110] Soltar o freio fecha de uma vez o que venceu durante ele
 - **Onde:** `_agenda_gestor_vetos`, bloco da 7f (`20261109100100`).

@@ -1,12 +1,12 @@
 -- Prova das perguntas da Agenda de Produção, Fase 7f (pacote P2): quem pode vencer, a linha, a ordem, o que destrava, o prazo, o teto, a rodada comunicar e a volta do que ficou
--- com o padrão (migration 20261109100100; spec-fase7f §5.2, §6.2, §6.3, §8.3 e R8.4, R8.5-7 a 11, R8.6, R8.7, R8.8, R8.12, R8.13). Ordem do fio (07/11): crítica nunca vence sozinha.
+-- com o padrão (migration 20261109100100; spec-fase7f §3.2, §5.2, §6.2, §6.3, §8.3 e R8.4, R8.5-7 a 11, R8.6, R8.7, R8.8, R8.12, R8.13).
 -- bancada: depende de 20261109100100
 --
 --   P1   destrava e a ordem: o dono primeiro, a crítica que perde amanhã antes dele; OS sem linha, sem base, só reserva; a régua da sexta
 --   P2   a linha de cada chave, byte a byte, com o prazo valendo, com o freio, em sombra e desligado; título, não a pergunta inteira; "conto" sem alocação; até 220 letras
 --   P3   o prazo só com a pergunta mostrada antes dele: a da carona, a mostrada depois e a sem prazo não vencem
---   P4   vencer efeito nada (resolvida, ação assumir, texto); crítica, cliente e dinheiro nunca; P4b ok = false e erro viram sem_padrao, sem repetir; P4c o prometido que surgiu
---        depois; P4d o padrao_do_dono respeita AG7-37; P4e o efeito opcao até o carimbo
+--   P4   vencer efeito nada (resolvida, ação assumir, texto); P4f a crítica nascida do motor vence com a recomendada, sem autor nenhum, e o *desfaz* volta; P4n o que nunca vence;
+--        P4b ok = false e erro viram sem_padrao, sem repetir; P4c o prometido que surgiu depois; P4d o padrao_do_dono respeita AG7-37; P4e o efeito opcao até o carimbo
 --   P5   o teto: as mais velhas que podem vencer, nunca a que espera, nunca muda a agenda
 --   P6   sombra só veto_teria_em; P6b o freio é igual a sombra, em agenda_gestor_rodar e na rodada comunicar; desligado, nada
 --   P7   agenda_desfazer da assumir: a frase, a pergunta nova, o estado depois; P7b sem OS não tem *desfaz <nome>*; janela de 2 dias úteis
@@ -90,7 +90,7 @@ create function pg_temp.q(p_c text) returns uuid language sql immutable as $f$ s
 create function pg_temp.os(p_n text) returns uuid language sql immutable as $f$ select ('f7f00000-0000-4000-8000-000000097' || p_n)::uuid $f$;
 -- O prazo valendo: modo_veto ligado, sem o freio.
 create function pg_temp.vale() returns void language sql as $f$
-  update public.agenda_config set modo_veto = 'ligado', gestor_so_propor = false where id
+  update public.agenda_config set modo_veto = 'ligado', gestor_so_propor = false, modo_proposta = 'ligado' where id
 $f$;
 create function pg_temp.linha(p_q uuid, p_hoje date default date '2026-11-10', p_agora timestamptz default timestamptz '2026-11-10 17:30-03') returns text language sql stable as $f$
   select public._agenda_pergunta_linha(p_q, p_hoje, p_agora) ->> 'texto'
@@ -112,6 +112,26 @@ $f$;
 -- Mostrada com o prazo, às 17:30 da véspera.
 create function pg_temp.mostra(p_q uuid, p_prazo timestamptz default timestamptz '2026-11-10 18:00-03') returns void language sql as $f$
   update public.agenda_perguntas set veto_ate = p_prazo, mostrada_vezes = mostrada_vezes + 1, mostrada_em = p_prazo - interval '1 day', mostrada_via = 'fechamento' where id = p_q
+$f$;
+-- A crítica do Giancarlo pelo caminho real: o dono disse que precisa até qui 12/11, e o motor, ao montar a OS na seg 09/11, não acha lugar: a pergunta sai de agenda_propor, com as opções, o efeito, a espera,
+-- a recomendação e a versão do plano. A recomendada é o atraso. Só o service_order_id e os dias vêm daqui: nenhuma coluna da pergunta é digitada.
+create function pg_temp.critica() returns uuid language plpgsql as $f$
+declare
+  v uuid;
+begin
+  update public.agenda_config set modo_proposta = 'ligado' where id;
+  insert into public.os_planejamento (service_order_id, dias, estimativa_fonte, estimativa_em, precisa_ate, material_conferido_em)
+  values (pg_temp.os('305'), 8, 'dono', timestamptz '2026-11-09 09:00-03', date '2026-11-12', timestamptz '2026-11-09 09:00-03');
+  perform public.agenda_propor('replano', null, null, array[pg_temp.os('305')], '{}'::jsonb, true, 'vigia', null, date '2026-11-09', timestamptz '2026-11-09 16:00-03');
+  select q.id into strict v from public.agenda_perguntas q
+   where q.tipo = 'nao_cabe' and q.service_order_id = pg_temp.os('305') and q.estado = 'aberta' and q.proposta_id is not null;
+  return v;
+end $f$;
+-- Uma crítica à mão, para os casos em que o motor não tem como chegar lá sem um cenário inteiro: mesma forma, com a opção 1 recomendada.
+create function pg_temp.critica_mao(p_tipo text, p_chave text, p_os uuid, p_os_ids uuid[]) returns uuid language sql as $f$
+  insert into public.agenda_perguntas (tipo, chave, service_order_id, os_ids, perda_em, texto, opcoes, recomendacao, modo, criada_em)
+  values (p_tipo, p_chave, p_os, p_os_ids, date '2026-11-20', 'Isso muda o plano. 1) Passa. 2) Fica.', '[{"n": 1, "texto": "Passa"}, {"n": 2, "texto": "Fica"}]', 1, 'ligado', timestamptz '2026-11-09 09:00-03')
+  returning id
 $f$;
 -- A pergunta do gestor na forma real de produção (estimativa, 3 opções, recomendação 2, sem opcao_padrao), posta em veto_tipos para o efeito opcao ter por onde passar. Nenhum tipo
 -- não crítico com efeito opcao está em veto_tipos no padrão: é assim que o caminho opcao, a recusa e o prometido se provam sem crítica vencer.
@@ -326,8 +346,9 @@ begin
       'A OS do Vanderlei (motorhome, Instalação de carregador) está parada há 4 dias úteis, com… Deixo como está no plano. ' || c_ate || ', fica assim.', pg_temp.linha(pg_temp.q('05')));
     r := pg_temp.ok(r, 'P2f espera cliente: sem prazo, com o motivo', pg_temp.linha(pg_temp.q('06')) =
       'Decisão 1: O serviço do Flávio (lancha, Revisão do piloto automático) não cabe mais em qua 11/11 com… Isto espera você: mexe no dia que o cliente já sabe.', pg_temp.linha(pg_temp.q('06')));
-    r := pg_temp.ok(r, 'P2g crítica: recomenda, não promete prazo nenhum: ela nunca vence sozinha', pg_temp.linha(pg_temp.q('07')) =
-      'Decisão 2: O serviço do Giancarlo (lancha, Troca do GPS) não cabe nas 2 próximas semanas com a… Recomendo a opção 1.', pg_temp.linha(pg_temp.q('07')));
+    r := pg_temp.ok(r, 'P2g crítica que pode vencer: o que fica e o prazo, como as outras, e até 220: o título cede', pg_temp.linha(pg_temp.q('07')) =
+      'Decisão 2: O serviço do Giancarlo (lancha, Troca do GPS) não cabe nas 2… Recomendo a opção 1: Passa para a semana seguinte, sem mudar o que já está marcado. ' || c_ate || ', fico com a opção 1.'
+      and char_length(pg_temp.linha(pg_temp.q('07'))) <= 220, pg_temp.linha(pg_temp.q('07')));
     r := pg_temp.ok(r, 'P2h espera dinheiro: o título, sem prazo', pg_temp.linha(pg_temp.q('08')) =
       'Decisão 3: A diária do Roberto de seg 09/11 ficou sem a OS ligada, e ela entra no custo do Vanderlei…', pg_temp.linha(pg_temp.q('08')));
 
@@ -443,8 +464,9 @@ begin
       'A OS do Vanderlei (motorhome, Instalação de carregador) está parada há 4 dias úteis, com… Deixo como está no plano.', pg_temp.linha(pg_temp.q('05')));
     v_id := pg_temp.perg('chegou', 'chegou:p2f:2026-11-11', pg_temp.os('306'), 'Tadeu (OS-F6): "Placa solar" tinha previsão para qua 11/11. Chegou?');
     r := pg_temp.ok(r, 'P2z6 nao_chegou, com o freio', pg_temp.linha(v_id) = 'Tadeu (OS-F6): "Placa solar" tinha previsão para qua 11/11. Conto que ainda não chegou.', pg_temp.linha(v_id));
-    r := pg_temp.ok(r, 'P2z7 a crítica e a que espera, com o freio: iguais às de sem o freio',
-      pg_temp.linha(pg_temp.q('07')) like '%Recomendo a opção 1.' and pg_temp.linha(pg_temp.q('06')) like '%Isto espera você: mexe no dia que o cliente já sabe.', null);
+    r := pg_temp.ok(r, 'P2z7 com o freio, a crítica recomenda e não promete prazo; a que espera segue igual',
+      pg_temp.linha(pg_temp.q('07')) like '%Recomendo a opção 1: Passa para a semana seguinte, sem mudar o que já está marcado.' and pg_temp.linha(pg_temp.q('07')) not like '%Sem resposta%'
+      and pg_temp.linha(pg_temp.q('06')) like '%Isto espera você: mexe no dia que o cliente já sabe.', pg_temp.linha(pg_temp.q('07')));
     update public.agenda_config set modo_veto = 'desligado', gestor_so_propor = false where id;
     v_l := public._agenda_pergunta_linha(pg_temp.q('02'), c_h, c_a);
     r := pg_temp.ok(r, 'P2z8 desligado: sem prazo e sem veto_diria', v_l ->> 'veto_ate' is null and not v_l ? 'veto_diria' and v_l ->> 'texto' not like '%Sem resposta%', v_l::text);
@@ -537,6 +559,7 @@ declare
   v_ch   text;
   v_disp int;
   v_cap  text;
+  v_txt  text;
   c_h    constant date := date '2026-11-10';
   c_a    constant timestamptz := timestamptz '2026-11-10 18:05-03';
 begin
@@ -565,32 +588,218 @@ begin
     if sqlerrm <> '__desfaz__' then raise; end if;
   end;
 
-  -- Crítica nunca vence sozinha: com tudo a favor
+  -- P4f: a crítica nascida do motor vence com a recomendada (AG7-15, §3.2)
+  begin
+    perform pg_temp.vale();
+    update public.clients set name = 'Geraldo' where name ilike 'Giancarlo%' and id <> (select client_id from public.service_orders where id = pg_temp.os('305'));
+    v_id := pg_temp.critica();
+    select * into v_q from public.agenda_perguntas where id = v_id;
+    r := pg_temp.ok(r, 'P4f0 (controle) ela nasceu do motor: proposta, versão, opções com efeito e espera, recomendação; sem espera; efeito opcao',
+      v_q.critica and v_q.proposta_id is not null and v_q.versao_base is not null and v_q.recomendacao = 1 and v_q.padrao_efeito = 'opcao' and v_q.padrao_chave = 'recomendacao' and v_q.veto_espera is null
+      and v_q.opcoes -> 0 -> 'efeito' ? 'restricoes' and v_q.opcoes -> 0 -> 'espera' <> '{}'::jsonb and pg_temp.est(pg_temp.q('07')) like 'descartada:%', left(to_jsonb(v_q)::text, 300));
+    r := pg_temp.ok(r, 'P4f0b antes de mostrar com prazo, não vence: o relógio não começou', pg_temp.vence() ->> 'assumidas' = '2', null);
+    r := pg_temp.ok(r, 'P4f0c e segue aberta', pg_temp.est(v_id) = 'aberta:-', null);
+    perform pg_temp.mostra(v_id);
+    r := pg_temp.ok(r, 'P4f0d a linha diz o que fica e o prazo', pg_temp.linha(v_id, c_h, timestamptz '2026-11-10 17:30-03') =
+      format('Decisão %s: Giancarlo: Não cabe tudo até qui 12/11. Recomendo a opção 1: Giancarlo (OS-F5) atrasa: termina ter 24/11 em vez de qui 12/11. Sem resposta até ter 10/11 às 18:00, fico com a opção 1.',
+             public._agenda_pergunta_linha(v_id, c_h, timestamptz '2026-11-10 17:30-03') ->> 'n'), pg_temp.linha(v_id, c_h, timestamptz '2026-11-10 17:30-03'));
+    v_ver := (select versao_plano from public.agenda_config where id);
+    v := pg_temp.vence();
+    select * into v_q from public.agenda_perguntas where id = v_id;
+    r := pg_temp.ok(r, 'P4f1 venceu com a recomendada: respondida pelo prazo, com a frase do prazo, sem ninguém em respondida_por, com o carimbo',
+      v_q.estado = 'respondida' and v_q.opcao_escolhida = 1 and v_q.respondida_via = 'prazo' and v_q.respondida_por is null and v_q.respondida_em = c_a and v_q.assumida_por = 'prazo' and v_q.assumida_em = c_a
+      and v_q.resposta = 'Sem resposta até ter 10/11 às 18:00: fiquei com a opção 1.' and v ->> 'assumidas' = '1' and v ->> 'recusadas' = '0', v::text);
+    select * into v_a from public.agenda_acoes a where a.pergunta_id = v_id;
+    r := pg_temp.ok(r, 'P4f2 a ação é crítica, com pergunta_id, desfazível, da vigia e sem autor, e mudou o plano de verdade',
+      v_a.critica and v_a.origem = 'vigia' and v_a.autor is null and v_a.executada and v_a.desfazivel_ate > c_a and cardinality(v_a.alocacoes_criadas) > 0 and v_a.service_order_id = pg_temp.os('305')
+      and (select versao_plano from public.agenda_config where id) <> v_ver and (select count(*) from public.agenda_acoes a where a.pergunta_id = v_id) = 1, to_jsonb(v_a)::text);
+    r := pg_temp.ok(r, 'P4f3 nenhum autor falso na proposta: criada pela vigia, sem autor, sem quem decidiu',
+      (select p.criada_por = 'vigia' and p.autor is null and p.decidida_por is null and p.estado = 'aplicada' from public.agenda_propostas p where p.id = v_a.proposta_id), null);
+    r := pg_temp.ok(r, 'P4f4 nada fica como dito pelo dono: dia não fixado por ele, estimativa como estava',
+      not exists (select 1 from public.agenda_alocacoes a where a.id = any (v_a.alocacoes_criadas) and a.fixado_por = 'dono')
+      and (select pl.estimativa_fonte = 'dono' and pl.dias = 8 from public.os_planejamento pl where pl.service_order_id = pg_temp.os('305')), null);
+    select string_agg(public._agenda_mudanca_texto(g, false), ' | ') into v_txt
+      from jsonb_array_elements(public._agenda_mudancas(c_h - 6, c_h, true, true, null)) g where g::text like '%Giancarlo%';
+    r := pg_temp.ok(r, 'P4f5 o dono lê a mudança no *o que mudou*, com o *desfaz*, sem dizer que foi ele',
+      v_txt like '%Giancarlo%' and v_txt like '%*desfaz Giancarlo* volta como estava.%' and v_txt !~* '(você (disse|pediu|decidiu|escolheu|mandou|aprovou)|como (pediu|disse)|decidiu|escolheu|dono)' and v_a.texto !~* '(você (disse|pediu|decidiu|escolheu|mandou|aprovou)|como (pediu|disse)|decidiu|escolheu|dono)', v_txt);
+    r := pg_temp.ok(r, 'P4f5b e ela vai no aviso, que só conta motor e vigia', exists (select 1 from jsonb_array_elements(public._agenda_aviso_mudancas(c_h)) g where g -> 'acao_ids' ? v_a.id::text), null);
+    v := public.agenda_desfazer_dito(pg_temp.adm(), 'Giancarlo', 'whatsapp', date '2026-11-11', c_a + interval '3 hours');
+    r := pg_temp.ok(r, 'P4f6 *desfaz Giancarlo* volta como o texto promete: os dias saem, e a ação fica desfeita',
+      v ->> 'ok' = 'true' and v ->> 'texto' = 'Desfeito. A decisão sobre o Giancarlo volta a ficar com você.' and not public._agenda_os_tem_dia(pg_temp.os('305'), date '2026-11-11')
+      and (select a.desfeita_em is not null from public.agenda_acoes a where a.id = v_a.id), v::text);
+    select * into v_q from public.agenda_perguntas q where q.tipo = 'nao_cabe' and q.service_order_id = pg_temp.os('305') and q.estado = 'aberta';
+    r := pg_temp.ok(r, 'P4f7 a decisão volta ao dono como pergunta nova, sem prazo: não vence de novo sem ser mostrada',
+      v_q.id is not null and v_q.id <> v_id and v_q.veto_ate is null and v_q.veto_espera is null and v_q.mostrada_vezes = 0 and v_q.opcoes = (select q.opcoes from public.agenda_perguntas q where q.id = v_id), left(to_jsonb(v_q)::text, 300));
+    r := pg_temp.ok(r, 'P4f8 a volta tem autor de verdade: quem desfez foi o dono, e isso sim fica em desfeita_por', (select a.desfeita_por = pg_temp.adm() from public.agenda_acoes a where a.id = v_a.id), null);
+    raise exception using errcode = 'P0001', message = '__desfaz__';
+  exception when sqlstate 'P0001' then
+    if sqlerrm <> '__desfaz__' then raise; end if;
+  end;
+
+  -- a agenda mudou depois da pergunta: ok = false vira sem_padrao, com a régua de agenda_decidir
+  begin
+    perform pg_temp.vale();
+    v_id := pg_temp.critica();
+    perform pg_temp.mostra(v_id);
+    -- outra OS toma o lugar, e a conta da opção 1 passa a terminar em outro dia
+    update public.os_planejamento set dias = 20 where service_order_id = pg_temp.os('305');
+    update public.agenda_alocacoes set estado = 'cancelada', cancelada_motivo = 'cliente' where id = md5('f7f:aloc:306:alex:2026-11-23:tarde')::uuid;
+    r := pg_temp.ok(r, 'P4g0 (controle) a versão do plano andou desde a pergunta', (select q.versao_base from public.agenda_perguntas q where q.id = v_id) <> (select versao_plano from public.agenda_config where id), null);
+    v_lg := (select count(*) from public.app_error_logs where action = 'gestor:vetos');
+    v := pg_temp.vence();
+    select * into v_q from public.agenda_perguntas where id = v_id;
+    r := pg_temp.ok(r, 'P4g1 a agenda mudou: ok = false, a pergunta fica aberta, com sem_padrao, sem carimbo e sem ação', v_q.estado = 'aberta' and v_q.veto_espera = 'sem_padrao' and v_q.assumida_por is null and v ->> 'recusadas' = '1'
+      and not exists (select 1 from public.agenda_acoes a where a.pergunta_id = v_id), v::text);
+    r := pg_temp.ok(r, 'P4g2 registra 1 vez', (select count(*) from public.app_error_logs where action = 'gestor:vetos') = v_lg + 1
+      and exists (select 1 from public.app_error_logs e where e.action = 'gestor:vetos' and e.message like '%A agenda mudou desde a pergunta%'), null);
+    v := pg_temp.vence(c_h, c_a + interval '15 minutes');
+    r := pg_temp.ok(r, 'P4g3 não repete no tique seguinte', not v ? 'recusadas' and (select count(*) from public.app_error_logs where action = 'gestor:vetos') = v_lg + 1, v::text);
+    r := pg_temp.ok(r, 'P4g4 a saída: a linha não promete mais prazo, e o dono ainda responde pelo número', pg_temp.linha(v_id, c_h, c_a) not like '%Sem resposta%' and (public._agenda_pergunta_linha(v_id, c_h, c_a) ->> 'n') is not null, pg_temp.linha(v_id, c_h, c_a));
+    raise exception using errcode = 'P0001', message = '__desfaz__';
+  exception when sqlstate 'P0001' then
+    if sqlerrm <> '__desfaz__' then raise; end if;
+  end;
+
+  -- P4n: o que nunca vence, cada um com a crítica nascida do motor ou na mesma forma, mostrada com o prazo, com tudo o mais a favor
+  begin
+    perform pg_temp.vale();
+    v_id := pg_temp.critica();
+    perform pg_temp.mostra(v_id);
+    update public.os_planejamento set prometido_tipo = 'faixa', prometido_de = date '2026-11-16', prometido_ate = date '2026-11-27', prometido_em = c_a - interval '1 hour', prometido_fonte = 'dono'
+     where service_order_id = pg_temp.os('305');
+    v := pg_temp.vence();
+    r := pg_temp.ok(r, 'P4n1 prometido surgido depois do nascimento: a crítica do motor não vence, com a foto ainda nula', pg_temp.est(v_id) = 'aberta:-' and (select veto_espera is null from public.agenda_perguntas where id = v_id)
+      and not exists (select 1 from public.agenda_acoes a where a.pergunta_id = v_id) and pg_temp.linha(v_id, c_h, c_a) like '%Isto espera você: mexe no dia que o cliente já sabe.', pg_temp.linha(v_id, c_h, c_a));
+    raise exception using errcode = 'P0001', message = '__desfaz__';
+  exception when sqlstate 'P0001' then
+    if sqlerrm <> '__desfaz__' then raise; end if;
+  end;
+  begin
+    perform pg_temp.vale();
+    v_id := pg_temp.critica_mao('atraso_longo', 'atraso_longo:p4n2', pg_temp.os('305'), array[pg_temp.os('305'), pg_temp.os('306')]);
+    perform pg_temp.mostra(v_id);
+    insert into public.os_planejamento (service_order_id, prometido_tipo, prometido_de, prometido_ate, prometido_em, prometido_fonte, atualizado_por)
+    values (pg_temp.os('306'), 'faixa', date '2026-11-23', date '2026-11-28', c_a, 'dono', pg_temp.adm());
+    v := pg_temp.vence();
+    r := pg_temp.ok(r, 'P4n2 o prometido na 2ª OS de os_ids também segura a crítica', pg_temp.est(v_id) = 'aberta:-' and not exists (select 1 from public.agenda_acoes a where a.pergunta_id = v_id), v::text);
+    raise exception using errcode = 'P0001', message = '__desfaz__';
+  exception when sqlstate 'P0001' then
+    if sqlerrm <> '__desfaz__' then raise; end if;
+  end;
+  begin
+    perform pg_temp.vale();
+    -- ficha enviada: o Roberto tem qui 12/11 no Lenine
+    v_id := pg_temp.critica_mao('atraso_longo', 'atraso_longo:p4n3', pg_temp.os('302'), array[pg_temp.os('302')]);
+    perform pg_temp.mostra(v_id);
+    r := pg_temp.ok(r, 'P4n3a (controle) sem nada dito à equipe, a crítica pode vencer', (select public._agenda_pergunta_espera(q, date '2026-11-10') is null from public.agenda_perguntas q where q.id = v_id), null);
+    insert into public.agenda_equipe_mensagens (id, payee_id, dia, tipo, modo, texto, enviar_em, estado, dedupe_key)
+    values (md5('f7f:ficha:p4n3')::uuid, (select id from public.payees where name = 'Roberto' and active), date '2026-11-12', 'ficha', 'ligado', 'Roberto, amanhã: 8h no motorhome do Lenine.',
+            timestamptz '2026-11-09 19:30-03', 'enfileirada', 'agenda-equipe:ficha:roberto:2026-11-12');
+    v := pg_temp.vence();
+    r := pg_temp.ok(r, 'P4n3 dia com ficha enviada: não vence, e a linha diz que a equipe já sabe', pg_temp.est(v_id) = 'aberta:-' and not exists (select 1 from public.agenda_acoes a where a.pergunta_id = v_id)
+      and pg_temp.linha(v_id, c_h, c_a) like '%Isto espera você: mexe no dia que a equipe já sabe.', pg_temp.linha(v_id, c_h, c_a));
+    -- a mesma ficha, nas 2 formas em que a OS pode estar na pergunta
+    v_id2 := pg_temp.critica_mao('atraso_longo', 'atraso_longo:p4n3b', pg_temp.os('305'), array[pg_temp.os('305'), pg_temp.os('302')]);
+    r := pg_temp.ok(r, 'P4n3b o dia dito na 2ª OS de os_ids também segura', (select public._agenda_pergunta_espera(q, date '2026-11-10') from public.agenda_perguntas q where q.id = v_id2) = 'equipe', null);
+    v_id2 := pg_temp.critica_mao('atraso_longo', 'atraso_longo:p4n3c', pg_temp.os('302'), array[pg_temp.os('305')]);
+    r := pg_temp.ok(r, 'P4n3c o dia dito na OS principal, fora de os_ids, também segura', (select public._agenda_pergunta_espera(q, date '2026-11-10') from public.agenda_perguntas q where q.id = v_id2) = 'equipe', null);
+    -- cancelada e reserva não foram ditas: o dia some da conta
+    update public.agenda_alocacoes set estado = 'cancelada', cancelada_motivo = 'cliente' where service_order_id = pg_temp.os('302') and payee_id = (select id from public.payees where name = 'Roberto' and active) and dia = date '2026-11-12';
+    r := pg_temp.ok(r, 'P4n3d a alocação cancelada não segura: o dia dito saiu do plano', (select public._agenda_pergunta_espera(q, date '2026-11-10') from public.agenda_perguntas q where q.id = v_id) is null, null);
+    insert into public.agenda_alocacoes (service_order_id, payee_id, dia, turno, presenca, tipo, estado, origem, reserva_de, condicao, condicao_tipo, condicao_ate)
+    select pg_temp.os('302'), (select id from public.payees where name = 'Roberto' and active), date '2026-11-12', 'tarde', 'turno', 'reserva', 'publicada', 'motor', 'condicionada', 'material', 'material', date '2026-11-11';
+    r := pg_temp.ok(r, 'P4n3e a reserva não segura: nunca foi dita a ninguém', (select public._agenda_pergunta_espera(q, date '2026-11-10') from public.agenda_perguntas q where q.id = v_id) is null, null);
+    raise exception using errcode = 'P0001', message = '__desfaz__';
+  exception when sqlstate 'P0001' then
+    if sqlerrm <> '__desfaz__' then raise; end if;
+  end;
+  begin
+    perform pg_temp.vale();
+    -- dia que o cliente ouviu: Tadeu confirmou seg 23/11, sem prometido gravado
+    v_id := pg_temp.critica_mao('atraso_longo', 'atraso_longo:p4n4', pg_temp.os('306'), array[pg_temp.os('306')]);
+    perform pg_temp.mostra(v_id);
+    update public.service_orders set client_confirmed_for = timestamptz '2026-11-23 08:00-03' where id = pg_temp.os('306');
+    v := pg_temp.vence();
+    r := pg_temp.ok(r, 'P4n4 dia avisado ao cliente: não vence, sem prometido nenhum', pg_temp.est(v_id) = 'aberta:-' and not exists (select 1 from public.agenda_acoes a where a.pergunta_id = v_id)
+      and (select public._agenda_pergunta_espera(q, date '2026-11-10') from public.agenda_perguntas q where q.id = v_id) = 'cliente', v::text);
+    -- a reserva nunca foi dita a ninguém, e o dia que já passou não conta
+    r := pg_temp.ok(r, 'P4n4b o dia já passado não segura', (select public._agenda_pergunta_espera(q, date '2026-11-24') from public.agenda_perguntas q where q.id = v_id) is null, null);
+    raise exception using errcode = 'P0001', message = '__desfaz__';
+  exception when sqlstate 'P0001' then
+    if sqlerrm <> '__desfaz__' then raise; end if;
+  end;
+  begin
+    perform pg_temp.vale();
+    v_id := pg_temp.critica_mao('remarcar_confirmado', 'remarcar_confirmado:p4n5', pg_temp.os('305'), array[pg_temp.os('305')]);
+    perform pg_temp.mostra(v_id);
+    v_id2 := pg_temp.critica_mao('dia_avisado', 'dia_avisado:p4n6', pg_temp.os('305'), array[pg_temp.os('305')]);
+    perform pg_temp.mostra(v_id2);
+    v := pg_temp.vence();
+    r := pg_temp.ok(r, 'P4n5 remarcar_confirmado nunca vence', pg_temp.est(v_id) = 'aberta:-' and (select veto_espera = 'cliente' from public.agenda_perguntas where id = v_id), v::text);
+    r := pg_temp.ok(r, 'P4n6 o tipo dia_avisado nunca vence: fora de veto_tipos', pg_temp.est(v_id2) = 'aberta:-' and (select veto_espera = 'tipo' from public.agenda_perguntas where id = v_id2), null);
+    raise exception using errcode = 'P0001', message = '__desfaz__';
+  exception when sqlstate 'P0001' then
+    if sqlerrm <> '__desfaz__' then raise; end if;
+  end;
+  begin
+    perform pg_temp.vale();
+    perform pg_temp.mostra(pg_temp.q('06'));
+    perform pg_temp.mostra(pg_temp.q('08'));
+    v := pg_temp.vence();
+    r := pg_temp.ok(r, 'P4n7 a de Flávio (prometido firme) e a diária (dinheiro), mostradas com prazo, não vencem', pg_temp.est(pg_temp.q('06')) = 'aberta:-' and pg_temp.est(pg_temp.q('08')) = 'aberta:-', v::text);
+    v := public.agenda_decidir(pg_temp.q('06'), 1::smallint, null, 'prazo', 'pelo prazo', c_h, c_a);
+    r := pg_temp.ok(r, 'P4n8 a última porta: agenda_decidir pelo prazo recusa a que espera, chamada direto', v ->> 'ok' = 'false' and v ->> 'texto' = 'Essa pergunta espera você: nada mudou.' and pg_temp.est(pg_temp.q('06')) = 'aberta:-', v::text);
+    v := public.agenda_decidir(pg_temp.q('08'), 1::smallint, null, 'prazo', 'pelo prazo', c_h, c_a);
+    r := pg_temp.ok(r, 'P4n9 a diária também, antes do desvio dela', v ->> 'ok' = 'false' and pg_temp.est(pg_temp.q('08')) = 'aberta:-', v::text);
+    raise exception using errcode = 'P0001', message = '__desfaz__';
+  exception when sqlstate 'P0001' then
+    if sqlerrm <> '__desfaz__' then raise; end if;
+  end;
+  begin
+    perform pg_temp.vale();
+    v_id := pg_temp.critica();
+    perform pg_temp.mostra(v_id);
+    v := public.agenda_decidir(v_id, 1::smallint, pg_temp.adm(), 'prazo', 'pelo prazo', c_h, c_a);
+    r := pg_temp.ok(r, 'P4n10 o canal prazo não aceita autor: não grava o dono como quem decidiu', v ->> 'ok' = 'false' and pg_temp.est(v_id) = 'aberta:-' and (select respondida_por is null from public.agenda_perguntas where id = v_id), v::text);
+    update public.agenda_config set veto_tipos = array_remove(veto_tipos, 'nao_cabe') where id;
+    v := pg_temp.vence();
+    r := pg_temp.ok(r, 'P4n11 tipo que saiu de veto_tipos depois de nascer: não vence', pg_temp.est(v_id) = 'aberta:-' and (select public._agenda_pergunta_espera(q, date '2026-11-10') from public.agenda_perguntas q where q.id = v_id) = 'tipo', v::text);
+    update public.agenda_config set veto_tipos = veto_tipos || '{nao_cabe}', modo_proposta = 'sombra' where id;
+    v := pg_temp.vence();
+    r := pg_temp.ok(r, 'P4n12 modo de quem pergunta fora de ligado: não vence', pg_temp.est(v_id) = 'aberta:-' and (select public._agenda_pergunta_espera(q, date '2026-11-10') from public.agenda_perguntas q where q.id = v_id) = 'teste', v::text);
+    update public.agenda_config set modo_proposta = 'ligado' where id;
+    raise exception using errcode = 'P0001', message = '__desfaz__';
+  exception when sqlstate 'P0001' then
+    if sqlerrm <> '__desfaz__' then raise; end if;
+  end;
+  begin
+    -- o freio: a crítica do motor, mostrada e vencida: 0 ações, o plano igual, as perguntas iguais fora veto_teria_em
+    perform pg_temp.vale();
+    v_id := pg_temp.critica();
+    perform pg_temp.mostra(v_id);
+    update public.agenda_config set gestor_so_propor = true where id;
+    v_ver := (select versao_plano from public.agenda_config where id);
+    v_n := (select count(*) from public.agenda_acoes);
+    v_txt := (select md5(string_agg((to_jsonb(q) - 'veto_teria_em' - 'destrava')::text, '|' order by q.id)) from public.agenda_perguntas q);
+    v := pg_temp.vence();
+    r := pg_temp.ok(r, 'P4n13 com o freio, a crítica vencida: só veto_teria_em, 0 ações, md5 igual, o plano igual', v ->> 'teria' = '3' and v ->> 'assumidas' = '0'
+      and (select veto_teria_em = c_a from public.agenda_perguntas where id = v_id) and (select count(*) from public.agenda_acoes) = v_n and (select versao_plano from public.agenda_config where id) = v_ver
+      and (select md5(string_agg((to_jsonb(q) - 'veto_teria_em' - 'destrava')::text, '|' order by q.id)) from public.agenda_perguntas q) = v_txt, v::text);
+    v := public.agenda_decidir(v_id, 1::smallint, null, 'prazo', 'pelo prazo', c_h, c_a);
+    r := pg_temp.ok(r, 'P4n14 com o freio, a porta recusa também', v ->> 'ok' = 'false' and pg_temp.est(v_id) = 'aberta:-', v::text);
+    raise exception using errcode = 'P0001', message = '__desfaz__';
+  exception when sqlstate 'P0001' then
+    if sqlerrm <> '__desfaz__' then raise; end if;
+  end;
+
+  -- o teto só fecha efeito nada: a crítica fica, mesmo a que pode vencer pelo prazo
   begin
     perform pg_temp.vale();
     perform pg_temp.mostra(pg_temp.q('07'));
-    perform pg_temp.mostra(pg_temp.q('06'));
-    perform pg_temp.mostra(pg_temp.q('08'));
-    r := pg_temp.ok(r, 'P4f (controle) a crítica do Giancarlo tem tudo o que a regra da spec pedia: mostrada antes do prazo, tipo em veto_tipos, sem espera, opção de verdade',
-      (select q.critica and q.veto_espera is null and q.padrao_efeito = 'opcao' and q.tipo = any ((public._agenda_cfg()).veto_tipos) and q.mostrada_em < q.veto_ate and q.veto_ate <= c_a
-         from public.agenda_perguntas q where q.id = pg_temp.q('07')), null);
-    v_ver := (select versao_plano from public.agenda_config where id);
-    v_n := (select count(*) from public.agenda_acoes);
-    v := pg_temp.vence();
-    r := pg_temp.ok(r, 'P4g crítica nunca vence sozinha pelo prazo: aberta, sem carimbo, sem ação, sem mexer no plano',
-      (select q.estado = 'aberta' and q.assumida_por is null and q.opcao_escolhida is null and q.respondida_via is null from public.agenda_perguntas q where q.id = pg_temp.q('07'))
-      and (select versao_plano from public.agenda_config where id) = v_ver
-      and not exists (select 1 from public.agenda_acoes a where a.pergunta_id = pg_temp.q('07')), v::text);
-    r := pg_temp.ok(r, 'P4h e a espera crítica não vai para a coluna: a foto do nascimento fica', (select veto_espera is null from public.agenda_perguntas where id = pg_temp.q('07'))
-      and public._agenda_pergunta_linha(pg_temp.q('07'), c_h, c_a) ->> 'veto_ate' is null, null);
-    v := public.agenda_decidir(pg_temp.q('07'), 1::smallint, null, 'prazo', 'pelo prazo', c_h, c_a);
-    r := pg_temp.ok(r, 'P4i a última porta: agenda_decidir pelo prazo recusa a crítica, mesmo chamada direto', v ->> 'ok' = 'false' and pg_temp.est(pg_temp.q('07')) = 'aberta:-', v::text);
-    v := public.agenda_decidir(pg_temp.q('08'), 1::smallint, null, 'prazo', 'pelo prazo', c_h, c_a);
-    r := pg_temp.ok(r, 'P4j a diária também, antes do desvio dela', v ->> 'ok' = 'false' and pg_temp.est(pg_temp.q('08')) = 'aberta:-', v::text);
     v := public._agenda_comunicar_teto(c_h, c_a);
-    r := pg_temp.ok(r, 'P4k o teto não fecha crítica: fecha a mais velha que não é crítica',
-      pg_temp.est(pg_temp.q('07')) = 'aberta:-' and pg_temp.est(pg_temp.q('06')) = 'aberta:-' and pg_temp.est(pg_temp.q('08')) = 'aberta:-' and v ->> 'assumidas' = '1' and pg_temp.est(pg_temp.q('01')) = 'resolvida:teto', v::text);
-    -- só sobram críticas acima do teto: ele passa, e diz quantas
+    r := pg_temp.ok(r, 'P4k o teto não aplica opção: fecha as 3 mais velhas de efeito nada, e a crítica fica, mesmo podendo vencer pelo prazo',
+      pg_temp.est(pg_temp.q('07')) = 'aberta:-' and pg_temp.est(pg_temp.q('06')) = 'aberta:-' and pg_temp.est(pg_temp.q('08')) = 'aberta:-' and v ->> 'assumidas' = '3' and pg_temp.est(pg_temp.q('01')) = 'resolvida:teto', v::text);
+    -- só sobram críticas e quem espera acima do teto: ele passa, e diz quantas
     update public.agenda_config set perguntas_abertas_max = 3 where id;
     update public.agenda_perguntas set veto_espera = 'dono' where id in (pg_temp.q('04'), pg_temp.q('05'));
     v := public._agenda_comunicar_teto(c_h, c_a);
@@ -605,11 +814,9 @@ begin
     update public.agenda_config set veto_tipos = array_remove(veto_tipos, 'duracao') where id;
     v := pg_temp.vence();
     r := pg_temp.ok(r, 'P4k3 a lista mudou depois de a pergunta nascer: fora de veto_tipos hoje não vence', pg_temp.est(pg_temp.q('02')) = 'aberta:-' and pg_temp.est(pg_temp.q('03')) = 'resolvida:prazo'
-      and (select public._agenda_pergunta_espera(q) from public.agenda_perguntas q where q.id = pg_temp.q('02')) = 'tipo', v::text);
+      and (select public._agenda_pergunta_espera(q, date '2026-11-10') from public.agenda_perguntas q where q.id = pg_temp.q('02')) = 'tipo', v::text);
     v := public._agenda_pergunta_assumir(pg_temp.q('06'), 'prazo', c_h, c_a);
     r := pg_temp.ok(r, 'P4k4 a porta de dentro relê: chamada direto na que espera, não assume', v ->> 'assumida' = 'false' and v ->> 'motivo' = 'cliente' and pg_temp.est(pg_temp.q('06')) = 'aberta:-', v::text);
-    v := public._agenda_pergunta_assumir(pg_temp.q('07'), 'prazo', c_h, c_a);
-    r := pg_temp.ok(r, 'P4k5 chamada direto na crítica, não assume', v ->> 'assumida' = 'false' and v ->> 'motivo' = 'critica' and pg_temp.est(pg_temp.q('07')) = 'aberta:-', v::text);
     v := public._agenda_pergunta_assumir(pg_temp.q('03'), 'prazo', c_h, c_a);
     r := pg_temp.ok(r, 'P4k6 a fechada não assume de novo', v ->> 'assumida' = 'false' and v ->> 'motivo' = 'fechada' and (select count(*) from public.agenda_acoes a where a.pergunta_id = pg_temp.q('03')) = 1, v::text);
     r := pg_temp.ok(r, 'P4k7 o caminho que não existe: 22023', pg_temp.lanca(format('select public._agenda_pergunta_assumir(%L, ''x'', current_date, now())', pg_temp.q('05'))) = '22023'
@@ -628,10 +835,10 @@ begin
     v_id := pg_temp.estimativa(pg_temp.os('305'));
     update public.agenda_config set gestor_so_propor = true where id;
     v := public.agenda_decidir(v_id, 2::smallint, null, 'prazo', 'pelo prazo', c_h, c_a);
-    r := pg_temp.ok(r, 'P4m agenda_decidir pelo prazo com o freio: a porta recusa, nada mudou', v ->> 'ok' = 'false' and v ->> 'texto' = 'Essa pergunta espera você: nada mudou.' and pg_temp.est(v_id) = 'aberta:-', v::text);
+    r := pg_temp.ok(r, 'P4l2 agenda_decidir pelo prazo com o freio: a porta recusa, nada mudou', v ->> 'ok' = 'false' and v ->> 'texto' = 'Essa pergunta espera você: nada mudou.' and pg_temp.est(v_id) = 'aberta:-', v::text);
     update public.agenda_config set gestor_so_propor = false, modo_veto = 'sombra' where id;
     v := public.agenda_decidir(v_id, 2::smallint, null, 'prazo', 'pelo prazo', c_h, c_a);
-    r := pg_temp.ok(r, 'P4n e em sombra', v ->> 'ok' = 'false' and v ->> 'texto' = 'Essa pergunta espera você: nada mudou.' and pg_temp.est(v_id) = 'aberta:-', v::text);
+    r := pg_temp.ok(r, 'P4l3 e em sombra', v ->> 'ok' = 'false' and v ->> 'texto' = 'Essa pergunta espera você: nada mudou.' and pg_temp.est(v_id) = 'aberta:-', v::text);
     raise exception using errcode = 'P0001', message = '__desfaz__';
   exception when sqlstate 'P0001' then
     if sqlerrm <> '__desfaz__' then raise; end if;
@@ -642,7 +849,7 @@ begin
     perform pg_temp.vale();
     update public.agenda_config set modo_marcar_sozinho = 'ligado' where id;
     v_id := pg_temp.estimativa(pg_temp.os('305'), null, 3::smallint);  -- a opção "Me diga" não vale sem resposta: _agenda_gestor_decidir devolve ok = false
-    r := pg_temp.ok(r, 'P4b0 (controle) a pergunta do efeito opcao pode vencer: a regra deixa', (select public._agenda_pergunta_espera(q) is null and q.padrao_efeito = 'opcao' from public.agenda_perguntas q where q.id = v_id), null);
+    r := pg_temp.ok(r, 'P4b0 (controle) a pergunta do efeito opcao pode vencer: a regra deixa', (select public._agenda_pergunta_espera(q, date '2026-11-10') is null and q.padrao_efeito = 'opcao' from public.agenda_perguntas q where q.id = v_id), null);
     v_n := (select count(*) from public.app_error_logs where action = 'gestor:vetos');
     v := pg_temp.vence();
     select * into v_q from public.agenda_perguntas where id = v_id;
@@ -691,7 +898,7 @@ begin
     end $f$;
     v := pg_temp.vence();
     r := pg_temp.ok(r, 'P4b6 efeito opcao sem opção de verdade: sem_padrao, e agenda_decidir nem é chamada',
-      (select public._agenda_pergunta_espera(q) from public.agenda_perguntas q where q.id = v_id) = 'sem_padrao' and pg_temp.est(v_id) = 'aberta:-' and coalesce(v ->> 'erros', '0') = '0', v::text);
+      (select public._agenda_pergunta_espera(q, date '2026-11-10') from public.agenda_perguntas q where q.id = v_id) = 'sem_padrao' and pg_temp.est(v_id) = 'aberta:-' and coalesce(v ->> 'erros', '0') = '0', v::text);
     v_id2 := pg_temp.perg('chegou', 'chegou:p4:fora', pg_temp.os('305'), 'Forçada.', '[]', 1::smallint);
     perform set_config('agenda.backfill_padrao', 'on', true);
     update public.agenda_perguntas set padrao_efeito = 'opcao', padrao_chave = 'recomendacao' where id = v_id2;
@@ -699,14 +906,14 @@ begin
     perform pg_temp.mostra(v_id2);
     v := pg_temp.vence();
     r := pg_temp.ok(r, 'P4b7 efeito opcao com a opção fora das opções: sem_padrao, e agenda_decidir nem é chamada',
-      (select public._agenda_pergunta_espera(q) from public.agenda_perguntas q where q.id = v_id2) = 'sem_padrao' and pg_temp.est(v_id2) = 'aberta:-' and coalesce(v ->> 'erros', '0') = '0', v::text);
+      (select public._agenda_pergunta_espera(q, date '2026-11-10') from public.agenda_perguntas q where q.id = v_id2) = 'sem_padrao' and pg_temp.est(v_id2) = 'aberta:-' and coalesce(v ->> 'erros', '0') = '0', v::text);
     v_id2 := pg_temp.perg('chegou', 'chegou:p4:sem', pg_temp.os('305'), 'Forçada.');
     perform set_config('agenda.backfill_padrao', 'on', true);
     update public.agenda_perguntas set padrao_efeito = null, padrao_chave = null where id = v_id2;
     perform set_config('agenda.backfill_padrao', '', true);
     perform pg_temp.mostra(v_id2);
     v := pg_temp.vence();
-    r := pg_temp.ok(r, 'P4b8 sem padrão nenhum (a aberta de antes do backfill): não vence', (select public._agenda_pergunta_espera(q) from public.agenda_perguntas q where q.id = v_id2) = 'sem_padrao' and pg_temp.est(v_id2) = 'aberta:-', v::text);
+    r := pg_temp.ok(r, 'P4b8 sem padrão nenhum (a aberta de antes do backfill): não vence', (select public._agenda_pergunta_espera(q, date '2026-11-10') from public.agenda_perguntas q where q.id = v_id2) = 'sem_padrao' and pg_temp.est(v_id2) = 'aberta:-', v::text);
     raise exception using errcode = 'P0001', message = '__desfaz__';
   exception when sqlstate 'P0001' then
     if sqlerrm <> '__desfaz__' then raise; end if;
@@ -715,10 +922,10 @@ begin
   -- P4c: o prometido que surgiu depois de a pergunta nascer
   begin
     perform pg_temp.vale();
-    r := pg_temp.ok(r, 'P4c0 (controle) a do Giancarlo nasceu sem prometido', (select veto_espera is null from public.agenda_perguntas where id = pg_temp.q('07')) and pg_temp.linha(pg_temp.q('07'), c_h, c_a) like '%Recomendo a opção 1.', null);
+    r := pg_temp.ok(r, 'P4c0 (controle) a do Giancarlo nasceu sem prometido', (select veto_espera is null from public.agenda_perguntas where id = pg_temp.q('07')) and pg_temp.linha(pg_temp.q('07'), c_h, c_a) like '%fico com a opção 1.', null);
     insert into public.os_planejamento (service_order_id, prometido_tipo, prometido_de, prometido_ate, prometido_em, prometido_fonte, atualizado_por)
     values (pg_temp.os('305'), 'firme', date '2026-11-20', date '2026-11-20', c_a, 'dono', pg_temp.adm());
-    r := pg_temp.ok(r, 'P4c1 na crítica, a linha já diz que espera o cliente, com a foto ainda nula',
+    r := pg_temp.ok(r, 'P4c1 na crítica, a linha passa a dizer que espera o cliente, com a foto ainda nula',
       (select veto_espera is null from public.agenda_perguntas where id = pg_temp.q('07')) and pg_temp.linha(pg_temp.q('07'), c_h, c_a) like '%Isto espera você: mexe no dia que o cliente já sabe.', pg_temp.linha(pg_temp.q('07'), c_h, c_a));
     r := pg_temp.ok(r, 'P4c2a e a ordem também', (select e ->> 'veto_espera' from jsonb_array_elements(public.agenda_perguntas_em_ordem(c_h, c_a)) e where e ->> 'id' = pg_temp.q('07')::text) = 'cliente', null);
     -- o efeito opcao que pode vencer: a mesma OS
@@ -737,7 +944,7 @@ begin
     update public.agenda_config set modo_marcar_sozinho = 'ligado' where id;
     -- nasce sem nada dito; o prometido chega na 2ª OS da pergunta depois de ela nascer
     v_id := pg_temp.estimativa(pg_temp.os('305'), null, 3::smallint);
-    r := pg_temp.ok(r, 'P4c4 (controle) sem prometido a pergunta passa pela regra, e vira recusa por outro motivo', (select public._agenda_pergunta_espera(q) is null from public.agenda_perguntas q where q.id = v_id), null);
+    r := pg_temp.ok(r, 'P4c4 (controle) sem prometido a pergunta passa pela regra, e vira recusa por outro motivo', (select public._agenda_pergunta_espera(q, date '2026-11-10') is null from public.agenda_perguntas q where q.id = v_id), null);
     raise exception using errcode = 'P0001', message = '__desfaz__';
   exception when sqlstate 'P0001' then
     if sqlerrm <> '__desfaz__' then raise; end if;
@@ -755,7 +962,7 @@ begin
     v_lg := (select count(*) from public.app_error_logs);
     v := pg_temp.vence();
     r := pg_temp.ok(r, 'P4c5 o prometido na 2ª OS de os_ids também segura, e sem linha de log: não é erro, é regra',
-      pg_temp.est(v_id) = 'aberta:-' and (select public._agenda_pergunta_espera(q) from public.agenda_perguntas q where q.id = v_id) = 'cliente'
+      pg_temp.est(v_id) = 'aberta:-' and (select public._agenda_pergunta_espera(q, date '2026-11-10') from public.agenda_perguntas q where q.id = v_id) = 'cliente'
       and (select count(*) from public.app_error_logs) = v_lg, v::text);
     raise exception using errcode = 'P0001', message = '__desfaz__';
   exception when sqlstate 'P0001' then
@@ -770,7 +977,7 @@ begin
             '[{"n": 1, "texto": "4 dias"}, {"n": 2, "texto": "6 dias"}]', 2, 'ligado', timestamptz '2026-11-09 09:00-03') returning id into v_id;
     insert into public.os_planejamento (service_order_id, prometido_tipo, prometido_de, prometido_ate, prometido_em, prometido_fonte, atualizado_por)
     values (pg_temp.os('305'), 'faixa', date '2026-11-23', date '2026-11-28', c_a, 'dono', pg_temp.adm());
-    r := pg_temp.ok(r, 'P4c7 o prometido na OS principal, fora de os_ids, também segura', (select public._agenda_pergunta_espera(q) from public.agenda_perguntas q where q.id = v_id) = 'cliente', null);
+    r := pg_temp.ok(r, 'P4c7 o prometido na OS principal, fora de os_ids, também segura', (select public._agenda_pergunta_espera(q, date '2026-11-10') from public.agenda_perguntas q where q.id = v_id) = 'cliente', null);
     raise exception using errcode = 'P0001', message = '__desfaz__';
   exception when sqlstate 'P0001' then
     if sqlerrm <> '__desfaz__' then raise; end if;
@@ -781,7 +988,7 @@ begin
     -- o efeito nada não muda dia: Nelson tem faixa prometida, e a §6.3 é ele
     r := pg_temp.ok(r, 'P4c6 efeito nada com prometido vence: não mexe em dia nenhum (§6.3)',
       (select pl.prometido_tipo = 'faixa' from public.os_planejamento pl where pl.service_order_id = pg_temp.os('301'))
-      and (select public._agenda_pergunta_espera(q) is null from public.agenda_perguntas q where q.id = pg_temp.q('02')), null);
+      and (select public._agenda_pergunta_espera(q, date '2026-11-10') is null from public.agenda_perguntas q where q.id = pg_temp.q('02')), null);
     raise exception using errcode = 'P0001', message = '__desfaz__';
   exception when sqlstate 'P0001' then
     if sqlerrm <> '__desfaz__' then raise; end if;
@@ -793,7 +1000,7 @@ begin
     perform pg_temp.mostra(pg_temp.q('01'));
     v_disp := (select count(*) from public.agenda_disponibilidade d where d.payee_id = public._agenda_dono(null));
     v_cap := (select coalesce(string_agg(k.payee_id::text || k.dia::text, ','), '') from public.agenda_capacidade(date '2026-11-16', date '2026-11-20', c_h) k where k.payee_id = public._agenda_dono(null));
-    r := pg_temp.ok(r, 'P4d0 (controle) o padrão do dono: abre_e_fecha, efeito nada, pode vencer', (select q.padrao_chave = 'abre_e_fecha' and q.padrao_efeito = 'nada' and public._agenda_pergunta_espera(q) is null from public.agenda_perguntas q where q.id = pg_temp.q('01')), null);
+    r := pg_temp.ok(r, 'P4d0 (controle) o padrão do dono: abre_e_fecha, efeito nada, pode vencer', (select q.padrao_chave = 'abre_e_fecha' and q.padrao_efeito = 'nada' and public._agenda_pergunta_espera(q, date '2026-11-10') is null from public.agenda_perguntas q where q.id = pg_temp.q('01')), null);
     v := pg_temp.vence();
     select * into v_q from public.agenda_perguntas where id = pg_temp.q('01');
     select * into v_a from public.agenda_acoes a where a.pergunta_id = pg_temp.q('01') and a.tipo = 'assumir';
@@ -929,7 +1136,7 @@ begin
     update public.agenda_config set modo_marcar_sozinho = 'ligado' where id;
     v_id := pg_temp.estimativa(pg_temp.os('305'));
     v := public._agenda_comunicar_teto(c_h, c_a);
-    r := pg_temp.ok(r, 'P5j o teto nunca aplica opção: a estimativa pode vencer pelo prazo, não pelo teto', pg_temp.est(v_id) = 'aberta:-' and v ->> 'assumidas' = '0' and (select public._agenda_pergunta_espera(q) is null from public.agenda_perguntas q where q.id = v_id), v::text);
+    r := pg_temp.ok(r, 'P5j o teto nunca aplica opção: a estimativa pode vencer pelo prazo, não pelo teto', pg_temp.est(v_id) = 'aberta:-' and v ->> 'assumidas' = '0' and (select public._agenda_pergunta_espera(q, date '2026-11-10') is null from public.agenda_perguntas q where q.id = v_id), v::text);
     raise exception using errcode = 'P0001', message = '__desfaz__';
   exception when sqlstate 'P0001' then
     if sqlerrm <> '__desfaz__' then raise; end if;
@@ -1000,8 +1207,8 @@ begin
     perform pg_temp.mostra(pg_temp.q('07'));
     perform pg_temp.mostra(pg_temp.q('06'));
     v := pg_temp.vence();
-    r := pg_temp.ok(r, 'P6f em sombra, a crítica e a que espera o cliente não ganham veto_teria_em', (select count(*) from public.agenda_perguntas q where q.id in (pg_temp.q('06'), pg_temp.q('07')) and q.veto_teria_em is not null) = 0
-      and v ->> 'teria' = '2', v::text);
+    r := pg_temp.ok(r, 'P6f em sombra, a crítica que pode vencer entra na medição; a que espera o cliente, não', (select q.veto_teria_em is null from public.agenda_perguntas q where q.id = pg_temp.q('06'))
+      and (select q.veto_teria_em is not null from public.agenda_perguntas q where q.id = pg_temp.q('07')) and v ->> 'teria' = '3', v::text);
     update public.agenda_perguntas set veto_espera = 'dono' where id in (pg_temp.q('01'), pg_temp.q('04'));
     v := public._agenda_comunicar_teto(c_h, c_a);
     r := pg_temp.ok(r, 'P6g em sombra, o teto também não marca quem espera: pula para a que pode vencer', (select q.veto_teria_em is null from public.agenda_perguntas q where q.id = pg_temp.q('01'))
@@ -1360,6 +1567,9 @@ begin
     position('function public.agenda_resolver_os(' in v_mig) = 0 and position('function public.agenda_rascunho_' in v_mig) = 0 and position('function public.os_carteira(' in v_mig) = 0
     and position('function public._agenda_cliente_contexto(' in v_mig) = 0 and position('function public.agenda_data_dita(' in v_mig) = 0 and position('function public._agenda_data_conferida(' in v_mig) = 0
     and split_part(v_mig, '-- ── 9. As recriadas', 1) !~* '(insert into|update|delete from)\s+public\.agenda_disponibilidade', null);
+  r := pg_temp.ok(r, 'P9e2 agenda_propor e agenda_aplicar não mudam, nem de corpo nem de grant: a decisão pelo prazo não abre caminho novo para eles',
+    position('function public.agenda_propor(' in v_mig) = 0 and position('function public.agenda_aplicar(' in v_mig) = 0
+    and v_mig !~* 'on function[^;]*public\.agenda_(propor|aplicar)\(' , null);
   r := pg_temp.ok(r, 'P9f sem alter table nem dado: só funções', v_mig !~* '^\s*alter\s+table' and v_mig !~* '\ninsert into public\.agenda_config', null);
   perform pg_temp.gravar(r);
 end
@@ -1371,6 +1581,7 @@ declare
   r      jsonb := '[]';
   v_tec  uuid;
   v_adm  uuid := pg_temp.adm();
+  v_id   uuid;
   v      text;
   x      record;
   c_args constant text := $s$date '2026-11-10', timestamptz '2026-11-10 17:30-03'$s$;
@@ -1383,7 +1594,7 @@ begin
       ('_agenda_zona', $q$select public._agenda_zona(null, null, date '2026-11-10', date '2026-11-10')$q$),
       ('_agenda_classe_da_saida', $q$select public._agenda_classe_da_saida('linha', null, date '2026-11-10', now())::text$q$),
       ('_agenda_pergunta_linha', format('select public._agenda_pergunta_linha(%L, date ''2026-11-10'', now())::text', pg_temp.q('01'))),
-      ('_agenda_pergunta_espera', format('select public._agenda_pergunta_espera(q) from public.agenda_perguntas q where q.id = %L', pg_temp.q('01'))),
+      ('_agenda_pergunta_espera', format('select public._agenda_pergunta_espera(q, date ''2026-11-10'') from public.agenda_perguntas q where q.id = %L', pg_temp.q('01'))),
       ('_agenda_pergunta_frases', format('select public._agenda_pergunta_frases(q, date ''2026-11-10'')::text from public.agenda_perguntas q where q.id = %L', pg_temp.q('01'))),
       ('_agenda_pergunta_assumir', format('select public._agenda_pergunta_assumir(%L, ''prazo'', date ''2026-11-10'', now())::text', pg_temp.q('02'))),
       ('_agenda_destrava', format('select public._agenda_destrava(q, date ''2026-11-10'')::text from public.agenda_perguntas q where q.id = %L', pg_temp.q('01'))),
@@ -1442,6 +1653,30 @@ begin
   exception when sqlstate 'P0001' then
     if sqlerrm <> '__desfaz__' then raise; end if;
   end;
+  begin
+    -- a crítica nascida do motor, como service_role: a rodada aplica sem autor, e ninguém mais alcança os 2 de dentro
+    perform pg_temp.vale();
+    update public.agenda_config set modo_marcar_sozinho = 'ligado', modo_compre_ate = 'sombra' where id;
+    v_id := pg_temp.critica();
+    perform pg_temp.mostra(v_id);
+    v := pg_temp.como(null, 'service_role', format('select public.agenda_gestor_rodar(%s)::text', $s$date '2026-11-10', timestamptz '2026-11-10 18:05-03'$s$));
+    r := pg_temp.ok(r, 'P10h4 a crítica vence pela rodada como service_role: sem 42501, sem autor em nenhuma das 3 tabelas',
+      v::jsonb #>> '{contagens,vetos,erros}' = '0' and pg_temp.est(v_id) = 'respondida:prazo'
+      and (select a.autor is null and a.critica and a.origem = 'vigia' from public.agenda_acoes a where a.pergunta_id = v_id)
+      and (select p.autor is null and p.decidida_por is null from public.agenda_propostas p join public.agenda_acoes a on a.proposta_id = p.id where a.pergunta_id = v_id)
+      and (select q.respondida_por is null from public.agenda_perguntas q where q.id = v_id), left(v, 400));
+    raise exception using errcode = 'P0001', message = '__desfaz__';
+  exception when sqlstate 'P0001' then
+    if sqlerrm <> '__desfaz__' then raise; end if;
+  end;
+  for x in select * from (values
+      ('agenda_aplicar', format('select public.agenda_aplicar(%L, null, ''vigia'', null, null, date ''2026-11-10'', now())::text', gen_random_uuid())),
+      ('agenda_decidir', format('select public.agenda_decidir(%L, 1::smallint, null, ''prazo'', ''t'', date ''2026-11-10'', now())::text', pg_temp.q('07')))) t(nome, sql) loop
+    r := pg_temp.ok(r, format('P10h5 %s pela origem do prazo: anon, técnico e o login do administrador não alcançam; quem alcança é o service_role, como antes', x.nome),
+      pg_temp.como(null, 'anon', x.sql) like 'erro 42501%' and pg_temp.como(v_tec, 'authenticated', x.sql) like 'erro 42501%' and pg_temp.como(pg_temp.adm(), 'authenticated', x.sql) like 'erro 42501%'
+      and has_function_privilege('service_role', format('public.%s', case x.nome when 'agenda_aplicar' then 'agenda_aplicar(uuid, uuid[], text, uuid, uuid, date, timestamptz)' else 'agenda_decidir(uuid, smallint, uuid, text, text, date, timestamptz)' end), 'execute'), null);
+  end loop;
+  r := pg_temp.ok(r, 'P10h6 agenda_propor: anon não alcança, e a porta não mudou', not has_function_privilege('anon', 'public.agenda_propor(text, date, date, uuid[], jsonb, boolean, text, uuid, date, timestamptz)', 'execute'), null);
   begin
     -- a porta da decisão pelo prazo continua só no service_role, como antes, e o desfazer também
     v := format('select public.agenda_decidir(%L, 1::smallint, null, ''prazo'', ''t'', %s)::text', pg_temp.q('07'), c_args);

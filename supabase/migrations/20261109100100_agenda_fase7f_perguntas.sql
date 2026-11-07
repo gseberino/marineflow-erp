@@ -2,7 +2,7 @@
 -- destrava, o prazo, o teto de abertas, a rodada comunicar e a volta do que ficou com o padrão.
 -- Spec: scratchpad agenda-pesquisa/spec-fase7f.md (§5.2, §6.2, §6.3, §8.3 agenda_fase7f_perguntas.sql e o bloco R8, que vale sobre o corpo: R8.1, R8.2, R8.4, R8.5-7 a 11,
 -- R8.6, R8.7, R8.8, R8.12, R8.13); nomes: fase7-registro.md §1 (7f P2); respostas do dono: fase7-padroes.md (AG7-15 o prazo; AG7-24 o teto; AG7-02 os dias do dono primeiro;
--- AG7-37 o dono conta só para abrir e fechar). Ordem do fio (07/11): pergunta crítica nunca vence sozinha.
+-- AG7-37 o dono conta só para abrir e fechar).
 -- Depende das Fases 1 a 6, do lote de 30/10, das etapas 7a a 7d e da base da 7f (20261109100000). NÃO depende da 7e.
 --
 -- ═══ SÓ FUNÇÕES — OK NOMEADO ═══ (9 funções novas, 3 recriadas; nenhuma tabela, nenhuma coluna, nenhuma lista, nenhum dado)
@@ -15,7 +15,7 @@
 --
 -- O QUE MUDA:
 --   1. _agenda_pergunta_espera (nova): por que a pergunta não vence AGORA, ou nulo se pode vencer. É a regra única: quem vence, quem escreve o prazo e a ordem leem a mesma
---      função. veto_espera é a foto do nascimento: aqui o prometido é conferido de novo (R8.5, notas do P1). Crítica nunca vence sozinha.
+--      função. veto_espera é a foto do nascimento: aqui o prometido e o dia já dito à equipe ou ao cliente são conferidos de novo (R8.5, notas do P1).
 --   2. _agenda_pergunta_frases (nova): o texto de cada chave, num lugar só (o que fica sem resposta). Só diz o que está no banco: sem alocação é "conto", nunca "marquei".
 --   3. _agenda_pergunta_linha (nova): a linha de uma pergunta, pelo título, o que fica e o prazo, com "Decisão N:" quando ela tem número em agenda_decisoes_abertas (R8.4, R8.7).
 --      O prazo só é escrito com o prazo valendo de verdade (modo_veto ligado, sem o freio). veto_ate da saída = o prazo que está no texto; veto_diria = o que seria, só em sombra.
@@ -27,7 +27,8 @@
 --   8. _agenda_comunicar_teto (nova): acima de perguntas_abertas_max, a mais velha que pode vencer, só com efeito nada: o teto nunca muda a agenda.
 --   9. agenda_comunicar_rodar (nova): a rodada, molde de agenda_gestor_rodar, com o relógio entre os passos e parou_no (R8.5-7). Sem set statement_timeout e sem o passo vetos
 --      (R8.5-8). Os passos de P4 e P5 são pulados enquanto não existem. NADA a chama ainda: o passo 0e do task-automations é do P4.
---  10. agenda_decidir (recriada): aceita o canal prazo; pelo prazo, recusa crítica e recusa com o freio. Nada mais muda.
+--  10. agenda_decidir (recriada): aceita o canal prazo. Pelo prazo, recusa com o freio, em sombra e no que não pode vencer; o que passa propõe e aplica como as rodadas automáticas: origem
+--      vigia, sem autor. Ninguém decidiu: nem a ação, nem a proposta, nem a pergunta dizem que foi o dono. Nada mais muda.
 --  11. agenda_desfazer (recriada): o ramo da ação assumir, antes do caminho genérico: a pergunta volta aberta, sem prazo (R8.5-10).
 --
 -- O QUE NÃO MUDA: com modo_veto desligado ou em sombra, com ou sem o freio, as leituras e os textos ao dono, à equipe e ao cliente são os de antes, byte a byte: nada lê as funções
@@ -49,7 +50,7 @@
 --     public._agenda_comunicar_destrava(date, timestamptz), public.agenda_perguntas_em_ordem(date, timestamptz),
 --     public._agenda_pergunta_assumir(uuid, text, date, timestamptz), public._agenda_pergunta_linha(uuid, date, timestamptz),
 --     public._agenda_pergunta_frases(public.agenda_perguntas, date), public._agenda_destrava(public.agenda_perguntas, date),
---     public._agenda_pergunta_espera(public.agenda_perguntas);
+--     public._agenda_pergunta_espera(public.agenda_perguntas, date);
 --   Ação assumir que já exista fica como registro (o tipo continua na lista).
 --
 -- IDEMPOTENTE: create or replace function, revoke/grant e comment.
@@ -57,17 +58,19 @@
 -- ── 1. Quem pode vencer agora ───────────────────────────────────────────────────────────────────────
 -- A regra única. veto_espera é a foto do nascimento, e aqui ela é conferida: o prometido que surgiu depois segura o efeito opcao, em qualquer OS da pergunta (só 4 de 131 OS têm linha
 -- em os_planejamento, e sem linha o exists é falso, o caso comum). Só o efeito opcao: o efeito nada não muda dia nenhum (§6.3: Nelson tem faixa prometida e a estimativa dele vence).
--- Fora de veto_tipos hoje também segura: a lista pode mudar depois de a pergunta nascer. Opção nula ou fora das opções = sem_padrao, nunca agenda_decidir(null) (R8.12-2). A
--- crítica vem depois do prometido para a linha dizer o motivo certo. Quem fez a pergunta em teste segura, como no bloco do 7a: o interruptor de quem pergunta vale antes do prazo. Devolve o que
--- segura, ou nulo: 'critica' e 'teste' só existem aqui, não são valores da coluna.
-create or replace function public._agenda_pergunta_espera(p_q public.agenda_perguntas)
+-- O dia já dito segura do mesmo jeito: alocação de pé, de hoje em diante, em OS da pergunta, em dia que _agenda_dia_avisado diz que o cliente ou a equipe já sabem (AG7-15: o que muda dia já dito
+-- espera sempre; a ficha enviada é a parte da equipe). Fora de veto_tipos hoje também segura: a lista pode mudar depois de a pergunta nascer. Opção nula ou fora das opções = sem_padrao, nunca
+-- agenda_decidir(null) (R8.12-2). Quem fez a pergunta em teste segura, como no bloco do 7a: o interruptor de quem pergunta vale antes do prazo. Devolve o que segura, ou nulo: 'equipe' e 'teste'
+-- só existem aqui, não são valores da coluna.
+create or replace function public._agenda_pergunta_espera(p_q public.agenda_perguntas, p_hoje date)
  returns text
  language plpgsql
  stable
  set search_path to 'public'
 as $function$
 declare
-  v_op smallint := coalesce(p_q.opcao_padrao, p_q.recomendacao);
+  v_op  smallint := coalesce(p_q.opcao_padrao, p_q.recomendacao);
+  v_dia text;
 begin
   if p_q.veto_espera is not null then
     return p_q.veto_espera;
@@ -85,9 +88,12 @@ begin
                 where pl.service_order_id = any (coalesce(p_q.os_ids, '{}') || p_q.service_order_id) and pl.prometido_tipo is not null) then
       return 'cliente';
     end if;
-  end if;
-  if p_q.critica then
-    return 'critica';
+    select max(public._agenda_dia_avisado(a.payee_id, a.service_order_id, a.dia)) into v_dia  -- 'cliente' > 'equipe': o cliente vence, como em _agenda_criticidade
+      from public.agenda_alocacoes a
+     where a.service_order_id = any (coalesce(p_q.os_ids, '{}') || p_q.service_order_id) and a.estado in ('publicada', 'fixada') and a.tipo <> 'reserva' and a.dia >= p_hoje;
+    if v_dia is not null then
+      return case when v_dia = 'equipe' then 'equipe' else 'cliente' end;
+    end if;
   end if;
   if not p_q.tipo = any ((public._agenda_cfg()).veto_tipos) then
     return 'tipo';
@@ -99,8 +105,8 @@ begin
 end;
 $function$;
 
-comment on function public._agenda_pergunta_espera(public.agenda_perguntas) is
-  'Agenda de Produção (Fase 7f, P2; AG7-15): por que a pergunta não vence AGORA: veto_espera (a foto do nascimento), sem_padrao (sem chave, ou efeito opcao sem uma opção de verdade), cliente (efeito opcao com prometido em qualquer OS dela, conferido na hora), critica (pergunta crítica nunca vence sozinha, ordem do fio em 07/11), tipo (fora de veto_tipos hoje), teste (o modo de quem pergunta fora de ligado); nulo = pode vencer. A regra única: quem vence, a linha e a ordem leem esta função. STABLE, sem grant.';
+comment on function public._agenda_pergunta_espera(public.agenda_perguntas, date) is
+  'Agenda de Produção (Fase 7f, P2; AG7-15): por que a pergunta não vence AGORA: veto_espera (a foto do nascimento), sem_padrao (sem chave, ou efeito opcao sem uma opção de verdade), cliente (efeito opcao com prometido em qualquer OS dela, ou com dia que o cliente já ouviu, conferidos na hora), equipe (efeito opcao com dia de ficha enviada), tipo (fora de veto_tipos hoje), teste (o modo de quem pergunta fora de ligado); nulo = pode vencer. Pergunta crítica passa pela mesma régua. A regra única: quem vence, a linha e a ordem leem esta função. STABLE, sem grant.';
 
 -- ── 2. O que fica sem resposta, chave a chave ───────────────────────────────────────────────────────
 -- O texto de cada chave mora aqui (§3.1 item 5). Só o efeito nada: o efeito opcao é "Recomendo a opção N", na linha. O título é o que ele tem de curto (R8.4): a pergunta inteira fica em
@@ -204,7 +210,7 @@ comment on function public._agenda_pergunta_frases(public.agenda_perguntas, date
   'Agenda de Produção (Fase 7f, P2; §3.1 item 5, §6.2, §6.3, R8.4, R8.12-9): as frases de uma pergunta: {nome, rotulo, titulo, frase, sem_resposta, sem_prazo, fica}. O texto de cada chave mora só aqui; a pergunta inteira fica em *agenda pendências*. Sem alocação de pé é "conto", nunca "marquei". STABLE, sem grant.';
 
 -- ── 3. A linha de uma pergunta ──────────────────────────────────────────────────────────────────────
--- R8.4: título, o que fica e o prazo, no máximo 220 letras (os limites: 12 do número, 32 do nome, 91 do título e a cauda mais longa). R8.7: o número impresso é o n de
+-- R8.4: título, o que fica e o prazo, no máximo 220 letras (os limites: 12 do número, 32 do nome, 91 do título e a cauda mais longa; no efeito opcao, o título cede). R8.7: o número impresso é o n de
 -- agenda_decisoes_abertas, com a mesma hora: é ele que agenda_rascunho_aplicar resolve; quem não tem número não ganha "Decisão". Só escreve "Sem resposta até" com o prazo valendo:
 -- em sombra e com o freio nada vence, e prometer seria afirmar o que não acontece (R8.6, R8.12-9). Assim veto_ate é sempre o prazo que está NO TEXTO, e quem registra o que mostrou grava
 -- só ele: o relógio nunca começa de um prazo que o dono não leu (§3.1 item 7). veto_diria é o que seria, só em sombra. O 7a pode ter gravado um prazo que já passou sem a pergunta ter
@@ -216,6 +222,7 @@ create or replace function public._agenda_pergunta_linha(p_pergunta uuid, p_hoje
  set search_path to 'public'
 as $function$
 declare
+  c_max   constant int := 220;  -- estrutural: a linha da §6.2
   q       public.agenda_perguntas;
   v_modo  text;
   v_esp   text;
@@ -226,6 +233,7 @@ declare
   v_ate   timestamptz;
   v_diria timestamptz;
   v_sem   text;
+  v_cauda text;
   v_txt   text;
 begin
   if p_hoje is null or p_agora is null then
@@ -236,7 +244,7 @@ begin
     raise exception '_agenda_pergunta_linha: a pergunta % não existe.', p_pergunta using errcode = 'P0002';
   end if;
   v_modo := public._agenda_fala_modo('veto');
-  v_esp := public._agenda_pergunta_espera(q);
+  v_esp := public._agenda_pergunta_espera(q, p_hoje);
   v_op := coalesce(q.opcao_padrao, q.recomendacao);
   v_fr := public._agenda_pergunta_frases(q, p_hoje);
   v_n := (select (e ->> 'n')::int from jsonb_array_elements(public.agenda_decisoes_abertas(p_agora)) e where e ->> 'id' = q.id::text);
@@ -252,11 +260,17 @@ begin
   end if;
   v_sem := format('Sem resposta até %s às %s', public._dia_curto((v_ate at time zone 'America/Sao_Paulo')::date),
                   to_char(v_ate at time zone 'America/Sao_Paulo', 'HH24:MI'));
+  -- o que fica sem resposta é a opção, com o que ela faz: a pergunta inteira, com as outras opções, fica em *agenda pendências*. O título cede para o que fica caber.
+  if q.padrao_efeito = 'opcao' and v_esp is null then
+    v_cauda := format(' Recomendo a opção %s', v_op)
+               || coalesce(': ' || (select public._agenda_corta(rtrim(o ->> 'texto', ' .'), 80) from jsonb_array_elements(q.opcoes) o where o ->> 'n' = v_op::text), '') || '.'
+               || case when v_ate is not null then format(' %s, fico com a opção %s.', v_sem, v_op) else '' end;
+  end if;
   v_txt := case
     when v_esp = 'cliente' then (v_fr ->> 'titulo') || ' Isto espera você: mexe no dia que o cliente já sabe.'
-    when q.padrao_efeito = 'opcao' and (v_esp is null or v_esp = 'critica') then
-      (v_fr ->> 'titulo') || format(' Recomendo a opção %s.', v_op)
-      || case when v_ate is not null then format(' %s, fico com a opção %s.', v_sem, v_op) else '' end
+    when v_esp = 'equipe' then (v_fr ->> 'titulo') || ' Isto espera você: mexe no dia que a equipe já sabe.'
+    when q.padrao_efeito = 'opcao' and v_esp is null then
+      public._agenda_corta(v_fr ->> 'titulo', c_max - char_length(v_cauda) - char_length(coalesce(format('Decisão %s: ', v_n), ''))) || v_cauda
     when v_esp is null then
       (v_fr ->> 'frase') || case when v_ate is not null then format(' %s, %s', v_sem, v_fr ->> 'sem_resposta')
                                  when v_fr ->> 'sem_prazo' <> '' then ' ' || (v_fr ->> 'sem_prazo') else '' end
@@ -387,7 +401,7 @@ begin
                             order by o.ordem), '[]'::jsonb)
     into v
     from (select q.id, q.tipo, q.service_order_id, q.destrava, q.padrao_chave,
-                 public._agenda_pergunta_espera(q) as espera,
+                 public._agenda_pergunta_espera(q, p_hoje) as espera,
                  public._agenda_pergunta_linha(q.id, p_hoje, p_agora) as l,
                  row_number() over (order by case when q.critica and q.perda_em <= v_amanha then q.perda_em end nulls last,
                                              q.tipo = any (cf.perguntas_primeiro) desc,
@@ -436,8 +450,8 @@ begin
   if not found or q.estado <> 'aberta' then
     return jsonb_build_object('assumida', false, 'motivo', 'fechada');
   end if;
-  if public._agenda_pergunta_espera(q) is not null then
-    return jsonb_build_object('assumida', false, 'motivo', public._agenda_pergunta_espera(q));
+  if public._agenda_pergunta_espera(q, p_hoje) is not null then
+    return jsonb_build_object('assumida', false, 'motivo', public._agenda_pergunta_espera(q, p_hoje));
   end if;
   v_quando := case when p_por = 'prazo'
                    then format('sem resposta até %s às %s', public._dia_curto((q.veto_ate at time zone 'America/Sao_Paulo')::date),
@@ -512,7 +526,7 @@ begin
   end if;
   for q in select x.* from public.agenda_perguntas x
             where x.estado = 'aberta' and x.modo = 'ligado' and x.tipo <> 'conferencia' and (x.expira_em is null or x.expira_em > p_agora)
-              and x.padrao_efeito = 'nada' and x.opcao_escolhida is null and public._agenda_pergunta_espera(x) is null
+              and x.padrao_efeito = 'nada' and x.opcao_escolhida is null and public._agenda_pergunta_espera(x, p_hoje) is null
             order by x.criada_em, x.id
             limit v_n - cf.perguntas_abertas_max loop
     if v_modo <> 'ligado' then
@@ -720,15 +734,15 @@ begin
                                                       'p_agora', p_agora));
     end;
   end loop;
-  -- FASE 7f: (7f P2, §5.2, R8.5-8, R8.5-9, R8.6) as abertas em ligado com o prazo vencido e mostradas antes dele, que podem vencer agora (_agenda_pergunta_espera: o prometido é conferido de novo, e crítica
-  -- nunca vence sozinha). O modo é o efetivo: em sombra e com *gestor, só propor*, só veto_teria_em, uma vez, e nada mais. As travas na mesma ordem do 7a, só antes da 1ª que aplica. Erro numa pergunta:
+  -- FASE 7f: (7f P2, §5.2, R8.5-8, R8.5-9, R8.6) as abertas em ligado com o prazo vencido e mostradas antes dele, que podem vencer agora (_agenda_pergunta_espera: o prometido e o dia já dito são conferidos de novo, com a
+  -- mesma régua para a crítica). O modo é o efetivo: em sombra e com *gestor, só propor*, só veto_teria_em, uma vez, e nada mais. As travas na mesma ordem do 7a, só antes da 1ª que aplica. Erro numa pergunta:
   -- registra, e veto_espera = sem_padrao, para não repetir a cada tique; a pergunta fica aberta e sem prazo. As chaves novas só quando houve algo: o tique ocioso devolve o de antes.
   v_7f_modo := public._agenda_fala_modo('veto');
   if v_7f_modo <> 'desligado' then
     for v_7f_q in select q.* from public.agenda_perguntas q
                    where q.estado = 'aberta' and q.modo = 'ligado' and q.veto_ate is not null and q.veto_ate <= p_agora and q.opcao_escolhida is null
                      and coalesce(q.mostrada_vezes > 0 and q.mostrada_em < q.veto_ate, false)
-                     and public._agenda_pergunta_espera(q) is null
+                     and public._agenda_pergunta_espera(q, p_hoje) is null
                    order by q.veto_ate, q.criada_em, q.id loop
       if v_7f_modo <> 'ligado' then
         update public.agenda_perguntas set veto_teria_em = p_agora where id = v_7f_q.id and veto_teria_em is null;
@@ -822,9 +836,9 @@ begin
   if not found then
     raise exception 'Não encontrei essa pergunta.' using errcode = 'P0002';
   end if;
-  -- FASE 7f: (7f P2, ordem do fio em 07/11; R8.6) pelo prazo, a crítica nunca: ela espera o dono. E com o freio ou em sombra nada decide pelo prazo. É a última porta: quem chama já filtrou, e a recusa
-  -- vira veto_espera = sem_padrao.
-  if p_via = 'prazo' and (v_q.critica or public._agenda_fala_modo('veto') <> 'ligado') then
+  -- FASE 7f: (7f P2, R8.6) pelo prazo não há autor; com o freio ou em sombra nada decide, e o que não pode vencer não vence: é a última porta, sob a trava e com a pergunta relida. Quem chama já filtrou, e a
+  -- recusa vira veto_espera = sem_padrao.
+  if p_via = 'prazo' and (p_autor is not null or public._agenda_fala_modo('veto') <> 'ligado' or public._agenda_pergunta_espera(v_q, p_hoje) is not null) then
     return jsonb_build_object('ok', false, 'texto', 'Essa pergunta espera você: nada mudou.');
   end if;
   -- FASE 7f: fim
@@ -980,12 +994,29 @@ begin
        set estado = 'respondida', opcao_escolhida = p_opcao, resposta = left(p_trecho, 500), respondida_em = p_agora,
            respondida_por = p_autor, respondida_via = p_via
      where id = p_pergunta;
+    -- FASE 7f: (7f P2, §5.2) pelo prazo ninguém decidiu: como nas rodadas automáticas, origem vigia e sem autor. Assim a ação sai no *o que mudou* e no aviso, que só contam motor e vigia, com o *desfaz*
+    -- dela; não fixa o dia pelo dono nem marca a duração como aceita, o que p_via = dono faria; e nem a proposta nem a ação dizem que foi ele.
+    if p_via = 'prazo' then
+      v_r := public.agenda_propor('replano', null, null, v_q.os_ids, v_rest || jsonb_build_object('decisao', p_pergunta), true, 'vigia', null, p_hoje, p_agora);
+    else
+    -- FASE 7f: fim
     v_r := public.agenda_propor('replano', null, null, v_q.os_ids, v_rest || jsonb_build_object('decisao', p_pergunta),
                                 true, 'dono', p_autor, p_hoje, p_agora);
+    -- FASE 7f: (fecha o "se é prazo")
+    end if;
+    -- FASE 7f: fim
     if not coalesce((v_r ->> 'ok')::boolean, false) then
       raise exception using errcode = 'P0098', message = coalesce(v_r ->> 'texto', 'não deu');
     end if;
+    -- FASE 7f: (7f P2, §5.2) o mesmo caminho do propor: a ação sai crítica, com a pergunta, e sem autor
+    if p_via = 'prazo' then
+      v_ap := public.agenda_aplicar((v_r ->> 'proposta_id')::uuid, null, 'vigia', null, p_pergunta, p_hoje, p_agora);
+    else
+    -- FASE 7f: fim
     v_ap := public.agenda_aplicar((v_r ->> 'proposta_id')::uuid, null, 'dono', p_autor, p_pergunta, p_hoje, p_agora);
+    -- FASE 7f: (fecha o "se é prazo")
+    end if;
+    -- FASE 7f: fim
     if not coalesce((v_ap ->> 'ok')::boolean, false) then
       raise exception using errcode = 'P0098', message = coalesce(v_ap ->> 'texto', 'não deu');
     end if;
@@ -999,7 +1030,7 @@ end;
 $function$;
 
 comment on function public.agenda_decidir(uuid, smallint, uuid, text, text, date, timestamptz) is
-  'Agenda de Produção (Fase 2, P2): a resposta do dono a uma pergunta crítica aberta (só em ligado). Opção que não existe = recusa, nada marcado. Se a agenda mudou desde a pergunta, o efeito da opção é refeito agora e, se não termina como a opção dizia (espera), devolve a pergunta com os dias de agora sem executar. Senão: a pergunta fica respondida (opcao_escolhida, resposta = as palavras do dono, respondida_*) e o efeito é executado — agenda_propor(replano, as OS da pergunta, as restrições da opção + decisao) e agenda_aplicar com p_pergunta (toda ação sai critica = true com pergunta_id). Falhou = nada fica, a pergunta continua aberta. Canais: whatsapp, painel, tela. Fase 3: diaria e diaria_ligar vão a _agenda_decidir_diaria (o lançamento, a correção pelo registrar_diaria ou a ligação às OS, com modo_diaria ligado). Fase 5 (P3): cliente_aprovar e cliente_aviso vão a _agenda_cliente_decidir (manda ou segura a mensagem ao cliente; com modo_cliente ligado). Fase 6 (P6): aprendizado vai a _agenda_aprendizado_decidir (1 o medido passa a valer — na carga, agenda_config.carga_max muda —, 2 trava, 3 volta ao padrão e trava; a 1 e a 3 com a ação crítica desfazível; com modo_aprendizado ligado e o item na lista). CORREÇÃO FASE 6 (C1, regressão B2): a pergunta do aprendizado toma pg_advisory_xact_lock(hashtext(''agenda_aprender'')) antes do for update da pergunta. FASE 7 (7a P4): as perguntas do gestor da agenda (situacao, estimativa, reavaliar, reestimar, ficha_estimativa, onda, sabado, bem_livre, compre_ate, sinal) vão a _agenda_gestor_decidir (o efeito e o modo delas: o do gestor); dia_avisado e dia_prometido seguem a decisão crítica de sempre; equipe_cadastro, a de antes. FASE 7b (P3; R4.1-3, R4.1-6, R4.2(b)): as perguntas da equipe com opções têm o efeito delas, com a pergunta e o modo dela (_agenda_modo_da_pergunta) ligados (senão "ainda está em teste") — equipe_cadastro chamada: 1 "Anotei: sigo com a equipe que tenho."; 2 "Me diga quem saiu ou quem entrou e em que dias vem (ex.: Alex saiu; Mateus vem qua e qui; Mateus vem toda terça)." (sem diária); equipe_cadastro contato: 1 põe na lista da rotina (agenda_equipe_contato recebe_rotina, incluido_por dono) com a ação equipe desfazível ("Pus Mateus na rotina da equipe, como você pediu. *desfaz* tira.", depois.motivo contato); 2 grava a recusa — a linha parada (recebe_rotina false, parou_em agora, "você disse que não"): nem a regra d14 nem a pergunta voltam; dias_semana: a opção com dias grava a semana pelo _agenda_equipe_dias_gravar (origem dono; a 2, "Fico em campo de seg a sex", cria o padrão do dono {1..5} sem frequência; a 3, "Nenhum dia", prende só a semana), com a ação equipe do dono; a 1 ("Fica assim") só fica respondida. A chamada da 7a (sem opções) e o telefone (sem opções) seguem o de antes. CORREÇÃO DA REVISÃO DA 7b (achados 3 e 10): na pergunta dias_semana do dono, a opção com dias grava com agenda.dias_padrao_do_dono = sim (só nessa chamada): ela é a única fala do dono que troca o padrão dele ("Fico em campo de seg a sex" = toda semana); a resposta diz "toda semana a partir de agora". FASE 7d (P5, §5.5, R1): os tipos combinar, local e acesso vão a _agenda_local_decidir (o efeito e a regra delas: a pergunta e o modo cru, não o freio), antes do "não é de decisão". FASE 7f (P2; §5.2): o canal prazo passa, com respondida_por nulo e a resposta = o texto do passo; pelo prazo, recusa a crítica (ordem do fio em 07/11) e recusa com modo_veto efetivo fora de ligado (*gestor, só propor*): {ok: false}, nada mudou.';
+  'Agenda de Produção (Fase 2, P2): a resposta do dono a uma pergunta crítica aberta (só em ligado). Opção que não existe = recusa, nada marcado. Se a agenda mudou desde a pergunta, o efeito da opção é refeito agora e, se não termina como a opção dizia (espera), devolve a pergunta com os dias de agora sem executar. Senão: a pergunta fica respondida (opcao_escolhida, resposta = as palavras do dono, respondida_*) e o efeito é executado — agenda_propor(replano, as OS da pergunta, as restrições da opção + decisao) e agenda_aplicar com p_pergunta (toda ação sai critica = true com pergunta_id). Falhou = nada fica, a pergunta continua aberta. Canais: whatsapp, painel, tela. Fase 3: diaria e diaria_ligar vão a _agenda_decidir_diaria (o lançamento, a correção pelo registrar_diaria ou a ligação às OS, com modo_diaria ligado). Fase 5 (P3): cliente_aprovar e cliente_aviso vão a _agenda_cliente_decidir (manda ou segura a mensagem ao cliente; com modo_cliente ligado). Fase 6 (P6): aprendizado vai a _agenda_aprendizado_decidir (1 o medido passa a valer — na carga, agenda_config.carga_max muda —, 2 trava, 3 volta ao padrão e trava; a 1 e a 3 com a ação crítica desfazível; com modo_aprendizado ligado e o item na lista). CORREÇÃO FASE 6 (C1, regressão B2): a pergunta do aprendizado toma pg_advisory_xact_lock(hashtext(''agenda_aprender'')) antes do for update da pergunta. FASE 7 (7a P4): as perguntas do gestor da agenda (situacao, estimativa, reavaliar, reestimar, ficha_estimativa, onda, sabado, bem_livre, compre_ate, sinal) vão a _agenda_gestor_decidir (o efeito e o modo delas: o do gestor); dia_avisado e dia_prometido seguem a decisão crítica de sempre; equipe_cadastro, a de antes. FASE 7b (P3; R4.1-3, R4.1-6, R4.2(b)): as perguntas da equipe com opções têm o efeito delas, com a pergunta e o modo dela (_agenda_modo_da_pergunta) ligados (senão "ainda está em teste") — equipe_cadastro chamada: 1 "Anotei: sigo com a equipe que tenho."; 2 "Me diga quem saiu ou quem entrou e em que dias vem (ex.: Alex saiu; Mateus vem qua e qui; Mateus vem toda terça)." (sem diária); equipe_cadastro contato: 1 põe na lista da rotina (agenda_equipe_contato recebe_rotina, incluido_por dono) com a ação equipe desfazível ("Pus Mateus na rotina da equipe, como você pediu. *desfaz* tira.", depois.motivo contato); 2 grava a recusa — a linha parada (recebe_rotina false, parou_em agora, "você disse que não"): nem a regra d14 nem a pergunta voltam; dias_semana: a opção com dias grava a semana pelo _agenda_equipe_dias_gravar (origem dono; a 2, "Fico em campo de seg a sex", cria o padrão do dono {1..5} sem frequência; a 3, "Nenhum dia", prende só a semana), com a ação equipe do dono; a 1 ("Fica assim") só fica respondida. A chamada da 7a (sem opções) e o telefone (sem opções) seguem o de antes. CORREÇÃO DA REVISÃO DA 7b (achados 3 e 10): na pergunta dias_semana do dono, a opção com dias grava com agenda.dias_padrao_do_dono = sim (só nessa chamada): ela é a única fala do dono que troca o padrão dele ("Fico em campo de seg a sex" = toda semana); a resposta diz "toda semana a partir de agora". FASE 7d (P5, §5.5, R1): os tipos combinar, local e acesso vão a _agenda_local_decidir (o efeito e a regra delas: a pergunta e o modo cru, não o freio), antes do "não é de decisão". FASE 7f (P2; §5.2): o canal prazo passa, com respondida_por nulo e a resposta = o texto do passo; recusa com autor, com modo_veto efetivo fora de ligado (*gestor, só propor*) e no que _agenda_pergunta_espera segura: {ok: false}, nada mudou. A decisão crítica pelo prazo propõe e aplica com origem vigia, sem autor: a ação sai crítica, com pergunta_id, desfazível, e não diz que foi o dono.';
 
 -- agenda_desfazer (de 20261107100870_agenda_fase7d_correcao4.sql)
 create or replace function public.agenda_desfazer(p_acao uuid, p_autor uuid default null, p_via text default 'dono',
@@ -1471,7 +1502,7 @@ comment on function public.agenda_desfazer(uuid, uuid, text, date, timestamptz) 
 
 -- ── 10. Portas ──────────────────────────────────────────────────────────────────────────────────────
 -- Sem grant a ninguém: quem as chama é definer (agenda_gestor_rodar, agenda_comunicar_rodar, agenda_perguntas_em_ordem). As recriadas mantêm as portas de antes (repetidas para a migration valer sozinha).
-revoke all on function public._agenda_pergunta_espera(public.agenda_perguntas),
+revoke all on function public._agenda_pergunta_espera(public.agenda_perguntas, date),
                        public._agenda_pergunta_frases(public.agenda_perguntas, date),
                        public._agenda_pergunta_linha(uuid, date, timestamptz),
                        public._agenda_pergunta_assumir(uuid, text, date, timestamptz),
