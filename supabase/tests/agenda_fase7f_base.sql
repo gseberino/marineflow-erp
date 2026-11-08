@@ -1151,6 +1151,8 @@ begin
      and p.proname not in ('agenda_bloco_do_fechamento')  -- P3
      and p.proname not in ('_agenda_comunicar_lote_guardaria', '_agenda_comunicar_quinta', '_agenda_e_excecao', '_agenda_lote_ligado')  -- P4
      and p.proname not in ('_agenda_saude_comunicacao', 'agenda_veto_dito', 'agenda_saude')  -- P7 (agenda_saude: a marca "-- (7f" dentro do bloco do gestor, não o bloco)
+     and p.proname not in ('_agenda_comunicar_convites', '_agenda_comunicar_convites_vencidos', '_agenda_comunicar_mudancas_equipe', '_agenda_comunicar_previsto',
+                           '_agenda_equipe_mudanca_na_hora')  -- P5
      and not exists (select 1 from regexp_matches(coalesce(p.prosrc, ''), '-- FASE 7f:') x);
   v_res := pg_temp.ok(v_res, 'B10c nenhuma função de antes lê as colunas nem chama as funções novas: o gatilho é a única porta', v_dif is null, v_dif);
   v_res := pg_temp.ok(v_res, 'B10d sem dado: nenhuma ação assumir, rodada comunicar, mensagem previsto, mudanca, convite nem semana; ninguém assumida',

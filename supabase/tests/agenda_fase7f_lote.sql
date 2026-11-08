@@ -748,16 +748,22 @@ declare
   v_rob uuid;
 begin
   if not pg_temp.na_bancada() then return; end if;
-  r := pg_temp.ok(r, 'O5a a migration não recria _agenda_texto_do_acorde, e a viva não tem bloco da 7f',
+  -- (7f P5) o P5 (20261109101000) recria _agenda_texto_do_acorde com o "Já avisei" e cria a mensagem de mudança: com ele no banco, a viva tem o bloco dele e a prova é
+  -- o E3 de agenda_fase7f_equipe.sql; sem ele, o de antes
+  r := pg_temp.ok(r, 'O5a a migration não recria _agenda_texto_do_acorde, e a viva não tem bloco da 7f (até o P5, que a recria: E3 de agenda_fase7f_equipe)',
     position('function public._agenda_texto_do_acorde(' in v_mig) = 0
-    and (select p.prosrc not like '%FASE 7f%' from pg_proc p where p.oid = 'public._agenda_texto_do_acorde(uuid, date, date)'::regprocedure), null);
+    and (select p.prosrc not like '%FASE 7f%' or (to_regprocedure('public._agenda_comunicar_mudancas_equipe(date, timestamptz)') is not null and p.prosrc like '%(7f P5%')
+           from pg_proc p where p.oid = 'public._agenda_texto_do_acorde(uuid, date, date)'::regprocedure), null);
   begin
     perform pg_temp.prepara();
     update public.agenda_config set modo_equipe = 'ligado' where id;
     select id into v_rob from public.payees where name = 'Roberto' and active;
-    r := pg_temp.ok(r, 'O5b nenhum caminho registra a mensagem de mudança à equipe: o registrar recusa o tipo (22023), e nenhuma função a insere',
-      pg_temp.lanca(format($q$select public._agenda_equipe_registrar(%L::uuid, date '2026-11-11', 'mudanca', 'Roberto, mudou.', now())$q$, v_rob)) = '22023'
-      and not exists (select 1 from pg_proc p where p.pronamespace = 'public'::regnamespace and p.prosrc ~ 'insert into public\.agenda_equipe_mensagens' and p.prosrc ~ '''mudanca'''),
+    r := pg_temp.ok(r, 'O5b nenhum caminho registra a mensagem de mudança à equipe: o registrar recusa o tipo (22023), e nenhuma função a insere (até o P5, que a cria)',
+      case when to_regprocedure('public._agenda_comunicar_mudancas_equipe(date, timestamptz)') is not null
+           -- (7f P5) com o P5: o registrar aceita a mudança no ramo dela (com os modos da equipe desligados, nada grava), e quem a insere é ele
+           then (public._agenda_equipe_registrar(v_rob, date '2026-11-11', 'mudanca', 'Roberto, mudou.', now(), null, null, '{}'::date[]) ->> 'modo') = 'desligado'
+           else pg_temp.lanca(format($q$select public._agenda_equipe_registrar(%L::uuid, date '2026-11-11', 'mudanca', 'Roberto, mudou.', now())$q$, v_rob)) = '22023'
+                and not exists (select 1 from pg_proc p where p.pronamespace = 'public'::regnamespace and p.prosrc ~ 'insert into public\.agenda_equipe_mensagens' and p.prosrc ~ '''mudanca''') end,
       null);
     perform pg_temp.desfaz();
   exception when sqlstate 'P0001' then

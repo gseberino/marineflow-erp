@@ -247,7 +247,8 @@ insert into _pd_recriadas values
   ('_agenda_aplicar_disponibilidade(uuid, jsonb, text, date)', 'P2'), ('agenda_rascunho_gravar(uuid, date)', 'P2'),
   ('agenda_rascunho_planejar(uuid, text, text, jsonb, text, date)', 'P2'), ('_agenda_aplicar_planejar(uuid, uuid, jsonb, text, date)', 'P2'),
   ('_agenda_rascunho_frase(text, jsonb)', 'P2'),
-  ('_agenda_equipe_registrar(uuid, date, text, text, timestamptz, date, text)', 'P3'), ('_agenda_rotina_sem_resposta(date, timestamptz)', 'P3'),
+  ('_agenda_equipe_registrar(uuid, date, text, text, timestamptz, date, text, date[], uuid[], text)', 'P3'), -- (7f P5, R8.5-16) a assinatura nova
+  ('_agenda_rotina_sem_resposta(date, timestamptz)', 'P3'),
   ('agenda_resposta_da_equipe(text, text, text, timestamptz)', 'P3'),
   ('agenda_decidir(uuid, smallint, uuid, text, text, date, timestamptz)', 'P3'), ('agenda_desfazer(uuid, uuid, text, date, timestamptz)', 'P3'),
   ('_agenda_ver_equipe(date)', 'P3'), ('_agenda_linhas_do_fechamento(date)', 'P3'), ('_agenda_gestor_equipe(date, timestamptz)', 'P3'),

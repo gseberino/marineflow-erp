@@ -1421,9 +1421,11 @@ begin
     perform pg_temp.vale();
     v_n := (select count(*) from public.agenda_vigia_rodadas where rotina = 'comunicar');
     v := public.agenda_comunicar_rodar(c_h, c_a);
-    r := pg_temp.ok(r, 'P8a a rodada: destrava e teto rodam, o da quinta (P4) pula fora do dia, os do P5 pulam por não existir, e grava 1 linha',
+    -- (7f P5) com 20261109101000 os passos da equipe existem: o previsto pula fora do dia, e o dos convites vencidos não acha nenhum ({vencidos: 0}, a 1ª leitura)
+    r := pg_temp.ok(r, 'P8a a rodada: destrava e teto rodam, o da quinta (P4) pula fora do dia, os do P5 pulam por não existir (ou, com o P5, pulam ou não acham nada), e grava 1 linha',
       (v ->> 'rodou')::boolean and v #>> '{contagens,teto,assumidas}' = '3' and v #> '{contagens,destrava}' ? 'atualizadas'
-      and v #>> '{contagens,quinta,pulado}' = 'true' and v #>> '{contagens,previsto,pulado}' = 'true' and v #>> '{contagens,convites_vencidos,pulado}' = 'true'
+      and v #>> '{contagens,quinta,pulado}' = 'true' and v #>> '{contagens,previsto,pulado}' = 'true'
+      and (v #>> '{contagens,convites_vencidos,pulado}' = 'true' or v #> '{contagens,convites_vencidos}' = '{"vencidos": 0}'::jsonb)
       and (select count(*) from public.agenda_vigia_rodadas where rotina = 'comunicar') = v_n + 1 and v -> 'avisos' = '[]'::jsonb and v -> 'falhas' = '[]'::jsonb and v ->> 'parou_no' is null, v::text);
     r := pg_temp.ok(r, 'P8b sem o passo vetos (R8.5-8)', not v -> 'contagens' ? 'vetos', null);
     r := pg_temp.ok(r, 'P8c a linha da rodada: rotina, modos, duração', (select x.duracao_ms >= 0 and x.contagens -> 'modos' ->> 'veto' = 'ligado' and x.erros = 0 from public.agenda_vigia_rodadas x where x.rotina = 'comunicar' order by x.rodou_em desc limit 1), null);
@@ -1478,7 +1480,8 @@ begin
     begin
       raise exception 'estourou' using errcode = 'P0001';
     end $f$;
-    create function public._agenda_comunicar_previsto(p_hoje date, p_agora timestamptz) returns jsonb language sql as $f$ select '{"ok": 1}'::jsonb $f$;
+    -- (7f P5) o passo previsto existe desde 20261109101000: o dublê é create or replace, como o da quinta (P4)
+    create or replace function public._agenda_comunicar_previsto(p_hoje date, p_agora timestamptz) returns jsonb language sql as $f$ select '{"ok": 1}'::jsonb $f$;
     v_n := (select count(*) from public.app_error_logs where action = 'comunicar:quinta');
     v := public.agenda_comunicar_rodar(c_h, c_a);
     r := pg_temp.ok(r, 'P8k erro de um passo: registra em comunicar:<passo>, a linha sai, e o passo seguinte roda',
@@ -1496,7 +1499,8 @@ begin
     begin
       raise exception 'canceling statement due to statement timeout' using errcode = '57014';
     end $f$;
-    create function public._agenda_comunicar_previsto(p_hoje date, p_agora timestamptz) returns jsonb language sql as $f$ select '{"ok": 1}'::jsonb $f$;
+    -- (7f P5) o passo previsto existe desde 20261109101000: o dublê é create or replace, como o da quinta (P4)
+    create or replace function public._agenda_comunicar_previsto(p_hoje date, p_agora timestamptz) returns jsonb language sql as $f$ select '{"ok": 1}'::jsonb $f$;
     v := public.agenda_comunicar_rodar(c_h, c_a);
     r := pg_temp.ok(r, 'P8l query_canceled (57014): parou_no, a linha da rodada sai, e o passo seguinte não roda', v ->> 'parou_no' = 'quinta' and not v -> 'contagens' ? 'previsto'
       and (select x.contagens ->> 'parou_no' from public.agenda_vigia_rodadas x where x.rotina = 'comunicar' order by x.rodou_em desc limit 1) = 'quinta', v::text);
@@ -1513,7 +1517,8 @@ begin
       perform pg_sleep(5.2);
       return '{"demorou": true}'::jsonb;
     end $f$;
-    create function public._agenda_comunicar_previsto(p_hoje date, p_agora timestamptz) returns jsonb language sql as $f$ select '{"ok": 1}'::jsonb $f$;
+    -- (7f P5) o passo previsto existe desde 20261109101000: o dublê é create or replace, como o da quinta (P4)
+    create or replace function public._agenda_comunicar_previsto(p_hoje date, p_agora timestamptz) returns jsonb language sql as $f$ select '{"ok": 1}'::jsonb $f$;
     v := public.agenda_comunicar_rodar(c_h, c_a);
     r := pg_temp.ok(r, 'P8m passou de comunicar_tempo_max entre 2 passos: para, grava parou_no = o que não rodou, sem erro', v ->> 'parou_no' = 'previsto' and v #>> '{contagens,quinta,demorou}' = 'true' and not v -> 'contagens' ? 'previsto' and v ->> 'erros' = '0', v::text);
     raise exception using errcode = 'P0001', message = '__desfaz__';

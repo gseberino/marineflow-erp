@@ -1264,7 +1264,8 @@ select format('J3 %s: ninguém de fora', f),
        and not has_function_privilege('service_role', f::regprocedure, 'execute'), null
   from unnest(array[
     'public._agenda_equipe_enfileirar(uuid)',
-    'public._agenda_equipe_registrar(uuid, date, text, text, timestamptz, date, text)',
+    -- (7f P5, R8.5-16) o registro ganhou p_dias, p_alocacoes e p_chave (default null); a assinatura de 7 saiu e a porta é a de antes
+    'public._agenda_equipe_registrar(uuid, date, text, text, timestamptz, date, text, date[], uuid[], text)',
     'public._agenda_diaria_do_dia(uuid, date, text, date, timestamptz)',
     'public._agenda_lancar_diaria(uuid, date, numeric, uuid[], text, text, uuid, date, timestamptz, jsonb)',
     'public._agenda_decidir_diaria(uuid, smallint, uuid, text, text, date, timestamptz)',

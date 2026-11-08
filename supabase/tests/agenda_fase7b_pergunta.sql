@@ -1050,7 +1050,8 @@ begin
   -- marca de dentro e saem junto com ele (não contam aqui)
   -- FASE 7b: fim
   for f in select * from (values
-      ('_agenda_equipe_registrar', 'public._agenda_equipe_registrar(uuid, date, text, text, timestamptz, date, text)', 'mig_equipe_fase3', '20261026100300', 1),
+      -- (7f P5, R8.5-16) a assinatura nova do registro (p_dias, p_alocacoes, p_chave; a de 7 saiu): o corpo é o mesmo, tirados os blocos da 7f
+      ('_agenda_equipe_registrar', 'public._agenda_equipe_registrar(uuid, date, text, text, timestamptz, date, text, date[], uuid[], text)', 'mig_equipe_fase3', '20261026100300', 1),
       ('_agenda_rotina_sem_resposta', 'public._agenda_rotina_sem_resposta(date, timestamptz)', 'mig_equipe_fase3', '20261026100300', 1),
       ('agenda_resposta_da_equipe', 'public.agenda_resposta_da_equipe(text, text, text, timestamptz)', 'mig_equipe_fase3', '20261026100300', 4),
       ('agenda_decidir', 'public.agenda_decidir(uuid, smallint, uuid, text, text, date, timestamptz)', 'mig_perguntas_fase7a', '20261031100300', 2),
@@ -1149,7 +1150,7 @@ begin
 end
 $q13d$;
 with f(sig, quem) as (values
-  ('public._agenda_equipe_registrar(uuid, date, text, text, timestamptz, date, text)', 'n'),
+  ('public._agenda_equipe_registrar(uuid, date, text, text, timestamptz, date, text, date[], uuid[], text)', 'n'),  -- (7f P5, R8.5-16) a assinatura nova
   ('public._agenda_rotina_sem_resposta(date, timestamptz)', 'n'), ('public._agenda_gestor_equipe(date, timestamptz)', 'n'),
   ('public.agenda_resposta_da_equipe(text, text, text, timestamptz)', 's'),
   ('public.agenda_decidir(uuid, smallint, uuid, text, text, date, timestamptz)', 's'),

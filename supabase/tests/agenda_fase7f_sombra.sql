@@ -166,9 +166,16 @@ begin
     v_res := pg_temp.res(v_res, 'N3 os modos da rodada: o bloco e o lote em teste, o prazo em teste (com o freio), e os 3 sem código desligados',
                          v_ult.contagens -> 'modos' = '{"bloco": "sombra", "lote": "sombra", "veto": "sombra", "previsto": "desligado", "convite": "desligado", "camadas": "desligado"}'::jsonb,
                          (v_ult.contagens -> 'modos')::text);
-    v_res := pg_temp.res(v_res, 'N4 os 4 passos da equipe dizem "ainda não existe" (o P5 não existe)',
-                         (select count(*) from unnest(array['previsto', 'mudancas_equipe', 'convites', 'convites_vencidos']) p
-                           where v_ult.contagens -> p = '{"pulado": true, "motivo": "ainda não existe"}'::jsonb) = 4, v_ult.contagens::text);
+    -- (7f P5) com 20261109101000 no banco os 4 passos existem: com previsto e convite desligados (o dado só põe os 3 do núcleo em teste), pulam ou não acham nada,
+    -- sem escrever (o E8 de agenda_fase7f_equipe.sql prova); sem ela, "ainda não existe"
+    v_res := pg_temp.res(v_res, 'N4 os 4 passos da equipe dizem "ainda não existe" (o P5 não existe) ou, com o P5, pulam desligados sem escrever nada',
+                         case when to_regprocedure('public._agenda_comunicar_previsto(date, timestamptz)') is null
+                              then (select count(*) from unnest(array['previsto', 'mudancas_equipe', 'convites', 'convites_vencidos']) p
+                                     where v_ult.contagens -> p = '{"pulado": true, "motivo": "ainda não existe"}'::jsonb) = 4
+                              else v_ult.contagens -> 'mudancas_equipe' = '{"pulado": true, "motivo": "desligado"}'::jsonb
+                                   and v_ult.contagens -> 'convites' = '{"pulado": true, "motivo": "desligado"}'::jsonb
+                                   and v_ult.contagens -> 'convites_vencidos' = '{"vencidos": 0}'::jsonb
+                                   and v_ult.contagens -> 'previsto' ->> 'pulado' = 'true' end, v_ult.contagens::text);
     v_r2 := public.agenda_comunicar_rodar(c_ter, pg_temp.em(c_ter, '18:30'));
     v_res := pg_temp.res(v_res, 'N5 1 linha por tique: o 2º tique grava a 2ª', (v_r2 ->> 'rodou')::boolean and pg_temp.rodadas() = v_n + 2, v_r2::text);
     v_res := pg_temp.res(v_res, 'N6 em sombra, o tique não manda nada: a fila, a equipe, o cliente e o aviso do dono iguais; o plano e as ações iguais; as perguntas só nas medidas',
