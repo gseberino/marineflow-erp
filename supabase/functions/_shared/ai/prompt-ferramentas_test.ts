@@ -811,7 +811,7 @@ Deno.test("pós-merge (A): o dia sem trabalho não vai para registrar_diaria —
 
 // Fase 7f (P7; spec-fase7f.md §7 e R8.5-28): as 2 linhas novas. O silêncio é a resposta só onde o prazo está escrito ("Sem resposta até"); a única saída de quem não quer
 // o padrão é a palavra *agenda espera <nome>*, do dono e antes do modelo, e *agenda fica* não aparece: não existe. "Pode deixar como você propôs" não grava nada (S120, e
-// S121 com o freio: a pergunta continua esperando o dono).
+// S124 com o freio: a pergunta continua esperando o dono).
 Deno.test("agenda de produção (Fase 7f, P7): o silêncio e o *agenda espera*, sem *agenda fica*; a informação só quando o dono pergunta", () => {
   const secao = secaoDaAgenda();
   // (conferência do P7, 08/11) o silêncio só vale onde o prazo está escrito: com o freio (gestor_so_propor, a produção) e em sombra nenhuma linha diz
