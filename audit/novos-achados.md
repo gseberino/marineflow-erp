@@ -3581,3 +3581,23 @@ porque só o dono pode preenchê-las.
 - **Onde:** `task-automations/agenda-comunicar.ts` (o passo 0e) chama `agenda_comunicar_rodar`, que até o P3 não tinha chamador.
 - **Efeito:** com os 6 modos desligados (produção hoje), ela volta na hora, sem linha. Depois do dado `20261109100900` (os 6 em sombra), ela grava 1 linha em `agenda_vigia_rodadas` por tique (rotina `comunicar`), o `destrava` das abertas 1 vez por dia e o `veto_teria_em` do teto do P2 (a medida da sombra), além de `contagens.lote_guardaria` e `contagens.quinta.quinta_diria`. Nenhuma mensagem. O replay mostrou o `veto_teria_em` em 1 pergunta por rodada.
 - **Origem:** Fase 7f, P4.
+### [NOVO-agenda-121] *agenda pendências* acima das 1.800 letras dava "permission denied" (em produção desde a 7d)
+- **Onde:** `_agenda_ver_decisoes` (7d, 20261107100860) é invoker e chama `_agenda_titulo_da_pergunta` no corte (a linha "Também esperam: …"), e a 7d deixou essa função sem grant nem para `service_role` (20261107100850). O WhatsApp chama `agenda_ver` como `service_role`, e o painel com o JWT do administrador.
+- **Efeito:** quando o "Também quero saber" passa das 1.800 letras, o foco inteiro falha, e o dono lê "Não consegui ler a agenda agora". Em 06/11 o foco tinha 1.697 letras; hoje, 1.622 na carteira real. A fixture da 7f, com 8 abertas no tamanho real, já passa. Os testes da 7d não pegaram porque rodam como dono do banco; o eval K140 pegou.
+- **Na Fase 7f (P7):** grant de `_agenda_titulo_da_pergunta` a `authenticated` e `service_role` em 20261109100600 (é texto puro, imutável; o anon continua fora). O V1m2 confere a porta; de ponta a ponta, quem prova é o eval K140 (o V1m roda na mesma sessão em que o dono do banco já leu o foco, e o plpgsql reaproveita o plano: ali não morde). T0a e T0b de `agenda_fase7d_correcao2.sql` mudaram de propósito.
+- **Origem:** Fase 7f, P7.
+### [NOVO-agenda-122] *agenda espera* não alcança o prazo próprio, e hoje não muda nenhuma pergunta real
+- **Onde:** `agenda_veto_dito` (20261109100600). O gatilho `_agenda_perguntas_antes` só leva `veto_espera` de nulo a `dono`; as perguntas com relógio próprio (7a, 7b, 7c) nascem com `veto_espera = tipo`, e as de dinheiro e de cliente com `dinheiro` e `cliente`.
+- **Efeito:** para elas a palavra responde "já espera você" ou "tem prazo próprio, até …": o prazo do 7a, do 7b ou do 7c continua valendo, e a saída é responder a pergunta. Na carteira real de hoje (`sql/wf7f_p7_delta`), as abertas com nome (Giancarlo, Lenine e Vanderlei) são assim, e a única que vence pela 7f é a dos dias do dono, que fica fora da palavra (AG7-37): *agenda espera* não mudaria nada hoje.
+- **Na Fase 7f (P7):** sem conserto: estender a palavra ao relógio de outra etapa mexe no que o 7a, o 7b e o 7c decidem, e a spec não pede.
+- **Origem:** Fase 7f, P7.
+### [NOVO-agenda-123] A pergunta que passou a esperar o dono não volta a ter prazo
+- **Onde:** `_agenda_perguntas_antes` (20261109100600): `veto_espera` não volta de `dono` a nulo, e *agenda espera* não tem *desfaz*.
+- **Efeito:** o dono que disser *agenda espera* por engano não tem como devolver o padrão àquela pergunta; ela só fecha com a resposta dele. Pelo desenho (§5.7: "nunca mais vence"), é o esperado; a releitura não promete volta.
+- **Na Fase 7f (P7):** sem conserto: um *desfaz* da espera pediria uma ação nova e o gatilho de volta.
+- **Origem:** Fase 7f, P7.
+### [NOVO-agenda-124] Com decisões longas e prazo em mais de uma, a linha de como responder pode sair pelo corte
+- **Onde:** `_agenda_ver_decisoes`: o corte do "Também quero saber" (7d) e, se ainda não couber, o `_agenda_juntar` de sempre, que tira linhas do fim.
+- **Efeito:** com as 3 decisões da fixture (de 330 a 440 letras) e prazo em 1, o foco fica em 1.792 de 1.800 letras. Com prazo em 2 ou 3, a linha de como responder, que agora leva o *agenda espera*, é a primeira a sair, e no lugar fica "(e mais 1 linha)". As decisões continuam inteiras. Hoje a carteira real tem 2 decisões e nenhum prazo (o freio).
+- **Na Fase 7f (P7):** sem conserto: mudar o corte de sempre é da 7d; o P8 confere o tamanho no pós-deploy.
+- **Origem:** Fase 7f, P7.
