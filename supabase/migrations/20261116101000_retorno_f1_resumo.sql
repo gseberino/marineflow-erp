@@ -28,7 +28,7 @@
 --      a promessa guardada em dados.prazo pelo retorno_pegar; ela conta como "prazo hoje" e vai em prometido_ate.
 --      Sem isso, o "hoje até as 10h" que o cliente vai ouvir às 08:10 cairia entre os "sem prazo" (até 3), e a
 --      linha que sustenta a promessa seria cortada;
---    - "Para conferir", a janela: a spec diz "aberto nas últimas 24 h", mas o caso vive até 3 dias úteis e o
+--    - "Para conferir", a janela: a spec diz "aberto nas últimas 24 h", mas o caso vive dias (desde o cartão F1-10, até o dono resolver) e o
 --      _retorno_triar marca parar_largo em QUALQUER mensagem dele. No parar_largo e no opt_out vale a ÚLTIMA mensagem
 --      do caso: pela 1ª, o pedido feito no 2º dia do caso nunca chegaria ao dono, e este é o único canal dele (P5,
 --      regra 3). E o início da janela é o menor entre 24 h atrás e a mesma hora da manhã anterior que leu o retorno:

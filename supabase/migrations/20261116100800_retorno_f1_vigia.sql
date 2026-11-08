@@ -28,8 +28,9 @@
 --       o caso fecha ('conteudo') e as agendadas dele são canceladas (respondida_pelo_dono);
 --     5 fechar: 'silencio' (respondido sem conteúdo, SEM promessa ouvida, 4 h sem recebida); 'nada' (caso
 --       nada sem mensagem de nenhum lado há 4 h; fora o da promessa do dono, que o relógio guarda até vencer
---       — desvio da spec, falha fecha); 'expirou' (3 dias úteis completos sem recebida e sem topo_dia por vir).
---       O caso com promessa ouvida nunca fecha por silêncio: só por conteúdo ou por idade;
+--       — desvio da spec, falha fecha); 'expirou' (expira_dias_uteis completos sem recebida e sem topo_dia por
+--       vir; com expira_dias_uteis nulo, o padrão desde o cartão F1-10 de 08/11/2026, nunca: o caso fica na lista
+--       até o dono resolver). O caso com promessa ouvida nunca fecha por silêncio: só por conteúdo ou por idade;
 --     6 relógio (casos abertos com recibo e promessa, sem conteúdo): o acorde de X − acorde_antes; em
 --       X − adiamento_antes, o adiamento com X2 (casos com o mesmo X em fila, 1 min entre eles, nunca depois
 --       de X − 1 min; R1-11) ou, sem X2, o fim do dia ali mesmo (sem 3ª promessa); em X2, com o adiamento
@@ -509,10 +510,12 @@ begin
      where a.id = f.id;
     get diagnostics v_n_nada = row_count;
 
-    -- expirou: 3 dias úteis completos sem recebida do número, e sem a manhã de topo por vir
+    -- expirou: expira_dias_uteis completos sem recebida do número, e sem a manhã de topo por vir. Nulo (o padrão,
+    -- cartão F1-10 de 08/11/2026) = nunca: o caso fica na lista até o dono resolver
     with fechar as (
       select a.id from public.retorno_aberturas a
-       where a.estado in ('aberta', 'vencida')
+       where v_cfg.expira_dias_uteis is not null
+         and a.estado in ('aberta', 'vencida')
          and a.gravada_em <= v_agora
          and v_hoje > public.agenda_somar_du((a.ultima_em at time zone c_fuso)::date, v_cfg.expira_dias_uteis)
          and (a.topo_dia is null or a.topo_dia < v_hoje)

@@ -27,6 +27,7 @@
 --      num sub-bloco desfeito) não conta e sai do filtro, com log; trocado o body pela transcrição, o vigia seguinte
 --      tria de novo (recibo de número novo); o áudio de risco de um cliente vira passagem;
 --  12. expirou: caso sem recebida há 4 dias úteis → fechada/expirou (e a agendada dele cai); com topo_dia hoje, fica;
+--      12b: com expira_dias_uteis nulo (o padrão, cartão F1-10), o mesmo caso fica aberto e a agendada fica;
 --  13. retenção: coleta de 181 dias sem cadastro → nula; com cadastro → fica; de 179 dias → fica; o mesmo no lead
 --      (o convertido fica);
 --  14. alongamento: ligado com 19 casos nada; com o 20º (15 cumpridos, 75%), em sombra nada (o portão do modo, com o
@@ -632,6 +633,20 @@ begin
        or (pg_temp.retorno_f1_vigia_caso(v_caso2)).estado is distinct from 'aberta' then
       raise exception '12: expirou errado (o de 4 dias úteis fecha e cancela; o de topo_dia hoje fica): % / %', to_jsonb(v_ab), v_v;
     end if;
+    perform pg_temp.retorno_f1_vigia_limpa();
+
+    -- ── 12b. (cartão F1-10, 08/11) Sem prazo (expira_dias_uteis nulo, o padrão): o caso de 4 dias úteis fica ──
+    update public.retorno_config set expira_dias_uteis = null where id;
+    v_caso := pg_temp.retorno_f1_vigia_caso_sintetico('5547900009920', c_d2 + interval '10 hours', 'cliente');
+    v_id := pg_temp.retorno_f1_vigia_sintetica(v_caso, '5547900009920', 'recibo_cliente', 'agendada', c_d8 + interval '11 hours');
+    v_v := pg_temp.retorno_f1_vigia_roda('12b', c_d8 + interval '10 hours');
+    if (pg_temp.retorno_f1_vigia_caso(v_caso)).estado is distinct from 'aberta'
+       or (pg_temp.retorno_f1_vigia_le(v_id)).estado is distinct from 'agendada'
+       or (v_v #>> '{fechadas,expirou}')::int is distinct from 0 then
+      raise exception '12b: sem prazo, o caso de 4 dias úteis fechou, a agendada caiu ou o vigia contou expirado: % / %',
+        to_jsonb(pg_temp.retorno_f1_vigia_caso(v_caso)), v_v;
+    end if;
+    update public.retorno_config set expira_dias_uteis = 3 where id;
     perform pg_temp.retorno_f1_vigia_limpa();
 
     -- ── 5. Acorde simulado: o teto do dia em avisos_do_dono; às 20:30 fora da janela ─────────────────

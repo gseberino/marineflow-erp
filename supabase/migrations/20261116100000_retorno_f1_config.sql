@@ -95,7 +95,9 @@ create table if not exists public.retorno_config (
   acorde_antes        interval not null default '60 minutes',
   insistencia_apos    interval not null default '60 minutes',
   caso_fecha_silencio interval not null default '4 hours',
-  expira_dias_uteis   smallint not null default 3 check (expira_dias_uteis between 1 and 10),
+  -- (08/11/2026, cartão F1-10 do dono: "fica na lista até eu resolver") nulo = o caso nunca fecha por idade; só por
+  -- conteúdo, silêncio ou nada. Um número de 1 a 10 volta à regra antiga (fecha depois de N dias úteis sem recebida).
+  expira_dias_uteis   smallint default null check (expira_dias_uteis is null or expira_dias_uteis between 1 and 10),
   incerta_conferir_ate interval not null default '30 minutes',
   conteudo_min_caracteres smallint not null default 15,
   -- interruptores (J.11)
