@@ -3710,3 +3710,35 @@ porque só o dono pode preenchê-las.
 - **Efeito:** depois de ligar, nenhum número da saúde mostra se a semana saiu, se o dia exato saiu antes da véspera ou se a mudança chegou ao cliente sem o dono. A lista dos liberados (`cliente.tipos_liberados`) já conta a semana (P6).
 - **Na Fase 7f (P6):** fica para o pacote seguinte, que recria `_agenda_saude_comunicacao` uma vez com a equipe e o cliente.
 - **Origem:** Fase 7f, P6.
+
+### [NOVO-agenda-139] O aviso de atraso "só o fim mudou" cai em erro quando o fim novo é um sábado marcado
+
+- **Encontrado em:** Agenda de Produção, Fase 7f, P9 (08/11/2026; caso M2c de `agenda_fase7f_final.sql`).
+- **Onde:** `_agenda_cliente_texto`, tipo `pode_atrasar`, variante `remarcado`, forma `fim` (Fase 6, P7): `n = agenda_du_entre(dito_ate, fim)`, e `n < 1` lança 22023. Sábado com `sabado_util` falso não é dia útil: do dia dito sexta para o fim novo no sábado, `n` dá 0.
+- **Efeito:** o passo do atraso registra o erro da OS (`cliente:atraso:os`) e segue; o cliente não recebe aviso, e o erro volta a cada tique enquanto o plano ficar assim. Raro: pede um sábado marcado logo depois da data dita.
+- **Na Fase 7f (P9):** não corrigido (é o M6 de hoje, byte a byte). Para um pacote de correção do cliente.
+- **Origem:** Fase 7f, P9.
+
+### [NOVO-agenda-140] O serviço adiantado para antes da semana dita não vira mensagem
+
+- **Encontrado em:** Agenda de Produção, Fase 7f, P9 (08/11/2026).
+- **Onde:** a semana que mudou nasce onde nasceria o M6 remarcado, e `_agenda_cliente_risco` só vê risco quando o fim novo passa do prometido (`v_novo > prometido_ate`).
+- **Efeito:** o cliente que ouviu a semana de 23/11 e cujo serviço foi adiantado para a de 16/11 não recebe aviso de semana; a confirmação da véspera diz o dia. É o que acontece hoje com o dia firme. O texto aprovado ("precisou passar… Desculpe pela mudança") não serve para adiantar.
+- **Na Fase 7f (P9):** fica assim (o pedido é "no lugar do M6"). Dito ao dono no item 11.
+- **Origem:** Fase 7f, P9.
+
+### [NOVO-agenda-141] A semana que mudou que o dono não responde a tempo não vira o "não consegui avisar"
+
+- **Encontrado em:** Agenda de Produção, Fase 7f, P9 (08/11/2026).
+- **Onde:** o laço `nao_saiu` de `_agenda_cliente_atraso` só olha `tipo = 'pode_atrasar'`; a semana que mudou é `tipo = 'semana'`. O acorde da "mudança de hoje ou amanhã" (§5.6, item 3) também não foi construído.
+- **Efeito:** com a pergunta sem resposta até vencer, o cliente fica com a semana antiga. A rede que sobra é a de hoje: quando a data dita passa, a pergunta `cliente_aviso` "passou" com o acorde; e a véspera do dia novo.
+- **Na Fase 7f (P9):** menor caminho seguro, dito no pedido. Só importa com as camadas ligadas de verdade; revisar antes do "OK semana prevista ao cliente" se o dono quiser o acorde.
+- **Origem:** Fase 7f, P9.
+
+### [NOVO-agenda-142] A saúde mede o dia exato "cedo" com um dia de folga na segunda
+
+- **Encontrado em:** Agenda de Produção, Fase 7f, P9 (08/11/2026).
+- **Onde:** `_agenda_saude_comunicacao`, zero `dia_exato_cedo`: compara a data do envio com `agenda_somar_du(dia_alvo, -cliente_dia_exato_du)` (dias úteis). O toque da véspera (`_agenda_cliente_confirmar`, P6) conta em dias de janela: a véspera de uma segunda é o sábado.
+- **Efeito:** para o serviço da segunda, o zero só acusa envio antes da sexta, não antes do sábado. Não dá falso alarme, mas deixa passar 1 dia nesse caso. Hoje vale 0 e não há semana enviada.
+- **Na Fase 7f (P9):** fica assim: o zero que derruba o `ok` não pode dar falso alarme no dia da publicação.
+- **Origem:** Fase 7f, P9.
