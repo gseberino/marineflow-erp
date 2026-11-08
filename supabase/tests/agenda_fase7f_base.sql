@@ -1148,6 +1148,7 @@ begin
      and p.prosrc ~ '_agenda_(classe_da_saida|fala_modo|zona)\(|padrao_chave|padrao_efeito|veto_espera|veto_teria_em|assumida_por|assumida_em|modo_bloco_agenda|modo_lote_dono|modo_veto|modo_equipe_previsto|modo_equipe_convite|modo_cliente_camadas|veto_tipos|comunicar_tempo_max'
      -- (quem vier depois nesta etapa entra aqui)
      and p.proname not in ('_agenda_comunicar_teto', '_agenda_pergunta_assumir', '_agenda_pergunta_espera', '_agenda_pergunta_frases', '_agenda_pergunta_linha', 'agenda_comunicar_rodar', 'agenda_perguntas_em_ordem')  -- P2
+     and p.proname not in ('agenda_bloco_do_fechamento')  -- P3
      and not exists (select 1 from regexp_matches(coalesce(p.prosrc, ''), '-- FASE 7f:') x);
   v_res := pg_temp.ok(v_res, 'B10c nenhuma função de antes lê as colunas nem chama as funções novas: o gatilho é a única porta', v_dif is null, v_dif);
   v_res := pg_temp.ok(v_res, 'B10d sem dado: nenhuma ação assumir, rodada comunicar, mensagem previsto, mudanca, convite nem semana; ninguém assumida',
@@ -1180,7 +1181,8 @@ begin
   execute current_setting('agenda_teste.fase7f');
   create temp table _leitura (nome text, sql text) on commit drop;
   insert into _leitura values
-    ('agenda_textos_do_fechamento', format('select public.agenda_textos_do_fechamento(%L::date)::text', c_hoje)),
+    -- (P3) a chave bloco existe fora de desligado e vai só ao detalhe (R8.6): o resto da saída é que é byte a byte (agenda_fase7f_bloco.sql, L6)
+    ('agenda_textos_do_fechamento', format('select (public.agenda_textos_do_fechamento(%L::date) - ''bloco'')::text', c_hoje)),
     ('_agenda_linhas_do_fechamento', format('select public._agenda_linhas_do_fechamento(%L::date)::text', c_hoje)),
     ('agenda_decisoes_abertas', format('select public.agenda_decisoes_abertas(%L::timestamptz)::text', c_agor)),
     ('_agenda_ver_decisoes', format('select public._agenda_ver_decisoes(%L::date, %L::timestamptz)::text', c_hoje, c_agor)),
