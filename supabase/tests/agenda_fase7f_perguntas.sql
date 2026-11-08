@@ -1421,7 +1421,7 @@ begin
     perform pg_temp.vale();
     v_n := (select count(*) from public.agenda_vigia_rodadas where rotina = 'comunicar');
     v := public.agenda_comunicar_rodar(c_h, c_a);
-    r := pg_temp.ok(r, 'P8a a rodada: destrava e teto rodam, os de P4 e P5 pulam, e grava 1 linha',
+    r := pg_temp.ok(r, 'P8a a rodada: destrava e teto rodam, o da quinta (P4) pula fora do dia, os do P5 pulam por não existir, e grava 1 linha',
       (v ->> 'rodou')::boolean and v #>> '{contagens,teto,assumidas}' = '3' and v #> '{contagens,destrava}' ? 'atualizadas'
       and v #>> '{contagens,quinta,pulado}' = 'true' and v #>> '{contagens,previsto,pulado}' = 'true' and v #>> '{contagens,convites_vencidos,pulado}' = 'true'
       and (select count(*) from public.agenda_vigia_rodadas where rotina = 'comunicar') = v_n + 1 and v -> 'avisos' = '[]'::jsonb and v -> 'falhas' = '[]'::jsonb and v ->> 'parou_no' is null, v::text);
@@ -1474,7 +1474,7 @@ begin
   begin
     -- 1 passo que falha não derruba os outros
     perform pg_temp.vale();
-    create function public._agenda_comunicar_quinta(p_hoje date, p_agora timestamptz) returns jsonb language plpgsql as $f$
+    create or replace function public._agenda_comunicar_quinta(p_hoje date, p_agora timestamptz) returns jsonb language plpgsql as $f$
     begin
       raise exception 'estourou' using errcode = 'P0001';
     end $f$;
@@ -1492,7 +1492,7 @@ begin
   begin
     -- query_canceled: para, registra, grava a rodada com parou_no; o passo seguinte não roda
     perform pg_temp.vale();
-    create function public._agenda_comunicar_quinta(p_hoje date, p_agora timestamptz) returns jsonb language plpgsql as $f$
+    create or replace function public._agenda_comunicar_quinta(p_hoje date, p_agora timestamptz) returns jsonb language plpgsql as $f$
     begin
       raise exception 'canceling statement due to statement timeout' using errcode = '57014';
     end $f$;
@@ -1508,7 +1508,7 @@ begin
     -- o relógio entre os passos: 5 s é o mínimo do CHECK
     perform pg_temp.vale();
     update public.agenda_config set comunicar_tempo_max = interval '5 seconds' where id;
-    create function public._agenda_comunicar_quinta(p_hoje date, p_agora timestamptz) returns jsonb language plpgsql as $f$
+    create or replace function public._agenda_comunicar_quinta(p_hoje date, p_agora timestamptz) returns jsonb language plpgsql as $f$
     begin
       perform pg_sleep(5.2);
       return '{"demorou": true}'::jsonb;
@@ -1523,7 +1523,7 @@ begin
   begin
     -- avisos: o que a quinta (P4) devolver
     perform pg_temp.vale();
-    create function public._agenda_comunicar_quinta(p_hoje date, p_agora timestamptz) returns jsonb language sql as $f$ select '{"avisos": [{"texto": "a semana"}]}'::jsonb $f$;
+    create or replace function public._agenda_comunicar_quinta(p_hoje date, p_agora timestamptz) returns jsonb language sql as $f$ select '{"avisos": [{"texto": "a semana"}]}'::jsonb $f$;
     v := public.agenda_comunicar_rodar(c_h, c_a);
     r := pg_temp.ok(r, 'P8n avisos = o que o passo da quinta devolve', v -> 'avisos' = '[{"texto": "a semana"}]'::jsonb, v::text);
     raise exception using errcode = 'P0001', message = '__desfaz__';

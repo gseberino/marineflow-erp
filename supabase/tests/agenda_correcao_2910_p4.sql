@@ -632,8 +632,9 @@ end
 $copia$;
 
 -- ── P. Portas (sempre) ───────────────────────────────────────────────────────────────────────────────────
+-- (7f P4, R8.5-16) a assinatura do enfileirar ganhou p_semana boolean default false; a de 6 argumentos saiu, e as portas são as de antes
 with f(sig) as (values ('public.agenda_aviso_pecas(date, timestamptz)'),
-                       ('public.agenda_aviso_enfileirar(text, uuid[], uuid[], boolean, date, timestamptz)'),
+                       ('public.agenda_aviso_enfileirar(text, uuid[], uuid[], boolean, date, timestamptz, boolean)'),
                        ('public.agenda_aviso_conferir(timestamptz)'))
 insert into _resultado
 select 'P1 as 3 RPCs do aviso: só o service_role (nem anon nem authenticated); security definer; search_path fixo',

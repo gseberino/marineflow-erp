@@ -623,7 +623,8 @@ declare
   v_mig text;
 begin
   for f in select * from (values
-      ('agenda_aviso_enfileirar', 'public.agenda_aviso_enfileirar(text, uuid[], uuid[], boolean, date, timestamptz)', 'mig_correcao_aviso', '20261030100300', 2),
+      -- (7f P4, R8.5-16) a assinatura ganhou p_semana boolean default false: a de 6 argumentos saiu, e o corpo continua conferido contra a fonte do lote
+      ('agenda_aviso_enfileirar', 'public.agenda_aviso_enfileirar(text, uuid[], uuid[], boolean, date, timestamptz, boolean)', 'mig_correcao_aviso', '20261030100300', 2),
       ('agenda_aviso_pecas', 'public.agenda_aviso_pecas(date, timestamptz)', 'mig_correcao_aviso', '20261030100300', 2),
       ('_agenda_linhas_do_fechamento', 'public._agenda_linhas_do_fechamento(date)', 'mig_leituras_fase5', '20261028100500', 2),
       ('_agenda_mudancas', 'public._agenda_mudancas(date, date, boolean, boolean, timestamptz)', 'mig_correcao_textos_fase6', '20261029100950', 4),
@@ -662,7 +663,7 @@ select 'P1 as 3 novas são peças de dentro: ninguém de fora (nem anon, nem aut
                 and not p.prosecdef and coalesce(array_to_string(p.proconfig, ','), '') like '%search_path=public%'), null
   from f join pg_proc p on p.oid = f.sig::regprocedure;
 with f(sig) as (values ('public.agenda_aviso_pecas(date, timestamptz)'),
-                       ('public.agenda_aviso_enfileirar(text, uuid[], uuid[], boolean, date, timestamptz)'),
+                       ('public.agenda_aviso_enfileirar(text, uuid[], uuid[], boolean, date, timestamptz, boolean)'),
                        ('public.agenda_vigiar(date, timestamptz)'), ('public._agenda_modo_da_pergunta(text, text)'))
 insert into _resultado
 select 'P2 as recriadas do motor e do aviso continuam só do service_role',
