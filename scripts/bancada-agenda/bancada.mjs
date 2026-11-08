@@ -102,6 +102,12 @@ export const FORA_DA_BANCADA = new Set([
   '20261106100400_pin_mascarar_chegada.sql',
   // Limpeza do PIN nas mensagens antigas (dado de OUTRA sessão, já aplicado em produção; entra na main em 71dafe2f): só apaga texto de whatsapp_messages, que a agenda não lê.
   '20261106100500_pin_limpar_antigas.sql',
+  // Retorno F0b-1 (pacote de 08/11, de OUTRA sessão e já em produção; entra na main em c1a1d9a9): tabelas do retorno e colunas em clients e whatsapp_leads, que a bancada
+  // não modela. Não recriam função da agenda (só chamam). O retorno tem a bancada própria.
+  '20261116100000_retorno_f1_config.sql',
+  '20261116100100_retorno_f1_tabelas.sql',
+  '20261116100200_retorno_f1_silencio.sql',
+  '20261116100250_retorno_f1_vinculos.sql',
   // Merge do main (28/10/2026): migrations de OUTRAS sessões, já aplicadas em produção, que caíram depois de PRIMEIRA
   // pela data. Mexem em diárias (conta corrente, recibo, lote, anotação × CPF) e no agrupar OS — tabelas que a bancada
   // não modela (anotacoes_do_extrato, orcamento_agrupamentos, os_agrupamento_movidos…) e funções que a agenda não chama
