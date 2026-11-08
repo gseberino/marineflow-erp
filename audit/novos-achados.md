@@ -3622,3 +3622,51 @@ porque só o dono pode preenchê-las.
 - **Efeito:** medido em `pg_locks` no replay (`f7f/p8/travas.mjs`, `travas.out`): ACCESS EXCLUSIVE também em `agenda_acoes`, `agenda_vigia_rodadas` (a lista das rotinas, pelo ampliador) e `agenda_cliente_mensagens` (o SET EXPRESSION de `modelo` e a lista dos tipos); SHARE em `agenda_equipe_mensagens` e `agenda_cliente_mensagens` (os índices). `agenda_vigia_rodadas` é escrita por toda rodada de todo tique: um tique que pegar a migration no meio espera, ou a migration estoura o `LOCK_TIMEOUT` e cai inteira (nada fica). A 100300 trava `agenda_dono_avisos`.
 - **Na Fase 7f (P8):** o roteiro (`fila-do-dono/fase77f-publicar.md`) começa a 100000 logo depois de um tique, à noite, com `LOCK_TIMEOUT=5s`, e lista as 6.
 - **Origem:** Fase 7f, P8.
+
+### [NOVO-agenda-128] A resposta da equipe vai à última mensagem que saiu: o SIM ao convite pode virar o OK da ficha
+
+- **Encontrado em:** Agenda de Produção, Fase 7f, P5 (08/11/2026), no E11j de `agenda_fase7f_equipe.sql`.
+- **Onde:** `agenda_resposta_da_equipe`: a mensagem a que ele responde é a última que o sistema começou e ainda espera resposta (a regra da Fase 3). O P5 só estica a validade do convite até o prazo dele.
+- **Efeito:** o convite sai quarta 10:15 para sexta; a ficha de quinta sai quarta 19:30; o "sim" das 20:00 confirma a ficha de quinta, e o convite continua sem SIM. Na quinta 19:30 ele vence, e a pessoa sai de sexta (o dono recebe o acorde "não respondeu ao convite"). O mesmo com o previsto ou a mudança mandados depois do convite: o "ok" é só ciência deles. Quando duas mensagens saem no mesmo instante (a mudança das 19:30 e a da hora), o empate é pela hora de criação, que é a mesma.
+- **Na Fase 7f (P5):** sem conserto: a gramática fixa da Fase 3 responde à última mensagem, e ler "a qual delas" pede IA (§12, fora). A saída é o dono, pelo acorde do vencido, e a pessoa pode responder de novo antes do prazo. Entra no "Antes de ligar" do convite como risco a medir (os vencidos que tinham resposta depois do convite).
+- **Origem:** Fase 7f, P5.
+
+### [NOVO-agenda-129] "Não posso quarta" depois da validade da resposta é o "não vou" de amanhã
+
+- **Encontrado em:** Agenda de Produção, Fase 7f, P5 (08/11/2026), escrevendo o E6.
+- **Onde:** `agenda_resposta_da_equipe`, o ramo do "não vou" sem mensagem pendente (`m.id is null`): antes do fim da manhã, hoje; depois, o próximo dia útil. É da Fase 3.
+- **Efeito:** o previsto sai quinta 19:30. Até as 09:30 de sexta (`equipe_resposta_validade`, 14 h), "não posso quarta" vai ao dono sem remanejar (o P5). Depois disso, sem mensagem pendente, a mesma frase vira o "não vou" do próximo dia útil e tira a pessoa do plano daquele dia. Com o previsto ligado, a equipe passa a ter mais motivo para responder depois.
+- **Na Fase 7f (P5):** sem conserto: mudar o "não vou" sem mensagem é da Fase 3, e o P5 não recria esse ramo. Hoje não chega a ninguém (o Alex não tem telefone). Vai para a lista "antes de ligar" do previsto.
+- **Origem:** Fase 7f, P5.
+
+### [NOVO-agenda-130] `_agenda_tecnico_declarado` não olha `substituida_em`: o padrão do dono substituído continua declarando
+
+- **Encontrado em:** Agenda de Produção, Fase 7f, P5 (08/11/2026), no controle do E4d2 (`agenda_fase7f_equipe.sql`): substituir a linha do dono não tirava o Alex do declarado.
+- **Onde:** `_agenda_tecnico_declarado` (`20261102100000:1260`, 7c): `min(d.criado_em)` das linhas `origem = 'dono'` com `dias_semana`, sem `d.substituida_em is null`.
+- **Efeito:** quem o dono declarou e depois tirou (o "o Rafael saiu" do K94 substitui o padrão) continua técnico declarado: sai da proteção do novato (7b/7c) e, no P5, nunca é convidado (o convite é só para quem não tem dia declarado).
+- **Na Fase 7f (P5):** sem conserto: a função é da 7c e lida por dentro do motor. O controle do E4d2 usa o cadastro recente. Para o fio.
+- **Origem:** Fase 7f, P5.
+
+### [NOVO-agenda-131] A saúde da comunicação ainda não conta a equipe
+
+- **Encontrado em:** Agenda de Produção, Fase 7f, P5 (08/11/2026).
+- **Onde:** `_agenda_saude_comunicacao` (P7, `20261109100600`). O P7 deixou "os da equipe e do cliente (aceites 6 e 7) para o P5 e o P6".
+- **Efeito:** o aceite 6 da §11 (nenhuma ficha de dia com convite sem SIM; até 1 mudança das 19:30 por pessoa e dia; previstos, mudanças, convites por resposta, por semana) não aparece na saúde. O teste prova as regras (E4b, E2e, E7), mas a saúde não as mede em produção.
+- **Na Fase 7f (P5):** não recriei `_agenda_saude_comunicacao`: ela está na lista dos 38 md5 do P8, e o pacote seguinte (o dado do P5 e do P6, o pós-deploy, os md5) é o lugar dela. Fica como pedido a ele, com os 2 zeros (`ficha_sem_sim`, `mudanca_19h_repetida`) e os números da equipe.
+- **Origem:** Fase 7f, P5.
+
+### [NOVO-agenda-132] A mudança decidida à noite só sai às 07:30
+
+- **Encontrado em:** Agenda de Produção, Fase 7f, P5 (08/11/2026), no E3f.
+- **Onde:** `_agenda_equipe_mudanca_na_hora`: fora da janela da equipe (07:30 a 20:00), espera o próximo tique dentro dela, para não ser recusada de vez (a lição de setembro).
+- **Efeito:** o dono decide às 21:00 que "amanhã o Alex não precisa vir"; a mensagem sai às 07:30, meia hora antes do início das 08:00. Se a pessoa sai de casa antes, chega à toa.
+- **Na Fase 7f (P5):** sem conserto: a janela é do dono (`equipe_janela_inicio`). O acorde da noite continua dizendo ao dono "avise ele" (a mensagem ainda não está na fila), e é ele quem decide ligar.
+- **Origem:** Fase 7f, P5.
+
+### [NOVO-agenda-133] A ficha que não comporta a semana (mais de 600 letras) sai sem ela, e a semana não sai sozinha
+
+- **Encontrado em:** Agenda de Produção, Fase 7f, P5 (08/11/2026), no E11x.
+- **Onde:** `_agenda_rotina_ficha` e `_agenda_rotina_como_foi` (o P5): a semana só vai junto quando a ficha e ela cabem em 600 letras; e o passo previsto não manda a quem "tem ficha" de amanhã (R8.5-17: não recriar o que já foi à fila).
+- **Efeito:** com a ficha perto de 600 letras (várias OS no dia, as etapas, o acesso do 7d), a pessoa não recebe o previsto naquela quinta. A R8.5 conferiu que a ficha + o previsto cabem em 600 (440 + ~70); o caso é raro.
+- **Na Fase 7f (P5):** a escolha segura: nunca a 3ª mensagem nem a ficha cortada. A saúde do pacote seguinte pode contar "previsto que não coube".
+- **Origem:** Fase 7f, P5.
