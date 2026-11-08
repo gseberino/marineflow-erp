@@ -824,6 +824,23 @@ begin
   exception when sqlstate 'P0001' then
     if sqlerrm <> '__desfaz__' then raise; end if;
   end;
+  -- V3c6: o resumo_tarde mínimo que agenda_fase2_conferencia_vigia.sql cria na bancada (dia, telefone, detalhe; sem turno nem criado_em): a saúde não quebra, e o bloco
+  -- conta como sem a tabela; com a tabela inteira (o controle, o V3c4), ele é lido
+  begin
+    perform pg_temp.modos('sombra');
+    drop table public.resumo_tarde;
+    create table public.resumo_tarde (dia date, phone_normalized text, detalhe jsonb not null default '{}');
+    insert into public.resumo_tarde (dia, phone_normalized, detalhe)
+    values (c_h, '5547900000210', jsonb_build_object('caracteres', 1400, 'agenda', jsonb_build_object('bloco_diria', jsonb_build_object('modo', 'ligado'),
+            'bloco_mostrou', jsonb_build_array(jsonb_build_object('parte', 'veredito'), jsonb_build_object('parte', 'dia')))));
+    r := pg_temp.ok(r, 'V3c6 resumo_tarde sem turno nem criado_em (o da bancada da Fase 2): a saúde não quebra; o bloco sai {} e bloco_grande 0, como sem a tabela',
+      pg_temp.lanca($q$select public.agenda_saude(date '2026-11-10', timestamptz '2026-11-10 17:30-03')$q$) = 'ok'
+      and (public.agenda_saude(c_h, c_a) #> '{comunicacao,numeros,bloco}') = '{}'::jsonb and (public.agenda_saude(c_h, c_a) #>> '{comunicacao,bloco_grande}')::int = 0,
+      pg_temp.lanca($q$select public.agenda_saude(date '2026-11-10', timestamptz '2026-11-10 17:30-03')$q$));
+    perform pg_temp.desfaz();
+  exception when sqlstate 'P0001' then
+    if sqlerrm <> '__desfaz__' then raise; end if;
+  end;
 
   -- V3d: as perguntas — com prazo, esperam você, a idade em dias úteis e a complacência
   begin

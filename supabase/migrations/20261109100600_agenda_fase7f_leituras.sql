@@ -452,7 +452,10 @@ begin
 
   -- o bloco nos fechamentos dos últimos 7 dias, pelo detalhe de resumo_tarde (P3): em sombra, bloco_seria (o texto que sairia com ele ligado); ligado, bloco_mostrou e o texto que saiu.
   -- No mínimo o bloco é o veredito e a 1ª decisão (com o "e mais N"): acima de texto_max com qualquer outra linha, ele ainda podia ceder, e isso é o bloco_grande.
-  if to_regclass('public.resumo_tarde') is not null then
+  -- A tabela é a do Secretário (20261015210000); um resumo_tarde sem as colunas que o bloco lê (o da bancada da Fase 2 tem só dia, telefone e detalhe) conta como sem a tabela.
+  if to_regclass('public.resumo_tarde') is not null
+     and (select count(*) from pg_attribute a where a.attrelid = to_regclass('public.resumo_tarde') and a.attnum > 0 and not a.attisdropped
+             and a.attname in ('dia', 'turno', 'detalhe', 'criado_em')) = 4 then
     execute $q$
       select coalesce(jsonb_build_object(
                'em_sombra', count(*) filter (where t.detalhe -> 'agenda' ? 'bloco_seria'),
