@@ -116,6 +116,13 @@ create function pg_temp.modos(p text) returns void language sql as $f$
      set modo_bloco_agenda = p, modo_veto = p, modo_lote_dono = p, modo_equipe_previsto = p, modo_equipe_convite = p, modo_cliente_camadas = p
    where id
 $f$;
+-- *agenda espera* sem derrubar o arquivo: o erro (do gatilho ou do CHECK) volta como status, e a linha do caso reprova com ele
+create function pg_temp.espera(p_alvo text, p_hoje date, p_agora timestamptz) returns jsonb language plpgsql as $f$
+begin
+  return public.agenda_veto_dito(pg_temp.adm(), 'espera', p_alvo, p_hoje, p_agora);
+exception when others then
+  return jsonb_build_object('status', 'erro', 'erro', sqlstate || ': ' || sqlerrm);
+end $f$;
 create function pg_temp.foco() returns text language sql stable as $f$
   select public._agenda_ver_decisoes(date '2026-11-10', timestamptz '2026-11-10 17:30-03') ->> 'texto'
 $f$;
@@ -135,6 +142,10 @@ begin
                  pg_temp.corpo(current_setting('agenda_teste.mig_correcao3_fase7d'), '_agenda_ver_decisoes'));
   execute format($q$create function pg_temp.saude_7d(p_hoje date, p_agora timestamptz) returns jsonb language plpgsql stable set search_path to 'public' as $b$%s$b$$q$,
                  pg_temp.corpo(current_setting('agenda_teste.mig_leituras_fase7d'), 'agenda_saude'));
+  -- agenda_saude desta migration com só o 1º termo do ok (o de antes da 7b) em verdadeiro: na fixture ele já é falso por outro motivo, e assim o que sobra no ok são as
+  -- chaves equipe_dias, local e comunicacao. Se a troca não achar o termo, o V3b0 reprova.
+  execute format($q$create function pg_temp.saude_so_zeros(p_hoje date, p_agora timestamptz) returns jsonb language plpgsql stable set search_path to 'public' as $b$%s$b$$q$,
+                 replace(pg_temp.corpo(current_setting('agenda_teste.mig_leituras_fase7f'), 'agenda_saude'), $r$'ok', v_sem = 0 and$r$, $r$'ok', true or v_sem = 0 and$r$));
 end $f$;
 -- Os títulos do "Também esperam: …" (a linha do corte), em ordem; e as linhas do texto sem ela.
 create function pg_temp.titulos(p text) returns text[] language sql immutable as $f$
@@ -343,7 +354,7 @@ begin
   begin
     perform pg_temp.modos('ligado');
     update public.agenda_config set gestor_so_propor = false where id;
-    perform public.agenda_veto_dito(pg_temp.adm(), 'espera', 'Giancarlo', c_h, c_a);
+    perform pg_temp.espera('Giancarlo', c_h, c_a);
     update public.agenda_perguntas set estado = 'resolvida', resolvida_motivo = 'teste V1i3' where id in (pg_temp.q('02'), pg_temp.q('03'), pg_temp.q('04'), pg_temp.q('05'));
     v := pg_temp.foco();
     r := pg_temp.ok(r, 'V1i3 nenhuma decisão com prazo e prazo no "Também quero saber": "Eu não escolho por você." fica, com o *agenda espera* no fim',
@@ -452,7 +463,7 @@ begin
       public.agenda_resolver_os('Nelson', c_h) ->> 'status' = 'ambiguo'
       and (select veto_ate = timestamptz '2026-11-10 18:00-03' and mostrada_vezes > 0 and veto_espera is null from public.agenda_perguntas where id = pg_temp.q('02')), null);
     v_m0 := md5((select string_agg(to_jsonb(q)::text, ',' order by q.id) from public.agenda_perguntas q where q.id <> pg_temp.q('02')));
-    v := public.agenda_veto_dito(pg_temp.adm(), 'espera', 'Nelson', c_h, c_a);
+    v := pg_temp.espera('Nelson', c_h, c_a);
     select * into v_q from public.agenda_perguntas where id = pg_temp.q('02');
     r := pg_temp.ok(r, 'V2b *agenda espera Nelson*, com o freio: o texto da §6.2; a pergunta do Nelson ganha veto_espera = dono e o prazo nulo; as outras não mudam',
       v ->> 'texto' = 'Combinado: a pergunta de Nelson espera você, sem prazo.' and (v ->> 'mudou')::boolean and v ->> 'pergunta_id' = pg_temp.q('02')::text
@@ -492,42 +503,42 @@ begin
   begin
     perform pg_temp.modos('sombra');
     -- o nome que não casa: a lista das que podem esperar, na ordem do bloco, sem os dias do dono e sem a Correa (sem OS nem fornecedor na chave)
-    v := public.agenda_veto_dito(pg_temp.adm(), 'espera', 'Tadeu', c_h, c_a);
+    v := pg_temp.espera('Tadeu', c_h, c_a);
     r := pg_temp.ok(r, 'V2e o nome sem pergunta aberta (o Tadeu): nao_achei e a lista, na ordem do bloco, sem os dias do dono nem a Correa; nada muda',
       v ->> 'status' = 'nao_achei' and not (v ->> 'mudou')::boolean
       and v ->> 'texto' = 'Não achei pergunta aberta de Tadeu. Podem esperar você: Flávio, Nelson, Lenine, Vanderlei e Giancarlo. Diga *agenda espera* e o nome.'
       and not exists (select 1 from public.agenda_perguntas where veto_espera = 'dono'), v::text);
-    v := public.agenda_veto_dito(pg_temp.adm(), 'espera', 'Fulano de Tal', c_h, c_a);
+    v := pg_temp.espera('Fulano de Tal', c_h, c_a);
     r := pg_temp.ok(r, 'V2e2 o nome que não é de ninguém: a mesma lista', v ->> 'status' = 'nao_achei' and v ->> 'texto' like 'Não achei pergunta aberta de Fulano de Tal. Podem esperar você: Flávio,%', v::text);
     -- os dias do dono (AG7-37): nenhum nome os alcança
     v_m0 := md5((select to_jsonb(x)::text from public.agenda_perguntas x where x.id = pg_temp.q('01')));
-    v := public.agenda_veto_dito(pg_temp.adm(), 'espera', 'você', c_h, c_a);
+    v := pg_temp.espera('você', c_h, c_a);
     r := pg_temp.ok(r, 'V2f a pergunta dos seus dias em campo (padrao_do_dono, AG7-37) não é alvo: "você" não acha nada, e ela não muda',
       v ->> 'status' = 'nao_achei' and md5((select to_jsonb(x)::text from public.agenda_perguntas x where x.id = pg_temp.q('01'))) = v_m0, v::text);
     -- a que já espera: o Flávio (espera o cliente desde que nasceu)
-    v := public.agenda_veto_dito(pg_temp.adm(), 'espera', 'Flávio', c_h, c_a);
+    v := pg_temp.espera('Flávio', c_h, c_a);
     r := pg_temp.ok(r, 'V2g a que já espera (o Flávio, mexe no dia que o cliente já sabe): ja_espera, nada muda',
       v ->> 'status' = 'ja_espera' and not (v ->> 'mudou')::boolean and v ->> 'texto' = 'A pergunta de Flávio já espera você: ela não fica com o padrão sozinha.'
       and (select veto_espera from public.agenda_perguntas where id = pg_temp.q('06')) = 'cliente', v::text);
     -- a crítica que pode vencer (Giancarlo) também pode esperar; e pelo número da OS
-    v := public.agenda_veto_dito(pg_temp.adm(), 'espera', 'Giancarlo', c_h, c_a);
+    v := pg_temp.espera('Giancarlo', c_h, c_a);
     r := pg_temp.ok(r, 'V2h a crítica que pode vencer (Giancarlo, AG7-15) também passa a esperar, pelo nome; a linha dela perde a opção que fica',
       v ->> 'texto' = 'Combinado: a pergunta de Giancarlo espera você, sem prazo.' and (select veto_espera from public.agenda_perguntas where id = pg_temp.q('07')) = 'dono'
       and position('Recomendo a opção' in public._agenda_pergunta_linha(pg_temp.q('07'), c_h, c_a) ->> 'texto') = 0, v::text);
     -- dito de novo: a 2ª vez já espera
-    v := public.agenda_veto_dito(pg_temp.adm(), 'espera', 'Giancarlo', c_h, c_a);
+    v := pg_temp.espera('Giancarlo', c_h, c_a);
     r := pg_temp.ok(r, 'V2h2 de novo: "já espera você", nada muda', v ->> 'status' = 'ja_espera' and v ->> 'texto' = 'A pergunta de Giancarlo já espera você: ela não fica com o padrão sozinha.', v::text);
     -- o Vanderlei tem 3: a parada e um estouro (os 2 podem esperar; a parada vem antes na ordem do bloco: a mais velha) e a diária (dinheiro); vai a 1ª que pode, na ordem
     insert into public.agenda_perguntas (chave, tipo, texto, modo, service_order_id, os_ids, perda_em, expira_em, criada_em)
     values ('estouro:teste-v2i', 'estouro', 'A OS do Vanderlei (motorhome, Instalação de carregador) passou do previsto. Deixo como está no plano?', 'ligado',
             pg_temp.os('303'), array[pg_temp.os('303')], date '2026-11-13', timestamptz '2026-11-17 18:00-03', timestamptz '2026-11-10 16:00-03');
-    v := public.agenda_veto_dito(pg_temp.adm(), 'espera', 'Vanderlei', c_h, c_a);
+    v := pg_temp.espera('Vanderlei', c_h, c_a);
     r := pg_temp.ok(r, 'V2i o nome com 3 abertas: vai a 1ª que ainda pode esperar na ordem do bloco (a parada do Vanderlei), nem o estouro (depois dela) nem a diária',
       v ->> 'pergunta_id' = pg_temp.q('05')::text and (select veto_espera from public.agenda_perguntas where id = pg_temp.q('05')) = 'dono'
       and (select veto_espera from public.agenda_perguntas where chave = 'estouro:teste-v2i') is null
       and (select veto_espera from public.agenda_perguntas where id = pg_temp.q('08')) = 'dinheiro', v::text);
     -- dito de novo, a próxima que pode: o estouro
-    v := public.agenda_veto_dito(pg_temp.adm(), 'espera', 'Vanderlei', c_h, c_a);
+    v := pg_temp.espera('Vanderlei', c_h, c_a);
     r := pg_temp.ok(r, 'V2i2 de novo, a próxima do mesmo nome que ainda pode esperar (o estouro)',
       v ->> 'status' = 'espera' and (select veto_espera from public.agenda_perguntas where chave = 'estouro:teste-v2i') = 'dono', v::text);
     perform pg_temp.desfaz();
@@ -542,7 +553,7 @@ begin
             pg_temp.os('306'), array[pg_temp.os('306')], '[{"n": 1, "texto": "Metade"}, {"n": 2, "texto": "Quase tudo"}]', 1,
             timestamptz '2026-11-11 18:00-03', date '2026-11-11', timestamptz '2026-11-12 18:00-03')
     returning id into v_id;
-    v := public.agenda_veto_dito(pg_temp.adm(), 'espera', 'Tadeu', c_h, c_a);
+    v := pg_temp.espera('Tadeu', c_h, c_a);
     r := pg_temp.ok(r, 'V2j o tipo com prazo próprio (situacao, espera = tipo): prazo_proprio, com o dia e a hora dele, e nada muda',
       v ->> 'status' = 'prazo_proprio'
       and v ->> 'texto' = 'A pergunta de Tadeu tem prazo próprio, até qua 11/11 às 18:00: o *agenda espera* não muda esse. Para outra escolha, responda a pergunta.'
@@ -553,7 +564,7 @@ begin
             pg_temp.os('306'), array[pg_temp.os('306')], '[{"n": 1, "texto": "2 dias"}, {"n": 2, "texto": "3 dias"}]', 1, 1,
             timestamptz '2026-11-11 18:00-03', date '2026-11-11', timestamptz '2026-11-12 18:00-03')
     returning id into v_id;
-    v := public.agenda_veto_dito(pg_temp.adm(), 'espera', 'Tadeu', c_h, c_a);
+    v := pg_temp.espera('Tadeu', c_h, c_a);
     r := pg_temp.ok(r, 'V2j2 com opcao_padrao, o prazo fica (veto_padrao_tem_prazo) e a pergunta passa a esperar: nada lança',
       v ->> 'status' = 'espera' and (select veto_espera = 'dono' and veto_ate is not null from public.agenda_perguntas where id = v_id), v::text);
     update public.agenda_perguntas set estado = 'resolvida', resolvida_motivo = 'teste V2j2' where id = v_id;
@@ -562,7 +573,7 @@ begin
     values ('parada:teste-v2j3', 'parada', 'A instalação de placa solar está parada há 3 dias úteis. Deixo como está no plano?', 'ligado',
             null, array[pg_temp.os('306')], date '2026-11-13', timestamptz '2026-11-17 18:00-03')
     returning id into v_id;
-    v := public.agenda_veto_dito(pg_temp.adm(), 'espera', 'Tadeu', c_h, c_a);
+    v := pg_temp.espera('Tadeu', c_h, c_a);
     r := pg_temp.ok(r, 'V2j3 a pergunta com a OS só em os_ids: o nome do cliente dela a acha',
       v ->> 'status' = 'espera' and v ->> 'pergunta_id' = v_id::text and (select veto_espera from public.agenda_perguntas where id = v_id) = 'dono', v::text);
     -- os dias do dono com OS (como a do Rodrigo em produção, se viesse com a OS): nem assim é alvo (AG7-37)
@@ -571,7 +582,7 @@ begin
     values ('padrao_do_dono:teste-v2j3', 'padrao_do_dono', 'Para marcar Tadeu (OS-F6), preciso saber em que dias você fica em campo.', 'ligado',
             pg_temp.os('306'), array[pg_temp.os('306')], date '2026-11-13', timestamptz '2026-11-17 18:00-03')
     returning id into v_id;
-    v := public.agenda_veto_dito(pg_temp.adm(), 'espera', 'Tadeu', c_h, c_a);
+    v := pg_temp.espera('Tadeu', c_h, c_a);
     r := pg_temp.ok(r, 'V2f2 os seus dias em campo com a OS do Tadeu: *agenda espera Tadeu* não os alcança (nao_achei), e a pergunta não muda (AG7-37)',
       v ->> 'status' = 'nao_achei' and (select veto_espera from public.agenda_perguntas where id = v_id) is null, v::text);
     -- e com a OS de outro Nelson (OS-J2): "Nelson" continua ambíguo no resolvedor, e os dias do dono não contam como pergunta dele; vai a do Nelson da OS-F1
@@ -580,7 +591,7 @@ begin
     values ('padrao_do_dono:teste-v2f3', 'padrao_do_dono', 'Para marcar Nelson (OS-J2), preciso saber em que dias você fica em campo.', 'ligado',
             'd7d00000-0000-4000-8000-000000097202', array['d7d00000-0000-4000-8000-000000097202'::uuid], date '2026-11-13', timestamptz '2026-11-17 18:00-03')
     returning id into v_id;
-    v := public.agenda_veto_dito(pg_temp.adm(), 'espera', 'Nelson', c_h, c_a);
+    v := pg_temp.espera('Nelson', c_h, c_a);
     r := pg_temp.ok(r, 'V2f3 os seus dias com a OS de outro Nelson: o ambíguo vai à do Nelson da OS-F1, não pergunta qual; os seus dias não mudam',
       v ->> 'status' = 'espera' and v ->> 'pergunta_id' = pg_temp.q('02')::text and (select veto_espera from public.agenda_perguntas where id = v_id) is null, v::text);
     -- o fornecedor da pergunta (sem OS): pelo nome dele
@@ -590,7 +601,7 @@ begin
     values ('fornecedor_cadastro:f7f00000-0000-4000-8000-00000000f7a1', 'fornecedor_cadastro', 'A Correa não tem cadastro de prazo. Conto 7 dias úteis?', 'ligado',
             date '2026-11-13', timestamptz '2026-11-17 18:00-03')
     returning id into v_id;
-    v := public.agenda_veto_dito(pg_temp.adm(), 'espera', 'Correa', c_h, c_a);
+    v := pg_temp.espera('Correa', c_h, c_a);
     r := pg_temp.ok(r, 'V2j4 sem OS, o fornecedor da pergunta pelo nome: *agenda espera Correa* acha a do cadastro dela',
       v ->> 'status' = 'espera' and v ->> 'pergunta_id' = v_id::text and v ->> 'texto' = 'Combinado: a pergunta de Correa espera você, sem prazo.', v::text);
     perform pg_temp.desfaz();
@@ -653,12 +664,15 @@ begin
   -- V3b: cada violação forçada conta 1, e só ela; o ok de agenda_saude cai
   begin
     perform pg_temp.modos('sombra');
+    r := pg_temp.ok(r, 'V3b0 o controle: na cópia de agenda_saude com o resto do ok em verdadeiro, sem violação o ok é verdadeiro (e o de agenda_saude já é falso na fixture)',
+      (pg_temp.saude_so_zeros(c_h, c_a) ->> 'ok')::boolean and not (public.agenda_saude(c_h, c_a) ->> 'ok')::boolean
+      and pg_temp.saude_so_zeros(c_h, c_a) - 'ok' = public.agenda_saude(c_h, c_a) - 'ok', null);
     -- assumida pelo prazo sem ter sido mostrada antes dele (a Correa nunca foi mostrada)
     update public.agenda_perguntas set estado = 'resolvida', resolvida_motivo = 'teste V3b', assumida_por = 'prazo', assumida_em = c_a where id = pg_temp.q('04');
     v := public.agenda_saude(c_h, c_a) -> 'comunicacao';
     r := pg_temp.ok(r, 'V3b assumida_sem_prazo_mostrado = 1 (a Correa, nunca mostrada), e só ela; zeros_ok falso e o ok de agenda_saude cai',
       (v ->> 'assumida_sem_prazo_mostrado')::int = 1 and (select bool_and((v ->> z)::int = 0) from unnest(c_zeros) z where z <> 'assumida_sem_prazo_mostrado')
-      and not (v ->> 'zeros_ok')::boolean and not (public.agenda_saude(c_h, c_a) ->> 'ok')::boolean, v::text);
+      and not (v ->> 'zeros_ok')::boolean and not (public.agenda_saude(c_h, c_a) ->> 'ok')::boolean and not (pg_temp.saude_so_zeros(c_h, c_a) ->> 'ok')::boolean, v::text);
     perform pg_temp.desfaz();
   exception when sqlstate 'P0001' then
     if sqlerrm <> '__desfaz__' then raise; end if;
@@ -708,7 +722,7 @@ begin
     -- o teto só fecha efeito nada que pode vencer: com as de efeito nada esperando o dono ou fechadas, sobra só o Giancarlo (efeito opcao), e o teto passa com motivo
     update public.agenda_config set perguntas_abertas_max = 5 where id;
     update public.agenda_perguntas set estado = 'resolvida', resolvida_motivo = 'teste V3b4c' where id in (pg_temp.q('01'), pg_temp.q('04'));
-    perform public.agenda_veto_dito(pg_temp.adm(), 'espera', x, c_h, c_a) from unnest(array['Nelson', 'Lenine', 'Vanderlei']) x;
+    perform pg_temp.espera(x, c_h, c_a) from unnest(array['Nelson', 'Lenine', 'Vanderlei']) x;
     v := public.agenda_saude(c_h, c_a) -> 'comunicacao';
     r := pg_temp.ok(r, 'V3b4c 6 abertas, teto 5: as de efeito nada esperam você, e a que sobra (Giancarlo) é de efeito opcao, que o teto não fecha: 0',
       (v ->> 'teto_passou_sem_motivo')::int = 0 and (v #>> '{numeros,perguntas,abertas}')::int = 6 and (v #>> '{numeros,perguntas,esperam_voce}')::int = 3, v::text);
@@ -814,7 +828,7 @@ begin
   -- V3d: as perguntas — com prazo, esperam você, a idade em dias úteis e a complacência
   begin
     perform pg_temp.modos('sombra');
-    perform public.agenda_veto_dito(pg_temp.adm(), 'espera', 'Giancarlo', c_h, c_a);
+    perform pg_temp.espera('Giancarlo', c_h, c_a);
     v := public.agenda_saude(c_h, c_a) -> 'comunicacao';
     r := pg_temp.ok(r, 'V3d as perguntas: 8 abertas, teto 5, 3 acima; com prazo 2 (Nelson e Lenine), 1 espera você (o Giancarlo, depois do *agenda espera*); a idade média em dias úteis',
       v #> '{numeros,perguntas}' @> '{"abertas": 8, "teto": 5, "acima_do_teto": 3, "com_prazo": 2, "esperam_voce": 1}'::jsonb
