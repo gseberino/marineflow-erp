@@ -3670,3 +3670,43 @@ porque só o dono pode preenchê-las.
 - **Efeito:** com a ficha perto de 600 letras (várias OS no dia, as etapas, o acesso do 7d), a pessoa não recebe o previsto naquela quinta. A R8.5 conferiu que a ficha + o previsto cabem em 600 (440 + ~70); o caso é raro.
 - **Na Fase 7f (P5):** a escolha segura: nunca a 3ª mensagem nem a ficha cortada. A saúde do pacote seguinte pode contar "previsto que não coube".
 - **Origem:** Fase 7f, P5.
+
+### [NOVO-agenda-134] A semana de 16/11 termina na quinta: sexta 20/11 é feriado nacional (Consciência Negra)
+
+- **Encontrado em:** Agenda de Produção, Fase 7f, P6 (08/11/2026), no C1c e na produção (`sql/wf7f_p6_estado`: `agenda_feriado('2026-11-20')` = "Consciência Negra", `agenda_dia_util` falso).
+- **Onde:** o texto aprovado da semana prevista (AG7-36) mostrava "(segunda 16/11 a sábado 21/11)"; a spec (R8.5-25) diz "sai a sexta". Pelo calendário (`agenda_dia_util`: sem sábado com `sabado_util` falso, sem feriado), a semana de 16/11 vai de segunda 16/11 a quinta 19/11.
+- **Efeito:** o cliente lê "(segunda 16/11 a quinta 19/11)". É o certo pela regra de R8.5-25 (o fim vem do calendário; o texto aprovado não muda), mas o dono aprovou o cartão com outra data no exemplo. O sábado só entra quando o plano marca o sábado (aí o texto é o do cartão, C2a).
+- **Na Fase 7f (P6):** `_agenda_cliente_camada` calcula a faixa pelo calendário; o item 11 de `fila-do-dono/fase7f-oks.md` mostra ao dono o texto com o feriado.
+- **Origem:** Fase 7f, P6.
+
+### [NOVO-agenda-135] Fora da semana dita, o cliente ouve o dia exato pelo aviso de hoje (M6 remarcado); o texto "Se mudar" aprovado fica sem uso
+
+- **Encontrado em:** Agenda de Produção, Fase 7f, P6 (08/11/2026), no C4c.
+- **Onde:** depois da semana enviada, o prometido é a faixa dela (`_agenda_cliente_prometer`). Se o plano sai da semana, `_agenda_cliente_risco` vê o risco e `_agenda_cliente_atraso` registra o `pode_atrasar` `remarcado` (firme): "O serviço no seu veleiro, que estava entre segunda (23/11) e sexta (27/11), precisou passar para segunda (30/11), pela manhã. Desculpe pela mudança. Pode ser? Responda SIM ou me diga outro dia.". O pedido do fio para o P6 é "fora da semana, como hoje"; a spec (§5.6) pedia a variante `semana:mudou` ("precisou passar para a semana de 23/11", o texto "Se mudar" que o dono aprovou em AG7-36) e a mudança da promessa sempre `pedida` (item 3 do registrar, com `_agenda_cliente_motivo_da_mudanca`).
+- **Efeito:** o cliente da semana prevista que tem o serviço remarcado para outra semana ouve o dia exato antes da véspera (contra o espírito de AG7-16), e o texto "Se mudar" aprovado não sai por caminho nenhum. Hoje toda mensagem nasce pedida (0 dias aprovados), então o dono vê cada uma antes.
+- **Na Fase 7f (P6):** não construídos: a variante `mudou`, o item 3 do registrar e `_agenda_cliente_motivo_da_mudanca`. Decidir no pacote seguinte (ou pedir ao fio) se o "Se mudar" substitui o M6 remarcado para a OS em camada.
+- **Origem:** Fase 7f, P6.
+
+### [NOVO-agenda-136] A semana que o dono não aprova a tempo não volta: o cliente fica só com a véspera
+
+- **Encontrado em:** Agenda de Produção, Fase 7f, P6 (08/11/2026), no C9f.
+- **Onde:** `_agenda_cliente_semana`. Nos 3 primeiros dias aprovados do tipo, cada semana nasce `pedida` (a pergunta `cliente_aprovar`) e vale até o fim da janela do dia de envio (19:00). Vencida sem o *manda cliente*, ela conta como "já tem" daquela semana e não nasce de novo; a segurada também.
+- **Efeito:** sem resposta do dono no dia, aquele cliente não recebe a semana; o dia exato vai na véspera como sempre. É a escolha de não repetir a mesma pergunta ao dono a cada dia (R8.10: "cada M12 é +1 pergunta ao dono"). A recusada pelo teto, pela hora ou pela leitura de agora tenta de novo no dia seguinte (R8.5-22, C9d).
+- **Na Fase 7f (P6):** dito ao dono no item 11 de `fase7f-oks.md`.
+- **Origem:** Fase 7f, P6.
+
+### [NOVO-agenda-137] O registro pergunta ao dono antes de saber se o cliente pode receber (telefone, conversa)
+
+- **Encontrado em:** Agenda de Produção, Fase 7f, P6 (08/11/2026), lendo `_agenda_cliente_registrar` (da Fase 5, `20261031100850`).
+- **Onde:** a pergunta `cliente_aprovar` nasce no registro; o telefone, o opt-out e a conversa no último ano (d10) só são conferidos no enfileirar (`_agenda_cliente_enfileirar`), depois do *manda cliente*.
+- **Efeito:** para o cliente sem telefone ou que nunca escreveu à HBR, o dono aprova uma mensagem que depois é recusada (`sem_telefone`, `sem_conversa`). Vale para todos os tipos desde a Fase 5; a semana não insiste (NOVO-agenda-136).
+- **Na Fase 7f (P6):** não mudado (o registro só ganhou a regra das camadas). Para um pacote de correção do cliente.
+- **Origem:** Fase 7f, P6.
+
+### [NOVO-agenda-138] A saúde da comunicação ainda não conta o cliente (aceite 7 da §11)
+
+- **Encontrado em:** Agenda de Produção, Fase 7f, P6 (08/11/2026).
+- **Onde:** `_agenda_saude_comunicacao` (P7) não tem os zeros do cliente da §11 (aceite 7: `dia_exato_cedo`, `promessa_mudou_sem_dono`, "semana nunca conta como dia ouvido") nem as métricas (semanas enviadas, mudanças que chegaram ao cliente). Como o NOVO-agenda-131 para a equipe.
+- **Efeito:** depois de ligar, nenhum número da saúde mostra se a semana saiu, se o dia exato saiu antes da véspera ou se a mudança chegou ao cliente sem o dono. A lista dos liberados (`cliente.tipos_liberados`) já conta a semana (P6).
+- **Na Fase 7f (P6):** fica para o pacote seguinte, que recria `_agenda_saude_comunicacao` uma vez com a equipe e o cliente.
+- **Origem:** Fase 7f, P6.
