@@ -81,6 +81,28 @@ begin
   end loop;
   return array_to_string(v_fora, E'\n');
 end $f$;
+-- (P9) o texto sem os blocos do P9: em 3 das 13 a viva tem, por cima, os blocos dele; sem o P9 no banco, é a própria
+create function pg_temp.sem_p9(p text) returns text language plpgsql immutable as $f$
+declare
+  v_fora   text[] := '{}';
+  v_dentro boolean := false;
+  l        text;
+begin
+  foreach l in array string_to_array(replace(p, E'\r\n', E'\n'), E'\n') loop
+    if not v_dentro and l ~ '^\s*-- FASE 7f: \(7f P9' then
+      v_dentro := true;
+      continue;
+    end if;
+    if v_dentro and l ~ '^\s*-- FASE 7f: fim' then
+      v_dentro := false;
+      continue;
+    end if;
+    if not v_dentro then
+      v_fora := v_fora || l;
+    end if;
+  end loop;
+  return array_to_string(v_fora, E'\n');
+end $f$;
 create function pg_temp.como(p_papel text, p_sql text) returns text language plpgsql as $f$
 declare
   v text;
@@ -437,9 +459,10 @@ begin
     t := pg_temp.texto_semana('compra_feita', pg_temp.os('403'), '{"primeira": false, "faixa_de": "2026-11-23", "faixa_ate": "2026-11-23", "n": 2}', h);
     r := pg_temp.ok(r, 'C2e o serviço com artigo feminino: "está prevista"; a faixa de 1 dia sem o "a"',
       t = 'Rui, a revisão do gerador está prevista para a semana de 23/11 (segunda 23/11), com uns 2 dias de trabalho. O dia certo eu confirmo na véspera. Se algum dia dessa semana não der, me diga.', t);
-    r := pg_temp.ok(r, 'C2f o que falta lança 22023: a variante (duas_semanas, mudou, nenhuma), a faixa, a faixa invertida, a faixa em 2 semanas, os dias',
+    r := pg_temp.ok(r, 'C2f o que falta lança 22023: a variante (duas_semanas, nenhuma; mudou só sem o P9 no banco), a faixa, a faixa invertida, a faixa em 2 semanas, os dias',
       pg_temp.lanca(format($q$select public._agenda_cliente_texto('semana', 'duas_semanas', %L, '{"faixa_de": "2026-11-23", "faixa_ate": "2026-11-27", "n": 3}', date '2026-11-11')$q$, pg_temp.os('401'))) = '22023'
-      and pg_temp.lanca(format($q$select public._agenda_cliente_texto('semana', 'mudou', %L, '{"faixa_de": "2026-11-23", "faixa_ate": "2026-11-27", "n": 3}', date '2026-11-11')$q$, pg_temp.os('401'))) = '22023'
+      and (to_regprocedure('public._agenda_cliente_semana_mudou(uuid, jsonb, date, timestamptz, timestamptz, timestamptz)') is not null   -- (P9) com ela no banco, a variante mudou existe
+           or pg_temp.lanca(format($q$select public._agenda_cliente_texto('semana', 'mudou', %L, '{"faixa_de": "2026-11-23", "faixa_ate": "2026-11-27", "n": 3}', date '2026-11-11')$q$, pg_temp.os('401'))) = '22023')
       and pg_temp.lanca(format($q$select public._agenda_cliente_texto('semana', null, %L, '{"faixa_de": "2026-11-23", "faixa_ate": "2026-11-27", "n": 3}', date '2026-11-11')$q$, pg_temp.os('401'))) = '22023'
       and pg_temp.lanca(format($q$select public._agenda_cliente_texto('semana', 'compra_feita', %L, '{"faixa_ate": "2026-11-27", "n": 3}', date '2026-11-11')$q$, pg_temp.os('401'))) = '22023'
       and pg_temp.lanca(format($q$select public._agenda_cliente_texto('semana', 'compra_feita', %L, '{"faixa_de": "2026-11-27", "faixa_ate": "2026-11-23", "n": 3}', date '2026-11-11')$q$, pg_temp.os('401'))) = '22023'
@@ -670,8 +693,12 @@ begin
       not exists (select 1 from public.agenda_cliente_mensagens x where x.service_order_id = pg_temp.os('401') and x.tipo = 'pode_atrasar'), v::text);
     perform pg_temp.plano('401', array[date '2026-11-30', date '2026-12-01']);
     v := public._agenda_cliente_atraso(date '2026-11-16', pg_temp.em(date '2026-11-16', '17:00'));
-    r := pg_temp.ok(r, 'C4c o plano saiu da semana (30/11): o M6 de hoje (remarcado), como antes',
-      exists (select 1 from public.agenda_cliente_mensagens x where x.service_order_id = pg_temp.os('401') and x.tipo = 'pode_atrasar' and x.variante = 'remarcado'), v::text);
+    -- (P9) com a semana que mudou no banco (20261109101200), o cliente que ouviu a semana recebe ela no lugar do M6; sem ela, o M6 de hoje. A função nova só por to_regprocedure, em texto
+    r := pg_temp.ok(r, 'C4c o plano saiu da semana (30/11): o M6 de hoje (remarcado); com o P9 no banco, a semana que mudou no lugar dele',
+      case when to_regprocedure('public._agenda_cliente_semana_mudou(uuid, jsonb, date, timestamptz, timestamptz, timestamptz)') is null
+           then exists (select 1 from public.agenda_cliente_mensagens x where x.service_order_id = pg_temp.os('401') and x.tipo = 'pode_atrasar' and x.variante = 'remarcado')
+           else not exists (select 1 from public.agenda_cliente_mensagens x where x.service_order_id = pg_temp.os('401') and x.tipo = 'pode_atrasar')
+                and exists (select 1 from public.agenda_cliente_mensagens x where x.service_order_id = pg_temp.os('401') and x.tipo = 'semana' and x.variante = 'mudou') end, v::text);
     perform pg_temp.desfaz();
   exception when sqlstate 'P0001' then
     if sqlerrm <> '__desfaz__' then raise; end if;
@@ -936,7 +963,7 @@ begin
     select count(*) into v_n from regexp_matches(replace(pg_temp.corpo(v_mig, x.nome), E'\r\n', E'\n'), '-- (FASE 7f: \(7f P6|\(7f P6)', 'g');
     r := pg_temp.ok(r, format('C8a %s: a viva é a desta migration; sem os %s blocos do P6, é o corpo da origem (agenda_teste.%s), byte a byte', x.nome, x.blocos, x.fonte),
       coalesce(current_setting('agenda_teste.' || x.fonte, true), '') <> ''
-      and replace((select p.prosrc from pg_proc p where p.oid = x.sig::regprocedure), E'\r\n', E'\n') = pg_temp.corpo(v_mig, x.nome)
+      and pg_temp.sem_p9(replace((select p.prosrc from pg_proc p where p.oid = x.sig::regprocedure), E'\r\n', E'\n')) = pg_temp.corpo(v_mig, x.nome)
       and v_n = x.blocos
       and pg_temp.sem_p6(pg_temp.corpo(v_mig, x.nome)) = replace(pg_temp.corpo(current_setting('agenda_teste.' || x.fonte, true), x.nome), E'\r\n', E'\n')
       and pg_temp.corpo(current_setting('agenda_teste.' || x.fonte, true), x.nome) <> '',

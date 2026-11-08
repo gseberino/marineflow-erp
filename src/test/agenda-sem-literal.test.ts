@@ -249,7 +249,8 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
   {
     onde: '_agenda_saude_comunicacao',
     casou: '24h',
-    vezes: 3,
+    // Fase 7f (P9, 20261109101200): recriada (+3: a mesma cópia; os blocos da equipe e do cliente não têm o literal).
+    vezes: 6,
     porque: 'nomes das chaves do resultado (rodadas_24h, erros_24h e falhas_lote_guardaria_24h da rodada comunicar: a janela de um dia da conferência, como os blocos de agenda_saude); não é rascunho_validade',
   },
   // Fase 7c (P8, 20261102100550): a rodada das etapas grava a rodada como a de quem faz o quê; a ordem e a conta do plano do dia têm
@@ -360,7 +361,8 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
   // Fase 7d (P6, 20261107100500): revalidar recriado (+1: a mesma cópia).
   // Fase 7d (correção, Onda 1, 20261107100800): revalidar recriado (+1: a mesma cópia).
   // Fase 7f (P6, 20261109101100): revalidar recriado (+1: a mesma cópia; a regra da semana não tem o nome do motivo).
-  ...([['_agenda_cliente_revalidar', 6], ['_agenda_cliente_enfileirar', 3], ['pedir_confirmacao_do_agendamento', 1],
+  // Fase 7f (P9, 20261109101200): revalidar recriado de novo (+1: a mesma cópia; a regra da semana que mudou não tem o nome do motivo).
+  ...([['_agenda_cliente_revalidar', 7], ['_agenda_cliente_enfileirar', 3], ['pedir_confirmacao_do_agendamento', 1],
         ['_pedir_confirmacao', 2]] as const).map(([onde, vezes]) => ({
     onde,
     casou: '24h',

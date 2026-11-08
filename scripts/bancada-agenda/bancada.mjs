@@ -85,6 +85,9 @@ export const FORA_DA_BANCADA = new Set([
   '20261107100900_agenda_fase7d_semente.sql',
   // Fase 7f (P1): os 6 modos de desligado para sombra (o P8 cria; o nome fica fixado aqui, R8.2). Na bancada cada teste liga o modo que precisa.
   '20261109100900_agenda_fase7f_sombra.sql',
+  // Fase 7f (P9, o final): o previsto, o convite e as camadas do cliente de desligado para sombra (a trava recusa sem as funções de P5, P6 e P9). O agenda_fase7f_final.sql
+  // o roda numa subtransação; na bancada cada teste liga o modo que precisa.
+  '20261109101900_agenda_fase7f_sombra_equipe_cliente.sql',
   // Retorno rápido ao cliente F0 (rebase de 05/11; spec-fase7d R6.0): as 5 migrations de OUTRA sessão, já aplicadas em produção, com data
   // depois de PRIMEIRA. Nenhuma recria função da agenda nem mexe em lista fechada dela (só whatsapp_messages, whatsapp_blocked_numbers e
   // gatilhos em whatsapp_send_queue e whatsapp_messages), e a bancada não modela o que elas atravessam: _texto_simples (20261007150000),
@@ -97,6 +100,8 @@ export const FORA_DA_BANCADA = new Set([
   // Retorno F0a-2 (rebase de 06/11): o gatilho que mascara o PIN em whatsapp_messages, de OUTRA sessão e já em produção. Só atravessa
   // app_users e whatsapp_messages, e a 7d não lê essa tabela. O dado das linhas antigas é outra migration, com OK próprio.
   '20261106100400_pin_mascarar_chegada.sql',
+  // Limpeza do PIN nas mensagens antigas (dado de OUTRA sessão, já aplicado em produção; entra na main em 71dafe2f): só apaga texto de whatsapp_messages, que a agenda não lê.
+  '20261106100500_pin_limpar_antigas.sql',
   // Merge do main (28/10/2026): migrations de OUTRAS sessões, já aplicadas em produção, que caíram depois de PRIMEIRA
   // pela data. Mexem em diárias (conta corrente, recibo, lote, anotação × CPF) e no agrupar OS — tabelas que a bancada
   // não modela (anotacoes_do_extrato, orcamento_agrupamentos, os_agrupamento_movidos…) e funções que a agenda não chama

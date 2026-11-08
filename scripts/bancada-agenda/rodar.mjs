@@ -405,6 +405,11 @@ const FIXTURES_COMO_TEXTO = [
   // Fase 7f (P6): a própria migration do cliente (20261109101100), para o C8 de agenda_fase7f_cliente.sql conferir as 13 cópias. As fontes já estão acima:
   // mig_cliente_fase7d, mig_correcao_fase7d, mig_protecoes_fase7a, mig_correcao_rodada_fase5, mig_respostas_fase5, mig_correcao_textos_fase6 e mig_leituras_fase7f.
   ['agenda_teste.mig_cliente_fase7f', '../../supabase/migrations/20261109101100_agenda_fase7f_cliente.sql'],
+  // Fase 7f (P9, o final): a própria migration da semana que mudou e da saúde da equipe e do cliente (20261109101200), para o K9 de agenda_fase7f_final.sql conferir as 5
+  // cópias (as fontes já estão acima: mig_cliente_fase7f, mig_correcao_rodada_fase5 e mig_leituras_fase7f); e o dado 20261109101900 (os 3 modos da equipe e do cliente
+  // de desligado a sombra, a trava e o DESFAZER; FORA_DA_BANCADA: o agenda_fase7f_final.sql o roda numa subtransação).
+  ['agenda_teste.mig_mudou_fase7f', '../../supabase/migrations/20261109101200_agenda_fase7f_mudou.sql'],
+  ['agenda_teste.mig_sombra_final_fase7f', '../../supabase/migrations/20261109101900_agenda_fase7f_sombra_equipe_cliente.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */
