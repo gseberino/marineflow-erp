@@ -977,6 +977,7 @@ begin
     s := public.agenda_saude(date '2026-10-30', pg_temp.em('2026-10-30 17:05'));
     v_res := pg_temp.ok(v_res, 'R11a agenda_saude().cliente: o modo, as ondas, os tipos liberados, a rodada, as mensagens por tipo; os zeros; o ok',
       s ->> 'ok' = 'true' and s #>> '{cliente,modo}' = 'ligado' and jsonb_array_length(s #> '{cliente,tipos_liberados}') = case when to_regprocedure('public._agenda_saude_local(date, timestamptz)') is null then 11 else 12 end  -- (7d P8) + onde_fica
+                                                                                     + case when to_regprocedure('public._agenda_cliente_semana(date, timestamptz)') is null then 0 else 1 end  -- (7f P6) + semana
       and (s #>> '{cliente,rodou_nas_ultimas_2h}')::boolean and s #> '{cliente,mensagens_7d,por_tipo}' ? 'pos_servico'
       and (s #>> '{cliente,fora_da_janela}')::int = 0 and (s #>> '{cliente,em_feriado_ou_domingo}')::int = 0
       and (s #>> '{cliente,acima_do_teto}')::int = 0 and (s #>> '{cliente,intervalo_curto}')::int = 0

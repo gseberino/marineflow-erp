@@ -178,7 +178,8 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     // Fase 7b (P5, 20261101100400): + 12 na recriada (a mesma cópia; a chave equipe_dias vem de _agenda_saude_equipe7b).
     // Fase 7d (P8, 20261107100700): + 12 na recriada (a mesma cópia; a chave local vem de _agenda_saude_local).
     // Fase 7f (P7, 20261109100600): + 12 na recriada (a mesma cópia; a chave comunicacao vem de _agenda_saude_comunicacao).
-    vezes: 88,
+    // Fase 7f (P6, 20261109101100): + 12 na recriada (a mesma cópia; a semana na lista dos liberados não tem o literal).
+    vezes: 100,
     porque: 'nomes das chaves do resultado (rodadas_24h, erros_24h, resposta_24h_pct: a janela de um dia da conferência); não é rascunho_validade',
   },
   // Fase 3 (P4): a rotina da equipe grava a rodada como a vigia.
@@ -200,7 +201,8 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     onde: 'agenda_cliente_vigiar',
     casou: '1000',
     // Fase 7d (P6, 20261107100500): recriada (+1: a mesma duração da rodada).
-    vezes: 2,
+    // Fase 7f (P6, 20261109101100): recriada (+1: a mesma duração da rodada; o passo semana entra na lista).
+    vezes: 3,
     porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_vigiar, agenda_rotina_rodar e agenda_material_vigiar); não é texto_max nem peca_embutida_acima',
   },
   // Fase 6 (P6): a rodada do aprendizado grava a rodada como a vigia, a rotina, o material e o cliente.
@@ -357,7 +359,8 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
   // Fase 6 (P7, 20261029100700): _pedir_confirmacao recriado (+1: a cópia leva o mesmo nome do motivo; o texto do botão sem "ele").
   // Fase 7d (P6, 20261107100500): revalidar recriado (+1: a mesma cópia).
   // Fase 7d (correção, Onda 1, 20261107100800): revalidar recriado (+1: a mesma cópia).
-  ...([['_agenda_cliente_revalidar', 5], ['_agenda_cliente_enfileirar', 3], ['pedir_confirmacao_do_agendamento', 1],
+  // Fase 7f (P6, 20261109101100): revalidar recriado (+1: a mesma cópia; a regra da semana não tem o nome do motivo).
+  ...([['_agenda_cliente_revalidar', 6], ['_agenda_cliente_enfileirar', 3], ['pedir_confirmacao_do_agendamento', 1],
         ['_pedir_confirmacao', 2]] as const).map(([onde, vezes]) => ({
     onde,
     casou: '24h',

@@ -759,7 +759,8 @@ Beto (OS-J12): Marina Itajaí (pela OS). Combinar: o acesso de Rafael para seg 2
   v_res := pg_temp.ok(v_res, 'V5af onde_fica sem aprovação do dono: fora de tipos_liberados', not (v_j #> '{cliente,tipos_liberados}') ? 'onde_fica', (v_j #> '{cliente,tipos_liberados}')::text);
   update public.agenda_config set cliente_aprovacao_dias = 0 where id;
   v_j := public.agenda_saude(d_hoje, pg_temp.em(d_hoje, '17:00'));
-  v_res := pg_temp.ok(v_res, 'V5ag onde_fica liberado: entra em tipos_liberados, por último', v_j #>> array['cliente', 'tipos_liberados', (jsonb_array_length(v_j #> '{cliente,tipos_liberados}') - 1)::text] = 'onde_fica', (v_j #> '{cliente,tipos_liberados}')::text);
+  -- (7f P6) a semana prevista, liberada, entra depois do M11: fora da conta do "por último" (com e sem o P6 no banco)
+  v_res := pg_temp.ok(v_res, 'V5ag onde_fica liberado: entra em tipos_liberados, por último', ((v_j #> '{cliente,tipos_liberados}') - 'semana') ->> (jsonb_array_length((v_j #> '{cliente,tipos_liberados}') - 'semana') - 1) = 'onde_fica', (v_j #> '{cliente,tipos_liberados}')::text);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;

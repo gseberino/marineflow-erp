@@ -402,6 +402,9 @@ const FIXTURES_COMO_TEXTO = [
   // Fase 7f (P5): a própria migration da equipe (20261109101000), para o E9 de agenda_fase7f_equipe.sql conferir as 8 cópias. As fontes já estão acima: mig_pergunta_fase7b,
   // mig_correcao2_fase7a, mig_protecoes_fase7a, mig_tarefas_fase7c e mig_equipe_fase3.
   ['agenda_teste.mig_equipe_fase7f', '../../supabase/migrations/20261109101000_agenda_fase7f_equipe.sql'],
+  // Fase 7f (P6): a própria migration do cliente (20261109101100), para o C8 de agenda_fase7f_cliente.sql conferir as 13 cópias. As fontes já estão acima:
+  // mig_cliente_fase7d, mig_correcao_fase7d, mig_protecoes_fase7a, mig_correcao_rodada_fase5, mig_respostas_fase5, mig_correcao_textos_fase6 e mig_leituras_fase7f.
+  ['agenda_teste.mig_cliente_fase7f', '../../supabase/migrations/20261109101100_agenda_fase7f_cliente.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */
