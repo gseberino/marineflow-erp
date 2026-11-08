@@ -365,3 +365,18 @@ Deno.test("P4 leitura do aviso: um SELECT só das colunas dele; ligado só com a
     await assertRejects(() => lerJanelasDaAgenda(d, "dono"), Error, trecho);
   }
 });
+
+// ── 7. (Fase 7f, P4) A mensagem da semana e o aviso da exceção ─────────────────────────────────────────────────────────
+// agenda_aviso_enfileirar passa a pôr na fila, com a mesma origem agenda-dono, a chave agenda-dono:semana:<dia> (a mensagem da quinta) e
+// agenda-dono:excecao:<rodada> (o aviso com o lote ligado). A janela lê a origem, não a chave: nada muda aqui (R8.5), só este teste.
+Deno.test("7f P4: a semana e a exceção saem pela janela do aviso; a chave não muda nada", () => {
+  for (const chave of ["agenda-dono:semana:2026-11-12", "agenda-dono:excecao:20261112T200000.000000", "agenda-dono:aviso:20261112T200000.000000"]) {
+    const l = (marcada: string) => linha(marcada, "agenda-dono", { dedupe_key: chave });
+    assertEquals(origemComJanelaDaAgenda("agenda-dono"), true);
+    assertEquals(recusaNaHoraDeEnviar(l("2026-11-12T17:00:20"), brt("2026-11-12T17:00:25"), COM_DONO), null, chave);
+    assertEquals(recusaNaHoraDeEnviar(l("2026-11-12T17:00:20"), brt("2026-11-12T19:30:00"), COM_DONO)?.motivo, "janela", chave);
+    assertEquals(recusaNaHoraDeEnviar(l("2026-11-15T10:00:00"), brt("2026-11-15T10:00:00"), COM_DONO)?.motivo, "domingo", chave);
+    assertEquals(recusaNaHoraDeEnviar(l("2026-11-12T17:00:20"), brt("2026-11-12T17:00:25"), { ...TODAS, dono: { ...DONO, ligado: false } })?.motivo, "modo", chave);
+    assertEquals(ehRespostaDireta({ source: "agenda-dono", dedupe_key: chave }), false, chave);
+  }
+});

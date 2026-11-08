@@ -18,6 +18,12 @@
 // 3) saem as últimas mudanças, com "• e mais N mudanças: *o que mudou* mostra todas." — essas contam (o dono sabe que
 // existem e tem a palavra que as mostra); 4) a única que sobrou e ainda passa é cortada na palavra, com "…". O texto nunca
 // passa do teto.
+//
+// (Fase 7f, P4) A mensagem da quinta (_agenda_comunicar_quinta, migration 20261109100300) vem com `semana`: o banco manda as
+// peças do mesmo jeito, e o cabeçalho, o rodapé e "Para a semana que vem preciso de:" já vêm prontos. Ela pode vir sem mudança,
+// com perguntas (é a mensagem da semana que sai mesmo sem mudança), e existe pelas perguntas: passando do teto, depois do que
+// ficou de fora saem as últimas mudanças ("e mais N") e só então as perguntas. Sem mudança, as perguntas não saem: se nem elas
+// cabem, nada a mandar (quem chama registra). O aviso de sempre (sem `semana`) segue o de antes, linha por linha.
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -46,6 +52,8 @@ export interface PecasDoAviso {
   perguntas: PerguntasDoAviso | null;
   /** a rodada de aprontar falhou no banco (o que mudou sai do mesmo jeito; quem chama registra o erro) */
   perguntasErro?: string | null;
+  /** (Fase 7f, P4) a mensagem da quinta: pode vir sem mudança, com perguntas; no corte, as mudanças saem antes das perguntas */
+  semana?: boolean;
 }
 
 /** A resposta de agenda_aviso_pecas, conferida. */
@@ -97,17 +105,21 @@ export function lerPecasDoAviso(v: unknown): RespostaDasPecas | null {
     const acaoIds = idsValidos(x.acao_ids);
     return texto && acaoIds.length ? [{ texto, acaoIds }] : [];
   });
-  if (!mudancas.length) return null;
+  // (Fase 7f, P4) só a mensagem da quinta vem sem mudança, e então com perguntas que contam
+  const semana = r.semana === true;
   const p = r.perguntas && typeof r.perguntas === "object" ? r.perguntas as Record<string, unknown> : null;
   const textoDasPerguntas = textoLimpo(p?.texto);
+  const perguntas = textoDasPerguntas ? { texto: textoDasPerguntas, perguntaIds: idsValidos(p?.pergunta_ids) } : null;
+  if (!mudancas.length && !(semana && perguntas?.perguntaIds.length)) return null;
   return {
     avisar: true,
     pecas: {
       rodada, dia, limite, cabecalho, mudancas,
       fora: textoLimpo(r.fora),
       rodape: textoLimpo(r.rodape),
-      perguntas: textoDasPerguntas ? { texto: textoDasPerguntas, perguntaIds: idsValidos(p?.pergunta_ids) } : null,
+      perguntas,
       ...(textoLimpo(r.perguntas_erro) ? { perguntasErro: textoLimpo(r.perguntas_erro) } : {}),
+      ...(semana ? { semana: true } : {}),
     },
   };
 }
@@ -135,10 +147,10 @@ function juntar(p: PecasDoAviso, o: { fora: boolean; perguntas: boolean; k: numb
   return o.perguntas && p.perguntas ? `${corpo}\n\n${p.perguntas.texto}` : corpo;
 }
 
-/** As peças → o texto do aviso e o que ele conta. null = nada a contar (nenhuma mudança). */
+/** As peças → o texto do aviso e o que ele conta. null = nada a contar (nenhuma mudança; na da quinta, nem pergunta). */
 export function montarAvisoDoGestor(p: PecasDoAviso): AvisoMontado | null {
   const n = p.mudancas.length;
-  if (!n) return null;
+  if (!n && !(p.semana && p.perguntas)) return null;
   const acaoIds = [...new Set(p.mudancas.flatMap((m) => m.acaoIds))];
   const pronto = (texto: string, perguntas: boolean, cortes: AvisoMontado["cortes"]): AvisoMontado => ({
     texto,
@@ -155,6 +167,18 @@ export function montarAvisoDoGestor(p: PecasDoAviso): AvisoMontado | null {
     cortes.push("fora");
     t = juntar(p, { fora: false, perguntas: true, k: n });
     if (t.length <= p.limite) return pronto(t, true, cortes);
+  }
+  // (Fase 7f, P4) a da quinta existe pelas perguntas: as últimas mudanças viram "e mais N" antes de elas saírem
+  if (p.semana) {
+    if (n > 1) {
+      cortes.push("mudancas");
+      for (let k = n - 1; k >= 1; k--) {
+        t = juntar(p, { fora: false, perguntas: true, k });
+        if (t.length <= p.limite) return pronto(t, true, cortes);
+      }
+    }
+    // sem mudança, as perguntas sozinhas não cabem: nada a mandar
+    if (!n) return null;
   }
   // 2) sem as perguntas
   if (p.perguntas) {

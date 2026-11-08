@@ -1196,10 +1196,12 @@ Deno.test("motor: R9 e R13 aposentadas; o responsável vem de responsavel.ts", a
   // Fase 7b (P3): e a rodada da semana da equipe, depois da rotina e antes do aprendizado (o banco registra e enfileira; nada sai daqui).
   // Fase 7c (P5): e a rodada de quem faz o quê, depois do aprendizado e antes da vigia (nada sai daqui). Fase 7c (P8): e a rodada das
   // etapas, antes da rotina e com o instante dela (nada sai daqui). Fase 7d (P5): e a rodada do local, depois de quem faz o quê e antes da vigia (nada sai daqui).
+  // Fase 7f (P4): e a rodada comunicar, depois da rodada do cliente e com o instante da vigia (só a mensagem da semana ao DONO, pela fila agenda-dono).
   assertEquals(fonte.replace(/\r\n/g, "\n").includes(
     "const summary = {\n      identidade, fios, agenda_material: agendaMaterial, agenda_material_vigia: agendaMaterialVigia, agenda_rotina: agendaRotina,\n" +
       "      agenda_tarefas: agendaTarefas, agenda_equipe_semana: agendaEquipeSemana,\n" +
       "      agenda_aprender: agendaAprender, agenda_habilidade: agendaHabilidade, agenda_local: agendaLocal, agenda_vigia: agendaVigia, agenda_aviso: agendaAviso, agenda_cliente_vigia: agendaClienteVigia,\n" +
+      "      agenda_comunicar: agendaComunicar,\n" +
       "      rules, r10, reminders, recurrence,\n    };"), true);
   assertEquals(fonte.includes('import { resolveAssignee } from "./responsavel.ts";'), true);
   assertEquals(/async function resolveAssignee/.test(fonte), false);

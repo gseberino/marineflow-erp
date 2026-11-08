@@ -1295,3 +1295,15 @@ Deno.test("trava do 1: numeroSozinho só aceita 1 e 2, e o que ela deixa passar 
   assertEquals(parseConfirmationReply("2")?.decision, "reject");
   assertEquals(parseConfirmationReply("1 7391"), { decision: "approve", pin: "7391" });
 });
+
+// (Fase 7f, P4) A mensagem da quinta sai pela fila com a origem agenda-dono, como o aviso do gestor, e as linhas trazem "Decisão N:". Um "1" sozinho depois
+// dela, com um pedido do assistente esperando, cai na trava (O4c da spec). Nada muda no código: a fila já lê a origem.
+Deno.test("trava do 1 (7f P4): depois da mensagem da semana (agenda-dono, enviada depois do pedido), o '1' sozinho pergunta a qual se refere", async () => {
+  const semana = { id: "fila-semana", source: "agenda-dono", status: "sent", phone_normalized: DONO_DA_TRAVA, created_at: DEPOIS_DO_PEDIDO, zapi_message_id: "WA-SEMANA" };
+  assertEquals(await trava(bancoDaTrava({ perguntas: [mostradaAntes], fila: [semana] }).admin), DUVIDA_DO_1);
+  assertStringIncludes(String(await trava(bancoDaTrava({ perguntas: [mostradaAntes], fila: [semana] }).admin, "2")), "Para recusar o pedido, mande *não*.");
+  // o controle: sem a mensagem da semana, a pergunta mostrada antes do pedido não trava (o 1 é do pedido)
+  assertEquals(await trava(bancoDaTrava({ perguntas: [mostradaAntes] }).admin), null);
+  // citando a mensagem da semana, é para a agenda
+  assertStringIncludes(String(await trava(bancoDaTrava({ perguntas: [mostradaAntes], fila: [semana] }).admin, "1", { citado: "WA-SEMANA" })), 'Esse "1" é para a agenda');
+});

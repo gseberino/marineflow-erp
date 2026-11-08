@@ -8,7 +8,9 @@
 //  3. o corte pelo teto, nesta ordem: o que ficou de fora; as perguntas (que então não contam como mostradas); as últimas
 //     mudanças ("e mais N", que contam); a única que sobrou, na palavra, com "…". Nunca passa do teto;
 //  4. a leitura do que o banco devolve: não avisar (com o motivo e o que espera a janela); formato estranho = null; mudança
-//     sem texto ou sem ação válida fica de fora; id que não é uuid não entra; ids repetidos uma vez só.
+//     sem texto ou sem ação válida fica de fora; id que não é uuid não entra; ids repetidos uma vez só;
+//  5. (Fase 7f, P4) a mensagem da quinta (semana): sem mudança com perguntas sai; no corte, as mudanças saem antes das perguntas;
+//     o texto é o mesmo que o banco junta (o O4v de agenda_fase7f_lote.sql); o aviso de sempre não muda.
 import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { lerPecasDoAviso, montarAvisoDoGestor, type PecasDoAviso } from "./aviso-do-gestor.ts";
 
@@ -165,5 +167,101 @@ Deno.test("leitura: formato que não é o combinado = null (quem chama registra 
                    { avisar: true, limite: 2400, rodada: "r", dia: "d", mudancas: [{ texto: "x", acao_ids: [A1] }] },
                    { avisar: true, limite: 2400, cabecalho: CABECALHO, rodada: "r", dia: "d", mudancas: "x" }]) {
     assertEquals(lerPecasDoAviso(v), null, JSON.stringify(v));
+  }
+});
+
+// ── (Fase 7f, P4) A mensagem da quinta ────────────────────────────────────────────────────────────────────────────────
+// O banco (_agenda_comunicar_quinta, migration 20261109100300) manda as peças com `semana`. Ela pode vir sem mudança, com
+// perguntas; no corte, as mudanças viram "e mais N" antes de as perguntas saírem. O aviso de sempre não muda (os testes de cima).
+// As peças de exemplo e o texto esperado são os MESMOS do O4v de supabase/tests/agenda_fase7f_lote.sql, que confere
+// _agenda_lote_texto (o texto que a sombra guarda): os dois lados juntam igual.
+const SEMANA_PERGUNTAS = [
+  "Para a semana que vem preciso de:",
+  "· Decisão 2: O serviço do Giancarlo (lancha, Troca do GPS) não cabe nas 2… Recomendo a opção 1: Passa para a semana seguinte, sem mudar o que já está marcado.",
+  "· Você: Quais dias você fica em campo na semana de 16/11? Hoje eu conto você só para abrir e… Por enquanto conto você só para abrir e fechar.",
+  "(e mais 3 em *agenda pendências*)",
+  "Pode ser um áudio só, citando o nome do cliente.",
+].join("\n");
+const SEMANA_BANCO = {
+  avisar: true, semana: true, rodada: "2026-11-12T20:00:00+00:00", dia: "2026-11-12", limite: 2400,
+  cabecalho: "Agenda — o que eu mudei sozinho:",
+  mudancas: [
+    { texto: "Marquei Lenine em seg 16/11 com Alex (3 dias, estimativa minha). *desfaz Lenine* volta como estava.", acao_ids: [A1] },
+    { texto: "Passei Vanderlei da tarde de hoje para qua 11/11 de manhã. *desfaz Vanderlei* volta como estava.", acao_ids: [A2] },
+  ],
+  fora: "Ficou de fora: MP (esperando o sinal).", rodape: "*agenda plano* mostra tudo.",
+  perguntas: { texto: SEMANA_PERGUNTAS, pergunta_ids: [Q1, Q2] }, perguntas_erro: null,
+};
+const SEMANA_TEXTO = [
+  "Agenda — o que eu mudei sozinho:",
+  "• Marquei Lenine em seg 16/11 com Alex (3 dias, estimativa minha). *desfaz Lenine* volta como estava.",
+  "• Passei Vanderlei da tarde de hoje para qua 11/11 de manhã. *desfaz Vanderlei* volta como estava.",
+  "Ficou de fora: MP (esperando o sinal).",
+  "*agenda plano* mostra tudo.",
+  "",
+  SEMANA_PERGUNTAS,
+].join("\n");
+const SEMANA_SEM_MUDANCA = { ...SEMANA_BANCO, cabecalho: "Agenda — a semana que vem:", mudancas: [], fora: null };
+const SEMANA_SEM_MUDANCA_TEXTO = ["Agenda — a semana que vem:", "*agenda plano* mostra tudo.", "", SEMANA_PERGUNTAS].join("\n");
+
+function lidaDaSemana(v: unknown): PecasDoAviso {
+  const r = lerPecasDoAviso(v);
+  if (!r || !r.avisar) throw new Error("as peças da semana não foram lidas");
+  return r.pecas;
+}
+
+Deno.test("semana: o texto é o mesmo que o banco junta (O4v do teste SQL): cabeçalho, mudanças, o de fora, rodapé, linha em branco e as perguntas", () => {
+  const p = lidaDaSemana(SEMANA_BANCO);
+  assertEquals(p.semana, true);
+  const m = montarAvisoDoGestor(p)!;
+  assertEquals(m.texto, SEMANA_TEXTO);
+  assertEquals([m.acaoIds, m.perguntaIds, m.comPerguntas, m.cortes], [[A1, A2], [Q1, Q2], true, []]);
+});
+
+Deno.test("semana: sem mudança, com perguntas, sai (a mensagem da semana sai mesmo sem mudança); nenhuma ação conta", () => {
+  const p = lidaDaSemana(SEMANA_SEM_MUDANCA);
+  const m = montarAvisoDoGestor(p)!;
+  assertEquals(m.texto, SEMANA_SEM_MUDANCA_TEXTO);
+  assertEquals([m.acaoIds, m.perguntaIds, m.comPerguntas], [[], [Q1, Q2], true]);
+});
+
+Deno.test("semana: sem mudança e sem pergunta (ou sem pergunta que conte) não é lida; o aviso de sempre sem mudança continua null", () => {
+  assertEquals(lerPecasDoAviso({ ...SEMANA_SEM_MUDANCA, perguntas: null }), null);
+  assertEquals(lerPecasDoAviso({ ...SEMANA_SEM_MUDANCA, perguntas: { texto: SEMANA_PERGUNTAS, pergunta_ids: ["nao-e-uuid"] } }), null);
+  assertEquals(lerPecasDoAviso({ ...SEMANA_SEM_MUDANCA, semana: undefined }), null, "sem a marca da semana, é o aviso de sempre: sem mudança, nada");
+  assertEquals(lerPecasDoAviso({ ...SEMANA_SEM_MUDANCA, semana: "sim" }), null, "só true marca a semana");
+  assertEquals(montarAvisoDoGestor({ ...lidaDaSemana(SEMANA_SEM_MUDANCA), semana: undefined }), null, "o montador também: sem a marca, sem mudança = nada");
+});
+
+Deno.test("semana: o aviso de sempre não ganha a chave semana (as peças de antes, iguais)", () => {
+  const r = lerPecasDoAviso({ ...SEMANA_BANCO, semana: false });
+  assertEquals(r?.avisar === true ? "semana" in r.pecas : "?", false);
+});
+
+Deno.test("semana: passou do teto — sai o de fora; depois as últimas mudanças viram \"e mais N\" e as perguntas FICAM (e contam)", () => {
+  const p = lidaDaSemana(SEMANA_BANCO);
+  const semFora = SEMANA_TEXTO.replace("Ficou de fora: MP (esperando o sinal).\n", "");
+  const a = montarAvisoDoGestor({ ...p, limite: semFora.length })!;
+  assertEquals([a.texto, a.cortes, a.comPerguntas], [semFora, ["fora"], true]);
+  const umaMudanca = semFora.replace(/• Passei Vanderlei[^\n]*\n/, "• e mais 1 mudança: *o que mudou* mostra todas.\n");
+  const b = montarAvisoDoGestor({ ...p, limite: umaMudanca.length })!;
+  assertEquals([b.texto, b.cortes, b.perguntaIds, b.acaoIds], [umaMudanca, ["fora", "mudancas"], [Q1, Q2], [A1, A2]]);
+});
+
+Deno.test("semana: nem com 1 mudança cabe com as perguntas — elas saem (e não contam); sem mudança e sem caber, nada a mandar", () => {
+  const p = lidaDaSemana(SEMANA_BANCO);
+  const m = montarAvisoDoGestor({ ...p, limite: 600 })!;
+  assert(m.texto.length <= 600);
+  assertEquals([m.comPerguntas, m.perguntaIds, m.cortes.includes("perguntas")], [false, [], true]);
+  assertEquals(montarAvisoDoGestor({ ...lidaDaSemana(SEMANA_SEM_MUDANCA), limite: SEMANA_SEM_MUDANCA_TEXTO.length - 1 }), null);
+});
+
+Deno.test("semana: nunca passa do teto, em qualquer teto (de 600 a 2400)", () => {
+  for (const base of [SEMANA_BANCO, SEMANA_SEM_MUDANCA]) {
+    const p = lidaDaSemana(base);
+    for (let limite = 600; limite <= 2400; limite += 37) {
+      const m = montarAvisoDoGestor({ ...p, limite });
+      if (m) assert(m.texto.length <= limite, `${limite}: ${m.texto.length}`);
+    }
   }
 });

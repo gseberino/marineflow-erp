@@ -45,6 +45,10 @@
 //      mensagem-modelo vai a quem e quando (o banco escreve o texto e confere a janela, o teto e a aprovação dos 3
 //      primeiros dias). Depois da vigia (lê o plano já replanejado) e antes das regras. Passo à parte: nunca lança
 //      (agenda:cliente-vigia).
+//   0e. A rodada do que se fala (agenda-comunicar.ts, Fase 7f P4): agenda_comunicar_rodar, depois da rodada do cliente e com o MESMO instante
+//      da vigia e do aviso (mede o aviso desta rodada: contagens.lote_guardaria). O banco decide tudo: o destrava, o teto e, no dia do plano, a
+//      mensagem da semana ao dono, que volta em avisos e sai pelo caminho do aviso (o montador e agenda_aviso_enfileirar com p_semana). Em sombra
+//      nada sai. Passo à parte: nunca lança (agenda:comunicar); a função ausente é pulada calada.
 //   1. Regras de rules.ts (RULES): criam tarefas (dedupe por automation_key) e auto-resolvem
 //      as que a condição sumiu ("Resolvido automaticamente: ..."). A R1 e a R16 saem com a agenda automática
 //      ligada (agenda_config.modo_proposta) e a R2 com a vigia ligada (modo_vigia) — o mesmo interruptor da
@@ -69,6 +73,7 @@ import { sincronizarMaterialDaAgenda } from "./material-da-agenda.ts";
 import { lerModosDaAgenda, lerModosDaEquipe, lerModosDoCliente, r10DesligadaPelaAgenda } from "./agenda-modos.ts";
 import { vigiarAgenda } from "./agenda-vigia.ts";
 import { avisarDonoDaAgenda } from "./agenda-aviso.ts";
+import { comunicarDaAgenda } from "./agenda-comunicar.ts";
 import { rodarRotinaDaAgenda } from "./agenda-rotina.ts";
 import { vigiarMaterialDaAgenda } from "./agenda-material.ts";
 import { vigiarClienteDaAgenda } from "./agenda-cliente.ts";
@@ -605,6 +610,17 @@ servirComCors(async (req) => {
       agendaClienteVigia = { erro: String((e as any)?.message ?? e) };
     }
 
+    // A rodada do que se fala (Fase 7f, P4): depois da rodada do cliente e antes das regras, com o MESMO instante da vigia e do aviso (o banco mede o que o
+    // lote guardaria do aviso desta rodada). O banco decide o que roda; só a mensagem da semana sai daqui, pelo caminho do aviso. Tem o próprio try/catch
+    // (comunicarDaAgenda nunca lança: devolve { erro } e grava em app_error_logs); o de fora é a segunda trava, para nada daqui parar as regras.
+    let agendaComunicar: unknown = null;
+    try {
+      agendaComunicar = await comunicarDaAgenda(db, agoraDaVigia);
+    } catch (e) {
+      console.error("agenda:comunicar:", e);
+      agendaComunicar = { erro: String((e as any)?.message ?? e) };
+    }
+
     const rules = await runRules(db, settings);
     const r10 = await runTechnicianReminders(db, settings);
     const reminders = await processReminders(db);
@@ -614,6 +630,7 @@ servirComCors(async (req) => {
       identidade, fios, agenda_material: agendaMaterial, agenda_material_vigia: agendaMaterialVigia, agenda_rotina: agendaRotina,
       agenda_tarefas: agendaTarefas, agenda_equipe_semana: agendaEquipeSemana,
       agenda_aprender: agendaAprender, agenda_habilidade: agendaHabilidade, agenda_local: agendaLocal, agenda_vigia: agendaVigia, agenda_aviso: agendaAviso, agenda_cliente_vigia: agendaClienteVigia,
+      agenda_comunicar: agendaComunicar,
       rules, r10, reminders, recurrence,
     };
     // Regra que falhou também é motivo para auditar: sem isto, um tick em que TODAS as
