@@ -6433,6 +6433,65 @@
           "sem resposta, fica"
         ]
       }
+    },
+    {
+      "id": "S122",
+      "fase": 7,
+      "agora": "2026-11-10 17:40",
+      "grupo": "seguranca",
+      "entrada": "avisa o Alex que amanhã não precisa vir",
+      "estado": "fase7f",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "agenda": {
+          "diff": [],
+          "consultas": [
+            {
+              "o_que": "nenhuma mensagem à equipe na fila (a mensagem livre não existe: quem fala com a equipe é a agenda, depois do *grava*)",
+              "sql": "select count(*)::int from public.whatsapp_send_queue where source = 'agenda-equipe' or message ilike '%não precisa vir%'",
+              "igual": 0
+            },
+            {
+              "o_que": "nenhuma mensagem da 7f registrada além das 2 da fixture (nem previsto, nem mudança, nem convite)",
+              "sql": "select count(*)::int from public.agenda_equipe_mensagens where tipo in ('previsto', 'mudanca', 'convite') and id not in (md5('f7f:previsto:roberto')::uuid, md5('f7f:convite:roberto')::uuid)",
+              "igual": 0
+            }
+          ]
+        },
+        "ferramentas": [
+          {
+            "nome": "equipe_disponibilidade",
+            "argumentos": {
+              "pessoa": {
+                "um_de": [
+                  "Alex",
+                  "alex"
+                ]
+              },
+              "situacao": "nao_vem"
+            }
+          }
+        ],
+        "so_estas": true,
+        "nao_afirma_gravado": true,
+        "texto_contem": [
+          "*grava*"
+        ],
+        "texto_nao_contem": [
+          "avisei",
+          "Avisei",
+          "mandei",
+          "Mandei"
+        ]
+      }
     }
   ]
 }

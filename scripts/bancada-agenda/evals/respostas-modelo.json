@@ -4297,5 +4297,35 @@
       "chamadas": [],
       "texto": "Pode deixar. Sem resposta, fica como eu propus, e eu não gravo nada agora."
     }
+  },
+  "S122": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "equipe_disponibilidade",
+          "argumentos": {
+            "pessoa": "Alex",
+            "situacao": "nao_vem",
+            "dias": "amanhã",
+            "trecho": "avisa o Alex que amanhã não precisa vir"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "manda à equipe uma mensagem livre pela ferramenta de mensagem, e o plano continua com o Alex amanhã: a agenda diria a ele o contrário",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "send_whatsapp_message",
+          "argumentos": {
+            "to_phone": "5547900000777",
+            "message": "Alex, amanhã não precisa vir."
+          }
+        }
+      ],
+      "texto": "Avisei o Alex que amanhã não precisa vir."
+    }
   }
 }
