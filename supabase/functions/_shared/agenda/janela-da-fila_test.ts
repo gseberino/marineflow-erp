@@ -380,3 +380,25 @@ Deno.test("7f P4: a semana e a exceção saem pela janela do aviso; a chave não
     assertEquals(ehRespostaDireta({ source: "agenda-dono", dedupe_key: chave }), false, chave);
   }
 });
+
+Deno.test("7f P5: o previsto, a mudança e o convite (agenda-equipe:previsto|mudanca|convite:…) saem pela janela normal da equipe; só a resposta tem a direta", () => {
+  // a janela-da-fila lê a origem e a chave, não o tipo: a mensagem nova da equipe é uma linha "agenda-equipe" como a ficha (R8.5, §5.5)
+  for (const chave of ["agenda-equipe:previsto:p:2026-11-16", "agenda-equipe:mudanca:p:2026-11-11:19h", "agenda-equipe:mudanca:p:2026-11-11:acao",
+                       "agenda-equipe:convite:p:2026-11-13"]) {
+    const l = (marcada: string) => linha(marcada, "agenda-equipe", { dedupe_key: chave });
+    assertEquals(janelaDaOrigem("agenda-equipe"), "equipe", chave);
+    assertEquals(ehRespostaDireta({ source: "agenda-equipe", dedupe_key: chave }), false, chave);
+    assertEquals(recusaNaHoraDeEnviar(l("2026-11-12T19:30:00"), brt("2026-11-12T19:30:05"), TODAS), null, chave);
+    assertEquals(recusaNaHoraDeEnviar(l("2026-11-12T19:30:00"), brt("2026-11-12T19:59:59"), TODAS), null, chave);
+    // a noite: a lição de setembro (mensagem à equipe à noite); a resposta direta (até 22:00) não vale para elas
+    assertEquals(recusaNaHoraDeEnviar(l("2026-11-12T19:30:00"), brt("2026-11-12T20:00:00"), TODAS)?.motivo, "janela", chave);
+    assertEquals(recusaNaHoraDeEnviar(l("2026-11-12T21:00:00"), brt("2026-11-12T21:05:00"), TODAS)?.motivo, "janela", chave);
+    assertEquals(recusaNaHoraDeEnviar(l("2026-11-15T10:00:00"), brt("2026-11-15T10:00:00"), TODAS)?.motivo, "domingo", chave);
+    assertEquals(recusaNaHoraDeEnviar(l("2026-11-12T07:29:00"), brt("2026-11-12T07:29:30"), TODAS)?.motivo, "janela", chave);
+    assertEquals(recusaNaHoraDeEnviar(l("2026-11-12T19:30:00"), brt("2026-11-12T19:30:05"), { ...TODAS, equipe: { ...EQUIPE, ligado: false } })?.motivo, "modo",
+                 chave);
+  }
+  // o controle: a resposta de mesma hora, pela chave dela, ainda sai às 21:05 (a direta)
+  const resp = linha("2026-11-12T21:00:00", "agenda-equipe", { dedupe_key: "agenda-equipe:resposta:p:wa" });
+  assertEquals(recusaNaHoraDeEnviar(resp, brt("2026-11-12T21:05:00"), TODAS), null);
+});
