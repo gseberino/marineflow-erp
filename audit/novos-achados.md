@@ -3532,3 +3532,27 @@ porque só o dono pode preenchê-las.
 - **Efeito:** com `gestor_so_propor` ligado nada vence, e `veto_teria_em` marca. No 1º tique depois de soltar, toda pergunta com `veto_ate` vencido e mostrada antes dele fecha, cada uma com a sua ação e o seu *desfaz*. Só pega quem teve o prazo escrito: a linha só escreve prazo com o freio solto, então isso exige freio ligado depois de mostrar. Efeito `nada`: nenhuma muda a agenda.
 - **Na Fase 7f (P2):** sem conserto, e dito ao dono em `fase7f-oks.md`, item 5. Prova: P6e.
 - **Origem:** Fase 7f, P2.
+
+### [NOVO-agenda-111] A linha da pergunta pode não dizer o que está perguntando
+- **Onde:** `_agenda_pergunta_linha` e `_agenda_titulo_da_pergunta` (`20261109100100`, `20261107100850`), lidas pela 1ª vez no bloco do P3.
+- **Efeito:** o título é a 1ª frase, em até 90 letras. Na carteira real de 07/11: "Decisão 2: Na agenda conto com Alex: você disse todo dia útil." é uma afirmação, sem o "está certo?" nem as opções; "Chegou por e-mail a nota 495411 da Tamoyo (SC, sem cadastro), despachada sáb 31/10: deve…" corta antes da pergunta. A resposta pelo número funciona, mas quem lê só o bloco não sabe o que responder.
+- **Na Fase 7f (P3):** sem conserto: R8.4 pede a linha curta, com a pergunta inteira em *agenda pendências*, e é o `(e mais N em *agenda pendências*)` que aponta para lá. No nível mínimo essa linha sai. Dito ao dono em `fase7f-oks.md`, item 6. O ajuste, se o dono pedir, é no título, não no bloco.
+- **Origem:** Fase 7f, P3.
+
+### [NOVO-agenda-112] `perguntas_vezes_max` não vale no bloco
+- **Onde:** `agenda_bloco_do_fechamento` (`20261109100200`).
+- **Efeito:** as linhas antigas mostravam a pergunta não crítica em até 2 fechamentos. O bloco segue `agenda_perguntas_em_ordem`, que não olha `mostrada_vezes` (§5.3): sem resposta e sem prazo, a mesma pergunta volta todo dia até expirar, e as de baixo esperam. Em 07/11, `padrao_do_dono` tem 4 mostras, sem `expira_em`, e `estimativa` tem 5.
+- **Na Fase 7f (P3):** fica. Cortar pelo `perguntas_vezes_max` tiraria `padrao_do_dono` do bloco, contra AG7-02 (os dias do dono primeiro), e sem mostrar não há prazo escrito, então ela nunca venceria. Com o prazo ligado, quem pode vencer sai sozinha. Dito ao dono em `fase7f-oks.md`, item 6.
+- **Origem:** Fase 7f, P3.
+
+### [NOVO-agenda-113] `bloco_compras_du` e `bloco_compras_max` ficaram sem leitor
+- **Onde:** `agenda_config` (`20261109100000`).
+- **Efeito:** R8.4 trocou `_agenda_bloco_compras` pelo texto de `p_linhas`, e quem decide o que entra é a perda da linha `compras` (`compras_aviso_du`). Os 2 parâmetros existem, têm CHECK e não mudam nada.
+- **Na Fase 7f (P3):** sem conserto: tirar coluna é outra migration, e o P1 já está fechado. Quem mexer neles não vê efeito.
+- **Origem:** Fase 7f, P3.
+
+### [NOVO-agenda-114] A revisão do mês cheia não cabe em 1.000 com o bloco
+- **Onde:** `textoComOBloco` (`ai-daily-briefing/secretario-tarde-texto.ts`).
+- **Efeito:** com 5 cobranças e 950 letras, nada do que é do Secretário pode ceder: as linhas com letra e a frase de como responder são o assunto da revisão. Com o mínimo do bloco (veredito e 1ª decisão, ~230 letras) o texto da simulação chegou a 1.087. O Aceite 4 da §11 diz "fechamento ≤ 1.000". **Nas tardes reais** (`sql/wf7f_p3_fechamentos`, 10 turnos de 23/10 a 06/11, só tamanhos): com o mínimo de 207 letras, o da carteira de 07/11, 1 a 2 de 10 passariam (revisão do mês de 03/11, 1.003; revisão da semana de 04/11, 1.045, ou 972 se o "Amanhã" sair inteiro); com o mínimo mais longo, 338 letras, 3 a 5 de 10, até 1.176.
+- **Na Fase 7f (P3):** vale "o veredito e a 1ª decisão nunca saem" (R8.4), e o texto sai inteiro, acima do limite, sem o corte duro, como o retorno faz com "Ainda esperando hoje". O `bloco_grande` do P7 tem de contar isso sem tratar como defeito de leitura. Dito ao dono em `fase7f-oks.md`, item 6.
+- **Origem:** Fase 7f, P3.
