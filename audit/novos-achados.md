@@ -3601,3 +3601,24 @@ porque só o dono pode preenchê-las.
 - **Efeito:** com as 3 decisões da fixture (de 330 a 440 letras) e prazo em 1, o foco fica em 1.792 de 1.800 letras. Com prazo em 2 ou 3, a linha de como responder, que agora leva o *agenda espera*, é a primeira a sair, e no lugar fica "(e mais 1 linha)". As decisões continuam inteiras. Hoje a carteira real tem 2 decisões e nenhum prazo (o freio).
 - **Na Fase 7f (P7):** sem conserto: mudar o corte de sempre é da 7d; o P8 confere o tamanho no pós-deploy.
 - **Origem:** Fase 7f, P7.
+### [NOVO-agenda-125] *agenda espera* não passa pelo whatsapp-webhook de hoje: a edge entra na publicação da 7f
+
+- **Encontrado em:** Agenda de Produção, Fase 7f, P8 (08/11/2026), no grafo de import das edges contra `d8055efc` (`f7f/p8/afetadas.mjs`).
+- **Onde:** `whatsapp-webhook/index.ts` usa `ehComandoDaAgendaLigada` (`_shared/agenda/executar.ts`), que lê `lerComandoDaAgenda` (`_shared/agenda/comandos.ts`); o P7 ensinou *agenda espera <nome>* nos dois. A R8.13 lista 4 edges, sem o webhook.
+- **Efeito:** o webhook no ar (v78, árvore de `d8055efc`) não reconhece "agenda espera Nelson": o `lerComandoDaAgenda` de `d8055efc` devolve null (`f7f/p8/velho/prova-palavra.ts`). Sem pergunta de comprovante esperando, o texto vai ao assistente do mesmo jeito; com ela esperando, o roteamento do texto do dono pode tratá-lo como resposta ao comprovante. É o caso do *agenda locais* na 7d (R6.11).
+- **Na Fase 7f (P8):** o webhook entra no passo 2 do roteiro (5 edges, não 4). Nenhum código muda. Ele está no item 14 do retorno: a janela de seg 23/11 depois das 19h vale para ele também.
+- **Origem:** Fase 7f, P8.
+
+### [NOVO-agenda-126] Depois da 7f, os md5 da 7d dão "diferentes" em 9 funções, e o ligar-fase7d.sql pede o da 7d verde
+
+- **Onde:** `sql/wf7d_md5_esperado.sql` (4 que a 7f recria: `_agenda_ver_decisoes`, `agenda_decidir`, `agenda_desfazer`, `agenda_saude`) e `sql/wf7d_md5_7a_sem7b7c7d.sql` (5: `_agenda_gestor_vetos`, `_agenda_perguntas_antes`, `agenda_aviso_pecas`, `agenda_fechamento_registrar`, `agenda_textos_do_fechamento`). O `publicar/exec/ligar-fase7d.sql` pede, para `v_pos_deploy_verde`, que "o wf7d_md5_esperado bateu".
+- **Efeito:** com a 7f no ar, os dois dão 92 de 96 e 72 de 77, de propósito e para sempre. Quem for ligar um modo da 7d depois da 7f não tem como confirmar o verde que o cabeçalho pede.
+- **Na Fase 7f (P8):** `sql/wf7f_md5_7d_sem7f.sql` junta as 4 listas da 7d sem as 9 (parte A, 269 funções) e confere as 10 que a 7f recria, tirados os blocos dela, contra o md5 de antes tirado de produção (parte B). Vale antes e depois da 7f (conferido no replay e em produção, 08/11). O roteiro da 7f diz para usá-lo no lugar dos da 7d. O `ligar-fase7d.sql` não foi mudado: a troca da frase do cabeçalho é do fio.
+- **Origem:** Fase 7f, P8.
+
+### [NOVO-agenda-127] A 100000 da 7f trava 6 tabelas, não 3
+
+- **Onde:** `20261109100000_agenda_fase7f_base.sql`. A R8.14 fala de ALTER TABLE em `agenda_config`, `agenda_perguntas` e `agenda_equipe_mensagens`.
+- **Efeito:** medido em `pg_locks` no replay (`f7f/p8/travas.mjs`, `travas.out`): ACCESS EXCLUSIVE também em `agenda_acoes`, `agenda_vigia_rodadas` (a lista das rotinas, pelo ampliador) e `agenda_cliente_mensagens` (o SET EXPRESSION de `modelo` e a lista dos tipos); SHARE em `agenda_equipe_mensagens` e `agenda_cliente_mensagens` (os índices). `agenda_vigia_rodadas` é escrita por toda rodada de todo tique: um tique que pegar a migration no meio espera, ou a migration estoura o `LOCK_TIMEOUT` e cai inteira (nada fica). A 100300 trava `agenda_dono_avisos`.
+- **Na Fase 7f (P8):** o roteiro (`fila-do-dono/fase77f-publicar.md`) começa a 100000 logo depois de um tique, à noite, com `LOCK_TIMEOUT=5s`, e lista as 6.
+- **Origem:** Fase 7f, P8.
