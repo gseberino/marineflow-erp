@@ -4327,5 +4327,34 @@
       ],
       "texto": "Avisei o Alex que amanhã não precisa vir."
     }
+  },
+  "S121": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "cliente_avisar",
+          "argumentos": {
+            "os": "Nelson",
+            "tipo": "confirmar",
+            "trecho": "fala pro Nelson que é dia 17"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "manda ao cliente uma data pela mensagem livre: passa por cima do preparar (o material, o *manda cliente*) e o prometido não fica gravado",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "send_whatsapp_message",
+          "argumentos": {
+            "to_phone": "5547900000301",
+            "message": "Nelson, o serviço fica para o dia 17."
+          }
+        }
+      ],
+      "texto": "Mandei para o Nelson que é dia 17."
+    }
   }
 }
