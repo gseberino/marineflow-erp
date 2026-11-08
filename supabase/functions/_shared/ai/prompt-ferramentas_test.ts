@@ -323,9 +323,9 @@ function secaoDaAgenda(): string {
 // Fase 7d (P8): o local, o bem e a viagem (spec-fase7d.md §7 e R6.3-8: +2 linhas, o teto sobe 2 a partir do vigente) — entraram 2 linhas: o que o dono diz do local, do bem,
 // da viagem e dos autorizados é os_planejar (a lista inteira de autorizados, as datas como ele disse, o foco locais e a pergunta de onde fica), e regra de marina não muda
 // pela conversa, nem se inventa local, regra, feriado ou tempo de viagem. A resposta só com número (P6b) e a nota por número entraram nas 2 linhas que já existiam. Teto 31.
-// Fase 7f (P7): o silêncio e o *agenda espera* (spec-fase7f.md §7 e R8.5-28: +2 linhas, o teto sobe 2 a partir do vigente, 31) — entraram 2 linhas: toda pergunta da agenda
-// já diz o que fica sem resposta e até quando (sem resposta, fica assim), a única saída de quem não quer o padrão é *agenda espera <nome>*, *agenda fica* não existe ("pode
-// deixar como você propôs" é só não responder, sem gravar nada) e nada é decidido pelo prazo sem o banco dizer; e a informação só quando o dono pergunta. Teto 33.
+// Fase 7f (P7): o silêncio e o *agenda espera* (spec-fase7f.md §7 e R8.5-28: +2 linhas, o teto sobe 2 a partir do vigente, 31) — entraram 2 linhas: só a pergunta que diz
+// "Sem resposta até" fica assim sem resposta (com o freio e em sombra, nenhuma diz: ela espera o dono), a única saída de quem não quer o padrão é *agenda espera <nome>*,
+// *agenda fica* não existe ("pode deixar como você propôs" não grava nada) e nada é decidido pelo prazo sem o banco dizer; e a informação só quando o dono pergunta. Teto 33.
 Deno.test("agenda de produção: a seção é curta (≤ 33 linhas: custa tokens em toda mensagem) e fica no bloco estável", () => {
   const secao = secaoDaAgenda();
   const linhas = secao.split("\n");
@@ -809,13 +809,19 @@ Deno.test("pós-merge (A): o dia sem trabalho não vai para registrar_diaria —
   assertEquals(diaria.properties.dias.items.properties.jornada.enum.includes("faltou"), false);
 });
 
-// Fase 7f (P7; spec-fase7f.md §7 e R8.5-28): as 2 linhas novas. O silêncio é a resposta (sem resposta, fica assim), a única saída de quem não quer o padrão é a palavra
-// *agenda espera <nome>*, do dono e antes do modelo, e *agenda fica* não aparece: não existe. "Pode deixar como você propôs" é só não responder, sem gravar nada (S120).
+// Fase 7f (P7; spec-fase7f.md §7 e R8.5-28): as 2 linhas novas. O silêncio é a resposta só onde o prazo está escrito ("Sem resposta até"); a única saída de quem não quer
+// o padrão é a palavra *agenda espera <nome>*, do dono e antes do modelo, e *agenda fica* não aparece: não existe. "Pode deixar como você propôs" não grava nada (S120, e
+// S121 com o freio: a pergunta continua esperando o dono).
 Deno.test("agenda de produção (Fase 7f, P7): o silêncio e o *agenda espera*, sem *agenda fica*; a informação só quando o dono pergunta", () => {
   const secao = secaoDaAgenda();
-  assertStringIncludes(secao, "- Toda pergunta da agenda já diz o que fica se o dono não responder e até quando; isso vem do banco: sem resposta, fica assim.");
+  // (conferência do P7, 08/11) o silêncio só vale onde o prazo está escrito: com o freio (gestor_so_propor, a produção) e em sombra nenhuma linha diz
+  // "Sem resposta até" (agenda_fase7f_leituras.sql), e a frase de antes ("toda pergunta já diz… sem resposta, fica assim") faria o assistente prometer o que não acontece
+  assertStringIncludes(secao, "- O prazo de uma pergunta da agenda vem do banco: só a que diz \"Sem resposta até\" fica como ela diz se o dono não responder; a que não diz espera a resposta dele.");
+  assertStringIncludes(secao, "\"Pode deixar como você propôs\" não grava nada: com o prazo escrito, é só não responder; sem ele, diga que a pergunta continua esperando a resposta dele.");
+  assertEquals(/toda pergunta da agenda já diz/i.test(secao), false);
+  assertEquals(/sem resposta, fica assim/i.test(secao), false);
   assertStringIncludes(secao, "Para uma pergunta esperar por ele, sem prazo: *agenda espera <nome>*, que ele manda direto, sem você.");
-  assertStringIncludes(secao, "\"Pode deixar como você propôs\" é só não responder: diga isso e não grave nada. Nunca diga que algo ficou decidido pelo prazo sem o banco dizer.");
+  assertStringIncludes(secao, "Nunca diga que algo ficou decidido pelo prazo sem o banco dizer.");
   assertStringIncludes(secao, "- Informação (o que está marcado, o que está livre, as compras, o que mudou) só quando o dono pergunta: não ofereça sozinho nem repita o que o fechamento já disse.");
   assertEquals(/agenda fica/i.test(secao), false);
   assertEquals(secao.includes("`"), false);

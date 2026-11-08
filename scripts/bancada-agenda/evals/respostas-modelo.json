@@ -4272,7 +4272,7 @@
   "S120": {
     "boa": {
       "chamadas": [],
-      "texto": "Sem resposta, fica assim: cada pergunta já diz o que fica e até quando, e eu não gravo nada agora. Para uma esperar você, sem prazo, mande *agenda espera* e o nome."
+      "texto": "Eu não gravo nada agora: as que dizem \"Sem resposta até\" ficam como dizem, no prazo, e as outras esperam a sua resposta. Para uma esperar você, sem prazo, mande *agenda espera* e o nome."
     },
     "ruim": {
       "por_que": "fecha as perguntas pelo dono, como se \"pode deixar\" fosse a resposta de todas (o que o *agenda fica* fazia, e saiu)",
@@ -4283,7 +4283,19 @@
           "sql": "update public.agenda_perguntas set estado = 'resolvida', resolvida_motivo = 'o dono disse: pode deixar como você propôs' where estado = 'aberta' and padrao_chave is not null"
         }
       ],
-      "texto": "Sem resposta, fica assim: cada pergunta já diz o que fica e até quando, e eu não gravo nada agora. Para uma esperar você, sem prazo, mande *agenda espera* e o nome."
+      "texto": "Eu não gravo nada agora: as que dizem \"Sem resposta até\" ficam como dizem, no prazo, e as outras esperam a sua resposta. Para uma esperar você, sem prazo, mande *agenda espera* e o nome."
+    }
+  },
+  "S121": {
+    "boa": {
+      "chamadas": [],
+      "texto": "Eu não gravo nada agora, e nenhuma pergunta tem prazo: cada uma continua esperando a sua resposta. Para responder, diga a decisão e a opção."
+    },
+    "ruim": {
+      "por_que": "promete o silêncio com o freio, quando nenhuma linha diz \"Sem resposta até\": o dono acha que ficou resolvido, e as perguntas continuam abertas",
+      "reprova_em": "texto",
+      "chamadas": [],
+      "texto": "Pode deixar. Sem resposta, fica como eu propus, e eu não gravo nada agora."
     }
   }
 }
