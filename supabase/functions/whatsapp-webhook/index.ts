@@ -28,11 +28,16 @@ import { formatoDoResumoNoBanco } from "../_shared/secretario/formato.ts";
 import { ehComandoDaAgendaLigada } from "../_shared/agenda/executar.ts";
 import { respostaDaEquipe } from "../_shared/agenda/resposta-da-equipe.ts";
 import { respostaDoCliente } from "../_shared/agenda/resposta-do-cliente.ts";
+import { ehPedidoDeParar } from "../_shared/whatsapp/parar.ts";
+import { abrirNoRetorno, consumidaPelosLeitores, identificarCliente, noFundo } from "./retorno.ts";
 
 // Manejo automático da resposta (Camada de Inteligência de Comunicação, módulo G):
 // fecha o loop no ai_comms_log (marca respondido + intenção) e HONRA OPT-OUT sozinho.
 // Serve cliente E fornecedor. Best-effort: nunca derruba o webhook.
-async function manejarRespostaAutomatica(admin: any, tabela: "clients" | "suppliers", entityId: string, texto: string): Promise<void> {
+// `identificacaoNova` (Retorno F1, P13) = o cliente veio de retorno_identificar (retorno_config.identificacao_nova ligada).
+async function manejarRespostaAutomatica(
+  admin: any, tabela: "clients" | "suppliers", entityId: string, texto: string, identificacaoNova = false,
+): Promise<void> {
   try {
     if (!entityId || !texto?.trim()) return;
     const r = classificarResposta(texto);
@@ -47,7 +52,14 @@ async function manejarRespostaAutomatica(admin: any, tabela: "clients" | "suppli
     const logId = (log as any[])?.[0]?.id;
     if (logId) await admin.from("ai_comms_log").update({ responded_at: new Date().toISOString(), reply_intent: r.intencao }).eq("id", logId);
     // Opt-out é ação segura e clara: honra na hora (bloqueia envios futuros).
-    if (r.intencao === "opt_out") {
+    // Retorno F1 (P13): o cliente achado pela identificação nova só ganha o opt-out no PARAR estreito (a mensagem
+    // inteira, a regra de _e_pedido_de_parar): com ela, a regra larga ("nunca mais", "me tira") passaria a calar 22
+    // números em vez de 4 (R1-17). Com a identificação desligada, e sempre no fornecedor, vale a regra larga de hoje:
+    // sem o retorno ligado, nada muda. O PARAR por extenso que deixa de gravar ("pare de me mandar mensagem") só chega
+    // ao dono pelo parar_largo (P2) e pela linha "Para conferir" (P9/P14), que sobem em 16/11: entre ligar a chave e
+    // 16/11, ele não grava opt-out nem chega a ninguém. O ai_comms_log acima segue marcado como antes.
+    const estreito = tabela === "clients" && identificacaoNova === true;
+    if (r.intencao === "opt_out" && (!estreito || ehPedidoDeParar(texto))) {
       await admin.from(tabela).update({ opt_out_whatsapp: true }).eq("id", entityId);
     }
   } catch (_e) {
@@ -497,12 +509,22 @@ export async function handler(req: Request): Promise<Response> {
     let leadId = null;
     let isNewLead = false;
 
-    const { data: client } = await admin
-      .from("clients")
-      .select("id")
-      .or(`phone.ilike.%${phone}%,whatsapp.ilike.%${phone}%`)
-      .eq("active", true)
-      .maybeSingle();
+    // Retorno F0b-1 (P13): com retorno_config.identificacao_nova ligada, o cliente vem de retorno_identificar (a chave de
+    // 8 dígitos e o DDD do quem_escreve; ambíguo = nenhum cliente, nunca um deles). Desligada, sem a função ou com erro:
+    // o ILIKE de sempre. Vale para a recebida e para o eco (fromMe), como hoje.
+    const ident = await identificarCliente(admin, phone);
+    let client: { id: string } | null = null;
+    if (ident.usar) {
+      client = ident.clientId ? { id: ident.clientId } : null;
+    } else {
+      const { data: doIlike } = await admin
+        .from("clients")
+        .select("id")
+        .or(`phone.ilike.%${phone}%,whatsapp.ilike.%${phone}%`)
+        .eq("active", true)
+        .maybeSingle();
+      client = doIlike;
+    }
 
     if (client) {
       clientId = client.id;
@@ -577,7 +599,7 @@ export async function handler(req: Request): Promise<Response> {
     // Cliente tem prioridade; se não for cliente, tenta fornecedor (respostas de cotação).
     if (!event.fromMe && body) {
       if (clientId) {
-        manejarRespostaAutomatica(admin, "clients", clientId, body).catch(() => {});
+        manejarRespostaAutomatica(admin, "clients", clientId, body, ident.usar).catch(() => {});
       } else {
         (async () => {
           try {
@@ -601,16 +623,21 @@ export async function handler(req: Request): Promise<Response> {
       // consumida = a confirmação de 30/09 e a conferência do recibo abaixo não leem o mesmo texto. Erro = como hoje.
       const doCliente = !daEquipe &&
         await respostaDoCliente(admin, { phone, body, messageId: msg?.id ?? null, tipo: event.messageType });
+      // Retorno F1 (P13): os três leitores abaixo guardam a promessa com o resultado (null = não rodou ou falhou). Ninguém
+      // espera por elas aqui, então o comportamento deles não muda; só o retorno_abrir, no fundo, no fim deste bloco.
+      let pConfirmacao: PromiseLike<unknown> = Promise.resolve(null);
+      let pConferencia: PromiseLike<unknown> = Promise.resolve(null);
+      let pRevisao: PromiseLike<unknown> = Promise.resolve(null);
       // Confirmação do agendamento (30/09/2026): o "SIM" de quem recebeu o pedido da Agenda. A RPC
       // só confirma concordância curta ("sim", "confirmo", 👍) de cliente com pedido nas últimas
       // 72 h; "sim, mas preciso remarcar" não confirma. Frase longa nem chega a ela.
       if (body.trim().length <= 60 && !daEquipe && !doCliente) {
-        admin.rpc("registrar_confirmacao_do_cliente", { p_phone: phone, p_body: body, p_message_id: msg?.id ?? null })
-          .then(() => {}, () => {});
+        pConfirmacao = admin.rpc("registrar_confirmacao_do_cliente", { p_phone: phone, p_body: body, p_message_id: msg?.id ?? null })
+          .then((r) => r?.data ?? null, () => null);
         // Conferência do acerto de diárias (06/10/2026): o "ok"/"confere" do freelancer a quem o
         // recibo foi mandado nos últimos 7 dias. Mesma regra de concordância curta.
-        admin.rpc("registrar_conferencia_do_freelancer", { p_phone: phone, p_body: body, p_message_id: msg?.id ?? null })
-          .then(() => {}, () => {});
+        pConferencia = admin.rpc("registrar_conferencia_do_freelancer", { p_phone: phone, p_body: body, p_message_id: msg?.id ?? null })
+          .then((r) => r?.data ?? null, () => null);
       }
       // Resposta ao lembrete de revisão (07/10/2026): só vale para quem recebeu lembrete/campanha nos
       // últimos 21 dias (a RPC confere). PARAR → opt-out; "sim" → tarefa "Agendar revisão"; uma data
@@ -619,9 +646,19 @@ export async function handler(req: Request): Promise<Response> {
       // novo como resposta à revisão — o "sim" confirmaria a OS E criaria "Agendar revisão"; o "pode ser dia 5?"
       // remarcaria a OS E adiaria o plano de manutenção. O "ok" tem um dono só.
       if (body.trim().length <= 500 && !doCliente) {
-        admin.rpc("registrar_resposta_da_revisao", {
+        pRevisao = admin.rpc("registrar_resposta_da_revisao", {
           p_telefone: phone, p_texto: body, p_mensagem: msg?.id ?? null, p_data: lerDataDaResposta(body),
-        }).then(() => {}, () => {});
+        }).then((r) => r?.data ?? null, () => null);
+      }
+      // Retorno rápido (F1, P13): abre o caso do retorno no fundo — a resposta à Evolution não espera. A ordem fica
+      // garantida: equipe → agenda (aguardadas acima) → as três RPCs (esperadas dentro do abrirNoRetorno) → o retorno.
+      // "Consumida" = só a confirmação, a conferência ou a revisão; a agenda o retorno lê na tabela. Nunca lança.
+      if (msg?.id) {
+        noFundo(abrirNoRetorno(admin, {
+          msgId: msg.id,
+          leitores: [pConfirmacao, pConferencia, pRevisao],
+          consumida: (v) => consumidaPelosLeitores({ confirmacao: v[0], conferencia: v[1], revisao: v[2] }),
+        }));
       }
     }
 
