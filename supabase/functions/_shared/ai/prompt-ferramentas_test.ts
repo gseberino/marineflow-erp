@@ -323,10 +323,13 @@ function secaoDaAgenda(): string {
 // Fase 7d (P8): o local, o bem e a viagem (spec-fase7d.md §7 e R6.3-8: +2 linhas, o teto sobe 2 a partir do vigente) — entraram 2 linhas: o que o dono diz do local, do bem,
 // da viagem e dos autorizados é os_planejar (a lista inteira de autorizados, as datas como ele disse, o foco locais e a pergunta de onde fica), e regra de marina não muda
 // pela conversa, nem se inventa local, regra, feriado ou tempo de viagem. A resposta só com número (P6b) e a nota por número entraram nas 2 linhas que já existiam. Teto 31.
-Deno.test("agenda de produção: a seção é curta (≤ 31 linhas: custa tokens em toda mensagem) e fica no bloco estável", () => {
+// Fase 7f (P7): o silêncio e o *agenda espera* (spec-fase7f.md §7 e R8.5-28: +2 linhas, o teto sobe 2 a partir do vigente, 31) — entraram 2 linhas: toda pergunta da agenda
+// já diz o que fica sem resposta e até quando (sem resposta, fica assim), a única saída de quem não quer o padrão é *agenda espera <nome>*, *agenda fica* não existe ("pode
+// deixar como você propôs" é só não responder, sem gravar nada) e nada é decidido pelo prazo sem o banco dizer; e a informação só quando o dono pergunta. Teto 33.
+Deno.test("agenda de produção: a seção é curta (≤ 33 linhas: custa tokens em toda mensagem) e fica no bloco estável", () => {
   const secao = secaoDaAgenda();
   const linhas = secao.split("\n");
-  assertEquals(linhas.length <= 31, true, `a seção tem ${linhas.length} linhas`);
+  assertEquals(linhas.length <= 33, true, `a seção tem ${linhas.length} linhas`);
   // Estável = em cache. O volátil muda a cada turno e não pode carregar a seção.
   const volatil = buildSystemBlocks(CONVERSA_LIGADA, { userName: "Teste", userRole: "admin", channel: "whatsapp" })[1].text;
   assertEquals(volatil.includes(SECAO_AGENDA), false);
@@ -637,8 +640,8 @@ Deno.test("agenda de produção (correção 29/10, P2): o serviço novo depois d
   assertEquals(secao.includes("`"), false);
   // (Fase 7a, P7) o teto da seção passou a 25 (a linha do gestor da agenda); (Fase 7b, P5) a 27 (os dias de cada pessoa e a dupla);
   // (Fase 7c, P4) a 28 (quem faz o quê); (Fase 7c, P8) a 29 (as etapas de um serviço);
-  // (Fase 7d, P8) a 31 (o local e a regra de marina)
-  assertEquals(secao.split("\n").length <= 31, true);
+  // (Fase 7d, P8) a 31 (o local e a regra de marina); (Fase 7f, P7) a 33 (o silêncio e o *agenda espera*)
+  assertEquals(secao.split("\n").length <= 33, true);
 });
 
 // Fase 7b (P5; spec-fase7b.md §7 e §R4.8): as 2 linhas novas ensinam o que as ferramentas têm de verdade — a semana de
@@ -804,4 +807,20 @@ Deno.test("pós-merge (A): o dia sem trabalho não vai para registrar_diaria —
   const diaria = porNome.get("registrar_diaria")!.input_schema as { properties: Record<string, any> };
   assertEquals(diaria.properties.jornada.enum.includes("faltou"), false);
   assertEquals(diaria.properties.dias.items.properties.jornada.enum.includes("faltou"), false);
+});
+
+// Fase 7f (P7; spec-fase7f.md §7 e R8.5-28): as 2 linhas novas. O silêncio é a resposta (sem resposta, fica assim), a única saída de quem não quer o padrão é a palavra
+// *agenda espera <nome>*, do dono e antes do modelo, e *agenda fica* não aparece: não existe. "Pode deixar como você propôs" é só não responder, sem gravar nada (S120).
+Deno.test("agenda de produção (Fase 7f, P7): o silêncio e o *agenda espera*, sem *agenda fica*; a informação só quando o dono pergunta", () => {
+  const secao = secaoDaAgenda();
+  assertStringIncludes(secao, "- Toda pergunta da agenda já diz o que fica se o dono não responder e até quando; isso vem do banco: sem resposta, fica assim.");
+  assertStringIncludes(secao, "Para uma pergunta esperar por ele, sem prazo: *agenda espera <nome>*, que ele manda direto, sem você.");
+  assertStringIncludes(secao, "\"Pode deixar como você propôs\" é só não responder: diga isso e não grave nada. Nunca diga que algo ficou decidido pelo prazo sem o banco dizer.");
+  assertStringIncludes(secao, "- Informação (o que está marcado, o que está livre, as compras, o que mudou) só quando o dono pergunta: não ofereça sozinho nem repita o que o fechamento já disse.");
+  assertEquals(/agenda fica/i.test(secao), false);
+  assertEquals(secao.includes("`"), false);
+  // a palavra é do dono: o leitor da agenda a lê antes do modelo; "agenda fica" e o pedido em conversa vão ao modelo
+  assertEquals(lerComandoDaAgenda("agenda espera Nelson"), { comando: "veto", acao: "espera", alvo: "nelson" });
+  assertEquals(lerComandoDaAgenda("agenda fica"), null);
+  assertEquals(lerComandoDaAgenda("pode deixar como você propôs"), null);
 });

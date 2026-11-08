@@ -1389,3 +1389,89 @@ Deno.test("Fase 7c (P8) — o que o dono diz e pergunta das etapas vai ao modelo
   for (const f of frasesDaAgenda()) assert(!/etapa/.test(f), f);
   for (const t of ["sim", "ok", "1", "não", "2"]) assertEquals(lerComandoDaAgenda(t), null, t);
 });
+
+// ─── Fase 7f (P7, spec-fase7f.md §7 e R8.5-28): *agenda espera <nome>* ──────────────────────────────────────────────────
+// A única saída de quem não quer o padrão de uma pergunta. Age (com "?" vai ao modelo). O nome pela régua do *desfaz*. *agenda fica* NÃO existe: é conversa.
+// Não colide com o secretário, a confirmação (sim/ok/1), o menu, o PDF, os comprovantes, a pergunta ativa nem com as palavras da agenda de antes (as do 7a,
+// *agenda pendências*, *desfaz*, *grava*, *o que mudou*, *agenda plano*). As do retorno (frasesDoRetorno, da F2, fora do main) foram provadas fora do código:
+// notas-fase7f.md, P7.
+
+const espera = (alvo: string): ComandoDaAgenda => ({ comando: "veto", acao: "espera", alvo });
+
+const TABELA_F7F: Array<[string, ComandoDaAgenda]> = [
+  ["agenda espera Nelson", espera("nelson")],
+  ["Agenda espera o Nelson", espera("nelson")],
+  ["*agenda espera Flávio*", espera("flavio")],
+  ["agenda espera Nelson.", espera("nelson")],
+  ["agenda espera OS-00074", espera("os-00074")],
+  ["agenda espera Rodrigo Silva", espera("rodrigo silva")],
+  ["agenda espera do Giancarlo", espera("giancarlo")],
+];
+
+Deno.test("Fase 7f (P7) — lerComandoDaAgenda: *agenda espera <nome>*, com o nome pela régua do *desfaz*", () => {
+  for (const [texto, esperado] of TABELA_F7F) assertEquals(lerComandoDaAgenda(texto), esperado, texto);
+  // nenhuma frase fixa nova: a palavra só existe com o nome
+  for (const f of frasesDaAgenda()) assert(!/^agenda (espera|fica)/.test(f), f);
+});
+
+// *agenda fica* não existe; sem nome, com "?", com letra, com conectivo ou palavra de outra ferramenta, a frase vai ao modelo.
+const CONVERSA_F7F = [
+  "agenda fica", "Agenda fica", "*agenda fica*", "agenda fica tudo", "agenda fica assim", "agenda espera", "agenda espera?", "agenda espera Nelson?",
+  "agenda espera b", "agenda espera o item C", "agenda espera a pergunta do Nelson", "agenda espera o pix do Roberto", "agenda espera tudo",
+  "agenda espera isso", "espera Nelson", "espera o Nelson", "agenda esperar Nelson", "a agenda espera o Nelson", "pode esperar o Nelson",
+  "deixa o Nelson esperar", "pode deixar como você propôs", "deixa como está", "agenda espera o Nelson e o Lenine da semana que vem",
+];
+
+Deno.test("Fase 7f (P7) — *agenda fica*, a palavra sem nome, a pergunta e o alvo que não serve vão ao modelo", () => {
+  for (const t of CONVERSA_F7F) assertEquals(lerComandoDaAgenda(t), null, t);
+});
+
+Deno.test("Fase 7f (P7) — *agenda espera* não é do secretário, da confirmação, do menu, do PDF, dos comprovantes nem da pergunta ativa", () => {
+  const formas = TABELA_F7F.map(([t]) => t);
+  for (const t of [...formas, ...formas.map((x) => `*${x.replace(/^\*|\*$/g, "")}*`), ...CONVERSA_F7F]) {
+    assertEquals(lerComandoDoSecretario(t), null, `secretário: ${t}`);
+    assertEquals(parseConfirmationReply(t), null, `confirmação: ${t}`);
+    assertEquals(parseOptionReply(t, 9), null, `opção: ${t}`);
+    assertEquals(lerPedidoDePdf(t), null, `pdf: ${t}`);
+    assertEquals(lerComando(t), null, `comprovantes: ${t}`);
+    const n = normalizarResposta(t.replace(/[*_~]/g, ""));
+    assertEquals(lerSimNao(n), null, `sim/não: ${t}`);
+    assertEquals(lerNumero(n, 99), null, `número: ${t}`);
+    assertEquals(pareceRespostaCurta(t), false, `resposta curta: ${t}`);
+    const trava = travaDaConfirmacao(estadoComCmpNoConfirmar(), t, { pending_confirm_action_id: "pend-1" });
+    assertEquals(trava.travar, false, `trava do CMP: ${t}`);
+  }
+  for (const t of ["sim", "ok", "1", "não", "2"]) assertEquals(lerComandoDaAgenda(t), null, t);
+});
+
+Deno.test("Fase 7f (P7) — as palavras de antes continuam como eram, e nenhuma vira *agenda espera*", () => {
+  // nenhuma frase fixa é lida como a palavra nova
+  for (const f of frasesDaAgenda()) assert(lerComandoDaAgenda(f)?.comando !== "veto", f);
+  // as do 7a, *agenda pendências*, *desfaz*, *grava*, *o que mudou* e *agenda plano*: o mesmo de antes
+  assertEquals(lerComandoDaAgenda("gestor, só propor"), { comando: "gestor", so_propor: true });
+  assertEquals(lerComandoDaAgenda("gestor, pode marcar"), { comando: "gestor", so_propor: false });
+  assertEquals(lerComandoDaAgenda("Nelson com dupla"), { comando: "dupla", alvo: "nelson", dupla: true });
+  assertEquals(lerComandoDaAgenda("agenda pendências"), { comando: "ver", periodo: null, foco: "decisoes", pessoa: null });
+  assertEquals(lerComandoDaAgenda("o que você precisa de mim"), { comando: "ver", periodo: null, foco: "decisoes", pessoa: null });
+  assertEquals(lerComandoDaAgenda("desfaz Nelson"), { comando: "desfazer", alvo: "nelson" });
+  assertEquals(lerComandoDaAgenda("desfaz"), { comando: "desfazer", alvo: null });
+  assertEquals(lerComandoDaAgenda("grava"), { comando: "gravar" });
+  assertEquals(lerComandoDaAgenda("o que mudou"), { comando: "ver", periodo: null, foco: "mudancas", pessoa: null });
+  assertEquals(lerComandoDaAgenda("agenda plano"), plano);
+  // e a palavra nova não é nenhuma delas
+  for (const [t] of TABELA_F7F) {
+    const c = lerComandoDaAgenda(t)!;
+    assert(c.comando === "veto" && !["gestor", "dupla", "desfazer", "gravar", "ver"].includes(String((c as { comando: string }).comando)), t);
+  }
+});
+
+Deno.test("Fase 7f (P7) — webhook: *agenda espera* vai ao assistente só com a agenda automática fora de desligado (como o *desfaz*)", async () => {
+  for (const modo of ["sombra", "ligado"]) {
+    assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(modo, "sombra"), "agenda espera Nelson"), true, modo);
+    assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(modo, "desligado"), "agenda espera Nelson"), false, `${modo} sem a automática`);
+    assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(modo, "sombra"), "agenda fica"), false, `${modo}: agenda fica`);
+  }
+  for (const modo of ["desligado", "erro", "sem_tabela"]) {
+    assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(modo, "ligado"), "agenda espera Nelson"), false, modo);
+  }
+});

@@ -847,3 +847,13 @@ Deno.test("Fase 7d (P7) — os_planejar: uma RPC só, com o que o dono disse com
   assertEquals(r.pergunta, "Qual deles: Kalmar Estaleiro (Itajaí) ou Marina Itajaí (Itajaí)?");
   assertEquals(JSON.stringify(r).includes("gravado"), false);
 });
+
+// Fase 7f (P7; spec-fase7f.md §7): a descrição do foco decisoes diz que cada pergunta traz o que fica sem resposta e até quando (o prazo vem do banco). Nenhuma
+// ferramenta nova (a palavra *agenda espera* é do dono, antes do modelo), e o foco continua só de leitura.
+Deno.test("Fase 7f (P7) — agenda_ver: o foco decisoes diz o que fica sem resposta e até quando; nenhuma ferramenta nova", () => {
+  const ver = porNome("agenda_ver");
+  assertStringIncludes(ver.description, "(foco decisoes: as decisões numeradas, com as opções e a recomendação; cada pergunta diz o que fica se o dono não responder e até quando)");
+  assertEquals(agendaProducaoTools.some((t) => /veto|espera/.test(t.name)), false);
+  assertEquals(ver.description.includes("agenda fica"), false);
+  assertStringIncludes(ver.description, "Só lê: não marca nada");
+});

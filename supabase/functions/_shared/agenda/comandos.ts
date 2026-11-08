@@ -113,6 +113,15 @@
 //   cliente, pessoa, bem nem fornecedor (sql/wf7dd_p8_locais) nem palavra de outra ferramenta (comandos_test.ts). O que o dono diz do local ("o barco do Nelson está na
 //   Marina Itajaí") é conversa: vai ao modelo (os_planejar).
 //
+// Fase 7f (P7, 08/11/2026; spec-fase7f.md §7 e R8.5-28) — a única saída de quem não quer o padrão de uma pergunta:
+//   agenda espera <nome>                        → a pergunta daquele nome espera o dono, sem prazo (agenda_veto_dito, espera): ela não fica mais com o
+//                                                  padrão sozinha. O nome pela régua do *desfaz* (o nome do cliente até 3 palavras ou o número, nunca uma
+//                                                  letra, sem conectivo nem palavra de outra ferramenta); o banco resolve a OS (ou o fornecedor da pergunta)
+//                                                  e, se o nome não casa, devolve a lista das que podem esperar
+//   *agenda fica* NÃO existe (R8.5-28): sem resposta, cada pergunta já fica como a agenda disse, no prazo dela; "agenda fica" é conversa (vai ao
+//   modelo, que explica o silêncio). Age: dita com "?" vai ao modelo. Como o *desfaz*, só com a agenda automática fora de 'desligado'. "espera" não é
+//   palavra do secretário, dos comprovantes, da confirmação nem das palavras do 7a (comandos_test.ts), e "agenda espera" não começa nenhuma frase fixa.
+//
 // Correção de 29/10 (P1) — as frases naturais do dono que caíam no modelo sem roteiro (todas de VER, valem com "?"):
 //   quando tenho agenda livre · quando eu tenho agenda livre · tenho agenda livre · eu tenho agenda livre
 //   quando estou livre · quando eu estou livre · tem vaga na agenda · quando tem vaga na agenda      → livre (como *livre*)
@@ -189,7 +198,9 @@ export type ComandoDaAgenda =
   /** (Fase 7a, P7) agenda_gestor_dito: *gestor, só propor* (so_propor true) / *gestor, pode marcar* (false) */
   | { comando: "gestor"; so_propor: boolean }
   /** (Fase 7a, P7) agenda_dupla_dita: *<alvo> com dupla* (dupla true) / *<alvo> sem dupla* (false); o alvo como o dono disse */
-  | { comando: "dupla"; alvo: string; dupla: boolean };
+  | { comando: "dupla"; alvo: string; dupla: boolean }
+  /** (Fase 7f, P7) agenda_veto_dito: *agenda espera <nome>* (a pergunta daquele nome espera o dono, sem prazo); o alvo como o dono disse */
+  | { comando: "veto"; acao: "espera"; alvo: string };
 
 /** A jornada da palavra *diária*: inteira (também "dia inteiro"), meia ou não (não lançar / apagar). */
 export type JornadaDita = "inteira" | "meia" | "nao";
@@ -347,7 +358,13 @@ function alvoDito(alvo: string): string | undefined {
 
 /** "dia feito [quando]", "dia nao|parcial [motivo] [quando]", "choveu [quando]", "desfaz [alvo]" → o comando, ou null. */
 function lerPalavraComplemento(t: string): ComandoDaAgenda | null {
-  let m = /^dia feito(?: (.+))?$/.exec(t);
+  // Fase 7f (P7): *agenda espera <nome>* (o nome pela régua do *desfaz*; sem nome não é palavra: "agenda espera" sozinho vai ao modelo)
+  let m = /^agenda espera (.+)$/.exec(t);
+  if (m) {
+    const nome = alvoDito(m[1].trim());
+    return nome === undefined ? null : { comando: "veto", acao: "espera", alvo: nome };
+  }
+  m = /^dia feito(?: (.+))?$/.exec(t);
   if (m) {
     const quando = quandoDito(m[1]);
     return quando === undefined ? null : { comando: "dia", resultado: "cumprido", motivo: null, quando };
@@ -489,6 +506,8 @@ export function ehPalavraDaFase2(cmd: ComandoDaAgenda): boolean {
   if (cmd.comando === "concluir" || cmd.comando === "entregar") return true;
   // (Fase 7a, P7) a palavra do gestor e a da dupla: como o *desfaz*, só com a agenda automática fora de 'desligado'
   if (cmd.comando === "gestor" || cmd.comando === "dupla") return true;
+  // (Fase 7f, P7) *agenda espera <nome>*: também (as perguntas que ela alcança são as da agenda automática)
+  if (cmd.comando === "veto") return true;
   return cmd.comando === "ver" && (cmd.foco === "mudancas" || cmd.foco === "decisoes" || cmd.foco === "plano");
 }
 
@@ -504,6 +523,8 @@ const PALAVRAS_QUE_AGEM: ReadonlySet<ComandoDaAgenda["comando"]> = new Set([
   "cliente",
   // (Fase 7a, P7) "gestor só propor?" e "Lenine com dupla?" são pergunta, não ordem
   "gestor", "dupla",
+  // (Fase 7f, P7) "agenda espera Nelson?" é pergunta, não ordem
+  "veto",
 ]);
 
 /** O texto termina em pergunta? O "?" final que o normalizarComando tira (também com negrito, espaço ou aspas depois). */

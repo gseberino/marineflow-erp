@@ -27,6 +27,7 @@ import {
   RPC_ENTREGAR_DITO,
   RPC_GESTOR_DITO,
   RPC_GRAVAR,
+  RPC_VETO_DITO,
   TEXTO_SEM_AGENDA,
   TEXTO_SEM_CLIENTE,
   TEXTO_SEM_ANOTAR,
@@ -39,6 +40,8 @@ import {
   TEXTO_SEM_GESTOR,
   TEXTO_SEM_GRAVAR,
   TEXTO_SO_ADMIN,
+  TEXTO_SEM_VETO,
+  TEXTO_VETO_NAO_LIGADO,
 } from "./executar.ts";
 import { RPC_AGENDA_VER } from "./rpc-das-ferramentas.ts";
 
@@ -845,4 +848,63 @@ Deno.test("Fase 7c (P8) — o *grava* das etapas é o de sempre: uma RPC, o text
   }
   const fonte = await Deno.readTextFile(new URL("./executar.ts", import.meta.url));
   assertEquals(fonte.includes("agenda_rascunho_etapa"), false);
+});
+
+// ─── Fase 7f (P7, spec-fase7f.md §7, R8.5-28): *agenda espera <nome>* ──────────────────────────────────────────────────
+
+Deno.test("Fase 7f (P7) — chamadaDoComando: *agenda espera <nome>* → agenda_veto_dito com espera, o nome como o dono disse, o dia e a hora", () => {
+  const agora = "2026-11-10T20:40:00.000Z";
+  assertEquals(chamadaDoComando(lerComandoDaAgenda("agenda espera Nelson")!, AUTOR, "2026-11-10", "whatsapp", agora),
+               { rpc: RPC_VETO_DITO, params: { p_autor: AUTOR, p_acao: "espera", p_alvo: "nelson", p_hoje: "2026-11-10", p_agora: agora } });
+  // sem o dia do teste, o dia de Brasília do instante
+  assertEquals(chamadaDoComando(lerComandoDaAgenda("agenda espera o Flávio")!, AUTOR, undefined, "whatsapp", "2026-11-11T01:30:00.000Z").params,
+               { p_autor: AUTOR, p_acao: "espera", p_alvo: "flavio", p_hoje: "2026-11-10", p_agora: "2026-11-11T01:30:00.000Z" });
+});
+
+Deno.test("Fase 7f (P7) — executar: o texto do banco volta como está (também a lista do nome que não casa, que não segue ao modelo); erro = frase + log", async () => {
+  const cmd = lerComandoDaAgenda("agenda espera Nelson")!;
+  const ok = cliente({ [RPC_VETO_DITO]: { data: { ok: true, mudou: true, status: "espera", texto: "Combinado: a pergunta de Nelson espera você, sem prazo." } } });
+  assertEquals(await executarComandoDaAgenda(ok, cmd, { autor: AUTOR }), { ok: true, texto: "Combinado: a pergunta de Nelson espera você, sem prazo." });
+  assertEquals(ok.chamadas[0].args.p_acao, "espera");
+  const lista = cliente({ [RPC_VETO_DITO]: { data: { ok: false, status: "nao_achei", texto: "Não achei pergunta aberta de nelson. Podem esperar você: Lenine e Flávio. Diga *agenda espera* e o nome." } } });
+  assertEquals(await executarComandoDaAgenda(lista, cmd, { autor: AUTOR }),
+               { ok: true, texto: "Não achei pergunta aberta de nelson. Podem esperar você: Lenine e Flávio. Diga *agenda espera* e o nome." });
+  const erro = cliente({ [RPC_VETO_DITO]: { error: { message: "rede", code: "XX000" } } });
+  const log = cliente();
+  assertEquals(await executarComandoDaAgenda(erro, cmd, { autor: AUTOR, log }), { ok: false, texto: TEXTO_SEM_VETO });
+  const [l] = log.logs();
+  assertEquals([l.p_context, l.p_action, (l.p_details as Record<string, unknown>).rpc], ["agenda", "comando:veto", RPC_VETO_DITO]);
+  const negado = cliente({ [RPC_VETO_DITO]: { error: { code: "42501", message: "Só o administrador mexe na agenda." } } });
+  assertEquals((await executarComandoDaAgenda(negado, cmd, { autor: AUTOR })).texto, TEXTO_SO_ADMIN);
+  assert(!/erro|error|rpc|ferramenta/i.test(TEXTO_SEM_VETO));
+});
+
+Deno.test("Fase 7f (P7) — executar: antes da migration (PGRST202 ou 42883) a palavra diz que ainda não está ligada, sem registro de erro", async () => {
+  const cmd = lerComandoDaAgenda("agenda espera Nelson")!;
+  for (const code of ["PGRST202", "42883"]) {
+    const sem = cliente({ [RPC_VETO_DITO]: { error: { code, message: "function public.agenda_veto_dito does not exist" } } });
+    const log = cliente();
+    assertEquals(await executarComandoDaAgenda(sem, cmd, { autor: AUTOR, log }), { ok: true, texto: TEXTO_VETO_NAO_LIGADO }, code);
+    assertEquals(log.logs().length, 0, code);
+  }
+  // o controle: outra palavra com PGRST202 continua erro (frase + log)
+  const gestor = lerComandoDaAgenda("gestor, só propor")!;
+  const log = cliente();
+  assertEquals((await executarComandoDaAgenda(cliente({ [RPC_GESTOR_DITO]: { error: { code: "PGRST202", message: "x" } } }), gestor, { autor: AUTOR, log })).ok, false);
+  assertEquals(log.logs().length, 1);
+  assert(!/erro|error|rpc|ferramenta|migration/i.test(TEXTO_VETO_NAO_LIGADO));
+});
+
+Deno.test("Fase 7f (P7) — camada: *agenda espera* só com a agenda automática fora de desligado; com \"?\" é pergunta; *agenda fica* nunca", async () => {
+  const { d, c } = deps({ modo: "ligado", fase2: "sombra", texto: "Combinado: a pergunta de Nelson espera você, sem prazo." });
+  assertEquals((await camadaDaAgenda("agenda espera Nelson", d))?.texto, "Combinado: a pergunta de Nelson espera você, sem prazo.");
+  assertEquals(c.executar.length, 1);
+  const desl = deps({ modo: "ligado", fase2: "desligado" });
+  assertEquals(await camadaDaAgenda("agenda espera Nelson", desl.d), null);
+  assertEquals(desl.c.executar.length, 0);
+  for (const t of ["agenda espera Nelson?", "agenda fica", "agenda fica?"]) {
+    const x = deps({ modo: "ligado", fase2: "ligado" });
+    assertEquals(await camadaDaAgenda(t, x.d), null, t);
+    assertEquals(x.c.executar.length, 0, t);
+  }
 });

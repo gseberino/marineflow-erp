@@ -53,8 +53,14 @@
 // Fase 7c (P4, 01/11/2026; spec-fase7c.md §7): *agenda quem faz* e "quem faz o quê" são agenda_ver foco habilidades, pelo mesmo
 // caminho das de ver da Fase 1 (só com modo_leitura fora de 'desligado'). Nenhuma age: o que o dono diz de quem faz o quê vai ao
 // modelo (equipe_habilidade, que só deixa o rascunho) e só o *grava* grava. Nada novo aqui além do foco que o mapeamento aceita.
+//
+// Fase 7f (P7, 08/11/2026; spec-fase7f.md §7, R8.5-28): *agenda espera <nome>* executa direto (agenda_veto_dito com p_acao = 'espera': a pergunta daquele
+// nome passa a esperar o dono, sem prazo). Pede o dia e a hora, como o gestor. O nome que não casa é a resposta do banco (a lista das que podem esperar): não
+// segue ao modelo. Antes da migration 20261109100600 a função não existe (PGRST202/42883): a resposta é que ainda não está ligado, sem registro de erro.
+// *agenda fica* não existe.
 
 import { diaBR } from "../agenda-dia.ts";
+import { ehPortaAusente } from "../porta-ausente.ts";
 import { logEdgeError } from "../log-error.ts";
 import { lerModoDaProposta, type ModoDaProposta, modoDaPropostaNoBanco } from "../agenda-modo.ts";
 import { type ComandoDaAgenda, ehPalavraDaDiaria, ehPalavraDaFase2, ehPalavraDoCliente, lerComandoDaAgenda } from "./comandos.ts";
@@ -80,6 +86,8 @@ export const RPC_CLIENTE_DITO = "agenda_cliente_decidir_dito";
 export const RPC_GESTOR_DITO = "agenda_gestor_dito";
 /** Fase 7a (P7): *<nome> com dupla* / *<nome> sem dupla*. */
 export const RPC_DUPLA_DITA = "agenda_dupla_dita";
+/** Fase 7f (P7): *agenda espera <nome>*. */
+export const RPC_VETO_DITO = "agenda_veto_dito";
 
 export { modoDaPropostaNoBanco };
 export type { ModoDaProposta };
@@ -225,6 +233,8 @@ export function chamadaDoComando(
   if (cmd.comando === "dupla") {
     return { rpc: RPC_DUPLA_DITA, params: comAgora({ p_autor: autor, p_alvo: cmd.alvo, p_dupla: cmd.dupla }) };
   }
+  // (Fase 7f, P7) a pergunta daquele nome espera o dono: o dia e a hora, como o gestor (o banco resolve o nome)
+  if (cmd.comando === "veto") return { rpc: RPC_VETO_DITO, params: comAgora({ p_autor: autor, p_acao: cmd.acao, p_alvo: cmd.alvo }) };
   if (cmd.comando === "gravar") return { rpc: RPC_GRAVAR, params: comHoje({ p_autor: autor }) };
   if (cmd.comando === "descartar") return { rpc: RPC_DESCARTAR, params: { p_autor: autor } };
   // Fase 2: a palavra vai como o dono disse (o dia e o alvo são resolvidos no banco; aqui nada é calculado)
@@ -294,6 +304,10 @@ export const TEXTO_SEM_CLIENTE =
 export const TEXTO_SEM_GESTOR =
   "Não consegui mudar o gestor da agenda agora: nada mudou. Mande de novo em alguns minutos.";
 export const TEXTO_SEM_DUPLA = "Não consegui anotar a dupla agora: nada mudou. Mande de novo em alguns minutos.";
+/** Fase 7f (P7): quando o banco falha no *agenda espera* (dizer de novo não muda em dobro: a pergunta já espera). */
+export const TEXTO_SEM_VETO = "Não consegui deixar a pergunta esperando você agora: nada mudou. Mande de novo em alguns minutos.";
+/** Fase 7f (P7): antes da migration 20261109100600, a função não existe. */
+export const TEXTO_VETO_NAO_LIGADO = "O *agenda espera* ainda não está ligado: por enquanto, responda a pergunta.";
 
 function textoDoErro(cmd: ComandoDaAgenda, e: unknown): string {
   if ((e as { code?: unknown })?.code === "42501") return TEXTO_SO_ADMIN;
@@ -319,6 +333,8 @@ function textoDoErro(cmd: ComandoDaAgenda, e: unknown): string {
       return TEXTO_SEM_GESTOR;
     case "dupla":
       return TEXTO_SEM_DUPLA;
+    case "veto":
+      return TEXTO_SEM_VETO;
     default:
       return TEXTO_SEM_AGENDA;
   }
@@ -349,6 +365,8 @@ function rpcDoComando(cmd: ComandoDaAgenda): string {
       return RPC_GESTOR_DITO;
     case "dupla":
       return RPC_DUPLA_DITA;
+    case "veto":
+      return RPC_VETO_DITO;
     default:
       return RPC_AGENDA_VER;
   }
@@ -416,6 +434,8 @@ export async function executarComandoDaAgenda(
     if (texto === null) throw new Error(`${chamada.rpc} respondeu sem texto`);
     return seguirAoModelo(cmd, data) ? { ok: true, texto, seguirAoModelo: true } : { ok: true, texto };
   } catch (e) {
+    // (Fase 7f, P7) a palavra nova antes da migration dela: não é erro, é o estado de antes (sem registro)
+    if (cmd.comando === "veto" && ehPortaAusente(e)) return { ok: true, texto: TEXTO_VETO_NAO_LIGADO };
     const err = e as { message?: unknown; code?: unknown };
     await logEdgeError(ctx.log ?? cliente, {
       context: "agenda",

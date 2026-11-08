@@ -142,7 +142,8 @@ export const agendaProducaoTools: ToolDef[] = [
       "Agenda de produção do dono, lida do banco com o texto pronto: o que ele tem que fazer (foco o_que_fazer), a " +
       "semana (periodo), quando fica livre (foco livre), o que está atrasado (foco atrasos), o material (foco material), " +
       "as perguntas para montar a semana (foco aprontar), o que a agenda mudou sozinha (foco mudancas), o que ela precisa " +
-      "do dono (foco decisoes: as decisões numeradas, com as opções e a recomendação), o publicado dia a dia (foco plano), " +
+      "do dono (foco decisoes: as decisões numeradas, com as opções e a recomendação; cada pergunta diz o que fica se o dono " +
+      "não responder e até quando), o publicado dia a dia (foco plano), " +
       "como foi a semana, quanto do plano foi cumprido (foco ppc), as diárias que a agenda lançou e as perguntas de diária " +
       "(foco diarias), o que a equipe respondeu hoje e no próximo dia útil (foco equipe), os marcos de uma OS (os + foco " +
       "marcos: entrada, início, conclusão e entrega), a comissão dos técnicos de um mês (foco comissao com o mês em periodo, " +
