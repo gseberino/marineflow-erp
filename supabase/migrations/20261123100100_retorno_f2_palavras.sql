@@ -1,7 +1,7 @@
 -- Retorno rápido ao cliente, F2 (P4): as palavras do dono no banco.
 --
 -- retorno_dito(comando, autor, agora) é a porta única das palavras sem cartão: *retorno*, *ver N*, *pessoal*, *pessoal não*,
--- *fora até*, *segura* e *solta*, *libera*, *errado*. A camada (P3) lê a forma; aqui se confere o autor, se resolve o alvo,
+-- *resolvido N* (08/11/2026), *fora até*, *segura* e *solta*, *libera*, *errado*. A camada (P3) lê a forma; aqui se confere o autor, se resolve o alvo,
 -- se grava e se devolve o texto exato. Nenhum texto do cliente sai pelo campo "historico".
 --
 -- O que *segura* faz com o que está no meio:
@@ -18,7 +18,8 @@
 -- Quando a agenda publicar essa função, a frase some sem deploy daqui.
 --
 -- Reverter: drop function public.retorno_dito(jsonb, uuid, timestamptz), public._retorno_dito_libera(jsonb, uuid, timestamptz),
--- public._retorno_dito_pessoal(integer, uuid, timestamptz), public._retorno_dito_errado(text, timestamptz),
+-- public._retorno_dito_pessoal(integer, uuid, timestamptz), public._retorno_dito_resolvido(integer, uuid, timestamptz),
+-- public._retorno_dito_errado(text, timestamptz),
 -- public._retorno_toque(text, uuid, uuid, timestamptz), public._retorno_tipo_curto(text),
 -- public._retorno_auditar_palavra(uuid, jsonb, jsonb, text). A camada trata a função ausente como "segue como sempre".
 
@@ -256,6 +257,73 @@ comment on function public._retorno_dito_pessoal(integer, uuid, timestamptz) is
 
 revoke all on function public._retorno_dito_pessoal(integer, uuid, timestamptz) from public, anon, authenticated;
 
+-- (08/11/2026, cartão F1-10) *resolvido N*: o dono resolveu fora do WhatsApp. Sem o prazo de 3 dias, o caso só sai da lista
+-- por resposta escrita ou por esta palavra. Diferente do *pessoal*: o número continua recebendo o automático, e só este caso
+-- fecha. Sempre com número ("resolvido" sozinho é do Secretário, que marca o item dele como feito).
+create or replace function public._retorno_dito_resolvido(p_n integer, p_autor uuid, p_agora timestamptz)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_vivo jsonb;
+  v_cartao uuid;
+  v_item public.retorno_cartao_itens;
+  v_ab public.retorno_aberturas;
+  v_rotulo text;
+  v_k integer;
+begin
+  if p_n is null then
+    return jsonb_build_object('ok', false, 'seguir_ao_modelo', true);
+  end if;
+  v_vivo := public.retorno_cartao_vivo(p_agora);
+  if v_vivo is null then
+    return jsonb_build_object('ok', false, 'seguir_ao_modelo', true);
+  end if;
+  v_cartao := (v_vivo ->> 'id')::uuid;
+
+  select * into v_item from public.retorno_cartao_itens i
+   where i.cartao_id = v_cartao and i.n = p_n and i.estado = 'vivo';
+  if not found then
+    return jsonb_build_object('ok', true, 'texto', format('Não há caso %s nesta lista. Mande *retorno*.', p_n));
+  end if;
+
+  select * into v_ab from public.retorno_aberturas a where a.id = v_item.abertura_id for update;
+  v_rotulo := public._retorno_rotulo(v_ab.id, p_agora);
+
+  update public.retorno_saidas s
+     set estado = 'cancelada', motivo = 'caso_fechado', decidida_em = p_agora, atualizada_em = now()
+   where s.abertura_id = v_ab.id and s.estado = 'agendada';
+  get diagnostics v_k = row_count;
+
+  update public.retorno_aberturas a
+     set estado = 'fechada', fechada_em = p_agora, fechada_motivo = 'dono', atualizada_em = now()
+   where a.id = v_ab.id and a.estado <> 'fechada';
+
+  update public.retorno_cartao_itens i
+     set estado = 'caiu', caiu_motivo = 'caso_fechado', decidido_em = p_agora
+   where i.id = v_item.id;
+
+  update public.retorno_cartoes c
+     set texto = public._retorno_cartao_texto(c.id, null)
+   where c.id = v_cartao;
+
+  perform public._retorno_auditar_palavra(p_autor, jsonb_build_object('estado', v_ab.estado),
+    jsonb_build_object('estado', 'fechada', 'fechada_motivo', 'dono', 'abertura', v_ab.id), '*resolvido* do dono');
+  perform public._retorno_toque('resolvido', v_cartao, v_ab.id, p_agora);
+
+  return jsonb_build_object('ok', true,
+    'texto', case when v_k = 0 then format('%s: resolvido, saiu da lista.', v_rotulo)
+                  else format('%s: resolvido, saiu da lista, e cancelei o que estava agendado para ele.', v_rotulo) end);
+end;
+$$;
+
+comment on function public._retorno_dito_resolvido(integer, uuid, timestamptz) is
+  'Retorno F2 (cartão F1-10): *resolvido N*. Fecha o caso do item N como ''dono'' (resolvido fora do WhatsApp; não conta como cumprido), cancela as saídas agendadas dele e tira o item do cartão. O número continua recebendo o automático. Só com número.';
+
+revoke all on function public._retorno_dito_resolvido(integer, uuid, timestamptz) from public, anon, authenticated;
+
 -- *errado <letra>*: a letra é a gravada no envio, e vale até o fechamento seguinte ao letra_dia.
 create or replace function public._retorno_dito_errado(p_letra text, p_agora timestamptz)
 returns jsonb
@@ -431,6 +499,14 @@ begin
       end if;
       v_texto := v_r ->> 'texto';
       v_user := 'pessoal';
+
+    when 'resolvido' then
+      v_r := public._retorno_dito_resolvido((p_comando ->> 'n')::integer, p_autor, v_agora);
+      if coalesce((v_r ->> 'ok')::boolean, false) is false then
+        return v_r;
+      end if;
+      v_texto := v_r ->> 'texto';
+      v_user := 'resolvido ' || coalesce(p_comando ->> 'n', '');
 
     when 'pessoal_desfaz' then
       v_antes := v_cfg.pessoal_ultimo;

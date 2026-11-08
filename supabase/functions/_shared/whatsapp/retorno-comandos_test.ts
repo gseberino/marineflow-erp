@@ -36,6 +36,10 @@ const TABELA: Array<[string, ComandoDoRetorno]> = [
   ["pessoal 2", { comando: "pessoal", n: 2 }],
   ["2 pessoal", { comando: "pessoal", n: 2 }],
   ["Pessoal não", { comando: "pessoal_desfaz" }],
+  // (08/11/2026, cartão F1-10) só com número: "resolvido" sozinho é do Secretário
+  ["resolvido 2", { comando: "resolvido", n: 2 }],
+  ["2 resolvido", { comando: "resolvido", n: 2 }],
+  ["*Resolvido 3*.", { comando: "resolvido", n: 3 }],
   ["fora até quarta", { comando: "fora_ate", dia: "quarta" }],
   ["Fora até 25/11.", { comando: "fora_ate", dia: "25/11" }],
   ["fora até hoje", { comando: "fora_ate", dia: "hoje" }],
@@ -92,7 +96,9 @@ const CONVERSA = [
   "1", "2", "3", "sim", "não", "1: pode", "sim 7391", "4 B", "0 B", "ver 4", "ver", "só 4", "só 1 e 1", "não 1 e 1",
   // o que age, dito como pergunta
   "segura tudo?", "solta recibos?", "libera Rodrigo?", "fora até quarta?", "pessoal 2?", "errado Z?", "1 A?", "só 3?", "não 2?",
-  "sim sem 2?",
+  "sim sem 2?", "resolvido 2?",
+  // o resolvido sem número é do Secretário; fora de 1 a 3 ou em frase, conversa
+  "resolvido", "resolvida 2", "resolvido 4", "resolvido 0", "o 2 foi resolvido", "já resolvi o 2", "resolvido o problema",
   // outras do libera
   "liberar", "libera", "libera o sinal", "libera o saldo", "libera o boleto", "libera a fatura", "libera a NF", "libera o recibo",
   "libera o acesso", "libera agora", "libera não", "libera do cliente do barco azul da marina", "fora até", "errado", "",
@@ -120,9 +126,11 @@ Deno.test("nada mais longo que o ditado é palavra", () => {
   assert(lido?.comando === "ditar" && lido.texto.length === 1050, "o ditado longo chega à camada, que recusa com o motivo");
 });
 
-Deno.test("o que depende de cartão vivo é só escolher, ditar, so, sem, tirar, ver e pessoal com número", () => {
+Deno.test("o que depende de cartão vivo é só escolher, ditar, so, sem, tirar, ver, resolvido e pessoal com número", () => {
   const deCartao = (t: string) => ehComandoDeCartao(lerComandoDoRetorno(t)!);
-  for (const t of ["1 A", "dita 2 ok", "só 3", "sim sem 2", "não 2", "ver 1", "pessoal 2"]) assert(deCartao(t), t);
+  for (const t of ["1 A", "dita 2 ok", "só 3", "sim sem 2", "não 2", "ver 1", "pessoal 2", "resolvido 2", "2 resolvido"]) {
+    assert(deCartao(t), t);
+  }
   for (const t of ["retorno", "pessoal", "pessoal não", "fora até quarta", "segura tudo", "solta tudo", "libera Rodrigo", "errado Z"]) {
     assert(!deCartao(t), t);
   }
@@ -164,7 +172,7 @@ Deno.test("as formas fixas não são sim, não, número de menu nem resposta cur
 });
 
 Deno.test("1 não, 1 não entendi, 2 sim, 2 B e 2 dias não são sim nem não na confirmação", () => {
-  for (const t of ["1 não", "1 não entendi", "2 sim", "2 B", "2 dias", "2 baterias", "2 pessoal", "2 peças"]) {
+  for (const t of ["1 não", "1 não entendi", "2 sim", "2 B", "2 dias", "2 baterias", "2 pessoal", "2 resolvido", "2 peças"]) {
     assertEquals(parseConfirmationReply(t), null, t);
   }
 });

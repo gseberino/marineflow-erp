@@ -349,7 +349,7 @@ begin
 
   insert into public.retorno_cartoes (gatilho, dia, estado, hash, texto, mais, criado_em, expira_em, dados)
   values (p_gatilho, (v_agora at time zone c_fuso)::date, 'lista', '', '', v_mais, v_agora, v_agora + v_cfg.cartao_validade,
-          jsonb_build_object('rodape', '*ver 1* · *pessoal 1*'))
+          jsonb_build_object('rodape', '*ver 1* · *resolvido 1* · *pessoal 1*'))
   returning id into v_cartao;
 
   for v_caso in select c.abertura_id from public._retorno_cartao_casos(v_agora, v_cfg.cartao_max_itens) c loop

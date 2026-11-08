@@ -477,7 +477,7 @@ begin
   insert into public.retorno_cartoes (gatilho, dia, estado, aviso_id, hash, texto, mais, criado_em, expira_em, dados)
   values (p_gatilho, v_hoje, 'lista', p_aviso, '', '', v_mais, v_agora, v_expira,
           jsonb_build_object('rodape', case
-            when not v_cfg.cartao_ligado then '*ver 1* · *pessoal 1*'
+            when not v_cfg.cartao_ligado then '*ver 1* · *resolvido 1* · *pessoal 1*'
             when v_ocupado then 'Tem um pedido aberto antes deste: responda a ele e mande *retorno* de novo.' end))
   returning id into v_cartao;
 

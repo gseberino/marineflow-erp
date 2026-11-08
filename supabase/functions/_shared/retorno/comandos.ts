@@ -17,6 +17,8 @@ export type ComandoDoRetorno =
   | { comando: "retorno" }
   | { comando: "pessoal"; n: number | null }
   | { comando: "pessoal_desfaz" }
+  // (08/11/2026, cartão F1-10) o dono resolveu fora do WhatsApp. Só com número: "resolvido" sozinho é do Secretário.
+  | { comando: "resolvido"; n: number }
   | { comando: "fora_ate"; dia: string }
   | { comando: "segura"; alvo: "recibos" | "tudo" }
   | { comando: "solta"; alvo: "recibos" | "tudo" }
@@ -115,6 +117,9 @@ export function lerComandoDoRetorno(texto: string): ComandoDoRetorno | null {
   m = /^pessoal ([1-3])$/.exec(t) ?? /^([1-3]) pessoal$/.exec(t);
   if (m) return { comando: "pessoal", n: Number(m[1]) };
 
+  m = /^resolvido ([1-3])$/.exec(t) ?? /^([1-3]) resolvido$/.exec(t);
+  if (m) return { comando: "resolvido", n: Number(m[1]) };
+
   m = /^fora ate (.{2,30})$/.exec(t);
   if (m) return { comando: "fora_ate", dia: m[1] };
 
@@ -169,6 +174,7 @@ export function ehComandoDeCartao(c: ComandoDoRetorno): boolean {
     case "sem":
     case "tirar":
     case "ver":
+    case "resolvido":
       return true;
     case "pessoal":
       return c.n !== null;
@@ -183,5 +189,6 @@ export function frasesDoRetorno(): string[] {
     "retorno", "ver retorno", "pessoal", "pessoal 1", "pessoal 2", "pessoal 3", "1 pessoal", "2 pessoal", "3 pessoal",
     "pessoal nao", "segura recibos", "solta recibos", "segura tudo", "solta tudo", "errado z", "errado y", "errado x",
     "errado w", "errado v", "ver 1", "ver 2", "ver 3",
+    "resolvido 1", "resolvido 2", "resolvido 3", "1 resolvido", "2 resolvido", "3 resolvido",
   ];
 }

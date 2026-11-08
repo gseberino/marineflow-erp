@@ -56,7 +56,7 @@ begin
     v_caso := pg_temp.f2c_caso('5547900009401', 'cliente', c_agora - interval '2 hours', v_cl);
     update public.retorno_config set cartao_ligado = false;
     v_r := public.retorno_cartao_abrir('puxar', c_agora);
-    if v_r ->> 'acao' <> 'lista' or v_r ->> 'texto' not like '%*ver 1* · *pessoal 1*' then
+    if v_r ->> 'acao' <> 'lista' or v_r ->> 'texto' not like '%*ver 1* · *resolvido 1* · *pessoal 1*' then
       raise exception '4a: desligado (%)', v_r;
     end if;
     if exists (select 1 from public.ai_operator_pending_actions p where p.action_name = 'retorno_executar_cartao') then

@@ -54,6 +54,11 @@ alter table public.retorno_config add constraint retorno_config_meio_dia_urgente
 alter table public.retorno_aberturas drop constraint retorno_aberturas_cumprida_por_check;
 alter table public.retorno_aberturas add constraint retorno_aberturas_cumprida_por_check
   check (cumprida_por in ('celular', 'tela', 'assistente', 'cartao', 'modelo'));
+-- (08/11/2026, cartão F1-10) 'dono' = *resolvido N*: o dono resolveu fora do WhatsApp (ligação, pessoalmente). Sem o prazo
+-- de 3 dias, é o jeito de o caso sair da lista sem resposta escrita; não conta como cumprido (ninguém sabe a hora).
+alter table public.retorno_aberturas drop constraint retorno_aberturas_fechada_motivo_check;
+alter table public.retorno_aberturas add constraint retorno_aberturas_fechada_motivo_check
+  check (fechada_motivo in ('conteudo', 'silencio', 'nada', 'expirou', 'dono'));
 
 alter table public.retorno_saidas drop constraint retorno_saidas_tipo_check;
 alter table public.retorno_saidas add constraint retorno_saidas_tipo_check check (tipo in (
@@ -156,7 +161,7 @@ create table public.retorno_toques (                -- cada resposta do dono a u
   cartao_id uuid references public.retorno_cartoes(id) on delete set null,
   abertura_id uuid references public.retorno_aberturas(id) on delete set null,
   palavra text not null check (palavra in ('sim_pin', 'nao', 'letra', 'dita', 'so', 'sem', 'tirar', 'ver', 'pessoal',
-                                           'errado', 'libera')),
+                                           'errado', 'libera', 'resolvido')),
   latencia_s integer,                               -- do envio do cartão até esta resposta
   rapido boolean not null default false             -- menos de fadiga_s
 );

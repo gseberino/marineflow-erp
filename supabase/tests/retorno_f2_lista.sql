@@ -84,7 +84,7 @@ begin
         || '2. Paulo · 13:00 · sem promessa · ''FRASE-MARCADA-F2 preciso de uma ajuda com a lancha''' || E'\n'
         || '3. número novo · 12:00 · sem promessa · ''FRASE-MARCADA-F2 preciso de uma ajuda com a lancha''' || E'\n'
         || 'e mais 3: *retorno*' || E'\n'
-        || '*ver 1* · *pessoal 1*';
+        || '*ver 1* · *resolvido 1* · *pessoal 1*';
     if v_r ->> 'texto' is distinct from v_t then
       raise exception '3a: texto (%)', v_r ->> 'texto';
     end if;

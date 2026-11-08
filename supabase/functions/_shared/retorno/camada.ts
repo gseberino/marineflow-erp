@@ -107,7 +107,7 @@ export async function camadaDoRetorno(texto: string, deps: DependenciasDaCamada)
     if (comando.comando === "escolher" && !(vivo.letras[String(comando.n)] ?? []).includes(comando.letra)) {
       return pin ? falha(comando.comando, r14(comando.n, comando.letra)) : null;
     }
-    if (vivo.estado === "lista" && comando.comando !== "ver" && comando.comando !== "pessoal") {
+    if (vivo.estado === "lista" && comando.comando !== "ver" && comando.comando !== "pessoal" && comando.comando !== "resolvido") {
       return falha(comando.comando, SO_CONSULTA);
     }
     if (comando.comando === "ditar" && comando.texto.length > TEXTO_MAX_DITADO) {
@@ -115,7 +115,8 @@ export async function camadaDoRetorno(texto: string, deps: DependenciasDaCamada)
     }
   }
 
-  const naPalavra = !ehComandoDeCartao(comando) || comando.comando === "ver" || comando.comando === "pessoal";
+  const naPalavra = !ehComandoDeCartao(comando) || comando.comando === "ver" || comando.comando === "pessoal" ||
+    comando.comando === "resolvido";
   const rpc = naPalavra ? "retorno_dito" : "retorno_decidir_dito";
   let resposta: RespostaDaRpc;
   try {
