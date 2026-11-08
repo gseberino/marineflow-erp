@@ -3556,3 +3556,28 @@ porque só o dono pode preenchê-las.
 - **Efeito:** com 5 cobranças e 950 letras, nada do que é do Secretário pode ceder: as linhas com letra e a frase de como responder são o assunto da revisão. Com o mínimo do bloco (veredito e 1ª decisão, ~230 letras) o texto da simulação chegou a 1.087. O Aceite 4 da §11 diz "fechamento ≤ 1.000". **Nas tardes reais** (`sql/wf7f_p3_fechamentos`, 10 turnos de 23/10 a 06/11, só tamanhos): com o mínimo de 207 letras, o da carteira de 07/11, 1 a 2 de 10 passariam (revisão do mês de 03/11, 1.003; revisão da semana de 04/11, 1.045, ou 972 se o "Amanhã" sair inteiro); com o mínimo mais longo, 338 letras, 3 a 5 de 10, até 1.176.
 - **Na Fase 7f (P3):** vale "o veredito e a 1ª decisão nunca saem" (R8.4), e o texto sai inteiro, acima do limite, sem o corte duro, como o retorno faz com "Ainda esperando hoje". O `bloco_grande` do P7 tem de contar isso sem tratar como defeito de leitura. Dito ao dono em `fase7f-oks.md`, item 6.
 - **Origem:** Fase 7f, P3.
+### [NOVO-agenda-115] A ficha que o gestor segurou não era exceção, e com o lote só chegaria depois do dia
+- **Onde:** `_agenda_classe_da_saida` (20261109100000): a ação `equipe` com `depois.motivo = 'ficha_segurada'` ("Não mandei a ficha de seg 09/11 a Alex… Fale com Alex.") não tem alocação nem mensagem ligada enviada, e a exceção da §3.1 item 4 pede alguém que já saiba.
+- **Efeito:** 3 dos 5 avisos reais de 03 a 07/11 eram só ela, para o mesmo dia ou o próximo dia útil (`sql/wf7f_p4_acoes_dos_avisos`, só SELECT). Pela regra da spec, o lote a guardaria para o fechamento das 17:30 do dia do aviso; a de sáb 07/11, para seg 09/11 às 17:30, depois do dia em que o Alex não sabia que tinha serviço.
+- **Na Fase 7f (P4):** `_agenda_e_excecao` a conta como exceção quando o dia é até o próximo dia útil (O1i). `_agenda_classe_da_saida` não foi recriada: a ordem do Mudou do bloco (P3) ainda não a põe na frente. Quem recriar a classe soma a regra lá e tira a de `_agenda_e_excecao`.
+- **Origem:** Fase 7f, P4.
+### [NOVO-agenda-116] Com o lote, o que muda depois do fechamento de sexta ou no sábado espera a segunda às 17:30
+- **Onde:** o lote (`agenda_aviso_pecas` com `_agenda_lote_ligado`) e o Secretário da tarde, que não roda no sábado.
+- **Efeito:** a mudança que não é exceção fica com `contada_em` nulo até o próximo bloco. Da sexta 17:30 à segunda 17:30 são 3 dias sem a agenda falar, fora a exceção. `_agenda_mudancas` lê os últimos 7 dias: nada some, mas chega tarde. Dito ao dono em `fase7f-oks.md`, item 7.
+- **Origem:** Fase 7f, P4.
+### [NOVO-agenda-117] A decisão crítica sai na mensagem da quinta e de novo no fechamento meia hora depois
+- **Onde:** `agenda_bloco_do_fechamento` (20261109100200): as decisões tiram o que um aviso de hoje levou, menos a crítica (a regra das linhas de antes).
+- **Efeito:** na quinta, a crítica que a mensagem das 17:00 levou volta no bloco das 17:30 (O4h). As não críticas não voltam. Não mudei: é a regra do P3, e a crítica perde amanhã. O P7 pode querer olhar.
+- **Origem:** Fase 7f, P4.
+### [NOVO-agenda-118] A mensagem da quinta que perde o tique das 17:00 e o das 17:15 sai às 18:00, depois do fechamento
+- **Onde:** `_agenda_comunicar_quinta` + `agenda_aviso_enfileirar` (a pausa do fechamento, `gestor_aviso_pausa_inicio`/`_fim`, 17:25 a 18:00).
+- **Efeito:** a quinta tenta em todo tique a partir de 16:50 até sair (a chave só nasce no enfileirar). Se os tiques de 17:00 e 17:15 falharem, ela cai na pausa e sai às 18:00. O bloco das 17:30, sem a mensagem, mostra a semana e as perguntas; a das 18:00 repete as perguntas. Não medi quantas vezes os tiques das 17:00 e das 17:15 falham.
+- **Origem:** Fase 7f, P4.
+### [NOVO-agenda-119] A conta e o texto do aviso moram em 2 lugares
+- **Onde:** `_agenda_lote_mudancas` e `_agenda_lote_fora` (20261109100300) copiam a correção da OS em duas linhas e o "ficou de fora" de `agenda_aviso_pecas`, que não foi mudada fora dos blocos (a cópia confere). `_agenda_lote_texto` junta como o montador TS `juntar`.
+- **Efeito:** quem mudar o aviso num lugar tem de mudar no outro. O O4v e o teste do montador conferem o mesmo texto letra a letra; a correção do estimar e o "ficou de fora" não têm caso que os compare (a fixture não tem proposta com `fora`).
+- **Origem:** Fase 7f, P4.
+### [NOVO-agenda-120] A rodada comunicar passa a rodar a cada tique, e em sombra já escreve
+- **Onde:** `task-automations/agenda-comunicar.ts` (o passo 0e) chama `agenda_comunicar_rodar`, que até o P3 não tinha chamador.
+- **Efeito:** com os 6 modos desligados (produção hoje), ela volta na hora, sem linha. Depois do dado `20261109100900` (os 6 em sombra), ela grava 1 linha em `agenda_vigia_rodadas` por tique (rotina `comunicar`), o `destrava` das abertas 1 vez por dia e o `veto_teria_em` do teto do P2 (a medida da sombra), além de `contagens.lote_guardaria` e `contagens.quinta.quinta_diria`. Nenhuma mensagem. O replay mostrou o `veto_teria_em` em 1 pergunta por rodada.
+- **Origem:** Fase 7f, P4.
