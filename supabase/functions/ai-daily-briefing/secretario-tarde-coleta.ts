@@ -30,11 +30,14 @@ import { osDaAgenda, type OsDaAgenda, osDoPlano } from "./secretario-coleta.ts";
 import type { ItemDaManha } from "./secretario-tarde-regras.ts";
 import {
   type AgendaDoFechamento,
+  type BlocoDaAgenda,
   type ContaDoMes,
   CORTE_DO_ITEM_DE_AMANHA,
   type DiaDeAmanha,
   type LinhaDaAgenda,
+  type LinhaDoBloco,
   type Panorama,
+  PARTES_DO_BLOCO,
   TIPOS_DE_LINHA_DA_AGENDA,
 } from "./secretario-tarde-texto.ts";
 import type { DadosDoEscritorio } from "./secretario-texto.ts";
@@ -306,7 +309,7 @@ export async function lerAmanha(
       const t = typeof iso === "string" ? Date.parse(iso) : NaN;
       return !Number.isNaN(t) && t >= Date.parse(inicio) && t < Date.parse(fim);
     };
-    const itens: Array<{ hora: string | null; texto: string; ord: string }> = [];
+    const itens: Array<{ hora: string | null; texto: string; ord: string; doPlano?: boolean }> = [];
     for (const t of tarefas.values()) {
       const comHoraNoDia = noDia(t.scheduled_start_at) ? String(t.scheduled_start_at) : null;
       if (!comHoraNoDia && t.source === "automation") continue; // a R16 recriada não é compromisso
@@ -326,14 +329,14 @@ export async function lerAmanha(
       }
     }
     for (const o of doPlano ?? osDaAgenda(ou(agendadas, "OS de amanhã") as Array<Record<string, unknown>>, inicio, fim, CORTE_DO_ITEM_DE_AMANHA)) {
-      itens.push({ hora: o.hora, texto: o.texto, ord: o.ord });
+      itens.push({ hora: o.hora, texto: o.texto, ord: o.ord, ...(doPlano ? { doPlano: true } : {}) });
     }
     itens.sort((a, b) => a.ord.localeCompare(b.ord));
     const ate = somarDias(amanha, 1);
     // (24/10/2026, Fase 2, P5) com a R16 desligada (a compra pelo plano), a compra que precisa sair é a do plano: o dia
     // da reserva ou do serviço até o dia seguinte a `amanha`
     const compras = planoLigado && oss.some((o) => o.plano?.compraPeloPlano)
-      ? comprasDoPlano(oss, hoje, ate)
+      ? comprasDoPlano(oss, hoje, ate).map((c) => ({ ...c, doPlano: true }))
       : oss.filter((o) => ATIVAS.has(o.status) && o.tarefa_compra && o.agendada_em)
         .filter((o) => {
           const d = diaBR(new Date(o.agendada_em!));
@@ -360,7 +363,7 @@ export async function lerAmanha(
     }
     return {
       dia: amanha,
-      itens: [...itens.map(({ hora, texto }) => ({ hora, texto })), ...compras],
+      itens: [...itens.map(({ hora, texto, doPlano: p }) => ({ hora, texto, ...(p ? { doPlano: p } : {}) })), ...compras],
       ...(comPagar ? { pagar } : {}),
       // as OS vêm da coleta da manhã, cuja leitura é essencial (lança): chegando aqui, a carteira foi lida
       carteira: { semData: osSemData(oss, hoje) },
@@ -397,9 +400,49 @@ export function agendaDoFechamento(data: unknown): AgendaDoFechamento | null {
   // (30/10/2026, Fase 7a, P7) as vagas garantidas da agenda (0 a 2) e, em sombra, as que ela teria: só repassa o que o banco disse
   const vagas = vagasDaAgenda(r.vagas_garantidas);
   const teria = vagasDaAgenda(r.vaga_teria);
+  // (Fase 7f, P3) o bloco, conferido: fora da forma, a tarde de antes
+  const bloco = blocoDaAgenda(r.bloco);
   return {
     modo: r.modo, cauda, semana, ...(linhas.length ? { linhas } : {}), ...(vagas > 0 ? { vagas_garantidas: vagas } : {}),
-    ...(teria > 0 ? { vaga_teria: teria } : {}),
+    ...(teria > 0 ? { vaga_teria: teria } : {}), ...(bloco ? { bloco } : {}),
+  };
+}
+
+/** (Fase 7f, P3) Até quantas letras uma linha do bloco pode ter: o teto do parâmetro bloco_max_chars. */
+const LINHA_DO_BLOCO_MAX = 800;
+
+/**
+ * (07/11/2026, Fase 7f, P3, migration 20261109100200) agenda_textos_do_fechamento(...).bloco → o bloco conferido, ou null: sem a chave (modo desligado, banco antes do P3) ou fora da forma.
+ * Uma linha errada tira o bloco inteiro: bloco pela metade poderia dizer "nada mudou" sem as linhas que mudaram. Sem ele, a agenda fala pelas linhas de sempre.
+ */
+export function blocoDaAgenda(v: unknown): BlocoDaAgenda | null {
+  const b = (v ?? {}) as Record<string, unknown>;
+  if (b.modo !== "sombra" && b.modo !== "ligado") return null;
+  const nivel = Number(b.nivel), min = Number(b.nivel_min);
+  if (!Array.isArray(b.linhas) || !Number.isInteger(nivel) || !Number.isInteger(min) || nivel < 0 || nivel > min) return null;
+  const linhas: LinhaDoBloco[] = [];
+  for (const l of b.linhas) {
+    const x = (l ?? {}) as Record<string, unknown>;
+    if (!(PARTES_DO_BLOCO as readonly unknown[]).includes(x.parte)) return null;
+    if (typeof x.texto !== "string" || !x.texto.trim() || x.texto.length > LINHA_DO_BLOCO_MAX) return null;
+    if (!Number.isInteger(x.nivel_entra) || !(x.nivel_de_corte === null || Number.isInteger(x.nivel_de_corte))) return null;
+    linhas.push({
+      parte: x.parte as LinhaDoBloco["parte"],
+      texto: x.texto.replace(/\s+/g, " ").trim(),
+      pergunta_id: typeof x.pergunta_id === "string" ? x.pergunta_id : null,
+      ...(Array.isArray(x.pergunta_ids) && x.pergunta_ids.some((a) => typeof a === "string")
+        ? { pergunta_ids: x.pergunta_ids.filter((a): a is string => typeof a === "string") }
+        : {}),
+      acao_ids: Array.isArray(x.acao_ids) ? x.acao_ids.filter((a): a is string => typeof a === "string") : [],
+      ...(typeof x.veto_ate === "string" ? { veto_ate: x.veto_ate } : {}),
+      ...(typeof x.veto_diria === "string" ? { veto_diria: x.veto_diria } : {}),
+      nivel_entra: x.nivel_entra as number,
+      nivel_de_corte: x.nivel_de_corte as number | null,
+    });
+  }
+  if (!linhas.some((l) => l.parte === "veredito")) return null;
+  return {
+    modo: b.modo, linhas, nivel, nivel_min: min, chars: Number(b.chars) || 0, nada_mudou: b.nada_mudou === true, incompleto: b.incompleto === true,
   };
 }
 
@@ -456,7 +499,14 @@ export async function lerAgendaDoFechamento(admin: Admin, hoje: string, dia: str
   try {
     const { data, error } = await admin.rpc("agenda_textos_do_fechamento", { p_hoje: hoje, p_dia: dia });
     if (error) throw error;
-    return agendaDoFechamento(data);
+    const agenda = agendaDoFechamento(data);
+    // (Fase 7f, P3, §3.1 item 12) o banco não escreve numa função de leitura: quem registra o bloco incompleto ou fora da forma é aqui. O fechamento segue, com a linha honesta do banco
+    // ou com as linhas de sempre
+    const b = (data as { bloco?: { modo?: unknown } } | null)?.bloco;
+    if (b && b.modo !== "desligado" && (!agenda?.bloco || agenda.bloco.incompleto)) {
+      await falhouNaAgenda(admin, "bloco", new Error(agenda?.bloco ? "o bloco saiu incompleto" : "o bloco veio fora da forma"));
+    }
+    return agenda;
   } catch (e) {
     await falhouNaAgenda(admin, "agenda", e);
     return null;

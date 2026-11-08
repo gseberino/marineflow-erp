@@ -37,9 +37,11 @@ import { type ModoDoPortao, REGRAS_PADRAO, type RegrasDaVozUnica } from "../_sha
 import { lerPortao } from "../_shared/uma-voz/registrar.ts";
 import {
   amanhaComAAgenda,
+  blocoLigado,
   type ContaDoMes,
   type DiaDeAmanha,
   type LinhaDaAgenda,
+  linhasDoBloco,
   minutosDoEscritorio,
   type Panorama,
   semanaCabe,
@@ -186,14 +188,15 @@ export function montarTardeDosDados(p: {
     })
     : null;
   const planoDaTarde = plano && turno !== "fechamento" ? { ...plano, escritorio: [], doEscritorio: [] } : plano;
-  const t = textoDaTarde({
+  const dadosDoTexto = {
     hoje, turno, ficaram, amanha: lido.amanha, fornecedores, escritorio: lido.escritorio,
     parados, panorama: lido.panorama, antigas,
     mesQueFechou: lido.mesQueFechou?.conta ?? null, faturamento: lido.mesQueFechou?.faturamento ?? null,
     pergunta: p.pergunta,
     guardado: planoDaTarde, semResposta, semRespostaMax: portao.regras.sem_resposta_hoje_max,
     ...(p.lote ? { lote: p.lote } : {}),
-  });
+  };
+  const t = textoDaTarde(dadosDoTexto);
   const e = lido.escritorio;
   const linhaLote = p.lote ? linhaDoLote(p.lote) : null;
   // (24/10/2026, Agenda de Produção Fase 1, P6) o que a agenda diria e o que dela saiu no texto. Na sombra (como nasce),
@@ -203,6 +206,16 @@ export function montarTardeDosDados(p: {
   // (24/10/2026, Fase 2, P5) as linhas do plano: todas as que a agenda diria, com o modo (a sombra compara por aqui), e as
   // que saíram no texto
   const linhasMostradas = t.agenda?.linhas ?? [];
+  // (07/11/2026, Fase 7f, P3, R8.6, R8.14) o bloco no detalhe: em sombra, as linhas e o texto que sairia com ele ligado, para conferir os 1.000 antes de ligar; ligado, o que saiu. O texto não muda.
+  const blocoDiria = ag?.bloco
+    ? {
+      modo: ag.bloco.modo, nivel: ag.bloco.nivel, chars: ag.bloco.chars, nada_mudou: ag.bloco.nada_mudou, incompleto: ag.bloco.incompleto,
+      linhas: linhasDoBloco(ag.bloco, ag.bloco.nivel).map((l) => ({ parte: l.tipo, texto: l.texto })),
+    }
+    : null;
+  const seria = ag?.bloco?.modo === "sombra"
+    ? textoDaTarde({ ...dadosDoTexto, amanha: { ...lido.amanha!, agenda: { ...ag, bloco: { ...ag.bloco, modo: "ligado" } } } })
+    : null;
   const agenda = ag
     ? {
       modo: ag.modo,
@@ -213,6 +226,9 @@ export function montarTardeDosDados(p: {
       // (30/10/2026, Fase 7a, P7) as vagas garantidas da agenda e, em sombra, as que ela teria (a vaga só no detalhe)
       ...(ag.vagas_garantidas ? { vagas_garantidas: ag.vagas_garantidas } : {}),
       ...(ag.vaga_teria ? { vaga_teria: ag.vaga_teria } : {}),
+      ...(blocoDiria ? { bloco_diria: blocoDiria } : {}),
+      ...(seria ? { bloco_seria: { caracteres: seria.texto?.length ?? 0, texto: seria.texto } } : {}),
+      ...(blocoLigado(ag) ? { bloco_mostrou: linhasMostradas.map((l) => ({ parte: l.tipo, texto: l.texto })) } : {}),
       ...(ag.linhas
         ? {
           linhas_diria: ag.linhas.map((l) => ({ tipo: l.tipo, perda: l.perda, modo: l.modo, texto: l.texto })),
@@ -479,8 +495,10 @@ export async function registrarAgendaDoFechamento(
     const { data, error } = await admin.rpc("agenda_fechamento_registrar", {
       p_hoje: hoje,
       // (correção da 7a, 20261031100980) com as pergunta_ids da linha das perguntas do gestor, quando ela as traz
+      // (Fase 7f, P3) o prazo escrito no texto e o que seria: só a linha do bloco os traz, e o banco grava no update que a mostra
       p_linhas: linhas.map((l) => ({
         pergunta_id: l.pergunta_id, acao_ids: l.acao_ids, ...(l.pergunta_ids?.length ? { pergunta_ids: l.pergunta_ids } : {}),
+        ...(l.veto_ate ? { veto_ate: l.veto_ate } : {}), ...(l.veto_diria ? { veto_diria: l.veto_diria } : {}),
       })),
       p_via: "fechamento",
     });

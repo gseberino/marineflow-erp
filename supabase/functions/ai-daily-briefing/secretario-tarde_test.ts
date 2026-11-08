@@ -637,3 +637,61 @@ Deno.test("Correção da 7a: o registro do fechamento manda as pergunta_ids da l
     p_linhas: [{ pergunta_id: "q-ficha", acao_ids: [], pergunta_ids: ["q-ficha", "q-nelson", "q-mp"] }, { pergunta_id: "q", acao_ids: [] }],
   });
 });
+
+// (07/11/2026, Agenda de Produção Fase 7f, P3, migration 20261109100200) O bloco no turno inteiro, da leitura ao registro. A forma do bloco e os textos saem do banco (supabase/tests/agenda_fase7f_bloco.sql).
+const VEREDITO_DO_BANCO = "Agenda: mudei 1 coisa e preciso de 1 resposta sua. Amanhã (sex 16/10): Nelson com Roberto.";
+const blocoDoBanco = (modo: "ligado" | "sombra", linhas: unknown[] = []) => ({
+  modo, nivel: 0, nivel_min: 3, chars: 300, nada_mudou: false, incompleto: false,
+  linhas: [
+    { parte: "veredito", texto: VEREDITO_DO_BANCO, pergunta_id: null, pergunta_ids: [], acao_ids: [], veto_ate: null, nivel_entra: 0, nivel_de_corte: null },
+    { parte: "hoje", texto: "Hoje: 2 meios-dias marcados; falta dizer como foi (*dia feito* confirma).", pergunta_id: "q-conf", pergunta_ids: ["q-conf"], acao_ids: [], veto_ate: null, nivel_entra: 0, nivel_de_corte: 3 },
+    { parte: "mudou", texto: "Mudou: passei Vanderlei para qua 11/11.", pergunta_id: null, pergunta_ids: [], acao_ids: ["a-van"], veto_ate: null, nivel_entra: 0, nivel_de_corte: 2 },
+    { parte: "decisao", texto: "· Nelson: marquei 3 dias pela estimativa. Sem resposta até sex 16/10 às 18:00, fica assim.", pergunta_id: "q-nelson", pergunta_ids: ["q-nelson"], acao_ids: [],
+      veto_ate: "2026-10-16T18:00:00-03:00", nivel_entra: 0, nivel_de_corte: null },
+    { parte: "decisao", texto: "· Lenine: marquei sem peça a comprar.", pergunta_id: "q-lenine", pergunta_ids: ["q-lenine"], acao_ids: [], veto_ate: null, veto_diria: "2026-10-16T18:00:00-03:00",
+      nivel_entra: 0, nivel_de_corte: 3 },
+    ...linhas,
+  ],
+});
+
+Deno.test("Fase 7f, P3: bloco em sombra: o texto e o que se registra são os de antes; o bloco vai só ao detalhe, com o texto que sairia", async () => {
+  const antes = await tardeComPlano(comLinhasDoPlano("ligado"), { formato: "ligado", modo: "novo", enviado: true });
+  const s = await tardeComPlano({ ...comLinhasDoPlano("ligado"), bloco: blocoDoBanco("sombra") }, { formato: "ligado", modo: "novo", enviado: true });
+  assertEquals(s.p.texto, antes.p.texto);
+  assertEquals(s.p.letras, antes.p.letras);
+  assertEquals(s.chamadas.find((c) => c.nome === "agenda_fechamento_registrar")?.args, antes.chamadas.find((c) => c.nome === "agenda_fechamento_registrar")?.args);
+  const ag = (s.p.detalhe as { agenda: Record<string, unknown> }).agenda;
+  const diria = ag.bloco_diria as { modo: string; linhas: Array<{ parte: string; texto: string }> };
+  assertEquals(diria.modo, "sombra");
+  assertEquals(diria.linhas[0], { parte: "veredito", texto: VEREDITO_DO_BANCO });
+  const seria = ag.bloco_seria as { caracteres: number; texto: string };
+  assertEquals(seria.caracteres, seria.texto.length);
+  assert(seria.texto.includes(VEREDITO_DO_BANCO), seria.texto);
+  assert(!(s.p.texto as string).includes(VEREDITO_DO_BANCO), "em sombra o dono não lê o bloco");
+  assertEquals("bloco_mostrou" in ag, false);
+  // sem a chave no banco, o detalhe é o de antes: nem bloco_diria
+  assertEquals("bloco_diria" in (antes.p.detalhe as { agenda: Record<string, unknown> }).agenda, false);
+});
+
+Deno.test("Fase 7f, P3: bloco ligado: as linhas dele saem, e o registro leva a pergunta, a conferência, as ações e o prazo que estava no texto", async () => {
+  const l = await tardeComPlano({ ...comLinhasDoPlano("ligado"), bloco: blocoDoBanco("ligado") }, { formato: "ligado", modo: "novo", enviado: true });
+  const texto = l.p.texto as string;
+  assert(texto.includes(VEREDITO_DO_BANCO) && !texto.includes(DECISAO_DO_BANCO), texto);
+  const ag = (l.p.detalhe as { agenda: Record<string, unknown> }).agenda;
+  assertEquals((ag.bloco_mostrou as Array<{ parte: string }>).map((x) => x.parte), ["veredito", "hoje", "mudou", "decisao", "decisao"]);
+  assertEquals("bloco_seria" in ag, false);
+  assertEquals(ag.mostrou, true);
+  const reg = l.chamadas.find((c) => c.nome === "agenda_fechamento_registrar")?.args as { p_linhas: Array<Record<string, unknown>> };
+  assertEquals(reg.p_linhas, [
+    { pergunta_id: null, acao_ids: [] },
+    { pergunta_id: "q-conf", acao_ids: [], pergunta_ids: ["q-conf"] },
+    { pergunta_id: null, acao_ids: ["a-van"] },
+    { pergunta_id: "q-nelson", acao_ids: [], pergunta_ids: ["q-nelson"], veto_ate: "2026-10-16T18:00:00-03:00" },
+    { pergunta_id: "q-lenine", acao_ids: [], pergunta_ids: ["q-lenine"], veto_diria: "2026-10-16T18:00:00-03:00" },
+  ]);
+});
+
+Deno.test("Fase 7f, P3: bloco ligado com a tarde que não saiu (sombra, rebaixada): nada conta como mostrado, e o prazo não nasce", async () => {
+  const s = await tardeComPlano({ ...comLinhasDoPlano("ligado"), bloco: blocoDoBanco("ligado") }, { formato: "sombra", modo: "novo", enviado: false });
+  assertEquals(s.chamadas.some((c) => c.nome === "agenda_fechamento_registrar"), false);
+});

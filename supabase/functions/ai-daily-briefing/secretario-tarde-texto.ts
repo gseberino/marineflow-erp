@@ -13,6 +13,8 @@
 //   (24/10/2026, Fase 2, P5, agenda automática LIGADA) logo depois do "Amanhã", as linhas do plano — a decisão que espera
 //   o dono, o dia de hoje (conferência + o que mudou sozinho), a semana publicada na quinta, o que mudou, uma pergunta —
 //   nas vagas que sobram de REGRAS.maxManha, da maior perda para a menor. Na sombra, só no detalhe.
+//   (07/11/2026, Fase 7f, P3, com modo_bloco_agenda ligado) no lugar das linhas do plano e da semana, o bloco: o veredito, o dia de hoje, o que mudou, as
+//   decisões e as compras, nos 3 turnos, pelo ponto único linhasDoFechamento. Na sombra, só no detalhe. O "Amanhã" fica com a tarefa e o a pagar: o dia do plano vai no veredito.
 //   Fornecedores esperando há mais de 1 dia: <nomes>.
 //   Escritório: 46 despesas e 4 entradas para conferir, 15 alertas, 6 débitos sem loja; uns 25 min. *escritório*
 //   (sexta) Esta semana o resumo ajudou? Responda *ajudou*, *pouco* ou *atrapalhou*.
@@ -76,8 +78,11 @@ export function linhaDaRevisao(l: LinhaComLetra, max = 140): string {
 export interface DiaDeAmanha {
   /** o próximo dia com manhã (seg–sáb, sem feriado) */
   dia: string;
-  /** compromissos (OS marcada, tarefa com hora) e compras que precisam sair, na ordem */
-  itens: Array<{ hora: string | null; texto: string }>;
+  /**
+   * compromissos (OS marcada, tarefa com hora) e compras que precisam sair, na ordem. (Fase 7f, P3) doPlano = veio do plano: com o bloco ligado, ele sai do "Amanhã", porque o
+   * veredito e as compras do bloco já dizem. Continua contando em temAlgo.
+   */
+  itens: Array<{ hora: string | null; texto: string; doPlano?: boolean }>;
   /** (16/10/2026, F3) contas a pagar que vencem até `dia` (depois de hoje): quantas e o total. Ausente = não leu */
   pagar?: { n: number; total: number } | null;
   /**
@@ -115,6 +120,44 @@ export interface AgendaDoFechamento {
   vagas_garantidas?: number;
   /** (Fase 7a, P7) Em sombra, as vagas que a agenda teria (só para o detalhe; nada muda no texto). */
   vaga_teria?: number;
+  /**
+   * (07/11/2026, Fase 7f, P3, migration 20261109100200) O bloco da agenda (agenda_bloco_do_fechamento). Ausente com modo_bloco_agenda desligado ou com a forma errada: a tarde de antes.
+   * Em sombra, só o detalhe de resumo_tarde muda: o texto é o de antes, byte a byte.
+   */
+  bloco?: BlocoDaAgenda;
+}
+
+/** As partes do bloco, na ordem do texto (lista fechada: o que vier fora dela tira o bloco inteiro, nunca pela metade). */
+export const PARTES_DO_BLOCO = ["veredito", "hoje", "mudou", "semana", "decisao", "compras", "outras"] as const;
+
+/**
+ * Uma linha do bloco. Ela vale nos níveis de corte de nivel_entra (inclusive) até nivel_de_corte (exclusive; nulo = nunca sai: o veredito e a 1ª decisão). O texto de cada nível vem
+ * do banco: quem corta aqui só filtra pelo número, e corta igual.
+ */
+export interface LinhaDoBloco {
+  parte: (typeof PARTES_DO_BLOCO)[number];
+  texto: string;
+  pergunta_id: string | null;
+  pergunta_ids?: string[];
+  acao_ids: string[];
+  /** o prazo escrito no texto: o registro o grava junto da pergunta mostrada */
+  veto_ate?: string;
+  /** o prazo que seria, com o prazo em sombra ou com o freio: só para medir */
+  veto_diria?: string;
+  nivel_entra: number;
+  nivel_de_corte: number | null;
+}
+
+export interface BlocoDaAgenda {
+  modo: "sombra" | "ligado";
+  linhas: LinhaDoBloco[];
+  /** o menor nível em que o bloco cabe em bloco_max_chars */
+  nivel: number;
+  /** o último nível: só o veredito e a 1ª decisão */
+  nivel_min: number;
+  chars: number;
+  nada_mudou: boolean;
+  incompleto: boolean;
 }
 
 /**
@@ -138,7 +181,8 @@ export const TIPOS_DE_LINHA_DA_AGENDA = [
  * Fase 3: a diária que espera o dono, a conclusão do gestor, a semana medida, a comissão do mês).
  */
 export interface LinhaDaAgenda {
-  tipo: (typeof TIPOS_DE_LINHA_DA_AGENDA)[number];
+  /** (Fase 7f, P3) a linha do bloco leva a parte no lugar do tipo; PARTES_DO_BLOCO nunca entra em TIPOS_DE_LINHA_DA_AGENDA */
+  tipo: (typeof TIPOS_DE_LINHA_DA_AGENDA)[number] | (typeof PARTES_DO_BLOCO)[number];
   /** o texto pronto do banco ("Agenda, preciso de você. …", "Agenda de hoje: …", "Agenda: publiquei a semana …") */
   texto: string;
   /** 0–100: o que se perde sem a linha (decisão 100/80/50, compras 80/65/45, as perguntas do gestor com prazo 76 (Fase 7a, correção 2), cliente 75/40, dia 70, gestor 65, semana 60, ppc 55, diária 50/80, conclusão 45, mudanças 40, pergunta 30, comissão 20) */
@@ -160,6 +204,9 @@ export interface LinhaDaAgenda {
   /** as ações que a linha conta (ficam contadas quando o fechamento sai) */
   acao_ids: string[];
   modo: "sombra" | "ligado";
+  /** (Fase 7f, P3) só na linha do bloco: o prazo escrito no texto e o que seria (LinhaDoBloco) */
+  veto_ate?: string;
+  veto_diria?: string;
 }
 
 /**
@@ -207,6 +254,7 @@ export function linhaDeAmanha(hoje: string, a: DiaDeAmanha): string {
     : `${nomeDoDia(a.dia)} (${ddmm(a.dia)})`;
   // F3 (16/10/2026): a conta a pagar que vence até a próxima manhã
   const pagar = a.pagar && a.pagar.n > 0 ? `; a pagar: ${plural(a.pagar.n, "conta", "contas")}, ${brl(a.pagar.total)}` : "";
+  if (!a.itens.length && pagar && blocoLigado(a.agenda)) return `${rotulo}: ${pagar.slice(2)}.`;
   if (!a.itens.length) return `${rotulo}: ${semNadaMarcado(a.carteira, a.agenda)}${pagar}.`;
   const itens = a.itens.slice(0, 3).map((i) => `${i.hora ? `${i.hora} ` : ""}${umaLinha(i.texto, CORTE_DO_ITEM_DE_AMANHA)}`);
   return `${rotulo}: ${itens.join("; ")}${a.itens.length > 3 ? ` (e mais ${a.itens.length - 3})` : ""}${pagar}.`;
@@ -371,6 +419,8 @@ export interface DadosDaTarde {
    * lugar da do escritório; nas revisões, uma linha antes da pergunta. Ausente = a tarde de antes, byte a byte.
    */
   lote?: LoteParaTexto | null;
+  /** (Fase 7f, P3) o nível de corte do bloco nesta montagem (textoComOBloco); ausente = o que o banco mandou */
+  nivelDoBloco?: number;
 }
 
 /** A linha do escritório da tarde: a do lote (no dia dele) ou a de sempre; o guardado do escritório vai à parte. */
@@ -399,9 +449,36 @@ export interface TextoDaTarde {
  * (05/11/2026) Também nos dias de revisão: toda segunda (ou terça, depois de feriado) a tarde é a revisão da semana, e o 1º dia
  * útil do mês é a do mês. Sem as linhas, a pergunta do gestor que vencia naquele dia nunca era vista (o prazo só corre depois de
  * mostrada) e a véspera da OS passava calada: na semana de 02/11 foram dois dias seguidos sem a agenda (ter e qua).
+ * (07/11/2026, Fase 7f, P3, R8.4) O ponto único: com o bloco ligado, as linhas do bloco nos 3 turnos, no lugar das linhas do plano.
  */
 function linhasDoFechamento(d: DadosDaTarde): LinhaDaAgenda[] {
+  const b = blocoLigado(d.amanha?.agenda);
+  if (b) return linhasDoBloco(b, d.nivelDoBloco ?? b.nivel);
   return linhasDaAgendaQueCabem(d.turno === "fechamento" ? d.ficaram.length : 0, d.amanha?.agenda);
+}
+
+/** (Fase 7f, P3) O bloco que fala: só o ligado. Em sombra ele vai ao detalhe, e nada muda no texto. */
+export function blocoLigado(agenda: AgendaDoFechamento | null | undefined): BlocoDaAgenda | null {
+  return agenda?.bloco?.modo === "ligado" ? agenda.bloco : null;
+}
+
+/** (Fase 7f, P3) As linhas do bloco no nível n, no formato das linhas da agenda: o texto, o registro e o detalhe seguem um caminho só. */
+export function linhasDoBloco(b: BlocoDaAgenda, n: number): LinhaDaAgenda[] {
+  return b.linhas
+    .filter((l) => l.nivel_entra <= n && (l.nivel_de_corte === null || n < l.nivel_de_corte))
+    .map(({ parte, nivel_entra: _e, nivel_de_corte: _c, ...l }) => ({ ...l, tipo: parte, perda: 0, modo: "ligado" as const }));
+}
+
+/**
+ * (Fase 7f, P3, NOVO-agenda-75) O "Amanhã" da tarde. Com o bloco ligado, o dia do plano vai no veredito: aqui ficam a tarefa e o a pagar, e sem nada disso a linha some. Sem ele, a de sempre.
+ * d.amanha.itens não muda: temAlgo continua contando o que há amanhã.
+ */
+function amanhaDaTarde(d: DadosDaTarde): string | null {
+  const a = d.amanha;
+  if (!a) return null;
+  if (!blocoLigado(a.agenda)) return linhaDeAmanha(d.hoje, a);
+  const itens = a.itens.filter((i) => !i.doPlano);
+  return itens.length || (a.pagar?.n ?? 0) > 0 ? linhaDeAmanha(d.hoje, { ...a, itens }) : null;
 }
 
 /**
@@ -410,6 +487,8 @@ function linhasDoFechamento(d: DadosDaTarde): LinhaDaAgenda[] {
  */
 function semanaDoFechamento(d: DadosDaTarde): string[] {
   const ag = d.amanha?.agenda;
+  // (Fase 7f, P3) com o bloco ligado, ele fica no lugar das linhas do plano e da semana (§1)
+  if (blocoLigado(ag)) return [];
   if (d.turno !== "fechamento" || ag?.modo !== "ligado" || !semanaCabe(d.ficaram.length + linhasDoFechamento(d).length, ag)) return [];
   return ag.semana;
 }
@@ -418,10 +497,11 @@ function semanaDoFechamento(d: DadosDaTarde): string[] {
 function comAAgenda(t: TextoDaTarde, d: DadosDaTarde, semana: number, linhas: LinhaDaAgenda[] = []): TextoDaTarde {
   const a = d.amanha;
   if (!a?.agenda) return t;
-  const cauda = !!t.texto && a.agenda.modo === "ligado" && !!a.agenda.cauda && a.itens.length === 0;
+  const b = blocoLigado(a.agenda);
+  const cauda = !b && !!t.texto && a.agenda.modo === "ligado" && !!a.agenda.cauda && a.itens.length === 0;
   return {
     ...t,
-    agenda: { cauda, semana: t.texto ? semana : 0, ...(a.agenda.linhas ? { linhas: t.texto ? linhas : [] } : {}) },
+    agenda: { cauda, semana: t.texto ? semana : 0, ...(a.agenda.linhas || b ? { linhas: t.texto ? linhas : [] } : {}) },
   };
 }
 
@@ -445,6 +525,15 @@ function cabecaDoDia(hoje: string): string {
   return `${nomeDoDia(hoje).toLowerCase()}, ${ddmm(hoje)}`;
 }
 
+/**
+ * (Fase 7f, P3, R8.4) As linhas da agenda contam como "há algo"? Como a cauda do "Amanhã", o veredito sozinho não conta: existe todo dia, e o fechamento sairia em dia calado. A contagem é a
+ * do bloco inteiro, não a do nível: cortar não muda se há algo a dizer.
+ */
+function linhasContam(d: DadosDaTarde, linhas: LinhaDaAgenda[]): boolean {
+  const b = blocoLigado(d.amanha?.agenda);
+  return b ? b.linhas.some((l) => l.parte !== "veredito") : linhas.length > 0;
+}
+
 // (Fase 7a, correção 2) curtas: as linhas da agenda que têm a forma curta (texto_curto) vão nela — só no fechamento enxuto
 function textoDoFechamento(d: DadosDaTarde, curto: boolean, semanaMax: number, linhasMax = Infinity, curtas = false): TextoDaTarde {
   const topo = topoDaTarde(d, curto);
@@ -460,7 +549,7 @@ function textoDoFechamento(d: DadosDaTarde, curto: boolean, semanaMax: number, l
   // como "há algo": sem isso, "só se houver algo" viraria descarte do guardado (spec uma voz §6.3-1)
   // (23/10/2026) a carteira sem data NÃO conta: ela existe quase todo dia, e o fechamento passaria a sair sempre
   const temAlgo = d.ficaram.length > 0 || (d.amanha?.itens.length ?? 0) > 0 || (d.amanha?.pagar?.n ?? 0) > 0 ||
-    d.fornecedores.length > 0 || d.pergunta || topo.length > 0 || semanaToda.length > 0 || linhasTodas.length > 0;
+    d.fornecedores.length > 0 || d.pergunta || topo.length > 0 || semanaToda.length > 0 || linhasContam(d, linhasTodas);
   if (!temAlgo) return comAAgenda({ texto: null, letras: [] }, d, 0);
   const proxima = proximaRevisaoDaSemana(d.hoje);
   const abertura = d.ficaram.length
@@ -469,7 +558,7 @@ function textoDoFechamento(d: DadosDaTarde, curto: boolean, semanaMax: number, l
     : `Fechamento de ${cabecaDoDia(d.hoje)}: nada ficou de hoje.`;
   const itens = d.ficaram.map((l) => linhaQueFicou(l, curto ? 90 : 150));
   const fim = [
-    d.amanha ? linhaDeAmanha(d.hoje, d.amanha) : null,
+    amanhaDaTarde(d),
     // (24/10/2026, Fase 2, P5) logo depois do "Amanhã": as linhas do plano (inteiras: o corte tira linha, nunca o meio)
     ...linhas.map((l) => (curtas && l.texto_curto ? l.texto_curto : l.texto)),
     // (24/10/2026, P6) logo depois do "Amanhã": a semana que vem (projeção), só na quinta, ligada e com vaga
@@ -509,7 +598,7 @@ function textoDaRevisaoDaSemana(d: DadosDaTarde, curto: boolean, linhasMax = Inf
   const linhas = linhasDoFechamento(d).slice(0, linhasMax);
   const panorama = [
     // (16/10/2026) o "Amanhã" do fechamento também na revisão de segunda (a terça: OS marcada, tarefa, compra, a pagar)
-    d.amanha ? linhaDeAmanha(d.hoje, d.amanha) : null,
+    amanhaDaTarde(d),
     ...linhas.map((l) => (curtas && l.texto_curto ? l.texto_curto : l.texto)),
     p?.mes ? linhaDoMesAteAqui(p.mes) : null,
     curto ? null : linhaDoVigia(p?.vigia ?? null),
@@ -552,7 +641,7 @@ function textoDaRevisaoDoMes(d: DadosDaTarde, curto: boolean, linhasMax = Infini
   if (d.pergunta) blocos.push("", PERGUNTA_DA_SEMANA);
   const t: TextoDaTarde = { texto: blocos.join("\n"), letras: a?.linhas ?? [] };
   const ag = d.amanha?.agenda;
-  return ag ? { ...t, agenda: { cauda: false, semana: 0, ...(ag.linhas ? { linhas } : {}) } } : t;
+  return ag ? { ...t, agenda: { cauda: false, semana: 0, ...(ag.linhas || blocoLigado(ag) ? { linhas } : {}) } } : t;
 }
 
 /**
@@ -563,6 +652,31 @@ function textoDaRevisaoDoMes(d: DadosDaTarde, curto: boolean, linhasMax = Infini
  */
 function semOsExtras(d: DadosDaTarde): DadosDaTarde {
   return { ...d, fornecedores: [], escritorio: null, lote: null, semResposta: [], panorama: null, faturamento: null };
+}
+
+/**
+ * (07/11/2026, Fase 7f, P3, R8.4) A régua dos 1.000 com o bloco ligado: ele conta como linha garantida. Primeiro cede por dentro, nível a nível, com o Secretário inteiro e depois curto.
+ * Sem caber nem no último nível, o que é do Secretário e não perde hoje sai (semOsExtras), e o bloco volta a ter o que couber. A conta é sempre o texto montado: o que estiver em semOsExtras
+ * conta, seja o que for. O veredito e a 1ª decisão nunca saem. Se nem assim couber, ele inteiro, acima do limite (como o "Ainda esperando hoje" do retorno): o corte duro passaria no meio de
+ * uma linha com letra ou da decisão.
+ */
+function textoComOBloco(
+  b: BlocoDaAgenda,
+  montar: (curto: boolean, semanaMax: number, linhasMax: number, enxuto: boolean, nivel: number) => TextoDaTarde,
+): TextoDaTarde {
+  const cabe = (t: TextoDaTarde) => !t.texto || t.texto.length <= LIMITE_DA_TARDE;
+  const niveis = Array.from({ length: b.nivel_min - b.nivel + 1 }, (_, i) => b.nivel + i);
+  for (const n of niveis) {
+    for (const curto of [false, true]) {
+      const t = montar(curto, 0, Infinity, false, n);
+      if (cabe(t)) return t;
+    }
+  }
+  for (const n of niveis) {
+    const t = montar(true, 0, Infinity, true, n);
+    if (cabe(t)) return t;
+  }
+  return montar(true, 0, Infinity, true, b.nivel_min);
 }
 
 /**
@@ -577,10 +691,11 @@ function semOsExtras(d: DadosDaTarde): DadosDaTarde {
  * Secretário cheio (3 que ficaram, ~900 caracteres em produção de 20 a 30/10), o corte tirava toda linha da agenda: a pergunta do
  * gestor nunca era vista, o prazo dela não corria e a ficha do dia marcado pela estimativa ficava segurada. Sem vaga garantida (o
  * banco antes da 7a, a sombra), o caminho é o de antes, byte a byte.
+ * (07/11/2026, Fase 7f, P3, R8.4) Com o bloco ligado, a régua é a de textoComOBloco. semExtras só muda no teste: é a prova de que ela conta o que a função tirar, sem saber o nome.
  */
-export function textoDaTarde(d: DadosDaTarde): TextoDaTarde {
-  const montar = (curto: boolean, semanaMax: number, linhasMax = Infinity, enxuto = false) => {
-    const dd = enxuto ? semOsExtras(d) : d;
+export function textoDaTarde(d: DadosDaTarde, semExtras: (d: DadosDaTarde) => DadosDaTarde = semOsExtras): TextoDaTarde {
+  const montar = (curto: boolean, semanaMax: number, linhasMax = Infinity, enxuto = false, nivel?: number) => {
+    const dd = { ...(enxuto ? semExtras(d) : d), ...(nivel === undefined ? {} : { nivelDoBloco: nivel }) };
     return d.turno === "fechamento" ? textoDoFechamento(dd, curto, semanaMax, linhasMax, enxuto)
       : d.turno === "revisao_semana" ? textoDaRevisaoDaSemana(dd, curto, linhasMax, enxuto)
       : textoDaRevisaoDoMes(dd, curto, linhasMax, enxuto);
@@ -592,6 +707,8 @@ export function textoDaTarde(d: DadosDaTarde): TextoDaTarde {
   const n = semanaDoFechamento(d).length;
   // (Fase 7a, correção 2) quantas das L têm vaga garantida: as primeiras (as de maior perda)
   const G = Math.min(L, d.amanha?.agenda?.vagas_garantidas ?? 0);
+  const bloco = blocoLigado(d.amanha?.agenda);
+  if (bloco) return textoComOBloco(bloco, montar);
   for (let l = L; l >= 0; l--) {
     for (const k of l === L ? [...new Set([n, Math.min(n, 1), 0])] : [0]) {
       const longo = montar(false, k, l);
