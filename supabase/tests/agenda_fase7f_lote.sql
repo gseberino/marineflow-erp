@@ -761,7 +761,9 @@ begin
     r := pg_temp.ok(r, 'O5b nenhum caminho registra a mensagem de mudança à equipe: o registrar recusa o tipo (22023), e nenhuma função a insere (até o P5, que a cria)',
       case when to_regprocedure('public._agenda_comunicar_mudancas_equipe(date, timestamptz)') is not null
            -- (7f P5) com o P5: o registrar aceita a mudança no ramo dela (com os modos da equipe desligados, nada grava), e quem a insere é ele
-           then (public._agenda_equipe_registrar(v_rob, date '2026-11-11', 'mudanca', 'Roberto, mudou.', now(), null, null, '{}'::date[]) ->> 'modo') = 'desligado'
+           -- (conferência do orquestrador, 08/11) a chamada de 8 argumentos vai por SQL dinâmico (query_to_xml): estática, o PL/pgSQL resolve a função ao
+           -- planejar a expressão inteira, e sem o P5 o teste quebrava ("does not exist") em vez de seguir pelo ramo de baixo
+           then (xpath('/row/m/text()', query_to_xml(format($q$select public._agenda_equipe_registrar(%L::uuid, date '2026-11-11', 'mudanca', 'Roberto, mudou.', now(), null, null, '{}'::date[]) ->> 'modo' as m$q$, v_rob), false, true, '')))[1]::text = 'desligado'
            else pg_temp.lanca(format($q$select public._agenda_equipe_registrar(%L::uuid, date '2026-11-11', 'mudanca', 'Roberto, mudou.', now())$q$, v_rob)) = '22023'
                 and not exists (select 1 from pg_proc p where p.pronamespace = 'public'::regnamespace and p.prosrc ~ 'insert into public\.agenda_equipe_mensagens' and p.prosrc ~ '''mudanca''') end,
       null);
