@@ -301,25 +301,26 @@ begin
     end if;
 
     -- (08/11/2026, cartão F1-10) resolvido: só com número; fecha só aquele caso, como 'dono', sem tocar no lead.
+    -- (o cartão de antes tem o mesmo c_agora; um minuto depois, o cartão vivo é sempre o novo)
     v_caso := pg_temp.retorno_f2_pal_caso('5547900009204', 'cliente', c_agora - interval '50 minutes', v_cl);
     v_caso2 := pg_temp.retorno_f2_pal_caso('5547900009205', 'numero_novo', c_agora - interval '20 minutes');
     insert into public.retorno_saidas (abertura_id, tipo, chave, phone_normalized, modo, enviar_em, dados, dedupe_key)
     values (v_caso, 'recibo_cliente', public._agenda_chave_telefone('5547900009204'), '5547900009204', 'sombra',
             c_agora + interval '3 hours', '{}', 'teste-f2-pal:resolvido')
     returning id into v_saida;
-    v_r := public.retorno_dito('{"comando": "retorno"}', v_dono, c_agora);
+    v_r := public.retorno_dito('{"comando": "retorno"}', v_dono, c_agora + interval '1 minute');
     if v_r ->> 'cartao_id' is null then
       raise exception '8p: retorno não abriu a lista (%)', v_r;
     end if;
-    v_r := public.retorno_dito('{"comando": "resolvido", "n": null}', v_dono, c_agora);
+    v_r := public.retorno_dito('{"comando": "resolvido", "n": null}', v_dono, c_agora + interval '1 minute');
     if not coalesce((v_r ->> 'seguir_ao_modelo')::boolean, false) then
       raise exception '8q: resolvido sem número não seguiu ao modelo (%)', v_r;
     end if;
-    v_r := public.retorno_dito('{"comando": "resolvido", "n": 3}', v_dono, c_agora);
+    v_r := public.retorno_dito('{"comando": "resolvido", "n": 3}', v_dono, c_agora + interval '1 minute');
     if v_r ->> 'texto' is distinct from 'Não há caso 3 nesta lista. Mande *retorno*.' then
       raise exception '8r: item que não existe (%)', v_r;
     end if;
-    v_r := public.retorno_dito('{"comando": "resolvido", "n": 2}', v_dono, c_agora);
+    v_r := public.retorno_dito('{"comando": "resolvido", "n": 2}', v_dono, c_agora + interval '1 minute');
     if v_r ->> 'texto' is distinct from 'Zebedeu: resolvido, saiu da lista, e cancelei o que estava agendado para ele.' then
       raise exception '8s: texto (%)', v_r;
     end if;
@@ -339,11 +340,11 @@ begin
     if not exists (select 1 from public.retorno_toques t where t.abertura_id = v_caso and t.palavra = 'resolvido') then
       raise exception '8x: sem toque';
     end if;
-    v_r := public.retorno_dito('{"comando": "resolvido", "n": 2}', v_dono, c_agora);
+    v_r := public.retorno_dito('{"comando": "resolvido", "n": 2}', v_dono, c_agora + interval '1 minute');
     if v_r ->> 'texto' is distinct from 'Não há caso 2 nesta lista. Mande *retorno*.' then
       raise exception '8y: resolvido duas vezes (%)', v_r;
     end if;
-    v_r := public.retorno_dito('{"comando": "resolvido", "n": 1}', v_dono, c_agora);
+    v_r := public.retorno_dito('{"comando": "resolvido", "n": 1}', v_dono, c_agora + interval '1 minute');
     if v_r ->> 'texto' is distinct from 'número novo: resolvido, saiu da lista.' then
       raise exception '8z: sem agendada, o texto curto (%)', v_r;
     end if;
