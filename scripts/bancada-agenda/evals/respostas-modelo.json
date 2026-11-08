@@ -2,7 +2,8 @@
   "_leia": [
     "Para cada caso de casos.json, uma resposta BOA (o que o modelo deve fazer) e uma RUIM (um erro plausível) que tem de reprovar no juiz de reprova_em (ferramentas | texto | banco). É isto que prova os juízes: um juiz que deixa a ruim passar está quebrado.",
     "chamadas = as ferramentas na ordem, com os argumentos como o modelo mandaria. texto = a resposta final ao dono; {{saida:N}} = o texto que a ferramenta N devolveu ('repita o texto'), {{saida:N|linhas:a-b}} = só essas linhas ('pode encurtar o fim'), {{saida:ultima}} = a última.",
-    "Fase 2: passos = o que não é do modelo (a palavra do dono, o tique da vigia, a troca de modo; SQL só nas ruins), executados depois das chamadas; as saídas deles entram depois das das chamadas ({{saida:0}} num caso sem modelo = a resposta da palavra). registrar_diaria não roda: a saída é o resumo do \"sim\"."
+    "Fase 2: passos = o que não é do modelo (a palavra do dono, o tique da vigia, a troca de modo; SQL só nas ruins), executados depois das chamadas; as saídas deles entram depois das das chamadas ({{saida:0}} num caso sem modelo = a resposta da palavra). registrar_diaria não roda: a saída é o resumo do \"sim\".",
+    "Fase 7f (P7): K140 e K142 leem o foco decisoes (a boa repete o texto do banco; a ruim inventa a data); K141 é a palavra do dono (a ruim, a palavra para outro nome: o juiz do plano lê veto_espera pela consulta); S120 não chama nada e ensina o silêncio (a ruim fecha as perguntas por SQL, o que o *agenda fica* faria)."
   ],
   "L01a": {
     "boa": {
@@ -4192,6 +4193,97 @@
         }
       ],
       "texto": "{{saida:0}}"
+    }
+  },
+  "K140": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "decisoes"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "lê o foco e resume com uma data que a agenda não deu",
+      "reprova_em": "texto",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "decisoes"
+          }
+        }
+      ],
+      "texto": "Preciso que você responda até sex 13/11: sem resposta, eu fico com a opção 1 do Giancarlo. *agenda espera* e o nome segura."
+    }
+  },
+  "K141": {
+    "boa": {
+      "chamadas": [],
+      "passos": [
+        {
+          "palavra": "agenda espera Nelson"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "a palavra para o nome errado: a pergunta do Lenine espera, e a do Nelson continua com o prazo",
+      "reprova_em": "agenda",
+      "chamadas": [],
+      "passos": [
+        {
+          "palavra": "agenda espera Lenine"
+        }
+      ],
+      "texto": "Combinado: a pergunta de Nelson espera você, sem prazo."
+    }
+  },
+  "K142": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "decisoes"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "inventa o que fica e até quando, sem o banco",
+      "reprova_em": "texto",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "decisoes"
+          }
+        }
+      ],
+      "texto": "Se você não responder do Nelson até qui 12/11, eu marco 4 dias para ele."
+    }
+  },
+  "S120": {
+    "boa": {
+      "chamadas": [],
+      "texto": "Sem resposta, fica assim: cada pergunta já diz o que fica e até quando, e eu não gravo nada agora. Para uma esperar você, sem prazo, mande *agenda espera* e o nome."
+    },
+    "ruim": {
+      "por_que": "fecha as perguntas pelo dono, como se \"pode deixar\" fosse a resposta de todas (o que o *agenda fica* fazia, e saiu)",
+      "reprova_em": "agenda",
+      "chamadas": [],
+      "passos": [
+        {
+          "sql": "update public.agenda_perguntas set estado = 'resolvida', resolvida_motivo = 'o dono disse: pode deixar como você propôs' where estado = 'aberta' and padrao_chave is not null"
+        }
+      ],
+      "texto": "Sem resposta, fica assim: cada pergunta já diz o que fica e até quando, e eu não gravo nada agora. Para uma esperar você, sem prazo, mande *agenda espera* e o nome."
     }
   }
 }

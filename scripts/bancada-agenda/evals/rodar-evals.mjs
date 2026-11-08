@@ -49,6 +49,9 @@
 // que ele chamou; agenda_config é do juiz dos parâmetros), sobre a foto das etapas.
 // Fase 7d (P8): os estados fase7d (os 6 modos em teste) e fase7d_ligado (ligados, freio solto) são a fixture-fase7d.sql (o cenário J, sex 16/07/2027) por cima da fase7c; e um juiz a mais
 // (nenhum cadastro mudado pelo modelo: agenda_locais, os_autorizados e as colunas da §4.2 iguais antes e depois do que ele chamou), sobre a foto da 7d.
+// Fase 7f (P7): os estados fase7f (os 6 modos da 7f em teste, com o freio de produção) e fase7f_ligado (ligados, freio solto) são a fixture-fase7f.sql (ter 10/11/2026: as 8
+// perguntas da etapa, com o tamanho real) por cima da fase7d. O juiz dos parâmetros vale; o que a foto do plano não mostra da pergunta (veto_espera, veto_ate, o mostrado) vai em
+// espera.agenda.consultas.
 // Sem modelo, isto prova os juízes e o caminho das RPCs, não o modelo: o ao-vivo.ts faz a parte do modelo.
 
 import { readFileSync } from 'node:fs';
@@ -108,6 +111,8 @@ const FASE7C = ler(join(FIXTURES, 'fixture-fase7c.sql'));
 const FASE7C_TAREFAS = ler(join(FIXTURES, 'fixture-fase7c-tarefas.sql'));
 // (Fase 7d, P8) o cenário J por cima da 7c
 const FASE7D = ler(join(FIXTURES, 'fixture-fase7d.sql'));
+// (Fase 7f, P7) as 8 perguntas da etapa, por cima da 7d (a fixture confere que a da 7d já está)
+const FASE7F = ler(join(FIXTURES, 'fixture-fase7f.sql'));
 /** (Fase 6) os 7 itens do aprendizado (aprendizado_ligados no estado fase6_ligado). */
 const ITENS_DO_APRENDIZADO = ['fator', 'mo', 'presenca', 'fornecedor', 'capacidade_dono', 'aviso_cliente', 'revisao'];
 /** (Fase 5) os 11 tipos da mensagem ao cliente (cliente_tipos_ligados no estado fase5_ligado). */
@@ -832,6 +837,7 @@ async function aplicarEstado(db, estado) {
   if (estado.startsWith('fase7b')) return void await aplicarEstadoDaFase7b(db, estado);
   if (estado.startsWith('fase7c')) return void await aplicarEstadoDaFase7c(db, estado);
   if (estado.startsWith('fase7d')) return void await aplicarEstadoDaFase7d(db, estado);
+  if (estado.startsWith('fase7f')) return void await aplicarEstadoDaFase7f(db, estado);
   if (estado === 'pos_rodada') return void await db.exec(POS_RODADA);
   if (estado === 'replay_0104') {
     await db.exec(REPLAY_0104);
@@ -1071,6 +1077,21 @@ async function aplicarEstadoDaFase7d(db, estado) {
                      and client_id in (select c.id from public.clients c where public._agenda_nome_curto(c.name) in ('Nelson', 'Lenine', 'Kalmar'))`);
   const m = estado === 'fase7d_ligado' ? 'ligado' : 'sombra';
   await db.query(`update public.agenda_config set modo_local_calendario = $1, modo_local_autorizacao = $1, modo_bem = $1, modo_patio = $1, modo_viagem = $1, modo_mesmo_local = $1 where id`, [m]);
+}
+
+/**
+ * (Fase 7f, P7) Os estados da 7f: fixture-fase7f.sql (ter 10/11/2026: as 8 perguntas da etapa, o Nelson com o prazo de ter 10/11 18:00 escrito no fechamento de seg 09/11)
+ * por cima da fase7d (os 6 modos da 7d em teste).
+ *   fase7f         os 6 modos da 7f em teste, com o freio (gestor_so_propor), como a produção fica depois da migration de dado 20261109100900;
+ *   fase7f_ligado  os 6 ligados, freio solto: a linha escreve o prazo.
+ */
+async function aplicarEstadoDaFase7f(db, estado) {
+  if (!['fase7f', 'fase7f_ligado'].includes(estado)) throw new Error(`estado "${estado}" não existe`);
+  await aplicarEstadoDaFase7d(db, 'fase7d');
+  await db.exec(FASE7F);
+  const ligado = estado === 'fase7f_ligado';
+  await db.query(`update public.agenda_config set modo_bloco_agenda = $1, modo_veto = $1, modo_lote_dono = $1, modo_equipe_previsto = $1, modo_equipe_convite = $1,
+                    modo_cliente_camadas = $1, gestor_so_propor = $2 where id`, [ligado ? 'ligado' : 'sombra', !ligado]);
 }
 
 /** Um tique da rotina da equipe (o task-automations a chama logo antes da vigia). */
