@@ -218,9 +218,12 @@ end $f$;
 create function pg_temp.limpa() returns void language sql as $f$
   update public.agenda_perguntas set estado = 'resolvida', resolvida_motivo = 'teste' where estado = 'aberta'
 $f$;
+-- (Fase 7f, P7) a hora sobe 1 s a cada pergunta, na ordem em que o caso as cria: "Também quero saber" vai na ordem de agenda_perguntas_em_ordem (R8.7), que desempata
+-- por criada_em e depois pelo id (sorteado). Com a mesma hora para todas, a ordem do corte ficaria sorteada.
 create function pg_temp.perg(p_tipo text, p_chave text, p_texto text, p_opcoes jsonb, p_os uuid default null, p_perda date default null) returns uuid language sql as $f$
   insert into public.agenda_perguntas (tipo, chave, service_order_id, os_ids, texto, opcoes, perda_em, modo, criada_em)
-  values (p_tipo, p_chave, p_os, case when p_os is null then '{}'::uuid[] else array[p_os] end, p_texto, p_opcoes, p_perda, 'ligado', timestamptz '2027-07-16 08:00-03')
+  values (p_tipo, p_chave, p_os, case when p_os is null then '{}'::uuid[] else array[p_os] end, p_texto, p_opcoes, p_perda, 'ligado',
+          timestamptz '2027-07-16 08:00-03' + make_interval(secs => (select count(*) from public.agenda_perguntas)))
   returning id
 $f$;
 create function pg_temp.ver(p_hoje date default date '2027-07-16') returns jsonb language sql stable as $f$

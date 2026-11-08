@@ -177,7 +177,8 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     // 20261031100600): + 12 na recriada (a mesma cópia, 10, e o rodadas_24h e o erros_24h da rodada do gestor, no bloco gestor).
     // Fase 7b (P5, 20261101100400): + 12 na recriada (a mesma cópia; a chave equipe_dias vem de _agenda_saude_equipe7b).
     // Fase 7d (P8, 20261107100700): + 12 na recriada (a mesma cópia; a chave local vem de _agenda_saude_local).
-    vezes: 76,
+    // Fase 7f (P7, 20261109100600): + 12 na recriada (a mesma cópia; a chave comunicacao vem de _agenda_saude_comunicacao).
+    vezes: 88,
     porque: 'nomes das chaves do resultado (rodadas_24h, erros_24h, resposta_24h_pct: a janela de um dia da conferência); não é rascunho_validade',
   },
   // Fase 3 (P4): a rotina da equipe grava a rodada como a vigia.
@@ -241,6 +242,13 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     casou: '24h',
     vezes: 2,
     porque: 'nomes das chaves do resultado (rodadas_24h e erros_24h da rodada do local: a janela de um dia da conferência, como os blocos de agenda_saude); não é rascunho_validade',
+  },
+  // Fase 7f (P7, 20261109100600): a saúde da comunicação (a chave comunicacao de agenda_saude), o mesmo molde, mais as falhas do pré-passo do lote no mesmo dia.
+  {
+    onde: '_agenda_saude_comunicacao',
+    casou: '24h',
+    vezes: 3,
+    porque: 'nomes das chaves do resultado (rodadas_24h, erros_24h e falhas_lote_guardaria_24h da rodada comunicar: a janela de um dia da conferência, como os blocos de agenda_saude); não é rascunho_validade',
   },
   // Fase 7c (P8, 20261102100550): a rodada das etapas grava a rodada como a de quem faz o quê; a ordem e a conta do plano do dia têm
   // as constantes de estrutura delas, uma vez cada, com nome (o que é parâmetro vem de agenda_config: tarefas_*, jornada_horas,

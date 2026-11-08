@@ -1090,6 +1090,8 @@ insert into _definer_da_agenda values ('_agenda_perguntas_padrao');
 insert into _definer_da_agenda values ('agenda_perguntas_em_ordem'), ('agenda_comunicar_rodar');
 -- (Fase 7f, P3) o bloco é definer: as funções da 7f não têm grant, e a porta está dentro dele (agenda_fase7f_bloco.sql, L10)
 insert into _definer_da_agenda values ('agenda_bloco_do_fechamento');
+-- (Fase 7f, P7) a palavra *agenda espera* (o administrador por _autor_da_agenda, só service_role) e a saúde da comunicação (a porta de _agenda_saude_local, dentro)
+insert into _definer_da_agenda values ('agenda_veto_dito'), ('_agenda_saude_comunicacao');
   -- FASE 7f: fim
 
 insert into _resultado

@@ -1150,6 +1150,7 @@ begin
      and p.proname not in ('_agenda_comunicar_teto', '_agenda_pergunta_assumir', '_agenda_pergunta_espera', '_agenda_pergunta_frases', '_agenda_pergunta_linha', 'agenda_comunicar_rodar', 'agenda_perguntas_em_ordem')  -- P2
      and p.proname not in ('agenda_bloco_do_fechamento')  -- P3
      and p.proname not in ('_agenda_comunicar_lote_guardaria', '_agenda_comunicar_quinta', '_agenda_e_excecao', '_agenda_lote_ligado')  -- P4
+     and p.proname not in ('_agenda_saude_comunicacao', 'agenda_veto_dito', 'agenda_saude')  -- P7 (agenda_saude: a marca "-- (7f" dentro do bloco do gestor, não o bloco)
      and not exists (select 1 from regexp_matches(coalesce(p.prosrc, ''), '-- FASE 7f:') x);
   v_res := pg_temp.ok(v_res, 'B10c nenhuma função de antes lê as colunas nem chama as funções novas: o gatilho é a única porta', v_dif is null, v_dif);
   v_res := pg_temp.ok(v_res, 'B10d sem dado: nenhuma ação assumir, rodada comunicar, mensagem previsto, mudanca, convite nem semana; ninguém assumida',
@@ -1189,7 +1190,8 @@ begin
     ('_agenda_ver_decisoes', format('select public._agenda_ver_decisoes(%L::date, %L::timestamptz)::text', c_hoje, c_agor)),
     ('agenda_aprontar', format('select public.agenda_aprontar(%L::date)::text', c_hoje)),
     ('agenda_aviso_pecas', format('select public.agenda_aviso_pecas(%L::date, %L::timestamptz)::text', c_hoje, c_agor)),
-    ('agenda_saude', format('select public.agenda_saude(%L::date, %L::timestamptz)::text', c_hoje, c_agor));
+    -- (P7) a chave comunicacao traz os 6 modos crus (R8.6: a saúde lê o modo cru): o resto da saída é que é byte a byte (agenda_fase7f_leituras.sql, V3a)
+    ('agenda_saude', format('select (public.agenda_saude(%L::date, %L::timestamptz) - ''comunicacao'')::text', c_hoje, c_agor));
   -- Sombra é byte a byte (R8.6): com e sem o freio, o desligado é a régua. Com o freio (o caso real), veto, previsto, convite e camadas ligados valem sombra: as leituras
   -- também não mudam. Bloco e lote ligados ficam de fora: eles mudam de propósito no P3 e no P4.
   foreach f in array array[false, true] loop

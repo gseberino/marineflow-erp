@@ -118,9 +118,12 @@ end $f$;
 create function pg_temp.limpa() returns void language sql as $f$
   update public.agenda_perguntas set estado = 'resolvida', resolvida_motivo = 'teste' where estado = 'aberta'
 $f$;
+-- (Fase 7f, P7) a hora sobe 1 s a cada pergunta, na ordem em que o caso as cria: "Também quero saber" vai na ordem de agenda_perguntas_em_ordem (R8.7), que desempata
+-- por criada_em e depois pelo id (sorteado). Com a mesma hora para todas, a ordem do corte ficaria sorteada.
 create function pg_temp.perg(p_tipo text, p_chave text, p_texto text, p_opcoes jsonb, p_os uuid default null, p_perda date default null) returns uuid language sql as $f$
   insert into public.agenda_perguntas (tipo, chave, service_order_id, os_ids, texto, opcoes, perda_em, modo, criada_em)
-  values (p_tipo, p_chave, p_os, case when p_os is null then '{}'::uuid[] else array[p_os] end, p_texto, p_opcoes, p_perda, 'ligado', timestamptz '2027-07-16 08:00-03')
+  values (p_tipo, p_chave, p_os, case when p_os is null then '{}'::uuid[] else array[p_os] end, p_texto, p_opcoes, p_perda, 'ligado',
+          timestamptz '2027-07-16 08:00-03' + make_interval(secs => (select count(*) from public.agenda_perguntas)))
   returning id
 $f$;
 create function pg_temp.ver(p_hoje date default date '2027-07-16') returns jsonb language sql stable as $f$
@@ -163,15 +166,19 @@ select 'T0a as 2 novas: invoker, a volatilidade, search_path fixo, e ninguém de
        count(p.oid) = 2
        and bool_and(not p.prosecdef and p.provolatile = f.vol and coalesce(array_to_string(p.proconfig, ','), '') = 'search_path=public'
                     and p.proacl is not null and not exists (select 1 from aclexplode(p.proacl) x where x.grantee = 0)
-                    and not has_function_privilege('anon', p.oid, 'execute') and not has_function_privilege('authenticated', p.oid, 'execute')
-                    and not has_function_privilege('service_role', p.oid, 'execute')),
+                    and not has_function_privilege('anon', p.oid, 'execute')
+                    -- (Fase 7f, P7; NOVO-agenda-121) _agenda_titulo_da_pergunta ganhou authenticated e service_role em 20261109100600: _agenda_ver_decisoes, que é invoker, a
+                    -- chama no corte das 1.800 letras, e sem o grant *agenda pendências* dava "permission denied". É texto puro; o anon continua fora
+                    and (f.sig = 'public._agenda_titulo_da_pergunta(text)'
+                         or (not has_function_privilege('authenticated', p.oid, 'execute') and not has_function_privilege('service_role', p.oid, 'execute')))),
        string_agg(f.sig, '; ') filter (where p.oid is null)
   from f left join pg_proc p on p.oid = to_regprocedure(f.sig);
 
 insert into _resultado
 select 'T0b rodando: o anon e o técnico não alcançam as novas (42501)',
        pg_temp.como('anon', $q$select public._agenda_titulo_da_pergunta('x')$q$) like 'erro 42501%'
-       and pg_temp.como('authenticated', $q$select public._agenda_titulo_da_pergunta('x')$q$) like 'erro 42501%'
+       -- (Fase 7f, P7; NOVO-agenda-121) o título tem grant a authenticated desde 20261109100600: o técnico não alcança a outra
+       and pg_temp.como('authenticated', $q$select public._agenda_saiu_da_equipe(gen_random_uuid())::text$q$) like 'erro 42501%'
        and pg_temp.como('service_role', $q$select public._agenda_saiu_da_equipe(gen_random_uuid())::text$q$) like 'erro 42501%', null;
 
 do $t0$

@@ -393,6 +393,9 @@ const FIXTURES_COMO_TEXTO = [
   // Fase 7f (P4): a própria migration do lote (20261109100300), para o O6 de agenda_fase7f_lote.sql conferir as cópias de agenda_aviso_pecas, agenda_aviso_enfileirar e
   // agenda_comunicar_rodar. As fontes já estão acima: mig_correcao2_fase7a, mig_correcao_revisao e mig_perguntas_fase7f.
   ['agenda_teste.mig_lote_fase7f', '../../supabase/migrations/20261109100300_agenda_fase7f_lote.sql'],
+  // Fase 7f (P7): a própria migration das leituras (20261109100600), para o V0 de agenda_fase7f_leituras.sql conferir as cópias de _agenda_perguntas_antes, _agenda_ver_decisoes e
+  // agenda_saude, e o B4z3 de agenda_fase7f_base.sql conferir o gatilho vivo. As fontes já estão acima: mig_base_fase7f, mig_correcao3_fase7d e mig_leituras_fase7d.
+  ['agenda_teste.mig_leituras_fase7f', '../../supabase/migrations/20261109100600_agenda_fase7f_leituras.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

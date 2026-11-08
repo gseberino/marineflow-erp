@@ -443,7 +443,8 @@ begin
   exception when sqlstate 'P0099' then null;
   end;
   v_res := pg_temp.ok(v_res, 'L2a desligado: a saúde de antes, byte a byte (fora a chave equipe_dias); equipe_dias com os 11 zeros em 0, zeros_ok, os modos desligados e o ok de antes',
-    (s - 'equipe_dias' - 'local')::text = s0::text
+    -- (Fase 7f, P7) a chave comunicacao (_agenda_saude_comunicacao) também fica de fora: os zeros dela entram no ok, e o ok continua o de antes
+    (s - 'equipe_dias' - 'local' - 'comunicacao')::text = s0::text
     and (select bool_and((s -> 'equipe_dias' ->> z)::int = 0) from unnest(c_zeros) z)
     and (s #>> '{equipe_dias,zeros_ok}')::boolean and s #>> '{equipe_dias,modos,dupla}' = 'desligado' and s ->> 'ok' = s0 ->> 'ok',
     left((s -> 'equipe_dias')::text, 600));
