@@ -35,6 +35,96 @@
 - **O quê:** `_agenda_dia_avisado(p_payee, p_os, p_dia)` chama `_agenda_cliente_ouviu(p_os, p_dia, now())`. A assinatura não tem `p_agora`, então `_agenda_zona` herda o relógio de verdade mesmo numa simulação com outro `p_agora`. Em produção os 2 são o mesmo instante, e o efeito é nulo; só um replay com relógio fixado vê a diferença, e só para mensagem em sombra com `enviar_em` entre os 2 instantes.
 - **Na Fase 7f:** sem conserto: `_agenda_dia_avisado` é da 7a e a zona a chama sem repetir a regra. `_agenda_classe_da_saida` passa `p_agora` ao `_agenda_cliente_ouviu` direto.
 
+### [NOVO-agenda-66] A medida da Fase 6 mede o calendário, e o estimador é por pessoa
+
+- **Encontrado em:** Agenda de Produção, spec-fase7e (29/10/2026; 7e-a).
+- **O quê:** a Fase 6 conta (dia, turno) distintos contra os dias × 2. O R$ 764 é por diária-PESSOA. Com a dupla só quando marcada (7b), a razão de calendário confunde "foram dois" com "demorou o dobro".
+- **Na Fase 7e:** o viés do estimador passa a usar pessoa-meios contra diárias-pessoa (`pm_reais` ÷ `pm_estimados`). A razão da Fase 6 fica como está.
+
+### [NOVO-agenda-67] O R$ por diária aprendido e o viés corrigiriam o mesmo erro duas vezes
+
+- **Encontrado em:** Agenda de Produção, spec-fase7e (29/10/2026; 7e-b).
+- **O quê:** o item `mo` da Fase 6 muda o divisor do estimador; o viés multiplica o resultado. Com os dois em uso, a duração seria corrigida duas vezes.
+- **Na Fase 7e:** o viés mede contra o estimador ao R$ padrão; com `modo_vies` ligado a duração usa o R$ padrão × o viés (o `mo` segue medido e mostrado). Pacote P3 (spec d12).
+
+### [NOVO-agenda-68] Check-in → check-out não mede duração
+
+- **Encontrado em:** Agenda de Produção, spec-fase7e (29/10/2026; 7e-c, `wf7e_03`).
+- **O quê:** nas 9 OS concluídas com os dois, a razão (dias úteis corridos ÷ dias estimados) vai de 2,0 a 26,5: é espera de peça e de cliente, não trabalho.
+- **Na Fase 7e:** só a conferência do dia e a diária ligada medem.
+
+### [NOVO-agenda-69] O prazo que o "compre até" usa nunca foi medido
+
+- **Encontrado em:** Agenda de Produção, spec-fase7e (29/10/2026; 7e-d).
+- **O quê:** o prazo medido da Fase 6 só lê a NF-e (do despacho à chegada: o transporte), e `material_remessas` tinha 0 linhas. O "compre até" conta da COMPRA à chegada.
+- **Na Fase 7e:** o P2 mede isso pela compra registrada (`agenda_medir_compra`).
+
+### [NOVO-agenda-70] Só uma amostra de tempo interno de compra
+
+- **Encontrado em:** Agenda de Produção, spec-fase7e (29/10/2026; 7e-e).
+- **O quê:** das 20 linhas de material em produção, 1 tem data de compra (OS-00104: aprovada 22/09, OC 13/10 = 14 d.u.). O padrão do 7a (AG7-07, 1 d.u., respondido) está muito abaixo dessa única medida.
+- **Na Fase 7e:** a medida sobe devagar pela credibilidade (`tempo_compra_n_min` 3).
+
+### [NOVO-agenda-71] `service_orders.priority` existe e ninguém lê
+
+- **Encontrado em:** Agenda de Produção, spec-fase7e (29/10/2026; 7e-f).
+- **O quê:** o CHECK aceita low/normal/high/urgent; as OS estão todas em "normal". O motor lê só `os_planejamento.prioridade_manual` (0 usos).
+- **Na Fase 7e:** a urgência lê os dois (P4, `_agenda_os_urgente`).
+
+### [NOVO-agenda-72] O validador não tem exceção para acrescentar no congelado
+
+- **Encontrado em:** Agenda de Produção, spec-fase7e (29/10/2026; 7e-g).
+- **O quê:** a regra 7 ("nada no congelado, salvo evento real e pedido do dono") recusaria o puxar na véspera (amanhã é congelado com `congelamento_du = 1`).
+- **Na Fase 7e:** exceção estreita, só criar, em célula livre, de quem já vem no dia, nunca cancelar (P4b).
+
+### [NOVO-agenda-143] Toda OS do Alex cai em `sem_diaria`, e o `fator` da Fase 6 fica preso
+
+- **Encontrado em:** Agenda de Produção, spec-fase7e R7.4 (08/11/2026).
+- **O quê:** o `motivo` da Fase 6 (`agenda_medir_os`) invalida a OS com `diarias_ligadas = 0` e sem `so_o_dono`. O Alex não tem perfil de diária, então `_agenda_lancar_diaria` devolve `sem_perfil` e nunca há `work_shifts` dele: toda OS em que só ele trabalhou cai ali, para sempre, e o `fator` por classe não anda.
+- **Na Fase 7e:** a `razao_estimativa` só exige a diária de quem TEM perfil (`motivo_razao`, P2). O `motivo` e o `valida` da Fase 6 não mudam: o `fator` segue preso enquanto o Alex não tiver perfil. Para ligar o fator de novo, ele precisa de perfil (decisão do dono).
+
+### [NOVO-agenda-144] Check-in quase não existe: 13 das 22 medidas são `sem_inicio`
+
+- **Encontrado em:** Agenda de Produção, spec-fase7e R7.4 e R7.9 (06/11/2026, reconferido 08/11).
+- **O quê:** 2 check-ins contra 11 check-outs em 90 dias. O 2º laço de `_agenda_aprender_congelar` só via OS com check-in, então a maior parte da medição nem começa.
+- **Na Fase 7e:** o P2 congela também pelo 1º dia de alocação vigente não reserva já passado (`agenda_du_entre` com o menor dos dois).
+
+### [NOVO-agenda-145] Nenhuma conferência de verdade: a medição da 7e não tem de onde tirar
+
+- **Encontrado em:** Agenda de Produção, spec-fase7e R7.4 e R7.9 (08/11/2026).
+- **O quê:** das 53 alocações, 3 têm resultado, todos `sem_registro` gravado pelo sistema em 05/11 (OS-00074, o plano falso): 0 conferidas de verdade. O "como foi" do Alex é recusado por falta de telefone, sobra o *dia feito* do dono, e o silêncio vira `sem_registro`.
+- **Na Fase 7e:** não muda em código. É pré-requisito do *ligar* (R7.14), dito ao dono em R7.F-1 a R7.F-3.
+
+### [NOVO-agenda-146] `os_material.critico` é true nas 20 linhas: o miúdo só existe calculado, atrás de regra freada
+
+- **Encontrado em:** Agenda de Produção, spec-fase7e R7.5-5 (06/11/2026).
+- **O quê:** o miúdo abaixo de `critico_valor_min` (AG7-05) só é reconhecido dentro de `os_prontidao`, atrás da regra `critico_por_valor`, que está freada. A coluna `critico` nunca muda: `nao_critica` não dispararia.
+- **Na Fase 7e:** função nova `_agenda_material_critico` (P2), que lê o fato do dono e o valor unitário, sem portão de regra.
+
+### [NOVO-agenda-147] O *dia feito* ecoa o plano e zeraria a dispersão
+
+- **Encontrado em:** Agenda de Produção, spec-fase7e R7.4 (06/11/2026).
+- **O quê:** com a OS por estimativa, o *dia feito* marca o plano como cumprido e a razão tende a 1,00 quando a OS acaba no último dia planejado. Resíduos iguais dão σ = 0, e a conta da folga cairia a 0: carga 0,95, tirando a reserva por falta de medida, não por folga de verdade.
+- **Na Fase 7e:** σ = 0 ou nulo = `calculado` nulo (`medindo`), e o piso `folga_semana_min` 0,05 (P4).
+
+### [NOVO-agenda-148] O ajudante sem cadastro some da medida
+
+- **Encontrado em:** Agenda de Produção, spec-fase7e R7.4 e R7.F-4 (06/11/2026).
+- **O quê:** Mateus e Vinicius não têm cadastro: o trabalho deles não vira alocação nem diária. O `pm_reais` da OS em que um deles ajudou sai menor, e o viés desce.
+- **Na Fase 7e:** sem código. O cadastro é do dono (R7.F-4).
+
+### [NOVO-agenda-149] A temporada com 1 técnico: o que dissemos ao dono estava errado
+
+- **Encontrado em:** Agenda de Produção, spec-fase7e R7.3-6 e R7.10-5 (06/11/2026).
+- **O quê:** `fase7-padroes.md` diz "7,5 em nov, mar e mai". O teto é `floor`: numa semana de 10 meios-dias, 0,75 e 0,70 dão os mesmos 7. A reserva é 1 meio-dia; 5% e 10% só diferem com 2 ou mais técnicos.
+- **Na Fase 7e:** nada a mudar; a correção vai ao dono (R7.F-7).
+
+### [NOVO-agenda-150] O painel e o *quem chamar* não sabem da folga da semana
+
+- **Encontrado em:** Agenda de Produção, spec-fase7e R7.N (06/11/2026).
+- **O quê:** `_agenda_painel`, `_agenda_vigia_backlog`, `_agenda_quem_chamar`, `_agenda_gestor_dupla`, `_agenda_tecnicos_da_grade` e `agenda_tela_semana` seguem com `carga_max`. Com `modo_folga_semana` ligado, o painel e o *quem chamar* contam 1 meio-dia a mais do que o motor marca.
+- **Na Fase 7e:** não recriadas de propósito. O P4 confere se algum texto ao dono afirma o número.
+
 ### [NOVO-agenda-96] `dados` de `agenda_ver` não chega ao modelo, e `mostrada_em` não vê a conversa (Fase 7d, correção, Onda 2)
 
 - **Encontrado em:** Agenda de Produção, Fase 7d, Onda 2 (06/11/2026), ao fazer o O8 e o R1.

@@ -414,6 +414,10 @@ const FIXTURES_COMO_TEXTO = [
   // de desligado a sombra, a trava e o DESFAZER; FORA_DA_BANCADA: o agenda_fase7f_final.sql o roda numa subtransação).
   ['agenda_teste.mig_mudou_fase7f', '../../supabase/migrations/20261109101200_agenda_fase7f_mudou.sql'],
   ['agenda_teste.mig_sombra_final_fase7f', '../../supabase/migrations/20261109101900_agenda_fase7f_sombra_equipe_cliente.sql'],
+  // Fase 7e (P1): a fixture da etapa (spec-fase7e §8.2, com o R7.12-8; por cima da da 7d: o pacote de cada teste acrescenta a sua parte) e a própria base da 7e (20261111100000), de onde o B8c de
+  // agenda_fase7e_base.sql confere que ela só cria as 6 funções novas.
+  ['agenda_teste.fase7e', 'fixture-fase7e.sql'],
+  ['agenda_teste.mig_base_fase7e', '../../supabase/migrations/20261111100000_agenda_fase7e_tabelas.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

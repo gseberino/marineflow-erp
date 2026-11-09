@@ -134,7 +134,9 @@ create function pg_temp.foto(p_dia date, p_os uuid) returns jsonb language sql s
                 from public.os_planejamento p),
     'plano_vazias', (select coalesce(jsonb_agg(p.service_order_id order by p.service_order_id), '[]') from public.os_planejamento p
                       where jsonb_strip_nulls(to_jsonb(p)) - 'service_order_id' - 'atualizado_em' - 'tarefas_assinatura' - 'tarefas_sincronizadas_em'
-                            - 'historico' - 'bem_indisponivel' - 'exigencias_ditas' = '{}'::jsonb
+                            - 'historico' - 'bem_indisponivel' - 'exigencias_ditas'
+                            - 'vies_dono_fixo' -- (7e P1) nasce false em toda linha: não a torna "preenchida"
+                            = '{}'::jsonb
                         and p.historico = '[]'::jsonb and p.exigencias_ditas = '{}'::jsonb and to_jsonb(p) -> 'bem_indisponivel' = '"{}"'::jsonb),
     'etiquetas', (select coalesce(jsonb_agg(py.name || ' ' || e.etiqueta || ' ' || e.nivel || ' ' || e.origem || ' ' || e.estado
                    order by py.name, e.etiqueta), '[]') from public.agenda_etiquetas e join public.payees py on py.id = e.payee_id),

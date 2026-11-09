@@ -544,8 +544,22 @@ begin
                            'modo_cliente_camadas', 'bloco_max_chars', 'bloco_decisoes_max', 'bloco_mudancas_max',
                            'bloco_compras_max', 'bloco_compras_du', 'veto_tipos', 'perguntas_abertas_max', 'dono_semana_aviso',
                            'dono_semana_hora', 'equipe_convite_antecedencia_h', 'cliente_dia_exato_du', 'cliente_semana_du',
-                           'cliente_camadas_para', 'comunicar_tempo_max']) n)));
+                           'cliente_camadas_para', 'comunicar_tempo_max']) n)))
      -- FASE 7f: fim
+     -- FASE 7e: os 37 que a Fase 7e pôs em agenda_config e os 11 de os_planejamento (20261111100000) têm o caso deles em agenda_fase7e_base.sql (B1 cobra pelo nome e pelo limite; B2c, os do planejamento).
+     and not (c.conname = any (array(
+       select 'agenda_config_' || n || '_check'
+         from unnest(array['modo_vies', 'modo_folga_semana', 'modo_urgencia', 'modo_promessa', 'modo_tempo_compra', 'modo_folga_compra', 'credibilidade_k', 'vies_n_min', 'vies_min', 'vies_max',
+                           'folga_dispersao_padrao', 'folga_percentil', 'folga_semanas', 'folga_semanas_min', 'folga_residuos_min', 'folga_meios_min', 'folga_semana_max', 'folga_semana_min',
+                           'folga_semana_troca_max', 'carga_semana_min', 'carga_semana_max', 'folga_temporada_barco', 'folga_temporada_rv', 'urgencia_du', 'puxar_hora', 'puxar_quem', 'puxar_max_os',
+                           'promessa_n_min', 'promessa_min', 'tempo_compra_n_min', 'tempo_compra_percentil', 'tempo_compra_max_du', 'folga_compra_n_min', 'folga_compra_percentil',
+                           'folga_compra_max_du', 'prazo_sem_fornecedor_n_min', 'aprender_tempo_max']) n
+       union all
+       select unnest(array['estimativa_no_inicio_coerente', 'marcado_coerente', 'prazo_plano_coerente', 'os_planejamento_dp_bruto_no_inicio_check',
+                           'os_planejamento_pessoas_no_inicio_check', 'os_planejamento_pm_plano_no_inicio_check', 'os_planejamento_prazo_plano_no_inicio_check',
+                           'os_planejamento_vies_marcado_check', 'os_planejamento_vies_marcado_chave_check', 'os_planejamento_tempo_compra_marcado_check',
+                           'os_planejamento_folga_compra_marcada_check']))));
+     -- FASE 7e: fim
   insert into _resultado values ('B todo CHECK das 6 tabelas tem um caso que ele recusa', v_sem_caso is null, v_sem_caso);
 end
 $b$;
@@ -1093,6 +1107,8 @@ insert into _definer_da_agenda values ('agenda_bloco_do_fechamento');
 -- (Fase 7f, P7) a palavra *agenda espera* (o administrador por _autor_da_agenda, só service_role) e a saúde da comunicação (a porta de _agenda_saude_local, dentro)
 insert into _definer_da_agenda values ('agenda_veto_dito'), ('_agenda_saude_comunicacao');
   -- FASE 7f: fim
+  -- FASE 7e: (7e P1, 20261111100000) nenhuma definer nova: o modo, a credibilidade, o z e a temporada são invoker, e o gatilho _agenda_medidas_compra_so_muda só mexe na própria linha. agenda_fase7e_base.sql prova as portas.
+  -- FASE 7e: fim
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

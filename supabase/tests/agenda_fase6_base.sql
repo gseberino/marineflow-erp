@@ -335,8 +335,11 @@ select 'B1z os CHECKs de os_planejamento, agenda_medidas_os e agenda_aprendizado
         or c.conrelid in ('public.agenda_medidas_os'::regclass, 'public.agenda_aprendizado'::regclass))
    -- FASE 7: o CHECK que a Fase 7a pôs em agenda_medidas_os (20261031100000: o fator da estimativa só na medida válida por
    -- orçamento) tem o caso dele em agenda_fase7a_base.sql (B1z). A lista dias_fonte ampliada continua com o nome e o caso daqui.
-   and c.conname <> 'fator_orcamento_so_orcamento';
+   and c.conname <> 'fator_orcamento_so_orcamento'
    -- FASE 7: fim
+   -- FASE 7e: os 4 CHECKs que a 7e pôs em agenda_medidas_os (20261111100000) têm o caso deles em agenda_fase7e_base.sql (B2f a B2i).
+   and c.conname not in ('agenda_medidas_os_estimativa_origem_check', 'agenda_medidas_os_motivo_razao_check', 'razao_so_valida', 'razao_dono_so_valida');
+   -- FASE 7e: fim
 
 -- ── B2. RLS e privilégios ───────────────────────────────────────────────────────────────────────────────
 insert into _resultado
