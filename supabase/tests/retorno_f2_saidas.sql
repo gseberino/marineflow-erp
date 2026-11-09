@@ -96,7 +96,7 @@ begin
     if v_r ->> 'saida_id' is distinct from v_s.id::text or v_r ->> 'origem' <> 'retorno_modelo' then
       raise exception '1c: pegar (%)', v_r;
     end if;
-    if v_r ->> 'texto' not like 'Oi, Rodrigo!%O serviço % está aguardando a chegada de uma peça para seguirmos. O Gustavo te avisa quando ela chegar.' then
+    if v_r ->> 'texto' not like 'Oi, Rodrigo!%O serviço % está aguardando a chegada de uma peça. Assim que ela chegar, o Gustavo avisa você.' then
       raise exception '1d: texto (%)', v_r ->> 'texto';
     end if;
     if v_r -> 'validador' -> 'trechos_do_modelo' is null or v_r -> 'validador' ->> 'nome_permitido' <> 'Rodrigo' then
@@ -250,7 +250,7 @@ begin
     perform pg_temp.f2s_livre();
     v_r := public.retorno_pegar(c_agora);
     if v_r ->> 'variante' is distinct from 'vou_confirmar'
-       or v_r ->> 'texto' not like 'Oi, Clara (mensagem automática da HBR). Vou confirmar com o Gustavo e ele te responde %' then
+       or v_r ->> 'texto' not like 'Oi, Clara! Vou confirmar com o Gustavo, e ele retorna para você %' then
       raise exception '7b: variante ligada (%)', v_r;
     end if;
 

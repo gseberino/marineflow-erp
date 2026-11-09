@@ -408,6 +408,7 @@ declare
   v_trechos text[];
   v_outros text[] := '{}';
   v_cliente jsonb;
+  v_fala text := public._retorno_quando_fala(d ->> 'quando', d ->> 'hora');   -- VOZ-2: é valor do banco, como {quando}
 begin
   select * into v_s from public.retorno_saidas s where s.id = p_saida;
   select * into v_ab from public.retorno_aberturas a where a.id = v_s.abertura_id;
@@ -416,7 +417,7 @@ begin
   -- texto (o texto é modelo fixo + valores do banco: o T22 tem "hoje" no modelo; "de ontem à noite" é valor).
   v_datas := array(
     select distinct x from (
-      select unnest(array[d ->> 'quando', d ->> 'quando_lista', d ->> 'dia_msg', d ->> 'dia_peca']) as x   -- F2: dia_peca
+      select unnest(array[d ->> 'quando', d ->> 'quando_lista', d ->> 'dia_msg', v_fala, d ->> 'dia_peca']) as x   -- F2: dia_peca
       union all
       select (regexp_match(y, '[0-9]{2}/[0-9]{2}'))[1]
         from unnest(array[d ->> 'quando', d ->> 'quando_lista', d ->> 'dia_msg']) as y
@@ -431,7 +432,7 @@ begin
   v_corte := v_texto;
   for v_valor in
     select x from unnest(array[d ->> 'nome', d ->> 'quando', d ->> 'hora', d ->> 'quando_lista', d ->> 'cumprimento',
-                               d ->> 'de_quando', d ->> 'dia_msg', d ->> 'hora_msg', d ->> 'do_bem',
+                               d ->> 'de_quando', d ->> 'dia_msg', d ->> 'hora_msg', d ->> 'do_bem', v_fala,
                                d ->> 'dia_peca']) as x   -- F2: dia_peca. {no_bem} fica de fora de propósito: é do modelo, e cortá-lo viraria eco
      where x is not null and btrim(x) <> ''
      order by char_length(x) desc, x
@@ -753,17 +754,19 @@ begin
                               when 'manha_outro_dia' then 'manha_sem_nome'
                               when 'fora_ate' then 'fora_ate_sem_nome'
                               else 'sem_nome' end;
-        elsif v_var in ('padrao', 'outro_dia') then
-          -- K4: apresentação inteira quando a chave não teve, em 30 dias, saída do retorno que o cliente ouviu.
-          -- Pelo modo PRETENDIDO: ligado conta só enviada/incerta; sombra conta também a sombra.
-          v_ouviu := exists (select 1 from public.retorno_saidas o
-                              where o.chave = v_s.chave
-                                and o.id <> v_s.id
-                                and o.emissor = 'retorno'
-                                and o.tipo not in ('acorde', 'cadastro_provisorio', 'fila')
-                                and o.decidida_em > v_agora - v_cfg.apresentacao_intervalo
-                                and o.decidida_em <= v_agora
-                                and (o.estado in ('enviada', 'incerta') or (not v_pretendido and o.estado = 'sombra')));
+        elsif v_var in ('padrao', 'outro_dia', 'manha', 'manha_outro_dia', 'fora_ate', 'volta', 'volta_queda') then
+          -- VOZ-1 e VOZ-6: a Claudia se apresenta só se ninguém (retorno ou agenda) falou com este cliente.
+          -- Em sombra, a sombra do retorno também conta, para a simulação sair como sairia ligada.
+          v_ouviu := public._cliente_ja_apresentada(v_ab.client_id, v_s.chave, v_hoje)
+                     or (not v_pretendido
+                         and exists (select 1 from public.retorno_saidas o
+                                      where o.chave = v_s.chave
+                                        and o.id <> v_s.id
+                                        and o.emissor = 'retorno'
+                                        and o.tipo not in ('acorde', 'cadastro_provisorio', 'fila')
+                                        and o.decidida_em > v_agora - v_cfg.apresentacao_intervalo
+                                        and o.decidida_em <= v_agora
+                                        and o.estado = 'sombra'));
           if not v_ouviu then
             v_var := v_var || '_apresentacao';
           end if;
@@ -814,7 +817,7 @@ begin
         v_campos := jsonb_build_object('hora', v_dados ->> 'hora');
 
       elsif v_s.tipo in ('fim_do_dia', 'urgente') then
-        -- A marca de topo vem antes do texto: é o que torna verdadeiro "abre a lista dele … cedo".
+        -- A marca de topo vem antes do texto: é o que torna verdadeiro "o primeiro da lista dele … cedo".
         v_topo := public.agenda_somar_du(v_hoje + 1, 0);
         update public.retorno_aberturas a
            set topo_dia = case when a.topo_dia is null or a.topo_dia < v_hoje then v_topo
@@ -853,15 +856,8 @@ begin
           elsif v_nome is null then
             v_var := 'sem_nome';
           else
-            -- K4, como no recibo
-            v_ouviu := exists (select 1 from public.retorno_saidas o
-                                where o.chave = v_s.chave
-                                  and o.id <> v_s.id
-                                  and o.emissor = 'retorno'
-                                  and o.tipo not in ('acorde', 'cadastro_provisorio', 'fila')
-                                  and o.decidida_em > v_agora - v_cfg.apresentacao_intervalo
-                                  and o.decidida_em <= v_agora
-                                  and o.estado in ('enviada', 'incerta'));
+            -- VOZ-1 e VOZ-6: a Claudia se apresenta só se ninguém falou com este cliente
+            v_ouviu := public._cliente_ja_apresentada(v_ab.client_id, v_s.chave, v_hoje);
             v_var := case when v_ouviu then 'padrao' else 'padrao_apresentacao' end;
           end if;
         end if;

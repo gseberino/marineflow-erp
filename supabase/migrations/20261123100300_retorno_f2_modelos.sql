@@ -310,24 +310,24 @@ begin
   case p_tipo
     when 'modelo_aguarda_peca' then
       if v_no_bem is null then raise exception 'modelo: falta no_bem' using errcode = '22023'; end if;
-      return format('o serviço %s está aguardando a chegada de uma peça para seguirmos. %s', v_no_bem,
-                    case when coalesce((d ->> 'te_aviso')::boolean, false) then 'Te aviso por aqui quando ela chegar.'
-                         else 'O Gustavo te avisa quando ela chegar.' end);
+      return format('o serviço %s está aguardando a chegada de uma peça. %s', v_no_bem,
+                    case when coalesce((d ->> 'te_aviso')::boolean, false) then 'Assim que ela chegar, aviso você por aqui.'
+                         else 'Assim que ela chegar, o Gustavo avisa você.' end);
     when 'modelo_peca_chegou' then
       if v_dia is null or v_dia !~ '^[0-9]{2}/[0-9]{2}$' then raise exception 'modelo: falta dia_peca' using errcode = '22023'; end if;
       return case when d ->> 'intencao' = 'status'
-                  then format('a peça do serviço chegou em %s. O próximo passo é o Gustavo marcar o dia do serviço.', v_dia)
-                  else format('chegou sim: a peça chegou em %s. O próximo passo é o Gustavo marcar o dia do serviço.', v_dia) end;
+                  then format('a peça do serviço chegou no dia %s. Agora o Gustavo vai marcar o dia do serviço.', v_dia)
+                  else format('a peça chegou sim, no dia %s. Agora o Gustavo vai marcar o dia do serviço.', v_dia) end;
     when 'modelo_pronto' then
       if v_no_bem is null then raise exception 'modelo: falta no_bem' using errcode = '22023'; end if;
-      return format('ficou sim: o serviço %s está pronto. Quando fica bom para você buscar? O Gustavo combina o horário por aqui.', v_no_bem);
+      return format('o serviço %s está pronto. Qual o melhor dia para você buscar? O Gustavo combina o horário por aqui.', v_no_bem);
     when 'modelo_em_servico' then
       if v_no_bem is null then raise exception 'modelo: falta no_bem' using errcode = '22023'; end if;
-      return format('o serviço %s está em andamento hoje. O Gustavo te passa as novidades por aqui.', v_no_bem);
+      return format('o serviço %s está em andamento hoje. O Gustavo passa as novidades por aqui.', v_no_bem);
     when 'modelo_liberado' then
-      return 'pode sim: o serviço está liberado para retirada. Combine o horário com o Gustavo por aqui.';
+      return 'pode sim: o serviço está liberado para retirada. É só combinar o horário com o Gustavo por aqui.';
     when 'modelo_retirada_nao' then
-      return 'ainda não dá para retirar: o serviço não terminou. O Gustavo te chama para combinar.';
+      return 'ainda não dá para retirar, porque o serviço não terminou. O Gustavo chama você para combinar.';
     else
       raise exception 'modelo: tipo desconhecido' using errcode = '22023';
   end case;
@@ -358,9 +358,9 @@ begin
     raise exception 'abertura: falta o nome' using errcode = '22023';
   end if;
   return case p_variante
-    when 'padrao' then format('Oi, %s (mensagem automática da HBR). %s', v_nome, v_maior)
-    when 'padrao_apresentacao' then format('Oi, %s! Aqui é o assistente da HBR (mensagem automática). %s', v_nome, v_maior)
-    when 'sem_nome' then 'Oi! Aqui é o assistente da HBR (mensagem automática). ' || v_maior
+    when 'padrao' then format('Oi, %s! %s', v_nome, v_maior)
+    when 'padrao_apresentacao' then format('Oi, %s! Aqui é a Claudia, assistente virtual da HBR. %s', v_nome, v_maior)
+    when 'sem_nome' then 'Olá! Aqui é a Claudia, assistente virtual da HBR. ' || v_maior
     when 'apos_recibo' then format('%s, %s', v_nome, v_corpo)
     when 'apos_recibo_sem_nome' then v_maior
   end;
@@ -449,19 +449,19 @@ declare
 begin
   v_modelo := case p_tipo || '/' || p_variante
     when 'recibo_cliente/retirada' then -- T29
-      'Oi, {nome} (mensagem automática da HBR). Recebi. Retirar antes depende de como está o serviço, e quem confirma é o Gustavo: ele te responde {quando} até as {hora}.'
+      'Oi, {nome}! Retirar antes depende de como está o serviço, e quem confirma é o Gustavo. Ele retorna para você {quando_fala}.'
     when 'recibo_cliente/adicional' then -- T30
-      'Anotado, {nome} (mensagem automática da HBR). Passei ao Gustavo como serviço extra: ele avalia e te passa o valor antes de fazer qualquer coisa. Te responde {quando} até as {hora}.'
+      'Anotado, {nome}! Passei ao Gustavo como serviço extra: ele avalia e informa o valor antes de fazer qualquer coisa. Ele retorna para você {quando_fala}.'
     when 'recibo_cliente/vou_confirmar' then -- T31
-      'Oi, {nome} (mensagem automática da HBR). Vou confirmar com o Gustavo e ele te responde {quando} até as {hora}.'
+      'Oi, {nome}! Vou confirmar com o Gustavo, e ele retorna para você {quando_fala}.'
     when 'recibo_cliente/orcamento' then -- T32
-      'Oi, {nome} (mensagem automática da HBR). Recebi, e o seu orçamento já está em preparação com o Gustavo; ele te responde {quando} até as {hora}.'
+      'Oi, {nome}! Seu orçamento já está em preparação com o Gustavo, e ele retorna para você {quando_fala}.'
     when 'adiamento/orcamento' then -- T33
-      '{nome}, seu orçamento está em preparação, e o Gustavo está conferindo os valores. Ele te responde até as {hora}.'
+      '{nome}, seu orçamento está em preparação e o Gustavo está conferindo os valores. Ele retorna para você ainda hoje.'
     when 'adiamento/orcamento_sem_nome' then -- T34
-      'Seu orçamento está em preparação, e o Gustavo está conferindo os valores. Ele te responde até as {hora}.'
+      'Seu orçamento está em preparação e o Gustavo está conferindo os valores. Ele retorna para você ainda hoje.'
     when 'coleta_numero_novo/nome_orcamento' then -- T35
-      'Obrigado! Seu orçamento já está em preparação com o Gustavo. Como posso te chamar?'
+      'Obrigada! Seu orçamento já está em preparação com o Gustavo. Como posso chamar você?'
   end;
   if v_modelo is null then
     raise exception 'texto F2: par desconhecido' using errcode = '22023';
@@ -469,6 +469,18 @@ begin
 
   v_texto := v_modelo;
   for v_campo in select distinct (regexp_matches(v_modelo, '\{([a-z_]+)\}', 'g'))[1] loop
+    -- {quando_fala} sai de quando + hora (VOZ-2), conferidos aqui.
+    if v_campo = 'quando_fala' then
+      if coalesce(btrim(d ->> 'quando'), '') !~ c_dia or coalesce(btrim(d ->> 'hora'), '') !~ c_hora then
+        raise exception 'texto F2: quando ou hora ausente ou inválido' using errcode = '22023';
+      end if;
+      v_valor := public._retorno_quando_fala(btrim(d ->> 'quando'), btrim(d ->> 'hora'));
+      if v_valor is null then
+        raise exception 'texto F2: quando ou hora ausente ou inválido' using errcode = '22023';
+      end if;
+      v_texto := replace(v_texto, '{quando_fala}', v_valor);
+      continue;
+    end if;
     v_valor := nullif(btrim(d ->> v_campo), '');
     if v_valor is null
        or (v_campo = 'quando' and v_valor !~ c_dia)

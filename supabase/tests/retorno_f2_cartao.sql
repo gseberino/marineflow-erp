@@ -217,7 +217,7 @@ begin
     if v_r ->> 'texto' not like '%O que sei: aguardando o compressor (em falta, previsão padrão %, 7 dias úteis)%' then
       raise exception '5b: fato (%)', v_r ->> 'texto';
     end if;
-    if v_r ->> 'texto' not like '%Modelo: ''Oi, Rodrigo (mensagem automática da HBR). O serviço % está aguardando a chegada de uma peça para seguirmos. O Gustavo te avisa quando ela chegar.''%' then
+    if v_r ->> 'texto' not like '%Modelo: ''Oi, Rodrigo! O serviço % está aguardando a chegada de uma peça. Assim que ela chegar, o Gustavo avisa você.''%' then
       raise exception '5c: modelo (%)', v_r ->> 'texto';
     end if;
     if v_r ->> 'texto' not like '%*1 B* = a peça chegou · *1 C* = dite a previsão%' then

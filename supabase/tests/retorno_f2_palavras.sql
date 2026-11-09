@@ -143,7 +143,7 @@ begin
 
     -- fora até.
     v_r := public.retorno_dito('{"comando": "fora_ate", "dia": "quarta"}', v_dono, c_agora);
-    if v_r ->> 'texto' is distinct from 'Anotado: até amanhã o recibo diz que você está fora e que responde amanhã até as 10h. *fora até hoje* desfaz.' then
+    if v_r ->> 'texto' is distinct from 'Anotado: até amanhã o recibo diz que você está fora e que retorna amanhã de manhã. *fora até hoje* desfaz.' then
       raise exception '5a: R05 (%)', v_r;
     end if;
     if (select c.fora_ate from public.retorno_config c) is distinct from date '2026-11-11' then

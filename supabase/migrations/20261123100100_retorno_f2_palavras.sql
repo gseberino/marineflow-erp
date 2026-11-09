@@ -472,8 +472,9 @@ begin
         v_texto := 'Anotado: você voltou, e o recibo volta ao normal.';
       else
         update public.retorno_config set fora_ate = v_ate, atualizado_em = now(), atualizado_por = p_autor;
-        v_texto := format('Anotado: até %1$s o recibo diz que você está fora e que responde %1$s até as %2$s. *fora até hoje* desfaz.',
-                          public._retorno_quando(v_ate, v_hoje), public._retorno_hora(v_cfg.promessa_manha));
+        v_texto := format('Anotado: até %1$s o recibo diz que você está fora e que retorna %2$s. *fora até hoje* desfaz.',
+                          public._retorno_quando(v_ate, v_hoje),
+                          public._retorno_quando_fala(public._retorno_quando(v_ate, v_hoje), public._retorno_hora(v_cfg.promessa_manha)));
       end if;
       perform public._retorno_auditar_palavra(p_autor, jsonb_build_object('fora_ate', v_cfg.fora_ate),
         jsonb_build_object('fora_ate', case when v_ate = v_hoje then null else v_ate end), '*fora até* do dono');

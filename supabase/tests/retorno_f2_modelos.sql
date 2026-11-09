@@ -28,14 +28,14 @@ begin
     -- M01–M06 e M02b, com cada abertura.
     for r in
       select * from (values
-        ('modelo_aguarda_peca', '{"no_bem": "no seu motorhome"}'::jsonb, 'o serviço no seu motorhome está aguardando a chegada de uma peça para seguirmos. O Gustavo te avisa quando ela chegar.'),
-        ('modelo_aguarda_peca', '{"no_bem": "no seu motorhome", "te_aviso": true}'::jsonb, 'o serviço no seu motorhome está aguardando a chegada de uma peça para seguirmos. Te aviso por aqui quando ela chegar.'),
-        ('modelo_peca_chegou', '{"dia_peca": "09/12"}'::jsonb, 'chegou sim: a peça chegou em 09/12. O próximo passo é o Gustavo marcar o dia do serviço.'),
-        ('modelo_peca_chegou', '{"dia_peca": "09/12", "intencao": "status"}'::jsonb, 'a peça do serviço chegou em 09/12. O próximo passo é o Gustavo marcar o dia do serviço.'),
-        ('modelo_pronto', '{"no_bem": "no seu motorhome"}'::jsonb, 'ficou sim: o serviço no seu motorhome está pronto. Quando fica bom para você buscar? O Gustavo combina o horário por aqui.'),
-        ('modelo_em_servico', '{"no_bem": "no seu motorhome"}'::jsonb, 'o serviço no seu motorhome está em andamento hoje. O Gustavo te passa as novidades por aqui.'),
-        ('modelo_liberado', '{}'::jsonb, 'pode sim: o serviço está liberado para retirada. Combine o horário com o Gustavo por aqui.'),
-        ('modelo_retirada_nao', '{}'::jsonb, 'ainda não dá para retirar: o serviço não terminou. O Gustavo te chama para combinar.')
+        ('modelo_aguarda_peca', '{"no_bem": "no seu motorhome"}'::jsonb, 'o serviço no seu motorhome está aguardando a chegada de uma peça. Assim que ela chegar, o Gustavo avisa você.'),
+        ('modelo_aguarda_peca', '{"no_bem": "no seu motorhome", "te_aviso": true}'::jsonb, 'o serviço no seu motorhome está aguardando a chegada de uma peça. Assim que ela chegar, aviso você por aqui.'),
+        ('modelo_peca_chegou', '{"dia_peca": "09/12"}'::jsonb, 'a peça chegou sim, no dia 09/12. Agora o Gustavo vai marcar o dia do serviço.'),
+        ('modelo_peca_chegou', '{"dia_peca": "09/12", "intencao": "status"}'::jsonb, 'a peça do serviço chegou no dia 09/12. Agora o Gustavo vai marcar o dia do serviço.'),
+        ('modelo_pronto', '{"no_bem": "no seu motorhome"}'::jsonb, 'o serviço no seu motorhome está pronto. Qual o melhor dia para você buscar? O Gustavo combina o horário por aqui.'),
+        ('modelo_em_servico', '{"no_bem": "no seu motorhome"}'::jsonb, 'o serviço no seu motorhome está em andamento hoje. O Gustavo passa as novidades por aqui.'),
+        ('modelo_liberado', '{}'::jsonb, 'pode sim: o serviço está liberado para retirada. É só combinar o horário com o Gustavo por aqui.'),
+        ('modelo_retirada_nao', '{}'::jsonb, 'ainda não dá para retirar, porque o serviço não terminou. O Gustavo chama você para combinar.')
       ) as x(tipo, dados, esperado)
     loop
       v_t := public._retorno_corpo_do_modelo(r.tipo, r.dados);
@@ -59,22 +59,22 @@ begin
     -- As aberturas.
     v_t := public._retorno_corpo_do_modelo('modelo_pronto', jsonb_build_object('no_bem', c_no_bem));
     if public._retorno_abertura_do_modelo('padrao', jsonb_build_object('nome', 'Rodrigo', 'corpo', v_t))
-       is distinct from 'Oi, Rodrigo (mensagem automática da HBR). Ficou sim: o serviço no seu motorhome está pronto. Quando fica bom para você buscar? O Gustavo combina o horário por aqui.' then
+       is distinct from 'Oi, Rodrigo! O serviço no seu motorhome está pronto. Qual o melhor dia para você buscar? O Gustavo combina o horário por aqui.' then
       raise exception '2a: padrao';
     end if;
     if public._retorno_abertura_do_modelo('padrao_apresentacao', jsonb_build_object('nome', 'Rodrigo', 'corpo', v_t))
-       not like 'Oi, Rodrigo! Aqui é o assistente da HBR (mensagem automática). Ficou sim:%' then
+       not like 'Oi, Rodrigo! Aqui é a Claudia, assistente virtual da HBR. O serviço%' then
       raise exception '2b: apresentacao';
     end if;
     if public._retorno_abertura_do_modelo('sem_nome', jsonb_build_object('corpo', v_t))
-       not like 'Oi! Aqui é o assistente da HBR (mensagem automática). Ficou sim:%' then
+       not like 'Olá! Aqui é a Claudia, assistente virtual da HBR. O serviço%' then
       raise exception '2c: sem_nome';
     end if;
     if public._retorno_abertura_do_modelo('apos_recibo', jsonb_build_object('nome', 'Rodrigo', 'corpo', v_t))
-       not like 'Rodrigo, ficou sim:%' then
+       not like 'Rodrigo, o serviço%' then
       raise exception '2d: apos_recibo';
     end if;
-    if public._retorno_abertura_do_modelo('apos_recibo_sem_nome', jsonb_build_object('corpo', v_t)) not like 'Ficou sim:%' then
+    if public._retorno_abertura_do_modelo('apos_recibo_sem_nome', jsonb_build_object('corpo', v_t)) not like 'O serviço%' then
       raise exception '2e: apos_recibo_sem_nome';
     end if;
     if pg_temp.f2m_falta($q$select public._retorno_abertura_do_modelo('padrao', '{"corpo": "x"}')$q$) <> '22023' then
@@ -84,13 +84,13 @@ begin
     -- T29–T35.
     for r in
       select * from (values
-        ('recibo_cliente', 'retirada', 'Oi, Rodrigo (mensagem automática da HBR). Recebi. Retirar antes depende de como está o serviço, e quem confirma é o Gustavo: ele te responde hoje até as 19h.'),
-        ('recibo_cliente', 'adicional', 'Anotado, Rodrigo (mensagem automática da HBR). Passei ao Gustavo como serviço extra: ele avalia e te passa o valor antes de fazer qualquer coisa. Te responde hoje até as 19h.'),
-        ('recibo_cliente', 'vou_confirmar', 'Oi, Rodrigo (mensagem automática da HBR). Vou confirmar com o Gustavo e ele te responde hoje até as 19h.'),
-        ('recibo_cliente', 'orcamento', 'Oi, Rodrigo (mensagem automática da HBR). Recebi, e o seu orçamento já está em preparação com o Gustavo; ele te responde hoje até as 19h.'),
-        ('adiamento', 'orcamento', 'Rodrigo, seu orçamento está em preparação, e o Gustavo está conferindo os valores. Ele te responde até as 19h.'),
-        ('adiamento', 'orcamento_sem_nome', 'Seu orçamento está em preparação, e o Gustavo está conferindo os valores. Ele te responde até as 19h.'),
-        ('coleta_numero_novo', 'nome_orcamento', 'Obrigado! Seu orçamento já está em preparação com o Gustavo. Como posso te chamar?')
+        ('recibo_cliente', 'retirada', 'Oi, Rodrigo! Retirar antes depende de como está o serviço, e quem confirma é o Gustavo. Ele retorna para você ainda hoje.'),
+        ('recibo_cliente', 'adicional', 'Anotado, Rodrigo! Passei ao Gustavo como serviço extra: ele avalia e informa o valor antes de fazer qualquer coisa. Ele retorna para você ainda hoje.'),
+        ('recibo_cliente', 'vou_confirmar', 'Oi, Rodrigo! Vou confirmar com o Gustavo, e ele retorna para você ainda hoje.'),
+        ('recibo_cliente', 'orcamento', 'Oi, Rodrigo! Seu orçamento já está em preparação com o Gustavo, e ele retorna para você ainda hoje.'),
+        ('adiamento', 'orcamento', 'Rodrigo, seu orçamento está em preparação e o Gustavo está conferindo os valores. Ele retorna para você ainda hoje.'),
+        ('adiamento', 'orcamento_sem_nome', 'Seu orçamento está em preparação e o Gustavo está conferindo os valores. Ele retorna para você ainda hoje.'),
+        ('coleta_numero_novo', 'nome_orcamento', 'Obrigada! Seu orçamento já está em preparação com o Gustavo. Como posso chamar você?')
       ) as x(tipo, variante, esperado)
     loop
       v_t := public._retorno_texto_f2(r.tipo, r.variante, '{"nome": "Rodrigo", "quando": "hoje", "hora": "19h"}');
