@@ -13,6 +13,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { executarChamadaDeTool, interrupcaoDaTool } from "../_shared/ai/agent.ts";
 import { osDoTurno } from "../_shared/agenda/carona.ts";
 import type { Role } from "../_shared/ai/tools/index.ts";
+import { casoAmarradoDaSessao } from "../_shared/ai/tools/registry.ts";
 import { ferramentasDoJob } from "../_shared/ai/max/ferramentas-do-job.ts";
 import { responderMcp, type ServidorDoTurno } from "../_shared/ai/max/mcp.ts";
 import { sha256Hex, TIPOS_DO_AGENTE } from "../_shared/ai/max/claude-max.ts";
@@ -76,10 +77,11 @@ export async function handler(req: Request): Promise<Response> {
   // só o admin chega aqui pelo Max — ver provedorDoTurno).
   // Retorno F2 (P9): a marca de quem leu um caso do cartão vale para o turno do Max também.
   const { data: sessao } = sessionId
-    ? await admin.from("ai_operator_sessions").select("metadata").eq("id", sessionId).maybeSingle()
+    ? await admin.from("ai_operator_sessions").select("metadata, client_id, vessel_id").eq("id", sessionId).maybeSingle()
     : { data: null };
   const toolCtx = { sb: admin, admin, userId: usuario.id, userRole: cargo, jwt: "", appOrigin: settings.app_public_url || "", settings, canal,
-    sessaoAmarrada: (sessao?.metadata as Record<string, unknown> | null)?.retorno_amarrada === true };
+    sessaoAmarrada: (sessao?.metadata as Record<string, unknown> | null)?.retorno_amarrada === true,
+    casoAmarrado: casoAmarradoDaSessao(sessao) };
 
   // O turno é o job (aprovação em lote, 29/10/2026): cada linha de auditoria leva o id dele, e a entrega confere por ali o
   // que o turno gravou e o que falhou.

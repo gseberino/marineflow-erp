@@ -990,8 +990,7 @@ export const whatsappTools: ToolDef[] = [
 
       // Retorno F3 (K6): a validade que sai no PDF é a do ENVIO. A data entra em quote_validity_date antes de montar, e o
       // montarDocumentoDaOrdem relê a ordem pelo id: `so` daqui em diante não usa os campos de validade.
-      // ctx.validadeDoCartao é declarado em ToolCtx pela P7; até lá, o cast evita depender do campo.
-      const validade = await fixarValidadeDoEnvio(admin, so, (ctx as ToolCtx & { validadeDoCartao?: string }).validadeDoCartao);
+      const validade = await fixarValidadeDoEnvio(admin, so, ctx.validadeDoCartao);
       // ── formato 'pdf_e_link': o arquivo do Baixar, com o link na legenda ──────────────
       const montado = await montarDocumentoDaOrdem(admin, so, settings);
       if (!montado.ok) {

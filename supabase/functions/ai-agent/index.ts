@@ -52,6 +52,7 @@ import { buildSystemBlocks } from "../_shared/ai/prompt.ts";
 import { callClaude, ClaudeApiError, type ClaudeContentBlock, type ClaudeMessage } from "../_shared/ai/anthropic.ts";
 import { MAX_ITERATIONS_WHATSAPP, MODEL_AGENT, MODEL_LITE } from "../_shared/ai/models.ts";
 import { allTools, toolsByName, type Role } from "../_shared/ai/tools/index.ts";
+import { casoAmarradoDaSessao } from "../_shared/ai/tools/registry.ts";
 import {
   checkWhatsAppRateLimit,
   conversaDosComprovantesLigada,
@@ -621,7 +622,7 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
   if (!appUser) return jr({ error: "Usuário não autorizado para o canal WhatsApp" }, 403);
 
   const sessionId = await resolveOrCreateWhatsAppSession(admin, phoneNormalized, appUserId);
-  const { data: sessionRow } = await admin.from("ai_operator_sessions").select("metadata").eq("id", sessionId).maybeSingle();
+  const { data: sessionRow } = await admin.from("ai_operator_sessions").select("metadata, client_id, vessel_id").eq("id", sessionId).maybeSingle();
   const metadata: Record<string, any> = (sessionRow?.metadata as any) || {};
 
   const { data: settingsRows } = await admin.from("app_settings").select("key, value");
@@ -631,7 +632,7 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
   });
 
   // Sem JWT de usuário neste canal — sb e admin são o mesmo client service-role.
-  const toolCtx = { sb: admin, admin, userId: appUserId, userRole: (appUser.role as Role) || "unknown", jwt: "", appOrigin: settings.app_public_url || "", settings, sessaoAmarrada: metadata.retorno_amarrada === true };
+  const toolCtx = { sb: admin, admin, userId: appUserId, userRole: (appUser.role as Role) || "unknown", jwt: "", appOrigin: settings.app_public_url || "", settings, sessaoAmarrada: metadata.retorno_amarrada === true, casoAmarrado: casoAmarradoDaSessao(sessionRow) };
 
   // ---- Camada determinística (custo $0): o vocabulário do retorno rápido (F2) ----
   // ANTES da trava e da confirmação: "não 2" rejeitaria o cartão inteiro, e "1 A sim <PIN>" levaria o PIN ao modelo.
@@ -1073,7 +1074,7 @@ async function handleEntregaDoMax(body: Record<string, any>): Promise<Response> 
     .maybeSingle();
   if (!appUser || !sessionId || !phoneNormalized) return jr({ error: "Turno sem usuário, sessão ou telefone" }, 422);
 
-  const { data: sessionRow } = await admin.from("ai_operator_sessions").select("metadata").eq("id", sessionId).maybeSingle();
+  const { data: sessionRow } = await admin.from("ai_operator_sessions").select("metadata, client_id, vessel_id").eq("id", sessionId).maybeSingle();
   const metadata: Record<string, any> = (sessionRow?.metadata as any) || {};
   const { data: settingsRows } = await admin.from("app_settings").select("key, value");
   const settings: Record<string, string> = {};
@@ -1134,7 +1135,7 @@ async function handleEntregaDoMax(body: Record<string, any>): Promise<Response> 
   }
   // Só aviso: a reserva ainda pode responder. Se ela falhar também, o turno abaixo registra a falha.
   await logEdgeError(admin, { context: "ai-agent", action: "max_falhou", level: "warn", message: `Turno do Claude Max falhou (${job.error_code ?? job.status}); refazendo pelo OpenRouter` });
-  const toolCtx = { sb: admin, admin, userId: appUser.id, userRole: (appUser.role as Role) || "unknown", jwt: "", appOrigin: settings.app_public_url || "", settings };
+  const toolCtx = { sb: admin, admin, userId: appUser.id, userRole: (appUser.role as Role) || "unknown", jwt: "", appOrigin: settings.app_public_url || "", settings, sessaoAmarrada: metadata.retorno_amarrada === true, casoAmarrado: casoAmarradoDaSessao(sessionRow) };
   return await turnoDoModeloNoWhatsApp({
     admin, sessionId, phoneNormalized, appUser, settings, toolCtx, metadata, effectiveText: texto, permitirMax: false,
   });

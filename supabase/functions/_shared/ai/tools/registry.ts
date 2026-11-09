@@ -22,6 +22,13 @@ export interface ToolCtx {
   /** Retorno F2 (P9): o modelo leu um caso do cartão nesta sessão, e o envio livre pede PIN. */
   sessaoAmarrada?: boolean;
   /**
+   * Retorno F3 (P7): o cliente e a unidade do caso lido. Serve só à nota "não é o cliente do caso do cartão" no resumo;
+   * nenhuma guarda decide por ele, e quem pede orçamento para outro cliente segue com PIN.
+   */
+  casoAmarrado?: { client_id: string | null; vessel_id: string | null };
+  /** Retorno F3 (P9): a data da legenda do cartão. Fica no contexto para o modelo não alcançar. */
+  validadeDoCartao?: string;
+  /**
    * De onde veio o pedido (07/10/2026): no chat do app um documento pode voltar como link para
    * baixar; no WhatsApp ele vai como arquivo na conversa. Ausente = WhatsApp (o comportamento antigo).
    */
@@ -110,6 +117,14 @@ export const CHAVE_DO_RETRATO = "_retrato";
 export function lerRetrato(args: unknown): Record<string, unknown> | null {
   const r = (args as Record<string, unknown> | null | undefined)?.[CHAVE_DO_RETRATO];
   return r && typeof r === "object" && !Array.isArray(r) ? r as Record<string, unknown> : null;
+}
+
+/** Retorno F3 (P7): o casoAmarrado de uma linha de ai_operator_sessions; só existe com a marca retorno_amarrada. */
+export function casoAmarradoDaSessao(
+  sessao: { metadata?: unknown; client_id?: string | null; vessel_id?: string | null } | null | undefined,
+): ToolCtx["casoAmarrado"] {
+  if ((sessao?.metadata as Record<string, unknown> | null | undefined)?.retorno_amarrada !== true) return undefined;
+  return { client_id: sessao?.client_id ?? null, vessel_id: sessao?.vessel_id ?? null };
 }
 
 /** Quem pediu a ação que ficou pendente. */
