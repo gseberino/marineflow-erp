@@ -1067,7 +1067,7 @@ export const whatsappTools: ToolDef[] = [
       }
       const rotuloDoc = `${doc.rotulo} ${doc.numero}`;
       if (envio.deduplicated) {
-        return { ok: true, deduplicated: true, aviso: `Este mesmo PDF (${rotuloDoc}) já foi enviado hoje para este cliente; não reenviei.`, destino_chave8: digitos.slice(-8), ...validade };
+        return { ok: true, deduplicated: true, aviso: `Este mesmo PDF (${rotuloDoc}) já foi enviado hoje para este cliente; não reenviei.`, destino_chave8: digitos.slice(-8), ...validade, ...(modoTeste ? { desviado_para_teste: true } : {}) };
       }
       await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: `${marca} ${legenda}`, status: "sent" });
       // Modo de teste (calculado lá em cima): dizer "chegou ao cliente" seria fingir.
@@ -1092,6 +1092,8 @@ export const whatsappTools: ToolDef[] = [
         ...(g.avisos.length ? { avisos_estilo: g.avisos } : {}),
         destino_chave8: digitos.slice(-8),
         ...validade,
+        // Retorno F3: sem isto, o cartão diria "PDF enviado a Ana" e fecharia o caso com o PDF no número de teste.
+        ...(modoTeste ? { desviado_para_teste: true } : {}),
       };
     },
   },

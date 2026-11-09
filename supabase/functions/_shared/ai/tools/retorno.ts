@@ -22,7 +22,7 @@ import { tipoDoSeletor, TIPOS_DE_UNIDADE } from "../../unidade.ts";
 import { guardaDeEnvio } from "../comms/send-guard.ts";
 import { normalizarTermo, resolverItens } from "../keyword-resolver.ts";
 import { servicoComMesmoNome } from "./products.ts";
-import { brl, montarOrcamento, qtd } from "./quote-builder.ts";
+import { brl, montarOrcamento, qtd, recusaDoTitulo } from "./quote-builder.ts";
 import { lerRetrato, type ToolCtx, type ToolDef } from "./registry.ts";
 import { criarUnidadeSemDuplicado } from "./vessels.ts";
 import { retratoDoEnvio, sendWhatsapp, whatsappTools } from "./whatsapp.ts";
@@ -118,7 +118,8 @@ async function destinoDoCaso(ctx: ToolCtx, n: unknown): Promise<Destino | null> 
 }
 
 async function lerCaso(args: Record<string, unknown>, ctx: ToolCtx): Promise<Record<string, unknown>> {
-  const { data, error } = await ctx.admin.rpc("retorno_ver_caso_para_modelo", { p_n: args.n, p_autor: ctx.userId });
+  // A marca vai à sessão deste turno: a do cartão pode já ter girado, e o próximo turno do Max lê a sua (erp-mcp).
+  const { data, error } = await ctx.admin.rpc("retorno_ver_caso_para_modelo", { p_n: args.n, p_autor: ctx.userId, p_sessao: ctx.sessaoId ?? null });
   if (error || !data) return { error: "Não consegui ler o caso agora." };
   const caso = data as { erro?: string; recebidas?: Array<{ hora: string; texto: string | null }> } & Record<string, unknown>;
   if (caso.erro) return { error: caso.erro };
@@ -302,10 +303,18 @@ export function omitirResultadosDoRetorno<T extends Record<string, unknown>>(row
 
 /**
  * Depois de o modelo ler um caso, o envio livre sobe para alto: pede PIN e mostra o número. O orçamento livre também: o modelo
- * pode ter lido texto de cliente, e o ORÇ só nasce com PIN (F3, P7).
+ * pode ter lido texto de cliente, e o ORÇ só nasce com PIN (F3, P7). create_service_order é a mesma porta quando abre orçamento.
  */
-export function riscoDoEnvioLivre<R extends string>(nome: string, risco: R, sessaoAmarrada: boolean | undefined): R | "high" {
-  return (nome === "send_whatsapp_message" || nome === "create_quote_from_items") && sessaoAmarrada ? "high" : risco;
+export function riscoDoEnvioLivre<R extends string>(
+  nome: string,
+  risco: R,
+  sessaoAmarrada: boolean | undefined,
+  args?: Record<string, unknown> | null,
+): R | "high" {
+  if (!sessaoAmarrada) return risco;
+  if (nome === "send_whatsapp_message" || nome === "create_quote_from_items") return "high";
+  if (nome === "create_service_order" && (!args?.status || args.status === "draft")) return "high";
+  return risco;
 }
 
 // ─── Orçamento pelo cartão (F3, P8) ─────────────────────────────────────────────────────────────────────────────────────
@@ -402,7 +411,7 @@ export async function orcarEEnviar(o: OrcamentoDoCartao, ctx: ToolCtx, deps: Dep
     // O PIN foi sobre o total da proposta, não sobre o que a gravação produziu. R$ 0,01 por linha cobre só o meio centavo
     // entre o round do numeric e o r2 do JavaScript.
     if (Math.abs(Number(so.total) - Number(pre.total)) > 0.01 * (pre.args.items.length + pre.args.labor.length)) {
-      avisos.push(`${quem}: o ${so.orcamento} ficou com R$ ${so.total} e a proposta dizia R$ ${pre.total}; confira na tela. Nada foi ao cliente.`);
+      avisos.push(`${quem}: o ${so.orcamento} ficou com R$ ${brl(Number(so.total))} e a proposta dizia R$ ${brl(Number(pre.total))}; confira na tela. Nada foi ao cliente.`);
       await soltarItem();
       return avisos;
     }
@@ -413,9 +422,11 @@ export async function orcarEEnviar(o: OrcamentoDoCartao, ctx: ToolCtx, deps: Dep
     return avisos;
   }
 
+  // Só o ramo que cria diz "criado": no PDF de rascunho, o orçamento já existia.
+  const criou = pre.acao === "orcar";
   const v = validarSaida(pre.legenda.texto, pre.legenda.contexto);
   if (!v.ok) {
-    avisos.push(`${quem}: legenda recusada; orçamento ${so.orcamento} criado, nada saiu`);
+    avisos.push(criou ? `${quem}: legenda recusada; orçamento ${so.orcamento} criado, nada saiu` : `${quem}: legenda recusada; o PDF do ${so.orcamento} não saiu`);
     await soltarItem();
     return avisos;
   }
@@ -432,6 +443,13 @@ export async function orcarEEnviar(o: OrcamentoDoCartao, ctx: ToolCtx, deps: Dep
     ctx.validadeDoCartao = undefined;
   }
 
+  // Modo de teste do WhatsApp: o PDF foi ao número de teste. O cliente não recebeu nada, e o caso não fecha como se tivesse recebido.
+  if (envio.desviado_para_teste) {
+    avisos.push(criou ? `${quem}: orçamento ${so.orcamento} criado, mas o PDF foi ao número de teste, não ao cliente` : `${quem}: o PDF do ${so.orcamento} foi ao número de teste, não ao cliente`);
+    await soltarItem();
+    return avisos;
+  }
+
   await rpc(ctx, "retorno_previa_pdf", {
     p_previa: pre.previa_id, p_ok: !envio.error, p_chave: envio.destino_chave8 ?? null,
     p_so: so.service_order_id, p_abertura: pre.abertura_id, p_item: o.item_id ?? null,
@@ -441,9 +459,9 @@ export async function orcarEEnviar(o: OrcamentoDoCartao, ctx: ToolCtx, deps: Dep
     if (envio.error) await soltarItem();
     else await rpc(ctx, "retorno_item_enviado", { p_item: o.item_id, p_ok: true, p_wa_id: null });
   }
-  if (envio.error) avisos.push(`${quem}: orçamento ${so.orcamento} criado, mas o PDF não saiu (${envio.error}); responda pelo celular`);
+  if (envio.error) avisos.push(criou ? `${quem}: orçamento ${so.orcamento} criado, mas o PDF não saiu (${envio.error}); responda pelo celular` : `${quem}: o PDF do ${so.orcamento} não saiu (${envio.error}); responda pelo celular`);
   else if (envio.deduplicated) avisos.push(`PDF do ${so.orcamento} já tinha ido a ${pre.rotulo} hoje; não reenviei.`);
-  else avisos.push(`Orçamento ${so.orcamento} criado e PDF enviado a ${pre.rotulo}.`);
+  else avisos.push(criou ? `Orçamento ${so.orcamento} criado e PDF enviado a ${pre.rotulo}.` : `PDF do ${so.orcamento} enviado a ${pre.rotulo}.`);
   if (envio.aviso_validade) avisos.push(`${quem}: ${envio.aviso_validade}`);
   return avisos;
 }
@@ -729,9 +747,8 @@ export async function planoDaProposta(
   let titulo = ver.titulo || "Orçamento";
   if (typeof args.titulo === "string" && args.titulo.trim()) {
     const t = args.titulo.trim();
-    if (t.length > 120 || /R\$/.test(t) || mascararDadosPessoais(t) !== t) {
-      return { recusa: "⚠️ O título não pode ter valor, documento ou telefone, nem passar de 120 letras: diga de outro jeito." };
-    }
+    const recusaTitulo = recusaDoTitulo(t);
+    if (recusaTitulo) return { recusa: recusaTitulo };
     titulo = t;
   }
 

@@ -632,7 +632,7 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
   });
 
   // Sem JWT de usuário neste canal — sb e admin são o mesmo client service-role.
-  const toolCtx = { sb: admin, admin, userId: appUserId, userRole: (appUser.role as Role) || "unknown", jwt: "", appOrigin: settings.app_public_url || "", settings, sessaoAmarrada: metadata.retorno_amarrada === true, casoAmarrado: casoAmarradoDaSessao(sessionRow) };
+  const toolCtx = { sb: admin, admin, userId: appUserId, userRole: (appUser.role as Role) || "unknown", jwt: "", appOrigin: settings.app_public_url || "", settings, sessaoId: sessionId, sessaoAmarrada: metadata.retorno_amarrada === true, casoAmarrado: casoAmarradoDaSessao(sessionRow) };
 
   // ---- Camada determinística (custo $0): o vocabulário do retorno rápido (F2) ----
   // ANTES da trava e da confirmação: "não 2" rejeitaria o cartão inteiro, e "1 A sim <PIN>" levaria o PIN ao modelo.
@@ -1135,7 +1135,7 @@ async function handleEntregaDoMax(body: Record<string, any>): Promise<Response> 
   }
   // Só aviso: a reserva ainda pode responder. Se ela falhar também, o turno abaixo registra a falha.
   await logEdgeError(admin, { context: "ai-agent", action: "max_falhou", level: "warn", message: `Turno do Claude Max falhou (${job.error_code ?? job.status}); refazendo pelo OpenRouter` });
-  const toolCtx = { sb: admin, admin, userId: appUser.id, userRole: (appUser.role as Role) || "unknown", jwt: "", appOrigin: settings.app_public_url || "", settings, sessaoAmarrada: metadata.retorno_amarrada === true, casoAmarrado: casoAmarradoDaSessao(sessionRow) };
+  const toolCtx = { sb: admin, admin, userId: appUser.id, userRole: (appUser.role as Role) || "unknown", jwt: "", appOrigin: settings.app_public_url || "", settings, sessaoId: sessionId, sessaoAmarrada: metadata.retorno_amarrada === true, casoAmarrado: casoAmarradoDaSessao(sessionRow) };
   return await turnoDoModeloNoWhatsApp({
     admin, sessionId, phoneNormalized, appUser, settings, toolCtx, metadata, effectiveText: texto, permitirMax: false,
   });
@@ -1669,7 +1669,7 @@ servirComCors(async (req) => {
       system,
       messages: toAnthropicMessages(podarHistoricoParaLLM(historyMessages)),
       tools: toolsForRole,
-      toolCtx: { sb, admin, userId, userRole: userRole as Role, jwt, appOrigin, settings, canal: "panel" as const },
+      toolCtx: { sb, admin, userId, userRole: userRole as Role, jwt, appOrigin, settings, canal: "panel" as const, sessaoId: resolvedSessionId },
       sessionId: resolvedSessionId,
       channel: "panel" as const,
       effort: "medium" as const, // painel: trabalho complexo de ERP, tolera mais latência

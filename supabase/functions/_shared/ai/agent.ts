@@ -1139,7 +1139,7 @@ export async function executarChamadaDeTool(
   // confirmação. Só sobe o risco, nunca rebaixa.
   const riscoSemAmarra = foraDoPerfil && riscoDaTool === "low" && !rodaDiretoPelaRede(foraDoPerfil) ? "medium" : riscoDaTool;
   // Retorno F2 (P9): depois de o modelo ler um caso do cartão, o envio livre pede PIN e mostra o número.
-  const effectiveRisk = riscoDoEnvioLivre(tc.name, riscoSemAmarra, amb.toolCtx.sessaoAmarrada);
+  const effectiveRisk = riscoDoEnvioLivre(tc.name, riscoSemAmarra, amb.toolCtx.sessaoAmarrada, tc.input as Record<string, unknown>);
 
   // Autonomia concedida pelo dono para ESTA ação (Onda 2). Ações de dinheiro/destrutivas
   // nunca entram aqui — ver NEVER_AUTONOMOUS. Pela rede também não: a autonomia foi dada

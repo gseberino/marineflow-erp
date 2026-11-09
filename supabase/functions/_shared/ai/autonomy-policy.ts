@@ -23,6 +23,8 @@ export const NEVER_AUTONOMOUS = new Set<string>([
   "retorno_orcar_caso",
   "retorno_cadastrar_unidade",
   "create_quote_from_items",
+  // Revisão da F3: com a sessão amarrada, abrir orçamento por aqui é a mesma porta. Sem amarra segue direto, pelo mesmo motivo do de cima.
+  "create_service_order",
   "register_payment",
   "register_deposit_and_convert",
   "receive_purchase_order",

@@ -80,6 +80,7 @@ export async function handler(req: Request): Promise<Response> {
     ? await admin.from("ai_operator_sessions").select("metadata, client_id, vessel_id").eq("id", sessionId).maybeSingle()
     : { data: null };
   const toolCtx = { sb: admin, admin, userId: usuario.id, userRole: cargo, jwt: "", appOrigin: settings.app_public_url || "", settings, canal,
+    sessaoId: sessionId || undefined,
     sessaoAmarrada: (sessao?.metadata as Record<string, unknown> | null)?.retorno_amarrada === true,
     casoAmarrado: casoAmarradoDaSessao(sessao) };
 

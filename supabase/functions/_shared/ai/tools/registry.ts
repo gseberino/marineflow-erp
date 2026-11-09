@@ -21,6 +21,8 @@ export interface ToolCtx {
   settings: Record<string, string>;
   /** Retorno F2 (P9): o modelo leu um caso do cartão nesta sessão, e o envio livre pede PIN. */
   sessaoAmarrada?: boolean;
+  /** Retorno F3: a sessão deste turno, para a marca de quem leu o caso cair nela e não na sessão em que o cartão nasceu. Nunca vem do modelo. */
+  sessaoId?: string;
   /**
    * Retorno F3 (P7): o cliente e a unidade do caso lido. Serve só à nota "não é o cliente do caso do cartão" no resumo;
    * nenhuma guarda decide por ele, e quem pede orçamento para outro cliente segue com PIN.

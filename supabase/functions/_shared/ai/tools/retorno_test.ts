@@ -363,7 +363,7 @@ Deno.test("total divergente além de R$ 0,01 por linha não chama send e traz os
     const dg = depsFalsos(g, { orcamento: { ok: true, orcamento: "ORÇ-00151", service_order_id: "os-1", total: 8040.04 } });
     const a = await orcarEEnviar(ORC(), g.c, dg.deps);
     assertEquals(g.nomes().includes("enviar_pdf"), false);
-    assertStringIncludes(a[0], "o 1: o ORÇ-00151 ficou com R$ 8040.04 e a proposta dizia R$ 8040; confira na tela. Nada foi ao cliente.");
+    assertStringIncludes(a[0], "o 1: o ORÇ-00151 ficou com R$ 8.040,04 e a proposta dizia R$ 8.040; confira na tela. Nada foi ao cliente.");
     assertEquals(g.chamadas.at(-1)?.fn, "retorno_previa_soltar");
   });
 });
@@ -465,7 +465,7 @@ Deno.test("pdf de rascunho: acao pdf passa o p_so ao preparo, não monta, e envi
     assertEquals(f.nomes().includes("montar"), false);
     assertEquals(f.nomes().includes("retorno_previa_orc_criado"), false);
     assertEquals(d.enviados[0].service_order_id, "os-9");
-    assertEquals(a, ["Orçamento ORÇ-00140 criado e PDF enviado a Ana."]);
+    assertEquals(a, ["PDF do ORÇ-00140 enviado a Ana."]);
   });
 });
 
@@ -965,3 +965,51 @@ Deno.test("retorno_ler_caso: amarra sai da devolutiva e fica no contexto", async
 });
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
+
+
+// ─── Revisão da F3 ──────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Deno.test("retorno_ler_caso marca a sessão do turno, não a do cartão", async () => {
+  const { c, chamadas } = ctxDoCaso({ n: 2, recebidas: [], fatos: {} });
+  c.sessaoId = "sessao-do-turno";
+  await toolsByName.retorno_ler_caso.execute({ n: 2 }, c);
+  assertEquals(chamadas.find((x) => x.fn === "retorno_ver_caso_para_modelo")?.args, { p_n: 2, p_autor: "dono", p_sessao: "sessao-do-turno" });
+  const sem = ctxDoCaso({ n: 2, recebidas: [], fatos: {} });
+  await toolsByName.retorno_ler_caso.execute({ n: 2 }, sem.c);
+  assertEquals(sem.chamadas.find((x) => x.fn === "retorno_ver_caso_para_modelo")?.args.p_sessao, null);
+});
+
+Deno.test("create_service_order de orçamento sobe a risco alto só com a sessão amarrada; OS numerada segue como sempre", () => {
+  assertEquals(riscoDoEnvioLivre("create_service_order", "low", true, {}), "high");
+  assertEquals(riscoDoEnvioLivre("create_service_order", "low", true, { status: "draft" }), "high");
+  assertEquals(riscoDoEnvioLivre("create_service_order", "low", true, { status: "in_progress" }), "low");
+  assertEquals(riscoDoEnvioLivre("create_service_order", "low", false, {}), "low");
+  assertEquals(riscoDoEnvioLivre("create_service_order", "low", undefined, { status: "draft" }), "low");
+  assertEquals(isAutonomyGranted("create_service_order", "high", { ai_autonomy_create_service_order: "auto" }), false);
+});
+
+Deno.test("PDF de rascunho: as frases de falha não dizem que o orçamento foi criado agora", async () => {
+  await comRelogio(MEIO_DIA, async () => {
+    const pdf = { ...PRE_OK, acao: "pdf", numero: "ORÇ-00140", args: undefined, previa_id: null };
+    const orc = ORC({ acao: "pdf", service_order_id: "os-9", numero: "ORÇ-00140", previa_id: null });
+    const f = fluxo({ retorno_previa_preparar: pdf });
+    const d = depsFalsos(f, { envio: { error: "provedor fora" } });
+    assertEquals(await orcarEEnviar(orc, f.c, d.deps), ["o 1: o PDF do ORÇ-00140 não saiu (provedor fora); responda pelo celular"]);
+
+    const g = fluxo({ retorno_previa_preparar: { ...pdf, legenda: { ...LEGENDA, contexto: { ...CONTEXTO_LEGENDA, audiencia: "equipe" } } } });
+    const dg = depsFalsos(g);
+    assertEquals(await orcarEEnviar(orc, g.c, dg.deps), ["o 1: legenda recusada; o PDF do ORÇ-00140 não saiu"]);
+  });
+});
+
+Deno.test("WhatsApp em modo de teste: o dono sabe que foi ao número de teste, e o caso fica aberto", async () => {
+  await comRelogio(MEIO_DIA, async () => {
+    const f = fluxo({ retorno_previa_preparar: PRE_OK });
+    const d = depsFalsos(f, { envio: { ok: true, destino_chave8: "87654321", desviado_para_teste: true } });
+    const a = await orcarEEnviar(ORC(), f.c, d.deps);
+    assertEquals(a, ["o 1: orçamento ORÇ-00151 criado, mas o PDF foi ao número de teste, não ao cliente"]);
+    assertEquals(f.nomes().includes("retorno_previa_pdf"), false);
+    assertEquals(f.nomes().includes("retorno_item_enviado"), false);
+    assertEquals(f.chamadas.at(-1)?.fn, "retorno_previa_soltar");
+  });
+});
