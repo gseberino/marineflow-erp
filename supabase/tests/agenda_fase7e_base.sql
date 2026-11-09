@@ -849,7 +849,9 @@ declare
   c_novas constant text[] := array['_agenda_margem_modo', '_agenda_margem_modo_cru', '_agenda_credibilidade', '_agenda_z', '_agenda_temporada', '_agenda_medidas_compra_so_muda', '_agenda_dias_com_vies', '_agenda_vies_dono_da_os', '_agenda_aprender_vies',
     -- as novas do P2 (20261111100100), sem marca porque são inteiras da 7e
     '_agenda_margem_tipo_os', '_agenda_margem_dp_bruto', '_agenda_margem_dono_e_pessoa', '_agenda_material_critico', '_agenda_margem_em_uso', '_agenda_vies_da_os', '_agenda_tempo_interno_compra',
-    '_agenda_aprender_congelar_marcacao', 'agenda_medir_compra', '_agenda_aprender_medir_compras'];
+    '_agenda_aprender_congelar_marcacao', 'agenda_medir_compra', '_agenda_aprender_medir_compras',
+    -- as novas do P4 (20261111100300), sem marca porque são inteiras da 7e
+    '_agenda_aprender_folga_semana', '_agenda_carga_da_semana', '_agenda_os_urgente'];
 begin
   -- nenhuma função de antes lê as colunas nem chama as funções novas. Quem vier depois nesta etapa: a função recriada leva a marca -- FASE 7e (sai daqui sozinha); a função NOVA, sem marca, entra em c_novas, pelo nome.
   select string_agg(p.proname, ',' order by p.proname) into v_dif

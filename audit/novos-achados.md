@@ -3899,3 +3899,20 @@ porque só o dono pode preenchê-las.
 - **Efeito:** a OS aprovada sem viés e com dupla ligada passa de total 10 para 12 depois de aprovada: `restantes` passa a 2, e o motor pode marcar 2 meios-dias a mais (replay real, `f7e/p3/freio3-aprova.mjs`, âncora do P2: 6/10 → 6/12, 10 meios publicados).
 - **Na Fase 7e:** a aprovada COM o viés fica certa (`aprovado_com_vies` guarda o total publicado); a sem o viés continua como a 7b deixou, porque mudar seria mudar a sombra (e o P3 não mexe no que existe sem o viés).
 - **Origem:** Fase 7e, P3.
+
+### [NOVO-agenda-160] Com a folga da semana ligada, 2 textos ao dono e a cor da barra ainda falam a carga fixa (o motor marca menos)
+
+- **Encontrado em:** Agenda de Produção, Fase 7e, P4 (09/11/2026), a conferência que R7.N e o achado 150 pediram: se algum texto afirma o número. Leitura do código e do `pg_proc`, não rodado em ligado.
+- **Onde:** `agenda_capacidade_semanal.comprometivel` (`round(técnicos × carga_max + parte do dono, 2)`) alimenta `agenda_textos_do_fechamento` ("(~%s por semana, contando você)", `20261109100200`) e `_agenda_resumo` ("no ritmo de ~%s diárias de equipe por semana", `20261024160500`); `agenda_tela_semana` pinta a barra de verde até `cf.carga_max` (`20261026100600`, BarraDeCarga); `_agenda_vigia_backlog` compara o backlog com o comprometível.
+- **Efeito:** só com `modo_folga_semana` ligado de verdade: o dono lê a capacidade com 80% e o motor marca 70 a 84%. Com 1 técnico, é 1 meio-dia a mais no texto do que o motor marca por semana (8 contra 7). A barra fica verde numa semana que já passou da carga daquela semana. Em sombra e no freio, nada muda.
+- **O que NÃO é afetado:** `agenda_livre_de_verdade` lê `teto_equipe` do contexto e já sai com a carga da semana (`_agenda_grade_de_agora` → `_agenda_contexto`).
+- **Na Fase 7e:** não recriadas de propósito (R7.N; fora da R7.1). A menor correção é ler `_agenda_carga_da_semana` com o portão em `agenda_capacidade_semanal`, numa decisão à parte antes do "OK ligar a folga da semana": o texto diz "~", e o erro é de 1 meio-dia. Pedido no retorno do P4.
+- **Origem:** Fase 7e, P4.
+
+### [NOVO-agenda-161] A proposta aberta é revalidada com a carga de agora, e a folga pode ter andado depois que ela saiu
+
+- **Encontrado em:** Agenda de Produção, Fase 7e, P4 (09/11/2026), lendo `agenda_aplicar` → `agenda_validar` → `_agenda_validar_itens`. Não rodado.
+- **Onde:** a regra 6 lê `_agenda_carga_da_semana` na hora de aplicar. O passo da rodada (P7) pode mudar `folga_semana` em `em_uso` entre o motor e a aprovação.
+- **Efeito:** só em ligado: uma proposta montada com a carga da semana em 75% e aprovada depois que ela caiu para 70% volta com "Não mudei nada: A equipe passaria do limite da semana…". É a mesma saída de quando o dono muda `carga_max` ou a agenda anda (o motor refaz a proposta); nada grava errado.
+- **Na Fase 7e:** registrado, sem mudança: a folga anda no máximo 0,05 por rodada e a proposta tem validade curta.
+- **Origem:** Fase 7e, P4.
