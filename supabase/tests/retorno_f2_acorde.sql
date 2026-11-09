@@ -20,8 +20,8 @@ begin
   values (public._agenda_chave_telefone(p_fone), p_fone, '47', 'cliente', '{"papel": "cliente"}', v_cl, v_msg, v_msg,
           p_aberta, p_aberta, p_aberta, p_aberta, 'recibo', 'recibo_cliente', 'aberta', 'ligado', p_sinais)
   returning id into v_id;
-  insert into public.retorno_mensagens (whatsapp_message_id, abertura_id, chave, recebida_em, gravada_em, corpo_hash, pede_resposta)
-  values (v_msg, v_id, public._agenda_chave_telefone(p_fone), p_aberta, p_aberta, 'x', true);
+  insert into public.retorno_mensagens (whatsapp_message_id, abertura_id, chave, recebida_em, gravada_em, corpo_hash, pede_resposta, sinais)
+  values (v_msg, v_id, public._agenda_chave_telefone(p_fone), p_aberta, p_aberta, 'x', true, p_sinais);
   return v_id;
 end $f$;
 
@@ -198,8 +198,10 @@ begin
     end if;
     perform public.retorno_vigia_cartao(c_d3 + interval '10 hours 1 minute');
     perform public.retorno_vigia_cartao(c_d3 + interval '10 hours 2 minutes');
-    select * into v_sa from public.retorno_saidas s where s.id = v_s3;
-    if v_sa.estado <> 'cancelada' or v_sa.motivo <> 'guardado_no_portao' then
+    -- o relógio empata pelo id: um dos dois é o 3º do dia
+    select * into v_sa from public.retorno_saidas s where s.id in (v_s2, v_s3) and s.estado = 'cancelada';
+    if not found or v_sa.motivo <> 'guardado_no_portao'
+       or (select count(*) from public.retorno_saidas s where s.id in (v_s, v_s2, v_s3) and s.estado = 'enviada') <> 2 then
       raise exception '2b: %', to_jsonb(v_sa);
     end if;
     if (select a.situacao from public.avisos_do_dono a where a.id = (v_sa.dados ->> 'aviso_id')::uuid) <> 'guardado' then
@@ -271,7 +273,9 @@ begin
     v_r := public.retorno_pegar(c_d7 + interval '10 hours');
     select * into v_sa from public.retorno_saidas s where s.id = v_s;
     if v_sa.dados -> 'prazo' ->> 'fonte' is distinct from 'acorde' or v_sa.dados -> 'prazo' ->> 'hora' is distinct from '19h' then
-      raise exception '6a: (%) / %', v_r, to_jsonb(v_sa);
+      raise exception '6a: sinais % / acordes % / avisos %', (select a.sinais from public.retorno_aberturas a where a.id = v_caso),
+        (select jsonb_agg(jsonb_build_object('estado', x.estado, 'motivo', x.motivo, 'dados', x.dados)) from public.retorno_saidas x where x.abertura_id = v_caso and x.tipo = 'acorde'),
+        (select jsonb_agg(jsonb_build_object('dia', y.dia, 'situacao', y.situacao, 'motivo', y.motivo, 'assunto', y.assunto)) from public.avisos_do_dono y where y.dia = '2027-01-28');
     end if;
     update public.retorno_saidas s set dados = s.dados - 'aguarda_cartao' where s.tipo = 'acorde' and s.dados ? 'aguarda_cartao';
     perform public.aviso_registrar(jsonb_build_object('phone', v_phone, 'modo', v_modo, 'fonte', 'me_acorde', 'chave', 'teste-vaga-9513',
