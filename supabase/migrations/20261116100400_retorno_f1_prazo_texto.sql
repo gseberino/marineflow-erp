@@ -620,7 +620,7 @@ begin
         if coalesce(v_valor, '') = '' then
           raise exception using errcode = '22023', message = 'retorno_texto: falta ' || v_parte;
         end if;
-        if v_valor !~ case v_parte when 'quando' then c_dia else c_hora end then
+        if v_valor !~ (case v_parte when 'quando' then c_dia else c_hora end) then
           raise exception using errcode = '22023', message = 'retorno_texto: valor fora da lista em ' || v_parte;
         end if;
       end loop;
