@@ -213,10 +213,10 @@ begin
     perform pg_temp.replay('sombra');
     -- qui 29/10 10:07: só os de todo tique (antes das 16:45)
     r := public.agenda_gestor_rodar(c_d29, pg_temp.em(c_d29, '10:07'));
-    v_res := pg_temp.ok(v_res, 'R1c antes das 16:45: só os passos de todo tique (vetos; o encaixe, do 7a P8, roda; o sinal, do 7a P12, e o bem, do 7a P13, rodam e em teste pulam; o puxar ainda não existe: pulado), nenhum diário',
+    v_res := pg_temp.ok(v_res, 'R1c antes das 16:45: só os passos de todo tique (vetos; o encaixe, do 7a P8, roda; o sinal, do 7a P12, e o bem, do 7a P13, rodam e em teste pulam; o puxar, da 7e P4b, nasce desligado), nenhum diário',
       (r ->> 'rodou')::boolean and not (r ->> 'diaria')::boolean
       and r #> '{contagens,vetos}' ? 'aplicadas'
-      and r #>> '{contagens,puxar,motivo}' = 'ainda não existe'
+      and r #>> '{contagens,puxar,rodou}' = 'false' and r #>> '{contagens,puxar,modo}' = 'desligado'
       and coalesce(r #>> '{contagens,encaixe,motivo}', '') <> 'ainda não existe'
       -- (7a P12 e P13: os passos sinal e bem existem; em teste eles pulam: o gestor não marca sozinho)
       and r #>> '{contagens,sinal,pulado}' = 'true' and r #>> '{contagens,sinal,motivo}' = 'o gestor não marca sozinho'
@@ -246,9 +246,18 @@ begin
     v_res := pg_temp.ok(v_res, 'R1f no sábado (não é dia útil) só os de todo tique', (r ->> 'rodou')::boolean and not (r ->> 'diaria')::boolean,
       left(r::text, 300));
 
+    -- o passo que ainda não existe é pulado (com a 7e P4b o puxar já existe: aqui ele some só neste bloco)
+    begin
+      drop function public._agenda_gestor_puxar(date, timestamptz);
+      r := public.agenda_gestor_rodar(c_d30, pg_temp.em(c_d30, '10:07'));
+      v_res := pg_temp.ok(v_res, 'R1f2 o passo que ainda não existe é pulado, e a rodada segue', r #>> '{contagens,puxar,motivo}' = 'ainda não existe' and r #>> '{contagens,puxar,pulado}' = 'true', left(r::text, 300));
+      raise exception 'desfaz' using errcode = 'P0099';
+    exception when sqlstate 'P0099' then null;
+    end;
+
     -- o erro de um passo vai a app_error_logs e a rodada segue (o puxar do 7e, de mentira, que falha)
     begin
-      execute $p$create function public._agenda_gestor_puxar(p_hoje date, p_agora timestamptz) returns jsonb language plpgsql as $b$
+      execute $p$create or replace function public._agenda_gestor_puxar(p_hoje date, p_agora timestamptz) returns jsonb language plpgsql as $b$
                  begin raise exception 'quebrou de propósito' using errcode = 'XX000'; end $b$$p$;
       v_n := (select count(*) from public.app_error_logs where action = 'gestor:puxar');
       r := public.agenda_gestor_rodar(c_d30, pg_temp.em(c_d30, '16:52'));
@@ -263,7 +272,7 @@ begin
     end;
     -- o tempo estourado (query_canceled): registra, grava a rodada (parou_no) e encerra, sem os diários
     begin
-      execute $p$create function public._agenda_gestor_puxar(p_hoje date, p_agora timestamptz) returns jsonb language plpgsql as $b$
+      execute $p$create or replace function public._agenda_gestor_puxar(p_hoje date, p_agora timestamptz) returns jsonb language plpgsql as $b$
                  begin raise exception 'canceling statement due to statement timeout' using errcode = '57014'; end $b$$p$;
       v_n := (select count(*) from public.app_error_logs where action = 'gestor:puxar');
       r := public.agenda_gestor_rodar(c_d30, pg_temp.em(c_d30, '16:52'));

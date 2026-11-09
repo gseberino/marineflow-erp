@@ -846,7 +846,7 @@ do $b8$
 declare
   v_res jsonb := '[]'::jsonb;
   v_dif text;
-  c_novas constant text[] := array['_agenda_margem_modo', '_agenda_margem_modo_cru', '_agenda_credibilidade', '_agenda_z', '_agenda_temporada', '_agenda_medidas_compra_so_muda', '_agenda_dias_com_vies', '_agenda_vies_dono_da_os', '_agenda_aprender_vies',
+  c_novas constant text[] := array['_agenda_gestor_puxar', '_agenda_margem_modo', '_agenda_margem_modo_cru', '_agenda_credibilidade', '_agenda_z', '_agenda_temporada', '_agenda_medidas_compra_so_muda', '_agenda_dias_com_vies', '_agenda_vies_dono_da_os', '_agenda_aprender_vies',
     -- as novas do P2 (20261111100100), sem marca porque são inteiras da 7e
     '_agenda_margem_tipo_os', '_agenda_margem_dp_bruto', '_agenda_margem_dono_e_pessoa', '_agenda_material_critico', '_agenda_margem_em_uso', '_agenda_vies_da_os', '_agenda_tempo_interno_compra',
     '_agenda_aprender_congelar_marcacao', 'agenda_medir_compra', '_agenda_aprender_medir_compras',

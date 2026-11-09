@@ -3924,3 +3924,10 @@ porque só o dono pode preenchê-las.
 - **Efeito:** só em ligado. Medido no `tempo_compra` (F1v22 de `agenda_fase7e_folga.sql`: em_uso 4, calculado nulo: medindo, em_uso nulo). Pelo mesmo caminho do gravador, por leitura e não rodado: `vies`. O `vies` só mexe em OS ainda não marcada e o `tempo_compra` no "compre até" das seguintes; a folga mexia na carga de todas as semanas, e por isso entrou primeiro.
 - **Na Fase 7e:** não corrigido: os textos de ação desses itens afirmam medida ("Aprendi com as OS concluídas"), e a volta por passo pede frase própria de cada um. A saída menor é a mesma do bloco da folga no gravador, item a item, se o dono ligar esses modos.
 - **Origem:** Fase 7e, P4 (correção da conferência).
+
+### [NOVO-agenda-170] A sombra diária do gestor apaga o puxar (e o encaixe) do diário do dia, se rodar depois
+- **Onde:** `_agenda_gestor_sombra` (`20261031100750_agenda_fase7a_revisao.sql:1465`, a definição mais nova; a montagem do objeto, em `:1619`), passo diário do gestor.
+- **O que acontece:** por leitura, não rodado: a sombra monta o objeto novo e só guarda a chave `revisao` do que já havia em `agenda_gestor_dia.sombra`. O `puxar` (e o `encaixe` da 7a) escritos antes no mesmo dia somem. Com os padrões a ordem é certa: os diários no 1º tique a partir de `gestor_hora_revisao` (16:45) e o puxar a partir de `puxar_hora` (17:30), no tique seguinte. Só acontece se o dono puser `puxar_hora` antes de `gestor_hora_revisao` (o CHECK deixa de 12:00 a 19:00) ou se os diários atrasarem para depois das 17:30 (uma rodada que parou no tempo).
+- **Efeito:** só em teste, e só no diário: nenhum número nem mensagem. A `contagens.puxar` de `agenda_vigia_rodadas` fica, com o mesmo conteúdo.
+- **Na Fase 7e:** não corrigido. `_agenda_gestor_sombra` não está na R7.1 (lista fechada do que a etapa recria), e hoje ninguém lê `sombra.puxar`. A saída menor, quando alguém passar a ler: guardar também as chaves que não são da sombra no merge de `:1619`.
+- **Origem:** Fase 7e, P4b.

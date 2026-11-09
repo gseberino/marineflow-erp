@@ -1112,6 +1112,8 @@ insert into _definer_da_agenda values ('_agenda_aprender_congelar_marcacao'), ('
 insert into _definer_da_agenda values ('_agenda_aprender_vies');
 -- Fase 7e (P4): o passo da folga da semana da rodada do aprendizado (definer, sem grant nenhum: quem o chama é agenda_aprender, no P7).
 insert into _definer_da_agenda values ('_agenda_aprender_folga_semana');
+-- Fase 7e (P4b): o passo puxar do job agenda-gestor (definer, sem grant nenhum: quem o chama é agenda_gestor_rodar).
+insert into _definer_da_agenda values ('_agenda_gestor_puxar');
   -- FASE 7f: fim
   -- FASE 7e: (7e P1, 20261111100000) nenhuma definer nova: o modo, a credibilidade, o z e a temporada são invoker, e o gatilho _agenda_medidas_compra_so_muda só mexe na própria linha. agenda_fase7e_base.sql prova as portas.
   -- FASE 7e: fim
