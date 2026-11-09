@@ -3940,3 +3940,19 @@ porque só o dono pode preenchê-las.
 - **Efeito:** com a classe de 1 OS medida sai "Prazo real: 8 em cada 10 OS terminaram em até 1,00× os dias planejados (1 OS)". Visto no replay real, com razões plantadas (`f7e/p5/leitores.log`). A conta é honesta, e o parêntese diz o n, mas a frase afirma uma proporção que 1 OS não tem (classe 9 de R7.12).
 - **Na Fase 7e:** não muda no P5, que pela R7.13 só cria as 2 funções. O texto só aparece ao dono quando o P7 puser o passo na rodada e mostrar o bloco; é lá que se decide a forma para poucas OS. Sem efeito hoje: o passo não tem chamador e a medição de produção dá 0 razões.
 - **Origem:** Fase 7e, P5.
+
+### [NOVO-agenda-190] Quando o prazo aprendido do fornecedor muda, o "compre até" já gravado é recontado, inclusive em OS marcada
+
+- **Encontrado em:** Agenda de Produção, Fase 7e, P6 (09/11/2026), por leitura de código; não rodado.
+- **Onde:** `_agenda_gestor_compra_conta` (7a P10): `v_mesma` compara `compre_ate_base.prazo` com o prazo de hoje do fornecedor. O tempo interno agora fica congelado na OS marcada (R7.5-15, P6); o prazo do fornecedor continua sendo o de agora.
+- **Efeito:** se `fornecedor_prazo` em uso mudar (a Fase 6 já fazia isso pelas notas; com o P6 ligado, também pelas compras), o "compre até" de OS já com compromisso anda junto. §3.1-10 ("o publicado não muda pelo aprendizado") só foi aplicada ao tempo interno.
+- **Na Fase 7e:** não mudado: é comportamento de antes da etapa, e congelar o prazo por linha é mais que o P6 pediu. Registrado para decisão futura.
+- **Origem:** Fase 7e, P6.
+
+### [NOVO-agenda-191] No tique diário do gestor, o "compre até" pode ficar um tique atrás do que foi remarcado no mesmo tique
+
+- **Encontrado em:** Agenda de Produção, Fase 7e, P6 (09/11/2026), replay real (`f7e/p6/grava.mjs` e `diag1.mjs`), igual com e sem o P6.
+- **Onde:** `agenda_gestor_rodar`, ordem dos passos (`c_tique` antes de `c_diarios`, e em `c_diarios` `compre_ate` antes de `revisao`).
+- **Efeito:** logo depois do 1º tique diário, 7 de 7 itens da carteira real saem com `muda` verdadeiro na conta; no tique seguinte (o passo roda em todo tique com `compre_ate` fora de desligado) o gravado acompanha e `muda` volta a falso. Atraso de um tique, sem efeito no dono.
+- **Na Fase 7e:** não mudado (é da 7a). A prova de que o gravado fica estável olha depois do 2º tique.
+- **Origem:** Fase 7e, P6.

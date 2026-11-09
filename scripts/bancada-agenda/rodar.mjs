@@ -428,6 +428,8 @@ const FIXTURES_COMO_TEXTO = [
   ['agenda_teste.mig_puxar_fase7e', '../../supabase/migrations/20261111100350_agenda_fase7e_puxar.sql'],
   // Fase 7e (P5): a migration do prazo real (o P0d de agenda_fase7e_promessa.sql confere que ela só cria as 2 funções)
   ['agenda_teste.mig_promessa_fase7e', '../../supabase/migrations/20261111100400_agenda_fase7e_promessa.sql'],
+  // Fase 7e (P6): a migration das compras (o C5 de agenda_fase7e_compras.sql)
+  ['agenda_teste.mig_compras_fase7e', '../../supabase/migrations/20261111100500_agenda_fase7e_compras.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */
