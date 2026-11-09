@@ -138,7 +138,7 @@ declare
   v_os uuid; v_os2 uuid;
   v_cartao uuid;
   v_ip uuid; v_ip2 uuid;
-  v_ses uuid;
+  v_ses uuid; v_ses2 uuid;
   v_r jsonb; v_r2 jsonb;
   v_t text; v_h text;
   v_n integer;
@@ -195,6 +195,7 @@ begin
     if not (v_r ->> 'precisa_pin')::boolean or v_r ->> 'texto' not like 'Vou mandar a %: ''%''. *sim <PIN>* manda.' then
       raise exception '3a: L (%)', v_r;
     end if;
+    perform pg_temp.f3d_igual('3a2 L segue valendo com o PIN', v_r ->> 'pin_nao_vale', null);
     perform pg_temp.f3d_igual('3b acao depois do L', (select i.acao_sim from public.retorno_cartao_itens i where i.id = v_ip), null);
     perform pg_temp.f3d_igual('3c modelo', (select i.modelo_tipo from public.retorno_cartao_itens i where i.id = v_ip), 'modelo_ver_no_local');
     perform pg_temp.f3d_igual('3d previa intacta', (select i.previa_id::text from public.retorno_cartao_itens i where i.id = v_ip), v_pv::text);
@@ -204,6 +205,7 @@ begin
     if v_r ->> 'texto' not like '%ORÇ-D001%' then
       raise exception '1c: B devia usar o outro parecido: %', v_r;
     end if;
+    perform pg_temp.f3d_igual('1c2 o PIN junto da letra não vale', v_r ->> 'pin_nao_vale', 'true');
     perform pg_temp.f3d_igual('3e acao depois do B', (select i.acao_sim from public.retorno_cartao_itens i where i.id = v_ip), 'orcar');
     select * into v_prev from public.retorno_previa where id = v_pv;
     perform pg_temp.f3d_igual('1d anterior descartada', v_prev.estado, 'descartada');
@@ -215,6 +217,7 @@ begin
     update public.retorno_config set previa_modo = 'sombra' where id;
     v_r := pg_temp.f3d_letra(1, 'B', v_dono);
     perform pg_temp.f3d_igual('1g frase desligado', v_r ->> 'texto', 'O orçamento pelo cartão está desligado: nada mudou.');
+    perform pg_temp.f3d_igual('1g2 PIN não vale sem mudança', v_r ->> 'pin_nao_vale', 'true');
     if (select p.estado from public.retorno_previa p where p.id = v_pv) <> 'proposta' then
       raise exception '1h: mudou a proposta com a flag desligada';
     end if;
@@ -271,6 +274,7 @@ begin
     perform pg_temp.f3d_igual('14a C e F', (select string_agg(o ->> 'letra', ',' order by o ->> 'letra') from public.retorno_cartao_itens i, jsonb_array_elements(i.opcoes) o where i.id = v_ip), 'C,F,L');
     v_h := (select p.hash from public.retorno_previa p where p.id = v_pv);
     v_r := pg_temp.f3d_letra(1, 'F', v_dono);   -- a 2ª da lista é a Vaga
+    perform pg_temp.f3d_igual('17a2 PIN não vale na letra de unidade', v_r ->> 'pin_nao_vale', 'true');
     perform pg_temp.f3d_igual('17a abertura', (select a.unidade_escolhida_id::text from public.retorno_aberturas a where a.id = v_caso), v_un::text);
     select * into v_prev from public.retorno_previa where id = v_pv;
     perform pg_temp.f3d_igual('17b vessel', v_prev.vessel_id::text, v_un::text);
@@ -391,6 +395,16 @@ begin
     end if;
     update public.retorno_config set previa_modo = 'ligado' where id;
 
+    -- 5e2. A reversão documentada: as duas flags desligadas com o cartão vivo. Item fora e "foi desligado", não "mudou".
+    v_cartao := pg_temp.f3d_cartao(c_agora);
+    update public.retorno_config set previa_modo = 'desligado', previa_ditado_ligado = false where id;
+    v_r := public.retorno_cartao_executar(v_cartao, v_dono, c_agora);
+    if (v_r ->> 'aviso') not like '%o 1 não saiu, porque o orçamento pelo cartão foi desligado; não criei nada%' or jsonb_array_length(v_r -> 'orcamentos') <> 0 then
+      raise exception '5e2: reversão completa: %', v_r;
+    end if;
+    perform pg_temp.f3d_igual('5e3 item fora', (select i.estado from public.retorno_cartao_itens i where i.cartao_id = v_cartao and i.n = 1), 'fora');
+    update public.retorno_config set previa_modo = 'ligado', previa_ditado_ligado = true where id;
+
     -- 18 (cont.). Um modelo e um orçamento: "Vai sair 1: rótulo do modelo", sem o rótulo do orçamento.
     perform pg_temp.f3d_fechar(array[v_caso]);
     v_cl := pg_temp.f3d_cli('Carla Modelo F3', 107);
@@ -428,17 +442,17 @@ begin
 
     -- Passou: devolutiva única, com args do construtor, sem validade vinda do modelo.
     v_r := public.retorno_previa_preparar(v_pv, v_ip, v_dono, c_agora);
-    if not (v_r ->> 'ok')::boolean or v_r ->> 'acao' <> 'orcar' or v_r ->> 'previa_id' <> v_pv::text or v_r ->> 'abertura_id' <> v_caso::text
-       or (v_r ->> 'total')::numeric <> 1800 or v_r ->> 'chave8' <> public._agenda_chave_telefone('5547900700109')
-       or v_r ->> 'validade_data' <> '2026-11-17' or v_r -> 'legenda' ->> 'validade_data' <> '2026-11-17'
-       or (v_r -> 'args' ->> 'client_id')::uuid <> v_cl or (v_r -> 'args' ->> 'vessel_id')::uuid <> v_un or v_r -> 'args' ->> 'origem' <> 'retorno_previa'
-       or v_r -> 'args' ->> 'title' <> 'Baterias' then
+    if (v_r ->> 'ok')::boolean is distinct from true or v_r ->> 'acao' is distinct from 'orcar' or v_r ->> 'previa_id' is distinct from v_pv::text or v_r ->> 'abertura_id' is distinct from v_caso::text
+       or (v_r ->> 'total')::numeric is distinct from 1800 or v_r ->> 'chave8' is distinct from public._agenda_chave_telefone('5547900700109')
+       or v_r ->> 'validade_data' is distinct from '2026-11-17' or v_r -> 'legenda' ->> 'validade_data' is distinct from '2026-11-17'
+       or (v_r -> 'args' ->> 'client_id')::uuid is distinct from v_cl or (v_r -> 'args' ->> 'vessel_id')::uuid is distinct from v_un or v_r -> 'args' ->> 'origem' is distinct from 'retorno_previa'
+       or v_r -> 'args' ->> 'title' is distinct from 'Baterias' then
       raise exception '6a: passou: %', v_r;
     end if;
-    if jsonb_array_length(v_r -> 'args' -> 'items') <> 1 or v_r -> 'args' -> 'items' -> 0 ->> 'keyword' <> 'Bateria' or (v_r -> 'args' -> 'items' -> 0 ->> 'unit_price')::numeric <> 500
-       or (v_r -> 'args' -> 'items' -> 0 ->> 'quantity')::numeric <> 2 or (v_r -> 'args' -> 'items' -> 0 ->> 'product_id')::uuid <> v_prod
-       or jsonb_array_length(v_r -> 'args' -> 'labor') <> 1 or v_r -> 'args' -> 'labor' -> 0 ->> 'description' <> 'Instalação'
-       or (v_r -> 'args' -> 'labor' -> 0 ->> 'price')::numeric <> 800 or v_r -> 'args' -> 'labor' -> 0 ->> 'billing_unit' <> 'hour' or (v_r -> 'args' -> 'labor' -> 0 ->> 'service_id')::uuid <> v_serv then
+    if jsonb_array_length(v_r -> 'args' -> 'items') is distinct from 1 or v_r -> 'args' -> 'items' -> 0 ->> 'keyword' is distinct from 'Bateria' or (v_r -> 'args' -> 'items' -> 0 ->> 'unit_price')::numeric is distinct from 500
+       or (v_r -> 'args' -> 'items' -> 0 ->> 'quantity')::numeric is distinct from 2 or (v_r -> 'args' -> 'items' -> 0 ->> 'product_id')::uuid is distinct from v_prod
+       or jsonb_array_length(v_r -> 'args' -> 'labor') is distinct from 1 or v_r -> 'args' -> 'labor' -> 0 ->> 'description' is distinct from 'Instalação'
+       or (v_r -> 'args' -> 'labor' -> 0 ->> 'price')::numeric is distinct from 800 or v_r -> 'args' -> 'labor' -> 0 ->> 'billing_unit' is distinct from 'hour' or (v_r -> 'args' -> 'labor' -> 0 ->> 'service_id')::uuid is distinct from v_serv then
       raise exception '6b: args: %', v_r -> 'args';
     end if;
     if v_r ? 'numero' or v_r -> 'legenda' ->> 'texto' like '%FRASE-MARCADA%' then
@@ -452,7 +466,7 @@ begin
     -- Regra 0 (flag), com rótulo e prefixo; item vai a fora.
     update public.retorno_config set previa_modo = 'sombra' where id;
     v_r := public.retorno_previa_preparar(v_pv, v_ip, v_dono, c_agora);
-    if v_r ->> 'motivo' <> 'desligado' or v_r ->> 'frase' <> 'não saiu, porque o orçamento pelo cartão foi desligado; não criei nada' or v_r ->> 'rotulo' is null then
+    if v_r ->> 'motivo' is distinct from 'desligado' or v_r ->> 'frase' is distinct from 'não saiu, porque o orçamento pelo cartão foi desligado; não criei nada' or v_r ->> 'rotulo' is null then
       raise exception '6e: regra 0: %', v_r;
     end if;
     perform pg_temp.f3d_igual('6f item fora', (select i.estado from public.retorno_cartao_itens i where i.id = v_ip), 'fora');
@@ -461,7 +475,7 @@ begin
 
     -- Regra 1: só o dono, com p_item nulo e com rótulo (27).
     v_r := public.retorno_previa_preparar(v_pv, null, c_outro, c_agora);
-    if v_r ->> 'motivo' <> 'nao_e_o_dono' or v_r ->> 'frase' <> 'não saiu, porque só o dono pode fazer isso; não criei nada' or v_r ->> 'rotulo' is null then
+    if v_r ->> 'motivo' is distinct from 'nao_e_o_dono' or v_r ->> 'frase' is distinct from 'não saiu, porque só o dono pode fazer isso; não criei nada' or v_r ->> 'rotulo' is null then
       raise exception '6g: regra 1: %', v_r;
     end if;
 
@@ -496,8 +510,8 @@ begin
     -- O telefone segue achando o cliente (quem_escreve), mas o WhatsApp do cadastro aponta para outro número.
     update public.clients set phone = '(47) 90070-0109', whatsapp = '(47) 90070-4321' where id = v_cl;
     v_r := public.retorno_previa_preparar(v_pv, v_ip, v_dono, c_agora);
-    if v_r ->> 'motivo' <> 'contato_diferente'
-       or v_r ->> 'frase' <> 'não saiu, porque o WhatsApp do cadastro (••4321) não é o número do caso: corrija o cadastro ou mande pelo celular; não criei nada' then
+    if v_r ->> 'motivo' is distinct from 'contato_diferente'
+       or v_r ->> 'frase' is distinct from 'não saiu, porque o WhatsApp do cadastro (••4321) não é o número do caso: corrija o cadastro ou mande pelo celular; não criei nada' then
       raise exception '7a: %', v_r;
     end if;
     if (public._retorno_item_conferir(v_ip, c_agora, true) ->> 'ok')::boolean is distinct from true then
@@ -597,6 +611,34 @@ begin
     if (select c.texto from public.retorno_cartoes c where c.id = v_cartao) like '%Bruno%' then
       raise exception '24b: cartão com o item feito';
     end if;
+    -- Era o único item: o cartão foi decidido, com a pendência e a pergunta encerradas e o ponteiro limpo.
+    perform pg_temp.f3d_igual('24b2 cartão decidido', (select c.estado || '/' || c.decidido_por from public.retorno_cartoes c where c.id = v_cartao), 'decidido/sim_pin');
+    perform pg_temp.f3d_igual('24b3 pendência encerrada', (select p.status from public.ai_operator_pending_actions p join public.retorno_cartoes c on c.pendencia_id = p.id where c.id = v_cartao), 'rejected');
+    perform pg_temp.f3d_igual('24b4 ponteiro limpo', (select s.metadata ->> 'pending_confirm_action_id' from public.ai_operator_sessions s join public.retorno_cartoes c on c.sessao_id = s.id where c.id = v_cartao), null);
+
+    -- Cartão vivo sem item: o rodapé não sai quebrado, e o *retorno* fecha esse e abre outro.
+    v_cartao := pg_temp.f3d_cartao(c_agora);
+    v_ip := pg_temp.f3d_item(v_cartao, 1);
+    update public.retorno_cartao_itens set estado = 'fora' where id = v_ip;
+    v_t := public._retorno_cartao_texto(v_cartao, null);
+    if v_t like '%*ver *%' or v_t like '%*dita  %' then
+      raise exception '24b5: rodapé quebrado: %', v_t;
+    end if;
+    v_r := public.retorno_cartao_abrir('puxar', c_agora + interval '1 minute');
+    if v_r ->> 'acao' is distinct from 'cartao' or (v_r ->> 'cartao_id')::uuid is not distinct from v_cartao then
+      raise exception '24b6: o cartão vazio prendeu o caso: %', v_r;
+    end if;
+    perform pg_temp.f3d_igual('24b7 o vazio foi decidido', (select c.estado from public.retorno_cartoes c where c.id = v_cartao), 'decidido');
+    -- retorno_previa_caiu no último item também decide.
+    v_cartao := (v_r ->> 'cartao_id')::uuid;
+    v_ip := pg_temp.f3d_item(v_cartao, 1);
+    perform public.retorno_previa_caiu(null, v_ip, 'orc_existe', c_agora + interval '2 minutes');
+    perform pg_temp.f3d_igual('24b8 caiu decide', (select c.estado from public.retorno_cartoes c where c.id = v_cartao), 'decidido');
+    -- O ditado livre (retorno_caso_respondido) no último item também.
+    v_cartao := pg_temp.f3d_cartao(c_agora);
+    v_ip := pg_temp.f3d_item(v_cartao, 1);
+    perform public.retorno_caso_respondido(v_ip, 'Texto ditado de teste', 'wa-f3', c_agora + interval '3 minutes');
+    perform pg_temp.f3d_igual('24b9 ditado livre decide', (select c.estado from public.retorno_cartoes c where c.id = v_cartao), 'decidido');
     perform pg_temp.f3d_fechar(array[v_caso]);
 
     -- 20: cliente com 2 unidades e rascunho válido: passa, com cliente e unidade do rascunho.
@@ -856,6 +898,22 @@ begin
     if v_r -> 'amarra' ->> 'client_id' is not null then
       raise exception '14d: amarra do ambíguo: %', v_r;
     end if;
+
+    -- 14e. A marca vai à sessão do turno, que pode não ser a do cartão (a sessão gira em 4 h, o cartão vive 24 h), e a vigia solta as duas.
+    perform pg_temp.f3d_fechar(array[v_caso]);
+    v_cl := pg_temp.f3d_cli('Rui Turno F3', 121);
+    v_caso := pg_temp.f3d_caso(121, 'cliente', v_cl);
+    v_cartao := pg_temp.f3d_cartao(c_agora);
+    select c.sessao_id into v_ses from public.retorno_cartoes c where c.id = v_cartao;
+    update public.ai_operator_sessions set client_id = null, vessel_id = null, service_order_id = null, metadata = metadata - 'retorno_amarrada' where id = v_ses;
+    insert into public.ai_operator_sessions (channel, owner_user_id, status) values ('web', v_dono, 'open') returning id into v_ses2;
+    v_r := public.retorno_ver_caso_para_modelo(1, v_dono, c_agora, v_ses2);
+    perform pg_temp.f3d_igual('14e marca na sessão do turno', (select s.metadata ->> 'retorno_amarrada' from public.ai_operator_sessions s where s.id = v_ses2), 'true');
+    perform pg_temp.f3d_igual('14f cliente na sessão do turno', (select s.client_id::text from public.ai_operator_sessions s where s.id = v_ses2), v_cl::text);
+    perform pg_temp.f3d_igual('14g a sessão do cartão fica sem a marca', (select s.metadata ->> 'retorno_amarrada' from public.ai_operator_sessions s where s.id = v_ses), null);
+    perform pg_temp.f3d_limpar();
+    perform public.retorno_vigia_cartao(c_agora + interval '1 minute');
+    perform pg_temp.f3d_igual('14h a vigia solta a marca do painel', (select s.metadata ->> 'retorno_amarrada' from public.ai_operator_sessions s where s.id = v_ses2), null);
 
     raise exception 'retorno_f3_desfaz' using errcode = 'P0001';
   exception when others then

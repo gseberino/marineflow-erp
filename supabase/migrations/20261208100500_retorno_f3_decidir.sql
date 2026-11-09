@@ -6,7 +6,7 @@
 -- 3. retorno_cartao_executar: o item de orçamento entra em "orcamentos" (o SQL só decide; quem cria e manda é a ferramenta, P8), e nunca em "Vai sair".
 -- 4. retorno_previa_preparar (C-PREP): as 8 regras, em ordem, a devolutiva única e os args do construtor. retorno_previa_caiu, _soltar, _orc_criado, _pdf, _ver (C-VER, STABLE: só lê), _retorno e _aplicar.
 --
--- Tudo nasce desligado: sem proposta viva e sem letra nova no item, nada aqui é alcançado. Reverter: reaplicar as versões de 20261123100500.
+-- Tudo nasce desligado: sem proposta viva e sem letra nova no item, nada aqui é alcançado. Reverter: reaplicar as versões de 20261123100500 e, de retorno_vigia_cartao, a de 20261201100000; a de retorno_ver_caso_para_modelo exige o drop da assinatura com p_sessao.
 
 -- ── 1. Auxiliares ───────────────────────────────────────────────────────────────────────────────────
 
@@ -285,11 +285,17 @@ set search_path = public
 as $$
 declare
   v_agora timestamptz := coalesce(p_agora, now());
+  v_cartao uuid;
 begin
   if p_item is not null then
     update public.retorno_cartao_itens i
        set estado = 'caiu', caiu_motivo = p_motivo, decidido_em = coalesce(i.decidido_em, v_agora)
-     where i.id = p_item and i.estado in ('vivo', 'feito');
+     where i.id = p_item and i.estado in ('vivo', 'feito')
+     returning i.cartao_id into v_cartao;
+    -- Revisão da F3: o último item vivo saiu pelo ditado: o cartão não fica vivo sem nada.
+    if v_cartao is not null and not public._retorno_cartao_fechar_se_vazio(v_cartao, v_agora) then
+      update public.retorno_cartoes c set texto = public._retorno_cartao_texto(c.id, null) where c.id = v_cartao and c.estado = 'vivo';
+    end if;
   end if;
   if p_previa is not null then
     update public.retorno_previa p
@@ -414,6 +420,8 @@ begin
      where i.id = p_item and i.estado = 'vivo'
      returning i.cartao_id into v_cartao;
     if v_cartao is not null then
+      -- Revisão da F3: decide antes de refazer o texto. Era o último caso? O cartão não fica vivo sem item.
+      perform public._retorno_cartao_fechar_se_vazio(v_cartao, v_agora);
       update public.retorno_cartoes c set texto = public._retorno_cartao_texto(c.id, null) where c.id = v_cartao;
     end if;
   elsif v_abertura is not null then
@@ -433,10 +441,32 @@ end;
 $$;
 
 comment on function public.retorno_previa_pdf(uuid, boolean, text, timestamptz, uuid, uuid, uuid) is
-  'Retorno F3 (P6, C-PDF): o PDF saiu: grava pdf_em e a chave do telefone que recebeu; rascunho sem proposta ganha a linha origem rascunho. p_ok falso não grava nada. Com item vivo (ditado), item feito e cartão refeito; sem item (cartão caído), fecha o caso.';
+  'Retorno F3 (P6, C-PDF): o PDF saiu: grava pdf_em e a chave do telefone que recebeu; rascunho sem proposta ganha a linha origem rascunho. p_ok falso não grava nada. Com item vivo (ditado), item feito, cartão refeito e, se era o último item, decidido; sem item (cartão caído), fecha o caso.';
 
 revoke all on function public.retorno_previa_pdf(uuid, boolean, text, timestamptz, uuid, uuid, uuid) from public, anon, authenticated;
 grant execute on function public.retorno_previa_pdf(uuid, boolean, text, timestamptz, uuid, uuid, uuid) to service_role;
+
+-- Gerado do corpo vigente (20261123100500), com o trecho -- F3: o ditado livre também não deixa o cartão vivo sem item.
+create or replace function public.retorno_caso_respondido(p_item uuid, p_texto text, p_wa_id text default null, p_agora timestamptz default now())
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_agora timestamptz := coalesce(p_agora, now());
+  v_cartao uuid;   -- F3 (revisão)
+  v_r jsonb;
+begin
+  update public.retorno_cartao_itens i
+     set texto_ditado = left(p_texto, 1000), ditado_via = 'assistente', estado = 'feito', decidido_em = v_agora
+   where i.id = p_item
+   returning i.cartao_id into v_cartao;
+  v_r := public.retorno_item_enviado(p_item, true, p_wa_id, v_agora);
+  perform public._retorno_cartao_fechar_se_vazio(v_cartao, v_agora);   -- F3 (revisão)
+  return v_r;
+end;
+$$;
 
 -- ── 4. A leitura e o ditado ─────────────────────────────────────────────────────────────────────────
 
@@ -660,7 +690,7 @@ begin
          provisorios_n = v_prov,
          preco_mais_antigo = v_antigo,
          hash = v_hash,
-         dados = p.dados || jsonb_build_object('travada', true, 'ajustada_por_ditado', true),
+         dados = p.dados || jsonb_build_object('travada', true, 'ajustada_por_ditado', true, 'ditada_em', v_agora),   -- ditada_em: o cartão compara com a data do rascunho
          atualizada_em = v_agora
    where p.id = v_id;
 
@@ -758,7 +788,7 @@ begin
     when 'responder' then
       -- F3 (P6): a letra L com o ditado desligado não vale: M07 não sai sem as letras ligadas.
       if v_op ->> 'modelo' = 'modelo_ver_no_local' and not coalesce((public._retorno_cfg()).previa_ditado_ligado, false) then
-        return jsonb_build_object('ok', true, 'texto', 'O orçamento pelo cartão está desligado: nada mudou.');
+        return jsonb_build_object('ok', true, 'pin_nao_vale', true, 'texto', 'O orçamento pelo cartão está desligado: nada mudou.');
       end if;
       v_texto := public._retorno_texto_do_modelo(p_item.abertura_id,
         jsonb_build_object('modelo', v_op ->> 'modelo', 'os_id', v_op ->> 'os_id'), null, p_agora);
@@ -772,22 +802,23 @@ begin
 
     when 'parecido' then
       -- F3 (P6): *B* troca pelo outro parecido. p_fonte só vale com previa_modo = 'ligado' (retorno_previa_montar também barra).
+      -- pin_nao_vale (revisão da F3): o PIN mandado junto da letra não vale. O dono lê as linhas novas e manda *sim <PIN>* sozinho, inclusive quando nada mudou.
       if (public._retorno_cfg()).previa_modo is distinct from 'ligado' then
-        return jsonb_build_object('ok', true, 'texto', 'O orçamento pelo cartão está desligado: nada mudou.');
+        return jsonb_build_object('ok', true, 'pin_nao_vale', true, 'texto', 'O orçamento pelo cartão está desligado: nada mudou.');
       end if;
       v_r := public.retorno_previa_montar(p_item.abertura_id, p_agora, (v_op ->> 'os_id')::uuid);
       if v_r ->> 'acao' = 'nada' then
-        return jsonb_build_object('ok', true, 'texto', 'Não consegui usar esse orçamento: nada mudou.');
+        return jsonb_build_object('ok', true, 'pin_nao_vale', true, 'texto', 'Não consegui usar esse orçamento: nada mudou.');
       end if;
       v_item := public._retorno_item_remontar(p_item.id, p_agora);
-      return jsonb_build_object('ok', true, 'texto', (select string_agg(l, E'\n') from jsonb_array_elements_text(v_item -> 'linhas') l));
+      return jsonb_build_object('ok', true, 'pin_nao_vale', true, 'texto', (select string_agg(l, E'\n') from jsonb_array_elements_text(v_item -> 'linhas') l));
 
     when 'unidade' then
       -- F3 (P6): a escolha do dono vale mais que a busca por nome; a proposta fica travada e o hash é recalculado (a rodada a mantém).
       v_cli := (public._retorno_cadastro_do_caso(p_item.abertura_id) ->> 'client_id')::uuid;
       v_ves := (v_op ->> 'vessel_id')::uuid;
       if v_cli is null or not exists (select 1 from public.vessels v where v.id = v_ves and v.active and v.client_id = v_cli) then
-        return jsonb_build_object('ok', true, 'texto', format('A unidade da opção %s já não vale para este cliente, e nada foi feito. Mande *retorno*.', v_letra));
+        return jsonb_build_object('ok', true, 'pin_nao_vale', true, 'texto', format('A unidade da opção %s já não vale para este cliente, e nada foi feito. Mande *retorno*.', v_letra));
       end if;
       update public.retorno_aberturas a set unidade_escolhida_id = v_ves, atualizada_em = now() where a.id = p_item.abertura_id;
       update public.retorno_previa p
@@ -797,7 +828,7 @@ begin
              atualizada_em = p_agora
        where p.abertura_id = p_item.abertura_id and p.estado in ('proposta', 'sombra');
       v_item := public._retorno_item_remontar(p_item.id, p_agora);
-      return jsonb_build_object('ok', true, 'texto', (select string_agg(l, E'\n') from jsonb_array_elements_text(v_item -> 'linhas') l));
+      return jsonb_build_object('ok', true, 'pin_nao_vale', true, 'texto', (select string_agg(l, E'\n') from jsonb_array_elements_text(v_item -> 'linhas') l));
 
     when 'cliente' then
       -- Vale só para este caso: não vincula o número nem regrava mensagem.
@@ -805,7 +836,8 @@ begin
          set client_id = (v_op ->> 'client_id')::uuid, papel = 'cliente', atualizada_em = now()
        where a.id = p_item.abertura_id;
       v_item := public._retorno_item_remontar(p_item.id, p_agora);
-      return jsonb_build_object('ok', true, 'texto', (select string_agg(l, E'\n') from jsonb_array_elements_text(v_item -> 'linhas') l));
+      -- Revisão da F3: definido o cliente, o item pode nascer com um rascunho dele a mandar, que o dono ainda não leu.
+      return jsonb_build_object('ok', true, 'pin_nao_vale', (v_item ->> 'acao_sim') is not null, 'texto', (select string_agg(l, E'\n') from jsonb_array_elements_text(v_item -> 'linhas') l));
 
     when 'desfaz_cadastro' then
       v_prov := (v_op ->> 'client_id')::uuid;
@@ -832,7 +864,11 @@ begin
 end;
 $$;
 
-create or replace function public.retorno_ver_caso_para_modelo(p_n integer, p_autor uuid, p_agora timestamptz default now())
+-- Revisão da F3: p_sessao é a sessão do turno que leu o caso (vem do servidor, nunca do modelo). O cartão vive 24 h e a sessão gira em 4 h,
+-- e o erp-mcp lê a marca da sessão do job: marcar só a do cartão deixava o create_quote_from_items sem PIN no turno que já leu o cliente.
+drop function if exists public.retorno_ver_caso_para_modelo(integer, uuid, timestamptz);
+
+create or replace function public.retorno_ver_caso_para_modelo(p_n integer, p_autor uuid, p_agora timestamptz default now(), p_sessao uuid default null)
 returns jsonb
 language plpgsql
 security definer
@@ -894,18 +930,21 @@ begin
     update public.ai_operator_sessions s
        set client_id = v_ab.client_id, vessel_id = v_vessel, service_order_id = (v_os ->> 'id')::uuid,
            metadata = coalesce(s.metadata, '{}'::jsonb) || '{"retorno_amarrada": true}'::jsonb
-     where s.id = v_c.sessao_id;
+     where s.id = coalesce(p_sessao, v_c.sessao_id);
   else
     update public.ai_operator_sessions s
        set client_id = null, vessel_id = null, service_order_id = null,
            metadata = coalesce(s.metadata, '{}'::jsonb) || '{"retorno_amarrada": true}'::jsonb
-     where s.id = v_c.sessao_id;
+     where s.id = coalesce(p_sessao, v_c.sessao_id);
   end if;
 
   return jsonb_build_object('n', p_n, 'rotulo', v_d ->> 'rotulo', 'os', v_os ->> 'numero', 'recebidas', v_recebidas, 'fatos', coalesce(v_f, '{}'::jsonb),
     'amarra', jsonb_build_object('client_id', case when v_ab.papel = 'cliente' then v_ab.client_id end, 'vessel_id', v_vessel));   -- F3 (P6): lerCaso tira antes de entregar ao modelo
 end;
 $$;
+
+revoke all on function public.retorno_ver_caso_para_modelo(integer, uuid, timestamptz, uuid) from public, anon, authenticated;
+grant execute on function public.retorno_ver_caso_para_modelo(integer, uuid, timestamptz, uuid) to service_role;
 
 create or replace function public.retorno_decidir_dito(p_comando jsonb, p_autor uuid, p_agora timestamptz default now())
 returns jsonb
@@ -1165,5 +1204,234 @@ begin
                        case when v_c.mais > 0 then format('Mais %s esperando: *retorno*.', v_c.mais) end);
 
   return jsonb_build_object('ok', true, 'aviso', v_aviso, 'ditados', v_ditados, 'vai_sair', v_n, 'orcamentos', v_orcamentos);   -- F3 (P6)
+end;
+$$;
+
+-- ── 6. Gerado do corpo vigente (20261201100000), com o trecho -- F3 ─────────────────────────────────
+
+create or replace function public.retorno_vigia_cartao(p_agora timestamptz default now())
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  c_fuso constant text := 'America/Sao_Paulo';
+  v_agora timestamptz := coalesce(p_agora, now());
+  v_hoje date := (v_agora at time zone c_fuso)::date;
+  v_cfg public.retorno_config := public._retorno_cfg();
+  v_vivo jsonb;
+  v_cartao uuid;
+  r record;
+  v_conf jsonb;
+  v_caidos integer := 0;
+  v_promovidos integer := 0;
+  v_rebaixados integer := 0;
+  v_avisos integer := 0;
+  v_dono uuid;
+  v_phone text;
+  v_motivo text;
+  v_rotulo text;
+  v_edit integer;
+  v_tot integer;
+  v_hora time := (v_agora at time zone c_fuso)::time;   -- F2 (P14)
+  v_a public.retorno_saidas;                            -- F2 (P14)
+  v_acordes integer := 0;                               -- F2 (P14)
+begin
+  if v_cfg.id is null or v_cfg.modo = 'desligado' then
+    return jsonb_build_object('rodou', false);
+  end if;
+  select d.id, d.phone into v_dono, v_phone from public._comprovante_dono() d;
+
+  -- 1 e 2. Queda e validade.
+  begin
+    v_vivo := public.retorno_cartao_vivo(v_agora);
+    if v_vivo ->> 'estado' = 'vivo' then
+      v_cartao := (v_vivo ->> 'id')::uuid;
+      if (select c.expira_em from public.retorno_cartoes c where c.id = v_cartao) < v_agora then
+        perform public._retorno_cartao_encerrar(v_cartao, 'expirou', 'expired', 'cartao_expirou', v_agora);
+      else
+        for r in select i.id from public.retorno_cartao_itens i where i.cartao_id = v_cartao and i.estado = 'vivo' loop
+          v_conf := public._retorno_item_conferir(r.id, v_agora, false);
+          if not (v_conf ->> 'ok')::boolean then
+            update public.retorno_cartao_itens i set estado = 'caiu', caiu_motivo = v_conf ->> 'motivo', decidido_em = v_agora where i.id = r.id;
+            v_caidos := v_caidos + 1;
+          end if;
+        end loop;
+        if not exists (select 1 from public.retorno_cartao_itens i where i.cartao_id = v_cartao and i.estado = 'vivo') then
+          perform public._retorno_cartao_encerrar(v_cartao, 'caiu', 'rejected', 'cartao_caiu', v_agora);
+        elsif v_caidos > 0 then
+          update public.retorno_cartoes c set texto = public._retorno_cartao_texto(c.id, null) where c.id = v_cartao;
+        end if;
+      end if;
+    end if;
+  exception when others then
+    perform public._retorno_vigia_log('queda', sqlstate);
+  end;
+
+  -- 3. Amarração: sem cartão vivo, a sessão do dono solta o caso.
+  begin
+    if not exists (select 1 from public.retorno_cartoes c where c.estado = 'vivo') then
+      update public.ai_operator_sessions s
+         set client_id = null, vessel_id = null, service_order_id = null, metadata = s.metadata - 'retorno_amarrada'
+       where s.status = 'open' and s.metadata ? 'retorno_amarrada';   -- F3 (revisão): a marca agora pode estar em outra sessão do dono, inclusive a do painel
+    end if;
+  exception when others then
+    perform public._retorno_vigia_log('amarracao', sqlstate);
+  end;
+
+  -- 4. Promoção.
+  begin
+    for r in select t.* from public.retorno_modelo_tipos t where t.nivel = 'cartao' loop
+      continue when r.promocao_suspensa_ate is not null and r.promocao_suspensa_ate > v_agora;
+      if r.regua = 'dias' then
+        continue when cardinality(r.aprovados_dias) < v_cfg.modelo_dias_aprovacao;
+        continue when v_hoje <= (select max(d) from unnest(r.aprovados_dias) d);
+      else
+        continue when r.aprovados_usos < v_cfg.modelo_usos_liberado;
+      end if;
+      -- sem queixa nem pedido de parar desde a 1ª aprovação do período
+      continue when exists (
+        select 1
+          from public.retorno_saidas s
+          join public.retorno_mensagens m on m.chave = s.chave and m.recebida_em > s.decidida_em
+                                         and m.recebida_em <= s.decidida_em + interval '24 hours'
+         where s.tipo = r.tipo and s.estado = 'enviada' and s.decidida_em <= v_agora
+           and coalesce((m.sinais ->> 'reclamacao')::boolean, false));
+      continue when exists (
+        select 1
+          from public.retorno_saidas s
+          join public.whatsapp_blocked_numbers b on public._agenda_chave_telefone(b.phone_normalized) = s.chave
+         where s.tipo = r.tipo and s.estado = 'enviada' and b.tipo = 'opt_out'
+           and b.created_at > s.decidida_em and b.created_at <= s.decidida_em + interval '48 hours');
+      -- nos últimos 10 itens do tipo, editados até rebaixa_edicao_pct
+      select count(*), count(*) filter (where x.texto_ditado is not null) into v_tot, v_edit
+        from (select i.texto_ditado
+                from public.retorno_cartao_itens i
+                join public.retorno_cartoes c on c.id = i.cartao_id
+               where i.modelo_tipo = r.tipo and i.estado in ('feito', 'fora')
+               order by c.criado_em desc
+               limit 10) x;
+      continue when v_tot > 0 and v_edit::numeric / v_tot > v_cfg.rebaixa_edicao_pct;
+
+      update public.retorno_modelo_tipos t
+         set nivel = 'sozinho', promovido_em = v_agora, atualizado_em = now()
+       where t.tipo = r.tipo;
+      v_promovidos := v_promovidos + 1;
+    end loop;
+  exception when others then
+    perform public._retorno_vigia_log('promocao', sqlstate);
+  end;
+
+  -- 5. Fadiga: as últimas fadiga_vezes aprovações, todas rápidas, nas últimas 24 h.
+  begin
+    if (select count(*) from (select t.rapido from public.retorno_toques t
+                               where t.palavra = 'sim_pin' and t.em > v_agora - interval '24 hours' and t.em <= v_agora
+                               order by t.em desc limit v_cfg.fadiga_vezes) x where x.rapido) >= v_cfg.fadiga_vezes then
+      update public.retorno_modelo_tipos t
+         set promocao_suspensa_ate = v_agora + v_cfg.fadiga_suspende, atualizado_em = now()
+       where (t.promocao_suspensa_ate is null or t.promocao_suspensa_ate <= v_agora)
+         and t.tipo in (select i.modelo_tipo
+                          from public.retorno_toques q
+                          join public.retorno_cartao_itens i on i.cartao_id = q.cartao_id
+                         where q.palavra = 'sim_pin' and q.rapido and q.em > v_agora - interval '24 hours' and q.em <= v_agora
+                           and i.modelo_tipo is not null);
+    end if;
+  exception when others then
+    perform public._retorno_vigia_log('fadiga', sqlstate);
+  end;
+
+  -- 6. Rebaixamento: queixa até 24 h depois, opt-out até 48 h, ou 3 recusas do validador na última hora.
+  begin
+    for r in select t.tipo, t.promovido_em from public.retorno_modelo_tipos t where t.nivel = 'sozinho' loop
+      v_motivo := null;
+      if exists (select 1
+                   from public.retorno_saidas s
+                   join public.retorno_mensagens m on m.chave = s.chave and m.recebida_em > s.decidida_em
+                                                  and m.recebida_em <= s.decidida_em + interval '24 hours' and m.recebida_em <= v_agora
+                  where s.tipo = r.tipo and s.estado = 'enviada' and s.decidida_em > coalesce(r.promovido_em, v_agora - interval '30 days')
+                    and coalesce((m.sinais ->> 'reclamacao')::boolean, false)) then
+        v_motivo := 'queixa';
+      elsif exists (select 1
+                      from public.retorno_saidas s
+                      join public.whatsapp_blocked_numbers b on public._agenda_chave_telefone(b.phone_normalized) = s.chave
+                     where s.tipo = r.tipo and s.estado = 'enviada' and b.tipo = 'opt_out'
+                       and s.decidida_em > coalesce(r.promovido_em, v_agora - interval '30 days')
+                       and b.created_at > s.decidida_em and b.created_at <= s.decidida_em + interval '48 hours' and b.created_at <= v_agora) then
+        v_motivo := 'opt_out';
+      elsif (select count(*) from public.retorno_saidas s
+              where s.tipo = r.tipo and s.estado = 'recusada' and s.motivo = 'validador'
+                and s.decidida_em > v_agora - interval '1 hour' and s.decidida_em <= v_agora) >= 3 then
+        v_motivo := 'validador';
+      end if;
+      if v_motivo is not null and public._retorno_rebaixar(r.tipo, v_motivo, v_agora) then
+        v_rebaixados := v_rebaixados + 1;
+      end if;
+    end loop;
+  exception when others then
+    perform public._retorno_vigia_log('rebaixamento', sqlstate);
+  end;
+
+  -- 7. Saída aprovada que foi recusada: o dono vê na mensagem fixa seguinte, sem gastar acorde e sem texto do cliente.
+  begin
+    for r in
+      select s.id, s.abertura_id, s.phone_normalized, s.motivo
+        from public.retorno_saidas s
+       where s.estado = 'recusada' and coalesce((s.dados ->> 'aprovada')::boolean, false) and not s.dados ? 'avisada'
+    loop
+      v_rotulo := public._retorno_rotulo(r.abertura_id, v_agora);
+      perform public.aviso_registrar(jsonb_build_object(
+        'phone', v_phone, 'modo', public._retorno_modo_da_voz(), 'fonte', 'cliente',
+        'chave', 'retorno:recusa:' || r.id, 'assunto', 'contato:' || r.phone_normalized, 'destino', 'proxima_fixa',
+        'texto', format('Não saiu a mensagem para %s: %s. Responda pelo celular.', v_rotulo,
+                        case r.motivo when 'validador' then 'o texto não passou na conferência'
+                                      when 'fato_mudou' then 'o fato mudou'
+                                      else 'o canal recusou' end),
+        'agora', v_agora));
+      update public.retorno_saidas s set dados = s.dados || '{"avisada": true}'::jsonb, atualizada_em = now() where s.id = r.id;
+      v_avisos := v_avisos + 1;
+    end loop;
+  exception when others then
+    perform public._retorno_vigia_log('recusa', sqlstate);
+  end;
+
+  -- F2 (P14): 8 e 9. O acorde real, 1 por minuto; os outros ficam para o minuto seguinte.
+  begin
+    if v_cfg.modo = 'ligado' and 'acorde' = any (v_cfg.tipos_ligados) then
+      -- 9. A 1ª prioridade da manhã: quem ficou para hoje e ainda não teve resposta.
+      if public.agenda_dia_util(v_hoje) and v_hora >= time '08:00' and v_hora < time '20:00' then
+        insert into public.retorno_saidas (abertura_id, tipo, variante, chave, phone_normalized, client_id, modo,
+                                           estado, enviar_em, dados, dedupe_key)
+        select a.id, 'acorde', 'venceu', a.chave, a.phone_normalized, a.client_id, a.modo, 'agendada', v_agora,
+               jsonb_build_object('por', 'venceu'), 'retorno:' || a.id || ':acorde:venceu'
+          from public.retorno_aberturas a
+         where a.topo_dia = v_hoje and a.cumprida_em is null and a.estado in ('aberta', 'vencida')
+        on conflict (dedupe_key) do nothing;
+      end if;
+
+      select s.* into v_a
+        from public.retorno_saidas s
+       where s.tipo = 'acorde' and s.estado = 'agendada' and s.enviar_em <= v_agora
+       order by case s.variante when 'venceu' then 0 when 'passagem' then 1 when 'relogio' then 2 else 3 end, s.enviar_em, s.id
+       limit 1
+       for update skip locked;
+      if found then
+        if not exists (select 1 from public.retorno_aberturas a where a.id = v_a.abertura_id and a.estado <> 'fechada') then
+          update public.retorno_saidas s
+             set estado = 'cancelada', motivo = 'caso_fechado', decidida_em = v_agora, atualizada_em = now()
+           where s.id = v_a.id;
+        else
+          perform public._retorno_acorde_aplicar(v_a.id,
+            public._retorno_acordar(v_a.abertura_id, v_a.variante, v_agora, v_a.dados ->> 'por'), v_agora);
+          v_acordes := 1;
+        end if;
+      end if;
+    end if;
+  exception when others then
+    perform public._retorno_vigia_log('acorde', sqlstate);
+  end;
+
+  return jsonb_build_object('rodou', true, 'caidos', v_caidos, 'promovidos', v_promovidos, 'rebaixados', v_rebaixados, 'avisos', v_avisos,
+                            'acordes', v_acordes);
 end;
 $$;
