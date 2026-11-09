@@ -34,6 +34,7 @@ declare
   v_conv  boolean;
   v_dono  uuid;
   v_pes   uuid[];
+  v_cels  uuid[];
   v_cel   int;
   v_fila  jsonb := '[]'::jsonb;
   c       record;
@@ -97,8 +98,9 @@ begin
     -- As pessoas e as células de amanhã. ja_vem: tem turno marcado em D e o outro livre, ou é o dono com o dia declarado (7b). disponivel: também quem declarou. Da equipe, a rotina tem de alcançar a
     -- pessoa (contato, telefone: R7.7-6) e a ficha de D ainda não pode ter saído (a pessoa não saberia: a rotina só manda uma). O convite é a mesma regra da ficha (R7.7-8, _agenda_rotina_ficha, AG7-23).
     -- O dono fica fora da regra da rotina: ele não recebe ficha (quem o alcança é o aviso do gestor e o fechamento) e em produção não tem linha de contato. Exigir a rotina dele tirava toda OS que pede o dono.
-    select coalesce(array_agg(distinct g.payee_id), '{}'::uuid[]), count(*)::int
-      into v_pes, v_cel
+    -- v_cels: a pessoa de cada célula (repete quem tem duas), para a conta de teste lá embaixo
+    select coalesce(array_agg(distinct g.payee_id), '{}'::uuid[]), count(*)::int, coalesce(array_agg(g.payee_id), '{}'::uuid[])
+      into v_pes, v_cel, v_cels
       from public.agenda_grade(v_d, v_d, p_hoje) g
       join public.agenda_capacidade(v_d, v_d, p_hoje) k on k.payee_id = g.payee_id and k.dia = g.dia and k.turno = g.turno
       left join public.agenda_equipe_contato ct on ct.payee_id = g.payee_id
@@ -195,9 +197,13 @@ begin
                                              jsonb_build_object('os', v_os, 'proposta', v_p ->> 'proposta_id', 'violacoes', v_a -> 'violacoes', 'p_hoje', p_hoje, 'p_agora', p_agora));
               end if;
             else
-              -- em teste a alocação não existe: a simulação da próxima OS não veria esta. Melhor dizer menos do que contar duas na mesma pessoa
-              v_pes := array(select x from unnest(v_pes) x
-                              where x <> all (array(select (a ->> 'payee_id')::uuid from jsonb_array_elements(v_it -> 'alocacoes') a)));
+              -- em teste a alocação não existe: a simulação da próxima OS não veria esta. A conta é por célula: cada meio-dia de D que a OS ocupa de uma pessoa
+              -- (o turno, ou a ponta do dono, que o motor e a grade também dão por ocupado) gasta uma célula livre dela, e só sai quem ficou sem nenhuma.
+              -- Assim o dono com D declarado (2 células) segue para a próxima depois de abrir esta, e ninguém conta mais OS do que as células que tem.
+              v_cels := array(select w.x from (select x, row_number() over (partition by x) as k from unnest(v_cels) x) w
+                               where w.k > (select count(distinct a ->> 'turno') from jsonb_array_elements(v_it -> 'alocacoes') a
+                                             where (a ->> 'payee_id')::uuid = w.x and (a ->> 'dia')::date = v_d));
+              v_pes := array(select x from unnest(v_pes) x where x = any (v_cels));
             end if;
           end if;
           if v_mot is null then

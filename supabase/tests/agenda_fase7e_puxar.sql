@@ -8,7 +8,8 @@
 --   P4 em teste só o diário (R7.7-1), com o freio também; a simulação do gestor fica só dentro do passo
 --   P5 de verdade: a alocação nasce em D, releio depois; a reserva vira compromisso; uma vez por dia pela rodada inteira
 --   P6 o erro: vai a app_error_logs (gestor:puxar), não lança e segue para a próxima OS; query_canceled não é engolido
---   P7 a OS na forma real (conferência do P4b): a "abre e fecha" pela regra (a ponta do dono em D) e a que pede o dono, com o dia declarado por ele e sem a rotina
+--   P7 a OS na forma real (conferência do P4b): a "abre e fecha" pela regra (a ponta do dono em D) e a que pede o dono, com o dia declarado por ele e sem a rotina;
+--      e 2 por dia (2ª conferência): em teste, a conta por célula diz o mesmo número que o de verdade (P7e a P7h)
 --
 -- ═══ COMO RODAR ═══  Na bancada: node scripts/bancada-agenda/rodar.mjs. Em produção, só DEPOIS de aplicar a migration, com o OK: npx supabase@2.111.0 db query --linked -f supabase/tests/agenda_fase7e_puxar.sql
 --   Tudo dentro de begin/rollback. O que usa fixture só roda na bancada (fora dela sai PULADO). Uma linha false é defeito.
@@ -663,7 +664,7 @@ begin
     values (v_a, 'e7e00000-0000-4000-8000-000000000c02', 'sinal', date '2026-12-05', date '2026-12-05', 100, 100, 0, 'paid', true);
     r := pg_temp.rodar();
     v_res := pg_temp.ok(v_res, 'P3m4 com sinal pago passa na frente de quem foi aprovada antes', pg_temp.puxada(r, v_a) and (r ->> 'puxadas')::int = 1, r::text);
-    -- 2 por dia, em teste: a mesma pessoa não conta em duas OS
+    -- 2 por dia, em teste: quem tem uma célula só não conta em duas OS (a conta é por célula: P7e a P7h)
     update public.agenda_config set puxar_max_os = 2 where id;
     r := pg_temp.rodar();
     v_res := pg_temp.ok(v_res, 'P3n em teste, com puxar_max_os 2 e uma célula só: conta 1, sem dizer que a mesma pessoa faria as duas', (r ->> 'puxadas')::int = 1, r::text);
@@ -994,6 +995,7 @@ declare
   v_res jsonb := '[]'::jsonb;
   r jsonb;
   v_os uuid;
+  v_b uuid;
   v_raf uuid := pg_temp.pessoa('Rafael');
   v_dono uuid;
   v_n int;
@@ -1073,6 +1075,128 @@ begin
     raise exception 'desfaz' using errcode = 'P0098';
   exception when sqlstate 'P0098' then null;
   when others then v_res := pg_temp.ok(v_res, 'P7c sem exceção', false, sqlerrm);
+  end;
+
+  -- (3) 2 por dia (2ª conferência do P4b): em teste a simulação da 2ª OS não vê a 1ª, e a conta é por célula: cada meio-dia de D que a OS ocupa (o turno, ou a ponta
+  -- do dono, que o motor e a grade dão por ocupado) gasta uma célula de quem o faz, e só sai quem ficou sem nenhuma. Antes saía toda pessoa que a 1ª usou, e o dono que
+  -- declarou D (2 células) saía pela ponta. Em cada montagem, o teste e o de verdade dizem o mesmo número. A 2ª é um diagnóstico ("sempre" pela regra, e o dono
+  -- o faz sozinho, como a OS#8 do replay da conferência); a "sempre" comum pede também um técnico (a regra uma_pessoa), e o Rafael não teria outra célula.
+  -- (3a) a 1ª "abre e fecha" de 1 dia (o turno do Rafael em D à tarde, a abertura do dono em D, o fechamento depois de D), a 2ª o diagnóstico
+  begin
+    v_os := pg_temp.cena();
+    update public.os_planejamento set dono_presenca = null, dias = 1 where service_order_id = v_os;
+    v_b := pg_temp.pronta(902);
+    update public.os_planejamento set dono_presenca = null where service_order_id = v_b;
+    update public.service_orders set service_type = 'diagnosis' where id = v_b;
+    delete from public.agenda_equipe_contato where payee_id = v_dono;
+    insert into public.agenda_disponibilidade (payee_id, periodo, situacao, origem, nota, criado_por)
+    values (v_dono, daterange(pg_temp.d(), pg_temp.d(), '[]'), 'disponivel', 'dono', 'teste 7e P4b', pg_temp.adm());
+    update public.agenda_config set puxar_max_os = 2 where id;
+    v_res := pg_temp.ok(v_res, 'P7e0 a montagem: a 1ª "abre e fecha" e a 2ª "sempre" pela regra (diagnóstico)',
+      public.os_prontidao(v_os, pg_temp.pr()) #>> '{presenca_dono,presenca}' = 'abre_e_fecha' and public.os_prontidao(v_b, pg_temp.pr()) #>> '{presenca_dono,presenca}' = 'sempre',
+      (public.os_prontidao(v_b, pg_temp.pr()) -> 'presenca_dono')::text);
+    r := pg_temp.rodar();
+    v_res := pg_temp.ok(v_res, 'P7e em teste, 2 por dia, o dono com D declarado: a ponta dele na 1ª OS não o tira da 2ª (ele tem outra célula), 2 puxadas',
+      (r ->> 'celulas')::int = 3 and (r ->> 'puxadas')::int = 2 and pg_temp.puxada(r, v_os) and pg_temp.puxada(r, v_b) and (r ->> 'erros')::int = 0, r::text);
+    update public.agenda_config set modo_urgencia = 'ligado' where id;
+    r := pg_temp.rodar();
+    select string_agg(concat_ws('/', case a.service_order_id when v_os then 'a' else 'b' end, a.dia, a.turno, case when a.payee_id = v_dono then 'dono' when a.payee_id = v_raf then 'rafael' else '?' end, a.presenca), ','
+                      order by a.service_order_id = v_b, a.dia, a.turno, a.presenca)
+      into v_al from public.agenda_alocacoes a where a.service_order_id in (v_os, v_b) and a.estado in ('publicada', 'fixada');
+    v_res := pg_temp.ok(v_res, 'P7e2 de verdade, a mesma montagem: 2 puxadas; relido, em D o turno do Rafael e a abertura do dono na 1ª, o dono no turno da 2ª',
+      (r ->> 'puxadas')::int = 2 and (r ->> 'erros')::int = 0
+      and exists (select 1 from public.agenda_alocacoes a where a.service_order_id = v_os and a.payee_id = v_raf and a.dia = pg_temp.d() and a.presenca = 'turno' and a.estado in ('publicada', 'fixada'))
+      and exists (select 1 from public.agenda_alocacoes a where a.service_order_id = v_os and a.payee_id = v_dono and a.dia = pg_temp.d() and a.presenca = 'abertura' and a.estado in ('publicada', 'fixada'))
+      and exists (select 1 from public.agenda_alocacoes a where a.service_order_id = v_os and a.payee_id = v_dono and a.dia > pg_temp.d() and a.presenca = 'fechamento' and a.estado in ('publicada', 'fixada'))
+      and exists (select 1 from public.agenda_alocacoes a where a.service_order_id = v_b and a.payee_id = v_dono and a.dia = pg_temp.d() and a.presenca = 'turno' and a.estado in ('publicada', 'fixada')),
+      coalesce(v_al, 'sem alocação') || ' ' || r::text);
+    raise exception 'desfaz' using errcode = 'P0098';
+  exception when sqlstate 'P0098' then null;
+  when others then v_res := pg_temp.ok(v_res, 'P7e sem exceção', false, sqlerrm);
+  end;
+
+  -- (3b) a 1ª "abre e fecha" de meio dia: a abertura e o fechamento do dono no mesmo meio-dia de D gastam uma célula só
+  begin
+    v_os := pg_temp.cena();
+    update public.os_planejamento set dono_presenca = null where service_order_id = v_os;
+    v_b := pg_temp.pronta(902);
+    update public.os_planejamento set dono_presenca = null where service_order_id = v_b;
+    update public.service_orders set service_type = 'diagnosis' where id = v_b;
+    delete from public.agenda_equipe_contato where payee_id = v_dono;
+    insert into public.agenda_disponibilidade (payee_id, periodo, situacao, origem, nota, criado_por)
+    values (v_dono, daterange(pg_temp.d(), pg_temp.d(), '[]'), 'disponivel', 'dono', 'teste 7e P4b', pg_temp.adm());
+    update public.agenda_config set puxar_max_os = 2 where id;
+    r := pg_temp.rodar();
+    v_res := pg_temp.ok(v_res, 'P7f em teste, 2 por dia, a 1ª de meio dia: as duas pontas do dono no mesmo meio-dia de D são uma célula, e a 2ª sai puxada',
+      (r ->> 'celulas')::int = 3 and (r ->> 'puxadas')::int = 2 and pg_temp.puxada(r, v_os) and pg_temp.puxada(r, v_b), r::text);
+    update public.agenda_config set modo_urgencia = 'ligado' where id;
+    r := pg_temp.rodar();
+    select string_agg(concat_ws('/', case a.service_order_id when v_os then 'a' else 'b' end, a.dia, a.turno, case when a.payee_id = v_dono then 'dono' when a.payee_id = v_raf then 'rafael' else '?' end, a.presenca), ','
+                      order by a.service_order_id = v_b, a.dia, a.turno, a.presenca)
+      into v_al from public.agenda_alocacoes a where a.service_order_id in (v_os, v_b) and a.estado in ('publicada', 'fixada');
+    v_res := pg_temp.ok(v_res, 'P7f2 de verdade, a mesma montagem: 2 puxadas; relido, as duas pontas do dono na 1ª no mesmo meio-dia de D e o dono no turno da 2ª',
+      (r ->> 'puxadas')::int = 2
+      and (select count(*) from public.agenda_alocacoes a where a.service_order_id = v_os and a.payee_id = v_dono and a.dia = pg_temp.d() and a.presenca in ('abertura', 'fechamento') and a.estado in ('publicada', 'fixada')) = 2
+      and (select count(distinct a.turno) from public.agenda_alocacoes a where a.service_order_id = v_os and a.payee_id = v_dono and a.dia = pg_temp.d() and a.estado in ('publicada', 'fixada')) = 1
+      and exists (select 1 from public.agenda_alocacoes a where a.service_order_id = v_b and a.payee_id = v_dono and a.dia = pg_temp.d() and a.presenca = 'turno' and a.estado in ('publicada', 'fixada')),
+      coalesce(v_al, 'sem alocação') || ' ' || r::text);
+    raise exception 'desfaz' using errcode = 'P0098';
+  exception when sqlstate 'P0098' then null;
+  when others then v_res := pg_temp.ok(v_res, 'P7f sem exceção', false, sqlerrm);
+  end;
+
+  -- (3c) a guarda: o dono declara D, mas a manhã dele já tem turno marcado (na OS 900), e sobra só a tarde; a ponta dele na 1ª cai nessa tarde e a ocupa,
+  -- então a 2ª não tem onde (de verdade, o motor não a põe em D). O teste não pode contar 2.
+  begin
+    v_os := pg_temp.cena();
+    update public.os_planejamento set dono_presenca = null where service_order_id = v_os;
+    v_b := pg_temp.pronta(902);
+    update public.os_planejamento set dono_presenca = null where service_order_id = v_b;
+    update public.service_orders set service_type = 'diagnosis' where id = v_b;
+    delete from public.agenda_equipe_contato where payee_id = v_dono;
+    insert into public.agenda_disponibilidade (payee_id, periodo, situacao, origem, nota, criado_por)
+    values (v_dono, daterange(pg_temp.d(), pg_temp.d(), '[]'), 'disponivel', 'dono', 'teste 7e P4b', pg_temp.adm());
+    perform pg_temp.aloca(md5('e7e:p:900')::uuid, v_dono, pg_temp.d(), 'manha');
+    update public.agenda_config set puxar_max_os = 2 where id;
+    r := pg_temp.rodar();
+    v_res := pg_temp.ok(v_res, 'P7g em teste, a guarda: com só a tarde livre, a ponta do dono na 1ª OS gasta a célula dele, e a 2ª não conta (1 puxada, como de verdade)',
+      (r ->> 'celulas')::int = 2 and (r ->> 'puxadas')::int = 1 and pg_temp.puxada(r, v_os) and not pg_temp.puxada(r, v_b), r::text);
+    update public.agenda_config set modo_urgencia = 'ligado' where id;
+    r := pg_temp.rodar();
+    select string_agg(concat_ws('/', case a.service_order_id when v_os then 'a' else 'b' end, a.dia, a.turno, case when a.payee_id = v_dono then 'dono' when a.payee_id = v_raf then 'rafael' else '?' end, a.presenca), ','
+                      order by a.service_order_id = v_b, a.dia, a.turno, a.presenca)
+      into v_al from public.agenda_alocacoes a where a.service_order_id in (v_os, v_b) and a.estado in ('publicada', 'fixada');
+    v_res := pg_temp.ok(v_res, 'P7g2 de verdade, a mesma montagem: 1 puxada; relido, a ponta do dono da 1ª na tarde de D e nada da 2ª em D',
+      (r ->> 'puxadas')::int = 1 and pg_temp.puxada(r, v_os) and not pg_temp.puxada(r, v_b)
+      and exists (select 1 from public.agenda_alocacoes a where a.service_order_id = v_os and a.payee_id = v_dono and a.dia = pg_temp.d() and a.turno = 'tarde' and a.presenca in ('abertura', 'fechamento') and a.estado in ('publicada', 'fixada'))
+      and not exists (select 1 from public.agenda_alocacoes a where a.service_order_id = v_b and a.dia = pg_temp.d() and a.estado in ('publicada', 'fixada')),
+      coalesce(v_al, 'sem alocação') || ' ' || r::text);
+    raise exception 'desfaz' using errcode = 'P0098';
+  exception when sqlstate 'P0098' then null;
+  when others then v_res := pg_temp.ok(v_res, 'P7g sem exceção', false, sqlerrm);
+  end;
+
+  -- (3d) a conta é de cada pessoa: o dono com D declarado (2 células, o 1º da grade) não segura na lista o Rafael, que gastou a dele na 1ª. As duas OS são só da
+  -- equipe ('nunca', a fixture), então a 2ª não tem quem a faça em D.
+  begin
+    v_os := pg_temp.cena();
+    v_b := pg_temp.pronta(902);
+    delete from public.agenda_equipe_contato where payee_id = v_dono;
+    insert into public.agenda_disponibilidade (payee_id, periodo, situacao, origem, nota, criado_por)
+    values (v_dono, daterange(pg_temp.d(), pg_temp.d(), '[]'), 'disponivel', 'dono', 'teste 7e P4b', pg_temp.adm());
+    update public.agenda_config set puxar_max_os = 2 where id;
+    r := pg_temp.rodar();
+    v_res := pg_temp.ok(v_res, 'P7h em teste, a conta por pessoa: o Rafael gastou a célula dele na 1ª e sai, mesmo com o dono ainda com 2; a 2ª (só da equipe) não conta',
+      (r ->> 'celulas')::int = 3 and (r ->> 'puxadas')::int = 1 and pg_temp.puxada(r, v_os) and not pg_temp.puxada(r, v_b), r::text);
+    update public.agenda_config set modo_urgencia = 'ligado' where id;
+    r := pg_temp.rodar();
+    v_res := pg_temp.ok(v_res, 'P7h2 de verdade, a mesma montagem: 1 puxada; relido, nada da 2ª em D',
+      (r ->> 'puxadas')::int = 1 and pg_temp.puxada(r, v_os) and not pg_temp.puxada(r, v_b)
+      and not exists (select 1 from public.agenda_alocacoes a where a.service_order_id = v_b and a.dia = pg_temp.d() and a.estado in ('publicada', 'fixada')),
+      r::text);
+    raise exception 'desfaz' using errcode = 'P0098';
+  exception when sqlstate 'P0098' then null;
+  when others then v_res := pg_temp.ok(v_res, 'P7h sem exceção', false, sqlerrm);
   end;
   perform pg_temp.gravar(v_res);
 end
