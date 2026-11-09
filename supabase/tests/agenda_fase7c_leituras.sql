@@ -70,22 +70,22 @@ end $f$;
 -- fechar saem junto).
 create function pg_temp.sem_7c(p text) returns text language sql immutable as $f$
   select array_to_string(array(
-           select l from (select l, o, sum(case when (l ~ '^\s*-- FASE 7[cdf]:' and l !~ '^\s*-- FASE 7[cdf]: fim')
-                                                     or (l ~ '^\s*-- \(7[cdf] ' and l !~ '^\s*-- \(7[cdf]: fim\)') then 1
-                                                when l ~ '^\s*-- (FASE 7[cdf]: fim|\(7[cdf]: fim\))' then -1 else 0 end)
+           select l from (select l, o, sum(case when (l ~ '^\s*-- FASE 7[cdef]:' and l !~ '^\s*-- FASE 7[cdef]: fim')
+                                                     or (l ~ '^\s*-- \(7[cdef] ' and l !~ '^\s*-- \(7[cdef]: fim\)') then 1
+                                                when l ~ '^\s*-- (FASE 7[cdef]: fim|\(7[cdef]: fim\))' then -1 else 0 end)
                                        over (order by o rows between unbounded preceding and current row) as dentro,
-                                 l ~ '^\s*-- (FASE 7[cdf]: fim|\(7[cdf]: fim\))' as fecha
+                                 l ~ '^\s*-- (FASE 7[cdef]: fim|\(7[cdef]: fim\))' as fecha
                             from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n')
 $f$;
 -- (7d P8) a função passou a viver na 7d: antes de comparar com a etapa dela, tiram-se os blocos "-- FASE 7d:" e as marcas "-- (7d … -- (7d: fim)"
 create function pg_temp.sem_7d(p text) returns text language sql immutable as $f$
   select array_to_string(array(
-           select l from (select l, o, sum(case when (l ~ '^\s*-- FASE 7[df]:' and l !~ '^\s*-- FASE 7[df]: fim')
-                                                     or (l ~ '^\s*-- \(7[df] ' and l !~ '^\s*-- \(7[df]: fim\)') then 1
-                                                when l ~ '^\s*-- (FASE 7[df]: fim|\(7[df]: fim\))' then -1 else 0 end)
+           select l from (select l, o, sum(case when (l ~ '^\s*-- FASE 7[def]:' and l !~ '^\s*-- FASE 7[def]: fim')
+                                                     or (l ~ '^\s*-- \(7[def] ' and l !~ '^\s*-- \(7[def]: fim\)') then 1
+                                                when l ~ '^\s*-- (FASE 7[def]: fim|\(7[def]: fim\))' then -1 else 0 end)
                                        over (order by o rows between unbounded preceding and current row) as dentro,
-                                 l ~ '^\s*-- (FASE 7[df]: fim|\(7[df]: fim\))' as fecha
+                                 l ~ '^\s*-- (FASE 7[def]: fim|\(7[def]: fim\))' as fecha
                             from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n')
 $f$;

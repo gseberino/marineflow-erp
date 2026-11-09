@@ -78,9 +78,9 @@ begin
     -- FASE 7b: fim
     -- FASE 7c: (7c P2) e os blocos "-- FASE 7c: … fim" (a 20261102100100 recria o motor de novo, só acréscimo): a régua aceita "7c"
     -- FASE 7c: fim
-    if not v_bloco and l ~ '^\s*-- FASE 7[bcdf]?:' and l !~ '^\s*-- FASE 7[bcdf]?: fim' then v_bloco := true; continue; end if;
+    if not v_bloco and l ~ '^\s*-- FASE 7[bcdef]?:' and l !~ '^\s*-- FASE 7[bcdef]?: fim' then v_bloco := true; continue; end if;
     if v_bloco then
-      if l ~ '^\s*-- FASE 7[bcdf]?: fim' then v_bloco := false; end if;
+      if l ~ '^\s*-- FASE 7[bcdef]?: fim' then v_bloco := false; end if;
       continue;
     end if;
     v_b := v_b || l;

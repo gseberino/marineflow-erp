@@ -1309,9 +1309,9 @@ begin
   -- mais nova, a de 20261029100900: só acréscimo, a violação habilidade com modo_habilidade ligado); o fim é lido pelo prefixo. O que
   -- este J5 prova não muda: fora dos blocos da 7c e da Fase 6, só os da Fase 3 (C1)
   select string_agg(x.l, E'\n' order by x.o) into v_novo
-    from (select t.l, t.o, sum(case when t.l ~ '^\s*-- FASE 7[cdf]:' and t.l !~ '^\s*-- FASE 7[cdf]: fim' then 1
-                                    when t.l ~ '^\s*-- FASE 7[cdf]: fim' then -1 else 0 end) over (order by t.o) as dentro,
-                 t.l ~ '^\s*-- FASE 7[cdf]: fim' as fim
+    from (select t.l, t.o, sum(case when t.l ~ '^\s*-- FASE 7[cdef]:' and t.l !~ '^\s*-- FASE 7[cdef]: fim' then 1
+                                    when t.l ~ '^\s*-- FASE 7[cdef]: fim' then -1 else 0 end) over (order by t.o) as dentro,
+                 t.l ~ '^\s*-- FASE 7[cdef]: fim' as fim
             from unnest(string_to_array(v_novo, E'\n')) with ordinality t(l, o)) x
    where x.dentro = 0 and not x.fim;
   -- FASE 7c (P3): fim

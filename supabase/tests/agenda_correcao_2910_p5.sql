@@ -113,9 +113,9 @@ declare
   l text;
 begin
   foreach l in array string_to_array(replace(p, E'\r\n', E'\n'), E'\n') loop
-    if not v_dentro and l ~ '^\s*-- FASE 7:' and l !~ '^\s*-- FASE 7: fim' then v_dentro := true; continue; end if;
+    if not v_dentro and l ~ '^\s*-- FASE 7e?:' and l !~ '^\s*-- FASE 7e?: fim' then v_dentro := true; continue; end if;
     if v_dentro then
-      if l ~ '^\s*-- FASE 7: fim' then v_dentro := false; end if;
+      if l ~ '^\s*-- FASE 7e?: fim' then v_dentro := false; end if;
       continue;
     end if;
     v_fora := v_fora || l;
@@ -135,7 +135,7 @@ begin
   foreach l in array string_to_array(replace(pg_temp.sem_blocos(p), E'\r\n', E'\n'), E'\n') loop
     if not v_dentro and l ~ '^\s*-- FASE 7: \(7a correção, memória da rodada' then v_dentro := true; continue; end if;
     if v_dentro then
-      if l ~ '^\s*-- FASE 7: fim' then v_dentro := false; end if;
+      if l ~ '^\s*-- FASE 7e?: fim' then v_dentro := false; end if;
       continue;
     end if;
     v_fora := v_fora || l;

@@ -805,9 +805,9 @@ begin
   -- FASE 7b: (7b P3) e os blocos "-- FASE 7b: … fim" (a 20261101100200 recria de novo, só acréscimo): a régua é "FASE 7b?"
   -- FASE 7b: fim
   v_novo := array_to_string(array(
-    select t.l from (select u.l, u.o, u.l ~ '^\s*-- FASE 7[bdf]?: fim' as fim,
-                            sum(case when u.l ~ '^\s*-- FASE 7[bdf]?:' and u.l !~ '^\s*-- FASE 7[bdf]?: fim' then 1
-                                     when u.l ~ '^\s*-- FASE 7[bdf]?: fim' then -1 else 0 end) over (order by u.o) as nivel
+    select t.l from (select u.l, u.o, u.l ~ '^\s*-- FASE 7[bdef]?: fim' as fim,
+                            sum(case when u.l ~ '^\s*-- FASE 7[bdef]?:' and u.l !~ '^\s*-- FASE 7[bdef]?: fim' then 1
+                                     when u.l ~ '^\s*-- FASE 7[bdef]?: fim' then -1 else 0 end) over (order by u.o) as nivel
                        from unnest(string_to_array(v_novo, E'\n')) with ordinality u(l, o)) t
      where t.nivel = 0 and not t.fim order by t.o), E'\n');
   -- FASE 7 (7a P7): fim

@@ -166,9 +166,9 @@ begin
     -- FASE 7c: (7c P4) e os blocos "-- FASE 7c: … fim" (_agenda_rascunho_frase e agenda_rascunho_gravar recriadas de novo em
     -- 20261102100300, só acréscimo): a régua passa a "FASE 7[bc]?"
     -- FASE 7c: fim
-    if not v_f7 and l ~ '^\s*-- FASE 7[bcdf]?:' and l !~ '^\s*-- FASE 7[bcdf]?: fim' then v_f7 := true; continue; end if;
+    if not v_f7 and l ~ '^\s*-- FASE 7[bcdef]?:' and l !~ '^\s*-- FASE 7[bcdef]?: fim' then v_f7 := true; continue; end if;
     if v_f7 then
-      if l ~ '^\s*-- FASE 7[bcdf]?: fim' then v_f7 := false; end if;
+      if l ~ '^\s*-- FASE 7[bcdef]?: fim' then v_f7 := false; end if;
       continue;
     end if;
     if not v_bloco and l ~ '^\s*-- FASE 4:' and l !~ '^\s*-- FASE 4: fim' then v_bloco := true; continue; end if;

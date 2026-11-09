@@ -128,9 +128,9 @@ begin
     -- _agenda_classe_da_os depois do P12; eles saem junto, e o resto continua sendo a cópia do P12 sobre a de antes)
     -- FASE 7b: (7b P4) e os blocos "-- FASE 7b: … fim" (a 20261101100300 recria o motor de novo, só acréscimo): a régua aceita "7b"
     -- FASE 7b: fim
-    if not v_bloco and l ~ '^\s*-- FASE 7(: \((7a P12|7a correção 2)|b:|d:|f:)' and l !~ '^\s*-- FASE 7[bdf]: fim' then v_bloco := true; continue; end if;
+    if not v_bloco and l ~ '^\s*-- FASE 7(: \((7a P12|7a correção 2)|b:|d:|e:|f:)' and l !~ '^\s*-- FASE 7[bdef]: fim' then v_bloco := true; continue; end if;
     if v_bloco then
-      if l ~ '^\s*-- FASE 7[bdf]?: fim' then v_bloco := false; end if;
+      if l ~ '^\s*-- FASE 7[bdef]?: fim' then v_bloco := false; end if;
       continue;
     end if;
     v_b := v_b || l;

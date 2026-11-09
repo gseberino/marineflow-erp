@@ -44,11 +44,11 @@ end $f$;
 -- FASE 7f: o texto sem os blocos "-- FASE 7f: … -- FASE 7f: fim" e sem as marcas "-- (7f … -- (7f: fim)": quem recria uma destas na 7f só acrescenta, e a viva continua sendo a desta migration
 create function pg_temp.sem_7f(p text) returns text language sql immutable as $f$
   select array_to_string(array(
-           select l from (select l, o, sum(case when (l ~ '^\s*-- FASE 7f:' and l !~ '^\s*-- FASE 7f: fim')
-                                                     or (l ~ '^\s*-- \(7f ' and l !~ '^\s*-- \(7f: fim\)') then 1
-                                                when l ~ '^\s*-- (FASE 7f: fim|\(7f: fim\))' then -1 else 0 end)
+           select l from (select l, o, sum(case when (l ~ '^\s*-- FASE 7[ef]:' and l !~ '^\s*-- FASE 7[ef]: fim')
+                                                     or (l ~ '^\s*-- \(7[ef] ' and l !~ '^\s*-- \(7[ef]: fim\)') then 1
+                                                when l ~ '^\s*-- (FASE 7[ef]: fim|\(7[ef]: fim\))' then -1 else 0 end)
                                        over (order by o rows between unbounded preceding and current row) as dentro,
-                                 l ~ '^\s*-- (FASE 7f: fim|\(7f: fim\))' as fecha
+                                 l ~ '^\s*-- (FASE 7[ef]: fim|\(7[ef]: fim\))' as fecha
                             from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n')
 $f$;
@@ -60,10 +60,10 @@ declare
   l        text;
 begin
   foreach l in array string_to_array(replace(p, E'\r\n', E'\n'), E'\n') loop
-    if v_dentro = 0 and l ~ '^\s*-- FASE 7[df]:' and l !~ '^\s*-- FASE 7[df]: fim' then v_dentro := 1; continue; end if;
-    if v_dentro = 1 and l ~ '^\s*-- FASE 7[df]: fim' then v_dentro := 0; continue; end if;
-    if v_dentro = 0 and l ~ '^\s*-- \(7[df] ' then v_dentro := 2; continue; end if;
-    if v_dentro = 2 and l ~ '^\s*-- \(7[df]: fim\)' then v_dentro := 0; continue; end if;
+    if v_dentro = 0 and l ~ '^\s*-- FASE 7[def]:' and l !~ '^\s*-- FASE 7[def]: fim' then v_dentro := 1; continue; end if;
+    if v_dentro = 1 and l ~ '^\s*-- FASE 7[def]: fim' then v_dentro := 0; continue; end if;
+    if v_dentro = 0 and l ~ '^\s*-- \(7[def] ' then v_dentro := 2; continue; end if;
+    if v_dentro = 2 and l ~ '^\s*-- \(7[def]: fim\)' then v_dentro := 0; continue; end if;
     if v_dentro = 0 then v_fora := v_fora || l; end if;
   end loop;
   return array_to_string(v_fora, E'\n');
