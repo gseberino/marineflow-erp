@@ -398,7 +398,7 @@ begin
        or v_r ->> 'texto' is distinct from 'Oi, Mariana! Já passei sua mensagem ao Gustavo, e ele retorna para você ainda hoje.' then
       raise exception '4: o recibo em sombra não é o T01 exato: %', v_r;
     end if;
-    if v_r -> 'validador' -> 'datas_permitidas' is distinct from '["hoje"]'::jsonb
+    if v_r -> 'validador' -> 'datas_permitidas' is distinct from '["ainda hoje", "hoje"]'::jsonb
        or v_r -> 'validador' -> 'horas_permitidas' is distinct from '["19h"]'::jsonb
        or v_r -> 'validador' ->> 'nome_permitido' is distinct from 'Mariana'
        or v_r -> 'validador' -> 'nomes_de_outros' is distinct from '[]'::jsonb
