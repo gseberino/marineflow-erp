@@ -606,6 +606,17 @@ begin
       message = format('retorno_texto: modelo desconhecido %s/%s', coalesce(p_tipo, '(nenhum)'), coalesce(p_variante, '(nenhuma)'));
   end if;
 
+  -- O adiamento diz "ainda hoje" porque há um 2º prazo no mesmo dia: sem a hora dele, não há o que prometer.
+  if p_tipo = 'adiamento' then
+    v_valor := btrim(d ->> 'hora');
+    if coalesce(v_valor, '') = '' then
+      raise exception using errcode = '22023', message = 'retorno_texto: falta hora';
+    end if;
+    if v_valor !~ c_hora then
+      raise exception using errcode = '22023', message = 'retorno_texto: valor fora da lista em hora';
+    end if;
+  end if;
+
   -- Cada {campo} do modelo, na ordem em que aparece: presente, não vazio e dentro da lista fechada.
   -- Nenhum valor aceito tem chave ({ ou }), então a troca de um campo nunca cria outro campo.
   v_texto := v_modelo;
