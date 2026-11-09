@@ -461,6 +461,10 @@ begin
 
   select count(*) into v_total from public._retorno_cartao_casos(v_agora, null);
   if v_total = 0 then
+    -- O acorde que esperava o cartão: sem nada a mostrar, o aviso vai pela fila e o minuto seguinte não repete.
+    if p_gatilho = 'acorde' then
+      perform public._retorno_a01_na_fila(p_aviso, v_agora);
+    end if;
     return jsonb_build_object('acao', 'vazio', 'texto', 'Ninguém esperando agora.');
   end if;
   v_mais := greatest(0, v_total - v_cfg.cartao_max_itens);
