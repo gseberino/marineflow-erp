@@ -575,7 +575,7 @@ begin
     v_s := pg_temp.retorno_f1_pegar_le(v_s.id);
     if v_r ->> 'variante' is distinct from 'padrao_apresentacao'
        or v_r ->> 'texto' is distinct from 'Oi, Lucia! Aqui é a Claudia, assistente virtual da HBR. Já passei sua mensagem ao Gustavo, e ele retorna para você ainda esta manhã.'
-       or v_r -> 'validador' -> 'datas_permitidas' is distinct from '["hoje"]'::jsonb
+       or v_r -> 'validador' -> 'datas_permitidas' is distinct from '["ainda esta manhã", "hoje"]'::jsonb
        or v_r -> 'validador' -> 'horas_permitidas' is distinct from '["10h"]'::jsonb
        or v_s.dados -> 'prazo' ->> 'quando' is distinct from 'hoje' or v_s.dados -> 'prazo' ->> 'ref' is distinct from '2027-01-15'
        or v_s.dados -> 'prazo' -> 'outro_dia' is distinct from 'false'::jsonb
