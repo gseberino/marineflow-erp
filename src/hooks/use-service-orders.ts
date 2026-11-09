@@ -891,6 +891,8 @@ export function useDuplicateServiceOrder() {
         commissioned_user_id, commission_amount,
         converted_to_os_at,
         quote_status,
+        // Retorno F3 (P10.3): a cópia não nasceu de um ato no cartão, e leva a validade da sua própria vez.
+        quote_validity_date, origem, origem_chave8, origem_parceiro_id,
         service_order_parts, service_order_services, service_order_expenses,
         ...copyFields
       } = source as any;

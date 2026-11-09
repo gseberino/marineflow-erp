@@ -1,5 +1,5 @@
 import { blockTechnician, lerRetrato, NON_TECHNICIAN_ROLES, type ToolCtx, type ToolDef } from "./registry.ts";
-import { applyStockDelta } from "./service-orders.ts";
+import { applyStockDelta, resolverServicoDaLinha } from "./service-orders.ts";
 import { type ItemResolvido, resolverItens } from "../keyword-resolver.ts";
 import { validadePadraoDoOrcamento } from "../validade-orcamento.ts";
 import { recalcularOSComCascata } from "../../receivables/cascata.ts";
@@ -463,10 +463,15 @@ export async function montarOrcamento(
   for (const l of labor) {
     const q = Number(l.quantity) || 1;
     const preco = Number(l.price) || 0;
+    const nomeDaLinha = String(l.description || "Mão de obra");
+    // Retorno F3 (P10.2): com a flag ligada, mão de obra sem service_id ganha o do catálogo, ou um pendente de conferência.
+    const serviceId = l.service_id ?? (ctx.settings?.ai_servico_pendente_catalogo === "on"
+      ? (await resolverServicoDaLinha(sb, admin, nomeDaLinha, preco, l.billing_unit)).service_id
+      : null);
     svcRows.push({
       // service_id e billing_unit só chegam aqui com opcoes.origem: sem ela, semCamposDaProposta tirou os dois.
-      service_order_id: so.id, service_id: l.service_id ?? null,
-      name_snapshot: String(l.description || "Mão de obra"),
+      service_order_id: so.id, service_id: serviceId,
+      name_snapshot: nomeDaLinha,
       billing_unit_snapshot: l.billing_unit ?? "unit", quantity: q,
       unit_price_snapshot: preco, line_total: r2(preco * q),
     });

@@ -4,6 +4,7 @@ import { dayOverloadNotice } from "./agenda.ts";
 import { recalcularOSComCascata } from "../../receivables/cascata.ts";
 import { validadePadraoDoOrcamento } from "../validade-orcamento.ts";
 import { acharOS } from "./os-referencia.ts";
+import { servicoComMesmoNome } from "./products.ts";
 import { ehErro } from "./caixa.ts";
 import { ROTULOS_STATUS_OS, STATUS_OS, statusAoAgendar, type StatusOS } from "../../service-order-status.ts";
 import { modoDaPropostaNoBanco } from "../../agenda-modo.ts";
@@ -467,6 +468,42 @@ export async function vincularTecnico(sb: any, serviceOrderId: string, technicia
     : null;
 }
 
+/**
+ * Retorno F3 (P10.2): acha pelo nome igual, ou cadastra como pendente, o serviço de uma linha de mão de obra, para a
+ * busca de preço e o search_services encontrarem da próxima vez. Só roda com a flag ai_servico_pendente_catalogo. Nome
+ * diferente é serviço diferente: sem similaridade, um serviço novo por linha, e o catálogo se revê à mão. Nunca lança:
+ * sem service_id, a linha segue como hoje.
+ */
+export async function resolverServicoDaLinha(
+  // deno-lint-ignore no-explicit-any
+  sb: any,
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  nome: string,
+  preco: number,
+  billingUnit?: string,
+): Promise<{ service_id: string | null; criado: boolean }> {
+  const SEM = { service_id: null, criado: false };
+  try {
+    const limpo = String(nome ?? "").trim();
+    if (!limpo) return SEM;
+    const existente = await servicoComMesmoNome(admin, limpo);
+    if (existente) return { service_id: existente.id, criado: false };
+    const { data, error } = await sb.from("services").insert({
+      name: limpo,
+      billing_unit: billingUnit ?? "unit",
+      default_price: preco,
+      category: "Pendente de catálogo",
+      description: "Criado automaticamente pela mão de obra de um orçamento. Conferir nome e preço.",
+      active: true,
+    }).select("id").single();
+    if (error || !data?.id) return SEM;
+    return { service_id: data.id, criado: true };
+  } catch {
+    return SEM;
+  }
+}
+
 export const serviceOrderTools: ToolDef[] = [
   {
     name: "list_service_orders",
@@ -927,18 +964,23 @@ export const serviceOrderTools: ToolDef[] = [
       required: ["service_order_id", "service_name", "unit_price"],
     },
     risk: "low",
-    async execute(args, { sb, settings }) {
+    async execute(args, { sb, admin, settings }) {
       const { data: svc } = args.service_id
         ? await sb.from("services").select("name, billing_unit, default_price").eq("id", args.service_id).maybeSingle()
         : { data: null };
       const qty = Number(args.quantity) || 1;
       const defaultHourlyRate = Number(settings.default_hourly_rate) || 0;
       const price = Number(args.unit_price) || svc?.default_price || defaultHourlyRate || 0;
+      // Retorno F3 (P10.2): com a flag ligada, a linha sem service_id ganha o do catálogo, ou um pendente de conferência.
+      const serviceId = args.service_id
+        || (settings.ai_servico_pendente_catalogo === "on"
+          ? (await resolverServicoDaLinha(sb, admin, String(args.service_name ?? ""), price, args.billing_unit)).service_id
+          : null);
       const { data, error } = await sb
         .from("service_order_services")
         .insert({
           service_order_id: args.service_order_id,
-          service_id: args.service_id || null,
+          service_id: serviceId,
           name_snapshot: args.service_name || svc?.name || "",
           billing_unit_snapshot: args.billing_unit || svc?.billing_unit || "visit",
           quantity: qty,

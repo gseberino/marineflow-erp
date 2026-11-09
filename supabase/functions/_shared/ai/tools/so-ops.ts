@@ -531,7 +531,9 @@ export const soOpsTools: ToolDef[] = [
     },
     risk: "medium",
     roles: NON_TECHNICIAN_ROLES,
-    async execute(args, { sb, admin, userId }) {
+    async execute(args, { sb, admin, userId, sessaoAmarrada }) {
+      // Retorno F3 (P8.4): o modelo pode ter lido texto de cliente, e a cópia traria preço antigo sem o dono ver linha a linha.
+      if (sessaoAmarrada) return { error: "Com o caso amarrado, use a proposta do cartão: duplicar copiaria preço antigo sem você ver." };
       // 06/10/2026: a cópia perdia TODAS as peças (faltava unit_sale_snapshot, obrigatório; o erro
       // do insert era ignorado e a resposta dizia "copiei 2") e numerava por "último + 1", fora do
       // contador — a ORÇ-00112 (04/10) nasceu sem peças e roubou o número do orçamento seguinte.
@@ -567,6 +569,8 @@ export const soOpsTools: ToolDef[] = [
         travel_cost_total: _tt, subcontract_cost_total: _sct, labor_hours_total: _lh,
         commissioned_user_id: _cu, commission_amount: _cam, converted_to_os_at: _cv, quote_status: _qs,
         original_quote_amount: _oq, survey_id: _sv, reminder_sent_at: _rs, quote_validity_date: _qvd,
+        // Retorno F3 (P10.3): a cópia não nasceu de um ato no cartão, e a origem sujaria as medidas do portão.
+        origem: _or, origem_chave8: _oc8, origem_parceiro_id: _opi,
         client_confirmed_at: _cc, client_confirmed_for: _cf, client_confirmation_requested_at: _ccr,
         diagnosis: _dg, solution_applied: _sol, customer_visible_report: _cvr,
         service_order_parts: pecas, service_order_services: servicos,

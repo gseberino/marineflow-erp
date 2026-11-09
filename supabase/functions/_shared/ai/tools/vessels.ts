@@ -114,6 +114,31 @@ export async function contatosDasEmbarcacoes(sb: any, vesselIds: string[]): Prom
   return porEmbarcacao;
 }
 
+/**
+ * Retorno F3 (P10.1): cadastra a unidade sem duplicar. Mesmo nome ou mesmo registro no MESMO cliente pergunta antes;
+ * nome diferente nunca casa. Serve a create_vessel e a retorno_cadastrar_unidade.
+ */
+export async function criarUnidadeSemDuplicado(
+  // deno-lint-ignore no-explicit-any
+  sb: any,
+  campos: Record<string, unknown>,
+  confirmar = false,
+): Promise<Record<string, unknown>> {
+  const todas = await lerTodosOsCadastros(sb, "vessels", "id, name, client_id, hull_id_or_registration, active");
+  const iguais = todas.filter((v) => v.client_id === campos.client_id && (semAcento(v.name) === semAcento(campos.name)
+    || (campos.hull_id_or_registration && semAcento(v.hull_id_or_registration) === semAcento(campos.hull_id_or_registration))));
+  if (iguais.length && confirmar !== true) {
+    return {
+      ok: false,
+      ja_cadastrada: iguais.map((v) => ({ vessel_id: v.id, nome: v.name, registro: v.hull_id_or_registration || null, ativa: v.active !== false })),
+      pergunta: "Já existe unidade com esse nome ou registro para esse cliente. É a mesma? Se for, use a existente.",
+    };
+  }
+  const { data, error } = await sb.from("vessels").insert(campos).select().single();
+  if (error) throw error;
+  return { ok: true, vessel: data };
+}
+
 export const vesselTools: ToolDef[] = [
   {
     name: "search_vessels",
@@ -224,14 +249,15 @@ export const vesselTools: ToolDef[] = [
         year: { type: "number" },
         asset_type: { type: "string", description: `Tipo, um destes: ${LISTA_DE_TIPOS}. Jet ski é Moto aquática; van convertida é Motorhome.` },
         marina_id: { type: "string" },
+        hull_id_or_registration: { type: "string", description: "Número do casco, registro ou placa, se tiver." },
+        confirmar_duplicado: { type: "boolean", description: "true só depois que o dono confirmar que é outra unidade" },
       },
       required: ["client_id", "name", "asset_type"],
     },
     risk: "low",
     async execute(args, { sb }) {
-      const { data, error } = await sb.from("vessels").insert(args).select().single();
-      if (error) throw error;
-      return { ok: true, vessel: data };
+      const { confirmar_duplicado: confirmar, ...campos } = args as Record<string, unknown>;
+      return await criarUnidadeSemDuplicado(sb, campos, confirmar === true);
     },
   },
   {

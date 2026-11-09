@@ -70,6 +70,16 @@ describe('duplicar OS', () => {
     expect(cabecalho).toMatchObject({ status: 'open' });
   });
 
+  // Retorno F3 (P10.3): a cópia não nasceu de um ato no cartão, e levaria a validade antiga da original.
+  it('a cópia não leva a origem do retorno nem a validade da original', async () => {
+    Object.assign(fonte, { origem: 'retorno_ditado', origem_chave8: '12345678', origem_parceiro_id: 'p1', quote_validity_date: '2026-09-01' });
+    const { result } = renderHook(() => useDuplicateServiceOrder(), { wrapper });
+    result.current.mutate({ sourceId: 'os1', mode: 'quote' });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const cabecalho = (gravacoes.service_orders ?? [])[0] as Record<string, unknown>;
+    for (const campo of ['origem', 'origem_chave8', 'origem_parceiro_id', 'quote_validity_date']) expect(cabecalho, campo).not.toHaveProperty(campo);
+  });
+
   it('só despesa de comprovante: nenhuma despesa é gravada na OS nova', async () => {
     fonte.service_order_expenses = [despesa({ id: 'cmp', billable_to_client: false, origem_codigo: 'CMP-00124' })];
     const { result } = renderHook(() => useDuplicateServiceOrder(), { wrapper });
