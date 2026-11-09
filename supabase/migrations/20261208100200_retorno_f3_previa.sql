@@ -520,13 +520,16 @@ set search_path = public
 as $$
 declare
   v_p public.retorno_previa;
+  v_cliente uuid;
   v_vessel uuid;
 begin
   select * into v_p from public.retorno_previa p where p.id = p_previa;
   if not found then
     return null;
   end if;
-  v_vessel := coalesce(v_p.vessel_id, (public._retorno_unidade_do_caso(v_p.abertura_id, v_p.client_id, p_agora) ->> 'vessel_id')::uuid);
+  -- O mesmo cliente que o cartão usa: em número novo, a proposta nasce sem client_id, e a rodada só grava depois.
+  v_cliente := coalesce(v_p.client_id, (public._retorno_cadastro_do_caso(v_p.abertura_id) ->> 'client_id')::uuid);
+  v_vessel := coalesce(v_p.vessel_id, (public._retorno_unidade_do_caso(v_p.abertura_id, v_cliente, p_agora) ->> 'vessel_id')::uuid);
   return public._retorno_previa_hash(v_vessel, v_p.titulo, public._retorno_previa_linhas_json(p_previa));
 end;
 $$;
@@ -724,12 +727,19 @@ begin
         v_p := public._retorno_preco_da_peca(r.product_id, v_cliente, v_agora);
       end if;
     elsif r.service_id is not null then
-      v_nome := left(r.nome_cat, 200);
-      if not r.ativo then
+      -- O nome de catálogo pode ter nascido de uma mão de obra ditada (ai_servico_pendente_catalogo): passa pela mesma limpeza da linha livre.
+      if public._retorno_nome_limpo(r.nome_cat, v_fonte_client, v_fonte_vessel) is null then
+        v_nome := 'Serviço a descrever';
         v_estado_linha := 'provisorio';
-        v_motivo := 'inativo';
+        v_motivo := 'nome_com_dado_de_outro';
       else
-        v_p := public._retorno_preco_do_servico(r.service_id, r.nome_cat, v_cliente, v_agora);
+        v_nome := left(r.nome_cat, 200);
+        if not r.ativo then
+          v_estado_linha := 'provisorio';
+          v_motivo := 'inativo';
+        else
+          v_p := public._retorno_preco_do_servico(r.service_id, r.nome_cat, v_cliente, v_agora);
+        end if;
       end if;
     else
       v_limpo := public._retorno_nome_limpo(r.nome_fonte, v_fonte_client, v_fonte_vessel);

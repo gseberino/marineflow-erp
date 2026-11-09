@@ -81,7 +81,7 @@ declare
   c_agora constant timestamptz := '2040-06-15 10:00-03';
   c_passado constant timestamptz := '2040-02-01 10:00-03';
   v_cli uuid; v_cli2 uuid; v_un uuid; v_un2 uuid; v_un3 uuid;
-  v_p1 uuid; v_p2 uuid; v_p3 uuid; v_s1 uuid; v_s2 uuid; v_s3 uuid;
+  v_p1 uuid; v_p2 uuid; v_p3 uuid; v_s1 uuid; v_s2 uuid; v_s3 uuid; v_s_cat uuid;
   v_os uuid; v_os2 uuid; v_os3 uuid;
   v_caso uuid; v_caso2 uuid; v_caso3 uuid;
   v_id uuid; v_id2 uuid; v_id3 uuid;
@@ -209,6 +209,24 @@ begin
       raise exception '4e: dado pessoal passou';
     end if;
     perform pg_temp.f3v_igual('4f nome comum', public._retorno_nome_limpo('Instalação de banco de baterias', v_cli2, v_un2), 'Instalação de banco de baterias');
+
+    -- ═══ Revisão da F3. Nome de catálogo com dado da fonte (serviço pendente criado de mão de obra ditada) também vira "Serviço a descrever".
+    v_cli := pg_temp.f3v_cli('Paulo Catalogo Teste');
+    v_un := pg_temp.f3v_un(v_cli, 'Brisa Catalogo');
+    v_s_cat := pg_temp.f3v_serv('Instalação na Brisa Catalogo do Paulo', 300);
+    v_os := pg_temp.f3v_os('TF3V-FONTE-CAT', v_cli, v_un, 'draft', 'approved', '2040-05-21 10:00-03', 'troca de baterias');
+    perform pg_temp.f3v_lin(v_os, v_s_cat, 'Instalação na Brisa Catalogo do Paulo', 1, 300, '2040-05-21 10:00-03');
+    v_cli2 := pg_temp.f3v_cli('Outro Catalogo Teste');
+    perform pg_temp.f3v_un(v_cli2, 'Vento Catalogo');
+    v_caso := pg_temp.f3v_caso(4, 'cliente', v_cli2, 'preciso trocar as baterias do barco, quanto custa?');
+    v_r := public.retorno_previa_montar(v_caso, c_agora);
+    perform pg_temp.f3v_igual('4r1 acao', v_r ->> 'acao', 'criada');
+    select * into v_lin from public.retorno_previa_linhas where previa_id = (v_r ->> 'previa_id')::uuid;
+    perform pg_temp.f3v_igual('4r2 nome', v_lin.nome, 'Serviço a descrever');
+    perform pg_temp.f3v_igual('4r3 motivo', v_lin.motivo, 'nome_com_dado_de_outro');
+    if v_lin.preco is not null or v_lin.estado <> 'provisorio' then
+      raise exception '4r4: linha %', row_to_json(v_lin);
+    end if;
 
     -- ═══ 5. Motivos de nada: Cliente Final, papel, sem família, sem parecido, áudio, intenção, bem desconhecido.
     update public.retorno_config set previa_modo = 'ligado';
