@@ -418,6 +418,8 @@ const FIXTURES_COMO_TEXTO = [
   // agenda_fase7e_base.sql confere que ela só cria as 6 funções novas.
   ['agenda_teste.fase7e', 'fixture-fase7e.sql'],
   ['agenda_teste.mig_base_fase7e', '../../supabase/migrations/20261111100000_agenda_fase7e_tabelas.sql'],
+  // Fase 7e (P2): a migration da medição (o M8 de agenda_fase7e_medicao.sql)
+  ['agenda_teste.mig_medicao_fase7e', '../../supabase/migrations/20261111100100_agenda_fase7e_medicao.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

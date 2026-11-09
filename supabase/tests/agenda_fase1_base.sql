@@ -1106,6 +1106,8 @@ insert into _definer_da_agenda values ('agenda_perguntas_em_ordem'), ('agenda_co
 insert into _definer_da_agenda values ('agenda_bloco_do_fechamento');
 -- (Fase 7f, P7) a palavra *agenda espera* (o administrador por _autor_da_agenda, só service_role) e a saúde da comunicação (a porta de _agenda_saude_local, dentro)
 insert into _definer_da_agenda values ('agenda_veto_dito'), ('_agenda_saude_comunicacao');
+-- FASE 7e (P2, 20261111100100): o congelar da marcação e a medida da compra escrevem em os_planejamento e em agenda_medidas_compra, como o congelar e a medida da OS
+insert into _definer_da_agenda values ('_agenda_aprender_congelar_marcacao'), ('agenda_medir_compra');
   -- FASE 7f: fim
   -- FASE 7e: (7e P1, 20261111100000) nenhuma definer nova: o modo, a credibilidade, o z e a temporada são invoker, e o gatilho _agenda_medidas_compra_so_muda só mexe na própria linha. agenda_fase7e_base.sql prova as portas.
   -- FASE 7e: fim

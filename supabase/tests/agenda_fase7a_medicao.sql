@@ -104,9 +104,11 @@ begin
     execute replace(replace(pg_temp.inteira(v_m6, '_agenda_aprender_congelar'),
                             'create or replace function public._agenda_aprender_congelar(', 'create function pg_temp.congelar_antes('),
                     'public._agenda_dias_no_inicio(', 'pg_temp.dni_antes(');
-    execute replace(replace(pg_temp.inteira(v_c6, 'agenda_medir_os'),
+    -- FASE 7e (P2): pm_reais e compra_pendente são NOT NULL desde o P2; a cópia de antes as preenche para poder gravar (só o M7 a usa, e ele tira as 12 colunas da margem da comparação)
+    execute replace(replace(replace(pg_temp.inteira(v_c6, 'agenda_medir_os'),
                             'create or replace function public.agenda_medir_os(', 'create function pg_temp.medir_antes('),
-                    'public._agenda_dias_no_inicio(', 'pg_temp.dni_antes(');
+                    'public._agenda_dias_no_inicio(', 'pg_temp.dni_antes('),
+                    '  m.service_order_id := p_os;', '  m.service_order_id := p_os; m.pm_reais := 0; m.compra_pendente := false;');
   end if;
   return true;
 end $f$;
@@ -279,7 +281,7 @@ begin
     r := public._agenda_aprender_congelar(c_d03);
     r2 := pg_temp.congelar_antes(c_d03);
     v_res := pg_temp.ok(v_res, 'M2a em sombra nada congela (como antes): o Lenine fica sem os dias do início',
-      r = r2 and r ->> 'congeladas' = '0'
+      r - 'estimativas_congeladas' = r2 and r ->> 'congeladas' = '0'  -- FASE 7e (P2): o retorno ganha a chave do 2º laço
       and (select dias_no_inicio is null and dp_no_inicio is null from public.os_planejamento where service_order_id = v_len),
       r::text || ' / ' || r2::text);
     raise exception 'desfaz' using errcode = 'P0099';
@@ -543,15 +545,16 @@ begin
       begin
         perform set_config('agenda.gestor', x.var, true);
         if s = 'novo' then
-          v_novo := public._agenda_aprender_congelar(c_hoje)::text;
+          v_novo := (public._agenda_aprender_congelar(c_hoje) - 'estimativas_congeladas')::text;  -- FASE 7e (P2): o retorno ganha a chave do 2º laço
           for r in select so.id from public.service_orders so where so.status in ('completed', 'invoiced') order by so.id loop
-            v_novo := v_novo || coalesce(public._agenda_dias_no_inicio(r.id)::text, '-') || public.agenda_medir_os(r.id, c_hoje)::text;
+            v_novo := v_novo || coalesce(public._agenda_dias_no_inicio(r.id)::text, '-') || (public.agenda_medir_os(r.id, c_hoje) - array['razao_estimativa', 'razao_prazo', 'motivo_razao'])::text;  -- FASE 7e (P2)
           end loop;
+          -- FASE 7e (P2): o 2º laço do congelar cria linhas sem dias congelados; a comparação é das linhas com dias
           select v_novo || md5(string_agg(to_jsonb(pl)::text, '|' order by pl.service_order_id)) into v_novo
             from (select service_order_id, dias_no_inicio, dias_no_inicio_fonte, dias_no_inicio_em, dp_no_inicio
-                    from public.os_planejamento) pl;
-          select v_novo || md5(string_agg((to_jsonb(m) - 'medida_em')::text, '|' order by m.service_order_id)) into v_novo
-            from public.agenda_medidas_os m;
+                    from public.os_planejamento where dias_no_inicio is not null or dp_no_inicio is not null) pl;
+          select v_novo || md5(string_agg((to_jsonb(m) - array['medida_em', 'pm_reais', 'pm_estimados', 'estimativa_origem', 'razao_estimativa', 'pm_plano_dono', 'razao_dono', 'prazo_plano_du', 'prazo_real_du', 'razao_prazo', 'vies_marcado', 'compra_pendente', 'motivo_razao'])::text, '|' order by m.service_order_id)) into v_novo
+            from public.agenda_medidas_os m;  -- FASE 7e (P2): as 12 colunas da margem são dela
         else
           v_antes := pg_temp.congelar_antes(c_hoje)::text;
           for r in select so.id from public.service_orders so where so.status in ('completed', 'invoiced') order by so.id loop
@@ -559,8 +562,8 @@ begin
           end loop;
           select v_antes || md5(string_agg(to_jsonb(pl)::text, '|' order by pl.service_order_id)) into v_antes
             from (select service_order_id, dias_no_inicio, dias_no_inicio_fonte, dias_no_inicio_em, dp_no_inicio
-                    from public.os_planejamento) pl;
-          select v_antes || md5(string_agg((to_jsonb(m) - 'medida_em')::text, '|' order by m.service_order_id)) into v_antes
+                    from public.os_planejamento where dias_no_inicio is not null or dp_no_inicio is not null) pl;
+          select v_antes || md5(string_agg((to_jsonb(m) - array['medida_em', 'pm_reais', 'pm_estimados', 'estimativa_origem', 'razao_estimativa', 'pm_plano_dono', 'razao_dono', 'prazo_plano_du', 'prazo_real_du', 'razao_prazo', 'vies_marcado', 'compra_pendente', 'motivo_razao'])::text, '|' order by m.service_order_id)) into v_antes
             from public.agenda_medidas_os m;
         end if;
         perform set_config('agenda.gestor', '', true);

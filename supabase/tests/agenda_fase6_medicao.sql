@@ -206,12 +206,13 @@ begin
     execute current_setting('agenda_teste.fase6');
     r1 := public._agenda_aprender_congelar(c_hoje);
     v_res := pg_temp.ok(v_res, 'M3a congela as 13 OS com dias do dono (ou aceitos) e conta as 4 sem dias (141 e as 3 da fixture-fase5)',
-      r1 = '{"congeladas": 13, "sem_dias": 4}', r1::text);
+      r1 - 'estimativas_congeladas' = '{"congeladas": 13, "sem_dias": 4}', r1::text);  -- FASE 7e (P2): o retorno ganha estimativas_congeladas (o 2º laço)
     v_res := pg_temp.ok(v_res, 'M3b o congelado: 133 com os 2 do início (não os 3 de agora), 132 aceita; 141 sem nada',
       (select dias_no_inicio = 2 and dias_no_inicio_fonte = 'dono' and dias_no_inicio_em = date '2026-09-15' and dias = 3
          from public.os_planejamento where service_order_id = pg_temp.os('133'))
       and (select dias_no_inicio_fonte = 'aceita' from public.os_planejamento where service_order_id = pg_temp.os('132'))
-      and not exists (select 1 from public.os_planejamento where service_order_id = pg_temp.os('141')));
+      -- FASE 7e (P2): o 2º laço do congelar cria a linha da 141 (a estimativa do início), então "sem nada" é sem os dias congelados
+      and not exists (select 1 from public.os_planejamento where service_order_id = pg_temp.os('141') and dias_no_inicio is not null));
     -- o dono rediz os dias da 131 depois: o congelado fica, e a medida usa ele
     update public.os_planejamento set dias = 2, estimativa_em = timestamptz '2026-10-30 10:00-03',
            historico = historico || '[{"em": "2026-10-30", "antes": {"dias": 1}, "depois": {"dias": 2}}]'::jsonb
@@ -219,7 +220,7 @@ begin
     r2 := public._agenda_aprender_congelar(c_hoje);
     perform public.agenda_medir_os(pg_temp.os('131'), c_hoje);
     v_res := pg_temp.ok(v_res, 'M3c uma vez só: a 2ª rodada não congela nada; o que o dono rediz depois não muda o congelado nem a medida',
-      r2 = '{"congeladas": 0, "sem_dias": 4}'
+      r2 - 'estimativas_congeladas' = '{"congeladas": 0, "sem_dias": 4}'
       and (select dias_no_inicio = 1 from public.os_planejamento where service_order_id = pg_temp.os('131'))
       and (select meios_planejados = 2 and dias_no_inicio = 1 and fator = 1.00 from public.agenda_medidas_os
             where service_order_id = pg_temp.os('131')),
@@ -244,7 +245,7 @@ begin
     -- a rodada de qua 09/09 só vê o check-in até aquele dia: a 131 e a 132 (e a OS-00123 da fixture-fase5, sem dias)
     r1 := public._agenda_aprender_congelar(date '2026-09-09');
     v_res := pg_temp.ok(v_res, 'M3d só o que teve check-in até o dia da rodada: em 09/09, a 131 e a 132 (a OS-00123, sem dias)',
-      r1 = '{"congeladas": 2, "sem_dias": 1}'
+      r1 - 'estimativas_congeladas' = '{"congeladas": 2, "sem_dias": 1}'
       and (select count(*) from public.os_planejamento where dias_no_inicio is not null) = 2, r1::text);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;

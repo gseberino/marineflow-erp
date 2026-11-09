@@ -313,8 +313,8 @@ select 'B2a as 12 colunas de os_planejamento e as 12 de agenda_medidas_os',
   from c left join pg_attribute a on a.attrelid = ('public.' || c.tabela)::regclass and a.attname = c.coluna and not a.attisdropped;
 
 insert into _resultado
-select 'B2b agenda_medidas_os: pm_reais e compra_pendente NULÁVEIS e SEM DEFAULT no P1 (o agenda_medir_os de hoje passa NULL explícito no insert (m).* e compara to_jsonb(m): com NOT NULL/DEFAULT cairia ou andaria de versão a cada rodada; o NOT NULL é do P2)',
-       bool_and(not a.attnotnull and d.adbin is null) and count(*) = 2, string_agg(a.attname || ':' || a.attnotnull || ':' || coalesce(d.adbin::text, 'sem default'), ',')
+select 'B2b agenda_medidas_os: pm_reais e compra_pendente NOT NULL com DEFAULT (0 e false) desde o P2 (20261111100100: o P1 as deixou nuláveis porque o agenda_medir_os de então passava NULL explícito; o P2 recria a função gravando as duas em todo caminho e enche as linhas antes do NOT NULL)',
+       bool_and(a.attnotnull and coalesce(pg_get_expr(d.adbin, d.adrelid), '') = case a.attname when 'pm_reais' then '0' else 'false' end) and count(*) = 2, string_agg(a.attname || ':' || a.attnotnull || ':' || coalesce(pg_get_expr(d.adbin, d.adrelid), 'sem default'), ',')
   from pg_attribute a left join pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
  where a.attrelid = 'public.agenda_medidas_os'::regclass and a.attname in ('pm_reais', 'compra_pendente');
 
@@ -366,9 +366,11 @@ begin
   -- agenda_medidas_os: uma OS sem medida; a linha base já é uma medida inválida (a forma de um retrato sem razão)
   select so.id into v_sem from public.service_orders so where not exists (select 1 from public.agenda_medidas_os m where m.service_order_id = so.id) order by so.created_at limit 1;
   v_base := format($q$insert into public.agenda_medidas_os select * from jsonb_populate_record(null::public.agenda_medidas_os, jsonb_build_object(
-      'service_order_id', %L, 'classe_bem', 'rv', 'classe_sistema', 'geral', 'concluida_em', date '2026-11-11', 'valida', false, 'motivo', 'sem_inicio', 'meios_cumpridos', 0,
+      'service_order_id', %L, 'classe_bem', 'rv', 'classe_sistema', 'geral', 'concluida_em', date '2026-11-11', 'valida', false, 'motivo', 'sem_inicio', 'meios_cumpridos', 0, 'pm_reais', 0, 'compra_pendente', false,
       'meios_fora_do_plano', 0, 'meios_sem_registro', 0, 'diarias_ligadas', 0, 'so_o_dono', false, 'avisos_enviados', 0, 'versao', 1, 'historico', '[]'::jsonb, 'medida_em', now()) || %%L::jsonb)$q$, v_sem);
-  v_res := pg_temp.ok(v_res, 'B2e agenda_medidas_os: a linha base entra sem pm_reais nem compra_pendente (NULL explícito de jsonb_populate_record, como o insert (m).* de hoje)', pg_temp.recusa(format(v_base, '{}')) = 'aceitou', pg_temp.recusa(format(v_base, '{}')));
+  v_res := pg_temp.ok(v_res, 'B2e agenda_medidas_os: a linha base com pm_reais e compra_pendente entra; sem cada um deles (NULL explícito, como o insert (m).*) é recusada pelo NOT NULL do P2',
+    pg_temp.recusa(format(v_base, '{}')) = 'aceitou'
+    and pg_temp.recusa(format(v_base, '{"pm_reais": null}')) <> 'aceitou' and pg_temp.recusa(format(v_base, '{"compra_pendente": null}')) <> 'aceitou', pg_temp.recusa(format(v_base, '{}')));
   v_res := pg_temp.ok(v_res, 'B2f razao_so_valida: razão com motivo_razao = recusada; sem motivo, aceita',
     pg_temp.recusa(format(v_base, '{"razao_estimativa": 1.1, "motivo_razao": "sem_diaria"}')) = 'razao_so_valida'
     and pg_temp.recusa(format(v_base, '{"razao_estimativa": 1.1}')) = 'aceitou', pg_temp.recusa(format(v_base, '{"razao_estimativa": 1.1, "motivo_razao": "sem_diaria"}')));
@@ -844,7 +846,10 @@ do $b8$
 declare
   v_res jsonb := '[]'::jsonb;
   v_dif text;
-  c_novas constant text[] := array['_agenda_margem_modo', '_agenda_margem_modo_cru', '_agenda_credibilidade', '_agenda_z', '_agenda_temporada', '_agenda_medidas_compra_so_muda'];
+  c_novas constant text[] := array['_agenda_margem_modo', '_agenda_margem_modo_cru', '_agenda_credibilidade', '_agenda_z', '_agenda_temporada', '_agenda_medidas_compra_so_muda',
+    -- as novas do P2 (20261111100100), sem marca porque são inteiras da 7e
+    '_agenda_margem_tipo_os', '_agenda_margem_dp_bruto', '_agenda_margem_dono_e_pessoa', '_agenda_material_critico', '_agenda_margem_em_uso', '_agenda_vies_da_os', '_agenda_tempo_interno_compra',
+    '_agenda_aprender_congelar_marcacao', 'agenda_medir_compra', '_agenda_aprender_medir_compras'];
 begin
   -- nenhuma função de antes lê as colunas nem chama as funções novas. Quem vier depois nesta etapa: a função recriada leva a marca -- FASE 7e (sai daqui sozinha); a função NOVA, sem marca, entra em c_novas, pelo nome.
   select string_agg(p.proname, ',' order by p.proname) into v_dif
@@ -941,9 +946,9 @@ begin
   end if;
   execute current_setting('agenda_teste.fase7e');
   v_n := (select count(*) from public.service_orders);
-  v_res := pg_temp.ok(v_res, 'B9a a OS-E0 e as suas 3 linhas de material', (select count(*) = 3 from public.os_material m where m.service_order_id = 'e7e00000-0000-4000-8000-000000000e00'), null);
+  v_res := pg_temp.ok(v_res, 'B9a a OS-E0 e as suas 6 linhas de material (as 3 do P1 + as 3 do P2: a nota, o histórico, o balcão)', (select count(*) = 6 from public.os_material m where m.service_order_id = 'e7e00000-0000-4000-8000-000000000e00'), null);
   v_res := pg_temp.ok(v_res, 'B9b a forma real (R7.12-8): fonte nula e critico true nas 3 (R7.5-4, R7.5-5)',
-    (select bool_and(m.fonte is null and m.critico) from public.os_material m where m.service_order_id = 'e7e00000-0000-4000-8000-000000000e00'), null);
+    (select bool_and(m.fonte is null and m.critico) from public.os_material m where m.id = any (array[md5('e7e:material:m1')::uuid, md5('e7e:material:m2')::uuid, md5('e7e:material:m3')::uuid])), null);
   v_res := pg_temp.ok(v_res, 'B9c a forma real do histórico (R7.5-3): a chave é para, não depois, e tem as 7 chaves de produção',
     (select (m.historico -> 0) ?& array['em', 'de', 'para', 'por', 'autor', 'trecho', 'nota'] and not (m.historico -> 0) ? 'depois' and m.historico -> 0 ->> 'para' = 'comprado'
        from public.os_material m where m.id = md5('e7e:material:m1')::uuid), null);
@@ -952,13 +957,12 @@ begin
   v_res := pg_temp.ok(v_res, 'B9e o "miúdo" não existe na coluna: parafusos é critico true (só a função do P2 calcula)',
     (select m.critico from public.os_material m where m.id = md5('e7e:material:m2')::uuid), null);
   execute current_setting('agenda_teste.fase7e');
-  v_res := pg_temp.ok(v_res, 'B9f carregar a fixture 2× = 1×', (select count(*) from public.service_orders) = v_n and (select count(*) from public.os_material m where m.service_order_id = 'e7e00000-0000-4000-8000-000000000e00') = 3, null);
+  v_res := pg_temp.ok(v_res, 'B9f carregar a fixture 2× = 1×', (select count(*) from public.service_orders) = v_n and (select count(*) from public.os_material m where m.service_order_id = 'e7e00000-0000-4000-8000-000000000e00') = 6, null);
   perform pg_temp.gravar(v_res);
 end
 $b9$;
 
--- agenda_medir_os continua de pé sobre as colunas novas (R7.5-1 é do P2, mas o P1 não pode quebrar o que está no ar): o insert (m).* com NULL entra e, numa 2ª rodada, nada muda. Se pm_reais ou compra_pendente
--- voltarem a NOT NULL com DEFAULT, a 1ª chamada lança ou a 2ª anda de versão (a mutação que as devolve reprova aqui e no B2b).
+-- agenda_medir_os grava todas as colunas (R7.5-1, P2): a 1ª chamada entra pelo insert (m).* com as 2 preenchidas (o NOT NULL do P2) e, numa 2ª rodada, nada muda.
 do $b8e$
 declare
   v_res jsonb := '[]'::jsonb;
@@ -977,7 +981,7 @@ begin
   perform set_config('agenda.porta', 'off', true);
   v1 := public.agenda_medir_os(v_os, date '2026-11-09');
   v2 := public.agenda_medir_os(v_os, date '2026-11-09');
-  v_res := pg_temp.ok(v_res, 'B8e agenda_medir_os (a de hoje, sem o P2) grava a linha sem erro e na 2ª rodada não muda nada: as colunas novas não atrapalham o insert (m).* nem o to_jsonb(m) = to_jsonb(m0)',
+  v_res := pg_temp.ok(v_res, 'B8e agenda_medir_os (a recriada pelo P2) grava a linha sem erro e na 2ª rodada não muda nada: pm_reais e compra_pendente entram no insert (m).* e o to_jsonb(m) = to_jsonb(m0)',
     v1 ->> 'ok' = 'true' and v2 ->> 'mudou' = 'false' and v2 ->> 'versao' = v1 ->> 'versao', format('%s / %s', v1, v2));
   perform pg_temp.gravar(v_res);
 end

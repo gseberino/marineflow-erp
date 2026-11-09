@@ -3859,3 +3859,19 @@ porque só o dono pode preenchê-las.
 - **Efeito:** para o serviço da segunda, o zero só acusa envio antes da sexta, não antes do sábado. Não dá falso alarme, mas deixa passar 1 dia nesse caso. Hoje vale 0 e não há semana enviada.
 - **Na Fase 7f (P9):** fica assim: o zero que derruba o `ok` não pode dar falso alarme no dia da publicação.
 - **Origem:** Fase 7f, P9.
+
+### [NOVO-agenda-151] O molde de `agenda_meios_da_os` monta o array por concatenação e demora o quadrado do total de meios-dias
+
+- **Encontrado em:** Agenda de Produção, Fase 7e, P2 (09/11/2026), ao montar a medição: o laço `for k in 1 .. v_total` faz `v_molde := v_molde || jsonb_build_object(...)` e, com uma OS de R$ 100 milhões de mão de obra num teste, o `_agenda_aprender_congelar` não terminou em vários minutos.
+- **Onde:** `agenda_meios_da_os` (`20261101100300`, 7b P4); `_agenda_aprender_congelar` (o 2º laço da 7e P2) e a medida a chamam uma vez por OS que começa.
+- **Efeito:** nenhum na carteira real (a maior OS tem dezenas de meios-dias). Só valeria com um orçamento absurdo, e aí a vigia já pagaria o mesmo preço.
+- **Na Fase 7e:** fica. Não muda o motor por isso; o passo da rodada tem o `aprender_tempo_max` (P7) e o corte da sessão por cima.
+- **Origem:** Fase 7e, P2.
+
+### [NOVO-agenda-152] `_agenda_aprendizado_texto` não tem o texto "Fornecedor pela compra" (`fornecedor_prazo` com `detalhe.fonte = 'compras'`)
+
+- **Encontrado em:** Agenda de Produção, Fase 7e, P2 (09/11/2026).
+- **Onde:** spec §6.2, última linha, e §5.5 (P6): o texto depende do `detalhe.fonte` e do `detalhe.teria` que o `_agenda_aprender_fornecedor` do P6 grava, e R7.1 só lista `_agenda_aprendizado_texto` no P2.
+- **Efeito:** sem esse texto, o fornecedor medido pelas compras sai com o texto de sempre (o da nota).
+- **Na Fase 7e:** deixado para o P6, que dá o `detalhe` (registrado em "Para os pacotes seguintes" das notas): recriar `_agenda_aprendizado_texto` a partir do P2 quando o P6 existir.
+- **Origem:** Fase 7e, P2.
