@@ -121,9 +121,15 @@ end $f$;
 -- O corpo sem os blocos deste pacote ("-- FASE 7: (7a P12 … -- FASE 7: fim"; os das etapas de antes ficam).
 create function pg_temp.sem_p12(p_corpo text) returns text language plpgsql as $f$
 declare
-  v_b text[] := '{}'; v_bloco boolean := false; l text;
+  v_b text[] := '{}'; v_bloco boolean := false; v_7e boolean := false; l text;
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
+    -- (Fase 7e, P4: as marcas "-- (7e ... -- (7e: fim)" dentro de bloco de antes saem também, R7.2; dentro de bloco tirado, o laço de baixo as engole)
+    if not v_bloco and not v_7e and l ~ '^\s*-- \(7e ' then v_7e := true; continue; end if;
+    if v_7e then
+      if l ~ '^\s*-- \(7e: fim\)' then v_7e := false; end if;
+      continue;
+    end if;
     -- (correção 2 da 7a, 20261031100985: a dupla sem a 2ª pessoa acrescentou 2 blocos "-- FASE 7: (7a correção 2" à
     -- _agenda_classe_da_os depois do P12; eles saem junto, e o resto continua sendo a cópia do P12 sobre a de antes)
     -- FASE 7b: (7b P4) e os blocos "-- FASE 7b: … fim" (a 20261101100300 recria o motor de novo, só acréscimo): a régua aceita "7b"

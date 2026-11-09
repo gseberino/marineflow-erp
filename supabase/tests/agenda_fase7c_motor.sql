@@ -86,10 +86,10 @@ end $f$;
 -- O texto sem os blocos "-- FASE 7c: … -- FASE 7c: fim" (as linhas de abrir e de fechar saem junto).
 create function pg_temp.sem_7c(p text) returns text language sql immutable as $f$
   select array_to_string(array(
-           select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7[cdef]:' and l !~ '-- FASE 7[cdef]: fim' then 1
-                                                when l ~ '^\s*-- FASE 7[cdef]: fim' then -1 else 0 end)
+           select l from (select l, o, sum(case when l ~ '^\s*-- (FASE 7[cdef]:|\(7e )' and l !~ '-- FASE 7[cdef]: fim' then 1
+                                                when l ~ '^\s*-- (FASE 7[cdef]: fim|\(7e: fim\))' then -1 else 0 end)
                                        over (order by o rows between unbounded preceding and current row) as dentro,
-                                 l ~ '^\s*-- FASE 7[cdef]: fim' as fecha
+                                 l ~ '^\s*-- (FASE 7[cdef]: fim|\(7e: fim\))' as fecha
                             from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n')
 $f$;
