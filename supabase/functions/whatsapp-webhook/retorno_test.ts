@@ -112,6 +112,23 @@ Deno.test("identificarCliente: ligado e cliente = usa o cliente do banco", async
   assertEquals(await identificarCliente(banco, FONE), { usar: true, clientId: CLIENTE_A });
 });
 
+Deno.test("identificarCliente (F4, P2): parceiro com cadastro de cliente usa o cliente dele; sem cadastro, nulo", async () => {
+  // A MP continua com as mensagens gravadas no cadastro dela, como hoje (retorno_identificar devolve o client_id dela).
+  const comCadastro = bancoFalso(() => ({
+    data: { nova: true, papel: "parceiro", client_id: CLIENTE_A, clientes: [] }, error: null,
+  }));
+  assertEquals(await identificarCliente(comCadastro, FONE), { usar: true, clientId: CLIENTE_A });
+  const semCadastro = bancoFalso(() => ({ data: { nova: true, papel: "parceiro", client_id: null, clientes: [] }, error: null }));
+  assertEquals(await identificarCliente(semCadastro, FONE), { usar: true, clientId: null });
+  const idInvalido = bancoFalso(() => ({ data: { nova: true, papel: "parceiro", client_id: "abc", clientes: [] }, error: null }));
+  assertEquals(await identificarCliente(idInvalido, FONE), { usar: true, clientId: null });
+  // Papel parecido não passa: só "cliente" e "parceiro" trazem cliente.
+  const parecido = bancoFalso(() => ({
+    data: { nova: true, papel: "cliente_parceiro", client_id: CLIENTE_A, clientes: [CLIENTE_A] }, error: null,
+  }));
+  assertEquals(await identificarCliente(parecido, FONE), { usar: true, clientId: null });
+});
+
 Deno.test("identificarCliente: ambíguo nunca escolhe cliente (client_id nulo, ou mesmo preenchido por engano)", async () => {
   const ambiguo = bancoFalso(() => ({
     data: { nova: true, papel: "cliente_ambiguo", client_id: null, clientes: [CLIENTE_A, CLIENTE_B] }, error: null,

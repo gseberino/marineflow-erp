@@ -58,7 +58,8 @@ export type Identificacao = { usar: boolean; clientId: string | null };
 /**
  * A identificação nova do cliente (contrato C-IDENT). `usar: false` = o webhook faz o ILIKE de hoje (interruptor
  * desligado, função ausente, erro, resposta estranha). `usar: true` = vale o que o banco disse, e o cliente só vem
- * quando o papel é "cliente", com um cliente só e um uuid válido: ambíguo nunca escolhe cliente. Nunca lança.
+ * quando o papel é "cliente" (ou "parceiro", com o cadastro do parceiro como cliente, F4), com um cliente só e um uuid
+ * válido: ambíguo nunca escolhe cliente. Nunca lança.
  */
 export async function identificarCliente(admin: Db, phone: string): Promise<Identificacao> {
   const deHoje: Identificacao = { usar: false, clientId: null };
@@ -72,7 +73,10 @@ export async function identificarCliente(admin: Db, phone: string): Promise<Iden
     const clienteId = campo(data, "client_id");
     const clientes = campo(data, "clientes");
     const umSo = !Array.isArray(clientes) || clientes.length <= 1;
-    const valido = campo(data, "papel") === "cliente" && umSo && typeof clienteId === "string" && UUID.test(clienteId);
+    // F4 (P2): a pessoa de parceiro confirmada traz o cadastro do parceiro como cliente (a MP), quando existe: as mensagens
+    // dela continuam no cadastro dela, como hoje.
+    const papel = campo(data, "papel");
+    const valido = (papel === "cliente" || papel === "parceiro") && umSo && typeof clienteId === "string" && UUID.test(clienteId);
     return { usar: true, clientId: valido ? clienteId : null };
   } catch (e) {
     console.warn(`[whatsapp-webhook] retorno_identificar falhou: ${codigoDoErro(e)}`);
