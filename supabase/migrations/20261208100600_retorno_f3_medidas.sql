@@ -130,7 +130,7 @@ with casos as (
          date_trunc('week', a.aberta_em at time zone 'America/Sao_Paulo')::date as semana,
          coalesce(public._retorno_intencao_do_caso(a.id, now()) in ('orcamento', 'adicional'), false) as pedido
     from public.retorno_aberturas a
-   where a.nivel = 'recibo' or a.visita_a_combinar_em is not null
+   where a.nivel in ('recibo', 'passagem') or a.visita_a_combinar_em is not null   -- passagem é o mesmo caso, e costuma ser o mais demorado
 ), por_caso as (
   select c.id, c.semana, c.pedido, c.estado, c.aberta_em, c.visita_a_combinar_em,
          min(p.criada_em) filter (where p.origem = 'historico') as primeira_proposta_em,
@@ -167,9 +167,10 @@ with casos as (
 ), eventos as (
   select e.payload, date_trunc('week', e.created_at at time zone 'America/Sao_Paulo')::date as semana
     from public.ai_operator_audit e
-   where e.event_type = 'tool:create_quote_from_items'
+   where e.event_type in ('tool:create_quote_from_items', 'tool:create_service_order')
      and e.payload -> 'sessao_amarrada' = 'true'::jsonb
      and not e.payload ? 'erro'   -- a tentativa barrada é pre_validacao_recusada: e não chega aqui; com erro, nada foi criado
+     and (e.event_type = 'tool:create_quote_from_items' or coalesce(e.payload -> 'args' ->> 'status', 'draft') = 'draft')   -- create_service_order só conta quando abre orçamento
 ), semanas as (
   select pc.semana from por_caso pc
    where pc.pedido or pc.visita_a_combinar_em is not null or pc.primeira_proposta_em is not null or pc.pdf_em is not null

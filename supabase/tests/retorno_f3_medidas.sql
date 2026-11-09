@@ -324,6 +324,23 @@ begin
     -- Caso sem pedido de orçamento: não conta.
     v_caso := pg_temp.f3m_caso(23, v_cli, '2026-02-05 09:00-03', 'oi, tudo bem por ai?');
 
+    -- ═══ 14b. Revisão da F3: o caso que virou passagem continua sendo pedido (08/06/26). Com proposta e PDF, conta em tudo.
+    v_cli := pg_temp.f3m_cli('Gil Medidas Passagem');
+    v_un := pg_temp.f3m_un(v_cli, 'Brisa Passagem');
+    v_caso := pg_temp.f3m_caso(170, v_cli, '2026-06-08 09:00-03');
+    update public.retorno_aberturas set nivel = 'passagem' where id = v_caso;
+    v_so := pg_temp.f3m_orc('TF3M-170', v_cli, v_un, '2026-06-08 11:00-03', 'retorno_previa');
+    perform pg_temp.f3m_peca(v_so, v_p1, 1, 100, '2026-06-08 11:00-03');
+    v_id := pg_temp.f3m_prop(v_caso, v_cli, v_un, 'virou_orc', 'ligado', jsonb_build_array(pg_temp.f3m_lp(v_p1, 1, 100)), v_so, 'historico',
+                             '2026-06-08 10:00-03', '2026-06-08 11:30-03', pg_temp.f3m_chave(v_caso));
+    perform pg_temp.f3m_item(v_caso, v_id, 'feito', '2026-06-08 11:00-03');
+
+    -- ═══ 17b. Revisão da F3 (15/06/26): create_service_order que abriu orçamento em sessão amarrada é ORÇ sem ato; OS numerada e sessão solta, não.
+    perform pg_temp.f3m_evento('tool:create_service_order', '{"sessao_amarrada": true, "args": {"client_id": "c-1"}}', '2026-06-16 10:00-03');
+    perform pg_temp.f3m_evento('tool:create_service_order', '{"sessao_amarrada": true, "args": {"status": "draft"}}', '2026-06-16 10:01-03');
+    perform pg_temp.f3m_evento('tool:create_service_order', '{"sessao_amarrada": true, "args": {"status": "in_progress"}}', '2026-06-16 10:02-03');
+    perform pg_temp.f3m_evento('tool:create_service_order', '{"args": {"status": "draft"}}', '2026-06-16 10:03-03');
+
     -- ═══ 15. Mediana de PDF e o corte por linhas alteradas (09/02/26): [0, 1, infinito] dá 1 dia útil.
     v_cli := pg_temp.f3m_cli('Bia Medidas Semana');
     v_un := pg_temp.f3m_un(v_cli, 'Brisa Semana 2');
@@ -468,6 +485,18 @@ begin
     perform pg_temp.f3m_igual('14 mediana du', v_m.pedido_pdf_mediana_du::text, null);
     perform pg_temp.f3m_igual('14 mostradas', v_m.propostas_mostradas::text, '1');
     perform pg_temp.f3m_igual('14 viraram', v_m.viraram_pdf_ate_1_linha::text, '1');
+
+    select * into v_m from _f3m_v m where m.semana = date '2026-06-08';
+    if not found then
+      raise exception '14b: a semana do caso em passagem não apareceu';
+    end if;
+    perform pg_temp.f3m_igual('14b pedidos', v_m.pedidos::text, '1');
+    perform pg_temp.f3m_igual('14b com_proposta', v_m.com_proposta::text, '1');
+    perform pg_temp.f3m_igual('14b mediana h', v_m.pedido_proposta_mediana_h::text, '1.00');
+    perform pg_temp.f3m_igual('14b mediana du', v_m.pedido_pdf_mediana_du::text, '0.00');
+    perform pg_temp.f3m_igual('14b mostradas', v_m.propostas_mostradas::text, '1');
+    perform pg_temp.f3m_igual('14b viraram', v_m.viraram_pdf_ate_1_linha::text, '1');
+    perform pg_temp.f3m_igual('17b orc_sem_ato', (select m.orc_sem_ato::text from _f3m_v m where m.semana = date '2026-06-15'), '2');
     perform pg_temp.f3m_igual('14 pct com menos de 20', v_m.viraram_pdf_ate_1_linha_pct::text, null);
     perform pg_temp.f3m_igual('14 orc_sem_ato', v_m.orc_sem_ato::text, '0');
     perform pg_temp.f3m_igual('14 orc_duplicado', v_m.orc_duplicado::text, '0');
