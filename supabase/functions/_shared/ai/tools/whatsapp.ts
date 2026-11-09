@@ -14,7 +14,8 @@ import { guardaDeEnvio } from "../comms/send-guard.ts";
 import { registrarEnvio } from "../comms/send-log.ts";
 import { documentTypeFor } from "../../pdf/document-type.ts";
 import { fmtCurrency, vencimentoDoOrcamento } from "../../pdf/documento.ts";
-import { dataBR } from "../../pdf/datas.ts";
+import { dataBR, diaBR, somarDiasAoDia } from "../../pdf/datas.ts";
+import { diasDeValidade } from "../../dias-de-validade.ts";
 import { guardarEEntregar, impressaoDigitalDoDocumento, montarDocumentoDaOrdem, montarResumoDeValores } from "../../pdf/gerar-e-guardar.ts";
 import { desviadoPorTeste, modoDeTesteSemNumero, numeroDeTesteAtivo } from "../../whatsapp/marcar-enviado.ts";
 import { normalizePhoneNumber } from "../../whatsapp/normalize.ts";
@@ -316,7 +317,32 @@ export function mascararTelefone(telefone: unknown): string {
 }
 
 const CAMPOS_DA_ORDEM_PARA_ENVIO =
-  "id, service_order_number, share_token, client_id, status, grand_total, quote_status, created_at, quote_validity_days, quote_validity_date, cancellation_reason";
+  "id, service_order_number, share_token, client_id, status, grand_total, quote_status, created_at, quote_validity_days, quote_validity_date, cancellation_reason, origem";
+
+/**
+ * Retorno F3 (K6): 7 dias CONTADOS DO ENVIO, escritos no PDF. A data fica em quote_validity_date, que o PDF e a R19 já leem.
+ * Vale para ORÇ do retorno e para o que sai pelo cartão, e é refeita a cada tentativa enquanto o orçamento está em rascunho:
+ * PDF que falha não congela a data. Depois de 'sent' não renova (D13). Orçamento da tela e do assistente livre segue como
+ * está até a F5. Nunca lança: erro aqui segue o envio e devolve o aviso.
+ */
+export async function fixarValidadeDoEnvio(
+  admin: any,
+  so: { id: string; quote_status?: string | null; origem?: string | null },
+  dataDoCartao?: string | null,
+  agora: Date = new Date(),
+): Promise<{ aviso_validade?: string }> {
+  try {
+    if (so.quote_status !== "draft" || (!dataDoCartao && !so.origem)) return {};
+    const { data: cfg } = await admin.from("retorno_config").select("validade_orcamento_dias").maybeSingle();
+    const n = diasDeValidade(cfg?.validade_orcamento_dias) ?? 7;
+    const data = dataDoCartao ?? somarDiasAoDia(diaBR(agora), n);
+    const { error } = await admin.from("service_orders").update({ quote_validity_days: n, quote_validity_date: data }).eq("id", so.id);
+    if (error) throw error;
+    return {};
+  } catch {
+    return { aviso_validade: "Não consegui gravar a validade; o PDF saiu com a validade antiga, confira na tela." };
+  }
+}
 
 /** Ordem cancelada: se ela é a origem de um agrupamento, a frase aponta o orçamento (ou a OS) que vale agora. */
 export function frasesDaOrdemCancelada(so: { service_order_number?: string; status?: unknown; cancellation_reason?: unknown }) {
@@ -962,6 +988,10 @@ export const whatsappTools: ToolDef[] = [
         };
       }
 
+      // Retorno F3 (K6): a validade que sai no PDF é a do ENVIO. A data entra em quote_validity_date antes de montar, e o
+      // montarDocumentoDaOrdem relê a ordem pelo id: `so` daqui em diante não usa os campos de validade.
+      // ctx.validadeDoCartao é declarado em ToolCtx pela P7; até lá, o cast evita depender do campo.
+      const validade = await fixarValidadeDoEnvio(admin, so, (ctx as ToolCtx & { validadeDoCartao?: string }).validadeDoCartao);
       // ── formato 'pdf_e_link': o arquivo do Baixar, com o link na legenda ──────────────
       const montado = await montarDocumentoDaOrdem(admin, so, settings);
       if (!montado.ok) {
@@ -1038,7 +1068,7 @@ export const whatsappTools: ToolDef[] = [
       }
       const rotuloDoc = `${doc.rotulo} ${doc.numero}`;
       if (envio.deduplicated) {
-        return { ok: true, deduplicated: true, aviso: `Este mesmo PDF (${rotuloDoc}) já foi enviado hoje para este cliente; não reenviei.` };
+        return { ok: true, deduplicated: true, aviso: `Este mesmo PDF (${rotuloDoc}) já foi enviado hoje para este cliente; não reenviei.`, destino_chave8: digitos.slice(-8), ...validade };
       }
       await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: `${marca} ${legenda}`, status: "sent" });
       // Modo de teste (calculado lá em cima): dizer "chegou ao cliente" seria fingir.
@@ -1061,6 +1091,8 @@ export const whatsappTools: ToolDef[] = [
             : "O cliente recebeu só o PDF, sem texto nem link.")
           : "O cliente recebeu o PDF com o link para ver online e aprovar.",
         ...(g.avisos.length ? { avisos_estilo: g.avisos } : {}),
+        destino_chave8: digitos.slice(-8),
+        ...validade,
       };
     },
   },
