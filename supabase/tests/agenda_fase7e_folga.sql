@@ -8,7 +8,7 @@
 --   F3  o motor e o validador na mesma carga, nos 4 pontos dos 2 ramos (com e sem sábado), semana a semana; o por pessoa não muda sem o teto da equipe
 --   F3b a frase da carga e a troca pela do dono (R7.5-14)
 --   F4  a urgência: as 3 regras, a OS sem linha, sem chave em sombra (sem urgente_teste), 100% no motor e no validador, o motivo só quando passou do teto, a normal antes da urgente na fila
---   F5g os ganchos do puxar (o P4b é quem chama): o dia, quem vem, a regra 7 estreita, a máscara do local
+--   F5g os ganchos do puxar (o P4b é quem chama): o dia, quem vem, a regra 7 estreita (e a ponta do dono da OS puxada), a máscara do local
 --   F6  as cópias: tirados os blocos do P4, o corpo é o da origem; o que não se recria
 --   M1  sombra = antes, em md5: contexto, motor e validador contra as definições de antes (desligado, sombra, ligado com o freio)
 --   M1c sem relógio: com as funções da margem lançando, os 3 caminhos rodam em sombra
@@ -1074,6 +1074,21 @@ begin
     v_res := pg_temp.ok(v_res, 'F5g5 sem puxar, a regra 7 recusa o mesmo item', pg_temp.regra(v, 7) <> '-', pg_temp.regra(v, 7));
     v := public._agenda_validar_itens(jsonb_build_array(pg_temp.item(v_a, 'OS-7EF500', v_alex, 'Alex', c_d)), jsonb_build_object('p_restricoes', v_p), c_hoje, c_ag, false);
     v_res := pg_temp.ok(v_res, 'F5g6 outra pessoa: recusa', pg_temp.regra(v, 7) <> '-', pg_temp.regra(v, 7));
+    -- a ponta do dono (abrir e fechar) da OS puxada, no dia, com ele fora de pessoas: o motor só tira o turno de quem está fora, e a OS "abre e fecha" leva a ponta dele (conferência do P4b)
+    v := public._agenda_validar_itens(jsonb_build_array(jsonb_set(pg_temp.item(v_a, 'OS-7EF500', public._agenda_dono(null), 'Dono', c_d, 'tarde'), '{alocacoes,0,presenca}', '"abertura"')), jsonb_build_object('p_restricoes', v_p), c_hoje, c_ag, false);
+    v_res := pg_temp.ok(v_res, 'F5g6b a abertura do dono na OS puxada, no dia, com ele fora de pessoas: aceita', pg_temp.regra(v, 7) = '-', pg_temp.regra(v, 7));
+    v := public._agenda_validar_itens(jsonb_build_array(jsonb_set(pg_temp.item(v_a, 'OS-7EF500', public._agenda_dono(null), 'Dono', c_d, 'tarde'), '{alocacoes,0,presenca}', '"fechamento"')), jsonb_build_object('p_restricoes', v_p), c_hoje, c_ag, false);
+    v_res := pg_temp.ok(v_res, 'F5g6c o fechamento do dono na OS puxada, no dia: aceita', pg_temp.regra(v, 7) = '-', pg_temp.regra(v, 7));
+    v := public._agenda_validar_itens(jsonb_build_array(pg_temp.item(v_a, 'OS-7EF500', public._agenda_dono(null), 'Dono', c_d, 'tarde')), jsonb_build_object('p_restricoes', v_p), c_hoje, c_ag, false);
+    v_res := pg_temp.ok(v_res, 'F5g6d o turno do dono, com ele fora de pessoas: recusa (só a ponta)', pg_temp.regra(v, 7) <> '-', pg_temp.regra(v, 7));
+    v := public._agenda_validar_itens(jsonb_build_array(jsonb_set(pg_temp.item(v_a, 'OS-7EF500', v_alex, 'Alex', c_d, 'tarde'), '{alocacoes,0,presenca}', '"abertura"')), jsonb_build_object('p_restricoes', v_p), c_hoje, c_ag, false);
+    v_res := pg_temp.ok(v_res, 'F5g6e a ponta de quem não é o dono, fora de pessoas: recusa', pg_temp.regra(v, 7) <> '-', pg_temp.regra(v, 7));
+    v := public._agenda_validar_itens(jsonb_build_array(jsonb_set(pg_temp.item(pg_temp.os('E1'), 'OS-7E1', public._agenda_dono(null), 'Dono', c_d, 'tarde'), '{alocacoes,0,presenca}', '"abertura"')), jsonb_build_object('p_restricoes', v_p), c_hoje, c_ag, false);
+    v_res := pg_temp.ok(v_res, 'F5g6f a abertura do dono em outra OS: recusa', pg_temp.regra(v, 7) <> '-', pg_temp.regra(v, 7));
+    v := public._agenda_validar_itens(jsonb_build_array(jsonb_set(pg_temp.item(v_a, 'OS-7EF500', public._agenda_dono(null), 'Dono', c_d, 'tarde'), '{alocacoes,0,presenca}', '"abertura"')), jsonb_build_object('p_restricoes', jsonb_build_object('puxar', jsonb_build_object('dia', c_d + 1, 'pessoas', jsonb_build_array(v_rob), 'os', v_a))), c_hoje, c_ag, false);
+    v_res := pg_temp.ok(v_res, 'F5g6g a abertura do dono em amanhã, com o puxar para outro dia: recusa', pg_temp.regra(v, 7) <> '-', pg_temp.regra(v, 7));
+    v := public._agenda_validar_itens(jsonb_build_array(jsonb_set(pg_temp.item(v_a, 'OS-7EF500', public._agenda_dono(null), 'Dono', c_d, 'tarde'), '{alocacoes,0,presenca}', '"abertura"')), jsonb_build_object('p_restricoes', '{"acima_da_carga": true}'::jsonb), c_hoje, c_ag, false);
+    v_res := pg_temp.ok(v_res, 'F5g6h sem puxar, a abertura do dono amanhã continua recusada', pg_temp.regra(v, 7) <> '-', pg_temp.regra(v, 7));
     v := public._agenda_validar_itens(jsonb_build_array(pg_temp.item(v_a, 'OS-7EF500', v_rob, 'Roberto', c_hoje)), jsonb_build_object('p_restricoes', v_p), c_hoje, c_ag, false);
     v_res := pg_temp.ok(v_res, 'F5g7 outro dia (hoje, já começou): recusa', pg_temp.regra(v, 7) <> '-', pg_temp.regra(v, 7));
     v := public._agenda_validar_itens(jsonb_build_array(pg_temp.item(v_a, 'OS-7EF500', v_rob, 'Roberto', c_d)), jsonb_build_object('p_restricoes', jsonb_build_object('puxar', jsonb_build_object('dia', c_d + 1, 'pessoas', jsonb_build_array(v_rob), 'os', v_a))), c_hoje, c_ag, false);

@@ -11,7 +11,9 @@
 -- O QUE MUDA:
 --   _agenda_gestor_puxar(date, timestamptz): o passo do job agenda-gestor. O peso (R7.8): fora de hora é 1 leitura de config; as contas da fila só depois de ter célula livre; os filtros baratos antes de os_prontidao.
 --     Em teste (modo_urgencia em sombra, freio ligado ou modo_proposta em sombra): só o diário (agenda_gestor_dia.sombra.puxar), sem proposta, ação nem alocação (R7.7-1). De verdade: propõe na simulação, aceita só compromisso que comece em D, propõe de novo gravando e aplica.
---     Quem pode: tem de ter telefone que a rotina alcance (R7.7-6), a ficha de D ainda não saiu e, em ja_vem, não pode ter convite de D sem o SIM enquanto o convite estiver ligado de verdade (R7.7-8).
+--     Quem pode: da equipe, tem de ter telefone que a rotina alcance (R7.7-6) e a ficha de D ainda não saiu; o dono não está na rotina (quem o alcança é o aviso do gestor e o fechamento) e conta com o dia
+--     declarado (§5.3). Em ja_vem, não pode ter convite de D sem o SIM enquanto o convite estiver ligado de verdade (R7.7-8). A ponta do dono (abrir e fechar) da OS puxada em D vale mesmo com ele fora das
+--     pessoas: o motor só tira o turno de quem está fora, e o validador aceita a ponta (20261111100300).
 --     A OS: pronta, sem alocação vigente que não seja reserva, bem livre em D, "não antes de" até D, o que foi dito ao cliente tem de caber em D, material até D, acesso combinado em local de terceiro ou o bem no pátio (conflito 9, R7.7-2), e o dono não desfez. Fora a ficha presa na janela de veto do 7a-1.
 --   Sem texto novo. A contagem contagens.puxar da rodada troca o {"pulado": true} por {"rodou": false, ...} (ninguém a lê além dos testes). Em teste e com célula livre, o diário ganha a chave puxar, que sai crua em dados.sombra do foco gestor.
 
@@ -92,19 +94,21 @@ begin
     v_conv := public._agenda_fala_modo('convite') = 'ligado';
     v_dono := public._agenda_dono(null);
 
-    -- As pessoas e as células de amanhã. ja_vem: tem turno marcado em D e o outro livre, ou é o dono com o dia declarado (7b). disponivel: também quem declarou. Em todos os casos a rotina tem de alcançar a
+    -- As pessoas e as células de amanhã. ja_vem: tem turno marcado em D e o outro livre, ou é o dono com o dia declarado (7b). disponivel: também quem declarou. Da equipe, a rotina tem de alcançar a
     -- pessoa (contato, telefone: R7.7-6) e a ficha de D ainda não pode ter saído (a pessoa não saberia: a rotina só manda uma). O convite é a mesma regra da ficha (R7.7-8, _agenda_rotina_ficha, AG7-23).
+    -- O dono fica fora da regra da rotina: ele não recebe ficha (quem o alcança é o aviso do gestor e o fechamento) e em produção não tem linha de contato. Exigir a rotina dele tirava toda OS que pede o dono.
     select coalesce(array_agg(distinct g.payee_id), '{}'::uuid[]), count(*)::int
       into v_pes, v_cel
       from public.agenda_grade(v_d, v_d, p_hoje) g
       join public.agenda_capacidade(v_d, v_d, p_hoje) k on k.payee_id = g.payee_id and k.dia = g.dia and k.turno = g.turno
-      join public.agenda_equipe_contato ct on ct.payee_id = g.payee_id
+      left join public.agenda_equipe_contato ct on ct.payee_id = g.payee_id
      where g.livre
-       and ct.recebe_rotina
-       and public._agenda_equipe_tem_telefone(g.payee_id)
-       and not exists (select 1 from public.agenda_equipe_mensagens m
-                        where m.payee_id = g.payee_id and m.modo = v_meq
-                          and ((m.tipo = 'ficha' and m.dia = v_d) or (m.tipo = 'como_foi' and m.leva_ficha_de = v_d)))
+       and (g.eh_dono
+            or (ct.recebe_rotina
+                and public._agenda_equipe_tem_telefone(g.payee_id)
+                and not exists (select 1 from public.agenda_equipe_mensagens m
+                                 where m.payee_id = g.payee_id and m.modo = v_meq
+                                   and ((m.tipo = 'ficha' and m.dia = v_d) or (m.tipo = 'como_foi' and m.leva_ficha_de = v_d)))))
        and (exists (select 1 from public.agenda_alocacoes a
                      where a.payee_id = g.payee_id and a.dia = v_d and a.estado in ('publicada', 'fixada') and a.tipo <> 'reserva' and a.presenca = 'turno')
             or ((g.eh_dono or cf.puxar_quem = 'disponivel') and k.origem in ('diarista', 'dono')))
@@ -234,6 +238,6 @@ end;
 $function$;
 
 comment on function public._agenda_gestor_puxar(date, timestamptz) is
-  'Agenda de Produção (Fase 7e, P4b; spec §5.3, R7.7, AG7-31): o passo puxar do job agenda-gestor. A partir de puxar_hora da véspera, a folga que sobrou de amanhã (célula livre de quem já vem, com telefone que a rotina alcance, ficha de D ainda por sair e, com o convite ligado, sem convite de D à espera do SIM) puxa a próxima OS pronta da fila, até puxar_max_os, uma vez por dia útil. Com o freio ou fora de ligado, só o diário (agenda_gestor_dia.sombra.puxar). Erro vai a app_error_logs (agenda, gestor:puxar) e não lança. Nenhum texto novo.';
+  'Agenda de Produção (Fase 7e, P4b; spec §5.3, R7.7, AG7-31): o passo puxar do job agenda-gestor. A partir de puxar_hora da véspera, a folga que sobrou de amanhã (célula livre de quem já vem: da equipe, com telefone que a rotina alcance, ficha de D ainda por sair e, com o convite ligado, sem convite de D à espera do SIM; o dono, com o dia declarado, sem a rotina) puxa a próxima OS pronta da fila, até puxar_max_os, uma vez por dia útil. A ponta do dono (abrir e fechar) da OS puxada em D vale mesmo com ele fora das pessoas (o validador a aceita). Com o freio ou fora de ligado, só o diário (agenda_gestor_dia.sombra.puxar). Erro vai a app_error_logs (agenda, gestor:puxar) e não lança. Nenhum texto novo.';
 
 revoke all on function public._agenda_gestor_puxar(date, timestamptz) from public, anon, authenticated, service_role;

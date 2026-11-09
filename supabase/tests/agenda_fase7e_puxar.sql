@@ -8,6 +8,7 @@
 --   P4 em teste só o diário (R7.7-1), com o freio também; a simulação do gestor fica só dentro do passo
 --   P5 de verdade: a alocação nasce em D, releio depois; a reserva vira compromisso; uma vez por dia pela rodada inteira
 --   P6 o erro: vai a app_error_logs (gestor:puxar), não lança e segue para a próxima OS; query_canceled não é engolido
+--   P7 a OS na forma real (conferência do P4b): a "abre e fecha" pela regra (a ponta do dono em D) e a que pede o dono, com o dia declarado por ele e sem a rotina
 --
 -- ═══ COMO RODAR ═══  Na bancada: node scripts/bancada-agenda/rodar.mjs. Em produção, só DEPOIS de aplicar a migration, com o OK: npx supabase@2.111.0 db query --linked -f supabase/tests/agenda_fase7e_puxar.sql
 --   Tudo dentro de begin/rollback. O que usa fixture só roda na bancada (fora dela sai PULADO). Uma linha false é defeito.
@@ -64,7 +65,7 @@ create function pg_temp.pr() returns date language sql immutable as $f$ select d
 create function pg_temp.ag(p_h text default '17:37') returns timestamptz language sql immutable as $f$ select (date '2027-02-10' + p_h::time) at time zone 'America/Sao_Paulo' $f$;
 create function pg_temp.d() returns date language sql immutable as $f$ select date '2027-02-11' $f$;  -- qui: amanhã
 create function pg_temp.rodar(p_h text default '17:37') returns jsonb language sql as $f$ select public._agenda_gestor_puxar(pg_temp.pr(), pg_temp.ag(p_h)) $f$;
--- Uma OS pronta (dias ditos pelo dono, material conferido, motorhome ao pátio com o bem já lá): tudo o que o puxar pede
+-- Uma OS pronta (dias ditos pelo dono, material conferido, motorhome ao pátio com o bem já lá): tudo o que o puxar pede. Com dono_presenca 'nunca', que a carteira real não tem: a forma real é o P7
 create function pg_temp.pronta(p_n int, p_dias numeric default 0.5, p_prio smallint default null) returns uuid language plpgsql as $f$
 declare
   v_os uuid := md5('e7e:p:' || p_n)::uuid;
@@ -392,7 +393,14 @@ begin
     v_res := pg_temp.ok(v_res, 'P2q o dono com o dia declarado (e contato da rotina): conta em ja_vem', (r ->> 'celulas')::int = 2, r::text);
     delete from public.agenda_equipe_contato where payee_id = v_dono;
     r := pg_temp.rodar();
-    v_res := pg_temp.ok(v_res, 'P2r o dono sem linha de contato (como em produção hoje): não conta (R7.7-6: 0 pessoas puxáveis)', (r ->> 'celulas')::int = 0, r::text);
+    -- mudou de propósito na conferência do P4b: o dono não recebe ficha (quem o alcança é o aviso do gestor e o fechamento); exigir a rotina dele tirava toda OS que pede o dono
+    v_res := pg_temp.ok(v_res, 'P2r o dono sem linha de contato (como em produção hoje), com o dia declarado: conta (§5.3; a rotina é regra da equipe)', (r ->> 'celulas')::int = 2, r::text);
+    update public.payees set phone = null where id = v_dono;
+    r := pg_temp.rodar();
+    v_res := pg_temp.ok(v_res, 'P2r2 o dono sem telefone e sem linha de contato: conta igual', (r ->> 'celulas')::int = 2, r::text);
+    perform pg_temp.solto(format('delete from public.agenda_disponibilidade where payee_id = %L', v_dono));
+    r := pg_temp.rodar();
+    v_res := pg_temp.ok(v_res, 'P2r3 o dono sem linha de contato e sem o dia declarado: não conta (só a ponta dele fica livre, e ponta não é célula)', (r ->> 'celulas')::int = 0, r::text);
     raise exception 'desfaz' using errcode = 'P0098';
   exception when sqlstate 'P0098' then null;
   when others then v_res := pg_temp.ok(v_res, 'P2p sem exceção', false, sqlerrm);
@@ -976,6 +984,99 @@ begin
   perform pg_temp.gravar(v_res);
 end
 $p6$;
+
+-- ── P7. A OS na forma real (conferência do P4b) ───────────────────────────────────────────────────
+-- A fixture do P1 a P6 cria a OS com dono_presenca 'nunca'; na carteira real, 0 de 10 são assim (8 "abre e fecha" pela regra 'padrão', 2 "sempre").
+-- (1) a OS "abre e fecha": o motor dá a ponta do dono em D mesmo com ele fora das pessoas (só o turno fica sem capacidade), e o validador tem de aceitar;
+-- (2) a OS que pede o dono o tempo todo: o dono com o dia declarado conta no "já vem" sem linha na rotina (ele não recebe ficha; em produção não tem a linha).
+do $p7$
+declare
+  v_res jsonb := '[]'::jsonb;
+  r jsonb;
+  v_os uuid;
+  v_raf uuid := pg_temp.pessoa('Rafael');
+  v_dono uuid;
+  v_n int;
+  v_e0 text;
+  v_e1 text;
+  v_l jsonb;
+  v_al text;
+begin
+  if not pg_temp.fx() then
+    perform pg_temp.gravar(pg_temp.ok('[]', 'P7 a forma real', true, 'PULADO: sem a fixture (rode pela bancada)'));
+    return;
+  end if;
+  v_dono := public._agenda_dono(null);
+
+  -- (1) em teste, pela rodada inteira das 17:37
+  begin
+    v_os := pg_temp.cena();
+    update public.os_planejamento set dono_presenca = null where service_order_id = v_os;
+    v_res := pg_temp.ok(v_res, 'P7a0 a montagem: sem a presença dita, a OS fica "abre e fecha" pela regra; o dono, sem o dia declarado, tem só a ponta livre em D',
+      public.os_prontidao(v_os, pg_temp.pr()) #>> '{presenca_dono,presenca}' = 'abre_e_fecha'
+      and exists (select 1 from public.agenda_grade(pg_temp.d(), pg_temp.d(), pg_temp.pr()) g where g.payee_id = v_dono and g.turno = 'tarde' and g.curta_livre @> array['abertura'] and not g.livre),
+      (public.os_prontidao(v_os, pg_temp.pr()) -> 'presenca_dono')::text);
+    v_n := (select count(*) from public.app_error_logs where action = 'gestor:puxar');
+    v_e0 := public.agenda_saude(pg_temp.pr(), pg_temp.ag('17:36')) #>> '{gestor,erros_24h}';
+    perform public.agenda_gestor_rodar(pg_temp.pr(), pg_temp.ag());
+    select x.contagens -> 'puxar' into v_l from public.agenda_vigia_rodadas x where x.rotina = 'gestor' and x.p_agora = pg_temp.ag();
+    v_e1 := public.agenda_saude(pg_temp.pr(), pg_temp.ag('17:40')) #>> '{gestor,erros_24h}';
+    v_res := pg_temp.ok(v_res, 'P7a a OS "abre e fecha", em teste, pela rodada das 17:37: puxada em D, sem erro (motor e validador concordam sobre a ponta do dono)',
+      (v_l ->> 'em_teste')::boolean and (v_l ->> 'erros')::int = 0 and pg_temp.puxada(v_l, v_os), coalesce(v_l::text, 'sem a contagem'));
+    v_res := pg_temp.ok(v_res, 'P7a2 nada em app_error_logs (gestor:puxar) e a saúde do gestor segue com 0 erro nas 24 h',
+      (select count(*) from public.app_error_logs where action = 'gestor:puxar') = v_n and v_e1 = '0' and v_e0 = '0', v_n || ' erros antes; saúde ' || coalesce(v_e0, '?') || ' -> ' || coalesce(v_e1, '?'));
+    raise exception 'desfaz' using errcode = 'P0098';
+  exception when sqlstate 'P0098' then null;
+  when others then v_res := pg_temp.ok(v_res, 'P7a sem exceção', false, sqlerrm);
+  end;
+
+  -- (1) de verdade: releio do banco
+  begin
+    v_os := pg_temp.cena();
+    update public.os_planejamento set dono_presenca = null where service_order_id = v_os;
+    update public.agenda_config set modo_urgencia = 'ligado' where id;
+    v_n := (select count(*) from public.app_error_logs where action = 'gestor:puxar');
+    perform public.agenda_gestor_rodar(pg_temp.pr(), pg_temp.ag());
+    select x.contagens -> 'puxar' into v_l from public.agenda_vigia_rodadas x where x.rotina = 'gestor' and x.p_agora = pg_temp.ag();
+    v_e1 := public.agenda_saude(pg_temp.pr(), pg_temp.ag('17:40')) #>> '{gestor,erros_24h}';
+    select string_agg(concat_ws('/', a.dia, a.turno, case when a.payee_id = v_dono then 'dono' when a.payee_id = v_raf then 'rafael' else '?' end, a.presenca, a.estado), ',' order by a.dia, a.turno, a.presenca)
+      into v_al from public.agenda_alocacoes a where a.service_order_id = v_os and a.estado in ('publicada', 'fixada');
+    v_res := pg_temp.ok(v_res, 'P7b de verdade: a OS "abre e fecha" puxada; no banco, o turno do Rafael em D à tarde e a ponta do dono em D',
+      not (v_l ->> 'em_teste')::boolean and (v_l ->> 'puxadas')::int = 1 and (v_l ->> 'erros')::int = 0
+      and exists (select 1 from public.agenda_alocacoes a where a.service_order_id = v_os and a.payee_id = v_raf and a.dia = pg_temp.d() and a.turno = 'tarde' and a.presenca = 'turno' and a.estado in ('publicada', 'fixada'))
+      and exists (select 1 from public.agenda_alocacoes a where a.service_order_id = v_os and a.payee_id = v_dono and a.dia = pg_temp.d() and a.presenca in ('abertura', 'fechamento') and a.estado in ('publicada', 'fixada')),
+      coalesce(v_al, 'sem alocação') || ' ' || coalesce(v_l::text, ''));
+    v_res := pg_temp.ok(v_res, 'P7b2 de verdade, nada em app_error_logs (gestor:puxar) e a saúde do gestor com 0 erro',
+      (select count(*) from public.app_error_logs where action = 'gestor:puxar') = v_n and v_e1 = '0', v_n || ' antes; saúde ' || coalesce(v_e1, '?'));
+    raise exception 'desfaz' using errcode = 'P0098';
+  exception when sqlstate 'P0098' then null;
+  when others then v_res := pg_temp.ok(v_res, 'P7b sem exceção', false, sqlerrm);
+  end;
+
+  -- (2) a OS que pede o dono o tempo todo, com o dia de D declarado por ele e sem linha dele na rotina (como em produção)
+  begin
+    v_os := pg_temp.cena();
+    update public.os_planejamento set dono_presenca = 'sempre' where service_order_id = v_os;
+    delete from public.agenda_equipe_contato where payee_id = v_dono;
+    insert into public.agenda_disponibilidade (payee_id, periodo, situacao, origem, nota, criado_por)
+    values (v_dono, daterange(pg_temp.d(), pg_temp.d(), '[]'), 'disponivel', 'dono', 'teste 7e P4b', pg_temp.adm());
+    r := pg_temp.rodar();
+    v_res := pg_temp.ok(v_res, 'P7c a OS "sempre" com o dono declarando D, sem a rotina dele: as 2 células do dono contam no "já vem" e a OS sai puxada em D',
+      (r ->> 'celulas')::int = 3 and pg_temp.puxada(r, v_os) and (r ->> 'erros')::int = 0, r::text);
+    update public.agenda_config set modo_urgencia = 'ligado' where id;
+    r := pg_temp.rodar();
+    select string_agg(concat_ws('/', a.dia, a.turno, case when a.payee_id = v_dono then 'dono' when a.payee_id = v_raf then 'rafael' else '?' end, a.presenca, a.estado), ',' order by a.dia, a.turno, a.presenca)
+      into v_al from public.agenda_alocacoes a where a.service_order_id = v_os and a.estado in ('publicada', 'fixada');
+    v_res := pg_temp.ok(v_res, 'P7d de verdade: no banco, o dono no turno da OS em D',
+      (r ->> 'puxadas')::int = 1 and exists (select 1 from public.agenda_alocacoes a where a.service_order_id = v_os and a.payee_id = v_dono and a.dia = pg_temp.d() and a.presenca = 'turno' and a.estado in ('publicada', 'fixada')),
+      coalesce(v_al, 'sem alocação') || ' ' || r::text);
+    raise exception 'desfaz' using errcode = 'P0098';
+  exception when sqlstate 'P0098' then null;
+  when others then v_res := pg_temp.ok(v_res, 'P7c sem exceção', false, sqlerrm);
+  end;
+  perform pg_temp.gravar(v_res);
+end
+$p7$;
 
 select * from _resultado order by teste;
 rollback;
