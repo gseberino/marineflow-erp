@@ -362,6 +362,7 @@ Deno.test("14. amarrado: resumo e gravação têm o preço de retorno_previa_pre
   assertEquals(
     resumo,
     "Orçamento para *João Silva* · Lancha Mar Azul\n" +
+      "Título no PDF: Troca de baterias\n" +
       "1. Bateria LiFePO4 100Ah · 2 × R$ 2.300 · praticado em 12/08/26\n" +
       "2. Instalação · 1 × R$ 800\n" +
       "Total: R$ 5.400 · *sim <PIN>* cria o rascunho, e nada vai ao cliente",
@@ -574,4 +575,24 @@ Deno.test("casoAmarradoDaSessao: só com retorno_amarrada = true", () => {
   assertEquals(casoAmarradoDaSessao({ metadata: { retorno_amarrada: false }, client_id: "c", vessel_id: "v" }), undefined);
   assertEquals(casoAmarradoDaSessao({ metadata: null, client_id: "c", vessel_id: "v" }), undefined);
   assertEquals(casoAmarradoDaSessao(null), undefined);
+});
+
+
+// ─── Revisão da F3: o PDF imprime título e condição, e o PIN tem de valer sobre eles ─────────
+
+Deno.test("resumo amarrado mostra o título que vai ao PDF e a condição de pagamento", async () => {
+  const b = bancoFalso();
+  const resumo = await resumirOrcamentoLivre(b.db, { ...ARGS_LIVRES, payment_conditions: "50% na aprovação" }, {});
+  assertStringIncludes(resumo, "Título no PDF: Troca de baterias");
+  assertStringIncludes(resumo, "Condição: 50% na aprovação");
+  const sem = await resumirOrcamentoLivre(bancoFalso().db, ARGS_LIVRES, {});
+  assertEquals(sem.includes("Condição:"), false);
+});
+
+Deno.test("resumo amarrado recusa título com valor, documento ou telefone, e condição longa demais", async () => {
+  const recusa = "⚠️ O título não pode ter valor, documento ou telefone, nem passar de 120 letras: diga de outro jeito.";
+  for (const title of ["Promoção R$ 500", "CPF 123.456.789-09", "Ligue 47 99915-9654", "x".repeat(121)]) {
+    assertEquals(await resumirOrcamentoLivre(bancoFalso().db, { ...ARGS_LIVRES, title }, {}), recusa, title);
+  }
+  assertEquals(await resumirOrcamentoLivre(bancoFalso().db, { ...ARGS_LIVRES, payment_conditions: "y".repeat(301) }, {}), "⚠️ A condição de pagamento passou de 300 letras: diga mais curto.");
 });

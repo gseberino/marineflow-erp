@@ -241,3 +241,17 @@ Deno.test("a cópia sem amarra nasce com as três colunas nulas e quote_validity
   }
   assertEquals(copia.service_order_number, "ORÇ-00151");
 });
+
+
+// ─── create_service_order: o rastro do cartão não entra por argumento do modelo ──────────────
+
+Deno.test("create_service_order descarta origem, origem_chave8 e origem_parceiro_id vindos do modelo", async () => {
+  const criar = serviceOrderTools.find((t) => t.name === "create_service_order")!;
+  const b = bancoFalso({ company_settings: [{ default_quote_validity_days: 7 }] });
+  await criar.execute({ client_id: "c-1", vessel_id: "v-1", origem: "retorno_ditado", origem_chave8: "12345678", origem_parceiro_id: "p-1" }, ctxDe(b.db));
+  const gravada = b.linhas("service_orders")[0];
+  assertEquals(gravada.client_id, "c-1");
+  assertEquals("origem" in gravada, false);
+  assertEquals("origem_chave8" in gravada, false);
+  assertEquals("origem_parceiro_id" in gravada, false);
+});

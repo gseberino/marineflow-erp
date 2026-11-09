@@ -739,7 +739,8 @@ export const serviceOrderTools: ToolDef[] = [
       } catch {
         num = `${prefix}-${Date.now().toString().slice(-5)}`;
       }
-      const { items, ...rest } = args;
+      // Retorno F3: o rastro do cartão não entra por argumento do modelo (o rascunho com origem do caso tem prioridade no cartão).
+      const { items, origem: _origem, origem_chave8: _origemChave8, origem_parceiro_id: _origemParceiro, ...rest } = args;
       // Sem este campo no insert, o banco aplicava o DEFAULT 15 da coluna e a configuracao
       // da empresa nao valia para nada do que o assistente cria.
       const validade = await validadePadraoDoOrcamento(

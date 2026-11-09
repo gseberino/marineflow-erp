@@ -3,6 +3,7 @@ import { applyStockDelta, resolverServicoDaLinha } from "./service-orders.ts";
 import { type ItemResolvido, resolverItens } from "../keyword-resolver.ts";
 import { validadePadraoDoOrcamento } from "../validade-orcamento.ts";
 import { recalcularOSComCascata } from "../../receivables/cascata.ts";
+import { mascararDadosPessoais } from "../../retorno/mascara.ts";
 
 // MACRO — cria um orçamento INTEIRO numa única chamada (LLM orquestra, código executa).
 // Ver plans/marineflow-llm-orquestra-codigo-executa.md
@@ -102,6 +103,13 @@ const FALHA_NOS_PRECOS = "Não consegui conferir os preços agora. Nada foi regi
 export function sessaoAmarradaDe(args: Record<string, unknown>, ctx: ToolCtx): boolean {
   const r = lerRetrato(args);
   return r ? r.amarrada === true : ctx.sessaoAmarrada === true;
+}
+
+/** O título vai ao PDF do cliente: valor, documento e telefone nunca entram nele. null = serve. */
+export function recusaDoTitulo(titulo: string): string | null {
+  return titulo.length > 120 || /R\$/.test(titulo) || mascararDadosPessoais(titulo) !== titulo
+    ? "⚠️ O título não pode ter valor, documento ou telefone, nem passar de 120 letras: diga de outro jeito."
+    : null;
 }
 
 /** Com o caso amarrado, o modelo pode ter lido texto de cliente: nome solto não escolhe cadastro. */
@@ -217,9 +225,17 @@ export async function resumirOrcamentoLivre(
     if (imposto) linhas.push(`Imposto: R$ ${brl(imposto)}`);
 
     const outro = quem.casoAmarrado?.client_id && quem.casoAmarrado.client_id !== cli.id ? " (não é o cliente do caso do cartão)" : "";
+    // O PDF imprime título e condição: o PIN tem de valer sobre eles também.
+    const titulo = typeof args.title === "string" ? args.title.trim() : "";
+    const recusaTitulo = titulo ? recusaDoTitulo(titulo) : null;
+    if (recusaTitulo) return recusaTitulo;
+    const condicao = typeof args.payment_conditions === "string" ? args.payment_conditions.trim() : "";
+    if (condicao.length > 300) return "⚠️ A condição de pagamento passou de 300 letras: diga mais curto.";
     return [
       `Orçamento para *${cli.nome}* · ${ativo.nome}${outro}`,
+      ...(titulo ? [`Título no PDF: ${titulo}`] : []),
       ...linhas,
+      ...(condicao ? [`Condição: ${condicao}`] : []),
       `Total: R$ ${brl(r2(base + imposto))} · *sim <PIN>* cria o rascunho, e nada vai ao cliente`,
     ].join("\n");
   } catch {
