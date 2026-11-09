@@ -3875,3 +3875,19 @@ porque só o dono pode preenchê-las.
 - **Efeito:** sem esse texto, o fornecedor medido pelas compras sai com o texto de sempre (o da nota).
 - **Na Fase 7e:** deixado para o P6, que dá o `detalhe` (registrado em "Para os pacotes seguintes" das notas): recriar `_agenda_aprendizado_texto` a partir do P2 quando o P6 existir.
 - **Origem:** Fase 7e, P2.
+
+### [NOVO-agenda-153] Com o viés ligado, a prontidão diz os dias de antes e o motor usa os corrigidos
+
+- **Encontrado em:** Agenda de Produção, Fase 7e, P3 (09/11/2026).
+- **Onde:** `os_prontidao.duracao.dias` e `duracao.texto` saem de `os_duracao_sugerida` e de `p.dias` sem o viés; `agenda_meios_da_os` (que o motor e o validador leem) sai com o viés. O `os_prontidao` só é recriado no P6 e o cartão no P7.
+- **Efeito:** só com `modo_vies` ligado de verdade e viés em uso: o cartão e o foco da OS dizem os dias de antes enquanto o plano usa os corrigidos. `_agenda_cliente_risco` também lê `duracao.dias`. O P7 traz os textos com os 2 números (`texto_vies` de `agenda_meios_da_os`).
+- **Na Fase 7e:** deixado para o P6/P7, porque depende do texto que mostra os dois números. Em sombra e com o freio, não muda nada.
+- **Origem:** Fase 7e, P3.
+
+### [NOVO-agenda-154] O "aceita" pode nascer de uma duração que já leva o viés
+
+- **Encontrado em:** Agenda de Produção, Fase 7e, P3 (09/11/2026).
+- **Onde:** `agenda_aplicar`, a duração só sugerida aceita pelo dono: o item da proposta leva `dias` de `agenda_meios_da_os`, que passa a sair com o viés.
+- **Efeito:** sem o conserto, a correção do estimador viraria "dias do dono" (fonte `aceita`), com a correção de `dono:` por cima e `razao_dono` medindo a si mesma.
+- **Na Fase 7e:** corrigido no P3 (`agenda_aplicar` grava o número sem o viés). O plano publicado fica com o total corrigido e o `dias` gravado fica sem o viés: é a medida, não um defeito.
+- **Origem:** Fase 7e, P3.

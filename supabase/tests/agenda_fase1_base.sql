@@ -1108,6 +1108,8 @@ insert into _definer_da_agenda values ('agenda_bloco_do_fechamento');
 insert into _definer_da_agenda values ('agenda_veto_dito'), ('_agenda_saude_comunicacao');
 -- FASE 7e (P2, 20261111100100): o congelar da marcação e a medida da compra escrevem em os_planejamento e em agenda_medidas_compra, como o congelar e a medida da OS
 insert into _definer_da_agenda values ('_agenda_aprender_congelar_marcacao'), ('agenda_medir_compra');
+-- Fase 7e (P3): o passo do viés da rodada do aprendizado (definer, sem grant nenhum: quem o chama é agenda_aprender, no P7).
+insert into _definer_da_agenda values ('_agenda_aprender_vies');
   -- FASE 7f: fim
   -- FASE 7e: (7e P1, 20261111100000) nenhuma definer nova: o modo, a credibilidade, o z e a temporada são invoker, e o gatilho _agenda_medidas_compra_so_muda só mexe na própria linha. agenda_fase7e_base.sql prova as portas.
   -- FASE 7e: fim

@@ -120,9 +120,10 @@ declare
   v_b text[] := '{}'; v_bloco boolean := false; l text;
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
-    if not v_bloco and l ~ '^\s*-- FASE 7: \(7a P(9|11|12)' then v_bloco := true; continue; end if;
+    -- FASE 7e (P3): agenda_aplicar ganhou blocos da 7e, que também saem da comparação
+    if not v_bloco and l ~ '^\s*-- FASE 7(: \(7a P(9|11|12)|e:)' then v_bloco := true; continue; end if;
     if v_bloco then
-      if l ~ '^\s*-- FASE 7: fim' then v_bloco := false; end if;
+      if l ~ '^\s*-- FASE 7e?: fim' then v_bloco := false; end if;
       continue;
     end if;
     v_b := v_b || l;
