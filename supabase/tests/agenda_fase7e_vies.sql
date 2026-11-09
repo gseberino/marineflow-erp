@@ -10,7 +10,7 @@
 --   V6  as cópias: tirados os blocos do P3, o corpo é o da origem
 --   V7  o dono (AG7-33): os 2 números; a dupla dita intacta; repetir = vies_dono_fixo (frase até o *grava*); dizer o corrigido também; sobrevive ao passo 2; acima do máximo não corrige; só com vies_corrige_dono
 --   V8  a armadilha da medida: dp_bruto, pm_estimados, pm_plano e pessoas sem o viés (com freio, sem freio, com viés em uso, com vies_marcado); agenda.sem_vies volta ao valor de antes
---   V9  agenda_aplicar: a duração sugerida aceita grava sem o viés
+--   V9  agenda_aplicar: sem correção aplicada, o número do item, como antes (sombra, desligado, proposta antiga); com ela, dias sem o viés e o aprovado em aprovado_com_vies; o total lido fica o publicado, antes e depois da marcação, com a dupla, sem empilhar o dono:
 --   V10 a sombra não chama nada de novo (as funções novas trocadas por versões que lançam)
 --
 -- ═══ COMO RODAR ═══  Na bancada: node scripts/bancada-agenda/rodar.mjs. Em produção, só DEPOIS de aplicar a migration, com o OK: npx supabase@2.111.0 db query --linked -f supabase/tests/agenda_fase7e_vies.sql
@@ -53,6 +53,11 @@ select 'V0b as de leitura são stable; o passo é volatile e definer com search_
               from pg_proc p2 where p2.oid = 'public._agenda_aprender_vies(date, timestamptz)'::regprocedure),
        null
   from pg_proc p where p.oid in ('public._agenda_dias_com_vies(jsonb, numeric)'::regprocedure, 'public._agenda_vies_dono_da_os(uuid)'::regprocedure);
+
+insert into _resultado
+select 'V0c os_planejamento.aprovado_com_vies existe, jsonb, nula, sem padrão (só nasce com a duração aprovada com o viés)',
+       count(*) = 1 and bool_and(a.atttypid = 'jsonb'::regtype and not a.attnotnull and not a.atthasdef), null
+  from pg_attribute a where a.attrelid = 'public.os_planejamento'::regclass and a.attname = 'aprovado_com_vies' and not a.attisdropped;
 
 -- ── A fixture e os ajudantes ───────────────────────────────────────────────────────────────────────
 do $carga$
@@ -104,6 +109,34 @@ create function pg_temp.vies(p_chave text, p_uso numeric, p_n int default 5) ret
   values ('vies', p_chave, case when p_chave like '%:todas' then 'todas' else 'fina' end, 1, 1, p_n, p_uso, p_uso, 'em_uso', now())
   on conflict (item, chave) do update set em_uso = excluded.em_uso, calculado = excluded.calculado, estado = 'em_uso', n = excluded.n
 $f$;
+-- O dono aprova uma duração só sugerida: a proposta com o item (fonte sugerida, os dias que foram mostrados) e as alocações de verdade (N meios-dias de Zeca a partir de p_de, dia útil); agenda_aplicar pela via do dono
+create function pg_temp.aprova(p_os uuid, p_dias numeric, p_de date default date '2027-02-08', p_hoje date default date '2027-01-07', p_agora timestamptz default timestamptz '2027-01-07 10:00-03') returns jsonb language plpgsql as $f$
+declare
+  v_prop uuid;
+  cf     public.agenda_config := public._agenda_cfg();
+begin
+  insert into public.agenda_propostas (escopo, periodo, os_alvo, modo, estado, versao_base, itens, parametros, expira_em, criada_por)
+  values ('os', daterange(p_hoje, p_de + 60, '[]'), array[p_os], 'ligado', 'aberta', cf.versao_plano,
+          jsonb_build_array(jsonb_build_object('os', p_os, 'op', 'criar', 'tipo', 'execucao', 'fonte', 'sugerida', 'dias', p_dias, 'texto', 'marcar', 'motivo', 'teste', 'alocacoes', '[]'::jsonb, 'fixar_dono', false,
+            'critica', null, 'pergunta_chave', null, 'decisao', null, 'espera', false, 'interrupcoes', 0, 'meios_do_dono', 0, 'evento_real', false, 'aviso_material', null, 'de', p_de, 'ate', p_de)),
+          jsonb_build_object('p_hoje', p_hoje), greatest(now(), p_agora) + interval '1 day', 'dono') returning id into v_prop;
+  perform set_config('agenda.hoje', p_hoje::text, true);
+  return public.agenda_aplicar(v_prop, array[p_os], 'dono', null, null, p_hoje, p_agora);
+end $f$;
+-- Publica N meios-dias para a OS (o plano que o motor marcou: o caminho inteiro, agenda_marcar_os, roda no replay real em f7e/p3/aprova.mjs)
+create function pg_temp.publica(p_os uuid, p_n int, p_de date default date '2027-02-08') returns void language plpgsql as $f$
+declare
+  v_d date := p_de;
+  v_t text := 'manha';
+  k   int;
+begin
+  for k in 1 .. p_n loop
+    while not public.agenda_dia_util(v_d) loop v_d := v_d + 1; end loop;
+    insert into public.agenda_alocacoes (service_order_id, payee_id, dia, turno, presenca, tipo, estado, origem, publicada_em)
+    values (p_os, 'e7e00000-0000-4000-8000-00000000aa02', v_d, v_t, 'turno', 'execucao', 'publicada', 'motor', timestamptz '2027-01-07 10:00-03');
+    if v_t = 'manha' then v_t := 'tarde'; else v_t := 'manha'; v_d := v_d + 1; end if;
+  end loop;
+end $f$;
 -- O que vale em cada caso: o interruptor, o aprendizado ligado e o freio. Sem o freio, as regras do gestor valem.
 create function pg_temp.modo(p_modo text, p_freio boolean) returns void language sql as $f$
   update public.agenda_config
@@ -314,9 +347,14 @@ begin
     v_d := public.os_duracao_sugerida(v_os);
     v_res := pg_temp.ok(v_res, 'V2e o texto com viés > 1 (§6.4): "Estimativa minha: 5 dias pelo valor do orçamento × 1,2 (as OS de energia em motorhome costumam levar mais) = 6 dias."',
       v_d ->> 'texto_vies' = 'Estimativa minha: 5 dias pelo valor do orçamento × 1,2 (as OS de energia em motorhome costumam levar mais) = 6 dias.', v_d ->> 'texto_vies');
-    perform pg_temp.vies('estimativa:rv:energia', 0.99);
+    perform pg_temp.vies('estimativa:rv:energia', 0.80);
     v_d := public.os_duracao_sugerida(v_os);
-    v_res := pg_temp.ok(v_res, 'V2e2 o texto com viés < 1: "costumam levar um pouco menos"', v_d ->> 'texto_vies' like '%× 0,99 (as OS de energia em motorhome costumam levar um pouco menos) = 5 dias.', v_d ->> 'texto_vies');
+    v_res := pg_temp.ok(v_res, 'V2e2 o texto com viés < 1: "costumam levar um pouco menos"', v_d ->> 'texto_vies' like '%× 0,8 (as OS de energia em motorhome costumam levar um pouco menos) = 4 dias.', v_d ->> 'texto_vies');
+    -- a conta que não muda o número não vira frase ("5 dias × 1,02 = 5 dias"), mas as chaves seguem
+    perform pg_temp.vies('estimativa:rv:energia', 1.02);
+    v_d := public.os_duracao_sugerida(v_os);
+    v_res := pg_temp.ok(v_res, 'V2e3 5 dias × 1,02 = 5 dias: sem texto_vies, com vies e dias_planejado (os números existem, a frase não diz nada)',
+      not v_d ? 'texto_vies' and (v_d ->> 'vies')::numeric = 1.02 and (v_d ->> 'dias_planejado')::numeric = 5, v_d::text);
     -- viés 1 (o valor exato em uso): sem chave nenhuma
     perform pg_temp.vies('estimativa:rv:energia', 1);
     update public.agenda_aprendizado set em_uso = null, estado = 'medindo' where item = 'vies' and chave = 'estimativa:todas';
@@ -425,7 +463,14 @@ begin
     v_ped := pg_temp.aberta(18, 3056);
     perform pg_temp.dias(v_ped, 0.5, 'orcamento');
     v_m := public.agenda_meios_da_os(v_ped, c_hoje);
-    v_res := pg_temp.ok(v_res, 'V3j orcamento gravado com viés muito baixo: o piso de meio dia (0,5)', (v_m ->> 'dias')::numeric = 0.5 and (v_m ->> 'vies')::numeric = 0.3, v_m::text);
+    v_res := pg_temp.ok(v_res, 'V3j orcamento gravado com viés muito baixo: o piso de meio dia (0,5), e o número não muda: não é correção (sem chave)', (v_m ->> 'dias')::numeric = 0.5 and not v_m ? 'vies' and not v_m ? 'dias_sem_vies', v_m::text);
+    update public.agenda_aprendizado set em_uso = 1.20, calculado = 1.20 where item = 'vies' and chave = 'estimativa:rv:energia';
+    v_ped := md5('e7e:v:12')::uuid;
+    -- estimador que o arredondamento apaga: 5 × 1,02 = 5,1 → 5
+    v_ped := pg_temp.aberta(19, 3820);
+    update public.agenda_aprendizado set em_uso = 1.02, calculado = 1.02 where item = 'vies' and chave = 'estimativa:rv:energia';
+    v_m := public.agenda_meios_da_os(v_ped, c_hoje);
+    v_res := pg_temp.ok(v_res, 'V3k o estimador que o arredondamento apaga (5 × 1,02 = 5): sem vies nem dias_sem_vies (a saída de antes)', (v_m ->> 'dias')::numeric = 5 and not v_m ? 'vies' and not v_m ? 'dias_sem_vies', v_m::text);
     update public.agenda_aprendizado set em_uso = 1.20, calculado = 1.20 where item = 'vies' and chave = 'estimativa:rv:energia';
     v_ped := md5('e7e:v:12')::uuid;
     -- V3g guardas do estimador: sem base (gravada, com marcação diferente de 1) e diagnóstico não têm viés (R7.5-8, R7.5-9), mesmo com o congelado
@@ -526,7 +571,7 @@ begin
     -- a aceita também
     update public.os_planejamento set estimativa_fonte = 'aceita' where service_order_id = v_os;
     v_m := public.agenda_meios_da_os(v_os, c_hoje);
-    v_res := pg_temp.ok(v_res, 'V7b fonte aceita corrige igual', (v_m ->> 'dias')::numeric = 3.5, v_m::text);
+    v_res := pg_temp.ok(v_res, 'V7b fonte aceita corrige igual, e o texto não diz que ele disse: "Você aceitou 3 dias; contei 3,5"', (v_m ->> 'dias')::numeric = 3.5 and v_m ->> 'texto_vies' like 'Você aceitou 3 dias; contei 3,5 (%', v_m ->> 'texto_vies');
     update public.os_planejamento set estimativa_fonte = 'dono' where service_order_id = v_os;
     -- a dupla dita fica intacta (a correção só muda os dias)
     update public.os_planejamento set dupla_dita = 'inicio', dupla_meios = 2 where service_order_id = v_os;
@@ -604,7 +649,7 @@ begin
     v_os := pg_temp.aberta(39, 3820);
     perform pg_temp.dias(v_os, 0.5, 'dono');
     v_m := public.agenda_meios_da_os(v_os, c_hoje);
-    v_res := pg_temp.ok(v_res, 'V7t o piso dos dias do dono (0,5 × 0,3 = 0,15 → meio dia)', (v_m ->> 'dias')::numeric = 0.5 and (v_m ->> 'dias_dono')::numeric = 0.5, v_m::text);
+    v_res := pg_temp.ok(v_res, 'V7t o piso dos dias do dono (0,5 × 0,3 = 0,15 → meio dia): o número não muda, sem correção', (v_m ->> 'dias')::numeric = 0.5 and not v_m ? 'dias_dono' and not v_m ? 'vies', v_m::text);
     perform pg_temp.vies('dono:todas', 1.20, 5);
     -- sem correção em uso, repetir não é a saída: não há o que recusar
     v_os := pg_temp.aberta(40, 3820);
@@ -641,6 +686,29 @@ begin
     -- a fonte aceita não vira a saída (só o que ele disse como dono)
     perform public._agenda_aplicar_planejar(pg_temp.adm(), v_os, '{"dias": 3, "estimativa_fonte": "aceita"}'::jsonb, 'aceito a estimativa', c_hoje);
     v_res := pg_temp.ok(v_res, 'V7s repetir pela fonte aceita não marca a saída (só o que ele diz como dono)', not (select vies_dono_fixo from public.os_planejamento where service_order_id = v_os), null);
+    -- Correção que o arredondamento apaga não é correção (defeito 3 da conferência): 3 × 1,02 = 3
+    perform pg_temp.vies('dono:todas', 1.02, 5);
+    v_os := pg_temp.aberta(44, 3820);
+    perform pg_temp.dias(v_os, 3, 'dono');
+    v_m := public.agenda_meios_da_os(v_os, c_hoje);
+    v_res := pg_temp.ok(v_res, 'V7x dono disse 3, viés 1,02: 3 continua; sem dias_dono, sem texto, sem vies (a saída de antes)', (v_m ->> 'dias')::numeric = 3 and not v_m ? 'dias_dono' and not v_m ? 'texto_vies' and not v_m ? 'vies', v_m::text);
+    perform set_config('request.jwt.claims', json_build_object('sub', pg_temp.adm(), 'role', 'authenticated')::text, true);
+    perform public.os_planejar_pela_tela(v_os, 3, c_hoje);
+    perform set_config('request.jwt.claims', '', true);
+    v_res := pg_temp.ok(v_res, 'V7y repetir o 3 sem correção nenhuma não grava a saída nem congela a compra',
+      (select not vies_dono_fixo and marcado_em is null and tempo_compra_marcado is null and vies_marcado is null from public.os_planejamento where service_order_id = v_os), null);
+    update public.agenda_config set estimativa_max_diarias = 2 where id;
+    v_m := public.agenda_meios_da_os(v_os, c_hoje);
+    v_res := pg_temp.ok(v_res, 'V7z acima do máximo com o arredondamento apagando: nada a dizer (sem vies_acima_max nem texto)', not v_m ? 'vies_acima_max' and not v_m ? 'texto_vies', v_m::text);
+    update public.agenda_config set estimativa_max_diarias = 20 where id;
+    -- acima do máximo numa aceita: o verbo certo
+    perform pg_temp.vies('dono:todas', 1.20, 5);
+    update public.agenda_config set estimativa_max_diarias = 3 where id;
+    v_os := pg_temp.aberta(45, 3820);
+    perform pg_temp.dias(v_os, 3, 'aceita');
+    v_m := public.agenda_meios_da_os(v_os, c_hoje);
+    v_res := pg_temp.ok(v_res, 'V7z2 aceita acima do máximo: "Você aceitou", nunca "Você disse"', v_m ->> 'texto_vies' like 'Você aceitou 3 dias; pelo histórico%', v_m ->> 'texto_vies');
+    update public.agenda_config set estimativa_max_diarias = 20 where id;
     -- a classe do dono: a fina vence a geral
     perform pg_temp.vies('dono:rv:energia', 1.5, 3);
     v_os := pg_temp.aberta(36, 3820);
@@ -730,6 +798,31 @@ begin
     exception when sqlstate 'P0099' then null;
     end;
   end loop;
+  -- a OS aprovada com o viés (dias sem o viés, o aprovado à parte): pm_plano e razao_dono medem o número sem o viés
+  begin
+    perform pg_temp.modo('ligado', false);
+    v_os := md5('e7e:v8:ap')::uuid;
+    perform set_config('agenda.porta', 'on', true);
+    insert into public.service_orders (id, service_order_number, client_id, vessel_id, status, quote_status, service_type, created_at, updated_at, converted_to_os_at, check_in_at, check_out_at, delivered_at, grand_total)
+    values (v_os, 'OS-7EV802', 'e7e00000-0000-4000-8000-000000000c02', 'e7e00000-0000-4000-8000-000000000b02', 'completed', 'approved', 'repair',
+            timestamptz '2026-11-01 10:00-03', timestamptz '2026-12-15 10:00-03', timestamptz '2026-11-02 10:00-03', timestamptz '2026-12-07 08:00-03', timestamptz '2026-12-11 17:00-03', timestamptz '2026-12-12 10:00-03', 3820);
+    insert into public.service_order_services (service_order_id, name_snapshot, billing_unit_snapshot, quantity, unit_price_snapshot, line_total, created_at)
+    values (v_os, 'Instalação de inversor e baterias', 'visit', 1, 3820, 3820, timestamptz '2026-11-01 10:00-03');
+    perform set_config('agenda.porta', 'off', true);
+    insert into public.os_planejamento (service_order_id, dias, estimativa_fonte, estimativa_em, atualizado_em, aprovado_com_vies)
+    values (v_os, 5, 'aceita', timestamptz '2026-11-20 10:00-03', timestamptz '2026-11-20 10:00-03', jsonb_build_object('dias', 6, 'total', 12, 'vies', 1.2, 'em', date '2026-11-20'));
+    insert into public.agenda_alocacoes (service_order_id, payee_id, dia, turno, presenca, tipo, estado, origem, publicada_em, resultado, resultado_via, resultado_em)
+    select v_os, 'e7e00000-0000-4000-8000-00000000aa02'::uuid, d::date, t, 'turno', 'execucao', 'publicada', 'motor', timestamptz '2026-12-06 16:30-03', 'cumprido', 'dia_feito', (d::date + time '17:30') at time zone 'America/Sao_Paulo'
+      from generate_series(date '2026-12-07', date '2026-12-11', interval '1 day') d, unnest(array['manha', 'tarde']) t;
+    perform public._agenda_aprender_congelar(c_hoje);
+    perform public.agenda_medir_os(v_os, c_hoje);
+    v_res := pg_temp.ok(v_res, 'V8f aprovada com o viés: o plano lê 6 dias, a medida lê 5 (pm_plano 10, pm_plano_dono 10, razao_dono = 10 ÷ 10, sem o 12 do aprovado)',
+      (select (public.agenda_meios_da_os(v_os, c_hoje) ->> 'total')::int = 12 and pl.pm_plano_no_inicio = 10 and m.pm_plano_dono = 10 and m.razao_dono = 1 and m.dias_no_inicio = 5
+         from public.os_planejamento pl join public.agenda_medidas_os m on m.service_order_id = pl.service_order_id where pl.service_order_id = v_os),
+      (select format('pm_plano=%s pm_dono=%s razao=%s dias_inicio=%s', pl.pm_plano_no_inicio, m.pm_plano_dono, m.razao_dono, m.dias_no_inicio) from public.os_planejamento pl join public.agenda_medidas_os m on m.service_order_id = pl.service_order_id where pl.service_order_id = v_os));
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
   -- agenda.sem_vies volta ao valor de antes (com valor, vazio, e depois de erro numa OS do laço)
   begin
     perform pg_temp.modo('ligado', false);
@@ -763,40 +856,129 @@ begin
 end
 $v8$;
 
--- ── V9. agenda_aplicar: a sugestão aceita fica sem o viés ──────────────────────────────────────────
+-- ── V9. agenda_aplicar: a duração aprovada ──────────────────────────────────────────────────────────
 do $v9$
 declare
   v_res jsonb := '[]'::jsonb;
   c_hoje constant date := date '2027-01-07';
-  c_agora constant timestamptz := timestamptz '2027-01-07 10:00-03';
   v_os uuid;
-  v_prop uuid;
   v_r jsonb;
-  v_cfg public.agenda_config;
-  v_dias numeric;
-  v_item jsonb;
+  v_m jsonb;
+  v_pl public.os_planejamento;
+  r record;
 begin
   if not pg_temp.fx() then
     perform pg_temp.gravar(pg_temp.ok('[]', 'V9 aplicar', true, 'PULADO: sem a fixture'));
     return;
   end if;
+  perform set_config('agenda.hoje', c_hoje::text, true);
+  -- Sem correção aplicada, grava o número do item, como antes: sombra, desligado, viés que o arredondamento apaga, item já sem o viés. A proposta pode ser velha: o item (7) é o aprovado, a estimativa de agora (5) não manda
+  for r in select * from (values ('desligado', true, 7::numeric, 'V9a desligado, item antigo'), ('sombra', true, 7, 'V9b sombra, item antigo'), ('ligado', true, 7, 'V9c ligado com o freio (efetivo sombra), item antigo')) x(modo, freio, item, nome) loop
+    begin
+      perform pg_temp.modo(r.modo, r.freio);
+      update public.agenda_config set modo_proposta = 'ligado', marcar_regras = array_remove(marcar_regras, 'estimativa') where id;
+      perform pg_temp.vies('estimativa:rv:energia', 1.20);
+      v_os := pg_temp.aberta(51, 3820);   -- estimativa de agora: 5 dias
+      v_r := pg_temp.aprova(v_os, r.item);
+      select * into v_pl from public.os_planejamento where service_order_id = v_os;
+      v_res := pg_temp.ok(v_res, r.nome || ': grava o número do item (7), como antes do P3, e não guarda aprovado',
+        coalesce((v_r ->> 'ok')::boolean, false) and v_pl.dias = 7 and v_pl.estimativa_fonte = 'aceita' and v_pl.aprovado_com_vies is null, format('%s | dias=%s', v_r, v_pl.dias));
+      raise exception 'desfaz' using errcode = 'P0099';
+    exception when sqlstate 'P0099' then null;
+    end;
+  end loop;
   begin
     perform pg_temp.modo('ligado', false);
     update public.agenda_config set modo_proposta = 'ligado', marcar_regras = array_remove(marcar_regras, 'estimativa') where id;
-    v_cfg := public._agenda_cfg();
+    perform pg_temp.vies('estimativa:rv:energia', 1.02);
+    v_os := pg_temp.aberta(52, 3820);   -- 5 × 1,02 = 5: o arredondamento apaga
+    v_r := pg_temp.aprova(v_os, 5);
+    select * into v_pl from public.os_planejamento where service_order_id = v_os;
+    v_res := pg_temp.ok(v_res, 'V9d correção que o arredondamento apaga: grava o item, sem aprovado', v_pl.dias = 5 and v_pl.aprovado_com_vies is null, format('dias=%s ap=%s', v_pl.dias, v_pl.aprovado_com_vies));
+    -- o item já sem o viés (a proposta é de antes de o viés entrar em uso)
     perform pg_temp.vies('estimativa:rv:energia', 1.20);
-    v_os := pg_temp.aberta(51, 3820);   -- dias_realista 5, com o viés 6
-    v_item := jsonb_build_object('os', v_os, 'op', 'criar', 'tipo', 'execucao', 'fonte', 'sugerida', 'dias', 6, 'texto', 'marcar', 'motivo', 'teste', 'alocacoes', '[]'::jsonb, 'fixar_dono', false, 'critica', null, 'pergunta_chave', null, 'de', c_hoje, 'ate', c_hoje);
-    insert into public.agenda_propostas (escopo, periodo, os_alvo, modo, estado, versao_base, itens, parametros, expira_em, criada_por)
-    values ('os', daterange(c_hoje, c_hoje, '[]'), array[v_os], 'ligado', 'aberta', v_cfg.versao_plano, jsonb_build_array(v_item), jsonb_build_object('p_hoje', c_hoje), greatest(now(), c_agora) + interval '1 day', 'dono')
-    returning id into v_prop;
-    perform set_config('agenda.hoje', c_hoje::text, true);
-    v_r := public.agenda_aplicar(v_prop, array[v_os], 'dono', null, null, c_hoje, c_agora);
-    select dias into v_dias from public.os_planejamento where service_order_id = v_os;
-    v_res := pg_temp.ok(v_res, 'V9a agenda_aplicar pela via do dono, com a sugestão vindo com o viés (item 6 dias): grava a aceita sem o viés (5), e a leitura corrige pela chave dono: só se houver',
-      coalesce((v_r ->> 'ok')::boolean, false) and v_dias = 5 and (select estimativa_fonte = 'aceita' from public.os_planejamento where service_order_id = v_os),
-      format('%s | dias=%s', v_r, v_dias));
-    v_res := pg_temp.ok(v_res, 'V9b agenda_aplicar devolve agenda.sem_vies ao valor de antes (vazio)', coalesce(current_setting('agenda.sem_vies', true), '') = '', current_setting('agenda.sem_vies', true));
+    v_os := pg_temp.aberta(53, 3820);
+    v_r := pg_temp.aprova(v_os, 5);
+    select * into v_pl from public.os_planejamento where service_order_id = v_os;
+    v_res := pg_temp.ok(v_res, 'V9e item já sem o viés, viés em uso agora: grava o item (5), sem aprovado', v_pl.dias = 5 and v_pl.aprovado_com_vies is null, format('dias=%s ap=%s', v_pl.dias, v_pl.aprovado_com_vies));
+    -- com correção aplicada de fato: dois números, com as alocações de verdade
+    v_os := pg_temp.aberta(54, 3820);   -- 5 sem o viés, 6 com: 12 meios-dias
+    v_m := public.agenda_meios_da_os(v_os, c_hoje);
+    v_r := pg_temp.aprova(v_os, (v_m ->> 'dias')::numeric);
+    perform pg_temp.publica(v_os, (v_m ->> 'total')::int);
+    select * into v_pl from public.os_planejamento where service_order_id = v_os;
+    v_res := pg_temp.ok(v_res, 'V9f aprovada com o viés: dias 5 (sem o viés, a medida), aceita, e o aprovado guarda 6 dias, total 12, viés 1,2',
+      coalesce((v_r ->> 'ok')::boolean, false) and v_pl.dias = 5 and v_pl.estimativa_fonte = 'aceita'
+      and (v_pl.aprovado_com_vies ->> 'dias')::numeric = 6 and (v_pl.aprovado_com_vies ->> 'total')::int = 12 and (v_pl.aprovado_com_vies ->> 'vies')::numeric = 1.2,
+      format('%s | dias=%s ap=%s', v_r, v_pl.dias, v_pl.aprovado_com_vies));
+    v_m := public.agenda_meios_da_os(v_os, c_hoje);
+    v_res := pg_temp.ok(v_res, 'V9g lido depois de aprovar: dias 6, total 12, fonte aceita, 12 vigentes, nada a marcar nem a sobrar; vies_fonte aprovado, dias_sem_vies 5, sem "Você disse"',
+      (v_m ->> 'dias')::numeric = 6 and (v_m ->> 'total')::int = 12 and v_m ->> 'fonte' = 'aceita' and (v_m ->> 'vigentes')::int = 12 and (v_m ->> 'restantes')::numeric = 0
+      and v_m ->> 'vies_fonte' = 'aprovado' and (v_m ->> 'dias_sem_vies')::numeric = 5 and not v_m ? 'dias_dono' and not v_m ? 'texto_vies' and jsonb_array_length(v_m -> 'molde') = 12, v_m::text);
+    -- a marcação e a rodada seguinte não mexem no que foi aprovado
+    perform public._agenda_aprender_congelar_marcacao(c_hoje);
+    select * into v_pl from public.os_planejamento where service_order_id = v_os;
+    v_m := public.agenda_meios_da_os(v_os, c_hoje);
+    v_res := pg_temp.ok(v_res, 'V9h depois da marcação: dias 6, total 12, e a marcação da aprovada é da conta do estimador (estimativa:rv:energia, 1,20), não dono:',
+      (v_m ->> 'dias')::numeric = 6 and (v_m ->> 'total')::int = 12 and v_pl.vies_marcado = 1.2 and v_pl.vies_marcado_chave = 'estimativa:rv:energia', format('%s | %s %s', v_m ->> 'total', v_pl.vies_marcado, v_pl.vies_marcado_chave));
+    perform pg_temp.vies('estimativa:rv:energia', 1.40);
+    perform pg_temp.vies('dono:todas', 1.50, 7);
+    v_m := public.agenda_meios_da_os(v_os, c_hoje);
+    v_res := pg_temp.ok(v_res, 'V9i o viés muda (1,40) e o dono: entra (1,50): não muda nem empilha, vale o aprovado (6 dias, total 12)',
+      (v_m ->> 'dias')::numeric = 6 and (v_m ->> 'total')::int = 12 and not v_m ? 'dias_dono', v_m::text);
+    -- com o freio de volta, o aprovado segue
+    perform pg_temp.modo('ligado', true);
+    v_m := public.agenda_meios_da_os(v_os, c_hoje);
+    v_res := pg_temp.ok(v_res, 'V9j o freio de volta não mexe no que foi aprovado (6 dias, total 12; o P7 diz no cartão)', (v_m ->> 'dias')::numeric = 6 and (v_m ->> 'total')::int = 12, v_m::text);
+    perform set_config('agenda.sem_vies', 'on', true);
+    v_m := public.agenda_meios_da_os(v_os, c_hoje);
+    v_res := pg_temp.ok(v_res, 'V9k o que a medida lê (agenda.sem_vies): 5 dias, total 10, sem chave', (v_m ->> 'dias')::numeric = 5 and (v_m ->> 'total')::int = 10 and not v_m ? 'vies_fonte', v_m::text);
+    perform set_config('agenda.sem_vies', '', true);
+    perform pg_temp.modo('ligado', false);
+    -- o dono diz os dias de novo: o aprovado sai e o histórico guarda
+    perform public._agenda_aplicar_planejar(pg_temp.adm(), v_os, '{"dias": 4, "estimativa_fonte": "dono"}'::jsonb, 'são 4 dias', c_hoje);
+    select * into v_pl from public.os_planejamento where service_order_id = v_os;
+    v_res := pg_temp.ok(v_res, 'V9l o dono diz os dias de novo: vale o que ele disse, o aprovado sai e o histórico guarda o de antes',
+      v_pl.dias = 4 and v_pl.estimativa_fonte = 'dono' and v_pl.aprovado_com_vies is null
+      and exists (select 1 from jsonb_array_elements(v_pl.historico) h where (h #>> '{antes,aprovado_com_vies,dias}')::numeric = 6), v_pl.historico::text);
+    -- o aprovado só vale na fonte aceita (reestimar a OS para orçamento não pode ler o aprovado antigo)
+    v_os := pg_temp.aberta(57, 3820);
+    perform pg_temp.dias(v_os, 4, 'orcamento');
+    update public.os_planejamento set aprovado_com_vies = jsonb_build_object('dias', 6, 'total', 12, 'vies', 1.2, 'em', c_hoje) where service_order_id = v_os;
+    v_m := public.agenda_meios_da_os(v_os, c_hoje);
+    v_res := pg_temp.ok(v_res, 'V9o fonte orcamento com aprovado antigo: lê os dias dela (4 × 1,4 = 5,6 → 5,5), sem o aprovado', (v_m ->> 'dias')::numeric = 5.5 and v_m ->> 'vies_fonte' <> 'aprovado', v_m::text);
+    -- a aceita antiga (dias já ditos antes, não desta aprovação): o aprovado não entra nela
+    v_os := pg_temp.aberta(58, 3820);
+    perform pg_temp.dias(v_os, 4, 'aceita');
+    v_r := pg_temp.aprova(v_os, 6);
+    select * into v_pl from public.os_planejamento where service_order_id = v_os;
+    v_res := pg_temp.ok(v_res, 'V9p a OS que já tinha dias aceitos não muda ao ser aprovada de novo: dias 4 e sem aprovado', v_pl.dias = 4 and v_pl.aprovado_com_vies is null, format('dias=%s ap=%s', v_pl.dias, v_pl.aprovado_com_vies));
+    -- o orçamento gravado (fonte orcamento, sem a regra estimativa lê como sugerida) não vira aceita nem aprovado ao ser aprovado: o item é da fila e a linha já tem dias
+    v_os := pg_temp.aberta(61, 3820);
+    perform pg_temp.dias(v_os, 4, 'orcamento');
+    v_r := pg_temp.aprova(v_os, 6);
+    select * into v_pl from public.os_planejamento where service_order_id = v_os;
+    v_res := pg_temp.ok(v_res, 'V9q fonte orcamento gravada, item sugerida: dias 4 e sem aprovado (a linha já tinha dias)', v_pl.dias = 4 and v_pl.estimativa_fonte = 'orcamento' and v_pl.aprovado_com_vies is null, format('dias=%s fonte=%s ap=%s', v_pl.dias, v_pl.estimativa_fonte, v_pl.aprovado_com_vies));
+    -- a proposta velha, com a estimativa andando: dias do item, total pelo que ela tem (sem a conta da dupla)
+    perform pg_temp.vies('estimativa:rv:energia', 1.20);
+    v_os := pg_temp.aberta(55, 3820);
+    v_r := pg_temp.aprova(v_os, 7);
+    select * into v_pl from public.os_planejamento where service_order_id = v_os;
+    v_res := pg_temp.ok(v_res, 'V9m proposta velha (item 7, agora 6): o aprovado é o item (7 dias, total 14), dias 5 sem o viés',
+      v_pl.dias = 5 and (v_pl.aprovado_com_vies ->> 'dias')::numeric = 7 and (v_pl.aprovado_com_vies ->> 'total')::int = 14, v_pl.aprovado_com_vies::text);
+    -- com a dupla ligada: o total publicado não é dias × 2
+    update public.agenda_config set modo_dupla = 'ligado' where id;
+    v_os := pg_temp.aberta(56, 3820);
+    insert into public.os_planejamento (service_order_id, dupla_dita, dupla_meios) values (v_os, 'inicio', 2);
+    v_m := public.agenda_meios_da_os(v_os, c_hoje);
+    v_r := pg_temp.aprova(v_os, (v_m ->> 'dias')::numeric);
+    perform pg_temp.publica(v_os, (v_m ->> 'total')::int, date '2027-03-08');
+    select * into v_pl from public.os_planejamento where service_order_id = v_os;
+    v_m := public.agenda_meios_da_os(v_os, c_hoje);
+    v_res := pg_temp.ok(v_res, 'V9n dupla ligada: aprovado 6 dias, total 10 (12 − 2 de dupla); lido depois, o mesmo (a aceita não refaz a dupla, mas o total publicado fica); pm da dupla 12',
+      coalesce((v_r ->> 'ok')::boolean, false) and (v_pl.aprovado_com_vies ->> 'total')::int = 10 and (v_m ->> 'dias')::numeric = 6 and (v_m ->> 'total')::int = 10 and (v_m #>> '{dupla,pm}')::int = 12 and (v_m ->> 'restantes')::numeric = 0,
+      format('%s | total=%s pm=%s restantes=%s', v_r ->> 'ok', v_m ->> 'total', v_m #>> '{dupla,pm}', v_m ->> 'restantes'));
+    update public.agenda_config set modo_dupla = 'sombra' where id;
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;

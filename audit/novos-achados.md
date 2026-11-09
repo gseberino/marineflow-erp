@@ -3884,10 +3884,18 @@ porque só o dono pode preenchê-las.
 - **Na Fase 7e:** deixado para o P6/P7, porque depende do texto que mostra os dois números. Em sombra e com o freio, não muda nada.
 - **Origem:** Fase 7e, P3.
 
-### [NOVO-agenda-154] O "aceita" pode nascer de uma duração que já leva o viés
+### [NOVO-agenda-154] A duração aprovada com o viés tem dois números e nenhum lugar para os dois
 
-- **Encontrado em:** Agenda de Produção, Fase 7e, P3 (09/11/2026).
-- **Onde:** `agenda_aplicar`, a duração só sugerida aceita pelo dono: o item da proposta leva `dias` de `agenda_meios_da_os`, que passa a sair com o viés.
-- **Efeito:** sem o conserto, a correção do estimador viraria "dias do dono" (fonte `aceita`), com a correção de `dono:` por cima e `razao_dono` medindo a si mesma.
-- **Na Fase 7e:** corrigido no P3 (`agenda_aplicar` grava o número sem o viés). O plano publicado fica com o total corrigido e o `dias` gravado fica sem o viés: é a medida, não um defeito.
+- **Encontrado em:** Agenda de Produção, Fase 7e, P3 (09/11/2026), na conferência.
+- **Onde:** `agenda_aplicar`, a duração só sugerida que o dono aprova (`aceita`): o item da proposta leva `dias` de `agenda_meios_da_os`, que passa a sair com o viés.
+- **Efeito:** gravar o corrigido faz a correção do `dono:` entrar por cima e `razao_dono` medir a si mesma; gravar o sem viés faz o plano encolher depois de aprovado (`aceita` só lê a chave `dono:`: 14 meios-dias publicados e total 12, com `_agenda_vigia_estouro` e `restantes` contando contra 12).
+- **Na Fase 7e:** corrigido no P3: `os_planejamento.dias` guarda o número sem o viés (a medida) e `aprovado_com_vies` guarda os dias e o total aprovados (o plano). Sem correção aplicada de fato, grava-se o número do item, como antes. Em `aceita` sem `aprovado_com_vies` (aprovada sem correção), a correção `dono:` entra na leitura, como R7.3-2 manda, com o texto "Você aceitou".
+- **Origem:** Fase 7e, P3.
+
+### [NOVO-agenda-155] Sem o viés, a duração aceita com a dupla ligada cresce depois de aprovada (a 7b, antes do P3)
+
+- **Encontrado em:** Agenda de Produção, Fase 7e, P3 (09/11/2026), na conferência; é anterior à 7e.
+- **Onde:** `agenda_meios_da_os`, ramo da 7b: com `modo_dupla` ligado, a fonte estimada refaz o total (`pm − ni − nf`: 10 com 6 dias) e a aceita não (`dias × 2`: 12).
+- **Efeito:** a OS aprovada sem viés e com dupla ligada passa de total 10 para 12 depois de aprovada: `restantes` passa a 2, e o motor pode marcar 2 meios-dias a mais (replay real, `f7e/p3/freio3-aprova.mjs`, âncora do P2: 6/10 → 6/12, 10 meios publicados).
+- **Na Fase 7e:** a aprovada COM o viés fica certa (`aprovado_com_vies` guarda o total publicado); a sem o viés continua como a 7b deixou, porque mudar seria mudar a sombra (e o P3 não mexe no que existe sem o viés).
 - **Origem:** Fase 7e, P3.

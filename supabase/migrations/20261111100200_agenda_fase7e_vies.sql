@@ -3,7 +3,7 @@
 -- Spec: scratchpad agenda-pesquisa/spec-fase7e.md (§5.2 e o bloco R7, que vale sobre o corpo: R7.1, R7.3-2, R7.5-8, 10, 11, 12, R7.6, R7.8, R7.12, R7.13); nomes: fase7-registro.md; o registro do pacote: notas-fase7e.md.
 -- Depende de 20261111100000 (P1) e 20261111100100 (P2). Copiado das definições MAIS NOVAS: os_duracao_sugerida (20261101100300_agenda_fase7b_motor.sql:300), agenda_meios_da_os (20261101100300_agenda_fase7b_motor.sql:536), _agenda_aplicar_planejar (20261107100870_agenda_fase7d_correcao4.sql:901), _agenda_aprender_congelar (20261111100100_agenda_fase7e_medicao.sql:549), _agenda_aprender_congelar_marcacao (20261111100100_agenda_fase7e_medicao.sql:217), agenda_aplicar (20261031100750_agenda_fase7a_revisao.sql:1179).
 --
--- ═══ NÃO APLICADA ═══ Existe para revisão e espera o OK (publicar/exec/aplicar.sh, nunca db push: esta versão fica antes das 20261116* que já estão em produção). Só funções, nenhum dado.
+-- ═══ NÃO APLICADA ═══ Existe para revisão e espera o OK (publicar/exec/aplicar.sh, nunca db push: esta versão fica antes das 20261116* que já estão em produção). Uma coluna nova (os_planejamento.aprovado_com_vies, nula) e funções; nenhum dado.
 --
 -- POR QUE: a estimativa pelo valor do orçamento erra de um jeito medível, e com o P2 a rodada mede esse erro; falta usar o que foi medido. O R7.3-2 pede também corrigir os dias que o dono diz, sempre mostrando os dois números, com saída.
 --
@@ -13,7 +13,7 @@
 --   3. agenda_meios_da_os: dias, total e molde corrigidos no ramo da fonte do estimador, pelo congelado (vies_marcado) ou pelo de agora; a fonte orcamento GRAVADA corrige sobre p.dias (R7.5-11), a dupla ligada refaz o total com o viés (R7.5-10).
 --      Os dias que o dono disse: pela chave dono:, com os dois números em texto_vies; acima de estimativa_max_diarias, a correção não entra (R7.3-2).
 --   4. _agenda_aplicar_planejar: a saída do dono (R7.3-2, conflito 2d): repetir os dias grava vies_dono_fixo, vies_marcado 1,00 e marcado_em.
---   5. As correções da conferência (lições do P1 e do P2): _agenda_aprender_congelar lê o molde também sem o viés (agenda.sem_vies), para a medida não medir a si mesma; agenda_aplicar grava como "aceita" o número sem o viés; _agenda_aprender_congelar_marcacao congela a correção dos dias do dono pela chave dono:.
+--   5. As correções da conferência (lições do P1 e do P2): _agenda_aprender_congelar lê o molde também sem o viés (agenda.sem_vies), para a medida não medir a si mesma; agenda_aplicar, na duração aprovada com o viés, grava o número sem o viés em dias (a medida lê esse) e o aprovado em aprovado_com_vies (o plano lê esse), sem mudar nada quando não há correção aplicada; _agenda_aprender_congelar_marcacao congela a correção dos dias do dono pela chave dono:.
 --
 -- O QUE NÃO MUDA: nada em agenda_vigiar, agenda_cliente_vigiar nem agenda_propor; em sombra, zero chamada nova (só leitura de variável de sessão e de campos já na mão), salvo 1 leitura de config na OS com dias do dono sem marcação (hoje, nenhuma). _agenda_aprendido NÃO é recriada (R7.5-7).
 -- Nenhuma mensagem nova ao dono, à equipe ou ao cliente: os textos novos só aparecem em ligado, e quem os mostra é o P7. Nada de dinheiro.
@@ -23,6 +23,12 @@
 --   drop function if exists public._agenda_aprender_vies(date, timestamptz);
 --   drop function if exists public._agenda_dias_com_vies(jsonb, numeric);
 --   drop function if exists public._agenda_vies_dono_da_os(uuid);
+--   alter table public.os_planejamento drop column if exists aprovado_com_vies;
+
+-- ── 0. A coluna ───────────────────────────────────────────────────────────────────────────────────
+-- Conferência do P3: a duração só sugerida que o dono aprova com o viés aplicado tem dois números. dias fica com o de sem o viés (fonte aceita: é o que a medida lê e o que o dono:, se vier, não corrige por cima); esta guarda o que foi aprovado e publicado (dias e total: com a dupla da 7b ligada o total não é dias × 2).
+alter table public.os_planejamento add column if not exists aprovado_com_vies jsonb;
+comment on column public.os_planejamento.aprovado_com_vies is 'Agenda de Produção (Fase 7e, P3; §3.1-10): a duração aprovada pelo dono quando a sugestão vinha com o viés — {dias, total, vies, em}. Nula em todo o resto. agenda_meios_da_os a lê no lugar de dias (o plano publicado não muda pelo aprendizado); a medida lê dias, sem o viés. Dizer os dias de novo apaga.';
 
 -- ── 1. As novas ──────────────────────────────────────────────────────────────────────────────────
 
@@ -377,12 +383,14 @@ begin
     if v_7e_uso is not null and v_7e_uso <> 1 then
       v_7e_d := public._agenda_dias_com_vies(jsonb_build_object('horas', v_horas, 'mo', v_mo, 'pessoas', v_pes), v_7e_uso);
       v_7e_cls := public._agenda_classe_texto_do_nivel(regexp_replace(coalesce(v_7e_v ->> 'chave', ''), '^estimativa:', ''));
+      -- (o texto só quando o número muda: "3 dias × 1,02 = 3 dias" não diz nada)
       v_f7_extra := v_f7_extra || jsonb_build_object(
         'vies', v_7e_uso, 'vies_chave', v_7e_v ->> 'chave', 'dp_planejado', (v_7e_d ->> 'dp')::numeric, 'dias_planejado', (v_7e_d ->> 'dias')::numeric,
-        'pessoas_planejado', (v_7e_d ->> 'pessoas')::int,
+        'pessoas_planejado', (v_7e_d ->> 'pessoas')::int)
+        || case when (v_7e_d ->> 'dias')::numeric <> (v_7e_d ->> 'dias_padrao')::numeric then jsonb_build_object(
         'texto_vies', format('Estimativa minha: %s pelo valor do orçamento × %s (%s costumam levar %s) = %s.',
                              public._agenda_dias((v_7e_d ->> 'dias_padrao')::numeric), public._agenda_num(v_7e_uso, 2), coalesce(v_7e_cls, 'as OS'),
-                             case when v_7e_uso > 1 then 'mais' else 'um pouco menos' end, public._agenda_dias((v_7e_d ->> 'dias')::numeric)));
+                             case when v_7e_uso > 1 then 'mais' else 'um pouco menos' end, public._agenda_dias((v_7e_d ->> 'dias')::numeric))) else '{}'::jsonb end;
     end if;
   end if;
   -- FASE 7e: fim
@@ -484,6 +492,8 @@ declare
   v_7e_cont  numeric;
   v_7e_n     int;
   v_7e_saida jsonb;
+  v_7e_total int;
+  v_7e_verbo text;
   -- FASE 7e: fim
   -- FASE 7b: (7b P4) a dupla por meio-dia: a da OS, os meios-dias dela no início e no fim, as pessoas de cada passo do molde
   v_7b_modo  text;
@@ -535,52 +545,67 @@ begin
   end if;
   -- FASE 7: fim
   -- FASE 7e: (7e P3, §5.2, R7.5-11, R7.5-12, R7.3-2, §3.1-10) o viés na duração, depois de resolvida a fonte. Três contas, nenhuma muda a dupla dita (conflito 2a) e nenhuma mexe no que está gravado (a correção é na leitura):
-  --   o dono (dias ditos por ele, fonte dono/aceita): chave dono:, "você disse 3; contei 3,5"; acima de estimativa_max_diarias, a correção não entra e o texto diz os dois (R7.3-2).
+  --   o aprovado com o viés (fonte aceita, aprovado_com_vies): os dias e o total que o dono aprovou, como foram publicados, sem somar outra correção (§3.1-10). p.dias guarda o número sem o viés, que é o que a medida lê.
+  --   o dono (dias ditos por ele, fonte dono/aceita): chave dono:, "você disse 3; contei 3,5" ("você aceitou", na aceita); acima de estimativa_max_diarias, a correção não entra e o texto diz os dois (R7.3-2).
   --   a fonte orcamento GRAVADA (p.dias, "quanto falta", R7.5-11): sobre p.dias, nunca por v_sug.
   --   a estimativa (sugerida ou orcamento calculada): _agenda_dias_com_vies, com as pessoas da sugestão (R7.5-12); sem base ou diagnóstico, nada (R7.5-8).
+  -- Só é correção o que muda o número: com o corrigido igual ao de antes (3 × 1,02 = 3), a saída é a de antes, sem chave nem texto, e repetir os dias não é a saída do dono.
   -- O valor: o congelado na marcação, se for da mesma conta (uma OS marcada pela estimativa não usa esse valor nos dias do dono, nem o contrário), senão o de agora. "agenda.sem_vies" = on: a medida pede o número sem o viés (_agenda_aprender_congelar, a mesma simulação de agenda.gestor; ver notas): o viés mede o estimador e o plano, nunca o que ele mesmo mudou.
   -- R7.8: em sombra, zero chamada nova: variável de sessão e campos já na mão. A exceção é a OS com dias do dono sem marcação, que lê a config 1 vez para saber se o modo está ligado (a estimativa lê v_sug, que já passou pelo modo efetivo).
   if coalesce(current_setting('agenda.sem_vies', true), '') <> 'on' then
-    v_7e_dono := coalesce(v_fonte in ('dono', 'aceita'), false);
-    v_7e_vies := case when p.vies_marcado_chave is null then p.vies_marcado
-                      when (p.vies_marcado_chave like 'dono:%') = v_7e_dono then p.vies_marcado end;
-    v_7e_fonte := 'marcado';
-    if v_7e_vies is null then
-      v_7e_fonte := 'agora';
-      if v_7e_dono then
-        if (public._agenda_cfg()).modo_vies = 'ligado' then
-          v_7e_v := public._agenda_vies_dono_da_os(p_so_id);
-          v_7e_vies := (v_7e_v ->> 'vies_em_uso')::numeric;
-        end if;
-      elsif v_sug ? 'vies' then
-        v_7e_vies := (v_sug ->> 'vies')::numeric;
-      end if;
-    end if;
-    if v_7e_vies is not null and v_7e_vies <> 1 then
+    if v_fonte = 'aceita' and p.aprovado_com_vies is not null then
       v_7e_bruto := v_dias;
-      if v_7e_dono then
-        v_7e_c := public._agenda_cfg();
-        v_7e_n := coalesce((v_7e_v ->> 'n')::int, (select a.n from public.agenda_aprendizado a where a.item = 'vies' and a.chave = p.vies_marcado_chave), 0);
-        v_7e_cont := greatest(0.5, round(v_dias * v_7e_vies * 2) / 2);
-        if v_7e_cont * coalesce((v_sug ->> 'pessoas')::int, 1) > v_7e_c.estimativa_max_diarias then
-          v_7e_saida := jsonb_build_object('vies', v_7e_vies, 'vies_fonte', v_7e_fonte, 'vies_acima_max', true, 'dias_dono', trim_scale(v_7e_bruto), 'dias_corrigidos', trim_scale(v_7e_cont),
-            'texto_vies', format('Você disse %s; pelo histórico dos seus dias seriam %s (nos serviços assim, os seus dias levaram %s×; %s OS), mas isso passa do que eu corrijo sozinho: fico com o seu número.',
-                                 public._agenda_dias(v_7e_bruto), public._agenda_dias(v_7e_cont), public._agenda_num(v_7e_vies, 2), v_7e_n));
-        else
-          v_dias := v_7e_cont;
-          v_7e_saida := jsonb_build_object('vies', v_7e_vies, 'vies_fonte', v_7e_fonte, 'dias_dono', trim_scale(v_7e_bruto),
-            'texto_vies', format('Você disse %s; contei %s (nos serviços assim, os seus dias levaram %s×; %s OS).',
-                                 public._agenda_dias(v_7e_bruto), public._agenda_num(v_dias, 1), public._agenda_num(v_7e_vies, 2), v_7e_n));
+      v_dias := (p.aprovado_com_vies ->> 'dias')::numeric;
+      v_7e_total := (p.aprovado_com_vies ->> 'total')::int;
+      v_7e_saida := jsonb_build_object('vies', p.aprovado_com_vies -> 'vies', 'vies_fonte', 'aprovado', 'dias_sem_vies', trim_scale(v_7e_bruto));
+    else
+      v_7e_dono := coalesce(v_fonte in ('dono', 'aceita'), false);
+      v_7e_vies := case when p.vies_marcado_chave is null then p.vies_marcado
+                        when (p.vies_marcado_chave like 'dono:%') = v_7e_dono then p.vies_marcado end;
+      v_7e_fonte := 'marcado';
+      if v_7e_vies is null then
+        v_7e_fonte := 'agora';
+        if v_7e_dono then
+          if (public._agenda_cfg()).modo_vies = 'ligado' then
+            v_7e_v := public._agenda_vies_dono_da_os(p_so_id);
+            v_7e_vies := (v_7e_v ->> 'vies_em_uso')::numeric;
+          end if;
+        elsif v_sug ? 'vies' then
+          v_7e_vies := (v_sug ->> 'vies')::numeric;
         end if;
-      elsif not coalesce((v_sug ->> 'sem_base')::boolean, false) and public._agenda_margem_tipo_os(p_so_id) is distinct from 'diagnóstico' then
-        if p.dias is not null then
-          v_dias := greatest(0.5, round(p.dias * v_7e_vies * 2) / 2);
-        else
-          v_7e_dv := public._agenda_dias_com_vies(v_sug, v_7e_vies);
-          v_dias := (v_7e_dv ->> 'dias')::numeric;
-          v_7e_dp := (v_7e_dv ->> 'dp')::numeric;
+      end if;
+      if v_7e_vies is not null and v_7e_vies <> 1 then
+        v_7e_bruto := v_dias;
+        if v_7e_dono then
+          v_7e_cont := greatest(0.5, round(v_dias * v_7e_vies * 2) / 2);
+          if v_7e_cont <> v_dias then
+            v_7e_c := public._agenda_cfg();
+            v_7e_n := coalesce((v_7e_v ->> 'n')::int, (select a.n from public.agenda_aprendizado a where a.item = 'vies' and a.chave = p.vies_marcado_chave), 0);
+            v_7e_verbo := case when v_fonte = 'aceita' then 'aceitou' else 'disse' end;
+            if v_7e_cont * coalesce((v_sug ->> 'pessoas')::int, 1) > v_7e_c.estimativa_max_diarias then
+              v_7e_saida := jsonb_build_object('vies', v_7e_vies, 'vies_fonte', v_7e_fonte, 'vies_acima_max', true, 'dias_dono', trim_scale(v_7e_bruto), 'dias_corrigidos', trim_scale(v_7e_cont),
+                'texto_vies', format('Você %s %s; pelo histórico dos seus dias seriam %s (nos serviços assim, os seus dias levaram %s×; %s OS), mas isso passa do que eu corrijo sozinho: fico com o seu número.',
+                                     v_7e_verbo, public._agenda_dias(v_7e_bruto), public._agenda_dias(v_7e_cont), public._agenda_num(v_7e_vies, 2), v_7e_n));
+            else
+              v_dias := v_7e_cont;
+              v_7e_saida := jsonb_build_object('vies', v_7e_vies, 'vies_fonte', v_7e_fonte, 'dias_dono', trim_scale(v_7e_bruto),
+                'texto_vies', format('Você %s %s; contei %s (nos serviços assim, os seus dias levaram %s×; %s OS).',
+                                     v_7e_verbo, public._agenda_dias(v_7e_bruto), public._agenda_num(v_dias, 1), public._agenda_num(v_7e_vies, 2), v_7e_n));
+            end if;
+          end if;
+        elsif not coalesce((v_sug ->> 'sem_base')::boolean, false) and public._agenda_margem_tipo_os(p_so_id) is distinct from 'diagnóstico' then
+          if p.dias is not null then
+            v_7e_cont := greatest(0.5, round(p.dias * v_7e_vies * 2) / 2);
+          else
+            v_7e_dv := public._agenda_dias_com_vies(v_sug, v_7e_vies);
+            v_7e_cont := (v_7e_dv ->> 'dias')::numeric;
+            v_7e_dp := (v_7e_dv ->> 'dp')::numeric;
+          end if;
+          if v_7e_cont <> v_dias then
+            v_dias := v_7e_cont;
+            v_7e_saida := jsonb_build_object('vies', v_7e_vies, 'vies_fonte', v_7e_fonte, 'dias_sem_vies', trim_scale(v_7e_bruto));
+          end if;
         end if;
-        v_7e_saida := jsonb_build_object('vies', v_7e_vies, 'vies_fonte', v_7e_fonte, 'dias_sem_vies', trim_scale(v_7e_bruto));
       end if;
     end if;
     if v_7e_saida is not null then
@@ -648,6 +673,11 @@ begin
   v_cump := coalesce((v_plano ->> 'meios_cumpridos')::numeric, 0);
   v_vig := coalesce((v_plano ->> 'meios_vigentes')::int, 0);
   v_total := case when v_dias is null then null else (v_dias * 2)::int end;
+  -- FASE 7e: (7e P3, §3.1-10) a OS aprovada com o viés: o total que foi publicado (com a dupla da 7b ligada, ele não é dias × 2), para o plano não encolher nem crescer depois de aprovado
+  if v_7e_total is not null then
+    v_total := v_7e_total;
+  end if;
+  -- FASE 7e: fim
   -- FASE 7b: (7b P4, §5.3, §3.1-8, R4.3) a dupla por meio-dia (modo_dupla fora de desligado), sem a equipe dita e com 1 pessoa por
   -- serviço (com 2 ou mais, o meio-dia de dupla já tem a 2ª pessoa): a dupla da OS (_agenda_dupla_da_os: a dita pelo dono ou a regra
   -- pela tarefa). Ligado e com os dias estimados (fonte sugerida ou orcamento), a duração conserva as diárias-pessoa: pm = as
@@ -765,7 +795,7 @@ end;
 $function$;
 
 comment on function public.agenda_meios_da_os(uuid, date) is
-  'Agenda de Produção (Fase 2, P2): o molde dos meios-dias do que o dono disse — total = dias × 2 (meio dia = 1); por turno os diaristas ditos ("dia" vale nos dois) e quantos (desejado; sem equipe dita, as pessoas da sugestão, e o dono que fica o turno inteiro é uma delas); a presença do dono: o que ele disse → ele na equipe dita (turno nos turnos dele) → a regra d05 (sempre = turno em todos; abre_e_fecha = abertura no 1º e fechamento no último); restantes = total − cumpridos (cumprido/sem registro/passado sem resultado = 1, parcial = 0,5) − os meios-dias vigentes de hoje em diante. Sem os dias ditos: fonte sugerida (dias_realista), só para reserva e simulação. {ok, fonte, dias, total, restantes, passos, presenca, abre, fecha, dono_turno, por_turno, molde[{k, turno, pessoas_ditas, desejado, dono}]}. FASE 7 (7a P2): sem os dias ditos e com a regra estimativa (_agenda_gestor_regra), a fonte é ''orcamento'' com os dias de _agenda_gestor_estimativa quando ela usa (D7-1: a estimativa do orçamento vale como dias firmes; nada é gravado), e a saída ganha estimativa_motivo (por que não usa: situacao, sem_base, grande, embutida; null quando usa) e situacao_pendente; os dias de fonte ''orcamento'' gravados com o portão falso são lidos como ''sugerida''. Sem a regra, a saída de antes, byte a byte. CORREÇÃO 2 DA 7a (a 2ª revisão da etapa; AG7-02/AG7-04): com a regra uma_pessoa, o dono que fica o turno inteiro (presença sempre: a marina nova, o que ele disse) não é a pessoa da estimativa — os técnicos desejados por turno são as pessoas da sugestão, e ele vai junto; no diagnóstico e no comissionamento (dele), a de antes. Sem a regra, a de antes, byte a byte. FASE 7b (P4, §5.3, R4.3(e)): com modo_dupla fora de desligado, sem a equipe dita e com 1 pessoa por serviço, a dupla por meio-dia — dupla (a de _agenda_dupla_da_os: fonte dono ou regra) || {ni, nf, todos, pm (a soma das pessoas do molde), pm_estimativa, pk (as pessoas de cada passo do molde: 2 nos ni primeiros, nos nf últimos ou em todos, 1 nos outros), modo}, dk (as pessoas dos passos que restam) e dk_dono_conta (o dono que fica o turno inteiro é uma das pessoas, salvo a regra da correção 2 da 7a: presença sempre fora do diagnóstico e do comissionamento). Ligado e com os dias estimados, a duração conserva as diárias-pessoa: total = pm − ni − nf, com 2 × (ni + nf) <= pm (cortando primeiro o fim) e o tempo todo = ceil(pm / 2) meios-dias em dupla (Lenine 12 → 10; Vanderlei 15 → 13). Em teste ou com os dias ditos, o total é o de antes. O por_turno.desejado continua o de antes. Sem dupla (ou desligado), a saída de antes, byte a byte. FASE 7e (P3): com o viés em uso de verdade ou congelado na marcação, os dias do estimador (sugerida, orcamento calculada: _agenda_dias_com_vies; orcamento gravada: sobre p.dias, R7.5-11) saem corrigidos, com vies, vies_fonte (marcado ou agora) e dias_sem_vies; a dupla ligada conserva o viés (R7.5-10). Os dias do dono (dono/aceita) corrigem pela chave dono: (AG7-33), com dias_dono e texto_vies dizendo os dois; acima de estimativa_max_diarias a correção não entra (vies_acima_max, dias_corrigidos). agenda.sem_vies = on devolve a conta sem o viés (a medida). Fora disso, byte a byte a de antes.';
+  'Agenda de Produção (Fase 2, P2): o molde dos meios-dias do que o dono disse — total = dias × 2 (meio dia = 1); por turno os diaristas ditos ("dia" vale nos dois) e quantos (desejado; sem equipe dita, as pessoas da sugestão, e o dono que fica o turno inteiro é uma delas); a presença do dono: o que ele disse → ele na equipe dita (turno nos turnos dele) → a regra d05 (sempre = turno em todos; abre_e_fecha = abertura no 1º e fechamento no último); restantes = total − cumpridos (cumprido/sem registro/passado sem resultado = 1, parcial = 0,5) − os meios-dias vigentes de hoje em diante. Sem os dias ditos: fonte sugerida (dias_realista), só para reserva e simulação. {ok, fonte, dias, total, restantes, passos, presenca, abre, fecha, dono_turno, por_turno, molde[{k, turno, pessoas_ditas, desejado, dono}]}. FASE 7 (7a P2): sem os dias ditos e com a regra estimativa (_agenda_gestor_regra), a fonte é ''orcamento'' com os dias de _agenda_gestor_estimativa quando ela usa (D7-1: a estimativa do orçamento vale como dias firmes; nada é gravado), e a saída ganha estimativa_motivo (por que não usa: situacao, sem_base, grande, embutida; null quando usa) e situacao_pendente; os dias de fonte ''orcamento'' gravados com o portão falso são lidos como ''sugerida''. Sem a regra, a saída de antes, byte a byte. CORREÇÃO 2 DA 7a (a 2ª revisão da etapa; AG7-02/AG7-04): com a regra uma_pessoa, o dono que fica o turno inteiro (presença sempre: a marina nova, o que ele disse) não é a pessoa da estimativa — os técnicos desejados por turno são as pessoas da sugestão, e ele vai junto; no diagnóstico e no comissionamento (dele), a de antes. Sem a regra, a de antes, byte a byte. FASE 7b (P4, §5.3, R4.3(e)): com modo_dupla fora de desligado, sem a equipe dita e com 1 pessoa por serviço, a dupla por meio-dia — dupla (a de _agenda_dupla_da_os: fonte dono ou regra) || {ni, nf, todos, pm (a soma das pessoas do molde), pm_estimativa, pk (as pessoas de cada passo do molde: 2 nos ni primeiros, nos nf últimos ou em todos, 1 nos outros), modo}, dk (as pessoas dos passos que restam) e dk_dono_conta (o dono que fica o turno inteiro é uma das pessoas, salvo a regra da correção 2 da 7a: presença sempre fora do diagnóstico e do comissionamento). Ligado e com os dias estimados, a duração conserva as diárias-pessoa: total = pm − ni − nf, com 2 × (ni + nf) <= pm (cortando primeiro o fim) e o tempo todo = ceil(pm / 2) meios-dias em dupla (Lenine 12 → 10; Vanderlei 15 → 13). Em teste ou com os dias ditos, o total é o de antes. O por_turno.desejado continua o de antes. Sem dupla (ou desligado), a saída de antes, byte a byte. FASE 7e (P3): com o viés em uso de verdade ou congelado na marcação, os dias do estimador (sugerida, orcamento calculada: _agenda_dias_com_vies; orcamento gravada: sobre p.dias, R7.5-11) saem corrigidos, com vies, vies_fonte (marcado ou agora) e dias_sem_vies; a dupla ligada conserva o viés (R7.5-10). A aceita aprovada com o viés lê aprovado_com_vies (vies_fonte aprovado): os dias e o total publicados, sem somar outra correção. Os dias do dono (dono/aceita) corrigem pela chave dono: (AG7-33), com dias_dono e texto_vies dizendo os dois; acima de estimativa_max_diarias a correção não entra (vies_acima_max, dias_corrigidos). Correção que o arredondamento apaga não é correção: a saída é a de antes. agenda.sem_vies = on devolve a conta sem o viés (a medida). Fora disso, byte a byte a de antes.';
 
 -- _agenda_aplicar_planejar (de 20261107100870_agenda_fase7d_correcao4.sql:901; md5 do corpo de antes 98673d30737ab66bfc48e0f9a3677bea)
 create or replace function public._agenda_aplicar_planejar(p_autor uuid, p_os uuid, p_dados jsonb, p_trecho text, p_hoje date)
@@ -863,6 +893,9 @@ begin
     v_new.estimativa_em := now();
   end if;
   -- FASE 7e: (7e P3, AG7-33, R7.3-2, conflito 2d) a saída do dono: ele viu "Você disse 3 dias; contei 3,5" e repetiu 3 — ou disse o 3,5 que eu contei —: vale o número dele nesta OS, sem correção, e isso sobrevive ao soltar da marcação. Não é pergunta nem recusa: repetir é a resposta (R7.12-1). Vale só com correção em uso de fato (dias_dono na saída, a mesma conta que ele viu), e não acima do máximo, onde já não há correção a recusar.
+  if d ? 'dias' then
+    v_new.aprovado_com_vies := null;  -- o dono disse (ou aceitou) outra vez: o número aprovado com o viés deixa de valer
+  end if;
   if d ? 'dias' and coalesce(d ->> 'estimativa_fonte', '') = 'dono' then
     v_7e_m := public.agenda_meios_da_os(p_os, p_hoje);
     if v_7e_m ? 'dias_dono' and not v_7e_m ? 'vies_acima_max' and v_new.dias in (v_old.dias, (v_7e_m ->> 'dias')::numeric) then
@@ -1047,6 +1080,9 @@ begin
            tempo_compra_marcado = coalesce(x.tempo_compra_marcado, public._agenda_tempo_interno_compra(p_os)), folga_compra_marcada = coalesce(x.folga_compra_marcada, 0)
      where x.service_order_id = p_os;
   end if;
+  if d ? 'dias' and v_old.aprovado_com_vies is not null then
+    update public.os_planejamento x set aprovado_com_vies = null where x.service_order_id = p_os;
+  end if;
   -- FASE 7e: fim
   -- FASE 7d: (correção O21) "já está livre" (o bem sem indisponibilidade, modo livre) fecha a bem_livre mesmo sem campo do local na linha
   if d #>> '{bem,modo}' = 'livre' then
@@ -1131,7 +1167,7 @@ end;
 $function$;
 
 comment on function public._agenda_aplicar_planejar(uuid, uuid, jsonb, text, date) is
-  'Agenda de Produção (Fase 1, P5; Fase 2, P4): grava em os_planejamento (e os_planejamento_equipe) uma linha de rascunho planejar — só os campos ditos (Fase 2: adiantavel_patio → adiantavel_patio_dias); a equipe dita substitui a anterior. Histórico {em, autor, trecho, antes, depois} com só o que mudou (os 20 mais novos). Só pelo agenda_rascunho_gravar; só service_role. Fase 5 (P5): prometido → os_planejamento.prometido_* pelo _agenda_cliente_gravar_prometido (fonte dono; o original só na 1ª vez; linha própria no histórico); servico_cliente → os_planejamento.servico_cliente. Fase 7b (P2): a dupla dita → os_planejamento.dupla_dita (nao | todos | inicio | fim), dupla_meios (só inicio/fim), dupla_motivo ("você disse: vai em dupla nos 2 primeiros meios-dias") e dupla_em (a hora do *grava*), no histórico com o antes e o depois; com o prometido na mesma linha, o resto da linha ainda grava. Fase 7d (P7; §5.7): o que o dono disse do local e do bem → local_id, local_fonte = dono e local_em; bem_situacao e a fonte; bem_exige; descer_quem; entrada_em, retirada_em e entrada_fonte = dono; viagem; e os_autorizados (fonte dono, local_id = o local resolvido, valido_ate nulo; a lista dita substitui a anterior; quem saiu ganha revogado_em). Tudo no histórico. A pergunta local aberta fecha (resolvida, "você disse onde é") quando ele disse o que ela gravaria: o dono vence. A combinar e a acesso da OS passam pelo _agenda_local_resolver na hora. Uma ação local (origem dono, efeito planejar), com o que mudou e as perguntas que fechou: o *desfaz* (_agenda_desfazer_local) volta só isso; dias, equipe e os outros campos da mesma linha não têm *desfaz*, como sempre. Sem essas chaves, a de antes, byte a byte, e nenhuma ação. FASE 7e (P3): a saída do dono (AG7-33, R7.3-2): repetir os dias dele (ou dizer o número corrigido que eu mostrei) numa OS com correção diferente de 1 grava vies_dono_fixo, vies_marcado 1,00, marcado_em e o que a marcação congelaria.';
+  'Agenda de Produção (Fase 1, P5; Fase 2, P4): grava em os_planejamento (e os_planejamento_equipe) uma linha de rascunho planejar — só os campos ditos (Fase 2: adiantavel_patio → adiantavel_patio_dias); a equipe dita substitui a anterior. Histórico {em, autor, trecho, antes, depois} com só o que mudou (os 20 mais novos). Só pelo agenda_rascunho_gravar; só service_role. Fase 5 (P5): prometido → os_planejamento.prometido_* pelo _agenda_cliente_gravar_prometido (fonte dono; o original só na 1ª vez; linha própria no histórico); servico_cliente → os_planejamento.servico_cliente. Fase 7b (P2): a dupla dita → os_planejamento.dupla_dita (nao | todos | inicio | fim), dupla_meios (só inicio/fim), dupla_motivo ("você disse: vai em dupla nos 2 primeiros meios-dias") e dupla_em (a hora do *grava*), no histórico com o antes e o depois; com o prometido na mesma linha, o resto da linha ainda grava. Fase 7d (P7; §5.7): o que o dono disse do local e do bem → local_id, local_fonte = dono e local_em; bem_situacao e a fonte; bem_exige; descer_quem; entrada_em, retirada_em e entrada_fonte = dono; viagem; e os_autorizados (fonte dono, local_id = o local resolvido, valido_ate nulo; a lista dita substitui a anterior; quem saiu ganha revogado_em). Tudo no histórico. A pergunta local aberta fecha (resolvida, "você disse onde é") quando ele disse o que ela gravaria: o dono vence. A combinar e a acesso da OS passam pelo _agenda_local_resolver na hora. Uma ação local (origem dono, efeito planejar), com o que mudou e as perguntas que fechou: o *desfaz* (_agenda_desfazer_local) volta só isso; dias, equipe e os outros campos da mesma linha não têm *desfaz*, como sempre. Sem essas chaves, a de antes, byte a byte, e nenhuma ação. FASE 7e (P3): a saída do dono (AG7-33, R7.3-2): repetir os dias dele (ou dizer o número corrigido que eu mostrei) numa OS com correção que muda o número grava vies_dono_fixo, vies_marcado 1,00, marcado_em e o que a marcação congelaria. Dizer os dias de novo apaga o aprovado_com_vies.';
 
 -- _agenda_aprender_congelar (de 20261111100100_agenda_fase7e_medicao.sql:549; md5 do corpo de antes 1b5eb8c0b65b6d5ec4944286378e7ada)
 create or replace function public._agenda_aprender_congelar(p_hoje date)
@@ -1316,7 +1352,7 @@ begin
     v_dia := (r.prim at time zone 'America/Sao_Paulo')::date;
     v := public._agenda_vies_da_os(r.os);
     -- FASE 7e: (7e P3, AG7-33, §3.1-10) os dias que o dono disse (fonte dono/aceita) congelam a correção pela chave dono:, não a do estimador: o publicado não muda pelo aprendizado também nos dias dele, e agenda_meios_da_os só usa o congelado da conta dele.
-    if exists (select 1 from public.os_planejamento x where x.service_order_id = r.os and x.dias is not null and x.estimativa_fonte in ('dono', 'aceita')) then
+    if exists (select 1 from public.os_planejamento x where x.service_order_id = r.os and x.dias is not null and x.estimativa_fonte in ('dono', 'aceita') and x.aprovado_com_vies is null) then
       v := public._agenda_vies_dono_da_os(r.os);
     end if;
     -- FASE 7e: fim
@@ -1393,9 +1429,8 @@ declare
   v_nomes  text[] := '{}';
   v_q      record;
   v_texto  text;
-  -- FASE 7e: (7e P3) a sugestão aceita, sem o viés
-  v_7e_bruto numeric;
-  v_7e_sv    text;
+  -- FASE 7e: (7e P3) a sugestão aprovada com o viés
+  v_7e_m     jsonb;
   -- FASE 7e: fim
   -- CORREÇÃO FASE 6: (C1) item 3: a presença aprendida de cada OS publicada pela 1ª vez
   v_pa     jsonb;
@@ -1525,14 +1560,10 @@ begin
                    case when p_via in ('motor', 'vigia') then p_via else 'dono' end, null, p_autor, null, p_hoje, p_agora);
     end if;
     perform public._agenda_espelhar_datas(v_os, p_hoje);
-    -- FASE 7e: (7e P3, AG7-33) a duração só sugerida que o dono aceita pode vir com o viés (o item leva os dias corrigidos por agenda_meios_da_os). Grava-se o número sem o viés, senão: (a) a correção do dono entra por cima da do estimador; (b) razao_dono mede a si mesma (o molde congelado sai desses dias, agora sem o viés de antes). O número que vale para o plano continua sendo o da correção, pela leitura. Calculado aqui, antes do insert, enquanto a OS não tem dias.
-    if p_via in ('dono', 'tela', 'aprovacao')
-       and exists (select 1 from jsonb_array_elements(v_sel) e where (e ->> 'os')::uuid = v_os and e ->> 'op' = 'criar' and e ->> 'tipo' <> 'reserva' and e ->> 'fonte' = 'sugerida') then
-      v_7e_sv := coalesce(current_setting('agenda.sem_vies', true), '');
-      perform set_config('agenda.sem_vies', 'on', true);
-      v_7e_bruto := (public.agenda_meios_da_os(v_os, p_hoje) ->> 'dias')::numeric;
-      perform set_config('agenda.sem_vies', v_7e_sv, true);
-    end if;
+    -- FASE 7e: (7e P3, AG7-33, §3.1-10) a duração só sugerida que o dono aprova pode vir com o viés (o item leva os dias corrigidos por agenda_meios_da_os). Lido aqui, enquanto a OS não tem dias: dias_sem_vies só existe quando há correção aplicada de fato; sem ela, nada muda e grava-se o número do item, como sempre.
+    v_7e_m := case when p_via in ('dono', 'tela', 'aprovacao')
+                    and exists (select 1 from jsonb_array_elements(v_sel) e where (e ->> 'os')::uuid = v_os and e ->> 'op' = 'criar' and e ->> 'tipo' <> 'reserva' and e ->> 'fonte' = 'sugerida')
+                   then public.agenda_meios_da_os(v_os, p_hoje) end;
     -- FASE 7e: fim
     -- a duração só sugerida que o dono pediu para marcar fica aceita
     if p_via in ('dono', 'tela', 'aprovacao') then
@@ -1546,10 +1577,12 @@ begin
         set dias = excluded.dias, estimativa_fonte = 'aceita', estimativa_em = excluded.estimativa_em,
             atualizado_por = excluded.atualizado_por, atualizado_em = now()
         where public.os_planejamento.dias is null;
-      -- FASE 7e: (7e P3) a linha que acabou de nascer aceita fica com o número sem o viés
-      if v_7e_bruto is not null then
-        update public.os_planejamento x set dias = v_7e_bruto
-         where x.service_order_id = v_os and x.estimativa_fonte = 'aceita' and x.estimativa_em = p_agora and x.dias is distinct from v_7e_bruto;
+      -- FASE 7e: (7e P3, §3.1-10) aprovada com o viés: dias guarda o número sem o viés (é o que a medida lê: dias_no_inicio, pm_plano_no_inicio e razao_dono não medem a si mesmos) e aprovado_com_vies guarda o que foi aprovado, que é o que o plano continua lendo (agenda_meios_da_os), sem a correção do dono por cima. O total só vale se os dias de agora forem os do item; a proposta pode ter horas de vida.
+      if v_7e_m ? 'dias_sem_vies' then
+        update public.os_planejamento x
+           set dias = (v_7e_m ->> 'dias_sem_vies')::numeric,
+               aprovado_com_vies = jsonb_build_object('dias', x.dias, 'total', case when x.dias = (v_7e_m ->> 'dias')::numeric then (v_7e_m ->> 'total')::int else (x.dias * 2)::int end, 'vies', v_7e_m -> 'vies', 'em', p_hoje)
+         where x.service_order_id = v_os and x.dias is distinct from (v_7e_m ->> 'dias_sem_vies')::numeric;
       end if;
       -- FASE 7e: fim
     end if;
@@ -1651,7 +1684,7 @@ end;
 $function$;
 
 comment on function public.agenda_aplicar(uuid, uuid[], text, uuid, uuid, date, timestamptz) is
-  'Agenda de Produção (Fase 2, P2): aplica uma proposta, só com modo_proposta ligado (fora dele: "ainda está em teste", nada muda). Trava o plano; proposta fechada, vencida (expirada) ou de outra versão do plano (obsoleta; com p_via motor, refaz com os mesmos parâmetros e aplica a nova, uma vez) não aplica. agenda_validar não vazia = recusa com a lista. Itens: os das OS de p_os (todas, sem lista), sem os críticos — esses só com p_pergunta respondida (e então toda ação sai critica = true com pergunta_id). Cancelar → cancelada (o fixado com agenda.mexe_fixado); criar → publicada, fixada no congelado (congelamento) e no pedido do dono pela tela, aprovação ou *grava* (dono); o que não foi escolhido é apagado. Por OS: a porta (agendada quando tem dia; de volta quando ficou sem nenhum, aguardando peças se foi o material), o espelho das datas, a duração só sugerida que o dono pediu fica aceita, e uma linha em agenda_acoes (publicar/criar/mover/cancelar/promover_reserva/soltar_reserva) com antes/depois, a frase e o desfazer (desfazer_validade, até o 1º meio-dia começar; não na tela nem na aprovação). Vias: motor, vigia, conferencia, dono, tela, aprovacao. CORREÇÃO FASE 6 (C1, item 3): antes de publicar, guarda em os_planejamento.presenca_publicada/_motivo (só quando nulas) a presença aprendida com que cada OS entra no plano pela 1ª vez. FASE 7 (7a P9, spec §5.9 e §6.4): a proposta que o gestor monta sem o motor (a escada de reparo, _agenda_gestor_reparar; o corte do reestimar, _agenda_gestor_reestimar) traz em parametros.gestor o tipo da ação (reparar, reestimar) e a frase dela por OS: a ação sai com esse tipo e essa frase (o resto do aplicar não muda: as 14 regras, a porta, o desfazer). Sem parametros.gestor, a de antes, byte a byte. FASE 7e (P3): a duração só sugerida aceita pelo dono grava o número sem o viés.';
+  'Agenda de Produção (Fase 2, P2): aplica uma proposta, só com modo_proposta ligado (fora dele: "ainda está em teste", nada muda). Trava o plano; proposta fechada, vencida (expirada) ou de outra versão do plano (obsoleta; com p_via motor, refaz com os mesmos parâmetros e aplica a nova, uma vez) não aplica. agenda_validar não vazia = recusa com a lista. Itens: os das OS de p_os (todas, sem lista), sem os críticos — esses só com p_pergunta respondida (e então toda ação sai critica = true com pergunta_id). Cancelar → cancelada (o fixado com agenda.mexe_fixado); criar → publicada, fixada no congelado (congelamento) e no pedido do dono pela tela, aprovação ou *grava* (dono); o que não foi escolhido é apagado. Por OS: a porta (agendada quando tem dia; de volta quando ficou sem nenhum, aguardando peças se foi o material), o espelho das datas, a duração só sugerida que o dono pediu fica aceita, e uma linha em agenda_acoes (publicar/criar/mover/cancelar/promover_reserva/soltar_reserva) com antes/depois, a frase e o desfazer (desfazer_validade, até o 1º meio-dia começar; não na tela nem na aprovação). Vias: motor, vigia, conferencia, dono, tela, aprovacao. CORREÇÃO FASE 6 (C1, item 3): antes de publicar, guarda em os_planejamento.presenca_publicada/_motivo (só quando nulas) a presença aprendida com que cada OS entra no plano pela 1ª vez. FASE 7 (7a P9, spec §5.9 e §6.4): a proposta que o gestor monta sem o motor (a escada de reparo, _agenda_gestor_reparar; o corte do reestimar, _agenda_gestor_reestimar) traz em parametros.gestor o tipo da ação (reparar, reestimar) e a frase dela por OS: a ação sai com esse tipo e essa frase (o resto do aplicar não muda: as 14 regras, a porta, o desfazer). Sem parametros.gestor, a de antes, byte a byte. FASE 7e (P3): a duração só sugerida aprovada pelo dono com o viés aplicado grava dias sem o viés e o aprovado em aprovado_com_vies; sem correção aplicada, o número do item, como sempre.';
 
 -- ── 3. Portas ────────────────────────────────────────────────────────────────────────────────────
 -- Nada de anon. O passo da rodada sem grant nenhum (o P7 o chama de agenda_aprender, definer); as de leitura, para os leitores invoker (os_prontidao, agenda_meios_da_os, os_duracao_sugerida), como no P1 e no P2.
