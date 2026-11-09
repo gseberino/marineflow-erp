@@ -1155,6 +1155,7 @@ begin
                            '_agenda_equipe_mudanca_na_hora')  -- P5
      and p.proname not in ('_agenda_cliente_camada', '_agenda_cliente_semana')  -- P6
      and p.proname not in ('_agenda_cliente_semana_mudou')  -- P9
+     and p.proname not in ('_agenda_gestor_puxar')  -- 7e P4b (R7.7-8: o convite sem o SIM, pela mesma regra da ficha, lê _agenda_fala_modo)
      and not exists (select 1 from regexp_matches(coalesce(p.prosrc, ''), '-- FASE 7f:') x);
   v_res := pg_temp.ok(v_res, 'B10c nenhuma função de antes lê as colunas nem chama as funções novas: o gatilho é a única porta', v_dif is null, v_dif);
   v_res := pg_temp.ok(v_res, 'B10d sem dado: nenhuma ação assumir, rodada comunicar, mensagem previsto, mudanca, convite nem semana; ninguém assumida',
