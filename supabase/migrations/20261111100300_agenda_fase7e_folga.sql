@@ -1,7 +1,7 @@
 -- Agenda de Produção, Fase 7, etapa 7e ("A margem que aprende"), pacote P4: a folga da semana, a temporada e a urgência no motor. O quanto as OS variam passa a dizer quanto da semana da equipe guardar, a temporada guarda mais um pouco,
 -- e a OS que o cliente precisa logo pode usar a folga.
 -- Spec: scratchpad agenda-pesquisa/spec-fase7e.md (§5.3 e o bloco R7, que vale sobre o corpo: R7.1, R7.3-4, R7.4, R7.5-13, R7.5-14, R7.6, R7.7-3, R7.8, R7.12, R7.13); nomes: fase7-registro.md; o registro do pacote: notas-fase7e.md.
--- Depende de 20261111100000 (P1), 20261111100100 (P2) e 20261111100200 (P3). Copiado das definições MAIS NOVAS: _agenda_contexto (20261107100300_agenda_fase7d_motor.sql:352), _agenda_validar_itens (20261107100300_agenda_fase7d_motor.sql:2581), agenda_propor (20261107100800_agenda_fase7d_correcao.sql:568).
+-- Depende de 20261111100000 (P1), 20261111100100 (P2) e 20261111100200 (P3). Copiado das definições MAIS NOVAS: _agenda_contexto (20261107100300_agenda_fase7d_motor.sql:352), _agenda_validar_itens (20261107100300_agenda_fase7d_motor.sql:2581), agenda_propor (20261107100800_agenda_fase7d_correcao.sql:568), _agenda_aprendizado_gravar (20261111100100_agenda_fase7e_medicao.sql:1617), _agenda_aprendizado_texto (20261111100100_agenda_fase7e_medicao.sql:1065).
 --
 -- ═══ NÃO APLICADA ═══ Existe para revisão e espera o OK (publicar/exec/aplicar.sh, nunca db push: esta versão fica antes das 20261116* que já estão em produção). Só funções; nenhuma coluna, nenhuma tabela, nenhum dado.
 --
@@ -9,14 +9,15 @@
 -- e a OS urgente precisa poder usar a folga. _agenda_gestor_puxar (a véspera das 17:37) NÃO é deste pacote: é o P4b; aqui ficam os dois ganchos dele em agenda_propor e no validador, inertes sem p_restricoes.puxar.
 --
 -- O QUE MUDA, só com o modo ligado de verdade (o freio apaga: _agenda_margem_modo) e a regra teto_equipe (R7.6: sem ela o teto é por pessoa e a carga da semana não entra):
---   1. _agenda_aprender_folga_semana: o passo da rodada (o P7 o liga). A folga medida = z × σ dos resíduos do estimador × a mediana de g das semanas (§5.3), presa em [folga_semana_min, folga_semana_max] (R7.4); σ nulo ou zero = medindo.
+--   1. _agenda_aprender_folga_semana: o passo da rodada (o P7 o liga). A folga medida = z × σ dos resíduos do estimador × a mediana de g das semanas (§5.3), presa em [folga_semana_min, folga_semana_max] (R7.4); σ nulo ou zero = sem número medido (calculado nulo).
+--   1b. _agenda_aprendizado_gravar e _agenda_aprendizado_texto, só o item folga_semana (correção da conferência do P4): sem número medido e sem nada em uso, medindo. Com a folga em uso fora do padrão, e os dois modos ligados (crus, R7.6), ela volta ao padrão por passo (folga_semana_troca_max), com a ação "aprendizado" e o *desfaz* de sempre, em vez de cair de uma vez; dentro da trava fica como o dono decidiu. E o texto de medindo com as semanas já bastando diz o que falta (as OS medidas, ou que elas ainda não mostraram variação), sem "12 de 8".
 --   2. _agenda_carga_da_semana: carga_max + (o padrão − a folga em uso) − a temporada, presa em [carga_semana_min, carga_semana_max]. Em sombra, no freio ou desligada: carga_max (p_teste = o que seria, para a leitura em teste do P7).
 --   3. _agenda_os_urgente: passa na frente, marcada como urgente ou o cliente precisa em urgencia_du dias úteis.
 --   4. _agenda_contexto: o teto da equipe de cada semana (arredonda uma vez, na soma) e a saída carga_semana.
 --   5. _agenda_validar_itens: a regra 6 com a carga da semana nos 4 pontos dos 2 ramos vivos (R7.5-13) e a urgente até 100% em todos os ramos; a regra 7 aceita só o criar da OS puxada.
 --   6. agenda_propor: a urgente com teto100, as urgentes em p_restricoes e o motivo (R7.3-4: nunca "urgente" sozinho); "não coube na carga de N%" com a carga da semana nos 2 pontos da frase (R7.5-14); a OS puxada.
 --
--- O QUE NÃO MUDA: fora de ligado, as 3 recriadas saem byte a byte como antes (a chave nova fica AUSENTE) e em sombra não chamam nenhuma função nova (R7.8: o portão de custo lê a linha já carregada); agenda_vigiar, agenda_cliente_vigiar, agenda_capacidade_semanal e os leitores dela
+-- O QUE NÃO MUDA: os outros itens do gravador e dos textos (o bloco do P4 só vale para folga_semana; o achado 162 registra que os outros itens da margem caem de uma vez). Fora de ligado, as recriadas do motor saem byte a byte como antes (a chave nova fica AUSENTE) e em sombra não chamam nenhuma função nova (R7.8: o portão de custo lê a linha já carregada); agenda_vigiar, agenda_cliente_vigiar, agenda_capacidade_semanal e os leitores dela
 -- ficam como estão (R7.N; o achado 160 diz o que afirmam em ligado). Nenhuma mensagem nova ao dono, à equipe ou ao cliente: os textos novos só aparecem em ligado, dentro do item que já existia. Nada de dinheiro.
 --
 -- DESFAZER (na ordem):
@@ -29,7 +30,7 @@
 
 -- §5.3, R7.4, R7.12-2. O quanto da semana guardar para o que passa do previsto. Resíduos: as razões do estimador (só as dele: é dele que saem os planos do gestor, D7-1; a razão do dono fica no foco) contra o viés calculado da classe,
 -- ou o geral sem a classe. σ = 1,4826 × MAD (o fator da normal). As semanas: as completas antes de hoje com serviço bastante; g = √(Σ p²) ÷ Σ p (uma OS só = 1: a semana inteira depende dela).
--- Com σ nulo ou zero (R7.4: o dia feito ecoa o plano e zera a dispersão) não se calcula: o que vale é a medida, e não há medida. Nada aqui lê o freio nem os modos: quem decide o uso é o gravador (modo cru).
+-- Com σ nulo ou zero (R7.4: o dia feito ecoa o plano e zera a dispersão) não se calcula: o que vale é a medida, e não há medida. Nada aqui lê o freio nem os modos: quem decide o uso é o gravador (modo cru). Com a folga em uso, é ele também quem a faz voltar ao padrão por passo.
 create or replace function public._agenda_aprender_folga_semana(p_hoje date, p_agora timestamptz)
  returns jsonb
  language plpgsql
@@ -99,7 +100,7 @@ begin
       when v_sigma is null or v_sigma = 0 or v_ns < c.folga_semanas_min or v_nres < c.folga_residuos_min then null
       else round(least(c.folga_semana_max, greatest(c.folga_semana_min, v_z * v_sigma * v_g)), 2) end;
     v := public._agenda_aprendizado_gravar('folga_semana', 'equipe', 'geral', v_calc, v_ns, v_am, c.folga_dispersao_padrao,
-           jsonb_build_object('sigma', round(v_sigma, 4), 'g', round(v_g, 4), 'residuos', v_nres, 'z', v_z), p_agora);
+           jsonb_build_object('sigma', round(v_sigma, 4), 'g', round(v_g, 4), 'residuos', v_nres, 'z', v_z, 'residuos_min', c.folga_residuos_min), p_agora);
     return jsonb_build_object('semanas', v_ns, 'residuos', v_nres, 'sigma', round(v_sigma, 4), 'g', round(v_g, 4), 'calculado', v_calc,
                               'estado', v ->> 'estado', 'em_uso', v -> 'em_uso', 'acao_id', v -> 'acao_id', 'erros', 0);
   exception when others then
@@ -111,7 +112,7 @@ end;
 $function$;
 
 comment on function public._agenda_aprender_folga_semana(date, timestamptz) is
-  'Agenda de Produção (Fase 7e, P4; §5.3, R7.4): o passo folga_semana da rodada do aprender: a folga da semana que basta para o que passa do previsto, medida pelos resíduos do estimador e pelas semanas com serviço; σ nulo ou zero = medindo. Grava por _agenda_aprendizado_gravar. Sem grant: quem chama é agenda_aprender (P7).';
+  'Agenda de Produção (Fase 7e, P4; §5.3, R7.4): o passo folga_semana da rodada do aprender: a folga da semana que basta para o que passa do previsto, medida pelos resíduos do estimador e pelas semanas com serviço; σ nulo ou zero = calculado nulo (medindo; com a folga em uso, o gravador a traz de volta ao padrão por passo, com ação e *desfaz*). Grava por _agenda_aprendizado_gravar. Sem grant: quem chama é agenda_aprender (P7).';
 
 -- §5.3, R7.5-7, R7.6. A carga da semana (a segunda p_seg): carga_max + (o padrão − a folga em uso) − a temporada, presa nos limites. Sem o modo ligado de verdade (ou com p_teste falso em sombra), carga_max, sem dizer temporada nenhuma.
 -- p_teste = true: o que seria com a folga calculada em teste, para a leitura em teste do P7. Lê _agenda_margem_em_uso (R7.5-7), que já olha o modo efetivo e modo_aprendizado: com o aprendizado fora, vale o padrão e sobra a temporada.
@@ -3051,3 +3052,865 @@ $function$;
 
 comment on function public.agenda_propor(text, date, date, uuid[], jsonb, boolean, text, uuid, date, timestamptz) is
   'Agenda de Produção (Fase 2, P2): o motor — guloso serial determinístico (mesma entrada, mesma saída). Escopo semana (publica os blocos que COMEÇAM de segunda a sábado da semana seguinte), os ou replano (as OS de p_os, depois do congelado, no horizonte). Etapas: estabilidade (_agenda_violacoes: só sai o que não pode mais acontecer; o publicado não violado nunca vira "mover"), a fila por classe (_agenda_classe_da_os) na ordem (classe, prioridade do dono, razão crítica, sinal pago, aprovação, número), o encaixe (_agenda_encaixar: congelamento hoje + o próximo dia útil, salvo evento real e pedido do dono; ≤ wip_max frentes; o dono como tambor; teto de carga_max por pessoa e semana; multi-dia com no máximo interrupcoes_max dias parados), a sobrecarga (a OS com data dita que não cabe vira a pergunta crítica nao_cabe, com as opções simuladas e a recomendação; o banco nunca escolhe), o atraso crítico de quem já tinha plano (_agenda_criticidade), as reservas (teto, condicionada com a data-limite, pátio), a validação (_agenda_validar_itens: inválida nunca sai), o diff (itens), as OS de fora com quem trava, a carga, a pontuação e os textos. Restrições: {fixar:[{os, de, ate, pessoa}], tirar:[os], so_depois_de:[{os, dia}], atrasar:[os], aceitar_atraso:[os], acima_da_carga, decisao}. Com p_persistir: agenda_propostas (modo = modo_proposta; a aberta anterior fica obsoleta), as alocações em estado proposta e as perguntas críticas. Sem persistir, o texto termina com "É simulação: não muda nada.". Só service_role. CORREÇÃO FASE 6 (C1, item 14): a reserva por teto da OS que precisa do dono, com a capacidade dele em uso abaixo de carga_max, diz "não coube na sua parte da semana (56%)" (a carga de _agenda_carga_da_pessoa), e não "na carga de 80%". CORREÇÃO 29/10 (P3): (a) a entrada da fila da OS com reserva vigente (por teto ou condicionada, de hoje em diante: a que o item "a reserva vira compromisso" cancela) leva res_propria (a pessoa × semana de cada meio-dia reservado), e o encaixe do compromisso dela não conta a própria reserva no lugar até 100% — a promoção da reserva cabe com o teto apertado (o João, 4 de 4 na semana); a reserva das outras OS continua contando. (b) Com a agenda automática ligada e reserva no que entra, o resumo separa o marcado firme do reservado e diz quem ("Semana de 03 a 06/11 (seg 02 é Finados): 1 reservado (Lenine), nada marcado firme, 10 de fora."), e o título da semana diz quantos ("Semana de 03 a 06/11 (seg 02 é Finados) — 1 reservado, nada marcado firme", que abre o "Publiquei a semana de …"); sem reserva, ou fora de ligado, os de antes. FASE 7 (7a P3): o item de compromisso com a fonte orcamento (a estimativa do orçamento como dias firmes, só com a regra estimativa) termina "(estimativa minha: 6 dias)."; a recomendação das críticas dia_avisado ("A equipe já tinha recebido a ficha desse dia: recomendo seguir e você avisar quem ia") e dia_prometido ("É um dia que o cliente já ouviu: recomendo seguir e você falar com ele hoje"), que só nascem com a zona travada do P8. FASE 7 (7a P8, spec §3.2 e §5.8): com a regra zona_travada, a criticidade de cada compromisso colocado é refeita com p_violadas = _agenda_zona_fora (o que não conta para o dia já avisado: a violação, o resto do meio-dia dela e o que volta igual neste encaixe; nunca o fixado pelo dono): o meio-dia de um dia já dito à equipe ou ao cliente que sairia sem ter ficado impossível, e o fim que passaria do prometido firme, viram as críticas dia_avisado e dia_prometido, com a pergunta e a recomendação de sempre. Sem a regra, a de antes, byte a byte. FASE 7b (P4, §5.3, §6.3, R4.3): só com os modos da 7b — a entrada da fila ganha dk (as pessoas dos passos que restam), dk_dono_conta, dupla_fonte e o texto da dupla; da dupla inferida, passos1 (o bloco de 1 pessoa: ligado, a soma do dk; em teste, os passos de antes), dupla_ni/dupla_nf/dupla_todos e os nomes do que a tarefa pede; prazo_h (o índice da tarde de least(precisa_ate, o prometido firme)) e prazo; e dupla_sd na dupla dita que só passa pela régua dos técnicos com quem vem sob demanda. p_par ganha sab_modo, sab_politica, dupla_modo e dupla_espera. Ligado, o item com o sábado diz qual e por quê (" — com sáb 14/11 de manhã (Rafael se ofereceu), para cumprir o prazo de qua 18/11.") e o bloco de 1 pessoa da dupla inferida diz em que meios-dias chamar um ajudante (" Nos 2 primeiros meios-dias (qua 04/11, manhã e tarde) a troca do banco de baterias pede 2 pessoas e só Alex está na equipe: se chamar um ajudante, me diga (ex.: Mateus vem qua 04/11)."); o item leva dupla (o texto do cartão), dupla_fonte, dupla_falta [{dia, turno, onde}] e sabado. A dupla dita com dupla_sd sem bloco vai ao fora com o motivo dupla ("Lenine (OS-00074): precisa de 2 pessoas em 6 meios-dias e Mateus só vem qua 11 e qui 12/11 (4 meios-dias): me diga mais dias dele ou chame outro ajudante."), nunca sem_encaixe. Em teste, textos.em_teste e o fim do texto: "Em teste: para cumprir o prazo de Vanderlei (qua 18/11), eu usaria sáb 14/11 de manhã com Rafael, que se ofereceu." e "Em teste: no Lenine eu pediria um ajudante em qua 04/11 (manhã e tarde): a troca do banco de baterias pede 2 pessoas.". Sem os modos da 7b, a de antes, byte a byte. CORREÇÃO DA REVISÃO DA 7b (achados 22 e 23): o exemplo da dupla de 1 pessoa diz todos os dias em que falta a 2ª pessoa ("ex.: Mateus vem qua 18 e qui 19/11"); a dupla dita que só passou da espera por quem vem sob demanda e cujos dias livres são todos antes de a OS ficar pronta (os_prontidao.est) vai ao fora dupla com "…, antes de o serviço ficar pronto (qua 18/11): me diga dias dele a partir de qua 18/11 ou chame outro ajudante.". FASE 7c (P2, §5.2, R5.10-12): a entrada da fila ganha ext, exu, exf e exig_texto (os_exigencias, em qualquer modo) e, com modo_lider ou modo_habilidade ligado, lid, lid_nome, lid_duro, lid_plan e lid_fora (_agenda_lider_da_os); p_par ganha hab_modo, lid_modo, n, fcobre e lid_espera (sempre: o critério de cada alocação vai no item e o gatilho agenda_alocacoes_criterio o grava). Ligado: os motivos "pede … : vai …", "troquei o responsável: … não está livre até …; segui com …" e "…, o responsável, não está na equipe agora"; o aviso de habilidade (_agenda_aviso_da_habilidade) ao lado do de material onde o dono disse quem vai; o cancelar habilidade ("a equipe do dia não tinha quem o serviço pede") e o fora habilidade ("pede … e ninguém com isso fica livre junto nas próximas 6 semanas"); o contexto do "por que não cabe" leva hab_modo, n e fcobre. Com os 3 modos fora de ligado, as pessoas, os dias, os turnos e as presenças de antes (a projeção); só o critério aparece. CORREÇÃO DA REVISÃO DA 7c (20261102100580, achado 9): com a troca avisada do responsável (o lt do bloco: modo_lider ou modo_habilidade ligado), o texto do item (o da ação do "o que mudou", do fechamento e do aviso) termina " — troquei o responsável: Roberto não está livre até qua 11/11; segui com João." (até 320; sem caber, " — troquei o responsável (Roberto não está livre)."). Sem troca, o de antes. FASE 7d (P4, §5.4, R6.7b, R6.8): com calendario, patio, viagem ou mesmo_local ligado por _agenda_local_modo (com o freio, em teste), cada OS da fila lê o local (_agenda_local_resolvido; em teste, nenhuma chamada): a máscara entra em bem e em fora_h, a entrada no EST, a retirada em bem, a viagem soma os meios de estrada aos passos e tira o abre e fecha fora da região. Com as chaves só nos modos ligados, o item da fila ganha fora_h, local_txt, viagem, imax_os, local_texto e suposicoes, o item que entra ganha os 4 últimos e v_par ganha mesmo_dia e troca (temporada_meses). A saída pela violação local diz "o local não recebe a equipe nesse dia", e a OS que não coube no pátio vai ao fora com sem_encaixe, patio_cheio e o texto próprio. Com os 6 modos fora de ligado, a saída de antes, byte a byte. FASE 7e (P4): com modo_urgencia ligado de verdade, a OS urgente (_agenda_os_urgente) vai até 100% da semana, sai em p_restricoes.urgentes e o item diz o motivo quando a semana passou do teto; a frase da carga usa a carga da semana (R7.5-14); com p_restricoes.puxar, a OS puxada (P4b). Fora de ligado, a saída de antes, byte a byte.';
+
+-- _agenda_aprendizado_gravar (de 20261111100100_agenda_fase7e_medicao.sql:1617; md5 do corpo de antes 3dfa35d6aab18883e472a84f60a13925)
+create or replace function public._agenda_aprendizado_gravar(p_item text, p_chave text, p_nivel text, p_calculado numeric,
+                                                             p_n integer, p_amostra jsonb, p_padrao numeric, p_detalhe jsonb,
+                                                             p_agora timestamptz)
+ returns jsonb
+ language plpgsql
+ volatile
+ security definer
+ set search_path to 'public'
+as $function$
+declare
+  c        public.agenda_config := public._agenda_cfg();
+  v_hoje   date := (p_agora at time zone 'America/Sao_Paulo')::date;
+  v_lista  text := public._agenda_aprendizado_da_lista(p_item);
+  v_nmin   int;
+  r0       public.agenda_aprendizado;
+  r        public.agenda_aprendizado;
+  v_efet   numeric;
+  v_estado text;
+  v_d      jsonb;
+  v_ops    jsonb;
+  v_txt    text;
+  v_acao   uuid;
+  v_perg   uuid;
+  v_aberta boolean := false;
+  v_motivo text;
+  v_antes  jsonb := '{}'::jsonb;
+  v_depois jsonb := '{}'::jsonb;
+  v_hist   jsonb;
+  k        text;
+  -- FASE 7e: (7e P2, §5.1, R7.6) o ramo dos itens da margem: o modo CRU (o freio não entra aqui: soltar o freio recomeçaria do padrão), o passo e o novo em uso
+  v_7e_modo  text := public._agenda_margem_modo_cru(p_item);
+  v_7e_passo numeric;
+  v_7e_novo  numeric;
+  -- FASE 7e: fim
+  -- FASE 7e: (7e P4, §0-4, R7.4) a folga em uso que ficou sem medida volta ao padrão por passo
+  v_7e_volta boolean := false;
+  -- FASE 7e: fim
+begin
+  if p_item is null or p_chave is null or p_nivel is null or p_agora is null then
+    raise exception 'Falta o item, a chave, o nível ou a hora.' using errcode = '22023';
+  end if;
+  v_nmin := case p_item
+    when 'fator' then c.fator_n_min when 'mo' then c.mo_n_min when 'presenca' then c.presenca_n_min
+    when 'fornecedor_atraso' then c.fornecedor_n_min when 'fornecedor_prazo' then c.fornecedor_n_min
+    when 'capacidade_dono' then c.capacidade_semanas_min when 'cliente_pontualidade' then c.cliente_n_min
+    when 'aviso_folga' then c.aviso_n_min when 'carga' then least(c.ppc_baixo_semanas, c.ppc_alto_semanas)
+    when 'solver' then c.solver_semanas end;
+  -- FASE 7e: (7e P2, §5.1) o mínimo e o passo de cada item da margem
+  if v_7e_modo is not null then
+    v_nmin := case p_item when 'vies' then c.vies_n_min when 'promessa' then c.promessa_n_min when 'folga_semana' then c.folga_semanas_min
+                          when 'tempo_compra' then c.tempo_compra_n_min when 'folga_compra' then c.folga_compra_n_min
+                          when 'prazo_sem_fornecedor' then c.prazo_sem_fornecedor_n_min end;
+    v_7e_passo := case when p_item in ('vies', 'promessa') then c.fator_troca_max when p_item = 'folga_semana' then c.folga_semana_troca_max
+                       when p_item in ('tempo_compra', 'folga_compra') then c.fornecedor_troca_max_du end;
+  end if;
+  -- FASE 7e: fim
+  if v_nmin is null then
+    raise exception 'Item de aprendizado desconhecido: %.', p_item using errcode = '22023';
+  end if;
+
+  -- A linha (nasce medindo) e a trava dela: duas rodadas não gravam a mesma chave ao mesmo tempo.
+  insert into public.agenda_aprendizado (item, chave, nivel, padrao, n_min, calculado_em)
+  values (p_item, p_chave, p_nivel, p_padrao, v_nmin, p_agora)
+  on conflict (item, chave) do nothing;
+  select * into r0 from public.agenda_aprendizado where item = p_item and chave = p_chave for update;
+  if r0.nivel <> p_nivel then
+    raise exception 'A chave % de % é do nível %, não %.', p_chave, p_item, r0.nivel, p_nivel using errcode = '22023';
+  end if;
+  if r0.pergunta_id is not null then
+    v_aberta := exists (select 1 from public.agenda_perguntas q where q.id = r0.pergunta_id and q.estado = 'aberta');
+  end if;
+  r := r0;
+  r.padrao := p_padrao;
+  r.calculado := p_calculado;
+  r.n := coalesce(p_n, 0);
+  r.n_min := v_nmin;
+  r.amostra := case when jsonb_typeof(p_amostra) = 'array'
+                    then coalesce((select jsonb_agg(x order by o) from jsonb_array_elements(p_amostra) with ordinality t(x, o)
+                                    where o <= 60), '[]'::jsonb)
+                    else '[]'::jsonb end;
+  r.detalhe := case when jsonb_typeof(p_detalhe) = 'object' then p_detalhe else '{}'::jsonb end;
+  r.calculado_em := p_agora;
+  -- O que vale hoje: o em uso (também guardado na pergunta e na trava), senão o padrão.
+  v_efet := coalesce(r0.em_uso, p_padrao);
+
+  if p_calculado is null or r.n < v_nmin then
+    -- 1. poucas medidas
+    v_estado := 'medindo';
+  elsif v_lista is null or c.modo_aprendizado <> 'ligado' or not (v_lista = any (c.aprendizado_ligados)) then
+    -- 2. em teste (o modo, a lista; a pontualidade com o cliente é só medida)
+    v_estado := 'sombra';
+  elsif r0.estado = 'travado' and v_hoje <= r0.travado_ate
+        and (p_calculado = r0.travado_valor
+             or public._agenda_aprendizado_troca_cabe(p_item, p_nivel, r0.travado_valor, p_calculado)) then
+    -- 3. o dono travou e o medido não andou mais que o limite (o item que sempre pergunta: o medido não mudou)
+    v_estado := 'travado';
+  elsif p_calculado = v_efet then
+    -- 4. igual ao que vale
+    v_estado := 'em_uso';
+  elsif public._agenda_aprendizado_troca_cabe(p_item, p_nivel, v_efet, p_calculado) then
+    -- 5. troca pequena: entra sozinha, com *desfaz*
+    v_estado := 'em_uso';
+  else
+    -- 6. troca grande: pergunta
+    v_estado := 'pergunta';
+  end if;
+  -- FASE 7e: (7e P2, §5.1) os itens da margem andam por passo e nunca perguntam: a cadeia de cima só deu medindo ou sombra para eles (v_lista nula). Aqui, de medindo não sai. Em teste continua: o modo geral, o interruptor, a promessa
+  -- (AG7-32: nunca em uso), a folga da compra (R7.5-16: sem leitor nesta etapa, o texto "dou 2 dias a mais" seria mentira), o que é só medida e a chave dono: sem vies_corrige_dono. Dentro da trava, se o medido não andou mais que um passo; senão, em uso.
+  if v_7e_modo is not null and v_estado <> 'medindo' then
+    if c.modo_aprendizado <> 'ligado' or v_7e_modo <> 'ligado' or p_item in ('promessa', 'folga_compra', 'prazo_sem_fornecedor')
+       or (p_item = 'vies' and p_chave like 'dono:%' and not c.vies_corrige_dono) then
+      v_estado := 'sombra';
+    elsif r0.estado = 'travado' and v_hoje <= r0.travado_ate and abs(p_calculado - r0.travado_valor) <= v_7e_passo then
+      v_estado := 'travado';
+    else
+      v_estado := 'em_uso';
+    end if;
+  end if;
+  -- FASE 7e: fim
+
+  -- FASE 7e: (7e P4, §0-4, R7.4, R7.11) a folga da semana em uso que fica sem medida (σ = 0, poucas semanas ou poucos resíduos) não some de uma vez: em medindo o CHECK aprendizado_em_uso_coerente obriga em_uso nulo, e a carga da semana saltaria sem rastro. Continua em uso e anda um passo para o padrão, com a ação e o *desfaz* de sempre; dentro da trava, fica o que o dono decidiu. Com o interruptor fora de ligado a carga já é a de sempre: nada a trazer de volta. Modo cru, como o resto do gravador (R7.6). Quando chega ao padrão, cai em medindo sem mudar número nenhum.
+  if p_item = 'folga_semana' and v_estado = 'medindo' and r0.em_uso <> p_padrao
+     and c.modo_aprendizado = 'ligado' and v_7e_modo = 'ligado' then
+    v_7e_volta := true;
+    v_estado := case when r0.estado = 'travado' and v_hoje <= r0.travado_ate then 'travado' else 'em_uso' end;
+  end if;
+  -- FASE 7e: fim
+  r.estado := v_estado;
+  if v_estado in ('medindo', 'sombra') then
+    r.em_uso := null;
+    r.em_uso_desde := null;
+  elsif v_estado = 'em_uso' then
+    r.em_uso := p_calculado;
+    r.em_uso_desde := case when r0.em_uso = p_calculado and r0.estado = 'em_uso' then coalesce(r0.em_uso_desde, p_agora)
+                           else p_agora end;
+  else
+    -- pergunta e trava: o que vale continua valendo (nulo = o padrão)
+    r.em_uso := case when r0.estado in ('em_uso', 'pergunta', 'travado') then r0.em_uso end;
+  end if;
+  -- FASE 7e: (7e P2, §5.1) o em uso anda um passo por rodada (o calculado guarda o alvo), arredondado como o item: 2 casas no multiplicador e no percentual, inteiro nos dias (para cima na folga da compra)
+  if v_7e_modo is not null and v_estado = 'em_uso' then
+    v_7e_novo := v_efet + greatest(-v_7e_passo, least(v_7e_passo, p_calculado - v_efet));
+    r.em_uso := case p_item when 'folga_compra' then ceil(v_7e_novo) when 'tempo_compra' then round(v_7e_novo) else round(v_7e_novo, 2) end;
+    r.em_uso_desde := case when r0.em_uso = r.em_uso and r0.estado = 'em_uso' then coalesce(r0.em_uso_desde, p_agora) else p_agora end;
+  end if;
+  -- FASE 7e: fim
+  -- FASE 7e: (7e P4, §0-4) o passo da volta, com o padrão como alvo (o calculado é nulo: a conta de cima não serve aqui)
+  if v_7e_volta and v_estado = 'em_uso' then
+    r.em_uso := v_efet + greatest(-v_7e_passo, least(v_7e_passo, p_padrao - v_efet));
+  end if;
+  -- FASE 7e: fim
+  if v_estado <> 'travado' then
+    r.travado_ate := null;
+    r.travado_valor := null;
+  end if;
+
+  v_d := jsonb_build_object('chave', p_chave, 'calculado', p_calculado, 'em_uso', r.em_uso, 'efetivo', v_efet,
+                            'padrao', p_padrao, 'n', r.n, 'n_min', v_nmin,
+                            'desde', (r.em_uso_desde at time zone 'America/Sao_Paulo')::date, 'travado_ate', r.travado_ate,
+                            'trava_dias', c.aprender_trava_dias, 'detalhe', r.detalhe);
+  -- FASE 7e: (7e P2, §6.2) o que os textos da margem precisam e o gravador tem (o texto é IMMUTABLE e não lê a linha da config)
+  if v_7e_modo is not null then
+    v_d := v_d || jsonb_build_object('passo', v_7e_passo, 'carga_max', c.carga_max, 'folga_material_du', c.folga_material_du, 'fator_percentil', c.fator_percentil);
+  end if;
+  -- FASE 7e: fim
+
+  -- FASE 7e: (7e P2, §5.1) se havia pergunta aberta da chave da margem (não deveria), ela sai: o item nunca pergunta
+  if v_7e_modo is not null and v_aberta then
+    update public.agenda_perguntas set estado = 'resolvida', resolvida_motivo = 'O aprendizado agora anda aos poucos, sem pergunta.'
+     where id = r0.pergunta_id and estado = 'aberta';
+    v_aberta := false;
+  end if;
+  -- FASE 7e: fim
+  -- A pergunta aberta desta chave: fica (a mesma troca), ou sai (o medido voltou, caiu abaixo do mínimo, saiu do uso, mudou).
+  if v_aberta and not (v_estado = 'pergunta' and r0.estado = 'pergunta' and r0.calculado is not distinct from p_calculado) then
+    v_motivo := case
+      when v_estado = 'medindo' then 'Menos medidas que o mínimo: volto a medir.'
+      when v_estado = 'sombra' then 'Esse aprendizado saiu do uso (em teste).'
+      when v_estado = 'pergunta' then 'O medido mudou: perguntei de novo com o número novo.'
+      else 'O medido voltou para perto do que vale.' end;
+    update public.agenda_perguntas set estado = 'resolvida', resolvida_motivo = v_motivo
+     where id = r0.pergunta_id and estado = 'aberta';
+    v_aberta := false;
+  end if;
+
+  -- FASE 7e: (7e P2, §5.1, R7.5-19) a ação do item da margem: o em uso que muda é o do passo, o alvo fica em depois.alvo e o *desfaz* volta um passo. Nenhum item da margem passa pelo ramo da pergunta
+  if v_7e_modo is not null and v_estado = 'em_uso' and r.em_uso is distinct from v_efet then
+    insert into public.agenda_acoes (dia, executada, origem, tipo, texto, antes, depois, desfazivel_ate, criada_em)
+    values (v_hoje, true, 'vigia', 'aprendizado',
+            left(public._agenda_corta(public._agenda_aprendizado_texto(p_item, 'acao', v_d), 400), 400),
+            jsonb_build_object('item', p_item, 'chave', p_chave, 'nivel', p_nivel, 'em_uso', r0.em_uso, 'valor', v_efet, 'estado', r0.estado),
+            jsonb_build_object('item', p_item, 'chave', p_chave, 'nivel', p_nivel, 'em_uso', r.em_uso, 'n', r.n, 'alvo', p_calculado),
+            p_agora + c.desfazer_validade, p_agora)
+    returning id into v_acao;
+    r.acao_id := v_acao;
+  elsif v_7e_modo is null then
+  -- FASE 7e: fim
+  if v_estado = 'em_uso' and r.em_uso is distinct from v_efet then
+    -- 5. a ação no "o que mudou" das 17:30, com *desfaz aprendizado*
+    insert into public.agenda_acoes (dia, executada, origem, tipo, texto, antes, depois, desfazivel_ate, criada_em)
+    values (v_hoje, true, 'vigia', 'aprendizado',
+            left(public._agenda_corta(public._agenda_aprendizado_texto(p_item, 'acao', v_d), 400), 400),
+            jsonb_build_object('item', p_item, 'chave', p_chave, 'nivel', p_nivel, 'em_uso', r0.em_uso, 'valor', v_efet,
+                               'estado', r0.estado),
+            jsonb_build_object('item', p_item, 'chave', p_chave, 'nivel', p_nivel, 'em_uso', p_calculado, 'n', r.n),
+            p_agora + c.desfazer_validade, p_agora)
+    returning id into v_acao;
+    r.acao_id := v_acao;
+  elsif v_estado = 'pergunta' and not v_aberta then
+    -- 6. a pergunta crítica: 1 uso o medido (recomendo); 2 fico com o de agora; 3 volto ao padrão (só quando o que vale não é
+    -- o padrão e o medido também não; a carga e o planejador só têm 1 e 2)
+    v_ops := jsonb_build_array(
+      jsonb_build_object('n', 1, 'texto', public._agenda_aprendizado_texto(p_item, 'opcao1', v_d),
+                         'efeito', jsonb_build_object('em_uso', p_calculado)),
+      jsonb_build_object('n', 2, 'texto', public._agenda_aprendizado_texto(p_item, 'opcao2', v_d),
+                         'efeito', jsonb_build_object('travar', p_calculado)));
+    if p_item not in ('carga', 'solver') and v_efet is distinct from p_padrao and p_calculado is distinct from p_padrao then
+      v_ops := v_ops || jsonb_build_array(jsonb_build_object('n', 3, 'texto', public._agenda_aprendizado_texto(p_item, 'opcao3', v_d),
+                                                             'efeito', jsonb_build_object('em_uso', null)));
+    end if;
+    select public._agenda_aprendizado_texto(p_item, 'pergunta', v_d) || ' '
+           || string_agg(format('%s) %s%s', o ->> 'n', o ->> 'texto',
+                                case when o ->> 'n' = '1' and o ->> 'texto' !~ 'recomend' then ' (recomendo)' else '' end),
+                         '; ' order by (o ->> 'n')::int) || '.'
+      into v_txt
+      from jsonb_array_elements(v_ops) o;
+    -- CORREÇÃO FASE 6: (C2) texto 5: na troca grande do R$ por diária a opção 1 não leva o "(recomendo)" — a conta inclui a mão
+    -- de obra das OS em que o dono também trabalhou, e a decisão é dele, sem empurrão. A recomendação da pergunta continua 1
+    -- (o CHECK critica_tem_opcoes pede uma); só o texto muda.
+    if p_item = 'mo' then
+      v_txt := replace(v_txt, format('1) %s (recomendo)', v_ops -> 0 ->> 'texto'), format('1) %s', v_ops -> 0 ->> 'texto'));
+    end if;
+    -- CORREÇÃO FASE 6: fim
+    insert into public.agenda_perguntas (tipo, chave, dia, texto, opcoes, recomendacao, modo, criada_em)
+    values ('aprendizado', left(format('aprendizado:%s:%s', p_item, p_chave), 200), v_hoje,
+            left(public._agenda_corta(v_txt, 600), 600), v_ops, 1, 'ligado', p_agora)
+    on conflict (chave, modo) where estado = 'aberta' do nothing
+    returning id into v_perg;
+    if v_perg is null then
+      select q.id into v_perg from public.agenda_perguntas q
+       where q.chave = left(format('aprendizado:%s:%s', p_item, p_chave), 200) and q.modo = 'ligado' and q.estado = 'aberta';
+    end if;
+    r.pergunta_id := v_perg;
+  end if;
+  -- FASE 7e: (7e P2) fecha o desvio do item da margem
+  end if;
+  -- FASE 7e: fim
+
+  r.texto := left(public._agenda_corta(public._agenda_aprendizado_texto(p_item, 'foco_' || v_estado, v_d), 400), 400);
+
+  -- O histórico: em uso, estado e calculado, quando mudam (os 20 mais novos).
+  foreach k in array array['em_uso', 'estado', 'calculado'] loop
+    if to_jsonb(r0) -> k is distinct from to_jsonb(r) -> k then
+      v_antes := v_antes || jsonb_build_object(k, to_jsonb(r0) -> k);
+      v_depois := v_depois || jsonb_build_object(k, to_jsonb(r) -> k);
+    end if;
+  end loop;
+  v_hist := r0.historico;
+  if v_antes <> '{}'::jsonb then
+    v_hist := v_hist || jsonb_build_array(jsonb_build_object('em', p_agora, 'antes', v_antes, 'depois', v_depois));
+    if jsonb_array_length(v_hist) > 20 then
+      select jsonb_agg(x order by o) into v_hist
+        from jsonb_array_elements(v_hist) with ordinality t(x, o) where o > jsonb_array_length(v_hist) - 20;
+    end if;
+  end if;
+
+  update public.agenda_aprendizado
+     set padrao = r.padrao, calculado = r.calculado, em_uso = r.em_uso, n = r.n, n_min = r.n_min, amostra = r.amostra,
+         detalhe = r.detalhe, estado = r.estado, texto = r.texto, calculado_em = r.calculado_em, em_uso_desde = r.em_uso_desde,
+         travado_ate = r.travado_ate, travado_valor = r.travado_valor, pergunta_id = r.pergunta_id, acao_id = r.acao_id,
+         historico = v_hist
+   where id = r0.id;
+
+  return jsonb_build_object('item', p_item, 'chave', p_chave, 'nivel', p_nivel, 'estado', v_estado, 'estado_antes', r0.estado,
+                            'calculado', p_calculado, 'em_uso', r.em_uso, 'vale', coalesce(r.em_uso, p_padrao),
+                            'acao_id', v_acao, 'pergunta_id', case when v_estado = 'pergunta' then r.pergunta_id end,
+                            'texto', r.texto);
+end;
+$function$;
+
+comment on function public._agenda_aprendizado_gravar(text, text, text, numeric, integer, jsonb, numeric, jsonb, timestamptz) is
+  'Agenda de Produção (Fase 6): o gravador único de agenda_aprendizado (spec-fase6 §5.1) — o upsert de (item, chave) e o estado, nesta ordem: 1 n < n_min → medindo; 2 modo fora de ligado, item fora de aprendizado_ligados ou só de medida → sombra; 3 travado e dentro da trava (a data e o limite de troca a partir do valor recusado) → fica; 4 o medido = o que vale → em uso; 5 troca dentro do limite (§3.2) → em uso + a ação aprendizado (origem vigia, desfazível por desfazer_validade); 6 troca grande → pergunta crítica aprendizado (chave aprendizado:<item>:<chave>, uma aberta por chave). Toda mudança de em uso, estado e calculado vai ao histórico. Definer, sem grant a ninguém. CORREÇÃO FASE 6 (C2, texto 5): na pergunta do R$ por diária a opção 1 sai sem o "(recomendo)" (a recomendação da pergunta continua 1, pelo CHECK). FASE 7e (P2): o ramo por passo dos itens da margem (vies, folga_semana, promessa, tempo_compra, folga_compra, prazo_sem_fornecedor): medindo; sombra (modo geral, interruptor CRU, promessa, folga_compra, só medida, chave dono: sem vies_corrige_dono); travado (na trava, medido a até um passo); em uso, com o em uso andando até o passo por rodada e o calculado como alvo. Nunca pergunta. A ação guarda antes.em_uso e depois.alvo. Os itens da Fase 6, como antes. FASE 7e (P4): só o item folga_semana: em uso fora do padrão e sem número medido (calculado nulo ou abaixo do mínimo), com os dois modos ligados (crus), não cai em medindo: anda um passo para o padrão (ação aprendizado com *desfaz*), e dentro da trava fica o que o dono decidiu. No padrão, cai em medindo sem mudar número nenhum.';
+
+-- _agenda_aprendizado_texto (de 20261111100100_agenda_fase7e_medicao.sql:1065; md5 do corpo de antes d6efbf56237d8da99642b5411ba86930)
+create or replace function public._agenda_aprendizado_texto(p_item text, p_momento text, p_d jsonb)
+ returns text
+ language plpgsql
+ immutable
+ set search_path to 'public'
+as $function$
+declare
+  v_nivel  text := public._agenda_classe_texto_do_nivel(p_d ->> 'chave');
+  v_calc   text := public._agenda_aprendizado_valor(p_item, (p_d ->> 'calculado')::numeric);
+  v_uso    text := public._agenda_aprendizado_valor(p_item, (p_d ->> 'em_uso')::numeric);
+  v_efet   text := public._agenda_aprendizado_valor(p_item, (p_d ->> 'efetivo')::numeric);
+  v_padrao text := public._agenda_aprendizado_valor(p_item, (p_d ->> 'padrao')::numeric);
+  v_volta  text := public._agenda_aprendizado_valor(p_item, (p_d ->> 'volta')::numeric);
+  v_n      text := p_d ->> 'n';
+  v_nmin   text := p_d ->> 'n_min';
+  v_desde  text := public._dia_curto(nullif(p_d ->> 'desde', '')::date);
+  v_trava  text := public._dia_curto(nullif(p_d ->> 'travado_ate', '')::date);
+  v_dias   text := p_d ->> 'trava_dias';
+  v_rotulo text;
+begin
+  -- FASE 7e: (7e P2, §6.2, §6.3, R7.3, R7.5-19, R7.5-20, R7.12-9) os textos dos 6 itens da margem, antes de todos (um item da margem nunca passa pelos de baixo). Sem jargão: "o do meio" é a mediana e "8 em cada 10" é o percentil 80. n = 0 diz
+  -- "nenhuma ... ainda" (nunca "medi"). Promessa (AG7-32) e folga da compra (R7.5-16: sem leitor nesta etapa) só têm os textos de medindo e em teste: o gravador nunca as põe em uso. Tudo número daqui sai de p_d (o gravador).
+  if p_item in ('vies', 'folga_semana', 'promessa', 'tempo_compra', 'folga_compra', 'prazo_sem_fornecedor') then
+    declare
+      v_7e_chave text := regexp_replace(coalesce(p_d ->> 'chave', ''), '^(estimativa|dono):', '');
+      v_7e_dono  boolean := coalesce(p_d ->> 'chave', '') like 'dono:%';
+      v_7e_cls   text := public._agenda_classe_texto_do_nivel(v_7e_chave);
+      v_7e_geral boolean := v_7e_chave = 'todas';
+      v_7e_n     int := coalesce((p_d ->> 'n')::int, 0);
+      v_7e_alvo  boolean := (p_d ->> 'em_uso')::numeric is not distinct from (p_d ->> 'calculado')::numeric;
+      v_7e_sobe  boolean := (p_d ->> 'em_uso')::numeric > (p_d ->> 'efetivo')::numeric;
+      v_7e_num   text := public._agenda_num((p_d ->> 'efetivo')::numeric, 1);
+      v_7e_pnum  text := public._agenda_num((p_d ->> 'padrao')::numeric, 1);
+      v_7e_lei   text;
+      v_7e_guarda text;
+      v_7e_resto text;
+    begin
+      if p_item = 'vies' then
+        v_7e_lei := case when v_7e_dono then format('nos dias que você diz, as OS levam %s o que você combinou', v_calc)
+                         else format('%s levam %s o que eu estimo pelo orçamento', coalesce(v_7e_cls, 'as OS'), v_calc) end;
+        return case p_momento
+          when 'foco_medindo' then
+            case when v_7e_dono then format('Nos dias que você diz: %s; conto os seus dias como você disse.',
+                                            case when v_7e_n = 0 then 'nenhuma OS medida ainda' else format('%s de %s OS medidas', v_n, v_nmin) end)
+                 else format('Estimativa pelo valor: %s; marco os dias como saem do orçamento.',
+                             case when v_7e_n = 0 then 'nenhuma OS medida ainda' else format('%s de %s OS medidas', v_n, v_nmin) end) end
+          when 'foco_sombra' then
+            case when v_7e_dono then format('Em teste: %s (%s OS medidas). Hoje conto os seus dias como você disse.', v_7e_lei, v_n)
+                 when v_7e_geral then format('Em teste: %s (%s OS medidas). Hoje marco os dias como saem do orçamento.', v_7e_lei, v_n)
+                 else format('Em teste: %s (%s OS medidas; junto com o geral das OS). Hoje marco os dias como saem do orçamento.', v_7e_lei, v_n) end
+          when 'foco_em_uso' then
+            case when v_7e_dono and v_7e_alvo then format('%s (%s OS medidas): corrijo os seus dias com %s desde %s, e digo sempre os dois números.', public._agenda_maiuscula(v_7e_lei), v_n, v_uso, v_desde)
+                 when v_7e_dono then format('%s (%s OS medidas): corrijo os seus dias com %s desde %s e chego a %s aos poucos (até %s× por dia); digo sempre os dois números.',
+                                            public._agenda_maiuscula(v_7e_lei), v_n, v_uso, v_desde, v_calc, public._agenda_num((p_d ->> 'passo')::numeric, 2))
+                 when v_7e_alvo then format('%s (%s OS medidas): marco os dias delas com %s desde %s.', public._agenda_maiuscula(v_7e_lei), v_n, v_uso, v_desde)
+                 else format('%s (%s OS medidas): marco com %s desde %s e chego a %s aos poucos (até %s× por dia).',
+                             public._agenda_maiuscula(v_7e_lei), v_n, v_uso, v_desde, v_calc, public._agenda_num((p_d ->> 'passo')::numeric, 2)) end
+          when 'foco_travado' then format('%s (%s OS medidas); fico com %s até %s, como você decidiu.', public._agenda_maiuscula(v_7e_lei), v_n, v_efet, v_trava)
+          when 'acao' then
+            case when v_7e_dono then format('Aprendi com as OS concluídas: %s (%s OS). Passei a contar os seus dias com %s (era %s), sempre dizendo os dois números, só nos serviços que eu ainda não marquei. *desfaz aprendizado* volta.',
+                                            v_7e_lei, v_n, v_uso, v_efet)
+                 when v_7e_alvo then format('Aprendi com as OS concluídas: %s (%s OS). Passei a marcar os dias delas com %s (era %s), só nos serviços que eu ainda não marquei. *desfaz aprendizado* volta.',
+                                            v_7e_lei, v_n, v_uso, v_efet)
+                 else format('Aprendi com as OS concluídas: %s (%s OS). Passei a marcar com %s (era %s) e %s até %s aos poucos, só nos serviços que eu ainda não marquei. *desfaz aprendizado* volta.',
+                             v_7e_lei, v_n, v_uso, v_efet, case when v_7e_sobe then 'subo' else 'desço' end, v_calc) end
+          -- R7.5-19 e 20: volta um passo só (o valor de p_d.volta, nunca o padrão de cabeça), e a OS já marcada guarda o valor que tinha
+          when 'desfeito' then
+            case when v_7e_dono then format('Desfeito: os seus dias voltam a %s, só nos serviços que eu ainda não marquei. Não troco de novo por %s dias, salvo se o medido mudar muito.', v_volta, v_dias)
+                 else format('Desfeito: %s voltam a %s o que sai do orçamento, só nas que eu ainda não marquei. Não troco de novo por %s dias, salvo se o medido mudar muito.', coalesce(v_7e_cls, 'as OS'), v_volta, v_dias) end
+        end;
+      elsif p_item = 'folga_semana' then
+        -- o total guardado (1 − carga_max) e a parte que não é medida (urgência e falta): o resto do padrão
+        v_7e_guarda := round((1 - (p_d ->> 'carga_max')::numeric) * 100)::text || '%';
+        v_7e_resto := round((1 - (p_d ->> 'carga_max')::numeric - (p_d ->> 'padrao')::numeric) * 100)::text || '%';
+        -- FASE 7e: (7e P4, R7.4, R7.9, §0-4) sem número medido (calculado nulo). Com as semanas já no mínimo, o "N de M" da §6.2 diria "12 de 8" e não diz o que falta: aqui o que falta são as OS medidas (quem manda é o resíduo, R7.9) ou que elas mostrem variação (σ = 0). E a folga em uso que ficou sem medida volta ao padrão por passo: a linha e a ação dizem isso, e não "medi".
+        if (p_d ->> 'calculado') is null then
+          declare
+            v_7e_res   int := coalesce((p_d #>> '{detalhe,residuos}')::int, 0);
+            v_7e_rmin  int := (p_d #>> '{detalhe,residuos_min}')::int;
+            v_7e_basta boolean := v_7e_n >= (p_d ->> 'n_min')::int;
+            v_7e_igual boolean := (p_d ->> 'em_uso')::numeric = (p_d ->> 'padrao')::numeric;
+            v_7e_falta text := case when not v_7e_basta then format('%s de %s semanas com serviço marcado medidas', v_n, v_nmin)
+                                    when v_7e_res = 0 then 'nenhuma OS medida ainda'
+                                    when v_7e_res < v_7e_rmin then format('%s de %s OS medidas', v_7e_res, v_7e_rmin)
+                                    else format('as %s OS medidas ainda não mostraram variação', v_7e_res) end;
+          begin
+            if p_momento = 'foco_medindo' and v_7e_basta then
+              return format('Folga da semana: as semanas já bastam (%s), mas falta saber o quanto as OS variam: %s; guardo %s da semana da equipe (%s para o serviço que passa do previsto e %s para urgência e falta).', v_n, v_7e_falta, v_7e_guarda, v_padrao, v_7e_resto);
+            elsif p_momento = 'foco_em_uso' then
+              return case when v_7e_igual then format('Sem medida para a folga da semana (%s): voltei a guardar os %s de sempre da semana para o serviço que passa do previsto.', v_7e_falta, v_padrao)
+                          else format('Sem medida para a folga da semana (%s): guardo %s da semana para o serviço que passa do previsto desde %s e volto aos %s de sempre aos poucos.', v_7e_falta, v_uso, v_desde, v_padrao) end;
+            elsif p_momento = 'foco_travado' then
+              return format('Sem medida para a folga da semana (%s); fico com %s até %s, como você decidiu.', v_7e_falta, v_efet, v_trava);
+            elsif p_momento = 'acao' then
+              return case when v_7e_igual then format('Fiquei sem medida para a folga da semana (%s). Voltei a guardar os %s de sempre da semana para o serviço que passa do previsto (era %s). *desfaz aprendizado* volta.', v_7e_falta, v_padrao, v_efet)
+                          else format('Fiquei sem medida para a folga da semana (%s). Passei a guardar %s da semana para o serviço que passa do previsto (era %s) e volto aos %s de sempre aos poucos. *desfaz aprendizado* volta.', v_7e_falta, v_uso, v_efet, v_padrao) end;
+            end if;
+          end;
+        end if;
+        -- FASE 7e: fim
+        return case p_momento
+          when 'foco_medindo' then format('Folga da semana: %s; guardo %s da semana da equipe (%s para o serviço que passa do previsto e %s para urgência e falta).',
+                                          case when v_7e_n = 0 then 'nenhuma semana com serviço marcado medida ainda' else format('%s de %s semanas com serviço marcado medidas', v_n, v_nmin) end,
+                                          v_7e_guarda, v_padrao, v_7e_resto)
+          when 'foco_sombra' then format('Em teste: pelo quanto as OS variaram em %s semanas, %s da semana bastariam para o serviço que passa do previsto; hoje guardo %s.', v_n, v_calc, v_padrao)
+          when 'foco_em_uso' then
+            case when v_7e_alvo then format('Pelo quanto as OS variaram em %s semanas, guardo %s da semana para o serviço que passa do previsto desde %s (era %s).', v_n, v_uso, v_desde, v_padrao)
+                 else format('Pelo quanto as OS variaram em %s semanas, guardo %s da semana para o serviço que passa do previsto desde %s e chego a %s aos poucos (era %s).', v_n, v_uso, v_desde, v_calc, v_padrao) end
+          when 'foco_travado' then format('Pelo quanto as OS variaram em %s semanas, %s da semana bastariam para o serviço que passa do previsto; fico com %s até %s, como você decidiu.', v_n, v_calc, v_efet, v_trava)
+          when 'acao' then format('Medi %s semanas de serviço marcado: as OS variaram %s do que eu contava. Passei a guardar %s da semana para o serviço que passa do previsto (era %s)%s. *desfaz aprendizado* volta.',
+                                  v_n, case when v_7e_sobe then 'mais' else 'menos' end, v_uso, v_efet,
+                                  case when (p_d #>> '{detalhe,proxima_semana}') is not null then ': ' || (p_d #>> '{detalhe,proxima_semana}') else '' end)
+          when 'desfeito' then format('Desfeito: volto a guardar %s da semana para o serviço que passa do previsto. Não troco de novo por %s dias, salvo se o medido mudar muito.', v_volta, v_dias)
+        end;
+      elsif p_item = 'promessa' then
+        -- só para o dono (AG7-32): o cliente não ouve data de pronto, e por isso não há "em uso" nem "em teste" aqui
+        return case when v_7e_n = 0 then 'Prazo real: nenhuma OS medida ainda. Só para você: ao cliente não digo data de pronto.'
+                    when (p_d ->> 'calculado') is null or v_7e_n < coalesce((p_d ->> 'n_min')::int, 1)
+                      then format('Prazo real: %s de %s OS medidas. Só para você: ao cliente não digo data de pronto.', v_n, v_nmin)
+                    else format('Prazo real: %s em cada 10 OS terminaram em até %s os dias planejados (%s OS). Com essa folga, um serviço de 5 dias acaba em até %s dias úteis. Só para você: ao cliente não digo data de pronto.',
+                                round(coalesce((p_d ->> 'fator_percentil')::numeric, (p_d #>> '{detalhe,percentil}')::numeric) * 10),
+                                public._agenda_aprendizado_valor('promessa', coalesce((p_d #>> '{detalhe,p80}')::numeric, (p_d ->> 'calculado')::numeric)),
+                                v_n, round(5 * (p_d ->> 'calculado')::numeric)) end;
+      elsif p_item = 'tempo_compra' then
+        return case p_momento
+          when 'foco_medindo' then format('Seu tempo para comprar: %s (da aprovação até a compra); no "compre até" conto %s (padrão).',
+                                          case when v_7e_n = 0 then 'nenhuma OS medida ainda' else format('%s de %s OS medidas', v_n, v_nmin) end, v_padrao)
+          when 'foco_sombra' then format('Em teste: da aprovação até a compra você levou %s (o do meio de %s OS); junto com o padrão de %s, eu contaria %s no "compre até". Hoje conto %s.',
+                                         public._agenda_aprendizado_valor(p_item, (p_d #>> '{detalhe,percentil}')::numeric), v_n, v_7e_pnum, v_calc, v_7e_pnum)
+          when 'foco_em_uso' then
+            case when v_7e_alvo then format('Da aprovação até a compra você leva por volta de %s (%s OS medidas): é o que conto no "compre até" desde %s.', v_uso, v_n, v_desde)
+                 else format('Da aprovação até a compra você leva por volta de %s (%s OS medidas): conto %s no "compre até" desde %s e chego lá aos poucos.', v_calc, v_n, v_uso, v_desde) end
+          when 'foco_travado' then format('Da aprovação até a compra você leva por volta de %s (%s OS medidas); fico com %s no "compre até" até %s, como você decidiu.', v_calc, v_n, v_efet, v_trava)
+          when 'acao' then format('Medi o seu tempo da aprovação até a compra (%s OS): passei a contar %s no "compre até" (era %s), só nas OS que eu ainda não marquei: o pedido de compra sai %s mais %s. *desfaz aprendizado* volta.',
+                                  v_n, v_uso, v_7e_num, public._agenda_aprendizado_valor(p_item, abs((p_d ->> 'em_uso')::numeric - (p_d ->> 'efetivo')::numeric)),
+                                  case when v_7e_sobe then 'cedo' else 'tarde' end)
+          when 'desfeito' then format('Desfeito: volto a contar %s no "compre até", só nas OS que eu ainda não marquei. Não troco de novo por %s dias, salvo se o medido mudar muito.', v_volta, v_dias)
+        end;
+      elsif p_item = 'folga_compra' then
+        return case when p_momento = 'foco_sombra' then
+                 format('Em teste: nas OS marcadas antes da compra, a peça chegou até %s depois do que eu contava (%s OS; %s no prazo; %s começaram no dia marcado); eu daria %s a mais só a elas. Hoje não dou.',
+                        public._agenda_aprendizado_valor(p_item, (p_d #>> '{detalhe,maior}')::numeric), v_n, coalesce(p_d #>> '{detalhe,no_prazo}', '0'), coalesce(p_d #>> '{detalhe,comecaram_no_dia}', '0'), v_calc)
+               else format('OS marcadas antes da compra: %s; dou %s entre a chegada da peça e o 1º dia, como em todas.',
+                           case when v_7e_n = 0 then 'nenhuma medida ainda' else format('%s de %s medidas', v_n, v_nmin) end,
+                           public._agenda_aprendizado_valor(p_item, coalesce((p_d ->> 'folga_material_du')::numeric, 1))) end;
+      else
+        -- prazo_sem_fornecedor: só medida
+        return case when p_momento = 'foco_sombra' then
+                 format('Peças compradas sem fornecedor dito antes: chegaram em até %s depois da compra (%s compras); conto %s (o padrão é decisão sua).', v_calc, v_n, v_padrao)
+               else format('Peças compradas sem fornecedor dito antes: %s; conto %s (padrão).',
+                           case when v_7e_n = 0 then 'nenhuma compra medida ainda' else format('%s de %s compras medidas', v_n, v_nmin) end, v_padrao) end;
+      end if;
+    end;
+  end if;
+  -- FASE 7e: fim
+  -- CORREÇÃO FASE 6: (C2) texto 5: a pergunta do R$ por diária (a troca grande do valor) diz que a conta inclui as OS em
+  -- que o dono também trabalhou (a mão de obra delas entra; as diárias dele não); a opção 1 sai sem o "(recomendo)" (o
+  -- gravador não o põe no valor: _agenda_aprendizado_gravar). O resto do valor, como antes (abaixo).
+  if p_item = 'mo' and p_momento = 'pergunta' then
+    return format('Medi a mão de obra por diária: cada diária rendeu %s (%s OS com diária ligada; inclui as OS em que você também trabalhou), e hoje eu uso %s para estimar os dias pelo valor. É uma troca grande.',
+                  v_calc, v_n, v_efet);
+  end if;
+  -- CORREÇÃO FASE 6: fim
+  -- FASE 6: (P2) o R$ por diária (spec-fase6 §6.2 e §6.3): a mão de obra das OS com diária ligada ÷ as diárias ligadas; o
+  -- padrão é mo_por_diaria_real, e o valor entra no realista de os_duracao_sugerida ("estimar os dias pelo valor")
+  if p_item = 'mo' then
+    return case p_momento
+      when 'foco_medindo' then format('Valor por diária: %s de %s OS com diária ligada medidas; para estimar os dias pelo valor uso %s (padrão).',
+                                      v_n, v_nmin, v_padrao)
+      when 'foco_sombra' then format('Em teste: cada diária rendeu %s de mão de obra (%s OS com diária ligada); para estimar os dias pelo valor uso %s (padrão).',
+                                     v_calc, v_n, v_padrao)
+      when 'foco_em_uso' then format('Cada diária rendeu %s de mão de obra (%s OS com diária ligada): é o que uso para estimar os dias pelo valor desde %s.',
+                                     v_uso, v_n, v_desde)
+      when 'foco_pergunta' then format('Cada diária rendeu %s de mão de obra (%s OS com diária ligada), e hoje uso %s para estimar os dias pelo valor: a troca espera a sua resposta.',
+                                       v_calc, v_n, v_efet)
+      when 'foco_travado' then format('Cada diária rendeu %s de mão de obra (%s OS com diária ligada); para estimar os dias pelo valor fico com %s até %s, como você decidiu.',
+                                      v_calc, v_n, v_efet, v_trava)
+      when 'acao' then format('Cada diária rendeu %s de mão de obra (%s OS): passei a estimar os dias pelo valor com %s (era %s). *desfaz aprendizado* volta.',
+                              v_calc, v_n, v_calc, v_efet)
+      when 'pergunta' then format('Medi a mão de obra por diária: cada diária rendeu %s (%s OS com diária ligada), e hoje eu uso %s para estimar os dias pelo valor. É uma troca grande.',
+                                  v_calc, v_n, v_efet)
+      when 'opcao1' then format('Passo a usar %s', v_calc)
+      when 'opcao2' then format('Fico com %s', v_efet)
+      when 'opcao3' then 'Volto ao padrão'
+      when 'desfeito' then format('Desfeito: para estimar os dias pelo valor volto a %s por diária. Não troco de novo por %s dias, salvo se o medido mudar muito.',
+                                  coalesce(v_volta, v_padrao, 'o padrão'), v_dias)
+      when 'fico' then format('Combinado: fico com %s por diária. Volto a perguntar se o medido mudar muito.', v_efet)
+    end;
+  end if;
+
+  -- (P2) a presença do dono (spec-fase6 §6.2 e §6.3): k = as OS da classe a que ele foi sem estar no plano (detalhe.k) e n
+  -- = as OS medidas; 1 = o dia todo, 0 = o abre e fecha (o padrão). Na classe entra sozinha; em todas, sempre pergunta.
+  if p_item = 'presenca' and v_nivel is not null then
+    declare
+      v_foi  text := format('Você foi a %s de %s %s sem estar no plano', coalesce(p_d #>> '{detalhe,k}', '0'), v_n,
+                            substr(v_nivel, 4));
+      v_onde text := case when p_d ->> 'chave' = 'todas' then 'por padrão' else 'nelas' end;
+      v_dia  boolean := coalesce((p_d ->> 'calculado')::numeric, 0) >= 1;
+      v_udia boolean := coalesce((p_d ->> 'em_uso')::numeric, 0) >= 1;
+      v_edia boolean := coalesce((p_d ->> 'efetivo')::numeric, 0) >= 1;
+      v_vdia boolean := coalesce((p_d ->> 'volta')::numeric, 0) >= 1;
+    begin
+      return case p_momento
+        when 'foco_medindo' then format('%s: %s de %s OS medidas para saber se você fica o dia todo; conto com você para abrir e fechar (padrão).',
+                                        public._agenda_maiuscula(v_nivel), v_n, v_nmin)
+        when 'foco_sombra' then v_foi || case when v_dia then format(': em teste, eu contaria com você o dia todo %s.', v_onde)
+                                              else format(': em teste, continuo contando com você só para abrir e fechar %s.', v_onde) end
+        when 'foco_em_uso' then v_foi || case when v_udia then format(': conto com você o dia todo %s desde %s.', v_onde, v_desde)
+                                              else format(': conto com você só para abrir e fechar %s.', v_onde) end
+        when 'foco_pergunta' then v_foi || case when v_dia then ': perguntei se passo a contar com você o dia todo por padrão; espero a sua resposta.'
+                                                else ': perguntei se volto a contar com você só para abrir e fechar; espero a sua resposta.' end
+        when 'foco_travado' then v_foi || format('; fico com %s até %s, como você decidiu.',
+                                                 case when v_edia then 'o dia todo' else 'o abre e fecha' end, v_trava)
+        when 'acao' then v_foi || case when v_dia then ': passei a contar com você o dia todo nas próximas dessas OS (as que você não disse como é). *desfaz aprendizado* volta ao abre e fecha.'
+                                       else ': voltei a contar com você só para abrir e fechar nas próximas dessas OS (as que você não disse como é). *desfaz aprendizado* volta ao dia todo.' end
+        when 'pergunta' then v_foi || case when v_dia then '. Quer que eu conte com você o dia todo por padrão, e não só para abrir e fechar?'
+                                           else '. Quer que eu volte a contar com você só para abrir e fechar por padrão?' end
+        when 'opcao1' then case when v_dia then 'Sim, o dia todo (recomendo pelo medido)' else 'Sim, só abrir e fechar (recomendo pelo medido)' end
+        when 'opcao2' then case when v_dia then 'Não, continuo com o abre e fecha' else 'Não, continuo com o dia todo' end
+        when 'opcao3' then 'Volto ao padrão'
+        when 'desfeito' then format('Desfeito: n%s volto a contar com você %s. Não troco de novo por %s dias, salvo se o medido mudar muito.',
+                                    v_nivel, case when v_vdia then 'o dia todo' else 'só para abrir e fechar' end, v_dias)
+        when 'fico' then format('Combinado: fico com %s. Volto a perguntar se o medido mudar muito.',
+                                case when v_edia then 'o dia todo' else 'o abre e fecha' end)
+      end;
+    end;
+  end if;
+  -- FASE 6: fim
+  -- FASE 6: (P3) o fornecedor (spec-fase6 §6.2 e §6.3): o atraso das entregas (padrão 0: a chegada no dia que o fornecedor
+  -- diz) e o prazo da nota (da saída até a chegada; padrão = o prazo de hoje). O nome é o curto do cadastro (detalhe.nome),
+  -- sem artigo; detalhe.no_prazo = as entregas no prazo; detalhe.dono = o prazo é o que o dono disse (só mede).
+  if p_item in ('fornecedor_atraso', 'fornecedor_prazo') then
+    declare
+      v_nome  text := coalesce(p_d #>> '{detalhe,nome}', 'O fornecedor');
+      v_np    text := coalesce(p_d #>> '{detalhe,no_prazo}', '0');
+      v_dono  boolean := coalesce((p_d #>> '{detalhe,dono}')::boolean, false);
+      v_cnum  numeric := coalesce((p_d ->> 'calculado')::numeric, 0);
+      v_unum  numeric := coalesce((p_d ->> 'em_uso')::numeric, 0);
+      v_vnum  numeric := coalesce((p_d ->> 'volta')::numeric, (p_d ->> 'padrao')::numeric, 0);
+      -- "a chegada 2 dias úteis depois do que o fornecedor diz" / "a chegada no dia que o fornecedor diz"
+      v_ccheg text := case when v_cnum > 0 then format('a chegada %s depois do que o fornecedor diz', v_calc)
+                           else 'a chegada no dia que o fornecedor diz' end;
+      v_ucheg text := case when v_unum > 0 then format('a chegada %s depois do que o fornecedor diz', v_uso)
+                           else 'a chegada no dia que o fornecedor diz' end;
+      v_echeg text := case when coalesce((p_d ->> 'efetivo')::numeric, 0) > 0
+                           then format('a chegada %s depois do que o fornecedor diz', v_efet)
+                           else 'a chegada no dia que o fornecedor diz' end;
+      v_vcheg text := case when v_vnum > 0
+                           then format('a chegada %s depois do que o fornecedor diz',
+                                       public._agenda_aprendizado_valor('fornecedor_atraso', v_vnum))
+                           else 'a chegada no dia que o fornecedor diz' end;
+    begin
+      if p_item = 'fornecedor_atraso' then
+        return case p_momento
+          when 'foco_medindo' then format('%s: %s de %s entregas medidas.', v_nome, v_n, v_nmin)
+          when 'foco_sombra' then format('%s: %s de %s entregas no prazo%s (em teste).', v_nome, v_np, v_n,
+                                         case when v_cnum > 0 then '; o atraso chega a ' || v_calc else '' end)
+          when 'foco_em_uso' then format('%s: %s de %s entregas no prazo%s: conto %s (desde %s).', v_nome, v_np, v_n,
+                                         case when v_unum > 0 then '; o atraso chega a ' || v_uso else '' end, v_ucheg, v_desde)
+          when 'foco_pergunta' then format('%s: o atraso chega a %s (%s entregas), e hoje conto %s: a troca espera a sua resposta.',
+                                           v_nome, v_calc, v_n, v_echeg)
+          when 'foco_travado' then format('%s: o atraso chega a %s (%s entregas); fico com %s até %s, como você decidiu.',
+                                          v_nome, v_calc, v_n, v_echeg, v_trava)
+          when 'acao' then case when v_cnum > 0
+                                then format('%s atrasou até %s em %s entregas: passei a contar %s. *desfaz aprendizado* volta.',
+                                            v_nome, v_calc, v_n, v_ccheg)
+                                else format('%s voltou a entregar no prazo (%s de %s entregas): passei a contar %s. *desfaz aprendizado* volta.',
+                                            v_nome, v_np, v_n, v_ccheg) end
+          when 'pergunta' then case when v_cnum > 0
+                                    then format('Medi as entregas de %s: o atraso chega a %s (%s entregas), e hoje eu conto %s. É uma troca grande.',
+                                                v_nome, v_calc, v_n, v_echeg)
+                                    else format('Medi as entregas de %s: %s de %s no prazo, e hoje eu conto %s. É uma troca grande.',
+                                                v_nome, v_np, v_n, v_echeg) end
+          when 'opcao1' then format('Passo a contar %s', v_ccheg)
+          when 'opcao2' then format('Fico com %s', v_echeg)
+          when 'opcao3' then 'Volto ao padrão'
+          when 'desfeito' then format('Desfeito: para %s volto a contar %s. Não troco de novo por %s dias, salvo se o medido mudar muito.',
+                                      v_nome, v_vcheg, v_dias)
+          when 'fico' then format('Combinado: para %s fico com %s. Volto a perguntar se o medido mudar muito.', v_nome, v_echeg)
+        end;
+      end if;
+      -- o prazo da nota: da saída (despacho) até a chegada
+      return case p_momento
+        when 'foco_medindo' then case when v_dono
+               then format('%s: você disse %s; medi %s notas da saída até a chegada (vale o que você disse).',
+                           v_nome, coalesce(v_padrao, 'o prazo'), v_n)
+               else format('%s: %s de %s notas medidas da saída até a chegada; conto %s (padrão).',
+                           v_nome, v_n, v_nmin, coalesce(v_padrao, 'o prazo da classe')) end
+        when 'foco_sombra' then format('Em teste: %s leva até %s da saída da nota até a chegada (%s notas); hoje conto %s (padrão).',
+                                       v_nome, v_calc, v_n, coalesce(v_padrao, 'o prazo da classe'))
+        when 'foco_em_uso' then format('%s leva até %s da saída da nota até a chegada (%s notas): é o prazo que uso desde %s.',
+                                       v_nome, v_uso, v_n, v_desde)
+        when 'foco_pergunta' then format('%s leva até %s da saída da nota até a chegada (%s notas), e hoje conto %s: a troca espera a sua resposta.',
+                                         v_nome, v_calc, v_n, coalesce(v_efet, 'o prazo da classe'))
+        when 'foco_travado' then format('%s leva até %s da saída da nota até a chegada (%s notas); fico com %s até %s, como você decidiu.',
+                                        v_nome, v_calc, v_n, coalesce(v_efet, 'o prazo da classe'), v_trava)
+        when 'acao' then format('Medi as notas de %s: da saída até a chegada levam até %s (%s notas). Passei a contar %s no lugar de %s. *desfaz aprendizado* volta.',
+                                v_nome, v_calc, v_n, v_calc, coalesce(v_efet, 'o prazo da classe'))
+        when 'pergunta' then format('Medi as notas de %s: da saída até a chegada levam até %s (%s notas), e hoje eu conto %s. É uma troca grande.',
+                                    v_nome, v_calc, v_n, coalesce(v_efet, 'o prazo da classe'))
+        when 'opcao1' then format('Passo a contar %s', v_calc)
+        when 'opcao2' then format('Fico com %s', coalesce(v_efet, 'o prazo da classe'))
+        when 'opcao3' then 'Volto ao padrão'
+        when 'desfeito' then format('Desfeito: para %s volto a contar %s da saída da nota até a chegada. Não troco de novo por %s dias, salvo se o medido mudar muito.',
+                                    v_nome, coalesce(v_volta, v_padrao, 'o prazo da classe'), v_dias)
+        when 'fico' then format('Combinado: para %s fico com %s. Volto a perguntar se o medido mudar muito.',
+                                v_nome, coalesce(v_efet, 'o prazo da classe'))
+      end;
+    end;
+  end if;
+  -- FASE 6: fim
+  -- FASE 6: (P4) a capacidade do dono (spec-fase6 §6.2 e §6.3): quanto dos meios-dias dele marcados no plano ele fez (a
+  -- mediana das semanas: detalhe.taxa; "7 de cada 10"), nas últimas detalhe.janela semanas, e a parte da semana dele que o
+  -- motor marca (o padrão é carga_max, a de todos). "Seria" no singular só em teste (o spec); "seriam" na pergunta.
+  if p_item = 'capacidade_dono' then
+    declare
+      v_taxa numeric := (p_d #>> '{detalhe,taxa}')::numeric;
+      v_dez  text := coalesce(round(v_taxa * 10)::text, '?');
+      v_ult  text := case when p_d #>> '{detalhe,janela}' is null then 'Nas últimas semanas'
+                          else format('Nas últimas %s semanas', p_d #>> '{detalhe,janela}') end;
+      v_sems text := public._agenda_plural(coalesce((p_d ->> 'n')::int, 0), 'semana medida', 'semanas medidas');
+    begin
+      return case p_momento
+        when 'foco_medindo' then format('A sua semana no plano: %s de %s semanas medidas; marco até %s da sua semana (padrão).',
+                                        v_n, v_nmin, coalesce(v_padrao, 'a parte de todos'))
+        when 'foco_sombra' then format('%s você fez %s de cada 10 meios-dias seus marcados no plano (%s). Hoje marco até %s da sua semana; pelo medido seria %s (em teste).',
+                                       v_ult, v_dez, v_sems, coalesce(v_padrao, 'a parte de todos'), v_calc)
+        when 'foco_em_uso' then format('%s você fez %s de cada 10 meios-dias seus marcados no plano (%s): marco até %s da sua semana desde %s.',
+                                       v_ult, v_dez, v_sems, v_uso, v_desde)
+        when 'foco_pergunta' then format('%s você fez %s de cada 10 meios-dias seus marcados no plano (%s). Hoje marco até %s da sua semana; pelo medido seriam %s: a troca espera a sua resposta.',
+                                         v_ult, v_dez, v_sems, coalesce(v_efet, v_padrao), v_calc)
+        when 'foco_travado' then format('%s você fez %s de cada 10 meios-dias seus marcados no plano (%s). Pelo medido seriam %s; fico com %s da sua semana até %s, como você decidiu.',
+                                        v_ult, v_dez, v_sems, v_calc, coalesce(v_efet, v_padrao), v_trava)
+        when 'acao' then format('%s você fez %s de cada 10 meios-dias seus do plano: passei a marcar até %s da sua semana (era %s). *desfaz aprendizado* volta.',
+                                v_ult, v_dez, v_calc, coalesce(v_efet, v_padrao))
+        when 'pergunta' then format('%s você fez %s de cada 10 meios-dias seus marcados no plano. Hoje marco até %s da sua semana; pelo medido seriam %s.',
+                                    v_ult, v_dez, coalesce(v_efet, v_padrao), v_calc)
+        when 'opcao1' then format('Passo a marcar até %s', v_calc)
+        when 'opcao2' then format('Fico com %s', coalesce(v_efet, v_padrao))
+        when 'opcao3' then 'Volto ao padrão'
+        when 'desfeito' then format('Desfeito: volto a marcar até %s da sua semana. Não troco de novo por %s dias, salvo se o medido mudar muito.',
+                                    coalesce(v_volta, v_padrao, 'a parte de todos'), v_dias)
+        when 'fico' then format('Combinado: fico com %s da sua semana. Volto a perguntar se o medido mudar muito.',
+                                coalesce(v_efet, v_padrao))
+      end;
+    end;
+  end if;
+  -- FASE 6: fim
+  -- FASE 6: (P5) a pontualidade com o cliente (só medida: só a linha do foco) e a folga do aviso de atraso (spec-fase6 §6.2
+  -- e §6.3). A pontualidade lê detalhe.no_prazo e detalhe.p80_atraso_du; a folga é a faixa do aviso "com 2 dias úteis a mais"
+  -- (0 = a faixa do plano, o padrão)
+  if p_item = 'cliente_pontualidade' and p_momento like 'foco_%' then
+    if p_momento = 'foco_medindo' then
+      return format('Pontualidade: %s de %s OS com a 1ª data dita ao cliente medidas.', v_n, v_nmin);
+    end if;
+    return format('Pontualidade: %s de %s OS ficaram prontas até o dia dito primeiro ao cliente%s.',
+                  coalesce(p_d #>> '{detalhe,no_prazo}', '0'), v_n,
+                  case when coalesce((p_d #>> '{detalhe,p80_atraso_du}')::numeric, 0) > 0
+                       then '; o atraso chega a ' || public._agenda_aprendizado_valor('aviso_folga', (p_d #>> '{detalhe,p80_atraso_du}')::numeric)
+                       else '' end);
+  end if;
+  if p_item = 'aviso_folga' then
+    declare
+      v_cn numeric := coalesce((p_d ->> 'calculado')::numeric, 0);
+      -- "a faixa com 2 dias úteis a mais" / "a faixa do plano", de cada valor
+      v_fc text := case when coalesce((p_d ->> 'calculado')::numeric, 0) > 0 then format('a faixa com %s a mais', v_calc)
+                        else 'a faixa do plano' end;
+      v_fu text := case when coalesce((p_d ->> 'em_uso')::numeric, 0) > 0 then format('a faixa com %s a mais', v_uso)
+                        else 'a faixa do plano' end;
+      v_fe text := case when coalesce((p_d ->> 'efetivo')::numeric, (p_d ->> 'padrao')::numeric, 0) > 0
+                        then format('a faixa com %s a mais',
+                                    public._agenda_aprendizado_valor('aviso_folga', coalesce((p_d ->> 'efetivo')::numeric, (p_d ->> 'padrao')::numeric)))
+                        else 'a faixa do plano' end;
+      v_fv text := case when coalesce((p_d ->> 'volta')::numeric, (p_d ->> 'padrao')::numeric, 0) > 0
+                        then format('a faixa com %s a mais',
+                                    public._agenda_aprendizado_valor('aviso_folga', coalesce((p_d ->> 'volta')::numeric, (p_d ->> 'padrao')::numeric)))
+                        else 'a faixa do plano' end;
+      v_terminou text := case when coalesce((p_d ->> 'calculado')::numeric, 0) > 0
+                              then format('o serviço terminou até %s depois do fim que eu disse', v_calc)
+                              else 'o serviço terminou dentro da faixa que eu disse' end;
+    begin
+      return case p_momento
+        when 'foco_medindo' then format('Avisos de atraso: %s de %s avisos medidos; dou %s (padrão).', v_n, v_nmin, v_fe)
+        when 'foco_sombra' then format('Avisos de atraso: em %s, %s (em teste: eu daria %s).', v_n, v_terminou, v_fc)
+        when 'foco_em_uso' then format('Avisos de atraso: em %s, %s: dou %s desde %s.', v_n, v_terminou, v_fu, v_desde)
+        when 'foco_pergunta' then format('Avisos de atraso: em %s, %s, e hoje dou %s: a troca espera a sua resposta.',
+                                         v_n, v_terminou, v_fe)
+        when 'foco_travado' then format('Avisos de atraso: em %s, %s; fico com %s até %s, como você decidiu.',
+                                        v_n, v_terminou, v_fe, v_trava)
+        when 'acao' then format('Os avisos de atraso erraram para %s (%s avisos): passei a dar %s%s. *desfaz aprendizado* volta.',
+                                case when v_cn > coalesce((p_d ->> 'efetivo')::numeric, 0) then 'menos' else 'mais' end,
+                                v_n, v_fc,
+                                case when coalesce((p_d ->> 'efetivo')::numeric, 0) > 0 then format(' (era %s)', v_fe) else '' end)
+        when 'pergunta' then format('Medi os avisos de atraso: em %s, %s, e hoje eu dou %s. É uma troca grande.', v_n, v_terminou, v_fe)
+        when 'opcao1' then format('Passo a dar %s', v_fc)
+        when 'opcao2' then format('Fico com %s', v_fe)
+        when 'opcao3' then 'Volto ao padrão'
+        when 'desfeito' then format('Desfeito: volto a dar %s. Não troco de novo por %s dias, salvo se o medido mudar muito.',
+                                    v_fv, v_dias)
+        when 'fico' then format('Combinado: fico com %s. Volto a perguntar se o medido mudar muito.', v_fe)
+      end;
+    end;
+  end if;
+  -- FASE 6: fim
+  -- FASE 6: (P6) a carga de cada pessoa pelo plano cumprido (a revisão) e os gatilhos de um planejador mais forte (spec-fase6
+  -- §6.2 e §6.3). A carga lê detalhe.mostrar (o plano cumprido das semanas que o texto diz, da mais antiga para a mais nova),
+  -- detalhe.gatilho (baixo, alto ou nulo), detalhe.meta, detalhe.ppc_baixo e detalhe.ppc_alto; o planejador lê os números
+  -- da semana (os_ativas, pessoas, valem, n_valem, total, limites), as semanas seguidas e a resposta da pergunta (uma vez só)
+  if p_item = 'carga' then
+    declare
+      v_pcts  text[] := array(select public._agenda_aprendizado_valor('carga', x::numeric)
+                                from jsonb_array_elements_text(coalesce(p_d #> '{detalhe,mostrar}', '[]'::jsonb))
+                                     with ordinality t(x, o)
+                               order by o);
+      v_k     int := cardinality(array(select x from jsonb_array_elements_text(coalesce(p_d #> '{detalhe,mostrar}', '[]'::jsonb)) x));
+      v_gat   text := p_d #>> '{detalhe,gatilho}';
+      v_meta  text := public._agenda_aprendizado_valor('carga', (p_d #>> '{detalhe,meta}')::numeric);
+      v_hoje  text := coalesce(v_efet, v_padrao);
+      v_cumpr text;
+    begin
+      v_cumpr := case when v_k = 0 then 'O plano cumprido ainda não foi medido'
+                      when v_k = 1 then format('O plano foi cumprido em %s na última semana (meta %s)', v_pcts[1], v_meta)
+                      else format('O plano foi cumprido em %s nas últimas %s semanas (meta %s)', public._agenda_lista(v_pcts, null),
+                                  v_k, v_meta) end;
+      return case p_momento
+        when 'foco_medindo' then format('O plano cumprido: %s de %s semanas medidas; marco até %s da semana de cada pessoa.',
+                                        v_n, v_nmin, v_padrao)
+        when 'foco_sombra' then v_cumpr || '.'
+                                || case when (p_d ->> 'calculado')::numeric is distinct from (p_d ->> 'padrao')::numeric
+                                        then format(' Em teste: eu perguntaria se passo a marcar até %s da semana de cada pessoa (hoje %s).',
+                                                    v_calc, v_padrao)
+                                        else '' end
+        when 'foco_em_uso' then format('%s; marco até %s da semana de cada pessoa.', v_cumpr, v_uso)
+        when 'foco_pergunta' then format('%s: perguntei se passo a marcar até %s da semana de cada pessoa (hoje %s); espera a sua resposta.',
+                                         v_cumpr, v_calc, v_hoje)
+        when 'foco_travado' then format('%s; fico com %s até %s, como você decidiu.', v_cumpr, v_hoje, v_trava)
+        when 'acao' then format('Passei a marcar até %s da semana de cada pessoa (era %s), como você decidiu. *desfaz aprendizado* volta.',
+                                v_calc, v_hoje)
+        when 'pergunta' then case v_gat
+          when 'alto' then format('O plano foi cumprido acima de %s em %s semanas seguidas: posso estar marcando pouco.',
+                                  public._agenda_aprendizado_valor('carga', (p_d #>> '{detalhe,ppc_alto}')::numeric), v_k)
+          else format('O plano foi cumprido abaixo de %s em %s semanas seguidas (%s). Recomendo marcar até %s da semana de cada pessoa (hoje %s).',
+                      public._agenda_aprendizado_valor('carga', (p_d #>> '{detalhe,ppc_baixo}')::numeric), v_k,
+                      array_to_string(v_pcts, ', '), v_calc, v_hoje) end
+        when 'opcao1' then format('Passo para %s', v_calc)
+        when 'opcao2' then format('Fico com %s', v_hoje)
+        when 'opcao3' then 'Volto ao padrão'
+        when 'desfeito' then format('Desfeito: volto a marcar até %s da semana de cada pessoa. Não pergunto de novo por %s dias, salvo se o plano cumprido mudar.',
+                                    coalesce(v_volta, v_padrao), v_dias)
+        when 'fico' then format('Combinado: fico com %s. Volto a perguntar em %s dias se o plano cumprido continuar assim.', v_hoje, v_dias)
+      end;
+    end;
+  end if;
+  if p_item = 'solver' then
+    declare
+      v_valem text[] := array(select x from jsonb_array_elements_text(coalesce(p_d #> '{detalhe,valem}', '[]'::jsonb)) x);
+      v_base  text := format('Gatilhos de um planejador mais forte: %s de %s (%s OS ativas, %s pessoas)',
+                             coalesce(p_d #>> '{detalhe,n_valem}', '0'), coalesce(p_d #>> '{detalhe,total}', '0'),
+                             coalesce(p_d #>> '{detalhe,os_ativas}', '0'), coalesce(p_d #>> '{detalhe,pessoas}', '0'));
+      v_resp  text := p_d #>> '{detalhe,resposta}';
+      v_ja    boolean := coalesce((p_d #>> '{detalhe,perguntado}')::boolean, false);
+      v_lista text;
+    begin
+      v_lista := public._agenda_lista(array(
+        select 'de ' || case g
+                 when 'os_ativas' then format('%s OS ativas', p_d #>> '{detalhe,limites,os_ativas}')
+                 when 'pessoas' then format('%s pessoas', p_d #>> '{detalhe,limites,pessoas}')
+                 when 'curtas_dia' then format('%s idas curtas suas por dia útil',
+                                               public._agenda_num((p_d #>> '{detalhe,limites,curtas_dia}')::numeric, 1))
+                 when 'descarte' then format('%s%% dos planos que eu sugeri descartados',
+                                             round(100 * (p_d #>> '{detalhe,limites,descarte}')::numeric))
+               end
+          from unnest(v_valem) with ordinality u(g, o) order by o), null);
+      return case p_momento
+        when 'foco_medindo' then format('%s; medi %s de %s semanas.', v_base, v_n, v_nmin)
+        when 'foco_sombra' then v_base || '.'
+                                || case when (p_d ->> 'calculado')::numeric >= 1
+                                        then ' Em teste: eu avisaria que vale estudar um planejador mais forte.' else '' end
+        when 'foco_pergunta' then v_base || '. Perguntei se vale estudar um planejador mais forte; espera a sua resposta.'
+        when 'foco_em_uso' then v_base || case when v_resp = '1' then '. Você quis ver isso; nada muda sozinho.'
+                                               when v_resp = '2' then '. Você disse "agora não"; não pergunto de novo.'
+                                               when v_ja then '. Já perguntei uma vez; não pergunto de novo.'
+                                               else '.' end
+        when 'foco_travado' then v_base || '. Você disse "agora não"; não pergunto de novo.'
+        when 'pergunta' then format('Há %s semanas a agenda passa %s: vale estudar um planejador mais forte. Nada muda sozinho.',
+                                    coalesce(p_d #>> '{detalhe,semanas_seguidas}', v_n), v_lista)
+        when 'opcao1' then 'Quero ver isso'
+        when 'opcao2' then 'Agora não'
+        when 'opcao3' then 'Volto ao padrão'
+        when 'acao' then 'Combinado: anotei que você quer ver um planejador mais forte. Nada muda sozinho na agenda.'
+        when 'fico' then 'Combinado: agora não. Não pergunto de novo.'
+        when 'desfeito' then 'Desfeito: volto a só medir os gatilhos de um planejador mais forte.'
+      end;
+    end;
+  end if;
+  -- FASE 6: fim
+  -- O fator de campo (spec-fase6 §6.2 e §6.3).
+  -- CORREÇÃO FASE 6: (C2) texto 1: a linha do fator no cartão e no foco diz para que o fator serve — o limiar do "o que
+  -- falta?"; os dias do plano continuam os que o dono disse (a linha fica logo abaixo de "4 dias (você disse)" e fazia crer
+  -- que o plano usa 1,7 × 4) —; com o valor em uso igual ao padrão, que é o mesmo de sempre (e não "desde sex 30/10"); em
+  -- teste, com o medido igual ao padrão, sem o "hoje seria 1,5×, e vale 1,5×". Os outros momentos, como antes (abaixo).
+  if p_item = 'fator' and v_nivel is not null and p_momento = 'foco_em_uso' then
+    if (p_d ->> 'em_uso')::numeric is not distinct from (p_d ->> 'padrao')::numeric then
+      return format('%s levam até %s o combinado (%s OS): é o mesmo que eu já usava.',
+                    public._agenda_maiuscula(v_nivel), v_uso, v_n);
+    end if;
+    return format('%s levam até %s o combinado (%s OS): uso %s desde %s para perguntar o que falta (os dias do plano continuam os que você disse).',
+                  public._agenda_maiuscula(v_nivel), v_uso, v_n, v_uso, v_desde);
+  end if;
+  if p_item = 'fator' and v_nivel is not null and p_momento = 'foco_sombra'
+     and (p_d ->> 'calculado')::numeric is not distinct from (p_d ->> 'padrao')::numeric then
+    return format('Em teste: %s levam até %s o combinado (%s OS): é o mesmo que eu já uso.', v_nivel, v_calc, v_n);
+  end if;
+  -- CORREÇÃO FASE 6: fim
+  if p_item = 'fator' and v_nivel is not null then
+    return case p_momento
+      when 'foco_medindo' then format('%s: %s de %s OS medidas; para perguntar o que falta, uso %s o combinado (padrão).',
+                                      public._agenda_maiuscula(v_nivel), v_n, v_nmin, v_padrao)
+      when 'foco_sombra' then format('Em teste: %s levam até %s o combinado (%s OS); hoje seria %s, e vale %s (padrão).',
+                                     v_nivel, v_calc, v_n, v_calc, v_padrao)
+      when 'foco_em_uso' then format('%s levam até %s o combinado (%s OS): é o que uso desde %s.',
+                                     public._agenda_maiuscula(v_nivel), v_uso, v_n, v_desde)
+      when 'foco_pergunta' then format('%s levam até %s o combinado (%s OS), e hoje uso %s: a troca espera a sua resposta.',
+                                       public._agenda_maiuscula(v_nivel), v_calc, v_n, v_efet)
+      when 'foco_travado' then format('%s levam até %s o combinado (%s OS); fico com %s até %s, como você decidiu.',
+                                      public._agenda_maiuscula(v_nivel), v_calc, v_n, v_efet, v_trava)
+      when 'acao' then format('Aprendi com as OS concluídas: %s levam até %s o combinado (%s OS). Passei a usar %s no lugar de %s para perguntar o que falta. *desfaz aprendizado* volta.',
+                              v_nivel, v_calc, v_n, v_calc, v_efet)
+      when 'pergunta' then format('Medi %s: levam até %s o combinado (%s OS), e hoje eu uso %s. É uma troca grande.',
+                                  v_nivel, v_calc, v_n, v_efet)
+      when 'opcao1' then format('Passo a usar %s', v_calc)
+      when 'opcao2' then format('Fico com %s', v_efet)
+      when 'opcao3' then 'Volto ao padrão'
+      when 'desfeito' then format('Desfeito: %s voltam a %s para perguntar o que falta. Não troco de novo por %s dias, salvo se o medido mudar muito.',
+                                  v_nivel, v_volta, v_dias)
+      when 'fico' then format('Combinado: fico com %s. Volto a perguntar se o medido mudar muito.', v_efet)
+    end;
+  end if;
+
+  -- Os outros itens: um texto provisório, sem jargão; o pacote de cada item (P2 a P6) recria esta função com o texto da §6.
+  v_rotulo := case p_item
+    when 'mo' then 'O valor de mão de obra por diária'
+    when 'presenca' then 'A sua presença nas OS'
+    when 'fornecedor_atraso' then 'O atraso do fornecedor'
+    when 'fornecedor_prazo' then 'O prazo do fornecedor'
+    when 'capacidade_dono' then 'A parte da sua semana no plano'
+    when 'cliente_pontualidade' then 'A pontualidade com o cliente'
+    when 'aviso_folga' then 'A folga do aviso de atraso'
+    when 'carga' then 'A parte da semana de cada pessoa no plano'
+    when 'solver' then 'Os sinais de um planejador mais forte'
+    else 'O que eu medi' end;
+  return case p_momento
+    when 'foco_medindo' then format('%s: %s de %s medidas; vale %s (padrão).', v_rotulo, v_n, v_nmin, coalesce(v_padrao, 'o de hoje'))
+    when 'foco_sombra' then format('Em teste: %s medido é %s (%s medidas); vale %s (padrão).',
+                                   lower(left(v_rotulo, 1)) || substr(v_rotulo, 2), v_calc, v_n, coalesce(v_padrao, 'o de hoje'))
+    when 'foco_em_uso' then format('%s: uso %s, pelo medido (%s medidas), desde %s.', v_rotulo, v_uso, v_n, v_desde)
+    when 'foco_pergunta' then format('%s: o medido é %s (%s medidas), e hoje uso %s: a troca espera a sua resposta.',
+                                     v_rotulo, v_calc, v_n, coalesce(v_efet, 'o padrão'))
+    when 'foco_travado' then format('%s: o medido é %s (%s medidas); fico com %s até %s, como você decidiu.',
+                                    v_rotulo, v_calc, v_n, coalesce(v_efet, 'o padrão'), v_trava)
+    when 'acao' then format('Aprendi com o que aconteceu: %s passou a %s (era %s; %s medidas). *desfaz aprendizado* volta.',
+                            lower(left(v_rotulo, 1)) || substr(v_rotulo, 2), v_calc, coalesce(v_efet, 'o padrão'), v_n)
+    when 'pergunta' then format('Medi %s: %s (%s medidas), e hoje uso %s. É uma troca grande.',
+                                lower(left(v_rotulo, 1)) || substr(v_rotulo, 2), v_calc, v_n, coalesce(v_efet, 'o padrão'))
+    when 'opcao1' then format('Passo a usar %s', v_calc)
+    when 'opcao2' then format('Fico com %s', coalesce(v_efet, 'o de agora'))
+    when 'opcao3' then 'Volto ao padrão'
+    when 'desfeito' then format('Desfeito: %s volta a %s. Não troco de novo por %s dias, salvo se o medido mudar muito.',
+                                lower(left(v_rotulo, 1)) || substr(v_rotulo, 2), coalesce(v_volta, 'o padrão'), v_dias)
+    when 'fico' then format('Combinado: fico com %s. Volto a perguntar se o medido mudar muito.', coalesce(v_efet, 'o padrão'))
+  end;
+end;
+$function$;
+
+comment on function public._agenda_aprendizado_texto(text, text, jsonb) is
+  'Agenda de Produção (Fase 6): os textos do aprendizado ao dono, do banco — p_momento foco_<estado> (a linha do foco), acao (o que mudou sozinho), pergunta (a troca grande, sem as opções), opcao1/2/3, desfeito e fico. p_d: {chave, calculado, em_uso, efetivo (o que valia antes), padrao, volta, n, n_min, desde, travado_ate, trava_dias}. O fator tem os textos da spec-fase6 §6.2/§6.3; os outros itens, um texto provisório que o pacote de cada um recria (copiar DESTA definição). FASE 6 (P2): o R$ por diária (mo) e a presença do dono têm os textos da spec §6.2/§6.3 (a presença lê detalhe.k, as idas do dono). FASE 6 (P3): o atraso (fornecedor_atraso) e o prazo da nota (fornecedor_prazo) têm os textos da spec §6.2/§6.3 (o nome, as entregas no prazo e o "você disse" vêm do detalhe). FASE 6 (P4): a capacidade do dono (capacidade_dono) tem os textos da spec §6.2/§6.3 ("Nas últimas 8 semanas você fez 7 de cada 10 meios-dias seus marcados no plano …"; a taxa e a janela vêm do detalhe). FASE 6 (P5): a pontualidade com o cliente (cliente_pontualidade: só a linha do foco, "Pontualidade: 5 de 7 OS ficaram prontas até o dia dito primeiro ao cliente; o atraso chega a 2 dias úteis.") e a folga do aviso de atraso (aviso_folga: "a faixa com 2 dias úteis a mais"; 0 = a faixa do plano) têm os textos da spec §6.2/§6.3. FASE 6 (P6): a carga de cada pessoa pelo plano cumprido ("O plano foi cumprido em 52%, 55% e 48% nas últimas 3 semanas (meta 70%)."; a pergunta "abaixo de 60% em 3 semanas seguidas (…). Recomendo marcar até 70% …") e os gatilhos de um planejador mais forte ("Gatilhos de um planejador mais forte: 0 de 4 (9 OS ativas, 4 pessoas)."; a pergunta "Há 4 semanas a agenda passa de 25 OS ativas e de 6 pessoas: …") têm os textos da spec §6.2/§6.3. Todos os itens com o texto da spec. CORREÇÃO FASE 6 (C2, textos 1 e 5): o fator em uso diz "uso 1,7× desde … para perguntar o que falta (os dias do plano continuam os que você disse)", e "é o mesmo que eu já usava" com o valor do padrão; em teste, com o medido igual ao padrão, sem o "hoje seria X, e vale X"; a pergunta do R$ por diária diz que inclui as OS em que o dono também trabalhou. FASE 7e (P2): os textos da spec §6.2/§6.3 (com R7.3) para os 6 itens da margem. Nunca perguntam. O desfeito usa volta (um passo só) e diz que a OS marcada guarda o valor. FASE 7e (P4): folga_semana com calculado nulo: medindo com as semanas já bastando diz o que falta (as OS medidas ou a variação delas); em uso, travado e a ação dizem que ficou sem medida e que volta ao padrão aos poucos.';

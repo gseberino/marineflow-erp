@@ -2,7 +2,8 @@
 -- bancada: depende de 20261111100300
 --
 --   F0  as funções: portas, tipo
---   F1  a folga medida: os números da §8.2 (0,11), o medindo (semanas, resíduos, σ = 0: R7.4), o piso e o teto, quem conta, o passo, o freio não muda a conta, o erro
+--   F1  a folga medida: os números da §8.2 (0,11), o medindo (semanas, resíduos, σ = 0: R7.4), o piso e o teto, quem conta, o passo, o freio não muda a conta, o erro;
+--       F1v a folga em uso que fica sem medida volta ao padrão por passo, com ação e *desfaz* (conferência do P4); F1w o texto de medindo diz o que falta
 --   F2  a carga da semana: desligado, sombra, freio = carga_max; ligado 0,84 / 0,74 / 0,79 / 0,70; limites; p_teste; floor com 1 técnico (10 → 7 em 0,75 e 0,70); carga_semana só em ligado e só quando muda o teto
 --   F3  o motor e o validador na mesma carga, nos 4 pontos dos 2 ramos (com e sem sábado), semana a semana; o por pessoa não muda sem o teto da equipe
 --   F3b a frase da carga e a troca pela do dono (R7.5-14)
@@ -100,6 +101,17 @@ create function pg_temp.folga(p_uso numeric) returns void language sql as $f$
   values ('folga_semana', 'equipe', 'geral', 0.15, 8, 8, p_uso, p_uso, 'em_uso', now())
   on conflict (item, chave) do update set em_uso = excluded.em_uso, calculado = excluded.calculado, estado = 'em_uso'
 $f$;
+-- Os resíduos todos iguais (σ = 0): a razão de cada OS medida passa a ser o viés calculado da classe dela
+create function pg_temp.sigma_zero() returns void language plpgsql as $f$
+begin
+  set local session_replication_role = replica;
+  update public.agenda_medidas_os m set razao_estimativa = (select a.calculado from public.agenda_aprendizado a where a.item = 'vies' and a.chave = 'estimativa:' || m.classe_bem || ':' || m.classe_sistema)
+   where m.motivo_razao is null and m.razao_estimativa is not null;
+  set local session_replication_role = origin;
+end $f$;
+-- As ações do aprendizado da folga, e a carga de uma semana sem temporada (12/04: 0,80 + 0,15 − a folga em uso; em janeiro, o piso de 0,60 esconderia o passo)
+create function pg_temp.acoes_folga() returns int language sql stable as $f$ select count(*)::int from public.agenda_acoes where tipo = 'aprendizado' and antes ->> 'item' = 'folga_semana' $f$;
+create function pg_temp.carga_abr() returns numeric language sql stable as $f$ select (public._agenda_carga_da_semana(date '2027-04-12') ->> 'carga')::numeric $f$;
 -- A semana só com o Alex na equipe (a régua de produção: 1 técnico)
 create function pg_temp.so_alex(p_seg date) returns void language sql as $f$
   insert into public.agenda_disponibilidade (payee_id, periodo, situacao, origem, nota, criado_por)
@@ -201,6 +213,8 @@ declare
   r  jsonb;
   r2 jsonb;
   v_a public.agenda_aprendizado%rowtype;
+  v_ac public.agenda_acoes%rowtype;
+  v_c numeric;
   v_n int;
   v_err int;
 begin
@@ -370,6 +384,210 @@ begin
       select * into v_a from public.agenda_aprendizado where item = 'folga_semana' and chave = 'equipe';
       v_res := pg_temp.ok(v_res, 'F1q folga_semanas = 8 olha só as 8 semanas antes de hoje (de 09/11 a 28/12): a de 02/11 sai',
         (r ->> 'semanas')::int = 7 and not exists (select 1 from jsonb_array_elements(v_a.amostra) e where e ->> 'semana' = '2026-11-02'), v_a.amostra::text);
+      raise exception 'desfaz' using errcode = 'P0097';
+    exception when sqlstate 'P0097' then null;
+    end;
+
+    -- (correção da conferência) a folga em uso que fica sem medida volta ao padrão por passo, com ação e *desfaz*; e o texto diz o que falta
+    -- σ = 0 com a folga em uso: 0,30 → 0,25 → 0,20 → 0,15 → medindo (a carga anda junto; a ação e o texto em cada passo)
+    begin
+      update public.agenda_config set modo_folga_semana = 'ligado', gestor_so_propor = false where id;
+      perform pg_temp.folga(0.30);
+      perform pg_temp.sigma_zero();
+      v_c := pg_temp.carga_abr();
+      r := public._agenda_aprender_folga_semana(c_hoje, c_agora);
+      select * into v_a from public.agenda_aprendizado where item = 'folga_semana' and chave = 'equipe';
+      v_res := pg_temp.ok(v_res, 'F1v1 σ = 0 com a folga em uso (0,30): anda um passo para o padrão (0,25), continua em uso, sem calculado inventado e com o n de verdade',
+        v_a.estado = 'em_uso' and v_a.em_uso = 0.25 and v_a.calculado is null and v_a.n = 8 and r ->> 'calculado' is null and r ->> 'estado' = 'em_uso' and (r ->> 'em_uso')::numeric = 0.25, r::text);
+      v_res := pg_temp.ok(v_res, 'F1v2 a carga da semana muda só um passo: 0,65 → 0,70', v_c = 0.65 and pg_temp.carga_abr() = 0.70, v_c || ' -> ' || pg_temp.carga_abr());
+      select * into v_ac from public.agenda_acoes where tipo = 'aprendizado' and antes ->> 'item' = 'folga_semana' order by criada_em desc limit 1;
+      v_res := pg_temp.ok(v_res, 'F1v3 nasce 1 ação aprendizado (de 0,30 para 0,25), executada, com *desfaz* e a conta de quem a faz',
+        pg_temp.acoes_folga() = 1 and v_ac.executada and v_ac.desfazivel_ate is not null and (v_ac.antes ->> 'em_uso')::numeric = 0.30 and (v_ac.depois ->> 'em_uso')::numeric = 0.25 and (r ->> 'acao_id')::uuid = v_ac.id, row_to_json(v_ac)::text);
+      v_res := pg_temp.ok(v_res, 'F1v4 a ação diz o que mudou, sem "medi"',
+        v_ac.texto = 'Fiquei sem medida para a folga da semana (as 8 OS medidas ainda não mostraram variação). Passei a guardar 25% da semana para o serviço que passa do previsto (era 30%) e volto aos 15% de sempre aos poucos. *desfaz aprendizado* volta.', v_ac.texto);
+      v_res := pg_temp.ok(v_res, 'F1v5 a linha do foco, a caminho do padrão',
+        v_a.texto = 'Sem medida para a folga da semana (as 8 OS medidas ainda não mostraram variação): guardo 25% da semana para o serviço que passa do previsto desde qui 07/01 e volto aos 15% de sempre aos poucos.', v_a.texto);
+      r := public._agenda_aprender_folga_semana(c_hoje, c_agora + interval '1 minute');
+      v_c := pg_temp.carga_abr();
+      select * into v_a from public.agenda_aprendizado where item = 'folga_semana' and chave = 'equipe';
+      v_res := pg_temp.ok(v_res, 'F1v6 a 2ª rodada: 0,20 e a carga 0,75', v_a.em_uso = 0.20 and v_a.estado = 'em_uso' and v_c = 0.75, r::text || ' c ' || v_c);
+      r := public._agenda_aprender_folga_semana(c_hoje, c_agora + interval '2 minute');
+      v_c := pg_temp.carga_abr();
+      select * into v_a from public.agenda_aprendizado where item = 'folga_semana' and chave = 'equipe';
+      select * into v_ac from public.agenda_acoes where tipo = 'aprendizado' and antes ->> 'item' = 'folga_semana' order by criada_em desc limit 1;
+      v_res := pg_temp.ok(v_res, 'F1v7 a 3ª rodada chega ao padrão: 0,15, a carga 0,80, 3 ações, nenhum passo maior que 0,05', v_a.em_uso = 0.15 and v_a.estado = 'em_uso' and v_c = 0.80 and pg_temp.acoes_folga() = 3, r::text || ' c ' || v_c);
+      v_res := pg_temp.ok(v_res, 'F1v8 o último passo não promete voltar "aos poucos": a ação e o foco dizem que voltou',
+        v_ac.texto = 'Fiquei sem medida para a folga da semana (as 8 OS medidas ainda não mostraram variação). Voltei a guardar os 15% de sempre da semana para o serviço que passa do previsto (era 20%). *desfaz aprendizado* volta.'
+        and v_a.texto = 'Sem medida para a folga da semana (as 8 OS medidas ainda não mostraram variação): voltei a guardar os 15% de sempre da semana para o serviço que passa do previsto.', v_ac.texto || ' / ' || v_a.texto);
+      r := public._agenda_aprender_folga_semana(c_hoje, c_agora + interval '3 minute');
+      select * into v_a from public.agenda_aprendizado where item = 'folga_semana' and chave = 'equipe';
+      v_res := pg_temp.ok(v_res, 'F1v9 no padrão, a rodada seguinte cai em medindo sem mudar a carga e sem ação (efeito que não muda número não vira texto)',
+        v_a.estado = 'medindo' and v_a.em_uso is null and pg_temp.carga_abr() = 0.80 and pg_temp.acoes_folga() = 3 and v_a.texto like 'Folga da semana: as semanas já bastam%', r::text || ' ' || v_a.texto);
+      raise exception 'desfaz' using errcode = 'P0097';
+    exception when sqlstate 'P0097' then null;
+    end;
+
+    -- semanas abaixo do mínimo, com a folga em uso (uma temporada baixa): volta um passo, o n é o de verdade e o texto diz as semanas
+    begin
+      update public.agenda_config set modo_folga_semana = 'ligado', gestor_so_propor = false where id;
+      perform pg_temp.folga(0.20);
+      set local session_replication_role = replica;
+      delete from public.agenda_alocacoes where dia between date '2026-12-21' and date '2026-12-27';
+      set local session_replication_role = origin;
+      r := public._agenda_aprender_folga_semana(c_hoje, c_agora);
+      select * into v_a from public.agenda_aprendizado where item = 'folga_semana' and chave = 'equipe';
+      select * into v_ac from public.agenda_acoes where tipo = 'aprendizado' and antes ->> 'item' = 'folga_semana' order by criada_em desc limit 1;
+      v_res := pg_temp.ok(v_res, 'F1v10 com 7 semanas: de 0,20 para 0,15 (um passo), n = 7 de verdade, sem calculado',
+        v_a.em_uso = 0.15 and v_a.estado = 'em_uso' and v_a.n = 7 and v_a.calculado is null, r::text);
+      v_res := pg_temp.ok(v_res, 'F1v11 a ação diz que faltam semanas', pg_temp.acoes_folga() = 1 and v_ac.texto = 'Fiquei sem medida para a folga da semana (7 de 8 semanas com serviço marcado medidas). Voltei a guardar os 15% de sempre da semana para o serviço que passa do previsto (era 20%). *desfaz aprendizado* volta.', v_ac.texto);
+      raise exception 'desfaz' using errcode = 'P0097';
+    exception when sqlstate 'P0097' then null;
+    end;
+
+    -- resíduos abaixo do mínimo, com a folga em uso
+    begin
+      update public.agenda_config set modo_folga_semana = 'ligado', gestor_so_propor = false, fator_amostra_max = 6, folga_residuos_min = 7 where id;
+      perform pg_temp.folga(0.25);
+      r := public._agenda_aprender_folga_semana(c_hoje, c_agora);
+      select * into v_a from public.agenda_aprendizado where item = 'folga_semana' and chave = 'equipe';
+      v_res := pg_temp.ok(v_res, 'F1v12 com 6 resíduos para um mínimo de 7: de 0,25 para 0,20 e o foco diz quantas OS faltam',
+        v_a.em_uso = 0.20 and v_a.texto = 'Sem medida para a folga da semana (6 de 7 OS medidas): guardo 20% da semana para o serviço que passa do previsto desde qui 07/01 e volto aos 15% de sempre aos poucos.', v_a.texto);
+      raise exception 'desfaz' using errcode = 'P0097';
+    exception when sqlstate 'P0097' then null;
+    end;
+
+    -- o *desfaz* da volta: o dono manda; a trava segura sem medida; passada a trava, volta a andar
+    begin
+      update public.agenda_config set modo_folga_semana = 'ligado', gestor_so_propor = false where id;
+      perform pg_temp.folga(0.30);
+      perform pg_temp.sigma_zero();
+      r := public._agenda_aprender_folga_semana(c_hoje, c_agora);
+      select * into v_ac from public.agenda_acoes where tipo = 'aprendizado' and antes ->> 'item' = 'folga_semana' order by criada_em desc limit 1;
+      r2 := public._agenda_desfazer_aprendizado(v_ac.id, pg_temp.adm(), 'dono', c_hoje, c_agora + interval '10 minute');
+      select * into v_a from public.agenda_aprendizado where item = 'folga_semana' and chave = 'equipe';
+      v_res := pg_temp.ok(v_res, 'F1v13 o *desfaz* da volta devolve 0,30, trava e a carga volta a 0,65 (releitura depois da ação)',
+        (r2 ->> 'ok')::boolean and v_a.estado = 'travado' and v_a.em_uso = 0.30 and v_a.travado_ate = c_hoje + 28 and pg_temp.carga_abr() = 0.65, r2::text);
+      v_res := pg_temp.ok(v_res, 'F1v14 o foco da trava, sem número medido, diz o que falta e até quando',
+        v_a.texto = 'Sem medida para a folga da semana (as 8 OS medidas ainda não mostraram variação); fico com 30% até qui 04/02, como você decidiu.', v_a.texto);
+      r := public._agenda_aprender_folga_semana(c_hoje + 28, c_agora + interval '28 day');
+      select * into v_a from public.agenda_aprendizado where item = 'folga_semana' and chave = 'equipe';
+      v_res := pg_temp.ok(v_res, 'F1v15 no último dia da trava, sem medida, a rodada não mexe: 0,30, travado, sem ação nova, a carga igual',
+        v_a.estado = 'travado' and v_a.em_uso = 0.30 and v_a.travado_ate = c_hoje + 28 and pg_temp.acoes_folga() = 1 and pg_temp.carga_abr() = 0.65 and r ->> 'estado' = 'travado', r::text);
+      r := public._agenda_aprender_folga_semana(c_hoje + 29, c_agora + interval '29 day');
+      select * into v_a from public.agenda_aprendizado where item = 'folga_semana' and chave = 'equipe';
+      v_res := pg_temp.ok(v_res, 'F1v16 passada a trava, volta a andar um passo, com nova ação', v_a.estado = 'em_uso' and v_a.em_uso = 0.25 and pg_temp.acoes_folga() = 2 and v_a.travado_ate is null, r::text);
+      raise exception 'desfaz' using errcode = 'P0097';
+    exception when sqlstate 'P0097' then null;
+    end;
+
+    -- com o interruptor fora de ligado não há o que trazer de volta (a carga já é a de sempre)
+    begin
+      update public.agenda_config set modo_folga_semana = 'sombra', gestor_so_propor = false where id;
+      perform pg_temp.folga(0.30);
+      perform pg_temp.sigma_zero();
+      r := public._agenda_aprender_folga_semana(c_hoje, c_agora);
+      select * into v_a from public.agenda_aprendizado where item = 'folga_semana' and chave = 'equipe';
+      v_res := pg_temp.ok(v_res, 'F1v17 modo_folga_semana em sombra: medindo, em_uso nulo, nenhuma ação', v_a.estado = 'medindo' and v_a.em_uso is null and pg_temp.acoes_folga() = 0, r::text);
+      update public.agenda_config set modo_folga_semana = 'ligado', modo_aprendizado = 'sombra' where id;
+      perform pg_temp.folga(0.30);
+      r := public._agenda_aprender_folga_semana(c_hoje, c_agora);
+      select * into v_a from public.agenda_aprendizado where item = 'folga_semana' and chave = 'equipe';
+      v_res := pg_temp.ok(v_res, 'F1v18 modo_aprendizado em sombra: medindo, em_uso nulo, nenhuma ação', v_a.estado = 'medindo' and v_a.em_uso is null and pg_temp.acoes_folga() = 0, r::text);
+      raise exception 'desfaz' using errcode = 'P0097';
+    exception when sqlstate 'P0097' then null;
+    end;
+
+    -- em uso no próprio padrão: nada muda, nada é contado
+    begin
+      update public.agenda_config set modo_folga_semana = 'ligado', gestor_so_propor = false where id;
+      perform pg_temp.folga(0.15);
+      perform pg_temp.sigma_zero();
+      r := public._agenda_aprender_folga_semana(c_hoje, c_agora);
+      select * into v_a from public.agenda_aprendizado where item = 'folga_semana' and chave = 'equipe';
+      v_res := pg_temp.ok(v_res, 'F1v19 em uso no padrão (0,15): medindo, nenhuma ação', v_a.estado = 'medindo' and v_a.em_uso is null and pg_temp.acoes_folga() = 0, r::text);
+      raise exception 'desfaz' using errcode = 'P0097';
+    exception when sqlstate 'P0097' then null;
+    end;
+
+    -- abaixo do padrão, a volta sobe (o sinal do passo)
+    begin
+      update public.agenda_config set modo_folga_semana = 'ligado', gestor_so_propor = false where id;
+      perform pg_temp.folga(0.05);
+      perform pg_temp.sigma_zero();
+      r := public._agenda_aprender_folga_semana(c_hoje, c_agora);
+      select * into v_a from public.agenda_aprendizado where item = 'folga_semana' and chave = 'equipe';
+      select * into v_ac from public.agenda_acoes where tipo = 'aprendizado' and antes ->> 'item' = 'folga_semana' order by criada_em desc limit 1;
+      v_res := pg_temp.ok(v_res, 'F1v20 em uso abaixo do padrão (0,05): sobe um passo (0,10), a ação diz de quanto para quanto',
+        v_a.em_uso = 0.10 and v_a.estado = 'em_uso' and v_ac.texto = 'Fiquei sem medida para a folga da semana (as 8 OS medidas ainda não mostraram variação). Passei a guardar 10% da semana para o serviço que passa do previsto (era 5%) e volto aos 15% de sempre aos poucos. *desfaz aprendizado* volta.', v_ac.texto);
+      raise exception 'desfaz' using errcode = 'P0097';
+    exception when sqlstate 'P0097' then null;
+    end;
+
+    -- o freio não muda o que o gravador faz (modo cru, R7.6); e só a folga volta por passo
+    begin
+      update public.agenda_config set modo_folga_semana = 'ligado', gestor_so_propor = true where id;
+      perform pg_temp.folga(0.30);
+      perform pg_temp.sigma_zero();
+      r := public._agenda_aprender_folga_semana(c_hoje, c_agora);
+      select * into v_a from public.agenda_aprendizado where item = 'folga_semana' and chave = 'equipe';
+      v_res := pg_temp.ok(v_res, 'F1v21 com o freio, o gravador anda igual (modo cru) e a carga fica a de sempre (a medida não depende do freio)',
+        v_a.em_uso = 0.25 and v_a.estado = 'em_uso' and pg_temp.acoes_folga() = 1 and pg_temp.carga_abr() = (select carga_max from public.agenda_config where id), r::text);
+      update public.agenda_config set modo_tempo_compra = 'ligado', gestor_so_propor = false where id;
+      insert into public.agenda_aprendizado (item, chave, nivel, padrao, n_min, n, calculado, em_uso, estado, calculado_em)
+      values ('tempo_compra', 'todas', 'todas', 2, 3, 5, 4, 4, 'em_uso', c_agora);
+      r := public._agenda_aprendizado_gravar('tempo_compra', 'todas', 'todas', null, 5, '[]'::jsonb, 2, '{}'::jsonb, c_agora);
+      v_res := pg_temp.ok(v_res, 'F1v22 só a folga volta por passo: o tempo de compra sem medida segue o de antes (medindo, em_uso nulo; achado 162)', r ->> 'estado' = 'medindo' and r ->> 'em_uso' is null, r::text);
+      raise exception 'desfaz' using errcode = 'P0097';
+    exception when sqlstate 'P0097' then null;
+    end;
+
+    -- o caminho normal, com número medido, não muda de texto; e sem resíduo no detalhe é "nenhuma OS"
+    v_res := pg_temp.ok(v_res, 'F1w0 com calculado, a linha em uso segue a §6.2 (nada do bloco da volta)',
+      public._agenda_aprendizado_texto('folga_semana', 'foco_em_uso', '{"chave": "equipe", "n": 8, "n_min": 8, "padrao": 0.15, "carga_max": 0.8, "calculado": 0.08, "em_uso": 0.10, "efetivo": 0.15, "desde": "2027-01-07"}'::jsonb)
+        = 'Pelo quanto as OS variaram em 8 semanas, guardo 10% da semana para o serviço que passa do previsto desde qui 07/01 e chego a 8% aos poucos (era 15%).', null);
+    v_res := pg_temp.ok(v_res, 'F1w5 semanas bastando e sem resíduo no detalhe (12 de 8): "nenhuma OS medida ainda", nunca "12 de 8"',
+      public._agenda_aprendizado_texto('folga_semana', 'foco_medindo', '{"chave": "equipe", "n": 12, "n_min": 8, "padrao": 0.15, "carga_max": 0.8}'::jsonb)
+        = 'Folga da semana: as semanas já bastam (12), mas falta saber o quanto as OS variam: nenhuma OS medida ainda; guardo 20% da semana da equipe (15% para o serviço que passa do previsto e 5% para urgência e falta).', null);
+    v_res := pg_temp.ok(v_res, 'F1w6 resíduos no mínimo exato (6 de 6) já não faltam: é a variação que falta',
+      public._agenda_aprendizado_texto('folga_semana', 'foco_medindo', '{"chave": "equipe", "n": 12, "n_min": 8, "padrao": 0.15, "carga_max": 0.8, "detalhe": {"residuos": 6, "residuos_min": 6}}'::jsonb)
+        = 'Folga da semana: as semanas já bastam (12), mas falta saber o quanto as OS variam: as 6 OS medidas ainda não mostraram variação; guardo 20% da semana da equipe (15% para o serviço que passa do previsto e 5% para urgência e falta).', null);
+    -- o texto de medindo: com as semanas bastando, diz o que falta; abaixo delas, a §6.2. Do passo até a linha gravada.
+    begin
+      update public.agenda_config set folga_semanas_min = 6 where id;
+      perform pg_temp.sem_aprendizado($$item = 'vies'$$);
+      r := public._agenda_aprender_folga_semana(c_hoje, c_agora);
+      select * into v_a from public.agenda_aprendizado where item = 'folga_semana' and chave = 'equipe';
+      v_res := pg_temp.ok(v_res, 'F1w1 semanas além do mínimo (8 para 6) e 0 resíduos: reprova o "8 de 6" e diz que nenhuma OS foi medida',
+        v_a.n = 8 and v_a.n_min = 6 and v_a.estado = 'medindo' and v_a.texto = 'Folga da semana: as semanas já bastam (8), mas falta saber o quanto as OS variam: nenhuma OS medida ainda; guardo 20% da semana da equipe (15% para o serviço que passa do previsto e 5% para urgência e falta).', v_a.texto);
+      raise exception 'desfaz' using errcode = 'P0097';
+    exception when sqlstate 'P0097' then null;
+    end;
+    begin
+      update public.agenda_config set folga_semanas_min = 6, fator_amostra_max = 6, folga_residuos_min = 7 where id;
+      r := public._agenda_aprender_folga_semana(c_hoje, c_agora);
+      select * into v_a from public.agenda_aprendizado where item = 'folga_semana' and chave = 'equipe';
+      v_res := pg_temp.ok(v_res, 'F1w2 resíduos abaixo do mínimo: diz quantos de quantos, nunca "8 de 6 semanas"',
+        v_a.estado = 'medindo' and v_a.texto = 'Folga da semana: as semanas já bastam (8), mas falta saber o quanto as OS variam: 6 de 7 OS medidas; guardo 20% da semana da equipe (15% para o serviço que passa do previsto e 5% para urgência e falta).', v_a.texto);
+      raise exception 'desfaz' using errcode = 'P0097';
+    exception when sqlstate 'P0097' then null;
+    end;
+    begin
+      perform pg_temp.sigma_zero();
+      r := public._agenda_aprender_folga_semana(c_hoje, c_agora);
+      select * into v_a from public.agenda_aprendizado where item = 'folga_semana' and chave = 'equipe';
+      v_res := pg_temp.ok(v_res, 'F1w3 σ = 0 com 8 semanas para 8 (no mínimo exato já bastam): diz que as OS ainda não variaram',
+        v_a.n = 8 and v_a.n_min = 8 and v_a.estado = 'medindo' and v_a.texto = 'Folga da semana: as semanas já bastam (8), mas falta saber o quanto as OS variam: as 8 OS medidas ainda não mostraram variação; guardo 20% da semana da equipe (15% para o serviço que passa do previsto e 5% para urgência e falta).', v_a.texto);
+      raise exception 'desfaz' using errcode = 'P0097';
+    exception when sqlstate 'P0097' then null;
+    end;
+    begin
+      set local session_replication_role = replica;
+      delete from public.agenda_alocacoes where dia between date '2026-12-21' and date '2026-12-27';
+      set local session_replication_role = origin;
+      r := public._agenda_aprender_folga_semana(c_hoje, c_agora);
+      select * into v_a from public.agenda_aprendizado where item = 'folga_semana' and chave = 'equipe';
+      v_res := pg_temp.ok(v_res, 'F1w4 abaixo do mínimo de semanas, o texto da §6.2',
+        v_a.estado = 'medindo' and v_a.texto = 'Folga da semana: 7 de 8 semanas com serviço marcado medidas; guardo 20% da semana da equipe (15% para o serviço que passa do previsto e 5% para urgência e falta).', v_a.texto);
       raise exception 'desfaz' using errcode = 'P0097';
     exception when sqlstate 'P0097' then null;
     end;
@@ -916,6 +1134,7 @@ declare
   v_m text := coalesce(current_setting('agenda_teste.mig_folga_fase7e', true), '');
   v_7d text := coalesce(current_setting('agenda_teste.mig_motor_fase7d', true), '');
   v_7dc text := coalesce(current_setting('agenda_teste.mig_correcao_fase7d', true), '');
+  v_7e2 text := coalesce(current_setting('agenda_teste.mig_medicao_fase7e', true), '');
   n text;
 begin
   if v_m = '' then
@@ -927,6 +1146,9 @@ begin
     v_res := pg_temp.ok(v_res, 'F6b ' || n || ': tem bloco do P4', pg_temp.inteira(v_m, n) ~ '\(7e P4', null);
   end loop;
   v_res := pg_temp.ok(v_res, 'F6c agenda_propor: tirados os blocos do P4, o corpo é o da correção da 7d (20261107100800)', pg_temp.sem_p4(pg_temp.inteira(v_m, 'agenda_propor')) = pg_temp.inteira(v_7dc, 'agenda_propor'), null);
+  foreach n in array array['_agenda_aprendizado_gravar', '_agenda_aprendizado_texto'] loop
+    v_res := pg_temp.ok(v_res, 'F6f ' || n || ': tirados os blocos do P4, o corpo é o do P2 (20261111100100), e tem bloco do P4', v_7e2 <> '' and pg_temp.sem_p4(pg_temp.inteira(v_m, n)) = pg_temp.inteira(v_7e2, n) and pg_temp.inteira(v_m, n) ~ '\(7e P4', null);
+  end loop;
   v_res := pg_temp.ok(v_res, 'F6d a migration não recria o que R7.1 e R7.13 tiram daqui (_agenda_gestor_puxar é do P4b; _agenda_aprendido, _agenda_encaixar, _agenda_tentar_bloco, agenda_vigiar, agenda_cliente_vigiar, agenda_capacidade_semanal)',
     v_m !~ 'create or replace function public\.(_agenda_gestor_puxar|_agenda_aprendido|_agenda_encaixar|_agenda_tentar_bloco|agenda_vigiar|agenda_cliente_vigiar|agenda_gestor_rodar|agenda_capacidade_semanal)\(', null);
   v_res := pg_temp.ok(v_res, 'F6e sem urgente_teste (R7.13)', v_m !~ 'urgente_teste', null);

@@ -3914,5 +3914,13 @@ porque só o dono pode preenchê-las.
 - **Encontrado em:** Agenda de Produção, Fase 7e, P4 (09/11/2026), lendo `agenda_aplicar` → `agenda_validar` → `_agenda_validar_itens`. Não rodado.
 - **Onde:** a regra 6 lê `_agenda_carga_da_semana` na hora de aplicar. O passo da rodada (P7) pode mudar `folga_semana` em `em_uso` entre o motor e a aprovação.
 - **Efeito:** só em ligado: uma proposta montada com a carga da semana em 75% e aprovada depois que ela caiu para 70% volta com "Não mudei nada: A equipe passaria do limite da semana…". É a mesma saída de quando o dono muda `carga_max` ou a agenda anda (o motor refaz a proposta); nada grava errado.
-- **Na Fase 7e:** registrado, sem mudança: a folga anda no máximo 0,05 por rodada e a proposta tem validade curta.
+- **Na Fase 7e:** registrado, sem mudança: a folga em uso anda no máximo `folga_semana_troca_max` (0,05) por rodada, também quando fica sem medida (σ = 0, semanas ou resíduos abaixo do mínimo: volta ao padrão por passo, com ação e *desfaz*, e a carga anda junto; medido em F1v e no replay real, depois da correção da conferência do P4). A exceção é o dono desligar `modo_folga_semana` ou `modo_aprendizado`: aí a carga volta de uma vez à de sempre, porque ele pediu. A proposta tem validade curta.
 - **Origem:** Fase 7e, P4.
+
+### [NOVO-agenda-162] Os outros itens da margem ainda caem de uma vez quando ficam sem medida
+
+- **Encontrado em:** Agenda de Produção, Fase 7e, P4 (09/11/2026), na correção da conferência que trouxe a folga da semana de volta por passo.
+- **Onde:** `_agenda_aprendizado_gravar`: fora de `folga_semana`, item da margem em uso que recebe calculado nulo ou n abaixo do mínimo vai a `medindo`, e o CHECK `aprendizado_em_uso_coerente` zera `em_uso`. Sem ação, sem *desfaz*, sem passo.
+- **Efeito:** só em ligado. Medido no `tempo_compra` (F1v22 de `agenda_fase7e_folga.sql`: em_uso 4, calculado nulo: medindo, em_uso nulo). Pelo mesmo caminho do gravador, por leitura e não rodado: `vies`. O `vies` só mexe em OS ainda não marcada e o `tempo_compra` no "compre até" das seguintes; a folga mexia na carga de todas as semanas, e por isso entrou primeiro.
+- **Na Fase 7e:** não corrigido: os textos de ação desses itens afirmam medida ("Aprendi com as OS concluídas"), e a volta por passo pede frase própria de cada um. A saída menor é a mesma do bloco da folga no gravador, item a item, se o dono ligar esses modos.
+- **Origem:** Fase 7e, P4 (correção da conferência).
