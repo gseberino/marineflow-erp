@@ -32,7 +32,10 @@
 --      com NOT NULL/DEFAULT, o agenda_medir_os de hoje, que o P1 não recria, daria erro no "insert ... select (m).*" (NULL explícito) e, no update, to_jsonb(m) difere de
 --      to_jsonb(m0) e a medida anda de versão a cada rodada (R7.5-1; provado no replay real: agenda_aprender 0 → 1 erro, 1 → 21 medidas). O P2 põe o DEFAULT e o NOT NULL na migration
 --      que recria agenda_medir_os, depois de encher as linhas.
---   4. agenda_medidas_compra (nova): 1 linha por linha de material crítica que precisou de compra. Nunca se apaga; só muda inteira (versão + 1 e histórico).
+--   4. agenda_medidas_compra (nova): 1 linha por linha de material crítica que precisou de compra. Não se apaga direto; só muda inteira (versão + 1 e histórico). DESVIO DA §4.3, achado na conferência: a medida
+--      nasce com a OS ainda aberta, e o gatilho sem exceção travava exclusões normais de fora da agenda (tirar peça, serviço ou item de OC, apagar OS: a cascata de os_material; apagar fornecedor: o ON DELETE
+--      SET NULL dispara o BEFORE UPDATE). Agora a cascata passa (WHEN pg_trigger_depth() = 0 no gatilho de apagar: a linha de material deixou de existir, a medida vai junto) e o SET NULL do fornecedor também
+--      (só ele: depth > 1, fornecedor_id de valor a nulo, o resto igual). Apagar direto e nulo direto seguem recusados.
 --   5. agenda_aprendizado.item ganha vies, promessa, folga_semana, tempo_compra, folga_compra e prazo_sem_fornecedor, pelo ampliador da 7a.
 --   6. Funções novas: _agenda_margem_modo (o modo EFETIVO, com o freio: ligado + freio = sombra; promessa = sombra sempre, AG7-32), _agenda_margem_modo_cru (o
 --      modo cru, para o gravador e a saúde: R7.6), _agenda_credibilidade, _agenda_z, _agenda_temporada e o gatilho _agenda_medidas_compra_so_muda. Nada de antes
@@ -383,7 +386,7 @@ create index if not exists agenda_medidas_compra_os   on public.agenda_medidas_c
 create index if not exists agenda_medidas_compra_forn on public.agenda_medidas_compra(fornecedor_id) where valida_prazo;
 
 comment on table public.agenda_medidas_compra is
-  'Agenda de Produção (Fase 7e): uma linha por linha de material crítica que precisou de compra: quando a OS foi aprovada, quando a linha precisou, o que valeu na marcação, a compra, a chegada e o que deu para medir. NUNCA apagada; só muda inteira (versão + 1, com o histórico). Escrita só pelas funções da medição (P2).';
+  'Agenda de Produção (Fase 7e): uma linha por linha de material crítica que precisou de compra: quando a OS foi aprovada, quando a linha precisou, o que valeu na marcação, a compra, a chegada e o que deu para medir. Não se apaga direto: sai só com a linha de material, em cascata. Só muda inteira (versão + 1, com o histórico), fora o SET NULL do fornecedor apagado. Escrita só pelas funções da medição (P2).';
 comment on column public.agenda_medidas_compra.sem_fornecedor is 'Agenda de Produção (Fase 7e, AG7-06): o prazo contado foi o padrão da empresa (prazo_sem_fornecedor_du).';
 comment on column public.agenda_medidas_compra.entrega is 'nota:<id>, oc:<id> ou linha:<id> (o molde da Fase 6).';
 comment on column public.agenda_medidas_compra.aprovada_em is 'A aprovação da OS (a mesma de os_prontidao: converted_to_os_at, signed_at, created_at).';
@@ -423,6 +426,11 @@ begin
   if new.os_material_id is distinct from old.os_material_id or new.service_order_id is distinct from old.service_order_id then
     raise exception 'A medida da compra é da linha: a linha e a OS não mudam.';
   end if;
+  -- O fornecedor apagado (ON DELETE SET NULL): a FK escreve de dentro do gatilho dela (depth > 1) e só tira fornecedor_id. Só esse caminho passa sem versão: o nulo escrito direto, ou junto com outra coluna, continua recusado.
+  if pg_trigger_depth() > 1 and new.fornecedor_id is null and old.fornecedor_id is not null
+     and (to_jsonb(new) - 'fornecedor_id') = (to_jsonb(old) - 'fornecedor_id') then
+    return new;
+  end if;
   if new.versao is distinct from old.versao + 1
      or jsonb_array_length(new.historico) = 0
      or new.historico = old.historico then
@@ -433,11 +441,11 @@ end;
 $function$;
 
 comment on function public._agenda_medidas_compra_so_muda() is
-  'Agenda de Produção (Fase 7e, P1): gatilho BEFORE UPDATE de agenda_medidas_compra — a linha e a OS não mudam; toda mudança leva versao + 1 e uma entrada nova no histórico (agenda_medir_compra).';
+  'Agenda de Produção (Fase 7e, P1): gatilho BEFORE UPDATE de agenda_medidas_compra — a linha e a OS não mudam; toda mudança leva versao + 1 e uma entrada nova no histórico (agenda_medir_compra). A única exceção é o ON DELETE SET NULL do fornecedor apagado: fornecedor_id de valor a nulo, de dentro do gatilho da FK, com o resto igual.';
 
 drop trigger if exists agenda_medidas_compra_nao_apaga on public.agenda_medidas_compra;
 create trigger agenda_medidas_compra_nao_apaga before delete on public.agenda_medidas_compra
-  for each row execute function public._agenda_registro_nao_apaga();
+  for each row when (pg_trigger_depth() = 0) execute function public._agenda_registro_nao_apaga();
 drop trigger if exists agenda_medidas_compra_so_muda on public.agenda_medidas_compra;
 create trigger agenda_medidas_compra_so_muda before update on public.agenda_medidas_compra
   for each row execute function public._agenda_medidas_compra_so_muda();

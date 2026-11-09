@@ -11,7 +11,7 @@
 --   B3  RLS e privilégios: agenda_medidas_compra (anon nada, técnico vazia, admin lê); as funções novas sem porta para anon e public; o gatilho sem porta; authenticated chama o
 --       modo (o leitor invoker)
 --   B4  as listas: agenda_aprendizado.item com as 6 novas depois das 10 de antes; rotina, tipo das perguntas e tipo das ações sem nada novo
---   B5  agenda_medidas_compra: não se apaga, só muda inteira, os CHECKs e o que nasce vazio
+--   B5  agenda_medidas_compra: não se apaga direto, só muda inteira, os CHECKs e o que nasce vazio; as exclusões de fora da agenda passam (peça, serviço, item de OC, OS, fornecedor)
 --   B6  _agenda_z, _agenda_credibilidade (com o nulo) e _agenda_temporada (mês da quinta, barco só em temporada_meses)
 --   B7  a matriz: _agenda_margem_modo e _agenda_margem_modo_cru, item × modo × freio (R7.6); promessa = sombra sempre; prazo_sem_fornecedor = medida; outro nome = nulo;
 --       cada item lê o interruptor dele
@@ -572,6 +572,120 @@ begin
 end
 $b5$;
 
+-- O que vem de fora da agenda (desvio da §4.3): a medida nasce com a OS ainda aberta, então tirar peça, serviço ou item de OC, apagar a OS ou o fornecedor não podem ser recusados por ela. Cada linha com a sua origem
+-- real; o resultado da exclusão fica nesta transação (não é o recusa, que desfaz). Dentro de um gatilho (_dispara, depth 1 + o da medida, 2) se prova que só a escrita da FK passa, e não qualquer coisa nessa profundidade.
+create temp table _dispara (cmd text) on commit drop;
+create function pg_temp.dispara_tg() returns trigger language plpgsql as $f$ begin execute new.cmd; return new; end $f$;
+create trigger _dispara_tg before insert on _dispara for each row execute function pg_temp.dispara_tg();
+-- executa e diz 'ok' (a mudança fica) ou o erro (a subtransação desfaz)
+create function pg_temp.faz(p_sql text) returns text language plpgsql as $f$
+begin
+  execute p_sql;
+  return 'ok';
+exception when others then
+  return 'erro ' || sqlstate || ': ' || sqlerrm;
+end $f$;
+
+do $b5c$
+declare
+  v_res   jsonb := '[]'::jsonb;
+  v_cli   uuid;
+  v_bem   uuid;
+  v_prod  uuid;
+  v_os    uuid;
+  v_os2   uuid;
+  v_part  uuid;
+  v_serv  uuid;
+  v_oc    uuid;
+  v_item  uuid;
+  v_forn  uuid;
+  v_forn2 uuid;
+  v_m_p   uuid;
+  v_m_s   uuid;
+  v_m_i   uuid;
+  v_m_o   uuid;
+  v_m_f   uuid;
+  v_m_d   uuid;
+  v_m_n   uuid;
+  v       text;
+  v_antes jsonb;
+  v_dep   jsonb;
+  c_msg   constant text := 'erro P0001: A medida da compra só muda inteira: versão + 1 e o que mudou no histórico.';
+begin
+  select so.client_id, so.vessel_id into v_cli, v_bem from public.service_orders so where so.vessel_id is not null order by so.created_at limit 1;
+  select p.id into v_prod from public.products p order by p.id limit 1;
+  if v_cli is null or v_prod is null then
+    perform pg_temp.gravar(pg_temp.ok('[]', 'B5n as exclusões de fora da agenda', true, 'PULADO: sem OS ou produto no estado'));
+    return;
+  end if;
+  insert into public.service_orders (service_order_number, client_id, vessel_id, status, quote_status, service_type) values ('OS-B5C-1', v_cli, v_bem, 'open', 'approved', 'repair') returning id into v_os;
+  insert into public.service_orders (service_order_number, client_id, vessel_id, status, quote_status, service_type) values ('OS-B5C-2', v_cli, v_bem, 'open', 'approved', 'repair') returning id into v_os2;
+  insert into public.service_order_parts (service_order_id, product_id, quantity, unit_cost_snapshot, unit_sale_snapshot, line_total_cost, line_total_sale)
+  values (v_os, v_prod, 1, 10, 20, 10, 20) returning id into v_part;
+  insert into public.service_order_services (service_order_id, service_id, name_snapshot, billing_unit_snapshot, quantity, unit_price_snapshot) values (v_os, null, 'Serviço do B5', 'unit', 1, 10) returning id into v_serv;
+  insert into public.purchase_orders (po_number, status, service_order_id) values ('OC-B5C', 'draft', v_os) returning id into v_oc;
+  insert into public.purchase_order_items (purchase_order_id, description, quantity) values (v_oc, 'Item do B5', 1) returning id into v_item;
+  insert into public.suppliers (name) values ('Fornecedor do B5 a') returning id into v_forn;
+  insert into public.suppliers (name) values ('Fornecedor do B5 b') returning id into v_forn2;
+  -- as 3 de origem real (se um gatilho de antes já criou a linha, é ela) e as de origem dono: a da OS que sai, a do fornecedor, a do nulo direto
+  select m.id into v_m_p from public.os_material m where m.service_order_part_id = v_part;
+  if v_m_p is null then
+    insert into public.os_material (service_order_id, origem, service_order_part_id, descricao, quantidade_necessaria) values (v_os, 'peca', v_part, 'Peça do B5', 1) returning id into v_m_p;
+  end if;
+  select m.id into v_m_s from public.os_material m where m.service_order_service_id = v_serv;
+  if v_m_s is null then
+    insert into public.os_material (service_order_id, origem, service_order_service_id, descricao, quantidade_necessaria) values (v_os, 'texto_livre', v_serv, 'Serviço do B5', 1) returning id into v_m_s;
+  end if;
+  select m.id into v_m_i from public.os_material m where m.purchase_order_item_id = v_item;
+  if v_m_i is null then
+    insert into public.os_material (service_order_id, origem, purchase_order_item_id, descricao, quantidade_necessaria) values (v_os, 'oc', v_item, 'Item do B5', 1) returning id into v_m_i;
+  end if;
+  insert into public.os_material (service_order_id, origem, descricao, quantidade_necessaria) values (v_os2, 'dono', 'Linha da OS que sai', 1) returning id into v_m_o;
+  insert into public.os_material (service_order_id, origem, descricao, quantidade_necessaria) values (v_os, 'dono', 'Linha do fornecedor', 1) returning id into v_m_f;
+  insert into public.os_material (service_order_id, origem, descricao, quantidade_necessaria) values (v_os, 'dono', 'Linha do nulo direto', 1) returning id into v_m_d;
+  insert into public.os_material (service_order_id, origem, descricao, quantidade_necessaria) values (v_os, 'dono', 'Linha sem fornecedor', 1) returning id into v_m_n;
+  insert into public.agenda_medidas_compra (os_material_id, service_order_id, fornecedor_id, sem_fornecedor, entrega, aprovada_em, precisou_em, valida_tempo, valida_prazo, valida_folga, medida_em)
+  select x.id, x.os, x.f, x.f is null, 'linha:b5', date '2026-11-01', date '2026-11-01', false, false, false, now()
+    from (values (v_m_p, v_os, null::uuid), (v_m_s, v_os, null), (v_m_i, v_os, null), (v_m_o, v_os2, null), (v_m_f, v_os, v_forn), (v_m_d, v_os, v_forn2), (v_m_n, v_os, null)) as x(id, os, f);
+
+  v := pg_temp.faz(format('delete from public.service_order_parts where id = %L', v_part));
+  v_res := pg_temp.ok(v_res, 'B5n tirar a peça da OS: passa, e a linha de material e a medida saem junto (a cascata)', v = 'ok'
+    and not exists (select 1 from public.os_material m where m.id = v_m_p) and not exists (select 1 from public.agenda_medidas_compra c where c.os_material_id = v_m_p), v);
+  v := pg_temp.faz(format('delete from public.service_order_services where id = %L', v_serv));
+  v_res := pg_temp.ok(v_res, 'B5o tirar o serviço da OS: passa, e a medida sai junto', v = 'ok'
+    and not exists (select 1 from public.agenda_medidas_compra c where c.os_material_id = v_m_s), v);
+  v := pg_temp.faz(format('delete from public.purchase_order_items where id = %L', v_item));
+  v_res := pg_temp.ok(v_res, 'B5p tirar o item da OC: passa, e a medida sai junto', v = 'ok'
+    and not exists (select 1 from public.agenda_medidas_compra c where c.os_material_id = v_m_i), v);
+  v := pg_temp.faz(format('delete from public.service_orders where id = %L', v_os2));
+  v_res := pg_temp.ok(v_res, 'B5q apagar a OS: passa, e a medida sai junto', v = 'ok'
+    and not exists (select 1 from public.agenda_medidas_compra c where c.os_material_id = v_m_o), v);
+
+  v_antes := (select to_jsonb(c) from public.agenda_medidas_compra c where c.os_material_id = v_m_f);
+  v := pg_temp.faz(format('delete from public.suppliers where id = %L', v_forn));
+  v_dep := (select to_jsonb(c) from public.agenda_medidas_compra c where c.os_material_id = v_m_f);
+  v_res := pg_temp.ok(v_res, 'B5r apagar o fornecedor: passa; fornecedor_id fica nulo, com a mesma versão e o mesmo histórico, e nada mais muda', v = 'ok'
+    and v_dep is not null and v_dep ->> 'fornecedor_id' is null and v_antes ->> 'fornecedor_id' is not null
+    and (v_dep - 'fornecedor_id') = (v_antes - 'fornecedor_id'), coalesce(v, '') || ' / ' || coalesce(v_dep::text, 'sem linha'));
+
+  -- continua recusado: o apagar direto (a medida que tem linha de material) e o nulo direto
+  v := pg_temp.recusa(format('delete from public.agenda_medidas_compra where os_material_id = %L', v_m_d));
+  v_res := pg_temp.ok(v_res, 'B5s apagar a medida direto, com a linha de material de pé: recusado', v = 'erro P0001: O registro da agenda não se apaga.', v);
+  v := pg_temp.recusa(format('update public.agenda_medidas_compra set fornecedor_id = null where os_material_id = %L', v_m_d));
+  v_res := pg_temp.ok(v_res, 'B5t fornecedor_id = null direto: recusado (só a FK passa)', v = c_msg, v);
+  -- de dentro de um gatilho (depth 2, a mesma da FK), só o caminho exato passa: cada condição do guarda tem o seu caso
+  v := pg_temp.recusa(format('insert into _dispara values (%L)', format('update public.agenda_medidas_compra set fornecedor_id = %L where os_material_id = %L', v_forn2, v_m_n)));
+  v_res := pg_temp.ok(v_res, 'B5u dentro de um gatilho, pôr um fornecedor (de nulo a valor): recusado', v = c_msg, v);
+  v := pg_temp.recusa(format('insert into _dispara values (%L)', format('update public.agenda_medidas_compra set fornecedor_id = null, motivo = ''sem_compra'' where os_material_id = %L', v_m_d)));
+  v_res := pg_temp.ok(v_res, 'B5v dentro de um gatilho, o nulo junto com outra coluna: recusado', v = c_msg, v);
+  v := pg_temp.recusa(format('insert into _dispara values (%L)', format('update public.agenda_medidas_compra set fornecedor_id = null where os_material_id = %L', v_m_n)));
+  v_res := pg_temp.ok(v_res, 'B5w dentro de um gatilho, fornecedor que já era nulo (sem mudança nenhuma): recusado', v = c_msg, v);
+  v := pg_temp.recusa(format('insert into _dispara values (%L)', format('update public.agenda_medidas_compra set fornecedor_id = %L where os_material_id = %L', v_forn, v_m_d)));
+  v_res := pg_temp.ok(v_res, 'B5x dentro de um gatilho, trocar por outro fornecedor: recusado', v = c_msg, v);
+  perform pg_temp.gravar(v_res);
+end
+$b5c$;
+
 -- ── B6. As contas pequenas ───────────────────────────────────────────────────────────────────────────
 do $b6$
 declare
@@ -825,10 +939,6 @@ begin
     perform pg_temp.gravar(pg_temp.ok('[]', 'B9a a fixture', true, 'PULADO: sem agenda_teste.fase7e (rode pela bancada)'));
     return;
   end if;
-  -- As fixtures anteriores tiram o mundo de 23/10 (delete em os_material em cascata): a linha de teste do B3 e do B5 sairia pelo gatilho que não apaga, que aqui é só a fixture cumprindo o papel dela.
-  perform set_config('session_replication_role', 'replica', true);
-  delete from public.agenda_medidas_compra;
-  perform set_config('session_replication_role', 'origin', true);
   execute current_setting('agenda_teste.fase7e');
   v_n := (select count(*) from public.service_orders);
   v_res := pg_temp.ok(v_res, 'B9a a OS-E0 e as suas 3 linhas de material', (select count(*) = 3 from public.os_material m where m.service_order_id = 'e7e00000-0000-4000-8000-000000000e00'), null);
