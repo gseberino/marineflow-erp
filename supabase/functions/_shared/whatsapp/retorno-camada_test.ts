@@ -8,6 +8,7 @@ import {
   type DependenciasDaCamada,
   DITADO_LONGO,
   ehPalavraDoRetornoLigada,
+  PIN_NAO_VALE,
   ponteiroDoCartao,
   R13,
   r14,
@@ -184,4 +185,44 @@ Deno.test("ehPalavraDoRetornoLigada: a de cartão só com cartão vivo; erro = f
   assertEquals(await ehPalavraDoRetornoLigada(banco(null, { code: "PGRST202" }), "retorno"), false);
   assertEquals(await ehPalavraDoRetornoLigada(banco(null), "bom dia"), false);
   assertEquals(await ehPalavraDoRetornoLigada({ rpc: () => Promise.reject(new Error("x")) }, "retorno"), false);
+});
+
+
+// Revisão da F3: a letra que troca a proposta ou a unidade mostra linhas novas. O PIN na mesma mensagem não vale sobre o que o dono não leu.
+Deno.test("1 B sim <PIN> não confirma: devolve as linhas novas e pede o PIN sozinho, sem levar o PIN a lugar nenhum", async () => {
+  const linhas = "1. Ana · proposta com base no ORÇ-00071 · R$ 1.800";
+  const { d, reg } = deps({ resposta: { ok: true, pin_nao_vale: true, texto: linhas } });
+  const r = await camadaDoRetorno("1 B sim 7391", d);
+  assertEquals(reg.confirmados, []);
+  assertEquals(r?.jaEnviado, undefined);
+  assertEquals(r?.texto, `${linhas}\n${PIN_NAO_VALE}`);
+  assert(!JSON.stringify(r).includes("7391"));
+  assert(!JSON.stringify(reg.rpcs).includes("7391"));
+});
+
+Deno.test("1 C sim <PIN> (letra de unidade) e 1 B que não trocou nada: o PIN também não vale", async () => {
+  for (const [texto, resposta] of [
+    ["3 C sim 7391", { ok: true, pin_nao_vale: true, texto: "3. Ana · Brisa · R$ 500" }],
+    ["1 B sim 7391", { ok: true, pin_nao_vale: true, texto: "Não consegui usar esse orçamento: nada mudou." }],
+  ] as Array<[string, Record<string, unknown>]>) {
+    const { d, reg } = deps({ resposta });
+    const r = await camadaDoRetorno(texto, d);
+    assertEquals(reg.confirmados, [], texto);
+    assert(r?.texto.startsWith(String(resposta.texto)), texto);
+    assert(r?.texto.endsWith(PIN_NAO_VALE), texto);
+  }
+});
+
+Deno.test("sem PIN, a marca não muda nada: o dono só vê as linhas", async () => {
+  const { d, reg } = deps({ resposta: { ok: true, pin_nao_vale: true, texto: "as linhas" } });
+  assertEquals((await camadaDoRetorno("1 B", d))?.texto, "as linhas");
+  assertEquals(reg.confirmados, []);
+});
+
+Deno.test("letra de texto fixo, como 1 L sim <PIN>, segue confirmando", async () => {
+  const cartao: CartaoVivo = { ...CARTAO, letras: { "1": ["L"] } };
+  const { d, reg } = deps({ cartao, resposta: { ok: true, precisa_pin: true, texto: "Vou mandar" } });
+  const r = await camadaDoRetorno("1 L sim 7391", d);
+  assertEquals(reg.confirmados, ["7391"]);
+  assertEquals(r?.jaEnviado, true);
 });

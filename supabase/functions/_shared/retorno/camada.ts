@@ -50,6 +50,7 @@ export const R13 = "Esse cartão já não existe, e nada foi feito. Mande *retor
 export const R15 = "Não consegui agora; tente de novo em instantes.";
 export const SO_CONSULTA = "Esta lista é só para consulta. Mande *retorno* quando o pedido aberto terminar.";
 export const DITADO_LONGO = "Ditado longo demais: até 1.000 caracteres.";
+export const PIN_NAO_VALE = "O PIN não vale junto com esta letra, e nada foi criado nem enviado. Confira e mande *sim <PIN>* sozinho.";
 export const TEXTO_MAX_DITADO = 1000;
 
 export function r14(n: number, letra: string): string {
@@ -135,6 +136,7 @@ export async function camadaDoRetorno(texto: string, deps: DependenciasDaCamada)
     cartao_id?: string | null;
     seguir_ao_modelo?: boolean;
     precisa_pin?: boolean;
+    pin_nao_vale?: boolean;
     motivo?: string;
   };
   if (r.seguir_ao_modelo || r.motivo === "nao_e_o_dono") return null;
@@ -146,6 +148,10 @@ export async function camadaDoRetorno(texto: string, deps: DependenciasDaCamada)
     noHistorico: r.historico ?? null,
     ...(r.cartao_id ? { cartaoId: r.cartao_id } : {}),
   };
+
+  // F3: a letra que troca a proposta, a unidade ou o cliente põe no item linhas que o dono ainda não leu. O PIN junto não vale
+  // sobre elas: nada de confirmar, nenhuma tentativa gasta, e o PIN não vai ao modelo porque a camada responde aqui.
+  if (pin && r.pin_nao_vale) return { ...saida, texto: `${saida.texto}\n${PIN_NAO_VALE}` };
 
   // Com o ponteiro em outra pendência, o *sim <PIN>* seguinte aprovaria o pedido errado: nada de confirmar, nenhuma
   // tentativa gasta, e a seleção fica.
