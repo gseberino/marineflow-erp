@@ -133,10 +133,10 @@ select 'B1a agenda_config: modo_aprendizado nasce desligado na linha e o DEFAULT
        and (select array_agg(e ->> 0 order by o) from jsonb_array_elements(c.classe_bens) with ordinality t(e, o)) = '{rv,barco}'
        and (select array_agg(e ->> 0 order by o) from jsonb_array_elements(c.classe_sistemas) with ordinality t(e, o))
            = '{diagnostico,energia,motor,conectividade,conforto}'
-       -- o 1,5 de antes não muda: estouro_fator (o que o fator aprendido substitui) e fator_promessa (sem leitor)
+       -- o 1,5 de antes não muda: estouro_fator (o que o fator aprendido substitui) e fator_promessa (o P5 da 7e deu leitor a ele e trocou o comentário; o achado 43 acaba lá)
        and c.estouro_fator = 1.50 and c.fator_promessa = 1.50
        and (select col_description('public.agenda_config'::regclass, a.attnum) from pg_attribute a
-             where a.attrelid = 'public.agenda_config'::regclass and a.attname = 'fator_promessa') like '%SEM LEITOR (NOVO-agenda-43)%',
+             where a.attrelid = 'public.agenda_config'::regclass and a.attname = 'fator_promessa') like '%ponto de partida do prazo real%',
        (to_jsonb(c) - 'classe_bens' - 'classe_sistemas')::text
   from public.agenda_config c;
 

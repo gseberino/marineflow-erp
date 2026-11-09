@@ -14,7 +14,7 @@
 --   P3  a marcação com o viés de 1,00 em uso; os dias do dono com a correção (R7.3-2)
 --   P4  as 8 semanas da folga e a semana de 28/12 sem compromisso
 --   P4b a urgência e o puxar (a véspera de 06/01, 17:31)
---   P5  o prazo real das 8 OS do viés
+--   P5  nada: as OS do P2 dão razão de prazo 1,00 em todas, e o teste do P5 põe as 8 razões da §8.2 direto nas medidas (a medida de verdade tem o caso P1w dele)
 --   P6  as compras: tempo interno, folga, fornecedor (R7.3-5: o padrão de compra_interna_du é 1, e a peça sem fornecedor conta 7)
 --   Motivo de ficarem para eles: cada bloco só se prova com a função que o lê; o P1 não tem leitor (R7.12-8: fixture que confirma a spec, e não a produção, é a classe 8 de defeito).
 --

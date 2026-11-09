@@ -3286,6 +3286,7 @@ porque só o dono pode preenchê-las.
 - **Na Fase 6:** o fator de campo aprendido substitui o `estouro_fator` (P2 e P5), não o `fator_promessa`. A migration
   20261029100000 (P1) diz no comentário da coluna que ela não tem leitor. Criar a faixa mudaria o que a M1 diz ao cliente:
   fica para decisão do dono depois de ver a pontualidade medida (spec-fase6 §13, item 4).
+- **Na Fase 7e (P5, 09/11/2026):** `agenda_promessa_da_os` e `_agenda_aprender_promessa` (`20261111100400`) leem `fator_promessa` como ponto de partida do prazo real que só o dono vê, e o comentário da coluna mudou. Nenhuma das duas tem chamador até o P7. Ao cliente, nada: o dono respondeu não à data de pronto (AG7-32).
 
 ### [NOVO-agenda-44] O original da promessa ao cliente se perde no aviso "peça sem data"
 
@@ -3931,3 +3932,11 @@ porque só o dono pode preenchê-las.
 - **Efeito:** só em teste, e só no diário: nenhum número nem mensagem. A `contagens.puxar` de `agenda_vigia_rodadas` fica, com o mesmo conteúdo.
 - **Na Fase 7e:** não corrigido. `_agenda_gestor_sombra` não está na R7.1 (lista fechada do que a etapa recria), e hoje ninguém lê `sombra.puxar`. A saída menor, quando alguém passar a ler: guardar também as chaves que não são da sombra no merge de `:1619`.
 - **Origem:** Fase 7e, P4b.
+
+### [NOVO-agenda-180] O texto do prazo real diz "8 em cada 10 OS" com 1 OS medida
+
+- **Encontrado em:** Agenda de Produção, Fase 7e, P5 (09/11/2026).
+- **Onde:** `_agenda_aprendizado_texto`, ramo `promessa` (`20261111100100`, P2): a frase vale para qualquer n a partir de `promessa_n_min` (1).
+- **Efeito:** com a classe de 1 OS medida sai "Prazo real: 8 em cada 10 OS terminaram em até 1,00× os dias planejados (1 OS)". Visto no replay real, com razões plantadas (`f7e/p5/leitores.log`). A conta é honesta, e o parêntese diz o n, mas a frase afirma uma proporção que 1 OS não tem (classe 9 de R7.12).
+- **Na Fase 7e:** não muda no P5, que pela R7.13 só cria as 2 funções. O texto só aparece ao dono quando o P7 puser o passo na rodada e mostrar o bloco; é lá que se decide a forma para poucas OS. Sem efeito hoje: o passo não tem chamador e a medição de produção dá 0 razões.
+- **Origem:** Fase 7e, P5.
