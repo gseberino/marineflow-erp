@@ -12,6 +12,7 @@ import {
 } from "./retorno.ts";
 import { allTools, toolsByName } from "./index.ts";
 import { textoDoSim } from "../agent.ts";
+import { rodaDiretoPelaRede } from "../perfil-operacao.ts";
 import type { ToolCtx } from "./registry.ts";
 
 type Chamada = { fn: string; args: Record<string, unknown> };
@@ -167,4 +168,8 @@ Deno.test("com sessão amarrada, o envio livre pede PIN; sem ela, como sempre", 
   assertEquals(riscoDoEnvioLivre("send_whatsapp_message", "medium", false), "medium");
   assertEquals(riscoDoEnvioLivre("send_whatsapp_message", "medium", undefined), "medium");
   assertEquals(riscoDoEnvioLivre("get_service_order", "low", true), "low");
+});
+
+Deno.test("ler o caso roda direto pelo perfil enxuto do admin: não pede sim no meio do ditado", () => {
+  assertEquals(rodaDiretoPelaRede(toolsByName.retorno_ler_caso), true);
 });

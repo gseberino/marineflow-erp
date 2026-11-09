@@ -25,8 +25,7 @@
 
 /** Ferramentas do perfil de operação. Agrupadas por assunto só para leitura. */
 export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
-  // — O ditado do retorno rápido (F2): o dono dita a resposta de um caso do cartão —
-  "retorno_ler_caso",
+  // — O ditado do retorno rápido (F2): o dono dita a resposta de um caso do cartão. Ler o caso fica em SO_PELA_REDE. —
   "retorno_responder_caso",
   // — Montar e editar orçamento/OS (o grosso do uso real) —
   "create_quote_from_items",
@@ -367,6 +366,10 @@ export const SO_PELA_REDE: ReadonlySet<string> = new Set([
   //   comando lido antes do modelo. Mesmo teto (113, d14): fica na rede e roda direto (ESCRITAS_VERIFICADAS_DA_REDE). O
   //   prompt a ensina (AGENDA DE PRODUÇÃO). —
   "cliente_avisar",
+  // — Retorno F2 (P9, 09/11/2026): ler o caso do cartão antes de ditar. Sem isto, no perfil enxuto do admin, viraria um
+  //   pedido de "sim" no meio do ditado. Não tem prefixo de leitura porque grava a amarração da sessão: o nome não pode
+  //   mentir (ver ESCRITAS_VERIFICADAS_DA_REDE). O prompt a ensina (CARTÃO DO RETORNO). —
+  "retorno_ler_caso",
   // — E-mail (08/10/2026): silenciar um remetente é gesto raro e pede confirmação. —
   "silenciar_remetente_email",
   // — Memória por entidade: as notas APROVADAS já chegam prontas no contexto (ai-agent), então
@@ -694,6 +697,11 @@ export const ESCRITAS_VERIFICADAS_DA_REDE: Readonly<Record<string, string>> = {
     "só registra a mensagem esperando o dono (agenda_cliente_mensagens, pela RPC agenda_cliente_preparar, que confere o cargo); " +
     "o texto e as datas são do banco; a fila só recebe depois do *manda cliente* do dono, comando lido antes do modelo " +
     "(agenda_cliente_decidir_dito), que o modelo não alcança, e ainda passa pelas três travas do envio",
+  // 09/11/2026 (Retorno F2, P9): pela rede, ler o caso viraria uma pendência antes de ditar. Lido o execute: uma RPC só.
+  retorno_ler_caso:
+    "só amarra a sessão do próprio dono ao caso que ele pediu, pela RPC retorno_ver_caso_para_modelo (que confere o autor e o " +
+    "cartão aberto) em ai_operator_sessions; não muda cadastro, OS nem caso e não manda mensagem; a amarração só sobe o risco do " +
+    "envio livre, e o texto do cliente volta mascarado e marcado como dado de terceiro",
 };
 
 /**

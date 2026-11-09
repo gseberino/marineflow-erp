@@ -62,7 +62,7 @@ const ACRESCENTADAS = ["link_contact_to_entity", "update_supplier", "update_serv
 // cadastros (07/10/2026): editar marina e os contatos da embarcação.
 ACRESCENTADAS.push("update_marina", "add_vessel_contact", "update_vessel_contact");
 // Retorno F2 (P9): o ditado por áudio do cartão.
-ACRESCENTADAS.push("retorno_ler_caso", "retorno_responder_caso");
+ACRESCENTADAS.push("retorno_responder_caso");
 // diárias (11/10/2026, resposta 4 do dono): dividir o Pix do banco entre diárias e o reembolso de despesas pagas pelo técnico.
 ACRESCENTADAS.push("dividir_pagamento_freelancer");
 // operacional (07/10/2026): via do técnico e caixa de sugestões da agenda.
@@ -149,10 +149,11 @@ Deno.test("SO_PELA_REDE: pela rede, roda direto só leitura e escrita de sugest�
   // agenda_etiquetas e os_planejamento é o *grava* do dono.
   // servico_etapa (01/11/2026, Agenda de Produção, Fase 7c, P8): só anota o rascunho das etapas de uma OS; quem grava em os_tarefas
   // é o *grava* do dono.
+  // retorno_ler_caso (09/11/2026, Retorno F2, P9): só amarra a sessão do próprio dono ao caso; não muda cadastro, OS nem caso.
   assertEquals(escritasDiretas, [
     "agenda_aplicar", "agenda_desfazer", "agenda_propor", "cliente_avisar", "completar_comprovante", "enviar_arquivo_do_dropbox",
     "equipe_disponibilidade", "equipe_habilidade", "fornecedor_prazo", "interpret_customer_reply", "material_informar", "os_planejar",
-    "os_registrar_andamento", "remember_about_entity", "servico_etapa",
+    "os_registrar_andamento", "remember_about_entity", "retorno_ler_caso", "servico_etapa",
   ]);
   assertEquals(escritasDiretas, Object.keys(ESCRITAS_VERIFICADAS_DA_REDE).sort(), "lista verificada com nome que não é escrita low de SO_PELA_REDE");
 
