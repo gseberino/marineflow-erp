@@ -140,6 +140,8 @@ begin
        'O Gustavo não conseguiu retornar hoje, peço desculpas. Seu pedido é o primeiro da lista dele segunda (23/11) cedo.'),
       ('T24', 'urgente', 'acorde',
        'Avisei o Gustavo agora mesmo, Lenine.'),
+      ('T24a', 'urgente', 'acorde_sem_nome',
+       'Avisei o Gustavo agora mesmo.'),
       ('T25', 'urgente', 'sem_acorde',
        'Anotei como urgente, Lenine. O Gustavo vê segunda (23/11) cedo, antes de tudo.'),
       ('T26', 'urgente', 'sem_acorde_sem_nome',
@@ -185,8 +187,8 @@ begin
       v_n_urgente := v_n_urgente + 1;
     end if;
   end loop;
-  if v_n <> 33 then
-    raise exception '1: conferidos % modelos, esperados 33', v_n;
+  if v_n <> 34 then
+    raise exception '1: conferidos % modelos, esperados 34', v_n;
   end if;
   -- T04–T06, T20 e T21: exatamente 5 oferecem URGENTE.
   if v_n_urgente <> 5 then
@@ -241,6 +243,7 @@ begin
       ('fim_do_dia', 'com_nome'),
       ('fim_do_dia', 'sem_nome'),
       ('urgente', 'acorde'),
+      ('urgente', 'acorde_sem_nome'),
       ('urgente', 'sem_acorde'),
       ('urgente', 'sem_acorde_sem_nome'),
       ('parar', 'com_nome'),

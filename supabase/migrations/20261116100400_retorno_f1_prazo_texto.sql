@@ -49,7 +49,7 @@
 --    Sprinter…), com o acento de volta nas palavras que o sinal normalizou ("da embarcação").
 --
 -- 8. _retorno_texto(tipo, variante, dados): os modelos fixos (T01–T28, mais T07a, T08a, T10a, T12a e T13a, as
---    apresentações) e a linha de risco (L01), letra por letra os do cartão rr-voz-textos, com a voz da Claudia
+--    apresentações, e T24a, o urgente sem nome) e a linha de risco (L01), letra por letra os do cartão rr-voz-textos, com a voz da Claudia
 --    (VOZ-1, VOZ-2, VOZ-6). O prazo sai sem hora: {quando_fala} é "ainda hoje" ou "amanhã de manhã", e a hora
 --    fica por dentro (molde _agenda_cliente_texto). Falta de dado é
 --    ERRO (22023), nunca texto com buraco; os campos de lista fechada são conferidos (dia, hora,
@@ -590,6 +590,8 @@ begin
       'O Gustavo não conseguiu retornar hoje, peço desculpas. Seu pedido é o primeiro da lista dele {quando_lista} cedo.'
     when 'urgente/acorde' then -- T24
       'Avisei o Gustavo agora mesmo, {nome}.'
+    when 'urgente/acorde_sem_nome' then -- T24a
+      'Avisei o Gustavo agora mesmo.'
     when 'urgente/sem_acorde' then -- T25
       'Anotei como urgente, {nome}. O Gustavo vê {quando_lista} cedo, antes de tudo.'
     when 'urgente/sem_acorde_sem_nome' then -- T26

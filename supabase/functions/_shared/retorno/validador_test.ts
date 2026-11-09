@@ -49,6 +49,7 @@ const MODELOS: Record<string, string> = {
   T22: "{nome}, o Gustavo não conseguiu retornar hoje, peço desculpas. Seu pedido é o primeiro da lista dele {quando_lista} cedo.",
   T23: "O Gustavo não conseguiu retornar hoje, peço desculpas. Seu pedido é o primeiro da lista dele {quando_lista} cedo.",
   T24: "Avisei o Gustavo agora mesmo, {nome}.",
+  T24a: "Avisei o Gustavo agora mesmo.",
   T25: "Anotei como urgente, {nome}. O Gustavo vê {quando_lista} cedo, antes de tudo.",
   T26: "Anotei como urgente. O Gustavo vê {quando_lista} cedo, antes de tudo.",
   T27: "Combinado, {nome}. Não envio mais mensagens automáticas. Quando precisar, é só escrever.",
@@ -250,6 +251,7 @@ const CASOS: Caso[] = [
     opcoes: { nome: NOMES },
     extra: { marcas: { ...SEM_MARCAS, tem_topo: true }, textos_do_cliente: ["URGENTE"] },
   },
+  { id: "T24a", opcoes: {}, extra: { marcas: { ...SEM_MARCAS, tem_topo: true }, textos_do_cliente: ["URGENTE"] } },
   {
     id: "T25",
     opcoes: { nome: NOMES, quando_lista: QUANDO_OUTRO_DIA },
@@ -268,7 +270,7 @@ const CASOS: Caso[] = [
 
 Deno.test("a lista de casos cobre T01–T28 e as apresentações, sem faltar nem sobrar", () => {
   assertEquals(CASOS.map((c) => c.id), Object.keys(MODELOS));
-  assertEquals(Object.keys(MODELOS).length, 33);
+  assertEquals(Object.keys(MODELOS).length, 34);
 });
 
 for (const caso of CASOS) {
