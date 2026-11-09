@@ -3412,7 +3412,7 @@ begin
         -- o total guardado (1 − carga_max) e a parte que não é medida (urgência e falta): o resto do padrão
         v_7e_guarda := round((1 - (p_d ->> 'carga_max')::numeric) * 100)::text || '%';
         v_7e_resto := round((1 - (p_d ->> 'carga_max')::numeric - (p_d ->> 'padrao')::numeric) * 100)::text || '%';
-        -- FASE 7e: (7e P4, R7.4, R7.9, §0-4) sem número medido (calculado nulo). Com as semanas já no mínimo, o "N de M" da §6.2 diria "12 de 8" e não diz o que falta: aqui o que falta são as OS medidas (quem manda é o resíduo, R7.9) ou que elas mostrem variação (σ = 0). E a folga em uso que ficou sem medida volta ao padrão por passo: a linha e a ação dizem isso, e não "medi".
+        -- (7e P4, R7.4, R7.9, §0-4; marca sem FASE porque está dentro do bloco do P2) sem número medido (calculado nulo). Com as semanas já no mínimo, o "N de M" da §6.2 diria "12 de 8" e não diz o que falta: aqui o que falta são as OS medidas (quem manda é o resíduo, R7.9) ou que elas mostrem variação (σ = 0). E a folga em uso que ficou sem medida volta ao padrão por passo: a linha e a ação dizem isso, e não "medi".
         if (p_d ->> 'calculado') is null then
           declare
             v_7e_res   int := coalesce((p_d #>> '{detalhe,residuos}')::int, 0);
@@ -3437,7 +3437,7 @@ begin
             end if;
           end;
         end if;
-        -- FASE 7e: fim
+        -- (7e: fim)
         return case p_momento
           when 'foco_medindo' then format('Folga da semana: %s; guardo %s da semana da equipe (%s para o serviço que passa do previsto e %s para urgência e falta).',
                                           case when v_7e_n = 0 then 'nenhuma semana com serviço marcado medida ainda' else format('%s de %s semanas com serviço marcado medidas', v_n, v_nmin) end,
