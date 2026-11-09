@@ -49,8 +49,13 @@
 // Sem import nenhum, de propósito: o teste de isolamento (isolamento_test.ts) fica trivial, e o
 // validador não muda quando muda o resto do WhatsApp.
 //
+// F4 (P4.2, parceiro): validarSaidaAoParceiro é o mesmo conferir, com audiência "parceiro", limite de 1.500
+// caracteres e 18 linhas, nomes_da_lista no que o banco escreveu (eco) e duas regras a mais: valor_a_parceiro e
+// data_de_pronto. validarSaida não muda: a audiência "parceiro" continua reprovada ali.
+//
 // Reverter: apagar este arquivo, validador_test.ts e isolamento_test.ts (a edge retorno-recibos
-// importa validarSaida daqui: sem ela, retirar também a edge).
+// importa validarSaida daqui: sem ela, retirar também a edge). Só a F4: tirar validarSaidaAoParceiro,
+// ContextoAoParceiro, as duas regras e as opções de conferir, e apagar validador_parceiro_test.ts.
 
 export interface ContextoDoValidador {
   audiencia: "cliente";
@@ -64,14 +69,26 @@ export interface ContextoDoValidador {
   marcas: { tem_proposta: boolean; tem_topo: boolean; cliente_ouviu: boolean; conferida: boolean };
 }
 
+/**
+ * Retorno F4 (P4.2): o contexto do texto ao PARCEIRO (painel, pátio, eco, recibo, coleta, repassar), montado por
+ * _parceiro_contexto_do_validador. As mesmas listas do cliente, mais as duas do parceiro.
+ */
+export interface ContextoAoParceiro extends Omit<ContextoDoValidador, "audiencia"> {
+  audiencia: "parceiro";
+  nomes_da_lista: string[]; // os João S. das linhas: permitidos, mesmo não sendo o nome_permitido (só alimentam o eco)
+  papel_do_parceiro: "indicou" | "contratante" | "pagador" | null;
+}
+
 export type RegraDoValidador =
   | "vazio"
   | "contexto"
   | "audiencia"
   | "dinheiro"
+  | "valor_a_parceiro"
   | "dado_pessoal"
   | "promessa"
   | "data_fora"
+  | "data_de_pronto"
   | "hora_fora"
   | "os_de_outro"
   | "nome_de_outro"
@@ -88,6 +105,23 @@ export type ResultadoDoValidador = { ok: true } | { ok: false; regras: RegraDoVa
 export const LIMITE_DE_CARACTERES = 400;
 export const LIMITE_DE_LINHAS = 5;
 
+/** Ao parceiro (F4, P4.2): o painel cheio é cabeçalho, 14 linhas, "E mais", "Para ver de novo" e o rodapé. */
+export const LIMITE_PARCEIRO_CARACTERES = 1500;
+export const LIMITE_PARCEIRO_LINHAS = 18;
+
+/** A audiência exigida e os limites de cada validador. */
+interface Opcoes {
+  audiencia: "cliente" | "parceiro";
+  limiteCaracteres: number;
+  limiteLinhas: number;
+}
+const AO_CLIENTE: Opcoes = { audiencia: "cliente", limiteCaracteres: LIMITE_DE_CARACTERES, limiteLinhas: LIMITE_DE_LINHAS };
+const AO_PARCEIRO: Opcoes = {
+  audiencia: "parceiro",
+  limiteCaracteres: LIMITE_PARCEIRO_CARACTERES,
+  limiteLinhas: LIMITE_PARCEIRO_LINHAS,
+};
+
 /**
  * Confere o texto que vai ao cliente. `{ ok: true }` só quando nenhuma regra falhou; senão, a lista de
  * todas as que falharam, na ordem de RegraDoValidador. Nunca lança: exceção vira `['erro']`.
@@ -97,7 +131,26 @@ export function validarSaida(
   ctx: ContextoDoValidador | null | undefined,
 ): ResultadoDoValidador {
   try {
-    const regras = conferir(texto, ctx);
+    const regras = conferir(texto, ctx, AO_CLIENTE);
+    return regras.length === 0 ? { ok: true } : { ok: false, regras };
+  } catch {
+    return { ok: false, regras: ["erro"] };
+  }
+}
+
+/**
+ * Retorno F4 (P4.2): confere o texto que vai ao PARCEIRO. `audiencia` tem de ser exatamente "parceiro", e valem
+ * todas as regras de validarSaida com o contexto, com o limite de 1.500 caracteres e 18 linhas, mais duas:
+ * valor_a_parceiro (dinheiro ou "valor" seguido de número, sempre, inclusive para contratante: valor só sai no PDF) e
+ * data_de_pronto ("pront" seguido, na mesma linha e em até 40 caracteres, de data, dia da semana, "hoje" ou "amanhã").
+ * Nunca lança: exceção vira `['erro']`.
+ */
+export function validarSaidaAoParceiro(
+  texto: string,
+  ctx: ContextoAoParceiro | null | undefined,
+): ResultadoDoValidador {
+  try {
+    const regras = conferir(texto, ctx, AO_PARCEIRO);
     return regras.length === 0 ? { ok: true } : { ok: false, regras };
   } catch {
     return { ok: false, regras: ["erro"] };
@@ -187,6 +240,27 @@ function temDadoPessoal(t: string): boolean {
     if (m[0].replace(/\D/g, "").length >= MINIMO_DE_DIGITOS) return true;
   }
   return false;
+}
+
+// F4 (P4.2): ao parceiro, "valor" seguido de número também é valor (a regra da spec, sobre o texto sem acento). A frase
+// fixa "Valores e dados ficam com cada cliente" passa: não tem número.
+const VALOR_COM_NUMERO = new RegExp(ANTES + "valor(?:es)?\\s+(?:de |do |da |e |: )?\\d", "u");
+
+function temValorAoParceiro(t: string): boolean {
+  return DINHEIRO.some((r) => r.test(t)) || VALOR_COM_NUMERO.test(t);
+}
+
+// F4 (P4.2): data de pronto ao parceiro. Na mesma linha, "pront" seguido, em até 40 caracteres, de data (dd/mm), dia da
+// semana, "hoje" ou "amanhã". Um sentido só: a data ANTES do "pronto" (outra linha, outro fato) não conta; "dia útil" não
+// é dia.
+const DATA_DE_PRONTO = new RegExp(
+  ANTES + "pront\\p{L}*.{0,40}?(?:(?<!\\d)\\d{1,2}\\/\\d{1,2}(?!\\d)|" + ANTES +
+    "(?:segunda|terca|quarta|quinta|sexta|sabado|domingo|seg|ter|qua|qui|sex|sab|dom|hoje|amanha)" + DEPOIS + ")",
+  "u",
+);
+
+function temDataDePronto(t: string): boolean {
+  return t.split(QUEBRA_DE_LINHA).some((l) => DATA_DE_PRONTO.test(l));
 }
 
 const PROMESSA = new RegExp(
@@ -280,7 +354,9 @@ function ehListaDeTexto(v: unknown): v is string[] {
  * (bloqueia mais); marca só vale quando é exatamente `true`. Um getter que lança sobe até o catch de
  * validarSaida ('erro').
  */
-function lerContexto(ctx: unknown): ContextoLido {
+const PAPEIS_DO_PARCEIRO = new Set(["indicou", "contratante", "pagador"]);
+
+function lerContexto(ctx: unknown, opcoes: Opcoes): ContextoLido {
   const estado = { malformado: false };
   const marcas = { tem_proposta: false, tem_topo: false, cliente_ouviu: false, conferida: false };
   if (ctx === null || typeof ctx !== "object" || Array.isArray(ctx)) {
@@ -323,11 +399,19 @@ function lerContexto(ctx: unknown): ContextoLido {
     }
   }
 
+  // F4 (P4.2): ao parceiro, os nomes das linhas (permissão: só alimentam o eco) e o papel dele, obrigatórios.
+  let nomesDaLista: string[] = [];
+  if (opcoes.audiencia === "parceiro") {
+    nomesDaLista = permissao(o.nomes_da_lista);
+    const papel = o.papel_do_parceiro;
+    if (papel !== null && !(typeof papel === "string" && PAPEIS_DO_PARCEIRO.has(papel))) estado.malformado = true;
+  }
+
   const semAcento = (l: string[]) => l.map((s) => preparar(s, true));
   return {
     malformado: estado.malformado,
-    // Ausente já é 'contexto'; presente e diferente de "cliente" (parceiro é F4) é 'audiencia'.
-    audienciaErrada: audiencia !== undefined && audiencia !== "cliente",
+    // Ausente já é 'contexto'; presente e diferente da audiência deste validador é 'audiencia'.
+    audienciaErrada: audiencia !== undefined && audiencia !== opcoes.audiencia,
     datas: semAcento([...datas, ...trechos]),
     datasComAcento: [...datas, ...trechos].map((s) => preparar(s, false)),
     horas: semAcento(horas),
@@ -335,7 +419,8 @@ function lerContexto(ctx: unknown): ContextoLido {
     nomesDeOutros: semAcento(nomesDeOutros).map((s) => s.trim()).filter((s) => s.length > 0),
     textosDoCliente: semAcento(textosDoCliente),
     escritoPeloBanco: semAcento([
-      ...trechos, ...datas, ...horas, ...(typeof nome === "string" ? [nome] : []), ...LISTAS_FECHADAS_DOS_CAMPOS,
+      ...trechos, ...datas, ...horas, ...(typeof nome === "string" ? [nome] : []), ...nomesDaLista,
+      ...LISTAS_FECHADAS_DOS_CAMPOS,
     ]).map((s) => s.trim()).filter((s) => s.length > 0),
     marcas,
   };
@@ -389,31 +474,34 @@ function afirmaSemDado(t: string, marcas: ContextoLido["marcas"]): boolean {
 
 // ─── Todas as regras ─────────────────────────────────────────────────────────────────────────────
 
-function conferir(texto: unknown, ctx: unknown): RegraDoValidador[] {
+function conferir(texto: unknown, ctx: unknown, opcoes: Opcoes): RegraDoValidador[] {
   // Texto que não é string (veio nulo do JSON) é tratado como vazio: nunca sai.
   const bruto = typeof texto === "string" ? texto : "";
-  const c = lerContexto(ctx);
+  const c = lerContexto(ctx, opcoes);
   const t = preparar(bruto, true);
   const tComAcento = preparar(bruto, false);
+  const aoParceiro = opcoes.audiencia === "parceiro";
   const regras: RegraDoValidador[] = [];
 
   if (bruto.replace(INVISIVEL_OU_ESPACO, "").length === 0) regras.push("vazio");
   if (c.malformado) regras.push("contexto");
   if (c.audienciaErrada) regras.push("audiencia");
   if (DINHEIRO.some((r) => r.test(t))) regras.push("dinheiro");
+  if (aoParceiro && temValorAoParceiro(t)) regras.push("valor_a_parceiro");
   if (temDadoPessoal(t)) regras.push("dado_pessoal");
   if (PROMESSA.test(t)) regras.push("promessa");
   if (
     algumForaDe(t, DATAS, c.datas) ||
     algumForaDe(tComAcento, DATAS_COM_ACENTO, c.datasComAcento)
   ) regras.push("data_fora");
+  if (aoParceiro && temDataDePronto(t)) regras.push("data_de_pronto");
   if (algumForaDe(t, HORAS, c.horas)) regras.push("hora_fora");
   if (algumForaDe(t, OS, c.os)) regras.push("os_de_outro");
   if (citaNome(t, c.nomesDeOutros)) regras.push("nome_de_outro");
   if (afirmaSemDado(t, c.marcas)) regras.push("afirmacao_sem_dado");
   if (ecoaOCliente(t, c.textosDoCliente, c.escritoPeloBanco)) regras.push("eco_do_cliente");
   if (EMOJI.test(bruto)) regras.push("emoji");
-  if (bruto.length > LIMITE_DE_CARACTERES || bruto.split(QUEBRA_DE_LINHA).length > LIMITE_DE_LINHAS) {
+  if (bruto.length > opcoes.limiteCaracteres || bruto.split(QUEBRA_DE_LINHA).length > opcoes.limiteLinhas) {
     regras.push("tamanho");
   }
   if (PALAVRAS_PROIBIDAS.some((r) => r.test(t))) regras.push("palavra_proibida");

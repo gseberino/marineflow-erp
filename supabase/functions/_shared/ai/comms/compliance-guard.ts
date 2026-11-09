@@ -17,6 +17,10 @@ export interface ComplianceCtx {
   destinatarioIdentificado?: boolean;
   /** Texto final da mensagem (para checagens textuais, ex.: preço a técnico). */
   texto?: string;
+  /** Retorno F4 (P4.3): o papel do parceiro no vínculo da OS. Ausente ou nulo = trava o valor (falha fecha). */
+  papelDoParceiro?: "indicou" | "contratante" | "pagador" | null;
+  /** Retorno F4 (P4.3): o envio leva documento com valor (o PDF do orçamento ou da OS). */
+  documentoComValor?: boolean;
 }
 
 export interface Violacao {
@@ -46,9 +50,19 @@ function horaAgoraBrasilia(): number | null {
   }
 }
 
-/** A mensagem vai a quem é de fora (cliente ou fornecedor, pelo WhatsApp)? */
+/** A mensagem vai a quem é de fora (cliente, fornecedor ou parceiro, pelo WhatsApp)? */
 export function ehDeFora(ctx: Pick<ComplianceCtx, "canal" | "audiencia">): boolean {
-  return ctx.canal === "whatsapp" && (ctx.audiencia === "cliente" || ctx.audiencia === "fornecedor");
+  return ctx.canal === "whatsapp" &&
+    (ctx.audiencia === "cliente" || ctx.audiencia === "fornecedor" || ctx.audiencia === "parceiro");
+}
+
+/**
+ * Retorno F4 (P4.3): o texto fala de valor? R$ com número, Pix, ou "valor" seguido de número, sobre o texto sem acento e
+ * minúsculo, como na regra 3. "Valores e dados ficam com cada cliente" não é valor: não tem número.
+ */
+export function temValor(texto: string): boolean {
+  const norm = texto.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  return /r\$\s?\d|\bpix\b|\bvalor(es)?\s+(de |do |da |e |: )?\d/.test(norm);
 }
 
 /**
@@ -79,6 +93,17 @@ export function checarConformidade(ctx: ComplianceCtx): Violacao | null {
     const norm = ctx.texto.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
     if (/r\$\s?\d|\bpreco\b|\bcusto\b|\bmargem\b/.test(norm)) {
       return { codigo: "preco_a_tecnico", motivo: "Mensagem a técnico contém preço/custo/margem — técnico não deve ver valores." };
+    }
+  }
+
+  // 4) Retorno F4 (P4.3): valor ao PARCEIRO só com ele contratante ou pagador (decisão fechada: valor nunca a quem só
+  //    indicou). Papel ausente trava: falha fecha.
+  if (ctx.audiencia === "parceiro" && (ctx.documentoComValor || temValor(ctx.texto ?? ""))) {
+    if (ctx.papelDoParceiro !== "contratante" && ctx.papelDoParceiro !== "pagador") {
+      return {
+        codigo: "valor_a_parceiro",
+        motivo: "O envio leva valor a um parceiro que não é contratante nem pagador desta OS. Nada foi enviado: valor só vai à revenda que contrata ou paga.",
+      };
     }
   }
 

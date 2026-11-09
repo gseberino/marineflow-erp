@@ -3,7 +3,8 @@
 // o que NUNCA incluir. As tools de envio consultam perfilDeVoz() e o linter usa as proibições.
 // Fonte: matriz do plano (plans/marineflow-comunicacao-inteligente.md) + máximas de Grice.
 
-export type Audiencia = "dono" | "cliente" | "fornecedor" | "tecnico";
+// Retorno F4 (P4.3): "parceiro" é quem indica clientes (a MP): fala-se do cliente em terceira pessoa, nunca com valor.
+export type Audiencia = "dono" | "cliente" | "fornecedor" | "tecnico" | "parceiro";
 export type Canal = "panel" | "whatsapp";
 export type ModoSaudacao = "nome" | "neutra" | "informal";
 
@@ -61,6 +62,13 @@ const PERFIS: Record<Audiencia, Omit<VoiceProfile, "canal" | "tetoLinhas">> = {
     fecho: "",
     proibicoes: ["preco"],
   },
+  parceiro: {
+    audiencia: "parceiro",
+    registro: "Cordial e objetivo, falando do cliente em terceira pessoa. Nunca valor nem dado pessoal.",
+    saudacao: "nome",
+    fecho: "",
+    proibicoes: ["preco", "jargao_tecnico", "ameaca"],
+  },
 };
 
 // Teto de linhas por canal: WhatsApp é conversa curta; painel tolera mais.
@@ -70,6 +78,7 @@ function tetoLinhasDe(audiencia: Audiencia, canal: Canal): number {
     case "tecnico": return 3;
     case "fornecedor": return 14; // saudação + lista de itens
     case "cliente": return 10;
+    case "parceiro": return 18; // F4: o painel cheio (cabeçalho, 14 linhas, "E mais", "Para ver de novo" e o rodapé)
     default: return 0;
   }
 }
