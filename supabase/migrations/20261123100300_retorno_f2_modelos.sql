@@ -466,6 +466,10 @@ begin
   if v_modelo is null then
     raise exception 'texto F2: par desconhecido' using errcode = '22023';
   end if;
+  -- O adiamento diz "ainda hoje" porque há um 2º prazo no mesmo dia: sem a hora dele, não há o que prometer.
+  if p_tipo = 'adiamento' and coalesce(btrim(d ->> 'hora'), '') !~ c_hora then
+    raise exception 'texto F2: campo hora ausente ou inválido' using errcode = '22023';
+  end if;
 
   v_texto := v_modelo;
   for v_campo in select distinct (regexp_matches(v_modelo, '\{([a-z_]+)\}', 'g'))[1] loop
