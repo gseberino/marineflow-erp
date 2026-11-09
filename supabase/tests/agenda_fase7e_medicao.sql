@@ -604,6 +604,44 @@ begin
 end
 $m4$;
 
+-- M4r (R7.5-5): _agenda_material_critico dá o mesmo que os_prontidao, com a regra critico_por_valor ligada, em toda linha da fixture (peça abaixo e acima do limiar, texto livre, oc, dono); sem a regra, ele continua igual (não tem portão)
+do $m4r$
+declare
+  v_res jsonb := '[]'::jsonb;
+  c_hoje constant date := date '2027-01-07';
+  v_os0  constant uuid := 'e7e00000-0000-4000-8000-000000000e00';
+  v_dif  text;
+  v_n    int := 0;
+  v_c    int;
+  r      record;
+begin
+  if not pg_temp.fx() then return; end if;
+  perform set_config('agenda.hoje', c_hoje::text, true);
+  begin
+    update public.agenda_config set modo_marcar_sozinho = 'ligado', gestor_so_propor = false, marcar_regras = '{critico_por_valor}' where id;
+    insert into public.service_order_parts (id, service_order_id, product_id, quantity, unit_cost_snapshot, unit_sale_snapshot, line_total_cost, line_total_sale, created_at)
+    select md5('e7e:x-p' || n)::uuid, v_os0, (select id from public.products order by id limit 1), 1, 50, v, 50, v, timestamptz '2026-12-02 10:00-03'
+      from (values (1, 100::numeric), (2, 900)) t(n, v);
+    insert into public.os_material (id, service_order_id, service_order_part_id, origem, descricao, quantidade_necessaria, quantidade_na_mao, critico, situacao, fonte, atualizado_por)
+    select md5('e7e:material:p' || n)::uuid, v_os0, md5('e7e:x-p' || n)::uuid, 'peca', 'Peça ' || n, 1, 0, true, 'falta', null, 'aa000000-0000-4000-8000-000000000001' from generate_series(1, 2) n;
+    update public.agenda_config set critico_valor_min = 300 where id;
+    for r in select i, i ->> 'id' as id from jsonb_array_elements(public.os_prontidao(v_os0, c_hoje) #> '{material,itens}') i where i ->> 'id' is not null loop
+      v_n := v_n + 1;
+      if public._agenda_material_critico(r.id::uuid) is distinct from coalesce((r.i ->> 'critico')::boolean, true) then
+        v_dif := coalesce(v_dif, '') || r.id || ' ';
+      end if;
+    end loop;
+    select count(*) into v_c from jsonb_array_elements(public.os_prontidao(v_os0, c_hoje) #> '{material,itens}') i where not coalesce((i ->> 'critico')::boolean, true);
+    v_res := pg_temp.ok(v_res, 'M4r a função dá o mesmo crítico que os_prontidao (critico_por_valor ligada), em toda linha, e a peça de R$ 100 sai não crítica', v_n >= 7 and v_c >= 1 and v_dif is null, format('linhas=%s nao_criticas=%s dif=%s', v_n, v_c, v_dif));
+    update public.agenda_config set modo_marcar_sozinho = 'desligado' where id;
+    v_res := pg_temp.ok(v_res, 'M4r2 sem a regra, a função continua igual (sem portão); a prontidão diz crítico de novo na coluna, mas a medida usa a função', not public._agenda_material_critico(md5('e7e:material:p1')::uuid), null);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  perform pg_temp.gravar(v_res);
+end
+$m4r$;
+
 -- M4j: o retrato (o molde do P10: compre_ate_base na forma real), gravado uma vez; a chegada contada, o atraso, o limite, primeiro dia cumprido, a previsão anterior à compra, compra_pendente
 do $m4j$
 declare
