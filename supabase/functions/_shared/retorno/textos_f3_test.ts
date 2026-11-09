@@ -67,6 +67,23 @@ Deno.test("cada legenda passa no validador real", () => {
   }
 });
 
+Deno.test("o cliente que escreveu 'o orçamento das baterias' não reprova a legenda em eco: o {do_servico} é trecho do banco", async () => {
+  const sql = await lerMigration();
+  const corte = /select x from unnest\(array\[([^\]]+)\]\) as x/.exec(sql)?.[1];
+  assertEquals(corte, "v_nome, v_validade", "o corte da legenda não pode tirar o {do_servico} dos trechos");
+  const frases = ["e o orçamento das baterias, saiu?", "me passa o orcamento das baterias por favor", "preciso o orçamento das baterias"];
+  for (const variante of ["padrao", "padrao_apresentacao", "sem_nome", "sem_nome_ja_apresentada"]) {
+    const modelo = LEGENDAS[variante];
+    const texto = preencher(modelo);
+    const semNome = !modelo.includes("{nome}");
+    const cortes = [semNome ? "" : NOME, VALIDADE].filter(Boolean);
+    for (const frase of frases) {
+      const r = validarSaida(texto, contexto(texto, cortes, { textos_do_cliente: [frase], ...(semNome ? { nome_permitido: null } : {}) }));
+      assertEquals(r, { ok: true }, `${variante}: ${frase}`);
+    }
+  }
+});
+
 Deno.test("M07 passa nas aberturas que a saída usa", () => {
   const maior = M07[0].toUpperCase() + M07.slice(1);
   const casos = [

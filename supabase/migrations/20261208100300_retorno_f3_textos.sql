@@ -147,9 +147,11 @@ begin
     jsonb_build_object('nome', v_nome, 'do_servico', v_do_servico, 'validade', v_validade));
 
   -- Os trechos do modelo: o texto cortado nos valores dos {campos}, o maior primeiro (como em _retorno_contexto_do_validador).
+  -- O {do_servico} fica dentro do trecho: vem da tabela fechada de _retorno_familia_rotulo, é escrito pelo banco, e fora dele
+  -- o cliente que escreveu "o orçamento das baterias" reprovava a legenda em eco, sem saída pelo cartão.
   v_corte := v_texto;
   for v_valor in
-    select x from unnest(array[v_nome, v_validade, v_do_servico]) as x
+    select x from unnest(array[v_nome, v_validade]) as x
      where x is not null and btrim(x) <> ''
      order by char_length(x) desc, x
   loop

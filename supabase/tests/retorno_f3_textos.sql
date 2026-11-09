@@ -158,7 +158,7 @@ begin
       raise exception '4i: marcas: %', v_ctx -> 'marcas';
     end if;
     perform pg_temp.f3t_igual('4j trechos (do maior valor para o menor)', v_ctx ->> 'trechos_do_modelo',
-      '["Oi, ", "! Aqui é a Claudia, assistente virtual da HBR. Segue o orçamento ", ", que vale até ", ". Se tiver dúvida ou quiser ajustar algo, é só responder por aqui."]');
+      '["Oi, ", "! Aqui é a Claudia, assistente virtual da HBR. Segue o orçamento das baterias, que vale até ", ". Se tiver dúvida ou quiser ajustar algo, é só responder por aqui."]');
     -- O texto do cliente fica só no eco do validador: nunca sobe ao texto da legenda.
     if (v_ctx -> 'textos_do_cliente' -> 0 ->> 0) not like 'FRASE-MARCADA-F3%' or v_r ->> 'texto' like '%FRASE-MARCADA%' then
       raise exception '4k: textos do cliente: %', v_ctx -> 'textos_do_cliente';
