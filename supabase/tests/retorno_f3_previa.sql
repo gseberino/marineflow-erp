@@ -121,14 +121,14 @@ begin
     perform pg_temp.f3v_igual('1e fonte', v_prev.fonte_numero, 'TF3V-FONTE-1');
     perform pg_temp.f3v_igual('1f vessel', v_prev.vessel_id::text, v_un::text);
     perform pg_temp.f3v_igual('1g titulo', v_prev.titulo, 'Baterias');
-    if v_prev.linhas_n <> 3 or v_prev.provisorios_n <> 0 or v_prev.total <> 1350 then
+    if v_prev.linhas_n is distinct from 3 or v_prev.provisorios_n is distinct from 0 or v_prev.total is distinct from 1350 then
       raise exception '1h: % linhas, % provisórios, total %', v_prev.linhas_n, v_prev.provisorios_n, v_prev.total;
     end if;
     perform pg_temp.f3v_igual('1i data mais antiga', v_prev.preco_mais_antigo::text, '2040-02-01');
     if v_prev.hash is null or v_prev.hash = '' then
       raise exception '1j: hash vazio';
     end if;
-    if not coalesce((v_prev.dados ->> 'forte')::boolean, false) or not coalesce((v_prev.dados ->> 'fonte_aprovada')::boolean, false) then
+    if not coalesce((v_prev.dados ->> 'forte')::boolean is not false, false) or not coalesce((v_prev.dados ->> 'fonte_aprovada')::boolean is not false, false) then
       raise exception '1k: dados %', v_prev.dados;
     end if;
     -- A linha 1 (peça p1): preço mais novo a este cliente (450, não os 400 do parecido).
@@ -137,19 +137,19 @@ begin
     perform pg_temp.f3v_igual('2b fonte p1', v_lin.preco_fonte, 'praticado_cliente');
     perform pg_temp.f3v_igual('2c data p1', v_lin.preco_em::text, '2040-03-10');
     perform pg_temp.f3v_igual('2d nome p1', v_lin.nome, 'TF3V Bateria 200');
-    if v_lin.product_id is distinct from v_p1 or v_lin.quantidade <> 2 or v_lin.estado <> 'ok' then
+    if v_lin.product_id is distinct from v_p1 or v_lin.quantidade is distinct from 2 or v_lin.estado is distinct from 'ok' then
       raise exception '2e: linha p1 %', row_to_json(v_lin);
     end if;
     select * into v_lin from public.retorno_previa_linhas where previa_id = v_id and ordem = 3;
     perform pg_temp.f3v_igual('2f nome serviço', v_lin.nome, 'TF3V Instalação do banco');
-    if v_lin.service_id is distinct from v_s1 or v_lin.tipo <> 'servico' then
+    if v_lin.service_id is distinct from v_s1 or v_lin.tipo is distinct from 'servico' then
       raise exception '2g: linha serviço %', row_to_json(v_lin);
     end if;
     -- linhas_iniciais igual às linhas.
     select count(*) into v_n from jsonb_array_elements(v_prev.linhas_iniciais) x
      where x ->> 'nome' = 'TF3V Bateria 200' and (x ->> 'preco')::numeric = 450 and (x ->> 'quantidade')::numeric = 2
        and x ->> 'tipo' = 'peca' and x ->> 'product_id' = v_p1::text;
-    if v_n <> 1 or jsonb_array_length(v_prev.linhas_iniciais) <> 3 then
+    if v_n <> 1 or jsonb_array_length(v_prev.linhas_iniciais) is distinct from 3 then
       raise exception '2h: linhas_iniciais %', v_prev.linhas_iniciais;
     end if;
 
@@ -164,11 +164,11 @@ begin
     perform pg_temp.f3v_igual('3a acao', v_r ->> 'acao', 'criada');
     v_id2 := (v_r ->> 'previa_id')::uuid;
     select * into v_prev from public.retorno_previa where id = v_id2;
-    if v_prev.provisorios_n <> 1 or v_prev.total <> 0 then
+    if v_prev.provisorios_n is distinct from 1 or v_prev.total is distinct from 0 then
       raise exception '3b: % provisórios, total %', v_prev.provisorios_n, v_prev.total;
     end if;
     select * into v_lin from public.retorno_previa_linhas where previa_id = v_id2;
-    if v_lin.preco is not null or v_lin.estado <> 'provisorio' or v_lin.motivo <> 'sem_preco' or v_lin.preco_fonte <> 'sem_preco' then
+    if v_lin.preco is not null or v_lin.estado is distinct from 'provisorio' or v_lin.motivo is distinct from 'sem_preco' or v_lin.preco_fonte is distinct from 'sem_preco' then
       raise exception '3c: linha %', row_to_json(v_lin);
     end if;
 
@@ -186,7 +186,7 @@ begin
     select * into v_lin from public.retorno_previa_linhas where previa_id = v_id;
     perform pg_temp.f3v_igual('4b nome', v_lin.nome, 'Serviço a descrever');
     perform pg_temp.f3v_igual('18a motivo', v_lin.motivo, 'nome_com_dado_de_outro');
-    if v_lin.preco is not null or v_lin.preco_fonte <> 'sem_preco' or v_lin.estado <> 'provisorio' then
+    if v_lin.preco is not null or v_lin.preco_fonte is distinct from 'sem_preco' or v_lin.estado is distinct from 'provisorio' then
       raise exception '18b: linha %', row_to_json(v_lin);
     end if;
     select * into v_prev from public.retorno_previa where id = v_id;
@@ -224,7 +224,7 @@ begin
     select * into v_lin from public.retorno_previa_linhas where previa_id = (v_r ->> 'previa_id')::uuid;
     perform pg_temp.f3v_igual('4r2 nome', v_lin.nome, 'Serviço a descrever');
     perform pg_temp.f3v_igual('4r3 motivo', v_lin.motivo, 'nome_com_dado_de_outro');
-    if v_lin.preco is not null or v_lin.estado <> 'provisorio' then
+    if v_lin.preco is not null or v_lin.estado is distinct from 'provisorio' then
       raise exception '4r4: linha %', row_to_json(v_lin);
     end if;
 
@@ -265,7 +265,7 @@ begin
     v_r := public._retorno_cadastro_do_caso(v_caso);
     perform pg_temp.f3v_igual('6a client', v_r ->> 'client_id', v_cli::text);
     perform pg_temp.f3v_igual('6b vessel', v_r ->> 'vessel_id', v_un::text);
-    if not (v_r ->> 'provisorio')::boolean then
+    if (v_r ->> 'provisorio')::boolean is not true then
       raise exception '6c: provisório %', v_r;
     end if;
     update public.clients set active = false where id = v_cli;
@@ -292,13 +292,13 @@ begin
     perform pg_temp.f3v_lin(v_os, null, 'Serviço de bateria para teste', 1, 800, c_passado);
     v_caso := pg_temp.f3v_caso(30, 'cliente', v_cli, 'preciso trocar as baterias da Bri, quanto custa?');
     v_r := public._retorno_unidade_do_caso(v_caso, v_cli, c_agora);
-    if v_r ->> 'vessel_id' is not null or jsonb_array_length(v_r -> 'unidades') <> 2 then
+    if v_r ->> 'vessel_id' is not null or jsonb_array_length(v_r -> 'unidades') is distinct from 2 then
       raise exception '7a: unidade %', v_r;
     end if;
     v_r := public.retorno_previa_montar(v_caso, c_agora);
     perform pg_temp.f3v_igual('7b acao', v_r ->> 'acao', 'criada');
     select * into v_prev from public.retorno_previa where id = (v_r ->> 'previa_id')::uuid;
-    if v_prev.vessel_id is not null or jsonb_array_length(v_prev.dados -> 'unidades') <> 2 then
+    if v_prev.vessel_id is not null or jsonb_array_length(v_prev.dados -> 'unidades') is distinct from 2 then
       raise exception '7c: proposta %', row_to_json(v_prev);
     end if;
     -- Unidades com classes diferentes: mistas.
@@ -347,7 +347,7 @@ begin
 
     -- ═══ 10. Rodada: cria; a 2ª passada sem mensagem nova não recria; mensagem nova com as mesmas linhas mantém o id; linhas diferentes criam outra.
     v_r := public.retorno_previa_rodada(c_agora);
-    if (v_r ->> 'criadas')::int < 1 or (v_r ->> 'erros')::int <> 0 then
+    if (v_r ->> 'criadas')::int < 1 or (v_r ->> 'erros')::int is distinct from 0 then
       raise exception '10a: %', v_r;
     end if;
     select id into v_id from public.retorno_previa where abertura_id = v_caso and estado = 'sombra';
@@ -391,7 +391,7 @@ begin
     returning id into v_id3;
     v_r := public.retorno_previa_rodada(c_agora);
     select * into v_prev from public.retorno_previa where id = v_id2;
-    if v_prev.estado <> 'proposta' or v_prev.hash <> 'hash-travado' or v_prev.titulo <> 'Ditado' then
+    if v_prev.estado is distinct from 'proposta' or v_prev.hash is distinct from 'hash-travado' or v_prev.titulo is distinct from 'Ditado' then
       raise exception '11a: rodada mexeu na travada: %', row_to_json(v_prev);
     end if;
     select count(*) into v_n from public.retorno_previa_linhas where previa_id = v_id2 and nome = 'Serviço ditado';
@@ -473,7 +473,7 @@ begin
     v_os := pg_temp.f3v_os('TF3V-P-FUT', v_cli, v_un, 'draft', 'approved', '2040-07-01 10:00-03', 'peça');
     perform pg_temp.f3v_peca(v_os, v_p1, 1, 888, '2040-07-01 10:00-03');
     v_r := public._retorno_preco_da_peca(v_p1, v_cli, c_agora);
-    if (v_r ->> 'preco')::numeric <> 300 then
+    if (v_r ->> 'preco')::numeric is distinct from 300 then
       raise exception '12a: %', v_r;
     end if;
     perform pg_temp.f3v_igual('12b fonte', v_r ->> 'fonte', 'praticado_outro');
@@ -481,24 +481,24 @@ begin
     -- sem histórico: catálogo sem data
     v_p2 := pg_temp.f3v_prod('TF3V Peca So Catalogo', 77.5);
     v_r := public._retorno_preco_da_peca(v_p2, v_cli, c_agora);
-    if (v_r ->> 'preco')::numeric <> 77.5 or v_r ->> 'fonte' <> 'catalogo' or v_r ->> 'em' is not null then
+    if (v_r ->> 'preco')::numeric is distinct from 77.5 or v_r ->> 'fonte' is distinct from 'catalogo' or v_r ->> 'em' is not null then
       raise exception '12d: %', v_r;
     end if;
     -- O serviço: aprovado a este; depois o catálogo; sem nada, sem_preco.
     v_s1 := pg_temp.f3v_serv('TF3V Servico Preco', 111);
     v_r := public._retorno_preco_do_servico(v_s1, 'TF3V Servico Preco', v_cli, c_agora);
-    if v_r ->> 'fonte' <> 'catalogo' or (v_r ->> 'preco')::numeric <> 111 then
+    if v_r ->> 'fonte' is distinct from 'catalogo' or (v_r ->> 'preco')::numeric is distinct from 111 then
       raise exception '12e: %', v_r;
     end if;
     v_r := public._retorno_preco_do_servico(null, 'Serviço sem nome conhecido em lugar nenhum', v_cli, c_agora);
-    if v_r ->> 'preco' is not null or v_r ->> 'fonte' <> 'sem_preco' then
+    if v_r ->> 'preco' is not null or v_r ->> 'fonte' is distinct from 'sem_preco' then
       raise exception '12f: %', v_r;
     end if;
     -- Liga por nome normalizado quando não há service_id.
     v_os := pg_temp.f3v_os('TF3V-P-NOME', v_cli, v_un, 'draft', 'approved', '2040-02-02 10:00-03', 'serviço');
     perform pg_temp.f3v_lin(v_os, null, 'Serviço Por Nome Único', 2, 150, '2040-02-02 10:00-03');
     v_r := public._retorno_preco_do_servico(null, 'serviço por nome único', v_cli, c_agora);
-    if v_r ->> 'fonte' <> 'praticado_cliente' or (v_r ->> 'preco')::numeric <> 150 then
+    if v_r ->> 'fonte' is distinct from 'praticado_cliente' or (v_r ->> 'preco')::numeric is distinct from 150 then
       raise exception '12g: %', v_r;
     end if;
 
@@ -522,7 +522,7 @@ begin
     perform pg_temp.f3v_un(v_cli, 'Lancha');   -- nome igual ao tipo não identifica
     v_caso := pg_temp.f3v_caso(71, 'cliente', v_cli, 'a Brisamar precisa de bateria, quanto custa?');
     v_r := public._retorno_unidade_do_caso(v_caso, v_cli, c_agora);
-    if v_r ->> 'vessel_id' is not null or jsonb_array_length(v_r -> 'unidades') <> 4 then
+    if v_r ->> 'vessel_id' is not null or jsonb_array_length(v_r -> 'unidades') is distinct from 4 then
       raise exception '14a: Brisa casou em Brisamar: %', v_r;
     end if;
     v_caso2 := pg_temp.f3v_caso(72, 'cliente', v_cli, 'o s.i. 8.5 2016 precisa de bateria, quanto custa?');
@@ -558,7 +558,7 @@ begin
     update public.service_orders set grand_total = 0 where id = v_os2;
     perform pg_temp.f3v_lin(v_os2, null, 'Sem preço', 1, 0, c_passado);
     v_r := public._retorno_rascunho_do_caso(v_caso, c_agora);
-    if (v_r ->> 'linhas_sem_preco')::int <> 1 or (v_r ->> 'linhas_n')::int <> 1 or (v_r ->> 'total')::numeric <> 0 then
+    if (v_r ->> 'linhas_sem_preco')::int is distinct from 1 or (v_r ->> 'linhas_n')::int is distinct from 1 or (v_r ->> 'total')::numeric is distinct from 0 then
       raise exception '13e: %', v_r;
     end if;
     v_cli2 := pg_temp.f3v_cli('Novo Rascunho Teste');
@@ -605,7 +605,7 @@ begin
     if v_prev.hash = v_t then
       raise exception '16d: hash não mudou';
     end if;
-    if not coalesce((v_prev.dados ->> 'travada')::boolean, false) then
+    if not coalesce((v_prev.dados ->> 'travada')::boolean is not false, false) then
       raise exception '16e: travada perdida';
     end if;
     select count(*) into v_n from public.retorno_previa_linhas where previa_id = v_id;
@@ -702,7 +702,7 @@ begin
     perform pg_temp.f3v_igual('19d acao B', v_r ->> 'acao', 'criada');
     select * into v_prev2 from public.retorno_previa where id = (v_r ->> 'previa_id')::uuid;
     perform pg_temp.f3v_igual('19e fonte B', v_prev2.fonte_numero, 'TF3V-PAR-B');
-    if not coalesce((v_prev2.dados ->> 'travada')::boolean, false) then
+    if not coalesce((v_prev2.dados ->> 'travada')::boolean is not false, false) then
       raise exception '19f: B não travou';
     end if;
     if not exists (select 1 from jsonb_array_elements(v_prev2.dados -> 'alternativas') e where e ->> 'numero' = 'TF3V-PAR-A') then
@@ -723,7 +723,7 @@ begin
     v_caso := pg_temp.f3v_caso(93, 'cliente', v_cli, 'preciso trocar as baterias do barco, quanto custa?');
     v_r := public.retorno_previa_montar(v_caso, c_agora);
     select * into v_prev from public.retorno_previa where id = (v_r ->> 'previa_id')::uuid;
-    if v_prev.total <> 500.00 then
+    if v_prev.total is distinct from 500.00 then
       raise exception '20: total %', v_prev.total;
     end if;
 
@@ -806,16 +806,16 @@ begin
     perform pg_temp.f3v_igual('22a chave 0', v_a -> 0 ->> 'chave', '0');
     perform pg_temp.f3v_igual('22b chave x3', v_a -> 3 ->> 'chave', 'x3');
     perform pg_temp.f3v_igual('22c fonte orcado', v_a -> 0 ->> 'fonte', 'orcado_cliente');
-    if (v_a -> 0 ->> 'preco')::numeric <> 55 then
+    if (v_a -> 0 ->> 'preco')::numeric is distinct from 55 then
       raise exception '22d: %', v_a -> 0;
     end if;
-    if (v_a -> 0 ->> 'rotulo') like '%praticado%' or (v_a -> 0 ->> 'rotulo') not like '%orçado%' then
+    if (v_a -> 0 ->> 'rotulo') like '%praticado%' or coalesce((v_a -> 0 ->> 'rotulo'), '') not like '%orçado%' then
       raise exception '22e: rótulo %', v_a -> 0 ->> 'rotulo';
     end if;
-    if v_a -> 1 ->> 'preco' is not null or v_a -> 1 ->> 'fonte' <> 'sem_preco' then
+    if v_a -> 1 ->> 'preco' is not null or v_a -> 1 ->> 'fonte' is distinct from 'sem_preco' then
       raise exception '22f: zero %', v_a -> 1;
     end if;
-    if v_a -> 2 ->> 'preco' is not null or v_a -> 3 ->> 'preco' is not null or v_a -> 2 ->> 'fonte' <> 'sem_preco' then
+    if v_a -> 2 ->> 'preco' is not null or v_a -> 3 ->> 'preco' is not null or v_a -> 2 ->> 'fonte' is distinct from 'sem_preco' then
       raise exception '22g: serviço/peça sem id %', v_a;
     end if;
     v_a := public.retorno_previa_precos(null, jsonb_build_array(jsonb_build_object('chave', 'a', 'tipo', 'peca', 'product_id', v_p1)), c_agora);

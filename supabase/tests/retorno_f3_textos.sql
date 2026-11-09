@@ -153,8 +153,8 @@ begin
        or v_ctx -> 'os_permitidas' is distinct from '[]'::jsonb then
       raise exception '4h: listas do contexto: %', v_ctx;
     end if;
-    if not (v_ctx -> 'marcas' ->> 'tem_proposta')::boolean or (v_ctx -> 'marcas' ->> 'tem_topo')::boolean
-       or (v_ctx -> 'marcas' ->> 'cliente_ouviu')::boolean or (v_ctx -> 'marcas' ->> 'conferida')::boolean then
+    if (v_ctx -> 'marcas' ->> 'tem_proposta')::boolean is not true or (v_ctx -> 'marcas' ->> 'tem_topo')::boolean is not false
+       or (v_ctx -> 'marcas' ->> 'cliente_ouviu')::boolean is not false or (v_ctx -> 'marcas' ->> 'conferida')::boolean is not false then
       raise exception '4i: marcas: %', v_ctx -> 'marcas';
     end if;
     perform pg_temp.f3t_igual('4j trechos (do maior valor para o menor)', v_ctx ->> 'trechos_do_modelo',
@@ -276,7 +276,7 @@ begin
     v_saida2 := pg_temp.f3t_saida(v_caso4, 'modelo_ver_no_local', 'enviando', c_agora, 'm07');
     perform public.retorno_registrar_decisao(v_saida2, 'enviada', '{"provider_message_id": "wa-f3"}', c_agora + interval '1 minute');
     select * into v_ab from public.retorno_aberturas where id = v_caso4;
-    if v_ab.estado <> 'aberta' or v_ab.visita_a_combinar_em is distinct from c_agora + interval '1 minute' or v_ab.recibo_em is distinct from c_agora + interval '1 minute'
+    if v_ab.estado is distinct from 'aberta' or v_ab.visita_a_combinar_em is distinct from c_agora + interval '1 minute' or v_ab.recibo_em is distinct from c_agora + interval '1 minute'
        or v_ab.cumprida_em is not null or v_ab.fechada_em is not null then
       raise exception '9a: caso depois do M07: %', to_jsonb(v_ab);
     end if;
@@ -287,22 +287,22 @@ begin
     v_saida3 := pg_temp.f3t_saida(pg_temp.f3t_caso(5, 'cliente', v_cl3, 'tá pronto?', c_agora - interval '3 hours'), 'modelo_pronto', 'enviando', c_agora, 'pronto');
     perform public.retorno_registrar_decisao(v_saida3, 'enviada', '{"provider_message_id": "wa-f3b"}', c_agora + interval '1 minute');
     select a.* into v_ab from public.retorno_aberturas a join public.retorno_saidas s on s.abertura_id = a.id where s.id = v_saida3;
-    if v_ab.estado <> 'fechada' or v_ab.fechada_motivo <> 'conteudo' or v_ab.visita_a_combinar_em is not null then
+    if v_ab.estado is distinct from 'fechada' or v_ab.fechada_motivo is distinct from 'conteudo' or v_ab.visita_a_combinar_em is not null then
       raise exception '9c: modelo_pronto: %', to_jsonb(v_ab);
     end if;
 
     -- ═══ 10. _retorno_checar_antes: com a marca, adiamento e fim do dia caem; urgente também.
     update public.retorno_aberturas set visita_a_combinar_em = c_agora, estado = 'aberta', cumprida_em = null where id = v_caso4;
     v_r := public._retorno_checar_antes(pg_temp.f3t_saida(v_caso4, 'adiamento', 'agendada', c_agora, 'ad'), c_agora);
-    if v_r ->> 'acao' <> 'cancelar' or v_r ->> 'motivo' <> 'visita_a_combinar' then
+    if v_r ->> 'acao' is distinct from 'cancelar' or v_r ->> 'motivo' is distinct from 'visita_a_combinar' then
       raise exception '10a: adiamento (%)', v_r;
     end if;
     v_r := public._retorno_checar_antes(pg_temp.f3t_saida(v_caso4, 'fim_do_dia', 'agendada', c_agora, 'fd'), c_agora);
-    if v_r ->> 'acao' <> 'cancelar' or v_r ->> 'motivo' <> 'visita_a_combinar' then
+    if v_r ->> 'acao' is distinct from 'cancelar' or v_r ->> 'motivo' is distinct from 'visita_a_combinar' then
       raise exception '10b: fim do dia (%)', v_r;
     end if;
     v_r := public._retorno_checar_antes(pg_temp.f3t_saida(v_caso4, 'urgente', 'agendada', c_agora, 'urg'), c_agora);
-    if v_r ->> 'acao' <> 'cancelar' or v_r ->> 'motivo' <> 'visita_a_combinar' then
+    if v_r ->> 'acao' is distinct from 'cancelar' or v_r ->> 'motivo' is distinct from 'visita_a_combinar' then
       raise exception '10c: urgente (%)', v_r;
     end if;
     -- O recibo de mensagem nova do cliente segue normal: a marca não o cancela.
@@ -332,7 +332,7 @@ begin
       raise exception '11b: com a marca, fechou por silêncio (%)', v_ab.fechada_motivo;
     end if;
     select * into v_ab from public.retorno_aberturas where id = v_caso2;
-    if v_ab.estado <> 'fechada' or v_ab.fechada_motivo <> 'silencio' then
+    if v_ab.estado is distinct from 'fechada' or v_ab.fechada_motivo is distinct from 'silencio' then
       raise exception '11c: sem a marca, devia fechar por silêncio (%/%)', v_ab.estado, v_ab.fechada_motivo;
     end if;
     select * into v_ab from public.retorno_aberturas where id = v_caso3;
@@ -340,7 +340,7 @@ begin
       raise exception '11d: com a marca, fechou por nada (%)', v_ab.fechada_motivo;
     end if;
     select * into v_ab from public.retorno_aberturas where id = v_caso4;
-    if v_ab.estado <> 'fechada' or v_ab.fechada_motivo <> 'nada' then
+    if v_ab.estado is distinct from 'fechada' or v_ab.fechada_motivo is distinct from 'nada' then
       raise exception '11e: sem a marca, devia fechar por nada (%/%)', v_ab.estado, v_ab.fechada_motivo;
     end if;
 
@@ -354,7 +354,7 @@ begin
       raise exception '11f: com a marca, expirou (%)', v_ab.fechada_motivo;
     end if;
     select * into v_ab from public.retorno_aberturas where id = v_caso3;
-    if v_ab.estado <> 'fechada' or v_ab.fechada_motivo <> 'expirou' then
+    if v_ab.estado is distinct from 'fechada' or v_ab.fechada_motivo is distinct from 'expirou' then
       raise exception '11g: sem a marca, devia expirar (%/%)', v_ab.estado, v_ab.fechada_motivo;
     end if;
 
@@ -364,7 +364,7 @@ begin
             c_t + interval '5 minutes', c_t + interval '5 minutes', true);
     v_vig := public.retorno_vigia(c_t + interval '10 minutes');
     select * into v_ab from public.retorno_aberturas where id = v_caso;
-    if v_ab.estado <> 'fechada' or v_ab.fechada_motivo <> 'conteudo' or v_ab.cumprida_em is null then
+    if v_ab.estado is distinct from 'fechada' or v_ab.fechada_motivo is distinct from 'conteudo' or v_ab.cumprida_em is null then
       raise exception '11h: resposta com conteúdo não fechou (%/%)', v_ab.estado, v_ab.fechada_motivo;
     end if;
 

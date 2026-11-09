@@ -322,7 +322,7 @@ declare
 begin
   perform pg_temp.f3c_limpar();
   v_r := public.retorno_cartao_abrir('puxar', p_agora);
-  if v_r ->> 'acao' <> 'cartao' then
+  if v_r ->> 'acao' is distinct from 'cartao' then
     raise exception 'cartão não abriu: %', v_r;
   end if;
   return (v_r ->> 'cartao_id')::uuid;
@@ -556,7 +556,7 @@ begin
     update public.retorno_previa_linhas set nome = 'Serviço X', preco = 500, preco_fonte = 'praticado_cliente', preco_em = c_recente, estado = 'ok', motivo = null where previa_id = v_pv2;
     v_item := pg_temp.f3c_item(v_caso2);
     perform pg_temp.f3c_igual('4 acao', v_item ->> 'acao_sim', 'orcar');
-    if v_item ->> 'linhas' not like '%Vento%' then
+    if coalesce(v_item ->> 'linhas', '') not like '%Vento%' then
       raise exception '4a: unidade à vista: %', v_item -> 'linhas';
     end if;
     update public.retorno_aberturas set unidade_escolhida_id = null where id = v_caso2;

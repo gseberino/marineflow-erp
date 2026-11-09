@@ -97,8 +97,8 @@ begin
   if v_cfg.previa_modo is distinct from 'desligado' or v_cfg.previa_ditado_ligado then
     raise exception '1a: a proposta não nasceu desligada';
   end if;
-  if v_cfg.validade_orcamento_dias <> 7 or v_cfg.previa_max_linhas <> 12
-     or v_cfg.previa_idade_max <> interval '18 months' or v_cfg.previa_preco_velho <> interval '180 days' then
+  if v_cfg.validade_orcamento_dias is distinct from 7 or v_cfg.previa_max_linhas is distinct from 12
+     or v_cfg.previa_idade_max is distinct from interval '18 months' or v_cfg.previa_preco_velho is distinct from interval '180 days' then
     raise exception '1b: padrão diferente do combinado';
   end if;
   v := pg_temp.retorno_f3_base_erro($q$update public.retorno_config set previa_modo = 'ligado'$q$);

@@ -101,7 +101,7 @@ declare
 begin
   perform pg_temp.f3d_limpar();
   v_r := public.retorno_cartao_abrir('puxar', p_agora);
-  if v_r ->> 'acao' <> 'cartao' then
+  if v_r ->> 'acao' is distinct from 'cartao' then
     raise exception 'cartão não abriu: %', v_r;
   end if;
   return (v_r ->> 'cartao_id')::uuid;
@@ -192,7 +192,7 @@ begin
 
     -- 3. *L*: acao_sim nula depois da letra.
     v_r := pg_temp.f3d_letra(1, 'L', v_dono);
-    if not (v_r ->> 'precisa_pin')::boolean or v_r ->> 'texto' not like 'Vou mandar a %: ''%''. *sim <PIN>* manda.' then
+    if (v_r ->> 'precisa_pin')::boolean is not true or coalesce(v_r ->> 'texto', '') not like 'Vou mandar a %: ''%''. *sim <PIN>* manda.' then
       raise exception '3a: L (%)', v_r;
     end if;
     perform pg_temp.f3d_igual('3a2 L segue valendo com o PIN', v_r ->> 'pin_nao_vale', null);
@@ -202,7 +202,7 @@ begin
 
     -- Depois de *L*, a letra *B* devolve acao_sim = 'orcar' (remonta o item).
     v_r := pg_temp.f3d_letra(1, 'B', v_dono);
-    if v_r ->> 'texto' not like '%ORÇ-D001%' then
+    if coalesce(v_r ->> 'texto', '') not like '%ORÇ-D001%' then
       raise exception '1c: B devia usar o outro parecido: %', v_r;
     end if;
     perform pg_temp.f3d_igual('1c2 o PIN junto da letra não vale', v_r ->> 'pin_nao_vale', 'true');
@@ -227,10 +227,10 @@ begin
     v_r := pg_temp.f3d_letra(1, 'L', v_dono);
     perform pg_temp.f3d_igual('3f acao', (select i.acao_sim from public.retorno_cartao_itens i where i.id = v_ip), null);
     v_r := public.retorno_cartao_executar(v_cartao, v_dono, c_agora);
-    if jsonb_array_length(v_r -> 'orcamentos') <> 0 then
+    if jsonb_array_length(v_r -> 'orcamentos') is distinct from 0 then
       raise exception '3g: orcamentos devia ficar vazio com *L*: %', v_r;
     end if;
-    if (v_r ->> 'vai_sair')::integer <> 1 then
+    if (v_r ->> 'vai_sair')::integer is distinct from 1 then
       raise exception '3h: vai_sair %', v_r;
     end if;
     if (select s.tipo || '/' || s.estado from public.retorno_saidas s where s.abertura_id = v_caso and s.tipo = 'modelo_ver_no_local') <> 'modelo_ver_no_local/agendada' then
@@ -254,7 +254,7 @@ begin
     v_r := pg_temp.f3d_letra(1, 'L', v_dono);
     perform pg_temp.f3d_igual('3l acao nula', (select i.acao_sim from public.retorno_cartao_itens i where i.id = v_ip), null);
     v_r := public.retorno_cartao_executar(v_cartao, v_dono, c_agora);
-    if jsonb_array_length(v_r -> 'orcamentos') <> 0 or (select count(*) from public.retorno_saidas s where s.abertura_id = v_caso and s.tipo = 'modelo_ver_no_local') <> 1 then
+    if jsonb_array_length(v_r -> 'orcamentos') is distinct from 0 or (select count(*) from public.retorno_saidas s where s.abertura_id = v_caso and s.tipo = 'modelo_ver_no_local') <> 1 then
       raise exception '3m: M07 a partir do rascunho: %', v_r;
     end if;
     perform pg_temp.f3d_fechar(array[v_caso]);
@@ -278,10 +278,10 @@ begin
     perform pg_temp.f3d_igual('17a abertura', (select a.unidade_escolhida_id::text from public.retorno_aberturas a where a.id = v_caso), v_un::text);
     select * into v_prev from public.retorno_previa where id = v_pv;
     perform pg_temp.f3d_igual('17b vessel', v_prev.vessel_id::text, v_un::text);
-    if v_prev.hash = v_h or v_prev.hash <> public._retorno_previa_hash(v_un, v_prev.titulo, public._retorno_previa_linhas_json(v_pv)) then
+    if v_prev.hash = v_h or v_prev.hash is distinct from public._retorno_previa_hash(v_un, v_prev.titulo, public._retorno_previa_linhas_json(v_pv)) then
       raise exception '17c: hash';
     end if;
-    if not (v_prev.dados ->> 'travada')::boolean then
+    if (v_prev.dados ->> 'travada')::boolean is not true then
       raise exception '17d: travada';
     end if;
     perform pg_temp.f3d_igual('17e sombra', (select p.vessel_id::text from public.retorno_previa p where p.id = v_pv2), v_un::text);
@@ -302,7 +302,7 @@ begin
     update public.vessels set active = false where id = v_un;
     update public.retorno_cartao_itens set opcoes = jsonb_build_array(jsonb_build_object('letra', 'F', 'acao', 'unidade', 'vessel_id', v_un, 'rotulo', 'Vaga')) where id = v_ip;
     v_r := pg_temp.f3d_letra(1, 'F', v_dono);
-    if v_r ->> 'texto' not like '%já não vale para este cliente%' then
+    if coalesce(v_r ->> 'texto', '') not like '%já não vale para este cliente%' then
       raise exception '17j: unidade inativa: %', v_r;
     end if;
     update public.vessels set active = true where id = v_un;
@@ -319,7 +319,7 @@ begin
     if exists (select 1 from public.retorno_previa p where p.abertura_id = v_caso) then
       raise exception '17l: criou proposta';
     end if;
-    if v_r ->> 'texto' not like '%Dite o orçamento em áudio%' then
+    if coalesce(v_r ->> 'texto', '') not like '%Dite o orçamento em áudio%' then
       raise exception '17m: linha depois da letra: %', v_r;
     end if;
     perform pg_temp.f3d_fechar(array[v_caso]);
@@ -337,11 +337,11 @@ begin
     perform pg_temp.f3d_lin(v_pv2, 1, 'Peça 2', 1, 700, 'dito', 'ok', null, 'peca', v_prod);
     v_cartao := pg_temp.f3d_cartao(c_agora);
     v_r := public.retorno_cartao_executar(v_cartao, v_dono, c_agora);
-    if (v_r ->> 'vai_sair')::integer <> 0 or v_r ->> 'aviso' like '%Vai sair%' or v_r ->> 'aviso' like '%Nada para mandar%' then
+    if (v_r ->> 'vai_sair')::integer is distinct from 0 or v_r ->> 'aviso' like '%Vai sair%' or v_r ->> 'aviso' like '%Nada para mandar%' then
       raise exception '18a: só orçamentos: %', v_r;
     end if;
-    if jsonb_array_length(v_r -> 'orcamentos') <> 2 or v_r -> 'orcamentos' -> 0 ->> 'n' <> '1' or v_r -> 'orcamentos' -> 0 ->> 'previa_id' <> v_pv::text
-       or v_r -> 'orcamentos' -> 0 ->> 'acao' <> 'orcar' or v_r -> 'orcamentos' -> 0 ->> 'rotulo' is null then
+    if jsonb_array_length(v_r -> 'orcamentos') is distinct from 2 or v_r -> 'orcamentos' -> 0 ->> 'n' is distinct from '1' or v_r -> 'orcamentos' -> 0 ->> 'previa_id' is distinct from v_pv::text
+       or v_r -> 'orcamentos' -> 0 ->> 'acao' is distinct from 'orcar' or v_r -> 'orcamentos' -> 0 ->> 'rotulo' is null then
       raise exception '4a: orcamentos: %', v_r;
     end if;
     if (select i.estado from public.retorno_cartao_itens i where i.cartao_id = v_cartao and i.n = 1) <> 'feito'
@@ -361,7 +361,7 @@ begin
     v_ip := pg_temp.f3d_item(v_cartao, 1);
     perform pg_temp.f3d_igual('4d acao orcar com provisório', (select i.acao_sim from public.retorno_cartao_itens i where i.id = v_ip), 'orcar');
     v_r := public.retorno_cartao_executar(v_cartao, v_dono, c_agora);
-    if jsonb_array_length(v_r -> 'orcamentos') <> 0 or (v_r ->> 'aviso') like '%*dita%' or (v_r ->> 'aviso') not like '%tem item a completar (Bateria Z): não criei nada%' then
+    if jsonb_array_length(v_r -> 'orcamentos') is distinct from 0 or (v_r ->> 'aviso') like '%*dita%' or coalesce((v_r ->> 'aviso'), '') not like '%tem item a completar (Bateria Z): não criei nada%' then
       raise exception '4e: provisório: %', v_r;
     end if;
     perform pg_temp.f3d_igual('4f caiu', (select i.estado || '/' || i.caiu_motivo from public.retorno_cartao_itens i where i.id = v_ip), 'caiu/item_provisorio');
@@ -372,7 +372,7 @@ begin
     update public.retorno_config set modo = 'sombra', tipos_ligados = '{}' where id;
     v_cartao := pg_temp.f3d_cartao(c_agora);
     v_r := public.retorno_cartao_executar(v_cartao, v_dono, c_agora);
-    if jsonb_array_length(v_r -> 'orcamentos') <> 0 or (v_r ->> 'aviso') not like '%O retorno está em teste: não mandei.%' then
+    if jsonb_array_length(v_r -> 'orcamentos') is distinct from 0 or coalesce((v_r ->> 'aviso'), '') not like '%O retorno está em teste: não mandei.%' then
       raise exception '5a: sombra: %', v_r;
     end if;
     perform pg_temp.f3d_igual('5b item fora', (select i.estado from public.retorno_cartao_itens i where i.cartao_id = v_cartao and i.n = 1), 'fora');
@@ -381,7 +381,7 @@ begin
     -- 5c. Fora de 8h–20h: item fora, frase, orcamentos vazio.
     v_cartao := pg_temp.f3d_cartao(c_agora);
     v_r := public.retorno_cartao_executar(v_cartao, v_dono, c_noite);
-    if jsonb_array_length(v_r -> 'orcamentos') <> 0 or (v_r ->> 'aviso') not like '%o 1: fora do horário de envio; não criei nada. Mande *retorno* a partir das 8h%' then
+    if jsonb_array_length(v_r -> 'orcamentos') is distinct from 0 or coalesce((v_r ->> 'aviso'), '') not like '%o 1: fora do horário de envio; não criei nada. Mande *retorno* a partir das 8h%' then
       raise exception '5c: noite: %', v_r;
     end if;
     perform pg_temp.f3d_igual('5d fora', (select i.estado from public.retorno_cartao_itens i where i.cartao_id = v_cartao and i.n = 1), 'fora');
@@ -390,7 +390,7 @@ begin
     v_cartao := pg_temp.f3d_cartao(c_agora);
     update public.retorno_config set previa_modo = 'sombra' where id;
     v_r := public.retorno_cartao_executar(v_cartao, v_dono, c_agora);
-    if (v_r ->> 'aviso') not like '%o 1 não saiu, porque o orçamento pelo cartão foi desligado; não criei nada%' then
+    if coalesce((v_r ->> 'aviso'), '') not like '%o 1 não saiu, porque o orçamento pelo cartão foi desligado; não criei nada%' then
       raise exception '5e: flag desligada: %', v_r;
     end if;
     update public.retorno_config set previa_modo = 'ligado' where id;
@@ -399,7 +399,7 @@ begin
     v_cartao := pg_temp.f3d_cartao(c_agora);
     update public.retorno_config set previa_modo = 'desligado', previa_ditado_ligado = false where id;
     v_r := public.retorno_cartao_executar(v_cartao, v_dono, c_agora);
-    if (v_r ->> 'aviso') not like '%o 1 não saiu, porque o orçamento pelo cartão foi desligado; não criei nada%' or jsonb_array_length(v_r -> 'orcamentos') <> 0 then
+    if coalesce((v_r ->> 'aviso'), '') not like '%o 1 não saiu, porque o orçamento pelo cartão foi desligado; não criei nada%' or jsonb_array_length(v_r -> 'orcamentos') is distinct from 0 then
       raise exception '5e2: reversão completa: %', v_r;
     end if;
     perform pg_temp.f3d_igual('5e3 item fora', (select i.estado from public.retorno_cartao_itens i where i.cartao_id = v_cartao and i.n = 1), 'fora');
@@ -424,8 +424,8 @@ begin
       raise exception '18b: devia ter 1 modelo';
     end if;
     v_r := public.retorno_cartao_executar(v_cartao, v_dono, c_agora);
-    if (v_r ->> 'vai_sair')::integer <> 1 or (v_r ->> 'aviso') like '%' || (v_r -> 'orcamentos' -> 0 ->> 'rotulo') || '%' or jsonb_array_length(v_r -> 'orcamentos') <> 1
-       or (v_r ->> 'aviso') not like 'Vai sair 1: %' then
+    if (v_r ->> 'vai_sair')::integer is distinct from 1 or (v_r ->> 'aviso') like '%' || (v_r -> 'orcamentos' -> 0 ->> 'rotulo') || '%' or jsonb_array_length(v_r -> 'orcamentos') is distinct from 1
+       or coalesce((v_r ->> 'aviso'), '') not like 'Vai sair 1: %' then
       raise exception '18c: modelo e orçamento: %', v_r;
     end if;
     perform pg_temp.f3d_fechar(array[v_caso, v_caso2]);
@@ -575,7 +575,7 @@ begin
     v_ip := pg_temp.f3d_item(v_cartao, 1);
     perform pg_temp.f3d_igual('12a pdf', (select i.acao_sim from public.retorno_cartao_itens i where i.id = v_ip), 'pdf');
     v_r := public.retorno_previa_preparar(null, v_ip, v_dono, c_agora, v_os);
-    if not (v_r ->> 'ok')::boolean or v_r ->> 'acao' <> 'pdf' or v_r ->> 'numero' <> 'ORÇ-D151' or (v_r ->> 'total')::numeric <> 900 or v_r ? 'args' then
+    if (v_r ->> 'ok')::boolean is not true or v_r ->> 'acao' is distinct from 'pdf' or v_r ->> 'numero' is distinct from 'ORÇ-D151' or (v_r ->> 'total')::numeric is distinct from 900 or v_r ? 'args' then
       raise exception '12b: pdf passou: %', v_r;
     end if;
     -- Rascunho de outra unidade (a do caso já definida e diferente): recusa.
@@ -593,12 +593,12 @@ begin
     v_pv := pg_temp.f3d_prop(v_caso, v_cl, v_un, 'ditado', null, '{}', 900, 1, 0, 'virou_orc');
     update public.retorno_previa set service_order_id = v_os, familias = array['bateria'] where id = v_pv;
     v_r := public.retorno_previa_preparar(v_pv, v_ip, v_dono, c_agora, v_os);
-    if not (v_r ->> 'ok')::boolean or v_r ->> 'previa_id' <> v_pv::text then
+    if (v_r ->> 'ok')::boolean is not true or v_r ->> 'previa_id' is distinct from v_pv::text then
       raise exception '12d: virou_orc: %', v_r;
     end if;
     -- 20: p_previa nulo acha a proposta virou_orc do mesmo ORÇ, a legenda usa o {do_servico} dela, e o PDF não insere outra linha.
     v_r := public.retorno_previa_preparar(null, v_ip, v_dono, c_agora, v_os);
-    if v_r ->> 'previa_id' <> v_pv::text or v_r -> 'legenda' ->> 'texto' not like '%orçamento das baterias%' then
+    if v_r ->> 'previa_id' is distinct from v_pv::text or coalesce(v_r -> 'legenda' ->> 'texto', '') not like '%orçamento das baterias%' then
       raise exception '20a: %', v_r;
     end if;
     v_r2 := public.retorno_previa_pdf(null, true, '12345678', c_agora, v_os, v_caso, v_ip);
@@ -651,7 +651,7 @@ begin
     v_cartao := pg_temp.f3d_cartao(c_agora);
     v_ip := pg_temp.f3d_item(v_cartao, 1);
     v_r := public.retorno_previa_preparar(null, v_ip, v_dono, c_agora, v_os);
-    if not (v_r ->> 'ok')::boolean then
+    if (v_r ->> 'ok')::boolean is not true then
       raise exception '20c: 2 unidades: %', v_r;
     end if;
     -- Cliente inativo recusa (regra 4 do rascunho).
@@ -669,8 +669,8 @@ begin
     perform pg_temp.f3d_igual('24d item não mudou', (select i.estado from public.retorno_cartao_itens i where i.id = v_ip), 'vivo');
     v_r := public.retorno_previa_pdf(null, true, '12345678', c_agora, v_os, v_caso, v_ip);
     select * into v_prev from public.retorno_previa p where p.service_order_id = v_os;
-    if v_prev.origem <> 'rascunho' or v_prev.estado <> 'virou_orc' or v_prev.modo <> 'ligado' or v_prev.titulo <> 'Rascunho ORÇ-D152' or v_prev.hash <> ''
-       or v_prev.linhas_iniciais <> '[]'::jsonb or v_prev.pdf_chave <> '12345678' or v_prev.linhas_n <> 1 or v_prev.total <> 900 then
+    if v_prev.origem is distinct from 'rascunho' or v_prev.estado is distinct from 'virou_orc' or v_prev.modo is distinct from 'ligado' or v_prev.titulo is distinct from 'Rascunho ORÇ-D152' or v_prev.hash is distinct from ''
+       or v_prev.linhas_iniciais is distinct from '[]'::jsonb or v_prev.pdf_chave is distinct from '12345678' or v_prev.linhas_n is distinct from 1 or v_prev.total is distinct from 900 then
       raise exception '24e: linha rascunho: %', to_jsonb(v_prev);
     end if;
     perform pg_temp.f3d_fechar(array[v_caso]);
@@ -705,7 +705,7 @@ begin
     v_r := public.retorno_previa_orc_criado(v_pv, v_os, c_agora);
     v_r2 := public.retorno_previa_orc_criado(v_pv, v_os, c_agora + interval '1 minute');
     select * into v_prev from public.retorno_previa where id = v_pv;
-    if v_prev.estado <> 'virou_orc' or v_prev.service_order_id <> v_os or v_prev.decidida_em <> c_agora then
+    if v_prev.estado is distinct from 'virou_orc' or v_prev.service_order_id is distinct from v_os or v_prev.decidida_em is distinct from c_agora then
       raise exception 'orc_criado: %', to_jsonb(v_prev);
     end if;
     perform pg_temp.f3d_fechar(array[v_caso]);
@@ -719,7 +719,7 @@ begin
     v_cartao := pg_temp.f3d_cartao(c_agora);
     v_ip := pg_temp.f3d_item(v_cartao, 1);
     v_r := public.retorno_decidir_dito('{"comando": "ditar", "n": 1, "texto": "troca o controlador"}', v_dono, c_agora);
-    if v_r ->> 'texto' <> 'Isso parece ajuste da proposta, e *dita* manda o texto ao cliente. Diga sem o *dita*: ou mande *dita 1* com o texto completo ao cliente.' then
+    if v_r ->> 'texto' is distinct from 'Isso parece ajuste da proposta, e *dita* manda o texto ao cliente. Diga sem o *dita*: ou mande *dita 1* com o texto completo ao cliente.' then
       raise exception '9a: %', v_r;
     end if;
     if (select i.texto_ditado from public.retorno_cartao_itens i where i.id = v_ip) is not null then
@@ -738,9 +738,9 @@ begin
       raise exception '10: texto do cliente em retorno_previa_ver';
     end if;
     if v_r ->> 'hash' is distinct from public._retorno_previa_hash_efetivo(v_pv, c_agora)
-       or not (v_r ->> 'ditado_ligado')::boolean or v_r ->> 'previa_id' <> v_pv::text or (v_r ->> 'client_id')::uuid <> v_cl
-       or v_r ->> 'validade' <> 'terça (17/11)' or v_r ->> 'unidade_nome' <> 'Vela' or jsonb_array_length(v_r -> 'linhas') <> 1
-       or v_r -> 'linhas' -> 0 ->> 'rotulo' <> 'praticado em 12/08/26' or (v_r ->> 'cliente_generico')::boolean then
+       or (v_r ->> 'ditado_ligado')::boolean is not true or v_r ->> 'previa_id' is distinct from v_pv::text or (v_r ->> 'client_id')::uuid is distinct from v_cl
+       or v_r ->> 'validade' is distinct from 'terça (17/11)' or v_r ->> 'unidade_nome' is distinct from 'Vela' or jsonb_array_length(v_r -> 'linhas') is distinct from 1
+       or v_r -> 'linhas' -> 0 ->> 'rotulo' is distinct from 'praticado em 12/08/26' or (v_r ->> 'cliente_generico')::boolean is not false then
       raise exception '29a: ver: %', v_r;
     end if;
     -- 29: erro em cada um dos 3 casos.
@@ -772,11 +772,11 @@ begin
     v_ip := pg_temp.f3d_item(v_cartao, 1);
     v_h := public._retorno_previa_hash_efetivo(v_pv, c_agora);
     v_r := public.retorno_previa_retrato(v_caso, v_pv, v_h, '5547900700115', v_dono, c_agora);
-    if not (v_r ->> 'ok')::boolean or v_r ->> 'item_id' <> v_ip::text or (v_r ->> 'n')::integer <> 1 then
+    if (v_r ->> 'ok')::boolean is not true or v_r ->> 'item_id' is distinct from v_ip::text or (v_r ->> 'n')::integer is distinct from 1 then
       raise exception '15a: retrato: %', v_r;
     end if;
     v_r := public.retorno_previa_retrato(v_caso, v_pv, 'outro-hash', '5547900700115', v_dono, c_agora);
-    if (v_r ->> 'ok')::boolean or v_r ->> 'motivo' <> 'mudou' then
+    if (v_r ->> 'ok')::boolean is not false or v_r ->> 'motivo' is distinct from 'mudou' then
       raise exception '15b: outro hash: %', v_r;
     end if;
     update public.retorno_config set previa_ditado_ligado = false, previa_modo = 'desligado' where id;
@@ -785,7 +785,7 @@ begin
     update public.retorno_config set previa_ditado_ligado = true, previa_modo = 'ligado' where id;
     perform pg_temp.f3d_limpar();   -- o cartão cai
     v_r := public.retorno_previa_retrato(v_caso, v_pv, v_h, '5547900700115', v_dono, c_agora);
-    if not (v_r ->> 'ok')::boolean or v_r ->> 'item_id' is not null then
+    if (v_r ->> 'ok')::boolean is not true or v_r ->> 'item_id' is not null then
       raise exception '15d: cartão caído: %', v_r;
     end if;
     perform pg_temp.f3d_fechar(array[v_caso]);
@@ -827,10 +827,11 @@ begin
     v_r := public.retorno_previa_aplicar(null, v_t::jsonb, v_dono, c_agora, v_ip);
     v_pv := (v_r ->> 'previa_id')::uuid;
     select * into v_prev from public.retorno_previa where id = v_pv;
-    if v_prev.origem <> 'ditado' or v_prev.estado <> 'proposta' or v_prev.modo <> 'ligado' or v_prev.familias <> array['bateria'] or v_prev.fonte_numero is not null
-       or v_prev.titulo <> 'Troca das baterias' or v_prev.condicao_pagamento <> '50% de sinal' or v_prev.client_id <> v_cl or v_prev.vessel_id <> v_un
-       or v_prev.total <> 2140.00 or v_prev.linhas_n <> 3 or v_prev.provisorios_n <> 0 or v_prev.linhas_iniciais <> '[]'::jsonb
-       or v_prev.preco_mais_antigo <> date '2026-08-12' or v_prev.hash = 'plano-hash' or not (v_prev.dados ->> 'travada')::boolean or not (v_prev.dados ->> 'ajustada_por_ditado')::boolean then
+    if v_prev.origem is distinct from 'ditado' or v_prev.estado is distinct from 'proposta' or v_prev.modo is distinct from 'ligado' or v_prev.familias is distinct from array['bateria'] or v_prev.fonte_numero is not null
+       or v_prev.titulo is distinct from 'Troca das baterias' or v_prev.condicao_pagamento is distinct from '50% de sinal' or v_prev.client_id is distinct from v_cl or v_prev.vessel_id is distinct from v_un
+       or v_prev.total is distinct from 2140.00 or v_prev.linhas_n is distinct from 3 or v_prev.provisorios_n is distinct from 0 or v_prev.linhas_iniciais is distinct from '[]'::jsonb
+       or v_prev.preco_mais_antigo is distinct from date '2026-08-12' or v_prev.hash = 'plano-hash' or (v_prev.dados ->> 'travada')::boolean is not true or (v_prev.dados ->> 'ajustada_por_ditado')::boolean is not true
+       or (v_prev.dados ->> 'ditada_em')::timestamptz is distinct from c_agora then
       raise exception '23a: cabeçalho: %', to_jsonb(v_prev);
     end if;
     if v_prev.hash is distinct from v_r ->> 'hash'
@@ -857,14 +858,14 @@ begin
     v_r := public.retorno_previa_aplicar(v_pv2, jsonb_build_object('abertura_id', v_caso2, 'titulo', 'Ajustado', 'condicao', null, 'client_id', v_cl2, 'vessel_id', v_un2,
       'linhas', jsonb_build_array(jsonb_build_object('linha', 1, 'tipo', 'peca', 'product_id', v_prod, 'nome', 'Nova', 'quantidade', 2, 'preco', 300, 'fonte', 'dito', 'em', null, 'estado', 'ok'))), v_dono, c_agora);
     select * into v_prev from public.retorno_previa where id = v_pv2;
-    if v_prev.origem <> 'historico' or v_prev.fonte_numero <> 'ORÇ-D118' or v_prev.familias <> array['bateria'] or v_prev.modo <> 'ligado' or v_prev.total <> 600
-       or v_prev.titulo <> 'Ajustado' or v_prev.linhas_iniciais::text <> '[{"inicial": true}]' or (v_prev.dados -> 'alternativas') is null then
+    if v_prev.origem is distinct from 'historico' or v_prev.fonte_numero is distinct from 'ORÇ-D118' or v_prev.familias is distinct from array['bateria'] or v_prev.modo is distinct from 'ligado' or v_prev.total is distinct from 600
+       or v_prev.titulo is distinct from 'Ajustado' or v_prev.linhas_iniciais::text <> '[{"inicial": true}]' or (v_prev.dados -> 'alternativas') is null then
       raise exception '23j: existente: %', to_jsonb(v_prev);
     end if;
     v_h := v_prev.hash;
     v_r2 := public.retorno_previa_aplicar(v_pv2, jsonb_build_object('abertura_id', v_caso2, 'titulo', 'Ajustado', 'condicao', null, 'client_id', v_cl2, 'vessel_id', v_un2,
       'linhas', jsonb_build_array(jsonb_build_object('linha', 1, 'tipo', 'peca', 'product_id', v_prod, 'nome', 'Nova', 'quantidade', 2, 'preco', 300, 'fonte', 'dito', 'em', null, 'estado', 'ok'))), v_dono, c_agora);
-    if v_r2 ->> 'hash' <> v_h or (select count(*) from public.retorno_previa_linhas l where l.previa_id = v_pv2) <> 1 then
+    if v_r2 ->> 'hash' is distinct from v_h or (select count(*) from public.retorno_previa_linhas l where l.previa_id = v_pv2) <> 1 then
       raise exception '11b: idempotência: %', v_r2;
     end if;
     -- Só o dono aplica.
@@ -882,7 +883,7 @@ begin
     v_cartao := pg_temp.f3d_cartao(c_agora);
     select c.sessao_id into v_ses from public.retorno_cartoes c where c.id = v_cartao;
     v_r := public.retorno_ver_caso_para_modelo(1, v_dono, c_agora);
-    if v_r ->> 'erro' is not null or (v_r -> 'amarra' ->> 'client_id')::uuid <> v_cl then
+    if v_r ->> 'erro' is not null or (v_r -> 'amarra' ->> 'client_id')::uuid is distinct from v_cl then
       raise exception '14a: amarra: %', v_r;
     end if;
     perform pg_temp.f3d_igual('14b client_id gravado', (select s.client_id::text from public.ai_operator_sessions s where s.id = v_ses), v_cl::text);
