@@ -4,6 +4,7 @@
 --   C0  as funções: portas, tipo; o que a migration não recria nem cria (sem _agenda_folga_compra_du, R7.5-16)
 --   C1  os passos da rodada: o tempo de compra (padrão 1: tempo 2; o maior de cada OS; janela, n mínimo, teto), a folga (só medida), a peça sem fornecedor (conta 7, só medida; a compra é a entrega)
 --   C2  o fornecedor: Correa em desligado × sombra × ligado × ligado com o freio; a compra antes da nota da mesma entrega; a previsão de antes da compra fora do atraso da Kamell (só em ligado)
+--   C2t a frase do prazo medido e o foco fornecedores dizem o que foi medido: 5 compras e 0 notas, compras e notas juntas, só notas (o texto de antes)
 --   C3  os_prontidao: byte a byte em sombra (OS sem linha é o caso comum); com o freio; em ligado, o "compre até" 1 dia útil antes com o tempo 2; a marcação vale; a sombra não chama nada novo (R7.8)
 --   C3b _agenda_gestor_compra_conta: as 3 contas, o v_mesma estável com o marcado, o mesmo número da prontidão, e o que grava
 --   C4  o publicado não muda: a OS marcada com 2 guarda 2 quando o medido vira 3 (só o tempo: a folga fica sem leitor)
@@ -356,6 +357,10 @@ begin
   insert into public.suppliers (id, name, trade_name, city, state, active) values (v, p_nome, null, 'Itajaí', 'SC', true) on conflict (id) do nothing;
   return v;
 end $f$;
+-- Troca o detalhe da linha do prazo (só para variar a origem do número sem refazer as medidas)
+create function pg_temp.detalhe_prazo(p_forn uuid, p_det jsonb) returns void language sql as $f$
+  update public.agenda_aprendizado set detalhe = p_det where item = 'fornecedor_prazo' and chave = p_forn::text
+$f$;
 create function pg_temp.nota(p_n int, p_forn uuid, p_desp date, p_cheg date) returns uuid language plpgsql as $f$
 declare
   v uuid := md5('e7e:p6:nota:' || p_n)::uuid;
@@ -379,6 +384,12 @@ declare
   v_n1   uuid;
   v_n2   uuid;
   v_l    uuid;
+  v_mis  uuid;
+  v_ter  uuid;
+  v_pr   jsonb;
+  v_k    jsonb;
+  v_t    text;
+  k      int;
 begin
   if not pg_temp.fx() then
     perform pg_temp.gravar(pg_temp.ok('[]', 'C2 fornecedor', true, 'PULADO: sem a fixture'));
@@ -547,6 +558,76 @@ begin
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
+  begin
+    -- Quem LÊ o n de fornecedor_prazo também diz o que foi medido (conferência do P6; R7.12-9): o gravador passou a contar compras, e "(medido em 5 notas)" sem nota nenhuma é afirmação falsa.
+    perform pg_temp.modo('ligado', false);
+    v_corr := pg_temp.fornecedor('Correa');
+    v_mis := pg_temp.fornecedor('Mista');
+    v_ter := pg_temp.fornecedor('Terceira');
+    v_os := array[pg_temp.aberta(61), pg_temp.aberta(62), pg_temp.aberta(63)];
+    for k in 1 .. 5 loop
+      perform pg_temp.medida(160 + k, v_os[1], v_corr, 'oc:t' || k, p_comp => date '2026-12-10', p_cheg => date '2026-12-14', p_prazo => 2, p_vp => true);
+    end loop;
+    for k in 1 .. 3 loop
+      perform pg_temp.medida(170 + k, v_os[2], v_mis, 'oc:m' || k, p_comp => date '2026-12-10', p_cheg => date '2026-12-14', p_prazo => 2, p_vp => true);
+    end loop;
+    perform pg_temp.nota(61, v_mis, date '2026-12-10', date '2026-12-14');   -- 2 dias úteis, outra entrega
+    perform pg_temp.nota(62, v_mis, date '2026-12-11', date '2026-12-15');   -- 2 dias úteis, outra entrega
+    perform pg_temp.medida(180, v_os[2], v_ter, 'oc:u1', p_comp => date '2026-12-10', p_cheg => date '2026-12-14', p_prazo => 2, p_vp => true);   -- 1 só: fica medindo
+    perform public._agenda_aprender_fornecedor(c_hoje, c_ag);
+
+    r := pg_temp.aprendido('fornecedor_prazo', v_corr::text);
+    v_pr := public._agenda_prazo_do_fornecedor(v_corr);
+    v_res := pg_temp.ok(v_res, 'C2t1 5 compras e 0 notas: "(medido em 5 compras)", sem falar em nota; o resto do objeto é o do prazo medido (du 2, fonte medido, du_classe 1)',
+      r.em_uso = 2 and (r.detalhe ->> 'compras')::int = 5 and (r.detalhe ->> 'notas')::int = 0
+      and v_pr ->> 'texto' = 'entrega local, 2 dias úteis (medido em 5 compras)'
+      and v_pr - 'texto' = jsonb_build_object('classe', 'entrega_local', 'du', 2, 'corridos', null, 'fonte', 'medido', 'duvida', null, 'principal_id', null, 'du_classe', 1), v_pr::text);
+    r := pg_temp.aprendido('fornecedor_prazo', v_mis::text);
+    v_pr := public._agenda_prazo_do_fornecedor(v_mis);
+    v_res := pg_temp.ok(v_res, 'C2t2 3 compras e 2 notas: "(medido em 3 compras e 2 notas)"',
+      r.em_uso = 2 and (r.detalhe ->> 'compras')::int = 3 and (r.detalhe ->> 'notas')::int = 2
+      and v_pr ->> 'texto' = 'entrega local, 2 dias úteis (medido em 3 compras e 2 notas)', v_pr::text);
+
+    -- a conta do gestor classifica pelo texto (like '%(medido em %'): a frase nova continua "medido"
+    v_l := pg_temp.falta(64, v_os[3]);
+    update public.os_material set fornecedor_id = v_corr where id = v_l;
+    perform pg_temp.publica(v_os[3], 4);
+    v_k := public._agenda_gestor_compra_conta(v_os[3], c_hoje) -> 'itens' -> 0;
+    v_res := pg_temp.ok(v_res, 'C2t3 a conta do gestor continua classificando a compra medida como medido (prazo_fonte medido, prazo 2)',
+      v_k ->> 'prazo_fonte' = 'medido' and (v_k ->> 'prazo')::int = 2, v_k::text);
+
+    -- o foco fornecedores: Correa (só compras) na lista
+    v_t := public._agenda_ver_fornecedores(c_hoje) ->> 'texto';
+    v_res := pg_temp.ok(v_res, 'C2t4 foco fornecedores, só compras: o bloco diz "pelas compras", a linha diz "5 compras" e não sobra "nota"',
+      v_t like E'%Medido (pelas compras que chegaram):\n• Correa (Itajaí/SC): entrega local, 2 dias úteis (medido em 5 compras).\n%' and v_t not like '%nota%', v_t);
+
+    -- entra a Mista (compras e notas)
+    update public.os_material set fornecedor_id = v_mis where id = md5('e7e:p6:m:171')::uuid;
+    v_t := public._agenda_ver_fornecedores(c_hoje) ->> 'texto';
+    v_res := pg_temp.ok(v_res, 'C2t5 foco fornecedores, compras e notas num fornecedor: o bloco diz "pelas compras e notas"',
+      v_t like E'%Medido (pelas compras e notas que chegaram):\n%' and v_t like '%(medido em 3 compras e 2 notas).%' and v_t like '%(medido em 5 compras).%', v_t);
+
+    -- 1 compra e 1 nota: o singular
+    perform pg_temp.detalhe_prazo(v_mis, jsonb_build_object('fonte', 'compras', 'compras', 1, 'notas', 1));
+    v_pr := public._agenda_prazo_do_fornecedor(v_mis);
+    v_res := pg_temp.ok(v_res, 'C2t6 o singular: "(medido em 1 compra e 1 nota)"', v_pr ->> 'texto' = 'entrega local, 2 dias úteis (medido em 1 compra e 1 nota)', v_pr::text);
+
+    -- sem compra medida (o detalhe de antes do P6): o texto de antes, byte a byte
+    perform pg_temp.detalhe_prazo(v_mis, jsonb_build_object('n', 5, 'p50', 2, 'dono', false));
+    v_pr := public._agenda_prazo_do_fornecedor(v_mis);
+    v_res := pg_temp.ok(v_res, 'C2t7 sem compra medida: o texto de antes, byte a byte (o n da linha, "notas")', v_pr ->> 'texto' = 'entrega local, 2 dias úteis (medido em 5 notas)', v_pr::text);
+    v_t := public._agenda_ver_fornecedores(c_hoje) ->> 'texto';
+    v_res := pg_temp.ok(v_res, 'C2t8 um só com compras, outro só com notas: o bloco diz "pelas compras e notas"', v_t like E'%Medido (pelas compras e notas que chegaram):\n%' and v_t like '%(medido em 5 notas).%', v_t);
+
+    -- ninguém em uso por compra, e alguém medindo pela compra (fora do bloco): o título de antes
+    perform pg_temp.detalhe_prazo(v_corr, jsonb_build_object('n', 5, 'p50', 2, 'dono', false));
+    update public.os_material set fornecedor_id = v_ter where id = md5('e7e:p6:m:172')::uuid;
+    v_res := pg_temp.ok(v_res, 'C2t9 a Terceira tem compra medida e ainda mede (fora do bloco)', (pg_temp.aprendido('fornecedor_prazo', v_ter::text)).detalhe ->> 'fonte' = 'compras' and (pg_temp.aprendido('fornecedor_prazo', v_ter::text)).em_uso is null, null);
+    v_t := public._agenda_ver_fornecedores(c_hoje) ->> 'texto';
+    v_res := pg_temp.ok(v_res, 'C2t10 só notas no bloco: o título de antes, byte a byte, mesmo com alguém medindo pela compra', v_t like E'%Medido (pelas notas que chegaram):\n%' and v_t not like '%pelas compras%', v_t);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
   perform pg_temp.gravar(v_res);
 end
 $c2$;
@@ -567,6 +648,7 @@ declare
   m      text;
   f      boolean;
   v_dif  int;
+  v_i2   jsonb;
 begin
   if not pg_temp.fx() then
     perform pg_temp.gravar(pg_temp.ok('[]', 'C3 prontidão', true, 'PULADO: sem a fixture'));
@@ -634,7 +716,33 @@ begin
     perform pg_temp.publica(v_os2, 4, date '2027-03-01');
     v_res := pg_temp.ok(v_res, 'C3h2 a OS sem linha de planejamento, em sombra, também não chama função nova', public.os_prontidao(v_os2, c_hoje) ->> 'ok' = 'true', null);
     perform pg_temp.modo('ligado', true);
-    v_res := pg_temp.ok(v_res, 'C3h3 com o freio, ligado não chama função nova na prontidão (v_f7_firme é falsa)', public.os_prontidao(v_os2, c_hoje) ->> 'ok' = 'true', null);
+    v_res := pg_temp.ok(v_res, 'C3h3 com o freio, fora da simulação do gestor, ligado não chama função nova na prontidão (v_f7_firme é falsa)', public.os_prontidao(v_os2, c_hoje) ->> 'ok' = 'true', null);
+    -- a simulação do gestor (agenda.gestor = sombra) liga as regras mesmo com o freio: ligado com o freio vale sombra também no custo, e a OS sem marcação fica no parâmetro sem chamar a função
+    perform set_config('agenda.gestor', 'sombra', true);
+    begin
+      v_i2 := pg_temp.item1(public.os_prontidao(v_os2, c_hoje));
+    exception when others then
+      v_i2 := jsonb_build_object('lancou', sqlerrm);
+    end;
+    v_res := pg_temp.ok(v_res, 'C3h4 com o freio e na simulação do gestor, ligado, OS sem marcação: a regra roda (compra_firme) e a prontidão não chama a função nem muda o parâmetro',
+      not v_i2 ? 'lancou' and coalesce((v_i2 ->> 'compra_firme')::boolean, false) and not v_i2 ? 'tempo_interno_du', v_i2::text);
+    -- a OS marcada usa o dela, lido da linha: é o que o comentário de os_prontidao afirma
+    insert into public.os_planejamento (service_order_id, tempo_compra_marcado, marcado_em, atualizado_em) values (v_os2, 2, date '2027-01-06', timestamptz '2026-12-01 10:00-03');
+    v_i2 := pg_temp.item1(public.os_prontidao(v_os2, c_hoje));
+    v_res := pg_temp.ok(v_res, 'C3h5 com o freio e na simulação do gestor, a OS marcada usa o número dela (2), lido da linha, sem chamar a função', (v_i2 ->> 'tempo_interno_du')::int = 2, v_i2::text);
+    perform set_config('agenda.gestor', '', true);
+    -- o portão de firme: ligado de verdade, mas sem a regra compra_firme a conta não roda; a OS sem marcação não chama a função
+    perform pg_temp.modo('ligado', false);
+    update public.agenda_config set marcar_regras = array_remove(marcar_regras, 'compra_firme') where id;
+    v_os2 := pg_temp.aberta(57);
+    perform pg_temp.falta(57, v_os2);
+    perform pg_temp.publica(v_os2, 4, date '2027-03-15');
+    begin
+      v_i2 := pg_temp.item1(public.os_prontidao(v_os2, c_hoje));
+    exception when others then
+      v_i2 := jsonb_build_object('lancou', sqlerrm);
+    end;
+    v_res := pg_temp.ok(v_res, 'C3h6 ligado sem o freio, mas sem a regra compra_firme: a OS sem marcação não chama a função (a conta não roda)', not v_i2 ? 'lancou', v_i2::text);
     perform pg_temp.modo('sombra', false);
     v_res := pg_temp.ok(v_res, 'C6a2 o "Como eu conto" em sombra não chama função nova', public._agenda_ver_gestor(c_hoje) is not null, null);
     raise exception 'desfaz' using errcode = 'P0099';
@@ -744,7 +852,9 @@ begin
     ('os_prontidao', 'public.os_prontidao(uuid, date)', 'c69862188638af46cbb0d2d9d1b1e7ea'),
     ('_agenda_gestor_compra_conta', 'public._agenda_gestor_compra_conta(uuid, date)', '559c1ecb44eab4dce4bdb91d0221e34b'),
     ('_agenda_ver_gestor', 'public._agenda_ver_gestor(date)', '9a4f0eff1587a01a4963ac4161a64731'),
-    ('_agenda_aprendizado_texto', 'public._agenda_aprendizado_texto(text, text, jsonb)', 'd6efbf56237d8da99642b5411ba86930')) t(nome, assin, md5o)
+    ('_agenda_aprendizado_texto', 'public._agenda_aprendizado_texto(text, text, jsonb)', 'd6efbf56237d8da99642b5411ba86930'),
+    ('_agenda_prazo_do_fornecedor', 'public._agenda_prazo_do_fornecedor(uuid)', '82e9ff9a043dc182586acd751ee2a9a9'),
+    ('_agenda_ver_fornecedores', 'public._agenda_ver_fornecedores(date)', 'e71ba407c805508d2914f6a173f0b572')) t(nome, assin, md5o)
   loop
     v_res := pg_temp.ok(v_res, 'C5c ' || r.nome || ': tirados os blocos do P6, o corpo é o da origem (md5)',
       md5(pg_temp.sem_p6((select prosrc from pg_proc where oid = r.assin::regprocedure))) = r.md5o,

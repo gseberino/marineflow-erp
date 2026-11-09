@@ -1,6 +1,6 @@
 -- Agenda de Produção, Fase 7, etapa 7e ("A margem que aprende"), pacote P6: as compras. O tempo que o dono leva da aprovação até comprar passa a ser medido e a entrar no "compre até", e a compra registrada conta no prazo do fornecedor.
 -- Spec: scratchpad agenda-pesquisa/spec-fase7e.md (§5.5 e o bloco R7, que vale sobre o corpo: R7.1, R7.2, R7.5-15, R7.5-16, R7.6, R7.8, R7.12, R7.13); nomes: fase7-registro.md; o registro do pacote: f7e/p6/notas.md.
--- Depende de 20261111100000 (P1) e 20261111100100 (P2). Copiado das definições MAIS NOVAS: _agenda_aprender_fornecedor 20261029100900_agenda_fase6_correcao_calculo.sql:1203; os_prontidao 20261031100980_agenda_fase77a_correcao.sql:2044; _agenda_gestor_compra_conta 20261031100800_agenda_fase7a_compras.sql:104; _agenda_ver_gestor 20261101100850_agenda_fase77b_correcao2.sql:408; _agenda_aprendizado_texto 20261111100100_agenda_fase7e_medicao.sql:1065.
+-- Depende de 20261111100000 (P1) e 20261111100100 (P2). Copiado das definições MAIS NOVAS: _agenda_aprender_fornecedor 20261029100900_agenda_fase6_correcao_calculo.sql:1203; os_prontidao 20261031100980_agenda_fase77a_correcao.sql:2044; _agenda_gestor_compra_conta 20261031100800_agenda_fase7a_compras.sql:104; _agenda_ver_gestor 20261101100850_agenda_fase77b_correcao2.sql:408; _agenda_aprendizado_texto 20261111100100_agenda_fase7e_medicao.sql:1065; _agenda_prazo_do_fornecedor 20261029100300_agenda_fase6_fornecedor.sql:457; _agenda_ver_fornecedores 20261029100950_agenda_fase6_correcao_textos.sql:3032.
 --
 -- ═══ NÃO APLICADA ═══ Existe para revisão e espera o OK (publicar/exec/aplicar.sh, nunca db push: esta versão fica antes das 20261116* que já estão em produção). Nenhuma coluna nem tabela nova.
 --
@@ -14,8 +14,9 @@
 --   4. _agenda_ver_gestor: o "entre decidir e comprar" diz o número que vale.
 --   5. _agenda_aprender_fornecedor: fornecedor_prazo mede também as entregas pela compra (§5.5), com a nota da mesma entrega fora, e o atraso deixa de fora a previsão dita antes da compra. Em sombra só o detalhe.teria.
 --   6. _agenda_aprendizado_texto: o texto do "Fornecedor pela compra" (achado 152).
+--   7. _agenda_prazo_do_fornecedor e _agenda_ver_fornecedores: com fornecedor_prazo em uso medido por compra, a frase e o título do bloco "Medido" dizem o que foi medido; sem compra medida, o texto de antes.
 --
--- O QUE NÃO MUDA: agenda_vigiar, agenda_cliente_vigiar e agenda_propor não são recriadas; em sombra, com o freio e na OS sem marcação, a prontidão não faz nenhuma chamada nova (R7.8). Nenhuma mensagem nova ao dono, à equipe ou ao cliente: os textos novos só saem no foco e no "o que mudou", e o foco é do P7. Nada de dinheiro.
+-- O QUE NÃO MUDA: agenda_vigiar, agenda_cliente_vigiar e agenda_propor não são recriadas; em sombra e com o freio (também na simulação do gestor, agenda.gestor = sombra), na OS sem marcação a prontidão não faz nenhuma chamada nova (R7.8); a OS marcada lê o número da linha que já tem na mão. A chamada que continua é a de _agenda_gestor_compra_conta (passo do gestor, fora de agenda_vigiar, agenda_cliente_vigiar e agenda_propor), que com o freio devolve o parâmetro ou o marcado. Nenhuma mensagem nova ao dono, à equipe ou ao cliente: os textos novos só saem no foco e no "o que mudou", e o foco é do P7. Nada de dinheiro.
 --
 -- DESFAZER (na ordem):
 --   cada recriada volta à versão anterior pelo corpo da origem acima; depois, drop das 3 novas:
@@ -927,8 +928,8 @@ begin
     into v_itens
     from passo8 q;
   -- FASE 7e: (7e P6, §5.5, R7.5-15, R7.8) o tempo interno de compra de ESTA OS, na única conta que o usa (compra_firme, logo abaixo): o congelado na marcação, senão, com modo_tempo_compra ligado de verdade, o medido em uso (_agenda_tempo_interno_compra, por dentro).
-  -- O portão lê o que já está na mão (a linha da config e a de planejamento: em sombra, zero chamada nova, R7.8). c é a cópia local desta função: a conta de baixo fica como está. Com o freio, v_f7_firme é falsa e nada disto roda.
-  if v_f7_firme and jsonb_array_length(v_itens) > 0 and (p.tempo_compra_marcado is not null or c.modo_tempo_compra = 'ligado') then
+  -- O portão lê o que já está na mão (a linha da config e a de planejamento: em sombra, zero chamada nova, R7.8). c é a cópia local desta função: a conta de baixo fica como está. Com o freio, fora da simulação do gestor, v_f7_firme é falsa e nada disto roda; na simulação (agenda.gestor = sombra, _agenda_gestor_regra verdadeira) a regra roda: a OS marcada usa o número dela, lido da linha, e a sem marcação fica no parâmetro sem chamar a função, que com o freio devolveria o mesmo parâmetro.
+  if v_f7_firme and jsonb_array_length(v_itens) > 0 and (p.tempo_compra_marcado is not null or (c.modo_tempo_compra = 'ligado' and not c.gestor_so_propor)) then
     v_7e_param := c.compra_interna_du;
     v_7e_interno := coalesce(p.tempo_compra_marcado::int, public._agenda_tempo_interno_compra(p_so_id));
     c.compra_interna_du := v_7e_interno;
@@ -1632,7 +1633,7 @@ end;
 $function$;
 
 comment on function public.os_prontidao(uuid, date) is
-  'Agenda de Produção (Fase 1, P3; Fase 2, P2; Fase 4, P2: a linha de OC recebida ligada a um item de texto livre da conta conta só nele, não de novo como item da OC que já chegou; Fase 4, P1: o prazo de cada item é o do fornecedor — _agenda_prazo_do_fornecedor, com o que o dono disse, o cadastro repetido, o nome e a cidade tolerante ao caractere quebrado; o importado conta em dias corridos; o item ganha prazo_texto, duvida e corridos; o texto livre é coberto pela linha da OC ligada a ele): a prontidão de uma OS em p_hoje. Estado (o 1º que valer): congelada → concluida → fora_da_carteira → em_execucao/parada → fixada/programada (Fase 2: tem meio-dia vigente de hoje em diante, fixado ou publicado) → marcada (a janela antiga; só fora de modo_proposta ligado) → sem_sinal → aguardando_cliente → esperando_voce → aguardando_material → pronta. Parada (Fase 2) = em andamento, sem evidência (diária ligada, meio-dia cumprido/parcial ou check-in) há parada_du dias úteis e sem dia no plano. Restrições {tipo, quem (dono|cliente|terceiro), texto, bloqueia, desde, compre_ate, pergunta}, a mais forte primeiro. Material efetivo = conta bruta + fato informado em os_material, níveis A (na mão, quantidade completa) / B (previsão do fornecedor, nota, OC, Pix) / C (previsão do dono) / D (sem previsão: comprado em + prazo da classe, ou "se comprar hoje") / E (sem fornecedor nem classe); "material não conferido" com zero itens ou peça embutida em aberto; dpm, início pelo material (chegada + folga_material_du, sem folga remota), est, compre até para trás, prazo efetivo (precisa_ate ou aprovação + prazo_padrao_du) e razão crítica. Saída também com plano (_agenda_plano_da_os; null sem alocação), ultima_evidencia e ultima_diaria. Também aceita OS fora da carteira. Fase 6 (P3): no item de nível B, enquanto o dia dito não chegou e com o atraso do fornecedor em uso (fornecedor_atraso: _agenda_aprendido), data = a data provável (o dia dito + o atraso; é ela que move o DPM, o início pelo material e o motor), data_dita = o dia dito (o fato) e data_texto "a OC diz qui 05/11; Kamell costuma atrasar até 2 dias úteis: conto com seg 09/11"; atrasado e sem_data continuam pelo dia dito (a "chegou?"); C, A, D e E não mudam; sem atraso em uso, o item é o de antes. CORREÇÃO FASE 6 (C1): (item 1) material.inicio_mat_dito = o início pelo material pelo dia DITO (sem o atraso do fornecedor), só quando a data provável muda o início — _agenda_violacoes julga por ele o que já está publicado; (item 2) a previsão da nota (nfe) não ganha o atraso do fornecedor (já é saída + prazo); (item 8) o atraso é lido pela chave da medida (_agenda_fornecedor_da_medida: o inativo pelo principal). Sem atraso em uso, a saída é a de antes, byte a byte. CORREÇÃO 29/10 (P5): (1) o prazo do fornecedor uma vez por item (a barreira no passo 6; antes ~25 contas por item); (2) dentro da rodada da vigia (agenda.rodada), o resultado de cada OS é lembrado (_agenda_rodada_lembrar e _agenda_rodada_guardar), enquanto a transação não grava nada no que ela lê. O resultado é o mesmo, byte a byte. FASE 7 (7a P3), atrás do portão _agenda_gestor_regra (falso = a saída de antes, byte a byte): critico_por_valor (AG7-05) — sem o fato do dono, o item é crítico só com o valor unitário de venda >= critico_valor_min (sem valor = crítico), e ganha separar_vespera e valor_unit; prazo_padrao (AG7-06) — sem prazo do fornecedor, prazo_sem_fornecedor_du dias úteis, classe padrao, nível D ("sem fornecedor: contei 7 dias úteis"; o comprado sem previsão chega pelo dia da compra); compra_firme (AG7-07) — a chegada "se comprar" e o "compre até" contam compra_interna_du; o "compre até" gravado (os_material.compre_ate) da OS com compromisso segura a data enquanto não vence; o item em falta com "compre até" (ou compra combinada com chegada) abaixo de compre_ate_empurroes_max ganha compra_firme; sem_peca — a OS sem linha de material conta como sem peça (restrição sem_peca_suposta, que não trava); embutida_suposta — a peça embutida não trava ("Contei que não; se tiver, me diga") nem deixa o material não conferido; estimativa (D7-1) — sem os dias ditos e com _agenda_gestor_estimativa em uso, a duração é a fonte orcamento e a restrição duracao não nasce; sem usar (situacao, grande, embutida, sem_base), a restrição duracao diz o que o gestor faz sem resposta; os dias orcamento gravados dizem "(estimativa minha)"; situacao (AG7-11) — a restrição situacao, que trava (o texto de _agenda_os_situacao). CORREÇÃO DA 7a (revisão da etapa), no bloco da 7a P3 e num bloco novo: (achado 20) acima de estimativa_max_diarias, a restrição duracao e a situação dizem que o gestor perguntou e espera o dono (sem "sem resposta, marco"); (achado 24) enquanto o gestor pergunta antes de marcar (situacao, grande, sem_base), a restrição duracao trava (bloqueia) e a OS que seria pronta fica esperando_voce: não aparece como pronta para começar no painel, no *livre* e no "Amanhã". Com o portão falso, a de antes, byte a byte. FASE 7e (P6, §5.5, R7.5-15): com compra_firme, o tempo interno é o da OS: o congelado (tempo_compra_marcado), senão, com modo_tempo_compra ligado de verdade, o medido em uso (_agenda_tempo_interno_compra); o item em falta que contou um número diferente do parâmetro ganha tempo_interno_du. Em sombra, com o freio e na OS sem linha de planejamento: a saída de antes, byte a byte, sem chamada nova (R7.8).';
+  'Agenda de Produção (Fase 1, P3; Fase 2, P2; Fase 4, P2: a linha de OC recebida ligada a um item de texto livre da conta conta só nele, não de novo como item da OC que já chegou; Fase 4, P1: o prazo de cada item é o do fornecedor — _agenda_prazo_do_fornecedor, com o que o dono disse, o cadastro repetido, o nome e a cidade tolerante ao caractere quebrado; o importado conta em dias corridos; o item ganha prazo_texto, duvida e corridos; o texto livre é coberto pela linha da OC ligada a ele): a prontidão de uma OS em p_hoje. Estado (o 1º que valer): congelada → concluida → fora_da_carteira → em_execucao/parada → fixada/programada (Fase 2: tem meio-dia vigente de hoje em diante, fixado ou publicado) → marcada (a janela antiga; só fora de modo_proposta ligado) → sem_sinal → aguardando_cliente → esperando_voce → aguardando_material → pronta. Parada (Fase 2) = em andamento, sem evidência (diária ligada, meio-dia cumprido/parcial ou check-in) há parada_du dias úteis e sem dia no plano. Restrições {tipo, quem (dono|cliente|terceiro), texto, bloqueia, desde, compre_ate, pergunta}, a mais forte primeiro. Material efetivo = conta bruta + fato informado em os_material, níveis A (na mão, quantidade completa) / B (previsão do fornecedor, nota, OC, Pix) / C (previsão do dono) / D (sem previsão: comprado em + prazo da classe, ou "se comprar hoje") / E (sem fornecedor nem classe); "material não conferido" com zero itens ou peça embutida em aberto; dpm, início pelo material (chegada + folga_material_du, sem folga remota), est, compre até para trás, prazo efetivo (precisa_ate ou aprovação + prazo_padrao_du) e razão crítica. Saída também com plano (_agenda_plano_da_os; null sem alocação), ultima_evidencia e ultima_diaria. Também aceita OS fora da carteira. Fase 6 (P3): no item de nível B, enquanto o dia dito não chegou e com o atraso do fornecedor em uso (fornecedor_atraso: _agenda_aprendido), data = a data provável (o dia dito + o atraso; é ela que move o DPM, o início pelo material e o motor), data_dita = o dia dito (o fato) e data_texto "a OC diz qui 05/11; Kamell costuma atrasar até 2 dias úteis: conto com seg 09/11"; atrasado e sem_data continuam pelo dia dito (a "chegou?"); C, A, D e E não mudam; sem atraso em uso, o item é o de antes. CORREÇÃO FASE 6 (C1): (item 1) material.inicio_mat_dito = o início pelo material pelo dia DITO (sem o atraso do fornecedor), só quando a data provável muda o início — _agenda_violacoes julga por ele o que já está publicado; (item 2) a previsão da nota (nfe) não ganha o atraso do fornecedor (já é saída + prazo); (item 8) o atraso é lido pela chave da medida (_agenda_fornecedor_da_medida: o inativo pelo principal). Sem atraso em uso, a saída é a de antes, byte a byte. CORREÇÃO 29/10 (P5): (1) o prazo do fornecedor uma vez por item (a barreira no passo 6; antes ~25 contas por item); (2) dentro da rodada da vigia (agenda.rodada), o resultado de cada OS é lembrado (_agenda_rodada_lembrar e _agenda_rodada_guardar), enquanto a transação não grava nada no que ela lê. O resultado é o mesmo, byte a byte. FASE 7 (7a P3), atrás do portão _agenda_gestor_regra (falso = a saída de antes, byte a byte): critico_por_valor (AG7-05) — sem o fato do dono, o item é crítico só com o valor unitário de venda >= critico_valor_min (sem valor = crítico), e ganha separar_vespera e valor_unit; prazo_padrao (AG7-06) — sem prazo do fornecedor, prazo_sem_fornecedor_du dias úteis, classe padrao, nível D ("sem fornecedor: contei 7 dias úteis"; o comprado sem previsão chega pelo dia da compra); compra_firme (AG7-07) — a chegada "se comprar" e o "compre até" contam compra_interna_du; o "compre até" gravado (os_material.compre_ate) da OS com compromisso segura a data enquanto não vence; o item em falta com "compre até" (ou compra combinada com chegada) abaixo de compre_ate_empurroes_max ganha compra_firme; sem_peca — a OS sem linha de material conta como sem peça (restrição sem_peca_suposta, que não trava); embutida_suposta — a peça embutida não trava ("Contei que não; se tiver, me diga") nem deixa o material não conferido; estimativa (D7-1) — sem os dias ditos e com _agenda_gestor_estimativa em uso, a duração é a fonte orcamento e a restrição duracao não nasce; sem usar (situacao, grande, embutida, sem_base), a restrição duracao diz o que o gestor faz sem resposta; os dias orcamento gravados dizem "(estimativa minha)"; situacao (AG7-11) — a restrição situacao, que trava (o texto de _agenda_os_situacao). CORREÇÃO DA 7a (revisão da etapa), no bloco da 7a P3 e num bloco novo: (achado 20) acima de estimativa_max_diarias, a restrição duracao e a situação dizem que o gestor perguntou e espera o dono (sem "sem resposta, marco"); (achado 24) enquanto o gestor pergunta antes de marcar (situacao, grande, sem_base), a restrição duracao trava (bloqueia) e a OS que seria pronta fica esperando_voce: não aparece como pronta para começar no painel, no *livre* e no "Amanhã". Com o portão falso, a de antes, byte a byte. FASE 7e (P6, §5.5, R7.5-15): com compra_firme, o tempo interno é o da OS: o congelado (tempo_compra_marcado), senão, com modo_tempo_compra ligado de verdade, o medido em uso (_agenda_tempo_interno_compra); o item em falta que contou um número diferente do parâmetro ganha tempo_interno_du. Em sombra e com o freio (também na simulação do gestor), a OS sem marcação: a saída de antes, byte a byte, sem chamada nova (R7.8). A OS marcada usa o número dela na conta de compra_firme, que com o freio só roda na simulação do gestor.';
 
 -- _agenda_gestor_compra_conta (de 20261031100800_agenda_fase7a_compras.sql:104; md5 do corpo de antes 559c1ecb44eab4dce4bdb91d0221e34b)
 create or replace function public._agenda_gestor_compra_conta(p_os uuid, p_hoje date)
@@ -2827,6 +2828,359 @@ $function$;
 
 comment on function public._agenda_aprendizado_texto(text, text, jsonb) is
   'Agenda de Produção (Fase 6): os textos do aprendizado ao dono, do banco — p_momento foco_<estado> (a linha do foco), acao (o que mudou sozinho), pergunta (a troca grande, sem as opções), opcao1/2/3, desfeito e fico. p_d: {chave, calculado, em_uso, efetivo (o que valia antes), padrao, volta, n, n_min, desde, travado_ate, trava_dias}. O fator tem os textos da spec-fase6 §6.2/§6.3; os outros itens, um texto provisório que o pacote de cada um recria (copiar DESTA definição). FASE 6 (P2): o R$ por diária (mo) e a presença do dono têm os textos da spec §6.2/§6.3 (a presença lê detalhe.k, as idas do dono). FASE 6 (P3): o atraso (fornecedor_atraso) e o prazo da nota (fornecedor_prazo) têm os textos da spec §6.2/§6.3 (o nome, as entregas no prazo e o "você disse" vêm do detalhe). FASE 6 (P4): a capacidade do dono (capacidade_dono) tem os textos da spec §6.2/§6.3 ("Nas últimas 8 semanas você fez 7 de cada 10 meios-dias seus marcados no plano …"; a taxa e a janela vêm do detalhe). FASE 6 (P5): a pontualidade com o cliente (cliente_pontualidade: só a linha do foco, "Pontualidade: 5 de 7 OS ficaram prontas até o dia dito primeiro ao cliente; o atraso chega a 2 dias úteis.") e a folga do aviso de atraso (aviso_folga: "a faixa com 2 dias úteis a mais"; 0 = a faixa do plano) têm os textos da spec §6.2/§6.3. FASE 6 (P6): a carga de cada pessoa pelo plano cumprido ("O plano foi cumprido em 52%, 55% e 48% nas últimas 3 semanas (meta 70%)."; a pergunta "abaixo de 60% em 3 semanas seguidas (…). Recomendo marcar até 70% …") e os gatilhos de um planejador mais forte ("Gatilhos de um planejador mais forte: 0 de 4 (9 OS ativas, 4 pessoas)."; a pergunta "Há 4 semanas a agenda passa de 25 OS ativas e de 6 pessoas: …") têm os textos da spec §6.2/§6.3. Todos os itens com o texto da spec. CORREÇÃO FASE 6 (C2, textos 1 e 5): o fator em uso diz "uso 1,7× desde … para perguntar o que falta (os dias do plano continuam os que você disse)", e "é o mesmo que eu já usava" com o valor do padrão; em teste, com o medido igual ao padrão, sem o "hoje seria X, e vale X"; a pergunta do R$ por diária diz que inclui as OS em que o dono também trabalhou. FASE 7e (P2): os textos da spec §6.2/§6.3 (com R7.3) para os 6 itens da margem. Nunca perguntam. O desfeito usa volta (um passo só) e diz que a OS marcada guarda o valor. FASE 7e (P6, §6.2, achado 152): fornecedor_prazo pela compra (detalhe.fonte = compras: a frase diz "depois da compra" e nunca "nota" sozinha) e, em sombra, o parêntese do detalhe.teria no foco.';
+
+-- _agenda_prazo_do_fornecedor (de 20261029100300_agenda_fase6_fornecedor.sql:457; md5 do corpo de antes 82e9ff9a043dc182586acd751ee2a9a9)
+create or replace function public._agenda_prazo_do_fornecedor(p_fornecedor uuid)
+ returns jsonb
+ language plpgsql
+ stable
+ set search_path to 'public'
+as $function$
+declare
+  c          public.agenda_config := public._agenda_cfg();
+  s          public.suppliers%rowtype;
+  v_vazio    constant jsonb := jsonb_build_object('classe', null, 'du', null, 'corridos', null, 'fonte', null,
+                                                  'duvida', null, 'principal_id', null, 'texto', null);
+  v_nome_g   text;
+  v_grupo    jsonb := '[]'::jsonb;
+  v_ativo    boolean;
+  v_n        int := 0;
+  v_classes  int := 0;
+  v_um       uuid;
+  v_princ    uuid;
+  v_top      record;
+  v_empate   int;
+  v_duvida   text;
+  v_classe   text;
+  v_fonte    text;
+  v_du       int;
+  v_corr     int;
+  -- FASE 6: o prazo medido do fornecedor (fornecedor_prazo em uso)
+  v_med      numeric;
+  -- FASE 6: fim
+  -- FASE 7e: (7e P6, R7.12-9) de onde veio o número em uso (o detalhe de fornecedor_prazo)
+  v_7e_det   jsonb;
+  -- FASE 7e: fim
+begin
+  if p_fornecedor is null then
+    return v_vazio;
+  end if;
+  select * into s from public.suppliers where id = p_fornecedor;
+  if not found then
+    return v_vazio;
+  end if;
+  v_ativo := coalesce(s.active, true);
+
+  if s.modalidade is not null then
+    v_classe := s.modalidade;
+    v_fonte := 'dono';
+  else
+    v_nome_g := public._agenda_nome_de_grupo(coalesce(nullif(btrim(s.trade_name), ''), s.name));
+    if v_nome_g <> '' then
+      -- O grupo: este cadastro e os outros ATIVOS com o mesmo nome, com a classe que as regras 4–5 dariam a cada um, se
+      -- tem CNPJ de 14 dígitos e o peso (produtos + contas a pagar).
+      select coalesce(jsonb_agg(jsonb_build_object(
+               'id', o.id, 'ativo', coalesce(o.active, true), 'eu', o.id = s.id,
+               'classe', coalesce(public._agenda_classe_pelo_nome(concat_ws(' ', o.name, o.trade_name, o.display_name)),
+                                  public._agenda_classe_por_lugar(o.city, o.state)),
+               'cnpj14', length(regexp_replace(coalesce(o.cnpj_cpf, ''), '\D', '', 'g')) = 14,
+               'peso', (select count(*) from public.products pr where pr.supplier_id = o.id)
+                       + (select count(*) from public.payables pa where pa.supplier_id = o.id))
+               order by o.id), '[]'::jsonb)
+        into v_grupo
+        from public.suppliers o
+       where (o.id = s.id or coalesce(o.active, true))
+         and public._agenda_nome_de_grupo(coalesce(nullif(btrim(o.trade_name), ''), o.name)) = v_nome_g;
+      select count(*), min(e ->> 'id')
+        into v_n, v_um
+        from jsonb_array_elements(v_grupo) e
+       where not (e ->> 'eu')::boolean;
+    end if;
+
+    if v_n > 0 then
+      -- Os candidatos a principal: os ativos do grupo (o próprio só quando também está ativo).
+      select (e ->> 'cnpj14')::boolean as cnpj14, (e ->> 'peso')::bigint as peso, (e ->> 'id')::uuid as id into v_top
+        from jsonb_array_elements(v_grupo) e
+       where (e ->> 'ativo')::boolean
+       order by (e ->> 'cnpj14')::boolean desc, (e ->> 'peso')::bigint desc, e ->> 'id'
+       limit 1;
+      select count(*) into v_empate
+        from jsonb_array_elements(v_grupo) e
+       where (e ->> 'ativo')::boolean and (e ->> 'cnpj14')::boolean = v_top.cnpj14 and (e ->> 'peso')::bigint = v_top.peso;
+      v_princ := case when v_empate = 1 then v_top.id end;
+
+      if not v_ativo then
+        -- O cadastro que o dono já tirou de uso vale como o que ficou: o único ativo, ou o principal dos ativos.
+        v_um := case when v_n = 1 then v_um else v_princ end;
+        if v_um is not null then
+          return public._agenda_prazo_do_fornecedor(v_um) || jsonb_build_object('principal_id', v_um);
+        end if;
+        return v_vazio || jsonb_build_object('duvida', 'duplicado');
+      end if;
+
+      select count(distinct coalesce(e ->> 'classe', '-')) into v_classes
+        from jsonb_array_elements(v_grupo) e
+       where (e ->> 'ativo')::boolean;
+      if v_classes > 1 then
+        if v_princ is distinct from s.id then
+          return v_vazio || jsonb_build_object('duvida', 'duplicado', 'principal_id', v_princ);
+        end if;
+        v_duvida := 'duplicado';
+      else
+        v_princ := null;
+      end if;
+    end if;
+
+    v_classe := public._agenda_classe_pelo_nome(concat_ws(' ', s.name, s.trade_name, s.display_name));
+    if v_classe is not null then
+      v_fonte := 'nome';
+    else
+      v_classe := public._agenda_classe_por_lugar(s.city, s.state);
+      v_fonte := case when v_classe is not null then 'cidade' end;
+    end if;
+  end if;
+
+  if v_classe is null then
+    return v_vazio || jsonb_build_object('duvida', coalesce(v_duvida, 'sem_lugar'), 'principal_id', v_princ);
+  end if;
+  if v_classe = 'importacao' then
+    v_corr := case when v_fonte = 'dono' then coalesce(s.prazo_dias_corridos, c.importacao_dias) else c.importacao_dias end;
+  else
+    v_du := case when v_fonte = 'dono' then coalesce(s.prazo_dias_uteis, (c.prazo_classe_du ->> v_classe)::int)
+                 else (c.prazo_classe_du ->> v_classe)::int end;
+  end if;
+  -- FASE 6: (P3) o prazo medido (spec-fase6 §5.3), logo depois do que o dono disse: o de fornecedor_prazo em uso (as notas
+  -- que chegaram, da saída até a chegada; _agenda_aprendido: só com modo_aprendizado ligado e fornecedor na lista). A
+  -- classe fica; o importado (dias corridos) não muda; du_classe = o prazo de antes (o padrão com que a rodada compara)
+  if v_fonte <> 'dono' and v_classe <> 'importacao' then
+    v_med := public._agenda_aprendido('fornecedor_prazo', p_fornecedor::text);
+    if v_med is not null then
+      -- (7e P6, R7.12-9; marca curta porque este bloco fica dentro de um bloco da Fase 6) com compra medida (detalhe.fonte = compras, só em ligado de verdade), a frase diz o que foi medido: o n da linha soma compras e notas, e "(medido em 5 notas)" sem nota nenhuma é afirmação falsa.
+      -- Fica a substring "(medido em ": _agenda_gestor_compra_conta classifica por ela. Sem compra medida, o retorno de baixo, byte a byte. Só neste ramo (fornecedor_prazo em uso), 1 leitura pela chave da linha.
+      select a.detalhe into v_7e_det from public.agenda_aprendizado a where a.item = 'fornecedor_prazo' and a.chave = p_fornecedor::text;
+      if v_7e_det ->> 'fonte' = 'compras' then
+        return jsonb_build_object('classe', v_classe, 'du', v_med::int, 'corridos', v_corr, 'fonte', 'medido', 'duvida', v_duvida,
+          'principal_id', v_princ, 'du_classe', v_du,
+          'texto', public._agenda_classe_texto(v_classe, v_med::int, v_corr)
+                   || format(' (medido em %s)', public._agenda_plural((v_7e_det ->> 'compras')::int, 'compra', 'compras')
+                                                || case when (v_7e_det ->> 'notas')::int > 0 then ' e ' || public._agenda_plural((v_7e_det ->> 'notas')::int, 'nota', 'notas') else '' end));
+      end if;
+      -- (7e: fim)
+      return jsonb_build_object('classe', v_classe, 'du', v_med::int, 'corridos', v_corr, 'fonte', 'medido', 'duvida', v_duvida,
+        'principal_id', v_princ, 'du_classe', v_du,
+        'texto', public._agenda_classe_texto(v_classe, v_med::int, v_corr)
+                 || format(' (medido em %s notas)', (select a.n from public.agenda_aprendizado a
+                                                      where a.item = 'fornecedor_prazo' and a.chave = p_fornecedor::text)));
+    end if;
+  end if;
+  -- FASE 6: fim
+  return jsonb_build_object('classe', v_classe, 'du', v_du, 'corridos', v_corr, 'fonte', v_fonte, 'duvida', v_duvida,
+    'principal_id', v_princ,
+    'texto', public._agenda_classe_texto(v_classe, v_du, v_corr)
+             || case v_fonte when 'dono' then ' (você disse)' when 'cidade' then ' (pela cidade, chute meu)'
+                             else ' (pelo nome)' end);
+end;
+$function$;
+
+comment on function public._agenda_prazo_do_fornecedor(uuid) is
+  'Agenda de Produção (Fase 4): o prazo do fornecedor numa fonte só, {classe, du, corridos, fonte, duvida, principal_id, texto}. A 1ª regra que valer: o que o dono disse (suppliers.modalidade, fonte dono) → cadastro repetido (outro ativo com o mesmo nome de grupo: o inativo vale como o ativo que ficou; dois ativos de classe diferente = só o principal, CNPJ de 14 dígitos e mais produtos + contas, tem classe, os dois com duvida duplicado) → pelo nome (marketplace, importado; fonte nome) → pela cidade/UF tolerante ao caractere quebrado (fonte cidade) → nada (duvida sem_lugar). Os dias: os do dono, senão os da classe (agenda_config.prazo_classe_du); importado em dias corridos (agenda_config.importacao_dias). texto: "entrega local, 1 dia útil (pela cidade, chute meu)". FASE 6 (P3): logo depois do que o dono disse, a fonte medido — com fornecedor_prazo em uso (_agenda_aprendido: modo_aprendizado ligado e fornecedor na lista), du = o medido das notas que chegaram (da saída até a chegada), fonte medido, texto "outro estado, 6 dias úteis (medido em 5 notas)" e du_classe = o prazo de antes; o importado não muda. FASE 7e (P6, R7.12-9): com fornecedor_prazo em uso medido por compra (detalhe.fonte = compras), o texto diz o que foi medido: "(medido em 5 compras)" ou "(medido em 3 compras e 2 notas)". Sem compra medida, o de antes.';
+
+-- _agenda_ver_fornecedores (de 20261029100950_agenda_fase6_correcao_textos.sql:3032; md5 do corpo de antes e71ba407c805508d2914f6a173f0b572)
+create or replace function public._agenda_ver_fornecedores(p_hoje date)
+ returns jsonb
+ language plpgsql
+ stable
+ security definer
+ set search_path to 'public'
+as $function$
+declare
+  v_uid     uuid := (select auth.uid());
+  c         public.agenda_config;
+  c_ordem   constant text[] := array['balcao', 'entrega_local', 'distribuidor_sc_pr', 'outro_estado', 'marketplace', 'importacao'];
+  r         record;
+  v_id      uuid;
+  v_pr      jsonb;
+  v_lista   jsonb := '[]'::jsonb;
+  v_vistos  uuid[] := '{}';
+  v_grupos  text[] := '{}';
+  v_disse   text[];
+  v_chute   text[];
+  v_falta   text[] := '{}';
+  g         record;
+  v_ex      text[];
+  v_cab     text;
+  v_pe      text;
+  v_linhas  text[];
+  v_n       int;
+  k         int;
+  v_t       text;
+  -- FASE 6: (P8) o prazo medido em uso (fonte medido)
+  v_medido  text[];
+  -- FASE 6: fim
+  -- FASE 7e: (7e P6, R7.12-9) o título do bloco "Medido" quando há compra medida (nulo = o de antes)
+  v_7e_cab  text;
+  -- FASE 7e: fim
+begin
+  if p_hoje is null then
+    raise exception '_agenda_ver_fornecedores: sem o dia de hoje' using errcode = '22004';
+  end if;
+  if v_uid is not null and not public.is_admin_or_financial(v_uid) then
+    raise exception 'A agenda de produção é com o administrador.' using errcode = '42501';
+  end if;
+  -- CORREÇÃO FASE 6: (C2) regressão B8: sem o "sub" no JWT (auth.uid() nulo) só passa o service_role, ou nenhum JWT (o banco
+  -- por dentro: a rodada, o fechamento, os testes) — como agenda_fator_de_campo; o authenticated sem "sub" recebe 42501 (antes
+  -- o portão de cima não rodava, e ele lia tudo). Os JWT do Supabase sempre têm "sub": hoje não é explorável.
+  if v_uid is null then
+    declare
+      v_papel text;
+    begin
+      begin
+        v_papel := coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role', '');
+      exception when others then
+        v_papel := 'invalido';
+      end;
+      if v_papel not in ('', 'service_role') then
+        raise exception 'A agenda de produção é com o administrador.' using errcode = '42501';
+      end if;
+    end;
+  end if;
+  -- CORREÇÃO FASE 6: fim
+  c := public._agenda_cfg();
+
+  for r in
+    select x.id, max(x.contas) as contas
+      from (select p.fornecedor_id as id, p.contas from public._agenda_fornecedores_principais(p_hoje) p
+            union all
+            select m.fornecedor_id, 0
+              from public.os_carteira(p_hoje) k
+              join public.os_material m on m.service_order_id = k.service_order_id
+             where m.fornecedor_id is not null and m.situacao in ('falta', 'comprado', 'a_caminho')) x
+     group by x.id
+     order by max(x.contas) desc, x.id
+  loop
+    v_id := r.id;
+    v_pr := public._agenda_prazo_do_fornecedor(v_id);
+    -- o cadastro que o dono já tirou de uso vale como o que ficou
+    if not coalesce((select s.active from public.suppliers s where s.id = v_id), true) and v_pr ->> 'principal_id' is not null then
+      v_id := (v_pr ->> 'principal_id')::uuid;
+      v_pr := public._agenda_prazo_do_fornecedor(v_id);
+    end if;
+    continue when v_id = any (v_vistos);
+    v_vistos := v_vistos || v_id;
+    v_lista := v_lista || (jsonb_build_object(
+      'fornecedor_id', v_id, 'nome', public._agenda_fornecedor_curto(v_id), 'contas', r.contas,
+      'lugar', (select public._agenda_lugar_texto(s.city, s.state) from public.suppliers s where s.id = v_id),
+      'sem_lugar_no_cadastro', (select nullif(btrim(coalesce(s.city, '')), '') is null and nullif(btrim(coalesce(s.state, '')), '') is null
+                                  from public.suppliers s where s.id = v_id),
+      'grupo', (select public._agenda_nome_de_grupo(coalesce(nullif(btrim(s.trade_name), ''), s.name)) from public.suppliers s where s.id = v_id),
+      'frase', public._agenda_classe_texto(v_pr ->> 'classe', (v_pr ->> 'du')::int, (v_pr ->> 'corridos')::int))
+      || v_pr);
+  end loop;
+
+  -- o rótulo: "Premel (Itajaí/SC)"; sem lugar, só o nome
+  -- Você disse e o meu chute: uma linha por frase de prazo, na ordem das classes
+  select array_agg(t.l order by t.o) into v_disse
+    from (select '• ' || f.frase || ': ' || public._agenda_lista(array_agg(concat(f.nome, ' (' || f.lugar || ')') order by f.contas desc, f.nome), 6) || '.' as l,
+                 min(array_position(c_ordem, f.classe)) as o
+            from jsonb_to_recordset(v_lista) f(nome text, lugar text, contas int, classe text, fonte text, frase text)
+           where f.fonte = 'dono' and f.classe is not null
+           group by f.frase) t;
+  select array_agg(t.l order by t.o, t.l) into v_chute
+    from (select '• ' || f.frase || ': ' || public._agenda_lista(array_agg(concat(f.nome, ' (' || f.lugar || ')') order by f.contas desc, f.nome), 6) || '.' as l,
+                 min(array_position(c_ordem, f.classe)) as o
+            from jsonb_to_recordset(v_lista) f(nome text, lugar text, contas int, classe text, fonte text, frase text)
+           where f.fonte in ('cidade', 'nome') and f.classe is not null
+           group by f.frase) t;
+
+  -- FASE 6: (P8) o prazo medido (spec-fase6 §5.3; o risco do P3): com fornecedor_prazo em uso (_agenda_prazo_do_fornecedor,
+  -- fonte medido: só com o aprendizado ligado e fornecedor na lista), o fornecedor saía de "Você disse" e de "Meu chute" e
+  -- sumia do foco. Agora vai a "Medido (pelas notas que chegaram):", com o texto do prazo ("outro estado, 6 dias úteis
+  -- (medido em 5 notas)").
+  select array_agg(t.l order by t.o, t.l) into v_medido
+    from (select '• ' || concat(f.nome, ' (' || f.lugar || ')') || ': ' || f.texto || '.' as l,
+                 array_position(c_ordem, f.classe) as o
+            from jsonb_to_recordset(v_lista) f(nome text, lugar text, classe text, fonte text, texto text)
+           where f.fonte = 'medido') t;
+  -- FASE 6: fim
+  -- FASE 7e: (7e P6, R7.12-9) o título diz de onde veio o que está no bloco: só com fornecedor em uso por compra muda ("pelas compras"; "pelas compras e notas" se algum também tem nota, ou se outro é só de nota). Sem compra, nulo, e a linha de antes, byte a byte.
+  select case when bool_or(a.detalhe ->> 'fonte' = 'compras')
+              then format('Medido (pelas %s que chegaram):',
+                          case when bool_or(a.detalhe ->> 'fonte' is distinct from 'compras' or (a.detalhe ->> 'notas')::int > 0) then 'compras e notas' else 'compras' end) end
+    into v_7e_cab
+    from jsonb_to_recordset(v_lista) f(fornecedor_id uuid, fonte text)
+    join public.agenda_aprendizado a on a.item = 'fornecedor_prazo' and a.chave = f.fornecedor_id::text
+   where f.fonte = 'medido';
+  -- FASE 7e: fim
+  -- Falta você dizer: sem lugar no cadastro; o cadastro repetido (uma linha por nome, com os lugares e o que vale)
+  for r in select * from jsonb_to_recordset(v_lista) f(nome text, lugar text, classe text, duvida text, grupo text,
+                                                        sem_lugar_no_cadastro boolean, principal_id uuid)
+            order by f.nome loop
+    if r.duvida = 'duplicado' then
+      continue when r.grupo = any (v_grupos);
+      v_grupos := v_grupos || r.grupo;
+      -- os cadastros ativos do mesmo nome (o que vale primeiro) e o lugar do que vale
+      select count(*) as n,
+             public._agenda_lista(array_agg(coalesce(public._agenda_lugar_texto(s.city, s.state), 'sem cidade')
+                                            order by (s.id = r.principal_id) desc, s.id), 4) as lugares
+        into g
+        from public.suppliers s
+       where coalesce(s.active, true)
+         and public._agenda_nome_de_grupo(coalesce(nullif(btrim(s.trade_name), ''), s.name)) = r.grupo;
+      v_pe := (select public._agenda_lugar_texto(p.city, p.state) from public.suppliers p where p.id = r.principal_id);
+      v_falta := v_falta || case when v_pe is not null
+        then format('• %s: cadastrada %s vezes (%s); conto pela de %s. É a mesma?', r.nome, g.n, g.lugares, v_pe)
+        else format('• %s: cadastrada %s vezes (%s) e não sei qual vale. Qual é a certa?', r.nome, g.n, g.lugares) end;
+    elsif r.classe is null then
+      v_falta := v_falta || case when r.sem_lugar_no_cadastro then format('• %s: sem cidade no cadastro.', r.nome)
+                                 else format('• %s: não sei onde fica (%s).', r.nome, r.lugar) end;
+    end if;
+  end loop;
+
+  -- como responder: com dois nomes da lista ("a Premel eu pego no balcão", "a Toli chega em 3 dias úteis")
+  v_ex := array(select f.nome from jsonb_to_recordset(v_lista) f(nome text, contas int, classe text, fonte text)
+                 where f.classe is not null and coalesce(f.fonte, '') <> 'dono'
+                 order by array_position(c_ordem, f.classe), f.contas desc, f.nome limit 2);
+  v_pe := case when cardinality(v_ex) = 2
+               then format('Pode ser um áudio só: "a %s eu pego no balcão", "a %s chega em 3 dias úteis".', v_ex[1], v_ex[2])
+               else 'Pode ser um áudio só, do seu jeito: "eu pego no balcão", "chega em 3 dias úteis".' end;
+
+  v_cab := 'Como eu conto a chegada do material dos fornecedores principais:';
+  if jsonb_array_length(v_lista) = 0 then
+    return jsonb_build_object('ok', true,
+      'texto', 'Ainda não tenho fornecedor principal: nenhuma conta de material no último ano nem compra a caminho.',
+      'dados', jsonb_build_object('fornecedores', v_lista));
+  end if;
+  -- Cabe no teto: o chute sai do fim ("• e mais N"), nunca o que falta você dizer.
+  v_n := coalesce(cardinality(v_chute), 0);
+  for k in reverse v_n .. 0 loop
+    v_linhas := array[v_cab]
+                || case when coalesce(cardinality(v_disse), 0) = 0 then array['Você disse: nenhum ainda.']
+                        else array['Você disse:'] || v_disse end
+                -- FASE 6: (P8) o prazo medido, logo depois do que o dono disse (só aparece com fornecedor_prazo em uso)
+                || case when coalesce(cardinality(v_medido), 0) > 0 then array['Medido (pelas notas que chegaram):'] || v_medido
+                        else '{}'::text[] end
+                -- FASE 6: fim
+                || case when v_n > 0 then array['Meu chute (pela cidade ou pelo nome):'] || v_chute[1:k]
+                                          || case when k < v_n then array[format('• e mais %s', v_n - k)] else '{}'::text[] end
+                        else '{}'::text[] end
+                || case when cardinality(v_falta) > 0 then array['Falta você dizer:'] || v_falta else '{}'::text[] end
+                || array[v_pe];
+    -- FASE 7e: (7e P6, R7.12-9) dentro do laço, para o teto de texto contar com o título que vai sair
+    if v_7e_cab is not null then
+      v_linhas := array_replace(v_linhas, 'Medido (pelas notas que chegaram):', v_7e_cab);
+    end if;
+    -- FASE 7e: fim
+    v_t := public._agenda_juntar(v_linhas, null);
+    exit when char_length(v_t) <= c.texto_max;
+  end loop;
+  return jsonb_build_object('ok', true, 'texto', public._agenda_juntar(v_linhas, c.texto_max),
+    'dados', jsonb_build_object('fornecedores', v_lista, 'disse', coalesce(cardinality(v_disse), 0), 'chute', v_n,
+                                'falta', cardinality(v_falta)));
+end;
+$function$;
+
+comment on function public._agenda_ver_fornecedores(date) is
+  'Agenda de Produção (Fase 4, P6): agenda_ver foco fornecedores — como a agenda conta a chegada do material dos fornecedores principais (_agenda_fornecedores_principais) e dos das linhas da carteira ainda não na mão, pela fonte única (_agenda_prazo_do_fornecedor): "Você disse:" (suppliers.modalidade; vazio: "Você disse: nenhum ainda."), "Meu chute (pela cidade ou pelo nome):" uma linha por prazo ("• entrega local, 1 dia útil: Premel (Itajaí/SC) e Souper (Itajaí/SC)"), "Falta você dizer:" (sem cidade no cadastro; cadastro repetido: "• Kamell: cadastrada 2 vezes (Vila Velha/ES e Itajaí/SC); conto pela de Vila Velha/ES. É a mesma?") e "Pode ser um áudio só: …" com dois nomes da lista. O inativo vale como o que ficou. Até texto_max (o chute sai do fim com "• e mais N"). Definer (lê os principais, que são só do service_role): com login, só administrador e financeiro (senão 42501). {ok, texto, dados:{fornecedores, disse, chute, falta}}. FASE 6 (P8): o fornecedor com o prazo medido em uso (fonte medido de _agenda_prazo_do_fornecedor) vai ao grupo "Medido (pelas notas que chegaram):" ("• Kamell (Vila Velha/ES): outro estado, 6 dias úteis (medido em 5 notas)."), logo depois de "Você disse"; antes ele sumia do foco. Sem o medido em uso, o texto é o de antes. CORREÇÃO FASE 6 (C2, regressão B8): sem o sub no JWT, só o service_role (ou nenhum JWT); o authenticated sem sub recebe 42501. FASE 7e (P6, R7.12-9): com algum fornecedor em uso por compra, o título do bloco é "Medido (pelas compras que chegaram):" ou "Medido (pelas compras e notas que chegaram):". Sem compra medida, o de antes.';
 
 -- ── 3. Portas ─────────────────────────────────────────────────────────────────────────────────────
 -- Os 3 passos da rodada sem grant nenhum (o P7 os chama de agenda_aprender, definer; o molde é _agenda_aprender_fornecedor). As recriadas não mudam de porta.
