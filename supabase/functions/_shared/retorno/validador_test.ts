@@ -20,34 +20,39 @@ import {
 // ─── Os textos fixos (spec P3.1, literais) ───────────────────────────────────────────────────────
 
 const MODELOS: Record<string, string> = {
-  T01: "Oi, {nome} (mensagem automática da HBR). Recebi e passei ao Gustavo; ele te responde {quando} até as {hora}.",
-  T02: "Oi, {nome}! Aqui é o assistente da HBR (mensagem automática). Recebi e passei ao Gustavo; ele te responde {quando} até as {hora}.",
-  T03: "Oi! Aqui é o assistente da HBR (mensagem automática). Recebi sua mensagem e passei ao Gustavo; ele te responde {quando} até as {hora}.",
-  T04: "Recebi, {nome} (mensagem automática da HBR). O Gustavo te responde {quando} até as {hora}. Se não puder esperar, escreva URGENTE que eu aviso o Gustavo.",
-  T05: "Oi, {nome}! Aqui é o assistente da HBR (mensagem automática). Recebi sua mensagem; o Gustavo te responde {quando} até as {hora}. Se não puder esperar, escreva URGENTE que eu aviso o Gustavo.",
-  T06: "Oi! Aqui é o assistente da HBR (mensagem automática). Recebi sua mensagem; o Gustavo te responde {quando} até as {hora}. Se não puder esperar, escreva URGENTE que eu aviso o Gustavo.",
-  T07: "Bom dia, {nome} (mensagem automática da HBR). Recebi sua mensagem {de_quando}. O Gustavo te responde até as {hora}.",
-  T08: "Bom dia, {nome} (mensagem automática da HBR). Recebi sua mensagem {de_quando}. O Gustavo te responde {quando} até as {hora}.",
-  T09: "Bom dia! Aqui é o assistente da HBR (mensagem automática). Recebi sua mensagem {de_quando}. O Gustavo te responde {quando} até as {hora}.",
-  T10: "Recebi, {nome} (mensagem automática da HBR). O Gustavo está fora até {quando}; ele te responde {quando} até as {hora}.",
-  T11: "Oi! Aqui é o assistente da HBR (mensagem automática). Recebi sua mensagem. O Gustavo está fora até {quando}; ele te responde {quando} até as {hora}.",
-  T12: "Oi, {nome} (mensagem automática da HBR). Sua mensagem de {dia_msg} às {hora_msg} só chegou para nós agora. Desculpe a demora. O Gustavo te responde {quando} até as {hora}.",
-  T13: "Oi, {nome} (mensagem automática da HBR). Nosso WhatsApp ficou fora do ar, e sua mensagem de {dia_msg} às {hora_msg} só chegou agora. Desculpe a demora. O Gustavo te responde {quando} até as {hora}.",
-  T14: "Oi! Aqui é o assistente da HBR (mensagem automática). Recebi sua mensagem e passei ao Gustavo; ele te responde {quando} até as {hora}.",
-  T15: "{cumprimento}! Aqui é o assistente da HBR (mensagem automática). Recebi seu pedido e já passei ao Gustavo, que faz os orçamentos; ele te responde {quando} até as {hora}. Pra adiantar: me conta o que você precisa resolver ou instalar (pode ser por áudio).",
-  T16: "{cumprimento}! Aqui é o assistente da HBR (mensagem automática). Recebi seu pedido e já passei ao Gustavo, que faz os orçamentos; ele te responde {quando} até as {hora}. Pra adiantar: qual o modelo e o ano {do_bem}?",
-  T17: "{cumprimento}! Aqui é o assistente da HBR (mensagem automática). Recebi seu pedido e já passei ao Gustavo, que faz os orçamentos; ele te responde {quando} até as {hora}.",
-  T18: "Obrigado! Já passei ao Gustavo. Como posso te chamar?",
-  T19: "{cumprimento}! Aqui é o assistente da HBR (mensagem automática). Em que posso te ajudar? Pode ser por áudio.",
-  T20: "{nome}, o Gustavo ainda não conseguiu te responder. Seu pedido está anotado, e a resposta sai até as {hora}. Se não puder esperar, escreva URGENTE que eu aviso o Gustavo.",
-  T21: "O Gustavo ainda não conseguiu te responder. Seu pedido está anotado, e a resposta sai até as {hora}. Se não puder esperar, escreva URGENTE que eu aviso o Gustavo.",
-  T22: "{nome}, o Gustavo não conseguiu te responder hoje, desculpe. Seu pedido abre a lista dele {quando_lista} cedo.",
-  T23: "O Gustavo não conseguiu te responder hoje, desculpe. Seu pedido abre a lista dele {quando_lista} cedo.",
-  T24: "Avisei o Gustavo agora, {nome}.",
-  T25: "Anotado como urgente, {nome}. O Gustavo vê {quando_lista} cedo, antes de tudo.",
-  T26: "Anotado como urgente. O Gustavo vê {quando_lista} cedo, antes de tudo.",
-  T27: "Combinado, {nome}: não te mando mais mensagens automáticas. Se precisar, é só escrever.",
-  T28: "Combinado: não te mando mais mensagens automáticas. Se precisar, é só escrever.",
+  T01: "Oi, {nome}! Já passei sua mensagem ao Gustavo, e ele retorna para você {quando_fala}.",
+  T02: "Oi, {nome}! Aqui é a Claudia, assistente virtual da HBR. Já passei sua mensagem ao Gustavo, e ele retorna para você {quando_fala}.",
+  T03: "Olá! Aqui é a Claudia, assistente virtual da HBR. Já passei sua mensagem ao Gustavo, e ele retorna para você {quando_fala}.",
+  T04: "Oi, {nome}! Já passei sua mensagem ao Gustavo, e ele retorna para você {quando_fala}. Se for urgente, é só responder \"urgente\" que eu aviso o Gustavo na hora.",
+  T05: "Oi, {nome}! Aqui é a Claudia, assistente virtual da HBR. Já passei sua mensagem ao Gustavo, e ele retorna para você {quando_fala}. Se for urgente, é só responder \"urgente\" que eu aviso o Gustavo na hora.",
+  T06: "Olá! Aqui é a Claudia, assistente virtual da HBR. Já passei sua mensagem ao Gustavo, e ele retorna para você {quando_fala}. Se for urgente, é só responder \"urgente\" que eu aviso o Gustavo na hora.",
+  T07: "Bom dia, {nome}! Vi sua mensagem {de_quando} e já passei ao Gustavo. Ele retorna para você {quando_fala}.",
+  T07a: "Bom dia, {nome}! Aqui é a Claudia, assistente virtual da HBR. Vi sua mensagem {de_quando} e já passei ao Gustavo. Ele retorna para você {quando_fala}.",
+  T08: "Bom dia, {nome}! Vi sua mensagem {de_quando} e já passei ao Gustavo. Ele retorna para você {quando_fala}.",
+  T08a: "Bom dia, {nome}! Aqui é a Claudia, assistente virtual da HBR. Vi sua mensagem {de_quando} e já passei ao Gustavo. Ele retorna para você {quando_fala}.",
+  T09: "Bom dia! Aqui é a Claudia, assistente virtual da HBR. Vi sua mensagem {de_quando} e já passei ao Gustavo. Ele retorna para você {quando_fala}.",
+  T10: "Oi, {nome}! O Gustavo está fora até {quando}, mas sua mensagem já está com ele. Ele retorna para você {quando_fala}.",
+  T10a: "Oi, {nome}! Aqui é a Claudia, assistente virtual da HBR. O Gustavo está fora até {quando}, mas sua mensagem já está com ele. Ele retorna para você {quando_fala}.",
+  T11: "Olá! Aqui é a Claudia, assistente virtual da HBR. O Gustavo está fora até {quando}, mas sua mensagem já está com ele. Ele retorna para você {quando_fala}.",
+  T12: "Oi, {nome}! Sua mensagem de {dia_msg} às {hora_msg} só chegou para nós agora. Desculpe a demora. Já passei ao Gustavo, e ele retorna para você {quando_fala}.",
+  T12a: "Oi, {nome}! Aqui é a Claudia, assistente virtual da HBR. Sua mensagem de {dia_msg} às {hora_msg} só chegou para nós agora. Desculpe a demora. Já passei ao Gustavo, e ele retorna para você {quando_fala}.",
+  T13: "Oi, {nome}! Nosso WhatsApp ficou fora do ar por um tempo, e sua mensagem de {dia_msg} às {hora_msg} só chegou agora. Desculpe a demora. Já passei ao Gustavo, e ele retorna para você {quando_fala}.",
+  T13a: "Oi, {nome}! Aqui é a Claudia, assistente virtual da HBR. Nosso WhatsApp ficou fora do ar por um tempo, e sua mensagem de {dia_msg} às {hora_msg} só chegou agora. Desculpe a demora. Já passei ao Gustavo, e ele retorna para você {quando_fala}.",
+  T14: "Olá! Aqui é a Claudia, assistente virtual da HBR. Já passei sua mensagem ao Gustavo, e ele retorna para você {quando_fala}.",
+  T15: "{cumprimento}! Aqui é a Claudia, assistente virtual da HBR. Já passei seu pedido ao Gustavo, que cuida dos orçamentos, e ele retorna para você {quando_fala}. Para adiantar, pode me contar o que precisa resolver ou instalar? Pode ser por áudio.",
+  T16: "{cumprimento}! Aqui é a Claudia, assistente virtual da HBR. Já passei seu pedido ao Gustavo, que cuida dos orçamentos, e ele retorna para você {quando_fala}. Para adiantar, qual é o modelo e o ano {do_bem}?",
+  T17: "{cumprimento}! Aqui é a Claudia, assistente virtual da HBR. Já passei seu pedido ao Gustavo, que cuida dos orçamentos, e ele retorna para você {quando_fala}.",
+  T18: "Obrigada! Já passei ao Gustavo. Como posso chamar você?",
+  T19: "{cumprimento}! Aqui é a Claudia, assistente virtual da HBR. Em que posso ajudar? Se preferir, pode mandar um áudio.",
+  T20: "{nome}, o Gustavo ainda não conseguiu retornar, mas seu pedido está com ele e a resposta sai ainda hoje. Se for urgente, é só responder \"urgente\" que eu aviso o Gustavo na hora.",
+  T21: "O Gustavo ainda não conseguiu retornar, mas seu pedido está com ele e a resposta sai ainda hoje. Se for urgente, é só responder \"urgente\" que eu aviso o Gustavo na hora.",
+  T22: "{nome}, o Gustavo não conseguiu retornar hoje, peço desculpas. Seu pedido é o primeiro da lista dele {quando_lista} cedo.",
+  T23: "O Gustavo não conseguiu retornar hoje, peço desculpas. Seu pedido é o primeiro da lista dele {quando_lista} cedo.",
+  T24: "Avisei o Gustavo agora mesmo, {nome}.",
+  T25: "Anotei como urgente, {nome}. O Gustavo vê {quando_lista} cedo, antes de tudo.",
+  T26: "Anotei como urgente. O Gustavo vê {quando_lista} cedo, antes de tudo.",
+  T27: "Combinado, {nome}. Não envio mais mensagens automáticas. Quando precisar, é só escrever.",
+  T28: "Combinado. Não envio mais mensagens automáticas. Quando precisar, é só escrever.",
 };
 const L01 = "Se houver fogo, fumaça ou água entrando, ligue 193 (Bombeiros).";
 
@@ -56,10 +61,20 @@ type Marcas = ContextoDoValidador["marcas"];
 
 const SEM_MARCAS: Marcas = { tem_proposta: false, tem_topo: false, cliente_ouviu: false, conferida: false };
 
+/** _retorno_quando_fala: o prazo como o cliente lê (VOZ-2), sem hora exata. */
+function quandoFala(quando?: string, hora?: string): string | undefined {
+  if (!quando || !hora) return undefined;
+  const cedo = Number(hora.match(/^\d{1,2}/)?.[0]) < 12;
+  if (quando === "hoje") return cedo ? "ainda esta manhã" : "ainda hoje";
+  if (quando === "amanhã") return cedo ? "amanhã de manhã" : "amanhã";
+  const dia = quando.split(" (")[0];
+  return `${dia === "sábado" || dia === "domingo" ? "no" : "na"} ${dia}${cedo ? ", pela manhã" : ""}`;
+}
+
 /** Troca cada {campo} pelo valor; campo sem valor é erro do teste (como o 22023 do banco). */
 function compor(modelo: string, dados: Dados): string {
   return modelo.replace(/\{([a-z_]+)\}/g, (_, campo: string) => {
-    const v = dados[campo];
+    const v = campo === "quando_fala" ? quandoFala(dados.quando, dados.hora) : dados[campo];
     if (!v) throw new Error(`teste sem o campo ${campo}`);
     return v;
   });
@@ -88,6 +103,8 @@ function contextoDoPegar(
     const ddmm = v.match(/\d{2}\/\d{2}/);
     if (ddmm) datas.add(ddmm[0]);
   }
+  const fala = quandoFala(dados.quando, dados.hora);
+  if (fala) datas.add(fala); // {quando_fala} é valor do banco, como {quando}
   for (const palavra of ["hoje", "amanhã", "ontem"]) {
     if (modelo.includes(palavra) || Object.values(dados).some((v) => v.includes(palavra))) datas.add(palavra);
   }
@@ -137,7 +154,7 @@ const PEDRO = "Boa tarde, aqui é o Pedro, queria um orçamento";
 const DE_ONTEM = "Bom dia, viu minha mensagem de ontem à noite?";
 
 const CASOS: Caso[] = [
-  { id: "T01", opcoes: { nome: NOMES, quando: QUANDO, hora: HORA }, extra: { textos_do_cliente: ["vc me responde hoje até as 19h?"] } },
+  { id: "T01", opcoes: { nome: NOMES, quando: QUANDO, hora: HORA }, extra: { textos_do_cliente: ["o Gustavo retorna para você ainda hoje?"] } },
   {
     id: "T02",
     opcoes: { nome: NOMES, quando: QUANDO, hora: HORA },
@@ -147,9 +164,15 @@ const CASOS: Caso[] = [
   { id: "T04", opcoes: { nome: NOMES, quando: QUANDO_OUTRO_DIA, hora: HORA } },
   { id: "T05", opcoes: { nome: NOMES, quando: QUANDO_OUTRO_DIA, hora: HORA } },
   { id: "T06", opcoes: { quando: QUANDO_OUTRO_DIA, hora: HORA } },
-  { id: "T07", opcoes: { nome: NOMES, de_quando: DE_QUANDO, hora: HORA }, extra: { textos_do_cliente: [DE_ONTEM] } },
+  { id: "T07", opcoes: { nome: NOMES, de_quando: DE_QUANDO, quando: ["hoje"], hora: HORA }, extra: { textos_do_cliente: [DE_ONTEM] } },
+  { id: "T07a", opcoes: { nome: NOMES, de_quando: DE_QUANDO, quando: ["hoje"], hora: HORA }, extra: { textos_do_cliente: [DE_ONTEM] } },
   {
     id: "T08",
+    opcoes: { nome: NOMES, de_quando: DE_QUANDO, quando: QUANDO_OUTRO_DIA, hora: HORA },
+    extra: { textos_do_cliente: [DE_ONTEM] },
+  },
+  {
+    id: "T08a",
     opcoes: { nome: NOMES, de_quando: DE_QUANDO, quando: QUANDO_OUTRO_DIA, hora: HORA },
     extra: { textos_do_cliente: [DE_ONTEM] },
   },
@@ -159,6 +182,7 @@ const CASOS: Caso[] = [
     extra: { textos_do_cliente: [DE_ONTEM] },
   },
   { id: "T10", opcoes: { nome: NOMES, quando: QUANDO_OUTRO_DIA, hora: ["10h"] } },
+  { id: "T10a", opcoes: { nome: NOMES, quando: QUANDO_OUTRO_DIA, hora: ["10h"] } },
   { id: "T11", opcoes: { quando: QUANDO_OUTRO_DIA, hora: ["10h"] } },
   {
     id: "T12",
@@ -166,7 +190,17 @@ const CASOS: Caso[] = [
     extra: { textos_do_cliente: ["Oi, o inversor parou de novo, consegue olhar?"] },
   },
   {
+    id: "T12a",
+    opcoes: { nome: NOMES, dia_msg: DIA_MSG, hora_msg: HORA_MSG, quando: QUANDO, hora: HORA },
+    extra: { textos_do_cliente: ["Oi, o inversor parou de novo, consegue olhar?"] },
+  },
+  {
     id: "T13",
+    opcoes: { nome: NOMES, dia_msg: DIA_MSG, hora_msg: HORA_MSG, quando: QUANDO, hora: HORA },
+    extra: { textos_do_cliente: ["Oi, o inversor parou de novo, consegue olhar?"] },
+  },
+  {
+    id: "T13a",
     opcoes: { nome: NOMES, dia_msg: DIA_MSG, hora_msg: HORA_MSG, quando: QUANDO, hora: HORA },
     extra: { textos_do_cliente: ["Oi, o inversor parou de novo, consegue olhar?"] },
   },
@@ -201,12 +235,12 @@ const CASOS: Caso[] = [
     // O cliente escreveu um pedaço igual ao modelo fixo: é do modelo, não é eco.
     id: "T20",
     opcoes: { nome: NOMES, hora: HORA },
-    extra: { textos_do_cliente: ["Pelo jeito o Gustavo ainda não conseguiu te responder, né"] },
+    extra: { textos_do_cliente: ["Pelo jeito o Gustavo ainda não conseguiu retornar, né"] },
   },
   {
     id: "T21",
     opcoes: { hora: HORA },
-    extra: { textos_do_cliente: ["o Gustavo ainda não conseguiu te responder?"] },
+    extra: { textos_do_cliente: ["o Gustavo ainda não conseguiu retornar?"] },
   },
   // fim_do_dia e urgente: o retorno_pegar grava topo_dia antes, e a marca vai junto (tem_topo).
   { id: "T22", opcoes: { nome: NOMES, quando_lista: QUANDO_OUTRO_DIA }, extra: { marcas: { ...SEM_MARCAS, tem_topo: true } } },
@@ -232,9 +266,9 @@ const CASOS: Caso[] = [
 
 // ─── Positivos: todo texto fixo passa ────────────────────────────────────────────────────────────
 
-Deno.test("a lista de casos cobre T01–T28, sem faltar nem sobrar", () => {
+Deno.test("a lista de casos cobre T01–T28 e as apresentações, sem faltar nem sobrar", () => {
   assertEquals(CASOS.map((c) => c.id), Object.keys(MODELOS));
-  assertEquals(Object.keys(MODELOS).length, 28);
+  assertEquals(Object.keys(MODELOS).length, 33);
 });
 
 for (const caso of CASOS) {
@@ -266,7 +300,7 @@ Deno.test("L01 passa sozinha e no fim dos recibo_* (risco), com os maiores valor
   }
 });
 
-Deno.test("T22 sem a marca de topo não sai: 'abre a lista dele' exige o topo_dia gravado", () => {
+Deno.test("T22 sem a marca de topo não sai: 'o primeiro da lista dele' exige o topo_dia gravado", () => {
   const dados = { nome: "Lenine", quando_lista: "amanhã" };
   const texto = compor(MODELOS.T22, dados);
   assertEquals(validarSaida(texto, contextoDoPegar(MODELOS.T22, dados)), {
@@ -277,10 +311,12 @@ Deno.test("T22 sem a marca de topo não sai: 'abre a lista dele' exige o topo_di
 
 // ─── Negativos: um texto que só viola a regra ────────────────────────────────────────────────────
 
-const BASE = compor(MODELOS.T01, { nome: "Lenine", quando: "hoje", hora: "19h" });
+// Base dos negativos: um texto com data e hora, para as regras de data e hora terem o que barrar.
+const MODELO_BASE = "Oi, {nome}! Já passei sua mensagem ao Gustavo, e ele retorna para você {quando} até as {hora}.";
+const BASE = compor(MODELO_BASE, { nome: "Lenine", quando: "hoje", hora: "19h" });
 
 function ctxBase(extra: Partial<ContextoDoValidador> = {}): ContextoDoValidador {
-  return contextoDoPegar(MODELOS.T01, { nome: "Lenine", quando: "hoje", hora: "19h" }, extra);
+  return contextoDoPegar(MODELO_BASE, { nome: "Lenine", quando: "hoje", hora: "19h" }, extra);
 }
 
 /** O texto reprova, e só pela regra pedida. */
@@ -289,7 +325,7 @@ function so(regra: RegraDoValidador, texto: string, ctx: ContextoDoValidador | n
 }
 
 Deno.test("o texto de base dos negativos passa (o bloqueio vem só do que cada teste acrescenta)", () => {
-  assertEquals(BASE, "Oi, Lenine (mensagem automática da HBR). Recebi e passei ao Gustavo; ele te responde hoje até as 19h.");
+  assertEquals(BASE, "Oi, Lenine! Já passei sua mensagem ao Gustavo, e ele retorna para você hoje até as 19h.");
   assertEquals(validarSaida(BASE, ctxBase()), { ok: true });
 });
 
@@ -523,6 +559,7 @@ Deno.test("afirmacao_sem_dado: cada afirmação só passa com a sua marca", () =
     ["A peça foi conferida.", "conferida"],
     ["Seu orçamento está em preparação.", "tem_proposta"],
     ["Seu pedido abre a lista dele cedo.", "tem_topo"],
+    ["Seu pedido é o primeiro da lista dele cedo.", "tem_topo"],
   ];
   for (const [frase, marca] of casos) {
     so("afirmacao_sem_dado", `${BASE} ${frase}`);

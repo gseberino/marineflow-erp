@@ -1,6 +1,6 @@
 -- Retorno F1 (P3): os textos fixos (_retorno_texto, T01–T28 e a linha de risco L01), _retorno_oferece_urgente,
 -- _retorno_nome, _retorno_do_bem e _retorno_cumprimento.
--- 1. cada T01–T28, com dados completos, é EXATAMENTE o texto da tabela da especificação (P3.1), comparado
+-- 1. cada T01–T28 (e as apresentações T07a, T08a, T10a, T12a e T13a), com dados completos, é EXATAMENTE o texto da tabela da especificação (P3.1), comparado
 --    letra por letra com o texto já preenchido;
 -- 2. cada campo ausente, vazio ou fora da lista fechada → 22023 (um caso por campo, mais os da especificação:
 --    nome com dígito, quando = 'semana que vem', hora = '14 horas', cumprimento = 'Olá', do_bem = 'do X1');
@@ -9,7 +9,7 @@
 --    nem {campo} sobrando;
 -- 5. _retorno_nome: empresa sem display_name → nulo; "LENINE LORI BROCCA" → "Lenine"; display_name vence name;
 -- 6. _retorno_do_bem: lancha, van, motorhome, carro, ducato (e toda palavra de bem do P2 passa no T16);
--- 7. _retorno_oferece_urgente é verdadeiro exatamente nos pares cujo texto tem "URGENTE": a varredura passa
+-- 7. _retorno_oferece_urgente é verdadeiro exatamente nos pares cujo texto tem "urgente" entre aspas: a varredura passa
 --    pela tabela inteira, renderizada por _retorno_texto.
 -- Run (só pela bancada, de madrugada): npx supabase@2.111.0 db query --linked -f supabase/tests/retorno_f1_texto.sql
 -- Termina em ROLLBACK: nada fica gravado. Os cadastros do caso 5 são SINTÉTICOS (nenhum cadastro real é
@@ -57,7 +57,7 @@ begin
   -- ── 0. As funções: existem, só para quem é SECURITY DEFINER (nada a anon/authenticated) ─────────────────
   foreach v_nome in array array['public._retorno_texto(text, text, jsonb)', 'public._retorno_oferece_urgente(text, text)',
                                 'public._retorno_nome(uuid)', 'public._retorno_do_bem(text)',
-                                'public._retorno_cumprimento(timestamptz)']
+                                'public._retorno_cumprimento(timestamptz)', 'public._retorno_quando_fala(text, text)']
   loop
     if to_regprocedure(v_nome) is null then
       raise exception '0: % não existe', v_nome;
@@ -83,61 +83,71 @@ begin
   for v_r in
     select * from (values
       ('T01', 'recibo_cliente', 'padrao',
-       'Oi, Lenine (mensagem automática da HBR). Recebi e passei ao Gustavo; ele te responde amanhã até as 10h.'),
+       'Oi, Lenine! Já passei sua mensagem ao Gustavo, e ele retorna para você amanhã de manhã.'),
       ('T02', 'recibo_cliente', 'padrao_apresentacao',
-       'Oi, Lenine! Aqui é o assistente da HBR (mensagem automática). Recebi e passei ao Gustavo; ele te responde amanhã até as 10h.'),
+       'Oi, Lenine! Aqui é a Claudia, assistente virtual da HBR. Já passei sua mensagem ao Gustavo, e ele retorna para você amanhã de manhã.'),
       ('T03', 'recibo_cliente', 'sem_nome',
-       'Oi! Aqui é o assistente da HBR (mensagem automática). Recebi sua mensagem e passei ao Gustavo; ele te responde amanhã até as 10h.'),
+       'Olá! Aqui é a Claudia, assistente virtual da HBR. Já passei sua mensagem ao Gustavo, e ele retorna para você amanhã de manhã.'),
       ('T04', 'recibo_cliente', 'outro_dia',
-       'Recebi, Lenine (mensagem automática da HBR). O Gustavo te responde amanhã até as 10h. Se não puder esperar, escreva URGENTE que eu aviso o Gustavo.'),
+       'Oi, Lenine! Já passei sua mensagem ao Gustavo, e ele retorna para você amanhã de manhã. Se for urgente, é só responder "urgente" que eu aviso o Gustavo na hora.'),
       ('T05', 'recibo_cliente', 'outro_dia_apresentacao',
-       'Oi, Lenine! Aqui é o assistente da HBR (mensagem automática). Recebi sua mensagem; o Gustavo te responde amanhã até as 10h. Se não puder esperar, escreva URGENTE que eu aviso o Gustavo.'),
+       'Oi, Lenine! Aqui é a Claudia, assistente virtual da HBR. Já passei sua mensagem ao Gustavo, e ele retorna para você amanhã de manhã. Se for urgente, é só responder "urgente" que eu aviso o Gustavo na hora.'),
       ('T06', 'recibo_cliente', 'outro_dia_sem_nome',
-       'Oi! Aqui é o assistente da HBR (mensagem automática). Recebi sua mensagem; o Gustavo te responde amanhã até as 10h. Se não puder esperar, escreva URGENTE que eu aviso o Gustavo.'),
+       'Olá! Aqui é a Claudia, assistente virtual da HBR. Já passei sua mensagem ao Gustavo, e ele retorna para você amanhã de manhã. Se for urgente, é só responder "urgente" que eu aviso o Gustavo na hora.'),
       ('T07', 'recibo_cliente', 'manha',
-       'Bom dia, Lenine (mensagem automática da HBR). Recebi sua mensagem de ontem à noite. O Gustavo te responde até as 10h.'),
+       'Bom dia, Lenine! Vi sua mensagem de ontem à noite e já passei ao Gustavo. Ele retorna para você amanhã de manhã.'),
+      ('T07a', 'recibo_cliente', 'manha_apresentacao',
+       'Bom dia, Lenine! Aqui é a Claudia, assistente virtual da HBR. Vi sua mensagem de ontem à noite e já passei ao Gustavo. Ele retorna para você amanhã de manhã.'),
       ('T08', 'recibo_cliente', 'manha_outro_dia',
-       'Bom dia, Lenine (mensagem automática da HBR). Recebi sua mensagem de ontem à noite. O Gustavo te responde amanhã até as 10h.'),
+       'Bom dia, Lenine! Vi sua mensagem de ontem à noite e já passei ao Gustavo. Ele retorna para você amanhã de manhã.'),
+      ('T08a', 'recibo_cliente', 'manha_outro_dia_apresentacao',
+       'Bom dia, Lenine! Aqui é a Claudia, assistente virtual da HBR. Vi sua mensagem de ontem à noite e já passei ao Gustavo. Ele retorna para você amanhã de manhã.'),
       ('T09', 'recibo_cliente', 'manha_sem_nome',
-       'Bom dia! Aqui é o assistente da HBR (mensagem automática). Recebi sua mensagem de ontem à noite. O Gustavo te responde amanhã até as 10h.'),
+       'Bom dia! Aqui é a Claudia, assistente virtual da HBR. Vi sua mensagem de ontem à noite e já passei ao Gustavo. Ele retorna para você amanhã de manhã.'),
       ('T10', 'recibo_cliente', 'fora_ate',
-       'Recebi, Lenine (mensagem automática da HBR). O Gustavo está fora até amanhã; ele te responde amanhã até as 10h.'),
+       'Oi, Lenine! O Gustavo está fora até amanhã, mas sua mensagem já está com ele. Ele retorna para você amanhã de manhã.'),
+      ('T10a', 'recibo_cliente', 'fora_ate_apresentacao',
+       'Oi, Lenine! Aqui é a Claudia, assistente virtual da HBR. O Gustavo está fora até amanhã, mas sua mensagem já está com ele. Ele retorna para você amanhã de manhã.'),
       ('T11', 'recibo_cliente', 'fora_ate_sem_nome',
-       'Oi! Aqui é o assistente da HBR (mensagem automática). Recebi sua mensagem. O Gustavo está fora até amanhã; ele te responde amanhã até as 10h.'),
+       'Olá! Aqui é a Claudia, assistente virtual da HBR. O Gustavo está fora até amanhã, mas sua mensagem já está com ele. Ele retorna para você amanhã de manhã.'),
       ('T12', 'recibo_cliente', 'volta',
-       'Oi, Lenine (mensagem automática da HBR). Sua mensagem de sábado (21/11) às 21:40 só chegou para nós agora. Desculpe a demora. O Gustavo te responde amanhã até as 10h.'),
+       'Oi, Lenine! Sua mensagem de sábado (21/11) às 21:40 só chegou para nós agora. Desculpe a demora. Já passei ao Gustavo, e ele retorna para você amanhã de manhã.'),
+      ('T12a', 'recibo_cliente', 'volta_apresentacao',
+       'Oi, Lenine! Aqui é a Claudia, assistente virtual da HBR. Sua mensagem de sábado (21/11) às 21:40 só chegou para nós agora. Desculpe a demora. Já passei ao Gustavo, e ele retorna para você amanhã de manhã.'),
       ('T13', 'recibo_cliente', 'volta_queda',
-       'Oi, Lenine (mensagem automática da HBR). Nosso WhatsApp ficou fora do ar, e sua mensagem de sábado (21/11) às 21:40 só chegou agora. Desculpe a demora. O Gustavo te responde amanhã até as 10h.'),
+       'Oi, Lenine! Nosso WhatsApp ficou fora do ar por um tempo, e sua mensagem de sábado (21/11) às 21:40 só chegou agora. Desculpe a demora. Já passei ao Gustavo, e ele retorna para você amanhã de manhã.'),
+      ('T13a', 'recibo_cliente', 'volta_queda_apresentacao',
+       'Oi, Lenine! Aqui é a Claudia, assistente virtual da HBR. Nosso WhatsApp ficou fora do ar por um tempo, e sua mensagem de sábado (21/11) às 21:40 só chegou agora. Desculpe a demora. Já passei ao Gustavo, e ele retorna para você amanhã de manhã.'),
       ('T14', 'recibo_ambiguo', 'padrao',
-       'Oi! Aqui é o assistente da HBR (mensagem automática). Recebi sua mensagem e passei ao Gustavo; ele te responde amanhã até as 10h.'),
+       'Olá! Aqui é a Claudia, assistente virtual da HBR. Já passei sua mensagem ao Gustavo, e ele retorna para você amanhã de manhã.'),
       ('T15', 'recibo_numero_novo', 'pergunta_necessidade',
-       'Boa tarde! Aqui é o assistente da HBR (mensagem automática). Recebi seu pedido e já passei ao Gustavo, que faz os orçamentos; ele te responde amanhã até as 10h. Pra adiantar: me conta o que você precisa resolver ou instalar (pode ser por áudio).'),
+       'Boa tarde! Aqui é a Claudia, assistente virtual da HBR. Já passei seu pedido ao Gustavo, que cuida dos orçamentos, e ele retorna para você amanhã de manhã. Para adiantar, pode me contar o que precisa resolver ou instalar? Pode ser por áudio.'),
       ('T16', 'recibo_numero_novo', 'pergunta_modelo',
-       'Boa tarde! Aqui é o assistente da HBR (mensagem automática). Recebi seu pedido e já passei ao Gustavo, que faz os orçamentos; ele te responde amanhã até as 10h. Pra adiantar: qual o modelo e o ano do motorhome?'),
+       'Boa tarde! Aqui é a Claudia, assistente virtual da HBR. Já passei seu pedido ao Gustavo, que cuida dos orçamentos, e ele retorna para você amanhã de manhã. Para adiantar, qual é o modelo e o ano do motorhome?'),
       ('T17', 'recibo_numero_novo', 'sem_pergunta',
-       'Boa tarde! Aqui é o assistente da HBR (mensagem automática). Recebi seu pedido e já passei ao Gustavo, que faz os orçamentos; ele te responde amanhã até as 10h.'),
+       'Boa tarde! Aqui é a Claudia, assistente virtual da HBR. Já passei seu pedido ao Gustavo, que cuida dos orçamentos, e ele retorna para você amanhã de manhã.'),
       ('T18', 'coleta_numero_novo', 'nome',
-       'Obrigado! Já passei ao Gustavo. Como posso te chamar?'),
+       'Obrigada! Já passei ao Gustavo. Como posso chamar você?'),
       ('T19', 'saudacao_numero_novo', 'padrao',
-       'Boa tarde! Aqui é o assistente da HBR (mensagem automática). Em que posso te ajudar? Pode ser por áudio.'),
+       'Boa tarde! Aqui é a Claudia, assistente virtual da HBR. Em que posso ajudar? Se preferir, pode mandar um áudio.'),
       ('T20', 'adiamento', 'com_nome',
-       'Lenine, o Gustavo ainda não conseguiu te responder. Seu pedido está anotado, e a resposta sai até as 10h. Se não puder esperar, escreva URGENTE que eu aviso o Gustavo.'),
+       'Lenine, o Gustavo ainda não conseguiu retornar, mas seu pedido está com ele e a resposta sai ainda hoje. Se for urgente, é só responder "urgente" que eu aviso o Gustavo na hora.'),
       ('T21', 'adiamento', 'sem_nome',
-       'O Gustavo ainda não conseguiu te responder. Seu pedido está anotado, e a resposta sai até as 10h. Se não puder esperar, escreva URGENTE que eu aviso o Gustavo.'),
+       'O Gustavo ainda não conseguiu retornar, mas seu pedido está com ele e a resposta sai ainda hoje. Se for urgente, é só responder "urgente" que eu aviso o Gustavo na hora.'),
       ('T22', 'fim_do_dia', 'com_nome',
-       'Lenine, o Gustavo não conseguiu te responder hoje, desculpe. Seu pedido abre a lista dele segunda (23/11) cedo.'),
+       'Lenine, o Gustavo não conseguiu retornar hoje, peço desculpas. Seu pedido é o primeiro da lista dele segunda (23/11) cedo.'),
       ('T23', 'fim_do_dia', 'sem_nome',
-       'O Gustavo não conseguiu te responder hoje, desculpe. Seu pedido abre a lista dele segunda (23/11) cedo.'),
+       'O Gustavo não conseguiu retornar hoje, peço desculpas. Seu pedido é o primeiro da lista dele segunda (23/11) cedo.'),
       ('T24', 'urgente', 'acorde',
-       'Avisei o Gustavo agora, Lenine.'),
+       'Avisei o Gustavo agora mesmo, Lenine.'),
       ('T25', 'urgente', 'sem_acorde',
-       'Anotado como urgente, Lenine. O Gustavo vê segunda (23/11) cedo, antes de tudo.'),
+       'Anotei como urgente, Lenine. O Gustavo vê segunda (23/11) cedo, antes de tudo.'),
       ('T26', 'urgente', 'sem_acorde_sem_nome',
-       'Anotado como urgente. O Gustavo vê segunda (23/11) cedo, antes de tudo.'),
+       'Anotei como urgente. O Gustavo vê segunda (23/11) cedo, antes de tudo.'),
       ('T27', 'parar', 'com_nome',
-       'Combinado, Lenine: não te mando mais mensagens automáticas. Se precisar, é só escrever.'),
+       'Combinado, Lenine. Não envio mais mensagens automáticas. Quando precisar, é só escrever.'),
       ('T28', 'parar', 'sem_nome',
-       'Combinado: não te mando mais mensagens automáticas. Se precisar, é só escrever.')
+       'Combinado. Não envio mais mensagens automáticas. Quando precisar, é só escrever.')
     ) as t(id, tipo, variante, esperado)
   loop
     v_n := v_n + 1;
@@ -167,21 +177,82 @@ begin
     if v_t ~ '[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]' then
       raise exception '4c (%): o texto tem emoji', v_r.id;
     end if;
-    -- 7. URGENTE no texto ⇔ _retorno_oferece_urgente.
-    if (position('URGENTE' in v_t) > 0) is distinct from public._retorno_oferece_urgente(v_r.tipo, v_r.variante) then
+    -- 7. "urgente", entre aspas, no texto ⇔ _retorno_oferece_urgente.
+    if (position('"urgente"' in v_t) > 0) is distinct from public._retorno_oferece_urgente(v_r.tipo, v_r.variante) then
       raise exception '7 (%): _retorno_oferece_urgente(%, %) não bate com o texto', v_r.id, v_r.tipo, v_r.variante;
     end if;
-    if position('URGENTE' in v_t) > 0 then
+    if position('"urgente"' in v_t) > 0 then
       v_n_urgente := v_n_urgente + 1;
     end if;
   end loop;
-  if v_n <> 28 then
-    raise exception '1: conferidos % modelos, esperados 28', v_n;
+  if v_n <> 33 then
+    raise exception '1: conferidos % modelos, esperados 33', v_n;
   end if;
   -- T04–T06, T20 e T21: exatamente 5 oferecem URGENTE.
   if v_n_urgente <> 5 then
     raise exception '7b: % modelos com URGENTE, esperados 5 (T04–T06, T20, T21)', v_n_urgente;
   end if;
+  -- O prazo como o cliente lê (VOZ-2): sem hora exata, e a hora decide só manhã ou não.
+  for v_r in
+    select * from (values
+      ('hoje', '19h', 'ainda hoje'), ('hoje', '14h', 'ainda hoje'), ('hoje', '10h', 'ainda esta manhã'),
+      ('hoje', '10:30', 'ainda esta manhã'), ('amanhã', '10h', 'amanhã de manhã'), ('amanhã', '19h', 'amanhã'),
+      ('segunda (23/11)', '10h', 'na segunda, pela manhã'), ('terça (24/11)', '19h', 'na terça'),
+      ('sábado (21/11)', '10h', 'no sábado, pela manhã'), ('domingo (22/11)', '14h', 'no domingo')
+    ) as t(quando, hora, esperado)
+  loop
+    if public._retorno_quando_fala(v_r.quando, v_r.hora) is distinct from v_r.esperado then
+      raise exception '8 (% %): a fala do prazo saiu "%"', v_r.quando, v_r.hora, public._retorno_quando_fala(v_r.quando, v_r.hora);
+    end if;
+  end loop;
+  if public._retorno_quando_fala(null, '10h') is not null or public._retorno_quando_fala('hoje', null) is not null
+     or public._retorno_quando_fala('semana que vem', '10h') is not null or public._retorno_quando_fala('hoje', '14 horas') is not null then
+    raise exception '8b: a fala do prazo inventou texto para um valor que não conhece';
+  end if;
+  -- Nenhum texto ao cliente volta a citar a hora do prazo nem a "mensagem automática".
+  for v_r in
+    select m.tipo, m.variante from (values
+      ('recibo_cliente', 'padrao'),
+      ('recibo_cliente', 'padrao_apresentacao'),
+      ('recibo_cliente', 'sem_nome'),
+      ('recibo_cliente', 'outro_dia'),
+      ('recibo_cliente', 'outro_dia_apresentacao'),
+      ('recibo_cliente', 'outro_dia_sem_nome'),
+      ('recibo_cliente', 'manha'),
+      ('recibo_cliente', 'manha_apresentacao'),
+      ('recibo_cliente', 'manha_outro_dia'),
+      ('recibo_cliente', 'manha_outro_dia_apresentacao'),
+      ('recibo_cliente', 'manha_sem_nome'),
+      ('recibo_cliente', 'fora_ate'),
+      ('recibo_cliente', 'fora_ate_apresentacao'),
+      ('recibo_cliente', 'fora_ate_sem_nome'),
+      ('recibo_cliente', 'volta'),
+      ('recibo_cliente', 'volta_apresentacao'),
+      ('recibo_cliente', 'volta_queda'),
+      ('recibo_cliente', 'volta_queda_apresentacao'),
+      ('recibo_ambiguo', 'padrao'),
+      ('recibo_numero_novo', 'pergunta_necessidade'),
+      ('recibo_numero_novo', 'pergunta_modelo'),
+      ('recibo_numero_novo', 'sem_pergunta'),
+      ('coleta_numero_novo', 'nome'),
+      ('saudacao_numero_novo', 'padrao'),
+      ('adiamento', 'com_nome'),
+      ('adiamento', 'sem_nome'),
+      ('fim_do_dia', 'com_nome'),
+      ('fim_do_dia', 'sem_nome'),
+      ('urgente', 'acorde'),
+      ('urgente', 'sem_acorde'),
+      ('urgente', 'sem_acorde_sem_nome'),
+      ('parar', 'com_nome'),
+      ('parar', 'sem_nome')
+    ) as m(tipo, variante)
+  loop
+    v_t := public._retorno_texto(v_r.tipo, v_r.variante, c_dados || '{"hora": "19h"}');
+    if v_t ~ 'até as|mensagem automática da HBR|assistente da HBR' or (v_t ~ '19h' ) then
+      raise exception '8c (%/%): sobrou a hora ou a voz antiga: "%"', v_r.tipo, v_r.variante, v_t;
+    end if;
+  end loop;
+
   -- Fora da tabela, nunca verdadeiro.
   if public._retorno_oferece_urgente('recibo_cliente', 'padrao') or public._retorno_oferece_urgente('urgente', 'sem_acorde')
      or public._retorno_oferece_urgente('adiamento', 'outra') or public._retorno_oferece_urgente(null, null)
@@ -258,7 +329,7 @@ begin
     end if;
   end loop;
   -- Modelo sem campo aceita dados nulos; modelo com campo, não.
-  if public._retorno_texto('coleta_numero_novo', 'nome', null) is distinct from 'Obrigado! Já passei ao Gustavo. Como posso te chamar?'
+  if public._retorno_texto('coleta_numero_novo', 'nome', null) is distinct from 'Obrigada! Já passei ao Gustavo. Como posso chamar você?'
      or pg_temp.retorno_f1_texto_erro('recibo_cliente', 'padrao', null) <> '22023: retorno_texto: falta nome' then
     raise exception '2d: dados nulos fora da regra';
   end if;

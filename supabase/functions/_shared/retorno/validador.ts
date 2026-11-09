@@ -227,7 +227,7 @@ const OS: RegExp[] = [new RegExp(ANTES + "(?:os|orc|orcamento)[\\s\\-–—#.:°
 const JA_AVISADO = new RegExp(ANTES + "(?:foi|foram|ja|esta|estao|ficou)\\s+avisad", "u");
 const CONFERIDA = /conferid/u;
 const EM_PREPARACAO = new RegExp(ANTES + "em\\s+prepar", "u");
-const ABRE_A_LISTA = new RegExp(ANTES + "abr(?:e|ir|imos|indo)\\s+a\\s+lista", "u");
+const ABRE_A_LISTA = new RegExp(ANTES + "(?:abr(?:e|ir|imos|indo)\\s+a\\s+lista|primeir[oa]\\s+da\\s+lista)", "u");
 
 const EMOJI = /[\p{Extended_Pictographic}\p{Regional_Indicator}\p{Emoji_Modifier}\u{FE0F}\u{20E3}]/u;
 

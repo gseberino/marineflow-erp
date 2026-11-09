@@ -48,23 +48,33 @@
 --    lancha?"): "da" nos femininos de unidade.ts, "do" no resto, "do veículo" nos modelos (Ducato,
 --    Sprinter…), com o acento de volta nas palavras que o sinal normalizou ("da embarcação").
 --
--- 8. _retorno_texto(tipo, variante, dados): os 28 modelos fixos (T01–T28) e a linha de risco (L01), letra
---    por letra os da lista que o dono aprova antes de ligar (molde _agenda_cliente_texto). Falta de dado é
+-- 8. _retorno_texto(tipo, variante, dados): os modelos fixos (T01–T28, mais T07a, T08a, T10a, T12a e T13a, as
+--    apresentações) e a linha de risco (L01), letra por letra os do cartão rr-voz-textos, com a voz da Claudia
+--    (VOZ-1, VOZ-2, VOZ-6). O prazo sai sem hora: {quando_fala} é "ainda hoje" ou "amanhã de manhã", e a hora
+--    fica por dentro (molde _agenda_cliente_texto). Falta de dado é
 --    ERRO (22023), nunca texto com buraco; os campos de lista fechada são conferidos (dia, hora,
 --    cumprimento, "de ontem à noite", nome sem dígito, "do/da <bem>"). Nenhum texto copia trecho do
 --    cliente (R1-12) nem tem emoji. _retorno_oferece_urgente(tipo, variante): os modelos que oferecem
---    "escreva URGENTE" (T04–T06, T20, T21); única fonte para o P4, conferida contra os textos no teste.
+--    responder "urgente" (T04–T06, T20, T21); única fonte para o P4, conferida contra os textos no teste.
+--
+-- 9. _retorno_quando_fala(quando, hora): como o prazo é dito ao cliente (VOZ-2): "ainda hoje", "ainda esta
+--    manhã", "amanhã de manhã", "na segunda, pela manhã". Nulo se não reconhece o dia ou a hora.
+--
+-- 10. _cliente_ja_apresentada(cliente, chave, hoje): a Claudia já falou com este cliente? (VOZ-1, VOZ-6: uma
+--    vez só, seja no retorno ou na agenda.) Conta o que saiu de fato; a 'incerta' não conta, porque repetir a
+--    apresentação é melhor que omitir. A janela é retorno_config.apresentacao_intervalo, que passa a 365 dias.
 --
 -- Auxiliares internas: revoke de public, anon e authenticated, sem grant (quem chama é SECURITY DEFINER).
 -- As que leem tabela (retorno_config, clients, a agenda) são SECURITY DEFINER com search_path = public;
 -- as puras só fixam o search_path.
 --
--- Sem dado: só funções novas; nenhuma linha muda.
+-- Dado: só a linha de retorno_config, apresentacao_intervalo de 30 para 365 dias. O resto são funções novas.
 -- Reverter (depois das migrations seguintes da F1, que chamam estas): drop function
 -- public._retorno_texto(text, text, jsonb), public._retorno_oferece_urgente(text, text),
 -- public._retorno_prazo(timestamptz, text, boolean, boolean), public._retorno_x2(timestamptz),
 -- public._retorno_do_bem(text), public._retorno_nome(uuid), public._retorno_proxima_manha(timestamptz, text),
--- public._retorno_cumprimento(timestamptz), public._retorno_hora(time), public._retorno_quando(date, date).
+-- public._retorno_cumprimento(timestamptz), public._retorno_hora(time), public._retorno_quando(date, date),
+-- public._retorno_quando_fala(text, text), public._cliente_ja_apresentada(uuid, text, date).
 -- Sem deploy: update public.retorno_config set promessa_faixa = '{}' (a promessa volta à tabela) ou
 -- fora_ate = null.
 
@@ -261,7 +271,7 @@ $$;
 comment on function public._retorno_x2(timestamptz) is
   'Retorno F1: X2, o próximo momento de promessa do mesmo dia depois de X (promessa_meio_dia com o meio-dia ligado, senão promessa_fechamento); nulo depois do último. Única fonte do "vai haver adiamento".';
 
--- Os modelos cujo texto oferece "escreva URGENTE" (T04–T06, T20, T21).
+-- Os modelos cujo texto oferece responder "urgente" (T04–T06, T20, T21).
 create or replace function public._retorno_oferece_urgente(p_tipo text, p_variante text)
 returns boolean
 language sql
@@ -275,7 +285,7 @@ as $$
 $$;
 
 comment on function public._retorno_oferece_urgente(text, text) is
-  'Retorno F1: verdadeiro nos modelos que oferecem "escreva URGENTE" (recibo_cliente outro_dia*, adiamento com_nome/sem_nome). Única fonte; o teste confere contra _retorno_texto.';
+  'Retorno F1: verdadeiro nos modelos que oferecem responder "urgente" (recibo_cliente outro_dia*, adiamento com_nome/sem_nome). Única fonte; o teste confere contra _retorno_texto.';
 
 -- O "até X" do recibo (B.4.1). Devolve {faixa, fonte, prometido_ate, recibo_em, dia, ref, quando, hora,
 -- outro_dia, x2}; "agora" = p_quando (a carência é somada por quem chama).
@@ -449,6 +459,59 @@ $$;
 comment on function public._retorno_prazo(timestamptz, text, boolean, boolean) is
   'Retorno F1 (B.4.1): o "até X" do recibo, pela tabela de 8 regras (fora_ate, noite, folga, pressa com acorde, manhã cedo, meio, tarde) e pela calibração aprovada (promessa_faixa: só alonga, sempre num momento; inválida é ignorada e registrada). Quem chama passa greatest(aberta_em, agora). VOLATILE por gravar o log.';
 
+-- Como o prazo é dito ao cliente (VOZ-2): sem hora exata; a hora fica por dentro.
+create or replace function public._retorno_quando_fala(p_quando text, p_hora text)
+returns text
+language sql
+immutable
+set search_path = public
+as $$
+  select case
+    when v.h is null then null
+    when v.q = 'hoje' then case when v.h < 12 then 'ainda esta manhã' else 'ainda hoje' end
+    when v.q = 'amanhã' then case when v.h < 12 then 'amanhã de manhã' else 'amanhã' end
+    when v.q ~ '^(segunda|terça|quarta|quinta|sexta) \([0-9]{2}/[0-9]{2}\)$'
+      then 'na ' || split_part(v.q, ' (', 1) || case when v.h < 12 then ', pela manhã' else '' end
+    when v.q ~ '^(sábado|domingo) \([0-9]{2}/[0-9]{2}\)$'
+      then 'no ' || split_part(v.q, ' (', 1) || case when v.h < 12 then ', pela manhã' else '' end
+  end
+  from (select btrim(p_quando) as q, (regexp_match(btrim(p_hora), '^([0-9]{1,2})(h|:[0-9]{2})$'))[1]::int as h) v;
+$$;
+
+comment on function public._retorno_quando_fala(text, text) is
+  'Retorno F1 (VOZ-2): o prazo como o cliente lê, a partir de {quando} e {hora}: ainda hoje, ainda esta manhã, amanhã de manhã, amanhã, na segunda, pela manhã. Nulo se não reconhece.';
+
+-- A Claudia se apresenta uma vez por cliente (VOZ-1, VOZ-6).
+alter table public.retorno_config alter column apresentacao_intervalo set default '365 days';
+update public.retorno_config set apresentacao_intervalo = interval '365 days' where apresentacao_intervalo = interval '30 days';
+
+create or replace function public._cliente_ja_apresentada(p_client_id uuid, p_chave text, p_hoje date)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with j as (
+    select (p_hoje::timestamp at time zone 'America/Sao_Paulo')
+             - coalesce((public._retorno_cfg()).apresentacao_intervalo, interval '365 days') as desde,
+           ((p_hoje + 1)::timestamp at time zone 'America/Sao_Paulo') as ate
+  )
+  select exists (select 1 from public.agenda_cliente_mensagens m, j
+                  where p_client_id is not null
+                    and m.client_id = p_client_id
+                    and m.enviada_em > j.desde and m.enviada_em < j.ate)
+      or exists (select 1 from public.retorno_saidas s, j
+                  where s.emissor = 'retorno'
+                    and s.estado = 'enviada'
+                    and s.tipo not in ('acorde', 'cadastro_provisorio', 'fila')
+                    and (s.client_id = p_client_id or s.chave = p_chave)
+                    and s.enviada_em > j.desde and s.enviada_em < j.ate);
+$$;
+
+comment on function public._cliente_ja_apresentada(uuid, text, date) is
+  'VOZ-1 e VOZ-6: a Claudia já falou com este cliente? Conta agenda_cliente_mensagens enviada (por cliente) e retorno_saidas enviada ao cliente (por cliente ou chave de 8 dígitos), na janela de retorno_config.apresentacao_intervalo. A incerta não conta: repetir a apresentação é melhor que omitir.';
+
 -- Os textos fixos. Falta de dado ou valor fora da lista fechada = 22023.
 create or replace function public._retorno_texto(p_tipo text, p_variante text, p_dados jsonb)
 returns text
@@ -465,65 +528,76 @@ declare
   v_texto text;
   v_campo text;
   v_valor text;
+  v_parte text;
   v_ok boolean;
 begin
   v_modelo := case p_tipo || '/' || p_variante
     when 'recibo_cliente/padrao' then -- T01
-      'Oi, {nome} (mensagem automática da HBR). Recebi e passei ao Gustavo; ele te responde {quando} até as {hora}.'
+      'Oi, {nome}! Já passei sua mensagem ao Gustavo, e ele retorna para você {quando_fala}.'
     when 'recibo_cliente/padrao_apresentacao' then -- T02
-      'Oi, {nome}! Aqui é o assistente da HBR (mensagem automática). Recebi e passei ao Gustavo; ele te responde {quando} até as {hora}.'
+      'Oi, {nome}! Aqui é a Claudia, assistente virtual da HBR. Já passei sua mensagem ao Gustavo, e ele retorna para você {quando_fala}.'
     when 'recibo_cliente/sem_nome' then -- T03
-      'Oi! Aqui é o assistente da HBR (mensagem automática). Recebi sua mensagem e passei ao Gustavo; ele te responde {quando} até as {hora}.'
+      'Olá! Aqui é a Claudia, assistente virtual da HBR. Já passei sua mensagem ao Gustavo, e ele retorna para você {quando_fala}.'
     when 'recibo_cliente/outro_dia' then -- T04
-      'Recebi, {nome} (mensagem automática da HBR). O Gustavo te responde {quando} até as {hora}. Se não puder esperar, escreva URGENTE que eu aviso o Gustavo.'
+      'Oi, {nome}! Já passei sua mensagem ao Gustavo, e ele retorna para você {quando_fala}. Se for urgente, é só responder "urgente" que eu aviso o Gustavo na hora.'
     when 'recibo_cliente/outro_dia_apresentacao' then -- T05
-      'Oi, {nome}! Aqui é o assistente da HBR (mensagem automática). Recebi sua mensagem; o Gustavo te responde {quando} até as {hora}. Se não puder esperar, escreva URGENTE que eu aviso o Gustavo.'
+      'Oi, {nome}! Aqui é a Claudia, assistente virtual da HBR. Já passei sua mensagem ao Gustavo, e ele retorna para você {quando_fala}. Se for urgente, é só responder "urgente" que eu aviso o Gustavo na hora.'
     when 'recibo_cliente/outro_dia_sem_nome' then -- T06
-      'Oi! Aqui é o assistente da HBR (mensagem automática). Recebi sua mensagem; o Gustavo te responde {quando} até as {hora}. Se não puder esperar, escreva URGENTE que eu aviso o Gustavo.'
+      'Olá! Aqui é a Claudia, assistente virtual da HBR. Já passei sua mensagem ao Gustavo, e ele retorna para você {quando_fala}. Se for urgente, é só responder "urgente" que eu aviso o Gustavo na hora.'
     when 'recibo_cliente/manha' then -- T07
-      'Bom dia, {nome} (mensagem automática da HBR). Recebi sua mensagem {de_quando}. O Gustavo te responde até as {hora}.'
+      'Bom dia, {nome}! Vi sua mensagem {de_quando} e já passei ao Gustavo. Ele retorna para você {quando_fala}.'
+    when 'recibo_cliente/manha_apresentacao' then -- T07a
+      'Bom dia, {nome}! Aqui é a Claudia, assistente virtual da HBR. Vi sua mensagem {de_quando} e já passei ao Gustavo. Ele retorna para você {quando_fala}.'
     when 'recibo_cliente/manha_outro_dia' then -- T08
-      'Bom dia, {nome} (mensagem automática da HBR). Recebi sua mensagem {de_quando}. O Gustavo te responde {quando} até as {hora}.'
+      'Bom dia, {nome}! Vi sua mensagem {de_quando} e já passei ao Gustavo. Ele retorna para você {quando_fala}.'
+    when 'recibo_cliente/manha_outro_dia_apresentacao' then -- T08a
+      'Bom dia, {nome}! Aqui é a Claudia, assistente virtual da HBR. Vi sua mensagem {de_quando} e já passei ao Gustavo. Ele retorna para você {quando_fala}.'
     when 'recibo_cliente/manha_sem_nome' then -- T09
-      'Bom dia! Aqui é o assistente da HBR (mensagem automática). Recebi sua mensagem {de_quando}. O Gustavo te responde {quando} até as {hora}.'
+      'Bom dia! Aqui é a Claudia, assistente virtual da HBR. Vi sua mensagem {de_quando} e já passei ao Gustavo. Ele retorna para você {quando_fala}.'
     when 'recibo_cliente/fora_ate' then -- T10
-      'Recebi, {nome} (mensagem automática da HBR). O Gustavo está fora até {quando}; ele te responde {quando} até as {hora}.'
+      'Oi, {nome}! O Gustavo está fora até {quando}, mas sua mensagem já está com ele. Ele retorna para você {quando_fala}.'
+    when 'recibo_cliente/fora_ate_apresentacao' then -- T10a
+      'Oi, {nome}! Aqui é a Claudia, assistente virtual da HBR. O Gustavo está fora até {quando}, mas sua mensagem já está com ele. Ele retorna para você {quando_fala}.'
     when 'recibo_cliente/fora_ate_sem_nome' then -- T11
-      'Oi! Aqui é o assistente da HBR (mensagem automática). Recebi sua mensagem. O Gustavo está fora até {quando}; ele te responde {quando} até as {hora}.'
+      'Olá! Aqui é a Claudia, assistente virtual da HBR. O Gustavo está fora até {quando}, mas sua mensagem já está com ele. Ele retorna para você {quando_fala}.'
     when 'recibo_cliente/volta' then -- T12
-      'Oi, {nome} (mensagem automática da HBR). Sua mensagem de {dia_msg} às {hora_msg} só chegou para nós agora. Desculpe a demora. O Gustavo te responde {quando} até as {hora}.'
+      'Oi, {nome}! Sua mensagem de {dia_msg} às {hora_msg} só chegou para nós agora. Desculpe a demora. Já passei ao Gustavo, e ele retorna para você {quando_fala}.'
+    when 'recibo_cliente/volta_apresentacao' then -- T12a
+      'Oi, {nome}! Aqui é a Claudia, assistente virtual da HBR. Sua mensagem de {dia_msg} às {hora_msg} só chegou para nós agora. Desculpe a demora. Já passei ao Gustavo, e ele retorna para você {quando_fala}.'
     when 'recibo_cliente/volta_queda' then -- T13
-      'Oi, {nome} (mensagem automática da HBR). Nosso WhatsApp ficou fora do ar, e sua mensagem de {dia_msg} às {hora_msg} só chegou agora. Desculpe a demora. O Gustavo te responde {quando} até as {hora}.'
+      'Oi, {nome}! Nosso WhatsApp ficou fora do ar por um tempo, e sua mensagem de {dia_msg} às {hora_msg} só chegou agora. Desculpe a demora. Já passei ao Gustavo, e ele retorna para você {quando_fala}.'
+    when 'recibo_cliente/volta_queda_apresentacao' then -- T13a
+      'Oi, {nome}! Aqui é a Claudia, assistente virtual da HBR. Nosso WhatsApp ficou fora do ar por um tempo, e sua mensagem de {dia_msg} às {hora_msg} só chegou agora. Desculpe a demora. Já passei ao Gustavo, e ele retorna para você {quando_fala}.'
     when 'recibo_ambiguo/padrao' then -- T14
-      'Oi! Aqui é o assistente da HBR (mensagem automática). Recebi sua mensagem e passei ao Gustavo; ele te responde {quando} até as {hora}.'
+      'Olá! Aqui é a Claudia, assistente virtual da HBR. Já passei sua mensagem ao Gustavo, e ele retorna para você {quando_fala}.'
     when 'recibo_numero_novo/pergunta_necessidade' then -- T15
-      '{cumprimento}! Aqui é o assistente da HBR (mensagem automática). Recebi seu pedido e já passei ao Gustavo, que faz os orçamentos; ele te responde {quando} até as {hora}. Pra adiantar: me conta o que você precisa resolver ou instalar (pode ser por áudio).'
+      '{cumprimento}! Aqui é a Claudia, assistente virtual da HBR. Já passei seu pedido ao Gustavo, que cuida dos orçamentos, e ele retorna para você {quando_fala}. Para adiantar, pode me contar o que precisa resolver ou instalar? Pode ser por áudio.'
     when 'recibo_numero_novo/pergunta_modelo' then -- T16
-      '{cumprimento}! Aqui é o assistente da HBR (mensagem automática). Recebi seu pedido e já passei ao Gustavo, que faz os orçamentos; ele te responde {quando} até as {hora}. Pra adiantar: qual o modelo e o ano {do_bem}?'
+      '{cumprimento}! Aqui é a Claudia, assistente virtual da HBR. Já passei seu pedido ao Gustavo, que cuida dos orçamentos, e ele retorna para você {quando_fala}. Para adiantar, qual é o modelo e o ano {do_bem}?'
     when 'recibo_numero_novo/sem_pergunta' then -- T17
-      '{cumprimento}! Aqui é o assistente da HBR (mensagem automática). Recebi seu pedido e já passei ao Gustavo, que faz os orçamentos; ele te responde {quando} até as {hora}.'
+      '{cumprimento}! Aqui é a Claudia, assistente virtual da HBR. Já passei seu pedido ao Gustavo, que cuida dos orçamentos, e ele retorna para você {quando_fala}.'
     when 'coleta_numero_novo/nome' then -- T18
-      'Obrigado! Já passei ao Gustavo. Como posso te chamar?'
+      'Obrigada! Já passei ao Gustavo. Como posso chamar você?'
     when 'saudacao_numero_novo/padrao' then -- T19
-      '{cumprimento}! Aqui é o assistente da HBR (mensagem automática). Em que posso te ajudar? Pode ser por áudio.'
+      '{cumprimento}! Aqui é a Claudia, assistente virtual da HBR. Em que posso ajudar? Se preferir, pode mandar um áudio.'
     when 'adiamento/com_nome' then -- T20
-      '{nome}, o Gustavo ainda não conseguiu te responder. Seu pedido está anotado, e a resposta sai até as {hora}. Se não puder esperar, escreva URGENTE que eu aviso o Gustavo.'
+      '{nome}, o Gustavo ainda não conseguiu retornar, mas seu pedido está com ele e a resposta sai ainda hoje. Se for urgente, é só responder "urgente" que eu aviso o Gustavo na hora.'
     when 'adiamento/sem_nome' then -- T21
-      'O Gustavo ainda não conseguiu te responder. Seu pedido está anotado, e a resposta sai até as {hora}. Se não puder esperar, escreva URGENTE que eu aviso o Gustavo.'
+      'O Gustavo ainda não conseguiu retornar, mas seu pedido está com ele e a resposta sai ainda hoje. Se for urgente, é só responder "urgente" que eu aviso o Gustavo na hora.'
     when 'fim_do_dia/com_nome' then -- T22
-      '{nome}, o Gustavo não conseguiu te responder hoje, desculpe. Seu pedido abre a lista dele {quando_lista} cedo.'
+      '{nome}, o Gustavo não conseguiu retornar hoje, peço desculpas. Seu pedido é o primeiro da lista dele {quando_lista} cedo.'
     when 'fim_do_dia/sem_nome' then -- T23
-      'O Gustavo não conseguiu te responder hoje, desculpe. Seu pedido abre a lista dele {quando_lista} cedo.'
+      'O Gustavo não conseguiu retornar hoje, peço desculpas. Seu pedido é o primeiro da lista dele {quando_lista} cedo.'
     when 'urgente/acorde' then -- T24
-      'Avisei o Gustavo agora, {nome}.'
+      'Avisei o Gustavo agora mesmo, {nome}.'
     when 'urgente/sem_acorde' then -- T25
-      'Anotado como urgente, {nome}. O Gustavo vê {quando_lista} cedo, antes de tudo.'
+      'Anotei como urgente, {nome}. O Gustavo vê {quando_lista} cedo, antes de tudo.'
     when 'urgente/sem_acorde_sem_nome' then -- T26
-      'Anotado como urgente. O Gustavo vê {quando_lista} cedo, antes de tudo.'
+      'Anotei como urgente. O Gustavo vê {quando_lista} cedo, antes de tudo.'
     when 'parar/com_nome' then -- T27
-      'Combinado, {nome}: não te mando mais mensagens automáticas. Se precisar, é só escrever.'
+      'Combinado, {nome}. Não envio mais mensagens automáticas. Quando precisar, é só escrever.'
     when 'parar/sem_nome' then -- T28
-      'Combinado: não te mando mais mensagens automáticas. Se precisar, é só escrever.'
+      'Combinado. Não envio mais mensagens automáticas. Quando precisar, é só escrever.'
   end;
   if v_modelo is null then
     raise exception using errcode = '22023',
@@ -537,6 +611,24 @@ begin
     select x.m[1] from regexp_matches(v_modelo, '\{([a-z_]+)\}', 'g') with ordinality as x(m, n)
      group by x.m[1] order by min(x.n)
   loop
+    -- {quando_fala} sai de quando + hora, que passam pela mesma conferência dos outros campos.
+    if v_campo = 'quando_fala' then
+      foreach v_parte in array array['quando', 'hora'] loop
+        v_valor := btrim(d ->> v_parte);
+        if coalesce(v_valor, '') = '' then
+          raise exception using errcode = '22023', message = 'retorno_texto: falta ' || v_parte;
+        end if;
+        if v_valor !~ case v_parte when 'quando' then c_dia else c_hora end then
+          raise exception using errcode = '22023', message = 'retorno_texto: valor fora da lista em ' || v_parte;
+        end if;
+      end loop;
+      v_valor := public._retorno_quando_fala(btrim(d ->> 'quando'), btrim(d ->> 'hora'));
+      if v_valor is null then
+        raise exception using errcode = '22023', message = 'retorno_texto: valor fora da lista em quando';
+      end if;
+      v_texto := replace(v_texto, '{quando_fala}', v_valor);
+      continue;
+    end if;
     v_valor := btrim(d ->> v_campo);
     if coalesce(v_valor, '') = '' then
       raise exception using errcode = '22023', message = 'retorno_texto: falta ' || v_campo;
@@ -568,7 +660,7 @@ end;
 $$;
 
 comment on function public._retorno_texto(text, text, jsonb) is
-  'Retorno F1: os textos fixos T01–T28 (e a linha de risco L01 nos recibos) com os {campos} de p_dados. Falta de dado, valor fora da lista fechada ou modelo desconhecido = 22023. Nenhum texto copia trecho do cliente nem tem emoji.';
+  'Retorno F1: os textos fixos da Claudia, T01–T28 e as apresentações T07a, T08a, T10a, T12a e T13a (e a linha de risco L01 nos recibos), com os {campos} de p_dados. Falta de dado, valor fora da lista fechada ou modelo desconhecido = 22023. Nenhum texto copia trecho do cliente nem tem emoji.';
 
 revoke all on function public._retorno_quando(date, date) from public, anon, authenticated;
 revoke all on function public._retorno_hora(time) from public, anon, authenticated;
@@ -580,3 +672,5 @@ revoke all on function public._retorno_x2(timestamptz) from public, anon, authen
 revoke all on function public._retorno_oferece_urgente(text, text) from public, anon, authenticated;
 revoke all on function public._retorno_prazo(timestamptz, text, boolean, boolean) from public, anon, authenticated;
 revoke all on function public._retorno_texto(text, text, jsonb) from public, anon, authenticated;
+revoke all on function public._retorno_quando_fala(text, text) from public, anon, authenticated;
+revoke all on function public._cliente_ja_apresentada(uuid, text, date) from public, anon, authenticated;

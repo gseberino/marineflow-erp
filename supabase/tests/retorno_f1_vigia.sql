@@ -379,7 +379,7 @@ begin
     end if;
     v_r := pg_temp.retorno_f1_vigia_sombra('1a', v_s.id, c_d1 + interval '18 hours 30 minutes 30 seconds');
     v_ab := pg_temp.retorno_f1_vigia_caso(v_caso);
-    if v_r ->> 'texto' is distinct from 'Nadia, o Gustavo não conseguiu te responder hoje, desculpe. Seu pedido abre a lista dele amanhã cedo.'
+    if v_r ->> 'texto' is distinct from 'Nadia, o Gustavo não conseguiu retornar hoje, peço desculpas. Seu pedido é o primeiro da lista dele amanhã cedo.'
        or v_ab.estado is distinct from 'vencida' or v_ab.fim_do_dia_em is distinct from c_d1 + interval '18 hours 30 minutes 30 seconds'
        or v_ab.topo_dia is distinct from date '2027-03-02' then
       raise exception '1a: o fim do dia não venceu o caso (ou o texto não é o T22): % / %', v_r, to_jsonb(v_ab);
@@ -416,7 +416,7 @@ begin
     end if;
     v_r := pg_temp.retorno_f1_vigia_sombra('1b', v_s.id, c_d2 + interval '13 hours 30 minutes 30 seconds');
     v_ab := pg_temp.retorno_f1_vigia_caso(v_caso);
-    if v_r ->> 'texto' is distinct from 'Olga, o Gustavo ainda não conseguiu te responder. Seu pedido está anotado, e a resposta sai até as 19h. Se não puder esperar, escreva URGENTE que eu aviso o Gustavo.'
+    if v_r ->> 'texto' is distinct from 'Olga, o Gustavo ainda não conseguiu retornar, mas seu pedido está com ele e a resposta sai ainda hoje. Se for urgente, é só responder "urgente" que eu aviso o Gustavo na hora.'
        or v_ab.segundo_prazo is distinct from c_d2 + interval '19 hours' or v_ab.adiamento_em is null then
       raise exception '1b: o adiamento não gravou o 2º prazo (ou não é o T20): % / %', v_r, to_jsonb(v_ab);
     end if;
@@ -493,9 +493,9 @@ begin
        or jsonb_typeof(v_r) is distinct from 'object' or jsonb_typeof(v_r2) is distinct from 'object'
        or (array[(v_r ->> 'saida_id')::uuid, (v_r2 ->> 'saida_id')::uuid] @> array[v_s.id, v_id]) is not true
        or (case when (v_r ->> 'saida_id')::uuid = v_s.id then v_r else v_r2 end) ->> 'texto'
-          is distinct from 'Yara, o Gustavo não conseguiu te responder hoje, desculpe. Seu pedido abre a lista dele amanhã cedo.'
+          is distinct from 'Yara, o Gustavo não conseguiu retornar hoje, peço desculpas. Seu pedido é o primeiro da lista dele amanhã cedo.'
        or (case when (v_r ->> 'saida_id')::uuid = v_id then v_r else v_r2 end) ->> 'texto'
-          is distinct from 'Zilda, o Gustavo não conseguiu te responder hoje, desculpe. Seu pedido abre a lista dele amanhã cedo.' then
+          is distinct from 'Zilda, o Gustavo não conseguiu retornar hoje, peço desculpas. Seu pedido é o primeiro da lista dele amanhã cedo.' then
       raise exception '1c: os fins do dia em X não saíram (ou o adiamento atrasado não caiu): % / % / %', v_r, v_r2,
         to_jsonb(pg_temp.retorno_f1_vigia_le(v_id2));
     end if;

@@ -35,12 +35,12 @@ import {
 // ─── Dados de exemplo ────────────────────────────────────────────────────────────────────────────
 
 // T01 (spec P3.1), com o contexto que o retorno_pegar montaria (spec P6.1, passo 8).
-const MODELO_T01 = "Oi, {nome} (mensagem automática da HBR). Recebi e passei ao Gustavo; ele te responde {quando} até as {hora}.";
-const TEXTO_BOM = "Oi, Lenine (mensagem automática da HBR). Recebi e passei ao Gustavo; ele te responde hoje até as 19h.";
+const MODELO_T01 = "Oi, {nome}! Já passei sua mensagem ao Gustavo, e ele retorna para você {quando_fala}.";
+const TEXTO_BOM = "Oi, Lenine! Já passei sua mensagem ao Gustavo, e ele retorna para você ainda hoje.";
 const TEXTO_COM_DINHEIRO = TEXTO_BOM + " Custa R$ 100.";
 const CONTEXTO: ContextoDoValidador = {
   audiencia: "cliente",
-  datas_permitidas: ["hoje"],
+  datas_permitidas: ["hoje", "ainda hoje"],
   horas_permitidas: ["19h"],
   nome_permitido: "Lenine",
   nomes_de_outros: [],
@@ -226,7 +226,7 @@ Deno.test("validador: contexto ausente reprova com 'contexto' e nada sai", async
   assertEquals(r, resumo({ itens: 1, recusadas: 1 }));
   assertEquals(envios.length, 0);
   // Sem contexto, as listas de permissão valem vazias: a data e a hora do texto também reprovam.
-  assertEquals(banco.decisoes()[0].p_detalhe, { motivo: "validador", regras: ["contexto", "data_fora", "hora_fora"] });
+  assertEquals(banco.decisoes()[0].p_detalhe, { motivo: "validador", regras: ["contexto", "data_fora"] });
 });
 
 Deno.test("validador: texto vazio ou que não é texto reprova, sem envio", async () => {

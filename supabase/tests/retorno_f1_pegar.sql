@@ -29,7 +29,7 @@
 --      erros_seguidos, o canal e a equipe não; 3 incertas → so_reativo 'erros', e uma enviada o desliga; 2 incertas
 --      + 1 recusada/provedor também ligam; a incerta aplica os efeitos no caso; o efeito ilegível não desfaz a
 --      decisão (vai ao log, action 'decisao');
---  11. K4 pelo modo pretendido ligado: 1 sombra → T02; 1 enviada → T01; só cobrança automática → T02;
+--  11. Apresentação pelo modo pretendido ligado: 1 sombra → T02; 1 enviada → T01; só cobrança automática → T02; 11d: _cliente_ja_apresentada;
 --  12. desligado: nada vence e retorno_pegar devolve nulo.
 -- Cadastros e mensagens SINTÉTICOS de 55479000098xx, com datas de janeiro de 2027 (Brasília, sem horário de verão):
 -- seg 11/01 a sex 15/01 dias úteis, sáb 16/01, dom 17/01, seg 18/01.
@@ -395,7 +395,7 @@ begin
     v_r := public.retorno_pegar(c_ter + interval '9 hours 14 minutes 30 seconds');
     v_n := v_n + pg_temp.retorno_f1_pegar_item('4', v_r, v_s.id);
     if v_r ->> 'modo' is distinct from 'sombra' or v_r ->> 'variante' is distinct from 'padrao'
-       or v_r ->> 'texto' is distinct from 'Oi, Mariana (mensagem automática da HBR). Recebi e passei ao Gustavo; ele te responde hoje até as 19h.' then
+       or v_r ->> 'texto' is distinct from 'Oi, Mariana! Já passei sua mensagem ao Gustavo, e ele retorna para você ainda hoje.' then
       raise exception '4: o recibo em sombra não é o T01 exato: %', v_r;
     end if;
     if v_r -> 'validador' -> 'datas_permitidas' is distinct from '["hoje"]'::jsonb
@@ -403,7 +403,7 @@ begin
        or v_r -> 'validador' ->> 'nome_permitido' is distinct from 'Mariana'
        or v_r -> 'validador' -> 'nomes_de_outros' is distinct from '[]'::jsonb
        or v_r -> 'validador' -> 'trechos_do_modelo'
-          is distinct from '["Oi, ", " (mensagem automática da HBR). Recebi e passei ao Gustavo; ele te responde ", " até as ", "."]'::jsonb
+          is distinct from '["Oi, ", "! Já passei sua mensagem ao Gustavo, e ele retorna para você ", "."]'::jsonb
        or v_r -> 'validador' -> 'textos_do_cliente'
           is distinct from '["Bom dia, preciso de um orçamento para trocar o inversor do motorhome"]'::jsonb
        or v_r -> 'validador' -> 'marcas' is distinct from
@@ -470,7 +470,7 @@ begin
     v_s := pg_temp.retorno_f1_pegar_le(v_s.id);
     if v_r ->> 'modo' is distinct from 'sombra' or v_s.dados ->> 'sombra_motivo' is distinct from 'urgente_desligado'
        or v_r ->> 'variante' is distinct from 'outro_dia_apresentacao'
-       or v_r ->> 'texto' is distinct from 'Oi, Daniel! Aqui é o assistente da HBR (mensagem automática). Recebi sua mensagem; o Gustavo te responde amanhã até as 10h. Se não puder esperar, escreva URGENTE que eu aviso o Gustavo.' then
+       or v_r ->> 'texto' is distinct from 'Oi, Daniel! Aqui é a Claudia, assistente virtual da HBR. Já passei sua mensagem ao Gustavo, e ele retorna para você amanhã de manhã. Se for urgente, é só responder "urgente" que eu aviso o Gustavo na hora.' then
       raise exception '5b: o recibo das 16:00 não ficou em sombra urgente_desligado (T05): % / %', v_r, to_jsonb(v_s);
     end if;
     v_r2 := public.retorno_registrar_decisao(v_s.id, 'sombra', '{"validador": {"ok": true}}', c_ter + interval '16 hours 31 seconds');
@@ -487,7 +487,7 @@ begin
     v_s := pg_temp.retorno_f1_pegar_le(v_id);
     v_ab := (select a from public.retorno_aberturas a where a.id = v_caso);
     if v_r ->> 'modo' is distinct from 'sombra' or v_s.dados ->> 'sombra_motivo' is distinct from 'caso_em_sombra'
-       or v_r ->> 'texto' is distinct from 'Daniel, o Gustavo não conseguiu te responder hoje, desculpe. Seu pedido abre a lista dele amanhã cedo.'
+       or v_r ->> 'texto' is distinct from 'Daniel, o Gustavo não conseguiu retornar hoje, peço desculpas. Seu pedido é o primeiro da lista dele amanhã cedo.'
        or v_ab.topo_dia is distinct from date '2027-01-13'
        or v_r -> 'validador' -> 'marcas' -> 'tem_topo' is distinct from 'true'::jsonb
        or not (v_r -> 'validador' -> 'datas_permitidas' @> '["amanhã", "hoje"]'::jsonb)
@@ -512,8 +512,8 @@ begin
     v_r := public.retorno_pegar(v_s.enviar_em + interval '1 second');
     v_n := v_n + pg_temp.retorno_f1_pegar_item('5c', v_r, v_s.id);
     v_s := pg_temp.retorno_f1_pegar_le(v_s.id);
-    if v_r ->> 'variante' is distinct from 'manha'
-       or v_r ->> 'texto' is distinct from 'Bom dia, Elisa (mensagem automática da HBR). Recebi sua mensagem de ontem à noite. O Gustavo te responde até as 10h.'
+    if v_r ->> 'variante' is distinct from 'manha_apresentacao'
+       or v_r ->> 'texto' is distinct from 'Bom dia, Elisa! Aqui é a Claudia, assistente virtual da HBR. Vi sua mensagem de ontem à noite e já passei ao Gustavo. Ele retorna para você ainda esta manhã.'
        or v_r ->> 'modo' is distinct from 'sombra' or v_s.dados ->> 'sombra_motivo' is distinct from 'caso_sem_aviso'
        or not (v_r -> 'validador' -> 'datas_permitidas' @> '["ontem"]'::jsonb)
        or v_r -> 'validador' -> 'horas_permitidas' is distinct from '["10h"]'::jsonb then
@@ -536,8 +536,8 @@ begin
     end if;
     v_r := public.retorno_pegar(v_s.enviar_em + interval '1 second');
     v_n := v_n + pg_temp.retorno_f1_pegar_item('6', v_r, v_s.id);
-    if v_r ->> 'variante' is distinct from 'manha_outro_dia'
-       or v_r ->> 'texto' is distinct from 'Bom dia, Gisele (mensagem automática da HBR). Recebi sua mensagem de ontem à noite. O Gustavo te responde amanhã até as 10h.' then
+    if v_r ->> 'variante' is distinct from 'manha_outro_dia_apresentacao'
+       or v_r ->> 'texto' is distinct from 'Bom dia, Gisele! Aqui é a Claudia, assistente virtual da HBR. Vi sua mensagem de ontem à noite e já passei ao Gustavo. Ele retorna para você amanhã de manhã.' then
       raise exception '6: o recibo de domingo não é o T08: %', v_r;
     end if;
     perform pg_temp.retorno_f1_pegar_limpa();
@@ -574,7 +574,7 @@ begin
     v_n := v_n + pg_temp.retorno_f1_pegar_item('6b', v_r, v_s.id);
     v_s := pg_temp.retorno_f1_pegar_le(v_s.id);
     if v_r ->> 'variante' is distinct from 'padrao_apresentacao'
-       or v_r ->> 'texto' is distinct from 'Oi, Lucia! Aqui é o assistente da HBR (mensagem automática). Recebi e passei ao Gustavo; ele te responde hoje até as 10h.'
+       or v_r ->> 'texto' is distinct from 'Oi, Lucia! Aqui é a Claudia, assistente virtual da HBR. Já passei sua mensagem ao Gustavo, e ele retorna para você ainda esta manhã.'
        or v_r -> 'validador' -> 'datas_permitidas' is distinct from '["hoje"]'::jsonb
        or v_r -> 'validador' -> 'horas_permitidas' is distinct from '["10h"]'::jsonb
        or v_s.dados -> 'prazo' ->> 'quando' is distinct from 'hoje' or v_s.dados -> 'prazo' ->> 'ref' is distinct from '2027-01-15'
@@ -607,7 +607,7 @@ begin
     v_s := pg_temp.retorno_f1_pegar_saida(v_caso, 'saudacao');
     v_r := public.retorno_pegar(c_qua + interval '13 hours 10 minutes 30 seconds');
     v_n := v_n + pg_temp.retorno_f1_pegar_item('7b', v_r, v_s.id);
-    if v_r ->> 'texto' is distinct from 'Boa tarde! Aqui é o assistente da HBR (mensagem automática). Em que posso te ajudar? Pode ser por áudio.'
+    if v_r ->> 'texto' is distinct from 'Boa tarde! Aqui é a Claudia, assistente virtual da HBR. Em que posso ajudar? Se preferir, pode mandar um áudio.'
        or v_r -> 'validador' -> 'datas_permitidas' is distinct from '[]'::jsonb then
       raise exception '7b: a saudação não é o T19: %', v_r;
     end if;
@@ -622,7 +622,7 @@ begin
     v_r := public.retorno_pegar(c_qua + interval '13 hours 17 minutes 30 seconds');
     v_n := v_n + pg_temp.retorno_f1_pegar_item('7b', v_r, v_s.id);
     if v_r ->> 'variante' is distinct from 'sem_pergunta'
-       or v_r ->> 'texto' is distinct from 'Boa tarde! Aqui é o assistente da HBR (mensagem automática). Recebi seu pedido e já passei ao Gustavo, que faz os orçamentos; ele te responde hoje até as 19h.' then
+       or v_r ->> 'texto' is distinct from 'Boa tarde! Aqui é a Claudia, assistente virtual da HBR. Já passei seu pedido ao Gustavo, que cuida dos orçamentos, e ele retorna para você ainda hoje.' then
       raise exception '7b: o recibo depois da saudação não saiu (ou não é o T17): %', v_r;
     end if;
     perform public.retorno_registrar_decisao(v_s.id, 'sombra', '{"validador": {"ok": true}}', c_qua + interval '13 hours 17 minutes 31 seconds');
@@ -660,7 +660,7 @@ begin
     v_r := public.retorno_pegar(c_qui + interval '9 hours 2 minutes 30 seconds');
     v_n := v_n + pg_temp.retorno_f1_pegar_item('8a', v_r, v_s.id);
     if v_r ->> 'variante' is distinct from 'sem_nome' or v_r -> 'validador' -> 'nome_permitido' is distinct from 'null'::jsonb
-       or v_r ->> 'texto' is distinct from 'Oi! Aqui é o assistente da HBR (mensagem automática). Recebi sua mensagem e passei ao Gustavo; ele te responde hoje até as 19h.' then
+       or v_r ->> 'texto' is distinct from 'Olá! Aqui é a Claudia, assistente virtual da HBR. Já passei sua mensagem ao Gustavo, e ele retorna para você ainda hoje.' then
       raise exception '8a: a empresa sem display_name não recebeu o T03: %', v_r;
     end if;
     perform public.retorno_registrar_decisao(v_s.id, 'sombra', '{"validador": {"ok": true}}', c_qui + interval '9 hours 2 minutes 31 seconds');
@@ -881,7 +881,7 @@ begin
     v_r := public.retorno_pegar(c_sex + interval '9 hours 2 minutes 30 seconds');
     v_n := v_n + pg_temp.retorno_f1_pegar_item('11a', v_r);
     if v_r ->> 'variante' is distinct from 'padrao_apresentacao' or v_r ->> 'modo' is distinct from 'ligado'
-       or v_r ->> 'texto' is distinct from 'Oi, Ingrid! Aqui é o assistente da HBR (mensagem automática). Recebi e passei ao Gustavo; ele te responde hoje até as 19h.' then
+       or v_r ->> 'texto' is distinct from 'Oi, Ingrid! Aqui é a Claudia, assistente virtual da HBR. Já passei sua mensagem ao Gustavo, e ele retorna para você ainda hoje.' then
       raise exception '11a: com só uma sombra nos 30 dias, o recibo ligado não se apresentou (T02): %', v_r;
     end if;
     update public.retorno_config set proximo_envio_em = null where id;
@@ -895,7 +895,7 @@ begin
     v_r := public.retorno_pegar(c_sex + interval '9 hours 12 minutes 30 seconds');
     v_n := v_n + pg_temp.retorno_f1_pegar_item('11b', v_r);
     if v_r ->> 'variante' is distinct from 'padrao'
-       or v_r ->> 'texto' is distinct from 'Oi, Joana (mensagem automática da HBR). Recebi e passei ao Gustavo; ele te responde hoje até as 19h.' then
+       or v_r ->> 'texto' is distinct from 'Oi, Joana! Já passei sua mensagem ao Gustavo, e ele retorna para você ainda hoje.' then
       raise exception '11b: com uma enviada nos 30 dias, o recibo não é o T01: %', v_r;
     end if;
     update public.retorno_config set proximo_envio_em = null where id;
@@ -913,9 +913,54 @@ begin
     v_r := public.retorno_pegar(c_sex + interval '9 hours 22 minutes 30 seconds');
     v_n := v_n + pg_temp.retorno_f1_pegar_item('11c', v_r);
     if v_r ->> 'variante' is distinct from 'padrao_apresentacao'
-       or v_r ->> 'texto' is distinct from 'Oi, Karina! Aqui é o assistente da HBR (mensagem automática). Recebi e passei ao Gustavo; ele te responde hoje até as 19h.' then
+       or v_r ->> 'texto' is distinct from 'Oi, Karina! Aqui é a Claudia, assistente virtual da HBR. Já passei sua mensagem ao Gustavo, e ele retorna para você ainda hoje.' then
       raise exception '11c: a cobrança automática contou como apresentação já feita: %', v_r;
     end if;
+    -- 11d. _cliente_ja_apresentada (VOZ-1, VOZ-6): a enviada conta; a incerta e o que passou da janela, não; a agenda conta.
+    declare
+      v_hoje_t date := (c_sex at time zone 'America/Sao_Paulo')::date;
+      v_os_t uuid;
+      v_cli_t uuid;
+    begin
+      if not public._cliente_ja_apresentada(null, public._agenda_chave_telefone('5547900009821'), v_hoje_t) then
+        raise exception '11d: a enviada do retorno não contou como apresentação';
+      end if;
+      perform pg_temp.retorno_f1_pegar_sintetica(null, '5547900009826', 'recibo_cliente', 'padrao', 'incerta',
+                                                 c_sex - interval '5 days', c_sex - interval '5 days');
+      if public._cliente_ja_apresentada(null, public._agenda_chave_telefone('5547900009826'), v_hoje_t) then
+        raise exception '11d: a incerta contou como apresentação (repetir é melhor que omitir)';
+      end if;
+      perform pg_temp.retorno_f1_pegar_sintetica(null, '5547900009827', 'recibo_cliente', 'padrao', 'enviada',
+                                                 c_sex - interval '31 days', c_sex - interval '31 days');
+      if public._cliente_ja_apresentada(null, public._agenda_chave_telefone('5547900009827'), v_hoje_t) then
+        raise exception '11d: a enviada de fora da janela contou como apresentação';
+      end if;
+      if public._cliente_ja_apresentada(null, null, v_hoje_t)
+         or public._cliente_ja_apresentada(null, public._agenda_chave_telefone('5547900009828'), v_hoje_t) then
+        raise exception '11d: sem chave, ou sem nada enviado, a função disse que já se apresentou';
+      end if;
+      select o.id, o.client_id into v_os_t, v_cli_t
+        from public.service_orders o
+       where o.client_id is not null
+         and not exists (select 1 from public.agenda_cliente_mensagens m where m.client_id = o.client_id and m.enviada_em is not null)
+       limit 1;
+      if v_os_t is not null then
+        if public._cliente_ja_apresentada(v_cli_t, null, v_hoje_t) then
+          raise exception '11d: cliente sem mensagem nenhuma já estava apresentado';
+        end if;
+        insert into public.agenda_cliente_mensagens (client_id, service_order_id, tipo, origem, modo, texto, enviar_em, valida_ate,
+                                                     aprovacao, estado, dedupe_key, enviada_em)
+        values (v_cli_t, v_os_t, 'confirmar', 'rodada', 'ligado', 'Teste 11d', c_sex - interval '2 days', c_sex,
+                'livre', 'enviada', 'teste-11d-apresentacao', c_sex - interval '2 days');
+        if not public._cliente_ja_apresentada(v_cli_t, null, v_hoje_t) then
+          raise exception '11d: a mensagem enviada pela agenda não contou como apresentação';
+        end if;
+      end if;
+      if has_function_privilege('anon', 'public._cliente_ja_apresentada(uuid, text, date)', 'execute')
+         or has_function_privilege('authenticated', 'public._cliente_ja_apresentada(uuid, text, date)', 'execute') then
+        raise exception '11d: _cliente_ja_apresentada aberta a anon ou authenticated';
+      end if;
+    end;
     update public.retorno_config set modo = 'sombra', tipos_ligados = '{}', proximo_envio_em = null where id;
     perform pg_temp.retorno_f1_pegar_limpa();
 
