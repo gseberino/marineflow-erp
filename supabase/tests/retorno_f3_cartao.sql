@@ -959,6 +959,51 @@ begin
       raise exception '21b: visita não ficou na prioridade 7';
     end if;
 
+    -- ═══ Revisão da F3. Rascunho antigo e proposta ditada depois dele: vale o ditado (linha 2); rascunho feito depois do ditado volta a vencer.
+    perform pg_temp.f3c_limpar();
+    perform pg_temp.f3c_sumir(array(select a.id from public.retorno_aberturas a where a.phone_normalized like '55479008%'));
+    update public.retorno_config set previa_modo = 'ligado', previa_ditado_ligado = true where id;
+    v_cl := pg_temp.f3c_cli('Olavo Noite F3', 930);
+    v_un := pg_temp.f3c_un(v_cl, 'Noturna');
+    v_caso := pg_temp.f3c_caso(930, 'cliente', v_cl);
+    v_os := pg_temp.f3c_os('ORÇ-00930', v_cl, v_un, c_agora - interval '3 days', 700);
+    perform pg_temp.f3c_peca(v_os, v_p, 1, 700);
+    perform pg_temp.f3c_igual('R1 só o rascunho', pg_temp.f3c_item(v_caso) ->> 'acao_sim', 'pdf');
+    v_pv := pg_temp.f3c_prop(v_caso, v_cl, v_un, 'ditado', null, '{}', 800, 1, 0, null);
+    perform pg_temp.f3c_lin(v_pv, 1, 'Peça ditada', 1, 800, 'dito', null);
+    update public.retorno_previa set criada_em = c_agora - interval '1 hour' where id = v_pv;
+    v_item := pg_temp.f3c_item(v_caso);
+    perform pg_temp.f3c_igual('R2 o ditado vence o rascunho antigo', v_item ->> 'acao_sim', 'orcar');
+    perform pg_temp.f3c_igual('R3 a proposta no item', v_item ->> 'previa_id', v_pv::text);
+    update public.service_orders so set created_at = c_agora - interval '10 minutes' where so.id = v_os;
+    perform pg_temp.f3c_igual('R4 rascunho depois do ditado', pg_temp.f3c_item(v_caso) ->> 'acao_sim', 'pdf');
+    update public.retorno_previa
+       set origem = 'historico', fonte_numero = 'ORÇ-00500', fonte_em = '2026-08-12 10:00-03', criada_em = c_agora - interval '5 days',
+           dados = jsonb_build_object('forte', true, 'fonte_aprovada', true, 'ajustada_por_ditado', true, 'ditada_em', c_agora - interval '1 minute')
+     where id = v_pv;
+    perform pg_temp.f3c_igual('R5 ajustada depois do rascunho', pg_temp.f3c_item(v_caso) ->> 'acao_sim', 'orcar');
+
+    -- ═══ Revisão da F3. Número novo: a proposta nasceu sem client_id; a rodada grava cliente e unidade, e o hash que o dono viu não muda.
+    perform pg_temp.f3c_limpar();
+    perform pg_temp.f3c_sumir(array[v_caso]);
+    v_cl := pg_temp.f3c_cli('Zeca Provisorio F3');
+    v_un := pg_temp.f3c_un(v_cl, 'Unica');
+    v_caso := pg_temp.f3c_caso(931, 'numero_novo', null);
+    insert into public.audit_log (table_name, record_id, action, changed_by, new_value, reason)
+    values ('clients', v_cl, 'lead_converted', 'retorno', jsonb_build_object('caso', v_caso), 'teste');
+    v_pv := pg_temp.f3c_prop(v_caso, null, null, 'historico', 'ORÇ-00931', jsonb_build_object('forte', true, 'fonte_aprovada', true, 'travada', true), 100, 1, 0, c_recente);
+    perform pg_temp.f3c_lin(v_pv, 1, 'Peça', 1, 100, 'praticado_cliente', c_recente);
+    update public.retorno_previa set hash = public._retorno_previa_hash(null, titulo, public._retorno_previa_linhas_json(id)) where id = v_pv;
+    v_h := public._retorno_previa_hash_efetivo(v_pv, c_agora);
+    v_cartao := pg_temp.f3c_cartao(c_agora);
+    select i.id into v_ip from public.retorno_cartao_itens i where i.cartao_id = v_cartao and i.n = 1;
+    perform pg_temp.f3c_igual('R6 orcar sem client_id na proposta', (select i.acao_sim from public.retorno_cartao_itens i where i.id = v_ip), 'orcar');
+    update public.retorno_previa set client_id = v_cl, vessel_id = v_un, hash = public._retorno_previa_hash(v_un, titulo, public._retorno_previa_linhas_json(id)) where id = v_pv;
+    perform pg_temp.f3c_igual('R7 hash efetivo igual depois da rodada', public._retorno_previa_hash_efetivo(v_pv, c_agora), v_h);
+    if (public._retorno_item_conferir(v_ip, c_agora + interval '1 minute', true) ->> 'ok')::boolean is distinct from true then
+      raise exception 'R8: conferir devia passar (%)', public._retorno_item_conferir(v_ip, c_agora + interval '1 minute', true);
+    end if;
+
     raise exception 'retorno_f3_desfaz' using errcode = 'P0001';
   exception when others then
     if sqlstate <> 'P0001' or sqlerrm <> 'retorno_f3_desfaz' then

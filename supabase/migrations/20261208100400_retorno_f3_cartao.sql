@@ -143,6 +143,7 @@ declare
   v_rasc jsonb;
   v_ato boolean;
   v_int_ok boolean;
+  v_ditada_depois boolean := false;
   v_acao text;
   v_previa uuid;
   v_so_f3 uuid;
@@ -282,7 +283,13 @@ begin
       end if;
       v_vessel_nome := (select left(v.name, 30) from public.vessels v where v.id = v_vessel);
 
-      if v_rasc is not null then
+      -- A proposta ditada depois do rascunho é o ato mais novo do dono: ela vence a linha 1, senão o *sim <PIN>* mandaria o PDF velho.
+      -- O rascunho feito depois do ditado segue vencendo. O que nasceu do próprio caso nem cai aqui: a proposta dele já está em virou_orc, fora de v_pv.
+      v_ditada_depois := v_rasc is not null and v_pv.id is not null
+                         and (v_pv.origem = 'ditado' or coalesce((v_pv.dados ->> 'ajustada_por_ditado')::boolean, false))
+                         and (v_rasc ->> 'criado_em')::timestamptz < coalesce((v_pv.dados ->> 'ditada_em')::timestamptz, v_pv.criada_em);
+
+      if v_rasc is not null and not v_ditada_depois then
         -- Linhas 1 e 1b: o rascunho exato que está na mesa, com número, data e unidade à vista.
         v_so_f3 := (v_rasc ->> 'service_order_id')::uuid;
         v_opcoes := v_opcoes || jsonb_build_array(jsonb_build_object('letra', 'L', 'acao', 'responder', 'modelo', 'modelo_ver_no_local', 'os_id', null, 'rotulo', 'precisa ver no local'));
@@ -531,6 +538,8 @@ begin
         v_faz := v_faz || case when v_orc_acao = 'pdf' then ' (manda o PDF)' else ' (cria o orçamento e manda o PDF)' end;
       end if;
       v_rodape := format('*sim <PIN>* faz %s · *só %s* · *ver %s* · *não* · ou dite por áudio', v_faz, v_mandam[1], v_primeiro);
+    elsif v_primeiro is null then
+      v_rodape := 'Nada mais neste cartão. *retorno* abre de novo.';
     else
       v_rodape := format('*ver %1$s* · *dita %1$s …* · *não* · ou dite por áudio', v_primeiro);
     end if;
@@ -578,6 +587,31 @@ begin
 end;
 $$;
 
+-- Revisão da F3: o cartão vivo que ficou sem item (o último saiu pelo ditado) é decidido na hora. Pendência encerrada, ponteiro limpo só se for o dele,
+-- pergunta fechada: sem isto, o dono era chamado a aprovar um cartão vazio e os casos novos ficavam presos atrás dele. Devolve se fechou.
+create or replace function public._retorno_cartao_fechar_se_vazio(p_cartao uuid, p_agora timestamptz)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if p_cartao is null
+     or not exists (select 1 from public.retorno_cartoes c where c.id = p_cartao and c.estado = 'vivo')
+     or exists (select 1 from public.retorno_cartao_itens i where i.cartao_id = p_cartao and i.estado = 'vivo') then
+    return false;
+  end if;
+  perform public._retorno_cartao_encerrar(p_cartao, 'decidido', 'rejected', 'cartao_sem_casos', p_agora);
+  update public.retorno_cartoes c set decidido_em = coalesce(c.decidido_em, p_agora), decidido_por = coalesce(c.decidido_por, 'sim_pin') where c.id = p_cartao;
+  return true;
+end;
+$$;
+
+comment on function public._retorno_cartao_fechar_se_vazio(uuid, timestamptz) is
+  'Retorno F3 (revisão): decide o cartão vivo sem nenhum item vivo e encerra a pendência e a pergunta dele. Chamada quando o último item sai pelo ditado e por retorno_cartao_abrir.';
+
+revoke all on function public._retorno_cartao_fechar_se_vazio(uuid, timestamptz) from public, anon, authenticated;
+
 create or replace function public.retorno_cartao_abrir(p_gatilho text, p_agora timestamptz default now(), p_aviso uuid default null)
 returns jsonb
 language plpgsql
@@ -618,6 +652,10 @@ begin
   perform pg_advisory_xact_lock(hashtext('retorno:cartao'));
 
   v_vivo := public.retorno_cartao_vivo(v_agora);
+  -- Revisão da F3: cartão vivo sem item não reapresenta nem prende os casos novos: fecha, e segue como se não houvesse cartão.
+  if v_vivo ->> 'estado' = 'vivo' and public._retorno_cartao_fechar_se_vazio((v_vivo ->> 'id')::uuid, v_agora) then
+    v_vivo := null;
+  end if;
   if v_vivo is not null and v_vivo ->> 'estado' = 'vivo' then
     v_cartao := (v_vivo ->> 'id')::uuid;
     if p_gatilho = 'puxar' then
@@ -826,7 +864,10 @@ begin
 
   -- F3 (P5): o *sim <PIN>* vale sobre o que o dono leu. Compara também a proposta e o orçamento, que o hash sozinho não pega (outro previa_id com as mesmas linhas).
   -- Item com texto_ditado segue a regra da F2: o executor manda só o texto ditado, e a proposta não entra.
-  if p_executar and v_i.acao_sim is not null and v_i.modelo_tipo is null and v_i.texto_ditado is null then
+  -- Com a flag da ação desligada, quem responde é a 1ª regra do bloco de orçamento em retorno_cartao_executar: item fora, "foi desligado". Sem isto, o item
+  -- remontado com as flags desligadas não bate, e o dono leria que o caso mudou.
+  if p_executar and v_i.acao_sim is not null and v_i.modelo_tipo is null and v_i.texto_ditado is null
+     and public._retorno_previa_liberada(v_i.acao_sim, (select p.origem from public.retorno_previa p where p.id = v_i.previa_id)) then
     v_atual := public._retorno_item_montar(v_ab.id, v_i.n, p_agora);
     if (v_atual ->> 'hash') is distinct from v_i.hash
        or (v_atual ->> 'previa_id')::uuid is distinct from v_i.previa_id
