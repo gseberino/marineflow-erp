@@ -267,6 +267,151 @@ begin
 end
 $m1n$;
 
+-- M1p/M1q: a estimativa congelada não muda com o freio (a conferência do P2: com o freio, _agenda_gestor_regra é falsa e congelava a MO com deslocamento e outro molde); agenda.gestor volta ao valor de antes
+do $m1p$
+declare
+  v_res   jsonb := '[]'::jsonb;
+  c_hoje  constant date := date '2027-01-07';
+  c_regras constant text[] := '{estimativa,mo_limpa,uma_pessoa,diagnostico,situacao,sem_peca,embutida_suposta,critico_por_valor,prazo_padrao,compra_firme,teto_equipe,zona_travada,onda,escada,sinal_cobrar}';
+  v_a     uuid;
+  v_b     uuid;
+  v_f     boolean;
+  v_foto  text;
+  v_com   text;
+  v_sem   text;
+begin
+  if not pg_temp.fx() then return; end if;
+  perform set_config('agenda.hoje', c_hoje::text, true);
+  foreach v_f in array array[true, false] loop
+    begin
+      update public.agenda_config set modo_marcar_sozinho = 'ligado', marcar_regras = c_regras, equipe_sugerida = 2, equipe_padrao = 1, gestor_so_propor = v_f where id;
+      v_a := pg_temp.nova_os(61, date '2026-07-20', date '2026-07-21', 1528, 'Instalação de inversor e baterias');
+      insert into public.service_order_services (service_order_id, name_snapshot, billing_unit_snapshot, quantity, unit_price_snapshot, line_total, created_at)
+      values (v_a, 'Deslocamento técnico', 'visit', 1, 382, 382, timestamptz '2026-07-01 10:00-03');
+      v_b := pg_temp.nova_os(62, date '2026-07-22', date '2026-07-23', 1528);
+      insert into public.os_planejamento (service_order_id, dono_presenca) values (v_b, 'sempre');
+      perform public._agenda_aprender_congelar(c_hoje);
+      v_foto := (select format('a: dp=%s pm=%s pes=%s | b: dp=%s pm=%s pes=%s', a.dp_bruto_no_inicio, a.pm_plano_no_inicio, a.pessoas_no_inicio, b.dp_bruto_no_inicio, b.pm_plano_no_inicio, b.pessoas_no_inicio)
+                   from public.os_planejamento a, public.os_planejamento b where a.service_order_id = v_a and b.service_order_id = v_b);
+      if v_f then v_com := v_foto; else v_sem := v_foto; end if;
+      if v_f then
+        v_res := pg_temp.ok(v_res, 'M1p1 com o freio, a OS com linha de deslocamento congela sem ele: 1.528 ÷ 764 = 2,00 (não 2,50)', (select dp_bruto_no_inicio = 2 from public.os_planejamento where service_order_id = v_a), v_foto);
+        v_res := pg_temp.ok(v_res, 'M1p2 com o freio, a OS com o dono no turno congela o molde do gestor (1 pessoa, 4 meios), não o de 2 pessoas', (select pm_plano_no_inicio = 4 from public.os_planejamento where service_order_id = v_b), v_foto);
+      end if;
+      raise exception 'desfaz' using errcode = 'P0099';
+    exception when sqlstate 'P0099' then null;
+    end;
+  end loop;
+  v_res := pg_temp.ok(v_res, 'M1p3 com freio = sem freio, nas duas OS', v_com is not null and v_com = v_sem, format('%s // %s', v_com, v_sem));
+  perform pg_temp.gravar(v_res);
+end
+$m1p$;
+
+do $m1q$
+declare
+  v_res  jsonb := '[]'::jsonb;
+  c_hoje constant date := date '2027-01-07';
+  v_x    uuid;
+  v_y    uuid;
+  v_got  text;
+begin
+  if not pg_temp.fx() then return; end if;
+  perform set_config('agenda.hoje', c_hoje::text, true);
+  begin
+    -- com valor de antes
+    v_x := pg_temp.nova_os(63, date '2026-07-27', date '2026-07-27', 764);
+    perform set_config('agenda.gestor', 'xpto', true);
+    perform public._agenda_aprender_congelar(c_hoje);
+    v_got := current_setting('agenda.gestor', true);
+    v_res := pg_temp.ok(v_res, 'M1q1 agenda.gestor volta ao valor que tinha antes do congelar (xpto), não a vazio', v_got = 'xpto' and exists (select 1 from public.os_planejamento where service_order_id = v_x and estimativa_no_inicio_em is not null), v_got);
+    -- com a simulação já posta por quem chamou
+    v_x := pg_temp.nova_os(64, date '2026-07-28', date '2026-07-28', 764);
+    perform set_config('agenda.gestor', 'sombra', true);
+    perform public._agenda_aprender_congelar(c_hoje);
+    v_got := current_setting('agenda.gestor', true);
+    v_res := pg_temp.ok(v_res, 'M1q2 quem já estava em simulação continua nela', v_got = 'sombra', v_got);
+    -- vazio
+    v_x := pg_temp.nova_os(65, date '2026-07-29', date '2026-07-29', 764);
+    perform set_config('agenda.gestor', '', true);
+    perform public._agenda_aprender_congelar(c_hoje);
+    v_got := current_setting('agenda.gestor', true);
+    v_res := pg_temp.ok(v_res, 'M1q3 vazio continua vazio', v_got = '', v_got);
+    -- erro de uma OS no meio da simulação: as outras seguem e o valor de antes volta
+    alter function public.agenda_meios_da_os(uuid, date) rename to agenda_meios_da_os_de_verdade;
+    v_x := pg_temp.nova_os(66, date '2026-07-30', date '2026-07-30', 764);
+    v_y := pg_temp.nova_os(67, date '2026-07-31', date '2026-07-31', 764);
+    execute format($f$create function public.agenda_meios_da_os(p_so_id uuid, p_hoje date) returns jsonb language plpgsql stable as $b$ begin if p_so_id = %L then raise exception 'plantado no meio da simulação'; end if; return public.agenda_meios_da_os_de_verdade(p_so_id, p_hoje); end $b$$f$, v_x);
+    perform set_config('agenda.gestor', 'xpto', true);
+    perform public._agenda_aprender_congelar(c_hoje);
+    v_got := current_setting('agenda.gestor', true);
+    v_res := pg_temp.ok(v_res, 'M1q4 o erro de uma OS no meio da simulação: a OS fica de fora, a seguinte congela e o valor de antes volta',
+      v_got = 'xpto' and not exists (select 1 from public.os_planejamento where service_order_id = v_x and estimativa_no_inicio_em is not null)
+      and exists (select 1 from public.os_planejamento where service_order_id = v_y and estimativa_no_inicio_em is not null), v_got);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  perform pg_temp.gravar(v_res);
+end
+$m1q$;
+
+-- M3j/M3k: a medida da margem também sai sem o freio; as colunas da Fase 6 continuam lendo o freio (v_sug)
+do $m3j$
+declare
+  v_res   jsonb := '[]'::jsonb;
+  c_hoje  constant date := date '2027-01-07';
+  c_regras constant text[] := '{estimativa,mo_limpa,uma_pessoa,diagnostico,situacao,sem_peca,embutida_suposta,critico_por_valor,prazo_padrao,compra_firme,teto_equipe,zona_travada,onda,escada,sinal_cobrar}';
+  v_a     uuid;
+  v_b     uuid;
+  v_c     uuid;
+  v_f     boolean;
+  v_com   text;
+  v_sem   text;
+  v_foto  text;
+  v_got   text;
+begin
+  if not pg_temp.fx() then return; end if;
+  perform set_config('agenda.hoje', c_hoje::text, true);
+  foreach v_f in array array[true, false] loop
+    begin
+      update public.agenda_config set modo_marcar_sozinho = 'ligado', marcar_regras = c_regras, equipe_sugerida = 2, equipe_padrao = 1, gestor_so_propor = v_f where id;
+      -- a sem linha de planejamento: o caminho recalculada
+      v_a := pg_temp.nova_os(68, date '2026-08-24', date '2026-08-25', 1528, 'Instalação de inversor e baterias');
+      insert into public.service_order_services (service_order_id, name_snapshot, billing_unit_snapshot, quantity, unit_price_snapshot, line_total, created_at)
+      values (v_a, 'Deslocamento técnico', 'visit', 1, 382, 382, timestamptz '2026-07-01 10:00-03');
+      perform pg_temp.aloc(v_a, pg_temp.zeca(), date '2026-08-24', 'manha');
+      perform set_config('agenda.gestor', 'xpto', true);
+      perform public.agenda_medir_os(v_a, c_hoje);
+      v_got := current_setting('agenda.gestor', true);
+      -- os dias ditos, sem o plano congelado: as pessoas vêm da sugestão (5 dias × 2 meios × 1 pessoa, não 2)
+      v_b := pg_temp.nova_os(69, date '2026-08-26', date '2026-08-28', 3820, 'Instalação de inversor e baterias');
+      insert into public.os_planejamento (service_order_id, dias, estimativa_fonte, estimativa_em) values (v_b, 5, 'dono', timestamptz '2026-08-01 10:00-03');
+      perform public.agenda_medir_os(v_b, c_hoje);
+      perform set_config('agenda.gestor', '', true);
+      -- com a estimativa congelada (dp) mas sem o plano e as pessoas do início: as pessoas ainda vêm da sugestão; com a dupla dita, 2
+      v_c := pg_temp.nova_os(70, date '2026-08-31', date '2026-09-02', 3820, 'Instalação de inversor e baterias');
+      insert into public.os_planejamento (service_order_id, dias, estimativa_fonte, estimativa_em, estimativa_no_inicio_em, dp_bruto_no_inicio, dupla_dita, dupla_em)
+      values (v_c, 5, 'dono', timestamptz '2026-08-01 10:00-03', date '2026-08-31', 5, 'todos', timestamptz '2026-08-01 10:00-03');
+      perform public.agenda_medir_os(v_c, c_hoje);
+      v_foto := (select format('a: pm_est=%s origem=%s | b: pm_dono=%s', a.pm_estimados, a.estimativa_origem, b.pm_plano_dono) from public.agenda_medidas_os a, public.agenda_medidas_os b where a.service_order_id = v_a and b.service_order_id = v_b);
+      if v_f then
+        v_com := v_foto;
+        v_res := pg_temp.ok(v_res, 'M3j o caminho recalculada, com o freio: sem o deslocamento (pm 4,0), e agenda.gestor volta a xpto', (select pm_estimados = 4 and estimativa_origem = 'recalculada' from public.agenda_medidas_os where service_order_id = v_a) and v_got = 'xpto', v_foto || ' gestor=' || coalesce(v_got, 'nulo'));
+        v_res := pg_temp.ok(v_res, 'M3j2 v_sug não mudou: a coluna mo da Fase 6 segue com o freio, com o deslocamento', (select mo = 1910 from public.agenda_medidas_os where service_order_id = v_a), (select mo::text from public.agenda_medidas_os where service_order_id = v_a));
+        v_res := pg_temp.ok(v_res, 'M3k as pessoas do plano do dono, com o freio: as do gestor (5 dias, 10 meios × 1 = 10)', (select pm_plano_dono = 10 from public.agenda_medidas_os where service_order_id = v_b), v_foto);
+        v_res := pg_temp.ok(v_res, 'M3k3 dp congelado, sem plano nem pessoas do início: as pessoas ainda vêm da sugestão (a dupla dita: 10 × 2 = 20)', (select pm_plano_dono = 20 from public.agenda_medidas_os where service_order_id = v_c), (select coalesce(pm_plano_dono::text, 'nulo') from public.agenda_medidas_os where service_order_id = v_c));
+      else
+        v_sem := v_foto;
+        v_res := pg_temp.ok(v_res, 'M3j3 sem o freio a coluna mo já é sem o deslocamento (é o freio que muda v_sug, e só nas colunas da Fase 6)', (select mo = 1528 from public.agenda_medidas_os where service_order_id = v_a), (select mo::text from public.agenda_medidas_os where service_order_id = v_a));
+      end if;
+      raise exception 'desfaz' using errcode = 'P0099';
+    exception when sqlstate 'P0099' then null;
+    end;
+  end loop;
+  v_res := pg_temp.ok(v_res, 'M3k2 a medida da margem: com freio = sem freio', v_com is not null and v_com = v_sem, format('%s // %s', v_com, v_sem));
+  perform pg_temp.gravar(v_res);
+end
+$m3j$;
+
 -- ── M2. Os pessoa-meios reais ────────────────────────────────────────────────────────────────────────
 do $m2$
 declare

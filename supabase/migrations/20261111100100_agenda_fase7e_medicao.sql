@@ -15,6 +15,7 @@
 --   1. _agenda_aprender_congelar: o 2º laço (o da estimativa do início, §5.1 e R7.4): toda OS com check-in OU 1º dia de alocação vigente não reserva até hoje congela, uma vez, a estimativa bruta
 --      (dp_bruto_no_inicio: horas ÷ jornada, MO ÷ R$ da config, nunca o aprendido; nula sem base e no diagnóstico, R7.5-9), as pessoas, os pessoa-meios do molde (sem o dono que vai junto, R7.4), o 1º dia
 --      e o prazo planejado. A linha de os_planejamento nasce se faltar, sem tocar em atualizado_em (R7.5-22: a marca d'água do encaixe do gestor olha essa coluna). O retorno ganha estimativas_congeladas.
+--      A estimativa e o molde são lidos sob a simulação do gestor (agenda.gestor = sombra): o freio não muda o número que congela uma vez.
 --   2. agenda_medir_os: as 12 colunas da margem, gravadas nos 3 caminhos (insert e os 2 update; R7.5-1). pm_reais por (dia, turno, pessoa) sem o dono que vai junto; motivo_razao com a porta de R7.4.
 --      motivo, valida e fator da Fase 6 NÃO mudam: o fator segue preso (achado registrado em audit/novos-achados.md).
 --   3. Funções novas: _agenda_margem_tipo_os, _agenda_margem_dp_bruto e _agenda_margem_dono_e_pessoa (as réguas da medida, que não leem o freio); _agenda_material_critico (R7.5-5); _agenda_margem_em_uso
@@ -572,6 +573,7 @@ declare
   v_7e_pm  numeric;
   v_7e_pes int;
   v_7e_conta boolean;
+  v_7e_gestor text;
   n_7e     int := 0;
   -- FASE 7e: fim
 begin
@@ -636,9 +638,13 @@ begin
      order by x.dia, x.os
   loop
     begin
+      -- A estimativa do gestor é a de sem o freio: com ele, _agenda_gestor_regra é falsa para tudo e o número que congela uma vez entraria torto no viés (MO com deslocamento, outras pessoas, outro molde). As 2 chamadas, e só elas, sob a simulação que já existe (o portão lê agenda.gestor); o valor de antes volta logo depois e, num erro, volta pelo rollback do bloco.
+      v_7e_gestor := coalesce(current_setting('agenda.gestor', true), '');
+      perform set_config('agenda.gestor', 'sombra', true);
       v_7e_sug := public.os_duracao_sugerida(r7.os);
-      v_7e_dp := public._agenda_margem_dp_bruto(r7.os, v_7e_sug);
       v_7e_m := public.agenda_meios_da_os(r7.os, r7.dia);
+      perform set_config('agenda.gestor', v_7e_gestor, true);
+      v_7e_dp := public._agenda_margem_dp_bruto(r7.os, v_7e_sug);
       v_7e_conta := public._agenda_margem_dono_e_pessoa(r7.os);
       -- os pessoa-meios do molde: o dono com o turno conta quando está sozinho no meio-dia, ou é uma das pessoas (R7.4)
       select nullif(coalesce(sum((e ->> 'desejado')::int + case when e -> 'dono' ? 'turno' and ((e ->> 'desejado')::int = 0 or v_7e_conta) then 1 else 0 end), 0), 0)
@@ -674,7 +680,7 @@ end;
 $function$;
 
 comment on function public._agenda_aprender_congelar(date) is
-  'Agenda de Produção (Fase 6): a rodada do aprendizado congela, uma vez, os dias ditos no início — toda OS com check-in até p_hoje (na janela aprender_janela_dias) e sem os_planejamento.dias_no_inicio recebe o de _agenda_dias_no_inicio (só fonte dono ou aceita; a sugestão do banco nunca). {congeladas, sem_dias}. Definer, sem grant a ninguém. FASE 7 (7a P6): com o gestor ligado de verdade (a regra estimativa e o modo marcar ligado, fora da simulação da sombra), congela também a fonte orcamento — a estimativa que o gestor usou no dia do check-in (o 4º passo de _agenda_dias_no_inicio, também na OS sem linha de planejamento) e os dias que ele gravou pelo prazo —, uma vez, com dp_no_inicio (as diárias-pessoa estimadas; nulas nos dias gravados); a linha de os_planejamento nasce se faltar (os dias de agora continuam nulos). Conta em congeladas. Sem o portão, a fonte orcamento não congela (sem_dias), como antes. FASE 7e (P2): o 2º laço congela, uma vez, a estimativa do início (estimativa_no_inicio_em = o menor de check-in e 1º dia de alocação vigente não reserva; dp_bruto_no_inicio, pessoas_no_inicio, pm_plano_no_inicio, inicio_plano_no_inicio, prazo_plano_no_inicio). Sem base ou no diagnóstico, dp_bruto fica nulo. A linha nasce se faltar e atualizado_em não muda. O erro de uma OS vai a app_error_logs. O retorno ganha estimativas_congeladas.';
+  'Agenda de Produção (Fase 6): a rodada do aprendizado congela, uma vez, os dias ditos no início — toda OS com check-in até p_hoje (na janela aprender_janela_dias) e sem os_planejamento.dias_no_inicio recebe o de _agenda_dias_no_inicio (só fonte dono ou aceita; a sugestão do banco nunca). {congeladas, sem_dias}. Definer, sem grant a ninguém. FASE 7 (7a P6): com o gestor ligado de verdade (a regra estimativa e o modo marcar ligado, fora da simulação da sombra), congela também a fonte orcamento — a estimativa que o gestor usou no dia do check-in (o 4º passo de _agenda_dias_no_inicio, também na OS sem linha de planejamento) e os dias que ele gravou pelo prazo —, uma vez, com dp_no_inicio (as diárias-pessoa estimadas; nulas nos dias gravados); a linha de os_planejamento nasce se faltar (os dias de agora continuam nulos). Conta em congeladas. Sem o portão, a fonte orcamento não congela (sem_dias), como antes. FASE 7e (P2): o 2º laço congela, uma vez, a estimativa do início (estimativa_no_inicio_em = o menor de check-in e 1º dia de alocação vigente não reserva; dp_bruto_no_inicio, pessoas_no_inicio, pm_plano_no_inicio, inicio_plano_no_inicio, prazo_plano_no_inicio). Sem base ou no diagnóstico, dp_bruto fica nulo. A linha nasce se faltar e atualizado_em não muda. O erro de uma OS vai a app_error_logs. O retorno ganha estimativas_congeladas. A estimativa e o molde saem sob agenda.gestor = sombra (o resultado de sem o freio) e o valor anterior da variável volta logo depois; o 1º laço e v_gestor não mudam.';
 
 -- de 20261031100500_agenda_fase7a_medicao.sql:235; md5 do corpo de antes 8c3c39686b161fe637171cffeeba949f
 create or replace function public.agenda_medir_os(p_os uuid, p_hoje date)
@@ -716,6 +722,8 @@ declare
   v_7e_pf    numeric;
   v_7e_dp    numeric;
   v_7e_conta boolean;
+  v_7e_sug   jsonb;
+  v_7e_gestor text;
   c_razao_max constant numeric := 999::numeric / 100;
   -- FASE 7e: fim
 begin
@@ -886,12 +894,19 @@ begin
                                 and a.dia = ws.data and a.payee_id = wp.payee_id)
            group by ws.data, wp.payee_id) x;
   m.pm_reais := v_7e_pm + v_7e_pf;
+  -- A sugestão da margem, sem o freio (a mesma simulação do congelar): só quando a conta precisa dela. v_sug fica como está: é dele que saem as colunas da Fase 6 (mo, os dias sugeridos)
+  if pl.dp_bruto_no_inicio is null or (m.dias_fonte in ('dono', 'aceita') and pl.pm_plano_no_inicio is null and pl.pessoas_no_inicio is null) then
+    v_7e_gestor := coalesce(current_setting('agenda.gestor', true), '');
+    perform set_config('agenda.gestor', 'sombra', true);
+    v_7e_sug := public.os_duracao_sugerida(p_os);
+    perform set_config('agenda.gestor', v_7e_gestor, true);
+  end if;
   -- A estimativa: a congelada no início (dp_bruto_no_inicio); sem ela, a de agora (recalculada); sem base ou no diagnóstico, nula (R7.5-9)
   if pl.dp_bruto_no_inicio is not null then
     m.pm_estimados := 2 * pl.dp_bruto_no_inicio;
     m.estimativa_origem := 'congelada';
   else
-    v_7e_dp := public._agenda_margem_dp_bruto(p_os, v_sug);
+    v_7e_dp := public._agenda_margem_dp_bruto(p_os, v_7e_sug);
     if v_7e_dp is not null then
       m.pm_estimados := 2 * v_7e_dp;
       m.estimativa_origem := 'recalculada';
@@ -899,7 +914,7 @@ begin
   end if;
   -- O plano do dono: só com os dias ditos por ele
   if m.dias_fonte in ('dono', 'aceita') then
-    m.pm_plano_dono := coalesce(pl.pm_plano_no_inicio, m.meios_planejados * coalesce(pl.pessoas_no_inicio, (v_sug ->> 'pessoas')::int, 1));
+    m.pm_plano_dono := coalesce(pl.pm_plano_no_inicio, m.meios_planejados * coalesce(pl.pessoas_no_inicio, (v_7e_sug ->> 'pessoas')::int, 1));
   end if;
   -- O prazo: do início real à conclusão. least ignora o nulo, e aqui é o certo (sem check-in vale o 1º meio-dia feito); depois da conclusão não é prazo, e fica nulo
   m.prazo_plano_du := pl.prazo_plano_no_inicio;
@@ -1015,7 +1030,7 @@ end;
 $function$;
 
 comment on function public.agenda_medir_os(uuid, date) is
-  'Agenda de Produção (Fase 6): a medida da OS concluída (spec-fase6 §3.1, itens 5 e 6) em agenda_medidas_os — a classe, os dias ditos no início (senão a sugerida: não vale), os meios-dias planejados e os que aconteceram, as diárias ligadas, se é só do dono, a mão de obra, o fator (só a válida), o motivo da inválida, a 1ª promessa ao cliente contra a conclusão e o último aviso de atraso. Grava só quando muda (versao + 1 e o que mudou no histórico). A OS que voltou de concluída fica inválida (reaberta). Definer, sem grant a ninguém. CORREÇÃO FASE 6 (C1): (item 9) a conclusão é o check-out, senão o 1º instante em que a porta deixou a OS concluída (_agenda_concluida_em); sem nenhum dos dois, motivo sem_fim (não vale) e a data fica a já medida; (item 4) o fim da faixa do último aviso é o base.dados.faixa_ate_plano (sem a folga do aprendizado), quando a mensagem o tem. FASE 7 (7a P6, sem portão): a medida contra a estimativa do gestor (dias_fonte orcamento: os dias congelados ou os de _agenda_dias_no_inicio) não é dias_sugeridos — vale com os critérios de sempre; o fator dela fica à parte (fator := nulo; fator_orcamento := os meios-dias reais ÷ (dias × 2), só na válida), e o aprendizado do fator, que lê fator, continua só com os dias do dono; dp_no_inicio (o congelado, senão o do 4º passo) e dp_reais (as diárias ligadas + os meios-dias de turno do dono ÷ 2) só na medida por estimativa. O R$ por diária aprendido passa a contar a OS por estimativa válida com diarista. As outras medidas, byte a byte as de antes. FASE 7e (P2): as 12 colunas da margem (pm_reais sem o dono que vai junto, pm_estimados com estimativa_origem, razao_estimativa, pm_plano_dono e razao_dono, prazo_plano_du, prazo_real_du e razao_prazo, vies_marcado, compra_pendente, motivo_razao) nos 3 caminhos. motivo_razao tem a régua de R7.4: sem_inicio só sem check-in E sem meio-dia feito; sem_diaria só para quem tem perfil de diária no dia. motivo, valida e fator da Fase 6 não mudam.';
+  'Agenda de Produção (Fase 6): a medida da OS concluída (spec-fase6 §3.1, itens 5 e 6) em agenda_medidas_os — a classe, os dias ditos no início (senão a sugerida: não vale), os meios-dias planejados e os que aconteceram, as diárias ligadas, se é só do dono, a mão de obra, o fator (só a válida), o motivo da inválida, a 1ª promessa ao cliente contra a conclusão e o último aviso de atraso. Grava só quando muda (versao + 1 e o que mudou no histórico). A OS que voltou de concluída fica inválida (reaberta). Definer, sem grant a ninguém. CORREÇÃO FASE 6 (C1): (item 9) a conclusão é o check-out, senão o 1º instante em que a porta deixou a OS concluída (_agenda_concluida_em); sem nenhum dos dois, motivo sem_fim (não vale) e a data fica a já medida; (item 4) o fim da faixa do último aviso é o base.dados.faixa_ate_plano (sem a folga do aprendizado), quando a mensagem o tem. FASE 7 (7a P6, sem portão): a medida contra a estimativa do gestor (dias_fonte orcamento: os dias congelados ou os de _agenda_dias_no_inicio) não é dias_sugeridos — vale com os critérios de sempre; o fator dela fica à parte (fator := nulo; fator_orcamento := os meios-dias reais ÷ (dias × 2), só na válida), e o aprendizado do fator, que lê fator, continua só com os dias do dono; dp_no_inicio (o congelado, senão o do 4º passo) e dp_reais (as diárias ligadas + os meios-dias de turno do dono ÷ 2) só na medida por estimativa. O R$ por diária aprendido passa a contar a OS por estimativa válida com diarista. As outras medidas, byte a byte as de antes. FASE 7e (P2): as 12 colunas da margem (pm_reais sem o dono que vai junto, pm_estimados com estimativa_origem, razao_estimativa, pm_plano_dono e razao_dono, prazo_plano_du, prazo_real_du e razao_prazo, vies_marcado, compra_pendente, motivo_razao) nos 3 caminhos. motivo_razao tem a régua de R7.4: sem_inicio só sem check-in E sem meio-dia feito; sem_diaria só para quem tem perfil de diária no dia. A sugestão do caminho recalculada e das pessoas sai sob agenda.gestor = sombra, separada de v_sug, que alimenta as colunas da Fase 6. motivo, valida e fator da Fase 6 não mudam.';
 
 -- ── 6. O gravador, o valor e os textos ───────────────────────────────────────────────────────────────
 -- de 20261029100100_agenda_fase6_medicao.sql:581; md5 do corpo de antes 33db86b37bcee2396355e3f2809befed
