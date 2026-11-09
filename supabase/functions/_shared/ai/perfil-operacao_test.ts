@@ -63,6 +63,8 @@ const ACRESCENTADAS = ["link_contact_to_entity", "update_supplier", "update_serv
 ACRESCENTADAS.push("update_marina", "add_vessel_contact", "update_vessel_contact");
 // Retorno F2 (P9): o ditado por áudio do cartão.
 ACRESCENTADAS.push("retorno_responder_caso");
+// Retorno F3 (P8.3): o orçamento pelo cartão. A consulta é leitura; as duas de escrita viram pendência.
+ACRESCENTADAS.push("consultar_proposta_do_caso", "retorno_orcar_caso", "retorno_cadastrar_unidade");
 // diárias (11/10/2026, resposta 4 do dono): dividir o Pix do banco entre diárias e o reembolso de despesas pagas pelo técnico.
 ACRESCENTADAS.push("dividir_pagamento_freelancer");
 // operacional (07/10/2026): via do técnico e caixa de sugestões da agenda.
@@ -280,6 +282,8 @@ const RPC_SO_LEITURA_CONFERIDAS = new Set([
   "whatsapp_pending_inbox", "bi_top_clients", "get_promo_candidates", "linhas_do_checklist", "checklist_do_mes",
   // Comprovantes (F2, 11/10/2026): conferida no texto da migration (teste abaixo).
   "comprovantes_consultar",
+  // Retorno F3 (P8): a leitura de consultar_proposta_do_caso, conferida no texto da migration 20261208100500 (teste abaixo).
+  "retorno_previa_ver",
   // Agrupar orçamentos (15/10/2026): a leitura de listar_orcamentos_para_agrupar, conferida no texto da
   // migration 20261015181000 (teste abaixo).
   "orcamentos_para_agrupar",
@@ -406,6 +410,22 @@ Deno.test({
       assertEquals(corpo.includes(rota), false, `comprovantes_consultar chama ${rota}`);
     }
   },
+});
+
+Deno.test("retorno_previa_ver só lê: stable, sem insert/update/delete/perform e sem chamar retorno_cartao_vivo, que grava", () => {
+  const url = new URL("../../../migrations/20261208100500_retorno_f3_decidir.sql", import.meta.url);
+  const sql = Deno.readTextFileSync(url).replace(/--[^\n]*/g, "");
+  const inicio = sql.search(/create\s+or\s+replace\s+function\s+public\.retorno_previa_ver\s*\(/i);
+  assertEquals(inicio >= 0, true, "a migration não cria public.retorno_previa_ver");
+  const resto = sql.slice(inicio);
+  const cabecalho = resto.slice(0, resto.indexOf("$$")).toLowerCase();
+  assertEquals(/\bstable\b/.test(cabecalho), true, "retorno_previa_ver tem de ser stable");
+  const corpoIni = resto.indexOf("$$") + 2;
+  const corpo = resto.slice(corpoIni, resto.indexOf("$$", corpoIni)).toLowerCase();
+  assertEquals(corpo.length > 50, true, "corpo da função vazio — o recorte quebrou?");
+  const GRAVA = /\b(insert\s+into|update\s+public\.|delete\s+from|perform\b)/;
+  assertEquals(GRAVA.test(corpo), false, "retorno_previa_ver grava (ou chama rota) e a rede a roda sem confirmação");
+  assertEquals(corpo.includes("retorno_cartao_vivo"), false, "retorno_cartao_vivo encerra o cartão com update");
 });
 
 Deno.test("rede do admin: toda leitura pelo nome que roda direto só lê (rpc só às funções conferidas)", () => {

@@ -238,3 +238,53 @@ Deno.test("quemResponde: com o CMP no confirmar, a palavra marcada vai ao assist
   });
   assertEquals(citando.destino, "comprovante");
 });
+
+// ─── Retorno F3 (seção 7): as letras novas e o ditado livre. A F3 não acrescenta palavra ao leitor ───────────────────
+
+Deno.test("7.2: as letras novas caem em escolher; a regex exige letra sozinha", () => {
+  for (const t of ["1 b", "2 b", "3 b", "1 B", "1 l", "2 l", "3 l", "1 c", "1 f", "1 g", "1 h"]) {
+    assertEquals(lerComandoDoRetorno(t)?.comando, "escolher", t);
+    assertEquals(parseConfirmationReply(t), null, `confirmação: ${t}`);
+    assertEquals(lerComandoDaAgenda(t), null, `agenda: ${t}`);
+    assertEquals(lerComandoDoSecretario(t), null, `secretário: ${t}`);
+    assertEquals(lerComando(t), null, `comprovantes: ${t}`);
+    assertEquals(lerPedidoDePdf(t), null, `pdf: ${t}`);
+  }
+  for (const t of ["2 L sim 4321", "3 l sim 4321"]) assertEquals(lerComandoDoRetorno(t)?.comando, "escolher", t);
+  assertEquals(lerComandoDoRetorno("não 1")?.comando, "tirar");
+  assertEquals(parseConfirmationReply("não 1")?.decision, "reject");
+  // "3 l de óleo" e "3 litros" não são a letra L: a frase segue ao modelo
+  for (const t of ["3 l de óleo", "3 litros"]) assertEquals(lerComandoDoRetorno(t), null, t);
+});
+
+const DITADO_LIVRE = [
+  "troca o controlador por um de 60 amperes", "a instalação fica mil e oitocentos", "tira o item 2", "tira a bateria", "sem o frete",
+  "muda a mão de obra para 800", "orça igual ao 88", "faz igual ao ORÇ-00088", "orça o 1", "orça 1", "orçamento do 1", "precisa ver no local", "ver no local",
+  "local 1", "1 local", "visita 1", "ajusta o 1", "ajusta 1", "corrige o preço", "muda", "pode mandar", "manda", "manda pra ana", "preço de hoje",
+  "2 baterias", "2 baterias de 200 amperes", "3 litros", "1 hora", "1 kit", "2 m de cabo", "cria sem mandar", "só cria, não manda",
+  "cadastra a lancha brisa no 1", "cadastra o motorhome ducato no 3",
+];
+
+Deno.test("7.3: o ditado livre não é lido por nenhum leitor, segue ao assistente", () => {
+  for (const t of DITADO_LIVRE) {
+    assertEquals(lerComandoDoRetorno(t), null, `retorno: ${t}`);
+    assertEquals(lerComandoDaAgenda(t), null, `agenda: ${t}`);
+    assertEquals(lerComandoDoSecretario(t), null, `secretário: ${t}`);
+    assertEquals(lerComando(t), null, `comprovantes: ${t}`);
+    assertEquals(lerPedidoDePdf(t), null, `pdf: ${t}`);
+    assertEquals(parseConfirmationReply(t), null, `confirmação: ${t}`);
+    assertEquals(parseOptionReply(t, 9), null, `opção: ${t}`);
+    const n = normalizarResposta(t);
+    assertEquals(lerNumero(n, 99), null, `número: ${t}`);
+    assertEquals(lerSimNao(n), null, `sim/não: ${t}`);
+    assertEquals(pareceRespostaCurta(t), false, `curta: ${t}`);
+  }
+});
+
+Deno.test("7.3: os que precisam de cuidado", () => {
+  assertEquals(lerComandoDoRetorno("dita 1 troca o controlador")?.comando, "ditar");
+  assert(lerPedidoDePdf("manda o pdf do 1"), "é o atalho que já existe");
+  assertEquals(parseConfirmationReply("nao muda nada")?.decision, "reject");
+  for (const t of ["não manda ainda, só cria", "não manda, só cria o orçamento"]) assertEquals(parseConfirmationReply(t)?.decision, "reject", t);
+  for (const t of ["cria sem mandar", "só cria, não manda"]) assertEquals(parseConfirmationReply(t), null, t);
+});

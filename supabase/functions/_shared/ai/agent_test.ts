@@ -3,7 +3,9 @@
 //   deno test --allow-env supabase/functions/_shared/ai/agent_test.ts
 import { assertEquals, assertExists, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { callClaude } from "./anthropic.ts";
-import { interrupcaoDaTool, runAgentLoop } from "./agent.ts";
+import { buildPendingSummary, interrupcaoDaTool, resumoQueRecusa, runAgentLoop, textoDoSim } from "./agent.ts";
+import { quoteBuilderTools } from "./tools/quote-builder.ts";
+import { retornoTools } from "./tools/retorno.ts";
 import type { ToolDef } from "./tools/registry.ts";
 
 Deno.env.set("OPENROUTER_API_KEY", "test-key-not-real");
@@ -396,4 +398,130 @@ Deno.test("interrupcaoDaTool: o fluxo que já falou com o dono encerra o turno (
   const proposal = { pending_action_id: "p1", title: "t", summary_markdown: "s", risk_level: "medium" as const };
   assertEquals(interrupcaoDaTool(tc, { toolResult: {}, proposal, fluxo: { codigo: "CMP-00001" } }, false), { proposal });
   assertEquals(interrupcaoDaTool(tc, { toolResult: { ok: true } }, false), null);
+});
+
+// ─── Retorno F3 (P8.5): o orçamento com o caso amarrado vira pendência com o resumo em código ───────────────────────
+
+function adminDoDitado(rotas: Record<string, unknown> = {}) {
+  const auditRows: any[] = [];
+  const pendingRows: any[] = [];
+  const rpcs: string[] = [];
+  const tabelas: Record<string, any[]> = {
+    clients: [{ id: "c-2", name: "João Silva", generico: false }],
+    vessels: [{ id: "v-2", name: "Mar Azul" }],
+    ...(rotas.tabelas as Record<string, any[]> | undefined),
+  };
+  const admin = {
+    from(t: string) {
+      const q: any = {
+        select: () => q, eq: () => q, gt: () => q, gte: () => q, neq: () => q, order: () => q, limit: () => q, in: () => q, ilike: () => q, range: () => q,
+        maybeSingle: async () => ({ data: (tabelas[t] ?? [])[0] ?? null, error: null }),
+        then: (ok: (v: unknown) => unknown) => Promise.resolve({ data: tabelas[t] ?? [], error: null }).then(ok),
+        insert: (row: any) => {
+          if (t === "ai_operator_audit") auditRows.push(row);
+          if (t === "ai_operator_pending_actions") pendingRows.push(row);
+          return {
+            select: () => ({ single: async () => ({ data: { id: "p-1", title: row.title, summary: row.summary, risk_level: row.risk_level }, error: null }) }),
+            then: (r: (v: unknown) => void) => r({ data: null, error: null }),
+          };
+        },
+      };
+      return q;
+    },
+    rpc: (fn: string, a: unknown) => {
+      rpcs.push(fn);
+      const v = rotas[fn];
+      return Promise.resolve(typeof v === "function" ? (v as (x: unknown) => unknown)(a) : { data: v ?? null, error: null });
+    },
+  };
+  return { admin, auditRows, pendingRows, rpcs };
+}
+
+async function chamarComAdmin(def: ToolDef, input: unknown, admin: unknown, extra: Record<string, unknown> = {}) {
+  const { fetchStub } = mockFetchSequence([
+    { status: 200, body: claudeMsg({ content: [{ type: "tool_use", id: "toolu_f3", name: def.name, input }], stop_reason: "tool_use" }) },
+    { status: 200, body: claudeMsg({ content: [{ type: "text", text: "feito" }], stop_reason: "end_turn" }) },
+  ]);
+  return await withFetch(fetchStub, () =>
+    runAgentLoop({
+      system: [{ type: "text" as const, text: "teste" }],
+      sessionId: "s1",
+      toolCtx: { sb: admin, admin, userId: "dono", userRole: "admin" as const, jwt: "jwt", appOrigin: "", settings: {}, ...extra },
+      messages: [{ role: "user", content: [{ type: "text", text: "orça" }] }],
+      tools: [def],
+    } as any)
+  );
+}
+
+const CRIAR_ORCAMENTO = quoteBuilderTools.find((t) => t.name === "create_quote_from_items")!;
+const ORCAR_CASO = retornoTools.find((t) => t.name === "retorno_orcar_caso")!;
+const UNIDADE_DO_CASO = retornoTools.find((t) => t.name === "retorno_cadastrar_unidade")!;
+
+const ARGS_DO_ORCAMENTO = { client_id: "c-2", vessel_id: "v-2", title: "Baterias", items: [{ keyword: "Bateria", unit_price: 500 }], _retrato: { amarrada: false } };
+const VER_DO_DITADO = {
+  n: 1, rotulo: "Ana", titulo: "Troca", total: 1320, hash: "h", abertura_id: "a-1", phone: "5547900001234", client_id: "c-1", vessel_id: "v-1", unidade_nome: "Brisa",
+  unidades: [], previa_id: "pv-1", ditado_ligado: true, cliente_generico: false, validade: "terça (15/12)",
+  linhas: [{ linha: 1, tipo: "peca", product_id: "p-c", service_id: null, nome: "Controlador", quantidade: 1, preco: 1320, fonte: "catalogo", em: null, rotulo: "preço de catálogo, sem data", estado: "ok", motivo: null }],
+};
+
+Deno.test("amarrado e outro client_id: create_quote_from_items vira pendência high, com o resumo, sem 'ambíguo'; o _retrato do modelo sai", async () => {
+  const { admin, pendingRows, auditRows } = adminDoDitado({ search_products_trgm: [] });
+  await chamarComAdmin(CRIAR_ORCAMENTO, ARGS_DO_ORCAMENTO, admin, { sessaoAmarrada: true, casoAmarrado: { client_id: "c-1", vessel_id: "v-1" } });
+  assertEquals(pendingRows.length, 1);
+  assertEquals(pendingRows[0].risk_level, "high");
+  assertStringIncludes(pendingRows[0].summary, "João Silva");
+  assertStringIncludes(pendingRows[0].summary, "Mar Azul");
+  assertStringIncludes(pendingRows[0].summary, "(não é o cliente do caso do cartão)");
+  assertEquals(String(pendingRows[0].summary).toLowerCase().includes("ambíguo"), false);
+  // o retrato gravado é o do agente, e não o que veio do modelo
+  assertEquals(pendingRows[0].payload._retrato, { amarrada: true });
+  // a auditoria diz que a sessão estava amarrada (o portão escolha_por_nome depende disso)
+  assertEquals(auditRows.some((r) => r.payload?.sessao_amarrada === true), true);
+});
+
+Deno.test("sem amarra, create_quote_from_items roda direto, e a auditoria não ganha a marca", async () => {
+  const { admin, pendingRows, auditRows } = adminDoDitado({ search_products_trgm: [], next_document_number: 7 });
+  await chamarComAdmin(CRIAR_ORCAMENTO, { client_id: "c-2", vessel_id: "v-2", title: "x", items: [{ keyword: "Bateria", unit_price: 500 }] }, admin);
+  assertEquals(pendingRows.length, 0);
+  assertEquals(auditRows.some((r) => r.payload?.sessao_amarrada === true), false);
+});
+
+Deno.test("retorno_orcar_caso vira pendência high com o resumo literal; retorno_cadastrar_unidade pede só sim", async () => {
+  const rotas = { retorno_destino_do_item: { ok: true }, retorno_previa_ver: VER_DO_DITADO };
+  const a = adminDoDitado(rotas);
+  await chamarComAdmin(ORCAR_CASO, { n: 1, trocas: [{ linha: 1, preco: 1400 }] }, a.admin);
+  assertEquals(a.pendingRows[0].risk_level, "high");
+  assertStringIncludes(a.pendingRows[0].summary, "Proposta de *Ana* · Brisa");
+  assertStringIncludes(a.pendingRows[0].summary, "*sim <PIN>* cria o orçamento e manda o PDF a Ana");
+  assertEquals(a.pendingRows[0].payload._retrato.plano.linhas[0].preco, 1400);
+
+  const u = adminDoDitado({ retorno_previa_ver: { ...VER_DO_DITADO, vessel_id: null, unidade_nome: null } });
+  await chamarComAdmin(UNIDADE_DO_CASO, { n: 1, nome: "Brisa", tipo: "lancha" }, u.admin);
+  assertEquals(u.pendingRows[0].risk_level, "medium");
+  assertStringIncludes(u.pendingRows[0].summary, "*sim* confirma.");
+  assertEquals(String(u.pendingRows[0].summary).includes("PIN"), false);
+});
+
+Deno.test("1ª linha ⚠️ no resumo não cria pendência e volta ao modelo como recusa", async () => {
+  const a = adminDoDitado({ retorno_destino_do_item: { ok: true }, retorno_previa_ver: { erro: "sem_caso" } });
+  const r = await chamarComAdmin(ORCAR_CASO, { n: 3 }, a.admin);
+  assertEquals(a.pendingRows.length, 0);
+  assertEquals(r.toolEvents[0].result, { error: "Não há caso 3 no cartão.", nada_registrado: true });
+  assertEquals(resumoQueRecusa("create_quote_from_items", "⚠️ Falta preço em X: diga o valor.")?.error, "Falta preço em X: diga o valor.");
+  assertEquals(resumoQueRecusa("create_quote_from_items", "Orçamento para *A*\n1. x"), null);
+});
+
+Deno.test("textoDoSim: o ditado traz o aviso, sem dizer executado", () => {
+  assertEquals(textoDoSim("Montar orçamento do caso do cartão", { ok: true, aviso: "Orçamento ORÇ-00151 criado e PDF enviado a Ana.", so_texto: true }), "Orçamento ORÇ-00151 criado e PDF enviado a Ana.");
+});
+
+Deno.test("buildPendingSummary de create_quote_from_items: sem a marca usa o genérico e não chama a RPC; com a marca, o resumo linha a linha", async () => {
+  const args = { client_id: "c-2", vessel_id: "v-2", title: "x", items: [{ keyword: "Bateria", unit_price: 500 }] };
+  const sem = adminDoDitado({ search_products_trgm: [] });
+  const generico = await buildPendingSummary(sem.admin, "create_quote_from_items", args, { userId: "dono" });
+  assertEquals(generico.includes("sim <PIN>"), false);
+  assertEquals(sem.rpcs.includes("retorno_previa_precos"), false);
+  const com = adminDoDitado({ search_products_trgm: [] });
+  const amarrado = await buildPendingSummary(com.admin, "create_quote_from_items", args, { userId: "dono", sessaoAmarrada: true });
+  assertStringIncludes(amarrado, "*sim <PIN>* cria o rascunho");
 });

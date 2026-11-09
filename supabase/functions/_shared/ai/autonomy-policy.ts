@@ -18,6 +18,11 @@ import type { RiskLevel } from "./tools/registry.ts";
  */
 export const NEVER_AUTONOMOUS = new Set<string>([
   "retorno_responder_caso",
+  // Retorno F3 (P7 e P8): o ORÇ do caso só nasce com PIN. create_quote_from_items em sessão não amarrada segue direto, porque
+  // é low e isAutonomyGranted devolve true antes de olhar aqui.
+  "retorno_orcar_caso",
+  "retorno_cadastrar_unidade",
+  "create_quote_from_items",
   "register_payment",
   "register_deposit_and_convert",
   "receive_purchase_order",

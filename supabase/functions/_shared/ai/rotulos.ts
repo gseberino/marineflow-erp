@@ -12,6 +12,9 @@ export const TITULOS_DA_REDE_DO_ADMIN: Record<string, string> = {
   retorno_ler_caso: "Ler o caso do cartão",
   retorno_executar_cartao: "Cartão do retorno",
   retorno_responder_caso: "Responder o caso do cartão",
+  consultar_proposta_do_caso: "Ver a proposta do caso do cartão",
+  retorno_orcar_caso: "Montar orçamento do caso do cartão",
+  retorno_cadastrar_unidade: "Cadastrar unidade do caso do cartão",
   add_service_order_step: "Acrescentar passo ao roteiro da OS",
   add_vessel_contact: "Adicionar contato da embarcação ou veículo",
   agent_health_report: "Relatório de saúde do assistente",
@@ -133,6 +136,16 @@ export const TITULOS_DAS_ACOES_DIRETAS: Record<string, string> = {
 
 /** Rótulo dos campos que aparecem no resumo genérico ("- Rótulo: valor") das ações que podem virar cartão. */
 export const ROTULOS_DOS_CAMPOS: Record<string, string> = {
+  // Orçamento pelo cartão (Retorno F3, P8.3)
+  unidade: "Unidade",
+  trocas: "Linhas a trocar",
+  remover: "Linhas a tirar",
+  novas: "Peças novas",
+  mao_de_obra: "Mão de obra",
+  titulo: "Título",
+  condicao_pagamento: "Condição de pagamento",
+  sem_enviar: "Só criar, sem mandar",
+  registro: "Registro",
   n: "Caso",
   acao: "Ação",
   accepted: "Aceito",

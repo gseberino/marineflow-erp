@@ -402,3 +402,12 @@ Deno.test("trava do 1 da agenda: depois da trava do comprovante, antes da confir
   assert(!bloco.includes("metadata."), "não consome nada");
   assertEquals((fonte.match(/textoDaTravaDaAgenda\(/g) ?? []).length, 1, "só no turno do WhatsApp");
 });
+
+// Retorno F3 (P8.2): o sim do ditado passa pela mesma saída de toda pendência, e o cartão guardado volta para o ponteiro.
+Deno.test("Retorno F3: depois do sim do ditado, comAProximaPendencia devolve o ponteiro do cartão", () => {
+  const resolver = fonte.slice(fonte.indexOf("async function resolveWhatsAppConfirmation("), fonte.indexOf("async function comAProximaPendencia("));
+  assertStringIncludes(resolver, "return await comAProximaPendencia(admin, pending, message, clearedMetadata);");
+  const proxima = fonte.slice(fonte.indexOf("async function comAProximaPendencia("));
+  assertStringIncludes(proxima, "proximaPendenciaGuardada(admin, metadataLimpa)");
+  assertStringIncludes(proxima, "pending_confirm_action_id: guardada.pendencia.id");
+});

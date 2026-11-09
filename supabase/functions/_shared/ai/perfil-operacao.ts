@@ -27,6 +27,11 @@
 export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   // — O ditado do retorno rápido (F2): o dono dita a resposta de um caso do cartão. Ler o caso fica em SO_PELA_REDE. —
   "retorno_responder_caso",
+  // — O orçamento pelo cartão (Retorno F3, P8.3). Fora de PERFIL_ADMIN (teto de 113): o dono chega pela ferramenta_extra. A
+  //   consulta é leitura e roda direto; as duas de escrita viram pendência pela rede. O prompt as ensina (ORÇAMENTO PELO CARTÃO). —
+  "consultar_proposta_do_caso",
+  "retorno_orcar_caso",
+  "retorno_cadastrar_unidade",
   // — Montar e editar orçamento/OS (o grosso do uso real) —
   "create_quote_from_items",
   "create_service_order",

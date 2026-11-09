@@ -49,6 +49,9 @@ export const ASSUNTO_DAS_ACOES: Readonly<Record<string, readonly string[]>> = {
   // o cartão do retorno: um cartão novo substitui o anterior; a resposta ditada é por caso
   retorno_executar_cartao: [],
   retorno_responder_caso: ["n"],
+  // o orçamento do cartão: por caso (F3, P8.3)
+  retorno_orcar_caso: ["n"],
+  retorno_cadastrar_unidade: ["n"],
 };
 
 function valorDoAssunto(campo: string, v: unknown): string | null {

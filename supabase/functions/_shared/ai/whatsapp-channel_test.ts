@@ -1307,3 +1307,22 @@ Deno.test("trava do 1 (7f P4): depois da mensagem da semana (agenda-dono, enviad
   // citando a mensagem da semana, é para a agenda
   assertStringIncludes(String(await trava(bancoDaTrava({ perguntas: [mostradaAntes], fila: [semana] }).admin, "1", { citado: "WA-SEMANA" })), 'Esse "1" é para a agenda');
 });
+
+// ─── Retorno F3 (P8.2): a pendência do ditado desloca o ponteiro do cartão, e ele volta no fim ───────────────────────
+
+Deno.test("Retorno F3: a pendência do ditado guarda a do cartão, e depois do sim do ditado o cartão volta", async () => {
+  const CARTAO = { action_name: "retorno_executar_cartao", payload: { cartao_id: "c-1" }, title: "Cartão do retorno", session_id: "s1" };
+  const DITADO = { action_name: "retorno_orcar_caso", payload: { n: 1 } };
+  const { admin, gravado } = bancoDePendencias(true, CARTAO, DITADO);
+  const depois: Record<string, unknown> = { pending_confirm_action_id: "nova" };
+  const aviso = await cancelarPendenciaSubstituida(admin, { pending_confirm_action_id: "velha" }, depois, "u1");
+  assertEquals(gravado.update, undefined, "o cartão não é cancelado");
+  assertEquals(depois.pendencias_guardadas, ["velha"]);
+  assertStringIncludes(aviso, "continua esperando");
+
+  const linhas: Record<string, Record<string, unknown>> = { velha: { id: "velha", status: "pending", title: "Cartão do retorno", summary: "Retorno · 1 esperando", risk_level: "high" } };
+  const adm = { from: () => { let id = ""; const b: Record<string, unknown> = {}; b.select = () => b; b.eq = (_c: string, v: string) => { id = v; return b; }; b.maybeSingle = () => Promise.resolve({ data: linhas[id] ?? null, error: null }); return b; } };
+  const volta = await proximaPendenciaGuardada(adm, { pendencias_guardadas: ["velha"] }, AGORA);
+  assertEquals(volta?.pendencia.id, "velha");
+  assertEquals(volta?.restantes, []);
+});

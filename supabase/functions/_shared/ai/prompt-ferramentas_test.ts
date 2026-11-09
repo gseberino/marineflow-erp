@@ -63,6 +63,8 @@ const NAO_SAO_TOOLS = new Set<string>([
   // cadastros (07/10/2026): argumentos e campos de resultado de search_clients/create_client
   "incluir_inativos", "ja_cadastrado", "possiveis_duplicados", "confirmar_duplicado",
   // argumentos e campos de tool
+  // Orçamento pelo cartão (Retorno F3, P8.3): argumento de retorno_orcar_caso
+  "mao_de_obra",
   "action_name", "asset_type", "billing_unit", "client_id", "collection_ids", "custom_message", "delay_minutes",
   "display_name", "due_at", "entity_id", "extra_notes", "fiscal_verb", "force_new", "from_user", "internal_notes",
   "is_deposit", "is_quote", "item_id", "item_position", "lead_time_days", "markup_percent", "message_id",
@@ -829,4 +831,23 @@ Deno.test("agenda de produção (Fase 7f, P7): o silêncio e o *agenda espera*, 
   assertEquals(lerComandoDaAgenda("agenda espera Nelson"), { comando: "veto", acao: "espera", alvo: "nelson" });
   assertEquals(lerComandoDaAgenda("agenda fica"), null);
   assertEquals(lerComandoDaAgenda("pode deixar como você propôs"), null);
+});
+
+// Retorno F3 (P8.3): as três ferramentas do orçamento pelo cartão são ensinadas, com as regras que não podem cair.
+Deno.test("ORÇAMENTO PELO CARTÃO: o prompt ensina as três ferramentas e as regras", () => {
+  const texto = textoDoPrompt();
+  const bloco = texto.slice(texto.indexOf("ORÇAMENTO PELO CARTÃO:"));
+  assertEquals(bloco.startsWith("ORÇAMENTO PELO CARTÃO:"), true, "o bloco sumiu");
+  const trecho = bloco.slice(0, bloco.indexOf("════"));
+  for (const nome of ["consultar_proposta_do_caso", "retorno_orcar_caso", "retorno_cadastrar_unidade"]) {
+    assertEquals(trecho.includes(nome), true, nome);
+    assertEquals(PERFIL_OPERACAO.has(nome), true, `${nome} fora do perfil de operação`);
+  }
+  for (const regra of [
+    "Nunca invente preço, item, título ou cliente",
+    "nunca o nome",
+    "Quem pede o PIN e mostra as linhas é o sistema",
+    "nunca create_vessel",
+    "com client_id, nunca com nome",
+  ]) assertEquals(trecho.includes(regra), true, regra);
 });

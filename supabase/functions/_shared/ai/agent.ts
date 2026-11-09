@@ -3,7 +3,8 @@ import {
   resumirAcerto, resumirCadastro, resumirDiaria, resumirDivisaoDoPagamento, resumirEnvioAoFreelancer, resumirPagamento,
 } from "./tools/diarias.ts";
 import { resumirEnvioAoCliente } from "./tools/whatsapp.ts";
-import { resumirRespostaDoCaso, riscoDoEnvioLivre } from "./tools/retorno.ts";
+import { resumirPropostaDoCaso, resumirRespostaDoCaso, resumirUnidadeDoCaso, riscoDoEnvioLivre } from "./tools/retorno.ts";
+import { resumirOrcamentoLivre } from "./tools/quote-builder.ts";
 import { resumirAgendamento } from "./tools/agendamento.ts";
 import { resumirMensagem } from "./tools/resposta.ts";
 // fiscal e compras (07/10/2026): resumos da confirmação (nota ao cliente, receber e excluir OC).
@@ -472,6 +473,10 @@ RESUMO_QUE_RESOLVE.add("aprovar_propostas_de_lancamento");
 RESUMO_QUE_RESOLVE.add("create_service");
 // Retorno F2 (P9): sem cartão, sem o caso ou com o canal bloqueado, recusa em vez de pedir o "sim".
 RESUMO_QUE_RESOLVE.add("retorno_responder_caso");
+// Retorno F3 (P8): linha a linha, em código; recusa numa linha só, e a pendência não nasce.
+RESUMO_QUE_RESOLVE.add("retorno_orcar_caso");
+RESUMO_QUE_RESOLVE.add("retorno_cadastrar_unidade");
+RESUMO_QUE_RESOLVE.add("create_quote_from_items");
 
 export function resumoQueRecusa(toolName: string, resumo: string): { error: string; nada_registrado: true } | null {
   const t = resumo.trim();
@@ -487,7 +492,7 @@ export async function buildPendingSummary(
   admin: any,
   toolName: string,
   args: Record<string, unknown>,
-  quem: Partial<Pick<ToolCtx, "userId" | "userRole" | "settings">> = {},
+  quem: Partial<Pick<ToolCtx, "userId" | "userRole" | "settings" | "sessaoAmarrada" | "casoAmarrado">> = {},
 ): Promise<string> {
   // "Sim, é do X" (leva 8, revisão de 23/10/2026): com cliente_confirmado, o cartão mostra cada proposta (título, data,
   // valor) e, nas confirmadas, "cliente: <nome> (<motivo>)" — nunca uuid. Os outros argumentos (vínculo, categoria, OS…)
@@ -644,6 +649,13 @@ export async function buildPendingSummary(
   // Retorno F2 (P9): o "sim" é sobre o destino, preso ao caso, e o texto exato.
   if (toolName === "retorno_responder_caso") {
     return await resumirRespostaDoCaso(admin, args, quem.userId ?? "");
+  }
+  // Retorno F3 (P8): o preço do ditado aparece linha a linha, no texto que não passa pelo modelo.
+  if (toolName === "retorno_orcar_caso") return await resumirPropostaDoCaso(admin, args, quem.userId ?? "");
+  if (toolName === "retorno_cadastrar_unidade") return await resumirUnidadeDoCaso(admin, args, quem.userId ?? "");
+  // Só a sessão amarrada tem o resumo linha a linha; sem a marca, segue o genérico de sempre.
+  if (toolName === "create_quote_from_items" && quem.sessaoAmarrada === true) {
+    return await resumirOrcamentoLivre(admin, args, { casoAmarrado: quem.casoAmarrado });
   }
   if (toolName === "delete_purchase_order") {
     try {
@@ -849,6 +861,8 @@ async function writeAudit(
         args: entry.args,
         // Retorno F2: o que o cliente escreveu não fica na auditoria.
         result_summary: entry.eventType.includes("retorno_ler_caso") ? { omitido: true } : summarizeForAudit(entry.result),
+        // Retorno F3 (P8.3): sem isto, o portão escolha_por_nome não tem dado.
+        ...(amb.toolCtx.sessaoAmarrada ? { sessao_amarrada: true } : {}),
         ...(entry.autonomous ? { autonomous: true } : {}),
         ...(amb.turno ? { turno: amb.turno.id } : {}),
         ...(entry.detalhe ?? {}),
@@ -1184,6 +1198,7 @@ export async function executarChamadaDeTool(
       const limpa = !!solicitante || !!toolDef.retratoDaPendencia;
       let resumo = await buildPendingSummary(amb.toolCtx.admin, tc.name, limpa ? entrada : tc.input as Record<string, unknown>, {
         userId: amb.toolCtx.userId, userRole: amb.toolCtx.userRole, settings: amb.toolCtx.settings,
+        sessaoAmarrada: amb.toolCtx.sessaoAmarrada, casoAmarrado: amb.toolCtx.casoAmarrado,
       });
       // A recusa é decidida pelo resumo DA TOOL, antes da linha "Pedido por" (15/10/2026): com ela, a linha
       // "⚠️ …" ganhava uma segunda linha e virava pendência — o caso das tools com gravarSolicitante.
