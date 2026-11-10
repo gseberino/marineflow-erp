@@ -31,6 +31,7 @@ import { respostaDaEquipe } from "../_shared/agenda/resposta-da-equipe.ts";
 import { respostaDoCliente } from "../_shared/agenda/resposta-do-cliente.ts";
 import { ehPedidoDeParar } from "../_shared/whatsapp/parar.ts";
 import { abrirNoRetorno, consumidaPelosLeitores, identificarCliente, noFundo } from "./retorno.ts";
+import { lerNoParceiro } from "./parceiro.ts";
 
 // Manejo automático da resposta (Camada de Inteligência de Comunicação, módulo G):
 // fecha o loop no ai_comms_log (marca respondido + intenção) e HONRA OPT-OUT sozinho.
@@ -575,6 +576,11 @@ export async function handler(req: Request): Promise<Response> {
 
     if (insErr) return jr({ error: "db_error", details: insErr.message }, 500);
 
+    // Retorno F4 (P13): o leitor do parceiro, antes de qualquer outro (C-LER). O NÃO <sigla> do cliente, a resposta ao aviso
+    // que pode ser um "não", e o *pátio*, *pausar* e *retomar* do número de parceiro. Consumida = nenhum leitor abaixo vê a
+    // mensagem (agenda_resposta_do_cliente leria o mesmo "não"); o retorno_abrir ainda registra. Nunca lança.
+    const doParceiro = !event.fromMe ? await lerNoParceiro(admin, { msgId: msg?.id }) : { consumida: false };
+
     // Veio pelo formulário do site? Marca a origem no lead (só na primeira vez) e avisa o dono.
     const doSite = !event.fromMe ? lerMensagemDoSite(body) : null;
     if (doSite) {
@@ -600,66 +606,71 @@ export async function handler(req: Request): Promise<Response> {
     // (marca respondido + intenção) e honra opt-out automaticamente. Best-effort, assíncrono.
     // Cliente tem prioridade; se não for cliente, tenta fornecedor (respostas de cotação).
     if (!event.fromMe && body) {
-      if (clientId) {
-        manejarRespostaAutomatica(admin, "clients", clientId, body, ident.usar).catch(() => {});
-      } else {
-        (async () => {
-          try {
-            const { data: sup } = await admin.from("suppliers").select("id").ilike("phone", `%${phone}%`).eq("active", true).limit(1).maybeSingle();
-            if (sup?.id) await manejarRespostaAutomatica(admin, "suppliers", sup.id, body);
-          } catch { /* best-effort */ }
-        })();
-      }
-      // "Deixar a IA acompanhar": se este número tem missão ativa, a resposta pausa os toques
-      // e vai para o dono (waiting_reply). A resposta é DADO, não comando — a RPC só registra.
-      admin.rpc("followup_registrar_resposta", { p_phone: phone, p_body: body, p_message_id: msg?.id ?? null })
-        .then(() => {}, () => {});
-      // Agenda de Produção (Fase 3, P4, 24/10/2026): a resposta do técnico à ficha, à confirmação da manhã ou ao "como
-      // foi hoje?" (só com agenda_config.modo_equipe fora de desligado e o telefone de alguém da equipe; o banco lê, decide
-      // e enfileira a resposta dele). Consumida = a confirmação do cliente e a conferência do recibo abaixo não leem o
-      // mesmo texto (o "ok" tem um dono só, NOVO-agenda-17). Até 500 caracteres; erro = segue como hoje (nunca lança).
-      const daEquipe = await respostaDaEquipe(admin, { phone, body, messageId: event.messageId || msg?.id || null });
-      // Agenda de Produção (Fase 5, P4, 27/10/2026): a resposta do CLIENTE a uma mensagem da agenda (o SIM, "pode ser
-      // sexta?", "não dá terça", o acesso, o "PARAR", o áudio — que vai ao dono e nunca confirma). Só com
-      // agenda_config.modo_cliente ligado e uma mensagem da agenda esperando resposta o banco consome (em teste só registra);
-      // consumida = a confirmação de 30/09 e a conferência do recibo abaixo não leem o mesmo texto. Erro = como hoje.
-      const doCliente = !daEquipe &&
-        await respostaDoCliente(admin, { phone, body, messageId: msg?.id ?? null, tipo: event.messageType });
       // Retorno F1 (P13): os três leitores abaixo guardam a promessa com o resultado (null = não rodou ou falhou). Ninguém
       // espera por elas aqui, então o comportamento deles não muda; só o retorno_abrir, no fundo, no fim deste bloco.
       let pConfirmacao: PromiseLike<unknown> = Promise.resolve(null);
       let pConferencia: PromiseLike<unknown> = Promise.resolve(null);
       let pRevisao: PromiseLike<unknown> = Promise.resolve(null);
-      // Confirmação do agendamento (30/09/2026): o "SIM" de quem recebeu o pedido da Agenda. A RPC
-      // só confirma concordância curta ("sim", "confirmo", 👍) de cliente com pedido nas últimas
-      // 72 h; "sim, mas preciso remarcar" não confirma. Frase longa nem chega a ela.
-      if (body.trim().length <= 60 && !daEquipe && !doCliente) {
-        pConfirmacao = admin.rpc("registrar_confirmacao_do_cliente", { p_phone: phone, p_body: body, p_message_id: msg?.id ?? null })
-          .then((r) => r?.data ?? null, () => null);
-        // Conferência do acerto de diárias (06/10/2026): o "ok"/"confere" do freelancer a quem o
-        // recibo foi mandado nos últimos 7 dias. Mesma regra de concordância curta.
-        pConferencia = admin.rpc("registrar_conferencia_do_freelancer", { p_phone: phone, p_body: body, p_message_id: msg?.id ?? null })
-          .then((r) => r?.data ?? null, () => null);
-      }
-      // Resposta ao lembrete de revisão (07/10/2026): só vale para quem recebeu lembrete/campanha nos
-      // últimos 21 dias (a RPC confere). PARAR → opt-out; "sim" → tarefa "Agendar revisão"; uma data
-      // ("dia 15", "mês que vem" — lida aqui, com teste) → adia o plano; outro texto → sino.
-      // Agenda de Produção (correção C1 da Fase 5, item 10): a resposta que a agenda consumiu (doCliente) não é lida de
-      // novo como resposta à revisão — o "sim" confirmaria a OS E criaria "Agendar revisão"; o "pode ser dia 5?"
-      // remarcaria a OS E adiaria o plano de manutenção. O "ok" tem um dono só.
-      if (body.trim().length <= 500 && !doCliente) {
-        pRevisao = admin.rpc("registrar_resposta_da_revisao", {
-          p_telefone: phone, p_texto: body, p_mensagem: msg?.id ?? null, p_data: lerDataDaResposta(body),
-        }).then((r) => r?.data ?? null, () => null);
+      // Retorno F4 (P13): a mensagem que o leitor do parceiro consumiu não passa por nenhum leitor de hoje (nem o opt-out
+      // largo, nem o acompanhamento, nem a agenda, nem os três abaixo): o "não" tem um dono só.
+      if (!doParceiro.consumida) {
+        if (clientId) {
+          manejarRespostaAutomatica(admin, "clients", clientId, body, ident.usar).catch(() => {});
+        } else {
+          (async () => {
+            try {
+              const { data: sup } = await admin.from("suppliers").select("id").ilike("phone", `%${phone}%`).eq("active", true).limit(1).maybeSingle();
+              if (sup?.id) await manejarRespostaAutomatica(admin, "suppliers", sup.id, body);
+            } catch { /* best-effort */ }
+          })();
+        }
+        // "Deixar a IA acompanhar": se este número tem missão ativa, a resposta pausa os toques
+        // e vai para o dono (waiting_reply). A resposta é DADO, não comando — a RPC só registra.
+        admin.rpc("followup_registrar_resposta", { p_phone: phone, p_body: body, p_message_id: msg?.id ?? null })
+          .then(() => {}, () => {});
+        // Agenda de Produção (Fase 3, P4, 24/10/2026): a resposta do técnico à ficha, à confirmação da manhã ou ao "como
+        // foi hoje?" (só com agenda_config.modo_equipe fora de desligado e o telefone de alguém da equipe; o banco lê, decide
+        // e enfileira a resposta dele). Consumida = a confirmação do cliente e a conferência do recibo abaixo não leem o
+        // mesmo texto (o "ok" tem um dono só, NOVO-agenda-17). Até 500 caracteres; erro = segue como hoje (nunca lança).
+        const daEquipe = await respostaDaEquipe(admin, { phone, body, messageId: event.messageId || msg?.id || null });
+        // Agenda de Produção (Fase 5, P4, 27/10/2026): a resposta do CLIENTE a uma mensagem da agenda (o SIM, "pode ser
+        // sexta?", "não dá terça", o acesso, o "PARAR", o áudio — que vai ao dono e nunca confirma). Só com
+        // agenda_config.modo_cliente ligado e uma mensagem da agenda esperando resposta o banco consome (em teste só registra);
+        // consumida = a confirmação de 30/09 e a conferência do recibo abaixo não leem o mesmo texto. Erro = como hoje.
+        const doCliente = !daEquipe &&
+          await respostaDoCliente(admin, { phone, body, messageId: msg?.id ?? null, tipo: event.messageType });
+        // Confirmação do agendamento (30/09/2026): o "SIM" de quem recebeu o pedido da Agenda. A RPC
+        // só confirma concordância curta ("sim", "confirmo", 👍) de cliente com pedido nas últimas
+        // 72 h; "sim, mas preciso remarcar" não confirma. Frase longa nem chega a ela.
+        if (body.trim().length <= 60 && !daEquipe && !doCliente) {
+          pConfirmacao = admin.rpc("registrar_confirmacao_do_cliente", { p_phone: phone, p_body: body, p_message_id: msg?.id ?? null })
+            .then((r) => r?.data ?? null, () => null);
+          // Conferência do acerto de diárias (06/10/2026): o "ok"/"confere" do freelancer a quem o
+          // recibo foi mandado nos últimos 7 dias. Mesma regra de concordância curta.
+          pConferencia = admin.rpc("registrar_conferencia_do_freelancer", { p_phone: phone, p_body: body, p_message_id: msg?.id ?? null })
+            .then((r) => r?.data ?? null, () => null);
+        }
+        // Resposta ao lembrete de revisão (07/10/2026): só vale para quem recebeu lembrete/campanha nos
+        // últimos 21 dias (a RPC confere). PARAR → opt-out; "sim" → tarefa "Agendar revisão"; uma data
+        // ("dia 15", "mês que vem" — lida aqui, com teste) → adia o plano; outro texto → sino.
+        // Agenda de Produção (correção C1 da Fase 5, item 10): a resposta que a agenda consumiu (doCliente) não é lida de
+        // novo como resposta à revisão — o "sim" confirmaria a OS E criaria "Agendar revisão"; o "pode ser dia 5?"
+        // remarcaria a OS E adiaria o plano de manutenção. O "ok" tem um dono só.
+        if (body.trim().length <= 500 && !doCliente) {
+          pRevisao = admin.rpc("registrar_resposta_da_revisao", {
+            p_telefone: phone, p_texto: body, p_mensagem: msg?.id ?? null, p_data: lerDataDaResposta(body),
+          }).then((r) => r?.data ?? null, () => null);
+        }
       }
       // Retorno rápido (F1, P13): abre o caso do retorno no fundo — a resposta à Evolution não espera. A ordem fica
       // garantida: equipe → agenda (aguardadas acima) → as três RPCs (esperadas dentro do abrirNoRetorno) → o retorno.
       // "Consumida" = só a confirmação, a conferência ou a revisão; a agenda o retorno lê na tabela. Nunca lança.
+      // F4 (P13): a consumida pelo leitor do parceiro também conta, e sem isso o _parceiro_triar não a enxergaria.
       if (msg?.id) {
         noFundo(abrirNoRetorno(admin, {
           msgId: msg.id,
           leitores: [pConfirmacao, pConferencia, pRevisao],
-          consumida: (v) => consumidaPelosLeitores({ confirmacao: v[0], conferencia: v[1], revisao: v[2] }),
+          consumida: (v) => doParceiro.consumida || consumidaPelosLeitores({ confirmacao: v[0], conferencia: v[1], revisao: v[2] }),
         }));
       }
     }

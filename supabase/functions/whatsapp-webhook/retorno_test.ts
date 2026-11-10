@@ -371,7 +371,10 @@ Deno.test("index.ts: os três leitores guardam o resultado sem await, e o retorn
     `ordem: ${equipe} ${cliente} ${confirmacao} ${conferencia} ${revisao} ${guarda} ${abrir}`,
   );
   assert(bloco.includes("leitores: [pConfirmacao, pConferencia, pRevisao],"));
-  assert(bloco.includes("consumida: (v) => consumidaPelosLeitores({ confirmacao: v[0], conferencia: v[1], revisao: v[2] }),"));
+  // F4 (P13): o callback soma o leitor do parceiro antes dos três (parceiro_test.ts confere a ordem dele).
+  assert(bloco.includes(
+    "consumida: (v) => doParceiro.consumida || consumidaPelosLeitores({ confirmacao: v[0], conferencia: v[1], revisao: v[2] }),",
+  ));
   assertEquals(fonte.includes("await abrirNoRetorno("), false, "a resposta à Evolution não pode esperar o retorno");
   assertEquals(fonte.includes("await noFundo("), false);
   // as travas de hoje (o "ok" tem um dono só) continuam
