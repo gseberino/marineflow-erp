@@ -871,20 +871,30 @@ begin
      or v_f.estado is distinct from 'no_cartao' then
     raise exception '18a: o cartão não ficou vivo com o ponteiro';
   end if;
-  v_r := public.parceiro_vigia_cartao(c_t + interval '29 hours');
+  v_r := public.parceiro_vigia_cartao(c_t + interval '29 hours 1 minute');   -- expira_em = abertura + 24 h; vence depois dela (expira_em < agora)
   if (select c.estado || '/' || c.caiu_motivo from public.parceiro_cartoes c where c.id = v_cartao) is distinct from 'expirou/cartao_expirou'
      or (select p.status from public.ai_operator_pending_actions p where p.id = v_pend) is distinct from 'expired'
      or (select s.metadata ? 'pending_confirm_action_id' from public.ai_operator_sessions s where s.id = v_ses) is not false
      or (pg_temp.f4k_fila('vinculo:' || (pg_temp.f4k_item(v_cartao, 1)).interessado_id)).estado is distinct from 'espera'
      or coalesce((public.pergunta_ocupado(v_phone) ->> 'ocupado')::boolean, true) is not false then
-    raise exception '18b: o vencido (%)', v_r;
+    raise exception '18b: o vencido (% | cartão % | pendência % | ponteiro % | fila % | ocupado %)', v_r,
+      (select c.estado || '/' || c.caiu_motivo from public.parceiro_cartoes c where c.id = v_cartao),
+      (select p.status from public.ai_operator_pending_actions p where p.id = v_pend),
+      (select s.metadata ? 'pending_confirm_action_id' from public.ai_operator_sessions s where s.id = v_ses),
+      (pg_temp.f4k_fila('vinculo:' || (pg_temp.f4k_item(v_cartao, 1)).interessado_id)).estado,
+      public.pergunta_ocupado(v_phone);
   end if;
-  v_cartao := (public.parceiro_cartao_abrir_os('RCF', 'OS-98881', v_dono, c_t + interval '30 hours') ->> 'cartao_id')::uuid;
+  v_r := public.parceiro_cartao_abrir_os('RCF', 'OS-98881', v_dono, c_t + interval '30 hours');
+  v_cartao := (v_r ->> 'cartao_id')::uuid;
   update public.ai_operator_pending_actions set status = 'rejected'
    where id = (select c.pendencia_id from public.parceiro_cartoes c where c.id = v_cartao);
+  -- o fechamento preguiçoso numa instrução própria: na mesma instrução, a leitura do estado veria o cartão de antes
+  perform public.parceiro_cartao_vivo(c_t + interval '30 hours 1 minute');
   if public.parceiro_cartao_vivo(c_t + interval '30 hours 1 minute') is not null
      or (select c.estado || '/' || c.decidido_por from public.parceiro_cartoes c where c.id = v_cartao) is distinct from 'decidido/nao' then
-    raise exception '18c: a pendência rejeitada por fora não fechou o cartão';
+    raise exception '18c: a pendência rejeitada por fora não fechou o cartão (abrir: % | cartão: % % | vivo: %)', v_r,
+      (select c.estado from public.parceiro_cartoes c where c.id = v_cartao), (select c.decidido_por from public.parceiro_cartoes c where c.id = v_cartao),
+      public.parceiro_cartao_vivo(c_t + interval '30 hours 1 minute');
   end if;
   v_cartao := (public.parceiro_cartao_abrir_os('RCF', 'OS-98881', v_dono, c_t + interval '31 hours') ->> 'cartao_id')::uuid;
   update public.parceiro_cartao_itens set estado = 'fora' where cartao_id = v_cartao;
@@ -908,6 +918,9 @@ begin
    order by s.last_activity_at desc limit 1;
   insert into public.ai_operator_pending_actions (session_id, action_name, risk_level, title, summary, payload, status, expires_at)
     values (v_ses, 'outra_acao', 'high', 'Outra coisa', 'Outra coisa', '{}', 'pending', c_t + interval '10 days') returning id into v_pend;
+  -- _pendencia_viva_do_telefone só vê a pendência que a sessão aponta (pending_confirm_action_id)
+  update public.ai_operator_sessions set metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object('pending_confirm_action_id', v_pend::text)
+   where id = v_ses;
   v_r := public.parceiro_cartao_abrir('puxar', c_t + interval '32 hours 2 minutes');
   if v_r ->> 'acao' is distinct from 'ocupado'
      or (select count(*) from public.ai_operator_pending_actions p where p.action_name = 'parceiro_executar_cartao') is distinct from v_k then
