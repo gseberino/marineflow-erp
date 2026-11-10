@@ -173,6 +173,30 @@ Deno.test("via reduzida: o HTML não traz CPF, fone, e-mail nem endereço sinté
   }
 });
 
+// Revisão de 10/11 (seguranca-pdf): o card da unidade também é reduzido. O nome da unidade às vezes é a placa (3 dos 44
+// motorhomes) ou o nome do dono, e a placa é dado pessoal (P4.1): ficam só o tipo, o fabricante, o modelo e o ano.
+Deno.test("via reduzida: o card da unidade só com o tipo, sem o nome da unidade nem a placa sintética", () => {
+  const tempo = new FakeTime(new Date(AGORA));
+  try {
+    const sintetico = { ...ORCAMENTO, vessel: { ...ORCAMENTO.vessel, name: "ABC1D23", registration: "XYZ9K87" } };
+    const cardDaUnidade = (html: string) => {
+      const ini = html.indexOf("Embarcação ou veículo e local");
+      return html.slice(ini, html.indexOf('<div class="card pdf-texto"', ini));
+    };
+    const html = buildOrderHTML(sintetico, { ...DEFAULT_PDF_OPTIONS, validity: { mode: "days", days: 7 }, ocultarDadosDoCliente: true });
+    for (const dado of ["ABC1D23", "XYZ9K87"]) assertEquals(html.includes(dado), false, dado);
+    const card = cardDaUnidade(html);
+    assertEquals(card.includes(">Lancha</div>"), true, card);
+    assertEquals(card.includes("Schaefer V33 (2021)"), true, card);
+    assertEquals(card.includes("Inscrição"), false, card);
+    // desligada, o nome da unidade e a placa voltam, como sempre
+    const inteiro = cardDaUnidade(buildOrderHTML(sintetico, { ...DEFAULT_PDF_OPTIONS, validity: { mode: "days", days: 7 } }));
+    for (const dado of ["Lancha: ABC1D23", "Inscrição: XYZ9K87"]) assertEquals(inteiro.includes(dado), true, dado);
+  } finally {
+    tempo.restore();
+  }
+});
+
 Deno.test("via reduzida: nome do arquivo e título só com tipo e número; desligada, igual ao de sempre", () => {
   const dados = { ...ORCAMENTO, documentType: "quote" as const, client: { name: "João Pedro Silva" } };
   assertEquals(buildPDFFilename(dados, { ...DEFAULT_PDF_OPTIONS, ocultarDadosDoCliente: true }), `Orcamento_${String(ORCAMENTO.serviceOrder.service_order_number).replace("Ç", "C")}.pdf`);

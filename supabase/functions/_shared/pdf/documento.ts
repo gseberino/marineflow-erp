@@ -64,7 +64,8 @@ export type PDFOptions = {
   dueDate?: string;
   /**
    * Retorno F4 (P12.2): a via reduzida do PDF ao parceiro. O card do cliente e a linha de aceite mostram só o primeiro
-   * nome e a inicial, sem CPF/CNPJ, telefone, e-mail e endereço; o nome do arquivo e o título ficam com tipo e número.
+   * nome e a inicial, sem CPF/CNPJ, telefone, e-mail e endereço; o nome do arquivo e o título ficam com tipo e número; e
+   * (revisão de 10/11) o card da unidade fica só com o tipo, sem o nome da unidade e sem a placa ou inscrição.
    * Fica FORA de DEFAULT_PDF_OPTIONS de propósito: resolvePdfOptions só lê as chaves de lá, então app_settings nunca a
    * liga. Só existe por argumento (o send_service_order_link com destino parceiro). Ausente ou false: nada muda.
    */
@@ -1065,6 +1066,8 @@ export function buildOrderHTML(data: PDFData, options: PDFOptions): string {
   const unidade = campoDaUnidade(unidadeDoDocumento(data.vessel), { comIdentificacao: false, comModelo: false });
   // Retorno F4 (P12.2): na via reduzida ao parceiro, só o primeiro nome e a inicial (sem CPF/CNPJ, fone, e-mail e
   // endereço). Desligada, é o próprio data.client: o HTML sai caractere por caractere como antes.
+  // Revisão de 10/11 (seguranca-pdf): na via reduzida, o card da unidade mostra só o tipo ("Motorhome"), sem o nome da
+  // unidade (às vezes é a placa ou o nome do dono) e sem a placa ou inscrição; fabricante, modelo e ano ficam.
   const cliente: PDFData['client'] = options.ocultarDadosDoCliente ? { name: nomeReduzidoDoCliente(data.client?.name) } : data.client;
 
   const body = `
@@ -1091,10 +1094,10 @@ ${semValores ? `
   </div>
   <div class="card">
     <div class="section-title">Embarcação ou veículo e local</div>
-    ${unidade.valor ? `<div style="font-size:12px;font-weight:700;color:var(--pdf-primary);">${esc(unidade.rotulo)}: ${esc(unidade.valor)}</div>` : ''}
+    ${unidade.valor ? `<div style="font-size:12px;font-weight:700;color:var(--pdf-primary);">${esc(unidade.rotulo)}${options.ocultarDadosDoCliente ? '' : `: ${esc(unidade.valor)}`}</div>` : ''}
     <div style="font-size:10px;">
       ${data.vessel?.manufacturer ? `${esc(data.vessel.manufacturer)} ${esc(data.vessel.model || '')} (${data.vessel.year || '—'})<br/>` : ''}
-      ${data.vessel?.registration ? `${esc(rotuloDaIdentificacao(data.vessel.type))}: ${esc(data.vessel.registration)}<br/>` : ''}
+      ${data.vessel?.registration && !options.ocultarDadosDoCliente ? `${esc(rotuloDaIdentificacao(data.vessel.type))}: ${esc(data.vessel.registration)}<br/>` : ''}
       ${data.marina ? `<strong>${grupoDoTipo(data.vessel?.type) === 'veiculo' ? 'Local' : 'Marina'}:</strong> ${esc(data.marina.name)}${data.marina.city ? ` (${esc(data.marina.city)})` : ''}` : ''}
     </div>
   </div>

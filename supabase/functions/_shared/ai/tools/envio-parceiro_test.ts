@@ -38,7 +38,8 @@ const ORC = {
   operational_cost_total: 0,
   problem_description: "Troca de bateria do motorhome",
   clients: { name: CLIENTE.name, phone: "(47) 98888-7391", cpf_cnpj: CLIENTE.cpf_cnpj, email: CLIENTE.email, address_line_1: "Rua Sintética, 77", city: "Itajaí", state: "SC" },
-  vessels: { name: "Motorhome Azul", asset_type: "Motorhome" },
+  // revisão de 10/11 (seguranca-pdf): o nome da unidade e a placa sintéticos, que a via reduzida não mostra
+  vessels: { name: "Motorhome Azul", asset_type: "Motorhome", hull_id_or_registration: "ABC1D23" },
   marinas: null,
   service_order_services: [],
   service_order_parts: [],
@@ -247,7 +248,8 @@ Deno.test("via reduzida: o HTML não traz CPF, fone, e-mail nem endereço sinté
   assertEquals(r.ok, true, JSON.stringify(r));
   assertEquals(amb.htmls.length, 1);
   const html = amb.htmls[0];
-  for (const dado of ["123.456.789-09", "98888-7391", "joao.inventado@exemplo.com", "Rua Sintética", "João Pedro Inventado"]) {
+  // revisão de 10/11 (seguranca-pdf): nem o nome da unidade ("Azul") nem a placa
+  for (const dado of ["123.456.789-09", "98888-7391", "joao.inventado@exemplo.com", "Rua Sintética", "João Pedro Inventado", "Azul", "ABC1D23"]) {
     assertEquals(html.includes(dado), false, dado);
   }
   assertStringIncludes(html, "João I.");
@@ -260,6 +262,9 @@ Deno.test("na OS da própria parceira (reduzir falso), o PDF sai inteiro", async
   const amb = montarAmbiente({ destino: { ...DESTINO_OK, reduzir: false } });
   await executar(amb, PEDIDO);
   assertStringIncludes(amb.htmls[0], "123.456.789-09");
+  // revisão de 10/11 (seguranca-pdf): inteiro, com o nome da unidade e a placa
+  assertStringIncludes(amb.htmls[0], "Azul");
+  assertStringIncludes(amb.htmls[0], "ABC1D23");
 });
 
 Deno.test("cliente sem telefone chega ao envio: o parceiro não depende do número do cliente", async () => {
