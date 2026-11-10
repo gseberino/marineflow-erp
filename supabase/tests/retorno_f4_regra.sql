@@ -141,10 +141,11 @@ begin
   -- 5. veto no próprio vínculo
   v_c := pg_temp.f4r_cliente('Davi Regra F4', '5547900014305');
   v_i := pg_temp.f4r_liga(pg_temp.f4r_os(v_c, 'open'), v_p, 'indicou', 'confirmado', c_aviso);
-  update public.os_interessados set veto_do_cliente_em = c_t - interval '1 hour' where id = v_i;
+  -- o veto a 30 min de c_t: as 24 h do aviso (c_aviso, 25 h antes) vencem 1 h antes de c_t, e entre as duas a OS é visível
+  update public.os_interessados set veto_do_cliente_em = c_t - interval '30 minutes' where id = v_i;
   perform pg_temp.f4r_vis('r5', v_i, c_t, 'veto');
-  -- ninguém olha o futuro: antes do veto, visível
-  perform pg_temp.f4r_vis('r5b', v_i, c_t - interval '2 hours', null);
+  -- ninguém olha o futuro: antes do veto (e já passadas as 24 h do aviso), visível
+  perform pg_temp.f4r_vis('r5b', v_i, c_t - interval '45 minutes', null);
   -- 5a. retido (23: retido_em preenchido)
   v_c := pg_temp.f4r_cliente('Elis Regra F4', '5547900014306');
   v_i := pg_temp.f4r_liga(pg_temp.f4r_os(v_c, 'open'), v_p, 'indicou', 'confirmado', c_aviso);
@@ -183,7 +184,11 @@ begin
   update public.service_orders set liberado_retirada_em = c_t - interval '3 days' where id = v_os;
   v_i := pg_temp.f4r_liga(v_os, v_p, 'indicou', 'confirmado', c_aviso);
   perform pg_temp.f4r_vis('21d', v_i, c_t, null);
-  update public.service_orders set delivered_at = c_t - interval '1 day' where id = v_os;
+  -- a entrega só passa pela porta (_so_entrega_pela_porta: agenda.porta = 'on', local à transação), e fecha logo depois
+  perform set_config('agenda.porta', 'on', true);
+  -- so_entrega_depois_da_conclusao: entrega só com a saída (check_out_at)
+  update public.service_orders set check_out_at = c_t - interval '1 day', delivered_at = c_t - interval '1 day' where id = v_os;
+  perform set_config('agenda.porta', '', true);
   perform pg_temp.f4r_vis('21e', v_i, c_t, 'os_fora');
   -- rascunho sem origem do parceiro: fora; com a origem deste parceiro: visível
   v_os := pg_temp.f4r_os(v_c, 'draft', 'Motorhome', '2026-12-10 10:00-03', null, 'draft');
@@ -192,7 +197,10 @@ begin
   update public.service_orders set origem_parceiro_id = v_p where id = v_os;
   perform pg_temp.f4r_vis('21g', v_i, c_t, null);
   -- OS agrupada (merged_into_id): fora
+  -- _orcamento_agrupado_guarda: só Agrupar/Desagrupar mudam o vínculo (marineflow.agrupar_orcamentos, local à transação)
+  perform set_config('marineflow.agrupar_orcamentos', 'on', true);
   update public.service_orders set merged_into_id = v_os_a where id = v_os;
+  perform set_config('marineflow.agrupar_orcamentos', '', true);
   perform pg_temp.f4r_vis('21h', v_i, c_t, 'os_fora');
   -- 9. cliente inativo; cliente genérico sem telefone
   v_c := pg_temp.f4r_cliente('Joel Regra F4', '5547900014311');
@@ -236,41 +244,42 @@ begin
   end if;
 
   -- ── 15, 16 e 22. O lote, por sinal objetivo (só as OS deste teste; a carteira real também aparece e é ignorada) ──
+  -- as OS do lote nascem antes da hora real: parceiro_propor confere a regra 8 com now(), e OS no futuro dá os_fora
   insert into public.parceiros (nome, sigla, tipo, client_id) values ('Revenda Lote F4', 'RLF', 'revenda_e_patio', v_mp) returning id into v_p_lote;
   -- numero_do_pedido: rascunho pedido pela revenda (unidade náutica: sem carteira)
   v_c := pg_temp.f4r_cliente('Marta Lote F4', '5547900014321');
-  v_os_pedido := pg_temp.f4r_os(v_c, 'draft', 'Lancha', '2026-12-20 10:00-03', null, 'draft', v_p_lote);
+  v_os_pedido := pg_temp.f4r_os(v_c, 'draft', 'Lancha', '2026-11-01 10:00-03', null, 'draft', v_p_lote);
   -- unidade_anterior: a mesma unidade e o mesmo cliente com vínculo comercial confirmado (contratante) numa OS antiga
   v_l2 := pg_temp.f4r_cliente('Lúcia Lote F4', '5547900014322');
   insert into public.vessels (client_id, name, asset_type, hull_id_or_registration)
     values (v_l2, 'Sereia Lote', 'Lancha', 'PLC1F44') returning id into v_v2;
   v_os_antiga := pg_temp.f4r_os(v_l2, 'completed', 'Lancha', '2026-06-01 10:00-03', v_v2);
   perform pg_temp.f4r_liga(v_os_antiga, v_p_lote, 'contratante', 'confirmado', '2026-06-02 10:00-03');
-  v_os_unidade := pg_temp.f4r_os(v_l2, 'open', 'Lancha', '2026-12-21 10:00-03', v_v2);
+  v_os_unidade := pg_temp.f4r_os(v_l2, 'open', 'Lancha', '2026-11-02 10:00-03', v_v2);
   -- propria: a OS da própria revenda
-  v_os_propria := pg_temp.f4r_os(v_mp, 'open', 'Lancha', '2026-12-22 10:00-03');
+  v_os_propria := pg_temp.f4r_os(v_mp, 'open', 'Lancha', '2026-11-03 10:00-03');
   -- carteira: motorhome na carteira, sem outro sinal
   v_c := pg_temp.f4r_cliente('Nara Lote F4', '5547900014324');
-  v_os_carteira := pg_temp.f4r_os(v_c, 'open', 'Motorhome', '2026-12-23 10:00-03');
+  v_os_carteira := pg_temp.f4r_os(v_c, 'open', 'Motorhome', '2026-11-04 10:00-03');
   -- nome igual ao de um cliente ligado, sem sinal: nunca propõe
   v_c := pg_temp.f4r_cliente('Lúcia Lote F4', '5547900014325');
-  v_os_nome := pg_temp.f4r_os(v_c, 'open', 'Lancha', '2026-12-24 10:00-03');
+  v_os_nome := pg_temp.f4r_os(v_c, 'open', 'Lancha', '2026-11-05 10:00-03');
   -- a mesma placa e o mesmo nome de unidade de outro cliente, sem sinal e sem carteira: nunca propõe
   v_c := pg_temp.f4r_cliente('Otto Lote F4', '5547900014326');
   insert into public.vessels (client_id, name, asset_type, hull_id_or_registration)
     values (v_c, 'Sereia Lote', 'Lancha', 'PLC1F44') returning id into v_vessel;
-  v_os_placa := pg_temp.f4r_os(v_c, 'open', 'Lancha', '2026-12-25 10:00-03', v_vessel);
+  v_os_placa := pg_temp.f4r_os(v_c, 'open', 'Lancha', '2026-11-06 10:00-03', v_vessel);
   -- cliente com veto do par: fora
   v_c := pg_temp.f4r_cliente('Pia Lote F4', '5547900014327');
-  v_os_veto := pg_temp.f4r_os(v_c, 'open', 'Motorhome', '2026-12-26 10:00-03');
-  insert into public.parceiro_vetos (client_id, parceiro_id, em, origem) values (v_c, v_p_lote, c_t - interval '5 days', 'nao_mp');
+  v_os_veto := pg_temp.f4r_os(v_c, 'open', 'Motorhome', '2026-11-07 10:00-03');
+  insert into public.parceiro_vetos (client_id, parceiro_id, em, origem) values (v_c, v_p_lote, '2026-11-05 10:00-03', 'nao_mp');   -- antes da hora real: parceiro_propor olha now()
   -- 16. par recusado, com sinal forte: nunca volta
   v_c := pg_temp.f4r_cliente('Rui Lote F4', '5547900014328');
-  v_os_recusada := pg_temp.f4r_os(v_c, 'draft', 'Lancha', '2026-12-27 10:00-03', null, 'draft', v_p_lote);
+  v_os_recusada := pg_temp.f4r_os(v_c, 'draft', 'Lancha', '2026-11-08 10:00-03', null, 'draft', v_p_lote);
   perform pg_temp.f4r_liga(v_os_recusada, v_p_lote, 'indicou', 'recusado', null);
   -- 22. rascunho fora da regra 8 (sem origem do parceiro e fora da carteira): nunca proposto
   v_c := pg_temp.f4r_cliente('Saulo Lote F4', '5547900014329');
-  v_os_rascunho := pg_temp.f4r_os(v_c, 'draft', 'Motorhome', '2026-12-28 10:00-03', null, 'draft');
+  v_os_rascunho := pg_temp.f4r_os(v_c, 'draft', 'Motorhome', '2026-11-09 10:00-03', null, 'draft');
 
   v_ids := array[v_os_pedido, v_os_unidade, v_os_propria, v_os_carteira, v_os_nome, v_os_placa, v_os_veto, v_os_recusada,
                  v_os_rascunho, v_os_antiga];
