@@ -118,11 +118,11 @@ begin
     -- FASE 7b: fim
     -- FASE 7d: (7d P5) e os blocos da 7d (20261107100400 recria agenda_desfazer, só acréscimo)
     -- FASE 7d: fim
-    if not v_bloco and l ~ '^\s*-- (FASE [567][bcdf]?|CORREÇÃO 29/10 \(P3\)):' and l !~ '^\s*-- (FASE [567][bcdf]?|CORREÇÃO 29/10 \(P3\)): fim' then
+    if not v_bloco and l ~ '^\s*-- (FASE [567][bcdfg]?|CORREÇÃO 29/10 \(P3\)):' and l !~ '^\s*-- (FASE [567][bcdfg]?|CORREÇÃO 29/10 \(P3\)): fim' then
       v_bloco := true; continue;
     end if;
     if v_bloco then
-      if l ~ '^\s*-- (FASE [567][bcdf]?|CORREÇÃO 29/10 \(P3\)): fim' then v_bloco := false; end if;
+      if l ~ '^\s*-- (FASE [567][bcdfg]?|CORREÇÃO 29/10 \(P3\)): fim' then v_bloco := false; end if;
       continue;
     end if;
     -- CORREÇÃO 29/10 (revisão): os blocos da revisão do lote (20261030100500) também saem, e a linha que um deles

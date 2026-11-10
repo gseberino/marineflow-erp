@@ -799,7 +799,7 @@ begin
       (select replace(p.prosrc, E'\r\n', E'\n') from pg_proc p where p.oid = x.assin::regprocedure) = pg_temp.corpo(v_mig, x.nome), null);
     r := pg_temp.ok(r, format('O6c %s: %s blocos da 7f, e nenhum aberto dentro de um bloco de antes (os tiradores das etapas de antes não fecham no fim errado)', x.nome, x.blocos),
       (select count(*) from regexp_matches(pg_temp.corpo(v_mig, x.nome), '-- FASE 7f: fim', 'g')) = x.blocos
-      and not exists (select 1 from (select l, sum(case when l ~ '^\s*-- FASE 7[bcde]?:' and l !~ ': fim' then 1 when l ~ '^\s*-- FASE 7[bcde]?: fim' then -1 else 0 end) over (order by o) as prof
+      and not exists (select 1 from (select l, sum(case when l ~ '^\s*-- FASE 7[bcdeg]?:' and l !~ ': fim' then 1 when l ~ '^\s*-- FASE 7[bcdeg]?: fim' then -1 else 0 end) over (order by o) as prof
                                        from unnest(string_to_array(pg_temp.corpo(v_mig, x.nome), E'\n')) with ordinality u(l, o)) y
                        where y.prof > 0 and y.l ~ '^\s*-- FASE 7f:'), null);
   end loop;

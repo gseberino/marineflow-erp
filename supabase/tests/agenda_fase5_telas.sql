@@ -92,9 +92,9 @@ begin
     -- CORREÇÃO FASE 6: fim
     -- FASE 7b: (7b P5) e os blocos "-- FASE 7b: … fim" (a 20261101100400 recria os_plano_da_os de novo, só acréscimo): a régua aceita "7b", e "7d" (a 20261107100700, idem)
     -- FASE 7b: fim
-    if not v_bloco and l ~ '^\s*-- FASE ([56]|7[bdef]):' and l !~ '^\s*-- FASE ([56]|7[bdef]): fim' then v_bloco := true; continue; end if;
+    if not v_bloco and l ~ '^\s*-- FASE ([56]|7[bdefg]):' and l !~ '^\s*-- FASE ([56]|7[bdefg]): fim' then v_bloco := true; continue; end if;
     if v_bloco then
-      if l ~ '^\s*-- FASE ([56]|7[bdef]): fim' then v_bloco := false; end if;
+      if l ~ '^\s*-- FASE ([56]|7[bdefg]): fim' then v_bloco := false; end if;
       continue;
     end if;
     v_b := v_b || l;

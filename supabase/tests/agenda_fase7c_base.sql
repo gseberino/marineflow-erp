@@ -122,11 +122,11 @@ declare
   l        text;
 begin
   foreach l in array string_to_array(replace(p, E'\r\n', E'\n'), E'\n') loop
-    if not v_dentro and l ~ '^\s*-- FASE 7[cdef]:' and l !~ '^\s*-- FASE 7[cdef]: fim' then
+    if not v_dentro and l ~ '^\s*-- FASE 7[cdefg]:' and l !~ '^\s*-- FASE 7[cdefg]: fim' then
       v_dentro := true;
       continue;
     end if;
-    if v_dentro and l ~ '^\s*-- FASE 7[cdef]: fim' then
+    if v_dentro and l ~ '^\s*-- FASE 7[cdefg]: fim' then
       v_dentro := false;
       continue;
     end if;
@@ -144,10 +144,10 @@ end $f$;
 -- FASE 7d: o texto sem os blocos "-- FASE 7d: … -- FASE 7d: fim" (para o B11d comparar a viva com as da 7c, na mesma régua de antes)
 create function pg_temp.sem_7d(p text) returns text language sql immutable as $f$
   select array_to_string(array(
-           select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7[def]:' and l !~ '^\s*-- FASE 7[def]: fim' then 1
-                                                when l ~ '^\s*-- FASE 7[def]: fim' then -1 else 0 end)
+           select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7[defg]:' and l !~ '^\s*-- FASE 7[defg]: fim' then 1
+                                                when l ~ '^\s*-- FASE 7[defg]: fim' then -1 else 0 end)
                                        over (order by o rows between unbounded preceding and current row) as dentro,
-                                 l ~ '^\s*-- FASE 7[def]: fim' as fecha
+                                 l ~ '^\s*-- FASE 7[defg]: fim' as fecha
                             from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n')
 $f$;

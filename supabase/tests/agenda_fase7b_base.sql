@@ -611,10 +611,10 @@ begin
   select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = 'public._agenda_modo_da_pergunta(text, text)'::regprocedure;
   -- FASE 7c: a 20261102100000 recria de novo com o bloco "-- FASE 7c:" (só acréscimo): ele sai antes da régua da cópia da 7b
   v_novo := array_to_string(array(
-              select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7[cdef]:' and l !~ '^\s*-- FASE 7[cdef]: fim' then 1
-                                                   when l ~ '^\s*-- FASE 7[cdef]: fim' then -1 else 0 end)
+              select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7[cdefg]:' and l !~ '^\s*-- FASE 7[cdefg]: fim' then 1
+                                                   when l ~ '^\s*-- FASE 7[cdefg]: fim' then -1 else 0 end)
                                           over (order by o rows between unbounded preceding and current row) as dentro,
-                                    l ~ '^\s*-- FASE 7[cdef]: fim' as fecha
+                                    l ~ '^\s*-- FASE 7[cdefg]: fim' as fecha
                                from unnest(string_to_array(v_novo, E'\n')) with ordinality u(l, o)) x
                where dentro = 0 and not fecha order by o), E'\n');
   -- FASE 7c: fim

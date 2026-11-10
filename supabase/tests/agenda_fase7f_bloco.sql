@@ -701,7 +701,7 @@ begin
       (select replace(p.prosrc, E'\r\n', E'\n') from pg_proc p where p.oid = x.assin::regprocedure) = pg_temp.corpo(v_mig, x.nome), null);
     r := pg_temp.ok(r, format('L7c %s: o tirador morde: a cópia tem bloco da 7f', x.nome), pg_temp.corpo(v_mig, x.nome) like '%-- FASE 7f:%', null);
     r := pg_temp.ok(r, format('L7c2 %s: nenhum bloco da 7f aberto dentro de outro: os tiradores das etapas de antes não fecham no fim de um bloco de dentro', x.nome),
-      not exists (select 1 from (select l, sum(case when l ~ '^\s*-- FASE 7[bcde]?:' and l !~ ': fim' then 1 when l ~ '^\s*-- FASE 7[bcde]?: fim' then -1 else 0 end) over (order by o) as prof
+      not exists (select 1 from (select l, sum(case when l ~ '^\s*-- FASE 7[bcdeg]?:' and l !~ ': fim' then 1 when l ~ '^\s*-- FASE 7[bcdeg]?: fim' then -1 else 0 end) over (order by o) as prof
                                    from unnest(string_to_array(pg_temp.corpo(v_mig, x.nome), E'\n')) with ordinality u(l, o)) y
                    where y.prof > 0 and y.l ~ '^\s*-- FASE 7f:'), null);
   end loop;

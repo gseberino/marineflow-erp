@@ -173,9 +173,9 @@ begin
     -- FASE 7b: fim
     -- FASE 7d: (7d P5) e os blocos da 7d (20261107100400 recria agenda_decidir, só acréscimo)
     -- FASE 7d: fim
-    if not v_bloco and l ~ '^\s*-- FASE [567][bcdef]?:' and l !~ '^\s*-- FASE [567][bcdef]?: fim' then v_bloco := true; continue; end if;
+    if not v_bloco and l ~ '^\s*-- FASE [567][bcdefg]?:' and l !~ '^\s*-- FASE [567][bcdefg]?: fim' then v_bloco := true; continue; end if;
     if v_bloco then
-      if l ~ '^\s*-- FASE [567][bcdef]?: fim' then v_bloco := false; end if;
+      if l ~ '^\s*-- FASE [567][bcdefg]?: fim' then v_bloco := false; end if;
       continue;
     end if;
     v_b := v_b || l;

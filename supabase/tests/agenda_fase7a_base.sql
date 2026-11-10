@@ -974,10 +974,10 @@ begin
   -- (FASE 7b: a 20261101100000 recria de novo, com o bloco "-- FASE 7b:", que sai junto: '-- FASE 7b?:'. FASE 7c: e a
   -- 20261102100000, com o bloco "-- FASE 7c:", que também sai: '-- FASE 7[bc]?:')
   select array_to_string(array(
-           select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7[bcdef]?:' and l !~ '-- FASE 7[bcdef]?: fim' then 1
-                                                when l ~ '-- FASE 7[bcdef]?: fim' then -1 else 0 end)
+           select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7[bcdefg]?:' and l !~ '-- FASE 7[bcdefg]?: fim' then 1
+                                                when l ~ '-- FASE 7[bcdefg]?: fim' then -1 else 0 end)
                                        over (order by o rows between unbounded preceding and current row) as dentro,
-                                 l ~ '-- FASE 7[bcdef]?: fim' as fecha
+                                 l ~ '-- FASE 7[bcdefg]?: fim' as fecha
                             from unnest(string_to_array(v_novo, E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n') into v_sem;
   -- (o bloco do 7a P1 e, desde a 20261031100850, o do 7a P11, que a recria copiando desta: 2 blocos; sem eles, a de 30/10)

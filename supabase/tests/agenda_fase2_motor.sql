@@ -1065,12 +1065,12 @@ begin
     end if;
     -- CORREÇÃO FASE 6: fim
     -- FASE 7 (7a P3): e os blocos "-- FASE 7: … fim" (20261031100200 recriou os_prontidao: só acréscimo)
-    if not v_bloco and l ~ '^\s*-- FASE ([2467]|7e):' and l !~ '^\s*-- FASE ([2467]|7e): fim' then
+    if not v_bloco and l ~ '^\s*-- FASE ([2467]|7[eg]):' and l !~ '^\s*-- FASE ([2467]|7[eg]): fim' then
       v_bloco := true;
       continue;
     end if;
     if v_bloco then
-      if l ~ '^\s*-- FASE ([2467]|7e): fim' then v_bloco := false; end if;
+      if l ~ '^\s*-- FASE ([2467]|7[eg]): fim' then v_bloco := false; end if;
       continue;
     end if;
     v_b := v_b || l;
