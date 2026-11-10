@@ -331,6 +331,15 @@ begin
   if v_oi.situacao is distinct from 'confirmado' or v_oi.papel is distinct from 'indicou' or v_oi.confirmado_por is distinct from v_dono then
     raise exception '8d: C não gravou indicou (%)', v_r;
   end if;
+  -- revisão de 10/11 (banco-1): com o parceiro em sombra, a saída do aviso nasce em sombra e nunca sai; o dono lê isso, e
+  -- não "agendado"
+  if coalesce(v_r ->> 'aviso', '') not like '%o 1: ligado à RCF; o aviso ao cliente ficou em teste (sombra) e não sai%'
+     or v_r ->> 'aviso' like '%foi agendado%'
+     or not exists (select 1 from public.retorno_saidas s
+                     where s.tipo = 'parceiro_aviso_cliente' and s.client_id = v_oi.client_id and s.modo = 'sombra'
+                       and s.dedupe_key like '%:sombra') then
+    raise exception '8g: a frase do aviso em sombra (%)', v_r;
+  end if;
   select * into v_oi from public.os_interessados oi where oi.id = v_int2;
   if v_oi.situacao is distinct from 'confirmado' or v_oi.papel is distinct from 'anfitria' or v_oi.aviso_ao_cliente is distinct from 'nao_avisado'
      or exists (select 1 from public.retorno_saidas s where s.tipo = 'parceiro_aviso_cliente' and s.dados ->> 'client_id' = v_oi.client_id::text)
@@ -469,7 +478,8 @@ begin
   select * into v_pp from public.parceiro_paineis pp where pp.id = v_painel;
   if v_pp.editado is not true
      or (select l ->> 'fora_por' from jsonb_array_elements(v_pp.linhas) l where l ->> 'interessado_id' = v_int2::text) is distinct from 'tirada'
-     or coalesce((pg_temp.f4k_item(v_cartao, 1)).texto_mostrado, '') not like '1. Pátio da RCF de hoje: 1 veículos%' then
+     -- revisão de 10/11 (banco-4): "1 veículo", no singular
+     or coalesce((pg_temp.f4k_item(v_cartao, 1)).texto_mostrado, '') not like '1. Pátio da RCF de hoje: 1 veículo, %' then
     raise exception '7a: *1 tira 2* (%)', v_r;
   end if;
   v_r := pg_temp.f4k_dito('{"comando": "sabe", "n": 1, "linha": 1}', c_t + interval '33 minutes');
@@ -655,6 +665,12 @@ begin
      or (pg_temp.f4k_item(v_cartao, 2)).estado is distinct from 'vivo' then
     raise exception '20c: *resolvido* no vínculo (%)', v_r;
   end if;
+  -- revisão de 10/11 (banco-3): só a pergunta sem candidata viva: o rodapé oferece *resolvido 1*, nunca uma letra
+  perform pg_temp.f4k_dito('{"comando": "tirar", "ns": [2]}', c_t + interval '1 hour 22 minutes 30 seconds');
+  v_t := (select c.texto from public.parceiro_cartoes c where c.id = v_cartao);
+  if coalesce(v_t, '') not like '%*resolvido 1* fecha a conversa · *não N* tira · *ver 1* mostra' or v_t like '%Escolha a letra%' then
+    raise exception '15h: o rodapé da pergunta sem candidata (%)', v_t;
+  end if;
   perform public._parceiro_cartao_encerrar(v_cartao, 'decidido', 'rejected', null, c_t + interval '1 hour 23 minutes');
   update public.parceiros set ativo = false where id in (v_q, v_s);
   update public.parceiros set ativo = true where id = v_p;
@@ -695,6 +711,11 @@ begin
     raise exception '10a: letras de retido e aviso (% % %)', pg_temp.f4k_letras(v_cartao, 1), pg_temp.f4k_letras(v_cartao, 2),
                     pg_temp.f4k_letras(v_cartao, 3);
   end if;
+  -- revisão de 10/11 (banco-3): nada a fazer sem letra; o exemplo do rodapé é a 1ª letra do 1º item (o retido tem A e V)
+  v_t := (select c.texto from public.parceiro_cartoes c where c.id = v_cartao);
+  if coalesce(v_t, '') not like '%Escolha a letra (*1 A*) e mande *sim <PIN>* · *não N* tira · *ver 1* mostra' or v_t like '%*1 C*%' then
+    raise exception '10e: o rodapé do retido (%)', v_t;
+  end if;
   -- 21: no registrado, A e B não existem
   if coalesce(pg_temp.f4k_dito('{"comando": "escolher", "n": 3, "letra": "A"}', c_t + interval '2 hours 1 minute') ->> 'texto', '') not like 'O 3 não tem a letra A.%'
      or coalesce(pg_temp.f4k_dito('{"comando": "escolher", "n": 3, "letra": "B"}', c_t + interval '2 hours 1 minute') ->> 'texto', '') not like 'O 3 não tem a letra B.%' then
@@ -712,6 +733,12 @@ begin
                   where s.tipo = 'parceiro_aviso_cliente' and s.dedupe_key like 'parceiro:aviso:' || v_c || ':' || v_p || ':r1%')
      or (pg_temp.f4k_item(v_cartao, 3)).estado is distinct from 'feito' then
     raise exception '21b: a letra C não reenviou (%)', v_r;
+  end if;
+  -- revisão de 10/11 (banco-1): o reenvio com o parceiro em sombra grava a saída que nunca sai; o dono lê isso, e não
+  -- "sai de novo"
+  if coalesce(v_r ->> 'aviso', '') not like '%o 3: o reenvio do aviso ficou em teste (sombra) e não sai%'
+     or v_r ->> 'aviso' like '%sai de novo%' then
+    raise exception '21c: a frase do reenvio em sombra (%)', v_r;
   end if;
   -- A no retido limpa retido_em; A no aviso registra pessoalmente
   v_cartao := pg_temp.f4k_cartao(array[(pg_temp.f4k_fila('retido:' || v_int)).id, (pg_temp.f4k_fila('aviso:' || v_int2)).id],
@@ -799,11 +826,22 @@ begin
   if (select oi.situacao || '/' || oi.papel from public.os_interessados oi where oi.id = v_oi.id) is distinct from 'confirmado/indicou' then
     raise exception '9e: C no *parceiro 74* (%)', v_r;
   end if;
+  -- revisão de 10/11 (banco-1): com o parceiro desligado, nenhum aviso é agendado; o dono lê isso, e não "agendado"
+  if coalesce(v_r ->> 'aviso', '') not like '%o 1: ligado à RCF; o aviso ao cliente está desligado (nada sai)%'
+     or v_r ->> 'aviso' like '%foi agendado%'
+     or exists (select 1 from public.retorno_saidas s where s.tipo = 'parceiro_aviso_cliente' and s.client_id = v_c) then
+    raise exception '9i: a frase do aviso com o parceiro desligado (%)', v_r;
+  end if;
   v_r := public.parceiro_cartao_abrir_os('RCF', '98874', v_dono, c_t + interval '4 hours 3 minutes');
   v_cartao := (v_r ->> 'cartao_id')::uuid;
   if (pg_temp.f4k_item(v_cartao, 1)).tipo is distinct from 'corte' or pg_temp.f4k_letras(v_cartao, 1) is distinct from 'ARV'
      or coalesce((pg_temp.f4k_item(v_cartao, 1)).texto_mostrado, '') not like '1. OS-98874 · Ducato · ligada à RCF (ela indicou) · *1 A* pausa%' then
     raise exception '9f: o corte (%)', v_r;
+  end if;
+  -- revisão de 10/11 (banco-3): o corte não tem C; o rodapé usa a 1ª letra dele
+  v_t := (select c.texto from public.parceiro_cartoes c where c.id = v_cartao);
+  if coalesce(v_t, '') not like '%Escolha a letra (*1 A*) e mande *sim <PIN>*%' or v_t like '%*1 C*%' then
+    raise exception '9j: o rodapé do corte (%)', v_t;
   end if;
   perform pg_temp.f4k_dito('{"comando": "escolher", "n": 1, "letra": "A"}', c_t + interval '4 hours 4 minutes');
   perform pg_temp.f4k_sim(v_cartao, c_t + interval '4 hours 5 minutes');

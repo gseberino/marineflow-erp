@@ -459,6 +459,7 @@ declare
   v_papel text;
   v_av jsonb;
   v_aviso text;
+  v_saida uuid;
 begin
   -- 1. Só o dono.
   if p_autor is null or p_autor is distinct from (select d.id from public._comprovante_dono() d) then
@@ -523,9 +524,18 @@ begin
   end if;
 
   -- 5. Com telefone utilizável, o aviso ao cliente (P6); o vínculo segue nao_avisado até a mensagem sair.
+  --    Revisão de 10/11 (banco-1): 'agendado' só quando a mensagem vai sair de fato (a saída existe e o modo efetivo dela é
+  --    ligado). A F4 desligada não agenda nada (parceiro_desligado); o tipo em sombra grava a saída que nunca sai (sombra);
+  --    o aviso já enviado do par é herdado (herdado). O cartão diz ao dono a frase de cada um.
   v_av := public.parceiro_aviso_agendar(v_oi.id, v_agora);
   if coalesce((v_av ->> 'ok')::boolean, false) then
-    return jsonb_build_object('ok', true, 'interessado_id', v_oi.id, 'papel', v_papel, 'aviso', 'agendado',
+    v_saida := nullif(v_av ->> 'saida_id', '')::uuid;
+    v_aviso := case
+      when v_saida is null then coalesce(v_av ->> 'motivo', 'parceiro_desligado')
+      when coalesce((v_av ->> 'herdou')::boolean, false) or v_av ->> 'motivo' = 'ja_avisado' then 'herdado'
+      when public._parceiro_modo_efetivo(v_saida, v_agora) ->> 'modo' = 'ligado' then 'agendado'
+      else 'sombra' end;
+    return jsonb_build_object('ok', true, 'interessado_id', v_oi.id, 'papel', v_papel, 'aviso', v_aviso,
                               'saida_id', v_av -> 'saida_id');
   end if;
 
@@ -546,7 +556,7 @@ end;
 $$;
 
 comment on function public._parceiro_confirmar(uuid, uuid, text, timestamptz, text, uuid) is
-  'Retorno F4 (P3.1): confirma o vínculo proposto (só o dono, 42501). Papel final = coalesce(p_papel, papel); nulo → {ok: false, motivo: sem_papel}. Anfitriã sem aviso; OS da própria parceira → proprio_parceiro e aviso_em agora; com telefone, parceiro_aviso_agendar (P6); sem telefone, p_aviso pessoalmente/pela_revenda grava o aviso agora, e sem letra o item aviso entra na fila.';
+  'Retorno F4 (P3.1): confirma o vínculo proposto (só o dono, 42501). Papel final = coalesce(p_papel, papel); nulo → {ok: false, motivo: sem_papel}. Anfitriã sem aviso; OS da própria parceira → proprio_parceiro e aviso_em agora; com telefone, parceiro_aviso_agendar (P6), e o aviso devolvido diz o que vai acontecer: agendado (a saída sai, modo efetivo ligado), sombra (a saída nunca sai), parceiro_desligado (nada agendado) ou herdado (o par já foi avisado); sem telefone, p_aviso pessoalmente/pela_revenda grava o aviso agora, e sem letra o item aviso entra na fila (pendente).';
 
 revoke all on function public._parceiro_confirmar(uuid, uuid, text, timestamptz, text, uuid) from public, anon, authenticated;
 

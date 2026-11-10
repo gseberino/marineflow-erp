@@ -286,6 +286,8 @@ declare
   v_rodape text;
   v_final text;
   v_lim integer;
+  v_tipo text;
+  v_letra text;
 begin
   select * into v_c from public.parceiro_cartoes c where c.id = p_cartao;
   select count(*), min(i.n) into v_vivos, v_primeiro
@@ -310,7 +312,25 @@ begin
                               when cardinality(v_faz) = 2 then format('o %s e o %s', v_faz[1], v_faz[2])
                               else 'os 3' end, v_primeiro);
     else
-      v_rodape := format('Escolha a letra (*%s C*) e mande *sim <PIN>* · *não N* tira · *ver %s* mostra', v_primeiro, v_primeiro);
+      -- revisão de 10/11 (banco-3): a letra do exemplo é a 1ª que existe no 1º item vivo (C não existe no corte, no retido,
+      -- no aviso nem no pedido); sem letra, *resolvido N* na pergunta e no pedido, e só *não N* nos outros
+      select i.tipo,
+             (select t.o ->> 'letra'
+                from jsonb_array_elements(case when jsonb_typeof(i.opcoes) = 'array' then i.opcoes else '[]'::jsonb end)
+                     with ordinality t(o, k)
+               where coalesce(t.o ->> 'letra', '') <> ''
+               order by t.k
+               limit 1)
+        into v_tipo, v_letra
+        from public.parceiro_cartao_itens i
+       where i.cartao_id = p_cartao and i.estado = 'vivo' and i.n = v_primeiro;
+      if v_letra is not null then
+        v_rodape := format('Escolha a letra (*%s %s*) e mande *sim <PIN>* · *não N* tira · *ver %s* mostra', v_primeiro, v_letra, v_primeiro);
+      elsif v_tipo in ('pergunta', 'pedido') then
+        v_rodape := format('*resolvido %s* fecha a conversa · *não N* tira · *ver %s* mostra', v_primeiro, v_primeiro);
+      else
+        v_rodape := format('*não N* tira · *ver %s* mostra', v_primeiro);
+      end if;
     end if;
   else
     v_rodape := v_c.dados ->> 'rodape';
@@ -338,7 +358,7 @@ end;
 $$;
 
 comment on function public._parceiro_cartao_texto(uuid, text) is
-  'Retorno F4 (P8): o texto do cartão do parceiro: cabeçalho, os itens vivos com a letra escolhida, "e mais N" e o rodapé do que o *sim <PIN>* faz (item selecionado que não exige letra, ou com a letra). Nunca passa de 3.500 caracteres.';
+  'Retorno F4 (P8): o texto do cartão do parceiro: cabeçalho, os itens vivos com a letra escolhida, "e mais N" e o rodapé do que o *sim <PIN>* faz (item selecionado que não exige letra, ou com a letra); sem nada a fazer, o exemplo usa a 1ª letra do 1º item vivo, ou *resolvido N* (pergunta e pedido sem letra), ou só *não N*. Nunca passa de 3.500 caracteres.';
 
 revoke all on function public._parceiro_cartao_texto(uuid, text) from public, anon, authenticated;
 
@@ -751,7 +771,9 @@ begin
       end if;
       v_ver := v_ver || v_linha;
     end loop;
-    v_texto := format('%s. Pátio da %s de hoje: %s veículos, %s', p_n, v_pa.sigla, coalesce(v_saem, 0),
+    -- revisão de 10/11 (banco-4): "1 veículo" no singular, como no fechamento das 17:30
+    v_texto := format('%s. Pátio da %s de hoje: %s, %s', p_n, v_pa.sigla,
+                      case when coalesce(v_saem, 0) = 1 then '1 veículo' else coalesce(v_saem, 0) || ' veículos' end,
                       case when coalesce(v_mudaram, 0) = 0 then 'nenhum mudou'
                            when v_mudaram = 1 then '1 mudou' else v_mudaram || ' mudaram' end)
                || case when coalesce(v_fora, 0) > 0 then format(', %s fora (%s)', v_fora, replace(v_motivo, '_', ' ')) else '' end
@@ -1512,11 +1534,12 @@ begin
       perform public._parceiro_painel_marcar(v_pp.id, jsonb_build_array(jsonb_build_object('interessado_id', v_l ->> 'interessado_id',
                                                                                              'fora_por', 'tirada')));
       update public.parceiro_paineis pp set editado = true, impressao = public._parceiro_impressao(pp.linhas) where pp.id = v_pp.id;
-      -- o item mostra o painel de novo, com o mesmo n
+      -- o item mostra o painel de novo, com o mesmo n (revisão de 10/11, banco-4: "1 veículo" no singular)
       select count(*) into v_x from jsonb_array_elements((select pp.linhas from public.parceiro_paineis pp where pp.id = v_pp.id)) l
        where l ->> 'fora_por' is null and coalesce(l ->> 'n', '') ~ '^[0-9]{1,3}$';
       update public.parceiro_cartao_itens i
-         set texto_mostrado = regexp_replace(i.texto_mostrado, ': [0-9]+ veículos', format(': %s veículos', v_x)),
+         set texto_mostrado = regexp_replace(i.texto_mostrado, ': [0-9]+ veículos?,',
+                                             ': ' || (case when v_x = 1 then '1 veículo' else v_x || ' veículos' end) || ','),
              retrato = jsonb_set(i.retrato, '{ver}', coalesce((select jsonb_agg(case when x like v_linha || '. %' then x || ' [tirada]' else x end order by o)
                                                                  from jsonb_array_elements_text(i.retrato -> 'ver') with ordinality t(x, o)), '[]'::jsonb))
        where i.id = v_item.id;
@@ -1687,7 +1710,13 @@ begin
     return jsonb_build_object('r', 'feito',
       'frase', case when v_acao = 'recusar' then format('o %s: recusado para sempre', v_i.n)
                     when v_r ->> 'papel' = 'anfitria' then format('o %s: fica só no pátio, sem aviso e sem painel', v_i.n)
+                    -- revisão de 10/11 (banco-1): a frase diz o que vai acontecer de fato com o aviso
                     when v_r ->> 'aviso' = 'agendado' then format('o %s: ligado à %s; o aviso ao cliente foi agendado', v_i.n, v_sigla)
+                    when v_r ->> 'aviso' = 'sombra' then format('o %s: ligado à %s; o aviso ao cliente ficou em teste (sombra) e não sai', v_i.n, v_sigla)
+                    when v_r ->> 'aviso' = 'parceiro_desligado' then format('o %s: ligado à %s; o aviso ao cliente está desligado (nada sai)', v_i.n, v_sigla)
+                    when v_r ->> 'aviso' = 'herdado' then format('o %s: ligado à %s; o cliente já tinha recebido o aviso', v_i.n, v_sigla)
+                    when v_r ->> 'aviso' = 'pendente' and (v_cfg.id is null or v_cfg.parceiro_modo = 'desligado')
+                      then format('o %s: ligado à %s; o cliente segue sem aviso (o *parceiro* está desligado; o item volta quando ele ligar)', v_i.n, v_sigla)
                     when v_r ->> 'aviso' = 'pendente' then format('o %s: ligado à %s; o cliente segue sem aviso (volta no *parceiro*)', v_i.n, v_sigla)
                     else format('o %s: ligado à %s', v_i.n, v_sigla) end,
       'saida_id', v_r ->> 'saida_id');
@@ -1784,9 +1813,15 @@ begin
     if v_r is null or not coalesce((v_r ->> 'ok')::boolean, false) then
       return jsonb_build_object('r', 'falhou', 'motivo', coalesce(v_r ->> 'motivo', 'erro'));
     end if;
+    -- revisão de 10/11 (banco-1): "sai de novo" só com a saída ligada; o tipo em sombra grava a saída que nunca sai, e o
+    -- aviso já enviado do par é herdado
+    v_s := nullif(v_r ->> 'saida_id', '')::uuid;
     return jsonb_build_object('r', 'feito', 'saida_id', v_r ->> 'saida_id',
-      'frase', case when v_acao = 'reenviar' then format('o %s: a mensagem de aviso sai de novo', v_i.n)
-                    else format('o %s: aviso registrado', v_i.n) end);
+      'frase', case when v_acao is distinct from 'reenviar' then format('o %s: aviso registrado', v_i.n)
+                    when coalesce((v_r ->> 'herdou')::boolean, false) then format('o %s: o cliente já tinha recebido o aviso', v_i.n)
+                    when v_s is not null and public._parceiro_modo_efetivo(v_s, v_agora) ->> 'modo' = 'ligado'
+                      then format('o %s: a mensagem de aviso sai de novo', v_i.n)
+                    else format('o %s: o reenvio do aviso ficou em teste (sombra) e não sai', v_i.n) end);
 
   elsif v_i.tipo = 'retido' then
     if v_acao = 'seguir' then

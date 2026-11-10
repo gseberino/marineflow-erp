@@ -649,7 +649,8 @@ begin
     raise exception '27b: o preparo de outro autor (%)', v_x;
   end if;
   -- 8 e 27: o vínculo nasce no destino cliente, indicou e sem requalificar; o rascunho sem origem ganha a do parceiro; o
-  -- aviso ao cliente é agendado ao número que o *sim* copiou
+  -- aviso ao cliente é agendado ao número que o *sim* copiou. Revisão de 10/11 (banco-1): com o tipo do aviso fora de
+  -- parceiro_tipos_ligados, a saída nasce em sombra e o vínculo devolve aviso 'sombra', nunca 'agendado'
   v_r := public.parceiro_vinculo_do_pedido(v_ped.id, v_rasc, v_dono, 'cliente', c_t + interval '5 hours 12 minutes');
   select * into v_oi from public.os_interessados oi where oi.service_order_id = v_rasc and oi.parceiro_id = v_p;
   if (v_r ->> 'ok')::boolean is not true or v_r ->> 'papel' is distinct from 'indicou' or (v_r ->> 'requalificado')::boolean is not false
@@ -657,8 +658,9 @@ begin
      or v_oi.pessoa_id is distinct from v_rosa or v_oi.base is distinct from 'legitimo_interesse'
      or (select so.origem_parceiro_id from public.service_orders so where so.id = v_rasc) is distinct from v_p
      or not exists (select 1 from public.audit_log l where l.table_name = 'service_orders' and l.record_id = v_rasc and l.action = 'update')
-     or v_r ->> 'aviso' is distinct from 'agendado'
-     or not exists (select 1 from public.retorno_saidas s where s.tipo = 'parceiro_aviso_cliente' and s.phone_normalized = '5547900016902') then
+     or v_r ->> 'aviso' is distinct from 'sombra'
+     or not exists (select 1 from public.retorno_saidas s where s.tipo = 'parceiro_aviso_cliente' and s.phone_normalized = '5547900016902'
+                                                         and s.modo = 'sombra') then
     raise exception '8e/27c: o vínculo do pedido ao cliente (% / %)', v_r, to_jsonb(v_oi);
   end if;
   -- 11: o soltar leva o pedido de volta a cartao e a fila de feito a espera; o enviado fecha o caso
