@@ -179,6 +179,22 @@
 - **O quê:** a spec punha `_agenda_encaixe_simulado` só para service_role. `agenda_ctp` é invoker e o painel a chama com login: daria 42501 na tela.
 - **Na Fase 7g:** P4: definer, com a porta dentro (`auth.uid()` nulo ou admin/financeiro), grant a authenticated e service_role.
 
+### [NOVO-agenda-240] A cidade "N/D" do cadastro do cliente vira o lugar suposto da OS
+
+- **Encontrado em:** Agenda de Produção, Fase 7g, P2 (10/11/2026), na bancada sobre o replay real de 29/10 (`f7g/p2/nd.sql`): 1 cliente com a cidade `N/D`, e o ORÇ-00117 sai de `_agenda_local_resolvido` com a fonte `cidade` e o texto curto "em N/D".
+- **Onde:** `_agenda_local_resolvido` (`20261107100800_agenda_fase7d_correcao.sql:331`), o passo 5 (a cidade do cliente): só recusa a cidade vazia ou com o caractere quebrado.
+- **Efeito:** com um modo do local ligado de verdade (sem o freio), o motor e os textos da 7d tratam "N/D" como município ("em N/D"), e a suposição `local_suposto` da 7g (P2) grava `{"local": "em N/D", "fonte": "cidade"}`, que o "como pensei" do P3 diria como "em N/D (supus pela cidade do cliente)". Com o freio (hoje), os modos do local ficam em teste, o motor não lê o local e nada disso é gravado. Não medido em produção: só na carteira do replay de 29/10.
+- **Na Fase 7g:** não corrigido no P2: `_agenda_local_resolvido` é da 7d e não está na lista do R9.1; o P2 grava o que o motor usou. A saída menor: o passo 5 trata como sem cidade os marcadores de vazio (`N/D`, `N/A`, `-`), e o local fica `nenhum`.
+- **Origem:** Fase 7g, P2.
+
+### [NOVO-agenda-241] Com `modo_porque` ligado, a alocação refeita pelo *desfaz* herda o critério da substituída, e a medida da habilidade deixa de contá-la como `fora_do_motor`
+
+- **Encontrado em:** Agenda de Produção, Fase 7g, P2 (10/11/2026), por leitura de código e no teste (P3c de `agenda_fase7g_porque.sql`).
+- **Onde:** `_agenda_alocacoes_porque`, entrada (a) (`20261112100100`): R9.4-1 manda copiar o critério da substituída quando a nova chega sem. O gatilho da 7c (`_agenda_alocacao_criterio`) roda antes e marca a refeita com `criterio_detalhe.regra = fora_do_motor`; `agenda_habilidade_medidas` (`20261102100400:696`) conta por `coalesce(criterio, 'regra:' || regra)`.
+- **Efeito:** com `modo_porque` ligado, a refeita por `agenda_desfazer` ou `_agenda_desfazer_cliente` passa a contar com o critério de origem (`continuidade`, `unico`…) em `agenda_habilidade_medidas.criterios`, e não mais como `regra:fora_do_motor`. Em sombra e desligado nada muda (P3b: o P2 só copia com o modo ligado, para a sombra não mexer em coluna de fora da 7g).
+- **Na Fase 7g:** registrado. Decidir no ligar do `modo_porque` (R9.14) ou no P3, que lê o critério: ou a medida da 7c passa a ler a substituída, ou o porquê da 7g lê o critério pela `substitui_id` e a cópia sai.
+- **Origem:** Fase 7g, P2.
+
 ### [NOVO-agenda-96] `dados` de `agenda_ver` não chega ao modelo, e `mostrada_em` não vê a conversa (Fase 7d, correção, Onda 2)
 
 - **Encontrado em:** Agenda de Produção, Fase 7d, Onda 2 (06/11/2026), ao fazer o O8 e o R1.

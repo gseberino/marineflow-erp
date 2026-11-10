@@ -1126,6 +1126,9 @@ insert into _definer_da_agenda values ('_agenda_aprender_folga_semana');
 insert into _definer_da_agenda values ('_agenda_gestor_puxar');
 -- Fase 7e (P7): a saúde da margem (a porta de _agenda_saude_comunicacao, dentro: agenda_saude é invoker e o administrador logado a chama)
 insert into _definer_da_agenda values ('_agenda_saude_margem');
+-- Fase 7g (P2): o gatilho da zona e do degrau da ação (quem insere ação pode ser o service_role, que não tem porta em _agenda_zona; o molde do _agenda_perguntas_padrao da 7f P1;
+-- agenda_fase7g_porque.sql P0 prova a porta)
+insert into _definer_da_agenda values ('_agenda_acoes_porque');
   -- FASE 7f: fim
   -- FASE 7e: (7e P1, 20261111100000) nenhuma definer nova: o modo, a credibilidade, o z e a temporada são invoker, e o gatilho _agenda_medidas_compra_so_muda só mexe na própria linha. agenda_fase7e_base.sql prova as portas.
   -- FASE 7e: fim
