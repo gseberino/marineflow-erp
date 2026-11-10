@@ -11,8 +11,9 @@
 --       (vazia, com nulo, fora da lista de agenda_acoes.origem); o que cruza colunas (a amostra e o mínimo; a hora e a mensagem da quinta); o peso da linha
 --   B2  agenda_alocacoes.suposicoes (nula, sem DEFAULT: R9.4-1) e degrau; agenda_acoes.zona e degrau; os 4 CHECKs; tudo nulo nas linhas que existem; a zona da ação
 --       não muda depois do INSERT
---   B3  RLS e privilégios das 3 tabelas (anon nada, técnico vazio, admin lê, ninguém grava fora do service_role); as 8 funções sem porta para anon nem public e com
---       porta para authenticated e service_role (o CHECK e os leitores invoker); os 3 gatilhos sem porta; as 11: search_path fixo, nenhuma definer, a volatilidade
+--   B3  RLS e privilégios das 3 tabelas (anon nada, técnico vazio, admin lê, ninguém grava fora do service_role); as 8 funções sem porta para anon, public nem
+--       authenticated, com porta para service_role (§5.1, §3.1-13; o CHECK roda como quem escreve, e authenticated não grava as 2 tabelas); nenhuma função sem definer
+--       com porta para authenticated as chama (com controle); os 3 gatilhos sem porta; as 11: search_path fixo, nenhuma definer, a volatilidade
 --   B4  as listas: motivo com ferramenta no fim (AG7-27), rotina com explicar no fim; nada do P5b (nivel, ok_marcacao, ok_do_dono, espera_ok_desde); capacidade_motivos
 --       sem ferramenta
 --   B5  as 3 tabelas: os CHECKs, não se apagam direto, só mudam o permitido; a marcação sai em cascata com a OS (R9.12-12); o SET NULL da ação no tipo de OS passa; a
@@ -172,6 +173,39 @@ select 'B1h os 21 CHECKs de agenda_config existem pelo nome',
        string_agg(n.nome, ',') filter (where not exists (select 1 from pg_constraint k where k.conrelid = 'public.agenda_config'::regclass and k.conname = n.nome))
   from n;
 
+-- O cabeçalho da migration é afirmação (lição 9 da 7e): o número de CHECKs de agenda_config que ele diz (no DDL e no DESFAZER) é o que o do $$ cria e o catálogo tem,
+-- e a coluna que ele diz estar sem CHECK é a única das 22 sem CHECK. A conferência do P1 achou 20 no texto para 21 no do $$. Lê a migration como texto: só na bancada.
+do $b1h2$
+declare
+  v_mig   text := coalesce(current_setting('agenda_teste.mig_base_fase7g', true), '');
+  v_cab   int[];
+  v_desf  int[];
+  v_menos text[];
+  v_nomes text[];
+  v_cat   int;
+  v_sem   text;
+begin
+  if v_mig = '' then
+    perform pg_temp.gravar(pg_temp.ok('[]', 'B1h2 o cabeçalho da migration', true, 'PULADO: sem agenda_teste.mig_base_fase7g (rode pela bancada)'));
+    return;
+  end if;
+  select array_agg(m[1]::int) into v_cab from regexp_matches(v_mig, '(\d+) CHECKs novos por nome em agenda_config', 'g') m;
+  select array_agg(m[1]::int) into v_desf from regexp_matches(v_mig, 'drop dos (\d+) CHECKs', 'g') m;
+  select array_agg(m[1]) into v_menos from regexp_matches(v_mig, 'CHECK por nome em cada um, menos ([a-z_]+)', 'g') m;
+  select array_agg(m[1]) into v_nomes from regexp_matches(v_mig, '\(''(agenda_config_[a-z_]+_check)''', 'g') m;
+  select count(*)::int into v_cat from pg_constraint k where k.conrelid = 'public.agenda_config'::regclass and k.contype = 'c' and k.conname = any (v_nomes);
+  -- das 22 colunas da migration (as 21 dos nomes dos CHECKs mais marcacoes_desde), as que não têm CHECK nenhum no catálogo
+  select string_agg(a.attname, ',' order by a.attname) into v_sem
+    from pg_attribute a
+   where a.attrelid = 'public.agenda_config'::regclass and a.attnum > 0 and not a.attisdropped
+     and a.attname = any (array_append(array(select regexp_replace(x, '^agenda_config_(.*)_check$', '\1') from unnest(v_nomes) x), 'marcacoes_desde'))
+     and not exists (select 1 from pg_constraint k where k.conrelid = a.attrelid and k.contype = 'c' and a.attnum = any (k.conkey));
+  perform pg_temp.gravar(pg_temp.ok('[]', 'B1h2 o cabeçalho e o DESFAZER da migration dizem o número de CHECKs de agenda_config que o do $$ cria e o catálogo tem (21), e a coluna sem CHECK que ele diz é a única',
+    v_cab = array[21] and v_desf = array[21] and cardinality(v_nomes) = 21 and v_cat = 21 and v_menos = array[v_sem] and v_sem = 'marcacoes_desde',
+    format('cabeçalho %s, DESFAZER %s, do $$ %s, catálogo %s; sem CHECK: diz %s, é %s', v_cab, v_desf, cardinality(v_nomes), v_cat, v_menos, v_sem)));
+end
+$b1h2$;
+
 -- Cada CHECK de um limite recusa o valor logo abaixo e logo acima (pelo nome: o erro só vale se for ESTE check) e aceita os 2 limites. "extra" leva a coluna que cruza para
 -- fora do caminho (rebaixar_n_min sobe com a amostra no máximo, senão quem recusa é o CHECK da amostra).
 create temp table _fx (coluna text, abaixo text, acima text, lim_baixo text, lim_alto text, nome text, extra text) on commit drop;
@@ -321,6 +355,19 @@ end
 $b2$;
 
 -- ── B3. RLS e privilégios ────────────────────────────────────────────────────────────────────────────
+-- Quem chamaria as 8 pela porta de authenticated: função de public sem definer (roda como quem chama), com execute para authenticated, que cita uma das 8 (o B3e3 e o
+-- controle dele). O pacote que criar uma assim dá a porta a authenticated à função chamada, na mesma migration, e muda o B3e e o B3e3.
+create function pg_temp.chamador_sem_definer_7g() returns text language sql stable as $f$
+  select string_agg(p.oid::regprocedure::text, ', ' order by p.oid::regprocedure::text)
+    from pg_proc p
+   where p.pronamespace = 'public'::regnamespace
+     and not p.prosecdef
+     and has_function_privilege('authenticated', p.oid, 'execute')
+     and p.proname not in ('_agenda_suposicoes_validas', '_agenda_quem_marcou', '_agenda_degrau', '_agenda_zona_mais_severa', '_agenda_duracao_fonte_texto',
+                           '_agenda_suposicao_texto', '_agenda_criterio_texto', '_agenda_degrau_texto')
+     and p.prosrc ~ '_agenda_(suposicoes_validas|quem_marcou|degrau|zona_mais_severa|duracao_fonte_texto|suposicao_texto|criterio_texto|degrau_texto)\('
+$f$;
+
 do $b3$
 declare
   v_res  jsonb := '[]'::jsonb;
@@ -375,14 +422,37 @@ begin
       or exists (select 1 from pg_proc x, aclexplode(x.proacl) a where x.oid = p::regprocedure and a.grantee = 0 and a.privilege_type = 'EXECUTE');
   v_res := pg_temp.ok(v_res, 'B3d as 8 funções novas sem execute para anon nem para public', v_dif is null, v_dif);
   select string_agg(p, ', ') into v_dif from unnest(c_funcoes) p
-   where not has_function_privilege('authenticated', p, 'execute') or not has_function_privilege('service_role', p, 'execute');
-  v_res := pg_temp.ok(v_res, 'B3e as 8 têm execute para authenticated e service_role (o CHECK roda como quem escreve; a tela da semana e o cartão, invoker, chamam quem marcou e os textos)', v_dif is null, v_dif);
+   where has_function_privilege('authenticated', p, 'execute') or not has_function_privilege('service_role', p, 'execute');
+  v_res := pg_temp.ok(v_res, 'B3e as 8 têm execute só para service_role, nenhum para authenticated (§5.1 e §3.1-13: internas; o revoke é explícito, o privilégio padrão do esquema daria)', v_dif is null, v_dif);
+  select string_agg(x, ', ') into v_dif from unnest(array['public.agenda_alocacoes', 'public.agenda_acoes']) x
+   where has_table_privilege('authenticated', x, 'insert') or has_table_privilege('authenticated', x, 'update') or has_table_privilege('authenticated', x, 'delete')
+      or not has_table_privilege('service_role', x, 'insert') or not has_table_privilege('service_role', x, 'update');
+  v_res := pg_temp.ok(v_res, 'B3e2 authenticated não grava agenda_alocacoes nem agenda_acoes (só select, Fase 2) e o service_role grava: o CHECK das suposições, que roda como quem escreve, não precisa da porta de authenticated', v_dif is null, v_dif);
+  -- ninguém chama as 8 pela porta de authenticated; dos leitores do painel, a tela da semana e o plano da OS são definer. Controle: uma função sem definer, plantada com a
+  -- porta de authenticated, que chama quem marcou, aparece (e sai com a subtransação).
+  v_dif := pg_temp.chamador_sem_definer_7g();
+  begin
+    create function public._b3e3_sonda_7g() returns text language sql stable as $s$ select public._agenda_quem_marcou('tela') $s$;
+    grant execute on function public._b3e3_sonda_7g() to authenticated;
+    v := coalesce(pg_temp.chamador_sem_definer_7g(), 'nada');
+    raise exception using errcode = 'P0001', message = '__desfaz__';
+  exception when others then
+    if sqlerrm <> '__desfaz__' then v := 'erro ' || sqlstate || ': ' || sqlerrm; end if;
+  end;
+  select count(*) filter (where p.prosecdef)::text || '/' || count(*)::text into t
+    from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname in ('agenda_tela_semana', 'os_plano_da_os');
+  v_res := pg_temp.ok(v_res, 'B3e3 nenhuma função sem definer com porta para authenticated chama as 8, e agenda_tela_semana e os_plano_da_os são definer; controle: a plantada aparece',
+    v_dif is null and v in ('_b3e3_sonda_7g()', 'public._b3e3_sonda_7g()') and t = '2/2', format('chamadores %s | controle %s | definer entre tela e plano %s', coalesce(v_dif, 'nenhum'), v, t));
   select string_agg(p, ', ') into v_dif from unnest(c_gatilhos) p
    where has_function_privilege('anon', p, 'execute') or has_function_privilege('authenticated', p, 'execute') or has_function_privilege('service_role', p, 'execute');
   v_res := pg_temp.ok(v_res, 'B3f os 3 gatilhos sem execute para ninguém fora do dono', v_dif is null, v_dif);
-  -- a chamada de verdade do leitor invoker: authenticated (com o login do administrador) chega a quem marcou, que lê agenda_config; anon não
+  -- a chamada de verdade: authenticated, mesmo com o login do administrador, não chama quem marcou nem os textos (42501); o service_role chama (lê agenda_config); anon não
   v := pg_temp.como(v_adm, 'authenticated', $$select public._agenda_quem_marcou('tela')$$);
-  v_res := pg_temp.ok(v_res, 'B3g authenticated chama _agenda_quem_marcou (a porta do leitor invoker)', v = 'dono', v);
+  v_res := pg_temp.ok(v_res, 'B3g authenticated, com o login do administrador, não chama _agenda_quem_marcou (42501: sem porta, §5.1)', v like 'erro 42501%', v);
+  v := pg_temp.como(v_adm, 'authenticated', $$select public._agenda_degrau_texto('dia')$$);
+  v_res := pg_temp.ok(v_res, 'B3g2 authenticated, com o login do administrador, não chama os textos (42501)', v like 'erro 42501%', v);
+  v := pg_temp.como(null, 'service_role', $$select public._agenda_quem_marcou('tela')$$);
+  v_res := pg_temp.ok(v_res, 'B3g3 o service_role chama _agenda_quem_marcou (a porta que fica; lê agenda_config)', v = 'dono', v);
   v := pg_temp.como(null, 'anon', $$select public._agenda_quem_marcou('tela')$$);
   v_res := pg_temp.ok(v_res, 'B3h anon não chama _agenda_quem_marcou (42501)', v like 'erro 42501%', v);
   v := pg_temp.como(null, 'anon', $$select public._agenda_duracao_fonte_texto('dono', 2, null)$$);
@@ -1053,6 +1123,11 @@ begin
       from regexp_matches(current_setting('agenda_teste.mig_base_fase7g'), 'create or replace function public\.([a-z_0-9]+)\(', 'g') m;
     v_res := pg_temp.ok(v_res, 'B8c a migration só cria as 11 funções novas: nada do motor, da medição nem da saúde é recriado (R9.1)',
       v_dif = '_agenda_criterio_texto,_agenda_degrau,_agenda_degrau_texto,_agenda_duracao_fonte_texto,_agenda_marcacoes_so_muda,_agenda_placar_so_muda,_agenda_quem_marcou,_agenda_suposicao_texto,_agenda_suposicoes_validas,_agenda_tipos_os_so_muda,_agenda_zona_mais_severa', v_dif);
+    -- comentário é afirmação: nenhuma linha da migration chama a tela da semana, o plano da OS ou o cartão de invoker (são definer: B3e3). A conferência do P1 achou 2.
+    select string_agg(m[1], ' | ') into v_dif
+      from regexp_matches(current_setting('agenda_teste.mig_base_fase7g'),
+             '(?n)([^\n]*(tela da semana|tela_semana|plano da os|plano_da_os|cart[aã]o)[^\n]*invoker[^\n]*|[^\n]*invoker[^\n]*(tela da semana|tela_semana|plano da os|plano_da_os|cart[aã]o)[^\n]*)', 'gi') m;
+    v_res := pg_temp.ok(v_res, 'B8e nenhuma linha da migration chama a tela da semana, o plano da OS ou o cartão de invoker (são definer)', v_dif is null, left(v_dif, 400));
   end if;
   perform pg_temp.gravar(v_res);
 end

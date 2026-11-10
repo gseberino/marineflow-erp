@@ -7,7 +7,7 @@
 -- Depende das Fases 1 a 6, das etapas 7a a 7d, da 7f inteira e da 7e até o P3 (última: 20261111100200). NÃO recria nenhuma função de antes: só acrescenta.
 --
 -- ═══ DDL — OK NOMEADO ═══ (22 colunas novas em agenda_config — 4 interruptores e 18 parâmetros — e o DEFAULT dos 4 interruptores; 2 colunas novas em
--- agenda_alocacoes e 2 em agenda_acoes; 3 tabelas novas com RLS e 6 gatilhos; 2 listas fechadas pelo ampliador; 20 CHECKs novos por nome em agenda_config, 2 em
+-- agenda_alocacoes e 2 em agenda_acoes; 3 tabelas novas com RLS e 6 gatilhos; 2 listas fechadas pelo ampliador; 21 CHECKs novos por nome em agenda_config, 2 em
 -- agenda_alocacoes e 2 em agenda_acoes; 2 índices; 11 funções novas, 3 delas de gatilho)
 -- NÃO APLICADA. Existe para revisão e espera o OK. Nada aqui é copiado de outra migration: só colunas, tabelas, CHECKs e funções novas.
 --
@@ -20,7 +20,8 @@
 --      (como de 7a a 7e); quem os põe em sombra é a migration de dado 20261112100990, com OK nomeado. Os 15 parâmetros da §4.1 (porque_motivos_max 1, AG7-28;
 --      origens_do_dono; livre_semanas 4; como_pensei_*; correcao_janela_du; os 6 do rebaixar, AG7-25; explicar_hora 16:35; placar_janela, AG7-26;
 --      placar_semanas_hist) e os 3 do R9: marcacoes_desde (nula; o dado grava a hora dele: nada de antes entra na medida, R9.4-2), placar_min_linhas 3 (R9.4-3)
---      e explicar_tempo_max 15 s (R9.5-8). CHECK por nome em cada um; o de origens_do_dono é a lista de agenda_acoes.origem lida do CHECK vivo no dia da migration.
+--      e explicar_tempo_max 15 s (R9.5-8). CHECK por nome em cada um, menos marcacoes_desde (nula e sem limite: 21 CHECKs para as 22 colunas); o de
+--      origens_do_dono é a lista de agenda_acoes.origem lida do CHECK vivo no dia da migration.
 --   2. agenda_alocacoes: suposicoes (jsonb NULA, sem DEFAULT: nula = marcada antes da 7g ou com modo_porque desligado; [] = sem suposição; R9.4-1) e degrau.
 --      agenda_acoes: zona e degrau. Nascem nulas em todas as linhas; nada as escreve aqui (o P2 escreve, no INSERT).
 --   3. agenda_marcacoes (nova): uma linha por (ação executada, OS) que criou meio-dia que não é reserva, com o desfecho da do gestor e conferida (R9.4-2: algum
@@ -61,7 +62,7 @@
 --   alter table public.agenda_alocacoes drop constraint if exists alocacao_suposicoes_validas, drop constraint if exists alocacao_degrau_check,
 --     drop column if exists suposicoes, drop column if exists degrau;
 --   drop function if exists public._agenda_suposicoes_validas(jsonb);
---   (agenda_config: drop dos 20 CHECKs e das 22 colunas; agenda_alocacoes_motivo_check e agenda_vigia_rodadas_rotina_check: recriar sem ferramenta e sem explicar,
+--   (agenda_config: drop dos 21 CHECKs e das 22 colunas; agenda_alocacoes_motivo_check e agenda_vigia_rodadas_rotina_check: recriar sem ferramenta e sem explicar,
 --    só com nenhuma linha que os use.)
 --
 -- IDEMPOTENTE: add column if not exists, CHECK por nome em do $$ (só cria o que falta), o ampliador (soma só o que falta), create table if not exists,
@@ -218,7 +219,7 @@ as $function$
 $function$;
 
 comment on function public._agenda_suposicoes_validas(jsonb) is
-  'Agenda de Produção (Fase 7g, P1; §5.1, R9.4-1): o CHECK de agenda_alocacoes.suposicoes. Nula = true (marcada antes da 7g). Senão: lista de até 12 objetos, cada um com codigo (texto) na lista do §3.1 item 3 e detalhe (objeto). IMMUTABLE, invoker: tem grant a authenticated e service_role, porque o CHECK roda como quem escreve.';
+  'Agenda de Produção (Fase 7g, P1; §5.1, R9.4-1): o CHECK de agenda_alocacoes.suposicoes. Nula = true (marcada antes da 7g). Senão: lista de até 12 objetos, cada um com codigo (texto) na lista do §3.1 item 3 e detalhe (objeto). IMMUTABLE, invoker. O CHECK roda como quem escreve: execute só para service_role (que grava direto; a definer roda como o dono); authenticated não grava agenda_alocacoes (só select, Fase 2) e fica sem porta (§3.1 item 13).';
 
 alter table public.agenda_alocacoes
   add column if not exists suposicoes jsonb,
@@ -499,7 +500,7 @@ end;
 $function$;
 
 comment on function public._agenda_quem_marcou(text, text) is
-  'Agenda de Produção (Fase 7g, P1; §5.1, §3.1 item 6): dono se a alocação é do dono (origem dono) ou a ação tem origem em agenda_config.origens_do_dono; senão gestor (os dois nulos também). STABLE, invoker: tem grant a authenticated (a tela da semana, invoker, vai chamar no P7).';
+  'Agenda de Produção (Fase 7g, P1; §5.1, §3.1 item 6): dono se a alocação é do dono (origem dono) ou a ação tem origem em agenda_config.origens_do_dono; senão gestor (os dois nulos também). STABLE, sem porta para authenticated (§5.1): execute só para service_role; a definer que a chamar roda como o dono.';
 
 -- O degrau (§3.1 item 4): o que mudou entre o antes e o depois de uma substituição, no formato de agenda_acoes.antes/depois -> 'alocacoes' ([{payee_id, dia,
 -- turno, presenca}]). Só os meios de presenca turno contam (abrir e fechar do dono não é degrau; sem a chave, é turno). Do mais barato ao mais caro: pessoa <
@@ -733,16 +734,18 @@ $function$;
 comment on function public._agenda_degrau_texto(text) is
   'Agenda de Produção (Fase 7g, P1; §6.1): o degrau em palavras — pessoa, turno, dia, data e tirou; nulo ou outro = nula. IMMUTABLE.';
 
--- As portas (o molde da 7e P1; comum-7g, "função nova": o leitor invoker precisa da porta): nenhuma para anon nem public; authenticated e service_role têm execute — o
--- CHECK roda como quem escreve, e as leituras invoker do P3 e do P7 (a tela da semana, o cartão) chamam quem marcou e os textos como quem está logado. Os 3
--- gatilhos, sem porta para ninguém.
+-- As portas (§5.1 e §3.1 item 13: as internas _agenda_* sem porta para authenticated): nenhuma para public, anon nem authenticated; o service_role tem execute.
+-- O revoke de authenticated é explícito: o privilégio padrão do esquema dá execute a quem não for tirado. Hoje nenhuma função chama as 8 (B8b). Quem as chama
+-- de dentro de uma definer passa pela porta do dono; o CHECK das suposições roda como quem escreve, e authenticated não grava agenda_alocacoes nem agenda_acoes
+-- (só select, Fase 2). Pacote que fizer uma função sem definer, com porta para authenticated, chamar uma delas dá a porta a authenticated na mesma migration
+-- e muda o B3e (o B3e3 aponta essa função). Os 3 gatilhos, sem porta para ninguém.
 revoke all on function public._agenda_marcacoes_so_muda(), public._agenda_tipos_os_so_muda(), public._agenda_placar_so_muda()
   from public, anon, authenticated, service_role;
 revoke all on function public._agenda_suposicoes_validas(jsonb), public._agenda_quem_marcou(text, text), public._agenda_degrau(jsonb, jsonb, date, date, date),
                        public._agenda_zona_mais_severa(text[]), public._agenda_duracao_fonte_texto(text, numeric, numeric, text),
                        public._agenda_suposicao_texto(text, jsonb), public._agenda_criterio_texto(text), public._agenda_degrau_texto(text)
-  from public, anon;
+  from public, anon, authenticated;
 grant execute on function public._agenda_suposicoes_validas(jsonb), public._agenda_quem_marcou(text, text), public._agenda_degrau(jsonb, jsonb, date, date, date),
                           public._agenda_zona_mais_severa(text[]), public._agenda_duracao_fonte_texto(text, numeric, numeric, text),
                           public._agenda_suposicao_texto(text, jsonb), public._agenda_criterio_texto(text), public._agenda_degrau_texto(text)
-  to authenticated, service_role;
+  to service_role;
