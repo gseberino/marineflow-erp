@@ -3956,3 +3956,12 @@ porque só o dono pode preenchê-las.
 - **Efeito:** logo depois do 1º tique diário, 7 de 7 itens da carteira real saem com `muda` verdadeiro na conta; no tique seguinte (o passo roda em todo tique com `compre_ate` fora de desligado) o gravado acompanha e `muda` volta a falso. Atraso de um tique, sem efeito no dono.
 - **Na Fase 7e:** não mudado (é da 7a). A prova de que o gravado fica estável olha depois do 2º tique.
 - **Origem:** Fase 7e, P6.
+
+### [NOVO-agenda-210] O puxar dá erro, todo dia útil, na OS que tem reserva fixada que o compromisso puxado promoveria
+
+- **Encontrado em:** Agenda de Produção, Fase 7e, P4c (10/11/2026), procurando outras formas de item crítico para o tudo ou nada: sonda `f7e/p4c/y4.sql` (bancada) e montagem `crit2` do replay real (`f7e/p4c/tvr.mjs`). Igual com a 100350 de antes (`2b16e1c9`) e com a do P4c.
+- **Onde:** `agenda_propor` (o motor, `20261111100300`), passo 6 (b), "a reserva que virou compromisso nesta proposta": o cancelar sai com motivo `promovida`, `violada` falso e sem decisão. A regra 8 de `_agenda_validar_itens` só deixa sair a alocação fixada violada, pedida pelo dono ou decidida, e o motor valida a própria proposta (passo 11) e lança `P0001` "a proposta saiu inválida (erro do motor)".
+- **Efeito:** a candidata do puxar que tem uma reserva fixada (pelo dono ou pelo congelamento), não violada, num meio-dia que o compromisso puxado cobre, sai `fora` com `erro`: 1 linha em `app_error_logs` (`gestor:puxar`) por dia útil, em teste e de verdade (o caminho de erro do passo grava nos dois), e a saúde conta. Nada é aplicado, nada se perde, e teste e de verdade dizem o mesmo. Medido: na bancada (reserva do Rafael em D+1 de manhã, fixada pelo dono e pelo congelamento; A de 1,5 dia), `erro` e `app_error_logs` 0 → 1; no replay real (`crit2`: a OS#6 com reserva do Alex em qua 11/11 de manhã, fixada pelo dono), `erro` e 0 → 1, com máximo 1 e 2. Com a reserva publicada (não fixada), a mesma montagem é puxada sem erro.
+- **Frequência:** não medida. Por leitura, o caminho mais provável em produção é a reserva fixada pelo congelamento (o `agenda_aplicar` fixa o que cria até o dia congelado, reserva inclusive); essa forma não foi montada.
+- **Na Fase 7e:** não corrigido. É do motor (a promoção de reserva fixada), não do puxar; corrigir pede decidir se a reserva fixada pode virar compromisso sem a decisão do dono. Não conferido se outros caminhos do motor (o encaixe, a vigia) chegam a promover uma reserva fixada.
+- **Origem:** Fase 7e, P4c.

@@ -10,6 +10,8 @@
 --   P6 o erro: vai a app_error_logs (gestor:puxar), não lança e segue para a próxima OS; query_canceled não é engolido
 --   P7 a OS na forma real (conferência do P4b): a "abre e fecha" pela regra (a ponta do dono em D) e a que pede o dono, com o dia declarado por ele e sem a rotina;
 --      e 2 ou 3 por dia (2ª e 3ª conferências): em teste, a simulação de cada OS seguinte vê as já puxadas (num bloco que se desfaz, a fixada que elas cancelam com a chave, como o agenda_aplicar) e diz o mesmo que o de verdade (P7e a P7l)
+--   P8 tudo ou nada por OS (P4c): a OS cuja proposta traz item crítico (a reserva fixada pelo dono que viola) fica fora com pede_decisao,
+--      em teste e de verdade, sem perder o que tinha e sem proposta, pergunta nem alocação nova; a seguinte da fila é tentada; a mesma OS sem o item crítico continua puxada
 --
 -- ═══ COMO RODAR ═══  Na bancada: node scripts/bancada-agenda/rodar.mjs. Em produção, só DEPOIS de aplicar a migration, com o OK: npx supabase@2.111.0 db query --linked -f supabase/tests/agenda_fase7e_puxar.sql
 --   Tudo dentro de begin/rollback. O que usa fixture só roda na bancada (fora dela sai PULADO). Uma linha false é defeito.
@@ -1334,12 +1336,11 @@ begin
   when others then v_res := pg_temp.ok(v_res, 'P7k sem exceção', false, sqlerrm);
   end;
 
-  -- (3h) a 1ª tem uma reserva do Rafael em D+1 de manhã que está fixada (pelo congelamento, e pelo dono), e o Rafael fica indisponível em D+1: a simulação da 1ª
+  -- (3h) a 1ª tem uma reserva do Rafael em D+1 de manhã que está fixada pelo congelamento, e o Rafael fica indisponível em D+1: a simulação da 1ª
   -- cancela a reserva (violada), e o agenda_aplicar a tira com a chave do fixado. O bloco desfeito tem de tirar do mesmo jeito; sem a chave, o gatilho recusava
   -- ("Esse meio-dia está fixado") e a 2ª dava erro em teste, com uma linha em app_error_logs, onde o de verdade não dá erro (retomada da 3ª correção).
-  -- Com a fixada pelo dono, o compromisso da 1ª sai crítico (fixada_pelo_dono) e o agenda_aplicar sem a pergunta só leva o cancelar: de verdade a 1ª fica
-  -- "puxada" sem alocação e a 2ª pega a tarde do Rafael. Isso é do de verdade e fica fora desta correção (achado da retomada); aqui só se cobra o mesmo nos dois modos.
-  foreach v_k in array array['congelamento', 'dono'] loop
+  -- A mesma reserva fixada pelo dono deixa o compromisso da 1ª crítico (fixada_pelo_dono): é o tudo ou nada do P4c, no P8.
+  foreach v_k in array array['congelamento'] loop
   begin
     v_os := pg_temp.cena();
     perform pg_temp.aloca(v_os, v_raf, pg_temp.d() + 1, 'manha', 'reserva');
@@ -1371,6 +1372,127 @@ begin
   perform pg_temp.gravar(v_res);
 end
 $p7$;
+
+-- ── P8. Tudo ou nada por OS (P4c) ───────────────────────────────────────────────────────────────
+-- O agenda_aplicar sem pergunta só leva os itens não críticos (_agenda_itens_escolhidos). Quando a proposta da OS puxada trazia item crítico (o que pede a decisão do
+-- dono), de verdade ela contava como puxada sem compromisso, e o cancelar que viesse junto tirava o que ela tinha (a sonda Y2 da retomada da 3ª correção do P4b).
+-- Agora ela fica fora com pede_decisao, em teste e de verdade, com as vigentes que tinha (os mesmos ids e estados), sem proposta nem pergunta, e a seguinte da fila
+-- é tentada (como depois de qualquer OS fora). A mesma OS sem o item crítico continua puxada. As vigentes de uma OS, para comparar: id, estado e tipo.
+create function pg_temp.vig(p_os uuid) returns text language sql stable as $f$
+  select coalesce(string_agg(a.id::text || ':' || a.estado || ':' || a.tipo, ',' order by a.id), '-') from public.agenda_alocacoes a
+   where a.service_order_id = p_os and a.estado in ('publicada', 'fixada')
+$f$;
+do $p8$
+declare
+  v_res jsonb := '[]'::jsonb;
+  r jsonb;
+  r2 jsonb;
+  p jsonb;
+  v_os uuid;
+  v_b uuid;
+  v_raf uuid := pg_temp.pessoa('Rafael');
+  v_n int;
+  v_q int;
+  v_e0 text;
+  v_s0 text;
+  v_max int;
+  v_k text;
+  v_e1 text;
+begin
+  if not pg_temp.fx() then
+    perform pg_temp.gravar(pg_temp.ok('[]', 'P8 tudo ou nada', true, 'PULADO: sem a fixture (rode pela bancada)'));
+    return;
+  end if;
+
+  -- (1) A (901) com uma reserva do Rafael em D+1 de manhã, fixada pelo dono, e o Rafael indisponível em D+1: a reserva viola, a simulação a cancela, e o compromisso
+  -- de A na tarde de D sai crítico (fixada_pelo_dono). B (902) é a seguinte da fila. Com máximo 2 e com o padrão (1): antes, com 1, B nem era tentada.
+  foreach v_max in array array[2, 1] loop
+  begin
+    v_os := pg_temp.cena();
+    perform pg_temp.aloca(v_os, v_raf, pg_temp.d() + 1, 'manha', 'reserva');
+    update public.agenda_alocacoes set estado = 'fixada', fixado_por = 'dono' where service_order_id = v_os and tipo = 'reserva';
+    insert into public.agenda_disponibilidade (payee_id, periodo, situacao, origem, nota, criado_por)
+    values (v_raf, daterange(pg_temp.d() + 1, pg_temp.d() + 1, '[]'), 'indisponivel', 'dono', 'teste 7e P4c', pg_temp.adm());
+    v_b := pg_temp.pronta(902);
+    update public.agenda_config set puxar_max_os = v_max where id;
+    if v_max = 2 then
+      perform set_config('agenda.gestor', 'sombra', true);
+      p := public.agenda_propor('os', pg_temp.d(), null, array[v_os],
+                                jsonb_build_object('puxar', jsonb_build_object('dia', pg_temp.d(), 'pessoas', jsonb_build_array(v_raf), 'os', v_os), 'acima_da_carga', true),
+                                false, 'vigia', null, pg_temp.pr(), pg_temp.ag());
+      perform set_config('agenda.gestor', '', true);
+      v_res := pg_temp.ok(v_res, 'P8a0 a montagem: a simulação de A cancela a reserva fixada pelo dono (violada, não crítico) e o compromisso de A sai crítico (fixada_pelo_dono)',
+        exists (select 1 from jsonb_array_elements(p -> 'itens') i where i ->> 'op' = 'criar' and i ->> 'tipo' <> 'reserva' and i ->> 'critica' = 'fixada_pelo_dono')
+        and exists (select 1 from jsonb_array_elements(p -> 'itens') i where i ->> 'op' = 'cancelar' and i ->> 'critica' is null),
+        (select string_agg(concat_ws('/', i ->> 'op', i ->> 'tipo', coalesce(i ->> 'critica', '-')), ' ') from jsonb_array_elements(p -> 'itens') i));
+    end if;
+    v_s0 := pg_temp.vig(v_os);
+    v_e0 := pg_temp.foto();
+    v_n := (select count(*) from public.app_error_logs where action = 'gestor:puxar');
+    r := pg_temp.rodar();
+    v_res := pg_temp.ok(v_res, format('P8a em teste, máximo %s: A fora com pede_decisao e B puxada em D; nada gravado, nada em app_error_logs', v_max),
+      pg_temp.fora(r, v_os) = 'pede_decisao' and pg_temp.puxada(r, v_b) and (r ->> 'puxadas')::int = 1 and (r ->> 'erros')::int = 0
+      and pg_temp.foto() = v_e0 and (select count(*) from public.app_error_logs where action = 'gestor:puxar') = v_n,
+      r::text || ' ' || v_e0 || ' -> ' || pg_temp.foto());
+    update public.agenda_config set modo_urgencia = 'ligado' where id;
+    v_q := (select count(*) from public.agenda_perguntas);
+    r2 := pg_temp.rodar();
+    v_res := pg_temp.ok(v_res, format('P8a2 de verdade, máximo %s, relido: A fora com pede_decisao e com as vigentes que tinha (a reserva fixada pelo dono), sem proposta nem pergunta; B puxada, com compromisso em D; o teste disse o mesmo', v_max),
+      pg_temp.fora(r2, v_os) = 'pede_decisao' and pg_temp.vig(v_os) = v_s0
+      and exists (select 1 from public.agenda_alocacoes a where a.service_order_id = v_os and a.tipo = 'reserva' and a.estado = 'fixada' and a.fixado_por = 'dono')
+      and not exists (select 1 from public.agenda_propostas pr where v_os = any (pr.os_alvo))
+      and (select count(*) from public.agenda_perguntas) = v_q
+      and pg_temp.puxada(r2, v_b)
+      and exists (select 1 from public.agenda_alocacoes a where a.service_order_id = v_b and a.estado in ('publicada', 'fixada') and a.tipo <> 'reserva' and a.dia = pg_temp.d())
+      and (r2 ->> 'erros')::int = 0 and r ->> 'puxadas' = r2 ->> 'puxadas' and pg_temp.fora(r, v_os) = pg_temp.fora(r2, v_os) and pg_temp.fora(r, v_b) = pg_temp.fora(r2, v_b),
+      'A ' || pg_temp.fora(r2, v_os) || ' ' || v_s0 || ' -> ' || pg_temp.vig(v_os) || '; B ' || pg_temp.fora(r2, v_b) || '; perguntas ' || v_q || ' -> '
+      || (select count(*) from public.agenda_perguntas) || ' ' || r2::text);
+    raise exception 'desfaz' using errcode = 'P0098';
+  exception when sqlstate 'P0098' then null;
+  when others then v_res := pg_temp.ok(v_res, format('P8a sem exceção (máximo %s)', v_max), false, sqlerrm);
+  end;
+  end loop;
+
+  -- (2) A sozinha na fila (sem B), com a mesma reserva fixada pelo dono que viola: antes, de verdade, A contava como puxada, a reserva saía, nada entrava,
+  -- e a proposta gravada abria a pergunta ao dono. Agora nada é gravado: as contagens e a versão do plano ficam como estavam.
+  -- E a guarda (3): a mesma reserva publicada (não fixada) que viola não deixa nada crítico, e A continua puxada nos dois modos (a reserva sai e o compromisso entra).
+  foreach v_k in array array['dono', 'publicada'] loop
+  begin
+    v_os := pg_temp.cena();
+    perform pg_temp.aloca(v_os, v_raf, pg_temp.d() + 1, 'manha', 'reserva');
+    if v_k = 'dono' then
+      update public.agenda_alocacoes set estado = 'fixada', fixado_por = 'dono' where service_order_id = v_os and tipo = 'reserva';
+    end if;
+    insert into public.agenda_disponibilidade (payee_id, periodo, situacao, origem, nota, criado_por)
+    values (v_raf, daterange(pg_temp.d() + 1, pg_temp.d() + 1, '[]'), 'indisponivel', 'dono', 'teste 7e P4c', pg_temp.adm());
+    v_s0 := pg_temp.vig(v_os);
+    v_e0 := pg_temp.foto();
+    r := pg_temp.rodar();
+    update public.agenda_config set modo_urgencia = 'ligado' where id;
+    v_e1 := pg_temp.foto();
+    r2 := pg_temp.rodar();
+    if v_k = 'dono' then
+      v_res := pg_temp.ok(v_res, 'P8b em teste, A sozinha com a reserva fixada pelo dono que viola: fora com pede_decisao, nada gravado',
+        pg_temp.fora(r, v_os) = 'pede_decisao' and (r ->> 'puxadas')::int = 0 and (r ->> 'erros')::int = 0 and v_e1 = v_e0, r::text || ' ' || v_e0 || ' -> ' || v_e1);
+      v_res := pg_temp.ok(v_res, 'P8b2 de verdade, relido: A fora com pede_decisao, com a reserva que tinha; nada gravado (propostas, ações, alocações, perguntas, mensagens, versão do plano); o teste disse o mesmo',
+        pg_temp.fora(r2, v_os) = 'pede_decisao' and (r2 ->> 'puxadas')::int = 0 and (r2 ->> 'erros')::int = 0 and pg_temp.foto() = v_e1 and pg_temp.vig(v_os) = v_s0
+        and r ->> 'puxadas' = r2 ->> 'puxadas' and pg_temp.fora(r, v_os) = pg_temp.fora(r2, v_os),
+        r2::text || ' ' || v_e1 || ' -> ' || pg_temp.foto() || '; vigentes de A ' || v_s0 || ' -> ' || pg_temp.vig(v_os));
+    else
+      v_res := pg_temp.ok(v_res, 'P8c a guarda, A com a reserva publicada que viola: nada crítico, puxada em D em teste e de verdade; relido, a reserva saiu e o compromisso entrou',
+        pg_temp.puxada(r, v_os) and pg_temp.puxada(r2, v_os)
+        and exists (select 1 from public.agenda_alocacoes a where a.service_order_id = v_os and a.estado in ('publicada', 'fixada') and a.tipo <> 'reserva' and a.dia = pg_temp.d())
+        and not exists (select 1 from public.agenda_alocacoes a where a.service_order_id = v_os and a.estado in ('publicada', 'fixada') and a.tipo = 'reserva'),
+        r::text || ' | ' || r2::text || ' | vigentes de A ' || v_s0 || ' -> ' || pg_temp.vig(v_os));
+    end if;
+    raise exception 'desfaz' using errcode = 'P0098';
+  exception when sqlstate 'P0098' then null;
+  when others then v_res := pg_temp.ok(v_res, 'P8b sem exceção (' || v_k || ')', false, sqlerrm);
+  end;
+  end loop;
+  perform pg_temp.gravar(v_res);
+end
+$p8$;
 
 select * from _resultado order by teste;
 rollback;

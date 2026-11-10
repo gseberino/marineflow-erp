@@ -12,6 +12,8 @@
 --   _agenda_gestor_puxar(date, timestamptz): o passo do job agenda-gestor. O peso (R7.8): fora de hora é 1 leitura de config; as contas da fila só depois de ter célula livre; os filtros baratos antes de os_prontidao.
 --     Em teste (modo_urgencia em sombra, freio ligado ou modo_proposta em sombra): só o diário (agenda_gestor_dia.sombra.puxar), sem proposta, ação nem alocação (R7.7-1). De verdade: propõe na simulação, aceita só compromisso que comece em D, propõe de novo gravando e aplica.
 --     Com puxar_max_os > 1, em teste, a simulação de cada OS seguinte vê as já puxadas na rodada (os itens delas aplicados num bloco que se desfaz), como o de verdade as lê do banco.
+--     Tudo ou nada por OS (P4c): a OS cuja proposta traz item crítico (o que pede a decisão do dono, como fixada_pelo_dono ou nao_cabe) não é puxada e fica fora com o motivo pede_decisao, nos dois
+--     modos, sem proposta, pergunta nem alocação para ela (só a linha dela em por_os). O agenda_aplicar sem pergunta só leva os itens não críticos: de verdade, ela contava como puxada sem compromisso e perdia o que o cancelar levasse (a reserva).
 --     Quem pode: da equipe, tem de ter telefone que a rotina alcance (R7.7-6) e a ficha de D ainda não saiu; o dono não está na rotina (quem o alcança é o aviso do gestor e o fechamento) e conta com o dia
 --     declarado (§5.3). Em ja_vem, não pode ter convite de D sem o SIM enquanto o convite estiver ligado de verdade (R7.7-8). A ponta do dono (abrir e fechar) da OS puxada em D vale mesmo com ele fora das
 --     pessoas: o motor só tira o turno de quem está fora, e o validador aceita a ponta (20261111100300).
@@ -207,6 +209,10 @@ begin
                 and v_d < (cf.marcar_sozinho_desde at time zone 'America/Sao_Paulo')::date + cf.ficha_veto_dias
                 and exists (select 1 from jsonb_array_elements(v_it -> 'alocacoes') a where (a ->> 'payee_id')::uuid is distinct from v_dono) then
             v_mot := 'ficha_presa';
+          -- Tudo ou nada por OS (P4c): o agenda_aplicar sem pergunta só leva os itens não críticos. Com um item crítico, de verdade a OS contava como puxada sem
+          -- compromisso, e o cancelar que viesse junto tirava o que ela tinha (a reserva). Fica fora e não perde nada, em teste e de verdade.
+          elsif exists (select 1 from jsonb_array_elements(coalesce(v_p -> 'itens', '[]'::jsonb)) i where i ->> 'critica' is not null) then
+            v_mot := 'pede_decisao';
           end if;
           if v_mot is null then
             if v_real then
@@ -219,7 +225,7 @@ begin
                                              jsonb_build_object('os', v_os, 'proposta', v_p ->> 'proposta_id', 'violacoes', v_a -> 'violacoes', 'p_hoje', p_hoje, 'p_agora', p_agora));
               end if;
             else
-              -- em teste a alocação não existe: os itens que o agenda_aplicar levaria (os não críticos) vão para o bloco desfeito lá em cima, que as próximas simulações leem
+              -- em teste a alocação não existe: os itens que o agenda_aplicar levaria (os não críticos; com o tudo ou nada, todos) vão para o bloco desfeito lá em cima, que as próximas simulações leem
               v_tst := v_tst || public._agenda_itens_escolhidos(v_p -> 'itens', null, null);
             end if;
           end if;
@@ -261,6 +267,6 @@ end;
 $function$;
 
 comment on function public._agenda_gestor_puxar(date, timestamptz) is
-  'Agenda de Produção (Fase 7e, P4b; spec §5.3, R7.7, AG7-31): o passo puxar do job agenda-gestor. A partir de puxar_hora da véspera, a folga que sobrou de amanhã (célula livre de quem já vem: da equipe, com telefone que a rotina alcance, ficha de D ainda por sair e, com o convite ligado, sem convite de D à espera do SIM; o dono, com o dia declarado, sem a rotina) puxa a próxima OS pronta da fila, até puxar_max_os, uma vez por dia útil. A ponta do dono (abrir e fechar) da OS puxada em D vale mesmo com ele fora das pessoas (o validador a aceita). Com o freio ou fora de ligado, só o diário (agenda_gestor_dia.sombra.puxar); aí, com puxar_max_os > 1, a simulação de cada OS seguinte vê as puxadas antes dela na rodada (os itens delas aplicados num bloco que se desfaz), como o de verdade as lê do banco. Erro vai a app_error_logs (agenda, gestor:puxar) e não lança. Nenhum texto novo.';
+  'Agenda de Produção (Fase 7e, P4b; spec §5.3, R7.7, AG7-31): o passo puxar do job agenda-gestor. A partir de puxar_hora da véspera, a folga que sobrou de amanhã (célula livre de quem já vem: da equipe, com telefone que a rotina alcance, ficha de D ainda por sair e, com o convite ligado, sem convite de D à espera do SIM; o dono, com o dia declarado, sem a rotina) puxa a próxima OS pronta da fila, até puxar_max_os, uma vez por dia útil. A ponta do dono (abrir e fechar) da OS puxada em D vale mesmo com ele fora das pessoas (o validador a aceita). Tudo ou nada por OS (P4c): a OS cuja proposta traz item crítico (o que pede a decisão do dono) fica fora com o motivo pede_decisao, nos dois modos, sem proposta, pergunta nem alocação para ela (o agenda_aplicar sem pergunta só levaria a parte não crítica). Com o freio ou fora de ligado, só o diário (agenda_gestor_dia.sombra.puxar); aí, com puxar_max_os > 1, a simulação de cada OS seguinte vê as puxadas antes dela na rodada (os itens delas aplicados num bloco que se desfaz), como o de verdade as lê do banco. Erro vai a app_error_logs (agenda, gestor:puxar) e não lança. Nenhum texto novo.';
 
 revoke all on function public._agenda_gestor_puxar(date, timestamptz) from public, anon, authenticated, service_role;

@@ -20,7 +20,7 @@
 -- O QUE NÃO MUDA: os outros itens do gravador e dos textos (o bloco do P4 só vale para folga_semana; o achado 162 registra que os outros itens da margem caem de uma vez). Fora de ligado, as recriadas do motor saem byte a byte como antes (a chave nova fica AUSENTE) e em sombra não chamam nenhuma função nova (R7.8: o portão de custo lê a linha já carregada); agenda_vigiar, agenda_cliente_vigiar, agenda_capacidade_semanal e os leitores dela
 -- ficam como estão (R7.N; o achado 160 diz o que afirmam em ligado). Nenhuma mensagem nova ao dono, à equipe ou ao cliente: os textos novos só aparecem em ligado, dentro do item que já existia. Nada de dinheiro.
 --
--- DESFAZER (na ordem):
+-- DESFAZER (na ordem). Com a 20261111100500 (P6) aplicada, desfaça o P6 ANTES (o DESFAZER dela): a 100500 recria _agenda_aprendizado_texto a partir do corpo desta migration e leva junto o bloco do P4 (integração P4–P6, 09/11); voltar só esta função ao corpo da origem com o P6 no ar apagaria também o texto do P6, e deixá-la como está manteria vivo o bloco do P4.
 --   cada recriada volta à versão anterior pelo corpo da origem acima; depois, drop das 3 novas:
 --   drop function if exists public._agenda_aprender_folga_semana(date, timestamptz);
 --   drop function if exists public._agenda_carga_da_semana(date, boolean);
