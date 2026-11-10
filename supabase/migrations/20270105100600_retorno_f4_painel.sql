@@ -839,6 +839,7 @@ begin
               or v_cfg.eco_modo is distinct from 'ligado';
 
   for pa in select p.id from public.parceiros p where p.ativo order by p.criado_em, p.id loop
+    v_num := null;   -- o número é deste parceiro, nunca o da volta anterior
     select nn.id into v_num
       from public.parceiro_numeros nn
       join public.parceiro_pessoas pe on pe.id = nn.pessoa_id and pe.ativo
