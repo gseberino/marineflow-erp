@@ -5,7 +5,8 @@
 -- parceiro_previa_pdf, gerados de retorno_previa_preparar, _soltar, _caiu e _pdf (20261208100500_retorno_f3_decidir.sql), que não mudam.
 --
 -- 1. _parceiro_cadastro_liga (a chave do cadastro) e _parceiro_veiculo_rotulo (o rótulo do bem da F1, ou o modelo).
--- 2. parceiro_coleta_ler: veículo, 1º nome e número autorizado, sem modelo e sem consultar clients.
+-- 2. parceiro_coleta_ler: veículo, 1º nome e número autorizado, sem modelo e sem consultar clients; _parceiro_fone_da_casa
+--    descarta o número da própria parceira ou da casa (revisão de 10/11).
 -- 3. parceiro_cadastro_provisorio: nada | perguntar (duplicado por telefone) | criaria | criado. Só grava com a chave.
 -- 4. parceiro_pedido_rodada (no parceiro_vigia): a máquina de estados automática do pedido.
 -- 5. _parceiro_rascunho_do_pedido, _parceiro_legenda_do_orcamento (P16) e _parceiro_previa_recusa.
@@ -77,11 +78,38 @@ revoke all on function public._parceiro_veiculo_rotulo(text, text) from public, 
 
 -- ── 2. A leitura do pedido (C13, passo 2) ──────────────────────────────────────────────────────────────────────────────
 
+-- Revisão de 10/11 (seguranca-c13): o número que a parceira passa como o do cliente nunca é dela nem da casa: a chave do
+-- caso (quem escreveu), um número de parceiro que não foi recusado (de qualquer parceiro), a equipe (app_users) ou um
+-- favorecido (payees), como quem_escreve os separa. Verdadeiro: o número não serve ao cliente. Sem chave de 8 dígitos,
+-- falso (quem chama já recusa). Nunca consulta clients.
+create or replace function public._parceiro_fone_da_casa(p_fone text, p_abertura uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select x.chave is not null
+         and (x.chave is not distinct from (select a.chave from public.retorno_aberturas a where a.id = p_abertura)
+              or exists (select 1 from public.parceiro_numeros n where n.chave = x.chave and n.situacao <> 'recusado')
+              or exists (select 1 from public.app_users u
+                          where u.active
+                            and (public._mesmo_telefone(p_fone, u.phone_normalized) or public._mesmo_telefone(p_fone, u.phone)))
+              or exists (select 1 from public.payees p where p.active and public._mesmo_telefone(p_fone, p.phone)))
+    from (select public._agenda_chave_telefone(p_fone) as chave) x;
+$$;
+
+comment on function public._parceiro_fone_da_casa(text, uuid) is
+  'Retorno F4 (P10.1; revisão de 10/11, seguranca-c13): o número passado pela parceira é dela ou da casa? Verdadeiro quando a chave é a do caso, a de um número de parceiro não recusado, ou o telefone é da equipe (app_users ativo) ou de um favorecido (payees ativo). Sem chave, falso. Nunca consulta clients. Chamada por parceiro_coleta_ler (descarta o número) e por parceiro_cartao_executar (não copia e, ao cliente, nada sai).';
+
+revoke all on function public._parceiro_fone_da_casa(text, uuid) from public, anon, authenticated;
+
 -- O que dá para ler do pedido, sem nenhum modelo e sem nome de cadastro. Bem e modelo pela janela do caso
 -- (_retorno_pedido_de_servico desde aberta_em, como a regra 7); o 1º nome só na forma "do/da/cliente/nome + Nome" no texto
 -- como foi escrito, descartando bem, as palavras fixas (Gustavo, Claudia, HBR, cliente), a sigla e os nomes do próprio
--- parceiro; o número só com autorização escrita na mesma mensagem. Preenche só campo nulo, e só em coleta. completo_em é a
--- hora real da mensagem que completou veículo e nome. Nunca consulta clients. Devolve só marcas, nunca o nome nem o número.
+-- parceiro; o número só com autorização escrita na mesma mensagem, e nunca o da própria parceira ou da casa
+-- (_parceiro_fone_da_casa; o 1º número que serve, na ordem da mensagem). Preenche só campo nulo, e só em coleta. completo_em
+-- é a hora real da mensagem que completou veículo e nome. Nunca consulta clients. Devolve só marcas, nunca o nome nem o número.
 create or replace function public.parceiro_coleta_ler(p_abertura uuid, p_agora timestamptz)
 returns jsonb
 language plpgsql
@@ -165,14 +193,22 @@ begin
       end if;
     end if;
     if v_fone is null and public._retorno_busca(r.body) ~ c_re_autoriza then
-      v_m := substring(coalesce(r.body, '') from c_re_fone);
-      v_dig := regexp_replace(coalesce(v_m, ''), '\D', '', 'g');
-      if length(v_dig) in (10, 11) then
-        v_dig := '55' || v_dig;
-      end if;
-      if length(v_dig) in (12, 13) and v_dig like '55%' and public._agenda_chave_telefone(v_dig) is not null then
-        v_fone := v_dig;
-      end if;
+      -- revisão de 10/11 (seguranca-c13): cada número da mensagem, na ordem; o da própria parceira ou da casa
+      -- (_parceiro_fone_da_casa: a chave do caso, um número de parceiro, a equipe ou um favorecido) é descartado, e a
+      -- leitura segue para o próximo
+      for v_m in
+        select t.m[1] from regexp_matches(coalesce(r.body, ''), '(' || c_re_fone || ')', 'g') with ordinality as t(m, o) order by t.o
+      loop
+        v_dig := regexp_replace(coalesce(v_m, ''), '\D', '', 'g');
+        if length(v_dig) in (10, 11) then
+          v_dig := '55' || v_dig;
+        end if;
+        if length(v_dig) in (12, 13) and v_dig like '55%' and public._agenda_chave_telefone(v_dig) is not null
+           and not public._parceiro_fone_da_casa(v_dig, p_abertura) then
+          v_fone := v_dig;
+          exit;
+        end if;
+      end loop;
     end if;
   end loop;
 
@@ -206,7 +242,7 @@ end;
 $$;
 
 comment on function public.parceiro_coleta_ler(uuid, timestamptz) is
-  'Retorno F4 (P10.1, passo 2): lê do pedido do parceiro, só em coleta e só para campo nulo: o veículo (rótulo do bem da F1 ou o modelo, pela janela do caso), o 1º nome (só "do/da/cliente/nome + Nome", fora de bem e de palavra fixa) e o número com autorização escrita na mesma mensagem. completo_em = hora real da mensagem que completou veículo e nome. Nunca consulta clients. Devolve só marcas ({ok, mudou, veiculo, primeiro_nome, numero, completo}).';
+  'Retorno F4 (P10.1, passo 2): lê do pedido do parceiro, só em coleta e só para campo nulo: o veículo (rótulo do bem da F1 ou o modelo, pela janela do caso), o 1º nome (só "do/da/cliente/nome + Nome", fora de bem e de palavra fixa) e o número com autorização escrita na mesma mensagem (o 1º que não é da parceira nem da casa: _parceiro_fone_da_casa). completo_em = hora real da mensagem que completou veículo e nome. Nunca consulta clients. Devolve só marcas ({ok, mudou, veiculo, primeiro_nome, numero, completo}).';
 
 revoke all on function public.parceiro_coleta_ler(uuid, timestamptz) from public, anon, authenticated;
 grant execute on function public.parceiro_coleta_ler(uuid, timestamptz) to service_role;

@@ -1882,6 +1882,7 @@ declare
   v_op jsonb;
   v_destino text;
   v_dup boolean;
+  v_dela boolean;
   v_chave text;
   v_feitos integer := 0;
   v_aviso text;
@@ -1957,8 +1958,18 @@ begin
                                         else format('o %s: fora do horário de envio; não criei nada. Mande *parceiro* a partir das 8h', v_i.n) end);
           continue;
         end if;
-        -- o número que a MP passou: confere de novo que não é de outro cliente ativo
+        -- revisão de 10/11 (seguranca-c13): o número que a MP passou nunca é dela nem da casa (a chave do caso, um número de
+        -- parceiro, a equipe ou um favorecido). A coleta já o descarta; aqui, de novo, antes de gravar clients.whatsapp e
+        -- antes do orçamento ao cliente: nunca é copiado e, com destino cliente, nada sai.
         v_chave := public._agenda_chave_telefone(v_ped.whatsapp_informado);
+        v_dela := v_chave is not null and public._parceiro_fone_da_casa(v_ped.whatsapp_informado, v_ped.abertura_id);
+        if v_dela and v_destino = 'cliente' then
+          update public.parceiro_cartao_itens i set estado = 'fora' where i.id = v_i.id;
+          perform public._parceiro_fila_marcar(v_i.fila_id, 'espera', null, v_agora);
+          v_frases := v_frases || format('o %s: o número passado é da própria parceira; nada saiu', v_i.n);
+          continue;
+        end if;
+        -- o número que a MP passou: confere de novo que não é de outro cliente ativo
         v_dup := v_chave is not null and exists (
           select 1 from public.clients c
            where c.active and c.id is distinct from v_ped.client_id
@@ -1970,7 +1981,7 @@ begin
                                          (select pa.sigla from public.parceiros pa where pa.id = v_ped.parceiro_id));
           continue;
         end if;
-        if not v_dup and v_chave is not null and v_ped.client_id is not null then
+        if not v_dup and not v_dela and v_chave is not null and v_ped.client_id is not null then
           update public.clients c
              set whatsapp = v_ped.whatsapp_informado
            where c.id = v_ped.client_id and coalesce(btrim(c.whatsapp), '') = '';
@@ -2049,7 +2060,7 @@ end;
 $$;
 
 comment on function public.parceiro_cartao_executar(uuid, uuid, timestamptz) is
-  'Retorno F4 (C-EXEC-P): o *sim <PIN>* do cartão do parceiro. Só o dono. Fora da seleção → fila espera; conferência que falha → item caiu com o motivo (fato_mudou volta à fila, o resto cai); sem letra onde a letra é exigida → fila espera; feito → fila feito. O item pedido (P10): letra D desfaz; A e B levam o pedido a decidido, copiam o número autorizado (se não for de outro cliente) e entram em orcamentos. {ok, aviso, saidas, pdfs (sempre vazio), orcamentos}.';
+  'Retorno F4 (C-EXEC-P): o *sim <PIN>* do cartão do parceiro. Só o dono. Fora da seleção → fila espera; conferência que falha → item caiu com o motivo (fato_mudou volta à fila, o resto cai); sem letra onde a letra é exigida → fila espera; feito → fila feito. O item pedido (P10): letra D desfaz; A e B levam o pedido a decidido, copiam o número autorizado (se não for de outro cliente nem da casa: _parceiro_fone_da_casa) e entram em orcamentos; com o número da própria parceira e destino cliente, nada sai. {ok, aviso, saidas, pdfs (sempre vazio), orcamentos}.';
 
 revoke all on function public.parceiro_cartao_executar(uuid, uuid, timestamptz) from public, anon, authenticated;
 grant execute on function public.parceiro_cartao_executar(uuid, uuid, timestamptz) to service_role;

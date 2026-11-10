@@ -3,8 +3,9 @@
 -- pedido, com a chave do cadastro desligada (nada real nasce) e ligada; o duplicado por telefone; a letra D; o item pedido
 -- no cartão do parceiro (A, B, D e as formas sem letra); a ordem do *sim <PIN>* (o número copiado, o vínculo nos dois
 -- destinos, a requalificação tudo ou nada); o preparo, o soltar, o caiu e o PDF do parceiro, com os da F3 byte a byte iguais;
--- o P15; *resolvido N* no pedido. Roda só pela bancada (grupo 7, F4_ONDA=7). Termina em ROLLBACK. Telefones de teste
--- 55479000168xx (o parceiro) e 55479000169xx (os clientes); nomes inventados; números de documento ORÇ-989xx. Relógio:
+-- o P15; *resolvido N* no pedido; e, na revisão de 10/11 (29), o número da própria parceira ou da casa, que nunca vira o do
+-- cliente. Roda só pela bancada (grupo 7, F4_ONDA=7). Termina em ROLLBACK. Telefones de teste 55479000168xx (o parceiro e,
+-- no 29, um favorecido) e 55479000169xx (os clientes); nomes inventados; números de documento ORÇ-989xx. Relógio:
 -- ter 12/01/2027, das 10:00 às 19:00, e qua 13/01 (o silêncio de 24 h).
 begin;
 create temp table if not exists _bancada (arquivo text, ok boolean, numeros jsonb, em timestamptz default clock_timestamp());
@@ -858,6 +859,56 @@ begin
     raise exception '14i: o pedido vencido no cartão (%)', to_jsonb(pg_temp.f4q_ped(v_caso));
   end if;
   perform pg_temp.f4q_fechar(v_caso, c_t + interval '8 hours 50 minutes');
+
+  -- ── 29. Revisão de 10/11 (seguranca-c13): o número que a parceira passa nunca é dela nem da casa. Na coleta, o número do
+  --    próprio caso, o de outra pessoa da parceira e o de um favorecido são descartados, e a leitura segue até o número do
+  --    cliente; no *sim*, o pedido que traz o número da parceira (o que a leitura de antes gravaria) não copia ao cadastro e,
+  --    ao cliente, nada sai. Telefones 5547900016807 (favorecido) e 5547900016906 (cliente); documento ORÇ-98905 ──
+  insert into public.payees (name, kind, active, phone) values ('Favorecido C13', 'prestador', true, '5547900016807');
+  v_caso := pg_temp.f4q_abrir(c_n3, 'Orçamento de bateria pro motorhome do Ivo, liberado falar comigo no 47 90001-6803, com a Carla no 47 90001-6802 ou no 47 90001-6807',
+                              c_t + interval '8 hours 51 minutes');
+  v_ped := pg_temp.f4q_ped(v_caso);
+  if v_ped.id is null or v_ped.primeiro_nome is distinct from 'Ivo' or v_ped.whatsapp_informado is not null
+     or v_ped.autoriza_whatsapp is true then
+    raise exception '29a: o número da parceira ou da casa virou o do cliente (%)', to_jsonb(v_ped);
+  end if;
+  if public._parceiro_fone_da_casa('5547900016906', v_caso) is not false or public._parceiro_fone_da_casa(c_n3, v_caso) is not true
+     or public._parceiro_fone_da_casa(c_n2, v_caso) is not true or public._parceiro_fone_da_casa('5547900016807', v_caso) is not true
+     or public._parceiro_fone_da_casa(null, v_caso) is not false then
+    raise exception '29b: _parceiro_fone_da_casa';
+  end if;
+  perform pg_temp.f4q_fechar(v_caso, c_t + interval '8 hours 52 minutes');
+  v_caso := pg_temp.f4q_abrir(c_n3, 'Orçamento de bateria pro motorhome do Ivo, pode falar comigo no 47 90001-6803 ou com ele no 47 90001-6906',
+                              c_t + interval '8 hours 53 minutes');
+  perform pg_temp.f4q_alinhar(v_caso);
+  v_ped := pg_temp.f4q_ped(v_caso);
+  if v_ped.whatsapp_informado is distinct from '5547900016906' or v_ped.autoriza_whatsapp is not true then
+    raise exception '29c: a leitura não seguiu até o número do cliente (%)', to_jsonb(v_ped);
+  end if;
+  perform public.parceiro_pedido_rodada(c_t + interval '8 hours 54 minutes');
+  perform public.parceiro_pedido_rodada(c_t + interval '8 hours 55 minutes');
+  v_ped := pg_temp.f4q_ped(v_caso);
+  if v_ped.estado is distinct from 'cartao' or v_ped.client_id is null then
+    raise exception '29d: o pedido do Ivo não chegou ao cartão (%)', to_jsonb(v_ped);
+  end if;
+  v_rasc := pg_temp.f4q_rascunho(v_ped.client_id, v_ped.vessel_id, 'ORÇ-98905', c_t + interval '8 hours 56 minutes', 700);
+  -- o pedido com o número da Carla, como a leitura de antes desta revisão gravaria
+  update public.parceiro_pedidos set whatsapp_informado = c_n2 where id = v_ped.id;
+  v_cartao := pg_temp.f4q_cartao(array[(pg_temp.f4q_fila('pedido:' || v_ped.id)).id], c_t + interval '8 hours 57 minutes');
+  v_i := pg_temp.f4q_item(v_cartao, 1);
+  if coalesce(v_i.texto_mostrado, '') not like '%*1 A* ao cliente ••6802 (passado pela RCT)%' then
+    raise exception '29e: o item com o número da parceira (%)', v_i.texto_mostrado;
+  end if;
+  perform pg_temp.f4q_dito('{"comando": "escolher", "n": 1, "letra": "A"}', c_t + interval '8 hours 58 minutes');
+  v_r := pg_temp.f4q_sim(v_cartao, c_t + interval '8 hours 59 minutes');
+  if jsonb_array_length(v_r -> 'orcamentos') is distinct from 0
+     or (pg_temp.f4q_ped(v_caso)).estado is distinct from 'cartao'
+     or exists (select 1 from public.clients c where c.id = v_ped.client_id and c.whatsapp is not null)
+     or (pg_temp.f4q_fila('pedido:' || v_ped.id)).estado is distinct from 'espera'
+     or coalesce(v_r ->> 'aviso', '') not like '%o 1: o número passado é da própria parceira; nada saiu%' then
+    raise exception '29f: o *sim* com o número da parceira (%)', v_r;
+  end if;
+  perform pg_temp.f4q_fechar(v_caso, c_t + interval '8 hours 59 minutes 30 seconds');
 
   -- ── 14. A parceira nunca responde: sem veículo, depois de parceiro_coleta_espera, caiu/sem_resposta, sem cadastro ──
   v_caso := pg_temp.f4q_abrir(c_n1, 'Vim pelo site da HBR Systems, preciso de um orçamento', c_t + interval '9 hours');
