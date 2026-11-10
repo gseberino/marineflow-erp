@@ -861,11 +861,13 @@ begin
         end if;
       end if;
 
-      -- 6. O eco: o cliente ouviu o marco (P7). Nunca o parceiro sabe antes do cliente.
-      if v_s.tipo = 'parceiro_eco'
-         and public._parceiro_cliente_ouviu((v_dados -> 'os_ids' ->> 0)::uuid, v_var, v_agora) is null then
-        perform public._parceiro_pegar_fechar(v_s.id, 'recusada', 'cliente_nao_ouviu', v_dados, v_agora);
-        continue;
+      -- 6. O eco: o cliente ouviu o marco (P7). Nunca o parceiro sabe antes do cliente. Aninhado de propósito: o plpgsql
+      -- prepara a condição inteira na 1ª passada, e _parceiro_cliente_ouviu (P7, onda 5) não existe na onda 4.
+      if v_s.tipo = 'parceiro_eco' then
+        if public._parceiro_cliente_ouviu((v_dados -> 'os_ids' ->> 0)::uuid, v_var, v_agora) is null then
+          perform public._parceiro_pegar_fechar(v_s.id, 'recusada', 'cliente_nao_ouviu', v_dados, v_agora);
+          continue;
+        end if;
       end if;
 
       -- O eco e o repassar falam de uma OS só: nome que colide com outro cliente do parceiro derruba a saída (P4.2, item 5).
