@@ -26,6 +26,8 @@ const AQUI = dirname(fromFileUrl(import.meta.url)); // supabase/functions/_share
 const FUNCOES = resolve(AQUI, "..", ".."); // supabase/functions
 const RAIZ = resolve(FUNCOES, "..", ".."); // o repositório
 const DIR_RETORNO = join(FUNCOES, "_shared", "retorno");
+// Retorno F4 (P15): a camada do parceiro (o leitor e a marca do webhook) vale a mesma regra, testes inclusive, sem filtro novo
+const DIR_PARCEIRO = join(FUNCOES, "_shared", "parceiro");
 const DIR_RECIBOS = join(FUNCOES, "retorno-recibos");
 const ENTRADA_RECIBOS = join(DIR_RECIBOS, "index.ts");
 
@@ -236,11 +238,16 @@ Deno.test("isolamento: o extrator de imports e os classificadores enxergam o que
 
 // ─── Portão 1: imports diretos ───────────────────────────────────────────────────────────────────
 
-Deno.test("isolamento: nada em _shared/retorno/ nem em retorno-recibos/ importa _shared/ai/", () => {
-  const arquivos = [...arquivosDeCodigo(DIR_RETORNO), ...arquivosDeCodigo(DIR_RECIBOS)];
+Deno.test("isolamento: nada em _shared/retorno/, _shared/parceiro/ nem em retorno-recibos/ importa _shared/ai/", () => {
+  const arquivos = [...arquivosDeCodigo(DIR_RETORNO), ...arquivosDeCodigo(DIR_PARCEIRO), ...arquivosDeCodigo(DIR_RECIBOS)];
   assert(
     arquivos.some((a) => comparavel(a) === comparavel(join(DIR_RETORNO, "validador.ts"))),
     "a varredura não achou o validador: o portão estaria olhando a pasta errada",
+  );
+  assert(
+    arquivos.some((a) => comparavel(a) === comparavel(join(DIR_PARCEIRO, "camada.ts"))) &&
+      arquivos.some((a) => comparavel(a) === comparavel(join(DIR_PARCEIRO, "camada_test.ts"))),
+    "a varredura não achou a camada do parceiro (e o teste dela): o portão estaria olhando a pasta errada",
   );
   const violacoes: string[] = [];
   for (const arquivo of arquivos) {
@@ -271,9 +278,10 @@ Deno.test({
   },
 });
 
-Deno.test("isolamento: o grafo de cada módulo de _shared/retorno/ também fica fora de tools/, registry.ts e _shared/agenda/", async () => {
-  const modulos = arquivosDeCodigo(DIR_RETORNO).filter((a) => !/_test\.(ts|tsx|mts|js|mjs)$/.test(a));
+Deno.test("isolamento: o grafo de cada módulo de _shared/retorno/ e _shared/parceiro/ também fica fora de tools/, registry.ts e _shared/agenda/", async () => {
+  const modulos = [...arquivosDeCodigo(DIR_RETORNO), ...arquivosDeCodigo(DIR_PARCEIRO)].filter((a) => !/_test\.(ts|tsx|mts|js|mjs)$/.test(a));
   assert(modulos.length >= 1);
+  assert(modulos.some((a) => comparavel(a) === comparavel(join(DIR_PARCEIRO, "comandos.ts"))), "a pasta do parceiro ficou de fora");
   for (const modulo of modulos) {
     assertEquals(proibidosDoGrafo(await grafoDe(modulo)), [], modulo);
   }
