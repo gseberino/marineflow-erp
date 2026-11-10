@@ -165,3 +165,10 @@ Deno.test("aviso do turno que caiu no meio (revisão de 29/10): no topo do cart�
   assertEquals(respostaDoTurnoNoWhatsApp({ texto: "", aviso }, {}).replyText, aviso);
   assertEquals(respostaDoTurnoNoWhatsApp({ texto: "", aviso, conferido: "⚠️ Conferido" }, {}).replyText, `${aviso}\n\n⚠️ Conferido`);
 });
+
+Deno.test("Retorno F4 (P12.1): o cartão do parceiro no ponteiro também fica sem o lembrete, com o ponteiro mantido", () => {
+  const cartao = { title: "Cartão do parceiro", risk_level: "high", action_name: "parceiro_executar_cartao" };
+  const comCartao = respostaDoTurnoNoWhatsApp({ texto: "ok" }, antes, cartao);
+  assertEquals(comCartao.replyText, "ok");
+  assertEquals(comCartao.metadata.pending_confirm_action_id, "velha");
+});

@@ -1013,3 +1013,138 @@ Deno.test("WhatsApp em modo de teste: o dono sabe que foi ao número de teste, e
     assertEquals(f.chamadas.at(-1)?.fn, "retorno_previa_soltar");
   });
 });
+
+// ─── Retorno F4 (P12.1, P12.3): orcarEEnviar com item do parceiro (C13) ─────────────────────────────────────────────────
+
+const TEXTO_P16 = "Oi, Carla! Segue o orçamento do motorhome de João, válido até 15/01.";
+const LEGENDA_P16 = {
+  texto: TEXTO_P16,
+  contexto: {
+    audiencia: "parceiro" as const, datas_permitidas: ["15/01"], horas_permitidas: [] as string[], nome_permitido: "Carla",
+    nomes_de_outros: [] as string[], nomes_da_lista: ["João"], papel_do_parceiro: "contratante", os_permitidas: [] as string[],
+    textos_do_cliente: [] as string[], trechos_do_modelo: ["Oi, ", "! Segue o orçamento do ", " de ", ", válido até ", "."],
+    marcas: { tem_proposta: false, tem_topo: false, cliente_ouviu: false, conferida: false },
+  },
+  validade_data: "2027-01-15",
+};
+const PRE_PARCEIRO = { ...PRE_OK, rotulo: "MP (Carla)", parceiro_id: "pa-1", pedido_id: "pe-1", legenda: LEGENDA_P16, args: { ...PRE_OK.args, origem: "retorno_parceiro" } };
+const PRE_PARCEIRO_CLIENTE = { ...PRE_PARCEIRO, legenda: LEGENDA };
+const RPCS_DO_PARCEIRO = {
+  preparar: "parceiro_previa_preparar", soltar: "parceiro_previa_soltar", enviado: "parceiro_item_enviado",
+  caiu: "parceiro_previa_caiu", pdf: "parceiro_previa_pdf",
+};
+const OPC_PARCEIRO = {
+  rpcs: RPCS_DO_PARCEIRO, destino: "parceiro" as const, parceiro_id: "pa-1", pedido_id: "pe-1", soltar_sem_enviar: false,
+  frase_sem_enviar: "o 1: ficou em rascunho; o PDF ao parceiro só sai depois do aviso e de 24 h; peça de novo depois disso",
+};
+const OPC_CLIENTE = { ...OPC_PARCEIRO, destino: "cliente" as const };
+
+Deno.test("F4: os cinco nomes do parceiro, e nenhum retorno_previa_* da F3 fora o orc_criado; o preparar com p_pedido e p_destino", async () => {
+  await comRelogio(MEIO_DIA, async () => {
+    const f = fluxo({ parceiro_previa_preparar: PRE_PARCEIRO, parceiro_vinculo_do_pedido: { ok: true, interessado_id: "oi-1", papel: "contratante" } });
+    const d = depsFalsos(f);
+    const a = await orcarEEnviar(ORC(), f.c, d.deps, OPC_PARCEIRO);
+    assertEquals(f.nomes(), ["parceiro_previa_preparar", "montar", "retorno_previa_orc_criado", "parceiro_vinculo_do_pedido", "enviar_pdf", "parceiro_previa_pdf", "parceiro_item_enviado"]);
+    assertEquals(f.chamadas[0].args, { p_pedido: "pe-1", p_previa: "pv-1", p_item: "i-1", p_autor: "dono", p_so: null, p_destino: "parceiro" });
+    assertEquals(d.montados[0].opcoes, { origem: { valor: "retorno_parceiro", chave8: "12345678", parceiro_id: "pa-1" } });
+    assertEquals(f.chamadas[3].args, { p_pedido: "pe-1", p_so: "os-1", p_autor: "dono", p_destino: "parceiro" });
+    assertEquals(d.enviados[0].destino, "parceiro");
+    assertEquals(d.enviados[0].custom_message, TEXTO_P16);
+    assertEquals(f.chamadas[6].args, { p_item: "i-1", p_ok: true, p_wa_id: null });
+    assertEquals(a, ["Orçamento ORÇ-00151 criado e PDF enviado a MP (Carla)."]);
+  });
+});
+
+Deno.test("F4: o vínculo nasce também com destino cliente, antes do envio, e a legenda ao cliente passa no validador do cliente", async () => {
+  await comRelogio(MEIO_DIA, async () => {
+    const f = fluxo({ parceiro_previa_preparar: PRE_PARCEIRO_CLIENTE, parceiro_vinculo_do_pedido: { ok: true, interessado_id: "oi-1", papel: "indicou" } });
+    const d = depsFalsos(f);
+    const a = await orcarEEnviar(ORC(), f.c, d.deps, OPC_CLIENTE);
+    assertEquals(f.chamadas[0].args.p_destino, "cliente");
+    const ordem = f.nomes();
+    assert(ordem.indexOf("parceiro_vinculo_do_pedido") < ordem.indexOf("enviar_pdf"), ordem.join(" > "));
+    assertEquals(f.chamadas.find((x) => x.fn === "parceiro_vinculo_do_pedido")?.args.p_destino, "cliente");
+    assertEquals("destino" in d.enviados[0], false, "ao cliente, o envio de sempre");
+    assertEquals(a, ["Orçamento ORÇ-00151 criado e PDF enviado a MP (Carla)."]);
+  });
+});
+
+Deno.test("F4: ramo pdf — o vínculo logo depois do preparar, sem montar", async () => {
+  await comRelogio(MEIO_DIA, async () => {
+    const pdf = { ...PRE_PARCEIRO, acao: "pdf", numero: "ORÇ-00140", args: undefined, previa_id: null };
+    const f = fluxo({ parceiro_previa_preparar: pdf, parceiro_vinculo_do_pedido: { ok: true } });
+    const d = depsFalsos(f);
+    await orcarEEnviar(ORC({ acao: "pdf", service_order_id: "os-9", numero: "ORÇ-00140", previa_id: null }), f.c, d.deps, OPC_PARCEIRO);
+    assertEquals(f.nomes().slice(0, 3), ["parceiro_previa_preparar", "parceiro_vinculo_do_pedido", "enviar_pdf"]);
+    assertEquals(f.chamadas[1].args.p_so, "os-9");
+  });
+});
+
+Deno.test("F4: vínculo recusado — nada sai, o item é solto pelo parceiro e o dono ouve a frase", async () => {
+  await comRelogio(MEIO_DIA, async () => {
+    const f = fluxo({ parceiro_previa_preparar: PRE_PARCEIRO, parceiro_vinculo_do_pedido: { ok: false, motivo: "os_fora", frase: "o rascunho é de outro cliente; nada saiu" } });
+    const d = depsFalsos(f);
+    const a = await orcarEEnviar(ORC(), f.c, d.deps, OPC_PARCEIRO);
+    assertEquals(f.nomes().includes("enviar_pdf"), false);
+    assertEquals(f.chamadas.at(-1), { fn: "parceiro_previa_soltar", args: { p_item: "i-1" } });
+    assertEquals(a, ["o 1: o rascunho é de outro cliente; nada saiu"]);
+  });
+});
+
+Deno.test("F4: sem_enviar com soltar_sem_enviar falso — o vínculo nasce, a frase do parceiro vai ao dono e nada é solto", async () => {
+  await comRelogio(MEIO_DIA, async () => {
+    const f = fluxo({ parceiro_previa_preparar: PRE_PARCEIRO, parceiro_vinculo_do_pedido: { ok: true } });
+    const d = depsFalsos(f);
+    const a = await orcarEEnviar(ORC({ sem_enviar: true }), f.c, d.deps, OPC_PARCEIRO);
+    assertEquals(f.nomes(), ["parceiro_previa_preparar", "montar", "retorno_previa_orc_criado", "parceiro_vinculo_do_pedido"]);
+    assertEquals(a, [OPC_PARCEIRO.frase_sem_enviar]);
+    // com o padrão (F3), o sem_enviar continua soltando
+    const g = fluxo({ parceiro_previa_preparar: PRE_PARCEIRO, parceiro_vinculo_do_pedido: { ok: true } });
+    const dg = depsFalsos(g);
+    await orcarEEnviar(ORC({ sem_enviar: true }), g.c, dg.deps, { ...OPC_PARCEIRO, soltar_sem_enviar: undefined, frase_sem_enviar: undefined });
+    assertEquals(g.chamadas.at(-1)?.fn, "parceiro_previa_soltar");
+  });
+});
+
+Deno.test("F4: ja_existe chama parceiro_previa_caiu; PDF que falha solta pelo parceiro", async () => {
+  await comRelogio(MEIO_DIA, async () => {
+    const f = fluxo({ parceiro_previa_preparar: PRE_PARCEIRO });
+    const d = depsFalsos(f, { orcamento: { ja_existe: "ORÇ-00140", error: "x" } });
+    await orcarEEnviar(ORC(), f.c, d.deps, OPC_PARCEIRO);
+    assertEquals(f.chamadas.at(-1), { fn: "parceiro_previa_caiu", args: { p_previa: "pv-1", p_item: "i-1", p_motivo: "orc_existe" } });
+
+    const g = fluxo({ parceiro_previa_preparar: PRE_PARCEIRO, parceiro_vinculo_do_pedido: { ok: true } });
+    const dg = depsFalsos(g, { envio: { error: "provedor fora" } });
+    await orcarEEnviar(ORC(), g.c, dg.deps, OPC_PARCEIRO);
+    assertEquals(g.chamadas.find((x) => x.fn === "parceiro_previa_pdf")?.args.p_ok, false);
+    assertEquals(g.chamadas.at(-1)?.fn, "parceiro_previa_soltar");
+    assertEquals(g.nomes().some((n) => n.startsWith("retorno_previa_") && n !== "retorno_previa_orc_criado"), false);
+  });
+});
+
+Deno.test("F4: a legenda ao parceiro reprovada no validador do parceiro não sai (nunca passa pelo do cliente)", async () => {
+  await comRelogio(MEIO_DIA, async () => {
+    const comValor = { ...LEGENDA_P16, texto: "Oi, Carla! Segue o orçamento do motorhome de João, R$ 8.040, válido até 15/01." };
+    const f = fluxo({ parceiro_previa_preparar: { ...PRE_PARCEIRO, legenda: comValor }, parceiro_vinculo_do_pedido: { ok: true } });
+    const d = depsFalsos(f);
+    const a = await orcarEEnviar(ORC(), f.c, d.deps, OPC_PARCEIRO);
+    assertEquals(f.nomes().includes("enviar_pdf"), false);
+    assertEquals(a, ["o 1: legenda recusada; orçamento ORÇ-00151 criado, nada saiu"]);
+    assertEquals(f.chamadas.at(-1)?.fn, "parceiro_previa_soltar");
+  });
+});
+
+Deno.test("F4: opcoes ausente é igual ao de hoje, byte a byte", async () => {
+  await comRelogio(MEIO_DIA, async () => {
+    const f = fluxo({ retorno_previa_preparar: PRE_OK });
+    const d = depsFalsos(f);
+    const g = fluxo({ retorno_previa_preparar: PRE_OK });
+    const dg = depsFalsos(g);
+    assertEquals(await orcarEEnviar(ORC(), f.c, d.deps), await orcarEEnviar(ORC(), g.c, dg.deps, undefined));
+    assertEquals(JSON.stringify(f.chamadas), JSON.stringify(g.chamadas));
+    assertEquals(f.chamadas[0].args, { p_previa: "pv-1", p_item: "i-1", p_autor: "dono", p_so: null });
+    assertEquals(JSON.stringify(d.montados), JSON.stringify(dg.montados));
+    assertEquals(JSON.stringify(d.enviados), JSON.stringify(dg.enviados));
+    assertEquals(f.nomes().some((n) => n.startsWith("parceiro_")), false);
+  });
+});

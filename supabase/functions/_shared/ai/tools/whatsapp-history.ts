@@ -24,6 +24,7 @@
  */
 import { blockTechnician, type ToolDef } from "./registry.ts";
 import { chaveTelefone, padraoLikeTelefone } from "../phone.ts";
+import { chavesForaDoAssistente, FRASE_FORA_DO_ASSISTENTE, foraDoAssistente } from "../parceiro-fora-da-ia.ts";
 
 /** Cargos que podem ler conversa. Igual à RLS de `whatsapp_messages`, que recusa o
  *  vendedor externo — divergir aqui daria a ele uma tool que sempre volta vazia, e
@@ -247,8 +248,13 @@ export const whatsappHistoryTools: ToolDef[] = [
 
       const colunas = "direction, body, message_type, occurred_at, created_at, phone_normalized, sent_by";
 
+      // Retorno F4 (P12.4, linhas 1 e 2): os números confirmados de parceiro ficam fora do assistente enquanto
+      // parceiro_historico_na_ia é falso. A leitura das chaves é do service_role (ctx.admin); falha fecha.
+      const fora = await chavesForaDoAssistente(ctx.admin);
+
       // ── Conversa de um contato ────────────────────────────────────────────
       if (telefone) {
+        if (foraDoAssistente(fora, telefone)) return { error: FRASE_FORA_DO_ASSISTENTE };
         const like = padraoLikeTelefone(telefone);
         if (!like) return { error: `Telefone "${telefone}" é curto demais para casar com alguma conversa.` };
 
@@ -294,7 +300,8 @@ export const whatsappHistoryTools: ToolDef[] = [
       const { data, error } = await q.order("occurred_at", { ascending: false }).limit(teto);
       if (error) return { error: `Não consegui buscar nas mensagens: ${error.message}` };
 
-      const achadas = (data as any[]) || [];
+      // Retorno F4 (P12.4, linha 2): as linhas de chave confirmada saem do resultado, sem contar quantas
+      const achadas = ((data as any[]) || []).filter((m) => !foraDoAssistente(fora, String(m.phone_normalized || "")));
       if (achadas.length === 0) {
         return {
           procurou_por: procura,

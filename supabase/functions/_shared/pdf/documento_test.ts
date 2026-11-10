@@ -3,6 +3,9 @@ import { dirname, fromFileUrl, join } from "https://deno.land/std@0.224.0/path/m
 import { FakeTime } from "https://deno.land/std@0.224.0/testing/time.ts";
 import {
   buildOrderHTML,
+  buildPDFFilename,
+  nomeReduzidoDoCliente,
+  tituloParaImpressao,
   DEFAULT_PDF_OPTIONS,
   opcoesPadraoDoDocumento,
   type PDFOptions,
@@ -137,4 +140,63 @@ Deno.test("opcoesPadraoDoDocumento: padrão da EMPRESA (não o de fábrica), via
   assertEquals(os.showTerms, false);
   assertEquals(os.hideFinancials, false);
   assertEquals(os.validity, undefined);
+});
+
+// ─── Retorno F4 (P12.2): a via reduzida do PDF ao parceiro ───────────────────────────────────────────────────────
+// Nome e inicial do cliente, sem CPF/CNPJ, telefone, e-mail nem endereço; o nome do arquivo e o título só com tipo e
+// número. A opção nunca vem de app_settings: só por argumento. Desligada, nada muda (as referências acima já provam).
+
+Deno.test("via reduzida: o HTML não traz CPF, fone, e-mail nem endereço sintéticos, e o nome sai com a inicial", () => {
+  const tempo = new FakeTime(new Date(AGORA));
+  try {
+    const sintetico = {
+      ...ORCAMENTO,
+      client: { name: "João Pedro Silva", cpf_cnpj: "123.456.789-09", phone: "(47) 98888-4321", email: "joao.silva@exemplo.com", address: "Rua Inventada, 77, Itajaí" },
+    };
+    const html = buildOrderHTML(sintetico, { ...DEFAULT_PDF_OPTIONS, validity: { mode: "days", days: 7 }, ocultarDadosDoCliente: true });
+    for (const dado of ["123.456.789-09", "98888-4321", "joao.silva@exemplo.com", "Rua Inventada", "João Pedro Silva", "Pedro Silva", "CPF/CNPJ"]) {
+      assertEquals(html.includes(dado), false, dado);
+    }
+    // "Fone:" e "Email:" ainda aparecem no cabeçalho da empresa; no card do cliente, não
+    const ini = html.indexOf("Informações do Cliente");
+    const card = html.slice(ini, html.indexOf('<div class="card">', ini));
+    for (const rotulo of ["Fone:", "Email:", "CPF/CNPJ:"]) assertEquals(card.includes(rotulo), false, rotulo);
+    assertEquals(card.includes("João S."), true);
+    assertEquals(html.includes("João S."), true);
+    // a mesma montagem com a opção desligada traz tudo, como sempre
+    const inteiro = buildOrderHTML(sintetico, { ...DEFAULT_PDF_OPTIONS, validity: { mode: "days", days: 7 } });
+    for (const dado of ["123.456.789-09", "98888-4321", "joao.silva@exemplo.com", "Rua Inventada", "João Pedro Silva"]) {
+      assertEquals(inteiro.includes(dado), true, dado);
+    }
+  } finally {
+    tempo.restore();
+  }
+});
+
+Deno.test("via reduzida: nome do arquivo e título só com tipo e número; desligada, igual ao de sempre", () => {
+  const dados = { ...ORCAMENTO, documentType: "quote" as const, client: { name: "João Pedro Silva" } };
+  assertEquals(buildPDFFilename(dados, { ...DEFAULT_PDF_OPTIONS, ocultarDadosDoCliente: true }), `Orcamento_${String(ORCAMENTO.serviceOrder.service_order_number).replace("Ç", "C")}.pdf`);
+  assertEquals(tituloParaImpressao(dados, { ...DEFAULT_PDF_OPTIONS, ocultarDadosDoCliente: true }).includes("Joao"), false);
+  assertEquals(buildPDFFilename(dados, { ...DEFAULT_PDF_OPTIONS }), buildPDFFilename(dados, { ...DEFAULT_PDF_OPTIONS, ocultarDadosDoCliente: false }));
+  assertEquals(buildPDFFilename(dados, { ...DEFAULT_PDF_OPTIONS }).includes("Joao-Pedro-Silva"), true);
+});
+
+Deno.test("via reduzida: nome de uma palavra só fica inteiro; nunca vem de app_settings", () => {
+  assertEquals(nomeReduzidoDoCliente("João"), "João");
+  assertEquals(nomeReduzidoDoCliente("  Ana   maria  souza "), "Ana S.");
+  assertEquals(nomeReduzidoDoCliente(""), "Cliente");
+  const ajustes = { pdf_options_quote: JSON.stringify({ ocultarDadosDoCliente: true }) };
+  assertEquals(opcoesPadraoDoDocumento(ajustes, "quote").ocultarDadosDoCliente, undefined);
+  assertEquals("ocultarDadosDoCliente" in DEFAULT_PDF_OPTIONS, false);
+});
+
+Deno.test("via reduzida desligada: o HTML é o mesmo, caractere por caractere", () => {
+  const tempo = new FakeTime(new Date(AGORA));
+  try {
+    const base = { ...DEFAULT_PDF_OPTIONS, validity: { mode: "days" as const, days: 7 } };
+    assertEquals(buildOrderHTML(ORCAMENTO, { ...base, ocultarDadosDoCliente: false }), ler("orcamento.html"));
+    assertEquals(buildOrderHTML(OS_COM_PAGAMENTO, { ...DEFAULT_PDF_OPTIONS, ocultarDadosDoCliente: false }), ler("os-com-pagamento.html"));
+  } finally {
+    tempo.restore();
+  }
 });

@@ -17,6 +17,7 @@ import {
   parseConfirmationReply,
   parseOptionReply,
   pendenciaParaHerdar,
+  ponteiroEhDoCartao,
   queueWhatsAppReply,
   registroDoTurno,
   resolveOptionAsUserText,
@@ -1325,4 +1326,24 @@ Deno.test("Retorno F3: a pendência do ditado guarda a do cartão, e depois do s
   const volta = await proximaPendenciaGuardada(adm, { pendencias_guardadas: ["velha"] }, AGORA);
   assertEquals(volta?.pendencia.id, "velha");
   assertEquals(volta?.restantes, []);
+});
+
+// ─── Retorno F4 (P12.1): o ponteiro do cartão do parceiro é cartão, como o da F2 ──────────────────────────────────────
+
+Deno.test("Retorno F4: ponteiroEhDoCartao reconhece os dois cartões; outra pendência, sem ponteiro ou erro, não", async () => {
+  const banco = (action_name: string | null, lanca = false) => ({
+    from: () => {
+      const b: Record<string, unknown> = {};
+      b.select = () => b;
+      b.eq = () => b;
+      b.maybeSingle = () => (lanca ? Promise.reject(new Error("rede")) : Promise.resolve({ data: action_name ? { action_name } : null, error: null }));
+      return b;
+    },
+  });
+  const comPonteiro = { pending_confirm_action_id: "p-1" };
+  assertEquals(await ponteiroEhDoCartao(banco("retorno_executar_cartao"), comPonteiro), true);
+  assertEquals(await ponteiroEhDoCartao(banco("parceiro_executar_cartao"), comPonteiro), true);
+  assertEquals(await ponteiroEhDoCartao(banco("send_service_order_link"), comPonteiro), false);
+  assertEquals(await ponteiroEhDoCartao(banco("parceiro_executar_cartao"), {}), false);
+  assertEquals(await ponteiroEhDoCartao(banco("parceiro_executar_cartao", true), comPonteiro), false);
 });

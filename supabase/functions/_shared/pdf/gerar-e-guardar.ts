@@ -22,6 +22,7 @@ import {
   buildPDFFilename,
   esc,
   fmtCurrency,
+  nomeReduzidoDoCliente,
   opcoesPadraoDoDocumento,
   type PDFOptions,
   tituloParaImpressao,
@@ -73,6 +74,11 @@ export async function montarDocumentoDaOrdem(
   admin: LeitorDoBanco,
   ordem: { id: string; status: string | null },
   settings: Record<string, string>,
+  /**
+   * Retorno F4 (P12.2): a via reduzida do PDF ao parceiro (nome e inicial do cliente, sem CPF/CNPJ, fone, e-mail e
+   * endereço; o arquivo só com tipo e número). Só por argumento: app_settings nunca a liga. Ausente = como sempre.
+   */
+  extra?: { ocultarDadosDoCliente?: boolean },
 ): Promise<{ ok: true; doc: DocumentoDaOrdem } | { ok: false; motivo: string }> {
   let dados;
   try {
@@ -88,7 +94,11 @@ export async function montarDocumentoDaOrdem(
   // O padrão da empresa, a via do CLIENTE (hideFinancials: false) e a validade do próprio
   // orçamento — data fixa, senão dias, senão os da empresa. É a MESMA função das listas, do
   // envio pela tela e do portal ("três fontes para o mesmo padrão", 24 e 26/09/2026).
-  const opcoes: PDFOptions = opcoesPadraoDoDocumento(settings, tipoDoc, dados.serviceOrder);
+  const reduzida = extra?.ocultarDadosDoCliente === true;
+  const opcoes: PDFOptions = {
+    ...opcoesPadraoDoDocumento(settings, tipoDoc, dados.serviceOrder),
+    ...(reduzida ? { ocultarDadosDoCliente: true } : {}),
+  };
   const html = buildOrderHTML(dados, opcoes).replace(
     /<title>[^<]*<\/title>/,
     `<title>${esc(tituloParaImpressao(dados, opcoes))}</title>`,
@@ -101,7 +111,7 @@ export async function montarDocumentoDaOrdem(
       tipoDoc,
       rotulo: tipoDoc === "quote" ? "Orçamento" : "Ordem de Serviço",
       numero: dados.serviceOrder.service_order_number,
-      cliente: dados.client?.name || "—",
+      cliente: reduzida ? nomeReduzidoDoCliente(dados.client?.name) : (dados.client?.name || "—"),
       // A legenda leva o tipo ("· Motorhome Iveco Daily"), como o documento — decisão 9, 21/10/2026.
       embarcacao: dados.vessel?.name ? nomeDaUnidade({ name: dados.vessel.name, asset_type: dados.vessel.type }) : null,
       total: fmtCurrency(Number(dados.serviceOrder.grand_total) || 0),

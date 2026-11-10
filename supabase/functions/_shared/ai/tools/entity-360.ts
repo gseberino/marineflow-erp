@@ -1,5 +1,6 @@
 import type { ToolCtx, ToolDef } from "./registry.ts";
 import { chaveTelefone } from "../phone.ts";
+import { chavesForaDoAssistente, FRASE_FORA_DO_ASSISTENTE, foraDoAssistente } from "../parceiro-fora-da-ia.ts";
 import { contatosDasEmbarcacoes } from "./vessels.ts";
 import { STATUS_OS_ATIVAS } from "../../service-order-status.ts";
 // LGPD (leva 8): a descrição da conta a pagar pode ser o nome que o banco escreve com o CPF — sai mascarada.
@@ -176,7 +177,9 @@ export const entity360Tools: ToolDef[] = [
       // Conversa recente — o que ele falou por último.
       const chave = chaveTelefone(cli.whatsapp || cli.phone);
       let mensagens: unknown[] = [];
-      if (chave) {
+      // Retorno F4 (P12.4, linha 3): número confirmado de parceiro, com parceiro_historico_na_ia falso, fica fora (falha fecha)
+      const foraCliente = chave ? foraDoAssistente(await chavesForaDoAssistente(ctx.admin), cli.whatsapp || cli.phone) : false;
+      if (chave && !foraCliente) {
         const { data: msgs } = await sb
           .from("whatsapp_messages")
           .select("direction, body, created_at")
@@ -237,6 +240,7 @@ export const entity360Tools: ToolDef[] = [
         ultimos_servicos: ultimasConcluidas,
         financeiro: financeiro ?? "(oculto para o seu cargo)",
         conversa_recente: mensagens,
+        ...(foraCliente ? { nota: FRASE_FORA_DO_ASSISTENTE } : {}),
         notas_fiscais: financeiroOk ? notas : "(oculto para o seu cargo)",
         memoria: ((notasMem as any[]) || []).map((n) => ({ titulo: n.title, nota: n.body, assunto: n.topic })),
       };
@@ -303,7 +307,9 @@ export const entity360Tools: ToolDef[] = [
 
       const chave = chaveTelefone(sup.phone);
       let mensagens: unknown[] = [];
-      if (chave) {
+      // Retorno F4 (P12.4, linha 4): o mesmo da linha 3
+      const foraFornecedor = chave ? foraDoAssistente(await chavesForaDoAssistente(ctx.admin), sup.phone) : false;
+      if (chave && !foraFornecedor) {
         const { data: msgs } = await sb
           .from("whatsapp_messages")
           .select("direction, body, created_at")
@@ -355,6 +361,7 @@ export const entity360Tools: ToolDef[] = [
           descricao: mascararCpfNoTexto(c.description ?? null), saldo: r2(Number(c.balance_amount ?? c.amount) || 0), vencimento: c.due_date, status: c.status,
         })),
         conversa_recente: mensagens,
+        ...(foraFornecedor ? { nota: FRASE_FORA_DO_ASSISTENTE } : {}),
         memoria: ((notasMem as any[]) || []).map((n) => ({ titulo: n.title, nota: n.body })),
       };
     },

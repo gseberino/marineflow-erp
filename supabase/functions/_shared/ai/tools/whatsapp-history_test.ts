@@ -36,6 +36,11 @@ function fakeSb(canned: Record<string, unknown[]>) {
     from(tabela: string) {
       return chainable(canned[tabela] ?? []);
     },
+    // Retorno F4 (P12.4): parceiro_numeros_fora_da_ia com parceiro_historico_na_ia verdadeiro (nenhum número de fora): a
+    // saída de hoje. Os casos com número de parceiro estão em ../parceiro-fora-da-ia_test.ts.
+    rpc(fn: string) {
+      return Promise.resolve(fn === "parceiro_numeros_fora_da_ia" ? { data: [], error: null } : { data: null, error: null });
+    },
   };
 }
 

@@ -80,6 +80,8 @@ export const NEVER_AUTONOMOUS = new Set<string>([
   // quem paga por um cliente (leva 8, 22/10/2026): é o SIM do dono que faz o pagador valer — decisão dele: sempre com
   // o "sim", sobre o resumo resolvido (quem pagou, o cliente, a relação).
   "guardar_pagador_do_cliente",
+  // Retorno F4 (P12.1): o cartão do parceiro liga cliente a parceiro e manda mensagem ao parceiro. Só pela pendência, com PIN.
+  "parceiro_executar_cartao",
 ]);
 
 /**
@@ -95,13 +97,15 @@ export const NEVER_AUTONOMOUS = new Set<string>([
  * A tool normaliza igual (formatoDoEnvio em tools/whatsapp.ts) e o teste confere.
  */
 export const NEVER_AUTONOMOUS_WHEN: Record<string, (args: Record<string, unknown> | undefined) => boolean> = {
-  send_service_order_link: (args) => String(args?.formato ?? "").trim().toLowerCase() !== "link",
+  // Retorno F4 (P12.1): o destino parceiro trava em qualquer formato (a tool normaliza igual, destinoDoEnvio).
+  send_service_order_link: (args) =>
+    String(args?.formato ?? "").trim().toLowerCase() !== "link" || String(args?.destino ?? "").trim().toLowerCase() === "parceiro",
 };
 
 /** Explicação da trava por argumento, para o que o agente diz ao liberar/listar autonomia. */
 export const EXPLICACAO_DA_TRAVA_POR_ARGUMENTO: Record<string, string> = {
   send_service_order_link:
-    "Só o envio de 'só o link' pode agir sozinho. O PDF anexado ao cliente (o padrão) pede confirmação SEMPRE — leva preço e PIX num arquivo que não se desfaz.",
+    "Só o envio de 'só o link' ao cliente pode agir sozinho. O PDF anexado ao cliente (o padrão) pede confirmação SEMPRE — leva preço e PIX num arquivo que não se desfaz. E tudo o que vai ao parceiro também.",
 };
 
 /** Prefixo das chaves em app_settings. */

@@ -109,7 +109,11 @@ export function respostaDoTurnoNoWhatsApp(
     // ou o resumo): texto vazio não é enviado (enviarComRegistro). As referências de pendência e de
     // opções ficam como estavam — este turno não decidiu nenhuma delas.
     replyText = "";
-  } else if (pendenciaViva?.action_name === "retorno_executar_cartao" && metadata.pending_confirm_action_id) {
+  } else if (
+    // Retorno F4 (P12.1): o cartão do parceiro vive 24 h como o da F2, com o mesmo ponteiro
+    (pendenciaViva?.action_name === "retorno_executar_cartao" || pendenciaViva?.action_name === "parceiro_executar_cartao") &&
+    metadata.pending_confirm_action_id
+  ) {
     // Retorno F2 (P3.4): o cartão vive 24 h. O "⏳" em todo turno seria um toque escondido em toda conversa. O ponteiro fica
     // como está: cair no último ramo o zeraria, e o *sim <PIN>* do cartão não acharia mais a pendência. A carona avisa.
     replyText = juntar(d.aviso, textoOuOk, d.conferido);

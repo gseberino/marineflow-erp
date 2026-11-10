@@ -224,6 +224,19 @@ Deno.test("8. sem opcoes.origem, nenhum campo novo no insert", async () => {
   const [so] = b.linhas("service_orders");
   assertEquals("origem" in so, false);
   assertEquals("origem_chave8" in so, false);
+  assertEquals("origem_parceiro_id" in so, false);
+});
+
+Deno.test("7b. Retorno F4 (P12.1): origem.parceiro_id grava origem_parceiro_id; ausente grava nulo", async () => {
+  const comParceiro = bancoFalso();
+  await montarOrcamento({ ...BASE, items: [{ product_id: "p-1", keyword: "x", quantity: 1, unit_price: 10 }] }, ctxDe(comParceiro.db), {
+    origem: { valor: "retorno_parceiro", chave8: "12345678", parceiro_id: "pa-1" },
+  });
+  assertEquals(comParceiro.linhas("service_orders")[0].origem, "retorno_parceiro");
+  assertEquals(comParceiro.linhas("service_orders")[0].origem_parceiro_id, "pa-1");
+  const semParceiro = bancoFalso();
+  await montarOrcamento({ ...BASE, items: [{ product_id: "p-1", keyword: "x", quantity: 1, unit_price: 10 }] }, ctxDe(semParceiro.db), COM_ORIGEM);
+  assertEquals(semParceiro.linhas("service_orders")[0].origem_parceiro_id, null);
 });
 
 Deno.test("9. rascunho recente devolve ja_existe, sem nenhum insert, mesmo com force_new vindo nos argumentos", async () => {

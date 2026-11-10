@@ -6,6 +6,7 @@
 // faltava era a confirmação mostrar A QUE a resposta responde: a última mensagem da pessoa — o dono
 // confere de relance que a sugestão casa com a pergunta, no número certo, antes do "sim".
 import { destinoDoAgendamento, telefoneLegivel, telefoneParaEnvio } from "./agendamento.ts";
+import { chavesForaDoAssistente, foraDoAssistente } from "../parceiro-fora-da-ia.ts";
 
 const BRASILIA_MS = 3 * 60 * 60 * 1000;
 
@@ -26,6 +27,9 @@ function textoDaMensagem(corpo: unknown): string {
 /** A última mensagem que a pessoa MANDOU (entrada), para mostrar a que a resposta responde. */
 // deno-lint-ignore no-explicit-any
 export async function ultimaMensagemRecebida(admin: any, telefone: string): Promise<{ quando: string; texto: string } | null> {
+  // Retorno F4 (P12.4, linha 6): número confirmado de parceiro, com parceiro_historico_na_ia falso, sem a última mensagem
+  // (o resumo fica na conversa do assistente). Falha fecha.
+  if (foraDoAssistente(await chavesForaDoAssistente(admin), telefone)) return null;
   const { data } = await admin
     .from("whatsapp_messages")
     .select("body, occurred_at")

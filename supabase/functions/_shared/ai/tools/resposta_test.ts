@@ -18,6 +18,9 @@ function banco(opcoes: { cliente?: Record<string, unknown> | null; lead?: Record
       };
       return q;
     },
+    // Retorno F4 (P12.4): parceiro_historico_na_ia verdadeiro (nenhum número de fora): o resumo de hoje. Os casos com
+    // número de parceiro estão em ../parceiro-fora-da-ia_test.ts.
+    rpc: (fn: string) => Promise.resolve(fn === "parceiro_numeros_fora_da_ia" ? { data: [], error: null } : { data: null, error: null }),
   };
   return { admin, filtros };
 }

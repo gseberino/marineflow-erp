@@ -17,7 +17,7 @@
 import { createHash } from "node:crypto";
 import { logEdgeError } from "../../log-error.ts";
 import { mascararDadosPessoais } from "../../retorno/mascara.ts";
-import { validarSaida } from "../../retorno/validador.ts";
+import { validarSaida, validarSaidaAoParceiro } from "../../retorno/validador.ts";
 import { tipoDoSeletor, TIPOS_DE_UNIDADE } from "../../unidade.ts";
 import { guardaDeEnvio } from "../comms/send-guard.ts";
 import { normalizarTermo, resolverItens } from "../keyword-resolver.ts";
@@ -367,17 +367,49 @@ export function dependenciasReais(): DepsDoCartao {
 }
 
 /**
+ * Retorno F4 (P12.1): o mesmo caminho para o item do parceiro (C13). Sem opções, nada muda no caminho da F3.
+ *  · rpcs: os cinco nomes (preparar, soltar, enviado, caiu, pdf). Os da F3 atualizam retorno_cartao_itens pelo id: com
+ *    item do parceiro não fariam nada e não dariam erro. retorno_previa_orc_criado fica (só escreve em retorno_previa).
+ *  · pedido_id: o preparar do parceiro recebe p_pedido e p_destino (sem default no banco); e parceiro_vinculo_do_pedido roda
+ *    depois do montar (orcar) ou do preparar (pdf), sempre antes do sem_enviar e do envio, nos dois destinos.
+ *  · destino "parceiro": a guarda de janela e o validador do parceiro; o envio pelo send_service_order_link com destino.
+ *  · soltar_sem_enviar = false: o sem_enviar só diz frase_sem_enviar, sem soltar (o pedido fica decidido, a fila feito).
+ */
+export interface OpcoesDoOrcamento {
+  rpcs?: { preparar: string; soltar: string; enviado: string; caiu: string; pdf: string };
+  destino?: "cliente" | "parceiro";
+  parceiro_id?: string;
+  pedido_id?: string;
+  frase_sem_enviar?: string;
+  soltar_sem_enviar?: boolean;
+}
+
+/** Os nomes da F3: o padrão, sem opções. */
+const RPCS_DA_F3 = {
+  preparar: "retorno_previa_preparar", soltar: "retorno_previa_soltar", enviado: "retorno_item_enviado",
+  caiu: "retorno_previa_caiu", pdf: "retorno_previa_pdf",
+} as const;
+
+/** A janela e a guarda do texto ao parceiro: a legenda P16 não leva valor; o documento é conferido no envio (P12.2). */
+const GUARDA_PARCEIRO = { tipo: "os_link", audiencia: "parceiro", canal: "whatsapp", destinatarioIdentificado: true } as const;
+
+/**
  * Prepara, cria e manda um orçamento do cartão ou do ditado. Devolve as frases ao dono. Toda recusa volta o item à fila, para
  * ele reaparecer no próximo *retorno*.
  */
-export async function orcarEEnviar(o: OrcamentoDoCartao, ctx: ToolCtx, deps: DepsDoCartao): Promise<string[]> {
+export async function orcarEEnviar(o: OrcamentoDoCartao, ctx: ToolCtx, deps: DepsDoCartao, opcoes?: OpcoesDoOrcamento): Promise<string[]> {
   const avisos: string[] = [];
+  const nomes = opcoes?.rpcs ?? RPCS_DA_F3;
+  const aoParceiro = opcoes?.destino === "parceiro";
   const soltarItem = async () => {
-    if (o.item_id) await rpc(ctx, "retorno_previa_soltar", { p_item: o.item_id });
+    if (o.item_id) await rpc(ctx, nomes.soltar, { p_item: o.item_id });
   };
-  const pre = await rpc(ctx, "retorno_previa_preparar", {
-    p_previa: o.previa_id ?? null, p_item: o.item_id ?? null, p_autor: ctx.userId, p_so: o.acao === "pdf" ? o.service_order_id : null,
-  });
+  const pre = await rpc(ctx, nomes.preparar, opcoes?.pedido_id
+    ? {
+      p_pedido: opcoes.pedido_id, p_previa: o.previa_id ?? null, p_item: o.item_id ?? null, p_autor: ctx.userId,
+      p_so: o.acao === "pdf" ? o.service_order_id : null, p_destino: opcoes.destino ?? "cliente",
+    }
+    : { p_previa: o.previa_id ?? null, p_item: o.item_id ?? null, p_autor: ctx.userId, p_so: o.acao === "pdf" ? o.service_order_id : null });
   const quem = o.n ? `o ${o.n}` : `o caso de ${pre.rotulo}`;
   if (!pre.ok) {
     // o item já caiu, no SQL
@@ -385,19 +417,22 @@ export async function orcarEEnviar(o: OrcamentoDoCartao, ctx: ToolCtx, deps: Dep
     return avisos;
   }
 
-  if (!o.sem_enviar && foraDoHorario(pre.legenda.texto)) {
+  const fora = aoParceiro ? guardaDeEnvio(pre.legenda.texto, GUARDA_PARCEIRO).bloqueado : foraDoHorario(pre.legenda.texto);
+  if (!o.sem_enviar && fora) {
     // sem_enviar não passa pela guarda de janela: nada vai ao cliente
-    avisos.push(`${quem}: fora do horário de envio; não criei nada. Mande *retorno* a partir das 8h`);
+    avisos.push(`${quem}: fora do horário de envio; não criei nada. Mande *${opcoes?.pedido_id ? "parceiro" : "retorno"}* a partir das 8h`);
     await soltarItem();
     return avisos;
   }
 
   const so: Record<string, any> = pre.acao === "orcar"
-    ? await deps.montarOrcamento(pre.args, ctx, { origem: { valor: pre.args.origem, chave8: pre.chave8 } })
+    ? await deps.montarOrcamento(pre.args, ctx, {
+      origem: { valor: pre.args.origem, chave8: pre.chave8, ...(pre.parceiro_id ? { parceiro_id: pre.parceiro_id } : {}) },
+    })
     : { service_order_id: o.service_order_id, orcamento: pre.numero, total: pre.total };
   if (so.ja_existe) {
     avisos.push(`${quem}: já existe o ${so.ja_existe} de hoje; não criei outro`);
-    await rpc(ctx, "retorno_previa_caiu", { p_previa: pre.previa_id, p_item: o.item_id ?? null, p_motivo: "orc_existe" });
+    await rpc(ctx, nomes.caiu, { p_previa: pre.previa_id, p_item: o.item_id ?? null, p_motivo: "orc_existe" });
     return avisos;
   }
   if (so.error) {
@@ -416,15 +451,30 @@ export async function orcarEEnviar(o: OrcamentoDoCartao, ctx: ToolCtx, deps: Dep
       return avisos;
     }
   }
+  // Retorno F4 (P10.1, passo 3): o vínculo do pedido, nos dois destinos, com a OS já criada (ou o rascunho do ramo pdf), antes
+  // do sem_enviar e do envio. Recusou: nada sai, e o item é solto.
+  if (opcoes?.pedido_id) {
+    const vinculo = await rpc(ctx, "parceiro_vinculo_do_pedido", {
+      p_pedido: opcoes.pedido_id, p_so: so.service_order_id, p_autor: ctx.userId, p_destino: opcoes.destino ?? "cliente",
+    });
+    if (!vinculo?.ok) {
+      avisos.push(`${quem}: ${typeof vinculo?.frase === "string" && vinculo.frase ? vinculo.frase : "o vínculo com o parceiro não nasceu; nada saiu"}`);
+      await soltarItem();
+      return avisos;
+    }
+  }
   if (o.sem_enviar) {
-    avisos.push(`Rascunho ${so.orcamento} criado, nada foi ao cliente.`);
-    await soltarItem();
+    avisos.push(opcoes?.frase_sem_enviar ?? `Rascunho ${so.orcamento} criado, nada foi ao cliente.`);
+    if (opcoes?.soltar_sem_enviar !== false) await soltarItem();
     return avisos;
   }
 
   // Só o ramo que cria diz "criado": no PDF de rascunho, o orçamento já existia.
   const criou = pre.acao === "orcar";
-  const v = validarSaida(pre.legenda.texto, pre.legenda.contexto);
+  // Retorno F4: ao parceiro, o validador do parceiro (a legenda P16 vem com audiencia "parceiro"); ao cliente, o de sempre.
+  const v = aoParceiro && pre.legenda.contexto?.audiencia === "parceiro"
+    ? validarSaidaAoParceiro(pre.legenda.texto, pre.legenda.contexto)
+    : validarSaida(pre.legenda.texto, pre.legenda.contexto);
   if (!v.ok) {
     avisos.push(criou ? `${quem}: legenda recusada; orçamento ${so.orcamento} criado, nada saiu` : `${quem}: legenda recusada; o PDF do ${so.orcamento} não saiu`);
     await soltarItem();
@@ -435,9 +485,13 @@ export async function orcarEEnviar(o: OrcamentoDoCartao, ctx: ToolCtx, deps: Dep
   ctx.validadeDoCartao = pre.validade_data;
   let envio: Record<string, any>;
   try {
+    // Retorno F4: ao parceiro, o retrato e o pedido levam destino e parceiro_id (o número vem de parceiro_destino_do_pdf).
+    const doParceiro = aoParceiro ? { destino: "parceiro", ...(opcoes?.parceiro_id ? { parceiro_id: opcoes.parceiro_id } : {}) } : {};
     envio = await deps.enviarPdf({
-      service_order_id: so.service_order_id, formato: "pdf", custom_message: pre.legenda.texto,
-      _retrato: await retratoDoEnvio(ctx.admin, { service_order_id: so.service_order_id }),
+      service_order_id: so.service_order_id, formato: "pdf", custom_message: pre.legenda.texto, ...doParceiro,
+      _retrato: aoParceiro
+        ? await retratoDoEnvio(ctx.admin, { service_order_id: so.service_order_id, ...doParceiro }, ctx.userId)
+        : await retratoDoEnvio(ctx.admin, { service_order_id: so.service_order_id }),
     }, ctx) as Record<string, any>;
   } finally {
     ctx.validadeDoCartao = undefined;
@@ -450,14 +504,14 @@ export async function orcarEEnviar(o: OrcamentoDoCartao, ctx: ToolCtx, deps: Dep
     return avisos;
   }
 
-  await rpc(ctx, "retorno_previa_pdf", {
+  await rpc(ctx, nomes.pdf, {
     p_previa: pre.previa_id, p_ok: !envio.error, p_chave: envio.destino_chave8 ?? null,
     p_so: so.service_order_id, p_abertura: pre.abertura_id, p_item: o.item_id ?? null,
   });
   if (o.item_id) {
     // PDF que falha volta como linha 1, com o PDF do rascunho (R-4).
     if (envio.error) await soltarItem();
-    else await rpc(ctx, "retorno_item_enviado", { p_item: o.item_id, p_ok: true, p_wa_id: null });
+    else await rpc(ctx, nomes.enviado, { p_item: o.item_id, p_ok: true, p_wa_id: null });
   }
   if (envio.error) avisos.push(criou ? `${quem}: orçamento ${so.orcamento} criado, mas o PDF não saiu (${envio.error}); responda pelo celular` : `${quem}: o PDF do ${so.orcamento} não saiu (${envio.error}); responda pelo celular`);
   else if (envio.deduplicated) avisos.push(`PDF do ${so.orcamento} já tinha ido a ${pre.rotulo} hoje; não reenviei.`);
@@ -467,9 +521,9 @@ export async function orcarEEnviar(o: OrcamentoDoCartao, ctx: ToolCtx, deps: Dep
 }
 
 /** Item que dá exceção vira falha registrada, e o próximo segue: erro nunca trava a fila. */
-async function orcarEEnviarSemLancar(o: OrcamentoDoCartao, ctx: ToolCtx, deps: DepsDoCartao): Promise<string[]> {
+export async function orcarEEnviarSemLancar(o: OrcamentoDoCartao, ctx: ToolCtx, deps: DepsDoCartao, opcoes?: OpcoesDoOrcamento): Promise<string[]> {
   try {
-    return await orcarEEnviar(o, ctx, deps);
+    return await orcarEEnviar(o, ctx, deps, opcoes);
   } catch (e) {
     await logEdgeError(ctx.admin, {
       context: "ai-agent",

@@ -86,7 +86,12 @@ export interface OpcoesDaMontagem {
    * é o que libera items[].product_id, labor[].service_id e labor[].billing_unit.
    * O construtor nunca honra force_new por este caminho: rascunho recente vira {ja_existe}.
    */
-  origem?: { valor: "retorno_previa" | "retorno_ditado"; chave8: string };
+  origem?: {
+    valor: "retorno_previa" | "retorno_ditado" | "retorno_parceiro";
+    chave8: string;
+    /** Retorno F4 (P12.1): o parceiro do pedido (C13). Grava service_orders.origem_parceiro_id; ausente grava nulo. */
+    parceiro_id?: string;
+  };
 }
 
 /** Valor em R$ sem o símbolo, na mesma regra de _retorno_brl: inteiro sem centavos; com centavos, sempre duas casas. */
@@ -386,7 +391,9 @@ export async function montarOrcamento(
       discount_amount: args.discount_amount != null ? r2(Number(args.discount_amount)) : 0,
       service_order_number: num,
       created_by: userId ?? null,
-      ...(opcoes.origem ? { origem: opcoes.origem.valor, origem_chave8: opcoes.origem.chave8 } : {}),
+      ...(opcoes.origem
+        ? { origem: opcoes.origem.valor, origem_chave8: opcoes.origem.chave8, origem_parceiro_id: opcoes.origem.parceiro_id ?? null }
+        : {}),
     })
     .select("id, service_order_number")
     .single();

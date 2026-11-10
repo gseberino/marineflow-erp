@@ -220,7 +220,8 @@ export async function ponteiroEhDoCartao(
   if (typeof id !== "string" || !id) return false;
   try {
     const { data } = await admin.from("ai_operator_pending_actions").select("action_name").eq("id", id).maybeSingle();
-    return data?.action_name === "retorno_executar_cartao";
+    // Retorno F4 (P12.1): o cartão do parceiro, no mesmo molde, também é cartão
+    return data?.action_name === "retorno_executar_cartao" || data?.action_name === "parceiro_executar_cartao";
   } catch {
     return false;
   }

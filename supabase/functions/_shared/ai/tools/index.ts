@@ -76,6 +76,8 @@ import { cobrarJuntasTools } from "./cobrar-juntas.ts";
 import { papeladaTools } from "./papelada.ts";
 // O cartão do retorno rápido (F2): só pela pendência do cartão
 import { retornoSoPelaPendencia, retornoTools } from "./retorno.ts";
+// O cartão do parceiro (retorno rápido, F4, P12.1): só pela pendência do cartão, nunca na lista do modelo
+import { parceiroSoPelaPendencia } from "./parceiro.ts";
 // Agenda de Produção, Fase 1 (24/10/2026): agenda_ver (a leitura com o texto pronto do banco) e as três que anotam o
 // rascunho da conversa (os_planejar, material_informar, equipe_disponibilidade) — só o *grava* do dono grava.
 import { agendaProducaoTools } from "./agenda-producao.ts";
@@ -166,7 +168,7 @@ export const allTools: ToolDef[] = [
  * pelo modelo: ficam FORA de allTools (a lista que vai ao modelo, e o prefixo cacheado não muda) e entram só no mapa
  * de execução das pendências (approveAndExecutePendingAction).
  */
-export const toolsSoPelaPendencia: ToolDef[] = [...papeladaTools, ...retornoSoPelaPendencia];
+export const toolsSoPelaPendencia: ToolDef[] = [...papeladaTools, ...retornoSoPelaPendencia, ...parceiroSoPelaPendencia];
 
 export const toolsByName: Record<string, ToolDef> = Object.fromEntries(
   [...allTools, ...toolsSoPelaPendencia].map((t) => [t.name, t]),

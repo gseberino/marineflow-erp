@@ -62,7 +62,26 @@ export type PDFOptions = {
   validity?: { mode: 'days' | 'date'; days?: number; date?: string };
   // Invoice payment due date (yyyy-mm-dd)
   dueDate?: string;
+  /**
+   * Retorno F4 (P12.2): a via reduzida do PDF ao parceiro. O card do cliente e a linha de aceite mostram só o primeiro
+   * nome e a inicial, sem CPF/CNPJ, telefone, e-mail e endereço; o nome do arquivo e o título ficam com tipo e número.
+   * Fica FORA de DEFAULT_PDF_OPTIONS de propósito: resolvePdfOptions só lê as chaves de lá, então app_settings nunca a
+   * liga. Só existe por argumento (o send_service_order_link com destino parceiro). Ausente ou false: nada muda.
+   */
+  ocultarDadosDoCliente?: boolean;
 };
+
+/**
+ * Retorno F4 (P12.2): "João Pedro Silva" → "João S."; uma palavra só fica inteira; vazio → "Cliente". O que vai à via
+ * reduzida: o parceiro reconhece o cliente sem receber o nome inteiro.
+ */
+export function nomeReduzidoDoCliente(nome: unknown): string {
+  const partes = String(nome ?? '').trim().split(/\s+/).filter(Boolean);
+  if (partes.length === 0) return 'Cliente';
+  if (partes.length === 1) return partes[0];
+  const inicial = partes[partes.length - 1].charAt(0).toLocaleUpperCase('pt-BR');
+  return `${partes[0]} ${inicial}.`;
+}
 
 export const DEFAULT_PDF_OPTIONS: PDFOptions = {
   showServicePrices: true,
@@ -441,6 +460,8 @@ export function buildPDFFilename(data: PDFData, options?: PDFOptions): string {
   if (options?.hideFinancials && data.documentType === 'service_order') parts.push('Via-Execucao');
   const soNumber = data.serviceOrder?.service_order_number;
   if (soNumber) parts.push(slugifyForFilename(String(soNumber)));
+  // Retorno F4 (P12.2): na via reduzida, o arquivo não leva o nome do cliente nem o da unidade
+  if (options?.ocultarDadosDoCliente) return `${parts.filter(Boolean).join('_')}.pdf`;
   const clientName = slugifyForFilename(data.client?.name || '');
   if (clientName) parts.push(clientName);
   const vesselName = slugifyForFilename(data.vessel?.name || '');
@@ -1042,6 +1063,9 @@ export function buildOrderHTML(data: PDFData, options: PDFOptions): string {
   // "Motorhome: Iveco Daily" / "Lancha: Netuno II". Modelo e placa/inscrição têm linha
   // própria logo abaixo, por isso ficam fora daqui.
   const unidade = campoDaUnidade(unidadeDoDocumento(data.vessel), { comIdentificacao: false, comModelo: false });
+  // Retorno F4 (P12.2): na via reduzida ao parceiro, só o primeiro nome e a inicial (sem CPF/CNPJ, fone, e-mail e
+  // endereço). Desligada, é o próprio data.client: o HTML sai caractere por caractere como antes.
+  const cliente: PDFData['client'] = options.ocultarDadosDoCliente ? { name: nomeReduzidoDoCliente(data.client?.name) } : data.client;
 
   const body = `
 ${companyHeaderHTML(data.company, docTypeLabel, docNumber, {
@@ -1059,11 +1083,11 @@ ${semValores ? `
 <div class="grid">
   <div class="card">
     <div class="section-title">Informações do Cliente</div>
-    <div style="font-size:12px;font-weight:700;color:var(--pdf-primary);">${esc(data.client.name)}</div>
-    ${data.client.cpf_cnpj ? `<div style="font-size:10px;">CPF/CNPJ: ${esc(data.client.cpf_cnpj)}</div>` : ''}
-    ${data.client.phone ? `<div style="font-size:10px;">Fone: ${esc(data.client.phone)}</div>` : ''}
-    ${data.client.email ? `<div style="font-size:10px;">Email: ${esc(data.client.email)}</div>` : ''}
-    ${data.client.address ? `<div style="font-size:10px;margin-top:4px;color:var(--pdf-text-muted);">${esc(data.client.address)}</div>` : ''}
+    <div style="font-size:12px;font-weight:700;color:var(--pdf-primary);">${esc(cliente.name)}</div>
+    ${cliente.cpf_cnpj ? `<div style="font-size:10px;">CPF/CNPJ: ${esc(cliente.cpf_cnpj)}</div>` : ''}
+    ${cliente.phone ? `<div style="font-size:10px;">Fone: ${esc(cliente.phone)}</div>` : ''}
+    ${cliente.email ? `<div style="font-size:10px;">Email: ${esc(cliente.email)}</div>` : ''}
+    ${cliente.address ? `<div style="font-size:10px;margin-top:4px;color:var(--pdf-text-muted);">${esc(cliente.address)}</div>` : ''}
   </div>
   <div class="card">
     <div class="section-title">Embarcação ou veículo e local</div>
@@ -1214,7 +1238,7 @@ ${options.showSignature !== false ? `
   <div style="text-align:center;">
     <div style="height:60px;"></div>
     <div style="border-top:1px solid var(--pdf-primary);padding-top:8px;">
-      <div style="font-weight:700;text-transform:uppercase;color:var(--pdf-primary);">${esc(data.client.name)}</div>
+      <div style="font-weight:700;text-transform:uppercase;color:var(--pdf-primary);">${esc(cliente.name)}</div>
       <div style="font-size:9px;color:var(--pdf-text-muted);">${isQuote ? 'Aprovação do Orçamento' : 'Aceite do Serviço Realizado'}</div>
     </div>
   </div>

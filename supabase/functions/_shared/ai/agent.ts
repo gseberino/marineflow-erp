@@ -607,7 +607,8 @@ export async function buildPendingSummary(
   // lado da tool (tools/whatsapp.ts), que lê o destino do mesmo cadastro.
   if (toolName === "send_service_order_link") {
     try {
-      const r = await resumirEnvioAoCliente(admin, args);
+      // Retorno F4 (P12.2): com destino parceiro, o destino só responde ao dono (quem pede o "sim")
+      const r = await resumirEnvioAoCliente(admin, args, undefined, quem.userId ?? null);
       if (r) return r;
     } catch { /* cai no resumo genérico */ }
   }

@@ -11,6 +11,8 @@ export const TITULOS_DA_REDE_DO_ADMIN: Record<string, string> = {
   add_service_order_expense: "Lançar despesa na OS",
   retorno_ler_caso: "Ler o caso do cartão",
   retorno_executar_cartao: "Cartão do retorno",
+  // Retorno F4 (P12.1): o cartão do parceiro, o mesmo título que a pendência grava (_parceiro_cartao_viver)
+  parceiro_executar_cartao: "Cartão do parceiro",
   retorno_responder_caso: "Responder o caso do cartão",
   consultar_proposta_do_caso: "Ver a proposta do caso do cartão",
   retorno_orcar_caso: "Montar orçamento do caso do cartão",

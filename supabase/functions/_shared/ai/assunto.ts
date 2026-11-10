@@ -48,6 +48,8 @@ export const ASSUNTO_DAS_ACOES: Readonly<Record<string, readonly string[]>> = {
   aprovar_lote_da_papelada: [],
   // o cartão do retorno: um cartão novo substitui o anterior; a resposta ditada é por caso
   retorno_executar_cartao: [],
+  // Retorno F4 (P12.1): o cartão do parceiro, igual: um cartão novo substitui o anterior
+  parceiro_executar_cartao: [],
   retorno_responder_caso: ["n"],
   // o orçamento do cartão: por caso (F3, P8.3)
   retorno_orcar_caso: ["n"],

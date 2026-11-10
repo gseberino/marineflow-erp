@@ -10,6 +10,7 @@ import {
 } from "./registry.ts";
 import { chaveDeEnvio, diaLocal, hashCurto, liberarEnvio } from "../../whatsapp/idempotencia.ts";
 import { RECUSA_CLIENTE_FINAL } from "../comms/compliance-guard.ts";
+import { chavesForaDoAssistente, foraDoAssistente } from "../parceiro-fora-da-ia.ts";
 import { guardaDeEnvio } from "../comms/send-guard.ts";
 import { registrarEnvio } from "../comms/send-log.ts";
 import { documentTypeFor } from "../../pdf/document-type.ts";
@@ -234,6 +235,14 @@ export const FORMATO_PADRAO: FormatoDoEnvio = "pdf";
  * A trava de autonomia (autonomy-policy.ts, NEVER_AUTONOMOUS_WHEN) normaliza igual — só
  * "link" é liberável; o teste confere que as duas leituras não se separam.
  */
+/**
+ * Retorno F4 (P12.2): para quem vai a ordem. Só "parceiro" (sem espaço nem maiúscula) é o parceiro; qualquer outro valor,
+ * ou nenhum, é o cliente — o envio de sempre, sem ler a chave pdf_parceiro_ligado. A trava de autonomia normaliza igual.
+ */
+export function destinoDoEnvio(args: { destino?: unknown } | null | undefined): "cliente" | "parceiro" {
+  return String(args?.destino ?? "").trim().toLowerCase() === "parceiro" ? "parceiro" : "cliente";
+}
+
 export function formatoDoEnvio(args: { formato?: unknown } | null | undefined): FormatoDoEnvio | null {
   const bruto = args?.formato;
   if (bruto === undefined || bruto === null || String(bruto).trim() === "") return FORMATO_PADRAO;
@@ -275,6 +284,14 @@ export function validarPedidoDeEnvio(
 ): ({ error: string } & Record<string, unknown>) | null {
   const formato = formatoDoEnvio(args);
   if (!formato) return { error: `Formato "${String(args?.formato)}" não existe. Use 'pdf' (padrão, só o arquivo), 'pdf_e_link', 'resumo' (valores em texto) ou 'link'.` };
+  // Retorno F4 (P12.2): ao parceiro, só o PDF. O link público não passa pela via reduzida e continua valendo depois de um
+  // veto; o resumo põe valor em texto. Recusado aqui, antes de a pendência nascer.
+  if (destinoDoEnvio(args) === "parceiro" && formato !== "pdf") {
+    return {
+      error: "Ao parceiro vai só o PDF (formato 'pdf'), em via reduzida: o link continua valendo depois de um veto, e o resumo põe valor em texto. Nada foi enviado.",
+      nada_enviado: true,
+    };
+  }
   const mensagem = typeof args?.custom_message === "string" ? args.custom_message.trim() : "";
   if (mensagem.length > LIMITE_DA_MENSAGEM[formato]) {
     return {
@@ -402,9 +419,17 @@ export function legendaDoPdf(
  * do que o resumo mostrou.
  */
 // deno-lint-ignore no-explicit-any
-export async function retratoDoEnvio(admin: any, args: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+export async function retratoDoEnvio(admin: any, args: Record<string, unknown>, autor?: string | null): Promise<Record<string, unknown> | null> {
   const { data: so } = await buscarOrdemParaEnvio(admin, args?.service_order_id);
   if (!so) return null;
+  // Retorno F4 (P12.2): ao parceiro, o retrato é o do número que parceiro_destino_do_pdf devolve (em hash), com o destino,
+  // o parceiro e o número mascarado. Destino recusado: sem retrato (o execute recusa de novo, pela mesma regra).
+  if (destinoDoEnvio(args) === "parceiro") {
+    const d = await destinoDoParceiro(admin, so.id, autor ?? null, typeof args?.parceiro_id === "string" ? args.parceiro_id : null);
+    if (!d.ok) return null;
+    const digitosDoParceiro = String(d.phone).replace(/\D/g, "");
+    return { telefone: hashCurto(digitosDoParceiro), total: Number(so.grand_total) || 0, destino: "parceiro", parceiro_id: d.parceiro_id, numero: `••${digitosDoParceiro.slice(-4)}` };
+  }
   const { data: c } = so.client_id
     ? await admin.from("clients").select("whatsapp, phone").eq("id", so.client_id).maybeSingle()
     : { data: null };
@@ -412,11 +437,45 @@ export async function retratoDoEnvio(admin: any, args: Record<string, unknown>):
   return { telefone: hashCurto(digitos), total: Number(so.grand_total) || 0 };
 }
 
+/** Retorno F4 (C-DESTINO): a resposta de parceiro_destino_do_pdf. */
+export type DestinoDoParceiro =
+  | { ok: true; phone: string; chave8: string; rotulo: string; papel: string; interessado_id: string; parceiro_id: string; reduzir: boolean }
+  | { ok: false; motivo: string; frase: string };
+
+const DESTINO_INDISPONIVEL = "Não consegui conferir o destino do PDF ao parceiro; nada saiu.";
+
+/**
+ * Retorno F4 (P12.2): o único destino do PDF ao parceiro. Só o dono (o banco confere p_autor), regra do documento, número
+ * único confirmado; nunca por nome, nunca de argumento de telefone. Erro ou resposta torta = recusa (falha fecha).
+ */
+// deno-lint-ignore no-explicit-any
+export async function destinoDoParceiro(admin: any, os: string, autor: string | null, parceiro: string | null): Promise<DestinoDoParceiro> {
+  try {
+    const { data, error } = await admin.rpc("parceiro_destino_do_pdf", { p_os: os, p_autor: autor, p_parceiro: parceiro });
+    if (error || !data || typeof data !== "object") return { ok: false, motivo: "erro", frase: DESTINO_INDISPONIVEL };
+    const d = data as Record<string, unknown>;
+    if (d.ok !== true) {
+      return { ok: false, motivo: String(d.motivo ?? "erro"), frase: typeof d.frase === "string" && d.frase ? d.frase : DESTINO_INDISPONIVEL };
+    }
+    if (typeof d.phone !== "string" || String(d.phone).replace(/\D/g, "").length < 10) return { ok: false, motivo: "erro", frase: DESTINO_INDISPONIVEL };
+    return {
+      ok: true, phone: d.phone, chave8: String(d.chave8 ?? ""), rotulo: String(d.rotulo ?? "o parceiro"), papel: String(d.papel ?? ""),
+      interessado_id: String(d.interessado_id ?? ""), parceiro_id: String(d.parceiro_id ?? ""), reduzir: d.reduzir !== false,
+    };
+  } catch {
+    return { ok: false, motivo: "erro", frase: DESTINO_INDISPONIVEL };
+  }
+}
+
 /** O que mudou entre o retrato aprovado e o estado de agora, em português; null = nada. */
-export function oQueMudouDesdeOPedido(retrato: Record<string, unknown>, agora: { digitos: string; total: unknown }): string | null {
+export function oQueMudouDesdeOPedido(
+  retrato: Record<string, unknown>,
+  agora: { digitos: string; total: unknown },
+  quem: "cliente" | "parceiro" = "cliente",
+): string | null {
   const mudancas: string[] = [];
   if (typeof retrato.telefone === "string" && retrato.telefone !== hashCurto(agora.digitos)) {
-    mudancas.push("o WhatsApp do cliente no cadastro mudou");
+    mudancas.push(quem === "parceiro" ? "o número do parceiro que recebe o PDF mudou" : "o WhatsApp do cliente no cadastro mudou");
   }
   const antes = Number(retrato.total);
   const depois = Number(agora.total) || 0;
@@ -463,9 +522,16 @@ export async function resumirEnvioAoCliente(
   admin: any,
   args: Record<string, unknown>,
   agora: Date = new Date(),
+  /** Retorno F4 (P12.2): quem pede o "sim" — o destino ao parceiro só responde ao dono. Sem destino, não é lido. */
+  autor?: string | null,
 ): Promise<string | null> {
+  // Retorno F4: a chave pdf_parceiro_ligado só é lida com destino parceiro, e antes de qualquer outra leitura
+  if (destinoDoEnvio(args) === "parceiro" && !(await pdfAoParceiroLigado(admin))) {
+    return "⚠️ O PDF ao parceiro está desligado — o envio será recusado.";
+  }
   const { data: so } = await buscarOrdemParaEnvio(admin, args?.service_order_id);
   if (!so) return null;
+  if (destinoDoEnvio(args) === "parceiro") return await resumirEnvioAoParceiro(admin, args, so, autor ?? null);
   const { data: c } = so.client_id
     ? await admin.from("clients").select("name, display_name, whatsapp, phone, opt_out_whatsapp, generico").eq("id", so.client_id).maybeSingle()
     : { data: null };
@@ -532,6 +598,153 @@ export async function resumirEnvioAoCliente(
   if (c?.opt_out_whatsapp) linhas.push("⚠️ O cliente pediu para não receber WhatsApp (opt-out) — o envio será recusado.");
   if (c?.generico) linhas.push('⚠️ É o cadastro genérico "Cliente Final", com o telefone de um terceiro — o envio será recusado.');
   return linhas.join("\n");
+}
+
+// ─── Retorno F4 (P12.2): o PDF ao parceiro ──────────────────────────────────────────────────────────────────────────
+// Só com destino "parceiro" e retorno_config.pdf_parceiro_ligado. O destino é SÓ o de parceiro_destino_do_pdf (dono, regra
+// do documento, número único confirmado); o cadastro do cliente nem é lido. Só o PDF, em via reduzida quando o banco diz
+// `reduzir`, com contexto service_order (o whatsapp-send não marca 'sent', R-12). O registro vai a ai_comms_log com
+// audiência parceiro e o papel, sem nome: é a fonte da medida (P14).
+
+/** A chave do envio ao parceiro; erro ou ausência = desligada (falha fecha). Só é lida com destino parceiro. */
+// deno-lint-ignore no-explicit-any
+async function pdfAoParceiroLigado(admin: any): Promise<boolean> {
+  try {
+    const { data, error } = await admin.from("retorno_config").select("pdf_parceiro_ligado").maybeSingle();
+    return !error && data?.pdf_parceiro_ligado === true;
+  } catch {
+    return false;
+  }
+}
+
+const PAPEL_NO_RESUMO: Record<string, string> = { contratante: "ela contrata", pagador: "ela paga" };
+
+/** O resumo do "sim" do PDF ao parceiro: para quem (o rótulo do banco, com o número mascarado), qual documento e a via. */
+async function resumirEnvioAoParceiro(
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  args: Record<string, unknown>,
+  // deno-lint-ignore no-explicit-any
+  so: any,
+  autor: string | null,
+): Promise<string> {
+  const d = await destinoDoParceiro(admin, so.id, autor, typeof args?.parceiro_id === "string" ? args.parceiro_id : null);
+  if (!d.ok) return `⚠️ ${d.frase.replace(/\s*Nada saiu\.?$|;\s*nada saiu\.?$/i, "")} — o envio será recusado.`;
+  const rotulo = documentTypeFor(so.status) === "quote" ? "Orçamento" : "Ordem de Serviço";
+  const linhas = [
+    `PDF *para a ${d.rotulo}*${PAPEL_NO_RESUMO[d.papel] ? ` (${PAPEL_NO_RESUMO[d.papel]})` : ""}`,
+    `${rotulo}: *${so.service_order_number}* — Total *${fmtCurrency(Number(so.grand_total) || 0)}*`,
+    d.reduzir
+      ? "Formato: *só o PDF*, em via reduzida: nome e inicial do cliente, sem CPF, telefone, e-mail nem endereço"
+      : "Formato: *só o PDF* (a ordem é da própria parceira: vai com os dados dela)",
+  ];
+  const mensagem = typeof args?.custom_message === "string" ? args.custom_message.trim() : "";
+  if (mensagem) {
+    linhas.push(`Legenda: "${mensagem}"`);
+    if (mensagem.length > LIMITE_DA_MENSAGEM.pdf) linhas.push(`⚠️ A mensagem tem ${mensagem.length} caracteres (limite ${LIMITE_DA_MENSAGEM.pdf}) — o envio será recusado.`);
+  } else {
+    const legenda = legendaDoPdf(args, so);
+    linhas.push(legenda ? `Legenda: "${legenda}"` : "Legenda: nenhuma (só o arquivo)");
+  }
+  if (so.status === "cancelled") linhas.push(frasesDaOrdemCancelada(so).aviso);
+  return linhas.join("\n");
+}
+
+/** O execute com destino parceiro. Nunca lê telefone dos argumentos nem do cadastro do cliente. */
+async function enviarPdfAoParceiro(args: Record<string, unknown>, ctx: ToolCtx): Promise<Record<string, unknown>> {
+  const { admin, jwt, settings } = ctx;
+  // 0. a chave, antes de qualquer outra leitura
+  if (!(await pdfAoParceiroLigado(admin))) return { error: "O envio de PDF ao parceiro está desligado; nada saiu.", nada_enviado: true };
+  const { data: so, error: soErr } = await buscarOrdemParaEnvio(admin, args.service_order_id);
+  if (soErr || !so) return { error: `OS não encontrada. Verifique se o número ou ID está correto. Valor recebido: "${args.service_order_id}"`, nada_enviado: true };
+  if (so.status === "cancelled") return { error: frasesDaOrdemCancelada(so).erro, nada_enviado: true };
+  if (!so.share_token) return { error: `A ${so.service_order_number} não possui link público ainda. Abra a OS no app, clique em "Compartilhar" para gerar o link, e tente novamente.`, nada_enviado: true };
+
+  // 1. o destino, pela regra do documento; o parceiro só vem do retrato (que o sistema grava), nunca do argumento
+  const retrato = lerRetrato(args);
+  const d = await destinoDoParceiro(admin, so.id, ctx.userId ?? null, typeof retrato?.parceiro_id === "string" ? retrato.parceiro_id : null);
+  if (!d.ok) return { error: d.frase, nada_enviado: true };
+  const phone = d.phone;
+  const digitos = phone.replace(/\D/g, "");
+  const mudou = retrato ? oQueMudouDesdeOPedido(retrato, { digitos, total: so.grand_total }, "parceiro") : null;
+  if (mudou) return { error: `Desde o pedido, ${mudou}. Nada foi enviado — peça de novo para confirmar com os dados de agora.`, nada_enviado: true };
+
+  // 2. a guarda: janela e valor_a_parceiro com o papel (o documento leva valor)
+  const legenda = legendaDoPdf(args, so);
+  const preview = `[pdf parceiro] papel=${d.papel || "nenhum"}`;
+  if (legenda.length > 1024) return { error: "A mensagem personalizada ficou longa demais para a legenda do PDF (limite do WhatsApp). Encurte e tente de novo.", nada_enviado: true };
+  const papel = (d.papel === "indicou" || d.papel === "contratante" || d.papel === "pagador") ? d.papel : null;
+  const g = guardaDeEnvio(legenda, {
+    tipo: "os_link", audiencia: "parceiro", canal: "whatsapp", destinatarioIdentificado: true, papelDoParceiro: papel, documentoComValor: true,
+  });
+  if (g.bloqueado) {
+    await registrarEnvio(admin, { tipo: "os_link", audiencia: "parceiro", entityKind: "service_order", entityId: so.id, phone, preview, status: "blocked", blockCode: g.codigoBloqueio });
+    return { error: g.motivo, nada_enviado: true };
+  }
+
+  // 3. o documento, em via reduzida quando o banco diz reduzir
+  const validade = await fixarValidadeDoEnvio(admin, so, ctx.validadeDoCartao);
+  const montado = await montarDocumentoDaOrdem(admin, so, settings, { ocultarDadosDoCliente: d.reduzir });
+  if (!montado.ok) {
+    await registrarEnvio(admin, { tipo: "os_link", audiencia: "parceiro", entityKind: "service_order", entityId: so.id, phone, preview: `${preview} não gerado`, status: "failed" });
+    return { error: `O PDF não foi gerado (${montado.motivo}). Nada foi enviado ao parceiro.`, nada_enviado: true };
+  }
+  const doc = montado.doc;
+  const modoTeste = desviadoPorTeste(settings);
+  // 4. a chave anti-duplicado leva o número do parceiro; contexto service_order: o whatsapp-send não marca 'sent'
+  const chave = chaveDeEnvio("os-pdf", so.id, digitos, diaLocal(), impressaoDigitalDoDocumento(doc.html), modoTeste ? "teste" : null);
+  const entrega = await guardarEEntregar({
+    admin,
+    doc,
+    shareToken: so.share_token,
+    baseUrl: settings.app_public_url || "",
+    rotuloDoLog: "send_service_order_link (parceiro)",
+    entregar: (url) =>
+      enviarOrdemAoCliente({
+        phone,
+        serviceOrderId: so.id,
+        context: "service_order",
+        jwt,
+        dedupeKey: chave,
+        sentBy: ctx.userId,
+        conteudo: { kind: "document", url, filename: doc.nomeDoArquivo, caption: legenda },
+      }),
+  });
+  if (!entrega.ok) {
+    await registrarEnvio(admin, { tipo: "os_link", audiencia: "parceiro", entityKind: "service_order", entityId: so.id, phone, preview: `${preview} não gerado`, status: "failed" });
+    return { error: `O PDF não foi gerado (${entrega.motivo}). Nada foi enviado ao parceiro.`, nada_enviado: true };
+  }
+  const envio = entrega.valor;
+  if (!envio.ok) {
+    if (envio.semResposta) await liberarEnvio(admin, chave).catch(() => {});
+    await registrarEnvio(admin, { tipo: "os_link", audiencia: "parceiro", entityKind: "service_order", entityId: so.id, phone, preview, status: "failed" });
+    return envio.semResposta
+      ? { error: `O WhatsApp não confirmou o envio do PDF ao parceiro (${envio.error}): pode ter chegado ou não. Confira antes de reenviar.` }
+      : { error: `O WhatsApp recusou o envio do PDF ao parceiro (${envio.error}). Nada foi enviado.`, nada_enviado: true };
+  }
+  const rotuloDoc = `${doc.rotulo} ${doc.numero}`;
+  const teste = modoTeste ? { desviado_para_teste: true } : {};
+  if (envio.deduplicated) {
+    return { ok: true, deduplicated: true, aviso: `Este mesmo PDF (${rotuloDoc}) já foi enviado hoje a ${d.rotulo}; não reenviei.`, destino: "parceiro", destino_chave8: digitos.slice(-8), ...validade, ...teste };
+  }
+  await registrarEnvio(admin, { tipo: "os_link", audiencia: "parceiro", entityKind: "service_order", entityId: so.id, phone, preview, status: "sent" });
+  return {
+    ok: true,
+    formato: "pdf",
+    destino: "parceiro",
+    enviado_para: modoTeste ? "o número de TESTE do WhatsApp (modo de teste ligado), não o parceiro" : `a ${d.rotulo}`,
+    documento: rotuloDoc,
+    total: doc.total,
+    arquivo: doc.nomeDoArquivo,
+    destino_chave8: digitos.slice(-8),
+    observacao: modoTeste
+      ? "O modo de teste do WhatsApp está ligado: o PDF foi para o número de teste, NÃO para o parceiro. Diga isso."
+      : d.reduzir
+      ? "O parceiro recebeu o PDF em via reduzida (nome e inicial do cliente, sem CPF, telefone, e-mail nem endereço)."
+      : "O parceiro recebeu o PDF.",
+    ...validade,
+    ...teste,
+  };
 }
 
 /**
@@ -851,6 +1064,11 @@ export const whatsappTools: ToolDef[] = [
         },
         custom_message: { type: "string", description: "Mensagem personalizada. No formato link substitui o texto padrão (se não trouxer o link, ele vai no fim; até 4000 caracteres); no pdf_e_link vira a primeira linha da legenda (número, total e link vêm sempre; até 800 caracteres); no pdf é a legenda inteira — a frase que o dono quer junto do arquivo (até 1000 caracteres; sem ela, vai a frase padrão, ou nada com sem_legenda=true); no resumo entra logo depois do cumprimento (até 800)." },
         sem_legenda: { type: "boolean", description: "Só no formato pdf: true quando o usuário pedir o arquivo SEM texto ('só o arquivo', 'sem legenda', 'sem mensagem'). Sem isso e sem custom_message, vai a legenda padrão." },
+        destino: {
+          type: "string",
+          enum: ["cliente", "parceiro"],
+          description: "cliente (padrão) = o WhatsApp do cadastro do cliente, como sempre. parceiro = só quando o dono pedir o PDF à parceira (ex.: 'manda o pdf do 1 pra MP'): vai SÓ o PDF (formato 'pdf'), em via reduzida, ao número que o sistema escolhe pelo vínculo confirmado; nunca existe campo de telefone.",
+        },
       },
       required: ["service_order_id"],
     },
@@ -865,7 +1083,8 @@ export const whatsappTools: ToolDef[] = [
     // A pendência grava quem pediu: o execute revalida o cargo DELE, não o de quem aprova.
     gravarSolicitante: true,
     // E o retrato do que foi aprovado (telefone e total): mudou até o "sim", não envia.
-    retratoDaPendencia: (args, ctx) => retratoDoEnvio(ctx.admin, args),
+    // Retorno F4: com destino parceiro, o número que o banco devolve (parceiro_destino_do_pdf pede o autor).
+    retratoDaPendencia: (args, ctx) => retratoDoEnvio(ctx.admin, args, ctx.userId),
     lerPendencia: lerPendenciaDoEnvio,
     async execute(args, ctx) {
       const blocked = blockTechnician(ctx);
@@ -874,6 +1093,9 @@ export const whatsappTools: ToolDef[] = [
       // nem pela mão de um admin que aprove a pendência dele (validarPedidoDeEnvio).
       const recusado = validarPedidoDeEnvio(args, ctx);
       if (recusado) return recusado;
+      // Retorno F4 (P12.2): ao parceiro, um caminho próprio, antes de ler o telefone do cliente. Sem destino (ou com outro
+      // destino), daqui para baixo é o envio ao cliente de sempre, e a chave pdf_parceiro_ligado nem é lida.
+      if (destinoDoEnvio(args) === "parceiro") return await enviarPdfAoParceiro(args, ctx);
       const formato = formatoDoEnvio(args)!;
       const { admin, jwt, appOrigin, settings } = ctx;
       const { data: so, error: soErr } = await buscarOrdemParaEnvio(admin, args.service_order_id);
@@ -1364,6 +1586,9 @@ export const whatsappTools: ToolDef[] = [
         return { ok: true, total: 0, pendentes: [], message: "Nenhuma mensagem pendente de resposta." };
       }
       const now = Date.now();
+      // Retorno F4 (P12.4, linha 5): número confirmado de parceiro, com parceiro_historico_na_ia falso, sem a prévia; o
+      // contato e a hora ficam (o dono sabe quem espera). Falha fecha.
+      const fora = await chavesForaDoAssistente(admin);
       const pendentes = rows.map((r: any) => {
         const mins = Math.max(0, Math.round((now - new Date(r.last_inbound_at).getTime()) / 60000));
         const ha = mins < 60 ? `${mins} min` : mins < 1440 ? `${Math.round(mins / 60)} h` : `${Math.round(mins / 1440)} d`;
@@ -1373,7 +1598,7 @@ export const whatsappTools: ToolDef[] = [
           ha,
           recebida_em: r.last_inbound_at,
           nao_lidas: r.unread_count || 0,
-          previa: prettyPreview(r.last_body),
+          previa: foraDoAssistente(fora, r.phone) ? null : prettyPreview(r.last_body),
         };
       });
       return { ok: true, total: pendentes.length, pendentes };
