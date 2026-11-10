@@ -795,7 +795,8 @@ begin
       into v_letras
       from jsonb_array_elements(v_ops) o where o ->> 'letra' is not null;
     select count(*) into v_mais from jsonb_array_elements(v_ops) o where o ->> 'letra' is null;
-    v_texto := format('%s. %s · %s · ''%s''', p_n, public._retorno_rotulo(v_ab.id, v_agora),
+    -- _retorno_trecho já devolve o trecho entre aspas simples (ou "(foto)", "(sem texto)"): não se põe aspas de novo.
+    v_texto := format('%s. %s · %s · %s', p_n, public._retorno_rotulo(v_ab.id, v_agora),
                       coalesce(c_dias[extract(dow from v_m.recebida_em at time zone c_fuso)::integer + 1] || ' '
                                || to_char(v_m.recebida_em at time zone c_fuso, 'HH24:MI'), 'sem hora'),
                       coalesce(v_m.trecho, '(sem texto)'));
@@ -1892,6 +1893,13 @@ begin
         end if;
         if v_op ->> 'acao' = 'desfazer' then
           v_r := public.parceiro_pedido_desfazer(v_ped.id, p_autor, v_agora);
+          if not coalesce((v_r ->> 'ok')::boolean, false) then
+            -- a letra D não vale mais (o cliente ganhou OS, o pedido saiu do cartão): o item cai e nada muda
+            update public.parceiro_cartao_itens i set estado = 'caiu', caiu_motivo = 'fato_mudou', decidido_em = v_agora where i.id = v_i.id;
+            perform public._parceiro_fila_marcar(v_i.fila_id, 'espera', null, v_agora);
+            v_frases := v_frases || format('o %s não foi: %s', v_i.n, replace(coalesce(v_r ->> 'motivo', 'erro'), '_', ' '));
+            continue;
+          end if;
           update public.parceiro_cartao_itens i set estado = 'feito', decidido_em = v_agora where i.id = v_i.id;
           perform public._parceiro_fila_marcar(v_i.fila_id, 'feito', null, v_agora);
           v_frases := v_frases || format('o %s: cadastro desfeito', v_i.n);
