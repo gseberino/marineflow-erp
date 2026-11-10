@@ -221,7 +221,7 @@ begin
   v_item := pg_temp.f4t_pega(v_saida, c_painel);
   select * into v_sx from public.retorno_saidas s where s.id = v_saida;
   if v_item is null or v_sx.dados -> 'interessado_ids' is distinct from jsonb_build_array(v_i_h)
-     or v_sx.texto not like '%Hil T.%' or v_sx.texto like '%Gil%' then
+     or coalesce(v_sx.texto, '') not like '%Hil T.%' or v_sx.texto like '%Gil%' then
     raise exception '4b: o veto não cortou a linha do painel agendado (% %)', pg_temp.f4t_estado(v_saida), v_sx.texto;
   end if;
   v_i_g2 := pg_temp.f4t_liga(pg_temp.f4t_os(v_g), v_p, 'indicou', c_t - interval '2 days');

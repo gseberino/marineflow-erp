@@ -540,7 +540,7 @@ begin
                             c_painel - interval '1 minute', '5a');
   v_r := public.parceiro_pegar(c_painel);
   select * into v_x from public.retorno_saidas s where s.id = v_s;
-  if v_x.estado is distinct from 'preparada' or v_x.texto not like '%Ana C.%' or v_x.texto like '%Bruno%'
+  if v_x.estado is distinct from 'preparada' or coalesce(v_x.texto, '') not like '%Ana C.%' or v_x.texto like '%Bruno%'
      or v_x.dados -> 'interessado_ids' is distinct from jsonb_build_array(v_va) or v_x.dados -> 'os_ids' is distinct from jsonb_build_array(v_os_a)
      or jsonb_array_length(v_r -> 'linhas') is distinct from 1 or v_r -> 'linhas' -> 0 ->> 'n' is distinct from '1' then
     raise exception '5a: veto na 2ª linha (% / %)', pg_temp.f4c_estado(v_s), v_x.texto;
@@ -610,12 +610,12 @@ begin
                             c_painel - interval '1 minute', '19');
   perform public.parceiro_pegar(c_painel);
   if pg_temp.f4c_estado(v_s) is distinct from 'preparada/'
-     or (select s.texto from public.retorno_saidas s where s.id = v_s) not like '%Bruno C.%' then
+     or coalesce((select s.texto from public.retorno_saidas s where s.id = v_s), '') not like '%Bruno C.%' then
     raise exception '19a: o painel de duas linhas não foi reservado (%)', pg_temp.f4c_estado(v_s);
   end if;
   v_r := public.parceiro_saida_sem_linhas(v_s, array[2], '[{"n": 2, "regras": ["nome_de_outro"]}]'::jsonb, c_painel + interval '10 seconds');
   select * into v_x from public.retorno_saidas s where s.id = v_s;
-  if v_r ? 'caiu' or v_r ->> 'texto' is distinct from v_x.texto or v_x.texto like '%Bruno%' or v_x.texto not like '%1. Motorhome de Ana C.%'
+  if v_r ? 'caiu' or v_r ->> 'texto' is distinct from v_x.texto or v_x.texto like '%Bruno%' or coalesce(v_x.texto, '') not like '%1. Motorhome de Ana C.%'
      or jsonb_array_length(v_r -> 'linhas') is distinct from 1 or v_r -> 'validador' ->> 'audiencia' is distinct from 'parceiro'
      or v_x.dados -> 'interessado_ids' is distinct from jsonb_build_array(v_va) or v_x.dados -> 'os_ids' is distinct from jsonb_build_array(v_os_a)
      or not exists (select 1 from jsonb_array_elements(v_x.dados -> 'linhas_fora') f
@@ -645,8 +645,8 @@ begin
   select * into v_x from public.retorno_saidas s where s.id = v_s;
   if v_x.estado is distinct from 'enviando' or v_x.modo is distinct from 'ligado' or char_length(v_x.texto) <= 600
      or char_length(v_x.texto) > 1500 or array_length(string_to_array(v_x.texto, E'\n'), 1) > 18
-     or v_x.texto not like '%E mais 6 veículos.%' or v_x.texto not like 'Pátio HBR · sex (15/01)%'
-     or v_x.texto not like '%Valores e dados ficam com cada cliente.'
+     or coalesce(v_x.texto, '') not like '%E mais 6 veículos.%' or coalesce(v_x.texto, '') not like 'Pátio HBR · sex (15/01)%'
+     or coalesce(v_x.texto, '') not like '%Valores e dados ficam com cada cliente.'
      or jsonb_array_length(v_x.dados -> 'linhas') is distinct from 14 or jsonb_array_length(v_x.dados -> 'linhas_cortadas') is distinct from 6
      or jsonb_array_length(v_x.dados -> 'interessado_ids') is distinct from 14 or (v_x.dados ->> 'mais')::int is distinct from 6
      or jsonb_array_length(v_r -> 'linhas') is distinct from 14 then
@@ -716,7 +716,7 @@ begin
   v_s := pg_temp.f4c_aviso(v_c, v_p, array[v_vc], c_t - interval '1 minute', '7a');
   v_r := public.parceiro_pegar(c_t);
   if pg_temp.f4c_estado(v_s) is distinct from 'enviando/' or v_r -> 'validador' ->> 'audiencia' is distinct from 'cliente'
-     or (select s.texto from public.retorno_saidas s where s.id = v_s) not like '%responda NÃO RCF.' then
+     or coalesce((select s.texto from public.retorno_saidas s where s.id = v_s), '') not like '%responda NÃO RCF.' then
     raise exception '7a: o aviso não foi reservado (% / %)', pg_temp.f4c_estado(v_s), v_r;
   end if;
   v_r := public.retorno_registrar_decisao(v_s, 'enviada', '{"provider_message_id": "TESTE-F4"}'::jsonb, c_t + interval '30 seconds');
@@ -819,7 +819,7 @@ begin
   v_s := pg_temp.f4c_agenda('parceiro_recibo', null, v_n2, '{}', c_t - interval '5 minutes', '25b', v_caso2);
   perform public.parceiro_pegar(c_t);
   if pg_temp.f4c_estado(v_s) is distinct from 'preparada/'
-     or (select s.texto from public.retorno_saidas s where s.id = v_s) not like 'Aqui é a Claudia, assistente virtual da HBR. Já passei%' then
+     or coalesce((select s.texto from public.retorno_saidas s where s.id = v_s), '') not like 'Aqui é a Claudia, assistente virtual da HBR. Já passei%' then
     raise exception '25b: sem resposta do dono, o P02 não saiu (%)', pg_temp.f4c_estado(v_s);
   end if;
   perform pg_temp.f4c_limpa();

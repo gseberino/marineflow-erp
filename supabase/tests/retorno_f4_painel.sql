@@ -444,7 +444,7 @@ begin
       raise exception '20b: o texto traz a data % que não está nas fontes', v_t;
     end if;
   end loop;
-  if v_texto not like '%Motorhome de Joel P.: em serviço.%' or v_texto like '%João%' or v_texto like '%Kelly%' then
+  if coalesce(v_texto, '') not like '%Motorhome de Joel P.: em serviço.%' or v_texto like '%João%' or v_texto like '%Kelly%' then
     raise exception '20c/22b: o painel com as linhas sem data (%)', v_texto;
   end if;
   -- 22. nomes_de_outros leva o homônimo, e o texto não o cita
@@ -1247,7 +1247,7 @@ begin
   v_r := public.parceiro_patio_pedido(v_nt, pg_temp.f4p_msg('5547900017602', 'patio', c_t + interval '1 minute'), c_t + interval '1 minute');
   select * into v_x from public.retorno_saidas s where s.id = nullif(v_r ->> 'saida_id', '')::uuid;
   if v_r ->> 'acao' is distinct from 'direto' or v_x.dados -> 'linhas' -> 0 ->> 'etapa' is distinct from 'instalação do painel solar'
-     or public._parceiro_painel_texto('parceiro_patio', 'direto', v_x.dados -> 'linhas', 0, date '2027-01-14', false) ->> 'texto'
+     or coalesce(public._parceiro_painel_texto('parceiro_patio', 'direto', v_x.dados -> 'linhas', 0, date '2027-01-14', false) ->> 'texto', '')
         not like E'Pátio HBR · 14/01\n1. Motorhome de João S.: em serviço hoje (instalação do painel solar).\n2. Motorhome de Kauê E.: em serviço hoje.\n%' then
     raise exception 'R1r: o pátio direto sem a etapa (%)', v_r;
   end if;
@@ -1273,7 +1273,7 @@ begin
   if public.parceiro_linhas(v_pt, c_t) is distinct from v_esperado then
     raise exception 'R1v: desligar de novo não voltou às linhas de antes';
   end if;
-  if public._parceiro_painel_texto('parceiro_patio', 'direto', v_x.dados -> 'linhas', 0, date '2027-01-14', false) ->> 'texto'
+  if coalesce(public._parceiro_painel_texto('parceiro_patio', 'direto', v_x.dados -> 'linhas', 0, date '2027-01-14', false) ->> 'texto', '')
      not like E'Pátio HBR · 14/01\n1. Motorhome de João S.: em serviço hoje.\n2. Motorhome de Kauê E.: em serviço hoje.\n%' then
     raise exception 'R1w: a saída agendada com a etapa a levou com a chave desligada';
   end if;

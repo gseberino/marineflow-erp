@@ -170,7 +170,7 @@ begin
     raise exception '1d: a saída que espera não passou a cobrir o 2º vínculo';
   end if;
   v_item := pg_temp.f4a_pega(v_s, c_t);
-  if v_item ->> 'texto' not like '%Como você veio pela RAF, ela também acompanha o andamento do seu motorhome, sem valores.%'
+  if coalesce(v_item ->> 'texto', '') not like '%Como você veio pela RAF, ela também acompanha o andamento do seu motorhome, sem valores.%'
      or v_item -> 'validador' ->> 'audiencia' is distinct from 'cliente' then
     raise exception '1e: o texto do aviso (%)', v_item ->> 'texto';
   end if;
@@ -331,7 +331,7 @@ begin
   if v_x.dados -> 'interessado_ids' is distinct from jsonb_build_array(v_ih)
      or not exists (select 1 from jsonb_array_elements(v_x.dados -> 'linhas_fora') f
                      where f ->> 'interessado_id' = v_ig::text and f ->> 'fora_por' = 'regra')
-     or v_x.texto not like '%1. Motorhome de Hil A.: em serviço hoje.%' or v_x.texto like '%Gil%' then
+     or coalesce(v_x.texto, '') not like '%1. Motorhome de Hil A.: em serviço hoje.%' or v_x.texto like '%Gil%' then
     raise exception '5: o veto não cortou a linha do painel (% %)', v_x.dados -> 'interessado_ids', v_x.texto;
   end if;
   perform pg_temp.f4a_limpa();
@@ -567,7 +567,7 @@ begin
     raise exception '17a: o papel mais forte do par não foi ao aviso';
   end if;
   v_item := pg_temp.f4a_pega(v_s, c_t + interval '5 hours');
-  if v_item ->> 'texto' not like '%Este serviço no seu veículo está sendo feito por meio da RAF, e ela acompanha o andamento.%'
+  if coalesce(v_item ->> 'texto', '') not like '%Este serviço no seu veículo está sendo feito por meio da RAF, e ela acompanha o andamento.%'
      or v_item ->> 'texto' like '%veio pela%' then
     raise exception '17b: contratante no par não usou Q04/Q05 (%)', v_item ->> 'texto';
   end if;
@@ -575,7 +575,7 @@ begin
   v_iy := pg_temp.f4a_proposto(pg_temp.f4a_os(v_y, 'Motorhome'), v_p, 'indicou');
   v_r := public._parceiro_confirmar(v_iy, v_dono, null, c_t);
   v_item := pg_temp.f4a_pega((v_r ->> 'saida_id')::uuid, c_t + interval '5 hours');
-  if v_item ->> 'texto' not like '%Como você veio pela RAF, ela também acompanha o andamento do seu motorhome, sem valores.%' then
+  if coalesce(v_item ->> 'texto', '') not like '%Como você veio pela RAF, ela também acompanha o andamento do seu motorhome, sem valores.%' then
     raise exception '17c: só indicou não usou Q01/Q02 (%)', v_item ->> 'texto';
   end if;
 

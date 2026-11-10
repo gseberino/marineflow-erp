@@ -416,9 +416,9 @@ begin
     raise exception '16b: "e aí?" ou a reavaliação mexeu em mais_pedidos (%)', (pg_temp.f4q_ped(v_caso)).mais_pedidos;
   end if;
   v_x := public.parceiro_pedido_montar(v_ped.id, 1::smallint, c_t + interval '3 hours');
-  if v_x ->> 'texto_mostrado' not like '1. Pedido da RCT (Carla) para cliente dela · João (sem cadastro) · Motorhome · ''Orçamento de placa solar pro motorhome de um cliente''%'
-     or v_x ->> 'texto_mostrado' not like '%+1 pedidos nesta conversa, ainda sem dados: leia no celular%'
-     or v_x ->> 'texto_mostrado' not like '%Sem cadastro, nada foi criado: responda pelo celular. *resolvido 1*'
+  if coalesce(v_x ->> 'texto_mostrado', '') not like '1. Pedido da RCT (Carla) para cliente dela · João (sem cadastro) · Motorhome · ''Orçamento de placa solar pro motorhome de um cliente''%'
+     or coalesce(v_x ->> 'texto_mostrado', '') not like '%+1 pedidos nesta conversa, ainda sem dados: leia no celular%'
+     or coalesce(v_x ->> 'texto_mostrado', '') not like '%Sem cadastro, nada foi criado: responda pelo celular. *resolvido 1*'
      or jsonb_array_length(v_x -> 'opcoes') is distinct from 0 or v_x ->> 'hash' is null then
     raise exception '16c/15d: o item do pedido sem cadastro (%)', v_x ->> 'texto_mostrado';
   end if;
@@ -437,7 +437,7 @@ begin
   perform public.parceiro_pegar(v_s.enviar_em + interval '1 minute');
   select * into v_s from public.retorno_saidas s where s.id = v_s.id;
   if v_s.estado is distinct from 'preparada' or v_s.motivo is not null
-     or v_s.texto not like 'Carla, aqui é a Claudia, assistente virtual da HBR. O orçamento do motorhome de João está com o Gustavo;%' then
+     or coalesce(v_s.texto, '') not like 'Carla, aqui é a Claudia, assistente virtual da HBR. O orçamento do motorhome de João está com o Gustavo;%' then
     raise exception '19c: o P15 no parceiro_pegar (% % %)', v_s.estado, v_s.motivo, v_s.texto;
   end if;
   -- 16: caso fechado: o pedido novo abre outro caso e outra linha; "oi" num caso novo não abre coleta
@@ -484,8 +484,8 @@ begin
   v_cartao := pg_temp.f4q_cartao(array[(pg_temp.f4q_fila('pedido:' || v_ped.id)).id], c_t + interval '3 hours 36 minutes');
   v_i := pg_temp.f4q_item(v_cartao, 1);
   if v_i.tipo is distinct from 'pedido' or v_i.pedido_id is distinct from v_ped.id or pg_temp.f4q_letras(v_cartao, 1) is distinct from ''
-     or v_i.texto_mostrado not like '1. Pedido da RCT (Milena) para cliente dela · Davi · Motorhome · %'
-     or v_i.texto_mostrado not like '%o número que a RCT passou (••6905) já é de um cliente cadastrado; nada foi criado: responda pelo celular ou orce na tela para ele. *resolvido 1*'
+     or coalesce(v_i.texto_mostrado, '') not like '1. Pedido da RCT (Milena) para cliente dela · Davi · Motorhome · %'
+     or coalesce(v_i.texto_mostrado, '') not like '%o número que a RCT passou (••6905) já é de um cliente cadastrado; nada foi criado: responda pelo celular ou orce na tela para ele. *resolvido 1*'
      or v_i.texto_mostrado like '%90001%' then
     raise exception '21c: o item duplicado (%)', v_i.texto_mostrado;
   end if;
@@ -554,10 +554,10 @@ begin
   v_cartao := pg_temp.f4q_cartao(array[(pg_temp.f4q_fila('pedido:' || v_ped.id)).id], c_t + interval '4 hours 3 minutes');
   v_i := pg_temp.f4q_item(v_cartao, 1);
   if pg_temp.f4q_letras(v_cartao, 1) is distinct from 'D' or v_i.retrato ->> 'acao' is not null
-     or v_i.texto_mostrado not like '1. Pedido da RCT (Rosa) para cliente dela · Pedro (cadastro provisório) · Motorhome · %'
-     or v_i.texto_mostrado not like '%Sem proposta. Dite ao assistente ou orce na tela; o PDF volta aqui.%'
-     or v_i.texto_mostrado not like '%*1 D* desfaz o cadastro%' or v_i.texto_mostrado like '%90001%'
-     or v_i.texto_mostrado not like '% · número passado pela RCT: ••6901%' then
+     or coalesce(v_i.texto_mostrado, '') not like '1. Pedido da RCT (Rosa) para cliente dela · Pedro (cadastro provisório) · Motorhome · %'
+     or coalesce(v_i.texto_mostrado, '') not like '%Sem proposta. Dite ao assistente ou orce na tela; o PDF volta aqui.%'
+     or coalesce(v_i.texto_mostrado, '') not like '%*1 D* desfaz o cadastro%' or v_i.texto_mostrado like '%90001%'
+     or coalesce(v_i.texto_mostrado, '') not like '% · número passado pela RCT: ••6901%' then
     raise exception '18a/17a/10b: o item sem proposta (% / %)', pg_temp.f4q_letras(v_cartao, 1), v_i.texto_mostrado;
   end if;
   -- 17: autor que não é o dono
@@ -577,7 +577,7 @@ begin
      or not exists (select 1 from public.audit_log l where l.table_name = 'clients' and l.record_id = v_ped.client_id and l.action = 'update'
                                                        and l.changed_by = 'dono' and l.new_value ->> 'active' = 'false')
      or public._retorno_cadastro_do_caso(v_caso) is not null
-     or v_r ->> 'aviso' not like '%o 1: cadastro desfeito%' then
+     or coalesce(v_r ->> 'aviso', '') not like '%o 1: cadastro desfeito%' then
     raise exception '17c: a letra D (% / %)', v_r, to_jsonb(v_ped2);
   end if;
   perform pg_temp.f4q_fechar(v_caso, c_t + interval '4 hours 50 minutes');
@@ -598,8 +598,8 @@ begin
   v_i := pg_temp.f4q_item(v_cartao, 1);
   if pg_temp.f4q_letras(v_cartao, 1) is distinct from 'A' or v_i.retrato ->> 'acao' is distinct from 'pdf'
      or v_i.service_order_id is distinct from v_rasc or v_i.retrato ->> 'numero' is distinct from 'ORÇ-98901'
-     or v_i.texto_mostrado not like '%Rascunho ORÇ-98901 de 12/01: 1 item · R$ %'
-     or v_i.texto_mostrado not like '%*1 A* ao cliente ••6902 (passado pela RCT)%' or v_i.texto_mostrado like '%90001%' then
+     or coalesce(v_i.texto_mostrado, '') not like '%Rascunho ORÇ-98901 de 12/01: 1 item · R$ %'
+     or coalesce(v_i.texto_mostrado, '') not like '%*1 A* ao cliente ••6902 (passado pela RCT)%' or v_i.texto_mostrado like '%90001%' then
     raise exception '18b/8b/17d: o item com rascunho e só o número da parceira (% / %)', pg_temp.f4q_letras(v_cartao, 1), v_i.texto_mostrado;
   end if;
   -- 8: o número passou a ser de outro cliente entre o item e o *sim*: nada sai, nada é copiado, o pedido fica em cartao
@@ -609,7 +609,7 @@ begin
   if (pg_temp.f4q_ped(v_caso)).estado is distinct from 'cartao' or jsonb_array_length(v_r -> 'orcamentos') is distinct from 0
      or exists (select 1 from public.clients c where c.id = v_ped.client_id and c.whatsapp is not null)
      or (pg_temp.f4q_fila('pedido:' || v_ped.id)).estado is distinct from 'espera'
-     or v_r ->> 'aviso' not like '%já é de outro cliente; nada saiu%' then
+     or coalesce(v_r ->> 'aviso', '') not like '%já é de outro cliente; nada saiu%' then
     raise exception '8c: o número de outro cliente (%)', v_r;
   end if;
   update public.clients set whatsapp = null, active = false where id = v_outro;
@@ -711,9 +711,9 @@ begin
   v_i := pg_temp.f4q_item(v_cartao, 1);
   if pg_temp.f4q_letras(v_cartao, 1) is distinct from 'ABD' or v_i.retrato ->> 'acao' is distinct from 'orcar'
      or v_i.retrato ->> 'previa_id' is distinct from v_previa::text
-     or v_i.texto_mostrado not like '%Proposta com base no ORÇ-98902: 1 item · R$ %'
-     or v_i.texto_mostrado not like '%*1 B* à RCT (ela contrata?)%'
-     or v_i.texto_mostrado not like '%o PDF à RCT leva preço e Pix de Lucas; fica registrado como decisão sua%' then
+     or coalesce(v_i.texto_mostrado, '') not like '%Proposta com base no ORÇ-98902: 1 item · R$ %'
+     or coalesce(v_i.texto_mostrado, '') not like '%*1 B* à RCT (ela contrata?)%'
+     or coalesce(v_i.texto_mostrado, '') not like '%o PDF à RCT leva preço e Pix de Lucas; fica registrado como decisão sua%' then
     raise exception '18c/7a: o item com proposta e a letra B (% / %)', pg_temp.f4q_letras(v_cartao, 1), v_i.texto_mostrado;
   end if;
   perform pg_temp.f4q_dito('{"comando": "escolher", "n": 1, "letra": "B"}', c_t + interval '6 hours 5 minutes');
@@ -729,7 +729,7 @@ begin
   v_r := public.parceiro_previa_preparar(v_ped.id, v_previa, v_i.id, v_dono, null, 'parceiro', c_t + interval '6 hours 7 minutes');
   if (v_r ->> 'ok')::boolean is not true or v_r ->> 'acao' is distinct from 'orcar' or v_r ->> 'parceiro_id' is distinct from v_p::text
      or v_r -> 'args' ->> 'origem' is distinct from 'retorno_parceiro' or v_r -> 'args' ->> 'vessel_id' is distinct from v_ped.vessel_id::text
-     or v_r -> 'legenda' ->> 'texto' not like 'Rosa, aqui é a Claudia, assistente virtual da HBR. Segue o orçamento do veículo de Lucas, válido até __/__.'
+     or coalesce(v_r -> 'legenda' ->> 'texto', '') not like 'Rosa, aqui é a Claudia, assistente virtual da HBR. Segue o orçamento do veículo de Lucas, válido até __/__.'
      or v_r -> 'legenda' -> 'contexto' ->> 'audiencia' is distinct from 'parceiro'
      or not (v_r -> 'legenda' -> 'contexto' -> 'nomes_da_lista' ? 'Lucas') then
     raise exception '27d/24c: o preparo à parceira (%)', v_r;
@@ -744,7 +744,7 @@ begin
   v_r := public.parceiro_vinculo_do_pedido(v_ped.id, v_orc, v_dono, 'parceiro', c_t + interval '6 hours 9 minutes');
   drop function public.parceiro_requalificar(uuid, text, uuid, text, timestamptz, uuid);
   alter function public.parceiro_requalificar_real(uuid, text, uuid, text, timestamptz, uuid) rename to parceiro_requalificar;
-  if (v_r ->> 'ok')::boolean is not false or v_r ->> 'motivo' is distinct from 'requalificar_teste' or v_r ->> 'frase' not like '%nada saiu'
+  if (v_r ->> 'ok')::boolean is not false or v_r ->> 'motivo' is distinct from 'requalificar_teste' or coalesce(v_r ->> 'frase', '') not like '%nada saiu'
      or exists (select 1 from public.os_interessados oi where oi.service_order_id = v_orc)
      or exists (select 1 from public.retorno_saidas s where s.tipo = 'parceiro_aviso_cliente' and s.phone_normalized = '5547900016903') then
     raise exception '7b: a requalificação que falha deixou rastro (%)', v_r;
@@ -789,8 +789,8 @@ begin
   v_cartao := pg_temp.f4q_cartao(array[(pg_temp.f4q_fila('pedido:' || v_ped.id)).id], c_t + interval '8 hours 10 minutes');
   v_i := pg_temp.f4q_item(v_cartao, 1);
   if pg_temp.f4q_letras(v_cartao, 1) is distinct from 'B'
-     or v_i.texto_mostrado not like '%*1 B* à RCT (ela contrata?) (o PDF só sai depois do aviso e de 24 h)%'
-     or v_i.texto_mostrado not like '%ao cliente: quando tiver o número%' then
+     or coalesce(v_i.texto_mostrado, '') not like '%*1 B* à RCT (ela contrata?) (o PDF só sai depois do aviso e de 24 h)%'
+     or coalesce(v_i.texto_mostrado, '') not like '%ao cliente: quando tiver o número%' then
     raise exception '8f/9c: o item sem telefone e com espera (% / %)', pg_temp.f4q_letras(v_cartao, 1), v_i.texto_mostrado;
   end if;
   perform pg_temp.f4q_dito('{"comando": "escolher", "n": 1, "letra": "B"}', c_t + interval '8 hours 11 minutes');
