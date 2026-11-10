@@ -532,7 +532,7 @@ begin
   v := public._parceiro_contexto_do_validador(null, v_t,
          jsonb_build_object('tipo', 'parceiro_recibo', 'numero_id', v_num_carla, 'quando', 'hoje', 'hora', '19h'), c_t);
   if v ->> 'audiencia' is distinct from 'parceiro' or v ->> 'nome_permitido' is distinct from 'Carla'
-     or not (v -> 'datas_permitidas' ? 'ainda hoje') or jsonb_typeof(v -> 'papel_do_parceiro') is distinct from 'null'
+     or (v -> 'datas_permitidas' ? 'ainda hoje') is not true or jsonb_typeof(v -> 'papel_do_parceiro') is distinct from 'null'
      or (v -> 'marcas' ->> 'cliente_ouviu')::boolean is not false or v -> 'nomes_da_lista' is distinct from '[]'::jsonb
      or v -> 'trechos_do_modelo' is distinct from '["Oi, ", "! Já passei sua mensagem ao Gustavo, e ele retorna para vocês ", "."]'::jsonb
      or jsonb_typeof(v -> 'nomes_de_outros') is distinct from 'array' then
@@ -546,7 +546,7 @@ begin
                             'linhas', jsonb_build_array(jsonb_build_object('n', 1, 'estado', 'andamento', 'desde', '2027-01-02',
                                                                             'interessado_id', v_vinculo))), c_t);
   if v ->> 'papel_do_parceiro' is distinct from 'contratante' or v -> 'nomes_da_lista' is distinct from '["Par F."]'::jsonb
-     or not (v -> 'datas_permitidas' ?& array['ter (12/01)', '12/01', '02/01'])
+     or (v -> 'datas_permitidas' ?& array['ter (12/01)', '12/01', '02/01']) is not true
      or (v -> 'marcas' ->> 'cliente_ouviu')::boolean is not false then
     raise exception '14c: contexto do painel sem linha pronto (%)', v;
   end if;
