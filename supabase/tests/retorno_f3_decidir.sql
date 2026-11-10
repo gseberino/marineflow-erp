@@ -525,11 +525,12 @@ begin
     update public.retorno_cartao_itens set estado = 'vivo', caiu_motivo = null, decidido_em = null where id = v_ip;
 
     -- Regra 7: canal, também com p_item nulo (21).
-    update public.retorno_aberturas set nivel = 'nada' where id = v_caso;
+    -- nivel 'nada' exige motivo (retorno_aberturas_motivo, F1); 'parar' é o "pediu para não receber".
+    update public.retorno_aberturas set nivel = 'nada', motivo = 'parar' where id = v_caso;
     v_r := public.retorno_previa_preparar(v_pv, null, v_dono, c_agora);
     perform pg_temp.f3d_igual('21a nivel nada', v_r ->> 'motivo', 'canal_bloqueado');
     perform pg_temp.f3d_igual('21b frase', v_r ->> 'frase', 'pediu para não receber mensagem automática; não criei nada');
-    update public.retorno_aberturas set nivel = 'recibo' where id = v_caso;
+    update public.retorno_aberturas set nivel = 'recibo', motivo = null where id = v_caso;
     insert into public.whatsapp_leads (phone_normalized, lead_tipo) values ('5547900700109', 'pessoal');
     perform pg_temp.f3d_igual('21c lead pessoal', public.retorno_previa_preparar(v_pv, null, v_dono, c_agora) ->> 'motivo', 'canal_bloqueado');
     delete from public.whatsapp_leads where phone_normalized = '5547900700109' and lead_tipo = 'pessoal';
@@ -746,11 +747,13 @@ begin
     -- 29: erro em cada um dos 3 casos.
     perform pg_temp.f3d_igual('29b nao_e_o_dono', public.retorno_previa_ver(1, c_outro, c_agora) ->> 'erro', 'nao_e_o_dono');
     perform pg_temp.f3d_igual('29c sem_caso', public.retorno_previa_ver(2, v_dono, c_agora) ->> 'erro', 'sem_caso');
-    update public.ai_operator_pending_actions set status = 'executed' where id = (select c.pendencia_id from public.retorno_cartoes c where c.id = v_cartao);
-    perform pg_temp.f3d_igual('29d sem_cartao (pendência executada)', public.retorno_previa_ver(1, v_dono, c_agora) ->> 'erro', 'sem_cartao');
+    -- ai_op_protect_pending_action só deixa pending ir a approved, rejected ou expired, e estado terminal não volta:
+    -- 'rejected' encerra a pendência, e o cartão é reaberto (mesmo caso, item 1) para os passos seguintes.
+    update public.ai_operator_pending_actions set status = 'rejected' where id = (select c.pendencia_id from public.retorno_cartoes c where c.id = v_cartao);
+    perform pg_temp.f3d_igual('29d sem_cartao (pendência encerrada)', public.retorno_previa_ver(1, v_dono, c_agora) ->> 'erro', 'sem_cartao');
     -- 25: só lê: o cartão continua vivo depois.
     perform pg_temp.f3d_igual('25b cartão continua vivo', (select c.estado from public.retorno_cartoes c where c.id = v_cartao), 'vivo');
-    update public.ai_operator_pending_actions set status = 'pending' where id = (select c.pendencia_id from public.retorno_cartoes c where c.id = v_cartao);
+    v_cartao := pg_temp.f3d_cartao(c_agora);
     update public.retorno_previa set vessel_id = null where id = v_pv;
     v_un2 := pg_temp.f3d_un(v_cl, 'Quina');
     update public.retorno_aberturas set unidade_escolhida_id = v_un2 where id = v_caso;
@@ -796,7 +799,7 @@ begin
     v_caso := pg_temp.f3d_caso(116, 'numero_novo', null);
     insert into public.audit_log (table_name, record_id, action, changed_by, new_value, reason)
     values ('clients', v_cl, 'lead_converted', 'retorno', jsonb_build_object('caso', v_caso, 'vessel_id', v_un), 'teste');
-    update public.clients set provisorio = true where id = v_cl;
+    update public.clients set provisorio = true, origem = 'retorno' where id = v_cl;   -- clients_provisorio_origem
     v_pv := pg_temp.f3d_prop(v_caso, v_cl, v_un, 'historico', 'ORÇ-D116', jsonb_build_object('forte', true, 'fonte_aprovada', true), 500, 1, 0);
     perform pg_temp.f3d_lin(v_pv, 1, 'Peça', 1, 500, 'praticado_outro', 'ok', null, 'peca', v_prod);
     v_cartao := pg_temp.f3d_cartao(c_agora);
