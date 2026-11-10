@@ -48,7 +48,9 @@ $f$;
 create or replace function pg_temp.f4q_decidir(p_saida uuid, p_estado text, p_em timestamptz) returns void
 language plpgsql as $f$
 begin
-  update public.retorno_saidas set estado = p_estado, decidida_em = p_em, enviada_em = case when p_estado = 'enviada' then p_em end
+  -- retorno_saidas_texto: saída decidida tem texto
+  update public.retorno_saidas set estado = p_estado, decidida_em = p_em, enviada_em = case when p_estado = 'enviada' then p_em end,
+         texto = coalesce(texto, 'texto de teste (F4 C13)')
    where id = p_saida;
   perform public._parceiro_aplicar_efeitos(p_saida, p_em);
 end $f$;
