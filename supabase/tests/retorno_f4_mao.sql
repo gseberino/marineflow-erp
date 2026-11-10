@@ -45,13 +45,13 @@ $f$;
 create or replace function pg_temp.f4m_doc(p_fone text, p_arquivo text, p_em timestamptz, p_via boolean default false,
                                            p_tipo text default 'document') returns uuid
 language sql as $f$
-  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, raw_payload, saida_humana, occurred_at)
+  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, raw_payload, saida_humana, occurred_at, hora_real)
   values ('outbound', p_fone, p_tipo, null, 'teste-f4-mao-' || md5(p_fone || coalesce(p_arquivo, '') || p_em::text || random()::text),
           case when p_via
                then jsonb_build_object('via', 'whatsapp-send', 'data', jsonb_build_object('message', jsonb_build_object('documentMessage', jsonb_build_object('fileName', p_arquivo))))
                else jsonb_build_object('data', jsonb_build_object('source', 'unknown', 'message', jsonb_build_object('documentMessage', jsonb_build_object('fileName', p_arquivo))))
           end,
-          case when p_via then true end, p_em)
+          case when p_via then true end, p_em, p_em)
   returning id
 $f$;
 
