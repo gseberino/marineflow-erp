@@ -11,6 +11,7 @@
 -- O QUE MUDA:
 --   _agenda_gestor_puxar(date, timestamptz): o passo do job agenda-gestor. O peso (R7.8): fora de hora é 1 leitura de config; as contas da fila só depois de ter célula livre; os filtros baratos antes de os_prontidao.
 --     Em teste (modo_urgencia em sombra, freio ligado ou modo_proposta em sombra): só o diário (agenda_gestor_dia.sombra.puxar), sem proposta, ação nem alocação (R7.7-1). De verdade: propõe na simulação, aceita só compromisso que comece em D, propõe de novo gravando e aplica.
+--     Com puxar_max_os > 1, em teste, a simulação de cada OS seguinte vê as já puxadas na rodada (os itens delas aplicados num bloco que se desfaz), como o de verdade as lê do banco.
 --     Quem pode: da equipe, tem de ter telefone que a rotina alcance (R7.7-6) e a ficha de D ainda não saiu; o dono não está na rotina (quem o alcança é o aviso do gestor e o fechamento) e conta com o dia
 --     declarado (§5.3). Em ja_vem, não pode ter convite de D sem o SIM enquanto o convite estiver ligado de verdade (R7.7-8). A ponta do dono (abrir e fechar) da OS puxada em D vale mesmo com ele fora das
 --     pessoas: o motor só tira o turno de quem está fora, e o validador aceita a ponta (20261111100300).
@@ -34,8 +35,8 @@ declare
   v_conv  boolean;
   v_dono  uuid;
   v_pes   uuid[];
-  v_cels  uuid[];
   v_cel   int;
+  v_tst   jsonb := '[]'::jsonb;
   v_fila  jsonb := '[]'::jsonb;
   c       record;
   v_tipo  text;
@@ -83,7 +84,7 @@ begin
   v_d := public.agenda_somar_du(p_hoje, 1);
 
   begin
-    -- a trava só quando grava (em teste nada muda e o plano do dono não espera por isto)
+    -- a trava só quando grava (em teste nada fica gravado; com puxar_max_os > 1, o bloco desfeito lá embaixo a pega pelo gatilho da versão do plano só enquanto dura)
     if v_real then
       perform pg_advisory_xact_lock(hashtext('agenda_plano'));
     end if;
@@ -98,9 +99,8 @@ begin
     -- As pessoas e as células de amanhã. ja_vem: tem turno marcado em D e o outro livre, ou é o dono com o dia declarado (7b). disponivel: também quem declarou. Da equipe, a rotina tem de alcançar a
     -- pessoa (contato, telefone: R7.7-6) e a ficha de D ainda não pode ter saído (a pessoa não saberia: a rotina só manda uma). O convite é a mesma regra da ficha (R7.7-8, _agenda_rotina_ficha, AG7-23).
     -- O dono fica fora da regra da rotina: ele não recebe ficha (quem o alcança é o aviso do gestor e o fechamento) e em produção não tem linha de contato. Exigir a rotina dele tirava toda OS que pede o dono.
-    -- v_cels: a pessoa de cada célula (repete quem tem duas), para a conta de teste lá embaixo
-    select coalesce(array_agg(distinct g.payee_id), '{}'::uuid[]), count(*)::int, coalesce(array_agg(g.payee_id), '{}'::uuid[])
-      into v_pes, v_cel, v_cels
+    select coalesce(array_agg(distinct g.payee_id), '{}'::uuid[]), count(*)::int
+      into v_pes, v_cel
       from public.agenda_grade(v_d, v_d, p_hoje) g
       join public.agenda_capacidade(v_d, v_d, p_hoje) k on k.payee_id = g.payee_id and k.dia = g.dia and k.turno = g.turno
       left join public.agenda_equipe_contato ct on ct.payee_id = g.payee_id
@@ -171,7 +171,26 @@ begin
         v_mot := null;
         v_ini := null;
         begin
-          v_p := public.agenda_propor('os', v_d, null, array[v_os], v_rs, false, 'vigia', null, p_hoje, p_agora);
+          if jsonb_array_length(v_tst) = 0 then
+            v_p := public.agenda_propor('os', v_d, null, array[v_os], v_rs, false, 'vigia', null, p_hoje, p_agora);
+          else
+            -- Em teste, as OS já puxadas nesta rodada não estão no banco, e a simulação desta não veria o que elas ocupam (o meio-dia de cada pessoa,
+            -- a ponta do dono, a frente). Aqui elas entram como o agenda_aplicar as deixaria (sai o que cancelam, entra o que criam, vigente: o motor
+            -- e a grade não separam publicada de fixada), a simulação roda e o bloco desfaz tudo; só o resultado dela fica. De verdade, a 1ª já
+            -- está gravada e a 2ª simulação a lê do banco: este bloco nunca roda (v_tst só cresce em teste), nem com puxar_max_os = 1.
+            begin
+              update public.agenda_alocacoes a set estado = 'cancelada'
+                from jsonb_array_elements(v_tst) i, jsonb_array_elements(i -> 'alocacoes') x
+               where i ->> 'op' = 'cancelar' and a.id = (x ->> 'alocacao_id')::uuid;
+              insert into public.agenda_alocacoes (service_order_id, payee_id, dia, turno, presenca, tipo, estado, reserva_de)
+              select (i ->> 'os')::uuid, (x ->> 'payee_id')::uuid, (x ->> 'dia')::date, x ->> 'turno', x ->> 'presenca', i ->> 'tipo', 'publicada', i ->> 'reserva_de'
+                from jsonb_array_elements(v_tst) i, jsonb_array_elements(i -> 'alocacoes') x
+               where i ->> 'op' = 'criar';
+              v_p := public.agenda_propor('os', v_d, null, array[v_os], v_rs, false, 'vigia', null, p_hoje, p_agora);
+              raise exception 'desfaz' using errcode = 'P0095';
+            exception when sqlstate 'P0095' then null;
+            end;
+          end if;
           v_it := (select i from jsonb_array_elements(coalesce(v_p -> 'itens', '[]'::jsonb)) i
                     where i ->> 'op' = 'criar' and (i ->> 'os')::uuid = v_os and i ->> 'tipo' <> 'reserva' limit 1);
           v_ini := (select min((a ->> 'dia')::date) from jsonb_array_elements(v_it -> 'alocacoes') a);
@@ -197,13 +216,8 @@ begin
                                              jsonb_build_object('os', v_os, 'proposta', v_p ->> 'proposta_id', 'violacoes', v_a -> 'violacoes', 'p_hoje', p_hoje, 'p_agora', p_agora));
               end if;
             else
-              -- em teste a alocação não existe: a simulação da próxima OS não veria esta. A conta é por célula: cada meio-dia de D que a OS ocupa de uma pessoa
-              -- (o turno, ou a ponta do dono, que o motor e a grade também dão por ocupado) gasta uma célula livre dela, e só sai quem ficou sem nenhuma.
-              -- Assim o dono com D declarado (2 células) segue para a próxima depois de abrir esta, e ninguém conta mais OS do que as células que tem.
-              v_cels := array(select w.x from (select x, row_number() over (partition by x) as k from unnest(v_cels) x) w
-                               where w.k > (select count(distinct a ->> 'turno') from jsonb_array_elements(v_it -> 'alocacoes') a
-                                             where (a ->> 'payee_id')::uuid = w.x and (a ->> 'dia')::date = v_d));
-              v_pes := array(select x from unnest(v_pes) x where x = any (v_cels));
+              -- em teste a alocação não existe: os itens que o agenda_aplicar levaria (os não críticos) vão para o bloco desfeito lá em cima, que as próximas simulações leem
+              v_tst := v_tst || public._agenda_itens_escolhidos(v_p -> 'itens', null, null);
             end if;
           end if;
           if v_mot is null then
@@ -244,6 +258,6 @@ end;
 $function$;
 
 comment on function public._agenda_gestor_puxar(date, timestamptz) is
-  'Agenda de Produção (Fase 7e, P4b; spec §5.3, R7.7, AG7-31): o passo puxar do job agenda-gestor. A partir de puxar_hora da véspera, a folga que sobrou de amanhã (célula livre de quem já vem: da equipe, com telefone que a rotina alcance, ficha de D ainda por sair e, com o convite ligado, sem convite de D à espera do SIM; o dono, com o dia declarado, sem a rotina) puxa a próxima OS pronta da fila, até puxar_max_os, uma vez por dia útil. A ponta do dono (abrir e fechar) da OS puxada em D vale mesmo com ele fora das pessoas (o validador a aceita). Com o freio ou fora de ligado, só o diário (agenda_gestor_dia.sombra.puxar). Erro vai a app_error_logs (agenda, gestor:puxar) e não lança. Nenhum texto novo.';
+  'Agenda de Produção (Fase 7e, P4b; spec §5.3, R7.7, AG7-31): o passo puxar do job agenda-gestor. A partir de puxar_hora da véspera, a folga que sobrou de amanhã (célula livre de quem já vem: da equipe, com telefone que a rotina alcance, ficha de D ainda por sair e, com o convite ligado, sem convite de D à espera do SIM; o dono, com o dia declarado, sem a rotina) puxa a próxima OS pronta da fila, até puxar_max_os, uma vez por dia útil. A ponta do dono (abrir e fechar) da OS puxada em D vale mesmo com ele fora das pessoas (o validador a aceita). Com o freio ou fora de ligado, só o diário (agenda_gestor_dia.sombra.puxar); aí, com puxar_max_os > 1, a simulação de cada OS seguinte vê as puxadas antes dela na rodada (os itens delas aplicados num bloco que se desfaz), como o de verdade as lê do banco. Erro vai a app_error_logs (agenda, gestor:puxar) e não lança. Nenhum texto novo.';
 
 revoke all on function public._agenda_gestor_puxar(date, timestamptz) from public, anon, authenticated, service_role;
