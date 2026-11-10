@@ -21,8 +21,8 @@ language plpgsql as $f$
 declare
   v_m uuid;
 begin
-  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, occurred_at)
-  values ('inbound', p_fone, 'text', p_corpo, 'teste-f4-c13-' || md5(p_fone || p_corpo || p_em::text || random()::text), p_em)
+  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, occurred_at, hora_real)
+  values ('inbound', p_fone, 'text', p_corpo, 'teste-f4-c13-' || md5(p_fone || p_corpo || p_em::text || random()::text), p_em, p_em)
   returning id into v_m;
   return (public.retorno_abrir(v_m, false, p_em + interval '5 seconds') ->> 'abertura_id')::uuid;
 end $f$;
@@ -843,8 +843,8 @@ begin
   end if;
   perform pg_temp.f4q_abrir(c_n3, 'Conseguiu ver o orçamento?', c_t + interval '8 hours 35 minutes');
   v_s := pg_temp.f4q_saida(v_caso, 'parceiro_recibo', 'orcamento');
-  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, occurred_at, raw_payload)
-    values ('outbound', c_n3, 'text', 'ok', 'teste-f4-c13-25-ok', c_t + interval '8 hours 36 minutes', '{"data": {}}'::jsonb);
+  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, occurred_at, hora_real, raw_payload)
+    values ('outbound', c_n3, 'text', 'ok', 'teste-f4-c13-25-ok', c_t + interval '8 hours 36 minutes', c_t + interval '8 hours 36 minutes', '{"data": {}}'::jsonb);
   update public.retorno_saidas set estado = 'cancelada', motivo = 'caso_fechado', decidida_em = c_t
    where emissor = 'parceiro' and estado = 'agendada' and id <> v_s.id;
   update public.retorno_config set proximo_envio_em = null where id;
