@@ -247,7 +247,9 @@ revoke all on function public._parceiro_nomes_do_contexto(uuid, uuid[], uuid) fr
 -- palavra igual, em _texto_simples, ao 1º nome de uma entrada de p_nomes (nomes_da_lista e nomes_de_outros do painel; p_nomes
 -- nulo dá nulo: falha fecha). Além da spec (desvio registrado na entrega): nenhuma palavra de dia, mês, hoje, amanhã, ontem,
 -- meio-dia, meia-noite, pront* ou avisad*, porque o contexto do validador tira os trechos do próprio texto, e o validador
--- não vê essas palavras dentro da etapa.
+-- não vê essas palavras dentro da etapa. Revisão de 10/11 (seguranca-r1): nenhuma palavra de conclusão ou de entrega
+-- (entreg*, retir*, conclu*, finaliz*, termin* salvo terminal* e terminai*, liber*, acabad*, encerr*) e nenhuma palavra
+-- com maiúscula depois da 1ª (nome próprio).
 create or replace function public._parceiro_etapa_ok(p_etapa text, p_nomes text[])
 returns text
 language plpgsql
@@ -281,6 +283,20 @@ begin
               where p = any (v_primeiros) or p = any (c_dias) or p like 'pront%' or p like 'avisad%') then
     return null;
   end if;
+  -- Revisão de 10/11 (seguranca-r1): palavra de conclusão ou de entrega ("teste final e entrega", "retirada", "serviço
+  -- concluído") diz à parceira que o veículo fica pronto hoje, antes de o cliente ouvir; "terminal" e "terminais" não são
+  -- "terminar".
+  if exists (select 1 from unnest(v_palavras) as p
+              where p like 'entreg%' or p like 'retir%' or p like 'conclu%' or p like 'finaliz%' or p like 'liber%'
+                 or p like 'acabad%' or p like 'encerr%'
+                 or (p like 'termin%' and p not like 'terminal%' and p not like 'terminai%')) then
+    return null;
+  end if;
+  -- Revisão de 10/11 (seguranca-r1): palavra com maiúscula depois da 1ª é nome próprio (o sobrenome do cliente, o técnico,
+  -- alguém fora da carteira do parceiro), e o nome curto do cliente existe para esconder o sobrenome. Na dúvida, sem etapa.
+  if v ~ '[^[:alpha:]][[:upper:]]' then
+    return null;
+  end if;
   -- "março" sem acento é "marco" (de marcar): só com o acento, como no validador
   if lower(v) ~ '(^|[^[:alpha:]])março([^[:alpha:]]|$)' or v_simples ~ '(^|[^[:alpha:]])mei[oa][ -]?(dia|noite)([^[:alpha:]]|$)' then
     return null;
@@ -290,7 +306,7 @@ end;
 $$;
 
 comment on function public._parceiro_etapa_ok(text, text[]) is
-  'Retorno F4, R1 (resposta do dono ao F4-07, 09/11/2026): a etapa pronta para a linha em_servico ("em serviço hoje ({etapa})", 1ª letra minúscula) ou nulo. Não vazia, até 60 caracteres, sem controle nem dígito, só letras e " ,./-", começando por letra; nenhuma palavra igual ao 1º nome de p_nomes (nulo = nulo); e, além da spec, sem dia, mês, hoje/amanhã/ontem, meio-dia, pront* nem avisad*.';
+  'Retorno F4, R1 (resposta do dono ao F4-07, 09/11/2026): a etapa pronta para a linha em_servico ("em serviço hoje ({etapa})", 1ª letra minúscula) ou nulo. Não vazia, até 60 caracteres, sem controle nem dígito, só letras e " ,./-", começando por letra; nenhuma palavra igual ao 1º nome de p_nomes (nulo = nulo); e, além da spec, sem dia, mês, hoje/amanhã/ontem, meio-dia, pront* nem avisad*; e (revisão de 10/11) sem palavra de conclusão ou de entrega (entreg*, retir*, conclu*, finaliz*, termin* salvo terminal* e terminai*, liber*, acabad*, encerr*) e sem maiúscula depois da 1ª palavra (nome próprio).';
 
 revoke all on function public._parceiro_etapa_ok(text, text[]) from public, anon, authenticated;
 

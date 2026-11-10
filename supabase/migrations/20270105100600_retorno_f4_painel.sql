@@ -335,7 +335,9 @@ begin
   if v_estado is null and jsonb_typeof(v_fatos -> 'em_servico') = 'object' then
     v_estado := 'em_servico';
     v_desde := null;
-    if v_cfg.parceiro_etapa_ligada is true then
+    -- revisão de 10/11 (seguranca-r1): a linha retida (o pronto ou a peça que o cliente ainda não ouviu) nunca leva a
+    -- etapa: a tarefa do dia pode contar à parceira o que o cliente ainda não sabe
+    if v_cfg.parceiro_etapa_ligada is true and v_retida is null then
       v_etapa := nullif(btrim(v_fatos -> 'em_servico' ->> 'etapa'), '');
     end if;
   end if;
@@ -378,7 +380,7 @@ end;
 $$;
 
 comment on function public._parceiro_linha_da_os(uuid, timestamptz) is
-  'Retorno F4 (P7.2): o estado e a data de um vínculo pela tabela de P7.2, com retida_por (o marco que o cliente não ouviu) e fora_por sem_fato. Datas no dia de Brasília, nunca depois de hoje; o chegou_em só entra no andamento com o cliente tendo ouvido a peça. Com parceiro_sem_inicio_ligado (R2), open, approved, scheduled e awaiting_client sem data dão sem_inicio. Não confere a regra de ouro nem o nome. Erro sobe.';
+  'Retorno F4 (P7.2): o estado e a data de um vínculo pela tabela de P7.2, com retida_por (o marco que o cliente não ouviu) e fora_por sem_fato. Datas no dia de Brasília, nunca depois de hoje; o chegou_em só entra no andamento com o cliente tendo ouvido a peça. Com parceiro_sem_inicio_ligado (R2), open, approved, scheduled e awaiting_client sem data dão sem_inicio. Com parceiro_etapa_ligada (R1), a etapa crua vai em etapa_bruta só na linha em_servico sem retida_por (revisão de 10/11). Não confere a regra de ouro nem o nome. Erro sobe.';
 
 revoke all on function public._parceiro_linha_da_os(uuid, timestamptz) from public, anon, authenticated;
 
@@ -458,7 +460,11 @@ begin
     v_nomes := array(select distinct public._parceiro_nome_curto(oi.client_id)
                        from public.os_interessados oi
                       where oi.parceiro_id = p_parceiro
-                        and public._parceiro_nome_curto(oi.client_id) is not null);
+                        and public._parceiro_nome_curto(oi.client_id) is not null)
+               -- revisão de 10/11 (seguranca-r1): também o nome de quem trabalha na OS (equipe e favorecidos ativos), que a
+               -- tarefa do dia pode trazer em minúscula ("ajuste com o dario"); _parceiro_etapa_ok compara o 1º nome
+               || array(select u.full_name from public.app_users u where u.active and nullif(btrim(u.full_name), '') is not null)
+               || array(select p.name from public.payees p where p.active and nullif(btrim(p.name), '') is not null);
   end if;
   for v_l in select l from jsonb_array_elements(v_todas) l loop
     if v_l ->> 'fora_por' is null then
@@ -508,7 +514,7 @@ end;
 $$;
 
 comment on function public.parceiro_linhas(uuid, timestamptz) is
-  'Retorno F4 (P7.2): as linhas do parceiro agora, uma por OS visível (parceiro_os_visiveis): [{n, interessado_id, service_order_id, estado, desde, rotulo, retida_por, fora_por}], mais etapa na linha em_servico que sai, só com parceiro_etapa_ligada e a etapa aprovada por _parceiro_etapa_ok (R1). Exceção numa OS = fora_por erro; nome nulo ou colisão com outro cliente do parceiro = nome_ambiguo; sem fato = sem_fato. n só nas que saem, pela ordem dos estados; nenhuma linha tem texto.';
+  'Retorno F4 (P7.2): as linhas do parceiro agora, uma por OS visível (parceiro_os_visiveis): [{n, interessado_id, service_order_id, estado, desde, rotulo, retida_por, fora_por}], mais etapa na linha em_servico que sai, só com parceiro_etapa_ligada e a etapa aprovada por _parceiro_etapa_ok (R1), conferida contra os nomes dos clientes do parceiro e, desde a revisão de 10/11, os da equipe e dos favorecidos ativos. Exceção numa OS = fora_por erro; nome nulo ou colisão com outro cliente do parceiro = nome_ambiguo; sem fato = sem_fato. n só nas que saem, pela ordem dos estados; nenhuma linha tem texto.';
 
 revoke all on function public.parceiro_linhas(uuid, timestamptz) from public, anon, authenticated;
 grant execute on function public.parceiro_linhas(uuid, timestamptz) to service_role;

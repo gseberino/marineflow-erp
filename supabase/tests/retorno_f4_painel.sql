@@ -4,7 +4,8 @@
 -- F4_ONDA=5, F4_TESTES=retorno_f4_painel). Termina em ROLLBACK. Telefones de teste 55479000149xx a 55479000152xx; nomes
 -- inventados. Relógio: qui 14/01/2027 10:00 (dia útil); painéis de seg 11 a sex 15/01/2027; 01/01/2027 é feriado.
 -- Respostas do dono de 09/11 (R1, a etapa; R2, o veículo que não começou), no fim: telefones 55479000176xx e números de OS
--- OS-TF4R-01 a 11 e 21 a 29 (antes de rodar, conferir só por count(*) que não existem no banco).
+-- OS-TF4R-01 a 13 e 21 a 29 (antes de rodar, conferir só por count(*) que não existem no banco). A revisão de 10/11
+-- (seguranca-r1) põe a etapa de conclusão, o nome fora da lista, a linha retida e o nome da equipe (OS-TF4R-12 e 13).
 begin;
 create temp table if not exists _bancada (arquivo text, ok boolean, numeros jsonb, em timestamptz default clock_timestamp());
 create temp table if not exists _f4p_quebra (os uuid primary key);
@@ -265,6 +266,7 @@ declare
   v_n_fun integer := 0;
   v_pr uuid; v_nr uuid; v_ri uuid[];                         -- respostas de 09/11, R2
   v_pt uuid; v_nt uuid; v_ti uuid[] := '{}'; v_ot uuid; v_iz uuid;   -- respostas de 09/11, R1
+  v_iv uuid; v_iw uuid;                                      -- revisão de 10/11 (seguranca-r1)
   v_esperado jsonb;
   v_etapa60 text := rpad('Revisão geral', 60, ' da cabine');
 begin
@@ -1104,7 +1106,24 @@ begin
       ('   ', '{}', null),
       (null, '{}', null),
       ('Conferência com Zeca', array['Ana B.', 'Zeca F.'], null),
-      ('Conferência com Zeca', array['Ana B.'], 'conferência com Zeca'),
+      -- revisão de 10/11 (seguranca-r1): o nome fora da lista também fica de fora (maiúscula depois da 1ª palavra), e o da
+      -- equipe em minúscula sai pela lista de nomes que parceiro_linhas monta
+      ('Conferência com Zeca', array['Ana B.'], null),
+      ('Revisão elétrica do motorhome do Pereira', array['João P.'], null),
+      ('Troca do inversor com o Carlos', '{}', null),
+      ('Elétrica - Quadro', '{}', null),
+      ('troca do inversor com o carlos', array['Carlos Técnico'], null),
+      -- revisão de 10/11 (seguranca-r1): conclusão ou entrega diz à parceira que fica pronto hoje; terminal não é terminar
+      ('Teste final e entrega', '{}', null),
+      ('Retirada do veículo', '{}', null),
+      ('Serviço concluído', '{}', null),
+      ('Finalização da instalação', '{}', null),
+      ('Terminar a pintura', '{}', null),
+      ('Liberação para o cliente', '{}', null),
+      ('Pintura acabada', '{}', null),
+      ('Encerramento do serviço', '{}', null),
+      ('Troca do terminal da bateria', '{}', 'troca do terminal da bateria'),
+      ('Troca dos terminais', '{}', 'troca dos terminais'),
       ('Ajuste pedido pelo JOÃO', array['João S.'], null),
       ('Ajuste do joão', null, null),
       ('Entrega na sexta', '{}', null),
@@ -1278,6 +1297,33 @@ begin
     raise exception 'R1w: a saída agendada com a etapa a levou com a chave desligada';
   end if;
   update public.retorno_config set patio_nivel = 'cartao' where id;
+
+  -- ── Revisão de 10/11 (seguranca-r1): com parceiro_etapa_ligada, a linha retida (o pronto que o cliente ainda não ouviu,
+  --    caído para em serviço) sai sem a etapa, mesmo limpa; e o nome de quem trabalha na OS, em minúscula, tira a etapa. A
+  --    1ª linha (a de controle) segue com a etapa. OS OS-TF4R-12 e 13; telefones 5547900017642 e 5547900017643 ──
+  update public.retorno_config set parceiro_etapa_ligada = true where id;
+  insert into public.payees (name, kind, active) values ('Dario Equipe', 'prestador', true);
+  v_ot := pg_temp.f4p_os_n(pg_temp.f4p_cliente('Yara Retida', '5547900017642'), 'OS-TF4R-12', 'in_progress', c_t - interval '2 hours');
+  perform pg_temp.f4p_concluir(v_ot, c_t - interval '1 hour');
+  perform pg_temp.f4p_etapa(v_ot, 'Instalação do painel solar', date '2027-01-14');
+  v_iv := pg_temp.f4p_liga(v_ot, v_pt);
+  v_ot := pg_temp.f4p_os_n(pg_temp.f4p_cliente('Wil Equipe', '5547900017643'), 'OS-TF4R-13', 'in_progress', c_t - interval '2 hours');
+  perform pg_temp.f4p_etapa(v_ot, 'ajuste do quadro com o dario', date '2027-01-14');
+  v_iw := pg_temp.f4p_liga(v_ot, v_pt);
+  v_linhas := public.parceiro_linhas(v_pt, c_t);
+  v_l := pg_temp.f4p_linha(v_linhas, v_iv);
+  if v_l is null or v_l ->> 'estado' is distinct from 'em_servico' or v_l ->> 'retida_por' is distinct from 'pronto'
+     or v_l ->> 'fora_por' is not null or v_l ? 'etapa' then
+    raise exception 'R1x: a linha retida levou a etapa (%)', v_l;
+  end if;
+  v_l := pg_temp.f4p_linha(v_linhas, v_iw);
+  if v_l is null or v_l ->> 'estado' is distinct from 'em_servico' or v_l ->> 'fora_por' is not null or v_l ? 'etapa' then
+    raise exception 'R1y: o nome da equipe foi na etapa (%)', v_l;
+  end if;
+  if pg_temp.f4p_linha(v_linhas, v_ti[1]) ->> 'etapa' is distinct from 'instalação do painel solar' then
+    raise exception 'R1z: a linha de controle perdeu a etapa (%)', v_linhas;
+  end if;
+  update public.retorno_config set parceiro_etapa_ligada = false where id;
 
   -- ── A varredura do parceiro: as funções da P7 fechadas a anon e authenticated ──
   for v_rec in

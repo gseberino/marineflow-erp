@@ -259,8 +259,18 @@ const DATA_DE_PRONTO = new RegExp(
   "u",
 );
 
+// F4, revisão de 10/11 (seguranca-r1): a etapa da linha "em serviço hoje ({etapa})" com palavra de conclusão, de entrega ou
+// de pronto ("teste final e entrega", "retirada", "concluído") diz à parceira que o veículo fica pronto hoje: é data de
+// pronto. O banco (_parceiro_etapa_ok) já recusa essas etapas; esta é a segunda linha, com a mesma lista ("terminal" e
+// "terminais" não são "terminar").
+const ETAPA_DE_CONCLUSAO = new RegExp(
+  ANTES + "em\\s+servico\\s+hoje\\s*\\([^)]*?" + ANTES +
+    "(?:entreg|retir|conclu|finaliz|termin(?!al|ai)|liber|acabad|encerr|pront)",
+  "u",
+);
+
 function temDataDePronto(t: string): boolean {
-  return t.split(QUEBRA_DE_LINHA).some((l) => DATA_DE_PRONTO.test(l));
+  return t.split(QUEBRA_DE_LINHA).some((l) => DATA_DE_PRONTO.test(l) || ETAPA_DE_CONCLUSAO.test(l));
 }
 
 const PROMESSA = new RegExp(
