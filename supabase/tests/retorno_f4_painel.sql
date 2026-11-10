@@ -454,7 +454,7 @@ begin
            jsonb_build_object('parceiro_id', v_p, 'interessado_ids',
                               (select jsonb_agg(l -> 'interessado_id') from jsonb_array_elements(v_linhas) l where l ->> 'fora_por' is null)),
            c_t);
-  if not (v_r -> 'nomes_de_outros' ? 'João S.') then
+  if (v_r -> 'nomes_de_outros' ? 'João S.') is not true then
     raise exception '22c: o homônimo fora não está em nomes_de_outros (%)', v_r -> 'nomes_de_outros';
   end if;
 
@@ -942,7 +942,7 @@ begin
   update public.retorno_config set parceiro_modo = 'sombra' where id;
   v_r := public.parceiro_vigia(c_t + interval '6 hours');
   if (v_r ->> 'ok')::boolean is not true or jsonb_array_length(v_r -> 'erros') is distinct from 0
-     or not (v_r -> 'passos' ?& array['reler_vetos', 'aviso', 'ativacao', 'painel', 'eco'])
+     or (v_r -> 'passos' ?& array['reler_vetos', 'aviso', 'ativacao', 'painel', 'eco']) is not true
      or (to_regprocedure('public.parceiro_vigia_cartao(timestamptz)') is null and v_r -> 'passos' ? 'cartao')
      or (to_regprocedure('public.parceiro_pedido_rodada(timestamptz)') is null and v_r -> 'passos' ? 'pedido') then
     raise exception 'vigia b: em sombra (%)', v_r;
@@ -1089,8 +1089,8 @@ begin
   -- _parceiro_etapa_ok, regra a regra (as 4 últimas são o desvio: o validador não vê dia, pronto e avisado dentro da etapa)
   for v_rec in
     select * from (values
-      ('instalação do painel solar', '{}'::text[], 'instalação do painel solar'),
-      ('Instalação do painel solar', '{}', 'instalação do painel solar'),
+      ('instalação do inversor solar', '{}'::text[], 'instalação do inversor solar'),
+      ('Instalação do inversor solar', '{}', 'instalação do inversor solar'),
       ('  Teste final,  ajustes e limpeza ', '{}', 'teste final, ajustes e limpeza'),
       ('Elétrica - quadro/disjuntores', '{}', 'elétrica - quadro/disjuntores'),
       (v_etapa60, '{}', 'r' || substr(v_etapa60, 2)),
@@ -1125,6 +1125,11 @@ begin
       ('Troca do terminal da bateria', '{}', 'troca do terminal da bateria'),
       ('Troca dos terminais', '{}', 'troca dos terminais'),
       ('Ajuste pedido pelo JOÃO', array['João S.'], null),
+      -- conferência de 10/11: o sobrenome do cliente em minúscula, e como 1ª palavra, com o nome completo na lista; a
+      -- partícula do nome ("da", "do") não barra a etapa
+      ('ajuste do quadro do pereira', array['João P.', 'João Pereira da Silva'], null),
+      ('Pereira trouxe a peça', array['João Pereira da Silva'], null),
+      ('Instalação do painel da cabine', array['João Pereira da Silva', 'Ana do Couto'], 'instalação do painel da cabine'),
       ('Ajuste do joão', null, null),
       ('Entrega na sexta', '{}', null),
       ('Revisão de março', '{}', null),
@@ -1147,7 +1152,7 @@ begin
     values (v_c, '5547900017602', '00017602', '47', 'confirmado', c_t - interval '30 days', true) returning id into v_nt;
   for v_rec in
     select * from (values
-      (1, 'João Sales', 'Instalação do painel solar'),
+      (1, 'João Sales', 'Instalação do inversor solar'),
       (2, 'Kauê Etapa', 'Troca de 2 baterias'),
       (3, 'Lia Etapa', rpad('Revisão geral', 61, ' da cabine')),
       (4, 'Mel Etapa', E'Pintura\nda lateral'),
@@ -1172,7 +1177,7 @@ begin
   update public.os_interessados set veto_do_cliente_em = c_t - interval '3 days' where id = v_iz;
   -- a etapa está no fato (a F2 já a calcula): só a chave a separa da linha
   if public._parceiro_fato_da_os((select oi.service_order_id from public.os_interessados oi where oi.id = v_ti[1]), c_t)
-       -> 'fatos' -> 'em_servico' ->> 'etapa' is distinct from 'Instalação do painel solar' then
+       -> 'fatos' -> 'em_servico' ->> 'etapa' is distinct from 'Instalação do inversor solar' then
     raise exception 'R1c: a etapa não está no fato da OS';
   end if;
 
@@ -1213,7 +1218,7 @@ begin
     raise exception 'R1i: o bloco P11 mudou com as chaves desligadas';
   end if;
   if public._parceiro_texto('parceiro_painel', 'linha',
-       '{"n": 1, "bem": "motorhome", "cliente": "João S.", "estado": "em_servico", "etapa": "instalação do painel solar"}'::jsonb)
+       '{"n": 1, "bem": "motorhome", "cliente": "João S.", "estado": "em_servico", "etapa": "instalação do inversor solar"}'::jsonb)
      is distinct from '1. Motorhome de João S.: em serviço hoje.' then
     raise exception 'R1j: com a chave desligada, a etapa entrou no texto';
   end if;
@@ -1223,7 +1228,7 @@ begin
   update public.retorno_config set parceiro_etapa_ligada = true where id;
   v_linhas := public.parceiro_linhas(v_pt, c_t);
   if (select jsonb_object_agg(l ->> 'n', l -> 'etapa') from jsonb_array_elements(v_linhas) l where l ? 'etapa')
-     is distinct from jsonb_build_object('1', 'instalação do painel solar', '10', 'r' || substr(v_etapa60, 2)) then
+     is distinct from jsonb_build_object('1', 'instalação do inversor solar', '10', 'r' || substr(v_etapa60, 2)) then
     raise exception 'R1k: as etapas que saem (%)', v_linhas;
   end if;
   if (select jsonb_agg(t.l - 'etapa' order by t.o) from jsonb_array_elements(v_linhas) with ordinality t(l, o)) is distinct from v_esperado
@@ -1246,36 +1251,36 @@ begin
   perform public.parceiro_painel_rodada('2027-01-14 18:00-03');
   perform pg_temp.f4p_so(null, v_todos || v_pr);
   select * into v_x from public.retorno_saidas s where s.dedupe_key = 'parceiro:painel:' || v_painel || ':' || v_nt || ':sombra';
-  if v_x.id is null or v_x.dados -> 'linhas' -> 0 ->> 'etapa' is distinct from 'instalação do painel solar'
+  if v_x.id is null or v_x.dados -> 'linhas' -> 0 ->> 'etapa' is distinct from 'instalação do inversor solar'
      or (select count(*) from jsonb_array_elements(v_x.dados -> 'linhas') l where l ? 'etapa') is distinct from 2::bigint then
     raise exception 'R1o: a saída do painel não levou a etapa (%)', v_x.dados -> 'linhas';
   end if;
   v_t := pg_temp.f4p_pegar(v_x.id, '2027-01-14 18:02-03');
   v_texto := (select s.texto from public.retorno_saidas s where s.id = v_x.id);
   if v_t is distinct from 'preparada/'
-     or v_texto is distinct from E'Pátio HBR · qui (14/01)\n1. Motorhome de João S.: em serviço hoje (instalação do painel solar).\n2. Motorhome de Kauê E.: em serviço hoje.\n3. Motorhome de Lia E.: em serviço hoje.\n4. Motorhome de Mel E.: em serviço hoje.\n5. Motorhome de Nico E.: em serviço hoje.\n6. Motorhome de Olga E.: em serviço hoje.\n7. Motorhome de Pita E.: em serviço hoje.\n8. Motorhome de Quico E.: em serviço hoje.\n9. Motorhome de Rafa E.: em serviço hoje.\n10. Motorhome de Teo E.: em serviço hoje (revisão geral da cabine da cabine da cabine da cabine da cab).\nPara ver de novo, mande *pátio*.' then
+     or v_texto is distinct from E'Pátio HBR · qui (14/01)\n1. Motorhome de João S.: em serviço hoje (instalação do inversor solar).\n2. Motorhome de Kauê E.: em serviço hoje.\n3. Motorhome de Lia E.: em serviço hoje.\n4. Motorhome de Mel E.: em serviço hoje.\n5. Motorhome de Nico E.: em serviço hoje.\n6. Motorhome de Olga E.: em serviço hoje.\n7. Motorhome de Pita E.: em serviço hoje.\n8. Motorhome de Quico E.: em serviço hoje.\n9. Motorhome de Rafa E.: em serviço hoje.\n10. Motorhome de Teo E.: em serviço hoje (revisão geral da cabine da cabine da cabine da cabine da cab).\nPara ver de novo, mande *pátio*.' then
     raise exception 'R1p: o painel com a etapa (% / %)', v_t, v_texto;
   end if;
   -- o contexto do validador do painel com a etapa: o Zeca em nomes_de_outros, o João na lista (a linha passa no validador
   -- real: validador_parceiro_test.ts)
   v_r := public._parceiro_contexto_do_validador(v_x.id, v_texto, v_x.dados, '2027-01-14 18:02-03');
-  if not (v_r -> 'nomes_de_outros' ? 'Zeca F.') or not (v_r -> 'nomes_da_lista' ? 'João S.') then
+  if (v_r -> 'nomes_de_outros' ? 'Zeca F.') is not true or (v_r -> 'nomes_da_lista' ? 'João S.') is not true then
     raise exception 'R1q: o contexto do validador do painel com a etapa (%)', v_r;
   end if;
   -- o pátio direto e o bloco P11 levam a etapa
   v_r := public.parceiro_patio_pedido(v_nt, pg_temp.f4p_msg('5547900017602', 'patio', c_t + interval '1 minute'), c_t + interval '1 minute');
   select * into v_x from public.retorno_saidas s where s.id = nullif(v_r ->> 'saida_id', '')::uuid;
-  if v_r ->> 'acao' is distinct from 'direto' or v_x.dados -> 'linhas' -> 0 ->> 'etapa' is distinct from 'instalação do painel solar'
+  if v_r ->> 'acao' is distinct from 'direto' or v_x.dados -> 'linhas' -> 0 ->> 'etapa' is distinct from 'instalação do inversor solar'
      or coalesce(public._parceiro_painel_texto('parceiro_patio', 'direto', v_x.dados -> 'linhas', 0, date '2027-01-14', false) ->> 'texto', '')
-        not like E'Pátio HBR · 14/01\n1. Motorhome de João S.: em serviço hoje (instalação do painel solar).\n2. Motorhome de Kauê E.: em serviço hoje.\n%' then
+        not like E'Pátio HBR · 14/01\n1. Motorhome de João S.: em serviço hoje (instalação do inversor solar).\n2. Motorhome de Kauê E.: em serviço hoje.\n%' then
     raise exception 'R1r: o pátio direto sem a etapa (%)', v_r;
   end if;
-  if public._parceiro_linhas_que_saem(v_pt, c_t) -> 0 ->> 'etapa' is distinct from 'instalação do painel solar' then
+  if public._parceiro_linhas_que_saem(v_pt, c_t) -> 0 ->> 'etapa' is distinct from 'instalação do inversor solar' then
     raise exception 'R1s: o bloco P11 sem a etapa';
   end if;
   -- o texto: a etapa só vale em em_servico; a etapa torta nos dados dá 22023 (a linha sai com fora_por = 'texto')
   if public._parceiro_texto('parceiro_painel', 'linha',
-       '{"n": 1, "bem": "motorhome", "cliente": "João S.", "estado": "pronto", "etapa": "instalação do painel solar"}'::jsonb)
+       '{"n": 1, "bem": "motorhome", "cliente": "João S.", "estado": "pronto", "etapa": "instalação do inversor solar"}'::jsonb)
      is distinct from '1. Motorhome de João S.: pronto; o cliente já foi avisado para combinar a retirada.' then
     raise exception 'R1t: a etapa entrou numa linha que não é em_servico';
   end if;
@@ -1305,7 +1310,7 @@ begin
   insert into public.payees (name, kind, active) values ('Dario Equipe', 'prestador', true);
   v_ot := pg_temp.f4p_os_n(pg_temp.f4p_cliente('Yara Retida', '5547900017642'), 'OS-TF4R-12', 'in_progress', c_t - interval '2 hours');
   perform pg_temp.f4p_concluir(v_ot, c_t - interval '1 hour');
-  perform pg_temp.f4p_etapa(v_ot, 'Instalação do painel solar', date '2027-01-14');
+  perform pg_temp.f4p_etapa(v_ot, 'Instalação do inversor solar', date '2027-01-14');
   v_iv := pg_temp.f4p_liga(v_ot, v_pt);
   v_ot := pg_temp.f4p_os_n(pg_temp.f4p_cliente('Wil Equipe', '5547900017643'), 'OS-TF4R-13', 'in_progress', c_t - interval '2 hours');
   perform pg_temp.f4p_etapa(v_ot, 'ajuste do quadro com o dario', date '2027-01-14');
@@ -1320,7 +1325,7 @@ begin
   if v_l is null or v_l ->> 'estado' is distinct from 'em_servico' or v_l ->> 'fora_por' is not null or v_l ? 'etapa' then
     raise exception 'R1y: o nome da equipe foi na etapa (%)', v_l;
   end if;
-  if pg_temp.f4p_linha(v_linhas, v_ti[1]) ->> 'etapa' is distinct from 'instalação do painel solar' then
+  if pg_temp.f4p_linha(v_linhas, v_ti[1]) ->> 'etapa' is distinct from 'instalação do inversor solar' then
     raise exception 'R1z: a linha de controle perdeu a etapa (%)', v_linhas;
   end if;
   update public.retorno_config set parceiro_etapa_ligada = false where id;
