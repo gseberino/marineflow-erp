@@ -25,8 +25,8 @@
 --      proposta do gestor (parametros.gestor: a escada, a dupla e o corte, que não passam pelo motor): as suposições da alocação mais nova da OS que tem, e o
 --      degrau de parametros.gestor.degrau. Sem nada disso (o corte), fica nula: não se afirma o que não foi guardado. Os 3 escritores do gestor não são
 --      recriados (R9.4-1).
---   4. _agenda_alocacoes_imutavel (recriada de 20261102100100_agenda_fase7c_motor.sql:3289; md5 do corpo de antes 112b4e2ed6640e4bb2a102d90f134b1b): suposicoes, degrau e duracao_fonte entram na tupla que a
---      publicada, a fixada e a cancelada não mudam (§5.2).
+--   4. _agenda_alocacoes_imutavel (recriada de 20261102100100_agenda_fase7c_motor.sql:3289; md5 do corpo de antes 112b4e2ed6640e4bb2a102d90f134b1b): suposicoes e degrau entram na tupla que a publicada, a fixada e a
+--      cancelada não mudam (§5.2). duracao_fonte (da 7a) fica fora: pô-la mudaria o que vale para ela em todo modo, inclusive desligado.
 --   5. _agenda_acoes_porque (nova, gatilho BEFORE INSERT agenda_acoes_porque, SECURITY DEFINER): na ação executada que cria, move, cancela, promove, solta,
 --      publica, fixa, repara ou reestima (R9.5-16), a zona mais severa dos meios-dias tocados (_agenda_zona da 7f) e o degrau do antes para o depois. Ação
 --      sem as alocações no antes/depois: a zona pelos ids, degrau nulo. Uma falha não derruba a ação: zona e degrau nulos e o erro em app_error_logs
@@ -2040,9 +2040,10 @@ begin
   -- publicada, na fixada nem na cancelada
   v_mudou_o_que := v_mudou_o_que or (new.criterio, new.criterio_detalhe) is distinct from (old.criterio, old.criterio_detalhe);
   -- FASE 7c: fim
-  -- FASE 7g: (7g P2, §5.2, §3.1 item 2) o porquê gravado na hora (as suposições e o degrau da 7g, a fonte da duração da 7a) também não muda na publicada, na
-  -- fixada nem na cancelada: a leitura de depois mostra o que valia quando o motor decidiu. Só o INSERT preenche essas colunas.
-  v_mudou_o_que := v_mudou_o_que or (new.suposicoes, new.degrau, new.duracao_fonte) is distinct from (old.suposicoes, old.degrau, old.duracao_fonte);
+  -- FASE 7g: (7g P2, §5.2, §3.1 item 2) o porquê gravado na hora (as suposições e o degrau) também não muda na publicada, na fixada nem na cancelada: a
+  -- leitura de depois mostra o que valia quando o motor decidiu. Só o INSERT preenche essas 2 colunas. A fonte da duração (duracao_fonte, da 7a) fica fora:
+  -- pô-la aqui mudaria o que vale para ela em todo modo, inclusive desligado.
+  v_mudou_o_que := v_mudou_o_que or (new.suposicoes, new.degrau) is distinct from (old.suposicoes, old.degrau);
   -- FASE 7g: fim
   if old.estado = 'cancelada' and (v_mudou_o_que or new.estado is distinct from old.estado) then
     raise exception 'Alocação cancelada não volta nem muda: crie outra.';
@@ -2083,7 +2084,7 @@ end;
 $function$;
 
 comment on function public._agenda_alocacoes_imutavel() is
-  'Agenda de Produção (Fase 2): gatilho BEFORE UPDATE — publicada/fixada não muda (cancela-se e cria-se outra); proposta → publicada|fixada|cancelada, publicada → fixada|cancelada, fixada → cancelada só com agenda.mexe_fixado = on; cancelada não volta; com resultado não se cancela; correção do resultado vai para o histórico. FASE 7c (P2): criterio e criterio_detalhe entram na tupla que a publicada, a fixada e a cancelada não mudam. FASE 7g (P2): suposicoes, degrau e duracao_fonte entram na tupla que a publicada, a fixada e a cancelada não mudam.';
+  'Agenda de Produção (Fase 2): gatilho BEFORE UPDATE — publicada/fixada não muda (cancela-se e cria-se outra); proposta → publicada|fixada|cancelada, publicada → fixada|cancelada, fixada → cancelada só com agenda.mexe_fixado = on; cancelada não volta; com resultado não se cancela; correção do resultado vai para o histórico. FASE 7c (P2): criterio e criterio_detalhe entram na tupla que a publicada, a fixada e a cancelada não mudam. FASE 7g (P2): suposicoes e degrau entram na tupla que a publicada, a fixada e a cancelada não mudam (duracao_fonte, da 7a, fica como era).';
 
 -- ── 5. A ação guarda a zona e o degrau (gatilho) ─────────────────────────────────────────────────────
 -- §3.1 itens 4 e 5, §5.2 e R9.5-16. A zona é a mais severa dos meios-dias tocados (antes e depois), pela regra da 7f (_agenda_zona: o congelamento, o dia já

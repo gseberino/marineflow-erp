@@ -19,7 +19,7 @@
 --       degrau fora da lista não entra; a OS sem porquê guardado fica nula; o corte (sem proposta nem substituída) fica nulo; quem grava já disse, fica
 --   P4  o gatilho das ações: a zona na travada, na firme e na livre (a âncora é a data, contada à parte), o degrau (pessoa, turno, data, tirou), a ação sem as
 --       alocações (zona pelos ids, degrau nulo), a falha que não derruba a ação (registra), a ação não executada e o tipo fora da lista, desligado, e o service_role
---   P5  a vigente não muda o porquê (suposicoes, degrau, duracao_fonte); a proposta muda
+--   P5  a vigente não muda o porquê (suposicoes, degrau; duracao_fonte, da 7a, fica como era); a proposta muda
 --   P6  as cópias: tiradas os blocos -- FASE 7g, agenda_propor e _agenda_alocacoes_imutavel são as da origem, byte a byte; a migration só recria essas 2
 --   P7  o foco locais e o bloco do local iguais com e sem o porque no item (os modos do local ligados, sem o freio)
 --   P8  as suposições, código a código: cada uma entra só com o fato que a sustenta (a prontidão, os meios e o bloco montados; o que é lido do banco,
@@ -640,7 +640,7 @@ begin
     select a.id into strict v_id from public.agenda_alocacoes a
      where a.proposta_id = (v_p ->> 'proposta_id')::uuid and a.estado = 'publicada' and a.presenca = 'turno' and a.suposicoes is not null
      order by a.dia, a.turno, a.payee_id limit 1;
-    foreach c in array array['suposicoes = ''[]''::jsonb', 'degrau = ''dia''', 'duracao_fonte = ''dono'''] loop
+    foreach c in array array['suposicoes = ''[]''::jsonb', 'degrau = ''dia'''] loop
       begin
         execute format('update public.agenda_alocacoes set %s where id = %L', c, v_id);
         v := 'aceitou';
@@ -650,6 +650,15 @@ begin
       end;
       v_res := pg_temp.ok(v_res, 'P5a a publicada não muda: ' || c, v like 'Alocação publicada não muda%', v);
     end loop;
+    -- a fonte da duração (da 7a) fica como era: a publicada a aceita (agenda_fase7a_rodada.sql, R6c, faz isso)
+    begin
+      update public.agenda_alocacoes set duracao_fonte = 'dono' where id = v_id;
+      v := 'aceitou';
+      raise exception using errcode = 'P0098';
+    exception when sqlstate 'P0098' then null;
+              when others then v := sqlerrm;
+    end;
+    v_res := pg_temp.ok(v_res, 'P5a2 a publicada segue aceitando outra fonte da duração (a coluna da 7a fica como era)', v = 'aceitou', v);
     -- a cancelada também não (o cancelamento é permitido; depois, nada muda)
     update public.agenda_alocacoes set estado = 'cancelada', cancelada_motivo = 'desfeito' where id = v_id;
     begin
