@@ -9,12 +9,15 @@
 --    nome_permitido e pessoa_ok (P4.2).
 -- 3. _parceiro_texto: o catálogo P01–P16, as linhas do painel e do pátio, Q01–Q05 e Q03/Q03b. Gênero: o nome sempre com
 --    "de", e "o cliente" no lugar de pronome. P04 sem nome também sem pronome (desvio registrado na entrega da P4).
+--    Respostas do dono de 09/11 (o texto espera o cartão F4-17): _parceiro_etapa_ok e a linha "em serviço hoje ({etapa})"
+--    (R1, só com parceiro_etapa_ligada), e a linha "aguardando o início do serviço" (R2, só com parceiro_sem_inicio_ligado).
+--    As duas chaves nascem falsas na P7 e são lidas pelo jsonb da config; desligadas, a linha é a de antes.
 -- 4. _parceiro_contexto_do_validador: o contexto de validarSaidaAoParceiro (e de validarSaida nos Q). Chama
 --    _parceiro_cliente_ouviu (P7) só quando há linha que afirma "avisado"; plpgsql, compila na 1ª execução.
 -- 5. _cliente_ja_apresentada (gerada): o aviso ao cliente final enviado conta como apresentação.
 --
 -- Sem dado. Nada aqui é chamado enquanto parceiro_modo = 'desligado' (o padrão) e nenhum tipo do parceiro está ligado.
--- Reverter: reaplicar _cliente_ja_apresentada de 20261208100300; depois, drop function das sete funções _parceiro_* desta
+-- Reverter: reaplicar _cliente_ja_apresentada de 20261208100300; depois, drop function das oito funções _parceiro_* desta
 -- migration.
 
 -- ── 1. O nome curto, a palavra do bem e a apresentação ao número ────────────────────────────────────────────────────────
@@ -237,10 +240,65 @@ revoke all on function public._parceiro_nomes_do_contexto(uuid, uuid[], uuid) fr
 
 -- ── 3. O catálogo (P4.1). Falta de dado ou valor fora da lista = 22023, como _retorno_texto ────────────────────────────
 
+-- Respostas do dono de 09/11, R1 (F4-07): a etapa do dia (fatos.em_servico.etapa, o texto livre da tarefa) só vai à parceira
+-- pela conferência de dados. Devolve a etapa pronta para "em serviço hoje ({etapa})", com a 1ª letra minúscula e os espaços
+-- juntados, ou nulo. Todas obrigatórias: não vazia; até 60 caracteres; sem quebra de linha nem outro caractere de controle;
+-- sem dígito; só letras, espaço, vírgula, ponto, barra e hífen, começando por letra (sem parêntese, @, R$ nem aspas); nenhuma
+-- palavra igual, em _texto_simples, ao 1º nome de uma entrada de p_nomes (nomes_da_lista e nomes_de_outros do painel; p_nomes
+-- nulo dá nulo: falha fecha). Além da spec (desvio registrado na entrega): nenhuma palavra de dia, mês, hoje, amanhã, ontem,
+-- meio-dia, meia-noite, pront* ou avisad*, porque o contexto do validador tira os trechos do próprio texto, e o validador
+-- não vê essas palavras dentro da etapa.
+create or replace function public._parceiro_etapa_ok(p_etapa text, p_nomes text[])
+returns text
+language plpgsql
+immutable
+set search_path = public
+as $$
+declare
+  c_dias constant text[] := array['hoje', 'amanha', 'ontem', 'anteontem', 'segunda', 'terca', 'quarta', 'quinta', 'sexta',
+                                  'sabado', 'domingo', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab', 'dom', 'janeiro', 'fevereiro',
+                                  'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+  v text := btrim(p_etapa);
+  v_simples text;
+  v_palavras text[];
+  v_primeiros text[];
+begin
+  if v is null or v = '' or p_nomes is null then
+    return null;
+  end if;
+  if char_length(v) > 60 or v ~ '[[:cntrl:]]' or v ~ '[0-9]' or v !~ '^[[:alpha:]][[:alpha:] ,./-]*$' then
+    return null;
+  end if;
+  v := regexp_replace(v, ' {2,}', ' ', 'g');
+  v_simples := public._texto_simples(v);
+  v_palavras := array(select p from regexp_split_to_table(v_simples, '[^[:alpha:]]+') as p where p <> '');
+  -- o 1º nome de cada entrada ("João S." dá joao; "Ana-Maria S." dá ana e maria); pedaço de uma letra não é nome
+  v_primeiros := array(select p
+                         from unnest(p_nomes) as n,
+                              regexp_split_to_table(public._texto_simples(split_part(btrim(n), ' ', 1)), '[^[:alpha:]]+') as p
+                        where n is not null and char_length(p) >= 2);
+  if exists (select 1 from unnest(v_palavras) as p
+              where p = any (v_primeiros) or p = any (c_dias) or p like 'pront%' or p like 'avisad%') then
+    return null;
+  end if;
+  -- "março" sem acento é "marco" (de marcar): só com o acento, como no validador
+  if lower(v) ~ '(^|[^[:alpha:]])março([^[:alpha:]]|$)' or v_simples ~ '(^|[^[:alpha:]])mei[oa][ -]?(dia|noite)([^[:alpha:]]|$)' then
+    return null;
+  end if;
+  return lower(left(v, 1)) || substr(v, 2);
+end;
+$$;
+
+comment on function public._parceiro_etapa_ok(text, text[]) is
+  'Retorno F4, R1 (resposta do dono ao F4-07, 09/11/2026): a etapa pronta para a linha em_servico ("em serviço hoje ({etapa})", 1ª letra minúscula) ou nulo. Não vazia, até 60 caracteres, sem controle nem dígito, só letras e " ,./-", começando por letra; nenhuma palavra igual ao 1º nome de p_nomes (nulo = nulo); e, além da spec, sem dia, mês, hoje/amanhã/ontem, meio-dia, pront* nem avisad*.';
+
+revoke all on function public._parceiro_etapa_ok(text, text[]) from public, anon, authenticated;
+
 -- Campos: {abertura} (o prefixo de _parceiro_abertura; {comigo} é ele só na forma da 1ª mensagem), {quando_fala} (de
 -- quando + hora, como _retorno_texto), {nome}, {sigla}, {bem} (lista fechada), {cliente} (o nome curto, "João S."),
 -- {primeiro_nome} (o nome do cliente dito ou do cadastro) e {validade} (dd/mm). As linhas do painel e do pátio são a
--- variante 'linha' (n, bem, cliente, estado, desde); o painel, o pátio e o bloco P11 recebem as linhas já prontas.
+-- variante 'linha' (n, bem, cliente, estado, desde e, desde as respostas de 09/11, etapa); o painel, o pátio e o bloco P11
+-- recebem as linhas já prontas.
 create or replace function public._parceiro_texto(p_tipo text, p_variante text, p_dados jsonb)
 returns text
 language plpgsql
@@ -271,6 +329,7 @@ declare
   v_dia date;
   v_desde date;
   v_situacao text;
+  v_etapa text;
   v_linhas text[];
   v_mais integer := 0;
 begin
@@ -294,12 +353,24 @@ begin
         raise exception using errcode = '22023', message = 'parceiro_texto: desde inválido';
       end;
     end if;
+    -- R1 (resposta ao F4-07): a etapa só em em_servico e só com retorno_config.parceiro_etapa_ligada, lida pelo jsonb da
+    -- linha de config porque a coluna nasce na P7 (onda 5). A etapa passa de novo em _parceiro_etapa_ok (os nomes já foram
+    -- conferidos em parceiro_linhas); a torta dá 22023. Desligada, a etapa é ignorada e a linha é a de antes.
+    if d ->> 'estado' = 'em_servico' and jsonb_typeof(d -> 'etapa') = 'string'
+       and coalesce((to_jsonb(public._retorno_cfg()) ->> 'parceiro_etapa_ligada')::boolean, false) then
+      v_etapa := public._parceiro_etapa_ok(d ->> 'etapa', '{}'::text[]);
+      if v_etapa is null then
+        raise exception using errcode = '22023', message = 'parceiro_texto: valor fora da lista em etapa';
+      end if;
+    end if;
     v_situacao := case d ->> 'estado'
       when 'pronto' then 'pronto; o cliente já foi avisado para combinar a retirada'
       when 'peca_chegou' then (case when v_desde is not null then 'a peça chegou em ' || to_char(v_desde, 'DD/MM') end)
       when 'aguarda_peca' then (case when v_desde is not null then 'aguardando uma peça; sem novidade desde ' || to_char(v_desde, 'DD/MM')
                                      else 'aguardando uma peça' end)
-      when 'em_servico' then 'em serviço hoje'
+      -- em_servico_etapa (R1): "em serviço hoje ({etapa})"
+      when 'em_servico' then (case when v_etapa is not null then replace('em serviço hoje ({etapa})', '{etapa}', v_etapa)
+                                   else 'em serviço hoje' end)
       when 'andamento' then (case when v_desde is not null then 'sem novidade desde ' || to_char(v_desde, 'DD/MM') end)
       when 'andamento_sem_data' then 'em serviço'
       when 'orcamento' then 'orçamento pedido por vocês; com o Gustavo'
@@ -529,7 +600,7 @@ end;
 $$;
 
 comment on function public._parceiro_texto(text, text, jsonb) is
-  'Retorno F4 (P4.1): o catálogo fixo da F4. Ao parceiro: P01–P16 e as linhas do painel e do pátio (variante linha); ao cliente final: Q01–Q05 (o papel do par decide) e Q03/Q03b. Falta de dado ou valor fora da lista = 22023. P04 e P15 saem sem o nome quando ele colide com nomes_de_outros.';
+  'Retorno F4 (P4.1): o catálogo fixo da F4. Ao parceiro: P01–P16 e as linhas do painel e do pátio (variante linha; em_servico_etapa e sem_inicio só com as chaves das respostas de 09/11); ao cliente final: Q01–Q05 (o papel do par decide) e Q03/Q03b. Falta de dado ou valor fora da lista = 22023. P04 e P15 saem sem o nome quando ele colide com nomes_de_outros.';
 
 revoke all on function public._parceiro_texto(text, text, jsonb) from public, anon, authenticated;
 

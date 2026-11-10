@@ -5,7 +5,8 @@
 -- pergunta (4 letras, "e mais", sem candidata, letra que confirma ou cria); nenhum cartão sem o dono; o lote antes da fila; o
 -- cartão vencido, rejeitado por fora e vazio; o repassar em sombra; *resolvido N*; *segura pátio*. Roda só pela bancada
 -- (grupo 7, F4_ONDA=6). Termina em ROLLBACK. Telefones de teste 55479000166xx e 55479000167xx; nomes inventados; números de
--- OS 988xx. Relógio: ter 12/01/2027 10:00.
+-- OS 988xx. Relógio: ter 12/01/2027 10:00. Respostas do dono de 09/11 (R1, a etapa no *ver N* e no pátio), no fim:
+-- telefones 5547900017651 e 5547900017661, OS-98891.
 --
 -- Isolamento: antes de cada parceiro de teste ter OS, todo cliente que já existe ganha veto para ele (parceiro_vetos, tabela
 -- nova, desfeita no rollback): o lote e as letras só enxergam as OS criadas aqui.
@@ -131,6 +132,20 @@ language sql as $f$
   values (p_em, (p_em at time zone 'America/Sao_Paulo')::date, true, 'dono', 'concluir', p_os, 'concluiu no teste')
 $f$;
 
+-- Respostas de 09/11 (R1): a etapa do dia, como a F2 a lê (a 1ª tarefa ligada de os_tarefas_dia no dia).
+create or replace function pg_temp.f4k_etapa(p_os uuid, p_texto text, p_dia date) returns void
+language plpgsql as $f$
+declare
+  v_t uuid;
+begin
+  insert into public.os_tarefas (service_order_id, chave, origem, texto, fase, ordem, horas, estado, criada_em, mudou_em)
+    values (p_os, 'linha:teste-f4r', 'roteiro', p_texto, 1, 1, 1, 'viva', '2027-01-10 10:00-03', '2027-01-10 10:00-03')
+    returning id into v_t;
+  insert into public.os_tarefas_dia (tarefa_id, service_order_id, dia, turno, modo, fracao, comeca, termina, posicao, estado,
+                                     congelada_em)
+    values (v_t, p_os, p_dia, 'manha', 'ligado', 1, true, true, 1, 'planejada', '2027-01-10 10:00-03');
+end $f$;
+
 -- Só as linhas dadas ficam em espera: as outras vão a feito (o cenário não depende da ordem da fila).
 create or replace function pg_temp.f4k_so_fila(p_ids uuid[]) returns void
 language sql as $f$
@@ -174,6 +189,9 @@ declare
   v_rec record;
   v_n_fun integer := 0;
   i integer;
+  v_pt uuid; v_nt uuid; v_ot uuid; v_ves uuid; v_fp uuid; v_fq uuid;   -- respostas de 09/11, R1
+  v_item jsonb;
+  v_linhas jsonb;
 begin
   begin
   select d.id, d.phone into v_dono, v_phone from public._comprovante_dono() d;
@@ -855,6 +873,57 @@ begin
     raise exception '1d: com a pergunta aberta (%)', v_r;
   end if;
   update public.ai_operator_pending_actions set status = 'expired' where id = v_pend;
+
+  -- ── Respostas de 09/11, R1 (F4-07): com parceiro_etapa_ligada, o *ver N* do painel mostra ao dono a linha com a etapa que
+  --    vai à parceira, e o pátio pelo cartão a leva; desligada, a linha é a de antes. OS-98891; telefones 55479000176(51, 61) ──
+  update public.retorno_config set parceiro_modo = 'sombra', parceiro_tipos_ligados = '{}', patio_nivel = 'cartao', segura_patio = false
+   where id;
+  insert into public.parceiros (nome, sigla, tipo) values ('Revenda Etapa Cartao F4', 'REC', 'revenda') returning id into v_pt;
+  insert into public.parceiro_pessoas (parceiro_id, nome, papel) values (v_pt, 'Eunice', 'comercial') returning id into v_c;
+  insert into public.parceiro_numeros (pessoa_id, phone_normalized, chave, ddd, situacao, confirmado_em, recebe_painel)
+    values (v_c, '5547900017651', '00017651', '47', 'confirmado', c_t - interval '30 days', true) returning id into v_nt;
+  perform pg_temp.f4k_isolar(v_pt);
+  v_c := pg_temp.f4k_cliente('Davi Etapa', '5547900017661');
+  insert into public.vessels (client_id, name, asset_type) values (v_c, 'Unidade OS-98891', 'Motorhome') returning id into v_ves;
+  insert into public.service_orders (service_order_number, client_id, vessel_id, status, quote_status, service_type, created_at,
+                                     updated_at, grand_total, check_in_at)
+    values ('OS-98891', v_c, v_ves, 'in_progress', 'approved', 'repair', '2026-10-01 10:00-03', '2026-10-01 10:00-03', 0,
+            c_t - interval '2 hours')
+    returning id into v_ot;
+  perform pg_temp.f4k_etapa(v_ot, 'Instalação do painel solar', date '2027-01-12');
+  perform pg_temp.f4k_liga(v_ot, v_pt, 'indicou');
+  update public.retorno_config set parceiro_etapa_ligada = true where id;
+  v_linhas := public.parceiro_linhas(v_pt, c_t);
+  if jsonb_array_length(v_linhas) is distinct from 1 or v_linhas -> 0 ->> 'etapa' is distinct from 'instalação do painel solar' then
+    raise exception 'R1a: a linha da REC sem a etapa (%)', v_linhas;
+  end if;
+  insert into public.parceiro_paineis (parceiro_id, dia, estado, mudou, linhas, impressao, criado_em)
+    values (v_pt, '2027-01-12', 'aguardando', true, v_linhas, public._parceiro_impressao(v_linhas), c_t) returning id into v_painel;
+  v_fp := public._parceiro_fila_por('painel', v_pt, v_painel, 'painel:' || v_painel, '2027-01-12 18:30-03',
+                                    jsonb_build_object('dia', '2027-01-12', 'painel_id', v_painel));
+  v_fq := public._parceiro_fila_por('patio', v_pt, v_nt, 'patio:' || v_nt || ':2027-01-12', '2027-01-12 21:59-03',
+                                    jsonb_build_object('pedido_em', c_t, 'dia', '2027-01-12'));
+  v_item := public._parceiro_item_montar(v_fp, 1::smallint, c_t);
+  if v_item -> 'retrato' -> 'ver' ->> 0 is distinct from '1. Motorhome de Davi E.: em serviço hoje (instalação do painel solar).' then
+    raise exception 'R1b: o *ver* do painel sem a etapa (%)', v_item -> 'retrato';
+  end if;
+  v_item := public._parceiro_item_montar(v_fq, 2::smallint, c_t);
+  if v_item -> 'retrato' -> 'linhas' -> 0 ->> 'etapa' is distinct from 'instalação do painel solar'
+     or v_item -> 'retrato' -> 'ver' ->> 0 is distinct from E'Pátio HBR · 12/01\n1. Motorhome de Davi E.: em serviço hoje (instalação do painel solar).' then
+    raise exception 'R1c: o pátio pelo cartão sem a etapa (%)', v_item -> 'retrato';
+  end if;
+  update public.retorno_config set parceiro_etapa_ligada = false where id;
+  v_item := public._parceiro_item_montar(v_fp, 1::smallint, c_t);
+  if v_item -> 'retrato' -> 'ver' ->> 0 is distinct from '1. Motorhome de Davi E.: em serviço hoje.' then
+    raise exception 'R1d: com a chave desligada, o *ver* mostrou a etapa (%)', v_item -> 'retrato';
+  end if;
+  v_item := public._parceiro_item_montar(v_fq, 2::smallint, c_t);
+  if v_item -> 'retrato' -> 'linhas' is distinct from jsonb_build_array(jsonb_build_object(
+       'n', 1, 'interessado_id', v_linhas -> 0 -> 'interessado_id', 'service_order_id', v_ot, 'estado', 'em_servico', 'desde', null))
+     or v_item -> 'retrato' -> 'ver' ->> 0 is distinct from E'Pátio HBR · 12/01\n1. Motorhome de Davi E.: em serviço hoje.' then
+    raise exception 'R1e: com a chave desligada, o pátio pelo cartão mudou (%)', v_item -> 'retrato';
+  end if;
+  update public.parceiro_fila set estado = 'feito', decidido_em = now() where id in (v_fp, v_fq);
 
   -- ── A varredura: as tabelas fechadas a anon, as funções do parceiro fechadas a anon e authenticated ──
   if has_table_privilege('anon', 'public.parceiro_cartoes', 'select') or has_table_privilege('anon', 'public.parceiro_cartao_itens', 'select')

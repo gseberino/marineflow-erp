@@ -735,9 +735,12 @@ begin
         from public.os_interessados oi join public.service_orders so on so.id = oi.service_order_id
        where oi.id = nullif(v_l ->> 'interessado_id', '')::uuid;
       begin
+        -- a etapa (R1, respostas de 09/11): o dono vê a linha como ela vai à parceira
         v_linha := public._parceiro_texto('parceiro_painel', 'linha', jsonb_build_object(
                      'n', (v_l ->> 'n')::integer, 'bem', public._parceiro_bem(v_vessel), 'cliente', public._parceiro_nome_curto(v_cli),
-                     'estado', v_l ->> 'estado', 'desde', v_l -> 'desde'));
+                     'estado', v_l ->> 'estado', 'desde', v_l -> 'desde')
+                     || (case when jsonb_typeof(v_l -> 'etapa') = 'string' then jsonb_build_object('etapa', v_l -> 'etapa')
+                              else '{}'::jsonb end));
       exception when sqlstate '22023' or sqlstate '22P02' then
         v_linha := format('%s. (sem texto: sai do painel)', v_l ->> 'n');
       end;
@@ -759,9 +762,12 @@ begin
 
   elsif v_f.tipo = 'patio' then
     v_numero := public._parceiro_rotulo_do_numero(v_f.referencia);
+    -- a etapa (R1, respostas de 09/11) segue com a linha quando parceiro_linhas a pôs
     v_linhas := (select coalesce(jsonb_agg(jsonb_build_object('n', (l ->> 'n')::integer, 'interessado_id', l -> 'interessado_id',
                                                               'service_order_id', l -> 'service_order_id', 'estado', l -> 'estado',
                                                               'desde', l -> 'desde')
+                                           || (case when jsonb_typeof(l -> 'etapa') = 'string'
+                                                    then jsonb_build_object('etapa', l -> 'etapa') else '{}'::jsonb end)
                                            order by (l ->> 'n')::integer), '[]'::jsonb)
                    from jsonb_array_elements(public.parceiro_linhas(v_f.parceiro_id, v_agora)) l
                   where l ->> 'fora_por' is null and coalesce(l ->> 'n', '') ~ '^[0-9]{1,3}$');

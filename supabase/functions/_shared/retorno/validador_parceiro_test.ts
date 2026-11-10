@@ -56,6 +56,8 @@ const SITUACAO: Record<string, string> = {
   aguarda_peca: "aguardando uma peça; sem novidade desde {dd/mm}",
   aguarda_peca_sem_data: "aguardando uma peça",
   em_servico: "em serviço hoje",
+  // Respostas do dono de 09/11 (F4-07, R1): a etapa, só com parceiro_etapa_ligada e depois de _parceiro_etapa_ok (F4-17)
+  em_servico_etapa: "em serviço hoje ({etapa})",
   andamento: "sem novidade desde {dd/mm}",
   andamento_sem_data: "em serviço",
   orcamento: "orçamento pedido por vocês; com o Gustavo",
@@ -81,9 +83,10 @@ function compor(modelo: string, dados: Record<string, string>): string {
   });
 }
 
+/** A linha do painel; `data` é a {dd/mm} ou, em em_servico_etapa, a {etapa}. */
 function linha(n: number, bem: string, cliente: string, estado: string, data = ""): string {
   const Bem = bem.charAt(0).toUpperCase() + bem.slice(1);
-  return `${n}. ${Bem} de ${cliente}: ${SITUACAO[estado].replace("{dd/mm}", data)}.`;
+  return `${n}. ${Bem} de ${cliente}: ${SITUACAO[estado].replace("{dd/mm}", data).replace("{etapa}", data)}.`;
 }
 
 /** P06: cabeçalho, linhas, "E mais", "Para ver de novo" e o rodapé semanal. */
@@ -437,4 +440,58 @@ Deno.test("R2: 'aguardando o início do serviço' passa no validador real, no pa
   // sem data e sem previsão: a mesma linha com um prazo prometido reprova
   const prometida = "2. Motorhome de Bruno C.: aguardando o início do serviço, que fica pronto até sexta.";
   reprova(prometida, ctxParceiro(prometida, ["Motorhome", "Bruno C."], { nomes_da_lista: ["Bruno C."] }), "promessa", "data_de_pronto");
+});
+
+Deno.test("R1: a linha em_servico_etapa passa no validador real, no painel misto, sozinha e no bloco P11", () => {
+  const comEtapa = linha(1, "motorhome", "João S.", "em_servico_etapa", "instalação do painel solar");
+  assertEquals(comEtapa, "1. Motorhome de João S.: em serviço hoje (instalação do painel solar).");
+  const texto = painel("Pátio HBR · qui (14/01)", [
+    comEtapa,
+    linha(2, "motorhome", "Ana B.", "pronto"),
+    linha(3, "trailer", "Bruno C.", "em_servico"),
+    linha(4, "motorhome", "Caio D.", "sem_inicio"),
+  ]);
+  const nomes = ["João S.", "Ana B.", "Bruno C.", "Caio D."];
+  passa(texto, ctxParceiro(texto, ["qui (14/01)", "Motorhome", "Trailer", ...nomes], {
+    datas_permitidas: ["qui (14/01)", "14/01"],
+    nomes_da_lista: nomes,
+    nomes_de_outros: ["Zeca F."],
+    marcas: OUVIU,
+  }));
+  passa(comEtapa, ctxParceiro(comEtapa, ["Motorhome", "João S."], { nomes_da_lista: ["João S."] }));
+  const recibo = [
+    compor(P.P02, { abertura: ABERTURAS.pessoa, quando_fala: "ainda hoje" }),
+    "Enquanto isso, o pátio de hoje:",
+    comEtapa,
+  ].join("\n");
+  passa(recibo, ctxParceiro(recibo, ["Carla", "ainda hoje", "Motorhome", "João S."], {
+    datas_permitidas: ["ainda hoje"],
+    nome_permitido: "Carla",
+    nomes_da_lista: ["João S."],
+  }));
+});
+
+Deno.test("R1: a etapa com o nome de outro cliente ou com palavra de dinheiro reprova; a linha sai do painel (fora_por validador)", () => {
+  const outro = linha(1, "motorhome", "João S.", "em_servico_etapa", "conferência com Zeca F.");
+  so("nome_de_outro", outro, ctxParceiro(outro, ["Motorhome", "João S."], { nomes_da_lista: ["João S."], nomes_de_outros: ["Zeca F."] }));
+  const sinal = linha(1, "motorhome", "João S.", "em_servico_etapa", "troca do sinal de ré");
+  reprova(sinal, ctxParceiro(sinal, ["Motorhome", "João S."], { nomes_da_lista: ["João S."] }), "dinheiro", "valor_a_parceiro");
+});
+
+Deno.test("R1: dia, 'pronto' e 'avisado' dentro da etapa passam no validador (o trecho é o próprio texto); por isso o banco os recusa antes", () => {
+  // _parceiro_contexto_do_validador corta os trechos do PRÓPRIO texto, só nos nomes e nas datas permitidas: a palavra de dia
+  // escrita na etapa fica dentro de um trecho e não reprova data_fora; "pronto" sem data depois não é data_de_pronto; e
+  // "avisado" passa quando outra linha pronto deu a marca. Por isso _parceiro_etapa_ok (P4) recusa essas palavras.
+  const nomes = ["João S.", "Ana B."];
+  for (const etapa of ["entrega na sexta", "pronto para pintura", "troca com o cliente já avisado"]) {
+    const texto = painel("Pátio HBR · qui (14/01)", [
+      linha(1, "motorhome", "Ana B.", "pronto"),
+      linha(2, "motorhome", "João S.", "em_servico_etapa", etapa),
+    ]);
+    passa(texto, ctxParceiro(texto, ["qui (14/01)", "Motorhome", ...nomes], {
+      datas_permitidas: ["qui (14/01)", "14/01"],
+      nomes_da_lista: nomes,
+      marcas: OUVIU,
+    }), etapa);
+  }
 });

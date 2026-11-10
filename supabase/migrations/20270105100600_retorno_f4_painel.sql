@@ -23,20 +23,26 @@
 -- 9. parceiro_ativar e parceiro_ativacao_rodada (P01, uma vez por número), parceiro_reler_vetos (a rede do webhook que
 --    caiu, só a linha do veto) e parceiro_vigia (cada passo isolado; os de onda posterior só com a função no banco).
 --
--- 10. Respostas do dono de 09/11 (o texto espera o cartão F4-17, por isso as chaves nascem falsas): R2 (F4-14), o estado
---    sem_inicio ("aguardando o início do serviço") para open, approved, scheduled e awaiting_client sem data, só com
---    retorno_config.parceiro_sem_inicio_ligado. Desligada, a linha é byte a byte a de antes.
+-- 10. Respostas do dono de 09/11 (o texto espera o cartão F4-17, por isso as chaves nascem falsas): R1 (F4-07), a etapa do
+--    dia na linha em_servico ("em serviço hoje ({etapa})"), só com retorno_config.parceiro_etapa_ligada e só a que passa em
+--    _parceiro_etapa_ok (P4) contra os nomes dos clientes do parceiro; R2 (F4-14), o estado sem_inicio ("aguardando o
+--    início do serviço") para open, approved, scheduled e awaiting_client sem data, só com
+--    retorno_config.parceiro_sem_inicio_ligado. Desligadas, a linha é byte a byte a de antes.
 --
 -- Sem dado: funções novas e as chaves das respostas de 09/11 em retorno_config, nascidas falsas. Nada é chamado enquanto o
 -- cron não chamar parceiro_vigia (P14) e o webhook não chamar parceiro_ler_mensagem (P13). Com parceiro_modo = 'desligado'
 -- (o padrão), o vigia só relê o veto.
 -- Reverter: drop function das funções desta migration; alter table public.retorno_config drop column
--- parceiro_sem_inicio_ligado. As tabelas da P1 ficam.
+-- parceiro_etapa_ligada, drop column parceiro_sem_inicio_ligado. As tabelas da P1 ficam.
 
 -- ── 0. As chaves das respostas do dono de 09/11, nascidas desligadas ──────────────────────────────────────────────────
 
 alter table public.retorno_config
+  add column parceiro_etapa_ligada boolean not null default false,
   add column parceiro_sem_inicio_ligado boolean not null default false;
+
+comment on column public.retorno_config.parceiro_etapa_ligada is
+  'Retorno F4, R1 (resposta do dono ao F4-07, 09/11/2026): true põe a etapa do dia (fatos.em_servico.etapa, a 1ª tarefa ligada) na linha em_servico do painel e do pátio, "em serviço hoje ({etapa})", só a que passa em _parceiro_etapa_ok. Nasce false até o dono aprovar a frase no cartão F4-17; false = "em serviço hoje", como antes.';
 
 comment on column public.retorno_config.parceiro_sem_inicio_ligado is
   'Retorno F4, R2 (resposta do dono ao F4-14, 09/11/2026): true põe no painel e no pátio, como sem_inicio ("aguardando o início do serviço", sem data e sem previsão), a OS sem data em open, approved, scheduled ou awaiting_client. Nasce false até o dono aprovar a frase no cartão F4-17; false = a linha fica fora (sem_fato), como antes.';
@@ -249,8 +255,9 @@ revoke all on function public._parceiro_cliente_ouviu(uuid, text, timestamptz) f
 -- ── 2. A linha do painel (P7.2) ─────────────────────────────────────────────────────────────────────────────────────────
 
 -- A linha de um vínculo, sem o nome: {interessado_id, service_order_id, client_id, estado, desde, rotulo, retida_por,
--- fora_por}. A primeira que serve, na ordem de P7.2; o marco que o cliente não ouviu fica em retida_por, e a linha cai ao
--- estado seguinte. Toda data é o dia de Brasília e nunca passa de hoje. Erro sobe (quem chama isola a OS).
+-- fora_por}, mais etapa_bruta em em_servico com parceiro_etapa_ligada (R1; só parceiro_linhas a lê e a confere). A primeira
+-- que serve, na ordem de P7.2; o marco que o cliente não ouviu fica em retida_por, e a linha cai ao estado seguinte. Toda
+-- data é o dia de Brasília e nunca passa de hoje. Erro sobe (quem chama isola a OS).
 create or replace function public._parceiro_linha_da_os(p_interessado uuid, p_agora timestamptz)
 returns jsonb
 language plpgsql
@@ -275,6 +282,7 @@ declare
   v_d1 date;
   v_d2 date;
   v_d3 date;
+  v_etapa text;
 begin
   select * into v_oi from public.os_interessados oi where oi.id = p_interessado;
   if not found then
@@ -322,10 +330,14 @@ begin
       v_retida := coalesce(v_retida, 'aguarda_peca');
     end if;
   end if;
-  -- 4. em_servico
+  -- 4. em_servico. Com parceiro_etapa_ligada (R1), a etapa do fato vai crua em etapa_bruta: parceiro_linhas a confere contra
+  --    os nomes (_parceiro_etapa_ok) e a tira do objeto; desligada, a linha não ganha chave nenhuma.
   if v_estado is null and jsonb_typeof(v_fatos -> 'em_servico') = 'object' then
     v_estado := 'em_servico';
     v_desde := null;
+    if v_cfg.parceiro_etapa_ligada is true then
+      v_etapa := nullif(btrim(v_fatos -> 'em_servico' ->> 'etapa'), '');
+    end if;
   end if;
   -- 5. orcamento: o rascunho pedido por este parceiro
   if v_estado is null and v_so.status = 'draft' and v_so.origem_parceiro_id = v_oi.parceiro_id then
@@ -360,7 +372,8 @@ begin
 
   return jsonb_build_object('interessado_id', v_oi.id, 'service_order_id', v_oi.service_order_id, 'client_id', v_oi.client_id,
                             'estado', v_estado, 'desde', v_desde, 'rotulo', v_so.service_order_number,
-                            'retida_por', v_retida, 'fora_por', v_fora);
+                            'retida_por', v_retida, 'fora_por', v_fora)
+         || (case when v_etapa is not null then jsonb_build_object('etapa_bruta', v_etapa) else '{}'::jsonb end);
 end;
 $$;
 
@@ -392,7 +405,8 @@ revoke all on function public._parceiro_impressao(jsonb) from public, anon, auth
 -- As linhas do parceiro agora: uma por OS de parceiro_os_visiveis, cada uma no seu bloco (exceção = fora_por 'erro', e o
 -- resto segue). Nome nulo ou que colide com outro cliente do parceiro (o mesmo "João S.", ou "João" sozinho):
 -- fora_por 'nome_ambiguo'. Só as que saem ganham n, pelo estado e depois o número da OS. As fora ficam com n nulo, sem
--- texto. Chaves: n, interessado_id, service_order_id, estado, desde, rotulo, retida_por, fora_por.
+-- texto. Chaves: n, interessado_id, service_order_id, estado, desde, rotulo, retida_por, fora_por; e etapa (R1), só na linha
+-- em_servico que sai, com parceiro_etapa_ligada e a etapa aprovada por _parceiro_etapa_ok. Desligada, nenhuma chave a mais.
 create or replace function public.parceiro_linhas(p_parceiro uuid, p_agora timestamptz default now())
 returns jsonb
 language plpgsql
@@ -410,6 +424,8 @@ declare
   v_forma text;
   v_primeiro text;
   v_res jsonb := '[]'::jsonb;
+  v_nomes text[];
+  v_etapa text;
 begin
   for r in select * from public.parceiro_os_visiveis(p_parceiro, v_agora) loop
     begin
@@ -436,6 +452,14 @@ begin
                      where oi.parceiro_id = p_parceiro
                        and not (oi.client_id = any (v_saem))
                        and public._parceiro_nome_curto(oi.client_id) is not null);
+  -- R1 (respostas de 09/11): a etapa é conferida contra os nomes de todos os clientes do parceiro, em qualquer situação (o
+  -- que cobre nomes_da_lista e nomes_de_outros do painel), e só quando alguma linha trouxe etapa_bruta (a chave ligada)
+  if exists (select 1 from jsonb_array_elements(v_todas) l where l ? 'etapa_bruta') then
+    v_nomes := array(select distinct public._parceiro_nome_curto(oi.client_id)
+                       from public.os_interessados oi
+                      where oi.parceiro_id = p_parceiro
+                        and public._parceiro_nome_curto(oi.client_id) is not null);
+  end if;
   for v_l in select l from jsonb_array_elements(v_todas) l loop
     if v_l ->> 'fora_por' is null then
       v_forma := public._parceiro_nome_curto((v_l ->> 'client_id')::uuid);
@@ -443,6 +467,17 @@ begin
       if public._texto_simples(btrim(v_forma)) = any (v_outros) or public._texto_simples(btrim(v_primeiro)) = any (v_outros) then
         v_l := v_l || jsonb_build_object('fora_por', 'nome_ambiguo');
       end if;
+    end if;
+    -- R1: só a linha que sai leva a etapa, e só a que passa em _parceiro_etapa_ok; a etapa_bruta nunca sai daqui. Erro na
+    -- conferência tira só a etapa (falha fecha): a linha e o painel seguem.
+    if v_l ? 'etapa_bruta' then
+      begin
+        v_etapa := (case when v_l ->> 'fora_por' is null then public._parceiro_etapa_ok(v_l ->> 'etapa_bruta', v_nomes) end);
+      exception when others then
+        v_etapa := null;
+      end;
+      v_l := (v_l - 'etapa_bruta')
+             || (case when v_etapa is not null then jsonb_build_object('etapa', v_etapa) else '{}'::jsonb end);
     end if;
     v_res := v_res || jsonb_build_array(v_l - 'client_id');
   end loop;
@@ -466,13 +501,14 @@ begin
                                                  'service_order_id', y.l -> 'service_order_id', 'estado', y.l -> 'estado',
                                                  'desde', y.l -> 'desde', 'rotulo', y.l -> 'rotulo',
                                                  'retida_por', y.l -> 'retida_por', 'fora_por', y.l -> 'fora_por')
+                              || (case when y.l ? 'etapa' then jsonb_build_object('etapa', y.l -> 'etapa') else '{}'::jsonb end)
                               order by (not y.sai), y.n, y.l ->> 'rotulo' collate "C", y.l ->> 'service_order_id'), '[]'::jsonb)
       from y);
 end;
 $$;
 
 comment on function public.parceiro_linhas(uuid, timestamptz) is
-  'Retorno F4 (P7.2): as linhas do parceiro agora, uma por OS visível (parceiro_os_visiveis): [{n, interessado_id, service_order_id, estado, desde, rotulo, retida_por, fora_por}]. Exceção numa OS = fora_por erro; nome nulo ou colisão com outro cliente do parceiro = nome_ambiguo; sem fato = sem_fato. n só nas que saem, pela ordem dos estados; nenhuma linha tem texto.';
+  'Retorno F4 (P7.2): as linhas do parceiro agora, uma por OS visível (parceiro_os_visiveis): [{n, interessado_id, service_order_id, estado, desde, rotulo, retida_por, fora_por}], mais etapa na linha em_servico que sai, só com parceiro_etapa_ligada e a etapa aprovada por _parceiro_etapa_ok (R1). Exceção numa OS = fora_por erro; nome nulo ou colisão com outro cliente do parceiro = nome_ambiguo; sem fato = sem_fato. n só nas que saem, pela ordem dos estados; nenhuma linha tem texto.';
 
 revoke all on function public.parceiro_linhas(uuid, timestamptz) from public, anon, authenticated;
 grant execute on function public.parceiro_linhas(uuid, timestamptz) to service_role;
@@ -680,9 +716,12 @@ begin
        order by pp.criado_em, pp.id
     loop
       begin
+        -- a etapa (R1, respostas de 09/11) segue com a linha quando parceiro_linhas a pôs
         v_linhas := (select coalesce(jsonb_agg(jsonb_build_object('n', (l ->> 'n')::integer, 'interessado_id', l -> 'interessado_id',
                                                                   'service_order_id', l -> 'service_order_id', 'estado', l -> 'estado',
                                                                   'desde', l -> 'desde')
+                                               || (case when jsonb_typeof(l -> 'etapa') = 'string'
+                                                        then jsonb_build_object('etapa', l -> 'etapa') else '{}'::jsonb end)
                                                order by (l ->> 'n')::integer), '[]'::jsonb)
                        from jsonb_array_elements(r.linhas) l
                       where l ->> 'fora_por' is null and coalesce(l ->> 'n', '') ~ '^[0-9]{1,3}$');
@@ -794,9 +833,12 @@ begin
     return jsonb_build_object('ok', true, 'consumida', true, 'acao', 'recusada', 'motivo', v_motivo, 'saida_id', v_id);
   end if;
 
+  -- a etapa (R1, respostas de 09/11) segue com a linha quando parceiro_linhas a pôs
   v_linhas := (select coalesce(jsonb_agg(jsonb_build_object('n', (l ->> 'n')::integer, 'interessado_id', l -> 'interessado_id',
                                                             'service_order_id', l -> 'service_order_id', 'estado', l -> 'estado',
                                                             'desde', l -> 'desde')
+                                         || (case when jsonb_typeof(l -> 'etapa') = 'string'
+                                                  then jsonb_build_object('etapa', l -> 'etapa') else '{}'::jsonb end)
                                          order by (l ->> 'n')::integer), '[]'::jsonb)
                  from jsonb_array_elements(public.parceiro_linhas(v_num.parceiro_id, v_agora)) l
                 where l ->> 'fora_por' is null and coalesce(l ->> 'n', '') ~ '^[0-9]{1,3}$');

@@ -229,7 +229,10 @@ begin
       ('{"n": 5, "bem": "motorhome", "cliente": "Davi E.", "estado": "em_servico"}', '5. Motorhome de Davi E.: em serviço hoje.'),
       ('{"n": 6, "bem": "veículo", "cliente": "Edu F.", "estado": "orcamento"}', '6. Veículo de Edu F.: orçamento pedido por vocês; com o Gustavo.'),
       ('{"n": 7, "bem": "motorhome", "cliente": "Fábio G.", "estado": "andamento", "desde": "2026-12-28"}', '7. Motorhome de Fábio G.: sem novidade desde 28/12.'),
-      ('{"n": 8, "bem": "barco", "cliente": "Gil H.", "estado": "andamento_sem_data"}', '8. Barco de Gil H.: em serviço.')
+      ('{"n": 8, "bem": "barco", "cliente": "Gil H.", "estado": "andamento_sem_data"}', '8. Barco de Gil H.: em serviço.'),
+      -- R1 (respostas de 09/11): sem parceiro_etapa_ligada (falsa, ou nem existe antes da onda 5), a etapa é ignorada
+      ('{"n": 9, "bem": "motorhome", "cliente": "Hugo I.", "estado": "em_servico", "etapa": "instalação do painel solar"}',
+       '9. Motorhome de Hugo I.: em serviço hoje.')
     ) as x(dados, esperado)
   loop
     v_t := public._parceiro_texto('parceiro_painel', 'linha', v_r.dados);

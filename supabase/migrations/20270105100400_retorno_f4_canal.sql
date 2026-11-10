@@ -203,9 +203,12 @@ begin
         from public.os_interessados oi
         join public.service_orders so on so.id = oi.service_order_id
        where oi.id = nullif(v_l ->> 'interessado_id', '')::uuid;
+      -- a etapa (R1, respostas de 09/11) só vai quando a linha a traz; o catálogo só a usa com parceiro_etapa_ligada
       v_txt := public._parceiro_texto(p_tipo, 'linha', jsonb_build_object(
                  'n', v_k + 1, 'bem', public._parceiro_bem(v_vessel), 'cliente', public._parceiro_nome_curto(v_client),
-                 'estado', v_l ->> 'estado', 'desde', v_l -> 'desde'));
+                 'estado', v_l ->> 'estado', 'desde', v_l -> 'desde')
+                 || (case when jsonb_typeof(v_l -> 'etapa') = 'string' then jsonb_build_object('etapa', v_l -> 'etapa')
+                          else '{}'::jsonb end));
       v_k := v_k + 1;
       v_ok := v_ok || jsonb_build_array((v_l - 'k') || jsonb_build_object('k', v_k));
       v_textos := v_textos || to_jsonb(v_txt);
@@ -378,9 +381,12 @@ begin
   if jsonb_typeof(v_r) is distinct from 'array' then
     return '[]'::jsonb;
   end if;
+  -- a etapa (R1, respostas de 09/11) segue com a linha quando parceiro_linhas a pôs
   return (select coalesce(jsonb_agg(jsonb_build_object('n', (x ->> 'n')::integer, 'interessado_id', x -> 'interessado_id',
                                                        'service_order_id', x -> 'service_order_id', 'estado', x -> 'estado',
                                                        'desde', x -> 'desde')
+                                    || (case when jsonb_typeof(x -> 'etapa') = 'string' then jsonb_build_object('etapa', x -> 'etapa')
+                                             else '{}'::jsonb end)
                                     order by (x ->> 'n')::integer), '[]'::jsonb)
             from jsonb_array_elements(v_r) x
            where jsonb_typeof(x) = 'object'
@@ -390,7 +396,7 @@ end;
 $$;
 
 comment on function public._parceiro_linhas_que_saem(uuid, timestamptz) is
-  'Retorno F4 (P5.1, bloco P11): as linhas de parceiro_linhas (P7) que saem hoje, na ordem de n, só ids, estado e desde. Sem a função, lista vazia.';
+  'Retorno F4 (P5.1, bloco P11): as linhas de parceiro_linhas (P7) que saem hoje, na ordem de n, só ids, estado e desde (e a etapa, quando parceiro_linhas a pôs: R1 de 09/11). Sem a função, lista vazia.';
 
 revoke all on function public._parceiro_linhas_que_saem(uuid, timestamptz) from public, anon, authenticated;
 

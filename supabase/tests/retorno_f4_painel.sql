@@ -3,6 +3,8 @@
 -- nunca citada, o eco só depois de o cliente ouvir, e o leitor de palavras externas. Roda só pela bancada (grupo 7,
 -- F4_ONDA=5, F4_TESTES=retorno_f4_painel). Termina em ROLLBACK. Telefones de teste 55479000149xx a 55479000152xx; nomes
 -- inventados. Relógio: qui 14/01/2027 10:00 (dia útil); painéis de seg 11 a sex 15/01/2027; 01/01/2027 é feriado.
+-- Respostas do dono de 09/11 (R1, a etapa; R2, o veículo que não começou), no fim: telefones 55479000176xx e números de OS
+-- OS-TF4R-01 a 11 e 21 a 29 (antes de rodar, conferir só por count(*) que não existem no banco).
 begin;
 create temp table if not exists _bancada (arquivo text, ok boolean, numeros jsonb, em timestamptz default clock_timestamp());
 create temp table if not exists _f4p_quebra (os uuid primary key);
@@ -203,6 +205,20 @@ language sql as $f$
     from unnest(p_linhas) l
 $f$;
 
+-- Respostas de 09/11 (R1): a etapa do dia, como a F2 a lê (a 1ª tarefa ligada de os_tarefas_dia no dia).
+create or replace function pg_temp.f4p_etapa(p_os uuid, p_texto text, p_dia date) returns void
+language plpgsql as $f$
+declare
+  v_t uuid;
+begin
+  insert into public.os_tarefas (service_order_id, chave, origem, texto, fase, ordem, horas, estado, criada_em, mudou_em)
+    values (p_os, 'linha:teste-f4r', 'roteiro', p_texto, 1, 1, 1, 'viva', '2027-01-10 10:00-03', '2027-01-10 10:00-03')
+    returning id into v_t;
+  insert into public.os_tarefas_dia (tarefa_id, service_order_id, dia, turno, modo, fracao, comeca, termina, posicao, estado,
+                                     congelada_em)
+    values (v_t, p_os, p_dia, 'manha', 'ligado', 1, true, true, 1, 'planejada', '2027-01-10 10:00-03');
+end $f$;
+
 -- As linhas que saem como o painel e o pátio as copiavam antes de 09/11 (n, interessado_id, service_order_id, estado, desde).
 create or replace function pg_temp.f4p_copia_antes(p_linhas jsonb) returns jsonb
 language sql as $f$
@@ -248,7 +264,9 @@ declare
   v_rec record;
   v_n_fun integer := 0;
   v_pr uuid; v_nr uuid; v_ri uuid[];                         -- respostas de 09/11, R2
+  v_pt uuid; v_nt uuid; v_ti uuid[] := '{}'; v_ot uuid; v_iz uuid;   -- respostas de 09/11, R1
   v_esperado jsonb;
+  v_etapa60 text := rpad('Revisão geral', 60, ' da cabine');
 begin
   begin
   select d.id into v_dono from public._comprovante_dono() d;
@@ -1052,6 +1070,213 @@ begin
   exception when sqlstate '22023' then
     null;
   end;
+  update public.retorno_config set patio_nivel = 'cartao' where id;
+
+  -- ── Respostas de 09/11, R1 (F4-07): a etapa na linha em_servico. Com as duas chaves desligadas (o padrão), as linhas, o
+  --    painel, o pátio e o bloco P11 saem byte a byte como antes, mesmo com a etapa no fato; com parceiro_etapa_ligada, só a
+  --    etapa que passa em _parceiro_etapa_ok sai, "em serviço hoje ({etapa})". Números de OS OS-TF4R-01 a 11; telefones
+  --    5547900017602 e 55479000176(31 a 41) ──
+  update public.retorno_config
+     set parceiro_modo = 'sombra', parceiro_tipos_ligados = '{}', patio_nivel = 'cartao', segura_patio = false,
+         parceiro_sem_inicio_ligado = false
+   where id;
+  if (select c.parceiro_etapa_ligada from public.retorno_config c where c.id) is not false then
+    raise exception 'R1a: parceiro_etapa_ligada não nasceu falsa';
+  end if;
+
+  -- _parceiro_etapa_ok, regra a regra (as 4 últimas são o desvio: o validador não vê dia, pronto e avisado dentro da etapa)
+  for v_rec in
+    select * from (values
+      ('instalação do painel solar', '{}'::text[], 'instalação do painel solar'),
+      ('Instalação do painel solar', '{}', 'instalação do painel solar'),
+      ('  Teste final,  ajustes e limpeza ', '{}', 'teste final, ajustes e limpeza'),
+      ('Elétrica - quadro/disjuntores', '{}', 'elétrica - quadro/disjuntores'),
+      (v_etapa60, '{}', 'r' || substr(v_etapa60, 2)),
+      (rpad('Revisão geral', 61, ' da cabine'), '{}', null),
+      ('Troca de 2 baterias', '{}', null),
+      (E'Pintura\nda lateral', '{}', null),
+      (E'Pintura\tda lateral', '{}', null),
+      ('Revisão (geral)', '{}', null),
+      ('Contato pelo @', '{}', null),
+      ('Pagar R$ na entrega', '{}', null),
+      ('"Revisão"', '{}', null),
+      ('', '{}', null),
+      ('   ', '{}', null),
+      (null, '{}', null),
+      ('Conferência com Zeca', array['Ana B.', 'Zeca F.'], null),
+      ('Conferência com Zeca', array['Ana B.'], 'conferência com Zeca'),
+      ('Ajuste pedido pelo JOÃO', array['João S.'], null),
+      ('Ajuste do joão', null, null),
+      ('Entrega na sexta', '{}', null),
+      ('Revisão de março', '{}', null),
+      ('Pronto para pintura', '{}', null),
+      ('Troca com o cliente já avisado', '{}', null),
+      ('Almoço ao meio-dia', '{}', null)
+    ) as x(etapa, nomes, esperado)
+  loop
+    if public._parceiro_etapa_ok(v_rec.etapa, v_rec.nomes) is distinct from v_rec.esperado then
+      raise exception 'R1b: _parceiro_etapa_ok(%, %) deu % (esperava %)', v_rec.etapa, v_rec.nomes,
+        public._parceiro_etapa_ok(v_rec.etapa, v_rec.nomes), v_rec.esperado;
+    end if;
+  end loop;
+
+  -- Arranjo: dez OS em serviço hoje (check-in às 08:00), cada uma com a etapa do dia; a 8ª sem tarefa (etapa nula). O Zeca é
+  -- cliente da RET vetado: entra em nomes_de_outros e nunca na linha.
+  insert into public.parceiros (nome, sigla, tipo) values ('Revenda Etapa F4', 'RET', 'revenda') returning id into v_pt;
+  insert into public.parceiro_pessoas (parceiro_id, nome, papel) values (v_pt, 'Eunice', 'comercial') returning id into v_c;
+  insert into public.parceiro_numeros (pessoa_id, phone_normalized, chave, ddd, situacao, confirmado_em, recebe_painel)
+    values (v_c, '5547900017602', '00017602', '47', 'confirmado', c_t - interval '30 days', true) returning id into v_nt;
+  for v_rec in
+    select * from (values
+      (1, 'João Sales', 'Instalação do painel solar'),
+      (2, 'Kauê Etapa', 'Troca de 2 baterias'),
+      (3, 'Lia Etapa', rpad('Revisão geral', 61, ' da cabine')),
+      (4, 'Mel Etapa', E'Pintura\nda lateral'),
+      (5, 'Nico Etapa', 'Revisão (geral)'),
+      (6, 'Olga Etapa', 'Conferência com Zeca'),
+      (7, 'Pita Etapa', 'Ajuste pedido por Pita'),
+      (8, 'Quico Etapa', null),
+      (9, 'Rafa Etapa', 'Entrega na sexta'),
+      (10, 'Teo Etapa', v_etapa60)
+    ) as x(k, nome, etapa)
+    order by x.k
+  loop
+    v_ot := pg_temp.f4p_os_n(pg_temp.f4p_cliente(v_rec.nome, '55479000176' || (30 + v_rec.k)), 'OS-TF4R-' || lpad(v_rec.k::text, 2, '0'),
+                             'in_progress', c_t - interval '2 hours');
+    if v_rec.etapa is not null then
+      perform pg_temp.f4p_etapa(v_ot, v_rec.etapa, date '2027-01-14');
+    end if;
+    v_ti := v_ti || pg_temp.f4p_liga(v_ot, v_pt);
+  end loop;
+  v_iz := pg_temp.f4p_liga(pg_temp.f4p_os_n(pg_temp.f4p_cliente('Zeca Fora', '5547900017641'), 'OS-TF4R-11', 'open', null,
+                                            '2027-01-08 15:00-03'), v_pt);
+  update public.os_interessados set veto_do_cliente_em = c_t - interval '3 days' where id = v_iz;
+  -- a etapa está no fato (a F2 já a calcula): só a chave a separa da linha
+  if public._parceiro_fato_da_os((select oi.service_order_id from public.os_interessados oi where oi.id = v_ti[1]), c_t)
+       -> 'fatos' -> 'em_servico' ->> 'etapa' is distinct from 'Instalação do painel solar' then
+    raise exception 'R1c: a etapa não está no fato da OS';
+  end if;
+
+  -- As duas chaves desligadas: as linhas, o painel (caminho real), o pátio direto e o bloco P11 byte a byte como antes
+  v_esperado := pg_temp.f4p_ordem(array(select pg_temp.f4p_antes(v_ti[k], k, 'em_servico', null, null) from generate_series(1, 10) k));
+  v_linhas := public.parceiro_linhas(v_pt, c_t);
+  if v_linhas is distinct from v_esperado then
+    raise exception 'R1d: com as chaves desligadas, as linhas mudaram (veio %, esperava %)', v_linhas, v_esperado;
+  end if;
+  v_r := public.parceiro_painel_montar(v_pt, date '2027-01-14', '2027-01-14 17:30-03');
+  v_painel := (v_r ->> 'painel_id')::uuid;
+  if v_r ->> 'estado' is distinct from 'sombra'
+     or (select pp.linhas from public.parceiro_paineis pp where pp.id = v_painel) is distinct from v_esperado then
+    raise exception 'R1e: o painel do dia com as chaves desligadas (%)', v_r;
+  end if;
+  perform pg_temp.f4p_so(v_pt, v_todos || v_pr);
+  perform public.parceiro_painel_rodada('2027-01-14 17:50-03');
+  perform pg_temp.f4p_so(null, v_todos || v_pr);
+  select * into v_x from public.retorno_saidas s where s.dedupe_key = 'parceiro:painel:' || v_painel || ':' || v_nt || ':sombra';
+  if v_x.id is null or v_x.dados -> 'linhas' is distinct from pg_temp.f4p_copia_antes(v_esperado) then
+    raise exception 'R1f: a saída do painel copiou as linhas diferente (%)', v_x.dados -> 'linhas';
+  end if;
+  v_t := pg_temp.f4p_pegar(v_x.id, '2027-01-14 17:58-03');
+  v_texto := (select s.texto from public.retorno_saidas s where s.id = v_x.id);
+  if v_t is distinct from 'preparada/'
+     or v_texto is distinct from E'Pátio HBR · qui (14/01)\n1. Motorhome de João S.: em serviço hoje.\n2. Motorhome de Kauê E.: em serviço hoje.\n3. Motorhome de Lia E.: em serviço hoje.\n4. Motorhome de Mel E.: em serviço hoje.\n5. Motorhome de Nico E.: em serviço hoje.\n6. Motorhome de Olga E.: em serviço hoje.\n7. Motorhome de Pita E.: em serviço hoje.\n8. Motorhome de Quico E.: em serviço hoje.\n9. Motorhome de Rafa E.: em serviço hoje.\n10. Motorhome de Teo E.: em serviço hoje.\nPara ver de novo, mande *pátio*.\nValores e dados ficam com cada cliente.' then
+    raise exception 'R1g: o painel saiu diferente com as chaves desligadas (% / %)', v_t, v_texto;
+  end if;
+  update public.retorno_config set patio_nivel = 'direto' where id;
+  v_r := public.parceiro_patio_pedido(v_nt, pg_temp.f4p_msg('5547900017602', 'patio', c_t), c_t);
+  select * into v_x from public.retorno_saidas s where s.id = nullif(v_r ->> 'saida_id', '')::uuid;
+  if v_r ->> 'acao' is distinct from 'direto' or v_x.dados -> 'linhas' is distinct from pg_temp.f4p_copia_antes(v_esperado)
+     or public._parceiro_painel_texto('parceiro_patio', 'direto', v_x.dados -> 'linhas', 0, date '2027-01-14', false) ->> 'texto'
+        is distinct from E'Pátio HBR · 14/01\n1. Motorhome de João S.: em serviço hoje.\n2. Motorhome de Kauê E.: em serviço hoje.\n3. Motorhome de Lia E.: em serviço hoje.\n4. Motorhome de Mel E.: em serviço hoje.\n5. Motorhome de Nico E.: em serviço hoje.\n6. Motorhome de Olga E.: em serviço hoje.\n7. Motorhome de Pita E.: em serviço hoje.\n8. Motorhome de Quico E.: em serviço hoje.\n9. Motorhome de Rafa E.: em serviço hoje.\n10. Motorhome de Teo E.: em serviço hoje.' then
+    raise exception 'R1h: o pátio saiu diferente com as chaves desligadas (% / %)', v_r, v_x.dados -> 'linhas';
+  end if;
+  if public._parceiro_linhas_que_saem(v_pt, c_t) is distinct from pg_temp.f4p_copia_antes(v_esperado) then
+    raise exception 'R1i: o bloco P11 mudou com as chaves desligadas';
+  end if;
+  if public._parceiro_texto('parceiro_painel', 'linha',
+       '{"n": 1, "bem": "motorhome", "cliente": "João S.", "estado": "em_servico", "etapa": "instalação do painel solar"}'::jsonb)
+     is distinct from '1. Motorhome de João S.: em serviço hoje.' then
+    raise exception 'R1j: com a chave desligada, a etapa entrou no texto';
+  end if;
+
+  -- Ligada: só a 1ª (instalação) e a 10ª (60 caracteres) levam a etapa; dígito, 61 caracteres, quebra de linha, parêntese, o
+  -- 1º nome de outro cliente, o do próprio cliente, a etapa nula e o dia ficam sem ela. Estado, n, desde e impressão não mudam.
+  update public.retorno_config set parceiro_etapa_ligada = true where id;
+  v_linhas := public.parceiro_linhas(v_pt, c_t);
+  if (select jsonb_object_agg(l ->> 'n', l -> 'etapa') from jsonb_array_elements(v_linhas) l where l ? 'etapa')
+     is distinct from jsonb_build_object('1', 'instalação do painel solar', '10', 'r' || substr(v_etapa60, 2)) then
+    raise exception 'R1k: as etapas que saem (%)', v_linhas;
+  end if;
+  if (select jsonb_agg(t.l - 'etapa' order by t.o) from jsonb_array_elements(v_linhas) with ordinality t(l, o)) is distinct from v_esperado
+     or public._parceiro_impressao(v_linhas) is distinct from public._parceiro_impressao(v_esperado) then
+    raise exception 'R1l: a etapa mudou outra coisa na linha ou a impressão';
+  end if;
+  if exists (select 1 from jsonb_array_elements(v_linhas) l, jsonb_object_keys(l) k
+              where k not in ('n', 'interessado_id', 'service_order_id', 'estado', 'desde', 'rotulo', 'retida_por', 'fora_por', 'etapa'))
+     or exists (select 1 from jsonb_array_elements(v_linhas) l where l ? 'etapa' and l ->> 'estado' is distinct from 'em_servico') then
+    raise exception 'R1m: chave fora da lista positiva, ou etapa fora de em_servico';
+  end if;
+  -- o painel pelo caminho real (outro painel do mesmo dia: o de antes sai da tabela), a saída e o texto com a etapa
+  delete from public.parceiro_paineis where id = v_painel;
+  v_r := public.parceiro_painel_montar(v_pt, date '2027-01-14', '2027-01-14 17:31-03');
+  v_painel := (v_r ->> 'painel_id')::uuid;
+  if (select pp.linhas from public.parceiro_paineis pp where pp.id = v_painel) is distinct from v_linhas then
+    raise exception 'R1n: o painel não guardou a etapa (%)', v_r;
+  end if;
+  perform pg_temp.f4p_so(v_pt, v_todos || v_pr);
+  perform public.parceiro_painel_rodada('2027-01-14 18:00-03');
+  perform pg_temp.f4p_so(null, v_todos || v_pr);
+  select * into v_x from public.retorno_saidas s where s.dedupe_key = 'parceiro:painel:' || v_painel || ':' || v_nt || ':sombra';
+  if v_x.id is null or v_x.dados -> 'linhas' -> 0 ->> 'etapa' is distinct from 'instalação do painel solar'
+     or (select count(*) from jsonb_array_elements(v_x.dados -> 'linhas') l where l ? 'etapa') is distinct from 2::bigint then
+    raise exception 'R1o: a saída do painel não levou a etapa (%)', v_x.dados -> 'linhas';
+  end if;
+  v_t := pg_temp.f4p_pegar(v_x.id, '2027-01-14 18:02-03');
+  v_texto := (select s.texto from public.retorno_saidas s where s.id = v_x.id);
+  if v_t is distinct from 'preparada/'
+     or v_texto is distinct from E'Pátio HBR · qui (14/01)\n1. Motorhome de João S.: em serviço hoje (instalação do painel solar).\n2. Motorhome de Kauê E.: em serviço hoje.\n3. Motorhome de Lia E.: em serviço hoje.\n4. Motorhome de Mel E.: em serviço hoje.\n5. Motorhome de Nico E.: em serviço hoje.\n6. Motorhome de Olga E.: em serviço hoje.\n7. Motorhome de Pita E.: em serviço hoje.\n8. Motorhome de Quico E.: em serviço hoje.\n9. Motorhome de Rafa E.: em serviço hoje.\n10. Motorhome de Teo E.: em serviço hoje (revisão geral da cabine da cabine da cabine da cabine da cab).\nPara ver de novo, mande *pátio*.' then
+    raise exception 'R1p: o painel com a etapa (% / %)', v_t, v_texto;
+  end if;
+  -- o contexto do validador do painel com a etapa: o Zeca em nomes_de_outros, o João na lista (a linha passa no validador
+  -- real: validador_parceiro_test.ts)
+  v_r := public._parceiro_contexto_do_validador(v_x.id, v_texto, v_x.dados, '2027-01-14 18:02-03');
+  if not (v_r -> 'nomes_de_outros' ? 'Zeca F.') or not (v_r -> 'nomes_da_lista' ? 'João S.') then
+    raise exception 'R1q: o contexto do validador do painel com a etapa (%)', v_r;
+  end if;
+  -- o pátio direto e o bloco P11 levam a etapa
+  v_r := public.parceiro_patio_pedido(v_nt, pg_temp.f4p_msg('5547900017602', 'patio', c_t + interval '1 minute'), c_t + interval '1 minute');
+  select * into v_x from public.retorno_saidas s where s.id = nullif(v_r ->> 'saida_id', '')::uuid;
+  if v_r ->> 'acao' is distinct from 'direto' or v_x.dados -> 'linhas' -> 0 ->> 'etapa' is distinct from 'instalação do painel solar'
+     or public._parceiro_painel_texto('parceiro_patio', 'direto', v_x.dados -> 'linhas', 0, date '2027-01-14', false) ->> 'texto'
+        not like E'Pátio HBR · 14/01\n1. Motorhome de João S.: em serviço hoje (instalação do painel solar).\n2. Motorhome de Kauê E.: em serviço hoje.\n%' then
+    raise exception 'R1r: o pátio direto sem a etapa (%)', v_r;
+  end if;
+  if public._parceiro_linhas_que_saem(v_pt, c_t) -> 0 ->> 'etapa' is distinct from 'instalação do painel solar' then
+    raise exception 'R1s: o bloco P11 sem a etapa';
+  end if;
+  -- o texto: a etapa só vale em em_servico; a etapa torta nos dados dá 22023 (a linha sai com fora_por = 'texto')
+  if public._parceiro_texto('parceiro_painel', 'linha',
+       '{"n": 1, "bem": "motorhome", "cliente": "João S.", "estado": "pronto", "etapa": "instalação do painel solar"}'::jsonb)
+     is distinct from '1. Motorhome de João S.: pronto; o cliente já foi avisado para combinar a retirada.' then
+    raise exception 'R1t: a etapa entrou numa linha que não é em_servico';
+  end if;
+  begin
+    perform public._parceiro_texto('parceiro_painel', 'linha',
+      '{"n": 1, "bem": "motorhome", "cliente": "João S.", "estado": "em_servico", "etapa": "troca de 2 baterias"}'::jsonb);
+    raise exception 'R1u: a etapa torta teve texto';
+  exception when sqlstate '22023' then
+    null;
+  end;
+
+  -- Desligada de novo: as linhas voltam às de antes, e a saída do pátio que já tinha a etapa sai sem ela
+  update public.retorno_config set parceiro_etapa_ligada = false where id;
+  if public.parceiro_linhas(v_pt, c_t) is distinct from v_esperado then
+    raise exception 'R1v: desligar de novo não voltou às linhas de antes';
+  end if;
+  if public._parceiro_painel_texto('parceiro_patio', 'direto', v_x.dados -> 'linhas', 0, date '2027-01-14', false) ->> 'texto'
+     not like E'Pátio HBR · 14/01\n1. Motorhome de João S.: em serviço hoje.\n2. Motorhome de Kauê E.: em serviço hoje.\n%' then
+    raise exception 'R1w: a saída agendada com a etapa a levou com a chave desligada';
+  end if;
   update public.retorno_config set patio_nivel = 'cartao' where id;
 
   -- ── A varredura do parceiro: as funções da P7 fechadas a anon e authenticated ──
