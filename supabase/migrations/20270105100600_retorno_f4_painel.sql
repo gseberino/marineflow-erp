@@ -461,10 +461,20 @@ begin
                        from public.os_interessados oi
                       where oi.parceiro_id = p_parceiro
                         and public._parceiro_nome_curto(oi.client_id) is not null)
+               -- conferência de 10/11: o nome completo dos clientes do parceiro, porque _parceiro_etapa_ok compara toda palavra
+               -- e o sobrenome em minúscula ("ajuste do quadro do pereira") é o que o nome curto existe para esconder
+               || array(select distinct x.n
+                          from public.os_interessados oi
+                          join public.clients c on c.id = oi.client_id,
+                               unnest(array[c.name, c.display_name]) as x(n)
+                         where oi.parceiro_id = p_parceiro and nullif(btrim(x.n), '') is not null)
                -- revisão de 10/11 (seguranca-r1): também o nome de quem trabalha na OS (equipe e favorecidos ativos), que a
-               -- tarefa do dia pode trazer em minúscula ("ajuste com o dario"); _parceiro_etapa_ok compara o 1º nome
-               || array(select u.full_name from public.app_users u where u.active and nullif(btrim(u.full_name), '') is not null)
-               || array(select p.name from public.payees p where p.active and nullif(btrim(p.name), '') is not null);
+               -- tarefa do dia pode trazer em minúscula ("ajuste com o dario"). Só o 1º nome: o resto pode ser nome de empresa
+               -- com palavra de ofício ("Elétrica"), que barraria toda etapa
+               || array(select split_part(btrim(u.full_name), ' ', 1) from public.app_users u
+                         where u.active and nullif(btrim(u.full_name), '') is not null)
+               || array(select split_part(btrim(p.name), ' ', 1) from public.payees p
+                         where p.active and nullif(btrim(p.name), '') is not null);
   end if;
   for v_l in select l from jsonb_array_elements(v_todas) l loop
     if v_l ->> 'fora_por' is null then
