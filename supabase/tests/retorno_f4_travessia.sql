@@ -104,7 +104,6 @@ declare
   v_msg uuid;
   v_linhas jsonb;
   v_sx public.retorno_saidas;
-  v_n integer;
 begin
   begin
   select d.id into v_dono from public._comprovante_dono() d;
