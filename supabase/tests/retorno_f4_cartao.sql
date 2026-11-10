@@ -928,11 +928,11 @@ begin
     values ('OS-98891', v_c, v_ves, 'in_progress', 'approved', 'repair', '2026-10-01 10:00-03', '2026-10-01 10:00-03', 0,
             c_t - interval '2 hours')
     returning id into v_ot;
-  perform pg_temp.f4k_etapa(v_ot, 'Instalação do painel solar', date '2027-01-12');
+  perform pg_temp.f4k_etapa(v_ot, 'Instalação do inversor solar', date '2027-01-12');
   perform pg_temp.f4k_liga(v_ot, v_pt, 'indicou');
   update public.retorno_config set parceiro_etapa_ligada = true where id;
   v_linhas := public.parceiro_linhas(v_pt, c_t);
-  if jsonb_array_length(v_linhas) is distinct from 1 or v_linhas -> 0 ->> 'etapa' is distinct from 'instalação do painel solar' then
+  if jsonb_array_length(v_linhas) is distinct from 1 or v_linhas -> 0 ->> 'etapa' is distinct from 'instalação do inversor solar' then
     raise exception 'R1a: a linha da REC sem a etapa (%)', v_linhas;
   end if;
   insert into public.parceiro_paineis (parceiro_id, dia, estado, mudou, linhas, impressao, criado_em)
@@ -942,12 +942,12 @@ begin
   v_fq := public._parceiro_fila_por('patio', v_pt, v_nt, 'patio:' || v_nt || ':2027-01-12', '2027-01-12 21:59-03',
                                     jsonb_build_object('pedido_em', c_t, 'dia', '2027-01-12'));
   v_item := public._parceiro_item_montar(v_fp, 1::smallint, c_t);
-  if v_item -> 'retrato' -> 'ver' ->> 0 is distinct from '1. Motorhome de Davi E.: em serviço hoje (instalação do painel solar).' then
+  if v_item -> 'retrato' -> 'ver' ->> 0 is distinct from '1. Motorhome de Davi E.: em serviço hoje (instalação do inversor solar).' then
     raise exception 'R1b: o *ver* do painel sem a etapa (%)', v_item -> 'retrato';
   end if;
   v_item := public._parceiro_item_montar(v_fq, 2::smallint, c_t);
-  if v_item -> 'retrato' -> 'linhas' -> 0 ->> 'etapa' is distinct from 'instalação do painel solar'
-     or v_item -> 'retrato' -> 'ver' ->> 0 is distinct from E'Pátio HBR · 12/01\n1. Motorhome de Davi E.: em serviço hoje (instalação do painel solar).' then
+  if v_item -> 'retrato' -> 'linhas' -> 0 ->> 'etapa' is distinct from 'instalação do inversor solar'
+     or v_item -> 'retrato' -> 'ver' ->> 0 is distinct from E'Pátio HBR · 12/01\n1. Motorhome de Davi E.: em serviço hoje (instalação do inversor solar).' then
     raise exception 'R1c: o pátio pelo cartão sem a etapa (%)', v_item -> 'retrato';
   end if;
   update public.retorno_config set parceiro_etapa_ligada = false where id;
