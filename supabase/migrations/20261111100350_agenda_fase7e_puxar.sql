@@ -175,13 +175,16 @@ begin
             v_p := public.agenda_propor('os', v_d, null, array[v_os], v_rs, false, 'vigia', null, p_hoje, p_agora);
           else
             -- Em teste, as OS já puxadas nesta rodada não estão no banco, e a simulação desta não veria o que elas ocupam (o meio-dia de cada pessoa,
-            -- a ponta do dono, a frente). Aqui elas entram como o agenda_aplicar as deixaria (sai o que cancelam, entra o que criam, vigente: o motor
-            -- e a grade não separam publicada de fixada), a simulação roda e o bloco desfaz tudo; só o resultado dela fica. De verdade, a 1ª já
-            -- está gravada e a 2ª simulação a lê do banco: este bloco nunca roda (v_tst só cresce em teste), nem com puxar_max_os = 1.
+            -- a ponta do dono, a frente). Aqui as alocações delas ficam como o agenda_aplicar as deixaria (sai o que cancelam, a fixada com a chave,
+            -- como lá; entra o que criam, vigente: o motor e a grade não separam publicada de fixada), a simulação roda e o bloco desfaz tudo, a chave
+            -- também; só o resultado dela fica. De verdade, a 1ª já está gravada e a 2ª simulação a lê do banco: este bloco nunca roda (v_tst só
+            -- cresce em teste), nem com puxar_max_os = 1.
             begin
+              perform set_config('agenda.mexe_fixado', 'on', true);
               update public.agenda_alocacoes a set estado = 'cancelada'
                 from jsonb_array_elements(v_tst) i, jsonb_array_elements(i -> 'alocacoes') x
                where i ->> 'op' = 'cancelar' and a.id = (x ->> 'alocacao_id')::uuid;
+              perform set_config('agenda.mexe_fixado', 'off', true);
               insert into public.agenda_alocacoes (service_order_id, payee_id, dia, turno, presenca, tipo, estado, reserva_de)
               select (i ->> 'os')::uuid, (x ->> 'payee_id')::uuid, (x ->> 'dia')::date, x ->> 'turno', x ->> 'presenca', i ->> 'tipo', 'publicada', i ->> 'reserva_de'
                 from jsonb_array_elements(v_tst) i, jsonb_array_elements(i -> 'alocacoes') x

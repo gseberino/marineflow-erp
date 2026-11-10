@@ -9,7 +9,7 @@
 --   P5 de verdade: a alocação nasce em D, releio depois; a reserva vira compromisso; uma vez por dia pela rodada inteira
 --   P6 o erro: vai a app_error_logs (gestor:puxar), não lança e segue para a próxima OS; query_canceled não é engolido
 --   P7 a OS na forma real (conferência do P4b): a "abre e fecha" pela regra (a ponta do dono em D) e a que pede o dono, com o dia declarado por ele e sem a rotina;
---      e 2 ou 3 por dia (2ª e 3ª conferências): em teste, a simulação de cada OS seguinte vê as já puxadas (num bloco que se desfaz) e diz o mesmo que o de verdade (P7e a P7k)
+--      e 2 ou 3 por dia (2ª e 3ª conferências): em teste, a simulação de cada OS seguinte vê as já puxadas (num bloco que se desfaz, a fixada que elas cancelam com a chave, como o agenda_aplicar) e diz o mesmo que o de verdade (P7e a P7l)
 --
 -- ═══ COMO RODAR ═══  Na bancada: node scripts/bancada-agenda/rodar.mjs. Em produção, só DEPOIS de aplicar a migration, com o OK: npx supabase@2.111.0 db query --linked -f supabase/tests/agenda_fase7e_puxar.sql
 --   Tudo dentro de begin/rollback. O que usa fixture só roda na bancada (fora dela sai PULADO). Uma linha false é defeito.
@@ -1333,6 +1333,41 @@ begin
   exception when sqlstate 'P0098' then null;
   when others then v_res := pg_temp.ok(v_res, 'P7k sem exceção', false, sqlerrm);
   end;
+
+  -- (3h) a 1ª tem uma reserva do Rafael em D+1 de manhã que está fixada (pelo congelamento, e pelo dono), e o Rafael fica indisponível em D+1: a simulação da 1ª
+  -- cancela a reserva (violada), e o agenda_aplicar a tira com a chave do fixado. O bloco desfeito tem de tirar do mesmo jeito; sem a chave, o gatilho recusava
+  -- ("Esse meio-dia está fixado") e a 2ª dava erro em teste, com uma linha em app_error_logs, onde o de verdade não dá erro (retomada da 3ª correção).
+  -- Com a fixada pelo dono, o compromisso da 1ª sai crítico (fixada_pelo_dono) e o agenda_aplicar sem a pergunta só leva o cancelar: de verdade a 1ª fica
+  -- "puxada" sem alocação e a 2ª pega a tarde do Rafael. Isso é do de verdade e fica fora desta correção (achado da retomada); aqui só se cobra o mesmo nos dois modos.
+  foreach v_k in array array['congelamento', 'dono'] loop
+  begin
+    v_os := pg_temp.cena();
+    perform pg_temp.aloca(v_os, v_raf, pg_temp.d() + 1, 'manha', 'reserva');
+    update public.agenda_alocacoes set estado = 'fixada', fixado_por = v_k where service_order_id = v_os and tipo = 'reserva';
+    insert into public.agenda_disponibilidade (payee_id, periodo, situacao, origem, nota, criado_por)
+    values (v_raf, daterange(pg_temp.d() + 1, pg_temp.d() + 1, '[]'), 'indisponivel', 'dono', 'teste 7e P4b', pg_temp.adm());
+    v_b := pg_temp.pronta(902);
+    update public.agenda_config set puxar_max_os = 2 where id;
+    v_e0 := pg_temp.foto();
+    v_n := (select count(*) from public.app_error_logs where action = 'gestor:puxar');
+    r := pg_temp.rodar();
+    v_res := pg_temp.ok(v_res, 'P7l em teste, a 1ª com a reserva fixada (' || v_k || ') que viola: a 1ª puxada e a 2ª simulada sem erro; nada gravado, nada em app_error_logs, a chave do fixado não sobra',
+      pg_temp.puxada(r, v_os) and (r ->> 'erros')::int = 0 and pg_temp.fora(r, v_b) <> 'erro'
+      and (select count(*) from public.app_error_logs where action = 'gestor:puxar') = v_n and pg_temp.foto() = v_e0
+      and current_setting('agenda.mexe_fixado', true) is distinct from 'on',
+      r::text || ' ' || v_e0 || ' -> ' || pg_temp.foto() || ' chave=' || coalesce(current_setting('agenda.mexe_fixado', true), 'nula'));
+    update public.agenda_config set modo_urgencia = 'ligado' where id;
+    r2 := pg_temp.rodar();
+    v_res := pg_temp.ok(v_res, 'P7l2 de verdade, a mesma montagem (' || v_k || '): sem erro, a reserva fixada da 1ª cancelada, e o teste disse o mesmo (o número e o resultado de cada OS)',
+      (r2 ->> 'erros')::int = 0
+      and exists (select 1 from public.agenda_alocacoes a where a.service_order_id = v_os and a.tipo = 'reserva' and a.fixado_por = v_k and a.estado = 'cancelada')
+      and r ->> 'puxadas' = r2 ->> 'puxadas' and pg_temp.fora(r, v_os) = pg_temp.fora(r2, v_os) and pg_temp.fora(r, v_b) = pg_temp.fora(r2, v_b),
+      'teste ' || (r ->> 'puxadas') || ' (' || pg_temp.fora(r, v_os) || ', ' || pg_temp.fora(r, v_b) || '), de verdade ' || (r2 ->> 'puxadas') || ' (' || pg_temp.fora(r2, v_os) || ', ' || pg_temp.fora(r2, v_b) || ') ' || r2::text);
+    raise exception 'desfaz' using errcode = 'P0098';
+  exception when sqlstate 'P0098' then null;
+  when others then v_res := pg_temp.ok(v_res, 'P7l sem exceção (' || v_k || ')', false, sqlerrm);
+  end;
+  end loop;
   perform pg_temp.gravar(v_res);
 end
 $p7$;
