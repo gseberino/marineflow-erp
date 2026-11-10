@@ -84,8 +84,8 @@ declare
   v_m uuid;
   v uuid;
 begin
-  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, occurred_at)
-    values ('inbound', p_fone, 'text', 'mensagem de teste f4 canal', 'teste-f4-canal-' || md5(p_fone || p_em::text || clock_timestamp()::text), p_em)
+  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, occurred_at, hora_real)
+    values ('inbound', p_fone, 'text', 'mensagem de teste f4 canal', 'teste-f4-canal-' || md5(p_fone || p_em::text || clock_timestamp()::text), p_em, p_em)
     returning id into v_m;
   -- um caso vivo por número (retorno_aberturas_uma_viva): o anterior fecha antes, como na vida real
   update public.retorno_aberturas a
@@ -813,8 +813,8 @@ begin
 
   -- ── 25. Linha 1b: a resposta humana do dono à chave depois da abertura cancela; sem ela, sai ──
   v_caso := pg_temp.f4c_caso('5547900014502', c_t - interval '40 minutes');
-  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, occurred_at, raw_payload)
-    values ('outbound', '5547900014502', 'text', 'ok', 'teste-f4-canal-25-ok', c_t - interval '20 minutes', '{"data": {}}'::jsonb);
+  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, occurred_at, hora_real, raw_payload)
+    values ('outbound', '5547900014502', 'text', 'ok', 'teste-f4-canal-25-ok', c_t - interval '20 minutes', c_t - interval '20 minutes', '{"data": {}}'::jsonb);
   v_s := pg_temp.f4c_agenda('parceiro_recibo', null, v_n2, '{}', c_t - interval '10 minutes', '25a', v_caso);
   perform public.parceiro_pegar(c_t);
   if pg_temp.f4c_estado(v_s) is distinct from 'cancelada/respondida_pelo_dono'
@@ -838,8 +838,8 @@ begin
     from public.service_orders so where so.client_id in (v_a, v_b);
   v_antes := v_antes || (select md5(string_agg(oi.id::text || oi.situacao || coalesce(oi.papel, ''), ',' order by oi.id))
                            from public.os_interessados oi where oi.parceiro_id = v_p);
-  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, occurred_at)
-    values ('inbound', '5547900014501', 'text', 'pode fazer a troca da bateria', 'teste-f4-canal-14a', '2027-01-13 10:00-03')
+  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, occurred_at, hora_real)
+    values ('inbound', '5547900014501', 'text', 'pode fazer a troca da bateria', 'teste-f4-canal-14a', '2027-01-13 10:00-03', '2027-01-13 10:00-03')
     returning id into v_m;
   v_r := public.retorno_abrir(v_m, false, '2027-01-13 10:00:05-03');
   v_caso := (v_r ->> 'abertura_id')::uuid;
@@ -859,13 +859,13 @@ begin
   update public.retorno_aberturas a
      set estado = 'fechada', fechada_em = greatest(a.aberta_em, '2027-01-13 10:00-03'::timestamptz), fechada_motivo = 'expirou'
    where a.chave = '00014502' and a.estado in ('aberta', 'vencida');
-  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, occurred_at)
-    values ('inbound', '5547900014502', 'text', 'como tá a bateria do joão?', 'teste-f4-canal-14c', '2027-01-13 11:00-03')
+  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, occurred_at, hora_real)
+    values ('inbound', '5547900014502', 'text', 'como tá a bateria do joão?', 'teste-f4-canal-14c', '2027-01-13 11:00-03', '2027-01-13 11:00-03')
     returning id into v_m;
   v_r := public.retorno_abrir(v_m, false, '2027-01-13 11:00:05-03');
   v_caso2 := (v_r ->> 'abertura_id')::uuid;
-  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, occurred_at)
-    values ('inbound', '5547900014502', 'text', 'e então, alguma novidade da bateria?', 'teste-f4-canal-14d', '2027-01-13 13:00-03')
+  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, occurred_at, hora_real)
+    values ('inbound', '5547900014502', 'text', 'e então, alguma novidade da bateria?', 'teste-f4-canal-14d', '2027-01-13 13:00-03', '2027-01-13 13:00-03')
     returning id into v_m;
   v_r := public.retorno_abrir(v_m, false, '2027-01-13 13:00:05-03');
   select * into v_ab from public.retorno_aberturas a where a.id = v_caso2;
