@@ -15,7 +15,12 @@
 // Reverter: apagar este arquivo junto com rodada.ts e index.ts.
 
 import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { type ContextoDoValidador, validarSaida } from "../_shared/retorno/validador.ts";
+import {
+  type ContextoAoParceiro,
+  type ContextoDoValidador,
+  validarSaida,
+  validarSaidaAoParceiro,
+} from "../_shared/retorno/validador.ts";
 import {
   type Db,
   type DependenciasDaRodada,
@@ -34,6 +39,8 @@ import {
   RPC_DECISAO,
   RPC_LOG,
   RPC_PEGAR,
+  RPC_PEGAR_PARCEIRO,
+  RPC_SEM_LINHAS,
   type ResumoDaRodada,
 } from "./rodada.ts";
 
@@ -719,4 +726,403 @@ Deno.test("as duas listas de origens do retorno são iguais", async () => {
   const lista = /const ORIGENS_DO_RETORNO: ReadonlySet<string> = new Set\(\[([^\]]*)\]\)/.exec(fonte);
   assert(lista, "a lista sumiu de rodada.ts");
   assertEquals([...lista[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]), [...ORIGENS_DO_RETORNO]);
+});
+
+// ─── F4 (P5.2): as saídas do parceiro ─────────────────────────────────────────────────────────────────────────────────
+//
+// parceiro_pegar (C-PEGAR-P) só é chamado quando retorno_pegar devolve nulo, na mesma rodada. O validador do parceiro vale só
+// para o que veio de parceiro_pegar com audiência "parceiro"; o painel e o pátio são validados linha a linha, e a linha
+// reprovada sai por parceiro_saida_sem_linhas (C-LINHAS) antes de validar o texto inteiro uma vez. Nomes, telefones e
+// números inventados.
+
+const SAIDA_P = (n: number) => `22222222-2222-4222-8222-${String(n).padStart(12, "0")}`;
+const PAINEL_CAB = "Pátio HBR · ter (12/01)";
+const PAINEL_L1 = "1. Motorhome de Joana S.: em serviço hoje.";
+const PAINEL_L2 = "2. Motorhome de Dirce P.: sem novidade desde 02/01.";
+const PAINEL_PE = "Para ver de novo, mande *pátio*.";
+const PAINEL = [PAINEL_CAB, PAINEL_L1, PAINEL_L2, PAINEL_PE].join("\n");
+const PAINEL_SEM_2 = [PAINEL_CAB, PAINEL_L1, PAINEL_PE].join("\n");
+const RECIBO_P = "Oi, Carla! Já passei sua mensagem ao Gustavo, e ele retorna para vocês ainda hoje.";
+
+// O contexto que parceiro_pegar devolve para o painel: os trechos do texto cortado nos nomes e nas datas, mais os mesmos
+// trechos quebrados por linha (é o que deixa cada linha ser validada sozinha).
+const CTX_PAINEL: ContextoAoParceiro = {
+  audiencia: "parceiro",
+  datas_permitidas: ["02/01", "12/01", "ter (12/01)"],
+  horas_permitidas: [],
+  nome_permitido: null,
+  nomes_de_outros: [],
+  nomes_da_lista: ["Joana S.", "Dirce P."],
+  papel_do_parceiro: "indicou",
+  os_permitidas: [],
+  textos_do_cliente: [],
+  trechos_do_modelo: [
+    "Pátio HBR · ",
+    "\n1. Motorhome de ",
+    ": em serviço hoje.\n2. Motorhome de ",
+    ": sem novidade desde ",
+    ".\nPara ver de novo, mande *pátio*.",
+    "1. Motorhome de ",
+    ": em serviço hoje.",
+    "2. Motorhome de ",
+    ".",
+    "Para ver de novo, mande *pátio*.",
+  ],
+  marcas: { tem_proposta: false, tem_topo: false, cliente_ouviu: false, conferida: false },
+};
+// Dirce P. virou "outro" (vetou depois de montar): a linha 2 reprova por nome_de_outro, e o resto passa.
+const CTX_DIRCE_FORA: ContextoAoParceiro = {
+  ...structuredClone(CTX_PAINEL),
+  nomes_da_lista: ["Joana S."],
+  nomes_de_outros: ["Dirce P."],
+};
+const CTX_RECIBO_P: ContextoAoParceiro = {
+  ...structuredClone(CTX_PAINEL),
+  datas_permitidas: ["ainda hoje"],
+  nome_permitido: "Carla",
+  nomes_da_lista: [],
+  trechos_do_modelo: ["Oi, ", "! Já passei sua mensagem ao Gustavo, e ele retorna para vocês ", "."],
+};
+
+function itemParceiro(n: number, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    saida_id: SAIDA_P(n),
+    tentativa: 1,
+    dedupe_key: `parceiro:painel:${CASO(n)}:${SAIDA(n)}`,
+    tipo: "parceiro_painel",
+    variante: null,
+    origem: "retorno_parceiro",
+    classe: "resumo_parceiro",
+    modo: "sombra",
+    phone: FONE(50 + n),
+    texto: PAINEL,
+    validador: structuredClone(CTX_PAINEL),
+    linhas: [{ n: 1, texto: PAINEL_L1 }, { n: 2, texto: PAINEL_L2 }],
+    ...extra,
+  };
+}
+function reciboParceiro(n: number, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return itemParceiro(n, {
+    dedupe_key: `parceiro:recibo:${CASO(n)}`,
+    tipo: "parceiro_recibo",
+    classe: "resposta_imediata",
+    texto: RECIBO_P,
+    validador: structuredClone(CTX_RECIBO_P),
+    linhas: undefined,
+    ...extra,
+  });
+}
+
+type SemLinhas = (args: Record<string, unknown>) => RespostaDoBanco | Promise<RespostaDoBanco>;
+const SEM_LINHAS_NAO_ESPERADO: SemLinhas = () => {
+  throw new Error("parceiro_saida_sem_linhas não era esperado neste teste");
+};
+
+/** O banco falso com as duas RPCs do parceiro (o resto, como o BancoFalso). */
+class BancoDoParceiro extends BancoFalso {
+  private pegadasParceiro = 0;
+  constructor(
+    pegarRetorno: Pegar,
+    private pegarParceiro: Pegar,
+    private semLinhas: SemLinhas = SEM_LINHAS_NAO_ESPERADO,
+    aoRegistrar: AoRegistrar = REGISTRA_OK,
+  ) {
+    super(pegarRetorno, aoRegistrar);
+  }
+  override rpc(fn: string, args: Record<string, unknown>): Promise<RespostaDoBanco> {
+    if (fn === RPC_PEGAR_PARCEIRO) {
+      this.chamadas.push({ fn, args: structuredClone(args) });
+      return Promise.resolve(this.pegarParceiro(this.pegadasParceiro++));
+    }
+    if (fn === RPC_SEM_LINHAS) {
+      this.chamadas.push({ fn, args: structuredClone(args) });
+      try {
+        return Promise.resolve(this.semLinhas(args));
+      } catch (e) {
+        return Promise.reject(e);
+      }
+    }
+    return super.rpc(fn, args);
+  }
+}
+
+Deno.test("parceiro: premissas dos textos de exemplo no validador do parceiro (e linha a linha)", () => {
+  assertEquals(validarSaidaAoParceiro(PAINEL, CTX_PAINEL), { ok: true });
+  for (const l of [PAINEL_L1, PAINEL_L2]) assertEquals(validarSaidaAoParceiro(l, CTX_PAINEL), { ok: true }, l);
+  assertEquals(validarSaidaAoParceiro(PAINEL_L1, CTX_DIRCE_FORA), { ok: true });
+  assertEquals(validarSaidaAoParceiro(PAINEL_L2, CTX_DIRCE_FORA), { ok: false, regras: ["nome_de_outro"] });
+  assertEquals(validarSaidaAoParceiro(PAINEL_SEM_2, CTX_DIRCE_FORA), { ok: true });
+  assertEquals(validarSaidaAoParceiro(RECIBO_P, CTX_RECIBO_P), { ok: true });
+  // o validador do cliente reprova o contexto do parceiro pela audiência
+  assert(!validarSaida(RECIBO_P, CTX_RECIBO_P as unknown as ContextoDoValidador).ok);
+});
+
+Deno.test("parceiro: retorno_pegar vem antes, e parceiro_pegar só quando ele devolve nulo; sombra no validador do parceiro", async () => {
+  {
+    const banco = new BancoDoParceiro(daFila([]), daFila([reciboParceiro(1)]));
+    const { envios, enviar } = envioFalso(NAO_ENVIA);
+    const r = await rodada(banco, deps(enviar));
+    assertEquals(r, resumo({ itens: 1, sombra: 1 }));
+    assertEquals(envios.length, 0);
+    assertEquals(banco.chamadas.map((c) => c.fn), [RPC_PEGAR, RPC_PEGAR_PARCEIRO, RPC_DECISAO, RPC_PEGAR_PARCEIRO]);
+    assertEquals(banco.de(RPC_PEGAR_PARCEIRO)[0], { p_agora: "2026-11-17T13:00:00.000Z" });
+    assertEquals(banco.decisoes(), [{ p_saida: SAIDA_P(1), p_estado: "sombra", p_detalhe: { validador: { ok: true } } }]);
+  }
+  // Com item do retorno, ele sai primeiro; esgotado o retorno, a rodada não volta a perguntar a ele.
+  {
+    const banco = new BancoDoParceiro(daFila([item(1)]), daFila([reciboParceiro(2), reciboParceiro(3)]));
+    const { enviar } = envioFalso(NAO_ENVIA);
+    const r = await rodada(banco, deps(enviar));
+    assertEquals(r, resumo({ itens: 3, sombra: 3 }));
+    assertEquals(banco.chamadas.map((c) => c.fn), [
+      RPC_PEGAR,
+      RPC_DECISAO,
+      RPC_PEGAR,
+      RPC_PEGAR_PARCEIRO,
+      RPC_DECISAO,
+      RPC_PEGAR_PARCEIRO,
+      RPC_DECISAO,
+      RPC_PEGAR_PARCEIRO,
+    ]);
+    assertEquals(banco.decisoes().map((d) => d.p_saida), [SAIDA(1), SAIDA_P(2), SAIDA_P(3)]);
+  }
+});
+
+// O aviso ao cliente final (retorno_aviso) passa no validador do cliente, com o contexto do cliente.
+const AVISO_AO_CLIENTE = {
+  origem: "retorno_aviso",
+  tipo: "parceiro_aviso_cliente",
+  classe: "aviso",
+  dedupe_key: `parceiro:aviso:${CASO(4)}:${SAIDA(4)}`,
+  texto: TEXTO_BOM,
+  validador: structuredClone(CONTEXTO),
+};
+
+Deno.test("parceiro: ligado, o envio leva a origem do parceiro, o contexto retorno:<saída> e a chave parceiro:… do banco", async () => {
+  for (const extra of [{}, AVISO_AO_CLIENTE]) {
+    const it = reciboParceiro(1, { modo: "ligado", ...structuredClone(extra) });
+    const banco = new BancoDoParceiro(daFila([]), daFila([it]));
+    const { envios, enviar } = envioFalso(() => TABELA[0][1]);
+    const r = await rodada(banco, deps(enviar));
+    assertEquals(r, resumo({ itens: 1, enviadas: 1 }), it.origem as string);
+    assertEquals(envios, [{
+      phone: FONE(51),
+      message: it.texto as string,
+      origem: it.origem as string,
+      context: "retorno:" + SAIDA_P(1),
+      dedupe_key: it.dedupe_key as string,
+    }]);
+    assertEquals(banco.decisoes()[0].p_estado, "enviada");
+  }
+  // A chave em sombra (:sombra) também é do parceiro.
+  const banco = new BancoDoParceiro(daFila([]), daFila([reciboParceiro(1, { dedupe_key: `parceiro:recibo:${CASO(1)}:sombra` })]));
+  const { enviar } = envioFalso(NAO_ENVIA);
+  assertEquals(await rodada(banco, deps(enviar)), resumo({ itens: 1, sombra: 1 }));
+});
+
+Deno.test("parceiro: o validador do parceiro reprova valor (sempre, inclusive com número depois de 'valor')", async () => {
+  for (const texto of [RECIBO_P + " Custa R$ 100.", RECIBO_P + " O valor de 300 fica com ele."]) {
+    const esperado = validarSaidaAoParceiro(texto, CTX_RECIBO_P);
+    assert(!esperado.ok && esperado.regras.includes("valor_a_parceiro"), texto);
+    for (const modo of ["sombra", "ligado"]) {
+      const banco = new BancoDoParceiro(daFila([]), daFila([reciboParceiro(1, { modo, texto })]));
+      const { envios, enviar } = envioFalso(NAO_ENVIA);
+      const r = await rodada(banco, deps(enviar));
+      assertEquals(r, resumo({ itens: 1, recusadas: 1 }), texto);
+      assertEquals(envios.length, 0);
+      assertEquals(banco.decisoes(), [{
+        p_saida: SAIDA_P(1),
+        p_estado: "recusada",
+        p_detalhe: { motivo: "validador", regras: esperado.ok ? [] : esperado.regras },
+      }], texto);
+    }
+  }
+});
+
+Deno.test("parceiro: audiência ausente ou de outro valor reprova, como hoje", async () => {
+  const semAudiencia = structuredClone(CTX_RECIBO_P) as unknown as Record<string, unknown>;
+  delete semAudiencia.audiencia;
+  const casos: Array<[unknown, string]> = [
+    [semAudiencia, "contexto"],
+    [{ ...structuredClone(CTX_RECIBO_P), audiencia: "cliente" }, "audiencia"],
+    [{ ...structuredClone(CTX_RECIBO_P), audiencia: "PARCEIRO" }, "audiencia"],
+    [null, "contexto"],
+  ];
+  for (const [validador, regra] of casos) {
+    const banco = new BancoDoParceiro(daFila([]), daFila([reciboParceiro(1, { modo: "ligado", validador })]));
+    const { envios, enviar } = envioFalso(NAO_ENVIA);
+    await rodada(banco, deps(enviar));
+    assertEquals(envios.length, 0, regra);
+    const d = banco.decisoes()[0];
+    assertEquals(d.p_estado, "recusada", regra);
+    assert((d.p_detalhe as { regras: string[] }).regras.includes(regra), `${regra}: ${JSON.stringify(d.p_detalhe)}`);
+  }
+});
+
+Deno.test("parceiro: o validador vem da origem: aviso ao cliente com contexto do parceiro reprova com 'audiencia'", async () => {
+  const banco = new BancoDoParceiro(
+    daFila([]),
+    daFila([reciboParceiro(1, { modo: "ligado", ...structuredClone(AVISO_AO_CLIENTE), validador: structuredClone(CTX_RECIBO_P) })]),
+  );
+  const { envios, enviar } = envioFalso(NAO_ENVIA);
+  await rodada(banco, deps(enviar));
+  assertEquals(envios.length, 0);
+  assert((banco.decisoes()[0].p_detalhe as { regras: string[] }).regras.includes("audiencia"));
+});
+
+Deno.test("parceiro: a audiência do parceiro num item do retorno_pegar reprova com 'audiencia' (o validador mais largo é só do parceiro)", async () => {
+  const banco = new BancoDoParceiro(
+    daFila([item(1, { ...LIGADO, texto: RECIBO_P, validador: structuredClone(CTX_RECIBO_P) })]),
+    daFila([]),
+  );
+  const { envios, enviar } = envioFalso(NAO_ENVIA);
+  await rodada(banco, deps(enviar));
+  assertEquals(envios.length, 0);
+  const d = banco.decisoes()[0];
+  assertEquals(d.p_estado, "recusada");
+  assert((d.p_detalhe as { regras: string[] }).regras.includes("audiencia"));
+});
+
+Deno.test("parceiro: item torto (chave e origem trocadas entre retorno e parceiro): recusada/validador com 'contexto', sem envio", async () => {
+  const doParceiro: Array<[Record<string, unknown>, string]> = [
+    [{ dedupe_key: `retorno:${CASO(1)}:recibo` }, "chave_invalida"],
+    [{ dedupe_key: "parceiro" }, "chave_invalida"],
+    [{ origem: "retorno_recibo" }, "origem_invalida"],
+    [{ origem: "assistente" }, "origem_invalida"],
+  ];
+  for (const [extra, codigo] of doParceiro) {
+    const banco = new BancoDoParceiro(daFila([]), daFila([reciboParceiro(1, { modo: "ligado", ...extra })]));
+    const { envios, enviar } = envioFalso(NAO_ENVIA);
+    await rodada(banco, deps(enviar));
+    assertEquals(envios.length, 0, codigo);
+    assertEquals(banco.decisoes(), [{
+      p_saida: SAIDA_P(1),
+      p_estado: "recusada",
+      p_detalhe: { motivo: "validador", regras: ["contexto"], codigo },
+    }], codigo);
+  }
+  // E o item do retorno_pegar com chave ou origem do parceiro.
+  const doRetorno: Array<[Record<string, unknown>, string]> = [
+    [{ ...LIGADO, dedupe_key: `parceiro:recibo:${CASO(1)}` }, "chave_invalida"],
+    [{ ...LIGADO, origem: "retorno_parceiro" }, "origem_invalida"],
+  ];
+  for (const [extra, codigo] of doRetorno) {
+    const banco = new BancoDoParceiro(daFila([item(1, extra)]), daFila([]));
+    const { envios, enviar } = envioFalso(NAO_ENVIA);
+    await rodada(banco, deps(enviar));
+    assertEquals(envios.length, 0, codigo);
+    assertEquals(banco.decisoes()[0].p_detalhe, { motivo: "validador", regras: ["contexto"], codigo }, codigo);
+  }
+});
+
+Deno.test("parceiro: a linha reprovada sai e o resto segue, com parceiro_saida_sem_linhas chamada uma vez", async () => {
+  const novo = () => ({
+    data: { texto: PAINEL_SEM_2, linhas: [{ n: 1, texto: PAINEL_L1 }], validador: structuredClone(CTX_DIRCE_FORA) },
+    error: null,
+  });
+  const banco = new BancoDoParceiro(
+    daFila([]),
+    daFila([itemParceiro(1, { modo: "ligado", validador: structuredClone(CTX_DIRCE_FORA) })]),
+    novo,
+  );
+  const { envios, enviar } = envioFalso(() => TABELA[0][1]);
+  const r = await rodada(banco, deps(enviar));
+  assertEquals(r, resumo({ itens: 1, enviadas: 1 }));
+  assertEquals(banco.de(RPC_SEM_LINHAS), [{
+    p_saida: SAIDA_P(1),
+    p_ns: [2],
+    p_regras: [{ n: 2, regras: ["nome_de_outro"] }],
+    p_agora: "2026-11-17T13:00:00.000Z",
+  }]);
+  // sai o texto novo, nunca o antigo
+  assertEquals(envios.map((e) => e.message), [PAINEL_SEM_2]);
+  assertEquals(banco.decisoes().map((d) => d.p_estado), ["enviada"]);
+  // na sombra, o mesmo caminho, sem envio
+  const sombra = new BancoDoParceiro(daFila([]), daFila([itemParceiro(1, { validador: structuredClone(CTX_DIRCE_FORA) })]), novo);
+  const s = envioFalso(NAO_ENVIA);
+  assertEquals(await rodada(sombra, deps(s.enviar)), resumo({ itens: 1, sombra: 1 }));
+  assertEquals(sombra.de(RPC_SEM_LINHAS).length, 1);
+});
+
+Deno.test("parceiro: sem linha reprovada, parceiro_saida_sem_linhas não é chamada", async () => {
+  const banco = new BancoDoParceiro(daFila([]), daFila([itemParceiro(1)]));
+  const { enviar } = envioFalso(NAO_ENVIA);
+  assertEquals(await rodada(banco, deps(enviar)), resumo({ itens: 1, sombra: 1 }));
+  assertEquals(banco.de(RPC_SEM_LINHAS).length, 0);
+});
+
+Deno.test("parceiro: {caiu: true}, exceção ou resposta torta de parceiro_saida_sem_linhas = recusada/validador, sem enviar o texto antigo", async () => {
+  const ctxTodas: ContextoAoParceiro = {
+    ...structuredClone(CTX_PAINEL),
+    nomes_da_lista: [],
+    nomes_de_outros: ["Joana S.", "Dirce P."],
+  };
+  const casos: Array<[string, SemLinhas, string]> = [
+    ["caiu", () => ({ data: { caiu: true }, error: null }), "linhas_caiu"],
+    ["exceção", () => {
+      throw new Error("banco caiu");
+    }, "sem_linhas_erro"],
+    ["erro do banco", () => ({ data: null, error: { code: "P0001" } }), "sem_linhas_erro"],
+    ["sem texto", () => ({ data: { linhas: [] }, error: null }), "sem_linhas_erro"],
+  ];
+  for (const [nome, semLinhas, codigo] of casos) {
+    const banco = new BancoDoParceiro(
+      daFila([]),
+      daFila([itemParceiro(1, { modo: "ligado", validador: structuredClone(ctxTodas) })]),
+      semLinhas,
+    );
+    const { envios, enviar } = envioFalso(NAO_ENVIA);
+    const r = await rodada(banco, deps(enviar));
+    assertEquals(envios.length, 0, nome);
+    assertEquals(r, resumo({ itens: 1, recusadas: 1 }), nome);
+    assertEquals(banco.de(RPC_SEM_LINHAS).length, 1, nome);
+    assertEquals(banco.de(RPC_SEM_LINHAS)[0].p_ns, [1, 2], nome);
+    assertEquals(banco.decisoes(), [{
+      p_saida: SAIDA_P(1),
+      p_estado: "recusada",
+      p_detalhe: { motivo: "validador", regras: ["nome_de_outro"], codigo },
+    }], nome);
+  }
+});
+
+Deno.test("parceiro: o texto novo é validado uma vez só; reprovado (cabeçalho ou rodapé) = recusada/validador", async () => {
+  const banco = new BancoDoParceiro(
+    daFila([]),
+    daFila([itemParceiro(1, { modo: "ligado", validador: structuredClone(CTX_DIRCE_FORA) })]),
+    () => ({
+      data: { texto: PAINEL_SEM_2 + " R$ 10", linhas: [{ n: 1, texto: PAINEL_L1 }], validador: structuredClone(CTX_DIRCE_FORA) },
+      error: null,
+    }),
+  );
+  const { envios, enviar } = envioFalso(NAO_ENVIA);
+  await rodada(banco, deps(enviar));
+  assertEquals(envios.length, 0);
+  assertEquals(banco.de(RPC_SEM_LINHAS).length, 1);
+  const d = banco.decisoes()[0];
+  assertEquals(d.p_estado, "recusada");
+  assertEquals((d.p_detalhe as { motivo: string }).motivo, "validador");
+  assert((d.p_detalhe as { regras: string[] }).regras.includes("valor_a_parceiro"));
+});
+
+Deno.test("parceiro: linhas tortas reprovam o item com 'contexto', sem chamar parceiro_saida_sem_linhas", async () => {
+  for (const linhas of [[{ n: "1", texto: PAINEL_L1 }], [{ n: 1, texto: null }], "linhas", [null]]) {
+    const banco = new BancoDoParceiro(daFila([]), daFila([itemParceiro(1, { modo: "ligado", linhas })]));
+    const { envios, enviar } = envioFalso(NAO_ENVIA);
+    await rodada(banco, deps(enviar));
+    assertEquals(envios.length, 0, JSON.stringify(linhas));
+    assertEquals(banco.de(RPC_SEM_LINHAS).length, 0);
+    assertEquals(banco.decisoes()[0].p_detalhe, { motivo: "validador", regras: ["contexto"], codigo: "linhas_invalidas" });
+  }
+});
+
+Deno.test("parceiro: parceiro_pegar ausente (PGRST202, 42883) é silêncio; outro erro para a rodada", async () => {
+  for (const code of ["PGRST202", "42883"]) {
+    const banco = new BancoDoParceiro(daFila([item(1)]), () => ({ data: null, error: { code } }));
+    const { enviar } = envioFalso(NAO_ENVIA);
+    assertEquals(await rodada(banco, deps(enviar)), resumo({ itens: 1, sombra: 1 }), code);
+  }
+  const banco = new BancoDoParceiro(daFila([]), () => ({ data: null, error: { code: "57014" } }));
+  const { enviar } = envioFalso(NAO_ENVIA);
+  assertEquals(await rodada(banco, deps(enviar)), resumo({ erro: "57014" }));
+  assertEquals(banco.chamadas.map((c) => c.fn), [RPC_PEGAR, RPC_PEGAR_PARCEIRO]);
 });

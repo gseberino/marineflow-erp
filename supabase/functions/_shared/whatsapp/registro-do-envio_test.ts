@@ -73,7 +73,15 @@ Deno.test("quem mandou: o usuário do JWT manda sobre o corpo; chamada de sistem
 const SAIDA = "3f2b9c1e-7a4d-4e8b-9c0f-12ab34cd56ef";
 
 Deno.test("origem do retorno: aceita só em chamada de sistema; com JWT de usuário vira tela", () => {
-  assertEquals([...ORIGENS_DO_RETORNO], ["retorno_recibo", "retorno_coleta", "retorno_adiamento", "retorno_modelo"]);
+  // F4 (P5.2): as duas origens do parceiro (o texto à MP e o aviso ao cliente final) entram no fim da lista.
+  assertEquals([...ORIGENS_DO_RETORNO], [
+    "retorno_recibo",
+    "retorno_coleta",
+    "retorno_adiamento",
+    "retorno_modelo",
+    "retorno_parceiro",
+    "retorno_aviso",
+  ]);
   for (const o of ORIGENS_DO_RETORNO) {
     assertEquals(origemDoEnvio(o, true), o, o);
     assertEquals(origemDoEnvio(o, false), "tela", `${o} com JWT`);
@@ -114,6 +122,19 @@ Deno.test("via retorno só para as origens do retorno, com sent_by nulo; as outr
     assertEquals(l.raw_payload.via, "whatsapp-send", o);
     assertEquals(l.sent_by, DONO, o);
   }
+});
+
+Deno.test("F4: as origens do parceiro valem só em chamada de sistema e gravam via retorno, sem sent_by", () => {
+  for (const o of ["retorno_parceiro", "retorno_aviso"] as const) {
+    assertEquals(ehOrigemDoRetorno(o), true, o);
+    assertEquals(origemDoEnvio(o, true), o, o);
+    assertEquals(origemDoEnvio(o, false), "tela", `${o} com JWT`);
+    const l = linhaDaMensagemEnviada({ kind: "text", message: "x" }, MIGUEL, null, DONO, o, `retorno:${SAIDA}`);
+    assertEquals(l.raw_payload, { origem: o, contexto: `retorno:${SAIDA}`, via: "retorno" }, o);
+    assertEquals(l.sent_by, null, o);
+  }
+  // Grafia diferente não é do retorno.
+  for (const o of ["retorno_parceiros", "Retorno_Aviso", "parceiro"]) assertEquals(ehOrigemDoRetorno(o), false, o);
 });
 
 Deno.test("idDaSaidaDoRetorno: contexto bom dá o id; sem prefixo, uuid curto ou outro formato dá null", () => {

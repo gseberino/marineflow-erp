@@ -28,14 +28,32 @@
 // Quem lê via hoje: só _saida_e_humana e retorno_medidas_base (que conta o automático pelo
 // audit_log, gravado em todo envio).
 //
+// Retorno F4 (P5.2): o texto à parceira (retorno_parceiro) e o aviso ao cliente final (retorno_aviso) saem pelo mesmo
+// caminho, com as mesmas três regras. O whatsapp-send confere a saída por retorno_saida_autorizada, que passa a do
+// parceiro a parceiro_saida_autorizada. A lista é compilada na edge: origem nova pede reimplantar o whatsapp-send.
+//
 // Reverter: tirar OrigemDoRetorno de OrigemDoEnvio, ORIGENS_DO_RETORNO, ehOrigemDoRetorno,
-// idDaSaidaDoRetorno e os dois ternários de linhaDaMensagemEnviada (sent_by e via).
+// idDaSaidaDoRetorno e os dois ternários de linhaDaMensagemEnviada (sent_by e via). Só a F4: tirar
+// retorno_parceiro e retorno_aviso das duas listas.
 import { mesmoTelefone } from "../ai/phone.ts";
 
-export type OrigemDoRetorno = "retorno_recibo" | "retorno_coleta" | "retorno_adiamento" | "retorno_modelo";
+export type OrigemDoRetorno =
+  | "retorno_recibo"
+  | "retorno_coleta"
+  | "retorno_adiamento"
+  | "retorno_modelo"
+  | "retorno_parceiro"
+  | "retorno_aviso";
 export type OrigemDoEnvio = "assistente" | "tela" | "sistema" | OrigemDoRetorno;
 const ORIGENS: ReadonlyArray<OrigemDoEnvio> = ["assistente", "tela", "sistema"];
-export const ORIGENS_DO_RETORNO: ReadonlyArray<OrigemDoRetorno> = ["retorno_recibo", "retorno_coleta", "retorno_adiamento", "retorno_modelo"];
+export const ORIGENS_DO_RETORNO: ReadonlyArray<OrigemDoRetorno> = [
+  "retorno_recibo",
+  "retorno_coleta",
+  "retorno_adiamento",
+  "retorno_modelo",
+  "retorno_parceiro",
+  "retorno_aviso",
+];
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
