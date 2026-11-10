@@ -13,6 +13,7 @@ import {
   NAO_E_ALVO_DO_LIBERA,
 } from "../retorno/comandos.ts";
 import { frasesDaAgenda, lerComandoDaAgenda } from "../agenda/comandos.ts";
+import { frasesDoParceiro, lerComandoDoParceiro } from "../parceiro/comandos.ts";
 import { lerComandoDoSecretario } from "../secretario/comandos.ts";
 import { parseConfirmationReply, parseOptionReply } from "../ai/whatsapp-channel.ts";
 import { lerComando } from "../comprovantes/respostas.ts";
@@ -47,6 +48,11 @@ const TABELA: Array<[string, ComandoDoRetorno]> = [
   ["segura tudo", { comando: "segura", alvo: "tudo" }],
   ["Solta recibos.", { comando: "solta", alvo: "recibos" }],
   ["*solta tudo*", { comando: "solta", alvo: "tudo" }],
+  // Retorno F4 (P11.1): o único acréscimo ao leitor da F2
+  ["segura pátio", { comando: "segura", alvo: "patio" }],
+  ["segura patio", { comando: "segura", alvo: "patio" }],
+  ["Solta Pátio.", { comando: "solta", alvo: "patio" }],
+  ["*solta patio*", { comando: "solta", alvo: "patio" }],
   ["libera Rodrigo", { comando: "libera", alvo: "rodrigo", desfaz: false }],
   ["libera o Rodrigo", { comando: "libera", alvo: "rodrigo", desfaz: false }],
   ["libera OS-00161", { comando: "libera", alvo: "os-00161", desfaz: false }],
@@ -279,6 +285,58 @@ Deno.test("7.3: o ditado livre não é lido por nenhum leitor, segue ao assisten
     assertEquals(lerSimNao(n), null, `sim/não: ${t}`);
     assertEquals(pareceRespostaCurta(t), false, `curta: ${t}`);
   }
+});
+
+// ─── Retorno F4 (seção 7.2): as palavras do dono para o parceiro, contra os leitores REAIS ─────────────────────────
+
+Deno.test("F4 7.2: *segura pátio* e *solta pátio* são do retorno e não de outro leitor; *pátio* sozinho é conversa", () => {
+  for (const t of ["segura patio", "solta patio", "segura pátio", "solta pátio"]) {
+    assertEquals(ehComandoDeCartao(lerComandoDoRetorno(t)!), false, t);
+    assertEquals(lerComandoDoSecretario(t), null, `secretário: ${t}`);
+    assertEquals(lerComandoDaAgenda(t), null, `agenda: ${t}`);
+    assertEquals(lerComando(t), null, `comprovantes: ${t}`);
+    assertEquals(lerPedidoDePdf(t), null, `pdf: ${t}`);
+    assertEquals(parseConfirmationReply(t), null, `confirmação: ${t}`);
+  }
+  for (const t of ["patio", "pátio", "segura pátio?", "segura o pátio", "solta o pátio da MP"]) assertEquals(lerComandoDoRetorno(t), null, t);
+});
+
+Deno.test("F4 7.2: as formas do parceiro não são lidas por nenhum outro leitor", () => {
+  for (const f of frasesDoParceiro()) {
+    for (const t of [f, `*${f}*`, `${f[0].toUpperCase()}${f.slice(1)}.`]) {
+      assert(lerComandoDoParceiro(t) !== null, `o próprio leitor: ${t}`);
+      assertEquals(lerComandoDoRetorno(t), null, `retorno: ${t}`);
+      assertEquals(lerComandoDoSecretario(t), null, `secretário: ${t}`);
+      assertEquals(lerComandoDaAgenda(t), null, `agenda: ${t}`);
+      assertEquals(lerComando(t), null, `comprovantes: ${t}`);
+      assertEquals(lerPedidoDePdf(t), null, `pdf: ${t}`);
+      assertEquals(parseConfirmationReply(t), null, `confirmação: ${t}`);
+      assertEquals(parseOptionReply(t, 9), null, `opção: ${t}`);
+      const n = normalizarResposta(t);
+      assertEquals(lerSimNao(n), null, `sim/não: ${t}`);
+    }
+  }
+  // *parceiro?* segue à conversa; *nao mp* é do cliente e rejeita a pendência do ponteiro (A-10), nunca é do dono
+  assertEquals(lerComandoDoParceiro("parceiro?"), null);
+  assertEquals(parseConfirmationReply("nao mp")?.decision, "reject");
+  assertEquals(lerComandoDoParceiro("nao mp"), null);
+  // *volta mp* colide com o Secretário: por isso não existe
+  assertEquals(lerComandoDoParceiro("volta mp"), null);
+  // os pedidos de PDF à MP seguem ao modelo (send_service_order_link com destino parceiro)
+  for (const t of ["manda o pdf do 1 pra mp", "pdf pra mp"]) {
+    assertEquals(lerComandoDoParceiro(t), null, t);
+    assertEquals(lerComandoDoRetorno(t), null, t);
+  }
+});
+
+Deno.test("F4 7.2: as letras do cartão do parceiro são as da F2 (1 a, 1 r, 1 p, 1 t, 1 v)", () => {
+  for (const t of ["1 a", "1 b", "1 c", "1 r", "3 r", "1 p", "1 t", "1 v"]) {
+    assertEquals(lerComandoDoRetorno(t)?.comando, "escolher", t);
+    assertEquals(parseConfirmationReply(t), null, `confirmação: ${t}`);
+    assertEquals(lerComandoDaAgenda(t), null, `agenda: ${t}`);
+  }
+  assertEquals(lerComandoDoRetorno("1 b sim 4321"), { comando: "escolher", n: 1, letra: "B", resto: null, pin: "4321" });
+  assertEquals(lerComandoDoRetorno("sem 2"), null, "sem 2 sozinho não lê, igual ao da F2");
 });
 
 Deno.test("7.3: os que precisam de cuidado", () => {

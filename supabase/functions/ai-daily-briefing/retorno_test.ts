@@ -958,3 +958,39 @@ Deno.test("F2: lerExtra falha fechado e nunca lança", async () => {
   const certo = { rpc: () => Promise.resolve({ data: { palavra: true, contatos: { vendedores: 2 } }, error: null }) };
   assertEquals(await lerExtra(certo, "manha", new Date()), { palavra: true, contatos: { vendedores: 2, conhecidos: 0 } });
 });
+
+// ─── Retorno F4 (P11.2): a linha do parceiro, extra do fechamento ──────────────────────────────────────────────────
+
+Deno.test("F4: o fechamento leva a linha do parceiro depois dos extras do retorno; a revisão não lê", async () => {
+  const linha = "Pátio da MP: 4 veículos, 2 mudaram · *parceiro* para liberar";
+  const f = falsoAdmin(banco("2026-10-15"), { retorno_resumo_do_dia: FECHAMENTO_SOMBRA, parceiro_resumo_fechamento: { linhas: [linha] } });
+  const r = await rodarTurnoDaTarde(f.admin, { agora: AS_1730, pedido: "fechamento", dry: true });
+  const texto = String(r.corpo.texto);
+  assertStringIncludes(texto, linha);
+  assert(texto.indexOf("Em teste (retorno)") < texto.indexOf(linha), texto);
+  assertEquals(f.chamadas.filter((c) => c.nome === "parceiro_resumo_fechamento").map((c) => c.args), [{ p_agora: AS_1730.toISOString() }]);
+  // a linha pede, não abre: nenhuma RPC de cartão
+  assertEquals(f.chamadas.some((c) => /cartao/.test(c.nome)), false);
+  // sem linhas do parceiro, o fechamento de antes, byte a byte
+  const sem = falsoAdmin(banco("2026-10-15"), { retorno_resumo_do_dia: FECHAMENTO_SOMBRA, parceiro_resumo_fechamento: { linhas: [] } });
+  const antes = falsoAdmin(banco("2026-10-15"), { retorno_resumo_do_dia: FECHAMENTO_SOMBRA });
+  assertEquals(
+    (await rodarTurnoDaTarde(sem.admin, { agora: AS_1730, pedido: "fechamento", dry: true })).corpo.texto,
+    (await rodarTurnoDaTarde(antes.admin, { agora: AS_1730, pedido: "fechamento", dry: true })).corpo.texto,
+  );
+  // a revisão da semana não lê o parceiro
+  const agoraSeg = new Date("2026-10-19T20:30:00Z");
+  const seg = falsoAdmin(banco("2026-10-19"), { retorno_resumo_do_dia: SEGUNDA_LIGADO, parceiro_resumo_fechamento: { linhas: [linha] } });
+  const rev = await rodarTurnoDaTarde(seg.admin, { agora: agoraSeg, pedido: "revisao_semana", dry: true });
+  assert(!String(rev.corpo.texto).includes(linha));
+  assertEquals(seg.chamadas.some((c) => c.nome === "parceiro_resumo_fechamento"), false);
+});
+
+Deno.test("F4: com a tarde calada, a linha do parceiro sozinha não abre o fechamento (é extra, não conta como há algo)", async () => {
+  const ausente = falsoAdmin(banco("2026-10-15"), {
+    retorno_resumo_do_dia: new Error("Could not find the function"),
+    parceiro_resumo_fechamento: { linhas: ["NÃO MP: 1 cliente hoje"] },
+  });
+  const r = await rodarTurnoDaTarde(ausente.admin, { agora: AS_1730, pedido: "fechamento", dry: true });
+  assertEquals([r.status, r.corpo.texto], [200, null]);
+});

@@ -78,6 +78,7 @@ import {
 } from "../_shared/ai/whatsapp-channel.ts";
 import { pinNoTexto, verifyPin } from "../_shared/ai/whatsapp-pin.ts";
 import { camadaDoRetorno, type CartaoVivo, type DependenciasDaCamada, ponteiroDoCartao } from "../_shared/retorno/camada.ts";
+import { camadaDoParceiro, type CartaoDoParceiroVivo, type DependenciasDoParceiro } from "../_shared/parceiro/camada.ts";
 import { aplicarCarona, caronaDoTurno, comCarona, juntarCarona, osDoJob, osDoTurno } from "../_shared/agenda/carona.ts";
 import { caronaDoRetorno } from "../_shared/whatsapp/retorno-carona.ts";
 import { omitirResultadosDoRetorno } from "../_shared/ai/tools/retorno.ts";
@@ -575,6 +576,27 @@ function depsDoRetorno(
   };
 }
 
+/**
+ * Retorno F4 (P11.1): o que a camada do parceiro precisa do turno. O dono, o ponteiro e a confirmação são os da F2: o PIN tem
+ * um caminho só. A RPC vai como é, sem acrescentar p_autor: parceiro_cartao_abrir não o tem.
+ */
+function depsDoParceiro(admin: any, appUser: any, depsRetorno: DependenciasDaCamada): DependenciasDoParceiro {
+  return {
+    autor: appUser.id,
+    ehDoDono: depsRetorno.ehDoDono,
+    rpc: (fn, args) => admin.rpc(fn, args),
+    cartaoVivo: async () => {
+      const { data, error } = await admin.rpc("parceiro_cartao_vivo");
+      if (error) throw error;
+      return (data as CartaoDoParceiroVivo | null) ?? null;
+    },
+    cartaoDoRetornoVivo: async () => (await depsRetorno.cartaoVivo()) !== null,
+    ponteiro: depsRetorno.ponteiro,
+    tituloDoPonteiro: depsRetorno.tituloDoPonteiro,
+    confirmar: depsRetorno.confirmar,
+  };
+}
+
 /** O par da conversa: só rótulos e contagens, nunca o que o cliente escreveu. */
 async function gravarParDoRetorno(admin: any, sessionId: string, par: { user: string; assistant: string }): Promise<void> {
   try {
@@ -637,6 +659,17 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
   // ---- Camada determinística (custo $0): o vocabulário do retorno rápido (F2) ----
   // ANTES da trava e da confirmação: "não 2" rejeitaria o cartão inteiro, e "1 A sim <PIN>" levaria o PIN ao modelo.
   const depsRetorno = depsDoRetorno(admin, { appUser, phone: phoneNormalized, sessionId, toolCtx, texto: text, settings });
+  // Retorno F4 (P11.1): a camada do parceiro vem antes. *parceiro*, *parceiro 74*, *N tira L*, *N sabe L* e, com o cartão do
+  // parceiro vivo (e sem o da F2), as letras do cartão. O *sim <PIN>* segue o caminho único (depsRetorno.confirmar). O texto
+  // do cartão não vai à conversa: o SQL grava o par só com a contagem.
+  const doParceiro = await camadaDoParceiro(text, depsDoParceiro(admin, appUser, depsRetorno));
+  if (doParceiro) {
+    if (!doParceiro.jaEnviado) {
+      await queueWhatsAppReply(admin, phoneNormalized, doParceiro.texto);
+      await admin.from("ai_operator_sessions").update({ last_activity_at: new Date().toISOString() }).eq("id", sessionId);
+    }
+    return jr({ ok: true, parceiro: doParceiro.comando });
+  }
   const doRetorno = await camadaDoRetorno(text, depsRetorno);
   if (doRetorno) {
     if (!doRetorno.jaEnviado) {

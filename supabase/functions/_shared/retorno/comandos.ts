@@ -20,8 +20,9 @@ export type ComandoDoRetorno =
   // (08/11/2026, cartão F1-10) o dono resolveu fora do WhatsApp. Só com número: "resolvido" sozinho é do Secretário.
   | { comando: "resolvido"; n: number }
   | { comando: "fora_ate"; dia: string }
-  | { comando: "segura"; alvo: "recibos" | "tudo" }
-  | { comando: "solta"; alvo: "recibos" | "tudo" }
+  // Retorno F4 (P11.1): "patio" é o único acréscimo da F4 a este leitor (retorno_dito grava retorno_config.segura_patio)
+  | { comando: "segura"; alvo: "recibos" | "tudo" | "patio" }
+  | { comando: "solta"; alvo: "recibos" | "tudo" | "patio" }
   | { comando: "libera"; alvo: string; desfaz: boolean }
   | { comando: "errado"; letra: string }
   // só com cartão vivo (a camada confere):
@@ -123,8 +124,8 @@ export function lerComandoDoRetorno(texto: string): ComandoDoRetorno | null {
   m = /^fora ate (.{2,30})$/.exec(t);
   if (m) return { comando: "fora_ate", dia: m[1] };
 
-  m = /^(segura|solta) (recibos|tudo)$/.exec(t);
-  if (m) return { comando: m[1] as "segura" | "solta", alvo: m[2] as "recibos" | "tudo" };
+  m = /^(segura|solta) (recibos|tudo|patio)$/.exec(t);
+  if (m) return { comando: m[1] as "segura" | "solta", alvo: m[2] as "recibos" | "tudo" | "patio" };
 
   m = /^libera (.{2,40})$/.exec(t);
   if (m) {
@@ -187,7 +188,8 @@ export function ehComandoDeCartao(c: ComandoDoRetorno): boolean {
 export function frasesDoRetorno(): string[] {
   return [
     "retorno", "ver retorno", "pessoal", "pessoal 1", "pessoal 2", "pessoal 3", "1 pessoal", "2 pessoal", "3 pessoal",
-    "pessoal nao", "segura recibos", "solta recibos", "segura tudo", "solta tudo", "errado z", "errado y", "errado x",
+    "pessoal nao", "segura recibos", "solta recibos", "segura tudo", "solta tudo", "segura patio", "solta patio",
+    "errado z", "errado y", "errado x",
     "errado w", "errado v", "ver 1", "ver 2", "ver 3",
     "resolvido 1", "resolvido 2", "resolvido 3", "1 resolvido", "2 resolvido", "3 resolvido",
   ];

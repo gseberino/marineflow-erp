@@ -65,6 +65,7 @@ import type { LoteMontado } from "../_shared/papelada/lote.ts";
 import { CHAVE_DA_PAPELADA, lerFormatoDaPapelada, linhaDoLote } from "../_shared/papelada/texto.ts";
 import { contarRegrasGuardadas, montarLoteDaSemana, registrarLote } from "./secretario-papelada.ts";
 import { type ExtraDoFechamento, lerExtra, lerRetorno, linhasDoFechamento, type RetornoDoFechamento } from "./retorno.ts";
+import { lerParceiro } from "./parceiro.ts";
 
 // deno-lint-ignore no-explicit-any
 type Admin = any;
@@ -116,6 +117,8 @@ export interface LidoDaTarde {
   retorno?: RetornoDoFechamento | null;
   /** (F2, P12) retorno_resumo_extra ('fechamento'), nos três turnos; ausente ou null = o texto de antes */
   retornoExtra?: ExtraDoFechamento | null;
+  /** (F4, P11.2) parceiro_resumo_fechamento: as linhas do parceiro, extras do fechamento; ausente, null ou [] = o texto de antes */
+  parceiro?: string[] | null;
 }
 
 export interface TardeMontada {
@@ -197,7 +200,13 @@ export function montarTardeDosDados(p: {
   // 17:30 são a revisão, e é ela que cumpre o "hoje até as 19h"); o resumo do retorno, só no fechamento
   const doRetorno = lido.retorno ? linhasDoFechamento(lido.retorno, agora, lido.retornoExtra ?? null) : null;
   // (F2, P12) "mandei" nos três turnos; os extras, como o resumo, só no fechamento
-  const retorno = doRetorno && turno !== "fechamento" ? { ...doRetorno, resumo: null, extras: [] } : doRetorno;
+  const doDia = doRetorno && turno !== "fechamento" ? { ...doRetorno, resumo: null, extras: [] } : doRetorno;
+  // (F4, P11.2) as linhas do parceiro, só no fechamento, depois dos extras do retorno (fixa = false: as primeiras a sair).
+  // O fechamento pede, não abre: quem abre o cartão é o dono, com *parceiro*. Sem linhas, o texto de antes, byte a byte.
+  const doParceiro = turno === "fechamento" ? (lido.parceiro ?? []) : [];
+  const retorno = doParceiro.length
+    ? { ...(doDia ?? { esperando: null, resumo: null, fixa: false }), extras: [...(doDia?.extras ?? []), ...doParceiro] }
+    : doDia;
   const dadosDoTexto = {
     hoje, turno, ficaram, amanha: lido.amanha, fornecedores, escritorio: lido.escritorio,
     parados, panorama: lido.panorama, antigas,
@@ -205,7 +214,7 @@ export function montarTardeDosDados(p: {
     pergunta: p.pergunta,
     guardado: planoDaTarde, semResposta, semRespostaMax: portao.regras.sem_resposta_hoje_max,
     ...(p.lote ? { lote: p.lote } : {}),
-    ...(retorno && (retorno.esperando || retorno.resumo || retorno.mandei) ? { retorno } : {}),
+    ...(retorno && (retorno.esperando || retorno.resumo || retorno.mandei || doParceiro.length > 0) ? { retorno } : {}),
   };
   const t = textoDaTarde(dadosDoTexto);
   const e = lido.escritorio;
@@ -321,6 +330,8 @@ export async function lerTudoDaTarde(admin: Admin, p: {
     // lerRetorno nunca lança (erro = null = a tarde de antes)
     retorno: await lerRetorno(admin, "fechamento", p.agora),
     retornoExtra: await lerExtra(admin, "fechamento", p.agora),
+    // (F4, P11.2) lerParceiro nunca lança (erro = null = a tarde de antes); o texto só usa no fechamento
+    ...(p.turno === "fechamento" ? { parceiro: await lerParceiro(admin, p.agora) } : {}),
   };
 }
 
