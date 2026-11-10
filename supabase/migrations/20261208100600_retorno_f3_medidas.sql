@@ -8,7 +8,8 @@
 -- Cron próprio, e não um passo em retorno_vigia: a vigia já foi redefinida por gerador duas vezes (F1 e 20261201100000), e um passo a mais
 -- acoplaria a F3 à cadeia. Sem efeito enquanto previa_modo = 'desligado': a chamada lê 1 linha e sai.
 --
--- Reverter: select cron.unschedule(jobid) from cron.job where jobname = 'retorno-previa'; drop view public.retorno_f3_medidas.
+-- Reverter: select cron.unschedule(jobid) from cron.job where jobname = 'retorno-previa'; drop view public.retorno_f3_medidas;
+-- drop function public._retorno_f3_pedido_do_caso(uuid, timestamptz).
 
 create or replace function public._retorno_mediana_com_infinito(p_valores numeric[])
 returns numeric
@@ -124,11 +125,47 @@ comment on function public.retorno_previa_comparar(uuid, timestamptz) is
 revoke all on function public.retorno_previa_comparar(uuid, timestamptz) from public, anon, authenticated;
 grant execute on function public.retorno_previa_comparar(uuid, timestamptz) to service_role;
 
+-- O pedido das medidas vale também para o caso em passagem (revisão banco-1). _retorno_intencao_do_caso (F2) devolve nulo
+-- fora de 'recibo', de propósito, para o modelo; aqui é a mesma conta, sem a guarda do nível. Achado na 1ª bancada (10/11).
+create or replace function public._retorno_f3_pedido_do_caso(p_abertura uuid, p_agora timestamptz)
+returns boolean
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  c_ordem constant text[] := array['retirada', 'quando_pronto', 'peca', 'status', 'adicional', 'orcamento'];
+  v_ab public.retorno_aberturas;
+  v_lib boolean;
+  v_intencoes text[];
+  v_top text;
+begin
+  select * into v_ab from public.retorno_aberturas a where a.id = p_abertura;
+  if not found then
+    return false;
+  end if;
+  v_lib := public._retorno_tem_liberado(v_ab.phone_normalized, p_agora);
+  select array_agg(public._retorno_intencao_da_frase(public._retorno_busca(w.body), public._retorno_sinais(w.body), v_lib))
+    into v_intencoes
+    from public.retorno_mensagens m
+    join public.whatsapp_messages w on w.id = m.whatsapp_message_id
+   where m.abertura_id = p_abertura and m.pede_resposta and m.recebida_em <= p_agora;
+  select o.i into v_top from unnest(c_ordem) with ordinality o(i, ord) where o.i = any (coalesce(v_intencoes, '{}')) order by o.ord limit 1;
+  return coalesce(v_top in ('orcamento', 'adicional'), false);
+end;
+$$;
+
+comment on function public._retorno_f3_pedido_do_caso(uuid, timestamptz) is
+  'Retorno F3 (P11): o caso é pedido de orçamento (intenção orcamento ou adicional), em recibo ou passagem. A mesma conta de _retorno_intencao_do_caso, sem a guarda do nível, só para as medidas.';
+
+revoke all on function public._retorno_f3_pedido_do_caso(uuid, timestamptz) from public, anon, authenticated;
+
 create or replace view public.retorno_f3_medidas with (security_invoker = on) as
 with casos as (
   select a.id, a.chave, a.estado, a.aberta_em, a.visita_a_combinar_em,
          date_trunc('week', a.aberta_em at time zone 'America/Sao_Paulo')::date as semana,
-         coalesce(public._retorno_intencao_do_caso(a.id, now()) in ('orcamento', 'adicional'), false) as pedido
+         public._retorno_f3_pedido_do_caso(a.id, now()) as pedido
     from public.retorno_aberturas a
    where a.nivel in ('recibo', 'passagem') or a.visita_a_combinar_em is not null   -- passagem é o mesmo caso, e costuma ser o mais demorado
 ), por_caso as (
