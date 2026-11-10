@@ -852,7 +852,8 @@ begin
     ('os_prontidao', 'public.os_prontidao(uuid, date)', 'c69862188638af46cbb0d2d9d1b1e7ea'),
     ('_agenda_gestor_compra_conta', 'public._agenda_gestor_compra_conta(uuid, date)', '559c1ecb44eab4dce4bdb91d0221e34b'),
     ('_agenda_ver_gestor', 'public._agenda_ver_gestor(date)', '9a4f0eff1587a01a4963ac4161a64731'),
-    ('_agenda_aprendizado_texto', 'public._agenda_aprendizado_texto(text, text, jsonb)', 'd6efbf56237d8da99642b5411ba86930'),
+    -- Integração P4–P6 (09/11): a origem do texto é a 20261111100300 (o P4 a recriou depois do P2, com o texto da folga sem medida); no ramo do P6 era a 20261111100100 (d6efbf56237d8da99642b5411ba86930)
+    ('_agenda_aprendizado_texto', 'public._agenda_aprendizado_texto(text, text, jsonb)', '3da677f2b336f2fd012ccb96bde4f4a0'),
     ('_agenda_prazo_do_fornecedor', 'public._agenda_prazo_do_fornecedor(uuid)', '82e9ff9a043dc182586acd751ee2a9a9'),
     ('_agenda_ver_fornecedores', 'public._agenda_ver_fornecedores(date)', 'e71ba407c805508d2914f6a173f0b572')) t(nome, assin, md5o)
   loop
