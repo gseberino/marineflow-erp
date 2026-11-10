@@ -80,7 +80,7 @@ do $previa$
 declare
   c_agora constant timestamptz := '2040-06-15 10:00-03';
   c_passado constant timestamptz := '2040-02-01 10:00-03';
-  v_cli uuid; v_cli2 uuid; v_un uuid; v_un2 uuid; v_un3 uuid;
+  v_cli uuid; v_cli2 uuid; v_cli3 uuid; v_un uuid; v_un2 uuid; v_un3 uuid;
   v_p1 uuid; v_p2 uuid; v_p3 uuid; v_s1 uuid; v_s2 uuid; v_s3 uuid; v_s_cat uuid;
   v_os uuid; v_os2 uuid; v_os3 uuid;
   v_caso uuid; v_caso2 uuid; v_caso3 uuid;
@@ -106,9 +106,11 @@ begin
     perform pg_temp.f3v_peca(v_os, v_p1, 2, 400, c_passado);
     perform pg_temp.f3v_peca(v_os, v_p2, 1, 150, c_passado + interval '1 minute');
     perform pg_temp.f3v_lin(v_os, v_s1, 'TF3V Instalação do banco', 1, 300, c_passado);
-    -- Preço mais novo da mesma peça ao mesmo cliente, em OS sem família nenhuma (não concorre como parecido).
-    v_os2 := pg_temp.f3v_os('TF3V-NOVO-1', v_cli, v_un, 'draft', 'approved', '2040-03-10 10:00-03', 'serviço geral');
-    perform pg_temp.f3v_peca(v_os2, v_p1, 1, 450, '2040-03-10 10:00-03');
+    -- Preço mais novo da mesma peça ao mesmo cliente, em OS que não concorre como parecido. A família da OS vem também
+    -- dos nomes das linhas (P2.1), e "TF3V Bateria 200" já dá "bateria": por isso ela nasce depois da abertura do caso
+    -- (09:00), fora dos parecidos (created_at < p_antes), mas antes de c_agora, dentro do preço (created_at <= p_agora).
+    v_os2 := pg_temp.f3v_os('TF3V-NOVO-1', v_cli, v_un, 'draft', 'approved', '2040-06-15 09:30-03', 'serviço geral');
+    perform pg_temp.f3v_peca(v_os2, v_p1, 1, 450, '2040-06-15 09:30-03');
 
     v_caso := pg_temp.f3v_caso(1, 'cliente', v_cli, 'preciso trocar as baterias da lancha, quanto custa?');
     v_r := public.retorno_previa_montar(v_caso, c_agora);
@@ -135,7 +137,7 @@ begin
     select * into v_lin from public.retorno_previa_linhas where previa_id = v_id and ordem = 1;
     perform pg_temp.f3v_igual('2a preco p1', v_lin.preco::text, '450.00');
     perform pg_temp.f3v_igual('2b fonte p1', v_lin.preco_fonte, 'praticado_cliente');
-    perform pg_temp.f3v_igual('2c data p1', v_lin.preco_em::text, '2040-03-10');
+    perform pg_temp.f3v_igual('2c data p1', v_lin.preco_em::text, '2040-06-15');
     perform pg_temp.f3v_igual('2d nome p1', v_lin.nome, 'TF3V Bateria 200');
     if v_lin.product_id is distinct from v_p1 or v_lin.quantidade is distinct from 2 or v_lin.estado is distinct from 'ok' then
       raise exception '2e: linha p1 %', row_to_json(v_lin);
@@ -289,7 +291,7 @@ begin
     v_un := pg_temp.f3v_un(v_cli, 'Brisa Mar');
     v_un2 := pg_temp.f3v_un(v_cli, 'Maresia Sul');
     v_os := pg_temp.f3v_os('TF3V-FONTE-2UN', v_cli, v_un, 'draft', 'approved', c_passado, 'troca de baterias');
-    perform pg_temp.f3v_lin(v_os, null, 'Serviço de bateria para teste', 1, 800, c_passado);
+    perform pg_temp.f3v_lin(v_os, null, 'Serviço de bateria avulso', 1, 800, c_passado);
     v_caso := pg_temp.f3v_caso(30, 'cliente', v_cli, 'preciso trocar as baterias da Bri, quanto custa?');
     v_r := public._retorno_unidade_do_caso(v_caso, v_cli, c_agora);
     if v_r ->> 'vessel_id' is not null or jsonb_array_length(v_r -> 'unidades') is distinct from 2 then
@@ -339,8 +341,8 @@ begin
   -- Rodada e proposta travada num bloco próprio: cada bloco refaz o mínimo que precisa.
   begin
     update public.retorno_config set previa_modo = 'sombra', previa_ditado_ligado = true;
-    v_cli := pg_temp.f3v_cli('Rodada Teste');
-    v_un := pg_temp.f3v_un(v_cli, 'Rodada Barco');
+    v_cli := pg_temp.f3v_cli('Giro Teste');
+    v_un := pg_temp.f3v_un(v_cli, 'Giro Barco');
     v_os := pg_temp.f3v_os('TF3V-FONTE-RODA', v_cli, v_un, 'draft', 'approved', c_passado, 'troca de baterias');
     perform pg_temp.f3v_lin(v_os, null, 'Serviço rodada', 1, 500, c_passado);
     v_caso := pg_temp.f3v_caso(50, 'cliente', v_cli, 'preciso trocar as baterias do barco, quanto custa?');
@@ -421,8 +423,8 @@ begin
     update public.retorno_config set previa_modo = 'sombra', previa_ditado_ligado = true;
     v_cli := pg_temp.f3v_cli('Erro Forcado Teste');
     v_un := pg_temp.f3v_un(v_cli, 'Erro Forcado Barco');
-    v_cli2 := pg_temp.f3v_cli('Sadio Rodada Teste');
-    v_un2 := pg_temp.f3v_un(v_cli2, 'Sadio Barco');
+    v_cli2 := pg_temp.f3v_cli('Bento Saude Teste');
+    v_un2 := pg_temp.f3v_un(v_cli2, 'Saude Barco');
     v_os := pg_temp.f3v_os('TF3V-FONTE-ERR', v_cli2, v_un2, 'draft', 'approved', c_passado, 'troca de baterias');
     perform pg_temp.f3v_lin(v_os, null, 'Serviço sadio', 1, 500, c_passado);
     v_caso := pg_temp.f3v_caso(60, 'cliente', v_cli, 'preciso trocar as baterias do barco, quanto custa?');
@@ -578,7 +580,7 @@ begin
 
     -- ═══ 15. Cliente com 0 unidades: classe pela palavra do bem, vessel nulo, dados.unidades vazio; sem a palavra, sem_classe.
     v_cli := pg_temp.f3v_cli('Sem Unidade Teste');
-    v_un2 := pg_temp.f3v_un(pg_temp.f3v_cli('Fonte Classe Teste'), 'Fonte Classe Barco');
+    v_un2 := pg_temp.f3v_un(pg_temp.f3v_cli('Origem Classe Teste'), 'Origem Classe Barco');
     v_os := pg_temp.f3v_os('TF3V-FONTE-15', (select client_id from public.vessels where id = v_un2), v_un2, 'draft', 'approved', c_passado, 'troca de baterias');
     perform pg_temp.f3v_lin(v_os, null, 'Serviço de bateria fonte', 1, 700, c_passado);
     v_caso := pg_temp.f3v_caso(80, 'cliente', v_cli, 'a lancha precisa de bateria nova, quanto custa?');
@@ -653,8 +655,10 @@ begin
     update public.retorno_config set previa_modo = 'ligado';
 
     -- ═══ 18b. Produto e serviço inativos: provisório, motivo inativo, sem preço.
-    v_cli := pg_temp.f3v_cli('Inativo Teste');
-    v_un := pg_temp.f3v_un(v_cli, 'Inativo Barco');
+    -- Cliente e unidade sem nenhuma palavra do nome do serviço: com "Inativo Teste", _retorno_nome_limpo via "inativo"
+    -- em "TF3V Servico Inativo" e trocava a linha por "Serviço a descrever", como deve.
+    v_cli := pg_temp.f3v_cli('Lucio Fora Teste');
+    v_un := pg_temp.f3v_un(v_cli, 'Fora Barco');
     v_p1 := pg_temp.f3v_prod('TF3V Peca Inativa', 500, false);
     v_s1 := pg_temp.f3v_serv('TF3V Servico Inativo', 500, false);
     v_os := pg_temp.f3v_os('TF3V-FONTE-INAT', v_cli, v_un, 'draft', 'approved', c_passado, 'troca de baterias');
@@ -674,10 +678,10 @@ begin
     end if;
 
     -- ═══ 19. Parecido: o que nasceu depois da abertura não serve; alternativas depois de B.
-    v_cli := pg_temp.f3v_cli('Parecido Teste');
-    v_un := pg_temp.f3v_un(v_cli, 'Parecido Barco');
-    v_cli2 := pg_temp.f3v_cli('Parecido Outro Teste');
-    v_un2 := pg_temp.f3v_un(v_cli2, 'Parecido Outro Barco');
+    v_cli := pg_temp.f3v_cli('Rui Primeiro Teste');
+    v_un := pg_temp.f3v_un(v_cli, 'Primeiro Barco');
+    v_cli2 := pg_temp.f3v_cli('Bia Segunda Teste');
+    v_un2 := pg_temp.f3v_un(v_cli2, 'Segunda Barco');
     -- fonte principal: mesmo cliente.
     v_os := pg_temp.f3v_os('TF3V-PAR-A', v_cli, v_un, 'draft', 'approved', '2040-04-01 10:00-03', 'troca de baterias');
     perform pg_temp.f3v_lin(v_os, null, 'Serviço parecido a', 1, 100, '2040-04-01 10:00-03');
