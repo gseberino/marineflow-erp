@@ -59,12 +59,12 @@ $f$;
 -- O documento que saiu ao número da parceira: eco do aparelho (data, sem via) ou envio do sistema (com via).
 create or replace function pg_temp.f4md_doc(p_arquivo text, p_em timestamptz, p_via boolean default false) returns uuid
 language sql as $f$
-  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, raw_payload, occurred_at)
+  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, raw_payload, occurred_at, hora_real)
   values ('outbound', '5547900017201', 'document', null, 'teste-f4-medidas-' || md5(coalesce(p_arquivo, '') || p_em::text || random()::text),
           case when p_via
                then jsonb_build_object('via', 'whatsapp-send', 'data', jsonb_build_object('message', jsonb_build_object('documentMessage', jsonb_build_object('fileName', p_arquivo))))
                else jsonb_build_object('data', jsonb_build_object('source', 'unknown', 'message', jsonb_build_object('documentMessage', jsonb_build_object('fileName', p_arquivo))))
-          end, p_em)
+          end, p_em, p_em)
   returning id
 $f$;
 
@@ -75,8 +75,8 @@ declare
   v_m uuid;
   v_a uuid;
 begin
-  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, occurred_at)
-    values ('inbound', p_fone, 'text', 'pedido inventado de teste', 'teste-f4-medidas-caso-' || md5(p_fone || p_em::text), p_em)
+  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, occurred_at, hora_real)
+    values ('inbound', p_fone, 'text', 'pedido inventado de teste', 'teste-f4-medidas-caso-' || md5(p_fone || p_em::text), p_em, p_em)
     returning id into v_m;
   insert into public.retorno_aberturas (chave, phone_normalized, papel, quem, primeira_msg_id, aberta_em, gravada_em,
                                         ultima_em, ultima_gravada_em, nivel, tipo_recibo, modo)
