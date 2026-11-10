@@ -78,6 +78,9 @@
 //   · (Fase 7e, P1) também as funções das migrations 2026111110* (a base da 7e: o modo com o freio, a credibilidade, o z e a temporada; e os pacotes seguintes da etapa, pelo prefixo). Os DEFAULTs
 //     novos de agenda_config (os 6 interruptores e os 32 parâmetros: 5, 0,50, 2,50, 0,15, 0,80, 12, 8, 6, 4, 0,30, 0,05, 0,60, 0,95, as listas de temporada, 17:30, 1, 3, 15, 5, 20 s…) ficam em
 //     20261111100000, fora de função. A tabela da normal de _agenda_z (§4.5) é matemática, não parâmetro: escrita em inteiros (décimos de milésimo) para não confundir com um valor de agenda_config.
+//   · (Fase 7g, P1) também as funções das migrations 2026111210* (a base da 7g: quem marcou, o degrau, a zona mais severa, o CHECK das suposições, os textos do porquê e os gatilhos das 3
+//     tabelas; e os pacotes seguintes da etapa, pelo prefixo). Os DEFAULTs novos de agenda_config (os 4 interruptores e os 18 parâmetros: 1, 4, 3, 5, 10, 8, 0,50, 6, 28, 16:35, 15 s…) ficam
+//     em 20261112100000, fora de função; o limiar da peça pequena chega ao texto pelo detalhe gravado, não por literal.
 // Os inteiros pequenos (0, 1, 2, 7: meios-dias por dia, dias da semana…) e os limites de tamanho de texto dos CHECKs
 // são estrutura e não entram na regra.
 import { describe, expect, it } from 'vitest';
@@ -444,7 +447,7 @@ export function corposDasFuncoes(sql: string, arquivo: string): Trecho[] {
 
 function funcoesDasMigrations(): Trecho[] {
   return fs.readdirSync(MIGRATIONS)
-    .filter((f) => /^(2026102416|2026102510|2026102610|2026102710|2026102810|2026102910|2026103010|2026103110|2026110110|2026110210|2026110710|2026110910|2026111110)\d{4}_.+\.sql$/.test(f))
+    .filter((f) => /^(2026102416|2026102510|2026102610|2026102710|2026102810|2026102910|2026103010|2026103110|2026110110|2026110210|2026110710|2026110910|2026111110|2026111210)\d{4}_.+\.sql$/.test(f))
     .sort()
     .flatMap((f) => corposDasFuncoes(fs.readFileSync(path.join(MIGRATIONS, f), 'utf8').replace(/\r\n/g, '\n'), f));
 }

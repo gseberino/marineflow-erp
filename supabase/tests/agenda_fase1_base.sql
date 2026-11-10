@@ -558,8 +558,16 @@ begin
        select unnest(array['estimativa_no_inicio_coerente', 'marcado_coerente', 'prazo_plano_coerente', 'os_planejamento_dp_bruto_no_inicio_check',
                            'os_planejamento_pessoas_no_inicio_check', 'os_planejamento_pm_plano_no_inicio_check', 'os_planejamento_prazo_plano_no_inicio_check',
                            'os_planejamento_vies_marcado_check', 'os_planejamento_vies_marcado_chave_check', 'os_planejamento_tempo_compra_marcado_check',
-                           'os_planejamento_folga_compra_marcada_check']))));
+                           'os_planejamento_folga_compra_marcada_check']))))
      -- FASE 7e: fim
+     -- FASE 7g: os 21 que a Fase 7g pôs em agenda_config (20261112100000) têm o caso deles em agenda_fase7g_base.sql (B1h cobra pelo nome; B1i a B1p, cada limite e o que cruza
+     -- colunas).
+     and not (c.conname = any (array(
+       select 'agenda_config_' || n || '_check'
+         from unnest(array['modo_porque', 'modo_explicar', 'modo_placar', 'modo_rebaixar', 'porque_motivos_max', 'origens_do_dono', 'livre_semanas', 'como_pensei_perguntas',
+                           'como_pensei_itens_max', 'correcao_janela_du', 'rebaixar_janela_semanas', 'rebaixar_n_min', 'rebaixar_taxa', 'rebaixar_amostra', 'voltar_n',
+                           'rebaixar_trava_dias', 'explicar_hora', 'placar_janela', 'placar_semanas_hist', 'placar_min_linhas', 'explicar_tempo_max']) n)));
+     -- FASE 7g: fim
   insert into _resultado values ('B todo CHECK das 6 tabelas tem um caso que ele recusa', v_sem_caso is null, v_sem_caso);
 end
 $b$;

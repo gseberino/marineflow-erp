@@ -425,8 +425,12 @@ begin
      -- respondida_via) continuam com o nome e o caso daqui.
      and not (c.conname = any (array['agenda_perguntas_padrao_chave_check', 'agenda_perguntas_padrao_efeito_check', 'agenda_perguntas_veto_espera_check',
                                      'agenda_perguntas_destrava_check', 'agenda_perguntas_assumida_por_check', 'pergunta_padrao_coerente',
-                                     'pergunta_assumida_coerente', 'pergunta_assumida_fechada']));
+                                     'pergunta_assumida_coerente', 'pergunta_assumida_fechada']))
      -- FASE 7f: fim
+     -- FASE 7g: os 4 que a Fase 7g pôs em agenda_alocacoes e agenda_acoes (20261112100000: as suposições, o degrau da alocação, a zona e o degrau da ação) têm o caso deles em
+     -- agenda_fase7g_base.sql (B2c pelo nome; B2d, cada um recusando). As listas que a 7g ampliou (motivo do dia, rotina da rodada) continuam com o nome e o caso daqui.
+     and not (c.conname = any (array['alocacao_suposicoes_validas', 'alocacao_degrau_check', 'agenda_acoes_zona_check', 'agenda_acoes_degrau_check']));
+     -- FASE 7g: fim
   insert into _resultado values ('B todo CHECK e EXCLUDE da Fase 2 tem um caso que ele recusa', v_sem_caso is null, v_sem_caso);
 end
 $b$;

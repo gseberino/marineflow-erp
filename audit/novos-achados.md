@@ -125,6 +125,60 @@
 - **O quê:** `_agenda_painel`, `_agenda_vigia_backlog`, `_agenda_quem_chamar`, `_agenda_gestor_dupla`, `_agenda_tecnicos_da_grade` e `agenda_tela_semana` seguem com `carga_max`. Com `modo_folga_semana` ligado, o painel e o *quem chamar* contam 1 meio-dia a mais do que o motor marca.
 - **Na Fase 7e:** não recriadas de propósito. O P4 confere se algum texto ao dono afirma o número.
 
+### [NOVO-agenda-79] A alocação não diz por que foi feita
+
+- **Encontrado em:** Agenda de Produção, spec-fase7g §1 (29/10/2026; 7g-a, `wf7g_01`).
+- **O quê:** `agenda_alocacoes.motivos` guarda frases soltas do item da proposta ("tem peça a comprar? (o orçamento não tem nenhuma)"), sem código, sem o que foi suposto e sem o degrau do reparo. Explicar depois, a partir do estado de hoje, daria o porquê de hoje, não o da decisão. Em 09/11: 0 de 53 alocações com `criterio` (`sql/wf7g_p1_estado`).
+- **Na Fase 7g:** o P1 (`20261112100000`) cria o lugar: `agenda_alocacoes.suposicoes` (nula = de antes da 7g, sem DEFAULT, R9.4-1) e `degrau`; `agenda_acoes.zona` e `degrau`. Nada as escreve no P1; o P2 grava, no INSERT, pelos 6 caminhos que criam alocação.
+
+### [NOVO-agenda-80] "Depois de quinta" vira quinta
+
+- **Encontrado em:** Agenda de Produção, spec-fase7g §1 (29/10/2026; 7g-b).
+- **O quê:** `_agenda_data_conferida` só confere se a palavra que o modelo passou está no trecho do dono; a relação em volta ("depois de", "antes de", "não antes de") não é lida.
+- **Na Fase 7g:** P3, pela relação lida no banco só em `agenda_rascunho_marcar`, sem recriar `_agenda_data_conferida` (R9.4-5; ver NOVO-agenda-202).
+
+### [NOVO-agenda-81] O "se aprovar hoje" ainda é a projeção
+
+- **Encontrado em:** Agenda de Produção, spec-fase7g §1 (29/10/2026; 7g-c, `wf7g_08`); em 06/11 (R9.4-6), para o ORÇ-00131: "Pela fila de hoje, começa entre qua 16/12 e ter 05/01", com o Alex sem nada marcado depois de 12/11.
+- **O quê:** `agenda_ctp` ainda usa a projeção da Fase 1 (`_agenda_fila_faixa`); é a única saída viva dela depois do `modo_proposta` ligado.
+- **Na Fase 7g:** P4, pelo encaixe simulado da própria OS (R9.4-6; ver NOVO-agenda-203).
+
+### [NOVO-agenda-82] Não há motivo para ferramenta ou carro
+
+- **Encontrado em:** Agenda de Produção, spec-fase7g §1 (29/10/2026; 7g-d, `wf7g_03`).
+- **O quê:** o *dia não* e o "como foi" só conhecem 11 motivos; a medida que decide o 7h ("dias perdidos por ferramenta") não tem onde ser dita.
+- **Na Fase 7g:** o P1 amplia a lista fechada `agenda_alocacoes_motivo_check` com `ferramenta` (no fim; `capacidade_motivos` fica sem ele: não é falta do dono). As palavras, o texto e a lista do TS são do P6 (R9.5-15). Até lá, nenhum caminho grava o motivo novo.
+
+### [NOVO-agenda-83] Nada mede a correção do dono
+
+- **Encontrado em:** Agenda de Produção, spec-fase7g §1 (29/10/2026; 7g-e).
+- **O quê:** o *desfaz* existe, mas ninguém conta quantas marcações o dono aceitou, ajustou ou desfez; o silêncio vira aceite sem medida (ver NOVO-agenda-200).
+- **Na Fase 7g:** o P1 cria `agenda_marcacoes` (uma linha por ação executada e OS que criou meio-dia que não é reserva, com o desfecho da do gestor) e `agenda_tipos_os`; o P5 mede, a partir de `agenda_config.marcacoes_desde`.
+
+### [NOVO-agenda-200] O silêncio contado como aceite
+
+- **Encontrado em:** Agenda de Produção, spec-fase7g R9.4-2 (06/11/2026).
+- **O quê:** pela §3.1-7, a marcação do gestor que chega ao 1º dia sem correção é `aceita`. Em produção, em 06/11 (R9.9): 26 perguntas na história, 0 respondidas; 0 de 53 meios-dias com resultado. Com a regra como estava, "as correções caem" seria sucesso por omissão. E a 1ª rodada olharia para trás: o plano falso da OS-00074 (03/11) sairia `aceita`.
+- **Na Fase 7g:** o P1 cria `agenda_marcacoes.conferida` (not null, default false: algum meio-dia da marcação cumprido ou parcial na hora do desfecho) e `agenda_config.marcacoes_desde` (nula; o dado `20261112100990` grava a hora dele). A regra do dono (AG7-25: `aceita` conta) não muda; muda o que o texto afirma ("nenhuma conferida"). Quem mede é o P5; o texto é do P6.
+
+### [NOVO-agenda-201] Três escritores do gestor criam alocação fora de `agenda_propor`
+
+- **Encontrado em:** Agenda de Produção, spec-fase7g R9.4-1 (06/11/2026; reconciliado em 09/11).
+- **O quê:** a spec dizia que `agenda_propor` é "a única que cria" alocação. Criam também `_agenda_gestor_reparar`, `_agenda_gestor_reestimar`, `_agenda_gestor_dupla`, `agenda_desfazer` e `_agenda_desfazer_cliente`. Gravado só em `agenda_propor`, o porquê nasceria em 1 dos 6 caminhos. Além disso, `agenda_aplicar` grava ações `reparar` e `reestimar`, que criam alocação e não estavam na lista de tipos da marcação.
+- **Na Fase 7g:** o P1 põe `reparar` e `reestimar` em `agenda_marcacoes.tipo_acao` (7 valores). O P2 grava o porquê por um gatilho BEFORE INSERT (`_agenda_alocacoes_porque`), com 3 entradas (substituída, item da proposta, proposta do gestor), sem recriar os 3 do gestor.
+
+### [NOVO-agenda-202] "Não antes de quinta" e a relação da data
+
+- **Encontrado em:** Agenda de Produção, spec-fase7g R9.4-5 (06/11/2026).
+- **O quê:** a §5.3 recriava `_agenda_data_conferida`, que tem 8 chamadores e 22 chamadas (`agenda_rascunho_planejar` sozinha tem 11). Lida como a spec mandava, "não antes de quinta" tem "antes de" colado na data e viraria quarta em `nao_antes_de`.
+- **Na Fase 7g:** P3: `_agenda_data_conferida` não é recriada; `_agenda_relacao_dita` devolve nulo com "não" logo antes da relação, e só `agenda_rascunho_marcar` chama a data com relação.
+
+### [NOVO-agenda-203] `agenda_ctp` é invoker: o encaixe simulado não pode ser só do service_role
+
+- **Encontrado em:** Agenda de Produção, spec-fase7g R9.4-6 (06/11/2026).
+- **O quê:** a spec punha `_agenda_encaixe_simulado` só para service_role. `agenda_ctp` é invoker e o painel a chama com login: daria 42501 na tela.
+- **Na Fase 7g:** P4: definer, com a porta dentro (`auth.uid()` nulo ou admin/financeiro), grant a authenticated e service_role.
+
 ### [NOVO-agenda-96] `dados` de `agenda_ver` não chega ao modelo, e `mostrada_em` não vê a conversa (Fase 7d, correção, Onda 2)
 
 - **Encontrado em:** Agenda de Produção, Fase 7d, Onda 2 (06/11/2026), ao fazer o O8 e o R1.

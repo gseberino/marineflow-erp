@@ -435,6 +435,10 @@ const FIXTURES_COMO_TEXTO = [
   // Fase 7e (P8): o dado 20261111100900 (FORA_DA_BANCADA: os 6 modos de desligado para sombra, o fornecedor com 3 entregas e o DEFAULT; o agenda_fase7e_dado.sql o roda numa
   // subtransação desfeita, e o agenda_fase7e_pos_deploy.sql só o mostra na bancada)
   ['agenda_teste.mig_dado_fase7e', '../../supabase/migrations/20261111100900_agenda_fase7e_dado.sql'],
+  // Fase 7g (P1): a fixture da etapa (spec-fase7g §8.2, com o R9.5-22 e o R9.12-8; por cima da da 7d: o pacote de cada teste acrescenta a sua parte) e a própria base da 7g
+  // (20261112100000), de onde o B8c de agenda_fase7g_base.sql confere que ela só cria as funções novas.
+  ['agenda_teste.fase7g', 'fixture-fase7g.sql'],
+  ['agenda_teste.mig_base_fase7g', '../../supabase/migrations/20261112100000_agenda_fase7g_base.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

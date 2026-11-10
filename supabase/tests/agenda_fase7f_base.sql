@@ -258,7 +258,12 @@ begin
     ('dono_semana_aviso = ''fechamento''', 'aceitou'),
     ('dono_semana_hora = hora_do_plano - interval ''1 minute''', 'agenda_config_dono_semana_hora_check'),
     ('dono_semana_hora = cliente_janela_fim + interval ''1 minute''', 'agenda_config_dono_semana_hora_check'),
-    ('dono_semana_hora = hora_do_plano', 'aceitou'),
+    -- FASE 7g: a rodada explicar (explicar_hora, 16:35) fica antes da mensagem da quinta (20261112100000): a quinta só desce até hora_do_plano com a rodada antes dela, na
+    -- mesma escrita (sem a 7g, a escrita é a de antes)
+    ('dono_semana_hora = hora_do_plano' || case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                                                                  and a.attname = 'explicar_hora' and not a.attisdropped)
+                                                 then ', explicar_hora = ''12:00''' else '' end, 'aceitou'),
+    -- FASE 7g: fim
     ('dono_semana_hora = cliente_janela_fim', 'aceitou'),
     ('equipe_convite_antecedencia_h = 23', 'agenda_config_equipe_convite_antecedencia_h_check'),
     ('equipe_convite_antecedencia_h = 121', 'agenda_config_equipe_convite_antecedencia_h_check'),
@@ -817,6 +822,12 @@ begin
   ) as t(tabela, nome, novos)
   loop
     v_a := pg_temp.lista(r.tabela::regclass, r.nome);
+    -- FASE 7g: a 20261112100000 soma explicar depois de comunicar (agenda_fase7g_base.sql B4b confere a lista inteira)
+    if r.nome = 'agenda_vigia_rodadas_rotina_check' and v_a[cardinality(v_a)] = 'explicar'
+       and exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass and a.attname = 'modo_porque' and not a.attisdropped) then
+      v_a := v_a[1:cardinality(v_a) - 1];
+    end if;
+    -- FASE 7g: fim
     if v_a[cardinality(v_a) - cardinality(r.novos) + 1 : cardinality(v_a)] is distinct from r.novos then
       v_dif := coalesce(v_dif || ' | ', '') || r.nome || ': ' || array_to_string(v_a, ',');
     end if;

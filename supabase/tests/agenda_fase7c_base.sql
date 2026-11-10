@@ -601,8 +601,14 @@ select format('B3a %s: as de antes iguais e na mesma ordem, e habilidade no fim'
                             then case t.nome when 'agenda_acoes_tipo_check' then '{assumir}'::text[]
                                              when 'agenda_vigia_rodadas_rotina_check' then '{comunicar}'::text[]
                                              when 'agenda_equipe_mensagens_tipo_check' then '{previsto,mudanca,convite}'::text[] else '{}'::text[] end
-                            else '{}'::text[] end,
+                            else '{}'::text[] end
          -- FASE 7f: fim
+         -- FASE 7g: a 20261112100000 soma explicar no fim da rodada (agenda_fase7g_base.sql B4b confere a lista inteira)
+                    || case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                                         and a.attname = 'modo_porque' and not a.attisdropped)
+                            then case t.nome when 'agenda_vigia_rodadas_rotina_check' then '{explicar}'::text[] else '{}'::text[] end
+                            else '{}'::text[] end,
+         -- FASE 7g: fim
        array_to_string(pg_temp.lista(t.tabela::regclass, t.nome), ',')
   from (values
     ('public.agenda_perguntas', 'agenda_perguntas_tipo_check',
