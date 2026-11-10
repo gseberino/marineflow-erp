@@ -50,8 +50,8 @@ $f$;
 
 create or replace function pg_temp.f4t_msg(p_fone text, p_corpo text, p_em timestamptz) returns uuid
 language sql as $f$
-  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, occurred_at)
-  values ('inbound', p_fone, 'text', p_corpo, 'teste-f4-travessia-' || md5(p_fone || p_corpo || p_em::text || random()::text), p_em)
+  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, occurred_at, hora_real)
+  values ('inbound', p_fone, 'text', p_corpo, 'teste-f4-travessia-' || md5(p_fone || p_corpo || p_em::text || random()::text), p_em, p_em)
   returning id
 $f$;
 
