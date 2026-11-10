@@ -243,9 +243,9 @@ begin
       v_escritores := v_escritores || v_rec.proname;
     end if;
   end loop;
-  if not (v_escritores <@ array['_parceiro_triar', 'parceiro_pedido_rodada', 'parceiro_cartao_executar', 'parceiro_pedido_desfazer',
-                                'parceiro_previa_soltar'])
-     or not (array['parceiro_pedido_rodada', 'parceiro_cartao_executar', 'parceiro_pedido_desfazer', 'parceiro_previa_soltar'] <@ v_escritores) then
+  if (v_escritores <@ array['_parceiro_triar', 'parceiro_pedido_rodada', 'parceiro_cartao_executar', 'parceiro_pedido_desfazer',
+                                'parceiro_previa_soltar']) is not true
+     or (array['parceiro_pedido_rodada', 'parceiro_cartao_executar', 'parceiro_pedido_desfazer', 'parceiro_previa_soltar'] <@ v_escritores) is not true then
     raise exception '14a: quem escreve parceiro_pedidos.estado (%)', v_escritores;
   end if;
 
@@ -734,7 +734,7 @@ begin
      or v_r -> 'args' ->> 'origem' is distinct from 'retorno_parceiro' or v_r -> 'args' ->> 'vessel_id' is distinct from v_ped.vessel_id::text
      or coalesce(v_r -> 'legenda' ->> 'texto', '') not like 'Rosa, aqui é a Claudia, assistente virtual da HBR. Segue o orçamento do veículo de Lucas, válido até __/__.'
      or v_r -> 'legenda' -> 'contexto' ->> 'audiencia' is distinct from 'parceiro'
-     or not (v_r -> 'legenda' -> 'contexto' -> 'nomes_da_lista' ? 'Lucas') then
+     or (v_r -> 'legenda' -> 'contexto' -> 'nomes_da_lista' ? 'Lucas') is not true then
     raise exception '27d/24c: o preparo à parceira (%)', v_r;
   end if;
   -- o ORÇ que montarOrcamento criaria (P12), com a origem do parceiro
