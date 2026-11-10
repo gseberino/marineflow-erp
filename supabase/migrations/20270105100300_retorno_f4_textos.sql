@@ -303,6 +303,10 @@ begin
       when 'andamento' then (case when v_desde is not null then 'sem novidade desde ' || to_char(v_desde, 'DD/MM') end)
       when 'andamento_sem_data' then 'em serviço'
       when 'orcamento' then 'orçamento pedido por vocês; com o Gustavo'
+      -- R2 (resposta ao F4-14): só com retorno_config.parceiro_sem_inicio_ligado, lida pelo jsonb da linha de config porque
+      -- a coluna nasce na P7 (onda 5); ausente ou falsa, sem texto (22023), e a linha sai da saída já agendada
+      when 'sem_inicio' then (case when coalesce((to_jsonb(public._retorno_cfg()) ->> 'parceiro_sem_inicio_ligado')::boolean, false)
+                                   then 'aguardando o início do serviço' end)
     end;
     if v_situacao is null then
       raise exception using errcode = '22023', message = 'parceiro_texto: estado da linha desconhecido ou sem a data';

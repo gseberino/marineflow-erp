@@ -169,6 +169,50 @@ language sql as $f$
                   else p -> 'fatos' -> 'aguarda_peca' end))
 $f$;
 
+-- Respostas de 09/11 (R1 e R2): a OS com o número dado, para a ordem das linhas e o texto do painel serem literais.
+create or replace function pg_temp.f4p_os_n(p_cliente uuid, p_numero text, p_status text, p_check_in timestamptz default null,
+                                            p_convertida timestamptz default null, p_quote text default 'approved',
+                                            p_origem_parceiro uuid default null) returns uuid
+language plpgsql as $f$
+declare
+  v_v uuid;
+  v_id uuid;
+begin
+  insert into public.vessels (client_id, name, asset_type) values (p_cliente, 'Unidade ' || p_numero, 'Motorhome') returning id into v_v;
+  insert into public.service_orders (service_order_number, client_id, vessel_id, status, quote_status, service_type, created_at,
+                                     updated_at, grand_total, check_in_at, converted_to_os_at, origem_parceiro_id)
+  values (p_numero, p_cliente, v_v, p_status, p_quote, 'repair', '2026-12-10 10:00-03', '2026-12-10 10:00-03', 0, p_check_in,
+          p_convertida, p_origem_parceiro)
+  returning id into v_id;
+  return v_id;
+end $f$;
+
+-- A linha como parceiro_linhas a montava antes das respostas de 09/11: as 8 chaves, nenhuma a mais.
+create or replace function pg_temp.f4p_antes(p_interessado uuid, p_n integer, p_estado text, p_desde date, p_fora text) returns jsonb
+language sql as $f$
+  select jsonb_build_object('n', p_n, 'interessado_id', oi.id, 'service_order_id', oi.service_order_id, 'estado', p_estado,
+                            'desde', p_desde, 'rotulo', so.service_order_number, 'retida_por', null, 'fora_por', p_fora)
+    from public.os_interessados oi join public.service_orders so on so.id = oi.service_order_id
+   where oi.id = p_interessado
+$f$;
+
+-- A ordem de parceiro_linhas: as que saem por n; as de fora pelo número da OS (collate "C") e pelo id.
+create or replace function pg_temp.f4p_ordem(p_linhas jsonb[]) returns jsonb
+language sql as $f$
+  select jsonb_agg(l order by (l ->> 'n') is null, (l ->> 'n')::integer, l ->> 'rotulo' collate "C", l ->> 'service_order_id')
+    from unnest(p_linhas) l
+$f$;
+
+-- As linhas que saem como o painel e o pátio as copiavam antes de 09/11 (n, interessado_id, service_order_id, estado, desde).
+create or replace function pg_temp.f4p_copia_antes(p_linhas jsonb) returns jsonb
+language sql as $f$
+  select coalesce(jsonb_agg(jsonb_build_object('n', (l ->> 'n')::integer, 'interessado_id', l -> 'interessado_id',
+                                               'service_order_id', l -> 'service_order_id', 'estado', l -> 'estado', 'desde', l -> 'desde')
+                            order by (l ->> 'n')::integer), '[]'::jsonb)
+    from jsonb_array_elements(p_linhas) l
+   where l ->> 'fora_por' is null and coalesce(l ->> 'n', '') ~ '^[0-9]{1,3}$'
+$f$;
+
 do $painel$
 declare
   c_t constant timestamptz := '2027-01-14 10:00-03';        -- qui
@@ -203,6 +247,8 @@ declare
   v_antes bigint;
   v_rec record;
   v_n_fun integer := 0;
+  v_pr uuid; v_nr uuid; v_ri uuid[];                         -- respostas de 09/11, R2
+  v_esperado jsonb;
 begin
   begin
   select d.id into v_dono from public._comprovante_dono() d;
@@ -881,6 +927,132 @@ begin
      or (to_regprocedure('public.parceiro_pedido_rodada(timestamptz)') is null and v_r -> 'passos' ? 'pedido') then
     raise exception 'vigia b: em sombra (%)', v_r;
   end if;
+
+  -- ── Respostas de 09/11, R2 (F4-14): o veículo que não começou. Com parceiro_sem_inicio_ligado falsa (o padrão), as
+  --    linhas, o painel e o pátio saem byte a byte como antes; ligada, open, approved, scheduled e awaiting_client sem data
+  --    dão sem_inicio ("aguardando o início do serviço", n depois de andamento_sem_data); awaiting_parts sem data continua
+  --    fora, a data vence (linha 6) e o rascunho segue a regra 8 e a linha 5. Números de OS OS-TF4R-2x; telefones 176xx ──
+  update public.retorno_config set parceiro_modo = 'sombra', parceiro_tipos_ligados = '{}', patio_nivel = 'cartao', segura_patio = false
+   where id;
+  if (select c.parceiro_sem_inicio_ligado from public.retorno_config c where c.id) is not false then
+    raise exception 'R2a: parceiro_sem_inicio_ligado não nasceu falsa';
+  end if;
+  insert into public.parceiros (nome, sigla, tipo) values ('Revenda Inicio F4', 'RIN', 'revenda') returning id into v_pr;
+  insert into public.parceiro_pessoas (parceiro_id, nome, papel) values (v_pr, 'Iolanda', 'comercial') returning id into v_c;
+  insert into public.parceiro_numeros (pessoa_id, phone_normalized, chave, ddd, situacao, confirmado_em, recebe_painel)
+    values (v_c, '5547900017601', '00017601', '47', 'confirmado', c_t - interval '30 days', true) returning id into v_nr;
+  v_ri := array[
+    pg_temp.f4p_liga(pg_temp.f4p_os_n(pg_temp.f4p_cliente('Abel Inicio', '5547900017611'), 'OS-TF4R-21', 'open'), v_pr),
+    pg_temp.f4p_liga(pg_temp.f4p_os_n(pg_temp.f4p_cliente('Bia Inicio', '5547900017612'), 'OS-TF4R-22', 'approved'), v_pr),
+    pg_temp.f4p_liga(pg_temp.f4p_os_n(pg_temp.f4p_cliente('Ciro Inicio', '5547900017613'), 'OS-TF4R-23', 'scheduled'), v_pr),
+    pg_temp.f4p_liga(pg_temp.f4p_os_n(pg_temp.f4p_cliente('Duda Inicio', '5547900017614'), 'OS-TF4R-24', 'awaiting_client'), v_pr),
+    pg_temp.f4p_liga(pg_temp.f4p_os_n(pg_temp.f4p_cliente('Enzo Inicio', '5547900017615'), 'OS-TF4R-25', 'awaiting_parts'), v_pr),
+    pg_temp.f4p_liga(pg_temp.f4p_os_n(pg_temp.f4p_cliente('Fabi Inicio', '5547900017616'), 'OS-TF4R-26', 'open', null,
+                                      '2027-01-08 15:00-03'), v_pr),
+    pg_temp.f4p_liga(pg_temp.f4p_os_n(pg_temp.f4p_cliente('Gil Inicio', '5547900017617'), 'OS-TF4R-27', 'in_progress'), v_pr),
+    pg_temp.f4p_liga(pg_temp.f4p_os_n(pg_temp.f4p_cliente('Hana Inicio', '5547900017618'), 'OS-TF4R-28', 'draft', null, null,
+                                      'draft'), v_pr),
+    pg_temp.f4p_liga(pg_temp.f4p_os_n(pg_temp.f4p_cliente('Ivo Inicio', '5547900017619'), 'OS-TF4R-29', 'draft', null, null,
+                                      'draft', v_pr), v_pr)];
+
+  -- Desligada: as linhas são exatamente as de antes (8 chaves, os 4 status e o awaiting_parts fora por sem_fato)
+  v_esperado := pg_temp.f4p_ordem(array[
+    pg_temp.f4p_antes(v_ri[9], 1, 'orcamento', null, null),
+    pg_temp.f4p_antes(v_ri[6], 2, 'andamento', date '2027-01-08', null),
+    pg_temp.f4p_antes(v_ri[7], 3, 'andamento_sem_data', null, null),
+    pg_temp.f4p_antes(v_ri[1], null, null, null, 'sem_fato'),
+    pg_temp.f4p_antes(v_ri[2], null, null, null, 'sem_fato'),
+    pg_temp.f4p_antes(v_ri[3], null, null, null, 'sem_fato'),
+    pg_temp.f4p_antes(v_ri[4], null, null, null, 'sem_fato'),
+    pg_temp.f4p_antes(v_ri[5], null, null, null, 'sem_fato')]);
+  v_linhas := public.parceiro_linhas(v_pr, c_t);
+  if v_linhas is distinct from v_esperado then
+    raise exception 'R2b: com a chave desligada, as linhas mudaram (veio %, esperava %)', v_linhas, v_esperado;
+  end if;
+  -- o painel do dia, pelo caminho real (montar, rodada e pegar), byte a byte
+  v_r := public.parceiro_painel_montar(v_pr, date '2027-01-14', '2027-01-14 17:30-03');
+  v_painel := (v_r ->> 'painel_id')::uuid;
+  if v_r ->> 'estado' is distinct from 'sombra'
+     or (select pp.linhas from public.parceiro_paineis pp where pp.id = v_painel) is distinct from v_esperado then
+    raise exception 'R2c: o painel do dia com a chave desligada (%)', v_r;
+  end if;
+  perform pg_temp.f4p_so(v_pr, v_todos);
+  perform public.parceiro_painel_rodada('2027-01-14 17:50-03');
+  perform pg_temp.f4p_so(null, v_todos);
+  select * into v_x from public.retorno_saidas s where s.dedupe_key = 'parceiro:painel:' || v_painel || ':' || v_nr || ':sombra';
+  if v_x.id is null or v_x.dados -> 'linhas' is distinct from pg_temp.f4p_copia_antes(v_esperado) then
+    raise exception 'R2d: a saída do painel copiou as linhas diferente (%)', v_x.dados -> 'linhas';
+  end if;
+  -- (às 17:55, depois da reserva de 2 min do painel da RPF, que o item 23 preparou às 17:50)
+  v_t := pg_temp.f4p_pegar(v_x.id, '2027-01-14 17:55-03');
+  v_texto := (select s.texto from public.retorno_saidas s where s.id = v_x.id);
+  if v_t is distinct from 'preparada/'
+     or v_texto is distinct from E'Pátio HBR · qui (14/01)\n1. Motorhome de Ivo I.: orçamento pedido por vocês; com o Gustavo.\n2. Motorhome de Fabi I.: sem novidade desde 08/01.\n3. Motorhome de Gil I.: em serviço.\nPara ver de novo, mande *pátio*.\nValores e dados ficam com cada cliente.' then
+    raise exception 'R2e: o painel saiu diferente com a chave desligada (% / %)', v_t, v_texto;
+  end if;
+  -- o pátio direto, byte a byte
+  update public.retorno_config set patio_nivel = 'direto' where id;
+  v_r := public.parceiro_patio_pedido(v_nr, pg_temp.f4p_msg('5547900017601', 'patio', c_t), c_t);
+  select * into v_x from public.retorno_saidas s where s.id = nullif(v_r ->> 'saida_id', '')::uuid;
+  if v_r ->> 'acao' is distinct from 'direto' or v_x.dados -> 'linhas' is distinct from pg_temp.f4p_copia_antes(v_esperado)
+     or public._parceiro_painel_texto('parceiro_patio', 'direto', v_x.dados -> 'linhas', 0, date '2027-01-14', false) ->> 'texto'
+        is distinct from E'Pátio HBR · 14/01\n1. Motorhome de Ivo I.: orçamento pedido por vocês; com o Gustavo.\n2. Motorhome de Fabi I.: sem novidade desde 08/01.\n3. Motorhome de Gil I.: em serviço.' then
+    raise exception 'R2f: o pátio saiu diferente com a chave desligada (% / %)', v_r, v_x.dados -> 'linhas';
+  end if;
+
+  -- Ligada: os 4 status sem data dão sem_inicio; awaiting_parts sem data fica fora; a data vence; o rascunho de fora não entra
+  update public.retorno_config set parceiro_sem_inicio_ligado = true where id;
+  v_linhas := public.parceiro_linhas(v_pr, c_t);
+  perform pg_temp.f4p_confere('R2g open', pg_temp.f4p_linha(v_linhas, v_ri[1]), 'sem_inicio', null, null, null);
+  perform pg_temp.f4p_confere('R2g approved', pg_temp.f4p_linha(v_linhas, v_ri[2]), 'sem_inicio', null, null, null);
+  perform pg_temp.f4p_confere('R2g scheduled', pg_temp.f4p_linha(v_linhas, v_ri[3]), 'sem_inicio', null, null, null);
+  perform pg_temp.f4p_confere('R2g awaiting_client', pg_temp.f4p_linha(v_linhas, v_ri[4]), 'sem_inicio', null, null, null);
+  perform pg_temp.f4p_confere('R2g awaiting_parts sem data', pg_temp.f4p_linha(v_linhas, v_ri[5]), null, null, null, 'sem_fato');
+  perform pg_temp.f4p_confere('R2g com data, a linha 6', pg_temp.f4p_linha(v_linhas, v_ri[6]), 'andamento', '2027-01-08', null, null);
+  perform pg_temp.f4p_confere('R2g in_progress', pg_temp.f4p_linha(v_linhas, v_ri[7]), 'andamento_sem_data', null, null, null);
+  perform pg_temp.f4p_confere('R2g rascunho do parceiro', pg_temp.f4p_linha(v_linhas, v_ri[9]), 'orcamento', null, null, null);
+  if pg_temp.f4p_linha(v_linhas, v_ri[8]) is not null then
+    raise exception 'R2g: o rascunho fora da regra 8 entrou na linha';
+  end if;
+  if (select array_agg(l ->> 'interessado_id' order by (l ->> 'n')::integer) from jsonb_array_elements(v_linhas) l
+       where l ->> 'fora_por' is null)
+     is distinct from array[v_ri[9], v_ri[6], v_ri[7], v_ri[1], v_ri[2], v_ri[3], v_ri[4]]::text[] then
+    raise exception 'R2h: a ordem com sem_inicio (n 8, depois de andamento_sem_data) (%)', v_linhas;
+  end if;
+  if exists (select 1 from jsonb_array_elements(v_linhas) l, jsonb_object_keys(l) k
+              where k not in ('n', 'interessado_id', 'service_order_id', 'estado', 'desde', 'rotulo', 'retida_por', 'fora_por')) then
+    raise exception 'R2h: a linha sem_inicio tem chave fora da lista positiva';
+  end if;
+  v_texto := public._parceiro_painel_texto('parceiro_painel', 'padrao', pg_temp.f4p_copia_antes(v_linhas), 0, date '2027-01-14', false)
+             ->> 'texto';
+  if v_texto is distinct from E'Pátio HBR · qui (14/01)\n1. Motorhome de Ivo I.: orçamento pedido por vocês; com o Gustavo.\n2. Motorhome de Fabi I.: sem novidade desde 08/01.\n3. Motorhome de Gil I.: em serviço.\n4. Motorhome de Abel I.: aguardando o início do serviço.\n5. Motorhome de Bia I.: aguardando o início do serviço.\n6. Motorhome de Ciro I.: aguardando o início do serviço.\n7. Motorhome de Duda I.: aguardando o início do serviço.\nPara ver de novo, mande *pátio*.' then
+    raise exception 'R2i: o texto com sem_inicio (%)', v_texto;
+  end if;
+  v_r := public.parceiro_patio_pedido(v_nr, pg_temp.f4p_msg('5547900017601', 'patio', c_t + interval '1 minute'), c_t + interval '1 minute');
+  select * into v_x from public.retorno_saidas s where s.id = nullif(v_r ->> 'saida_id', '')::uuid;
+  if v_r ->> 'acao' is distinct from 'direto'
+     or (select count(*) from jsonb_array_elements(v_x.dados -> 'linhas') l where l ->> 'estado' = 'sem_inicio') is distinct from 4::bigint then
+    raise exception 'R2j: o pátio direto sem as linhas sem_inicio (%)', v_r;
+  end if;
+  v_r := public.parceiro_estados_sombra(v_pr, c_t);
+  if (v_r -> 'estados' ->> 'sem_inicio')::integer is distinct from 4 or (v_r -> 'estados' ->> 'fora_sem_fato')::integer is distinct from 1
+     or (v_r ->> 'total')::integer is distinct from 8 then
+    raise exception 'R2k: a foto de sombra com sem_inicio (%)', v_r;
+  end if;
+
+  -- Desligada de novo: as linhas voltam a ser as de antes, e a linha sem_inicio que já estava numa saída não tem texto (22023,
+  -- e o parceiro_pegar a tira com fora_por = 'texto')
+  update public.retorno_config set parceiro_sem_inicio_ligado = false where id;
+  if public.parceiro_linhas(v_pr, c_t) is distinct from v_esperado then
+    raise exception 'R2l: desligar de novo não voltou às linhas de antes';
+  end if;
+  begin
+    perform public._parceiro_texto('parceiro_painel', 'linha', '{"n": 4, "bem": "motorhome", "cliente": "Abel I.", "estado": "sem_inicio"}'::jsonb);
+    raise exception 'R2m: a linha sem_inicio teve texto com a chave desligada';
+  exception when sqlstate '22023' then
+    null;
+  end;
+  update public.retorno_config set patio_nivel = 'cartao' where id;
 
   -- ── A varredura do parceiro: as funções da P7 fechadas a anon e authenticated ──
   for v_rec in

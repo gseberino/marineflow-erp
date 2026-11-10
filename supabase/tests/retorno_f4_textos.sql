@@ -300,6 +300,8 @@ begin
       ('linha peça sem data', 'select public._parceiro_texto(''parceiro_painel'', ''linha'', ''{"n": 1, "bem": "motorhome", "cliente": "Ana B.", "estado": "peca_chegou"}'')'),
       ('linha estado estranho', 'select public._parceiro_texto(''parceiro_painel'', ''linha'', ''{"n": 1, "bem": "motorhome", "cliente": "Ana B.", "estado": "pronto_hoje"}'')'),
       ('linha data inválida', 'select public._parceiro_texto(''parceiro_painel'', ''linha'', ''{"n": 1, "bem": "motorhome", "cliente": "Ana B.", "estado": "andamento", "desde": "2027-13-40"}'')'),
+      ('linha sem_inicio com parceiro_sem_inicio_ligado desligada ou ausente (R2)',
+       'select public._parceiro_texto(''parceiro_painel'', ''linha'', ''{"n": 1, "bem": "motorhome", "cliente": "Ana B.", "estado": "sem_inicio"}'')'),
       ('painel sem linhas', 'select public._parceiro_texto(''parceiro_painel'', null, ''{"dia": "2027-01-12", "linhas": []}'')'),
       ('painel com 15 linhas', format('select public._parceiro_texto(''parceiro_painel'', null, %L)',
          jsonb_build_object('dia', '2027-01-12', 'linhas', (select jsonb_agg(i || '. Motorhome de Ana B.: em serviço.') from generate_series(1, 15) i)))),

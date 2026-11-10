@@ -6,9 +6,10 @@
 -- 2. _parceiro_cliente_ouviu: "o parceiro nunca sabe mais que o cliente". O marco ouvido pelo cliente (retorno_saidas
 --    modelo_* e agenda_cliente_mensagens enviadas; a incerta não conta) ou dito pelo dono (parceiro_cliente_sabe).
 -- 3. parceiro_linhas: uma linha por OS visível, pela tabela de P7.2 (pronto, peca_chegou, aguarda_peca, em_servico,
---    orcamento, andamento, andamento_sem_data ou fora por sem_fato), com a data de cada estado no fuso de Brasília e nunca
---    no futuro. Cada OS roda em bloco próprio: a que dá erro sai sozinha (fora_por = 'erro'). Nome nulo ou que colide com
---    outro cliente do parceiro: fora_por = 'nome_ambiguo'. Só as linhas que saem ganham n, na ordem dos estados.
+--    orcamento, andamento, andamento_sem_data, sem_inicio com a chave da R2, ou fora por sem_fato), com a data de cada
+--    estado no fuso de Brasília e nunca no futuro. Cada OS roda em bloco próprio: a que dá erro sai sozinha (fora_por =
+--    'erro'). Nome nulo ou que colide com outro cliente do parceiro: fora_por = 'nome_ambiguo'. Só as linhas que saem
+--    ganham n, na ordem dos estados.
 -- 4. parceiro_estados_sombra: só contagens por estado, sem as condições 6 e 7 da regra de ouro; nunca gera saída.
 -- 5. parceiro_painel_montar e parceiro_painel_rodada: o painel do dia (17:30), sem_mudanca fora de sexta, o estado pelo
 --    modo (sombra, aguardando com o item painel na fila, aprovado), as saídas entre 17:45 e 18:30 por número que recebe o
@@ -22,9 +23,23 @@
 -- 9. parceiro_ativar e parceiro_ativacao_rodada (P01, uma vez por número), parceiro_reler_vetos (a rede do webhook que
 --    caiu, só a linha do veto) e parceiro_vigia (cada passo isolado; os de onda posterior só com a função no banco).
 --
--- Sem dado: só funções novas. Nada é chamado enquanto o cron não chamar parceiro_vigia (P14) e o webhook não chamar
--- parceiro_ler_mensagem (P13). Com parceiro_modo = 'desligado' (o padrão), o vigia só relê o veto.
--- Reverter: drop function das funções desta migration. As tabelas da P1 ficam.
+-- 10. Respostas do dono de 09/11 (o texto espera o cartão F4-17, por isso as chaves nascem falsas): R2 (F4-14), o estado
+--    sem_inicio ("aguardando o início do serviço") para open, approved, scheduled e awaiting_client sem data, só com
+--    retorno_config.parceiro_sem_inicio_ligado. Desligada, a linha é byte a byte a de antes.
+--
+-- Sem dado: funções novas e as chaves das respostas de 09/11 em retorno_config, nascidas falsas. Nada é chamado enquanto o
+-- cron não chamar parceiro_vigia (P14) e o webhook não chamar parceiro_ler_mensagem (P13). Com parceiro_modo = 'desligado'
+-- (o padrão), o vigia só relê o veto.
+-- Reverter: drop function das funções desta migration; alter table public.retorno_config drop column
+-- parceiro_sem_inicio_ligado. As tabelas da P1 ficam.
+
+-- ── 0. As chaves das respostas do dono de 09/11, nascidas desligadas ──────────────────────────────────────────────────
+
+alter table public.retorno_config
+  add column parceiro_sem_inicio_ligado boolean not null default false;
+
+comment on column public.retorno_config.parceiro_sem_inicio_ligado is
+  'Retorno F4, R2 (resposta do dono ao F4-14, 09/11/2026): true põe no painel e no pátio, como sem_inicio ("aguardando o início do serviço", sem data e sem previsão), a OS sem data em open, approved, scheduled ou awaiting_client. Nasce false até o dono aprovar a frase no cartão F4-17; false = a linha fica fora (sem_fato), como antes.';
 
 -- ── 1. O fato da OS e o que o cliente ouviu ─────────────────────────────────────────────────────────────────────────────
 
@@ -247,6 +262,7 @@ declare
   c_fuso constant text := 'America/Sao_Paulo';
   v_agora timestamptz := coalesce(p_agora, now());
   v_hoje date := (coalesce(p_agora, now()) at time zone 'America/Sao_Paulo')::date;
+  v_cfg public.retorno_config := public._retorno_cfg();
   v_oi public.os_interessados;
   v_so record;
   v_f jsonb;
@@ -316,7 +332,7 @@ begin
     v_estado := 'orcamento';
     v_desde := null;
   end if;
-  -- 6 a 8. andamento (com data), andamento_sem_data (só em in_progress) ou fora
+  -- 6 a 8. andamento (com data), andamento_sem_data (só em in_progress), sem_inicio (R2, só com a chave) ou fora
   if v_estado is null then
     v_d1 := case when v_so.check_in_at <= v_agora then (v_so.check_in_at at time zone c_fuso)::date end;
     if v_ouviu_peca is not null then
@@ -333,6 +349,10 @@ begin
       v_estado := 'andamento';
     elsif v_so.status = 'in_progress' then
       v_estado := 'andamento_sem_data';
+    elsif v_cfg.parceiro_sem_inicio_ligado is true and v_so.status in ('open', 'approved', 'scheduled', 'awaiting_client') then
+      -- R2 (F4-14): o que ainda não começou, sem data e sem previsão. awaiting_parts sem data continua fora: o serviço pode
+      -- já ter começado.
+      v_estado := 'sem_inicio';
     else
       v_fora := 'sem_fato';
     end if;
@@ -345,7 +365,7 @@ end;
 $$;
 
 comment on function public._parceiro_linha_da_os(uuid, timestamptz) is
-  'Retorno F4 (P7.2): o estado e a data de um vínculo pela tabela de P7.2, com retida_por (o marco que o cliente não ouviu) e fora_por sem_fato. Datas no dia de Brasília, nunca depois de hoje; o chegou_em só entra no andamento com o cliente tendo ouvido a peça. Não confere a regra de ouro nem o nome. Erro sobe.';
+  'Retorno F4 (P7.2): o estado e a data de um vínculo pela tabela de P7.2, com retida_por (o marco que o cliente não ouviu) e fora_por sem_fato. Datas no dia de Brasília, nunca depois de hoje; o chegou_em só entra no andamento com o cliente tendo ouvido a peça. Com parceiro_sem_inicio_ligado (R2), open, approved, scheduled e awaiting_client sem data dão sem_inicio. Não confere a regra de ouro nem o nome. Erro sobe.';
 
 revoke all on function public._parceiro_linha_da_os(uuid, timestamptz) from public, anon, authenticated;
 
@@ -432,7 +452,8 @@ begin
     with x as (
       select l,
              case l ->> 'estado' when 'pronto' then 1 when 'peca_chegou' then 2 when 'aguarda_peca' then 3 when 'em_servico' then 4
-                                 when 'orcamento' then 5 when 'andamento' then 6 when 'andamento_sem_data' then 7 else 9 end as ord,
+                                 when 'orcamento' then 5 when 'andamento' then 6 when 'andamento_sem_data' then 7
+                                 when 'sem_inicio' then 8 else 9 end as ord,
              (l ->> 'fora_por') is null as sai
         from jsonb_array_elements(v_res) l
     ), y as (

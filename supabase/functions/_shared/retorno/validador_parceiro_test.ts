@@ -59,6 +59,8 @@ const SITUACAO: Record<string, string> = {
   andamento: "sem novidade desde {dd/mm}",
   andamento_sem_data: "em serviço",
   orcamento: "orçamento pedido por vocês; com o Gustavo",
+  // Respostas do dono de 09/11 (F4-14, R2): o veículo que não começou, só com parceiro_sem_inicio_ligado (texto no F4-17)
+  sem_inicio: "aguardando o início do serviço",
 };
 
 const ABERTURAS = {
@@ -402,4 +404,37 @@ Deno.test("validarSaida segue reprovando a audiência 'parceiro'; validarSaidaAo
     },
   };
   assertEquals(validarSaidaAoParceiro(texto, armadilha as ContextoAoParceiro), { ok: false, regras: ["erro"] });
+});
+
+// ─── Respostas do dono de 09/11 (R1 e R2): as situações novas da linha ────────────────────────────────
+
+const MIGRATION_TEXTOS = new URL("../../../migrations/20270105100300_retorno_f4_textos.sql", import.meta.url);
+
+Deno.test("cada situação da linha (P7.2, R1 e R2) está literal no catálogo da migration", () => {
+  // CRLF vira LF e '' vira ' (o SQL escapa o apóstrofo); a data entra no lugar de {dd/mm}, então só o começo é literal
+  const sql = Deno.readTextFileSync(MIGRATION_TEXTOS).replace(/\r\n/g, "\n").replace(/''/g, "'");
+  const fora = Object.entries(SITUACAO)
+    .filter(([, s]) => !sql.includes(s.includes("{dd/mm}") ? s.slice(0, s.indexOf("{dd/mm}")) : s))
+    .map(([estado]) => estado);
+  assertEquals(fora, [], "situação do teste que não está no catálogo do banco");
+});
+
+Deno.test("R2: 'aguardando o início do serviço' passa no validador real, no painel e sozinha; com promessa, reprova", () => {
+  const linhas = [
+    linha(1, "motorhome", "Ana B.", "andamento_sem_data"),
+    linha(2, "motorhome", "Bruno C.", "sem_inicio"),
+    linha(3, "trailer", "Caio D.", "sem_inicio"),
+  ];
+  assertEquals(linhas[1], "2. Motorhome de Bruno C.: aguardando o início do serviço.");
+  const texto = painel("Pátio HBR · qui (14/01)", linhas);
+  const nomes = ["Ana B.", "Bruno C.", "Caio D."];
+  passa(texto, ctxParceiro(texto, ["qui (14/01)", "Motorhome", "Trailer", ...nomes], {
+    datas_permitidas: ["qui (14/01)", "14/01"],
+    nomes_da_lista: nomes,
+  }));
+  // a linha sozinha, como a rodada valida linha a linha (P5.2)
+  passa(linhas[1], ctxParceiro(linhas[1], ["Motorhome", "Bruno C."], { nomes_da_lista: ["Bruno C."] }));
+  // sem data e sem previsão: a mesma linha com um prazo prometido reprova
+  const prometida = "2. Motorhome de Bruno C.: aguardando o início do serviço, que fica pronto até sexta.";
+  reprova(prometida, ctxParceiro(prometida, ["Motorhome", "Bruno C."], { nomes_da_lista: ["Bruno C."] }), "promessa", "data_de_pronto");
 });
