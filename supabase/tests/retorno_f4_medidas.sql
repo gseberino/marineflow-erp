@@ -330,12 +330,12 @@ begin
   if jsonb_typeof(v_linhas) is distinct from 'array' then
     raise exception '5a: o fechamento sem lista (%)', v_r;
   end if;
-  if not (v_linhas @> to_jsonb(array[
+  if (v_linhas @> to_jsonb(array[
            'Pátio da RMD: 2 veículos, 1 mudou · *parceiro* para liberar',
            'NÃO RMD: 1 cliente hoje',
            format('Vínculos sem aviso: %s', v0.vinculos_sem_aviso + 2),
            format('Respostas ao aviso para decidir: %s', 1) || ' · *parceiro*',
-           'RMD: 1 pergunta esperando · *parceiro*']::text[])) then
+           'RMD: 1 pergunta esperando · *parceiro*']::text[])) is not true then
     raise exception '5b: as linhas do fechamento (%)', v_linhas;
   end if;
   v_txt := v_linhas::text;
