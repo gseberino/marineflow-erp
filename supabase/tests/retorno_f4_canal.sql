@@ -85,8 +85,12 @@ declare
   v uuid;
 begin
   insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, occurred_at)
-    values ('inbound', p_fone, 'text', 'mensagem de teste f4 canal', 'teste-f4-canal-' || md5(p_fone || p_em::text), p_em)
+    values ('inbound', p_fone, 'text', 'mensagem de teste f4 canal', 'teste-f4-canal-' || md5(p_fone || p_em::text || clock_timestamp()::text), p_em)
     returning id into v_m;
+  -- um caso vivo por número (retorno_aberturas_uma_viva): o anterior fecha antes, como na vida real
+  update public.retorno_aberturas a
+     set estado = 'fechada', fechada_em = greatest(a.aberta_em, p_em), fechada_motivo = 'expirou'
+   where a.chave = right(p_fone, 8) and a.estado in ('aberta', 'vencida');
   insert into public.retorno_aberturas (chave, phone_normalized, ddd, papel, quem, primeira_msg_id, ultima_msg_id, aberta_em, gravada_em,
                                         ultima_em, ultima_gravada_em, nivel, motivo, tipo_recibo, modo)
     values (right(p_fone, 8), p_fone, '47', 'parceiro', public.quem_escreve(p_fone), v_m, v_m, p_em, p_em, p_em, p_em,
@@ -291,9 +295,9 @@ begin
   perform public.parceiro_pegar(c_t);
   select * into v_x from public.retorno_saidas s where s.id = v_s;
   if v_x.estado is distinct from 'agendada' or v_x.enviar_em is distinct from '2027-01-13 08:00-03'::timestamptz then
-    raise exception '4j: a ativação no teto das iniciadas não reagendou (% %)', v_x.estado, v_x.enviar_em;
+    raise exception '4j: a ativação no teto das iniciadas não reagendou (% % % %)', v_x.estado, v_x.motivo, v_x.enviar_em, v_x.dados -> 'erro';
   end if;
-  delete from public.agenda_cliente_mensagens where dedupe_key = 'agenda-cliente:teste:f4canal';
+  -- o registro da agenda não se apaga nem muda (_agenda_registro_nao_apaga, so_muda): fica, e sozinho conta 1 de 12 no teto
   perform pg_temp.f4c_limpa();
 
   -- 21. Com respostas_dia_max atingido, a resposta dá teto_dia e o aviso sai; aviso e painel nunca dão teto_dia.
@@ -441,7 +445,8 @@ begin
   insert into public.whatsapp_blocked_numbers (phone_normalized, reason, tipo, created_at)
     values ('5547900014501', 'Teste F4 canal', 'opt_out', c_t - interval '1 day');
   perform public.parceiro_pegar(c_t + interval '1 hour');
-  if pg_temp.f4c_estado(v_s) is distinct from 'recusada/opt_out' then
+  -- o motivo é o do canal: canal_bloqueado (F0a) dá 'bloqueado' para todo número em whatsapp_blocked_numbers
+  if pg_temp.f4c_estado(v_s) is distinct from 'recusada/bloqueado' then
     raise exception '4k: linha 9, canal (%)', pg_temp.f4c_estado(v_s);
   end if;
   delete from public.whatsapp_blocked_numbers where phone_normalized = '5547900014501' and reason = 'Teste F4 canal';
@@ -792,16 +797,17 @@ begin
      'O cliente tem WhatsApp? Se autorizar, me passa o número que o Gustavo fala direto.' then
     raise exception '15b: P04 sem pedido saiu com nome';
   end if;
+  -- 15d antes do 2º caso: a 3ª coleta é do 1º caso, que fecha quando o 2º abre
+  v_s3 := pg_temp.f4c_agenda('parceiro_coleta', 'whatsapp', v_n1, '{}', c_t - interval '1 minute', 'col3', v_caso);
+  perform public.parceiro_pegar(c_t);
+  if pg_temp.f4c_estado(v_s3) is distinct from 'recusada/teto_coleta' then
+    raise exception '15d: 3ª coleta do caso (%)', pg_temp.f4c_estado(v_s3);
+  end if;
   v_caso2 := pg_temp.f4c_caso('5547900014501', c_t - interval '5 minutes');
   v_s3 := pg_temp.f4c_agenda('parceiro_recibo', null, v_n1, '{}', c_t - interval '1 minute', 'rec2', v_caso2);
   perform public.parceiro_pegar(c_t);
   if pg_temp.f4c_estado(v_s3) is distinct from 'recusada/teto_numero' then
     raise exception '15c: recibo de outro caso em 12 h (%)', pg_temp.f4c_estado(v_s3);
-  end if;
-  v_s3 := pg_temp.f4c_agenda('parceiro_coleta', 'whatsapp', v_n1, '{}', c_t - interval '1 minute', 'col3', v_caso);
-  perform public.parceiro_pegar(c_t);
-  if pg_temp.f4c_estado(v_s3) is distinct from 'recusada/teto_coleta' then
-    raise exception '15d: 3ª coleta do caso (%)', pg_temp.f4c_estado(v_s3);
   end if;
   perform pg_temp.f4c_limpa();
 
@@ -849,6 +855,10 @@ begin
     raise exception '14b: "pode fazer" mexeu em OS ou vínculo';
   end if;
   -- 8 e 24: duas perguntas, 2 h entre elas, sem saída humana: recibo, pergunta na fila e insistências 1.
+  -- o caso do bloco 25, no mesmo número, fecha antes: senão a 1ª pergunta entra nele
+  update public.retorno_aberturas a
+     set estado = 'fechada', fechada_em = greatest(a.aberta_em, '2027-01-13 10:00-03'::timestamptz), fechada_motivo = 'expirou'
+   where a.chave = '00014502' and a.estado in ('aberta', 'vencida');
   insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, occurred_at)
     values ('inbound', '5547900014502', 'text', 'como tá a bateria do joão?', 'teste-f4-canal-14c', '2027-01-13 11:00-03')
     returning id into v_m;
