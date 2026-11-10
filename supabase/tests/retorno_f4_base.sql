@@ -89,8 +89,8 @@ begin
     values ('ORÇ-TF4-BASE1', v_cliente, v_unidade, 'draft', 'draft', 'repair', 100) returning id into v_os;
   insert into public.service_orders (service_order_number, client_id, vessel_id, status, quote_status, service_type, grand_total)
     values ('ORÇ-TF4-BASE2', v_cliente, v_unidade, 'draft', 'draft', 'repair', 100) returning id into v_os2;
-  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, occurred_at)
-    values ('inbound', c_fone, 'text', 'mensagem de teste um', 'teste-f4-base-1', '2027-01-05 09:00-03') returning id into v_msg;
+  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, occurred_at, hora_real)
+    values ('inbound', c_fone, 'text', 'mensagem de teste um', 'teste-f4-base-1', '2027-01-05 09:00-03', '2027-01-05 09:00-03') returning id into v_msg;
   insert into public.parceiros (nome, sigla, tipo) values ('Revenda Base F4', 'RBF', 'revenda_e_patio') returning id into v_parceiro;
   insert into public.parceiros (nome, sigla, tipo) values ('Revenda Apagar F4', 'RAF', 'revenda') returning id into v_parceiro_apagar;
   insert into public.parceiro_pessoas (parceiro_id, nome, papel) values (v_parceiro, 'Carla', 'comercial') returning id into v_pessoa;
