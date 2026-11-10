@@ -274,11 +274,14 @@ begin
   v := regexp_replace(v, ' {2,}', ' ', 'g');
   v_simples := public._texto_simples(v);
   v_palavras := array(select p from regexp_split_to_table(v_simples, '[^[:alpha:]]+') as p where p <> '');
-  -- o 1º nome de cada entrada ("João S." dá joao; "Ana-Maria S." dá ana e maria); pedaço de uma letra não é nome
+  -- toda palavra de cada entrada ("João S." dá joao; "João Pereira da Silva" dá joao, pereira e silva; "Ana-Maria S." dá
+  -- ana e maria): o sobrenome do cliente em minúscula, ou como 1ª palavra, também fica de fora (conferência de 10/11).
+  -- Pedaço de uma letra e partícula não são nome. Quem quer comparar só o 1º nome passa só o 1º nome.
   v_primeiros := array(select p
                          from unnest(p_nomes) as n,
-                              regexp_split_to_table(public._texto_simples(split_part(btrim(n), ' ', 1)), '[^[:alpha:]]+') as p
-                        where n is not null and char_length(p) >= 2);
+                              regexp_split_to_table(public._texto_simples(btrim(n)), '[^[:alpha:]]+') as p
+                        where n is not null and char_length(p) >= 2
+                          and p not in ('da', 'de', 'do', 'das', 'dos', 'di', 'du', 'e'));
   if exists (select 1 from unnest(v_palavras) as p
               where p = any (v_primeiros) or p = any (c_dias) or p like 'pront%' or p like 'avisad%') then
     return null;
@@ -306,7 +309,7 @@ end;
 $$;
 
 comment on function public._parceiro_etapa_ok(text, text[]) is
-  'Retorno F4, R1 (resposta do dono ao F4-07, 09/11/2026): a etapa pronta para a linha em_servico ("em serviço hoje ({etapa})", 1ª letra minúscula) ou nulo. Não vazia, até 60 caracteres, sem controle nem dígito, só letras e " ,./-", começando por letra; nenhuma palavra igual ao 1º nome de p_nomes (nulo = nulo); e, além da spec, sem dia, mês, hoje/amanhã/ontem, meio-dia, pront* nem avisad*; e (revisão de 10/11) sem palavra de conclusão ou de entrega (entreg*, retir*, conclu*, finaliz*, termin* salvo terminal* e terminai*, liber*, acabad*, encerr*) e sem maiúscula depois da 1ª palavra (nome próprio).';
+  'Retorno F4, R1 (resposta do dono ao F4-07, 09/11/2026): a etapa pronta para a linha em_servico ("em serviço hoje ({etapa})", 1ª letra minúscula) ou nulo. Não vazia, até 60 caracteres, sem controle nem dígito, só letras e " ,./-", começando por letra; nenhuma palavra igual a uma palavra de p_nomes, menos partícula e pedaço de 1 letra (nulo = nulo; conferência de 10/11); e, além da spec, sem dia, mês, hoje/amanhã/ontem, meio-dia, pront* nem avisad*; e (revisão de 10/11) sem palavra de conclusão ou de entrega (entreg*, retir*, conclu*, finaliz*, termin* salvo terminal* e terminai*, liber*, acabad*, encerr*) e sem maiúscula depois da 1ª palavra (nome próprio).';
 
 revoke all on function public._parceiro_etapa_ok(text, text[]) from public, anon, authenticated;
 
