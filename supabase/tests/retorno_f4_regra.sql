@@ -586,9 +586,9 @@ begin
 
   -- ── 25. parceiro_semear ──
   insert into public.payees (name, kind, active, phone) values ('Equipe Regra F4', 'prestador', true, '5547900014493');
-  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, occurred_at)
-    values ('inbound', '5547900007391', 'text', 'oi teste f4', 'teste-f4-regra-13', c_t - interval '10 days'),
-           ('inbound', '554700007391', 'text', 'oi teste f4', 'teste-f4-regra-12', c_t - interval '9 days');
+  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, occurred_at, hora_real)
+    values ('inbound', '5547900007391', 'text', 'oi teste f4', 'teste-f4-regra-13', c_t - interval '10 days', c_t - interval '10 days'),
+           ('inbound', '554700007391', 'text', 'oi teste f4', 'teste-f4-regra-12', c_t - interval '9 days', c_t - interval '9 days');
   v_semente := jsonb_build_array(jsonb_build_object(
     'nome', 'Semente Regra F4', 'sigla', 'SRF', 'tipo', 'revenda_e_patio', 'client_id', null,
     'pessoas', jsonb_build_array(
