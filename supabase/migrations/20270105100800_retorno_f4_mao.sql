@@ -114,7 +114,9 @@ begin
       continue;
     end if;
     v_doc := upper(v_casou[1]) || '-' || v_casou[2];
-    -- ORC- do arquivo é ORÇ- no banco (slugifyForFilename tira a cedilha); OS- fica como veio.
+    -- ORC- do arquivo é ORÇ- no banco (slugifyForFilename tira a cedilha); OS- fica como veio. A OS é deste documento,
+    -- nunca a da volta anterior.
+    v_os := null;
     select so.id into v_os
       from public.service_orders so
      where so.service_order_number = (case when v_casou[1] = 'orc' then 'ORÇ-' else 'OS-' end) || v_casou[2]
@@ -369,6 +371,7 @@ begin
            or (public.parceiro_os_visivel(v_int, v_agora) ->> 'visivel')::boolean is not true then
           continue;
         end if;
+        v_cl := null;
         select oi.client_id into v_cl from public.os_interessados oi where oi.id = v_int and oi.service_order_id = v_os;
         if v_cl is null or public._parceiro_fone_do_cliente(v_cl) is not null then
           continue;
