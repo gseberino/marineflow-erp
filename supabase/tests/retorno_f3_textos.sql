@@ -229,8 +229,11 @@ begin
       'Oi, Marcos! Aqui é a Claudia, assistente virtual da HBR. Segue o orçamento das baterias, que vale até segunda (15/03). Se tiver dúvida ou quiser ajustar algo, é só responder por aqui.');
 
     -- ═══ 7. Rascunho: p_client decide o nome e a apresentação, mesmo com outro cliente no caso.
+    -- Caso novo, de outro cliente (Rodrigo, já apresentado como cliente), num número que nunca recebeu apresentação:
+    -- o v_caso não serve, porque a chave dele já conta como apresentada desde o PDF do passo 4 (4n).
     v_cl3 := pg_temp.f3t_cli('Ana Rascunho Teste');
-    v_r := public.retorno_legenda_do_orcamento(v_caso, null, c_agora, v_cl3);
+    v_caso4 := pg_temp.f3t_caso(6, 'cliente', v_cl, 'preciso de orçamento de baterias', c_agora - interval '1 hour');
+    v_r := public.retorno_legenda_do_orcamento(v_caso4, null, c_agora, v_cl3);
     perform pg_temp.f3t_igual('7a p_client decide o nome', v_r ->> 'texto',
       'Oi, Ana! Aqui é a Claudia, assistente virtual da HBR. Segue o orçamento que você pediu, que vale até segunda (15/03). Se tiver dúvida ou quiser ajustar algo, é só responder por aqui.');
     perform pg_temp.f3t_igual('7b nome_permitido', v_r -> 'contexto' ->> 'nome_permitido', 'Ana');
@@ -276,7 +279,9 @@ begin
     v_saida2 := pg_temp.f3t_saida(v_caso4, 'modelo_ver_no_local', 'enviando', c_agora, 'm07');
     perform public.retorno_registrar_decisao(v_saida2, 'enviada', '{"provider_message_id": "wa-f3"}', c_agora + interval '1 minute');
     select * into v_ab from public.retorno_aberturas where id = v_caso4;
-    if v_ab.estado is distinct from 'aberta' or v_ab.visita_a_combinar_em is distinct from c_agora + interval '1 minute' or v_ab.recibo_em is distinct from c_agora + interval '1 minute'
+    -- A hora do efeito é a decidida_em da saída (a reserva do retorno_pegar, c_agora), como na F1
+    -- (_retorno_aplicar_efeitos: coalesce(decidida_em, p_agora)), não a hora do registro do envio.
+    if v_ab.estado is distinct from 'aberta' or v_ab.visita_a_combinar_em is distinct from c_agora or v_ab.recibo_em is distinct from c_agora
        or v_ab.cumprida_em is not null or v_ab.fechada_em is not null then
       raise exception '9a: caso depois do M07: %', to_jsonb(v_ab);
     end if;
@@ -319,9 +324,10 @@ begin
     update public.retorno_aberturas set respondida_em = '2027-03-08 10:00-03' where id = v_caso2;
     -- Nada: parado há mais de 4 h, com e sem a marca.
     v_caso3 := pg_temp.f3t_caso(13, 'cliente', v_cl, 'a bateria', '2027-03-08 08:00-03');
-    update public.retorno_aberturas set nivel = 'nada', visita_a_combinar_em = '2027-03-08 09:00-03' where id = v_caso3;
+    -- nivel 'nada' exige motivo (retorno_aberturas_motivo, F1).
+    update public.retorno_aberturas set nivel = 'nada', motivo = 'nao_pede_resposta', visita_a_combinar_em = '2027-03-08 09:00-03' where id = v_caso3;
     v_caso4 := pg_temp.f3t_caso(14, 'cliente', v_cl, 'o carregador', '2027-03-08 08:00-03');
-    update public.retorno_aberturas set nivel = 'nada' where id = v_caso4;
+    update public.retorno_aberturas set nivel = 'nada', motivo = 'nao_pede_resposta' where id = v_caso4;
 
     v_vig := public.retorno_vigia(c_t);
     if (v_vig ->> 'ok')::boolean is distinct from true then
