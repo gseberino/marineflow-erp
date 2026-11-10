@@ -10,8 +10,8 @@ language plpgsql as $f$
 declare
   v uuid;
 begin
-  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, occurred_at)
-  values ('inbound', p_fone, 'text', p_corpo, 'teste-f4-ident-' || md5(p_fone || p_corpo || p_em::text), p_em)
+  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, wa_message_id, occurred_at, hora_real)
+  values ('inbound', p_fone, 'text', p_corpo, 'teste-f4-ident-' || md5(p_fone || p_corpo || p_em::text), p_em, p_em)
   returning id into v;
   return v;
 end $f$;
