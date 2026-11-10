@@ -222,7 +222,7 @@ begin
   select array_agg(x.interessado_id order by x.interessado_id) into v_ids from public.parceiro_os_visiveis(v_p, c_t) x;
   if v_ids is distinct from (select array_agg(x.id order by x.id) from public.os_interessados x
                                where x.parceiro_id = v_p and (public.parceiro_os_visivel(x.id, c_t) ->> 'visivel')::boolean is true)
-     or not (v_i_a = any (v_ids)) then
+     or (v_i_a = any (v_ids)) is not true then
     raise exception '20a: parceiro_os_visiveis diferente da regra de ouro (%)', v_ids;
   end if;
   if exists (select 1 from public.parceiro_os_visiveis(v_p, c_t) x
@@ -649,7 +649,7 @@ begin
 
   -- ── parceiro_numeros_fora_da_ia (P12.4) ──
   update public.retorno_config set parceiro_historico_na_ia = false where id;
-  if not (array['00014401', '00007391']::text[] <@ public.parceiro_numeros_fora_da_ia())
+  if (array['00014401', '00007391']::text[] <@ public.parceiro_numeros_fora_da_ia()) is not true
      or exists (select 1 from unnest(public.parceiro_numeros_fora_da_ia()) x where x !~ '^[0-9]{8}$') then
     raise exception 'ia-a: chaves fora do assistente (%)', public.parceiro_numeros_fora_da_ia();
   end if;
