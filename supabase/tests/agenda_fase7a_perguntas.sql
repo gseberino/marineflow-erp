@@ -680,6 +680,25 @@ end
 $fx$;
 
 -- ── Q7. As cópias ───────────────────────────────────────────────────────────────────────────────────────
+-- (correção 98) _agenda_vigia_limpeza viva vem agora da 20261113100000 (o conserto do NOVO-agenda-98), que copia a desta etapa e
+-- só acrescenta o bloco "-- CORREÇÃO 10/11 (98):": o Q7b o tira do corpo vivo antes de comparar (o C0 de agenda_correcao_98.sql
+-- confere que, sem ele, o corpo vivo é o desta migration byte a byte). Quem recriar a limpeza depois copia da 20261113100000.
+create function pg_temp.sem_98(p text) returns text language plpgsql immutable as $f$
+declare
+  v_fora text[] := '{}';
+  v_dentro boolean := false;
+  l text;
+begin
+  foreach l in array string_to_array(replace(p, E'\r\n', E'\n'), E'\n') loop
+    if not v_dentro and l ~ '^\s*-- CORREÇÃO 10/11 \(98\):' and l !~ '^\s*-- CORREÇÃO 10/11 \(98\): fim' then v_dentro := true; continue; end if;
+    if v_dentro then
+      if l ~ '^\s*-- CORREÇÃO 10/11 \(98\): fim' then v_dentro := false; end if;
+      continue;
+    end if;
+    v_fora := v_fora || l;
+  end loop;
+  return array_to_string(v_fora, E'\n');
+end $f$;
 do $copia$
 declare
   v_c6   text := coalesce(current_setting('agenda_teste.mig_correcao_calculo_fase6', true), '');
@@ -697,7 +716,7 @@ begin
     pg_temp.sem_fase7(v_novo) = pg_temp.corpo(v_c6, 'agenda_decidir')
     and (select count(*) from regexp_matches(v_novo, '-- FASE 7: fim', 'g')) = 1,
     format('fonte %s × novo sem blocos %s caracteres', length(pg_temp.corpo(v_c6, 'agenda_decidir')), length(pg_temp.sem_fase7(v_novo))));
-  select replace(p.prosrc, E'\r\n', E'\n') into v_novo
+  select pg_temp.sem_98(p.prosrc) into v_novo
     from pg_proc p where p.oid = 'public._agenda_vigia_limpeza(date, timestamptz)'::regprocedure;
   insert into _resultado values ('Q7b _agenda_vigia_limpeza: sem o bloco "-- FASE 7:" (a pergunta do gestor), é o corpo de 20261030100500',
     pg_temp.sem_fase7(v_novo) = pg_temp.corpo(v_rv, '_agenda_vigia_limpeza')

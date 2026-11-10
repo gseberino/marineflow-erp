@@ -615,6 +615,25 @@ end
 $ordem$;
 
 -- ── K. As cópias (sempre que as migrations de origem vierem como texto) ─────────────────────────────────────
+-- (correção 98) _agenda_vigia_limpeza viva vem agora da 20261113100000 (o conserto do NOVO-agenda-98), que copia a da 7a
+-- (20261031100300) e só acrescenta o bloco "-- CORREÇÃO 10/11 (98):": o K1 o tira do corpo vivo antes dos outros tiradores (o C0
+-- de agenda_correcao_98.sql confere que, sem ele, é a da 7a byte a byte). Nas outras 8 funções não há bloco: o corpo passa igual.
+create function pg_temp.sem_98(p text) returns text language plpgsql immutable as $f$
+declare
+  v_fora text[] := '{}';
+  v_dentro boolean := false;
+  l text;
+begin
+  foreach l in array string_to_array(replace(p, E'\r\n', E'\n'), E'\n') loop
+    if not v_dentro and l ~ '^\s*-- CORREÇÃO 10/11 \(98\):' and l !~ '^\s*-- CORREÇÃO 10/11 \(98\): fim' then v_dentro := true; continue; end if;
+    if v_dentro then
+      if l ~ '^\s*-- CORREÇÃO 10/11 \(98\): fim' then v_dentro := false; end if;
+      continue;
+    end if;
+    v_fora := v_fora || l;
+  end loop;
+  return array_to_string(v_fora, E'\n');
+end $f$;
 do $copia$
 declare
   f record;
@@ -641,7 +660,7 @@ begin
       continue;
     end if;
     v_fonte := pg_temp.corpo(v_mig, f.nome);
-    select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = f.sig::regprocedure;
+    select pg_temp.sem_98(p.prosrc) into v_novo from pg_proc p where p.oid = f.sig::regprocedure;
     insert into _resultado values (
       format('K1 %s: sem os blocos "-- CORREÇÃO 29/10 (revisão):" (e com a linha trocada de volta), é o corpo de %s (com %s blocos)',
              f.nome, f.versao, f.blocos),

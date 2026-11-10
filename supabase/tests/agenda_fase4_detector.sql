@@ -1243,6 +1243,25 @@ end
 $d9$;
 
 -- ── D8. As cópias: fora dos blocos "-- FASE 4:", iguais às da migration de onde vieram ─────────────────
+-- (correção 98) _agenda_vigia_limpeza viva vem agora da 20261113100000 (o conserto do NOVO-agenda-98), que copia a da 7a
+-- (20261031100300) e só acrescenta o bloco "-- CORREÇÃO 10/11 (98):": o D8 o tira do corpo vivo antes dos outros tiradores (o C0
+-- de agenda_correcao_98.sql confere que, sem ele, é a da 7a byte a byte). Nas outras 4 funções não há bloco: o corpo passa igual.
+create function pg_temp.sem_98(p text) returns text language plpgsql immutable as $f$
+declare
+  v_fora text[] := '{}';
+  v_dentro boolean := false;
+  l text;
+begin
+  foreach l in array string_to_array(replace(p, E'\r\n', E'\n'), E'\n') loop
+    if not v_dentro and l ~ '^\s*-- CORREÇÃO 10/11 \(98\):' and l !~ '^\s*-- CORREÇÃO 10/11 \(98\): fim' then v_dentro := true; continue; end if;
+    if v_dentro then
+      if l ~ '^\s*-- CORREÇÃO 10/11 \(98\): fim' then v_dentro := false; end if;
+      continue;
+    end if;
+    v_fora := v_fora || l;
+  end loop;
+  return array_to_string(v_fora, E'\n');
+end $f$;
 do $d8$
 declare
   v_f3 text := current_setting('agenda_teste.mig_equipe_fase3', true);
@@ -1268,7 +1287,7 @@ begin
     -- tira-os antes (o agenda_fase5_respostas.sql, A10, confere a cópia da Fase 5 contra a de 20261027100400).
     if pg_temp.sem_fase4(pg_temp.corpo(f.mig, f.nome))
          is distinct from pg_temp.sem_fase4(array_to_string(pg_temp.sem_fase5(
-                            (select p.prosrc from pg_proc p where p.oid = f.sig::regprocedure)), E'\n'))
+                            (select pg_temp.sem_98(p.prosrc) from pg_proc p where p.oid = f.sig::regprocedure)), E'\n'))
        or position(f.marca in (select p.prosrc from pg_proc p where p.oid = f.sig::regprocedure)) = 0
        or position(f.marca in pg_temp.corpo(f.mig, f.nome)) > 0
     then

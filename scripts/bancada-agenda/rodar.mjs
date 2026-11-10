@@ -185,6 +185,10 @@ const FIXTURES_COMO_TEXTO = [
   ['agenda_teste.mig_correcao_motor', '../../supabase/migrations/20261030100200_agenda_correcao_motor.sql'],
   ['agenda_teste.mig_correcao_aviso', '../../supabase/migrations/20261030100300_agenda_correcao_aviso.sql'],
   ['agenda_teste.mig_correcao_desempenho', '../../supabase/migrations/20261030100400_agenda_correcao_desempenho.sql'],
+  // Correção do NOVO-agenda-98 (10/11): a própria migration (20261113100000), para o C0 de agenda_correcao_98.sql conferir que a cópia de
+  // _agenda_vigia_limpeza só acrescenta o bloco "-- CORREÇÃO 10/11 (98):" (a fonte, a 20261031100300, já está abaixo: mig_perguntas_fase7a).
+  // Fica junto das outras correções de fora de fase, e não no fim da lista, onde a 7e e a 7g acrescentam as delas.
+  ['agenda_teste.mig_correcao_98', '../../supabase/migrations/20261113100000_agenda_correcao_98.sql'],
   // Correção de 30/10 (equipe): a fonte de _agenda_vigia_equipe_sem_dias recriado na 20261030100600 (a revisão do lote, a
   // única) e de _agenda_equipe_tem_dias (que não muda), para o agenda_correcao_2910_equipe.sql conferir que a cópia só muda
   // nos blocos "-- CORREÇÃO 30/10 (equipe):" e rodar a definição de antes como pg_temp. As das 3 leituras da Fase 1
