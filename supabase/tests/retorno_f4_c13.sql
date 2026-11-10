@@ -122,8 +122,11 @@ declare
   v jsonb;
 begin
   v := public.parceiro_cartao_executar(p_cartao, (select d.id from public._comprovante_dono() d), p_agora);
-  update public.ai_operator_pending_actions p set status = 'executed'
+  -- ai_op_protect_pending_action: pending -> approved -> executed, como o executor de verdade
+  update public.ai_operator_pending_actions p set status = 'approved'
    where p.id = (select c.pendencia_id from public.parceiro_cartoes c where c.id = p_cartao) and p.status = 'pending';
+  update public.ai_operator_pending_actions p set status = 'executed'
+   where p.id = (select c.pendencia_id from public.parceiro_cartoes c where c.id = p_cartao) and p.status = 'approved';
   return v;
 end $f$;
 
