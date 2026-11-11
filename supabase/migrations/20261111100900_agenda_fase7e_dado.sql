@@ -10,7 +10,7 @@
 --   · os 6 modos em teste: o OK permanente do dono ("OK publicar em teste cada etapa quando o pós-deploy der verde", passo 3 de fila-do-dono/fase77e-publicar.md);
 --   · "OK fornecedor com 3 entregas" (§13, item 7; R7.14): o prazo e o atraso medidos de um fornecedor passam a valer com 3 entregas, e não 5. Hoje nenhum fornecedor tem 3
 --     (R7.9: 2 de 20 linhas de material têm fornecedor): sem efeito por mais de 1 ano (R7.10-4).
--- NÃO APLICADA. Este arquivo existe para revisão. Aplica DEPOIS das 9 migrations de estrutura da 7e (20261111100000, 100100, 100200, 100300, 100350, 100400, 100500 e 100600) e do
+-- NÃO APLICADA. Este arquivo existe para revisão. Aplica DEPOIS das 8 migrations de estrutura da 7e (20261111100000, 100100, 100200, 100300, 100350, 100400, 100500 e 100600) e do
 -- deploy de ai-agent e erp-mcp (passos 1 e 2 de fila-do-dono/fase77e-publicar.md).
 --
 -- A TRAVA (o bloco "do" logo abaixo, antes de qualquer mudança; a migration falha inteira e nada muda): recusa se faltar o código da 7e no banco (uma função de cada uma das 8 de

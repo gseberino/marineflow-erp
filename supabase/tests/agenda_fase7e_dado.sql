@@ -5,7 +5,8 @@
 --   S  os 6 interruptores da 7e: desligado → sombra (modo_promessa também: em teste para sempre, AG7-32); fornecedor_n_min 5 → 3 e o DEFAULT 3; o resto da linha igual (o freio, o
 --      aprendizado, os modos das Fases 1–6, de 7a–7d e da 7f, os outros números da 7e); atualizado_por nulo e a hora nova; o dado sozinho não escreve mais nada; de novo não muda nada
 --      (nem a hora); ligado nunca é rebaixado e sombra fica sombra; o 4 que o dono pôs no fornecedor fica; com nada a mudar, nenhuma linha muda (nem a hora)
---   T  a trava: sem o código da 7e no banco (uma função de estrutura, ou a rodada sem os passos da margem), recusa e nada muda
+--   T  a trava: sem o código da 7e no banco (uma função de estrutura, ou a rodada sem os passos da margem), recusa e nada muda; o cabeçalho diz quantas migrations de estrutura
+--      lista, e é o número da trava (T0)
 --   N  com a carteira da fixture da 7e: o dado sozinho não muda o motor, a prontidão, os meios das OS, a vigia nem a rodada do cliente (md5); a rodada do aprendizado com o dado roda os
 --      6 passos da margem em teste, sem erro, e só grava as linhas deles em teste (nada em uso, nenhuma ação nem pergunta da margem); depois dela, o motor e o resto continuam os de
 --      antes do dado (md5); o controle morde (o viés ligado sem o freio e em uso muda os meios das OS); o foco aprendizado ganha o bloco 8 (§6.2) e só ele; a saúde: a margem com os
@@ -185,6 +186,8 @@ declare
   v_s      jsonb;
   v_c0     text;
   v_gd     jsonb;
+  v_cab    text[];
+  v_trv    text[];
   c_hoje   constant date := date '2027-01-07';
   c_agora  constant timestamptz := timestamptz '2027-01-07 16:05-03';
   c_margem constant text[] := array['vies', 'folga_semana', 'promessa', 'tempo_compra', 'folga_compra', 'prazo_sem_fornecedor'];
@@ -245,6 +248,13 @@ begin
   end;
 
   -- ── T: a trava ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  -- T0 (a conferência do P8): o "Aplica DEPOIS das N migrations de estrutura da 7e (…)" do cabeçalho tem N = as versões que ele lista = o número da frase da trava (8)
+  v_cab := regexp_match(v_mig, 'Aplica DEPOIS das (\d+) migrations de estrutura da 7e \(([^)]*)\)');
+  v_trv := regexp_match(v_mig, 'vem depois das (\d+) migrations de estrutura da 7e');
+  v_res := pg_temp.res(v_res, 'T0 o cabeçalho diz quantas migrations de estrutura lista, e é o número da frase da trava (8)',
+                       v_cab is not null and v_trv is not null and v_trv[1] = '8' and v_cab[1] = v_trv[1]
+                       and v_cab[1]::int = (select count(*) from regexp_matches(v_cab[2], '\m\d{6}(\d{8})?\M', 'g')),
+                       format('cabeçalho %s (lista: %s); trava %s', v_cab[1], v_cab[2], v_trv[1]));
   begin
     perform pg_temp.partida();
     v_linha := pg_temp.linha();

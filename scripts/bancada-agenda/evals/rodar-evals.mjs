@@ -54,7 +54,8 @@
 // espera.agenda.consultas.
 // Fase 7e (P8): os estados fase7e (os 6 modos da margem em teste, com o freio de produção, como o dado 20261111100900 deixa) e fase7e_ligado (5 ligados, freio solto; o prazo real
 // fica em teste, AG7-32) são a fixture-fase7e.sql (qui 07/01/2027: as OS medidas, as semanas da folga, as compras) por cima da fase7d, só com as OS da 7e na carteira, e a rodada do
-// aprendizado de qui 07/01 às 16:05 (em teste ela só mede; ligada, põe em uso o que mediu). O juiz dos parâmetros vale.
+// aprendizado de qui 07/01 às 16:05 (em teste ela só mede; ligada, põe em uso o que mediu). O juiz dos parâmetros vale, e os três do cliente da Fase 5 (a fila, a mensagem livre
+// e o prometido só com *grava*), sobre a foto da Fase 5: a margem mexe no prazo, e ao cliente não se diz data de pronto (AG7-32; S110 a S112 da §8.5).
 // Sem modelo, isto prova os juízes e o caminho das RPCs, não o modelo: o ao-vivo.ts faz a parte do modelo.
 
 import { readFileSync } from 'node:fs';
@@ -1151,7 +1152,8 @@ async function fotosDoCaso(db, caso) {
     agenda: (caso.fase ?? 1) >= 2 ? await fotoDaAgenda(db) : null,
     fase3: caso.fase === 3 ? await fotoDaFase3(db) : null,
     fase4: caso.fase === 4 ? await fotoDaFase4(db) : null,
-    fase5: caso.fase === 5 ? await fotoDaFase5(db) : null,
+    // (Fase 7e, P8) também nos estados da 7e: os três juízes do cliente valem lá (o prazo; ao cliente não se diz data de pronto)
+    fase5: caso.fase === 5 || String(caso.estado ?? '').startsWith('fase7e') ? await fotoDaFase5(db) : null,
     // (Fase 7a) a mesma foto dos parâmetros (agenda_config inteira e o aprendizado): o modelo não muda modo nem regra do gestor
     fase6: caso.fase === 6 || caso.fase === 7 ? await fotoDaFase6(db) : null,
     // (Fase 7c, P6) as etiquetas e o que o dono diz de cada OS: o modelo não grava nenhuma (só o *grava* do dono)
@@ -1302,7 +1304,7 @@ export async function terminarCaso(db, caso, inicio, passos = []) {
     if (caso.fase === 4) {
       execucao.fase4 = { antes: inicio.antes.fase4, meio: meio.fase4, depois: depois.fase4, estado: caso.estado };
     }
-    if (caso.fase === 5) {
+    if (caso.fase === 5 || String(caso.estado ?? '').startsWith('fase7e')) {
       execucao.fase5 = { antes: inicio.antes.fase5, meio: meio.fase5, depois: depois.fase5, estado: caso.estado };
     }
     if (caso.fase === 6 || caso.fase === 7) {
@@ -1541,6 +1543,8 @@ export function controlesDosJuizes() {
     ...controlesDaFase7cTarefas(),
     // Fase 7d (P8): o juiz do cadastro sabe reprovar
     ...controlesDaFase7d(),
+    // Fase 7e (P8): os três juízes do cliente valem nos estados da 7e
+    ...controlesDaFase7e(),
     ['diff do plano: linha nova, linha que sumiu e campo que mudou',
       JSON.stringify(diffDasFotos({ os: { 'OS-00069': { status: 'scheduled' } } }, { os: { 'OS-00069': { status: 'in_progress' } } }))
         === JSON.stringify(['~ os OS-00069: status scheduled → in_progress'])],
@@ -1676,6 +1680,33 @@ function controlesDaFase7d() {
       && gradeNenhumCadastro({ ...caso, espera: { cadastro: { diff: ['~ os OS-J2: local_id nulo → x'] } } }, f7d(foto('manha'), foto('manha', 'x'))).ok
       && gradeNenhumCadastro(caso, f7d(foto('manha'), foto('manha'))).ok],
     ['Fase 7d sem a foto: o juiz do cadastro reprova', !gradeNenhumCadastro(caso, {}).ok],
+  ];
+}
+
+/**
+ * (Fase 7e, P8) Os três juízes do cliente nos estados da 7e (avaliar): entram em fase7e e em fase7e_ligado, e não em fase7d; a mensagem com texto que não é do banco e o
+ * prometido mudado pelo modelo reprovam; iguais passam; sem a foto da Fase 5, os três reprovam.
+ */
+function controlesDaFase7e() {
+  const caso = { fase: 7, estado: 'fase7e', entrada: 'fala pra Lia que fica pronto dia 20', espera: {} };
+  const livres = (n) => ({ totais: { tudo: { n: String(n) } } });
+  const prom = (ate) => ({ os: ate ? { 'OS-E0': { tipo: 'firme', de: ate, ate, original: ate, fonte: 'dono', servico: null } } : {} });
+  const base = () => ({ cliente: { fila: {}, mensagem: {} }, livres: livres(0), prometido: prom(null) });
+  const nota = (c, meio, depois) => avaliar(c, {
+    chamadas: [], texto: 'x', saidas: [],
+    execucao: { fase5: { antes: base(), meio: { ...base(), ...(meio ?? {}) }, depois: { ...base(), ...(depois ?? {}) }, estado: c.estado } },
+  });
+  const tres = (n) => ['cliente', 'mensagem_livre', 'prometido'].map((j) => n[j]?.ok);
+  const semFoto = avaliar(caso, { chamadas: [], texto: 'x', saidas: [], execucao: {} });
+  return [
+    ['(7e) os três juízes do cliente entram nos estados da 7e (fase7e e fase7e_ligado) e não nos da 7d; iguais passam',
+      JSON.stringify(tres(nota(caso))) === '[true,true,true]'
+      && JSON.stringify(tres(nota({ ...caso, estado: 'fase7e_ligado' }))) === '[true,true,true]'
+      && JSON.stringify(tres(nota({ ...caso, estado: 'fase7d' }))) === '[null,null,null]'],
+    ['(7e) a mensagem ao cliente com texto que não é do banco reprova; o prometido mudado pelo modelo (sem o *grava*) reprova',
+      nota(caso, null, { livres: livres(1) }).mensagem_livre?.ok === false
+      && nota(caso, { prometido: prom('2027-01-20') }, { prometido: prom('2027-01-20') }).prometido?.ok === false],
+    ['(7e) sem a foto da Fase 5, os três juízes do cliente reprovam', JSON.stringify(tres(semFoto)) === '[false,false,false]'],
   ];
 }
 

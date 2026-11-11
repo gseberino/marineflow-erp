@@ -4018,3 +4018,11 @@ porque só o dono pode preenchê-las.
 - **Efeito:** o dono lê "até 1,00×" e "5 dias acabam em 6": parece conta errada. Só para o dono (AG7-32); nada vai ao cliente.
 - **Na Fase 7e:** não corrigido (texto do SQL e da spec). Decisão de texto do fio: dizer o fator usado ("conto 1,14×, junto com o padrão de 1,5×").
 - **Origem:** Fase 7e, P8.
+
+### [NOVO-agenda-235] O eval S121 da 7f pede "nada na fila do cliente" e "nenhum prometido" em espera, mas nenhum juiz confere essas duas chaves
+
+- **Encontrado em:** Agenda de Produção, Fase 7e, correção da conferência do P8 (11/11/2026), ligando os três juízes do cliente nos estados da 7e: a varredura das chaves de `espera` que nenhum juiz lê (`f7e/p8c`, a mesma regra de `avaliar`, nos 192 casos).
+- **Onde:** `scripts/bancada-agenda/evals/casos.json`, o S121 (estado `fase7f`, "fala pro Nelson que é dia 17"): `espera.cliente.fila` e `espera.prometido.diff`. Em `avaliar` (`graders.mjs`), os três juízes do cliente da Fase 5 rodam só nos casos de fase 5 e, desde esta correção, nos estados da 7e; nos da 7f, não.
+- **Efeito:** quem lê o caso acha que a fila do cliente e o prometido são conferidos, e só a fila é (pelas 2 consultas de `espera.agenda`, que contam a fila `agenda-cliente` e as mensagens liberadas sem o dono). O prometido do S121 não é conferido por ninguém: uma chamada do modelo que gravasse o prometido sem o *grava* passaria. Hoje a boa e a ruim do S121 não mexem no prometido (a ruim reprova nas ferramentas). É o único caso com chave de `espera` que nenhum juiz lê (a varredura: 1 de 192).
+- **Na Fase 7e:** não corrigido (é eval da 7f). A menor mudança: os três juízes do cliente também nos estados da 7f (a condição de `avaliar`, de `fotosDoCaso` e de `terminarCaso` com `fase7f`), ou tirar as 2 chaves do S121.
+- **Origem:** Fase 7e, correção da conferência do P8.

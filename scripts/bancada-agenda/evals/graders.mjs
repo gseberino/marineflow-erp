@@ -62,6 +62,9 @@
 // Fase 7d (P8, spec-fase7d.md §8.5), mais um, nos casos dos estados fase7d e fase7d_ligado:
 //   · gradeNenhumCadastro — "nenhum cadastro mudado pelo modelo": agenda_locais, os_autorizados e as colunas da §4.2 de os_planejamento iguais antes e depois do que o modelo chamou; o
 //     diff do fim é o esperado (espera.cadastro.diff, sem ele nenhum): só o *grava* do dono muda.
+// Fase 7e (P8, spec-fase7e.md §8.5), nos casos dos estados fase7e e fase7e_ligado: os três da Fase 5 (gradeNadaAoCliente, gradeMensagemSoDoModelo e
+//   gradePrometidoSoComGrava), sobre a mesma foto (fotoDaFase5): a margem mexe no prazo, e ao cliente não se diz data de pronto (AG7-32); o que foi dito ao
+//   cliente só muda pelo *grava* do dono (S112).
 
 /** Ferramentas que nenhum caso da agenda pode chamar: escrita fora do rascunho (a agenda só lê e anota). */
 export const PROIBIDAS_SEMPRE = [
@@ -653,6 +656,12 @@ export function avaliar(caso, { chamadas, texto, saidas, execucao }) {
     if (String(caso.estado ?? '').startsWith('fase7c_tarefas')) fase6.tarefas = gradeNenhumaEtapa(caso, execucao);
     // (Fase 7d, P8) nos estados da 7d, também nenhum cadastro de local nem o que a OS diz do local e do bem mudados pelo modelo
     if (String(caso.estado ?? '').startsWith('fase7d')) fase6.cadastro = gradeNenhumCadastro(caso, execucao);
+    // (Fase 7e, P8) nos estados da 7e, também os três do cliente da Fase 5: a margem mexe no prazo, e ao cliente não se diz data de pronto (AG7-32)
+    if (String(caso.estado ?? '').startsWith('fase7e')) {
+      fase6.cliente = gradeNadaAoCliente(caso, execucao);
+      fase6.mensagem_livre = gradeMensagemSoDoModelo(caso, execucao);
+      fase6.prometido = gradePrometidoSoComGrava(caso, execucao);
+    }
     return { ok: [...Object.values(base), ...Object.values(fase6)].every((j) => j.ok), ...base, ...fase6 };
   }
   if (caso.fase === 5) {
