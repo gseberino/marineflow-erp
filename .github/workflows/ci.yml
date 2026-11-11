@@ -26,7 +26,9 @@ concurrency:
 jobs:
   gates:
     name: Gates bloqueantes
-    runs-on: ubuntu-latest
+    # 11/11/2026: o ubuntu-latest virou 26.04 e o Playwright 1.59.1 não instala o Chromium nele
+    # ("Build abre no navegador" falhava antes de abrir a página). Fixo em 24.04 até o Playwright suportar.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
