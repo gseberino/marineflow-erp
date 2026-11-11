@@ -31,6 +31,15 @@
 --       antes do OK, e o "ficou pronto" da Lucenira com a OS entregue antes do OK: a limpeza fecha a pergunta ("a OS saiu da
 --       carteira"), o fechamento, *agenda pendências* e a ordem não a mostram, o *manda* não promete ("Mando para …") nem manda
 --       ligar, e na hora de sair não nasce pergunta "não saiu" (a 1ª versão da 98, de 9abb46f0, deixava tudo isso acontecer)
+--   C11 (a reconferência de 10/11) a OS da mensagem poupada volta do concluído para a carteira: o "ficou pronto" da Lucenira
+--       poupado e a OS reaberta pela porta de verdade (os_transicionar_status, pela tela) para em andamento, aguardando peças ou
+--       aguardando o cliente; o pós-serviço do Robson (para ter 03/11 09:00) e a OS reaberta: a limpeza seguinte fecha a pergunta
+--       com o motivo próprio ("a OS não está mais concluída: a mensagem ao cliente não sai"), o fechamento, *agenda pendências* e a
+--       ordem não a mostram, o *manda* não promete nem manda ligar, e na hora de sair não nasce "não saiu" (a 2ª versão, de
+--       e387cb93, deixava a pergunta aberta até a validade); a OS reaberta antes da 1ª limpeza (o caminho de antes da 98) fecha
+--       igual; a matriz da carteira (13 tipos × 7 estados da OS na carteira) contra a de 20261031100300 e a revalidação de verdade:
+--       mudam só o pronto, o lembrete e o pós-serviço; e a OS concluída ou faturada e congelada (a prontidão diz congelada) deixa a
+--       pergunta do pronto aberta (o status deixa sair)
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -265,6 +274,10 @@ declare
   v_c    jsonb;
   v_lin  text[];    -- (C9) uma linha por mensagem: estado da OS|tipo|prontidão|revalidação|agora sem o freio|agora com o freio|a de antes
   v_pr   text;
+  v_alvo text;      -- (C11) o status para onde a OS é reaberta
+  v_k    int;       -- (C11) o número da volta
+  -- (C11) o motivo próprio da pergunta do pronto, do lembrete e do pós-serviço de OS que voltou para a carteira
+  c_mot_reaberta constant text := 'a OS não está mais concluída: a mensagem ao cliente não sai';
 begin
   if coalesce(current_setting('agenda_teste.fase5', true), '') = '' or v_7a = '' then
     insert into _resultado values ('C1–C8 (fixture-fase5)', true, 'PULADO: sem agenda_teste.fase5 / mig_perguntas_fase7a (rode pela bancada)');
@@ -723,6 +736,252 @@ begin
     raise exception 'desfaz' using errcode = 'P0098';
   exception when sqlstate 'P0098' then null;
   end;
+
+  -- ── C11. A OS da mensagem poupada volta do concluído para a carteira (a reconferência de 10/11) ──
+  -- (1, 2, 3) o "ficou pronto" da Lucenira (OS concluída às 15:00) esperando o OK, poupado pela limpeza das 15:30; às 16:00 a OS é
+  -- reaberta pela porta de verdade (os_transicionar_status, pela tela, o dono) para em andamento, aguardando peças ou aguardando o
+  -- cliente. A revalidação já diz "status": a mensagem não sai mais. A limpeza das 16:15 fecha a pergunta com o motivo próprio.
+  v_k := 0;
+  foreach v_alvo in array array['in_progress', 'awaiting_parts', 'awaiting_client'] loop
+    v_k := v_k + 1;
+    begin
+      perform pg_temp.ligar(3);
+      perform pg_temp.vig('2026-10-30 15:15');
+      m := pg_temp.msg(c_luc, 'pronto');
+      v_ml := m.id;
+      v_ql := m.pergunta_id;
+      r := pg_temp.limpa('2026-10-30 15:30');
+      v_ok := m.estado = 'aguardando_dono' and m.aprovacao = 'pedida' and (pg_temp.perg(v_ql)).estado = 'aberta';
+      t := format('15:30 %s', (pg_temp.perg(v_ql)).estado);
+      perform set_config('agenda_teste.hoje', '2026-10-30', true);
+      r := public.os_transicionar_status(c_luc, v_alvo, 'tela', 'C98: reaberta', c_dono, null, date '2026-10-30',
+                                         pg_temp.em('2026-10-30 16:00'), null);
+      v_pr := coalesce(public._agenda_cliente_revalidar(v_ml, pg_temp.em('2026-10-30 16:10')), 'sai');
+      t := t || format('; porta %s "%s"; status %s; prontidão %s; revalidação %s', r ->> 'ok', r ->> 'texto',
+                       (select so.status from public.service_orders so where so.id = c_luc),
+                       public.os_prontidao(c_luc, date '2026-10-30') ->> 'estado', v_pr);
+      v_ok := v_ok and coalesce((r ->> 'ok')::boolean, false)
+              and (select so.status from public.service_orders so where so.id = c_luc) = v_alvo
+              and public.os_prontidao(c_luc, date '2026-10-30') ->> 'estado' not in ('concluida', 'fora_da_carteira') and v_pr = 'status';
+      r := pg_temp.limpa('2026-10-30 16:15');
+      q := pg_temp.perg(v_ql);
+      v_res := pg_temp.ok(v_res, format('C11a%s o "ficou pronto" da Lucenira poupado (aberto às 15:30) e a OS reaberta às 16:00 pela porta para %s (a revalidação já diz "status"): a limpeza das 16:15 fecha a pergunta com o motivo próprio ("%s"); a mensagem segue esperando, sem sair',
+                                        v_k, v_alvo, c_mot_reaberta),
+        v_ok and q.estado = 'resolvida' and q.resolvida_motivo = c_mot_reaberta and (r ->> 'resolvidas')::int >= 1
+        and (pg_temp.msg(c_luc, 'pronto')).estado = 'aguardando_dono',
+        format('%s; 16:15 %s %s; limpeza %s', t, q.estado, coalesce(q.resolvida_motivo, '-'), r));
+      perform set_config('agenda.agora', pg_temp.em('2026-10-30 17:30')::text, true);
+      v_a := public._agenda_cliente_fechamento(date '2026-10-30');
+      v_b := public._agenda_linhas_do_fechamento(date '2026-10-30');
+      r2 := public._agenda_ver_decisoes(date '2026-10-30', pg_temp.em('2026-10-30 17:30'));
+      v_c := public.agenda_perguntas_em_ordem(date '2026-10-30', pg_temp.em('2026-10-30 17:30'));
+      perform set_config('agenda.agora', '', true);
+      v_res := pg_temp.ok(v_res, format('C11b%s 17:30 (OS %s): o fechamento do dia (a linha da mensagem e as linhas do fechamento), *agenda pendências* e a ordem das perguntas não a mostram', v_k, v_alvo),
+        not pg_temp.mostra(v_a, v_ql, 'Lucenira') and not pg_temp.mostra(v_b, v_ql, 'Lucenira')
+        and not pg_temp.mostra(r2, v_ql, 'Lucenira') and not pg_temp.mostra(v_c, v_ql, 'Lucenira')
+        and jsonb_typeof(v_b) = 'array' and jsonb_typeof(v_c) = 'array',
+        format('mensagem %s, linhas %s, pendências %s, ordem %s', pg_temp.mostra(v_a, v_ql, 'Lucenira'), pg_temp.mostra(v_b, v_ql, 'Lucenira'),
+               pg_temp.mostra(r2, v_ql, 'Lucenira'), pg_temp.mostra(v_c, v_ql, 'Lucenira')));
+      r := public.agenda_cliente_decidir_dito(c_dono, 'manda', 'Lucenira', 'whatsapp', date '2026-10-30', pg_temp.em('2026-10-30 17:35'));
+      m := pg_temp.msg(c_luc, 'pronto');
+      v_res := pg_temp.ok(v_res, format('C11c%s 17:35 *manda cliente Lucenira* (OS %s): não promete ("Mando para Lucenira …") nem manda ligar ("Recomendo ligar."); a mensagem segue pedida, sem fila; nenhuma pergunta "não saiu"', v_k, v_alvo),
+        coalesce(r ->> 'texto', '') not like '%Mando para Lucenira%' and coalesce(r ->> 'texto', '') not like '%Recomendo ligar%'
+        and m.estado = 'aguardando_dono' and m.aprovacao = 'pedida' and m.fila_id is null
+        and not exists (select 1 from public.agenda_perguntas x where x.chave = 'cliente_resposta:nao_saiu:' || v_ml),
+        r::text || ' | ' || m.estado || ' ' || m.aprovacao);
+      raise exception 'desfaz' using errcode = 'P0098';
+    exception when sqlstate 'P0098' then null;
+    end;
+  end loop;
+  -- (4) o pós-serviço do Robson (OS concluída e entregue) que o tique das 15:15 registrou para ter 03/11 09:00, pedido; poupado
+  -- às 15:30; a OS reaberta às 16:00 (pela porta; se ela não reabrir a OS entregue, como no replay, por um update com a marca dela)
+  begin
+    perform pg_temp.ligar(3);
+    perform pg_temp.vig('2026-10-30 15:15');
+    m := pg_temp.msg(c_rob, 'pos_servico');
+    v_ml := m.id;
+    v_ql := m.pergunta_id;
+    v_val := m.enviar_em;
+    r := pg_temp.limpa('2026-10-30 15:30');
+    v_ok := m.estado = 'aguardando_dono' and m.aprovacao = 'pedida' and (pg_temp.perg(v_ql)).estado = 'aberta'
+            and m.enviar_em > pg_temp.em('2026-10-31 00:00');
+    t := format('pós-serviço %s/%s, sai %s; 15:30 %s', m.estado, m.aprovacao, m.enviar_em, (pg_temp.perg(v_ql)).estado);
+    perform set_config('agenda_teste.hoje', '2026-10-30', true);
+    r := public.os_transicionar_status(c_rob, 'in_progress', 'tela', 'C98: reaberta', c_dono, null, date '2026-10-30',
+                                       pg_temp.em('2026-10-30 16:00'), null);
+    if (select so.status from public.service_orders so where so.id = c_rob) <> 'in_progress' then
+      perform set_config('agenda.porta', 'on', true);
+      update public.service_orders set status = 'in_progress' where id = c_rob;
+      perform set_config('agenda.porta', 'off', true);
+      t := t || format('; reaberta por update (a porta: %s)', coalesce(r ->> 'texto', '-'));
+    else
+      t := t || format('; reaberta pela porta ("%s")', r ->> 'texto');
+    end if;
+    v_pr := coalesce(public._agenda_cliente_revalidar(v_ml, pg_temp.em('2026-10-30 16:10')), 'sai');
+    r := pg_temp.limpa('2026-10-30 16:15');
+    q := pg_temp.perg(v_ql);
+    v_res := pg_temp.ok(v_res, format('C11d1 o pós-serviço do Robson (para ter 03/11 09:00) poupado e a OS reaberta às 16:00 (a revalidação já diz "status"): a limpeza das 16:15 fecha a pergunta com o motivo próprio'),
+      v_ok and v_pr = 'status' and q.estado = 'resolvida' and q.resolvida_motivo = c_mot_reaberta,
+      format('%s; revalidação %s; 16:15 %s %s', t, v_pr, q.estado, coalesce(q.resolvida_motivo, '-')));
+    r := public.agenda_cliente_decidir_dito(c_dono, 'manda', 'Robson', 'whatsapp', date '2026-10-30', pg_temp.em('2026-10-30 16:20'));
+    m := pg_temp.msg(c_rob, 'pos_servico');
+    v_res := pg_temp.ok(v_res, 'C11d2 16:20 *manda cliente Robson*: não promete ("Mando para Robson …") nem manda ligar; a mensagem segue pedida, sem aprovação e sem fila',
+      coalesce(r ->> 'texto', '') not like '%Mando para Robson%' and coalesce(r ->> 'texto', '') not like '%Recomendo ligar%'
+      and m.aprovacao = 'pedida' and m.estado = 'aguardando_dono' and m.fila_id is null,
+      r::text || ' | ' || m.estado || ' ' || m.aprovacao);
+    r2 := pg_temp.vig(to_char(v_val at time zone 'America/Sao_Paulo', 'YYYY-MM-DD HH24:MI'));
+    m := pg_temp.msg(c_rob, 'pos_servico');
+    v_res := pg_temp.ok(v_res, 'C11d3 na hora de sair (ter 03/11 09:00): nenhuma pergunta "não saiu" para ela, e ela não foi à fila',
+      not exists (select 1 from public.agenda_perguntas x where x.chave = 'cliente_resposta:nao_saiu:' || v_ml)
+      and not exists (select 1 from public.whatsapp_send_queue w where w.source_ref_id = v_ml)
+      and m.estado not in ('enfileirada', 'enviada') and m.aprovacao <> 'aprovada',
+      format('sai %s; mensagem %s/%s/%s', v_val, m.estado, m.aprovacao, coalesce(m.recusa_motivo, '-')));
+    raise exception 'desfaz' using errcode = 'P0098';
+  exception when sqlstate 'P0098' then null;
+  end;
+  -- (5) a OS reaberta às 15:20, antes da 1ª limpeza depois do pronto (o caminho que já existia sem a 98, parte do NOVO-agenda-291):
+  -- a de agora fecha igual; a de 20261031100300 (pg_temp.limpeza_antes) a deixava aberta
+  begin
+    perform pg_temp.ligar(3);
+    perform pg_temp.vig('2026-10-30 15:15');
+    m := pg_temp.msg(c_luc, 'pronto');
+    v_ql := m.pergunta_id;
+    perform set_config('agenda_teste.hoje', '2026-10-30', true);
+    r := public.os_transicionar_status(c_luc, 'in_progress', 'tela', 'C98: reaberta', c_dono, null, date '2026-10-30',
+                                       pg_temp.em('2026-10-30 15:20'), null);
+    begin
+      r2 := pg_temp.limpeza_antes(date '2026-10-30', pg_temp.em('2026-10-30 15:30'));
+      t := (pg_temp.perg(v_ql)).estado;
+      raise exception 'desfaz' using errcode = 'P0098';
+    exception when sqlstate 'P0098' then null;
+    end;
+    r2 := pg_temp.limpa('2026-10-30 15:30');
+    q := pg_temp.perg(v_ql);
+    v_res := pg_temp.ok(v_res, 'C11e a OS reaberta às 15:20, antes da 1ª limpeza depois do pronto: a de agora fecha a pergunta com o motivo próprio; a de 20261031100300 a deixava aberta (o caminho de antes da 98)',
+      coalesce((r ->> 'ok')::boolean, false) and q.estado = 'resolvida' and q.resolvida_motivo = c_mot_reaberta and t = 'aberta',
+      format('porta "%s"; agora %s %s; antes %s', r ->> 'texto', q.estado, coalesce(q.resolvida_motivo, '-'), t));
+    raise exception 'desfaz' using errcode = 'P0098';
+  exception when sqlstate 'P0098' then null;
+  end;
+  -- (6) a matriz da carteira: os 13 tipos da lista fechada × a OS do Flávio em 7 estados da carteira, cada mensagem esperando o dono
+  -- com a pergunta cliente_aprovar aberta (e 2 com a cliente_aviso); a âncora é a de 20261031100300 e a revalidação de verdade
+  -- (o d10, o M11 e as camadas fora do caminho, como no C9)
+  begin
+    perform pg_temp.ligar(3);
+    update public.agenda_config set cliente_conversa_dias = 0, onde_fica_desde = date '2026-10-01', modo_cliente_camadas = 'ligado',
+                                    gestor_so_propor = false where id;
+    v_lin := '{}';
+    foreach v_est in array array['scheduled', 'open', 'in_progress', 'awaiting_parts', 'awaiting_client', 'approved', 'draft_aprovado'] loop
+      begin
+        perform set_config('agenda.porta', 'on', true);
+        update public.service_orders
+           set status = case when v_est = 'draft_aprovado' then 'draft' else v_est end,
+               quote_status = case when v_est = 'draft_aprovado' then 'approved' else quote_status end,
+               delivered_at = null
+         where id = c_flav;
+        perform set_config('agenda.porta', 'off', true);
+        v_ids := '{}';
+        foreach t in array v_tipos || array['aviso:pronto', 'aviso:pos_servico'] loop
+          v_ex := gen_random_uuid();
+          v_ids := v_ids || public._agenda_cliente_perguntar(case when t like 'aviso:%' then 'cliente_aviso' else 'cliente_aprovar' end,
+                              case when t like 'aviso:%' then 'cliente_aviso:' else 'cliente_aprovar:' end || v_ex, c_flav, date '2026-11-03',
+                              date '2026-11-02', format('Mensagem para Flávio (%s), sai seg 02/11: "teste (C98, C11)". *manda cliente Flávio* ou *segura cliente Flávio*.', t),
+                              'ligado', pg_temp.em('2026-10-30 10:00'), pg_temp.em('2026-11-03 19:00'));
+          insert into public.agenda_cliente_mensagens (id, client_id, service_order_id, tipo, origem, modo, texto, enviar_em, valida_ate,
+                                                       aprovacao, pergunta_id, estado, dedupe_key, criada_em)
+          values (v_ex, c_cli_flav, c_flav, replace(t, 'aviso:', ''), 'rodada', 'ligado', 'teste (C98, C11)', pg_temp.em('2026-11-02 09:00'),
+                  pg_temp.em('2026-11-03 19:00'), case when t like 'aviso:%' then 'critica' else 'pedida' end, v_ids[cardinality(v_ids)],
+                  'aguardando_dono', 'agenda-cliente:c98:c11:' || t, pg_temp.em('2026-10-30 10:00'));
+        end loop;
+        perform set_config('agenda_teste.hoje', '2026-10-30', true);
+        select jsonb_object_agg(qq.tipo || '/' || mm.tipo, coalesce(public._agenda_cliente_revalidar(mm.id, pg_temp.em('2026-10-30 10:15')), 'sai'))
+          into v_rev
+          from public.agenda_cliente_mensagens mm join public.agenda_perguntas qq on qq.id = mm.pergunta_id where qq.id = any (v_ids);
+        v_pr := public.os_prontidao(c_flav, date '2026-10-30') ->> 'estado';
+        foreach v_freio in array array[false, true] loop
+          begin
+            update public.agenda_config set gestor_so_propor = v_freio where id;
+            r := pg_temp.limpa('2026-10-30 10:15');
+            if v_freio then v_b := pg_temp.c9_estados(v_ids); else v_a := pg_temp.c9_estados(v_ids); end if;
+            raise exception 'desfaz' using errcode = 'P0098';
+          exception when sqlstate 'P0098' then null;
+          end;
+        end loop;
+        begin
+          r := pg_temp.limpeza_antes(date '2026-10-30', pg_temp.em('2026-10-30 10:15'));
+          v_c := pg_temp.c9_estados(v_ids);
+          raise exception 'desfaz' using errcode = 'P0098';
+        exception when sqlstate 'P0098' then null;
+        end;
+        v_lin := v_lin || (select array_agg(format('%s|%s|%s|%s|%s|%s|%s', v_est, k, v_pr, v_rev ->> k, v_a ->> k, v_b ->> k, v_c ->> k) order by k)
+                             from jsonb_object_keys(v_rev) k);
+        raise exception 'desfaz' using errcode = 'P0098';
+      exception when sqlstate 'P0098' then null;
+      end;
+    end loop;
+    -- as linhas: 1 estado da OS | 2 pergunta/mensagem | 3 prontidão | 4 revalidação | 5 agora sem o freio | 6 agora com o freio | 7 a de antes
+    v_res := pg_temp.ok(v_res, 'C11f1 a cena: os 13 tipos × a OS do Flávio em 7 estados da carteira (agendada, aberta, em andamento, aguardando peças, aguardando o cliente, aprovada, orçamento aprovado) = 91 mensagens esperando o dono com a cliente_aprovar aberta (e 14 com a cliente_aviso); a prontidão nunca diz concluida nem fora_da_carteira; a revalidação de verdade diz "status" no pronto, no lembrete e no pós-serviço dos 7',
+      cardinality(v_lin) = 105
+      and (select count(*) from unnest(v_lin) l where split_part(l, '|', 2) like 'cliente_aprovar/%') = 91
+      and (select bool_and(split_part(l, '|', 3) not in ('concluida', 'fora_da_carteira')) from unnest(v_lin) l)
+      and (select count(*) from unnest(v_lin) l
+            where split_part(l, '|', 2) in ('cliente_aprovar/pronto', 'cliente_aprovar/pronto_lembrete', 'cliente_aprovar/pos_servico')
+              and split_part(l, '|', 4) = 'status') = 21,
+      format('%s linhas; prontidão: %s; revalidação do pronto/lembrete/pós-serviço: %s', cardinality(v_lin),
+             (select string_agg(distinct split_part(l, '|', 1) || '=' || split_part(l, '|', 3), ', ') from unnest(v_lin) l),
+             (select string_agg(distinct split_part(l, '|', 4), ', ') from unnest(v_lin) l
+               where split_part(l, '|', 2) in ('cliente_aprovar/pronto', 'cliente_aprovar/pronto_lembrete', 'cliente_aprovar/pos_servico'))));
+    v_res := pg_temp.ok(v_res, 'C11f2 a de agora (sem o freio) × a de 20261031100300, nas 105: só a cliente_aprovar do pronto, do lembrete e do pós-serviço muda (as 21: aberta antes, resolvida agora com o motivo próprio); as outras 70 cliente_aprovar (a do NOVO-agenda-291) e as 14 cliente_aviso ficam como antes',
+      (select count(*) from unnest(v_lin) l
+        where split_part(l, '|', 2) in ('cliente_aprovar/pronto', 'cliente_aprovar/pronto_lembrete', 'cliente_aprovar/pos_servico')
+          and split_part(l, '|', 5) = 'resolvida:' || c_mot_reaberta and split_part(l, '|', 7) = 'aberta:') = 21
+      and (select bool_and(split_part(l, '|', 5) = split_part(l, '|', 7)) from unnest(v_lin) l
+            where split_part(l, '|', 2) not in ('cliente_aprovar/pronto', 'cliente_aprovar/pronto_lembrete', 'cliente_aprovar/pos_servico'))
+      and (select count(*) from unnest(v_lin) l
+            where split_part(l, '|', 2) not in ('cliente_aprovar/pronto', 'cliente_aprovar/pronto_lembrete', 'cliente_aprovar/pos_servico')) = 84,
+      format('mudaram %s; agora: %s; antes: %s',
+             (select count(*) from unnest(v_lin) l where split_part(l, '|', 5) <> split_part(l, '|', 7)),
+             (select string_agg(x || ' ' || n, ', ' order by x) from (select split_part(l, '|', 5) x, count(*) n from unnest(v_lin) l group by 1) s),
+             (select string_agg(x || ' ' || n, ', ' order by x) from (select split_part(l, '|', 7) x, count(*) n from unnest(v_lin) l group by 1) s)));
+    v_res := pg_temp.ok(v_res, 'C11f3 com o freio, a de agora decide o mesmo nas 105',
+      (select bool_and(split_part(l, '|', 5) = split_part(l, '|', 6)) from unnest(v_lin) l) and cardinality(v_lin) = 105,
+      coalesce((select string_agg(l, '; ' order by l) from unnest(v_lin) l where split_part(l, '|', 5) <> split_part(l, '|', 6)), '-'));
+    raise exception 'desfaz' using errcode = 'P0098';
+  exception when sqlstate 'P0098' then null;
+  end;
+  -- (7) o erro contrário: a OS da Lucenira concluída (ou faturada) e congelada (em espera até qui 05/11: a prontidão diz congelada, e
+  -- a regra "a OS saiu da carteira" não vale); o status deixa o pronto sair, e a pergunta fica aberta, como antes
+  foreach v_alvo in array array['completed', 'invoiced'] loop
+    begin
+      perform pg_temp.ligar(3);
+      perform pg_temp.vig('2026-10-30 15:15');
+      m := pg_temp.msg(c_luc, 'pronto');
+      v_ml := m.id;
+      v_ql := m.pergunta_id;
+      perform set_config('agenda.porta', 'on', true);
+      update public.service_orders set status = v_alvo where id = c_luc;
+      perform set_config('agenda.porta', 'off', true);
+      insert into public.os_planejamento (service_order_id, congelada_ate, revisar_em) values (c_luc, date '2026-11-05', date '2026-11-05')
+      on conflict (service_order_id) do update set congelada_ate = excluded.congelada_ate, revisar_em = excluded.revisar_em;
+      v_pr := coalesce(public._agenda_cliente_revalidar(v_ml, pg_temp.em('2026-10-30 15:25')), 'sai');
+      begin
+        r2 := pg_temp.limpeza_antes(date '2026-10-30', pg_temp.em('2026-10-30 15:30'));
+        t := (pg_temp.perg(v_ql)).estado;
+        raise exception 'desfaz' using errcode = 'P0098';
+      exception when sqlstate 'P0098' then null;
+      end;
+      r := pg_temp.limpa('2026-10-30 15:30');
+      q := pg_temp.perg(v_ql);
+      v_res := pg_temp.ok(v_res, format('C11g%s a OS da Lucenira %s e congelada (a prontidão diz congelada; a revalidação deixa o pronto sair): a pergunta fica aberta, como na de 20261031100300',
+                                        case v_alvo when 'completed' then '1' else '2' end, case v_alvo when 'completed' then 'concluída' else 'faturada' end),
+        m.estado = 'aguardando_dono' and public.os_prontidao(c_luc, date '2026-10-30') ->> 'estado' = 'congelada' and v_pr <> 'status'
+        and q.estado = 'aberta' and t = 'aberta',
+        format('prontidão %s; revalidação %s; agora %s %s; antes %s', public.os_prontidao(c_luc, date '2026-10-30') ->> 'estado', v_pr,
+               q.estado, coalesce(q.resolvida_motivo, '-'), t));
+      raise exception 'desfaz' using errcode = 'P0098';
+    exception when sqlstate 'P0098' then null;
+    end;
+  end loop;
 
   -- ── C8. Sem o conserto: a definição de 20261031100300 de volta (numa subtransação) ──
   begin

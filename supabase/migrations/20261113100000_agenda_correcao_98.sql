@@ -25,16 +25,29 @@
 -- no dia, andamento, atraso, semana, onde fica); a do "ficou pronto" de OS já entregue. Quando a mensagem poupada sai de
 -- aguardando_dono, o caminho de sempre fecha a pergunta: *manda* e *segura* (_agenda_cliente_decidir, respondida), o
 -- cancelamento (_agenda_cliente_cancelar, descartada), a validade (a limpeza e o passo fila, vencida). Se a pergunta ficar aberta
--- com a mensagem já fora de aguardando_dono, ou se a OS for entregue ou sair do concluído, a regra de antes volta a valer na
--- mesma limpeza.
+-- com a mensagem já fora de aguardando_dono, se o "ficou pronto" ou o lembrete for entregue, ou se a OS for cancelada ou juntada,
+-- a regra de antes volta a valer na mesma limpeza. Se a OS sai do concluído de volta para a carteira (reaberta pela tela ou pelo
+-- assistente, a conclusão desfeita) com o pronto, o lembrete ou o pós-serviço esperando o dono, a regra do status já recusa a
+-- mensagem e a regra de antes não vale (a OS está na carteira): a pergunta fecha no tique seguinte, com o motivo próprio "a OS
+-- não está mais concluída: a mensagem ao cliente não sai". A mensagem fica aguardando_dono até a validade, sem sair, como a que
+-- perde a pergunta por "a OS saiu da carteira" (NOVO-agenda-290).
 -- A CONFERÊNCIA (10/11): a 1ª versão desta migration (ramo em 9abb46f0) poupava toda cliente_aprovar com a mensagem esperando,
 -- também a da mensagem que já não pode sair (a véspera de OS cancelada ou concluída, o "ficou pronto" de OS entregue). O dono
 -- recebia a pergunta no fechamento, o *manda* prometia ("Mando para X amanhã às 09:00.") e a mensagem era recusada na hora de
 -- sair, com "Recomendo ligar." sobre uma OS cancelada ou entregue. Nada chegava ao cliente. Esta versão poupa só a que pode sair.
--- O QUE NÃO MUDA: nenhuma outra pergunta (o bloco só olha cliente_aprovar, e só zera o motivo); a prontidão da OS é calculada
--- e guardada no cache da limpeza como antes; a ordem, as contagens das outras e o vencimento pela validade; o motor, o aviso, o
--- fechamento e as mensagens. Peso: uma consulta por pergunta cliente_aprovar que a regra de antes fecharia (nenhuma consulta
--- nova para as outras).
+-- A RECONFERÊNCIA (10/11): a 2ª versão (ramo em e387cb93) poupava a pergunta e não a fechava quando a OS voltava do concluído
+-- para a carteira: a pergunta ficava aberta até a validade da mensagem (cerca de 33 h no caso medido), o fechamento a mostrava
+-- (2 linhas), o teto a contava, e o *manda* respondia "Não mandei para X: a OS mudou antes de a mensagem sair. Recomendo ligar."
+-- (o pronto) ou "Mando para X amanhã às 09:00." para recusar na hora de sair, com uma pergunta "não saiu" (o pós-serviço). Nada
+-- chegava ao cliente. Esta versão fecha essa pergunta no tique seguinte (o elsif do bloco). A mesma regra fecha a pergunta da OS
+-- reaberta antes do 1º tique depois da mensagem, que já ficava aberta sem a 98 (parte do NOVO-agenda-291): a regra olha o estado
+-- da OS, não a história. A OS reaberta e concluída de novo antes da validade fica como na produção de hoje: a pergunta já fechou,
+-- e a mensagem (a mesma chave) não nasce de novo.
+-- O QUE NÃO MUDA: nenhuma outra pergunta (o bloco só olha cliente_aprovar: zera o motivo da que ainda pode sair e dá o motivo
+-- próprio à do pronto, do lembrete e do pós-serviço de OS que voltou para a carteira; a cliente_aprovar dos outros tipos com a
+-- OS na carteira, a do NOVO-agenda-291, fica como antes); a prontidão da OS é calculada e guardada no cache da limpeza como antes;
+-- a ordem, as contagens das outras e o vencimento pela validade; o motor, o aviso, o fechamento e as mensagens (a limpeza não
+-- grava mensagem). Peso: uma consulta por pergunta cliente_aprovar aberta de OS (nenhuma consulta nova para as outras).
 --
 -- Ordem de ligar: depois da 20261109101900 (a produção de 05aed8e0). Sem deploy de edge function (nenhum TS muda). Vale ao
 -- entrar, em qualquer modo (a pergunta cliente_aprovar só existe com modo_cliente ligado). Aplicar com o OK nomeado do dono.
@@ -216,8 +229,14 @@ begin
     -- OS na carteira (confirmação, véspera, acesso, material chegou, nova data, mudança no dia, andamento, atraso, semana, onde
     -- fica); a do "ficou pronto" de OS já entregue. Quando a mensagem sai de aguardando_dono, quem a tira fecha a pergunta
     -- (_agenda_cliente_decidir: mandada ou segurada; _agenda_cliente_cancelar: recusada; a validade, acima, e o passo fila:
-    -- vencida); se ela sobrar aberta, ou se a OS for entregue ou sair do concluído, a regra de antes volta a valer nesta mesma
-    -- limpeza. Só cliente_aprovar: nenhuma outra pergunta muda, e a prontidão da OS segue calculada (e guardada) como antes.
+    -- vencida); se ela sobrar aberta, se o "ficou pronto" ou o lembrete for entregue, ou se a OS for cancelada ou juntada, a regra
+    -- de antes volta a valer nesta mesma limpeza. Se a OS sai do concluído de volta para a carteira (reaberta pela tela ou pelo
+    -- assistente, a conclusão desfeita), a regra de antes não vale (a OS está na carteira), e a regra do status recusa o pronto, o
+    -- lembrete e o pós-serviço na hora de sair: a pergunta deles fecha aqui, com o motivo próprio (o elsif). Sem ele, ela ficava
+    -- aberta até a validade, o fechamento a mostrava, e o *manda* respondia "Recomendo ligar." ou prometia um envio que a
+    -- revalidação recusava (a reconferência de 10/11). Vale também para a OS reaberta antes do 1º tique depois da mensagem (o
+    -- caminho que já existia sem a 98, parte do NOVO-agenda-291). Só cliente_aprovar: nenhuma outra pergunta muda, e a
+    -- prontidão da OS segue calculada (e guardada) como antes.
     if v_mot is not null and r.tipo = 'cliente_aprovar'
        and exists (select 1 from public.agenda_cliente_mensagens m
                      join public.service_orders o on o.id = m.service_order_id
@@ -225,6 +244,13 @@ begin
                       and o.status in ('completed', 'invoiced')
                       and (m.tipo = 'pos_servico' or (m.tipo in ('pronto', 'pronto_lembrete') and o.delivered_at is null))) then
       v_mot := null;
+    elsif v_mot is null and r.tipo = 'cliente_aprovar'
+          and exists (select 1 from public.agenda_cliente_mensagens m
+                        join public.service_orders o on o.id = m.service_order_id
+                       where m.pergunta_id = r.id and m.estado = 'aguardando_dono'
+                         and m.tipo in ('pronto', 'pronto_lembrete', 'pos_servico')
+                         and o.status not in ('completed', 'invoiced')) then
+      v_mot := 'a OS não está mais concluída: a mensagem ao cliente não sai';
     end if;
     -- CORREÇÃO 10/11 (98): fim
     if v_mot is not null then
@@ -236,7 +262,7 @@ begin
 end;
 $function$;
 
-comment on function public._agenda_vigia_limpeza(date, timestamptz) is 'Agenda de Produção (Fase 2, P3), vigia passo 1: propostas abertas de outra versão do plano (obsoleta, só ligado) ou vencidas (expirada), com as alocações de proposta; perguntas vencidas; perguntas cuja condição sumiu (resolvida, com o fato: chegou, voltou a andar, saiu da carteira, o dia está anotado…). Fase 4 (P4): o chegou? do fornecedor (chegou:fornecedor:<linha>:<dia>) só se resolve quando a linha chega ou sai da OS. CORREÇÃO 29/10 (P3): a pergunta aberta em sombra (feita em teste) cujo modo já está ligado (_agenda_modo_da_pergunta) fecha como resolvida, "era do teste: com a agenda ligada, vale só a pergunta de verdade" (conta em resolvidas); a ligada de mesma chave continua — a lista para de parecer ter a pergunta duas vezes. CORREÇÃO 29/10 (revisão): (1) a pergunta da reserva (duracao:<os>, material_conferir:<os>, ligado) resolve quando a OS não tem mais reserva condicionada publicada de hoje em diante ("a reserva saiu"); (2) equipe_sem_dias resolve quando _agenda_equipe_tem_dias. FASE 7 (7a P4): a pergunta do gestor situacao/estimativa aberta resolve quando a OS ganhou os dias ("você respondeu") ou, com o gestor ligado e a pergunta de verdade, quando a pergunta que ele faria agora para a OS não é mais esta (_agenda_gestor_perguntas_da_os seco: "não precisa mais"); a OS que saiu da carteira já resolvia. CORREÇÃO 10/11 (98): a pergunta cliente_aprovar (o OK de uma mensagem ao cliente) fica aberta enquanto a mensagem dela espera o dono (aguardando_dono) e o status da OS ainda a deixa sair (a regra do status de _agenda_cliente_revalidar): o "ficou pronto" e o lembrete (pronto, pronto_lembrete) com a OS concluída ou faturada e não entregue, e o pós-serviço (pos_servico) com a OS concluída ou faturada. A da mensagem que já não pode sair fecha como antes ("a OS saiu da carteira"): OS cancelada, juntada ou em rascunho, tipo que exige a OS na carteira (confirmação, véspera, acesso, material chegou, nova data, mudança no dia, andamento, atraso, semana, onde fica) e o pronto de OS já entregue. Quem tira a mensagem de aguardando_dono (mandada, segurada, cancelada ou vencida) fecha a pergunta, e a que sobrar aberta volta à regra de antes (NOVO-agenda-98).';
+comment on function public._agenda_vigia_limpeza(date, timestamptz) is 'Agenda de Produção (Fase 2, P3), vigia passo 1: propostas abertas de outra versão do plano (obsoleta, só ligado) ou vencidas (expirada), com as alocações de proposta; perguntas vencidas; perguntas cuja condição sumiu (resolvida, com o fato: chegou, voltou a andar, saiu da carteira, o dia está anotado…). Fase 4 (P4): o chegou? do fornecedor (chegou:fornecedor:<linha>:<dia>) só se resolve quando a linha chega ou sai da OS. CORREÇÃO 29/10 (P3): a pergunta aberta em sombra (feita em teste) cujo modo já está ligado (_agenda_modo_da_pergunta) fecha como resolvida, "era do teste: com a agenda ligada, vale só a pergunta de verdade" (conta em resolvidas); a ligada de mesma chave continua — a lista para de parecer ter a pergunta duas vezes. CORREÇÃO 29/10 (revisão): (1) a pergunta da reserva (duracao:<os>, material_conferir:<os>, ligado) resolve quando a OS não tem mais reserva condicionada publicada de hoje em diante ("a reserva saiu"); (2) equipe_sem_dias resolve quando _agenda_equipe_tem_dias. FASE 7 (7a P4): a pergunta do gestor situacao/estimativa aberta resolve quando a OS ganhou os dias ("você respondeu") ou, com o gestor ligado e a pergunta de verdade, quando a pergunta que ele faria agora para a OS não é mais esta (_agenda_gestor_perguntas_da_os seco: "não precisa mais"); a OS que saiu da carteira já resolvia. CORREÇÃO 10/11 (98): a pergunta cliente_aprovar (o OK de uma mensagem ao cliente) fica aberta enquanto a mensagem dela espera o dono (aguardando_dono) e o status da OS ainda a deixa sair (a regra do status de _agenda_cliente_revalidar): o "ficou pronto" e o lembrete (pronto, pronto_lembrete) com a OS concluída ou faturada e não entregue, e o pós-serviço (pos_servico) com a OS concluída ou faturada. A da mensagem que já não pode sair fecha como antes ("a OS saiu da carteira"): OS cancelada, juntada ou em rascunho, tipo que exige a OS na carteira (confirmação, véspera, acesso, material chegou, nova data, mudança no dia, andamento, atraso, semana, onde fica) e o pronto de OS já entregue. Quem tira a mensagem de aguardando_dono (mandada, segurada, cancelada ou vencida) fecha a pergunta, e a que sobrar aberta volta à regra de antes. Se a OS volta do concluído para a carteira (reaberta) com o pronto, o lembrete ou o pós-serviço esperando o dono, a regra do status já os recusa: a pergunta deles fecha no tique seguinte, com o motivo "a OS não está mais concluída: a mensagem ao cliente não sai" (NOVO-agenda-98).';
 
 -- ── A porta ─────────────────────────────────────────────────────────────────────────────────────────────
 -- A de antes, repetida para a migration valer sozinha (create or replace não mexe em grant): ninguém de fora, só a agenda_vigiar
