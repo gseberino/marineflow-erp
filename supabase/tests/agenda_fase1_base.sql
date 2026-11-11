@@ -1129,6 +1129,10 @@ insert into _definer_da_agenda values ('_agenda_saude_margem');
 -- Fase 7g (P2): o gatilho da zona e do degrau da ação (quem insere ação pode ser o service_role, que não tem porta em _agenda_zona; o molde do _agenda_perguntas_padrao da 7f P1;
 -- agenda_fase7g_porque.sql P0 prova a porta)
 insert into _definer_da_agenda values ('_agenda_acoes_porque');
+-- Fase 7g (P3): as 2 leituras de como pensei, com porta própria (admin/financeiro com login, o service_role sem; o molde de agenda_perguntas_em_ordem): definer para
+-- não abrir as peças do porquê a authenticated (agenda_fase7g_como_pensei.sql C0 e C6 provam a porta)
+insert into _definer_da_agenda values ('_agenda_porque_da_os');
+insert into _definer_da_agenda values ('agenda_como_pensei');
   -- FASE 7f: fim
   -- FASE 7e: (7e P1, 20261111100000) nenhuma definer nova: o modo, a credibilidade, o z e a temporada são invoker, e o gatilho _agenda_medidas_compra_so_muda só mexe na própria linha. agenda_fase7e_base.sql prova as portas.
   -- FASE 7e: fim

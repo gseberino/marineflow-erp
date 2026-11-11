@@ -1106,7 +1106,10 @@ declare
   c_novas constant text[] := array['_agenda_suposicoes_validas', '_agenda_quem_marcou', '_agenda_degrau', '_agenda_degrau_texto', '_agenda_zona_mais_severa',
     '_agenda_duracao_fonte_texto', '_agenda_suposicao_texto', '_agenda_criterio_texto', '_agenda_marcacoes_so_muda', '_agenda_tipos_os_so_muda', '_agenda_placar_so_muda',
     -- FASE 7g: (7g P2, 20261112100100) os 2 gatilhos do porquê leem modo_porque e chamam o CHECK das suposições, o degrau e a zona mais severa
-    '_agenda_alocacoes_porque', '_agenda_acoes_porque'
+    '_agenda_alocacoes_porque', '_agenda_acoes_porque',
+    -- FASE 7g: fim
+    -- FASE 7g: (7g P3, 20261112100200) as leituras de como pensei e do porquê leem modo_explicar e os parâmetros dele e chamam as peças do P1
+    '_agenda_porque_fonte', '_agenda_porque_linha', '_agenda_porque_da_os', 'agenda_como_pensei'
     -- FASE 7g: fim
     ];
 begin

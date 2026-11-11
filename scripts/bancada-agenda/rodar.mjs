@@ -442,6 +442,9 @@ const FIXTURES_COMO_TEXTO = [
   // Fase 7g (P2): a migration do porquê (o P6 de agenda_fase7g_porque.sql: as 2 recriadas, tirados os blocos da 7g, são as da origem; a fonte de agenda_propor é
   // mig_folga_fase7e e a de _agenda_alocacoes_imutavel, mig_motor_fase7c, ambas acima).
   ['agenda_teste.mig_porque_fase7g', '../../supabase/migrations/20261112100100_agenda_fase7g_porque.sql'],
+  // Fase 7g (P3): a migration de como pensei (o C13 de agenda_fase7g_como_pensei.sql: agenda_rascunho_marcar, tirados os blocos da 7g, é a da origem, a
+  // 20261025100400 da Fase 2, e a migration não recria _agenda_data_conferida nem os outros 7 chamadores da data dita).
+  ['agenda_teste.mig_como_pensei_fase7g', '../../supabase/migrations/20261112100200_agenda_fase7g_como_pensei.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

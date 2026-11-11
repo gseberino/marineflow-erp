@@ -203,6 +203,14 @@
 - **Na Fase 7g:** não corrigido na correção da conferência do P2 (o defeito devolvido era o de `disponibilidade_suposta`). O menor conserto: chamar `_agenda_zona` sobre os (pessoa, dia) distintos (uma subconsulta com distinct, que o planejador não desfaz), nos 2 ramos; a zona gravada fica a mesma.
 - **Origem:** Fase 7g, P2 (correção da conferência).
 
+### [NOVO-agenda-250] A data dita com "depois de" ou "antes de" nas palavras que o modelo passa vira o próprio dia
+
+- **Encontrado em:** Agenda de Produção, Fase 7g, P3 (11/11/2026), na bancada (`f7g/p3/explorar.sql`, `passo1.out`): `_agenda_data_conferida('depois de quinta', 'passa o Daniel para depois de quinta', qui 29/10, 'futuro')` dá qui 05/11; "antes de sexta" dá a sexta; "a partir de segunda" dá a segunda (este, certo).
+- **Onde:** `agenda_data_dita` (`20261024160100_agenda_fase1_calendario.sql:450`): só "até" é separador de faixa ("até sexta" = de hoje até sexta); "depois de", "após" e "antes de" caem na data única de `_agenda_data_um`, que acha o dia da semana no meio do texto e ignora o resto. O R9.4-5 supunha o contrário ("se o próprio dito já começa pela relação, nulo: o agenda_data_dita já leu").
+- **Efeito:** quando o modelo passa as palavras inteiras do dono no dito ("depois de quinta" em vez de "quinta"), os 8 chamadores de `_agenda_data_conferida` (22 chamadas: o marcar, o planejar com `nao_antes_de`, `precisa_ate`, `bem_livre_em`…, a disponibilidade, o material, o andamento, o marco, a semana dita e `agenda_propor_dito`) leem o próprio dia: "passa para depois de quinta" marcaria na quinta. Hoje as ferramentas pedem o dia "como o dono disse (\"quinta\", \"dia 5\")", e o modelo costuma passar só o dia; não medi quantas vezes passa a relação junto (a palavra direta não passa pela auditoria, R9.5-26).
+- **Na Fase 7g:** o P3 resolve só em `agenda_rascunho_marcar`, no dia pedido, com `modo_explicar` ligado (R9.4-5, R9.11): `_agenda_relacao_dita` lê a relação também quando ela vem no começo do dito, e `_agenda_data_com_relacao` a aplica sobre a data conferida (C7a, C7b de `agenda_fase7g_como_pensei.sql`). Os outros 7 chamadores seguem como estão, de propósito (a relação em toda data dita é "etapa própria", R9.11). A saída menor para eles: chamar `_agenda_data_com_relacao` no mesmo ponto, um por um, com o teste da frase até o *grava*.
+- **Origem:** Fase 7g, P3.
+
 ### [NOVO-agenda-96] `dados` de `agenda_ver` não chega ao modelo, e `mostrada_em` não vê a conversa (Fase 7d, correção, Onda 2)
 
 - **Encontrado em:** Agenda de Produção, Fase 7d, Onda 2 (06/11/2026), ao fazer o O8 e o R1.

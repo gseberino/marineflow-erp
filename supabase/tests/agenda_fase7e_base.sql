@@ -857,7 +857,9 @@ declare
     -- a nova do P7 (20261111100600): a saúde da margem, inteira da 7e
     '_agenda_saude_margem',
     -- a 7g (P2, 20261112100100): as suposições da OS leem tempo_compra_marcado (o compra_interna_padrao, R9.5-3), sem a marca porque são inteiras da 7g
-    '_agenda_suposicoes_da_os'];
+    '_agenda_suposicoes_da_os',
+    -- a 7g (P3, 20261112100200): a fonte da duração lê _agenda_margem_modo('vies') e vies_marcado (a frase do viés só quando a 7e corrige, R9.3-1), inteira da 7g
+    '_agenda_porque_fonte'];
 begin
   -- nenhuma função de antes lê as colunas nem chama as funções novas. Quem vier depois nesta etapa: a função recriada leva a marca -- FASE 7e (sai daqui sozinha); a função NOVA, sem marca, entra em c_novas, pelo nome.
   select string_agg(p.proname, ',' order by p.proname) into v_dif
