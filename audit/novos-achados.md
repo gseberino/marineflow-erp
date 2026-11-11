@@ -195,6 +195,14 @@
 - **Na Fase 7g:** registrado. Decidir no ligar do `modo_porque` (R9.14) ou no P3, que lê o critério: ou a medida da 7c passa a ler a substituída, ou o porquê da 7g lê o critério pela `substitui_id` e a cópia sai.
 - **Origem:** Fase 7g, P2.
 
+### [NOVO-agenda-245] O gatilho das ações chama `_agenda_zona` por meio-dia do antes e do depois, e não por (pessoa, dia)
+
+- **Encontrado em:** Agenda de Produção, Fase 7g, correção da conferência do P2 (10/11/2026), conferindo o que as notas do P2 diziam do peso da zona ("1 `_agenda_zona` por (pessoa, dia) distinto tocado"): sonda no harness do teste (`f7g/p2c/sonda-zona.sql`, delta de `pg_stat_xact_user_functions`; o controle, 1 chamada direta, conta 1).
+- **Onde:** `_agenda_acoes_porque` (`20261112100100`), os 2 `select distinct public._agenda_zona(...)`: o distinct é do resultado, e a função roda uma vez por elemento de `antes.alocacoes || depois.alocacoes` (no ramo dos ids, uma vez por alocação).
+- **Efeito:** medido: mover 10 meios-dias (5 dias) de uma pessoa para outra = 20 chamadas (10 (pessoa, dia) distintos); o mesmo bloco no antes e no depois = 20 (5 distintos); 1 meio-dia de uma pessoa para outra = 2 (2 distintos). `_agenda_zona` não lê o turno: a manhã e a tarde do mesmo dia, e o mesmo meio-dia no antes e no depois, repetem a conta. Só roda com `modo_porque` fora de desligado, na ação executada dos 9 tipos (no replay de 08/11 em sombra, sem o freio, 2 ações). A zona gravada não muda (o distinct e a mais severa dão o mesmo). O tempo não foi medido.
+- **Na Fase 7g:** não corrigido na correção da conferência do P2 (o defeito devolvido era o de `disponibilidade_suposta`). O menor conserto: chamar `_agenda_zona` sobre os (pessoa, dia) distintos (uma subconsulta com distinct, que o planejador não desfaz), nos 2 ramos; a zona gravada fica a mesma.
+- **Origem:** Fase 7g, P2 (correção da conferência).
+
 ### [NOVO-agenda-96] `dados` de `agenda_ver` não chega ao modelo, e `mostrada_em` não vê a conversa (Fase 7d, correção, Onda 2)
 
 - **Encontrado em:** Agenda de Produção, Fase 7d, Onda 2 (06/11/2026), ao fazer o O8 e o R1.

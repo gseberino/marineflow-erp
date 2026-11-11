@@ -23,7 +23,8 @@
 --   P6  as cópias: tiradas os blocos -- FASE 7g, agenda_propor e _agenda_alocacoes_imutavel são as da origem, byte a byte; a migration só recria essas 2
 --   P7  o foco locais e o bloco do local iguais com e sem o porque no item (os modos do local ligados, sem o freio)
 --   P8  as suposições, código a código: cada uma entra só com o fato que a sustenta (a prontidão, os meios e o bloco montados; o que é lido do banco,
---       montado no banco), na ordem do §3.1-3, e a saída passa no CHECK
+--       montado no banco), na ordem do §3.1-3, e a saída passa no CHECK; e o peso de disponibilidade_suposta (P8n2, da conferência do P2): os dias declarados
+--       lidos no máximo 1 vez por (pessoa, semana) do bloco, e não por meio-dia
 --   M1c _agenda_suposicoes_da_os trocada por uma que lança: a simulação roda sem erro, igual e sem registro (nunca a chama); a vigia roda sem erro; gravando, o
 --       motor segue, o item fica sem porque, a alocação nula e o erro registrado (o controle que morde)
 --
@@ -48,6 +49,11 @@ $f$;
 
 create function pg_temp.os(p_num text) returns uuid language sql stable as $f$
   select id from public.service_orders where service_order_number = p_num
+$f$;
+
+-- Quantas vezes a função rodou nesta transação (os contadores da sessão; track_functions = all), como em agenda_correcao_2910_p5.sql.
+create function pg_temp.chamadas(p_nome text) returns bigint language sql as $f$
+  select coalesce(sum(f.calls), 0)::bigint from pg_stat_xact_user_functions f where f.schemaname = 'public' and f.funcname = p_nome
 $f$;
 
 -- p_sql como o papel p_papel, sem login: o resultado em texto, ou 'erro <estado>: <mensagem>'
@@ -800,6 +806,9 @@ declare
   c_d    constant date := date '2026-11-12';
   a1     jsonb;
   m      jsonb;
+  v_sl   constant uuid := '00000000-0000-4000-8000-0000000000c9';   -- P8n2: alguém sem nenhuma linha de disponibilidade (fonte nenhum)
+  v_k    bigint;
+  v_cham text;
 begin
   begin
   -- uma OS sem linha em os_planejamento (o caso comum), a 1ª pelo número: a base dos casos montados
@@ -925,6 +934,50 @@ begin
   s := public._agenda_suposicoes_da_os(v_os, jsonb_build_object('meios', jsonb_build_object('equipe_dita', true)), m, c_d);
   v_res := pg_temp.ok(v_res, 'P8n disponibilidade_suposta: Gama (o padrão que ele mesmo disse) e Alfa (a semente), na ordem do 1º meio-dia; Beta (o padrão do dono), Delta (a semana dita) e o dono, não',
                       s = '[{"codigo": "disponibilidade_suposta", "detalhe": {"pessoas": ["Gama", "Alfa"]}}]'::jsonb, s::text);
+  -- P8n2 (a conferência do P2): _agenda_dias_declarados roda no máximo 1 vez por (pessoa, semana) do bloco, e não por meio-dia (antes do conserto, 1 a 3 vezes por
+  -- meio-dia, medido: 10 meios-dias numa semana = 20 chamadas, 8 em 2 semanas = 16, o 3º caso = 102). A conta é o delta de pg_stat_xact_user_functions nesta
+  -- transação; o controle (1 chamada direta conta 1)
+  -- prova que o contador anda. Quem não tem linha nenhuma (fonte nenhum) é o caso mais caro: nenhuma semana é suposta, e o exists passa por todas.
+  -- track_functions só o superusuário liga: sem a permissão (fora da bancada), PULADO.
+  v_cham := null;
+  begin
+    perform set_config('track_functions', 'all', true);
+  exception when insufficient_privilege then
+    v_cham := 'PULADO: sem permissão para ligar track_functions (rode pela bancada)';
+  end;
+  if v_cham is not null then
+    v_res := pg_temp.ok(v_res, 'P8n2 disponibilidade_suposta lê os dias declarados no máximo 1 vez por (pessoa, semana) do bloco', true, v_cham);
+  else
+    v_k := pg_temp.chamadas('_agenda_dias_declarados');
+    perform public._agenda_dias_declarados(v_sl, c_d + 4);   -- seg 16/11 (a função só aceita a segunda da semana)
+    v_cham := (pg_temp.chamadas('_agenda_dias_declarados') - v_k)::text;
+    -- 10 meios-dias numa semana (seg 16 a sex 20/11, manhã e tarde): 1 semana, 1 chamada
+    m := (select jsonb_agg(jsonb_build_object('payee_id', v_sl, 'nome', 'Sem', 'dia', c_d + 4 + g / 2, 'turno', case when g % 2 = 0 then 'manha' else 'tarde' end,
+                                              'presenca', 'turno') order by g) from generate_series(0, 9) g);
+    v_k := pg_temp.chamadas('_agenda_dias_declarados');
+    s := public._agenda_suposicoes_da_os(v_os, jsonb_build_object('meios', jsonb_build_object('equipe_dita', true)), m, c_d);
+    v_cham := v_cham || ' ' || (pg_temp.chamadas('_agenda_dias_declarados') - v_k) || ' ' || s::text;
+    -- 8 meios-dias em 2 semanas (seg e ter de 16 e de 23/11): 2 chamadas
+    m := (select jsonb_agg(jsonb_build_object('payee_id', v_sl, 'nome', 'Sem', 'dia', d, 'turno', t, 'presenca', 'turno') order by d, t)
+            from unnest(array[c_d + 4, c_d + 5, c_d + 11, c_d + 12]) d, unnest(array['manha', 'tarde']) t);
+    v_k := pg_temp.chamadas('_agenda_dias_declarados');
+    s := public._agenda_suposicoes_da_os(v_os, jsonb_build_object('meios', jsonb_build_object('equipe_dita', true)), m, c_d);
+    v_cham := v_cham || ' ' || (pg_temp.chamadas('_agenda_dias_declarados') - v_k) || ' ' || s::text;
+    -- as 4 pessoas do P8n com 10 meios-dias cada na semana de c_d (seg 09 a sex 13/11), Gama com mais 4 na seguinte, e o dono com 2: 5 (pessoa, semana) fora
+    -- do dono, e o exists para na 1ª semana suposta (a de Gama): 4 chamadas, nenhuma do dono; as pessoas, as mesmas do P8n (todas começam seg de manhã: pelo nome)
+    m := (select jsonb_agg(jsonb_build_object('payee_id', x.p, 'nome', x.n, 'dia', c_d - 3 + g / 2, 'turno', case when g % 2 = 0 then 'manha' else 'tarde' end,
+                                              'presenca', 'turno') order by x.k, g)
+            from unnest(v_p, array['Alfa', 'Beta', 'Gama', 'Delta']) with ordinality x(p, n, k), generate_series(0, 9) g)
+         || (select jsonb_agg(jsonb_build_object('payee_id', v_p[3], 'nome', 'Gama', 'dia', c_d + 4 + g / 2, 'turno', case when g % 2 = 0 then 'manha' else 'tarde' end,
+                                                 'presenca', 'turno') order by g) from generate_series(0, 3) g)
+         || jsonb_build_array(jsonb_build_object('payee_id', v_dono, 'nome', 'Dono', 'dia', c_d - 3, 'turno', 'manha', 'presenca', 'turno'),
+                              jsonb_build_object('payee_id', v_dono, 'nome', 'Dono', 'dia', c_d + 4, 'turno', 'tarde', 'presenca', 'turno'));
+    v_k := pg_temp.chamadas('_agenda_dias_declarados');
+    s := public._agenda_suposicoes_da_os(v_os, jsonb_build_object('meios', jsonb_build_object('equipe_dita', true)), m, c_d);
+    v_cham := v_cham || ' ' || (pg_temp.chamadas('_agenda_dias_declarados') - v_k) || ' ' || s::text;
+    v_res := pg_temp.ok(v_res, 'P8n2 disponibilidade_suposta lê os dias declarados no máximo 1 vez por (pessoa, semana) do bloco, e não por meio-dia: o controle (1 chamada direta = 1), 10 meios-dias de quem não tem linha numa semana = 1 chamada, 8 em 2 semanas = 2, as 4 pessoas do P8n com 10 meios-dias e o dono = 4 (nenhuma do dono); as suposições, as mesmas',
+                        v_cham = '1 1 [] 2 [] 4 [{"codigo": "disponibilidade_suposta", "detalhe": {"pessoas": ["Alfa", "Gama"]}}]', v_cham);
+  end if;
 
   -- quanto_falta_padrao: os dias gravados quando a pergunta do "quanto falta?" venceu sem resposta (o caminho de verdade: _agenda_gestor_gravar_dias)
   insert into public.agenda_perguntas (tipo, chave, service_order_id, os_ids, texto, opcoes, recomendacao, versao_base, modo, criada_em)

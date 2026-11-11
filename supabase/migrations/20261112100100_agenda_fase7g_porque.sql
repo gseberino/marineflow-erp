@@ -134,7 +134,10 @@ begin
   end if;
 
   -- disponibilidade_suposta (AG7-03): quem está no bloco sem os dias declarados para aquela semana (_agenda_dias_declarados do 7b: a semente do histórico, ou o
-  -- padrão que não foi o dono quem disse = a última dita). A semana dita e o padrão do dono são declarados. O dono não entra. Na ordem do 1º meio-dia de cada um
+  -- padrão que não foi o dono quem disse = a última dita). A semana dita e o padrão do dono são declarados. O dono não entra. Na ordem do 1º meio-dia de cada um.
+  -- Os dias declarados são lidos 1 vez por (pessoa, semana) do bloco (correção da conferência do P2): o offset 0 segura o lateral. Sem ele, o planejador desfaz o
+  -- lateral, a função entra no filtro até 3 vezes e o filtro desce para baixo do distinct das semanas: de 1 a 3 leituras por meio-dia (10 meios-dias de quem não
+  -- tem linha, numa semana, davam 20 leituras; agora, 1)
   v_nomes := array(
     select y.nome
       from (select coalesce(nullif(btrim(a ->> 'nome'), ''),
@@ -150,7 +153,7 @@ begin
                      from (select distinct (a ->> 'dia')::date - (extract(isodow from (a ->> 'dia')::date)::int - 1) as seg
                              from jsonb_array_elements(v_alocs) a
                             where (a ->> 'payee_id')::uuid = y.payee and a ->> 'dia' is not null) s
-                     cross join lateral (select public._agenda_dias_declarados(y.payee, s.seg) as v) d
+                     cross join lateral (select public._agenda_dias_declarados(y.payee, s.seg) as v offset 0) d
                     where d.v ->> 'fonte' = 'historico' or (d.v ->> 'fonte' = 'padrao' and d.v ->> 'origem' is distinct from 'dono'))
      order by y.primeiro, y.nome, y.payee);
   if cardinality(v_nomes) > 0 then
