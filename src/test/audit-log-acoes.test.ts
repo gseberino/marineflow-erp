@@ -26,7 +26,9 @@ function acoesDoBanco(): string[] {
   const candidatas = fs.readdirSync(pasta)
     .filter((f) => f.endsWith('.sql'))
     .sort()
-    .filter((f) => /audit_log_action_check/i.test(fs.readFileSync(path.join(pasta, f), 'utf8')));
+    // Só conta a migration que REDEFINE o CHECK: citar o nome num comentário (as do retorno rápido
+    // citam, 11/11/2026) não muda a lista do banco e fazia o teste ler o arquivo errado.
+    .filter((f) => /ADD\s+CONSTRAINT\s+audit_log_action_check/i.test(fs.readFileSync(path.join(pasta, f), 'utf8')));
   expect(candidatas.length, 'nenhuma migration define audit_log_action_check').toBeGreaterThan(0);
 
   const sql = fs.readFileSync(path.join(pasta, candidatas[candidatas.length - 1]), 'utf8');
