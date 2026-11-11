@@ -17,7 +17,8 @@
 --   C6  as portas de verdade: o técnico com login 42501, o admin com login lê, authenticated sem login 42501, o service_role lê
 --   C7  a data dita (R9.4-5): a relação nas palavras do dono (_agenda_relacao_dita), a data com a relação, e da frase do dono até o *grava* ("passa o Daniel para
 --       depois de quinta" marca sex 06/11; "não antes de quinta" marca a quinta); em sombra e desligado, o rascunho byte a byte; os outros 7 chamadores e
---       _agenda_data_conferida no md5 de antes
+--       _agenda_data_conferida no md5 de antes; (correção da conferência) a negação longe da relação ("não pode antes de quinta", "antes de quinta não dá",
+--       "antes do dia 25, não dá") e o trecho com 2 pedidos ("o barco A na quinta e o barco B depois de quinta") não dão relação, do pedido ao *grava*
 --   C8  o freio (R9.6): a 1ª linha e o "Eu marcaria" da última conta do gestor (só o que toca a semana; a conta de outro dia; sem conta); sem o freio nada disso
 --   C9  "Preciso de você" (R9.7): a linha de agenda_perguntas_em_ordem como vem; o N de "Decisão N:" é o de agenda_decisoes_abertas (*agenda pendências*); a
 --       sem número com "•"; a já escolhida fora; o resto em *agenda pendências*
@@ -576,9 +577,31 @@ begin
                  ('quinta não, depois de quinta', 'quinta', 'depois'), ('depois de quinta, antes de quinta', 'quinta', '∅'), ('só depois do dia 10', 'dia 10', 'depois'),
                  ('depois de amanhã', 'amanhã', '∅'), ('marca o Daniel depois da quinta feira', 'quinta', 'depois'), ('desde terça', 'terça', 'a_partir'),
                  ('após sexta', 'sexta', 'depois'), ('até sexta compra o cabo e marca segunda', 'segunda', '∅'), ('marca de segunda a sexta', 'segunda', '∅'),
-                 ('chocolate quinta', 'quinta', '∅'), ('', 'quinta', '∅'), ('marca quinta', '', '∅')) t(tr, di, esp)
+                 ('chocolate quinta', 'quinta', '∅'), ('', 'quinta', '∅'), ('marca quinta', '', '∅'),
+                 -- (correção da conferência) a negação na oração da relação, antes ou depois da data: nula (a data de antes do P3)
+                 ('não pode antes de quinta', 'quinta', '∅'), ('não dá antes de quinta', 'quinta', '∅'), ('antes de quinta não dá', 'quinta', '∅'),
+                 ('nunca antes de quinta', 'quinta', '∅'), ('nem antes de quinta', 'quinta', '∅'), ('não é antes de quinta', 'quinta', '∅'),
+                 ('nada antes de quinta', 'quinta', '∅'), ('não marca antes de quinta', 'quinta', '∅'), ('antes de quinta não', 'quinta', '∅'),
+                 ('antes de quinta nem pensar', 'quinta', '∅'), ('não pode ser antes de quinta', 'quinta', '∅'), ('depois de quinta não dá', 'quinta', '∅'),
+                 ('depois de quinta não pode', 'quinta', '∅'), ('marca, mas não pode antes do dia 25', 'dia 25', '∅'), ('marca no dia 24, depois do dia 24 não dá', 'dia 24', '∅'),
+                 ('jamais antes de quinta', 'quinta', '∅'), ('n pode antes de quinta', 'quinta', '∅'), ('nenhum dia antes de quinta', 'quinta', '∅'),
+                 ('em nenhuma hipótese antes de quinta', 'quinta', '∅'),
+                 -- a negação numa oração sem a data (a vírgula do áudio): nula; com o seu próprio antes, depois ou até, a negação é dele e a relação fica
+                 ('antes do dia 25, não dá', 'dia 25', '∅'), ('antes do dia 25, ele não pode', 'dia 25', '∅'), ('não pode, antes do dia 25', 'dia 25', '∅'),
+                 ('antes de quinta, nem pensar', 'quinta', '∅'), ('passa o Daniel para depois de quinta, o cliente não respondeu', 'quinta', '∅'),
+                 ('só depois do dia 10, antes não dá', 'dia 10', 'depois'), ('antes de sexta, depois não dá', 'sexta', 'antes'), ('depois de quinta, até lá não dá', 'quinta', 'depois'),
+                 -- a data também sem relação (2 pedidos no mesmo trecho): nula; a data sem relação numa oração negada não conta
+                 ('marca o barco A na quinta e o barco B depois de quinta', 'quinta', '∅'), ('passa o barco A para quinta e o barco B para depois de quinta', 'quinta', '∅'),
+                 ('marca o barco A na quinta; o barco B só depois de quinta', 'quinta', '∅'), ('o barco A na sexta, o barco B antes de sexta', 'sexta', '∅'),
+                 ('pode marcar na quinta, antes de quinta ele não está', 'quinta', '∅'), ('não dá quinta, só depois de quinta', 'quinta', 'depois'),
+                 ('depois de quinta, quinta não', 'quinta', 'depois'), ('na quinta ele não pode e depois de quinta pode', 'quinta', 'depois'),
+                 ('quinta não mas depois de quinta', 'quinta', 'depois'), ('não antes de quinta, depois de quinta', 'quinta', '∅'),
+                 -- as que ficam
+                 ('depois de quinta', 'quinta', 'depois'), ('só depois de quinta', 'quinta', 'depois'), ('passa para depois do dia 24', 'dia 24', 'depois'),
+                 ('passa o Nelson para depois de quinta', 'quinta', 'depois'), ('passa o Allan para depois de quinta', 'quinta', 'depois'),
+                 ('até sexta compra o cabo para marcar segunda', 'segunda', '∅')) t(tr, di, esp)
    where coalesce(public._agenda_relacao_dita(t.tr, t.di), '∅') <> t.esp;
-  v_res := pg_temp.ok(v_res, 'C7a a relação logo antes da data (depois, antes, a partir, até; com "dia"; o dito que já começa por ela); "não" logo antes, relações diferentes, longe da data e sem data: nenhuma', v is null, v);
+  v_res := pg_temp.ok(v_res, 'C7a a relação logo antes da data (depois, antes, a partir, até; com "dia"; o dito que já começa por ela); nenhuma com negação na oração dela (antes ou depois da data), com negação solta numa oração sem a data, com a data também sem relação (2 pedidos), com relações diferentes, longe da data e sem data', v is null, v);
   if public.agenda_feriado(date '2026-11-02') is null then
     v_res := pg_temp.ok(v_res, 'C7b a data com a relação', true, 'PULADO: sem os feriados (Finados em 02/11)');
     perform pg_temp.gravar(v_res);
@@ -657,7 +680,11 @@ begin
     v := '';
     for r_d in select jsonb_build_object('di', t.di, 'ate', t.ate, 'tr', t.tr, 'de', t.de, 'atd', t.atd)
                  from (values ('quinta', null, 'marca o Daniel na quinta', '2026-11-05', '2026-11-05'), ('quinta', null, 'o Daniel não antes de quinta', '2026-11-05', '2026-11-05'),
-                              ('terça', 'quinta', 'marca o Daniel de terça até quinta', '2026-11-03', '2026-11-05')) t(di, ate, tr, de, atd) loop
+                              ('terça', 'quinta', 'marca o Daniel de terça até quinta', '2026-11-03', '2026-11-05'),
+                              ('quinta', null, 'o Daniel não pode antes de quinta', '2026-11-05', '2026-11-05'), ('quinta', null, 'antes de quinta o Daniel não pode', '2026-11-05', '2026-11-05'),
+                              ('quinta', null, 'marca o Daniel, mas antes de quinta não dá', '2026-11-05', '2026-11-05'),
+                              ('quinta', null, 'o Daniel na quinta, antes de quinta não dá', '2026-11-05', '2026-11-05'),
+                              ('quinta', null, 'marca o Daniel na quinta e o Antônio depois de quinta', '2026-11-05', '2026-11-05')) t(di, ate, tr, de, atd) loop
       r := public.agenda_rascunho_marcar(c_admin, 'whatsapp', 'Daniel', r_d ->> 'di', r_d ->> 'ate', null, r_d ->> 'tr', d29, pg_temp.em(d29, '17:00'));
       if not coalesce((r ->> 'ok')::boolean, false) or r::text like '%você disse%'
          or not exists (select 1 from public.agenda_rascunho x where x.chave = 'marcar:' || pg_temp.os('204') and x.estado = 'aberto'
@@ -665,7 +692,32 @@ begin
         v := v || format(' [%s | %s] %s', r_d ->> 'tr', r_d ->> 'di', r::text);
       end if;
     end loop;
-    v_res := pg_temp.ok(v_res, 'C7f ligado sem relação: "na quinta", "não antes de quinta" e o até de "de terça até quinta" (o p_ate) não ganham relação; a data é a de antes', v = '', v);
+    v_res := pg_temp.ok(v_res, 'C7f ligado sem relação: "na quinta", "não antes de quinta", o até de "de terça até quinta" (o p_ate), a negação longe da relação ("não pode antes de quinta", "antes de quinta não dá") e o pedido de outro barco no mesmo trecho não ganham relação; a data é a de antes', v = '', v);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  -- C7j: (correção da conferência) do pedido ao *grava*: "marca o Daniel, mas não pode antes de quinta" e o trecho com o pedido de outro barco ("o Antônio
+  -- depois de quinta") marcam o Daniel na quinta, como antes do P3 (sem o conserto: a quarta e a sexta, com "(você disse …)")
+  begin
+    perform pg_temp.publicado('sombra');
+    perform pg_temp.os_extra('204', 'Daniel', 1, jsonb_build_array(jsonb_build_object('payee', 'bb000000-0000-4000-8000-000000000002', 'turnos', 'dia')));
+    update public.agenda_config set modo_explicar = 'ligado' where id;
+    v := '';
+    for r_d in select jsonb_build_object('tr', t.tr) from (values ('marca o Daniel, mas não pode antes de quinta'), ('marca o Daniel na quinta e o Antônio depois de quinta')) t(tr) loop
+      begin
+        r := public.agenda_rascunho_marcar(c_admin, 'whatsapp', 'Daniel', 'quinta', null, null, r_d ->> 'tr', d29, pg_temp.em(d29, '17:00'));
+        r_s := pg_temp.grava(c_admin, d29, '17:05');
+        if not coalesce((r ->> 'ok')::boolean, false) or r::text like '%você disse%' or not coalesce((r_s ->> 'ok')::boolean, false)
+           or (select min(a.dia) from public.agenda_alocacoes a where a.service_order_id = pg_temp.os('204') and a.estado in ('publicada', 'fixada')) is distinct from date '2026-11-05' then
+          v := v || format(' [%s] %s | %s | %s', r_d ->> 'tr', coalesce(r ->> 'releitura', r::text), r_s::text,
+                 (select string_agg(a.dia::text || ' ' || a.turno, ', ' order by a.dia, a.turno) from public.agenda_alocacoes a
+                   where a.service_order_id = pg_temp.os('204') and a.estado in ('publicada', 'fixada')));
+        end if;
+        raise exception 'desfaz' using errcode = 'P0098';
+      exception when sqlstate 'P0098' then null;
+      end;
+    end loop;
+    v_res := pg_temp.ok(v_res, 'C7j ligado, do pedido ao *grava*: "marca o Daniel, mas não pode antes de quinta" e o trecho com o pedido de outro barco marcam o Daniel a partir da qui 05/11, sem "(você disse …)"', v = '', v);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;

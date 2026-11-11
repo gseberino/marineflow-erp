@@ -15,7 +15,8 @@
 --
 -- O QUE MUDA (com modo_explicar desligado, nada que o dono veja: as leituras novas respondem {modo: desligado} e a releitura do rascunho é a de antes):
 --   1. _agenda_relacao_dita (nova): a relação dita logo antes da data, nas palavras do dono (depois de, antes de, a partir de, até); nula sem relação, com
---      "não" logo antes ("não antes de quinta") e quando a data aparece com relações diferentes no mesmo trecho. Só lê o texto (IMMUTABLE).
+--      negação na oração dela ("não antes de quinta", "não pode antes de quinta", "antes de quinta não dá") ou numa oração sem a data ("antes do dia 25,
+--      não dá"), com a data também sem relação (2 pedidos no mesmo trecho) e com relações diferentes para a mesma data. Só lê o texto (IMMUTABLE).
 --   2. _agenda_data_com_relacao (nova): a data conferida com a relação aplicada — depois = o 1º dia útil depois; antes = o último dia útil antes; a partir =
 --      a data como está; até = de hoje até a data. Sem relação, a entrada byte a byte; com ela, a saída ganha relacao e relacao_texto ("você disse depois de
 --      quinta"). _agenda_data_conferida NÃO é recriada: os outros 7 chamadores (22 chamadas) seguem como estão (R9.4-5).
@@ -58,9 +59,17 @@
 -- R9.4-5 e §5.3: a relação é a expressão logo antes da data nas palavras do dono (o trecho), lidas como _agenda_data_no_passado lê (_agenda_preparar_data e a
 -- posição): "depois de", "depois do", "após" → depois; "antes de" → antes; "a partir de", "desde" → a_partir; "até", "até o" → ate (com "dia" no meio também:
 -- "depois do dia 10"). O dito que já começa pela relação ("depois de quinta", quando o modelo passa as palavras inteiras) vale pelo resto ("quinta"): a
--- releitura de agenda_data_dita não lê "depois de" nem "antes de" (lê "depois de quinta" como quinta). "não" logo antes da relação desfaz: "não antes de
--- quinta" é a partir de quinta, a data como está (nula); a vírgula separa ("quinta não, depois de quinta": o "não" é da 1ª). Com a data mais de uma vez
--- no trecho, vale a relação se só uma aparece; relações diferentes = nula.
+-- releitura de agenda_data_dita não lê "depois de" nem "antes de" (lê "depois de quinta" como quinta).
+-- (correção da conferência, 11/11) A relação só vale quando é a única leitura do trecho; na dúvida, nula: a data como foi dita, a de antes do P3.
+--   A oração vai de um "e" ou "mas" ao seguinte (a vírgula e o ponto e vírgula viram "e"; sem o acento, o "é" também parte: "não é antes de quinta"
+--   deixa o "não" numa oração sem a data, e a negação solta anula, abaixo).
+--   Negação (não, n, nunca, nem, nada, jamais, nenhum, nenhuma) na oração da relação e da data, antes ou depois dela: nula ("não antes de quinta", "não
+--   pode antes de quinta", "antes de quinta não dá").
+--   A data também sem relação, numa oração sem negação: nula (2 pedidos no mesmo trecho: "o barco A na quinta e o barco B depois de quinta"). A data sem
+--   relação numa oração negada não conta: "quinta não, depois de quinta" = depois.
+--   Negação numa oração sem a data e sem um "antes", "depois" ou "até" dela: nula ("antes do dia 25, não dá", a vírgula do áudio); com ele, a negação é
+--   dele ("só depois do dia 10, antes não dá" = depois).
+--   Relações diferentes para a mesma data: nula.
 create or replace function public._agenda_relacao_dita(p_trecho text, p_dito text)
  returns text
  language plpgsql
@@ -69,14 +78,18 @@ create or replace function public._agenda_relacao_dita(p_trecho text, p_dito tex
 as $function$
 declare
   c_rel  constant text := '(?:depois d[aoe]|apos(?: [ao])?|antes d[aoe]|a partir d[aoe]|desde(?: [ao])?|ate(?: [ao])?)(?: dia)?';
+  c_nao  constant text := '\m(nao|n|nunca|nem|nada|jamais|nenhuma?)\M';
   v_d    text := public._agenda_preparar_data(p_dito);
   v_t    text := ' ' || public._agenda_preparar_data(regexp_replace(coalesce(p_trecho, ''), '[,;]', ' e ', 'g')) || ' ';
   v_m    text[];
   v_pos  int := 0;
   v_i    int;
-  v_ant  text;
   v_k    text;
   v_rels text[] := '{}';
+  v_o    text;
+  v_nega boolean;
+  v_tem  boolean;
+  v_solta boolean := false;
 begin
   if v_d = '' then
     return null;
@@ -85,28 +98,41 @@ begin
   if v_m is not null then
     v_d := v_m[1];
   end if;
-  loop
-    v_i := strpos(substr(v_t, v_pos + 1), ' ' || v_d || ' ');
-    exit when v_i = 0;
-    v_pos := v_pos + v_i;
-    v_ant := left(v_t, v_pos);
-    continue when v_ant ~ ('\mnao ' || c_rel || ' $');
-    v_m := regexp_match(v_ant, '\m(' || c_rel || ') $');
-    continue when v_m is null;
-    v_k := case when v_m[1] ~ '^(depois|apos)' then 'depois'
-                when v_m[1] ~ '^antes' then 'antes'
-                when v_m[1] ~ '^(a partir|desde)' then 'a_partir'
-                else 'ate' end;
-    if not (v_k = any (v_rels)) then
-      v_rels := v_rels || v_k;
+  foreach v_o in array regexp_split_to_array(v_t, '\m(?:e|mas)\M') loop
+    v_nega := v_o ~ c_nao;
+    v_tem := false;
+    v_pos := 0;
+    loop
+      v_i := strpos(substr(v_o, v_pos + 1), ' ' || v_d || ' ');
+      exit when v_i = 0;
+      v_pos := v_pos + v_i;
+      v_tem := true;
+      v_m := regexp_match(left(v_o, v_pos), '\m(' || c_rel || ') $');
+      if v_m is null then
+        continue when v_nega;
+        return null;
+      end if;
+      if v_nega then
+        return null;
+      end if;
+      v_k := case when v_m[1] ~ '^(depois|apos)' then 'depois'
+                  when v_m[1] ~ '^antes' then 'antes'
+                  when v_m[1] ~ '^(a partir|desde)' then 'a_partir'
+                  else 'ate' end;
+      if not (v_k = any (v_rels)) then
+        v_rels := v_rels || v_k;
+      end if;
+    end loop;
+    if v_nega and not v_tem and v_o !~ '\m(depois|antes|ate)\M' then
+      v_solta := true;
     end if;
   end loop;
-  return case when cardinality(v_rels) = 1 then v_rels[1] end;
+  return case when cardinality(v_rels) = 1 and not v_solta then v_rels[1] end;
 end;
 $function$;
 
 comment on function public._agenda_relacao_dita(text, text) is
-  'Agenda de Produção (Fase 7g, P3; §3.1 item 9, §5.3, R9.4-5): a relação dita logo antes da data no trecho do dono — depois (depois de/da/do, após), antes (antes de/da/do), a_partir (a partir de, desde) ou ate (até, até o/a), com "dia" no meio também. O dito que já começa pela relação vale pelo resto. Nula sem relação, com "não" logo antes da relação ("não antes de quinta") e com relações diferentes para a mesma data. IMMUTABLE.';
+  'Agenda de Produção (Fase 7g, P3; §3.1 item 9, §5.3, R9.4-5): a relação dita logo antes da data no trecho do dono — depois (depois de/da/do, após), antes (antes de/da/do), a_partir (a partir de, desde) ou ate (até, até o/a), com "dia" no meio também. O dito que já começa pela relação vale pelo resto. Só vale quando é a única leitura do trecho (a oração vai de um "e" ou "mas", ou de uma vírgula, ao seguinte). Nula sem relação; com negação (não, n, nunca, nem, nada, jamais, nenhum, nenhuma) na oração da relação, antes ou depois da data ("não pode antes de quinta", "antes de quinta não dá"); com negação numa oração sem a data e sem um antes, depois ou até dela ("antes do dia 25, não dá"); com a data também sem relação fora de oração negada (2 pedidos no mesmo trecho); e com relações diferentes para a mesma data. "quinta não, depois de quinta" = depois. IMMUTABLE.';
 
 -- ── 2. A data com a relação aplicada ─────────────────────────────────────────────────────────────────
 -- R9.4-5: depois → o 1º dia útil depois do fim (de = até: um dia; o encaixe estende a marcação); antes → o último dia útil antes do começo (de = até); a_partir
