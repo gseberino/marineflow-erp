@@ -169,11 +169,12 @@ begin
     -- FASE 7: os blocos "-- FASE 7:" de uma recriação depois do lote (a 20261031100000 recria _agenda_modo_da_pergunta) também
     -- saem: a cópia continua conferida contra a fonte do lote. (FASE 7b: também os "-- FASE 7b:" — a 20261101100000 recria
     -- _agenda_modo_da_pergunta de novo. FASE 7c: e os "-- FASE 7c:" — a 20261102100000 a recria mais uma vez, só acréscimo.)
-    if not v_dentro and l ~ '^\s*-- FASE 7[bcdef]?:' and l !~ '^\s*-- FASE 7[bcdef]?: fim' then
+    -- (7e P7: e as marcas "-- (7e … -- (7e: fim)", de dentro de bloco de antes: a 20261111100600 recria _agenda_mudancas, só acrescentando)
+    if not v_dentro and l ~ '^\s*-- (FASE 7[bcdef]?:|\(7e )' and l !~ '^\s*-- (FASE 7[bcdef]?: fim|\(7e: fim\))' then
       v_dentro := true;
       continue;
     end if;
-    if v_dentro and l ~ '^\s*-- FASE 7[bcdef]?: fim' then
+    if v_dentro and l ~ '^\s*-- (FASE 7[bcdef]?: fim|\(7e: fim\))' then
       v_dentro := false;
       continue;
     end if;

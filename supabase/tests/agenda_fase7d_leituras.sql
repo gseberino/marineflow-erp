@@ -56,13 +56,14 @@ begin
 end $f$;
 -- O texto sem os blocos "-- FASE 7d: … -- FASE 7d: fim" e sem as marcas "-- (7d … -- (7d: fim)".
 -- FASE 7f: o texto sem os blocos "-- FASE 7f: … -- FASE 7f: fim" e sem as marcas "-- (7f … -- (7f: fim)": quem recria uma destas na 7f só acrescenta, e a viva continua sendo a desta migration
+-- (7e P7: e os da 7e, "-- FASE 7e:" e "-- (7e", que recria agenda_saude e os_plano_da_os depois da 7f, só acrescentando)
 create function pg_temp.sem_7f(p text) returns text language sql immutable as $f$
   select array_to_string(array(
-           select l from (select l, o, sum(case when (l ~ '^\s*-- FASE 7f:' and l !~ '^\s*-- FASE 7f: fim')
-                                                     or (l ~ '^\s*-- \(7f ' and l !~ '^\s*-- \(7f: fim\)') then 1
-                                                when l ~ '^\s*-- (FASE 7f: fim|\(7f: fim\))' then -1 else 0 end)
+           select l from (select l, o, sum(case when (l ~ '^\s*-- FASE 7[ef]:' and l !~ '^\s*-- FASE 7[ef]: fim')
+                                                     or (l ~ '^\s*-- \(7[ef] ' and l !~ '^\s*-- \(7[ef]: fim\)') then 1
+                                                when l ~ '^\s*-- (FASE 7[ef]: fim|\(7[ef]: fim\))' then -1 else 0 end)
                                        over (order by o rows between unbounded preceding and current row) as dentro,
-                                 l ~ '^\s*-- (FASE 7f: fim|\(7f: fim\))' as fecha
+                                 l ~ '^\s*-- (FASE 7[ef]: fim|\(7[ef]: fim\))' as fecha
                             from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n')
 $f$;

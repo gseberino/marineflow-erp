@@ -3968,3 +3968,19 @@ porque só o dono pode preenchê-las.
 - **Corrigido na reconferência do P4c (10/11):** a 2ª versão (`a601e357`) dizia no Efeito "qualquer reserva `teto` ou `condicionada` da candidata do puxar, fixada (pelo dono ou pelo congelamento), não violada e de hoje em diante, em qualquer dia [...], faz o motor lançar `P0001` (regra 8), e o puxar grava `erro` para ela", sem a condição de a OS estar fora de `v_h`; e o Onde não citava o filtro da `:2355`.
 - **Na Fase 7e:** não corrigido. É do motor (a promoção de reserva fixada), não do puxar; corrigir pede decidir se a reserva fixada pode virar compromisso sem a decisão do dono. Não conferido se outros caminhos do motor (o encaixe, a vigia) chegam a promover uma reserva fixada. Também não montado: a mesma OS depois que o dono responde à pergunta crítica (o motor com a decisão, que tira a OS de `v_xoc`).
 - **Origem:** Fase 7e, P4c.
+
+### [NOVO-agenda-220] *desfaz aprendizado compra* pelo WhatsApp não chega ao banco (e o prompt não conhece as 3 palavras da margem)
+
+- **Encontrado em:** Agenda de Produção, Fase 7e, P7 (10/11/2026), seguindo a frase do dono até o banco (lição 5 da 7d).
+- **Onde:** `supabase/functions/_shared/agenda/comandos.ts`: `COISA_DO_APRENDIZADO` (`:334`) só conhece as coisas da Fase 6 (fator, presença, valor, diária, folga, capacidade, carga, fornecedor), e "compra" está em `NAO_E_ALVO` (`:324`). E a linha do aprendizado em `_shared/ai/prompt.ts` (`:151`) lista só as coisas da Fase 6.
+- **Efeito:** a 20261111100600 ensina ao banco *desfaz aprendizado dias* (o viés), *semana* (a folga da semana) e *compra* (o tempo de compra) (R7.5-18; `agenda_desfazer_dito` e `_agenda_mudancas`). Pelo WhatsApp, "desfaz aprendizado dias" e "desfaz aprendizado semana" chegam ao banco pelo alvo de OS (`alvoDito`: 2 palavras, sem conectivo nem palavra de outra ferramenta), e o banco resolve. "desfaz aprendizado compra" não: `alvoDito` o recusa por causa de "compra", e a frase vai ao modelo, que não conhece a palavra pelo prompt. O "o que mudou" passa a dizer "*desfaz aprendizado compra* volta só essa" quando o tempo de compra é a 1ª linha desfazível. Lido no código; o TS não foi rodado.
+- **Na Fase 7e:** não corrigido no P7 (é TS e prompt: P8). A menor mudança: `dias|semana|compra` em `COISA_DO_APRENDIZADO` (antes de `alvoDito`), com o caso em `comandos_test.ts`; e as 3 palavras na linha que já existe do prompt (R7.5-18: sem linha nova; o teto de `prompt-ferramentas_test.ts` não muda). Sem efeito hoje: nada da margem fica em uso enquanto os 6 interruptores estão desligados ou em teste.
+- **Origem:** Fase 7e, P7.
+
+### [NOVO-agenda-221] O cartão da OS pode dizer 2 números de dias com o viés ligado: duracao.dias (sem o viés) e duracao.estimativa (com ele)
+
+- **Encontrado em:** Agenda de Produção, Fase 7e, P7 (10/11/2026), montando `duracao.estimativa` (§6.4).
+- **Onde:** `os_plano_da_os` (`20261111100600`): `duracao.dias` vem de `os_prontidao` (`duracao.dias`), que segue sem o viés em ligado (NOVO-agenda-153); `duracao.estimativa` vem de `agenda_meios_da_os`, o que o motor marca.
+- **Efeito:** com o viés em uso, o marcado ou o aprovado, o cartão pode trazer `dias` 2,5 ao lado da linha "Estimativa minha: 2,5 dias pelo valor do orçamento × 1,17 (…) = 3 dias." Os dados não mentem (a linha diz os 2 números e de onde vem cada um), mas a tela que mostrar só `dias` mostra o número que o motor não usa. A linha está provada na bancada (`agenda_fase7e_rodada.sql` R6e, R6f); o `dias` ao lado dela não foi lido lá: o que ele diz vem do achado 153 (leitura de código). Sem efeito hoje: o viés não está em uso e nenhuma OS tem o marcado diferente de 1.
+- **Na Fase 7e:** não corrigido (o achado 153 é da prontidão; a tela é do P8). O P8, ao pôr as 2 linhas em Duração (`PlanoDaOs.tsx`), mostra a estimativa no lugar do número sem o viés quando ela existe.
+- **Origem:** Fase 7e, P7.

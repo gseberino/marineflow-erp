@@ -1116,6 +1116,8 @@ insert into _definer_da_agenda values ('_agenda_aprender_vies');
 insert into _definer_da_agenda values ('_agenda_aprender_folga_semana');
 -- Fase 7e (P4b): o passo puxar do job agenda-gestor (definer, sem grant nenhum: quem o chama é agenda_gestor_rodar).
 insert into _definer_da_agenda values ('_agenda_gestor_puxar');
+-- Fase 7e (P7): a saúde da margem (a porta de _agenda_saude_comunicacao, dentro: agenda_saude é invoker e o administrador logado a chama)
+insert into _definer_da_agenda values ('_agenda_saude_margem');
   -- FASE 7f: fim
   -- FASE 7e: (7e P1, 20261111100000) nenhuma definer nova: o modo, a credibilidade, o z e a temporada são invoker, e o gatilho _agenda_medidas_compra_so_muda só mexe na própria linha. agenda_fase7e_base.sql prova as portas.
   -- FASE 7e: fim

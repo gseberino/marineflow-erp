@@ -66,12 +66,13 @@ begin
   return left(v, position('$function$' in v) - 1);
 end $f$;
 -- O texto sem os blocos "-- FASE 7f: … -- FASE 7f: fim" e, dentro de bloco de antes, "-- (7f … -- (7f: fim)" (as linhas de abrir e de fechar saem junto).
+-- (7e P7: tira também os blocos e as marcas da 7e, que recria agenda_saude depois da 7f, só acrescentando)
 create function pg_temp.sem_7f(p text) returns text language sql immutable as $f$
   select array_to_string(array(
-           select l from (select l, o, sum(case when l ~ '^\s*-- (FASE 7f:|\(7f )' and l !~ '^\s*-- (FASE 7f: fim|\(7f: fim\))' then 1
-                                                when l ~ '^\s*-- (FASE 7f: fim|\(7f: fim\))' then -1 else 0 end)
+           select l from (select l, o, sum(case when l ~ '^\s*-- (FASE 7[ef]:|\(7[ef] )' and l !~ '^\s*-- (FASE 7[ef]: fim|\(7[ef]: fim\))' then 1
+                                                when l ~ '^\s*-- (FASE 7[ef]: fim|\(7[ef]: fim\))' then -1 else 0 end)
                                        over (order by o rows between unbounded preceding and current row) as dentro,
-                                 l ~ '^\s*-- (FASE 7f: fim|\(7f: fim\))' as fecha
+                                 l ~ '^\s*-- (FASE 7[ef]: fim|\(7[ef]: fim\))' as fecha
                             from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n')
 $f$;
@@ -97,8 +98,9 @@ declare
   dentro boolean := false;
 begin
   foreach l in array string_to_array(replace(p, E'\r\n', E'\n'), E'\n') loop
-    if not dentro and l ~ '^\s*-- (FASE 7f: \(7f P6|\(7f P6)' then dentro := true; continue; end if;
-    if dentro and l ~ '^\s*-- (FASE 7f: fim|\(7f: fim\))' then dentro := false; continue; end if;
+    -- (7e P7: e as marcas da 7e, que recria agenda_saude depois do P6)
+    if not dentro and l ~ '^\s*-- (FASE 7f: \(7f P6|\(7f P6|FASE 7e: \(7e |\(7e )' then dentro := true; continue; end if;
+    if dentro and l ~ '^\s*-- (FASE 7[ef]: fim|\(7[ef]: fim\))' then dentro := false; continue; end if;
     if not dentro then fora := fora || l; end if;
   end loop;
   return array_to_string(fora, E'\n');
@@ -673,14 +675,16 @@ begin
   end loop;
   perform pg_temp.modos('desligado');
   r := pg_temp.ok(r, 'V3a2 com os 6 desligados, contra a 7d: só a chave comunicacao a mais, o resto byte a byte; e os números não são lidos',
-    (public.agenda_saude(c_h, c_a) - 'comunicacao') = pg_temp.saude_7d(c_h, c_a) and (public.agenda_saude(c_h, c_a) #> '{comunicacao,numeros}') = '{}'::jsonb, null);
+    -- (7e P7: e sem a chave margem, que a 7e soma depois, como a comunicacao)
+    (public.agenda_saude(c_h, c_a) - 'comunicacao' - 'margem') = pg_temp.saude_7d(c_h, c_a) and (public.agenda_saude(c_h, c_a) #> '{comunicacao,numeros}') = '{}'::jsonb, null);
 
   -- V3b: cada violação forçada conta 1, e só ela; o ok de agenda_saude cai
   begin
     perform pg_temp.modos('sombra');
     r := pg_temp.ok(r, 'V3b0 o controle: na cópia de agenda_saude com o resto do ok em verdadeiro, sem violação o ok é verdadeiro (e o de agenda_saude já é falso na fixture)',
       (pg_temp.saude_so_zeros(c_h, c_a) ->> 'ok')::boolean and not (public.agenda_saude(c_h, c_a) ->> 'ok')::boolean
-      and pg_temp.saude_so_zeros(c_h, c_a) - 'ok' = public.agenda_saude(c_h, c_a) - 'ok', null);
+      -- (7e P7: a cópia é a desta migration, sem a chave margem que a 7e soma depois)
+      and pg_temp.saude_so_zeros(c_h, c_a) - 'ok' = public.agenda_saude(c_h, c_a) - 'ok' - 'margem', null);
     -- assumida pelo prazo sem ter sido mostrada antes dele (a Correa nunca foi mostrada)
     update public.agenda_perguntas set estado = 'resolvida', resolvida_motivo = 'teste V3b', assumida_por = 'prazo', assumida_em = c_a where id = pg_temp.q('04');
     v := public.agenda_saude(c_h, c_a) -> 'comunicacao';

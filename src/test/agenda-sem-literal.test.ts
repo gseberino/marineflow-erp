@@ -182,7 +182,8 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     // Fase 7d (P8, 20261107100700): + 12 na recriada (a mesma cópia; a chave local vem de _agenda_saude_local).
     // Fase 7f (P7, 20261109100600): + 12 na recriada (a mesma cópia; a chave comunicacao vem de _agenda_saude_comunicacao).
     // Fase 7f (P6, 20261109101100): + 12 na recriada (a mesma cópia; a semana na lista dos liberados não tem o literal).
-    vezes: 100,
+    // Fase 7e (P7, 20261111100600): + 12 na recriada (a mesma cópia; a chave margem vem de _agenda_saude_margem, sem o literal).
+    vezes: 112,
     porque: 'nomes das chaves do resultado (rodadas_24h, erros_24h, resposta_24h_pct: a janela de um dia da conferência); não é rascunho_validade',
   },
   // Fase 3 (P4): a rotina da equipe grava a rodada como a vigia.
@@ -210,10 +211,11 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
   },
   // Fase 6 (P6): a rodada do aprendizado grava a rodada como a vigia, a rotina, o material e o cliente.
   // Correção C1 da Fase 6 (20261029100900): agenda_aprender recriada (+1: a mesma cópia).
+  // Fase 7e (P7, 20261111100600): recriada (+1: a mesma cópia; os passos da margem e o relógio não têm o literal).
   {
     onde: 'agenda_aprender',
     casou: '1000',
-    vezes: 2,
+    vezes: 3,
     porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_cliente_vigiar); não é texto_max nem peca_embutida_acima',
   },
   // Fase 7a (P7, 20261031100600): a rodada do gestor da agenda grava a rodada como a vigia, a rotina, o material, o cliente e o

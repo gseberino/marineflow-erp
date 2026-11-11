@@ -186,7 +186,9 @@ begin
     r := pg_temp.rodar('2026-10-30 16:05');
     v_res := pg_temp.ok(v_res, 'R1b desligado: a rodada roda só a medição (congelar e medir: 18 OS, 11 válidas) e grava a linha dela (rotina aprender, modo desligado)',
       r ->> 'rodou' = 'true' and r ->> 'modo' = 'desligado' and (r ->> 'erros')::int = 0
-      and (select array_agg(k order by k) from jsonb_object_keys(r -> 'contagens') k) = array['congelar', 'medir']
+      -- (7e P7, §5.6: medir_compras e congelar_marcacao rodam sempre, e a rodada diz os 6 interruptores em modos_margem; fora disso, as chaves de antes)
+      and (select array_agg(k order by k) from jsonb_object_keys((r -> 'contagens') - '{medir_compras,congelar_marcacao,modos_margem}'::text[]) k) = array['congelar', 'medir']
+      and (r -> 'contagens') ?& array['medir_compras', 'congelar_marcacao', 'modos_margem']
       and (r #>> '{contagens,medir,olhadas}')::int = 18 and (r #>> '{contagens,medir,validas}')::int = 11
       and (select count(*) from public.agenda_medidas_os) = 18
       and (select count(*) from public.agenda_vigia_rodadas x where x.rotina = 'aprender' and x.p_hoje = date '2026-10-30'
@@ -229,7 +231,8 @@ begin
       and (select array_agg(e ->> 'passo' order by e ->> 'passo') from jsonb_array_elements(r -> 'falhas') e)
           = array['capacidade', 'congelar', 'mo'], r -> 'falhas' #>> '{}');
     v_res := pg_temp.ok(v_res, 'R1g os outros passos rodaram (medir, fator, presenca, fornecedor, cliente e, sem a rodada de quinta, a revisão e o planejador: correção C1, item 13) e gravaram em teste; o mo que gravou antes de falhar não deixou nada',
-      (select array_agg(k order by k) from jsonb_object_keys(r -> 'contagens') k)
+      -- (7e P7, §5.6: e as da 7e, que rodam sempre)
+      (select array_agg(k order by k) from jsonb_object_keys((r -> 'contagens') - '{medir_compras,congelar_marcacao,modos_margem}'::text[]) k)
         = array['cliente', 'fator', 'fornecedor', 'medir', 'presenca', 'revisao', 'solver']
       and exists (select 1 from public.agenda_aprendizado a where a.item = 'fator' and a.estado = 'sombra')
       and exists (select 1 from public.agenda_aprendizado a where a.item = 'aviso_folga')
@@ -307,7 +310,8 @@ begin
     r := pg_temp.rodar('2026-10-30 16:05');
     v_res := pg_temp.ok(v_res, 'R2a sex 30/10, sem a rodada de quinta (o dia do plano): os 8 passos de todo dia e (correção C1, item 13) a revisão e o planejador, que a quinta não fez; nenhum erro',
       r ->> 'rodou' = 'true' and r ->> 'semanal' = 'true' and (r ->> 'erros')::int = 0
-      and (select array_agg(k order by k) from jsonb_object_keys(r -> 'contagens') k)
+      -- (7e P7, §5.6: e as da 7e, que rodam sempre)
+      and (select array_agg(k order by k) from jsonb_object_keys((r -> 'contagens') - '{medir_compras,congelar_marcacao,modos_margem}'::text[]) k)
           = array['capacidade', 'cliente', 'congelar', 'fator', 'fornecedor', 'medir', 'mo', 'presenca', 'revisao', 'solver'],
       r::text);
     v_res := pg_temp.ok(v_res, 'R2b os estados (ligado, todos os itens): o fator 1,7 entra sozinho nas classes com 6 OS (rv:energia, sistema:energia, bem:rv 1,6; todas 1,5 = o padrão), as de barco medindo; o R$ por diária (1.097 × 764) e a capacidade (0,56 × 0,80) perguntam; a presença entra na classe e, no geral, mede (correção C1, item 7: uma classe só); a carga pergunta (a revisão de sexta, item 13); a Kamell entra (atraso 2, prazo 6), a Correa medindo; a folga entra (2); a pontualidade só em teste',
@@ -343,7 +347,8 @@ begin
     r := pg_temp.rodar('2026-10-29 16:05');
     v_res := pg_temp.ok(v_res, 'R2f qui 29/10 (o dia do plano): os 10 passos; a carga pergunta 70% e o planejador mede (1 de 4 semanas)',
       r ->> 'semanal' = 'true' and (r ->> 'erros')::int = 0
-      and (select array_agg(k order by k) from jsonb_object_keys(r -> 'contagens') k)
+      -- (7e P7, §5.6: e as da 7e, que rodam sempre)
+      and (select array_agg(k order by k) from jsonb_object_keys((r -> 'contagens') - '{medir_compras,congelar_marcacao,modos_margem}'::text[]) k)
           = array['capacidade', 'cliente', 'congelar', 'fator', 'fornecedor', 'medir', 'mo', 'presenca', 'revisao', 'solver']
       and (pg_temp.linha('carga', 'todas')).estado = 'pergunta' and (pg_temp.linha('carga', 'todas')).calculado = 0.70
       and (pg_temp.linha('solver', 'gatilhos')).estado = 'medindo',
