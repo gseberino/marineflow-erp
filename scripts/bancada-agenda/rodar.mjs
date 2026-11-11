@@ -432,6 +432,9 @@ const FIXTURES_COMO_TEXTO = [
   ['agenda_teste.mig_compras_fase7e', '../../supabase/migrations/20261111100500_agenda_fase7e_compras.sql'],
   // Fase 7e (P7): a migration da rodada, da saúde e das leituras (o R0 de agenda_fase7e_rodada.sql: as 6 recriadas e a nova)
   ['agenda_teste.mig_rodada_fase7e', '../../supabase/migrations/20261111100600_agenda_fase7e_rodada.sql'],
+  // Fase 7e (P8): o dado 20261111100900 (FORA_DA_BANCADA: os 6 modos de desligado para sombra, o fornecedor com 3 entregas e o DEFAULT; o agenda_fase7e_dado.sql o roda numa
+  // subtransação desfeita, e o agenda_fase7e_pos_deploy.sql só o mostra na bancada)
+  ['agenda_teste.mig_dado_fase7e', '../../supabase/migrations/20261111100900_agenda_fase7e_dado.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */
