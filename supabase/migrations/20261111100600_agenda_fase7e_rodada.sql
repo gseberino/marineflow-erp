@@ -1,7 +1,7 @@
 -- Agenda de Produção, Fase 7, etapa 7e ("A margem que aprende"), pacote P7: a rodada, a saúde e as leituras. A rodada das 16:00 passa a rodar a medição das compras, o congelado da
 -- marcação e os 6 passos da margem, com relógio; a saúde ganha a chave margem; o foco aprendizado ganha o bloco 8 "Margem"; o cartão da OS ganha a estimativa com o viés e o prazo real.
 -- Spec: scratchpad agenda-pesquisa/spec-fase7e.md (§5.6, §6.2–6.4 e o bloco R7, que vale sobre o corpo: R7.1, R7.3, R7.5-17, R7.5-18, R7.6, R7.8-2, R7.12, R7.13, R7.R); nomes: fase7-registro.md;
--- o registro do pacote: notas-fase7e.md, seção "## P7". Depende de 20261111100000 (P1) a 20261111100500 (P6). Copiado das definições MAIS NOVAS: agenda_aprender 20261029100900_agenda_fase6_correcao_calculo.sql:2784; agenda_saude 20261109101100_agenda_fase7f_cliente.sql:2543; _agenda_ver_aprendizado 20261029100950_agenda_fase6_correcao_textos.sql:1624; os_plano_da_os 20261107100700_agenda_fase7d_leituras.sql:935; _agenda_mudancas 20261030100500_agenda_correcao_revisao.sql:715; agenda_desfazer_dito 20261029100950_agenda_fase6_correcao_textos.sql:155.
+-- o registro do pacote: notas-fase7e.md, seção "## P7". Depende de 20261111100000 (P1) a 20261111100500 (P6). Copiado das definições MAIS NOVAS: agenda_aprender 20261029100900_agenda_fase6_correcao_calculo.sql:2784; agenda_saude 20261109101100_agenda_fase7f_cliente.sql:2543; _agenda_ver_aprendizado 20261029100950_agenda_fase6_correcao_textos.sql:1624; os_plano_da_os 20261107100700_agenda_fase7d_leituras.sql:935; _agenda_mudancas 20261030100500_agenda_correcao_revisao.sql:715; agenda_desfazer_dito 20261029100950_agenda_fase6_correcao_textos.sql:155; e, pela correção da conferência do P7, _agenda_desfazer_aprendizado 20261029100900_agenda_fase6_correcao_calculo.sql:4017.
 --
 -- ═══ NÃO APLICADA ═══ Existe para revisão e espera o OK (publicar/exec/aplicar.sh, nunca db push: esta versão fica antes das 20261116* que já estão em produção). Nenhuma coluna nem tabela nova.
 --
@@ -19,6 +19,10 @@
 --   3. _agenda_ver_aprendizado: o bloco 8 "Margem" (§6.2), numa ordem total, com o corte da §5.6 (as linhas dele saem antes das dos blocos 1–7, salvo as em uso).
 --   4. os_plano_da_os: duracao.estimativa (§6.4: os 2 números, como o motor marca) e duracao.promessa (R7.3-1: o prazo real, só para o dono), ausentes sem nada a dizer.
 --   5. _agenda_mudancas e agenda_desfazer_dito: as palavras da margem (R7.5-18): *desfaz aprendizado dias*, *semana* e *compra*.
+--   6. (a conferência do P7) _agenda_desfazer_aprendizado: no viés, o *desfaz* do geral volta também as classes que entraram em uso com o valor dele no mesmo instante, sem ação própria,
+--      e o "voltam a" diz o que o leitor do motor usa depois; agenda_desfazer_dito desfaz o geral do viés antes das classes do lote. O cartão em teste: na simulação de "sem o freio" e
+--      nunca na OS marcada. O bloco 8 com o freio: "Em teste" no lugar de "marco". O "o que mudou": o viés com a chave na ordem fixa. carga_semana_fora: a conta antes de prender, só
+--      com a folga da semana ligada de verdade.
 --
 -- O QUE NÃO MUDA: agenda_vigiar, agenda_cliente_vigiar, agenda_propor, os_prontidao e o motor não são recriados. Com os 6 interruptores desligados (como a 20261111100000 os deixa até o dado
 -- 20261111100900), a rodada só soma medir_compras e congelar_marcacao (as tabelas da medição e o congelado da OS; nenhum leitor de antes muda), e o foco, o cartão, o "o que mudou" e a
@@ -26,13 +30,15 @@
 -- mensagem nova ao dono, à equipe ou ao cliente: o foco e o cartão são leituras; o "o que mudou" só ganha a palavra de cada item. Nada de dinheiro.
 --
 -- DESFAZER (na ordem):
---   cada recriada volta à versão anterior pelo corpo da origem acima (agenda_saude: a 20261109101100; os_plano_da_os: a 20261107100700; o resto, as de cada origem); depois:
+--   cada recriada volta à versão anterior pelo corpo da origem acima (agenda_saude: a 20261109101100; os_plano_da_os: a 20261107100700; _agenda_desfazer_aprendizado: a 20261029100900;
+--   o resto, as de cada origem); depois:
 --   drop function if exists public._agenda_saude_margem(date, timestamptz);
 
 -- ── 1. A saúde da margem (nova) ───────────────────────────────────────────────────────────────────
 
 -- Molde: _agenda_saude_comunicacao (7f) e _agenda_saude_local (7d): a porta, os zeros que entram no ok e os números. Sem os modos dentro: a chave não muda de um modo para o outro (o que os
--- modos fazem aparece nos zeros e nos números, e os interruptores estão na linha da config e em contagens.modos_margem da rodada).
+-- modos fazem aparece nos zeros e nos números, e os interruptores estão na linha da config e em contagens.modos_margem da rodada). Os zeros que vigiam o que um modo faz olham o modo
+-- dele: em_uso_com_interruptor_fora (o cru), carga_semana_fora (a folga da semana ligada de verdade) e rodada_puxar_atrasada (o puxar fora de desligado).
 create or replace function public._agenda_saude_margem(p_hoje date, p_agora timestamptz)
  returns jsonb
  language plpgsql
@@ -105,10 +111,15 @@ begin
           and a.item = any (c_itens) and a.estado in ('em_uso', 'pergunta', 'travado') and a.em_uso is not null
           and coalesce(public._agenda_margem_modo_cru(a.item), 'desligado') <> 'ligado'
           and a.calculado_em < p_agora - make_interval(hours => cf.aprender_atraso_h)),
-    -- alguma das 6 semanas (a desta e as 5 seguintes) com a carga fora de [carga_semana_min, carga_semana_max]: a carga que o motor e o validador leem (_agenda_carga_da_semana)
-    'carga_semana_fora', (
+    -- alguma das 6 semanas (a desta e as 5 seguintes) em que a conta da carga da margem (carga_max + o padrão − a folga em uso − a temporada, a de _agenda_carga_da_semana antes de
+    -- prender; todos os termos têm 2 casas, como a carga que ela devolve) sai de [carga_semana_min, carga_semana_max] e o motor prende no limite. Só com a folga da semana ligada de
+    -- verdade (o modo efetivo): fora disso a carga é carga_max cru, a que o dono escolheu (o CHECK dele vai além desses limites), e não há conta da margem para vigiar. A conferência do
+    -- P7: lida depois de prender, com a margem desligada e carga_max no limite do CHECK o zero acendia sem nada errado, e com ela ligada nunca acendia.
+    'carga_semana_fora', case when coalesce(public._agenda_margem_modo('folga_semana'), 'desligado') <> 'ligado' then 0 else (
        select count(*) from generate_series(0, c_semanas - 1) k
-        where (public._agenda_carga_da_semana(v_seg + 7 * k) ->> 'carga')::numeric not between cf.carga_semana_min and cf.carga_semana_max),
+        cross join lateral (select public._agenda_carga_da_semana(v_seg + 7 * k) as j) s
+        where cf.carga_max + (cf.folga_dispersao_padrao - (s.j ->> 'folga')::numeric) - (s.j ->> 'extra')::numeric
+              not between cf.carga_semana_min and cf.carga_semana_max) end,
     -- o puxar (P4b, com o tudo ou nada do P4c): de verdade, a OS puxada tem o compromisso novo em D e só perde as reservas publicadas dela mesma (a que vira compromisso, a que viola);
     -- a OS que fica fora não tem ação. Conta a ação de uma proposta do puxar (p_restricoes com puxar) que cancelou sem criar nada, cancelou alocação fixada ou cancelou o que não é
     -- reserva da própria OS (o defeito que o P4c consertou: a reserva fixada pelo dono cancelada, e a OS "puxada" sem compromisso)
@@ -181,7 +192,7 @@ end;
 $function$;
 
 comment on function public._agenda_saude_margem(date, timestamptz) is
-  'Agenda de Produção (Fase 7e, P7; §5.6, R7.5-17, R7.3-1): a chave margem de agenda_saude — os zeros obrigatórios (entram no ok; zeros_ok): passo_maior_que_o_limite (a ação da margem com |depois.em_uso − antes.valor| > o passo do item, em aprender_saude_dias), fora_dos_limites (viés, prazo real e folga da semana), em_uso_com_interruptor_fora (em uso com o interruptor cru fora de ligado há mais de aprender_atraso_h, com o aprendizado fora de desligado), carga_semana_fora (as 6 semanas, pela _agenda_carga_da_semana), puxar_cancelou (a ação do puxar que cancelou sem criar, cancelou fixada ou o que não é reserva da própria OS), puxar_duas_vezes, rodada_puxar_atrasada (até puxar_hora + 1 hora, com o portão do puxar e o gestor rodando) e medida_compra_sem_aprovacao (sem o promessa_antes_do_plano: AG7-32); e os números (itens, trocas_28d, puxadas_28d, puxadas_em_teste_28d, urgentes_28d, compras, os_com_compra_pendente, ultima_rodada). Sem os modos: a chave existe em todos e não muda de um modo para o outro. Definer, a porta de _agenda_saude_comunicacao (admin/financeiro ou service_role; 42501); sem o dia ou a hora, 22004.';
+  'Agenda de Produção (Fase 7e, P7; §5.6, R7.5-17, R7.3-1): a chave margem de agenda_saude — os zeros obrigatórios (entram no ok; zeros_ok): passo_maior_que_o_limite (a ação da margem com |depois.em_uso − antes.valor| > o passo do item, em aprender_saude_dias), fora_dos_limites (viés, prazo real e folga da semana), em_uso_com_interruptor_fora (em uso com o interruptor cru fora de ligado há mais de aprender_atraso_h, com o aprendizado fora de desligado), carga_semana_fora (as 6 semanas em que a conta da carga, antes de _agenda_carga_da_semana a prender, sai de [carga_semana_min, carga_semana_max]; só com a folga da semana ligada de verdade), puxar_cancelou (a ação do puxar que cancelou sem criar, cancelou fixada ou o que não é reserva da própria OS), puxar_duas_vezes, rodada_puxar_atrasada (até puxar_hora + 1 hora, com o portão do puxar e o gestor rodando) e medida_compra_sem_aprovacao (sem o promessa_antes_do_plano: AG7-32); e os números (itens, trocas_28d, puxadas_28d, puxadas_em_teste_28d, urgentes_28d, compras, os_com_compra_pendente, ultima_rodada). Sem os modos dentro: a chave existe em todos os modos; os zeros que vigiam um modo olham o dele. Definer, a porta de _agenda_saude_comunicacao (admin/financeiro ou service_role; 42501); sem o dia ou a hora, 22004.';
 
 -- ── 2. As recriadas ───────────────────────────────────────────────────────────────────────────────
 
@@ -1444,7 +1455,7 @@ begin
   -- Cada item só com o interruptor dele fora de desligado, pelo modo cru (em teste também aparece, "Em teste: …", §6.2); a peça sem fornecedor, que é só medida, vai com o tempo de
   -- compra. Sem linha gravada, a linha de "nenhuma … ainda", como o fator faz. O viés: a geral, as classes (sem a que ainda mede e sem a que repete a geral: o mesmo estado e o mesmo
   -- medido) e a linha do dono (dono:todas). A temporada: a da segunda que vem; em teste, só quando ela muda o que eu marcaria (lição 5). Com os 6 interruptores desligados, o bloco não
-  -- existe e o foco é o de antes, byte a byte.
+  -- existe e o foco é o de antes, byte a byte. Uma linha só diz que marca, guarda ou conta o que o leitor do motor usa (_agenda_margem_em_uso): com o freio, é "Em teste: …".
   v_linhas := coalesce((select jsonb_agg(l order by o) from jsonb_array_elements(v_linhas) with ordinality e(l, o) where l ->> 'bloco' is not null), '[]'::jsonb);
   if c.modo_aprendizado <> 'desligado' then
     v_7e_on := array_remove(array[
@@ -1476,17 +1487,32 @@ begin
         end if;
       end if;
     end if;
-    with m as (
-      select x.item, x.chave, x.nivel, x.estado, x.n::int as n, x.n_min::int as n_min, x.calculado, x.em_uso, x.texto,
-             array_position(array['vies', 'folga_semana', 'temporada', 'promessa', 'tempo_compra', 'folga_compra', 'prazo_sem_fornecedor'], x.item) as io,
-             case when x.chave in ('estimativa:todas', 'equipe', 'todas') then 1 when x.chave like 'dono:%' then 3 else 2 end as sub,
-             case x.estado when 'pergunta' then 1 when 'em_uso' then 2 when 'travado' then 3 when 'sombra' then 4 else 5 end as er
+    -- (a conferência do P7) a linha com um valor em uso que o leitor do motor não usa (_agenda_margem_em_uso: o freio, o interruptor fora de ligado ou o aprendizado fora de ligado;
+    -- o gravador anda pelo modo cru, R7.6) não diz que marca, guarda ou conta esse valor: diz o que ele diria em teste (o texto de foco_sombra, ou o de foco_medindo sem medido),
+    -- com o que vale de verdade (o padrão), como o cartão e a temporada no mesmo estado; o estado dela é sombra e o em uso, nulo. Com o leitor usando o valor, a linha de antes.
+    with m0 as (
+      select x.*, (x.estado in ('em_uso', 'pergunta', 'travado') and x.em_uso is not null and public._agenda_margem_em_uso(x.item, x.chave) is null) as parado
         from public.agenda_aprendizado x
        where x.item = any (v_7e_on) and nullif(btrim(x.texto), '') is not null
     ),
+    m as (
+      select x.item, x.chave, x.nivel, case when x.parado then 'sombra' else x.estado end as estado, x.n::int as n, x.n_min::int as n_min, x.calculado,
+             case when not x.parado then x.em_uso end as em_uso,
+             case when not x.parado then x.texto
+                  else public._agenda_aprendizado_texto(x.item, case when x.calculado is null or x.n < x.n_min then 'foco_medindo' else 'foco_sombra' end,
+                         jsonb_build_object('chave', x.chave, 'calculado', x.calculado, 'em_uso', null, 'efetivo', x.padrao, 'padrao', x.padrao, 'n', x.n, 'n_min', x.n_min,
+                                            'detalhe', x.detalhe, 'carga_max', c.carga_max, 'folga_material_du', c.folga_material_du, 'fator_percentil', c.fator_percentil,
+                                            'passo', case when x.item in ('vies', 'promessa') then c.fator_troca_max when x.item = 'folga_semana' then c.folga_semana_troca_max
+                                                          when x.item in ('tempo_compra', 'folga_compra') then c.fornecedor_troca_max_du end)) end as texto,
+             array_position(array['vies', 'folga_semana', 'temporada', 'promessa', 'tempo_compra', 'folga_compra', 'prazo_sem_fornecedor'], x.item) as io,
+             case when x.chave in ('estimativa:todas', 'equipe', 'todas') then 1 when x.chave like 'dono:%' then 3 else 2 end as sub,
+             case case when x.parado then 'sombra' else x.estado end when 'pergunta' then 1 when 'em_uso' then 2 when 'travado' then 3 when 'sombra' then 4 else 5 end as er
+        from m0 x
+    ),
     f as (
       select m.* from m
-       where not (m.item = 'vies' and ((m.sub = 3 and m.chave <> 'dono:todas')
+       where nullif(btrim(m.texto), '') is not null
+         and not (m.item = 'vies' and ((m.sub = 3 and m.chave <> 'dono:todas')
                                        or (m.sub = 2 and m.estado = 'medindo')
                                        or (m.sub = 2 and exists (select 1 from m g where g.item = 'vies' and g.chave = 'estimativa:todas'
                                                                    and g.estado = m.estado and g.calculado is not distinct from m.calculado))))
@@ -1768,6 +1794,8 @@ declare
   v_7e_pr   jsonb;
   v_7e_prom text;
   v_7e_dur  jsonb;
+  v_7e_gs   text;
+  v_7e_hs   numeric;
   -- FASE 7e: fim
 begin
   if p_os is null or p_hoje is null then
@@ -1966,7 +1994,8 @@ begin
   -- FASE 7e: (7e P7, §5.6, §6.4, R7.3-1, R7.3-2) duracao.estimativa e duracao.promessa, só na OS que ainda vai ser feita (como o campo, a equipe e o local):
   --   estimativa: com o viés aplicado ao que o motor marca (agenda_meios_da_os traz vies: ligado de verdade, o congelado na marcação ou o aprovado; o congelado vale também com o freio e
   --   com o interruptor desligado, R7.14), os 2 números ("Estimativa minha: 2,5 dias pelo valor do orçamento × 1,17 (…) = 3 dias."); nos dias do dono, o texto do P3 ("Você disse 3 dias;
-  --   contei 3,5 …", AG7-33). Em teste (o interruptor fora de desligado, sem o viés em uso): o que eu marcaria pelo medido da classe da OS, senão do geral, só se o número muda (lição 5).
+  --   contei 3,5 …", AG7-33). Em teste (o interruptor fora de desligado, sem o viés em uso): o que eu marcaria pelo medido da classe da OS, senão do geral, só se o número muda (lição 5),
+  --   na simulação de "sem o freio" (agenda.gestor = sombra), o único regime em que o viés vale; nunca na OS marcada (o congelado da marcação vale, também o 1,00).
   --   Sem base, diagnóstico (R7.5-8) e os dias do dono em teste: nada. A leitura cara (agenda_meios_da_os) só roda com o interruptor fora de desligado ou com a OS marcada ou aprovada com viés.
   --   promessa: com modo_promessa fora de desligado (o cru: o efetivo dele é sombra sempre), o prazo real com folga (agenda_promessa_da_os; AG7-32: nunca ao cliente), só com o fator
   --   medido (com o padrão, "pela folga do histórico" seria falso, R7.12-9) e quando a folga acrescenta dia (o fim com folga depois do fim do plano, lição 5).
@@ -1985,8 +2014,12 @@ begin
                            coalesce(public._agenda_classe_texto_do_nivel(regexp_replace(coalesce(v_7e_ch, ''), '^estimativa:', '')), 'as OS'),
                            case when v_7e_vi > 1 then 'mais' else 'um pouco menos' end, public._agenda_dias((v_7e_m ->> 'dias')::numeric),
                            case v_7e_m ->> 'vies_fonte' when 'marcado' then ' (o que valia quando marquei)' when 'aprovado' then ' (o que você aprovou)' else '' end);
+      -- (a conferência do P7) a OS marcada guarda o viés da marcação (§3.1-10): agenda_meios_da_os lê o congelado antes do de agora, e o 1,00 congelado também vale. Ligar não
+      -- muda os dias dela, e "eu marcaria" seria falso (a OS#72 do replay: o cartão dizia 8,5 dias, o de verdade ficava em 6). A mesma regra do motor: o congelado vale quando a chave
+      -- dele é da mesma conta (aqui, a da estimativa: sem chave, ou uma que não é dono:).
       elsif v_7e_c.modo_aprendizado <> 'desligado' and v_7e_c.modo_vies <> 'desligado' and public._agenda_margem_modo('vies') <> 'ligado'
-            and coalesce(pl.estimativa_fonte, '') not in ('dono', 'aceita') then
+            and coalesce(pl.estimativa_fonte, '') not in ('dono', 'aceita')
+            and (pl.vies_marcado is null or pl.vies_marcado_chave like 'dono:%') then
         select x.calculado, x.chave into v_7e_vi, v_7e_ch
           from public.agenda_aprendizado x
          where x.item = 'vies' and x.calculado is not null
@@ -1994,15 +2027,28 @@ begin
          order by x.chave = 'estimativa:todas', x.chave
          limit 1;
         if v_7e_vi is not null and v_7e_vi <> 1 then
+          -- (a conferência do P7) a conta em teste roda no regime em que o viés vale, sem o freio: com o gestor ligado (modo_marcar_sozinho), as regras dele (a mão de obra limpa, uma
+          -- pessoa, a estimativa…) mudam a sugestão (a OS#73 do replay: 2,5 h e R$ 500 com o freio, 1,5 h e R$ 300 sem ele; o cartão dizia 1 dia, o de verdade ficava em meio), e a conta
+          -- roda na simulação de "sem o freio" da 7a (agenda.gestor = sombra, a de _agenda_aprender_congelar); sem o gestor ligado, sem o freio as regras também ficam de fora, e a conta
+          -- é a de hoje. A sugestão e os dias sem o viés saem dela; o valor de antes volta logo depois (num erro, pelo rollback de quem chamou). Só se o viés muda o número nela
+          -- (lição 5); se o que ela marcaria sem o viés não é o de hoje (as regras do gestor mudam os dias), o texto diz os dois.
+          v_7e_gs := coalesce(current_setting('agenda.gestor', true), '');
+          if v_7e_c.modo_marcar_sozinho = 'ligado' then
+            perform set_config('agenda.gestor', 'sombra', true);
+          end if;
           v_7e_sug := public.os_duracao_sugerida(p_os);
+          v_7e_hs := (public.agenda_meios_da_os(p_os, p_hoje) ->> 'dias')::numeric;
+          perform set_config('agenda.gestor', v_7e_gs, true);
           if not coalesce((v_7e_sug ->> 'sem_base')::boolean, false) and public._agenda_margem_tipo_os(p_os) is distinct from 'diagnóstico' then
             v_7e_hj := (v_7e_m ->> 'dias')::numeric;
             v_7e_dd := case when pl.dias is not null then greatest(0.5, round(pl.dias * v_7e_vi * 2) / 2)
                             else (public._agenda_dias_com_vies(v_7e_sug, v_7e_vi) ->> 'dias')::numeric end;
-            if v_7e_hj is not null and v_7e_dd <> v_7e_hj then
-              v_7e_est := format('Em teste: com o que %s costumam levar, eu marcaria %s (hoje %s).',
-                                 coalesce(public._agenda_classe_texto_do_nivel(regexp_replace(v_7e_ch, '^estimativa:', '')), 'as OS'),
-                                 public._agenda_dias(v_7e_dd), public._agenda_num(v_7e_hj, 1));
+            if v_7e_hs is not null and v_7e_dd <> v_7e_hs then
+              v_7e_est := format('Em teste: com o que %s costumam levar, eu marcaria %s (%s).',
+                                 coalesce(public._agenda_classe_texto_do_nivel(regexp_replace(v_7e_ch, '^estimativa:', '')), 'as OS'), public._agenda_dias(v_7e_dd),
+                                 case when v_7e_hs = v_7e_hj then 'hoje ' || public._agenda_num(v_7e_hj, 1)
+                                      else 'sem isso, ' || public._agenda_num(v_7e_hs, 1)
+                                           || coalesce('; hoje ' || public._agenda_num(v_7e_hj, 1), '') end);
             end if;
           end if;
         end if;
@@ -2187,6 +2233,12 @@ as $function$
                          when 'capacidade_dono' then '5' when 'carga' then '6'
                          when 'fornecedor_atraso' then '7:' || coalesce(q.chave, '') || ':1'
                          when 'fornecedor_prazo' then '7:' || coalesce(q.chave, '') || ':2'
+                         -- (7e P7; a conferência do P7) o viés com a chave na ordem fixa, como o fornecedor: cada chave é um grupo, e as do mesmo instante (o geral, as classes, o do
+                         -- dono) desempatavam pelo id aleatório (o R10g de agenda_fase6_rodada.sql de novo). Na ordem do foco: o geral, as classes, o do dono. Os outros itens da margem
+                         -- têm uma chave só com ação (a folga da semana, equipe; o tempo de compra, todas) ou nunca têm ação (o gravador não põe em uso a promessa, a folga da compra
+                         -- nem a peça sem fornecedor): não empatam.
+                         when 'vies' then '9:vies:' || case when q.chave = 'estimativa:todas' then '1' when q.chave like 'dono:%' then '3' else '2' end || ':' || coalesce(q.chave, '')
+                         -- (7e: fim)
                          else '9:' || coalesce(q.item, '') end as ordem
            -- CORREÇÃO 29/10 (revisão): fim
       from (select a.id, a.tipo, a.service_order_id as os, a.dia, a.proposta_id, a.criada_em as em,
@@ -2384,7 +2436,165 @@ as $function$
 $function$;
 
 comment on function public._agenda_mudancas(date, date, boolean, boolean, timestamptz) is
-  'Agenda de Produção (Fase 2, P5; Fase 3, P6: a ordem de gravação criada_em, OS, id): o que a agenda mudou sozinha (motor e vigia; fora do fechamento também o replano da conferência) com agenda_acoes.dia em [p_de, p_ate], em grupos — a publicação da semana (as ações publicar da mesma proposta) e cada outra ação; o status que acompanha a publicação ou o replano da mesma OS no mesmo dia vai no grupo dela. Fase 4, P3: também a ação material da nota importada e da mensagem do fornecedor (origens nota e fornecedor). p_executada false = o que a sombra teria feito; p_fechamento = só o não contado e não desfeito, só motor e vigia. [{grupo, tipo, proposta_id, acao_ids, itens, os, nome, numero, desfazivel, desfeita, em}]. Fase 5, P5: também o que a resposta do cliente mudou (origem cliente: fixar e cliente — o dia confirmado, o pedido de outro dia, o acesso, o opt-out), com as ações do replano dele (depois.replano_acoes) no mesmo grupo (contadas juntas, a frase só a do cliente); o acorde da mensagem ao cliente (tipo cliente, origem vigia, depois.acorde) não é mudança e não entra. CORREÇÃO FASE 6 (C2, item 6 e texto 2): o aprendizado sai UMA linha por item do mesmo instante (o fator e a presença de várias classes juntos: a classe mais fina e "Também nas OS de …"; as outras ações no grupo, junto), sem o "*desfaz aprendizado* volta" de cada ação; na 1ª linha desfazível, uma vez, "*desfaz aprendizado* volta tudo; *desfaz aprendizado <coisa>* volta só essa". CORREÇÃO 29/10 (revisão): as linhas do aprendizado do mesmo instante saem numa ordem fixa (fator, presença, folga, valor, capacidade, carga e, por fornecedor, o atraso e o prazo), não pelo id aleatório; a frase do *desfaz aprendizado* vai na 1ª delas. FASE 7e (P7, R7.5-18): a palavra de cada item da margem no *desfaz aprendizado <coisa>*: dias (o viés, só quando é a única linha dele no instante), semana (a folga da semana) e compra (o tempo de compra). Assinatura e chaves iguais.';
+  'Agenda de Produção (Fase 2, P5; Fase 3, P6: a ordem de gravação criada_em, OS, id): o que a agenda mudou sozinha (motor e vigia; fora do fechamento também o replano da conferência) com agenda_acoes.dia em [p_de, p_ate], em grupos — a publicação da semana (as ações publicar da mesma proposta) e cada outra ação; o status que acompanha a publicação ou o replano da mesma OS no mesmo dia vai no grupo dela. Fase 4, P3: também a ação material da nota importada e da mensagem do fornecedor (origens nota e fornecedor). p_executada false = o que a sombra teria feito; p_fechamento = só o não contado e não desfeito, só motor e vigia. [{grupo, tipo, proposta_id, acao_ids, itens, os, nome, numero, desfazivel, desfeita, em}]. Fase 5, P5: também o que a resposta do cliente mudou (origem cliente: fixar e cliente — o dia confirmado, o pedido de outro dia, o acesso, o opt-out), com as ações do replano dele (depois.replano_acoes) no mesmo grupo (contadas juntas, a frase só a do cliente); o acorde da mensagem ao cliente (tipo cliente, origem vigia, depois.acorde) não é mudança e não entra. CORREÇÃO FASE 6 (C2, item 6 e texto 2): o aprendizado sai UMA linha por item do mesmo instante (o fator e a presença de várias classes juntos: a classe mais fina e "Também nas OS de …"; as outras ações no grupo, junto), sem o "*desfaz aprendizado* volta" de cada ação; na 1ª linha desfazível, uma vez, "*desfaz aprendizado* volta tudo; *desfaz aprendizado <coisa>* volta só essa". CORREÇÃO 29/10 (revisão): as linhas do aprendizado do mesmo instante saem numa ordem fixa (fator, presença, folga, valor, capacidade, carga e, por fornecedor, o atraso e o prazo), não pelo id aleatório; a frase do *desfaz aprendizado* vai na 1ª delas. FASE 7e (P7, R7.5-18): a palavra de cada item da margem no *desfaz aprendizado <coisa>*: dias (o viés, só quando é a única linha dele no instante), semana (a folga da semana) e compra (o tempo de compra); e, na ordem fixa, o viés com a chave (o geral, as classes, o do dono), não pelo id. Assinatura e chaves iguais.';
+
+-- _agenda_desfazer_aprendizado (de 20261029100900_agenda_fase6_correcao_calculo.sql:4017; md5 do corpo de antes 2df7e2e3fe9fb89275ce36612b22e10f)
+create or replace function public._agenda_desfazer_aprendizado(p_acao uuid, p_autor uuid, p_via text, p_hoje date,
+                                                               p_agora timestamptz)
+ returns jsonb
+ language plpgsql
+ volatile
+ security definer
+ set search_path to 'public'
+as $function$
+declare
+  cf       public.agenda_config := public._agenda_cfg();
+  v_a      public.agenda_acoes%rowtype;
+  r0       public.agenda_aprendizado;
+  r        public.agenda_aprendizado;
+  v_volta  numeric;
+  v_d      jsonb;
+  v_txt    text;
+  v_acao   uuid;
+  v_antes  jsonb := '{}'::jsonb;
+  v_depois jsonb := '{}'::jsonb;
+  v_hist   jsonb;
+  k        text;
+  -- FASE 7e: (7e P7; a conferência do P7) o viés: as classes que entraram em uso com o valor do geral, e o que o leitor usa depois
+  v_7e_volta numeric;
+  v_7e_x     public.agenda_aprendizado;
+  v_7e_h     jsonb;
+  v_7e_dx    jsonb;
+  -- FASE 7e: fim
+begin
+  if p_hoje is null or p_agora is null then
+    raise exception 'Falta o dia (p_hoje) ou a hora (p_agora).' using errcode = '22023';
+  end if;
+  -- CORREÇÃO FASE 6: (C1) regressão B2: o *desfaz* do aprendizado toma a trava da rodada do aprendizado (agenda_aprender) ANTES de travar
+  -- qualquer linha: a rodada trava agenda_aprendizado e depois agenda_perguntas; a decisão, o contrário. Com a mesma trava
+  -- primeiro, as duas se enfileiram (sem o 40P01 quando o dono responde durante a rodada das 16:00).
+  perform pg_advisory_xact_lock(hashtext('agenda_aprender'));
+  -- CORREÇÃO FASE 6: fim
+  select * into v_a from public.agenda_acoes where id = p_acao for update;
+  if not found or v_a.tipo <> 'aprendizado' then
+    raise exception 'Não encontrei essa mudança do aprendizado.' using errcode = 'P0002';
+  end if;
+  if not v_a.executada then
+    return jsonb_build_object('ok', false, 'texto', 'Isso foi só o teste do aprendizado: nada mudou para desfazer.');
+  end if;
+  if v_a.desfeita_em is not null then
+    return jsonb_build_object('ok', false, 'texto', 'Isso já foi desfeito.');
+  end if;
+  if v_a.desfazivel_ate is null or p_agora > v_a.desfazivel_ate then
+    return jsonb_build_object('ok', false, 'texto', 'Não dá mais para desfazer esse aprendizado: passou o prazo.');
+  end if;
+  select * into r0 from public.agenda_aprendizado a
+   where a.item = v_a.antes ->> 'item' and a.chave = v_a.antes ->> 'chave' for update;
+  if not found or r0.em_uso is distinct from (v_a.depois ->> 'em_uso')::numeric then
+    return jsonb_build_object('ok', false, 'texto', 'Esse aprendizado já mudou depois dessa mudança: não há o que desfazer nela.');
+  end if;
+  if v_a.depois ? 'carga_max' then
+    if not public._agenda_aprendizado_carga((v_a.depois ->> 'carga_max')::numeric, (v_a.antes ->> 'carga_max')::numeric,
+                                            p_autor, p_agora) then
+      return jsonb_build_object('ok', false,
+        'texto', format('A parte da semana de cada pessoa mudou depois (hoje %s): não há o que desfazer nessa mudança.',
+                        public._agenda_aprendizado_valor('carga', cf.carga_max)));
+    end if;
+  end if;
+
+  r := r0;
+  r.em_uso := (v_a.antes ->> 'em_uso')::numeric;
+  r.em_uso_desde := case when r.em_uso is not null then p_agora end;
+  r.estado := 'travado';
+  r.travado_ate := p_hoje + cf.aprender_trava_dias;
+  r.travado_valor := coalesce(r0.calculado, (v_a.depois ->> 'em_uso')::numeric);
+  v_volta := coalesce((v_a.antes ->> 'carga_max')::numeric, r.em_uso, r0.padrao);
+  v_d := jsonb_build_object('chave', r0.chave, 'calculado', r0.calculado, 'em_uso', r.em_uso, 'efetivo', v_volta,
+                            'padrao', r0.padrao, 'volta', v_volta, 'n', r0.n, 'n_min', r0.n_min,
+                            'desde', (r.em_uso_desde at time zone 'America/Sao_Paulo')::date, 'travado_ate', r.travado_ate,
+                            'trava_dias', cf.aprender_trava_dias, 'detalhe', r0.detalhe);
+  v_txt := public._agenda_aprendizado_texto(r0.item, 'desfeito', v_d);
+  r.texto := left(public._agenda_corta(public._agenda_aprendizado_texto(r0.item, 'foco_travado', v_d), 400), 400);
+
+  -- FASE 7e: (7e P7; a conferência do P7, §5.2, R7.5-19) o viés, antes de gravar a ação desfazer (agenda_acoes não aceita mudar o texto depois). (1) O "voltam a" diz o que o leitor do
+  -- motor usa depois (_agenda_margem_em_uso: a chave, senão o geral, senão 1), e não o padrão da linha: a classe sem valor próprio usa o geral, que pode ter sido desfeito no mesmo lote
+  -- (agenda_desfazer_dito desfaz o geral antes das classes). A linha ainda está como a ação a deixou, com valor em uso: o leitor dela dá esse valor só com o modo que o deixa valer (o
+  -- interruptor ligado de verdade, sem o freio, o aprendizado ligado; no dono:, vies_corrige_dono), e é esse portão que vale para o que volta. (2) O *desfaz* do geral volta também as
+  -- classes que entraram em uso no mesmo instante com o valor dele, sem ação própria: a classe tem o geral como padrão (_agenda_aprender_vies) e, quando a medida dela dá o mesmo número,
+  -- entra em uso sem ação (a OS não muda); sem isto ela ficava em uso com o valor do geral desfeito (a OS#37 do replay: 2,5 → 3,5 dias, e assim depois do *desfaz aprendizado dias*).
+  -- Ela volta ao que tinha antes daquele instante (nada em uso: o histórico dela diz) e fica travada como o geral. Os outros itens, como antes.
+  if r0.item = 'vies' then
+    v_7e_volta := coalesce(case when public._agenda_margem_em_uso('vies', r0.chave) is not null then r.em_uso end,
+                           case when r0.nivel <> 'todas' then public._agenda_margem_em_uso('vies', split_part(r0.chave, ':', 1) || ':todas') end, 1);
+    if v_7e_volta is distinct from v_volta then
+      v_d := v_d || jsonb_build_object('volta', v_7e_volta, 'efetivo', v_7e_volta);
+      v_txt := public._agenda_aprendizado_texto(r0.item, 'desfeito', v_d);
+      r.texto := left(public._agenda_corta(public._agenda_aprendizado_texto(r0.item, 'foco_travado', v_d), 400), 400);
+    end if;
+    if r0.nivel = 'todas' then
+      for v_7e_x in
+        select x.* from public.agenda_aprendizado x
+         where x.item = 'vies' and x.nivel <> 'todas' and split_part(x.chave, ':', 1) = split_part(r0.chave, ':', 1)
+           and x.estado = 'em_uso' and x.em_uso = (v_a.depois ->> 'em_uso')::numeric and x.em_uso_desde = v_a.criada_em
+           and exists (select 1 from jsonb_array_elements(x.historico) h
+                        where (h ->> 'em')::timestamptz = v_a.criada_em and h -> 'antes' -> 'em_uso' = 'null'::jsonb)
+           and not exists (select 1 from public.agenda_acoes b
+                            where b.tipo = 'aprendizado' and b.criada_em = v_a.criada_em and b.antes ->> 'item' = 'vies' and b.antes ->> 'chave' = x.chave)
+         order by x.chave
+         for update
+      loop
+        v_7e_dx := jsonb_build_object('chave', v_7e_x.chave, 'calculado', v_7e_x.calculado, 'em_uso', null, 'efetivo', v_7e_volta, 'padrao', v_7e_x.padrao,
+                                      'n', v_7e_x.n, 'n_min', v_7e_x.n_min, 'travado_ate', r.travado_ate, 'trava_dias', cf.aprender_trava_dias, 'detalhe', v_7e_x.detalhe);
+        v_7e_h := v_7e_x.historico || jsonb_build_array(jsonb_build_object('em', p_agora, 'antes', jsonb_build_object('em_uso', v_7e_x.em_uso, 'estado', v_7e_x.estado),
+                                                                           'depois', jsonb_build_object('em_uso', null, 'estado', 'travado'), 'desfeita', v_a.id));
+        if jsonb_array_length(v_7e_h) > 20 then
+          select jsonb_agg(e order by o) into v_7e_h
+            from jsonb_array_elements(v_7e_h) with ordinality t(e, o) where o > jsonb_array_length(v_7e_h) - 20;
+        end if;
+        update public.agenda_aprendizado
+           set em_uso = null, em_uso_desde = null, estado = 'travado', travado_ate = r.travado_ate, travado_valor = coalesce(v_7e_x.calculado, v_7e_x.em_uso),
+               texto = left(public._agenda_corta(public._agenda_aprendizado_texto('vies', 'foco_travado', v_7e_dx), 400), 400), historico = v_7e_h
+         where id = v_7e_x.id;
+      end loop;
+    end if;
+  end if;
+  -- FASE 7e: fim
+  insert into public.agenda_acoes (criada_em, dia, executada, origem, tipo, critica, antes, depois, texto, autor, desfaz_a)
+  values (clock_timestamp(), p_hoje, true, case when p_via in ('motor', 'vigia') then p_via else 'dono' end, 'desfazer', false,
+          jsonb_build_object('acao', v_a.id),
+          jsonb_build_object('item', r0.item, 'chave', r0.chave, 'em_uso', r.em_uso, 'travado_ate', r.travado_ate)
+            || case when v_a.depois ? 'carga_max' then jsonb_build_object('carga_max', v_a.antes -> 'carga_max') else '{}'::jsonb end,
+          left(public._agenda_corta(v_txt, 400), 400), p_autor, v_a.id)
+  returning id into v_acao;
+  update public.agenda_acoes set desfeita_em = p_agora, desfeita_por = p_autor, desfeita_pela = v_acao where id = v_a.id;
+
+  foreach k in array array['em_uso', 'estado', 'calculado'] loop
+    if to_jsonb(r0) -> k is distinct from to_jsonb(r) -> k then
+      v_antes := v_antes || jsonb_build_object(k, to_jsonb(r0) -> k);
+      v_depois := v_depois || jsonb_build_object(k, to_jsonb(r) -> k);
+    end if;
+  end loop;
+  v_hist := r0.historico;
+  if v_antes <> '{}'::jsonb then
+    v_hist := v_hist || jsonb_build_array(jsonb_build_object('em', p_agora, 'antes', v_antes, 'depois', v_depois,
+                                                             'desfeita', v_a.id));
+    if jsonb_array_length(v_hist) > 20 then
+      select jsonb_agg(x order by o) into v_hist
+        from jsonb_array_elements(v_hist) with ordinality t(x, o) where o > jsonb_array_length(v_hist) - 20;
+    end if;
+  end if;
+  update public.agenda_aprendizado
+     set em_uso = r.em_uso, estado = r.estado, em_uso_desde = r.em_uso_desde, travado_ate = r.travado_ate,
+         travado_valor = r.travado_valor, texto = r.texto, historico = v_hist
+   where id = r0.id;
+
+  return jsonb_build_object('ok', true, 'texto', v_txt, 'acao_id', v_acao, 'item', r0.item, 'chave', r0.chave,
+                            'em_uso', r.em_uso, 'travado_ate', r.travado_ate);
+end;
+$function$;
+
+comment on function public._agenda_desfazer_aprendizado(uuid, uuid, text, date, timestamptz) is
+  'Agenda de Produção (Fase 6, P6): o *desfaz* da ação aprendizado (spec-fase6 §5.6) — a que entrou sozinha (origem vigia) ou a da decisão 1/3 (origem dono): o em_uso de antes volta (nulo = o padrão) e a chave fica travada por aprender_trava_dias (travado_valor = o medido recusado); a da carga volta agenda_config.carga_max (só se ainda é a que a decisão gravou). Só dentro de desfazivel_ate e com a linha ainda como a ação a deixou. A ação desfazer (desfaz_a) e desfeita_* na original. Chamada por agenda_desfazer. Definer, sem grant. CORREÇÃO FASE 6 (C1, regressão B2): toma pg_advisory_xact_lock(hashtext(''agenda_aprender'')) antes do 1º for update. FASE 7e (P7, a conferência do P7): no viés, o *desfaz* do geral volta também as classes que entraram em uso no mesmo instante com o valor dele, sem ação própria (travadas, sem nada em uso), e o "voltam a" diz o que o leitor do motor usa depois (a chave, senão o geral, senão 1).';
 
 -- agenda_desfazer_dito (de 20261029100950_agenda_fase6_correcao_textos.sql:155; md5 do corpo de antes 3c1982e2e441330deb7d12b278b9d739)
 create or replace function public.agenda_desfazer_dito(p_autor uuid, p_alvo text default null, p_canal text default 'whatsapp',
@@ -2470,6 +2680,11 @@ begin
       select array_agg(m.id order by m.antes ->> 'item', m.antes ->> 'chave', m.id) into v_ids
         from m
        where m.criada_em = (select max(x.criada_em) from m x);
+      -- (7e P7; a conferência do P7) no viés, o geral antes das classes do mesmo lote: o *desfaz* de cada classe diz o que ela passa a usar (o geral, _agenda_desfazer_aprendizado), e
+      -- o geral do lote já tem de estar desfeito. Nos outros itens, a mesma ordem de antes.
+      v_ids := array(select a.id from public.agenda_acoes a where a.id = any (v_ids)
+                      order by a.antes ->> 'item', (a.antes ->> 'item' = 'vies' and a.antes ->> 'nivel' = 'todas') desc, a.antes ->> 'chave', a.id);
+      -- (7e: fim)
       if coalesce(cardinality(v_ids), 0) = 0 then
         return jsonb_build_object('ok', false, 'mudou', false, 'status', 'nenhuma',
           'texto', format('Não tenho mudança do aprendizado %s para desfazer agora.', v_de));
@@ -2506,6 +2721,13 @@ begin
     having count(*) > 0;
     v_ref := coalesce(v_ref, jsonb_build_object('status', 'nenhuma',
                                                 'texto', 'Não tenho mudança do aprendizado para desfazer agora.'));
+    -- (7e P7; a conferência do P7) no viés, o geral antes das classes do lote (como no *desfaz aprendizado <coisa>*, acima); nos outros itens, a mesma ordem de antes
+    if v_ref ? 'acao_ids' then
+      v_ref := v_ref || jsonb_build_object('acao_ids', (select jsonb_agg(a.id order by a.antes ->> 'item', (a.antes ->> 'item' = 'vies' and a.antes ->> 'nivel' = 'todas') desc,
+                                                                         a.antes ->> 'chave', a.id)
+                                                          from public.agenda_acoes a where a.id in (select (jsonb_array_elements_text(v_ref -> 'acao_ids'))::uuid)));
+    end if;
+    -- (7e: fim)
   else
   -- FASE 6: fim
   v_ref := public.agenda_acao_desfazivel(p_alvo, p_hoje, p_agora);
@@ -2542,7 +2764,7 @@ end;
 $function$;
 
 comment on function public.agenda_desfazer_dito(uuid, text, text, date, timestamptz) is
-  'Agenda de Produção (Fase 2, P3): a palavra *desfaz* (+ o nome, o número ou "semana") — agenda_acao_desfazivel (ambíguo ou nada: a frase pronta, nada muda) + agenda_desfazer(via dono) de cada ação; "semana" é tudo ou nada. Executa direto: é a ordem exata do dono. Admin pelo _autor_da_agenda. Fase 6 (P6): o alvo "aprendizado" = o último lote de ações aprendizado desfazíveis (as do mesmo instante), tudo ou nada; o texto é o "Desfeito: …" de cada uma. CORREÇÃO FASE 6 (C2, item 6): *desfaz aprendizado <coisa>* (fator, presença, valor/diária, folga, capacidade/carga, fornecedor ou o nome de um fornecedor) desfaz só as ações daquela coisa do instante mais novo, tudo ou nada; cada uma trava só a sua chave; *desfaz aprendizado* sozinho continua o lote. A coisa desconhecida = nao_achei; sem mudança = nenhuma. FASE 7e (P7, R7.5-18): *desfaz aprendizado dias* (o viés), *semana* (a folga da semana) e *compra* (o tempo de compra). A recusa da coisa que não existe é a de antes (a saída é a mesma: *desfaz aprendizado* sozinho volta tudo).';
+  'Agenda de Produção (Fase 2, P3): a palavra *desfaz* (+ o nome, o número ou "semana") — agenda_acao_desfazivel (ambíguo ou nada: a frase pronta, nada muda) + agenda_desfazer(via dono) de cada ação; "semana" é tudo ou nada. Executa direto: é a ordem exata do dono. Admin pelo _autor_da_agenda. Fase 6 (P6): o alvo "aprendizado" = o último lote de ações aprendizado desfazíveis (as do mesmo instante), tudo ou nada; o texto é o "Desfeito: …" de cada uma. CORREÇÃO FASE 6 (C2, item 6): *desfaz aprendizado <coisa>* (fator, presença, valor/diária, folga, capacidade/carga, fornecedor ou o nome de um fornecedor) desfaz só as ações daquela coisa do instante mais novo, tudo ou nada; cada uma trava só a sua chave; *desfaz aprendizado* sozinho continua o lote. A coisa desconhecida = nao_achei; sem mudança = nenhuma. FASE 7e (P7, R7.5-18): *desfaz aprendizado dias* (o viés), *semana* (a folga da semana) e *compra* (o tempo de compra). A recusa da coisa que não existe é a de antes (a saída é a mesma: *desfaz aprendizado* sozinho volta tudo). No lote, o geral do viés antes das classes (o texto de cada classe diz o que ela passa a usar).';
 
 -- ── 3. Portas ─────────────────────────────────────────────────────────────────────────────────────
 -- A nova tem a porta de _agenda_saude_comunicacao: agenda_saude é invoker e o administrador logado a chama. Nunca anon. As recriadas não mudam de porta.

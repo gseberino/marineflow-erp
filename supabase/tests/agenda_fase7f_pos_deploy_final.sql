@@ -10,7 +10,7 @@
 --   C  os 3 modos da equipe e do cliente em sombra (ligados só pelo OK nomeado, com o código no banco); bloco, prazo e lote como estão (em teste, ou ligados na ordem dos OKs); o freio (só mostra);
 --      semana fora de cliente_tipos_ligados enquanto as camadas não ligam
 --   F  cada uma das 37 funções de P5, P6 e P9 (23 recriadas e 14 novas): a assinatura, 1 por nome, security definer, volatilidade, search_path=public, as portas (anon e PUBLIC nunca) e o md5 do corpo
---      (sem CR); 1 assinatura de _agenda_equipe_registrar, a de 10 argumentos
+--      (sem CR e sem as marcas da 7e, que recria agenda_saude); 1 assinatura de _agenda_equipe_registrar, a de 10 argumentos
 --   E  nenhuma mensagem da equipe da 7f (previsto, mudança, convite) fora de teste, enquanto o modo dela não estiver ligado; nenhuma mensagem semana na fila, enquanto as camadas não ligarem
 --   Z  agenda_saude().comunicacao com os 13 zeros em 0 e zeros_ok; os modos que ela lê = os da linha; os números da equipe e do cliente presentes em teste; agenda_saude().ok (com o dado)
 --   S  nenhum erro cliente:% nem comunicar:% nas últimas 24 h; com o dado, a rodada do cliente dos últimos 30 min sem erro e com o passo semana chamado; a rodada comunicar dos últimos 30 min sem erro
@@ -66,6 +66,24 @@ select 'C4 o freio — só mostra (com gestor_so_propor, o que ligar vale como e
   from public.agenda_config c where c.id;
 
 -- ── F. As funções ─────────────────────────────────────────────────────────────────────────────────
+-- (7e, a conferência do P7) o corpo sem os blocos e as marcas da 7e ("-- FASE 7e: …" até "-- FASE 7e: fim"; "-- (7e …" até "-- (7e: fim)"), linha a linha: a 7e recria agenda_saude
+-- (20261111100600) com a chave margem em 2 marcas, e o resto do corpo é o da 7f, byte a byte. Sem marca da 7e (antes dela), o corpo como está.
+create function pg_temp.sem_7e(p text) returns text language plpgsql immutable as $f$
+declare
+  l      text;
+  fora   text[] := '{}';
+  dentro boolean := false;
+begin
+  foreach l in array string_to_array(p, E'\n') loop
+    if not dentro and l ~ '^\s*-- (FASE 7e:|\(7e )' and l !~ '^\s*-- (FASE 7e: fim|\(7e: fim\))' then dentro := true; continue; end if;
+    if dentro then
+      if l ~ '^\s*-- (FASE 7e: fim|\(7e: fim\))' then dentro := false; end if;
+      continue;
+    end if;
+    fora := fora || l;
+  end loop;
+  return array_to_string(fora, E'\n');
+end $f$;
 -- (assinatura, security definer, volatilidade, quem executa além do dono, o tipo, o md5 do corpo sem CR: gerado por f7f/p9/gerar9.mjs)
 create temp table _pf_f (f text primary key, definer boolean not null, vol "char" not null, papeis text not null, tipo text not null, m text not null) on commit drop;
 insert into _pf_f values
@@ -123,8 +141,9 @@ select format('F1 %s (%s): existe, 1 por nome, %s, %s, search_path=public, execu
   from _pf_f r
   left join pg_proc p on p.oid = to_regprocedure('public.' || r.f);
 insert into _resultado
-select format('F2 %s: o corpo é o do pacote final (md5)', r.f), p.oid is not null and md5(replace(p.prosrc, chr(13), '')) = r.m,
-       case when p.oid is null then 'NÃO EXISTE' when md5(replace(p.prosrc, chr(13), '')) <> r.m then 'md5 ' || md5(replace(p.prosrc, chr(13), '')) || ' ≠ ' || r.m end
+select format('F2 %s: o corpo é o do pacote final (md5, sem as marcas da 7e)', r.f), p.oid is not null and md5(pg_temp.sem_7e(replace(p.prosrc, chr(13), ''))) = r.m,
+       case when p.oid is null then 'NÃO EXISTE' when md5(pg_temp.sem_7e(replace(p.prosrc, chr(13), ''))) <> r.m
+            then 'md5 ' || md5(pg_temp.sem_7e(replace(p.prosrc, chr(13), ''))) || ' ≠ ' || r.m end
   from _pf_f r
   left join pg_proc p on p.oid = to_regprocedure('public.' || r.f);
 insert into _resultado

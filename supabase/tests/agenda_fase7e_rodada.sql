@@ -14,6 +14,9 @@
 --       com os 6 desligados, o foco de antes, byte a byte; pela palavra do dono (agenda_ver foco aprendizado)
 --   R6  o cartão: duracao.estimativa (em uso, o marcado, o do dono, em teste, o arredondamento que apaga) e duracao.promessa (R7.3-1); desligado, o de antes, byte a byte
 --   R7  com tudo em sombra e a rodada em teste gravada, o motor, a prontidão, a vigia e a rodada do cliente são os de antes (md5): a régua sem chave
+--   R8  a correção da conferência do P7, cada caso contra uma âncora de fora: o cartão em teste (a OS marcada; o regime sem o freio, com o gestor ligado e em teste) contra
+--       agenda_meios_da_os ligado de verdade; carga_semana_fora (fora de ligado de verdade, 0; ligado, a conta antes de prender); o *desfaz* do viés (a classe que entrou com o geral; o
+--       "voltam a") contra o leitor do motor; o bloco 8 com o freio contra o leitor; o "o que mudou" com os ids trocados
 --
 -- ═══ COMO RODAR ═══  Na bancada: node scripts/bancada-agenda/rodar.mjs. Em produção, só DEPOIS de aplicar a migration, com o OK: npx supabase@2.111.0 db query --linked -f supabase/tests/agenda_fase7e_rodada.sql
 --   Tudo dentro de begin/rollback. O que usa fixture só roda na bancada (fora dela sai PULADO). Uma linha false é defeito.
@@ -103,15 +106,17 @@ begin
   end if;
   select string_agg(distinct m[1], ',' order by m[1]) into v_dif
     from regexp_matches(v_mig, 'create or replace function public\.([a-z_0-9]+)\(', 'g') m;
-  v_res := pg_temp.ok(v_res, 'R0c a migration cria 1 (a saúde da margem) e recria só as 6 da R7.1 do P7: nada do motor, da vigia nem do gravador',
-    v_dif = '_agenda_mudancas,_agenda_saude_margem,_agenda_ver_aprendizado,agenda_aprender,agenda_desfazer_dito,agenda_saude,os_plano_da_os', v_dif);
+  -- (a conferência do P7) + _agenda_desfazer_aprendizado: o *desfaz* do viés volta a classe que entrou em uso com o geral, e diz o que o leitor usa depois
+  v_res := pg_temp.ok(v_res, 'R0c a migration cria 1 (a saúde da margem) e recria só as 6 da R7.1 do P7 e o *desfaz* do aprendizado (a conferência): nada do motor, da vigia nem do gravador',
+    v_dif = '_agenda_desfazer_aprendizado,_agenda_mudancas,_agenda_saude_margem,_agenda_ver_aprendizado,agenda_aprender,agenda_desfazer_dito,agenda_saude,os_plano_da_os', v_dif);
   for f in select * from (values
       ('agenda_aprender', 'public.agenda_aprender(date, timestamptz)', 'mig_correcao_calculo_fase6'),
       ('agenda_saude', 'public.agenda_saude(date, timestamptz)', 'mig_cliente_fase7f'),
       ('os_plano_da_os', 'public.os_plano_da_os(uuid, date)', 'mig_leituras_fase7d'),
       ('_agenda_ver_aprendizado', 'public._agenda_ver_aprendizado(date)', 'mig_correcao_textos_fase6'),
       ('_agenda_mudancas', 'public._agenda_mudancas(date, date, boolean, boolean, timestamptz)', 'mig_correcao_revisao'),
-      ('agenda_desfazer_dito', 'public.agenda_desfazer_dito(uuid, text, text, date, timestamptz)', 'mig_correcao_textos_fase6')) x(nome, sig, origem)
+      ('agenda_desfazer_dito', 'public.agenda_desfazer_dito(uuid, text, text, date, timestamptz)', 'mig_correcao_textos_fase6'),
+      ('_agenda_desfazer_aprendizado', 'public._agenda_desfazer_aprendizado(uuid, uuid, text, date, timestamptz)', 'mig_correcao_calculo_fase6')) x(nome, sig, origem)
   loop
     v_res := pg_temp.ok(v_res, format('R0d %s: a viva é a desta migration; sem os blocos do P7, é a da origem (agenda_teste.%s), byte a byte; e tem bloco', f.nome, f.origem),
       (select replace(p.prosrc, E'\r\n', E'\n') from pg_proc p where p.oid = f.sig::regprocedure) = pg_temp.corpo(v_mig, f.nome)
@@ -535,6 +540,8 @@ begin
         insert into public.agenda_aprendizado (item, chave, nivel, padrao, n_min, n, calculado, em_uso, em_uso_desde, estado, calculado_em)
         values ('tempo_compra', 'todas', 'todas', 1, 1, 5, 2, 2, c_agora - interval '30 hours', 'em_uso', c_agora - interval '30 hours');
       elsif v.chave = 'carga_semana_fora' then
+        -- (a conferência do P7) só com a folga da semana ligada de verdade (sem o freio): a conta 0,80 − a temporada fica abaixo do mínimo 0,85 nas 6 semanas
+        perform pg_temp.modos('ligado', false);
         update public.agenda_config set carga_semana_min = 0.85 where id;
       elsif v.chave = 'puxar_cancelou' then
         insert into public.agenda_propostas (escopo, periodo, os_alvo, modo, estado, versao_base, itens, parametros, expira_em, criada_por)
@@ -1084,6 +1091,354 @@ begin
   perform pg_temp.gravar(v_res);
 end
 $r6$;
+
+-- ── R8. A correção da conferência do P7 ─────────────────────────────────────────────────────────────
+-- Os defeitos que a conferência reproduziu no replay real (f7e/p7conf; antes e depois em f7e/p7c/rep.mjs), aqui na fixture, cada um contra uma âncora de fora: (a) o cartão em teste na OS
+-- marcada; (b) o cartão em teste no regime em que o viés vale (sem o freio: com o gestor ligado, as regras dele), contra agenda_meios_da_os ligado de verdade; (c) carga_semana_fora; (d) o
+-- *desfaz* do viés: a classe que entrou em uso com o geral e o "voltam a", contra o leitor do motor; (e) o bloco 8 com o freio, contra o leitor; (f) a ordem do "o que mudou" no empate.
+do $r8$
+declare
+  v_res jsonb := '[]'::jsonb;
+  c     jsonb;
+  c0    jsonb;
+  d     jsonb;
+  s     jsonb;
+  f     jsonb;
+  l8    jsonb;
+  x1    jsonb;
+  x2    jsonb;
+  v_os  uuid := md5('e7e:p7c:cartao')::uuid;
+  v_anc numeric;
+  v_sem numeric;
+  v_hj  numeric;
+  v_hs  numeric;
+  v_esp text;
+  v_t   text;
+  v_g   uuid;
+  v_k   uuid;
+  v_dif text;
+  v     record;
+  c_hoje constant date := date '2027-01-07';
+  c_agora constant timestamptz := timestamptz '2027-01-07 16:05-03';
+  c_t   constant timestamptz := timestamptz '2027-01-07 16:05-03';
+begin
+  if not pg_temp.fx() then
+    perform pg_temp.gravar(pg_temp.ok('[]', 'R8 a correção da conferência do P7', true, 'PULADO: sem a fixture (rode pela bancada)'));
+    return;
+  end if;
+  perform pg_temp.criar_antes('os_plano_da_os', 'mig_leituras_fase7d', 'plano_antes8');
+  begin
+    -- a OS do cartão, como a do R6: energia em motorhome, aberta, R$ 3.820 pela estimativa
+    perform set_config('agenda.porta', 'on', true);
+    insert into public.service_orders (id, service_order_number, client_id, vessel_id, status, quote_status, service_type, created_at, updated_at, converted_to_os_at, grand_total)
+    values (v_os, 'OS-7EP7C', 'e7e00000-0000-4000-8000-000000000c02', 'e7e00000-0000-4000-8000-000000000b02', 'approved', 'approved', 'repair',
+            timestamptz '2026-12-01 10:00-03', timestamptz '2026-12-01 10:00-03', timestamptz '2026-12-02 10:00-03', 3820);
+    insert into public.service_order_services (service_order_id, name_snapshot, billing_unit_snapshot, quantity, unit_price_snapshot, line_total, created_at)
+    values (v_os, 'Instalação de inversor e baterias', 'visit', 1, 3820, 3820, timestamptz '2026-12-01 10:00-03');
+    perform set_config('agenda.porta', 'off', true);
+
+    -- (a) a OS marcada com o viés congelado (1,00, sem chave): o motor fica com ele ligado de verdade; o cartão em teste não diz "eu marcaria"
+    perform pg_temp.modos('sombra');
+    insert into public.agenda_aprendizado (item, chave, nivel, padrao, n_min, n, calculado, estado, calculado_em)
+    values ('vies', 'estimativa:rv:energia', 'fina', 1, 1, 4, 1.40, 'sombra', c_agora), ('vies', 'estimativa:todas', 'todas', 1, 1, 8, 1.40, 'sombra', c_agora);
+    c0 := public.os_plano_da_os(v_os, c_hoje);
+    insert into public.os_planejamento (service_order_id, marcado_em, vies_marcado, atualizado_em) values (v_os, c_hoje - 3, 1.00, timestamptz '2026-12-01 10:00-03');
+    c := public.os_plano_da_os(v_os, c_hoje);
+    begin
+      perform pg_temp.modos('ligado', false);
+      v_sem := (public.agenda_meios_da_os(v_os, c_hoje) ->> 'dias')::numeric;
+      update public.agenda_aprendizado set estado = 'em_uso', em_uso = calculado, em_uso_desde = c_agora where item = 'vies';
+      v_anc := (public.agenda_meios_da_os(v_os, c_hoje) ->> 'dias')::numeric;
+      -- o controle que morde: a mesma OS sem a marcação, ligada de verdade, muda de dias com o viés
+      set local session_replication_role = replica; delete from public.os_planejamento where service_order_id = v_os; set local session_replication_role = origin;
+      v_hs := (public.agenda_meios_da_os(v_os, c_hoje) ->> 'dias')::numeric;
+      raise exception 'desfaz' using errcode = 'P0097';
+    exception when sqlstate 'P0097' then null;
+    end;
+    v_res := pg_temp.ok(v_res, 'R8a a OS marcada com o viés congelado 1,00: sem "Em teste: … eu marcaria" (o cartão de antes, byte a byte); ligado de verdade, o motor fica nos mesmos dias com e sem o viés em uso (a âncora). Os controles: sem a marcação, o cartão em teste diz "eu marcaria" e o motor ligado muda',
+      not (c -> 'duracao') ? 'estimativa' and c::text = pg_temp.plano_antes8(v_os, c_hoje)::text and v_anc = v_sem
+      and c0 #>> '{duracao,estimativa}' like 'Em teste: %eu marcaria %' and v_hs <> v_sem,
+      format('%s | ligado: sem o viés %s, com %s; sem a marcação, com o viés %s | sem a marcação, o cartão: %s', c #>> '{duracao,estimativa}', v_sem, v_anc, v_hs, c0 #>> '{duracao,estimativa}'));
+    -- o congelado de outra conta (o dos dias do dono, dono:) não vale para a estimativa (agenda_meios_da_os usa o de agora): o cartão em teste diz "eu marcaria", e ligado o motor muda
+    update public.os_planejamento set vies_marcado = 1.20, vies_marcado_chave = 'dono:rv:energia' where service_order_id = v_os;
+    c := public.os_plano_da_os(v_os, c_hoje);
+    begin
+      perform pg_temp.modos('ligado', false);
+      v_sem := (public.agenda_meios_da_os(v_os, c_hoje) ->> 'dias')::numeric;
+      update public.agenda_aprendizado set estado = 'em_uso', em_uso = calculado, em_uso_desde = c_agora where item = 'vies';
+      v_anc := (public.agenda_meios_da_os(v_os, c_hoje) ->> 'dias')::numeric;
+      raise exception 'desfaz' using errcode = 'P0097';
+    exception when sqlstate 'P0097' then null;
+    end;
+    v_res := pg_temp.ok(v_res, 'R8a2 a OS marcada com o congelado dos dias do dono (dono:rv:energia 1,20) e os dias pela estimativa: o congelado não vale para ela, o cartão em teste diz "eu marcaria" o que o motor ligado marca',
+      c #>> '{duracao,estimativa}' like 'Em teste: %eu marcaria ' || public._agenda_dias(v_anc) || ' (%' and v_anc <> v_sem,
+      format('%s | ligado: sem o viés %s, com %s', c #>> '{duracao,estimativa}', v_sem, v_anc));
+    set local session_replication_role = replica; delete from public.os_planejamento where service_order_id = v_os; set local session_replication_role = origin;
+
+    -- (b) o gestor ligado com o freio (como em produção): sem o freio, as regras dele mudam a sugestão (uma pessoa: os dias dobram). O "eu marcaria" é o que o motor ligado de verdade marca
+    update public.agenda_aprendizado set calculado = 1.17 where item = 'vies';
+    perform pg_temp.modos('sombra');
+    update public.agenda_config set modo_marcar_sozinho = 'ligado' where id;
+    c := public.os_plano_da_os(v_os, c_hoje);
+    v_hj := (public.agenda_meios_da_os(v_os, c_hoje) ->> 'dias')::numeric;
+    begin
+      update public.agenda_config set gestor_so_propor = false where id;
+      v_hs := (public.agenda_meios_da_os(v_os, c_hoje) ->> 'dias')::numeric;
+      perform pg_temp.modos('ligado', false);
+      update public.agenda_aprendizado set estado = 'em_uso', em_uso = calculado, em_uso_desde = c_agora where item = 'vies';
+      v_anc := (public.agenda_meios_da_os(v_os, c_hoje) ->> 'dias')::numeric;
+      raise exception 'desfaz' using errcode = 'P0097';
+    exception when sqlstate 'P0097' then null;
+    end;
+    v_esp := format('Em teste: com o que as OS de energia em motorhome costumam levar, eu marcaria %s (%s).', public._agenda_dias(v_anc),
+                    case when v_hs = v_hj then 'hoje ' || public._agenda_num(v_hj, 1) else 'sem isso, ' || public._agenda_num(v_hs, 1) || '; hoje ' || public._agenda_num(v_hj, 1) end);
+    v_res := pg_temp.ok(v_res, 'R8b o gestor ligado e o freio: o "eu marcaria" é o que o motor ligado de verdade marca (agenda_meios_da_os sem o freio, com o viés em uso), e o texto diz também o de sem o viés naquele regime e o de hoje, que as regras do gestor fazem diferentes',
+      c #>> '{duracao,estimativa}' = v_esp and v_hs <> v_hj and v_anc <> v_hs and (c -> 'duracao') - 'estimativa' = pg_temp.plano_antes8(v_os, c_hoje) -> 'duracao',
+      format('%s | esperado: %s', c #>> '{duracao,estimativa}', v_esp));
+    -- o viés que não muda o número no regime dele (1,02: 5 dias × 1,02 = 5), com o de hoje diferente (as regras do gestor): sem linha (lição 5); o motor ligado de verdade fica igual
+    update public.agenda_aprendizado set calculado = 1.02 where item = 'vies';
+    c := public.os_plano_da_os(v_os, c_hoje);
+    begin
+      update public.agenda_config set gestor_so_propor = false where id;
+      v_hs := (public.agenda_meios_da_os(v_os, c_hoje) ->> 'dias')::numeric;
+      perform pg_temp.modos('ligado', false);
+      update public.agenda_aprendizado set estado = 'em_uso', em_uso = calculado, em_uso_desde = c_agora where item = 'vies';
+      v_anc := (public.agenda_meios_da_os(v_os, c_hoje) ->> 'dias')::numeric;
+      raise exception 'desfaz' using errcode = 'P0097';
+    exception when sqlstate 'P0097' then null;
+    end;
+    v_res := pg_temp.ok(v_res, 'R8b3 o gestor ligado e o freio, o viés 1,02 (não muda o número sem o freio: o motor ligado de verdade marca o mesmo), e o de hoje diferente: sem "Em teste" (o cartão de antes, byte a byte)',
+      c::text = pg_temp.plano_antes8(v_os, c_hoje)::text and v_anc = v_hs and v_hs <> v_hj,
+      format('%s | ligado: sem o viés %s, com %s; hoje %s', c #>> '{duracao,estimativa}', v_hs, v_anc, v_hj));
+    update public.agenda_aprendizado set calculado = 1.17 where item = 'vies';
+    -- sem o gestor ligado, sem o freio as regras dele também ficam de fora: a conta é a de hoje, e o texto, o de sempre
+    update public.agenda_config set modo_marcar_sozinho = 'sombra' where id;
+    c := public.os_plano_da_os(v_os, c_hoje);
+    v_hj := (public.agenda_meios_da_os(v_os, c_hoje) ->> 'dias')::numeric;
+    begin
+      update public.agenda_config set gestor_so_propor = false where id;
+      v_hs := (public.agenda_meios_da_os(v_os, c_hoje) ->> 'dias')::numeric;
+      perform pg_temp.modos('ligado', false);
+      update public.agenda_aprendizado set estado = 'em_uso', em_uso = calculado, em_uso_desde = c_agora where item = 'vies';
+      v_anc := (public.agenda_meios_da_os(v_os, c_hoje) ->> 'dias')::numeric;
+      raise exception 'desfaz' using errcode = 'P0097';
+    exception when sqlstate 'P0097' then null;
+    end;
+    v_esp := format('Em teste: com o que as OS de energia em motorhome costumam levar, eu marcaria %s (hoje %s).', public._agenda_dias(v_anc), public._agenda_num(v_hj, 1));
+    v_res := pg_temp.ok(v_res, 'R8b2 o gestor em teste (modo_marcar_sozinho sombra): sem o freio as regras dele não entram, a conta é a de hoje, "eu marcaria … (hoje …)" bate com o motor ligado de verdade',
+      c #>> '{duracao,estimativa}' = v_esp and v_hs = v_hj and v_anc <> v_hj, format('%s | esperado: %s', c #>> '{duracao,estimativa}', v_esp));
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- (c) carga_semana_fora: fora de ligado de verdade, 0 para qualquer carga_max do CHECK (0,50 a 1,00)
+  begin
+    v_dif := null;
+    for v in select * from (values ('desligado', true, 1.00), ('desligado', true, 0.50), ('sombra', true, 1.00), ('sombra', true, 0.50), ('sombra', false, 1.00),
+                                   ('ligado', true, 1.00), ('ligado', true, 0.50)) t(modo, freio, carga) loop
+      perform pg_temp.modos(v.modo, v.freio);
+      update public.agenda_config set carga_max = v.carga where id;
+      s := public.agenda_saude(c_hoje, c_agora);
+      if (s #>> '{margem,carga_semana_fora}')::int <> 0 or not (s #>> '{margem,zeros_ok}')::boolean then
+        v_dif := coalesce(v_dif || '; ', '') || format('%s, freio %s, carga_max %s: %s', v.modo, v.freio, v.carga, s #>> '{margem,carga_semana_fora}');
+      end if;
+    end loop;
+    v_res := pg_temp.ok(v_res, 'R8c fora de ligado de verdade (desligado, em teste, ligado com o freio), carga_semana_fora = 0 com carga_max 0,50 e 1,00: a carga é a que o dono escolheu', v_dif is null, v_dif);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  -- ligado de verdade: a conta antes de prender (a folga em uso e a temporada entram nela)
+  for v in select * from (values
+      ('R8c2 ligado sem o freio, a folga em uso 0,30 e a temporada de janeiro e fevereiro (10%): a conta 0,80 + 0,15 − 0,30 − 0,10 = 0,55 fica abaixo do mínimo 0,60 nas 6 semanas e acende; a carga sai presa em 0,60', 0.80, true, true, 6, 0.60),
+      ('R8c3 o controle da folga: sem a folga em uso (o padrão), a conta 0,70 fica dentro: 0', 0.80, false, true, 0, 0.70),
+      ('R8c4 o controle da temporada: com a folga 0,30 e sem temporada, a conta 0,65 fica dentro: 0', 0.80, true, false, 0, 0.65),
+      ('R8c5 carga_max 1,00 sem folga nem temporada: a conta passa do máximo 0,95 e acende; a carga sai presa em 0,95', 1.00, false, false, 6, 0.95)) t(nome, carga, folga, temporada, n, presa) loop
+    begin
+      perform pg_temp.modos('ligado', false);
+      update public.agenda_config set carga_max = v.carga where id;
+      if not v.temporada then
+        update public.agenda_config set folga_temporada_barco = array_fill(0::numeric, array[12]), folga_temporada_rv = array_fill(0::numeric, array[12]) where id;
+      end if;
+      if v.folga then
+        insert into public.agenda_aprendizado (item, chave, nivel, padrao, n_min, n, calculado, em_uso, em_uso_desde, estado, calculado_em)
+        values ('folga_semana', 'equipe', 'geral', 0.15, 8, 8, 0.30, 0.30, c_agora, 'em_uso', c_agora)
+        on conflict (item, chave) do update set estado = 'em_uso', calculado = 0.30, em_uso = 0.30, em_uso_desde = c_agora, n = 8, travado_ate = null;
+      end if;
+      s := public.agenda_saude(c_hoje, c_agora);
+      v_res := pg_temp.ok(v_res, v.nome,
+        (s #>> '{margem,carga_semana_fora}')::int = v.n and (s #>> '{margem,zeros_ok}')::boolean = (v.n = 0)
+        and (public._agenda_carga_da_semana(c_hoje - (extract(isodow from c_hoje)::int - 1)) ->> 'carga')::numeric = v.presa,
+        format('carga_semana_fora %s; a carga da semana %s', s #>> '{margem,carga_semana_fora}', public._agenda_carga_da_semana(c_hoje - (extract(isodow from c_hoje)::int - 1)) ->> 'carga'));
+      raise exception 'desfaz' using errcode = 'P0099';
+    exception when sqlstate 'P0099' then null;
+    end;
+  end loop;
+
+  -- (d) o *desfaz* do viés: a rodada do gravador no mesmo instante põe o geral em uso (1,00 → 1,25, com ação), rv:energia (1,29, com ação) e rv:geral, cujo medido é o próprio geral
+  -- (1,25: entra em uso sem ação). barco:energia estava travada com 1,25 e a trava venceu: volta a uso no mesmo instante, também sem ação, mas o valor é o de antes (não veio do geral)
+  for v in select * from (values ('dias', 'aprendizado dias', false), ('tudo', 'aprendizado', false), ('freio', 'aprendizado dias', true), ('tela', null, false), ('classe', null, false)) t(caso, alvo, freio) loop
+    begin
+      perform pg_temp.modos('ligado', v.freio);
+      set local session_replication_role = replica; delete from public.agenda_aprendizado where item = 'vies'; delete from public.agenda_acoes where antes ->> 'item' = 'vies'; set local session_replication_role = origin;
+      insert into public.agenda_aprendizado (item, chave, nivel, padrao, n_min, n, calculado, em_uso, em_uso_desde, estado, travado_ate, travado_valor, calculado_em)
+      values ('vies', 'estimativa:barco:energia', 'fina', 1.25, 1, 2, 1.25, 1.25, c_t - interval '30 days', 'travado', c_hoje - 1, 1.25, c_t - interval '30 days');
+      perform public._agenda_aprendizado_gravar('vies', 'estimativa:todas', 'todas', 1.25, 8, '[]'::jsonb, 1, '{}'::jsonb, c_t);
+      perform public._agenda_aprendizado_gravar('vies', 'estimativa:rv:energia', 'fina', 1.29, 2, '[]'::jsonb, 1.25, '{}'::jsonb, c_t);
+      perform public._agenda_aprendizado_gravar('vies', 'estimativa:rv:geral', 'fina', 1.25, 3, '[]'::jsonb, 1.25, '{}'::jsonb, c_t);
+      perform public._agenda_aprendizado_gravar('vies', 'estimativa:barco:energia', 'fina', 1.25, 2, '[]'::jsonb, 1.25, '{}'::jsonb, c_t);
+      -- e 2 que não são do geral: barco:geral chega a 1,25 pela ação dela (vinha de 1,00), e o do dono (outro grupo) entra em uso com 1,25 sem ação
+      perform public._agenda_aprendizado_gravar('vies', 'estimativa:barco:geral', 'fina', 1.25, 2, '[]'::jsonb, 1, '{}'::jsonb, c_t);
+      perform public._agenda_aprendizado_gravar('vies', 'dono:rv:energia', 'fina', 1.25, 2, '[]'::jsonb, 1.25, '{}'::jsonb, c_t);
+      v_g := (select id from public.agenda_acoes where tipo = 'aprendizado' and antes ->> 'chave' = 'estimativa:todas');
+      v_k := (select id from public.agenda_acoes where tipo = 'aprendizado' and antes ->> 'chave' = 'estimativa:rv:energia');
+      if v.caso = 'dias' then
+        -- o pré-requisito: a fixture tem a classe em uso sem ação (rv:geral), a que volta da trava sem ação (barco:energia), a do dono sem ação e 3 ações
+        v_res := pg_temp.ok(v_res, 'R8d0 a montagem: o geral 1,25, rv:energia 1,29 e barco:geral 1,25 em uso com ação; rv:geral, barco:energia e o dono rv:energia em uso com 1,25 sem ação, no mesmo instante',
+          (select count(*) from public.agenda_acoes where tipo = 'aprendizado' and antes ->> 'item' = 'vies') = 3
+          and (select bool_and(estado = 'em_uso' and em_uso = 1.25 and em_uso_desde = c_t)
+                 from public.agenda_aprendizado where chave in ('estimativa:rv:geral', 'estimativa:barco:energia', 'estimativa:todas', 'estimativa:barco:geral', 'dono:rv:energia'))
+          and (select count(*) from public.agenda_aprendizado where item = 'vies' and acao_id is null and estado = 'em_uso') = 3
+          and v_g is not null and v_k is not null,
+          (select string_agg(chave || ' ' || estado || ' ' || coalesce(em_uso::text, '-'), ' | ' order by chave) from public.agenda_aprendizado where item = 'vies'));
+      end if;
+      if v.caso in ('dias', 'tudo', 'freio') then
+        d := public.agenda_desfazer_dito(pg_temp.adm(), v.alvo, 'whatsapp', c_hoje, c_t + interval '10 minutes');
+        v_t := d ->> 'texto';
+        v_res := pg_temp.ok(v_res, format('R8d %s (%s): o geral, rv:energia e rv:geral (a classe que entrou com o geral) sem nada em uso e travados; o leitor do motor sem viés nas 3; barco:energia (o valor dela, de antes) continua; o texto diz 1,00× nas 2, o geral antes da classe, e nunca 1,25×',
+                                         '*desfaz ' || v.alvo || '*', case when v.freio then 'com o freio' else 'sem o freio' end),
+          (d ->> 'ok')::boolean
+          and (select bool_and(estado = 'travado' and em_uso is null) from public.agenda_aprendizado where chave in ('estimativa:todas', 'estimativa:rv:energia', 'estimativa:rv:geral'))
+          and (select estado = 'em_uso' and em_uso = 1.25 from public.agenda_aprendizado where chave = 'estimativa:barco:energia')
+          and public._agenda_margem_em_uso('vies', 'estimativa:todas') is null and public._agenda_margem_em_uso('vies', 'estimativa:rv:energia') is null
+          and public._agenda_margem_em_uso('vies', 'estimativa:rv:geral') is null
+          and v_t like 'Desfeito: as OS voltam a 1,00× o que sai do orçamento,% Desfeito: as OS de energia em motorhome voltam a 1,00× o que sai do orçamento,%'
+          and v_t not like '%1,25×%'
+          and (select texto from public.agenda_acoes where tipo = 'desfazer' and desfaz_a = v_k) like 'Desfeito: as OS de energia em motorhome voltam a 1,00×%'
+          and (select texto from public.agenda_aprendizado where chave = 'estimativa:rv:energia') like '%fico com 1,00× até %'
+          and (select texto like '%fico com 1,00× até %' and travado_ate = c_hoje + 28 and historico -> -1 ->> 'desfeita' = v_g::text
+                 from public.agenda_aprendizado where chave = 'estimativa:rv:geral')
+          and (select estado = 'em_uso' and em_uso = 1.25 from public.agenda_aprendizado where chave = 'dono:rv:energia')
+          -- e o foco: a linha do geral travada sem valor em uso diz o que vale (o padrão, que o leitor usa), com ou sem o freio
+          and (select e ->> 'texto' from jsonb_array_elements((select x -> 'linhas' from jsonb_array_elements(public._agenda_ver_aprendizado(c_hoje) #> '{dados,blocos}') x
+                                                                where (x ->> 'bloco')::int = 8)) e
+                where e ->> 'chave' = 'estimativa:todas') like '%fico com 1,00× até %',
+          format('%s | %s', v_t, (select string_agg(chave || ' ' || estado || ' ' || coalesce(em_uso::text, '-'), ' | ' order by chave) from public.agenda_aprendizado where item = 'vies')));
+      elsif v.caso = 'tela' then
+        -- só o geral (a linha dele no "o que mudou"): a classe que entrou com ele volta junto; rv:energia, com o valor dela (a ação dela), continua
+        d := public.agenda_desfazer(v_g, pg_temp.adm(), 'tela', c_hoje, c_t + interval '10 minutes');
+        v_res := pg_temp.ok(v_res, 'R8d2 o *desfaz* só do geral (a tela): rv:geral volta junto (travada, sem nada em uso); rv:energia, com a ação dela, barco:energia (de antes), barco:geral (1,25 pela ação dela) e o do dono continuam; "as OS voltam a 1,00×"',
+          (d ->> 'ok')::boolean and d ->> 'texto' like 'Desfeito: as OS voltam a 1,00×%'
+          and (select estado = 'travado' and em_uso is null from public.agenda_aprendizado where chave = 'estimativa:rv:geral')
+          and (select estado = 'em_uso' and em_uso = 1.29 from public.agenda_aprendizado where chave = 'estimativa:rv:energia')
+          and (select bool_and(estado = 'em_uso' and em_uso = 1.25) from public.agenda_aprendizado where chave in ('estimativa:barco:energia', 'estimativa:barco:geral', 'dono:rv:energia')),
+          format('%s | %s', d ->> 'texto', (select string_agg(chave || ' ' || estado || ' ' || coalesce(em_uso::text, '-'), ' | ' order by chave) from public.agenda_aprendizado where item = 'vies')));
+      else
+        -- só a classe, com o geral em uso: ela passa a usar o geral, 1,25, e o texto diz isso; rv:geral não muda
+        d := public.agenda_desfazer(v_k, pg_temp.adm(), 'tela', c_hoje, c_t + interval '10 minutes');
+        v_res := pg_temp.ok(v_res, 'R8d3 o *desfaz* só de rv:energia, com o geral em uso: "voltam a 1,25×" (o geral, que o leitor passa a usar nela); rv:geral continua em uso',
+          (d ->> 'ok')::boolean and d ->> 'texto' like 'Desfeito: as OS de energia em motorhome voltam a 1,25×%'
+          and public._agenda_margem_em_uso('vies', 'estimativa:rv:energia') is null and public._agenda_margem_em_uso('vies', 'estimativa:todas') = 1.25
+          and (select estado = 'em_uso' and em_uso = 1.25 from public.agenda_aprendizado where chave = 'estimativa:rv:geral'),
+          d ->> 'texto');
+      end if;
+      raise exception 'desfaz' using errcode = 'P0099';
+    exception when sqlstate 'P0099' then null;
+    end;
+  end loop;
+  -- o 2º passo da classe (1,10 ontem, 1,29 hoje) desfeito: a linha volta a 1,10; sem o freio o leitor usa 1,10 e o texto diz 1,10; com o freio o leitor não usa nada e o texto diz 1,00
+  for v in select * from (values (false, '1,10×'), (true, '1,00×')) t(freio, volta) loop
+    begin
+      perform pg_temp.modos('ligado', v.freio);
+      set local session_replication_role = replica; delete from public.agenda_aprendizado where item = 'vies'; delete from public.agenda_acoes where antes ->> 'item' = 'vies'; set local session_replication_role = origin;
+      perform public._agenda_aprendizado_gravar('vies', 'estimativa:rv:energia', 'fina', 1.10, 2, '[]'::jsonb, 1, '{}'::jsonb, c_t - interval '1 day');
+      perform public._agenda_aprendizado_gravar('vies', 'estimativa:rv:energia', 'fina', 1.29, 2, '[]'::jsonb, 1, '{}'::jsonb, c_t);
+      v_k := (select id from public.agenda_acoes where tipo = 'aprendizado' and antes ->> 'chave' = 'estimativa:rv:energia' and criada_em = c_t);
+      d := public.agenda_desfazer(v_k, pg_temp.adm(), 'tela', c_hoje, c_t + interval '10 minutes');
+      v_res := pg_temp.ok(v_res, format('R8d4 o 2º passo da classe desfeito %s: a linha volta a 1,10 (travada); o leitor do motor dá %s, e o texto diz "voltam a %s"',
+                                       case when v.freio then 'com o freio' else 'sem o freio' end, case when v.freio then 'nada (1,00)' else '1,10' end, v.volta),
+        (d ->> 'ok')::boolean and d ->> 'texto' like 'Desfeito: as OS de energia em motorhome voltam a ' || v.volta || '%'
+        and (select estado = 'travado' and em_uso = 1.10 from public.agenda_aprendizado where chave = 'estimativa:rv:energia')
+        and public._agenda_margem_em_uso('vies', 'estimativa:rv:energia') is not distinct from case when v.freio then null else 1.10 end,
+        d ->> 'texto');
+      raise exception 'desfaz' using errcode = 'P0099';
+    exception when sqlstate 'P0099' then null;
+    end;
+  end loop;
+
+  -- (e) o bloco 8 com o freio: o gravador anda pelo modo cru (em uso), o leitor do motor não usa; a linha diz "Em teste", como o cartão e a temporada
+  begin
+    perform pg_temp.modos('ligado', true);
+    update public.agenda_config set texto_max = 3000 where id;
+    set local session_replication_role = replica; delete from public.agenda_aprendizado where item in ('vies', 'folga_semana', 'promessa', 'tempo_compra', 'folga_compra', 'prazo_sem_fornecedor'); set local session_replication_role = origin;
+    perform public._agenda_aprendizado_gravar('vies', 'estimativa:todas', 'todas', 1.25, 8, '[]'::jsonb, 1, '{}'::jsonb, c_t);
+    perform public._agenda_aprendizado_gravar('folga_semana', 'equipe', 'geral', 0.20, 8, '[]'::jsonb, 0.15, '{"residuos": 8, "residuos_min": 7}'::jsonb, c_t);
+    perform public._agenda_aprendizado_gravar('tempo_compra', 'todas', 'geral', 2, 5, '[]'::jsonb, 1, '{"percentil": 2}'::jsonb, c_t);
+    -- e 2 classes do viés: rv:energia em uso pelo gravador (n 2) e barco:geral só medida, em teste (n 5); a ordem do bloco 8 vai pelo estado que vale
+    perform public._agenda_aprendizado_gravar('vies', 'estimativa:rv:energia', 'fina', 1.29, 2, '[]'::jsonb, 1.25, '{}'::jsonb, c_t);
+    insert into public.agenda_aprendizado (item, chave, nivel, padrao, n_min, n, calculado, estado, texto, calculado_em)
+    values ('vies', 'estimativa:barco:geral', 'fina', 1.25, 1, 5, 0.90, 'sombra', 'Em teste: a classe só medida.', c_t);
+    f := public._agenda_ver_aprendizado(c_hoje);
+    l8 := (select x -> 'linhas' from jsonb_array_elements(f #> '{dados,blocos}') x where (x ->> 'bloco')::int = 8);
+    v_res := pg_temp.ok(v_res, 'R8e com o freio, o viés (o geral e rv:energia), a folga da semana e o tempo de compra em uso pelo gravador (o modo cru) e nulos no leitor: as 4 linhas dizem "Em teste: …" (estado sombra, sem em uso), nenhuma diz que marca, guarda ou conta; a do geral, byte a byte; as classes pelo n (barco:geral, 5, antes de rv:energia, 2), as duas em teste',
+      (select count(*) from public.agenda_aprendizado where item in ('vies', 'folga_semana', 'tempo_compra') and estado = 'em_uso' and em_uso is not null) = 4
+      and public._agenda_margem_em_uso('vies', 'estimativa:todas') is null and public._agenda_margem_em_uso('folga_semana', 'equipe') is null
+      and public._agenda_margem_em_uso('tempo_compra', 'todas') is null and public._agenda_margem_em_uso('vies', 'estimativa:rv:energia') is null
+      and (select count(*) filter (where e ->> 'texto' like 'Em teste: %' and e ->> 'estado' = 'sombra' and e -> 'em_uso' = 'null'::jsonb) = 4 and count(*) = 4
+             from jsonb_array_elements(l8) e join public.agenda_aprendizado a on a.item = e ->> 'item' and a.chave = e ->> 'chave' and a.em_uso is not null)
+      and (select e ->> 'texto' from jsonb_array_elements(l8) e where e ->> 'chave' = 'estimativa:todas')
+          = 'Em teste: as OS levam 1,25× o que eu estimo pelo orçamento (8 OS medidas). Hoje marco os dias como saem do orçamento.'
+      and (select o from jsonb_array_elements(l8) with ordinality t(e, o) where e ->> 'chave' = 'estimativa:barco:geral')
+          < (select o from jsonb_array_elements(l8) with ordinality t(e, o) where e ->> 'chave' = 'estimativa:rv:energia')
+      and f ->> 'texto' not like '%desde qui 07/01%',
+      (select string_agg(format('[%s/%s/%s] %s', e ->> 'chave', e ->> 'estado', e ->> 'em_uso', e ->> 'texto'), ' | ') from jsonb_array_elements(l8) e));
+    -- sem o freio, o leitor usa: as linhas de antes (o texto do gravador, em uso), e a em uso antes da em teste
+    update public.agenda_config set gestor_so_propor = false where id;
+    f := public._agenda_ver_aprendizado(c_hoje);
+    l8 := (select x -> 'linhas' from jsonb_array_elements(f #> '{dados,blocos}') x where (x ->> 'bloco')::int = 8);
+    v_res := pg_temp.ok(v_res, 'R8e2 sem o freio, as mesmas 4 linhas são as do gravador, em uso, como antes ("marco os dias delas com 1,25× desde qui 07/01"); rv:energia (em uso) antes de barco:geral (em teste)',
+      (select count(*) filter (where e ->> 'texto' = a.texto and e ->> 'estado' = 'em_uso' and (e ->> 'em_uso')::numeric = a.em_uso) = 4 and count(*) = 4
+         from jsonb_array_elements(l8) e join public.agenda_aprendizado a on a.item = e ->> 'item' and a.chave = e ->> 'chave' and a.em_uso is not null)
+      and (select o from jsonb_array_elements(l8) with ordinality t(e, o) where e ->> 'chave' = 'estimativa:rv:energia')
+          < (select o from jsonb_array_elements(l8) with ordinality t(e, o) where e ->> 'chave' = 'estimativa:barco:geral')
+      and f ->> 'texto' like '%marco os dias delas com 1,25× desde qui 07/01.%',
+      (select string_agg(format('[%s/%s] %s', e ->> 'chave', e ->> 'estado', e ->> 'texto'), ' | ') from jsonb_array_elements(l8) e));
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- (f) o "o que mudou" com 3 linhas do viés e 1 do tempo de compra no mesmo instante: trocar os ids não muda a lista
+  begin
+    perform pg_temp.modos('ligado', false);
+    for v in select * from (values (1), (2)) t(k) loop
+      set local session_replication_role = replica; delete from public.agenda_acoes where tipo = 'aprendizado'; set local session_replication_role = origin;
+      insert into public.agenda_acoes (id, criada_em, dia, executada, origem, tipo, texto, antes, depois, desfazivel_ate)
+      values (case v.k when 1 then '00000000-0000-4000-8000-0000000000e1'::uuid else 'ffffffff-0000-4000-8000-0000000000e1'::uuid end, c_t, c_hoje, true, 'vigia', 'aprendizado',
+              'Aprendi: as OS vão a 1,2. *desfaz aprendizado* volta.',
+              '{"item": "vies", "chave": "estimativa:todas", "nivel": "todas", "em_uso": null, "valor": 1, "estado": "sombra"}', '{"item": "vies", "chave": "estimativa:todas", "nivel": "todas", "em_uso": 1.2, "n": 5}', c_t + interval '7 days'),
+             (case v.k when 1 then '00000000-0000-4000-8000-0000000000e2'::uuid else 'eeeeeeee-0000-4000-8000-0000000000e2'::uuid end, c_t, c_hoje, true, 'vigia', 'aprendizado',
+              'Aprendi: energia em motorhome vai a 1,3. *desfaz aprendizado* volta.',
+              '{"item": "vies", "chave": "estimativa:rv:energia", "nivel": "fina", "em_uso": null, "valor": 1, "estado": "sombra"}', '{"item": "vies", "chave": "estimativa:rv:energia", "nivel": "fina", "em_uso": 1.3, "n": 5}', c_t + interval '7 days'),
+             (case v.k when 1 then '00000000-0000-4000-8000-0000000000e3'::uuid else 'dddddddd-0000-4000-8000-0000000000e3'::uuid end, c_t, c_hoje, true, 'vigia', 'aprendizado',
+              'Aprendi: barco vai a 0,9. *desfaz aprendizado* volta.',
+              '{"item": "vies", "chave": "estimativa:barco:geral", "nivel": "fina", "em_uso": null, "valor": 1, "estado": "sombra"}', '{"item": "vies", "chave": "estimativa:barco:geral", "nivel": "fina", "em_uso": 0.9, "n": 5}', c_t + interval '7 days'),
+             (case v.k when 1 then '00000000-0000-4000-8000-0000000000e4'::uuid else 'aaaaaaaa-0000-4000-8000-0000000000e4'::uuid end, c_t, c_hoje, true, 'vigia', 'aprendizado',
+              'Aprendi: o tempo de compra vai a 2. *desfaz aprendizado* volta.',
+              '{"item": "tempo_compra", "chave": "todas", "nivel": "geral", "em_uso": null, "valor": 1, "estado": "sombra"}', '{"item": "tempo_compra", "chave": "todas", "nivel": "geral", "em_uso": 2, "n": 5}', c_t + interval '7 days');
+      d := public._agenda_mudancas(c_hoje, c_hoje, true, false, c_t + interval '1 hour');
+      if v.k = 1 then x1 := d; else x2 := d; end if;
+    end loop;
+    v_t := (select string_agg(x, ' | ' order by o, k) from jsonb_array_elements(x1) with ordinality e(g, o), jsonb_array_elements_text(g -> 'itens') with ordinality i(x, k));
+    v_res := pg_temp.ok(v_res, 'R8f 3 linhas do viés e 1 do tempo de compra no mesmo instante, com os ids trocados: a mesma lista (os textos, na mesma ordem); o viés na ordem do foco: o geral, depois as classes pela chave',
+      (select jsonb_agg(g -> 'itens' order by o) from jsonb_array_elements(x1) with ordinality e(g, o)) = (select jsonb_agg(g -> 'itens' order by o) from jsonb_array_elements(x2) with ordinality e(g, o))
+      and position('as OS vão a 1,2' in v_t) < position('barco vai a 0,9' in v_t) and position('barco vai a 0,9' in v_t) < position('energia em motorhome vai a 1,3' in v_t)
+      and position('as OS vão a 1,2' in v_t) > 0,
+      v_t || ' || ' || (select string_agg(x, ' | ' order by o, k) from jsonb_array_elements(x2) with ordinality e(g, o), jsonb_array_elements_text(g -> 'itens') with ordinality i(x, k)));
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  perform pg_temp.gravar(v_res);
+end
+$r8$;
 
 -- ── R7. A régua sem chave: com tudo em sombra e a rodada em teste gravada, o motor, a prontidão, a vigia e a rodada do cliente são os de antes ──
 -- A âncora de fora: a rodada de ANTES do P7 (a agenda_aprender da origem, como função temporária) com os 6 desligados × a rodada do P7 com os 6 em sombra; depois de cada uma, as mesmas
