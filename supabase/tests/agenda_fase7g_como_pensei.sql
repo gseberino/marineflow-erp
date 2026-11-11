@@ -989,6 +989,9 @@ begin
   begin
     perform pg_temp.publicado('sombra');
     perform pg_temp.os_extra('204', 'Daniel', 1, '[]'::jsonb);
+    -- uma pergunta aberta: sem nenhuma, o plano pode nem chamar agenda_perguntas_em_ordem (a junção com agenda_perguntas vazia; a 1ª bancada inteira do P3, 11/11
+    -- 01:20, escolheu esse plano e a falha não aconteceu — o que o dono vê é o mesmo, "nada por agora")
+    perform pg_temp.perg('parada', 'parada:c12', pg_temp.os('201'), null, pg_temp.em(date '2026-10-29', '11:00'));
     v_ok := pg_temp.pensei('ligado');
     foreach v_f in array array['_agenda_painel(p_hoje date) returns jsonb', 'agenda_perguntas_em_ordem(p_hoje date, p_agora timestamp with time zone) returns jsonb',
                                '_agenda_grade_de_agora(p_hoje date) returns jsonb', '_agenda_porque_linha(p_os uuid, p_alocs jsonb, p_hoje date) returns text',
