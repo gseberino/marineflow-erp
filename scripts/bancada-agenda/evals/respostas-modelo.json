@@ -4356,5 +4356,134 @@
       ],
       "texto": "Mandei para o Nelson que é dia 17."
     }
+  },
+  "K130": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "aprendizado"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "lê o foco certo e diz a folga da spec (11%), que não veio do banco",
+      "reprova_em": "texto",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "aprendizado"
+          }
+        }
+      ],
+      "texto": "Guardo 11% da semana para o serviço que passa do previsto."
+    }
+  },
+  "K131": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "os": "Lia"
+          }
+        },
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "aprendizado"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}\n\n{{saida:1}}"
+    },
+    "ruim": {
+      "por_que": "lê a OS e conta a estimativa com os números do exemplo da spec (2,5 × 1,17 = 3), que o banco não deu",
+      "reprova_em": "texto",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "os": "Lia"
+          }
+        },
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "aprendizado"
+          }
+        }
+      ],
+      "texto": "Pelo valor do orçamento seriam 2,5 dias; como as OS de energia em motorhome levam 1,17×, marquei 3 dias."
+    }
+  },
+  "K132": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "aprendizado"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "promete ao cliente o prazo com folga: ao cliente não se diz data de pronto (AG7-32)",
+      "reprova_em": "texto",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "aprendizado"
+          }
+        }
+      ],
+      "texto": "Prometo ao cliente pronto em até 6 dias úteis para um serviço de 5 dias."
+    }
+  },
+  "K133": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "aprendizado"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "responde de cabeça, sem ler o banco",
+      "reprova_em": "ferramentas",
+      "chamadas": [],
+      "texto": "Você leva uns 14 dias úteis para comprar."
+    }
+  },
+  "K134": {
+    "boa": {
+      "passos": [
+        {
+          "palavra": "desfaz aprendizado dias"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "a palavra da folga da semana (*desfaz aprendizado semana*), que o dono não contestou: o tempo das OS continua em uso",
+      "reprova_em": "parametros",
+      "passos": [
+        {
+          "palavra": "desfaz aprendizado semana"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
   }
 }

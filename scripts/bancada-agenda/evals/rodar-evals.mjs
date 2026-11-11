@@ -52,6 +52,9 @@
 // Fase 7f (P7): os estados fase7f (os 6 modos da 7f em teste, com o freio de produção) e fase7f_ligado (ligados, freio solto) são a fixture-fase7f.sql (ter 10/11/2026: as 8
 // perguntas da etapa, com o tamanho real) por cima da fase7d. O juiz dos parâmetros vale; o que a foto do plano não mostra da pergunta (veto_espera, veto_ate, o mostrado) vai em
 // espera.agenda.consultas.
+// Fase 7e (P8): os estados fase7e (os 6 modos da margem em teste, com o freio de produção, como o dado 20261111100900 deixa) e fase7e_ligado (5 ligados, freio solto; o prazo real
+// fica em teste, AG7-32) são a fixture-fase7e.sql (qui 07/01/2027: as OS medidas, as semanas da folga, as compras) por cima da fase7d, só com as OS da 7e na carteira, e a rodada do
+// aprendizado de qui 07/01 às 16:05 (em teste ela só mede; ligada, põe em uso o que mediu). O juiz dos parâmetros vale.
 // Sem modelo, isto prova os juízes e o caminho das RPCs, não o modelo: o ao-vivo.ts faz a parte do modelo.
 
 import { readFileSync } from 'node:fs';
@@ -113,6 +116,8 @@ const FASE7C_TAREFAS = ler(join(FIXTURES, 'fixture-fase7c-tarefas.sql'));
 const FASE7D = ler(join(FIXTURES, 'fixture-fase7d.sql'));
 // (Fase 7f, P7) as 8 perguntas da etapa, por cima da 7d (a fixture confere que a da 7d já está)
 const FASE7F = ler(join(FIXTURES, 'fixture-fase7f.sql'));
+// (Fase 7e, P8) a margem: as OS medidas, as semanas da folga e as compras de qui 07/01/2027, por cima da 7d (a fixture confere que a da 7d já está)
+const FASE7E = ler(join(FIXTURES, 'fixture-fase7e.sql'));
 /** (Fase 6) os 7 itens do aprendizado (aprendizado_ligados no estado fase6_ligado). */
 const ITENS_DO_APRENDIZADO = ['fator', 'mo', 'presenca', 'fornecedor', 'capacidade_dono', 'aviso_cliente', 'revisao'];
 /** (Fase 5) os 11 tipos da mensagem ao cliente (cliente_tipos_ligados no estado fase5_ligado). */
@@ -838,6 +843,7 @@ async function aplicarEstado(db, estado) {
   if (estado.startsWith('fase7c')) return void await aplicarEstadoDaFase7c(db, estado);
   if (estado.startsWith('fase7d')) return void await aplicarEstadoDaFase7d(db, estado);
   if (estado.startsWith('fase7f')) return void await aplicarEstadoDaFase7f(db, estado);
+  if (estado.startsWith('fase7e')) return void await aplicarEstadoDaFase7e(db, estado);
   if (estado === 'pos_rodada') return void await db.exec(POS_RODADA);
   if (estado === 'replay_0104') {
     await db.exec(REPLAY_0104);
@@ -1092,6 +1098,34 @@ async function aplicarEstadoDaFase7f(db, estado) {
   const ligado = estado === 'fase7f_ligado';
   await db.query(`update public.agenda_config set modo_bloco_agenda = $1, modo_veto = $1, modo_lote_dono = $1, modo_equipe_previsto = $1, modo_equipe_convite = $1,
                     modo_cliente_camadas = $1, gestor_so_propor = $2 where id`, [ligado ? 'ligado' : 'sombra', !ligado]);
+}
+
+/**
+ * (Fase 7e, P8) Os estados da 7e: fixture-fase7e.sql (qui 07/01/2027: as 8 OS do viés, as 2 do dono, as 8 semanas da folga, as compras) por cima da fase7d (os 6 modos da 7d em teste).
+ * Só as OS da 7e ficam na carteira (as outras entram na OS-E0, como nos testes da 7e). O aprendizado ligado, o gestor ligado, o fornecedor com 3 entregas (o dado).
+ *   fase7e         os 6 modos da margem em teste, com o freio (gestor_so_propor), como a produção fica depois da migration de dado 20261111100900;
+ *   fase7e_ligado  o viés, a folga da semana, a urgência, o tempo de compra e a folga da compra ligados, freio solto; o prazo real em teste (AG7-32: nunca liga).
+ * Nos dois, a rodada do aprendizado de qui 07/01 às 16:05: em teste ela só mede; ligada, põe em uso o que mediu (o viés por passo, a folga da semana, o tempo de compra).
+ */
+async function aplicarEstadoDaFase7e(db, estado) {
+  if (!['fase7e', 'fase7e_ligado'].includes(estado)) throw new Error(`estado "${estado}" não existe`);
+  await aplicarEstadoDaFase7d(db, 'fase7d');
+  await db.exec(FASE7E);
+  await db.query(`select set_config('marineflow.agrupar_orcamentos', 'on', true)`);
+  await db.query(`update public.service_orders set merged_into_id = 'e7e00000-0000-4000-8000-000000000e00'
+                   where service_order_number not like 'OS-7E%' and service_order_number <> 'OS-E0' and merged_into_id is null`);
+  await db.query(`select set_config('marineflow.agrupar_orcamentos', '', true)`);
+  await db.query(`select set_config('agenda_teste.hoje', '2027-01-07', true)`);
+  const ligado = estado === 'fase7e_ligado';
+  // texto_max no teto (3000): com o de produção (1000) o foco aprendizado corta o bloco 8 em teste quase inteiro, e o assistente não leria a folga, o prazo real nem o tempo de compra
+  // (NOVO-agenda-230, devolvido ao fio: é SQL). Aqui os casos julgam o caminho (a ferramenta e o foco) e as palavras do banco, não o corte.
+  await db.query(`update public.agenda_config set modo_leitura = 'ligado', modo_aprendizado = 'ligado', modo_marcar_sozinho = 'ligado', fornecedor_n_min = 3, texto_max = 3000,
+                         modo_vies = $1, modo_folga_semana = $1, modo_urgencia = $1, modo_promessa = 'sombra', modo_tempo_compra = $1, modo_folga_compra = $1,
+                         gestor_so_propor = $2 where id`, [ligado ? 'ligado' : 'sombra', !ligado]);
+  const r = await db.query(`select public.agenda_aprender('2027-01-07'::date, '2027-01-07 16:05-03'::timestamptz) as r`);
+  if (r.rows[0].r?.rodou !== true || Number(r.rows[0].r?.erros ?? 0) > 0) {
+    throw new Error(`${estado}: a rodada do aprendizado de qui 07/01 16:05 não rodou limpa: ${JSON.stringify(r.rows[0].r)}`);
+  }
 }
 
 /** Um tique da rotina da equipe (o task-automations a chama logo antes da vigia). */

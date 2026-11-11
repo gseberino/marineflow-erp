@@ -3975,6 +3975,7 @@ porque só o dono pode preenchê-las.
 - **Onde:** `supabase/functions/_shared/agenda/comandos.ts`: `COISA_DO_APRENDIZADO` (`:334`) só conhece as coisas da Fase 6 (fator, presença, valor, diária, folga, capacidade, carga, fornecedor), e "compra" está em `NAO_E_ALVO` (`:324`). E a linha do aprendizado em `_shared/ai/prompt.ts` (`:151`) lista só as coisas da Fase 6.
 - **Efeito:** a 20261111100600 ensina ao banco *desfaz aprendizado dias* (o viés), *semana* (a folga da semana) e *compra* (o tempo de compra) (R7.5-18; `agenda_desfazer_dito` e `_agenda_mudancas`). Pelo WhatsApp, "desfaz aprendizado dias" e "desfaz aprendizado semana" chegam ao banco pelo alvo de OS (`alvoDito`: 2 palavras, sem conectivo nem palavra de outra ferramenta), e o banco resolve. "desfaz aprendizado compra" não: `alvoDito` o recusa por causa de "compra", e a frase vai ao modelo, que não conhece a palavra pelo prompt. O "o que mudou" passa a dizer "*desfaz aprendizado compra* volta só essa" quando o tempo de compra é a 1ª linha desfazível. Lido no código; o TS não foi rodado.
 - **Na Fase 7e:** não corrigido no P7 (é TS e prompt: P8). A menor mudança: `dias|semana|compra` em `COISA_DO_APRENDIZADO` (antes de `alvoDito`), com o caso em `comandos_test.ts`; e as 3 palavras na linha que já existe do prompt (R7.5-18: sem linha nova; o teto de `prompt-ferramentas_test.ts` não muda). Sem efeito hoje: nada da margem fica em uso enquanto os 6 interruptores estão desligados ou em teste.
+- **P8 (11/11):** a palavra "compra" continua sem chegar: `comandos.ts` é lido também pelo `whatsapp-webhook` e pelo `ai-daily-briefing` (o grafo de import, `f7e/p8/quem-importa.mjs`), que a 7e não publica (R7.13: "task-automations, whatsapp-webhook e ai-daily-briefing não mudam"). O prompt ganhou só "dias" e "semana", que chegam ao banco pelo alvo de 2 palavras do *desfaz* (o caso novo em `comandos_test.ts` e o da 7e em `prompt-ferramentas_test.ts`, que reprova se o prompt ensinar "compra"). O "OK ligar o tempo de compra" (`fase7e-oks.md`) e o `ligar-fase7e.sql` dizem como voltar sem a palavra. Devolvido ao fio: a correção é a linha de `COISA_DO_APRENDIZADO` e o deploy das 4 edges que leem `comandos.ts`.
 - **Origem:** Fase 7e, P7.
 
 ### [NOVO-agenda-221] O cartão da OS pode dizer 2 números de dias com o viés ligado: duracao.dias (sem o viés) e duracao.estimativa (com ele)
@@ -3983,4 +3984,37 @@ porque só o dono pode preenchê-las.
 - **Onde:** `os_plano_da_os` (`20261111100600`): `duracao.dias` vem de `os_prontidao` (`duracao.dias`), que segue sem o viés em ligado (NOVO-agenda-153); `duracao.estimativa` vem de `agenda_meios_da_os`, o que o motor marca.
 - **Efeito:** com o viés em uso, o marcado ou o aprovado, o cartão pode trazer `dias` 2,5 ao lado da linha "Estimativa minha: 2,5 dias pelo valor do orçamento × 1,17 (…) = 3 dias." Os dados não mentem (a linha diz os 2 números e de onde vem cada um), mas a tela que mostrar só `dias` mostra o número que o motor não usa. A linha está provada na bancada (`agenda_fase7e_rodada.sql` R6e, R6f); o `dias` ao lado dela não foi lido lá: o que ele diz vem do achado 153 (leitura de código). Sem efeito hoje: o viés não está em uso e nenhuma OS tem o marcado diferente de 1.
 - **Na Fase 7e:** não corrigido (o achado 153 é da prontidão; a tela é do P8). O P8, ao pôr as 2 linhas em Duração (`PlanoDaOs.tsx`), mostra a estimativa no lugar do número sem o viés quando ela existe.
+- **P8 (11/11), na tela:** com a estimativa que vale para a OS (em uso, o marcado ou o aprovado: a que não começa por "Em teste"), `PlanoDaOs.tsx` a mostra no lugar do texto da duração, no aberto e no resumo, e não a repete embaixo (o smoke, "com o viés valendo nesta OS"). Fica de fora o assistente: o foco da OS segue com o número sem o viés (NOVO-agenda-231).
 - **Origem:** Fase 7e, P7.
+
+### [NOVO-agenda-230] Em teste, o foco aprendizado corta o bloco 8 da margem pelo texto_max: o assistente não lê a folga, o prazo real nem o tempo de compra
+
+- **Encontrado em:** Agenda de Produção, Fase 7e, P8 (11/11/2026), montando os evals K130 a K133 (§8.5): a sonda do estado fase7e (`f7e/p8/sonda-evals.mjs`, `sonda-evals.out`).
+- **Onde:** `_agenda_ver_aprendizado` (`20261111100600`): no corte por `texto_max` (1.000), as linhas do bloco 8 saem antes das dos blocos 1 a 7, salvo as em uso e as travadas (o desenho da §5.6 e do P7). E `resultadoDaLeitura` (`_shared/agenda/rpc-das-ferramentas.ts`) passa ao modelo só o texto ("nada de `dados`").
+- **Efeito:** com a margem em teste, "quanta folga você guarda na semana?", "até quando você promete pro cliente?" e "quanto tempo eu levo pra comprar?" não têm a resposta no texto que o assistente recebe. Medido na sonda: o texto de *agenda aprendizado* acaba em "• e mais 10", e do bloco 8 só fica a linha geral do tempo das OS; com `texto_max` 3000 (`sonda-evals2.out`), as 11 linhas do bloco aparecem (o tempo das OS no geral, em 3 tipos de serviço e nos dias do dono; a folga, a temporada, o prazo real, o tempo de compra, a folga da compra, a peça sem fornecedor). No replay da carteira real (P7, `f7e/p7/real.log`): 929 letras, 1 linha do bloco 8. O assistente diria que não sabe, ou inventaria. Nada sai a ninguém; é o dono sem a resposta. Em uso, as linhas ficam no corte.
+- **Na Fase 7e:** não corrigido (é SQL do foco; o P8 é TS, tela, evals e dado). Os evals K130 a K133 rodam com `texto_max` 3000 no estado (julgam o caminho e as palavras do banco, não o corte) e dizem por quê. A menor mudança é do fio: o foco aceitar o recorte da margem (como o foco da OS aceita `os`), ou o bloco 8 ceder ao corte depois dos blocos 1 a 7 quando a pergunta é dele.
+- **Origem:** Fase 7e, P8.
+
+### [NOVO-agenda-231] O foco da OS (agenda_ver com os) diz a duração sem o viés e sem a estimativa; só o cartão da tela tem os 2 números
+
+- **Encontrado em:** Agenda de Produção, Fase 7e, P8 (11/11/2026), montando o eval K131 (§8.5, "por que o serviço do Vanderlei ficou com 3 dias?").
+- **Onde:** `_agenda_ver_os` (`20261102100550`) escreve "Duração: " com `os_prontidao.duracao.texto`, que segue sem o viés em ligado (NOVO-agenda-153). A estimativa com os 2 números ("2,5 dias pelo valor do orçamento × 1,17 … = 3 dias") só existe em `os_plano_da_os` (`20261111100600`), que a tela lê e o assistente não. A §6.4 fala do "cartão da OS e o foco da OS"; o P7 fez o cartão.
+- **Efeito:** com o tempo das OS em uso, o assistente lê "Duração: 1 a 2 dias" (o número sem a correção) e só acha o "× 1,11" no foco aprendizado, por tipo de serviço. Medido na sonda (estado fase7e_ligado, a OS-E0 da fixture: o foco da OS diz "1 a 2 dias, 1 pessoa"; o foco aprendizado, "as OS de energia em motorhome levam 1,11× … marco os dias delas com 1,11×"). Sem efeito hoje: nada em uso.
+- **Na Fase 7e:** não corrigido (SQL). K131 julga o caminho (a OS e o foco aprendizado) e que nenhum número venha de fora do banco.
+- **Origem:** Fase 7e, P8.
+
+### [NOVO-agenda-232] O *desfaz* do tempo das OS repete a mesma frase para cada linha do dono
+
+- **Encontrado em:** Agenda de Produção, Fase 7e, P8 (11/11/2026), na sonda dos evals (estado fase7e_ligado, *desfaz aprendizado dias*: `f7e/p8/sonda-evals.out`).
+- **Onde:** o texto do *desfaz* do item `vies` com chave `dono:<classe>` (`_agenda_desfazer_aprendizado`, `20261111100600`, a correção da conferência do P7, pelo `_agenda_aprendizado_texto`): a frase não diz a classe.
+- **Efeito:** com o geral do dono (`dono:todas`) e uma classe dele (`dono:rv:diagnostico`) em uso, a resposta ao dono traz 2 vezes "Desfeito: os seus dias voltam a 1,00×, só nos serviços que eu ainda não marquei. Não troco de novo por 28 dias, salvo se o medido mudar muito." O que volta está certo (as 2 linhas travadas); o texto não diz qual era qual. Só com dias do dono medidos e em uso (hoje 0 OS com dias do dono).
+- **Na Fase 7e:** não corrigido (SQL do texto). A menor mudança: a frase do dono com a classe ("os seus dias nos serviços de diagnóstico em motorhome voltam a…") ou uma frase só para as linhas do dono do mesmo instante.
+- **Origem:** Fase 7e, P8.
+
+### [NOVO-agenda-233] O prazo real diz um número e faz a conta com outro ("até 1,00× … um serviço de 5 dias acaba em até 6")
+
+- **Encontrado em:** Agenda de Produção, Fase 7e, P8 (11/11/2026), na sonda dos evals (estado fase7e: 13 OS com o prazo medido, 8 em cada 10 em até 1,00×).
+- **Onde:** a linha "Prazo real" do foco aprendizado (o texto do item `promessa`, `_agenda_aprendizado_texto`, P5/P7): a 1ª frase diz o P80 medido (1,00×); a 2ª ("Com essa folga, um serviço de 5 dias acaba em até 6 dias úteis") usa o fator com a credibilidade, que puxa para o padrão de 1,5× (aqui 1,14: 5 × 1,14 = 5,7 → 6). A forma é a da R7.3-1 e da §6.2 (1,34× e "até 7 dias", com o fator 1,40).
+- **Efeito:** o dono lê "até 1,00×" e "5 dias acabam em 6": parece conta errada. Só para o dono (AG7-32); nada vai ao cliente.
+- **Na Fase 7e:** não corrigido (texto do SQL e da spec). Decisão de texto do fio: dizer o fator usado ("conto 1,14×, junto com o padrão de 1,5×").
+- **Origem:** Fase 7e, P8.

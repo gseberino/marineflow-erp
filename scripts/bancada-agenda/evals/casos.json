@@ -6554,6 +6554,205 @@
           "Mandei"
         ]
       }
+    },
+    {
+      "id": "K130",
+      "fase": 7,
+      "agora": "2027-01-07 17:30",
+      "grupo": "leitura",
+      "entrada": "quanta folga você guarda na semana?",
+      "estado": "fase7e",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "foco": "aprendizado"
+            }
+          }
+        ],
+        "texto_contem": [
+          "guardo 20% da semana da equipe"
+        ]
+      }
+    },
+    {
+      "id": "K131",
+      "fase": 7,
+      "agora": "2027-01-07 17:30",
+      "grupo": "leitura",
+      "entrada": "por que o serviço da Lia ficou com esses dias?",
+      "estado": "fase7e_ligado",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "os": {
+                "um_de": [
+                  "Lia",
+                  "lia",
+                  "OS-E0"
+                ]
+              }
+            }
+          },
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "foco": "aprendizado"
+            }
+          }
+        ],
+        "texto_contem": [
+          "Duração: 1 a 2 dias",
+          "As OS de energia em motorhome levam 1,11×"
+        ]
+      }
+    },
+    {
+      "id": "K132",
+      "fase": 7,
+      "agora": "2027-01-07 17:30",
+      "grupo": "leitura",
+      "entrada": "até quando você promete pro cliente?",
+      "estado": "fase7e",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "foco": "aprendizado"
+            }
+          }
+        ],
+        "texto_contem": [
+          "ao cliente não digo data de pronto"
+        ]
+      }
+    },
+    {
+      "id": "K133",
+      "fase": 7,
+      "agora": "2027-01-07 17:30",
+      "grupo": "leitura",
+      "entrada": "quanto tempo eu levo pra comprar?",
+      "estado": "fase7e",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "foco": {
+                "um_de": [
+                  "aprendizado",
+                  "compras"
+                ]
+              }
+            }
+          }
+        ],
+        "texto_contem": [
+          [
+            "Seu tempo para comprar",
+            "Tempo até comprar"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "K134",
+      "fase": 7,
+      "sem_modelo": true,
+      "grupo": "seguranca",
+      "agora": "2027-01-07 17:30",
+      "estado": "fase7e_ligado",
+      "entrada": "desfaz aprendizado dias (o dono manda às 17:30 de qui 07/01, depois da rodada das 16:05 que pôs o tempo das OS em uso; a palavra nova da 7e, R7.5-18)",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": [
+            "+ acoes aprendizado vigia executada desfeita: n=5",
+            "+ acoes desfazer dono executada: n=5",
+            "- acoes aprendizado vigia executada"
+          ]
+        },
+        "parametros": {
+          "diff": [
+            "~ aprendizado vies dono:rv:diagnostico: em_uso 1.04 → nulo",
+            "~ aprendizado vies dono:rv:diagnostico: estado em_uso → travado",
+            "~ aprendizado vies dono:rv:diagnostico: travado nulo → 2027-02-04",
+            "~ aprendizado vies dono:todas: em_uso 1.02 → nulo",
+            "~ aprendizado vies dono:todas: estado em_uso → travado",
+            "~ aprendizado vies dono:todas: travado nulo → 2027-02-04",
+            "~ aprendizado vies estimativa:barco:energia: em_uso 1.07 → nulo",
+            "~ aprendizado vies estimativa:barco:energia: estado em_uso → travado",
+            "~ aprendizado vies estimativa:barco:energia: travado nulo → 2027-02-04",
+            "~ aprendizado vies estimativa:rv:energia: em_uso 1.11 → nulo",
+            "~ aprendizado vies estimativa:rv:energia: estado em_uso → travado",
+            "~ aprendizado vies estimativa:rv:energia: travado nulo → 2027-02-04",
+            "~ aprendizado vies estimativa:rv:geral: em_uso 0.96 → nulo",
+            "~ aprendizado vies estimativa:rv:geral: estado em_uso → travado",
+            "~ aprendizado vies estimativa:rv:geral: travado nulo → 2027-02-04"
+          ]
+        },
+        "texto_contem": [
+          "Desfeito: as OS de energia em motorhome voltam a 1,00×"
+        ]
+      }
     }
   ]
 }
