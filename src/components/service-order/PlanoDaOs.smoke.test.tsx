@@ -8,6 +8,8 @@
 // concluída, o cartão de antes); a presença aprendida pelo texto da presença ("pelo que medi: …").
 // Fase 7b (P5): a linha "Equipe" (rótulo acima, o texto do banco, em âmbar quando falta a 2ª pessoa ou a dupla dita espera, a nota
 // embaixo); "Em teste: eu marcaria …" em sombra; some nula (a dupla da agenda desligada, a OS concluída) e no cartão de antes.
+// Fase 7e (P8): as duas linhas em Duração (rótulo acima, o texto do banco): "Estimativa" (a de teste) e "Prazo real" (só para o dono); com o viés valendo, a estimativa entra no
+// lugar do texto da duração, no aberto e no resumo (NOVO-agenda-221), sem repetir embaixo; sem as chaves (nada a dizer, o cartão de antes), Duração fica como era.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -247,6 +249,65 @@ describe('cartão Plano da OS', () => {
     await user.click(await screen.findByRole('button', { name: /Ver o plano/ }));
     expect(screen.queryByTestId('plano-duracao-campo')).not.toBeInTheDocument();
     expect(screen.getByText('faixa 2 a 3,5 dias')).toBeInTheDocument();
+  });
+
+  it('Fase 7e (P8): as duas linhas em Duração, com o rótulo acima e o texto do banco: "Estimativa" (em teste) e "Prazo real" (só para o dono)', async () => {
+    const user = userEvent.setup();
+    const estimativa = 'Em teste: com o que as OS de energia em motorhome costumam levar, eu marcaria 3,5 dias (hoje 3).';
+    const promessa = 'Pela folga do histórico, pronto até sex 13/11 (só para você: ao cliente não digo data de pronto).';
+    h.rpc.mockResolvedValue({ data: {
+      ...PLANO_DE_EXEMPLO, status: 'in_progress', pode_entregar: false, duracao: { ...PLANO_DE_EXEMPLO.duracao, estimativa, promessa },
+    }, error: null });
+    montar(<PlanoDaOs osId="os-100" status="in_progress" />);
+    // o resumo fechado é o de antes: a estimativa de teste não vale para esta OS
+    expect(await screen.findByText(/3 dias: Roberto \(dia todo\) \(você disse\)/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Ver o plano/ }));
+    const rotuloDuracao = screen.getByText('Duração');
+    expect(rotuloDuracao.tagName).toBe('DT');
+    for (const [id, rot, txt] of [['plano-duracao-estimativa', 'Estimativa', estimativa], ['plano-duracao-promessa', 'Prazo real', promessa]]) {
+      const linha = screen.getByTestId(id);
+      expect(rotuloDuracao.nextElementSibling?.contains(linha)).toBe(true);
+      const [rotulo, texto] = Array.from(linha.children);
+      expect(rotulo.textContent).toBe(rot);
+      expect(texto.textContent).toBe(txt);
+      // o rótulo vem antes do texto (acima, em bloco)
+      expect(rotulo.compareDocumentPosition(texto) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+    // a duração de sempre continua (o texto, a faixa) e nada vira botão
+    expect(rotuloDuracao.nextElementSibling?.textContent).toContain('3 dias: Roberto (dia todo) (você disse)');
+    expect(rotuloDuracao.nextElementSibling?.textContent).toContain('faixa 2 a 3,5 dias');
+    expect(screen.queryByTestId('plano-duracao-vale')).not.toBeInTheDocument();
+    expect(within(rotuloDuracao.nextElementSibling as HTMLElement).queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('Fase 7e (P8): com o viés valendo nesta OS, a estimativa (os 2 números) entra no lugar do texto da duração, no aberto e no resumo, e não repete embaixo (NOVO-agenda-221)', async () => {
+    const user = userEvent.setup();
+    const estimativa = 'Estimativa minha: 2,5 dias pelo valor do orçamento × 1,17 (as OS de energia em motorhome costumam levar mais) = 3 dias.';
+    h.rpc.mockResolvedValue({ data: {
+      ...PLANO_DE_EXEMPLO, status: 'in_progress', pode_entregar: false,
+      duracao: { ...PLANO_DE_EXEMPLO.duracao, dias: 2.5, fonte: 'sugerida', texto: '2,5 dias (estimativa minha)', estimativa },
+    }, error: null });
+    montar(<PlanoDaOs osId="os-100" status="in_progress" />);
+    // fechado: o resumo diz a estimativa que vale, não o número sem o viés
+    expect(await screen.findByText(estimativa, { exact: false })).toBeInTheDocument();
+    expect(screen.queryByText(/2,5 dias \(estimativa minha\)/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Ver o plano/ }));
+    const dd = screen.getByText('Duração').nextElementSibling as HTMLElement;
+    expect(within(dd).getByTestId('plano-duracao-vale').textContent).toBe(estimativa);
+    expect(dd.textContent).not.toContain('2,5 dias (estimativa minha)');
+    expect(screen.queryByTestId('plano-duracao-estimativa')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('plano-duracao-promessa')).not.toBeInTheDocument();
+  });
+
+  it('Fase 7e (P8): sem as chaves (nada a dizer, ou o cartão de antes), Duração e o resumo ficam como eram', async () => {
+    const user = userEvent.setup();
+    h.rpc.mockResolvedValueOnce({ data: PLANO_DE_EXEMPLO, error: null });
+    montar(<PlanoDaOs osId="os-69" status="in_progress" />);
+    expect(await screen.findByText(/3 dias: Roberto \(dia todo\) \(você disse\)/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Ver o plano/ }));
+    for (const id of ['plano-duracao-vale', 'plano-duracao-estimativa', 'plano-duracao-promessa']) expect(screen.queryByTestId(id)).not.toBeInTheDocument();
+    expect(screen.queryByText('Estimativa')).not.toBeInTheDocument();
+    expect(screen.queryByText('Prazo real')).not.toBeInTheDocument();
   });
 
   it('Fase 7b (P5): a linha "Equipe" com o rótulo acima, o texto do banco em âmbar (falta a 2ª pessoa) e a nota embaixo; em teste, o "eu marcaria"', async () => {

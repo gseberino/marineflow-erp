@@ -19,6 +19,11 @@
  * do prazo em âmbar; "Em teste:" na frente do que ainda está em teste) e as notas. Tudo é o texto do banco, nenhum valor. Some com os 6 modos do
  * local desligados, na OS que já foi feita e no cartão de antes. Sem botão: o local o dono diz na conversa.
  *
+ * Fase 7e (P8): duas linhas em Duração (rótulo acima), o texto do banco (os_plano_da_os, 20261111100600): "Estimativa" (o "Em teste: … eu marcaria N dias" do viés
+ * medido) e "Prazo real" (o fim com a folga do histórico, só para o dono: ao cliente não se diz data de pronto, AG7-32). Com o viés valendo nesta OS (em uso, o da marcação ou o
+ * aprovado), a estimativa diz os 2 números ("2,5 dias pelo valor do orçamento × 1,17 … = 3 dias") e entra no lugar do texto da duração, que diria o número sem o viés
+ * (NOVO-agenda-221), também no resumo. Somem sem nada a dizer (a chave ausente) e no cartão de antes.
+ *
  * Fase 5 (P6): o bloco "Cliente" — o que foi dito ao cliente (e se ainda vale), a confirmação e as mensagens desta OS
  * (lista curta, "em teste" quando o modo é sombra). Sem botão de mandar: a aprovação é pela palavra (*manda cliente
  * <nome>* / *segura cliente <nome>*) ou na conversa; a tela só cita a palavra que o banco escreve.
@@ -37,6 +42,14 @@ import {
 import { cn } from '@/lib/utils';
 
 const STATUS_SEM_DURACAO = ['completed', 'invoiced', 'cancelled'];
+
+/**
+ * (Fase 7e, P8) A estimativa do banco já vale para esta OS (não é a de teste)? Então ela diz o número que o motor usa, e o texto da duração diria o sem o viés
+ * (NOVO-agenda-221): ela entra no lugar dele. A de teste começa por "Em teste" (os_plano_da_os) e fica como linha à parte.
+ */
+function estimativaQueVale(estimativa: string | null | undefined): string | null {
+  return estimativa && !estimativa.startsWith('Em teste') ? estimativa : null;
+}
 
 function SeloDoNivel({ item }: { item: MaterialDoPlano }) {
   return (
@@ -158,7 +171,8 @@ export function PlanoDaOs({ osId, status, className }: { osId: string; status: s
       toast.error(e instanceof Error ? e.message : 'O banco não registrou a entrega.');
     }
   };
-  const resumo = [data.estado, data.duracao.texto].filter(Boolean).join(' · ');
+  const vale = estimativaQueVale(data.duracao.estimativa);
+  const resumo = [data.estado, vale ?? data.duracao.texto].filter(Boolean).join(' · ');
   const janela = [data.janela.bem_indisponivel, data.janela.nao_antes_texto, data.janela.precisa_ate_texto].filter(Boolean);
 
   return (
@@ -188,12 +202,24 @@ export function PlanoDaOs({ osId, status, className }: { osId: string; status: s
           <DadosDaFicha>
             <Dado rotulo="Marcos" largo>{data.marcos.texto}</Dado>
             <Dado rotulo="Duração">
-              {data.duracao.texto}
+              {vale ? <span className="block break-words" data-testid="plano-duracao-vale">{vale}</span> : data.duracao.texto}
               {data.duracao.faixa_texto && <span className="block text-xs text-muted-foreground">{data.duracao.faixa_texto}</span>}
               {data.duracao.campo && (
                 <span className="mt-2 block" data-testid="plano-duracao-campo">
                   <span className="block text-xs text-muted-foreground">Pelas OS parecidas</span>
                   <span className="block break-words text-sm">{data.duracao.campo}</span>
+                </span>
+              )}
+              {data.duracao.estimativa && !vale && (
+                <span className="mt-2 block" data-testid="plano-duracao-estimativa">
+                  <span className="block text-xs text-muted-foreground">Estimativa</span>
+                  <span className="block break-words text-sm">{data.duracao.estimativa}</span>
+                </span>
+              )}
+              {data.duracao.promessa && (
+                <span className="mt-2 block" data-testid="plano-duracao-promessa">
+                  <span className="block text-xs text-muted-foreground">Prazo real</span>
+                  <span className="block break-words text-sm">{data.duracao.promessa}</span>
                 </span>
               )}
             </Dado>

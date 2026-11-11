@@ -591,6 +591,8 @@ Deno.test("Fase 6 (P8) — agenda_ver tem o foco aprendizado (enum e descrição
   const d = porNome("agenda_ver").description;
   assertStringIncludes(d, "o que a agenda aprendeu com o que aconteceu (foco aprendizado");
   assertStringIncludes(d, "mudar é decisão do dono pelas perguntas da agenda");
+  // Fase 7e (P8, spec-fase7e.md §7, R7.3-1): a margem no foco aprendizado, e o prazo real só para o dono (AG7-32)
+  assertStringIncludes(d, "e a margem: quanto as OS passam da estimativa pelo orçamento, a folga da semana, o prazo real só para o dono (ao cliente não digo data de pronto) e o tempo de compra");
   // nenhuma ferramenta da agenda recebe parâmetro de agenda_config nem item do aprendizado para mudar
   for (const t of agendaProducaoTools) {
     const props = Object.keys((t.input_schema as { properties?: Record<string, unknown> }).properties ?? {});

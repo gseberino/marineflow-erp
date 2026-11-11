@@ -397,6 +397,17 @@ export interface PlanoDaOsDados {
      * com o aprendizado desligado e na OS concluída, faturada ou cancelada.
      */
     campo?: string | null;
+    /**
+     * Fase 7e (P8): a estimativa com o que as OS costumam levar (os_plano_da_os, 20261111100600): valendo nesta OS, os 2 números ("Estimativa minha: 2,5 dias pelo valor do
+     * orçamento × 1,17 (…) = 3 dias."; nos dias do dono, "Você disse 3 dias; contei 3,5 (…)."); em teste, "Em teste: … eu marcaria 3 dias (hoje 2,5).". Ausente sem nada a dizer,
+     * na OS concluída, faturada ou cancelada e antes da migration.
+     */
+    estimativa?: string;
+    /**
+     * Fase 7e (P8): o prazo real com a folga do histórico, só para o dono ("Pela folga do histórico, pronto até sex 13/11 (só para você: ao cliente não digo data de
+     * pronto)."; AG7-32). Ausente sem o fator medido, quando a folga não acrescenta dia, na OS que já foi feita e antes da migration.
+     */
+    promessa?: string;
   };
   /**
    * Fase 6 (P8): aprendida = o motivo da presença que a agenda aprendeu ("você foi a 3 de 4 OS de energia em motorhome"); o

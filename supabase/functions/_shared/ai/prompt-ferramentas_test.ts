@@ -328,6 +328,8 @@ function secaoDaAgenda(): string {
 // Fase 7f (P7): o silêncio e o *agenda espera* (spec-fase7f.md §7 e R8.5-28: +2 linhas, o teto sobe 2 a partir do vigente, 31) — entraram 2 linhas: só a pergunta que diz
 // "Sem resposta até" fica assim sem resposta (com o freio e em sombra, nenhuma diz: ela espera o dono), a única saída de quem não quer o padrão é *agenda espera <nome>*,
 // *agenda fica* não existe ("pode deixar como você propôs" não grava nada) e nada é decidido pelo prazo sem o banco dizer; e a informação só quando o dono pergunta. Teto 33.
+// Fase 7e (P8): a margem (spec-fase7e.md §7 e R7.5-24: nenhuma linha nova, o teto fica 33) — tudo na linha do aprendizado que já existia: a margem no foco aprendizado, o prazo
+// real só para o dono (AG7-32: ao cliente não se diz data de pronto), o que é urgente e as palavras dias e semana do *desfaz aprendizado <coisa>*.
 Deno.test("agenda de produção: a seção é curta (≤ 33 linhas: custa tokens em toda mensagem) e fica no bloco estável", () => {
   const secao = secaoDaAgenda();
   const linhas = secao.split("\n");
@@ -583,7 +585,8 @@ Deno.test("agenda de produção (Fase 6, P8): o foco aprendizado, os números do
   assertStringIncludes(secao, "mudar é decisão do dono pelas perguntas da agenda");
   assertStringIncludes(secao, "*agenda aprendizado* e *desfaz aprendizado* o dono manda direto, sem você");
   // Fase 6 (correção C2, item 6): o *desfaz aprendizado <coisa>* volta só ela (o comando sem IA a LÊ)
-  assertStringIncludes(secao, "*desfaz aprendizado* com a coisa (fator, presença, valor, folga, capacidade ou o nome do fornecedor, como *desfaz aprendizado Kamell*) volta só ela");
+  // (7e P8, R7.5-18) + dias (o tempo das OS) e semana (a folga da semana): mudança deliberada da frase
+  assertStringIncludes(secao, "*desfaz aprendizado* com a coisa (fator, presença, valor, folga, capacidade, dias, semana ou o nome do fornecedor, como *desfaz aprendizado Kamell*) volta só ela");
   const so = lerComandoDaAgenda("desfaz aprendizado Kamell");
   assertEquals(so?.comando === "desfazer" ? so.alvo : null, "aprendizado kamell");
   const agendaVer = porNome.get("agenda_ver")!;
@@ -596,6 +599,27 @@ Deno.test("agenda de produção (Fase 6, P8): o foco aprendizado, os números do
   assertEquals(desfaz?.comando === "desfazer" ? desfaz.alvo : null, "aprendizado");
   // sem crase no texto ensinado (o prompt é um template literal)
   assertEquals(secao.includes("`"), false);
+});
+
+// Agenda de Produção (Fase 7e, P8; spec-fase7e.md §7, R7.3-1, R7.5-18, R7.5-24): a margem entra na linha do aprendizado (nenhuma linha nova): o que ela mede, o prazo real só
+// para o dono (AG7-32: ao cliente não se diz data de pronto, nem pelo modelo), o que é urgente (o banco decide a folga) e as palavras dias e semana, que chegam ao banco pelo
+// leitor de comandos de hoje (o alvo de 2 palavras do *desfaz*). "compra" não chega (NOVO-agenda-220: comandos.ts é de whatsapp-webhook e ai-daily-briefing, que a 7e não
+// publica): por isso não está na frase.
+Deno.test("agenda de produção (Fase 7e, P8): a margem na linha do aprendizado, o prazo real só para o dono, a urgência e as palavras dias e semana", () => {
+  const secao = secaoDaAgenda();
+  const linha = secao.split("\n").find((l) => l.startsWith("- O que a agenda aprendeu com o que aconteceu")) ?? "";
+  assertStringIncludes(linha, "e a margem (quanto o serviço costuma passar da estimativa, a folga da semana, o prazo real, o seu tempo de compra): agenda_ver foco aprendizado");
+  assertStringIncludes(linha, "O prazo real é só para o dono: ao cliente a agenda não diz data de pronto, e você também não.");
+  assertStringIncludes(linha, "Urgente é o serviço que passa na frente (prioridade 1) ou que o cliente precisa logo: o banco decide se ele usa a folga.");
+  assertStringIncludes(linha, "\"aumenta a folga\"");
+  // as palavras novas da frase chegam ao banco como o *desfaz <alvo>* (o banco resolve "aprendizado dias" e "aprendizado semana": agenda_desfazer_dito, 20261111100600)
+  for (const coisa of ["dias", "semana"]) {
+    const c = lerComandoDaAgenda(`desfaz aprendizado ${coisa}`);
+    assertEquals(c?.comando === "desfazer" ? c.alvo : null, `aprendizado ${coisa}`);
+  }
+  // a palavra que não chega não é ensinada
+  assertEquals(linha.includes("semana, compra"), false);
+  assertEquals(linha.includes("`"), false);
 });
 
 // Correção de 29/10 (P1): as frases naturais do dono ("quais estão agendados?", "como você pensou a semana que vem?",

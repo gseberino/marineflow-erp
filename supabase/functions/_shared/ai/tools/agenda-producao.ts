@@ -155,8 +155,9 @@ export const agendaProducaoTools: ToolDef[] = [
       "as mensagens ao cliente: o que espera o dono, o que a agenda vai mandar, o que mandou e quem respondeu (foco " +
       "clientes; com os, só daquela OS, e o que foi dito ao cliente), " +
       "o que a agenda aprendeu com o que aconteceu (foco aprendizado: quanto as OS de cada tipo levam além do combinado, o " +
-      "atraso de cada fornecedor, a capacidade do dono, a presença dele e o valor por diária, com quantas medidas; só lê, " +
-      "e mudar é decisão do dono pelas perguntas da agenda), " +
+      "atraso de cada fornecedor, a capacidade do dono, a presença dele e o valor por diária, com quantas medidas; e a " +
+      "margem: quanto as OS passam da estimativa pelo orçamento, a folga da semana, o prazo real só para o dono (ao " +
+      "cliente não digo data de pronto) e o tempo de compra; só lê, e mudar é decisão do dono pelas perguntas da agenda), " +
       "o que o gestor da agenda marcou ou marcaria sozinho e por quê (foco gestor: pela estimativa do orçamento, o que ele " +
       "perguntou antes de marcar e o que fica de fora; só lê), " +
       "quem faz o quê na equipe e o que cada OS pede (foco habilidades: o que cada um faz, o responsável de cada OS, o que a " +

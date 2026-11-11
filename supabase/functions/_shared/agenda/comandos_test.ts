@@ -885,6 +885,9 @@ const TABELA_F6: Array<[string, ComandoDaAgenda]> = [
   ["desfaz aprendizado", { comando: "desfazer", alvo: "aprendizado" }],
   ["Desfaz o aprendizado", { comando: "desfazer", alvo: "aprendizado" }],
   ["*desfaz aprendizado*", { comando: "desfazer", alvo: "aprendizado" }],
+  // Fase 7e (P8, R7.5-18): dias (o tempo das OS) e semana (a folga da semana) chegam como o alvo de 2 palavras; o banco os resolve (agenda_desfazer_dito, 20261111100600)
+  ["desfaz aprendizado dias", { comando: "desfazer", alvo: "aprendizado dias" }],
+  ["desfaz aprendizado semana", { comando: "desfazer", alvo: "aprendizado semana" }],
 ];
 
 Deno.test("Fase 6 (P8) — lerComandoDaAgenda: *agenda aprendizado* (de ver) e *desfaz aprendizado* (o *desfaz <alvo>*)", () => {
