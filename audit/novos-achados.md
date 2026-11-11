@@ -211,6 +211,15 @@
 - **Na Fase 7g:** o P3 resolve só em `agenda_rascunho_marcar`, no dia pedido, com `modo_explicar` ligado (R9.4-5, R9.11): `_agenda_relacao_dita` lê a relação também quando ela vem no começo do dito, e `_agenda_data_com_relacao` a aplica sobre a data conferida (C7a, C7b de `agenda_fase7g_como_pensei.sql`). Os outros 7 chamadores seguem como estão, de propósito (a relação em toda data dita é "etapa própria", R9.11). A saída menor para eles: chamar `_agenda_data_com_relacao` no mesmo ponto, um por um, com o teste da frase até o *grava*.
 - **Origem:** Fase 7g, P3.
 
+### [NOVO-agenda-255] A relação da data dita fica ao contrário quando o período é recusado sem palavra de negação ("antes de quinta fica difícil")
+
+- **Encontrado em:** Agenda de Produção, Fase 7g, P3, 2ª conferência independente (11/11/2026, `f7g/p3conf/r2-conf.mjs`, parte 1); medido de novo depois da 2ª correção (`f7g/p3c2/repro-rel.depois.txt`).
+- **Onde:** `_agenda_relacao_dita` (`20261112100200_agenda_fase7g_como_pensei.sql`): a relação só cai para nula com uma palavra de negação (não, n, nunca, nem, nada, jamais, nenhum, nenhuma, ninguém, impossível, "sem" + chance(s), condição(ões) ou como), na oração dela ou numa oração sem a data.
+- **Efeito:** "antes de quinta fica difícil", "antes de quinta está fora de questão" e "antes de quinta ele está viajando" dão `antes` (C7a; `f7g/p3c2/repro-rel.depois.txt`). Com `modo_explicar` ligado, a relação `antes` leva o pedido de marcar ao último dia útil antes da data, com "(você disse antes de …)" na releitura, que o dono lê antes do *grava*: é o caminho que o replay mediu com "antes do dia 25 ninguém pode" antes da 2ª correção (OS #8, 24/11 em vez de 25/11); com estas 3 frases o pedido não foi rodado no replay. Em sombra e desligado, nada: a função nem é chamada.
+- **Por que ficou:** pede uma regra de estrutura (o que vem depois da data na oração da relação). Cortar a relação sempre que vier algo depois da data apagaria pedidos que o C7a fixa como certos ("marca o Daniel depois da quinta feira"), e uma lista de palavras ("difícil", "fora de questão", "viajando") não fecha. A 2ª conferência deu as 2 saídas, a regra ou o limite registrado; ficou o limite, no comentário da função e no C7a (as 3 frases com `antes`, de propósito).
+- **Quem liga precisa saber:** o "OK ligar as leituras" (R9.14) liga também a leitura de "depois de/antes de/até" no pedido de marcar (desvio 1 do P3).
+- **Origem:** Fase 7g, P3 (2ª conferência).
+
 ### [NOVO-agenda-96] `dados` de `agenda_ver` não chega ao modelo, e `mostrada_em` não vê a conversa (Fase 7d, correção, Onda 2)
 
 - **Encontrado em:** Agenda de Produção, Fase 7d, Onda 2 (06/11/2026), ao fazer o O8 e o R1.

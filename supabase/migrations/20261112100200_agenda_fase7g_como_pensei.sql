@@ -15,8 +15,9 @@
 --
 -- O QUE MUDA (com modo_explicar desligado, nada que o dono veja: as leituras novas respondem {modo: desligado} e a releitura do rascunho é a de antes):
 --   1. _agenda_relacao_dita (nova): a relação dita logo antes da data, nas palavras do dono (depois de, antes de, a partir de, até); nula sem relação, com
---      negação na oração dela ("não antes de quinta", "não pode antes de quinta", "antes de quinta não dá") ou numa oração sem a data ("antes do dia 25,
---      não dá"), com a data também sem relação (2 pedidos no mesmo trecho) e com relações diferentes para a mesma data. Só lê o texto (IMMUTABLE).
+--      negação na oração dela ("não antes de quinta", "não pode antes de quinta", "antes de quinta ninguém pode") ou numa oração sem a data ("antes do dia
+--      25, não dá"; "antes do dia 25, até lá não dá"), com a data também sem relação em qualquer oração (2 pedidos no mesmo trecho) e com relações diferentes
+--      para a mesma data. Só lê o texto (IMMUTABLE).
 --   2. _agenda_data_com_relacao (nova): a data conferida com a relação aplicada — depois = o 1º dia útil depois; antes = o último dia útil antes; a partir =
 --      a data como está; até = de hoje até a data. Sem relação, a entrada byte a byte; com ela, a saída ganha relacao e relacao_texto ("você disse depois de
 --      quinta"). _agenda_data_conferida NÃO é recriada: os outros 7 chamadores (22 chamadas) seguem como estão (R9.4-5).
@@ -63,13 +64,19 @@
 -- (correção da conferência, 11/11) A relação só vale quando é a única leitura do trecho; na dúvida, nula: a data como foi dita, a de antes do P3.
 --   A oração vai de um "e" ou "mas" ao seguinte (a vírgula e o ponto e vírgula viram "e"; sem o acento, o "é" também parte: "não é antes de quinta"
 --   deixa o "não" numa oração sem a data, e a negação solta anula, abaixo).
---   Negação (não, n, nunca, nem, nada, jamais, nenhum, nenhuma) na oração da relação e da data, antes ou depois dela: nula ("não antes de quinta", "não
---   pode antes de quinta", "antes de quinta não dá").
---   A data também sem relação, numa oração sem negação: nula (2 pedidos no mesmo trecho: "o barco A na quinta e o barco B depois de quinta"). A data sem
---   relação numa oração negada não conta: "quinta não, depois de quinta" = depois.
---   Negação numa oração sem a data e sem um "antes", "depois" ou "até" dela: nula ("antes do dia 25, não dá", a vírgula do áudio); com ele, a negação é
---   dele ("só depois do dia 10, antes não dá" = depois).
+--   Negação (não, n, nunca, nem, nada, jamais, nenhum, nenhuma; e, da 2ª conferência, ninguém, impossível e "sem" + chance(s), condição(ões) ou como) na
+--   oração da relação e da data, antes ou depois dela: nula ("não antes de quinta", "não pode antes de quinta", "antes de quinta não dá", "antes de quinta
+--   ninguém pode", "antes de quinta sem chance").
+--   A data também sem relação, em qualquer oração: nula (2 pedidos no mesmo trecho: "o barco A na quinta e o barco B depois de quinta"). (2ª conferência)
+--   Antes, a data sem relação numa oração negada não contava; mas a negação pode ser de outra coisa ("o barco A não passa de quinta e o barco B depois de
+--   quinta", "na quinta se não chover"), e ler de quem ela é não é seguro: "quinta não, depois de quinta" também dá nula (a quinta, como foi dita).
+--   Negação numa oração sem a data e sem um "antes", "depois" ou "até" dela: nula ("antes do dia 25, não dá", a vírgula do áudio). Com ele, a negação é
+--   dele, e (2ª conferência) conta a direção: contrária à da relação, a relação fica ("só depois do dia 10, antes não dá" = depois; "antes de sexta,
+--   depois não dá" = antes); a mesma, desfaz a relação: nula ("antes do dia 25, até lá não dá", "depois de quinta, depois disso não dá"). A mesma direção é
+--   "antes" ou "até" com a relação antes ou ate, e "depois" com a relação depois. a_partir não muda a data (é a data dita): o advérbio não é olhado.
 --   Relações diferentes para a mesma data: nula.
+--   LIMITE (2ª conferência): sem palavra de negação, a oração que diz que o período não serve não é lida, e a relação fica ao contrário ("antes de quinta
+--   fica difícil", "antes de quinta está fora de questão", "antes de quinta ele está viajando" dão antes); pediria uma regra de estrutura (NOVO-agenda-255).
 create or replace function public._agenda_relacao_dita(p_trecho text, p_dito text)
  returns text
  language plpgsql
@@ -78,7 +85,7 @@ create or replace function public._agenda_relacao_dita(p_trecho text, p_dito tex
 as $function$
 declare
   c_rel  constant text := '(?:depois d[aoe]|apos(?: [ao])?|antes d[aoe]|a partir d[aoe]|desde(?: [ao])?|ate(?: [ao])?)(?: dia)?';
-  c_nao  constant text := '\m(nao|n|nunca|nem|nada|jamais|nenhuma?)\M';
+  c_nao  constant text := '\m(nao|n|nunca|nem|nada|jamais|nenhuma?|ninguem|impossivel|sem (?:chances?|condicao|condicoes|como))\M';
   v_d    text := public._agenda_preparar_data(p_dito);
   v_t    text := ' ' || public._agenda_preparar_data(regexp_replace(coalesce(p_trecho, ''), '[,;]', ' e ', 'g')) || ' ';
   v_m    text[];
@@ -88,8 +95,8 @@ declare
   v_rels text[] := '{}';
   v_o    text;
   v_nega boolean;
-  v_tem  boolean;
   v_solta boolean := false;
+  v_contra text[] := '{}';
 begin
   if v_d = '' then
     return null;
@@ -100,16 +107,13 @@ begin
   end if;
   foreach v_o in array regexp_split_to_array(v_t, '\m(?:e|mas)\M') loop
     v_nega := v_o ~ c_nao;
-    v_tem := false;
     v_pos := 0;
     loop
       v_i := strpos(substr(v_o, v_pos + 1), ' ' || v_d || ' ');
       exit when v_i = 0;
       v_pos := v_pos + v_i;
-      v_tem := true;
       v_m := regexp_match(left(v_o, v_pos), '\m(' || c_rel || ') $');
       if v_m is null then
-        continue when v_nega;
         return null;
       end if;
       if v_nega then
@@ -123,16 +127,23 @@ begin
         v_rels := v_rels || v_k;
       end if;
     end loop;
-    if v_nega and not v_tem and v_o !~ '\m(depois|antes|ate)\M' then
+    -- aqui a oração negada não tem a data (com ela, já voltou nula acima)
+    if v_nega and v_o !~ '\m(depois|antes|ate)\M' then
       v_solta := true;
     end if;
+    if v_nega and v_o ~ '\m(antes|ate)\M' then
+      v_contra := v_contra || '{antes,ate}'::text[];
+    end if;
+    if v_nega and v_o ~ '\mdepois\M' then
+      v_contra := v_contra || '{depois}'::text[];
+    end if;
   end loop;
-  return case when cardinality(v_rels) = 1 and not v_solta then v_rels[1] end;
+  return case when cardinality(v_rels) = 1 and not v_solta and not (v_rels[1] = any (v_contra)) then v_rels[1] end;
 end;
 $function$;
 
 comment on function public._agenda_relacao_dita(text, text) is
-  'Agenda de Produção (Fase 7g, P3; §3.1 item 9, §5.3, R9.4-5): a relação dita logo antes da data no trecho do dono — depois (depois de/da/do, após), antes (antes de/da/do), a_partir (a partir de, desde) ou ate (até, até o/a), com "dia" no meio também. O dito que já começa pela relação vale pelo resto. Só vale quando é a única leitura do trecho (a oração vai de um "e" ou "mas", ou de uma vírgula, ao seguinte). Nula sem relação; com negação (não, n, nunca, nem, nada, jamais, nenhum, nenhuma) na oração da relação, antes ou depois da data ("não pode antes de quinta", "antes de quinta não dá"); com negação numa oração sem a data e sem um antes, depois ou até dela ("antes do dia 25, não dá"); com a data também sem relação fora de oração negada (2 pedidos no mesmo trecho); e com relações diferentes para a mesma data. "quinta não, depois de quinta" = depois. IMMUTABLE.';
+  'Agenda de Produção (Fase 7g, P3; §3.1 item 9, §5.3, R9.4-5): a relação dita logo antes da data no trecho do dono — depois (depois de/da/do, após), antes (antes de/da/do), a_partir (a partir de, desde) ou ate (até, até o/a), com "dia" no meio também. O dito que já começa pela relação vale pelo resto. Só vale quando é a única leitura do trecho (a oração vai de um "e" ou "mas", ou de uma vírgula, ao seguinte). Nula sem relação; com negação (não, n, nunca, nem, nada, jamais, nenhum, nenhuma, ninguém, impossível, sem chance(s), sem condição(ões), sem como) na oração da relação, antes ou depois da data ("não pode antes de quinta", "antes de quinta não dá", "antes de quinta ninguém pode"); com negação numa oração sem a data e sem um antes, depois ou até dela ("antes do dia 25, não dá"), ou com o seu antes ou até diante da relação antes ou ate, ou o seu depois diante da relação depois ("antes do dia 25, até lá não dá"); com a data também sem relação em qualquer oração (2 pedidos no mesmo trecho; "quinta não, depois de quinta" também); e com relações diferentes para a mesma data. Limite: sem palavra de negação, "antes de quinta fica difícil" dá antes. IMMUTABLE.';
 
 -- ── 2. A data com a relação aplicada ─────────────────────────────────────────────────────────────────
 -- R9.4-5: depois → o 1º dia útil depois do fim (de = até: um dia; o encaixe estende a marcação); antes → o último dia útil antes do começo (de = até); a_partir

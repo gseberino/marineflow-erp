@@ -18,7 +18,9 @@
 --   C7  a data dita (R9.4-5): a relação nas palavras do dono (_agenda_relacao_dita), a data com a relação, e da frase do dono até o *grava* ("passa o Daniel para
 --       depois de quinta" marca sex 06/11; "não antes de quinta" marca a quinta); em sombra e desligado, o rascunho byte a byte; os outros 7 chamadores e
 --       _agenda_data_conferida no md5 de antes; (correção da conferência) a negação longe da relação ("não pode antes de quinta", "antes de quinta não dá",
---       "antes do dia 25, não dá") e o trecho com 2 pedidos ("o barco A na quinta e o barco B depois de quinta") não dão relação, do pedido ao *grava*
+--       "antes do dia 25, não dá") e o trecho com 2 pedidos ("o barco A na quinta e o barco B depois de quinta") não dão relação, do pedido ao *grava*;
+--       (2ª conferência) nem a negação com o seu advérbio na mesma direção ("antes do dia 25, até lá não dá"), nem a data sem relação numa oração negada de
+--       outro pedido ("marca esse no dia 24 se não chover e o outro barco depois do dia 24"), nem ninguém, impossível e "sem chance"; os limites medidos
 --   C8  o freio (R9.6): a 1ª linha e o "Eu marcaria" da última conta do gestor (só o que toca a semana; a conta de outro dia; sem conta); sem o freio nada disso
 --   C9  "Preciso de você" (R9.7): a linha de agenda_perguntas_em_ordem como vem; o N de "Decisão N:" é o de agenda_decisoes_abertas (*agenda pendências*); a
 --       sem número com "•"; a já escolhida fora; o resto em *agenda pendências*
@@ -574,7 +576,7 @@ begin
     from (values ('passa o Daniel para depois de quinta', 'quinta', 'depois'), ('passa o Daniel para depois de quinta', 'depois de quinta', 'depois'),
                  ('marca antes de sexta', 'sexta', 'antes'), ('a partir de segunda', 'segunda', 'a_partir'), ('até dia 27', 'dia 27', 'ate'), ('até o dia 27', '27', 'ate'),
                  ('não antes de quinta', 'quinta', '∅'), ('não antes de quinta', 'antes de quinta', '∅'), ('marca na quinta', 'quinta', '∅'),
-                 ('quinta não, depois de quinta', 'quinta', 'depois'), ('depois de quinta, antes de quinta', 'quinta', '∅'), ('só depois do dia 10', 'dia 10', 'depois'),
+                 ('quinta não, depois de quinta', 'quinta', '∅'), ('depois de quinta, antes de quinta', 'quinta', '∅'), ('só depois do dia 10', 'dia 10', 'depois'),
                  ('depois de amanhã', 'amanhã', '∅'), ('marca o Daniel depois da quinta feira', 'quinta', 'depois'), ('desde terça', 'terça', 'a_partir'),
                  ('após sexta', 'sexta', 'depois'), ('até sexta compra o cabo e marca segunda', 'segunda', '∅'), ('marca de segunda a sexta', 'segunda', '∅'),
                  ('chocolate quinta', 'quinta', '∅'), ('', 'quinta', '∅'), ('marca quinta', '', '∅'),
@@ -590,18 +592,42 @@ begin
                  ('antes do dia 25, não dá', 'dia 25', '∅'), ('antes do dia 25, ele não pode', 'dia 25', '∅'), ('não pode, antes do dia 25', 'dia 25', '∅'),
                  ('antes de quinta, nem pensar', 'quinta', '∅'), ('passa o Daniel para depois de quinta, o cliente não respondeu', 'quinta', '∅'),
                  ('só depois do dia 10, antes não dá', 'dia 10', 'depois'), ('antes de sexta, depois não dá', 'sexta', 'antes'), ('depois de quinta, até lá não dá', 'quinta', 'depois'),
-                 -- a data também sem relação (2 pedidos no mesmo trecho): nula; a data sem relação numa oração negada não conta
+                 -- a data também sem relação (2 pedidos no mesmo trecho): nula; (2ª conferência) também numa oração negada: de quem é a negação não se lê com segurança
                  ('marca o barco A na quinta e o barco B depois de quinta', 'quinta', '∅'), ('passa o barco A para quinta e o barco B para depois de quinta', 'quinta', '∅'),
                  ('marca o barco A na quinta; o barco B só depois de quinta', 'quinta', '∅'), ('o barco A na sexta, o barco B antes de sexta', 'sexta', '∅'),
-                 ('pode marcar na quinta, antes de quinta ele não está', 'quinta', '∅'), ('não dá quinta, só depois de quinta', 'quinta', 'depois'),
-                 ('depois de quinta, quinta não', 'quinta', 'depois'), ('na quinta ele não pode e depois de quinta pode', 'quinta', 'depois'),
-                 ('quinta não mas depois de quinta', 'quinta', 'depois'), ('não antes de quinta, depois de quinta', 'quinta', '∅'),
+                 ('pode marcar na quinta, antes de quinta ele não está', 'quinta', '∅'), ('não dá quinta, só depois de quinta', 'quinta', '∅'),
+                 ('depois de quinta, quinta não', 'quinta', '∅'), ('na quinta ele não pode e depois de quinta pode', 'quinta', '∅'),
+                 ('quinta não mas depois de quinta', 'quinta', '∅'), ('não antes de quinta, depois de quinta', 'quinta', '∅'),
                  -- as que ficam
                  ('depois de quinta', 'quinta', 'depois'), ('só depois de quinta', 'quinta', 'depois'), ('passa para depois do dia 24', 'dia 24', 'depois'),
                  ('passa o Nelson para depois de quinta', 'quinta', 'depois'), ('passa o Allan para depois de quinta', 'quinta', 'depois'),
-                 ('até sexta compra o cabo para marcar segunda', 'segunda', '∅')) t(tr, di, esp)
+                 ('até sexta compra o cabo para marcar segunda', 'segunda', '∅'),
+                 -- (2ª conferência) a negação numa oração sem a data, com o seu advérbio na mesma direção da relação ("antes" ou "até" com antes ou ate; "depois"
+                 -- com depois): nula; na direção contrária, a relação fica (acima e aqui); a_partir não muda a data e não olha o advérbio
+                 ('antes do dia 25, antes disso não dá', 'dia 25', '∅'), ('antes do dia 25, até lá não dá', 'dia 25', '∅'), ('antes de quinta, até lá não dá', 'quinta', '∅'),
+                 ('antes do dia 25, antes disso ele não pode', 'dia 25', '∅'), ('depois de quinta, depois disso não dá', 'quinta', '∅'), ('antes de quinta, antes disso não dá', 'quinta', '∅'),
+                 ('até o dia 27, antes disso não dá', 'dia 27', '∅'), ('até sexta, até lá não dá', 'sexta', '∅'), ('até lá não dá, antes de quinta', 'quinta', '∅'),
+                 ('depois de quinta, antes disso não dá', 'quinta', 'depois'), ('até sexta, depois não dá', 'sexta', 'ate'), ('até lá não dá, só depois de quinta', 'quinta', 'depois'),
+                 ('a partir de quinta, depois disso não dá', 'quinta', 'a_partir'), ('desde terça, antes não dá', 'terça', 'a_partir'),
+                 ('até sexta, depois disso o chocolate não chega', 'sexta', 'ate'), ('antes de sexta, depois disso o atendimento não abre', 'sexta', 'antes'),
+                 ('depois de quinta mas antes não dá', 'quinta', 'depois'), ('antes de sexta, depois disso ele não pode', 'sexta', 'antes'),
+                 ('não dá a partir de quinta até sexta', 'quinta', '∅'),
+                 -- (2ª conferência) a data sem relação numa oração negada de outro pedido: nula
+                 ('o barco A não passa de quinta e o barco B depois de quinta', 'quinta', '∅'), ('marca o barco A na quinta se não chover e o barco B depois de quinta', 'quinta', '∅'),
+                 ('marca o barco A na quinta que o cliente não pode antes e o barco B depois de quinta', 'quinta', '∅'), ('o barco não passa de quinta, depois de quinta o cliente viaja', 'quinta', '∅'),
+                 ('marca esse no dia 24 se não chover e o outro barco depois do dia 24', 'dia 24', '∅'), ('o barco não passa do dia 24, depois do dia 24 o cliente viaja', 'dia 24', '∅'),
+                 -- (2ª conferência) ninguém, impossível e "sem" + chance(s), condição(ões) ou como são negação; o "sem" sozinho não é
+                 ('antes do dia 25 ninguém pode', 'dia 25', '∅'), ('antes do dia 25 é impossível', 'dia 25', '∅'), ('antes de quinta ninguém pode', 'quinta', '∅'),
+                 ('ninguém pode antes de quinta', 'quinta', '∅'), ('antes de quinta ninguém está livre', 'quinta', '∅'), ('antes de quinta é impossível', 'quinta', '∅'),
+                 ('impossível antes de quinta', 'quinta', '∅'), ('antes de quinta, impossível', 'quinta', '∅'), ('antes de quinta sem chance', 'quinta', '∅'),
+                 ('sem condição antes de quinta', 'quinta', '∅'), ('depois de quinta ninguém pode', 'quinta', '∅'), ('depois de quinta é impossível', 'quinta', '∅'),
+                 ('sem chances antes de quinta', 'quinta', '∅'), ('antes de quinta sem condições', 'quinta', '∅'), ('sem como marcar antes de quinta', 'quinta', '∅'),
+                 ('antes de quinta de jeito nenhum', 'quinta', '∅'), ('antes de quinta não tem como', 'quinta', '∅'),
+                 ('passa para depois de quinta sem pressa', 'quinta', 'depois'), ('depois de quinta, sem chanceler', 'quinta', 'depois'),
+                 -- LIMITE (2ª conferência, NOVO-agenda-255): sem palavra de negação, a oração que diz que o período não serve não é lida; a relação fica, ao contrário
+                 ('antes de quinta fica difícil', 'quinta', 'antes'), ('antes de quinta está fora de questão', 'quinta', 'antes'), ('antes de quinta ele está viajando', 'quinta', 'antes')) t(tr, di, esp)
    where coalesce(public._agenda_relacao_dita(t.tr, t.di), '∅') <> t.esp;
-  v_res := pg_temp.ok(v_res, 'C7a a relação logo antes da data (depois, antes, a partir, até; com "dia"; o dito que já começa por ela); nenhuma com negação na oração dela (antes ou depois da data), com negação solta numa oração sem a data, com a data também sem relação (2 pedidos), com relações diferentes, longe da data e sem data', v is null, v);
+  v_res := pg_temp.ok(v_res, 'C7a a relação logo antes da data (depois, antes, a partir, até; com "dia"; o dito que já começa por ela); nenhuma com negação na oração dela (antes ou depois da data; ninguém, impossível e sem chance também), com negação solta numa oração sem a data ou com o seu advérbio na mesma direção da relação, com a data também sem relação em qualquer oração (2 pedidos), com relações diferentes, longe da data e sem data; os limites sem palavra de negação ficam', v is null, v);
   if public.agenda_feriado(date '2026-11-02') is null then
     v_res := pg_temp.ok(v_res, 'C7b a data com a relação', true, 'PULADO: sem os feriados (Finados em 02/11)');
     perform pg_temp.gravar(v_res);
@@ -697,13 +723,16 @@ begin
   exception when sqlstate 'P0099' then null;
   end;
   -- C7j: (correção da conferência) do pedido ao *grava*: "marca o Daniel, mas não pode antes de quinta" e o trecho com o pedido de outro barco ("o Antônio
-  -- depois de quinta") marcam o Daniel na quinta, como antes do P3 (sem o conserto: a quarta e a sexta, com "(você disse …)")
+  -- depois de quinta") marcam o Daniel na quinta, como antes do P3 (sem o conserto: a quarta e a sexta, com "(você disse …)"); (2ª conferência) e um pedido de
+  -- cada defeito dela: o "até lá" na mesma direção, o "se não chover" do outro barco e o "ninguém pode"
   begin
     perform pg_temp.publicado('sombra');
     perform pg_temp.os_extra('204', 'Daniel', 1, jsonb_build_array(jsonb_build_object('payee', 'bb000000-0000-4000-8000-000000000002', 'turnos', 'dia')));
     update public.agenda_config set modo_explicar = 'ligado' where id;
     v := '';
-    for r_d in select jsonb_build_object('tr', t.tr) from (values ('marca o Daniel, mas não pode antes de quinta'), ('marca o Daniel na quinta e o Antônio depois de quinta')) t(tr) loop
+    for r_d in select jsonb_build_object('tr', t.tr) from (values ('marca o Daniel, mas não pode antes de quinta'), ('marca o Daniel na quinta e o Antônio depois de quinta'),
+                                                          ('antes de quinta, até lá o Daniel não pode'), ('marca o Daniel na quinta se não chover e o Antônio depois de quinta'),
+                                                          ('marca o Daniel, antes de quinta ninguém pode')) t(tr) loop
       begin
         r := public.agenda_rascunho_marcar(c_admin, 'whatsapp', 'Daniel', 'quinta', null, null, r_d ->> 'tr', d29, pg_temp.em(d29, '17:00'));
         r_s := pg_temp.grava(c_admin, d29, '17:05');
@@ -717,7 +746,7 @@ begin
       exception when sqlstate 'P0098' then null;
       end;
     end loop;
-    v_res := pg_temp.ok(v_res, 'C7j ligado, do pedido ao *grava*: "marca o Daniel, mas não pode antes de quinta" e o trecho com o pedido de outro barco marcam o Daniel a partir da qui 05/11, sem "(você disse …)"', v = '', v);
+    v_res := pg_temp.ok(v_res, 'C7j ligado, do pedido ao *grava*: "marca o Daniel, mas não pode antes de quinta", o trecho com o pedido de outro barco (também com "se não chover"), "antes de quinta, até lá o Daniel não pode" e "marca o Daniel, antes de quinta ninguém pode" marcam o Daniel a partir da qui 05/11, sem "(você disse …)"', v = '', v);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
