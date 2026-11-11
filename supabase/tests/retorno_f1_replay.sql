@@ -99,6 +99,8 @@ declare
   c_sem_texto constant text[] := array['acorde', 'cadastro_provisorio', 'fila'];
   c_max_voltas constant integer := 20000;
   c_max_pegar constant integer := 500;
+  -- diagnóstico da revocação (10/11): os 17 interessados do fi22, por cid (left(md5(phone), 6)), como no montar_teste.sh
+  c_diag constant text[] := array['0565a2', '0cb30d', '4e17a5', '9ca816', '9e193c', 'f39a1b', '1b4e7f', '361ba8', '4da91c', '552146', '6b04a3', '732271', '9280bc', 'b4a97f', 'eda1af', '7e6189', '9655bb'];
   v_relogio timestamptz := clock_timestamp();
   v_aquecer timestamptz;
   v_inicio timestamptz;
@@ -134,6 +136,8 @@ declare
   v_recibos integer;
   v_lotes jsonb;
   v_rnn jsonb;
+  v_diag jsonb;
+  v_diag_abrir jsonb := '[]'::jsonb;
   v_publico jsonb;
   v_duplicado jsonb;
   v_ambiguo jsonb;
@@ -237,7 +241,7 @@ begin
 
     -- (2) as recebidas de (t anterior, t], em ordem
     for v_m in
-      select w.id, w.occurred_at
+      select w.id, w.occurred_at, left(md5(w.phone_normalized), 6) as cid
         from public.whatsapp_messages w
        where w.direction = 'inbound'
          and w.occurred_at > v_t_antes
@@ -247,6 +251,10 @@ begin
        order by w.occurred_at, w.id
     loop
       v_r := public.retorno_abrir(v_m.id, false, v_m.occurred_at);
+      if v_m.cid = any (c_diag) and v_m.occurred_at >= v_inicio then
+        v_diag_abrir := v_diag_abrir || jsonb_build_array(jsonb_build_object('cid', v_m.cid, 'acao', v_r ->> 'acao',
+          'papel', v_r ->> 'papel', 'nivel', v_r ->> 'nivel', 'motivo', v_r ->> 'motivo', 'caso', v_r ->> 'abertura_id'));
+      end if;
       v_recebidas := v_recebidas + 1;
       if v_m.occurred_at >= v_inicio then
         v_recebidas_janela := v_recebidas_janela + 1;
@@ -474,6 +482,44 @@ begin
            where s.emissor = 'retorno' and s.estado = 'sombra' and s.tipo = 'recibo_numero_novo'
              and s.decidida_em >= v_inicio and s.decidida_em < v_fim) x;
 
+  -- diagnóstico da revocação: por cid, só rótulos e contagens
+  with m as (
+    select left(md5(w.phone_normalized), 6) as cid, rm.abertura_id, rm.pede_resposta, rm.pede_motivo, rm.consumida,
+           case when jsonb_typeof(rm.sinais) = 'object' then rm.sinais else '{}'::jsonb end as sinais
+      from public.retorno_mensagens rm
+      join public.whatsapp_messages w on w.id = rm.whatsapp_message_id
+     where rm.recebida_em >= v_inicio and rm.recebida_em < v_fim
+       and left(md5(w.phone_normalized), 6) = any (c_diag)
+  ), por_cid as (
+    select x.cid from (select m.cid from m union select e ->> 'cid' from jsonb_array_elements(v_diag_abrir) e) x
+  )
+  select coalesce(jsonb_agg(d.o order by d.o ->> 'cid'), '[]'::jsonb) into v_diag
+    from (select jsonb_build_object(
+            'cid', p.cid,
+            'abrir', (select coalesce(jsonb_object_agg(z.k, z.n), '{}'::jsonb)
+                        from (select coalesce(e ->> 'acao', '∅') || '/' || coalesce(e ->> 'papel', '∅') || '/' || coalesce(e ->> 'nivel', '∅')
+                                     || '/' || coalesce(e ->> 'motivo', '∅') as k, count(*) as n
+                                from jsonb_array_elements(v_diag_abrir) e where e ->> 'cid' = p.cid group by 1) z),
+            'msgs', (select count(*) from m where m.cid = p.cid),
+            'pede', (select count(*) from m where m.cid = p.cid and m.pede_resposta),
+            'sem_caso', (select count(*) from m where m.cid = p.cid and m.abertura_id is null),
+            'consumidas', (select count(*) from m where m.cid = p.cid and m.consumida),
+            'pede_motivos', (select coalesce(jsonb_object_agg(z.k, z.n), '{}'::jsonb)
+                               from (select coalesce(m.pede_motivo, '∅') as k, count(*) as n from m where m.cid = p.cid group by 1) z),
+            'sinais_true', (select coalesce(jsonb_agg(distinct e.key), '[]'::jsonb)
+                              from m, jsonb_each(m.sinais) e where m.cid = p.cid and e.value = 'true'::jsonb),
+            'casos', (select coalesce(jsonb_agg(jsonb_build_object(
+                        'papel', to_jsonb(a) ->> 'papel', 'quem', to_jsonb(a) -> 'quem' ->> 'papel', 'nivel', to_jsonb(a) ->> 'nivel',
+                        'motivo', to_jsonb(a) ->> 'motivo', 'tipo_recibo', to_jsonb(a) ->> 'tipo_recibo', 'estado', to_jsonb(a) ->> 'estado',
+                        'fechada_motivo', to_jsonb(a) ->> 'fechada_motivo', 'insistencias', to_jsonb(a) ->> 'insistencias',
+                        'saidas', (select coalesce(jsonb_agg(s2.tipo || '/' || s2.estado || '/' || coalesce(s2.motivo, '')), '[]'::jsonb)
+                                     from public.retorno_saidas s2 where s2.abertura_id = a.id))), '[]'::jsonb)
+                        from public.retorno_aberturas a
+                       where a.id in (select m.abertura_id from m where m.cid = p.cid and m.abertura_id is not null)
+                          or a.id::text in (select e ->> 'caso' from jsonb_array_elements(v_diag_abrir) e where e ->> 'cid' = p.cid))
+          ) as o
+          from por_cid p) d;
+
   -- ── 5. As falhas na própria janela ───────────────────────────────────────────────────────────────────
   -- público errado
   with r as (
@@ -600,6 +646,7 @@ begin
     'recibos_perto_de_resposta_humana', jsonb_build_object('perto', v_perto, 'total', v_recibos),
     'lotes', v_lotes,
     'recibos_numero_novo', v_rnn,
+    'diag_interessados', v_diag,
     'falhas', jsonb_build_object('publico_errado', jsonb_array_length(v_publico),
                                  'duplicado', jsonb_array_length(v_duplicado),
                                  'ambiguo', jsonb_array_length(v_ambiguo),
