@@ -9911,6 +9911,9 @@ export type Database = {
           marina_id: string | null
           merged_into_id: string | null
           operational_cost_total: number | null
+          origem: string | null
+          origem_chave8: string | null
+          origem_parceiro_id: string | null
           original_quote_amount: number | null
           parts_cost_total: number | null
           payment_condition_preset_id: string | null
@@ -10002,6 +10005,9 @@ export type Database = {
           marina_id?: string | null
           merged_into_id?: string | null
           operational_cost_total?: number | null
+          origem?: string | null
+          origem_chave8?: string | null
+          origem_parceiro_id?: string | null
           original_quote_amount?: number | null
           parts_cost_total?: number | null
           payment_condition_preset_id?: string | null
@@ -10093,6 +10099,9 @@ export type Database = {
           marina_id?: string | null
           merged_into_id?: string | null
           operational_cost_total?: number | null
+          origem?: string | null
+          origem_chave8?: string | null
+          origem_parceiro_id?: string | null
           original_quote_amount?: number | null
           parts_cost_total?: number | null
           payment_condition_preset_id?: string | null
