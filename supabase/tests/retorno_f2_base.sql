@@ -58,7 +58,12 @@ declare
 begin
   begin
   -- 1. Os padrões e os 5 tipos.
-  select * into v_cfg from public.retorno_config;
+  -- 12/11/2026: "nasce desligada" se confere no PADRÃO das colunas, numa linha nova de uma cópia da tabela: a linha real
+  -- muda quando o dono liga as chaves (11/11: cartão e carona ligados; prévia em sombra), e o teste não pode depender disso.
+  create temp table if not exists _retorno_cfg_padrao_f2 (like public.retorno_config including defaults);
+  truncate _retorno_cfg_padrao_f2;
+  insert into _retorno_cfg_padrao_f2 default values;
+  select * into v_cfg from _retorno_cfg_padrao_f2;
   if v_cfg.cartao_ligado or v_cfg.carona_ligada or v_cfg.variantes_ligadas then
     raise exception '1a: alguma chave da F2 não nasceu desligada';
   end if;
