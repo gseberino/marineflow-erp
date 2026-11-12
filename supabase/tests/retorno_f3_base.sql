@@ -93,7 +93,12 @@ begin
     values (v_cartao, 1, v_abertura, 'orcamento', 'i-f3');
 
   -- 1. Os padrões. Tudo nasce desligado e a proposta exige o ditado ligado.
-  select * into v_cfg from public.retorno_config;
+  -- 12/11/2026: "nasce desligada" se confere no PADRÃO das colunas, numa linha nova de uma cópia da tabela: a linha real
+  -- muda quando o dono liga as chaves (11/11: cartão e carona ligados; prévia em sombra), e o teste não pode depender disso.
+  create temp table if not exists _retorno_cfg_padrao_f3 (like public.retorno_config including defaults);
+  truncate _retorno_cfg_padrao_f3;
+  insert into _retorno_cfg_padrao_f3 default values;
+  select * into v_cfg from _retorno_cfg_padrao_f3;
   if v_cfg.previa_modo is distinct from 'desligado' or v_cfg.previa_ditado_ligado then
     raise exception '1a: a proposta não nasceu desligada';
   end if;
