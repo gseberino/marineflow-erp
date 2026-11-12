@@ -11,7 +11,7 @@
 --      os 6 modos: com o dado, em teste ou ligados pelo OK nomeado, e o prazo real e a folga da compra NUNCA ligados (AG7-32, R7.5-16); sem o dado, desligados; o fornecedor com 3 entregas
 --      (linha e DEFAULT) com o dado; o freio (só mostra); a lista de itens do aprendizado com os 6 da margem
 --   F  cada uma das 54 funções da 7e (25 recriadas e 29 novas): a assinatura, 1 por nome, security definer, volatilidade, search_path=public, as portas (anon e PUBLIC nunca) e o md5
---      do corpo (sem CR: o do replay, f7e/p8/gerar-sql.mjs)
+--      do corpo (sem CR: o do replay, f7e/p8/gerar-sql.mjs; e sem os blocos e as marcas da 7g, que recria agenda_propor depois, só acrescentando)
 --   Z  agenda_saude().margem: os zeros em 0 e zeros_ok; agenda_saude().ok (com o dado; na bancada só mostra)
 --   S  nenhum erro aprender:% nem gestor:puxar nas últimas 24 h, e nenhum aberto; com o dado, a 1ª rodada do aprendizado com a margem, sem erro e com os 6 modos dela (antes dela, só mostra)
 --
@@ -155,9 +155,29 @@ select format('F1 %s (%s): existe, 1 por nome, %s, %s, search_path=public, execu
                         has_function_privilege('authenticated', p.oid, 'execute'), has_function_privilege('service_role', p.oid, 'execute')) end
   from _pe_f r
   left join pg_proc p on p.oid = to_regprocedure('public.' || r.f);
+-- (7g, o rebase sobre a 7e publicada) o corpo sem os blocos e as marcas da 7g ("-- FASE 7g: …" até "-- FASE 7g: fim"; "-- (7g …" até "-- (7g: fim)"), linha a linha: a 7g recria
+-- agenda_propor (20261112100100) só acrescentando blocos, e o resto do corpo é o da 7e, byte a byte. Sem marca da 7g (antes dela), o corpo como está. Molde: o pg_temp.sem_7e de
+-- agenda_fase7f_pos_deploy_final.sql.
+create function pg_temp.sem_7g(p text) returns text language plpgsql immutable as $f$
+declare
+  l      text;
+  fora   text[] := '{}';
+  dentro boolean := false;
+begin
+  foreach l in array string_to_array(p, E'\n') loop
+    if not dentro and l ~ '^\s*-- (FASE 7g:|\(7g )' and l !~ '^\s*-- (FASE 7g: fim|\(7g: fim\))' then dentro := true; continue; end if;
+    if dentro then
+      if l ~ '^\s*-- (FASE 7g: fim|\(7g: fim\))' then dentro := false; end if;
+      continue;
+    end if;
+    fora := fora || l;
+  end loop;
+  return array_to_string(fora, E'\n');
+end $f$;
 insert into _resultado
-select format('F2 %s: o corpo é o da 7e (md5)', r.f), p.oid is not null and md5(replace(p.prosrc, chr(13), '')) = r.m,
-       case when p.oid is null then 'NÃO EXISTE' when md5(replace(p.prosrc, chr(13), '')) <> r.m then 'md5 ' || md5(replace(p.prosrc, chr(13), '')) || ' ≠ ' || r.m end
+select format('F2 %s: o corpo é o da 7e (md5, sem as marcas da 7g)', r.f), p.oid is not null and md5(pg_temp.sem_7g(replace(p.prosrc, chr(13), ''))) = r.m,
+       case when p.oid is null then 'NÃO EXISTE' when md5(pg_temp.sem_7g(replace(p.prosrc, chr(13), ''))) <> r.m
+            then 'md5 ' || md5(pg_temp.sem_7g(replace(p.prosrc, chr(13), ''))) || ' ≠ ' || r.m end
   from _pe_f r
   left join pg_proc p on p.oid = to_regprocedure('public.' || r.f);
 
