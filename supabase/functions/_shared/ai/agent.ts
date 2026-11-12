@@ -1,6 +1,7 @@
 import { resumirPedido } from "./tools/caixa.ts";
 import {
   resumirAcerto, resumirCadastro, resumirDiaria, resumirDivisaoDoPagamento, resumirEnvioAoFreelancer, resumirPagamento,
+  resumirServico,
 } from "./tools/diarias.ts";
 import { resumirEnvioAoCliente } from "./tools/whatsapp.ts";
 import { resumirPropostaDoCaso, resumirRespostaDoCaso, resumirUnidadeDoCaso, riscoDoEnvioLivre } from "./tools/retorno.ts";
@@ -193,6 +194,7 @@ const TOOL_LABELS_PT: Record<string, string> = {
   ajustar_saldo_do_caixa: "Acertar o Caixa pela contagem",
   registrar_diaria: "Registrar diária",
   cadastrar_freelancer: "Cadastrar freelancer",
+  registrar_servico_prestador: "Registrar serviço do prestador",
   registrar_pagamento_freelancer: "Pagamento a freelancer",
   fechar_acerto_freelancer: "Fechar acerto de diárias",
   reabrir_acerto_freelancer: "Reabrir acerto de diárias",
@@ -563,6 +565,14 @@ export async function buildPendingSummary(
   if (toolName === "registrar_diaria") {
     try {
       const r = await resumirDiaria({ admin } as unknown as ToolCtx, args);
+      if (r) return r;
+    } catch { /* cai no resumo genérico */ }
+  }
+  // Serviço do prestador (12/11/2026): o "sim" é sobre o que o banco VAI gravar — o valor de hoje, se já entra
+  // na conta (o cliente já pagou a OS) e o que substitui.
+  if (toolName === "registrar_servico_prestador") {
+    try {
+      const r = await resumirServico({ admin } as unknown as ToolCtx, args);
       if (r) return r;
     } catch { /* cai no resumo genérico */ }
   }

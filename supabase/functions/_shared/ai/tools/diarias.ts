@@ -89,7 +89,8 @@ export function datasDoIntervalo(de: string, ate: string, fimDeSemana = false): 
 }
 
 interface Perfil { id: string; valor_diaria: number | null; vigencia_inicio: string; vigencia_fim: string | null }
-export interface Freelancer { id: string; nome: string; perfis: Perfil[] }
+/** modo "servico" (12/11/2026): o prestador que recebe por serviço/OS, sem diária (o Alex). */
+export interface Freelancer { id: string; nome: string; perfis: Perfil[]; modo?: "diaria" | "servico" }
 
 /** Quem tem perfil de diária — só esses entram aqui (Alex e Felipe, por exemplo, não). */
 async function freelancersComDiaria(ctx: ToolCtx): Promise<Freelancer[]> {
@@ -109,13 +110,32 @@ async function freelancersComDiaria(ctx: ToolCtx): Promise<Freelancer[]> {
   return [...porPessoa.values()];
 }
 
+/**
+ * 12/11/2026: o prestador que recebe por SERVIÇO (o Alex, CNPJ MEI) — tem conta corrente começada e
+ * nenhuma diária. Entra na mesma conta (saldo, extrato, Pix pelo CNPJ abatendo).
+ */
+async function prestadoresPorServico(ctx: ToolCtx): Promise<Freelancer[]> {
+  const { data, error } = await ctx.admin.from("payees").select("id, name")
+    .in("kind", ["prestador", "comissionado"]).eq("active", true).not("conta_corrente_desde", "is", null);
+  if (error) throw new Error(`Não consegui ler os prestadores: ${error.message}`);
+  return ((data ?? []) as any[]).map((p) => ({ id: p.id, nome: p.name, perfis: [], modo: "servico" as const }));
+}
+
 async function acharFreelancer(ctx: ToolCtx, dito: unknown): Promise<Freelancer | { error: string }> {
-  const lista = await freelancersComDiaria(ctx);
+  const comDiaria = (await freelancersComDiaria(ctx)).map((f) => ({ ...f, modo: "diaria" as const }));
+  const ids = new Set(comDiaria.map((f) => f.id));
+  const lista: Freelancer[] = [...comDiaria, ...(await prestadoresPorServico(ctx)).filter((p) => !ids.has(p.id))];
   const nomes = lista.map((f) => f.nome).join(", ") || "nenhum";
   const r = escolherPorNome(String(dito ?? ""), lista);
   if ("achado" in r) return r.achado;
   if ("ambiguo" in r) return { error: `Qual deles: ${r.ambiguo.map((f) => f.nome).join(" ou ")}?` };
-  return { error: `Não achei freelancer com diária chamado "${dito ?? ""}". Os que têm diária: ${nomes}.` };
+  return { error: `Não achei freelancer nem prestador chamado "${dito ?? ""}". Os que têm conta corrente: ${nomes}.` };
+}
+
+/** A categoria do Pix a ele: diária para o diarista; serviço de terceiros para o prestador por serviço. */
+const CATEGORIA_SERVICO = "Serviços de terceiros";
+export function categoriaDoPagamento(f: Pick<Freelancer, "modo">): string {
+  return f.modo === "servico" ? CATEGORIA_SERVICO : "Diárias de freelancers";
 }
 
 export interface PedidoDeDiaria {
@@ -267,6 +287,9 @@ export async function resolverDiaria(
   if (!JORNADAS.includes(jornada)) return { error: `Jornada "${args.jornada}" não existe: use inteiro, meio, apagar ou manter.` };
   const f = await acharFreelancer(ctx, args.freelancer);
   if ("error" in f) return f;
+  if (f.modo === "servico") {
+    return { error: `${f.nome} recebe por serviço, não por diária: use registrar_servico_prestador (a OS e o valor combinado ou o percentual).` };
+  }
   const hoje = dataDita("hoje")!;
   const data = args.data == null || args.data === "" ? hoje : dataDoDito(args.data);
   if (!data) return { error: `Não entendi a data "${args.data}". Use hoje, ontem, dd/mm ou o dia da semana.` };
@@ -715,12 +738,18 @@ function periodoResolvido(c: { de?: string | null; ate?: string | null }): strin
 }
 
 const ESTADO: Record<string, string> = {
-  deve: "você deve a ele", adiantado: "pago adiantado (ele deve dias)", quitado: "quitado", semdias: "há pagamento sem dia lançado",
+  deve: "você deve a ele", adiantado: "pago adiantado (ele deve dias)", quitado: "quitado", semdias: "há pagamento sem dia nem serviço lançado",
 };
+
+/** O estado do saldo nas palavras certas: o prestador por serviço deve serviço, não dias (12/11/2026). */
+export function situacaoDoSaldo(estado: string, modo?: string): string {
+  if (modo === "servico" && estado === "adiantado") return "pago adiantado (os serviços na conta ainda não cobrem o que foi pago)";
+  return ESTADO[estado] ?? estado;
+}
 
 async function saldoDito(ctx: ToolCtx, f: Freelancer): Promise<string> {
   const c = await chamar(ctx, "conta_corrente_freelancer", { p_favorecido_id: f.id, p_de: null, p_ate: null }) as Record<string, unknown>;
-  return c && !("error" in c) ? ` Saldo com ${f.nome}: ${brl.format(Math.abs(Number(c.saldo_final) || 0))} (${ESTADO[String(c.estado)] ?? c.estado}).` : "";
+  return c && !("error" in c) ? ` Saldo com ${f.nome}: ${brl.format(Math.abs(Number(c.saldo_final) || 0))} (${situacaoDoSaldo(String(c.estado), f.modo)}).` : "";
 }
 
 // ── Cadastro de freelancer novo ──────────────────────────────────────────────────────────────────
@@ -997,7 +1026,7 @@ export async function resumirPagamento(ctx: ToolCtx, args: Record<string, unknow
   const quando = diaCurto(p.data ?? dataDita("hoje")!);
   const linhas = [`Pagamento a *${p.freelancer.nome}*: *${brl.format(p.valor)}* ${ROTULO_DA_FORMA[p.forma]} · ${quando}` +
     (p.socio ? ` · pago por ${p.socio.nome} (fica como reembolso a ele)` : "")];
-  linhas.push(`Descrição: ${descricaoDoPagamento(p)} · ${CATEGORIA_DIARIAS}`);
+  linhas.push(`Descrição: ${descricaoDoPagamento(p)} · ${categoriaDoPagamento(p.freelancer)}`);
   // resposta 4 do dono: a divisão proposta entre diárias e reembolso (o dono confirma ou diz outra)
   const div = await divisaoPedida(ctx, p.freelancer, p.valor, p.reembolsos);
   if ("error" in div) linhas.push(`⚠️ ${div.error}`);
@@ -1106,7 +1135,7 @@ async function registrarPagamento(ctx: ToolCtx, p: PedidoDePagamento) {
     const r = await chamar(ctx, "anotar_transacao", {
       p_sentido: "saida", p_valor: p.valor, p_data: p.data, p_documento: null, p_nome: null,
       p_fornecedor_id: null, p_favorecido_id: p.freelancer.id, p_cliente_id: null,
-      p_categoria: CATEGORIA_DIARIAS, p_os_id: null, p_descricao: desc,
+      p_categoria: categoriaDoPagamento(p.freelancer), p_os_id: null, p_descricao: desc,
     }) as Record<string, unknown>;
     // 27/10/2026: o banco dizia "a transação na fila é de OUTRO (JOAO MARCELO RODRIGUES CORREA)" — era o
     // próprio João, com o cadastro sem CPF. Nome diferente não prova que é outra pessoa (nem que é a mesma):
@@ -1117,7 +1146,7 @@ async function registrarPagamento(ctx: ToolCtx, p: PedidoDePagamento) {
     return r;
   }
   return await chamar(ctx, "lancar_no_caixa", {
-    p_sentido: "saida", p_valor: p.valor, p_descricao: desc, p_data: p.data, p_categoria: CATEGORIA_DIARIAS,
+    p_sentido: "saida", p_valor: p.valor, p_descricao: desc, p_data: p.data, p_categoria: categoriaDoPagamento(p.freelancer),
     p_fornecedor_id: null, p_favorecido_id: p.freelancer.id, p_cliente_id: null, p_os_id: null,
     p_pago_por: p.forma === "dinheiro" ? "caixa" : "socio", p_socio_id: p.socio?.id ?? null,
   }) as Record<string, unknown>;
@@ -1300,7 +1329,141 @@ export async function resumirEnvioAoFreelancer(ctx: ToolCtx, args: Record<string
     "A mensagem pede para ele conferir e responder OK; a resposta fica registrada no acerto."].join("\n");
 }
 
+// ── Serviço do prestador (12/11/2026) ────────────────────────────────────────────────────────────
+// O Alex recebe por serviço: um valor combinado na OS ou um percentual que muda de serviço a serviço
+// (decisão do dono: "varia, digo em cada um"). O valor só entra no saldo quando o cliente paga a OS.
+
+const BASES = ["mao_de_obra", "total", "lucro"] as const;
+
+export interface ServicoDito { valor: number | null; percentual: number | null; base: string | null }
+
+/** Só o que foi DITO: o valor combinado OU o percentual com a base. Nada é suposto. */
+export function servicoDito(args: Record<string, unknown>): ServicoDito | { error: string } {
+  if (args.apagar === true) return { valor: null, percentual: null, base: null };
+  const valor = numeroDito(args.valor);
+  const pct = numeroDito(args.percentual);
+  if (valor != null && pct != null) return { error: "Diga só um: o valor combinado OU o percentual." };
+  if (valor == null && pct == null) {
+    return { error: "Qual foi o combinado nesse serviço: um valor em reais ou um percentual (de quê)? Pergunte ao dono; não suponha." };
+  }
+  if (valor != null) {
+    if (valor <= 0) return { error: "O valor do serviço tem de ser maior que zero." };
+    return { valor, percentual: null, base: null };
+  }
+  if (pct! <= 0 || pct! > 100) return { error: `Percentual fora do razoável: ${pct}%.` };
+  const base = String(args.base ?? "");
+  if (!(BASES as readonly string[]).includes(base)) {
+    return { error: `${pct}% de quê? Pergunte a base: mão de obra, total da OS ou lucro da OS.` };
+  }
+  return { valor: null, percentual: pct, base };
+}
+
+export interface PedidoDeServico extends ServicoDito {
+  prestador: Freelancer; os: { id: string; numero: string }; descricao: string | null; data: string | null; apagar: boolean;
+}
+
+export async function resolverServico(ctx: ToolCtx, args: Record<string, unknown>): Promise<PedidoDeServico | { error: string }> {
+  const d = servicoDito(args);
+  if ("error" in d) return d;
+  const f = await acharFreelancer(ctx, args.prestador);
+  if ("error" in f) return f;
+  if (f.modo !== "servico") return { error: `${f.nome} recebe por diária: o dia dele é registrar_diaria.` };
+  if (!args.os) return { error: "Em qual OS foi o serviço? O valor entra na conta dele quando o cliente pagar essa OS." };
+  const os = await osPeloNumero(ctx, args.os);
+  if (!os) return { error: "Em qual OS foi o serviço?" };
+  if ("error" in os) return os;
+  let data: string | null = null;
+  if (args.data != null && args.data !== "") {
+    data = dataDoDito(args.data);
+    if (!data) return { error: `Não entendi a data "${args.data}". Use hoje, ontem, dd/mm ou o dia da semana.` };
+  }
+  const descricao = args.descricao ? String(args.descricao).trim() || null : null;
+  return { ...d, prestador: f, os, descricao, data, apagar: args.apagar === true };
+}
+
+function paramsDoServico(p: PedidoDeServico): Record<string, unknown> {
+  return {
+    p_favorecido_id: p.prestador.id, p_os_id: p.os.id, p_valor: p.valor, p_percentual: p.percentual, p_base: p.base,
+    p_descricao: p.descricao, p_data: p.data,
+  };
+}
+
+async function servicoNaOs(ctx: ToolCtx, f: Freelancer, osId: string): Promise<Record<string, any> | null> {
+  const { data, error } = await ctx.admin.rpc("servicos_do_prestador", { p_favorecido_id: f.id, p_autor: null });
+  if (error) throw new Error(`Não consegui ler os serviços de ${f.nome}: ${error.message}`);
+  return ((data ?? []) as any[]).find((s) => s.os_id === osId) ?? null;
+}
+
+/** O texto do "sim": o banco simula sem gravar (valor de hoje, se já entra na conta, o que substitui). */
+export async function resumirServico(ctx: ToolCtx, args: Record<string, unknown>): Promise<string | null> {
+  const p = await resolverServico(ctx, args);
+  if ("error" in p) return null;
+  if (p.apagar) {
+    const atual = await servicoNaOs(ctx, p.prestador, p.os.id);
+    return atual
+      ? `Apagar o serviço de *${p.prestador.nome}* na ${p.os.numero}: ${brl.format(Number(atual.valor))} (${atual.rotulo}).`
+      : `Não há serviço de ${p.prestador.nome} na ${p.os.numero} para apagar.`;
+  }
+  const { data, error } = await ctx.admin.rpc("registrar_servico_prestador", { ...paramsDoServico(p), p_autor: null, p_simular: true });
+  if (error) return `Serviço de *${p.prestador.nome}* na ${p.os.numero}\n⚠️ ${semCodigo(error.message)} — o sistema vai recusar.`;
+  return String((data as Record<string, unknown> | null)?.message ?? "") || null;
+}
+
 export const diariasTools: ToolDef[] = [
+  {
+    name: "registrar_servico_prestador",
+    description:
+      "Registra o SERVIÇO de um prestador que recebe por serviço, não por diária (hoje o Alex, CNPJ MEI): 'o Alex fez a OS " +
+      "119, combinamos 600', 'Alex: 30% da mão de obra da OS 74', '20% do lucro da OS 112 pro Alex'. Um serviço por OS: " +
+      "registrar de novo na mesma OS CORRIGE (não duplica). O valor só entra no saldo dele quando o cliente PAGAR a OS; antes " +
+      "fica 'aguardando o cliente pagar' (o percentual acompanha a OS até lá). Precisa da OS e do valor combinado OU do " +
+      "percentual com a base (mao_de_obra, total ou lucro): se faltar, PERGUNTE — percentual e base mudam de serviço a " +
+      "serviço, nunca suponha. apagar=true só para serviço lançado por engano. Pagamento a ele não é aqui (Pix ao CNPJ dele " +
+      "vem do extrato; em dinheiro, registrar_pagamento_freelancer). Saldo e o que espera o cliente: consultar_freelancer. " +
+      "Pede confirmação.",
+    input_schema: {
+      type: "object",
+      properties: {
+        prestador: { type: "string", description: "Nome como a pessoa falou ('Alex')." },
+        os: { type: "string", description: "Número da OS do serviço ('119', 'OS-00119')." },
+        valor: { type: "number", description: "Valor combinado em reais. Só se a pessoa DISSER. Sem percentual." },
+        percentual: { type: "number", description: "Percentual combinado (30 = 30%). Só se a pessoa DISSER; exige a base. Sem valor." },
+        base: {
+          type: "string", enum: [...BASES],
+          description: "Base do percentual: mao_de_obra (serviços da OS, com o desconto), total (a OS inteira) ou lucro (recebido − peças a custo − despesas − imposto).",
+        },
+        descricao: { type: "string", description: "O que ele fez, se a pessoa disser." },
+        data: { type: "string", description: "Dia do serviço, se a pessoa disser ('ontem', dd/mm). Não muda quando entra na conta." },
+        apagar: { type: "boolean", description: "Tirar o serviço dessa OS (lançado por engano)." },
+      },
+      required: ["prestador", "os"],
+    },
+    risk: "medium",
+    roles: CARGOS,
+    preValidar(args) {
+      const d = servicoDito((args ?? {}) as Record<string, unknown>);
+      return "error" in d ? d : null;
+    },
+    async execute(args, ctx) {
+      const b = semAcesso(ctx);
+      if (b) return b;
+      const p = await resolverServico(ctx, args);
+      if ("error" in p) return p;
+      if (p.apagar) {
+        const atual = await servicoNaOs(ctx, p.prestador, p.os.id);
+        if (!atual) return { error: `Não há serviço de ${p.prestador.nome} na ${p.os.numero}.` };
+        const r = await chamar(ctx, "apagar_servico_prestador", { p_servico_id: atual.id }) as Record<string, unknown>;
+        if (r && "error" in r) return r;
+        return { ...r, aviso: `${String(r?.message ?? "")}${await saldoDito(ctx, p.prestador)}`.trim() };
+      }
+      const r = await chamar(ctx, "registrar_servico_prestador", paramsDoServico(p)) as Record<string, unknown>;
+      if (r && "error" in r) return r;
+      return {
+        ok: true, valor: r?.valor, entra_na_conta: r?.entra_na_conta, substituiu: r?.substituiu,
+        aviso: `${String(r?.message ?? "")}${await saldoDito(ctx, p.prestador)}`.trim(),
+      };
+    },
+  },
   {
     name: "registrar_diaria",
     description:
@@ -1402,12 +1565,13 @@ export const diariasTools: ToolDef[] = [
   {
     name: "consultar_freelancer",
     description:
-      "Quanto se deve a um freelancer de diária e o que ele trabalhou e recebeu: 'quanto devo pro Roberto?', 'quantos dias o Mickael " +
+      "Quanto se deve a um freelancer de diária OU ao prestador por serviço (Alex) e o que ele trabalhou e recebeu: 'quanto devo pro Roberto?', 'quantos dias o Mickael " +
       "fez esse mês?', 'o que falta pagar pro João?' (periodo=em_aberto), 'o que ele fez desde o último pagamento?', 'de 14/09 a 27/09' " +
       "(de/ate), 'quanto o Roberto tem de extra este mês?' (extras_no_periodo e descontos_no_periodo, com o freelancer). " +
       "reembolsos = reembolso de despesas pagas pelo técnico (despesas da empresa que ele pagou, com o comprovante CMP-00124): " +
       "somam a favor dele e entram no próximo acerto (para tirar um, o dono cancela o CMP); a mesma despesa não entra também " +
-      "como extra (o extra de almoço é quando ele traz o próprio). Sem nome, mostra todos. Só consulta — não grava nada. Para o " +
+      "como extra (o extra de almoço é quando ele traz o próprio). Prestador por serviço: servicos = o que já entrou (OS que o " +
+      "cliente pagou); aguardando_cliente_pagar = serviços em OS que o cliente ainda não pagou (fora do saldo). Sem nome, mostra todos. Só consulta — não grava nada. Para o " +
       "PDF do extrato, enviar_extrato_freelancer.",
     input_schema: {
       type: "object",
@@ -1440,7 +1604,11 @@ export const diariasTools: ToolDef[] = [
           ...(Number(x.pago_aguardando_banco) > 0 ? { pago_lancado_a_mao_aguardando_banco: Number(x.pago_aguardando_banco) } : {}),
           // 27/10/2026: o Pix que já saiu do banco para ele e espera a fila — já está no "pago"
           ...(Number(x.pago_falta_aprovar) > 0 ? { pago_no_banco_falta_aprovar_na_fila: Number(x.pago_falta_aprovar) } : {}),
-          saldo: Number(x.saldo_final), situacao: ESTADO[x.estado] ?? x.estado, ultimo_pagamento: x.ultimo_pagamento,
+          saldo: Number(x.saldo_final), situacao: situacaoDoSaldo(x.estado, x.modo), ultimo_pagamento: x.ultimo_pagamento,
+          // 12/11/2026: o prestador por serviço (Alex)
+          ...(x.modo === "servico"
+            ? { recebe_por: "serviço", servicos: Number(x.servicos), aguardando_cliente_pagar: Number(x.aguardando_cliente) }
+            : {}),
         }));
         return { pessoas };
       }
@@ -1457,6 +1625,13 @@ export const diariasTools: ToolDef[] = [
             ...(Number(l.extras) > 0 ? { extras: Number(l.extras) } : {}),
             ...(Number(l.descontos) > 0 ? { descontos: Number(l.descontos) } : {}),
             ...(l.observacao ? { observacao: l.observacao } : {}),
+          };
+        }
+        // 12/11/2026: o serviço do prestador entra no dia em que o cliente pagou a OS
+        if (l.tipo === "servico") {
+          return {
+            data: l.data, servico: (l.os ?? []).map((o: any) => o.numero).join(", "), como: l.jornada, valor: Number(l.trabalhado),
+            ...(l.observacao ? { o_que_fez: l.observacao } : {}),
           };
         }
         // F2b (11/10/2026): o reembolso de um comprovante é a favor dele, não pagamento; o rótulo
@@ -1485,7 +1660,14 @@ export const diariasTools: ToolDef[] = [
         pago: Number(c.pago),
         ...(Number(c.pago_falta_aprovar) > 0 ? { pago_no_banco_falta_aprovar_na_fila: Number(c.pago_falta_aprovar) } : {}),
         extras_no_periodo: soma("extras"), descontos_no_periodo: soma("descontos"),
-        saldo: Number(c.saldo_final), situacao: ESTADO[c.estado] ?? c.estado,
+        saldo: Number(c.saldo_final), situacao: situacaoDoSaldo(c.estado, c.favorecido?.modo),
+        ...(c.favorecido?.modo === "servico" ? {
+          recebe_por: "serviço (não tem diária)",
+          servicos_na_conta: Number(c.servicos ?? 0),
+          aguardando_cliente_pagar: ((c.servicos_aguardando_cliente ?? []) as any[]).map((x) => ({
+            os: x.numero, cliente: x.cliente, como: x.rotulo, valor_hoje: Number(x.valor),
+          })),
+        } : {}),
         ultimos_lancamentos: linhas,
       };
     },

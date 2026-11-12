@@ -163,6 +163,8 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   "consultar_freelancer",
   // 01/10/2026: o dono pediu "cadastre o João Marcelo" e o assistente não tinha como.
   "cadastrar_freelancer",
+  // 12/11/2026: o Alex recebe por serviço (valor combinado ou percentual por OS), não por diária.
+  "registrar_servico_prestador",
   // 06/10/2026: pagar ("paguei 100 pro Roberto no Pix"), o extrato/recibo em PDF e o acerto.
   "registrar_pagamento_freelancer",
   "enviar_extrato_freelancer",
@@ -564,6 +566,8 @@ export const PERFIL_ADMIN: ReadonlySet<string> = new Set([
   //   o perfil enxuto tem teto de 100 ferramentas — pela rede, escrita pede "sim" do mesmo jeito —
   "registrar_pagamento_freelancer",
   "enviar_extrato_freelancer",
+  // 12/11/2026: o serviço do Alex pelo WhatsApp (valor combinado ou percentual por OS)
+  "registrar_servico_prestador",
 
   // — (B) cotacao —
   "record_quote_response",
