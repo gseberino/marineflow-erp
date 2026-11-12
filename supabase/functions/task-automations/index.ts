@@ -45,6 +45,11 @@
 //      mensagem-modelo vai a quem e quando (o banco escreve o texto e confere a janela, o teto e a aprovação dos 3
 //      primeiros dias). Depois da vigia (lê o plano já replanejado) e antes das regras. Passo à parte: nunca lança
 //      (agenda:cliente-vigia).
+//   0d2. A rodada explicar (agenda-explicar.ts, Fase 7g P5): agenda_explicar_rodar roda uma vez por dia, no 1º tique a partir de
+//      agenda_config.explicar_hora (16:35; o banco decide; nos outros tiques devolve cedo ou ja_rodou, no domingo nada, e com os modos da etapa
+//      desligados, desligado): registra as marcações da agenda e o que aconteceu com as do gestor, e o que o rebaixar faria por tipo de OS (só em
+//      teste). Depois da rodada do cliente e ANTES da rodada comunicar (o placar do dia do plano guardado antes da mensagem da quinta). Nada sai
+//      daqui. Passo à parte: nunca lança (agenda:explicar); a função ausente é pulada calada.
 //   0e. A rodada do que se fala (agenda-comunicar.ts, Fase 7f P4): agenda_comunicar_rodar, depois da rodada do cliente e com o MESMO instante
 //      da vigia e do aviso (mede o aviso desta rodada: contagens.lote_guardaria). O banco decide tudo: o destrava, o teto e, no dia do plano, a
 //      mensagem da semana ao dono, que volta em avisos e sai pelo caminho do aviso (o montador e agenda_aviso_enfileirar com p_semana). Em sombra
@@ -78,6 +83,7 @@ import { rodarRotinaDaAgenda } from "./agenda-rotina.ts";
 import { vigiarMaterialDaAgenda } from "./agenda-material.ts";
 import { vigiarClienteDaAgenda } from "./agenda-cliente.ts";
 import { aprenderDaAgenda } from "./agenda-aprender.ts";
+import { explicarDaAgenda } from "./agenda-explicar.ts";
 import { rodarSemanaDaEquipe } from "./agenda-equipe-semana.ts";
 import { habilidadeDaAgenda } from "./agenda-habilidade.ts";
 import { localDaAgenda } from "./agenda-local.ts";
@@ -610,6 +616,17 @@ servirComCors(async (req) => {
       agendaClienteVigia = { erro: String((e as any)?.message ?? e) };
     }
 
+    // A rodada explicar (Fase 7g, P5): depois da rodada do cliente e ANTES da rodada comunicar (spec-fase7g R9.5-21: o placar do dia do plano fica
+    // guardado antes da mensagem da quinta). O banco decide quando roda (uma vez por dia) e o que roda; nada sai daqui. Tem o próprio try/catch
+    // (explicarDaAgenda nunca lança: devolve { erro } e grava em app_error_logs); o de fora é a segunda trava, para nada daqui parar o resto.
+    let agendaExplicar: unknown = null;
+    try {
+      agendaExplicar = await explicarDaAgenda(db, new Date());
+    } catch (e) {
+      console.error("agenda:explicar:", e);
+      agendaExplicar = { erro: String((e as any)?.message ?? e) };
+    }
+
     // A rodada do que se fala (Fase 7f, P4): depois da rodada do cliente e antes das regras, com o MESMO instante da vigia e do aviso (o banco mede o que o
     // lote guardaria do aviso desta rodada). O banco decide o que roda; só a mensagem da semana sai daqui, pelo caminho do aviso. Tem o próprio try/catch
     // (comunicarDaAgenda nunca lança: devolve { erro } e grava em app_error_logs); o de fora é a segunda trava, para nada daqui parar as regras.
@@ -630,7 +647,7 @@ servirComCors(async (req) => {
       identidade, fios, agenda_material: agendaMaterial, agenda_material_vigia: agendaMaterialVigia, agenda_rotina: agendaRotina,
       agenda_tarefas: agendaTarefas, agenda_equipe_semana: agendaEquipeSemana,
       agenda_aprender: agendaAprender, agenda_habilidade: agendaHabilidade, agenda_local: agendaLocal, agenda_vigia: agendaVigia, agenda_aviso: agendaAviso, agenda_cliente_vigia: agendaClienteVigia,
-      agenda_comunicar: agendaComunicar,
+      agenda_explicar: agendaExplicar, agenda_comunicar: agendaComunicar,
       rules, r10, reminders, recurrence,
     };
     // Regra que falhou também é motivo para auditar: sem isto, um tick em que TODAS as

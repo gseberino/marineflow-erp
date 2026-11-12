@@ -1109,7 +1109,11 @@ declare
     '_agenda_alocacoes_porque', '_agenda_acoes_porque',
     -- FASE 7g: fim
     -- FASE 7g: (7g P3, 20261112100200) as leituras de como pensei e do porquê leem modo_explicar e os parâmetros dele e chamam as peças do P1
-    '_agenda_porque_fonte', '_agenda_porque_linha', '_agenda_porque_da_os', 'agenda_como_pensei'
+    '_agenda_porque_fonte', '_agenda_porque_linha', '_agenda_porque_da_os', 'agenda_como_pensei',
+    -- FASE 7g: fim
+    -- FASE 7g: (7g P5, 20261112100400) a rodada explicar e os seus passos leem modo_porque, modo_rebaixar, modo_placar, marcacoes_desde, origens_do_dono,
+    -- correcao_janela_du, os parâmetros do rebaixar, explicar_hora e explicar_tempo_max, e escrevem agenda_marcacoes e agenda_tipos_os
+    '_agenda_marcacao_desfecho', '_agenda_explicar_marcacoes', '_agenda_explicar_tipos', 'agenda_explicar_rodar'
     -- FASE 7g: fim
     ];
 begin

@@ -448,6 +448,8 @@ const FIXTURES_COMO_TEXTO = [
   // Fase 7g (P4): a migration do livre e do "se aprovar hoje" (o L8 de agenda_fase7g_livre.sql: a migration cria as 2 novas e recria só as 3; as origens das 3, que
   // o teste roda como pg_temp para o "desligado = o de antes", são mig_correcao_fase7a, mig_correcao_fase7b e mig_leituras_fase1, acima).
   ['agenda_teste.mig_livre_fase7g', '../../supabase/migrations/20261112100300_agenda_fase7g_livre.sql'],
+  // Fase 7g (P5): a migration das marcações (o K0d de agenda_fase7g_correcoes.sql: a migration só cria as 4 novas e não recria nenhuma função de antes).
+  ['agenda_teste.mig_correcoes_fase7g', '../../supabase/migrations/20261112100400_agenda_fase7g_correcoes.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

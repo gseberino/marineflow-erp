@@ -279,6 +279,13 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     vezes: 2,
     porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_habilidade); não é texto_max nem peca_embutida_acima',
   },
+  // Fase 7g (P5, 20261112100400): a rodada explicar grava a rodada como a do aprendizado.
+  {
+    onde: 'agenda_explicar_rodar',
+    casou: '1000',
+    vezes: 1,
+    porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_aprender); não é texto_max nem peca_embutida_acima',
+  },
   {
     onde: 'agenda_tarefas_rodar',
     casou: '1000',
@@ -491,6 +498,8 @@ function tsDaAgenda(): Trecho[] {
     path.join(FUNCOES, 'task-automations', 'agenda-cliente.ts'),
     // Fase 6 (P8): o passo da rodada do aprendizado no motor de 15 min.
     path.join(FUNCOES, 'task-automations', 'agenda-aprender.ts'),
+    // Fase 7g (P5): o passo da rodada explicar no motor de 15 min.
+    path.join(FUNCOES, 'task-automations', 'agenda-explicar.ts'),
     // Fase 7d (P5): o passo da rodada do local no motor de 15 min.
     path.join(FUNCOES, 'task-automations', 'agenda-local.ts'),
     // Correção de 29/10 (P4): o passo do aviso do gestor ao dono no motor de 15 min (o montador, _shared/agenda/

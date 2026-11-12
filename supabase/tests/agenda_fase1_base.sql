@@ -1137,6 +1137,9 @@ insert into _definer_da_agenda values ('agenda_como_pensei');
 -- login; a grade do motor é só do service_role). agenda_fase7g_livre.sql L0 e L7 provam a porta
 insert into _definer_da_agenda values ('_agenda_encaixe_simulado');
 insert into _definer_da_agenda values ('_agenda_entrada_simulada_da_os');
+-- Fase 7g (P5): a rodada explicar (o molde de agenda_aprender: definer, só service_role, com a porta de admin/financeiro dentro para quem tiver login;
+-- agenda_fase7g_correcoes.sql K0 e K11 provam a porta)
+insert into _definer_da_agenda values ('agenda_explicar_rodar');
   -- FASE 7f: fim
   -- FASE 7e: (7e P1, 20261111100000) nenhuma definer nova: o modo, a credibilidade, o z e a temporada são invoker, e o gatilho _agenda_medidas_compra_so_muda só mexe na própria linha. agenda_fase7e_base.sql prova as portas.
   -- FASE 7e: fim
