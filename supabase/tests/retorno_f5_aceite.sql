@@ -201,9 +201,17 @@ begin
       ('fecho com 10% a menos', false, 'negociacao', null), ('fecho com dez por cento a menos', false, 'negociacao', null),
       ('pode fazer, menos a pintura', false, 'negociacao', null), ('fecho por quinhentos', false, 'negociacao', null),
       ('se ficar em quatro e quinhentos eu fecho', false, 'condicional', null), ('pode fazer se sair por cem', false, 'condicional', null),
-      -- E o aceite de verdade continua aceite.
+      -- O número por extenso abaixo de cem, o "e meio" e o "paus" (conferência das ondas 1 a 3).
+      ('Fecho por quatro', false, 'negociacao', null), ('Faz por três e meio que eu fecho', false, 'negociacao', null),
+      ('Fecho em quatro e meio', false, 'negociacao', null), ('pode fazer por cinquenta', false, 'negociacao', null),
+      ('fechado em dez paus', false, 'negociacao', null), ('Topo por quatro', false, 'negociacao', null),
+      ('pode fazer por oito', false, 'negociacao', null), ('fechado, quarenta e cinco à vista', false, 'negociacao', null),
+      ('pode fazer por um e meio', false, 'negociacao', null), ('fecho em três', false, 'negociacao', null),
+      -- E o aceite de verdade continua aceite (o "um"/"uma" é artigo; "dezembro" e "novembro" não são número).
       ('Pode fazer, obrigado!', true, null, 'pode fazer'), ('Pode seguir com o serviço', true, null, 'pode seguir'),
-      ('de acordo', true, null, 'de acordo'), ('Bom dia! Aprovado', true, null, 'aprovado'), ('pode começar', true, null, 'pode comecar')
+      ('de acordo', true, null, 'de acordo'), ('Bom dia! Aprovado', true, null, 'aprovado'), ('pode começar', true, null, 'pode comecar'),
+      ('Pode fazer, um abraço', true, null, 'pode fazer'), ('aprovado, pode marcar para dezembro', true, null, 'pode marcar'),
+      ('Fechado! Uma boa semana', true, null, 'fechado')
     ) as x(texto, aceite, barrado, sinal)
   loop
     v_r := public._orcamento_aceite(v_rec.texto);

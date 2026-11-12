@@ -3,7 +3,7 @@
 -- 1. _orcamento_aceite: um léxico estrito, sem IA, que erra para o lado de NÃO achar aceite. O "?", o "R$", o número e o
 --    "%" são lidos no texto cru (o _retorno_busca tira a pontuação, o "$" e o "%"); o resto, sobre _retorno_busca. Barreiras
 --    antes das formas fortes: a contraproposta sem "R$" ("fecho em 4500", "pode fazer por quatro mil", "se for 4000 pode
---    fazer", "pela metade") nunca vira aceite.
+--    fazer", "pela metade", "fecho por quatro", "faz por três e meio", "fechado em dez paus") nunca vira aceite.
 -- 2. _orcamento_candidatos: os orçamentos enviados ao cliente na mesma chave ANTES da mensagem, com o 1º envio dentro de
 --    aceite_janela; abertos (rascunho, sem conversão e sem agrupamento). Os candidatos são os do instante da mensagem.
 -- 3. _orcamento_agenda_esperando: a agenda espera resposta deste cliente (mensagem enviada e sem resposta dentro de
@@ -72,11 +72,14 @@ begin
   elsif v_b ~ '\m(se|caso)\s+(voce|voces|vc|vcs|der|fizer|fizerem|fazer|baixar|conseguir|puder|for|ficar|sair)' then
     v_barrado := 'condicional';
   -- A negociação: qualquer número ou "%" no texto cru (valor, contraproposta, prazo; aceite de verdade quase nunca traz
-  -- número, e errar aqui é não achar), o valor por extenso, a metade e o "menos".
+  -- número, e errar aqui é não achar), o número por extenso (de dois em diante, como o algarismo), o "e meio", o "pau",
+  -- a metade e o "menos". O "um"/"uma" fica de fora: é artigo ("pode fazer, um abraço").
   elsif v_cru ~ '[0-9%]'
-     or v_b ~ ('(desconto|abatimento|mais barato|parcel|\mreais\M|valor|preco|caro|\m(mil|cem|cento|duzentos|trezentos|'
-               || 'quatrocentos|quinhentos|seiscentos|setecentos|oitocentos|novecentos|conto|contos|pila|pilas|metade|menos|'
-               || 'por cento)\M)') then
+     or v_b ~ ('(desconto|abatimento|mais barato|parcel|\mreais\M|valor|preco|caro|\m(dois|duas|tres|quatro|cinco|seis|'
+               || 'sete|oito|nove|dez|onze|doze|treze|quatorze|catorze|quinze|dezesseis|dezasseis|dezessete|dezassete|'
+               || 'dezoito|dezenove|dezanove|vinte|trinta|quarenta|cinquenta|cincoenta|sessenta|setenta|oitenta|noventa|'
+               || 'mil|cem|cento|duzentos|trezentos|quatrocentos|quinhentos|seiscentos|setecentos|oitocentos|novecentos|'
+               || 'e meio|e meia|conto|contos|pila|pilas|pau|paus|metade|menos|por cento)\M)') then
     v_barrado := 'negociacao';
   elsif v_b ~ '\m(nao|ainda nao|vou pensar|vou ver|vou analisar|depois (te )?(falo|aviso|retorno)|mais pra frente|outro momento)\M' then
     v_barrado := 'negacao';
@@ -99,7 +102,7 @@ end;
 $$;
 
 comment on function public._orcamento_aceite(text) is
-  'Retorno F5 (P6.1): {aceite, sinal, barrado} do texto do cliente, sem IA. Falso: vazio, mídia sem legenda, [audio]. Barreiras, na ordem: pergunta ("?" no texto cru), valor ("R$" no texto cru), parar, encerrou, condicional (se/caso + você, der, fizer, fazer, baixar, conseguir, puder, for, ficar, sair), negociacao (qualquer número ou "%" no texto cru; desconto, abatimento, mais barato, parcel, reais, valor, preço, caro, o valor por extenso, metade, menos, por cento), negacao, pedido_de_orcamento (as outras sobre _retorno_busca). Aceite: pode/podem/podemos fazer|seguir|executar|começar|iniciar|marcar|agendar|tocar|dar andamento|mandar ver; fechado|fechamos|vamos fechar|quero fechar|pode fechar|fecho; aprovado|aprovada|aprovo|aprovei; autorizo|autorizado|aceito|de acordo|topo; vamos fazer|quero fazer|bora fazer. sinal = o trecho que casou (até 40).';
+  'Retorno F5 (P6.1): {aceite, sinal, barrado} do texto do cliente, sem IA. Falso: vazio, mídia sem legenda, [audio]. Barreiras, na ordem: pergunta ("?" no texto cru), valor ("R$" no texto cru), parar, encerrou, condicional (se/caso + você, der, fizer, fazer, baixar, conseguir, puder, for, ficar, sair), negociacao (qualquer número ou "%" no texto cru; desconto, abatimento, mais barato, parcel, reais, valor, preço, caro, o número por extenso de dois em diante, e meio/e meia, conto, pila, pau, metade, menos, por cento), negacao, pedido_de_orcamento (as outras sobre _retorno_busca). Aceite: pode/podem/podemos fazer|seguir|executar|começar|iniciar|marcar|agendar|tocar|dar andamento|mandar ver; fechado|fechamos|vamos fechar|quero fechar|pode fechar|fecho; aprovado|aprovada|aprovo|aprovei; autorizo|autorizado|aceito|de acordo|topo; vamos fazer|quero fazer|bora fazer. sinal = o trecho que casou (até 40).';
 
 revoke all on function public._orcamento_aceite(text) from public, anon, authenticated;
 
