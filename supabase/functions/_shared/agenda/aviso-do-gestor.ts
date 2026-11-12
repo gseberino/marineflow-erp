@@ -24,6 +24,11 @@
 // com perguntas (é a mensagem da semana que sai mesmo sem mudança), e existe pelas perguntas: passando do teto, depois do que
 // ficou de fora saem as últimas mudanças ("e mais N") e só então as perguntas. Sem mudança, as perguntas não saem: se nem elas
 // cabem, nada a mandar (quem chama registra). O aviso de sempre (sem `semana`) segue o de antes, linha por linha.
+//
+// (Fase 7g, P6) Com o placar ligado, a quinta traz a peça `placar` ({texto, linha}): o placar da semana, depois do rodapé e
+// antes das perguntas, separado por uma linha em branco dos dois lados (_agenda_lote_texto junta igual). No corte, o placar
+// cede primeiro, inteiro, antes de qualquer corte de antes: o texto, depois a linha, depois só "Placar da semana em *agenda
+// placar*.", depois nada; e só então os cortes de antes, na ordem de antes. Sem a peça, o texto e os cortes são os de antes.
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -38,6 +43,15 @@ export interface PerguntasDoAviso {
   texto: string;
   perguntaIds: string[];
 }
+
+/** (Fase 7g, P6) O placar da semana na mensagem da quinta: o texto (só as linhas com dado) e a versão de uma linha. */
+export interface PlacarDoAviso {
+  texto: string;
+  linha: string | null;
+}
+
+/** (Fase 7g, P6) O que vai no lugar do placar quando nem a linha cabe. */
+export const PLACAR_EM_OUTRO_LUGAR = "Placar da semana em *agenda placar*.";
 
 /** As peças que o banco devolve quando é para avisar. */
 export interface PecasDoAviso {
@@ -54,6 +68,8 @@ export interface PecasDoAviso {
   perguntasErro?: string | null;
   /** (Fase 7f, P4) a mensagem da quinta: pode vir sem mudança, com perguntas; no corte, as mudanças saem antes das perguntas */
   semana?: boolean;
+  /** (Fase 7g, P6) o placar da semana, antes das perguntas; no corte, cede primeiro */
+  placar?: PlacarDoAviso;
 }
 
 /** A resposta de agenda_aviso_pecas, conferida. */
@@ -70,7 +86,7 @@ export interface AvisoMontado {
   perguntaIds: string[];
   comPerguntas: boolean;
   /** o que o teto tirou, na ordem */
-  cortes: Array<"fora" | "perguntas" | "mudancas" | "linha">;
+  cortes: Array<"placar" | "fora" | "perguntas" | "mudancas" | "linha">;
 }
 
 function textoLimpo(v: unknown): string | null {
@@ -111,6 +127,9 @@ export function lerPecasDoAviso(v: unknown): RespostaDasPecas | null {
   const textoDasPerguntas = textoLimpo(p?.texto);
   const perguntas = textoDasPerguntas ? { texto: textoDasPerguntas, perguntaIds: idsValidos(p?.pergunta_ids) } : null;
   if (!mudancas.length && !(semana && perguntas?.perguntaIds.length)) return null;
+  // (Fase 7g, P6) o placar da semana: sem texto, não há placar (a chave fica de fora, como antes)
+  const pl = r.placar && typeof r.placar === "object" && !Array.isArray(r.placar) ? r.placar as Record<string, unknown> : null;
+  const textoDoPlacar = textoLimpo(pl?.texto);
   return {
     avisar: true,
     pecas: {
@@ -120,6 +139,7 @@ export function lerPecasDoAviso(v: unknown): RespostaDasPecas | null {
       perguntas,
       ...(textoLimpo(r.perguntas_erro) ? { perguntasErro: textoLimpo(r.perguntas_erro) } : {}),
       ...(semana ? { semana: true } : {}),
+      ...(textoDoPlacar ? { placar: { texto: textoDoPlacar, linha: textoLimpo(pl?.linha) } } : {}),
     },
   };
 }
@@ -137,13 +157,17 @@ function eMais(n: number): string {
   return `• e mais ${n} ${n === 1 ? "mudança" : "mudanças"}: *o que mudou* mostra todas.`;
 }
 
-function juntar(p: PecasDoAviso, o: { fora: boolean; perguntas: boolean; k: number; primeira?: string }): string {
+function juntar(
+  p: PecasDoAviso,
+  o: { fora: boolean; perguntas: boolean; k: number; primeira?: string; placar?: string | null },
+): string {
   const n = p.mudancas.length;
   const linhas = [p.cabecalho, ...p.mudancas.slice(0, o.k).map((m, i) => `• ${i === 0 && o.primeira !== undefined ? o.primeira : m.texto}`)];
   if (o.k < n) linhas.push(eMais(n - o.k));
   if (o.fora && p.fora) linhas.push(p.fora);
   if (p.rodape) linhas.push(p.rodape);
-  const corpo = linhas.join("\n");
+  // (Fase 7g, P6) o placar, numa linha em branco própria, antes das perguntas (sem ele, o texto de antes)
+  const corpo = o.placar ? `${linhas.join("\n")}\n\n${o.placar}` : linhas.join("\n");
   return o.perguntas && p.perguntas ? `${corpo}\n\n${p.perguntas.texto}` : corpo;
 }
 
@@ -160,8 +184,20 @@ export function montarAvisoDoGestor(p: PecasDoAviso): AvisoMontado | null {
     cortes,
   });
   const cortes: AvisoMontado["cortes"] = [];
-  let t = juntar(p, { fora: true, perguntas: true, k: n });
+  let t = juntar(p, { fora: true, perguntas: true, k: n, placar: p.placar?.texto });
   if (t.length <= p.limite) return pronto(t, true, cortes);
+  // (Fase 7g, P6) o placar cede primeiro, antes de qualquer corte de antes: a linha, depois só onde ver; não cabendo, sai, e os
+  // cortes de antes seguem sem ele
+  if (p.placar) {
+    cortes.push("placar");
+    for (const versao of [p.placar.linha, PLACAR_EM_OUTRO_LUGAR]) {
+      if (!versao) continue;
+      t = juntar(p, { fora: true, perguntas: true, k: n, placar: versao });
+      if (t.length <= p.limite) return pronto(t, true, cortes);
+    }
+    t = juntar(p, { fora: true, perguntas: true, k: n });
+    if (t.length <= p.limite) return pronto(t, true, cortes);
+  }
   // 1) sem o que ficou de fora
   if (p.fora) {
     cortes.push("fora");

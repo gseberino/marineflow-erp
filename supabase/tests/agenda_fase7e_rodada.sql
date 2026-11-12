@@ -52,6 +52,24 @@ begin
   v := substr(v, position(format('create or replace function public.%s(', p_nome) in v));
   return left(v, position(E'\n$function$;' in v) + length(E'\n$function$;') - 1);
 end $f$;
+-- (7g P6) o corpo vivo sem os blocos e as marcas da 7g ("-- FASE 7g:" … "-- FASE 7g: fim" e "-- (7g …" … "-- (7g: fim)"), linha a linha: a 7g recria agenda_saude
+-- (20261112100500) com a chave explicar numa marca, e o resto do corpo é o desta migration. Sem marca da 7g, o corpo como está.
+create function pg_temp.sem_7g(p_t text) returns text language plpgsql immutable as $f$
+declare
+  l text;
+  fora text[] := '{}';
+  dentro boolean := false;
+begin
+  foreach l in array string_to_array(replace(p_t, E'\r\n', E'\n'), E'\n') loop
+    if not dentro and l ~ '^\s*-- (FASE 7g:|\(7g )' and l !~ '^\s*-- (FASE 7g: fim|\(7g: fim\))' then dentro := true; continue; end if;
+    if dentro then
+      if l ~ '^\s*-- (FASE 7g: fim|\(7g: fim\))' then dentro := false; end if;
+      continue;
+    end if;
+    fora := fora || l;
+  end loop;
+  return array_to_string(fora, E'\n');
+end $f$;
 -- Sem os blocos do P7 ("-- FASE 7e: (7e P7" … "-- FASE 7e: fim" e "-- (7e P7" … "-- (7e: fim)"), linha a linha, como o montador
 create function pg_temp.sem_p7(p_t text) returns text language plpgsql immutable as $f$
 declare
@@ -119,7 +137,7 @@ begin
       ('_agenda_desfazer_aprendizado', 'public._agenda_desfazer_aprendizado(uuid, uuid, text, date, timestamptz)', 'mig_correcao_calculo_fase6')) x(nome, sig, origem)
   loop
     v_res := pg_temp.ok(v_res, format('R0d %s: a viva é a desta migration; sem os blocos do P7, é a da origem (agenda_teste.%s), byte a byte; e tem bloco', f.nome, f.origem),
-      (select replace(p.prosrc, E'\r\n', E'\n') from pg_proc p where p.oid = f.sig::regprocedure) = pg_temp.corpo(v_mig, f.nome)
+      (select pg_temp.sem_7g(p.prosrc) from pg_proc p where p.oid = f.sig::regprocedure) = pg_temp.corpo(v_mig, f.nome)
       and pg_temp.sem_p7(pg_temp.corpo(v_mig, f.nome)) = pg_temp.corpo(current_setting('agenda_teste.' || f.origem), f.nome)
       and pg_temp.corpo(v_mig, f.nome) ~ '-- (FASE 7e: \(7e P7|\(7e P7)',
       format('%s × %s letras', length(pg_temp.sem_p7(pg_temp.corpo(v_mig, f.nome))), length(pg_temp.corpo(current_setting('agenda_teste.' || f.origem), f.nome))));
@@ -490,7 +508,8 @@ begin
     v_dif := null;
     foreach k in array array['desligado', 'sombra', 'ligado'] loop
       perform pg_temp.modos(k);
-      if (public.agenda_saude(c_hoje, c_agora) - 'margem')::text is distinct from pg_temp.saude_antes(c_hoje, c_agora)::text then v_dif := coalesce(v_dif || ', ', '') || k; end if;
+      -- (7g P6: e sem a chave explicar, que a 7g soma depois, como a margem)
+      if (public.agenda_saude(c_hoje, c_agora) - 'margem' - 'explicar')::text is distinct from pg_temp.saude_antes(c_hoje, c_agora)::text then v_dif := coalesce(v_dif || ', ', '') || k; end if;
     end loop;
     v_res := pg_temp.ok(v_res, 'R4c sem linha nem ação da margem: agenda_saude sem a chave margem = a de antes do P7, byte a byte, nos 3 modos (o ok também)', v_dif is null, v_dif);
     v_res := pg_temp.ok(v_res, 'R4d o zeros_ok da margem entra no ok, depois de todos (a linha de agenda_saude)',

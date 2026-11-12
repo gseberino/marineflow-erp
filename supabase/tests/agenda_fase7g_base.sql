@@ -1113,7 +1113,12 @@ declare
     -- FASE 7g: fim
     -- FASE 7g: (7g P5, 20261112100400) a rodada explicar e os seus passos leem modo_porque, modo_rebaixar, modo_placar, marcacoes_desde, origens_do_dono,
     -- correcao_janela_du, os parâmetros do rebaixar, explicar_hora e explicar_tempo_max, e escrevem agenda_marcacoes e agenda_tipos_os
-    '_agenda_marcacao_desfecho', '_agenda_explicar_marcacoes', '_agenda_explicar_tipos', 'agenda_explicar_rodar'
+    '_agenda_marcacao_desfecho', '_agenda_explicar_marcacoes', '_agenda_explicar_tipos', 'agenda_explicar_rodar',
+    -- FASE 7g: fim
+    -- FASE 7g: (7g P6, 20261112100500) o placar lê placar_janela, placar_semanas_hist, modo_placar, agenda_marcacoes, agenda_tipos_os e agenda_placar_semanas;
+    -- a saúde lê os 3 modos, marcacoes_desde, correcao_janela_du, explicar_hora e as 3 tabelas
+    '_agenda_placar_periodo', '_agenda_mensagens_da_agenda', '_agenda_placar_numeros', '_agenda_placar_texto', 'agenda_placar', '_agenda_explicar_placar',
+    '_agenda_saude_explicar'
     -- FASE 7g: fim
     ];
 begin
@@ -1170,7 +1175,11 @@ begin
     ('_agenda_ver_decisoes', format('select public._agenda_ver_decisoes(%L::date, %L::timestamptz)::text', c_hoje, c_agor)),
     ('agenda_aprontar', format('select public.agenda_aprontar(%L::date)::text', c_hoje)),
     ('agenda_aviso_pecas', format('select public.agenda_aviso_pecas(%L::date, %L::timestamptz)::text', c_hoje, c_agor)),
-    ('agenda_saude', format('select public.agenda_saude(%L::date, %L::timestamptz)::text', c_hoje, c_agor));
+    -- FASE 7g: (7g P6, 20261112100500) a chave explicar lê os 4 modos de propósito (os zeros olham o modo de cada um: o rebaixar ligado sem o veto ligado acende,
+    -- R9.6) e o ok junta o zeros_ok dela: saem os dois. O ok das outras chaves vem dos zeros delas, que continuam na comparação; a chave explicar tem o Q6 de
+    -- agenda_fase7g_placar.sql
+    ('agenda_saude', format('select (public.agenda_saude(%L::date, %L::timestamptz) - ''explicar'' - ''ok'')::text', c_hoje, c_agor));
+    -- FASE 7g: fim
   foreach f in array array[true, false] loop
     update public.agenda_config set gestor_so_propor = f where id;
     perform pg_temp.modos('desligado');

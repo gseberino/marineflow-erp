@@ -411,8 +411,9 @@ Deno.test("os enums das ferramentas são os que o banco aceita (spec §8: evento
   assertEquals([...EVENTOS_DO_ANDAMENTO], ["trabalhou", "parcial", "nao_foi", "comecou", "parou", "concluiu", "entregou"]);
   for (const evento of Object.values(SINONIMOS_DO_ANDAMENTO)) assertEquals(EVENTOS_DO_ANDAMENTO.includes(evento), true, evento);
   assertEquals([...ESCOPOS_DA_PROPOSTA], ["semana", "proxima_semana", "os", "replano"]);
+  // (Fase 7g, P6; AG7-27) + ferramenta ("faltou ferramenta ou carro"): o banco traduz em _agenda_motivo_dito (o Q5 de agenda_fase7g_placar.sql)
   assertEquals([...MOTIVOS_DO_ANDAMENTO].sort(), [
-    "anterior", "cliente", "clima", "equipe", "esqueci", "estimativa", "imprevisto", "informacao", "material", "urgencia",
+    "anterior", "cliente", "clima", "equipe", "esqueci", "estimativa", "ferramenta", "imprevisto", "informacao", "material", "urgencia",
   ]);
 });
 

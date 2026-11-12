@@ -23,7 +23,7 @@
 //   agenda pendencias · o que voce precisa de mim          → agenda_ver foco decisoes
 //   agenda plano · plano da semana                         → agenda_ver foco plano
 //   <motivo> (uma palavra): material, cliente, equipe, anterior, informacao, clima, estimativa, imprevisto, urgencia,
-//   esqueci → o código LCI. <quando>: hoje, ontem, anteontem, segunda…sábado, dd/mm. <alvo>: o nome do cliente (até 3
+//   esqueci, ferramenta, carro (Fase 7g, P6: os 2 últimos são o código ferramenta) → o código LCI. <quando>: hoje, ontem, anteontem, segunda…sábado, dd/mm. <alvo>: o nome do cliente (até 3
 //   palavras, sem "do/da/de" nem as palavras de outras ferramentas: "desfaz o agrupamento do ORÇ-00120", "desfaz a baixa
 //   da conta de luz", "desfaz isso" vão ao modelo), o número da OS ou "semana", até 40 caracteres, resolvido no banco (a
 //   mesma resolução da Fase 1; ambíguo = pergunta; o nome que não acha nada vai ao modelo).
@@ -305,6 +305,9 @@ export const MOTIVOS_DO_DIA: Readonly<Record<string, string>> = Object.freeze({
   imprevisto: "imprevisto_tecnico",
   urgencia: "urgencia_outra_os",
   esqueci: "esqueci",
+  // (Fase 7g, P6; AG7-27) faltou ferramenta ou carro: o mesmo código nas 2 palavras (o banco: _agenda_motivo_dito)
+  ferramenta: "ferramenta",
+  carro: "ferramenta",
 });
 
 /** "hoje", "ontem", "anteontem", "segunda" (ou "segunda feira"), …, "sabado", "dd/mm". O banco resolve a data. */

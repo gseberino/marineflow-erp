@@ -89,12 +89,12 @@ declare
   l        text;
 begin
   foreach l in array string_to_array(replace(p, E'\r\n', E'\n'), E'\n') loop
-    -- (7e P7: e os blocos e as marcas da 7e, que recria agenda_saude depois da 7f, só acrescentando)
-    if not v_dentro and l ~ '^\s*-- (FASE 7f: \(7f P9|FASE 7e: \(7e |\(7e )' then
+    -- (7e P7: e os blocos e as marcas da 7e, que recria agenda_saude depois da 7f, só acrescentando; 7g P6: e os da 7g, do mesmo jeito)
+    if not v_dentro and l ~ '^\s*-- (FASE 7f: \(7f P9|FASE 7e: \(7e |\(7e |FASE 7g: \(7g |\(7g )' then
       v_dentro := true;
       continue;
     end if;
-    if v_dentro and l ~ '^\s*-- (FASE 7[ef]: fim|\(7e: fim\))' then
+    if v_dentro and l ~ '^\s*-- (FASE 7[efg]: fim|\(7[eg]: fim\))' then
       v_dentro := false;
       continue;
     end if;

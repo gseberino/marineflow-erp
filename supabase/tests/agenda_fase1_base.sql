@@ -1140,6 +1140,10 @@ insert into _definer_da_agenda values ('_agenda_entrada_simulada_da_os');
 -- Fase 7g (P5): a rodada explicar (o molde de agenda_aprender: definer, só service_role, com a porta de admin/financeiro dentro para quem tiver login;
 -- agenda_fase7g_correcoes.sql K0 e K11 provam a porta)
 insert into _definer_da_agenda values ('agenda_explicar_rodar');
+-- Fase 7g (P6): a leitura do placar e a chave explicar da saúde (a porta de _agenda_saude_margem dentro: admin/financeiro com login, service_role sem; grant a
+-- authenticated porque agenda_saude é invoker e o painel a chama). agenda_fase7g_placar.sql Q0 e Q6 provam a porta
+insert into _definer_da_agenda values ('agenda_placar');
+insert into _definer_da_agenda values ('_agenda_saude_explicar');
   -- FASE 7f: fim
   -- FASE 7e: (7e P1, 20261111100000) nenhuma definer nova: o modo, a credibilidade, o z e a temporada são invoker, e o gatilho _agenda_medidas_compra_so_muda só mexe na própria linha. agenda_fase7e_base.sql prova as portas.
   -- FASE 7e: fim

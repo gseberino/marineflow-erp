@@ -180,6 +180,8 @@ export const EVENTOS_DO_ANDAMENTO = ["trabalhou", "parcial", "nao_foi", "comecou
 /** (Fase 2) O motivo, na palavra do dono (o banco traduz para o código: _agenda_motivo_dito). */
 export const MOTIVOS_DO_ANDAMENTO = [
   "material", "cliente", "equipe", "anterior", "informacao", "clima", "estimativa", "imprevisto", "urgencia", "esqueci",
+  // (Fase 7g, P6; AG7-27) faltou ferramenta ou carro
+  "ferramenta",
 ] as const;
 /**
  * (Fase 3, P3) Os sinônimos que o modelo manda em evento: "terminou", "acabou", "finalizou", "pronto" são concluiu;

@@ -11,6 +11,8 @@
 //     sem texto ou sem ação válida fica de fora; id que não é uuid não entra; ids repetidos uma vez só;
 //  5. (Fase 7f, P4) a mensagem da quinta (semana): sem mudança com perguntas sai; no corte, as mudanças saem antes das perguntas;
 //     o texto é o mesmo que o banco junta (o O4v de agenda_fase7f_lote.sql); o aviso de sempre não muda.
+//  6. (Fase 7g, P6) o placar da quinta: antes das perguntas, o mesmo texto que o banco junta (o Q4p de agenda_fase7g_placar.sql);
+//     no corte, cede primeiro (o texto, a linha, onde ver, nada) e os cortes de antes seguem iguais; sem a peça, o de antes.
 import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { lerPecasDoAviso, montarAvisoDoGestor, type PecasDoAviso } from "./aviso-do-gestor.ts";
 
@@ -258,6 +260,81 @@ Deno.test("semana: nem com 1 mudança cabe com as perguntas — elas saem (e nã
 
 Deno.test("semana: nunca passa do teto, em qualquer teto (de 600 a 2400)", () => {
   for (const base of [SEMANA_BANCO, SEMANA_SEM_MUDANCA]) {
+    const p = lidaDaSemana(base);
+    for (let limite = 600; limite <= 2400; limite += 37) {
+      const m = montarAvisoDoGestor({ ...p, limite });
+      if (m) assert(m.texto.length <= limite, `${limite}: ${m.texto.length}`);
+    }
+  }
+});
+
+// ── (Fase 7g, P6) O placar da semana na mensagem da quinta ────────────────────────────────────────────────────────────────
+// A peça placar ({texto, linha}) vai depois do rodapé e antes das perguntas, com uma linha em branco dos dois lados. As peças e
+// o texto esperado são os MESMOS do Q4p de supabase/tests/agenda_fase7g_placar.sql, que confere _agenda_lote_texto: os dois
+// lados juntam igual. No corte, o placar cede primeiro, inteiro: o texto, a linha, "Placar da semana em *agenda placar*.",
+// nada; só então os cortes de antes (o de fora, as mudanças, as perguntas), na ordem de antes.
+const PLACAR_TEXTO = [
+  "Placar da semana de 02 a 07/11 (números do sistema):",
+  "• Serviços prontos com data firme: 1 de 5 (20%).",
+  "• Compras: 4 de 7 feitas até o \"compre até\".",
+  "• Perguntas abertas: 7 (a mais antiga com 5 dias úteis).",
+  "Detalhe em *agenda placar*.",
+].join("\n");
+const PLACAR_LINHA = "Placar 02 a 07/11: 1 de 5 prontos com data; compras 4 de 7 no prazo. Detalhe em *agenda placar*.";
+const SEMANA_COM_PLACAR = { ...SEMANA_BANCO, placar: { texto: PLACAR_TEXTO, linha: PLACAR_LINHA } };
+const CORPO_DA_SEMANA = SEMANA_TEXTO.slice(0, SEMANA_TEXTO.indexOf("\n\nPara a semana que vem"));
+const comPlacar = (placar: string) => `${CORPO_DA_SEMANA}\n\n${placar}\n\n${SEMANA_PERGUNTAS}`;
+
+Deno.test("placar: o texto é o mesmo que o banco junta (Q4p do teste SQL): o corpo, a linha em branco, o placar, a linha em branco e as perguntas", () => {
+  const p = lidaDaSemana(SEMANA_COM_PLACAR);
+  assertEquals(p.placar, { texto: PLACAR_TEXTO, linha: PLACAR_LINHA });
+  const m = montarAvisoDoGestor(p)!;
+  assertEquals(m.texto, comPlacar(PLACAR_TEXTO));
+  assertEquals([m.acaoIds, m.perguntaIds, m.comPerguntas, m.cortes], [[A1, A2], [Q1, Q2], true, []]);
+  assert(m.texto.length <= 2400, "o caso de hoje cabe inteiro no teto padrão da quinta (2400)");
+});
+
+Deno.test("placar: sem a peça, ou sem texto nela, as peças e o texto de antes (a chave nem aparece); sem linha, linha nula", () => {
+  for (const placar of [undefined, null, "texto", [], { texto: "  ", linha: PLACAR_LINHA }, { linha: PLACAR_LINHA }]) {
+    const p = lidaDaSemana({ ...SEMANA_BANCO, placar });
+    assertEquals("placar" in p, false, JSON.stringify(placar));
+    assertEquals(montarAvisoDoGestor(p)!.texto, SEMANA_TEXTO);
+  }
+  assertEquals(lidaDaSemana({ ...SEMANA_BANCO, placar: { texto: PLACAR_TEXTO } }).placar, { texto: PLACAR_TEXTO, linha: null });
+});
+
+Deno.test("placar: sem mudança e sem pergunta a quinta não sai, nem com o placar (nenhuma mensagem só de placar)", () => {
+  assertEquals(lerPecasDoAviso({ ...SEMANA_SEM_MUDANCA, perguntas: null, placar: { texto: PLACAR_TEXTO, linha: PLACAR_LINHA } }), null);
+  const so = lidaDaSemana({ ...SEMANA_SEM_MUDANCA, placar: { texto: PLACAR_TEXTO, linha: PLACAR_LINHA } });
+  assertEquals(montarAvisoDoGestor(so)!.texto, `Agenda — a semana que vem:\n*agenda plano* mostra tudo.\n\n${PLACAR_TEXTO}\n\n${SEMANA_PERGUNTAS}`);
+});
+
+Deno.test("placar: cede primeiro, antes de qualquer corte de antes — a linha, depois onde ver, depois nada; e só então o de fora", () => {
+  const p = lidaDaSemana(SEMANA_COM_PLACAR);
+  const a = montarAvisoDoGestor({ ...p, limite: comPlacar(PLACAR_LINHA).length })!;
+  assertEquals([a.texto, a.cortes, a.comPerguntas], [comPlacar(PLACAR_LINHA), ["placar"], true]);
+  const b = montarAvisoDoGestor({ ...p, limite: comPlacar("Placar da semana em *agenda placar*.").length })!;
+  assertEquals([b.texto, b.cortes, b.comPerguntas], [comPlacar("Placar da semana em *agenda placar*."), ["placar"], true]);
+  const c = montarAvisoDoGestor({ ...p, limite: SEMANA_TEXTO.length })!;
+  assertEquals([c.texto, c.cortes, c.comPerguntas, c.perguntaIds], [SEMANA_TEXTO, ["placar"], true, [Q1, Q2]]);
+  // sem o placar, os cortes de antes, iguais aos da mesma mensagem sem a peça
+  // (os tetos abaixo do texto sem o placar: nem onde ver cabe)
+  for (const limite of [SEMANA_TEXTO.length - 1, SEMANA_TEXTO.length - 100, 600]) {
+    assert(limite < SEMANA_TEXTO.length);
+    const com = montarAvisoDoGestor({ ...p, limite })!;
+    const sem = montarAvisoDoGestor({ ...lidaDaSemana(SEMANA_BANCO), limite })!;
+    assertEquals([com.texto, com.cortes, com.perguntaIds], [sem.texto, ["placar", ...sem.cortes], sem.perguntaIds], String(limite));
+  }
+});
+
+Deno.test("placar: sem a linha, do texto direto para onde ver", () => {
+  const p = lidaDaSemana({ ...SEMANA_BANCO, placar: { texto: PLACAR_TEXTO, linha: null } });
+  const m = montarAvisoDoGestor({ ...p, limite: comPlacar(PLACAR_LINHA).length })!;
+  assertEquals([m.texto, m.cortes], [comPlacar("Placar da semana em *agenda placar*."), ["placar"]]);
+});
+
+Deno.test("placar: nunca passa do teto, em qualquer teto (de 600 a 2400)", () => {
+  for (const base of [SEMANA_COM_PLACAR, { ...SEMANA_SEM_MUDANCA, placar: { texto: PLACAR_TEXTO, linha: PLACAR_LINHA } }]) {
     const p = lidaDaSemana(base);
     for (let limite = 600; limite <= 2400; limite += 37) {
       const m = montarAvisoDoGestor({ ...p, limite });

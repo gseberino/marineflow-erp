@@ -186,7 +186,8 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     // Fase 7f (P7, 20261109100600): + 12 na recriada (a mesma cópia; a chave comunicacao vem de _agenda_saude_comunicacao).
     // Fase 7f (P6, 20261109101100): + 12 na recriada (a mesma cópia; a semana na lista dos liberados não tem o literal).
     // Fase 7e (P7, 20261111100600): + 12 na recriada (a mesma cópia; a chave margem vem de _agenda_saude_margem, sem o literal).
-    vezes: 112,
+    // Fase 7g (P6, 20261112100500): + 12 na recriada (a mesma cópia; a chave explicar vem de _agenda_saude_explicar, com erros_dia, sem o literal).
+    vezes: 124,
     porque: 'nomes das chaves do resultado (rodadas_24h, erros_24h, resposta_24h_pct: a janela de um dia da conferência); não é rascunho_validade',
   },
   // Fase 3 (P4): a rotina da equipe grava a rodada como a vigia.
@@ -285,6 +286,13 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     casou: '1000',
     vezes: 1,
     porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_aprender); não é texto_max nem peca_embutida_acima',
+  },
+  // Fase 7g (P6, 20261112100500): o placar guardado cabe no CHECK da tabela (texto até 1000 letras, 20261112100000), e texto_max pode passar dele (até 3000).
+  {
+    onde: '_agenda_explicar_placar',
+    casou: '1000',
+    vezes: 1,
+    porque: 'o CHECK de agenda_placar_semanas.texto (char_length entre 3 e 1000), o teto da tabela: o texto guardado é least(texto_max, ele); não é texto_max nem peca_embutida_acima',
   },
   {
     onde: 'agenda_tarefas_rodar',

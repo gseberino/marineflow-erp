@@ -67,7 +67,8 @@ select 'C4 o freio — só mostra (com gestor_so_propor, o que ligar vale como e
 
 -- ── F. As funções ─────────────────────────────────────────────────────────────────────────────────
 -- (7e, a conferência do P7) o corpo sem os blocos e as marcas da 7e ("-- FASE 7e: …" até "-- FASE 7e: fim"; "-- (7e …" até "-- (7e: fim)"), linha a linha: a 7e recria agenda_saude
--- (20261111100600) com a chave margem em 2 marcas, e o resto do corpo é o da 7f, byte a byte. Sem marca da 7e (antes dela), o corpo como está.
+-- (20261111100600) com a chave margem em 2 marcas, e o resto do corpo é o da 7f, byte a byte. Sem marca da 7e (antes dela), o corpo como está. (7g P6: e os
+-- blocos e as marcas da 7g, do mesmo jeito: a 7g recria agenda_saude em 20261112100500 com a chave explicar numa marca "-- (7g".)
 create function pg_temp.sem_7e(p text) returns text language plpgsql immutable as $f$
 declare
   l      text;
@@ -75,9 +76,9 @@ declare
   dentro boolean := false;
 begin
   foreach l in array string_to_array(p, E'\n') loop
-    if not dentro and l ~ '^\s*-- (FASE 7e:|\(7e )' and l !~ '^\s*-- (FASE 7e: fim|\(7e: fim\))' then dentro := true; continue; end if;
+    if not dentro and l ~ '^\s*-- (FASE 7[eg]:|\(7[eg] )' and l !~ '^\s*-- (FASE 7[eg]: fim|\(7[eg]: fim\))' then dentro := true; continue; end if;
     if dentro then
-      if l ~ '^\s*-- (FASE 7e: fim|\(7e: fim\))' then dentro := false; end if;
+      if l ~ '^\s*-- (FASE 7[eg]: fim|\(7[eg]: fim\))' then dentro := false; end if;
       continue;
     end if;
     fora := fora || l;

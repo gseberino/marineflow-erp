@@ -861,7 +861,9 @@ declare
     -- a 7g (P3, 20261112100200): a fonte da duração lê _agenda_margem_modo('vies') e vies_marcado (a frase do viés só quando a 7e corrige, R9.3-1), inteira da 7g
     '_agenda_porque_fonte',
     -- a 7g (P5, 20261112100400): o desfecho da marcação lê vies_dono_fixo no histórico (a saída do dono não é correção, R9.3-1), inteira da 7g
-    '_agenda_marcacao_desfecho'];
+    '_agenda_marcacao_desfecho',
+    -- a 7g (P6, 20261112100500): os números do placar leem razao_estimativa e motivo_razao (o real × estimado da 7e, R9.4-3), inteira da 7g
+    '_agenda_placar_numeros'];
 begin
   -- nenhuma função de antes lê as colunas nem chama as funções novas. Quem vier depois nesta etapa: a função recriada leva a marca -- FASE 7e (sai daqui sozinha); a função NOVA, sem marca, entra em c_novas, pelo nome.
   select string_agg(p.proname, ',' order by p.proname) into v_dif

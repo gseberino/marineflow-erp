@@ -547,10 +547,17 @@ begin
     v_r := public.agenda_explicar_rodar(date '2026-11-24', timestamptz '2026-11-24 16:40-03');
     v := v_r::text;
     v_r := public.agenda_explicar_rodar(date '2026-11-26', timestamptz '2026-11-26 16:40-03');
-    v_res := pg_temp.ok(v_res, 'K11h só o placar fora do dia do plano, e no dia do plano sem a função dele (é do P6): {rodou: false, nada}, sem linha',
-      v::jsonb = '{"rodou": false, "nada": true}'::jsonb and v_r = '{"rodou": false, "nada": true}'::jsonb
-      and to_regprocedure('public._agenda_explicar_placar(date, timestamp with time zone)') is null
-      and not exists (select 1 from public.agenda_vigia_rodadas x where x.rotina = 'explicar' and x.p_hoje in (date '2026-11-24', date '2026-11-26')), v || ' | ' || v_r::text);
+    -- (7g P6, 20261112100500: a função do placar passou a existir; mudança deliberada) sem ela, no dia do plano, nada e sem linha; com ela, a rodada roda o
+    -- passo placar (1 linha). Fora do dia do plano, nada e sem linha, com ou sem ela.
+    v_res := pg_temp.ok(v_res, 'K11h só o placar fora do dia do plano: {rodou: false, nada}, sem linha; no dia do plano, nada sem a função do placar e o passo placar com ela (P6)',
+      v::jsonb = '{"rodou": false, "nada": true}'::jsonb
+      and not exists (select 1 from public.agenda_vigia_rodadas x where x.rotina = 'explicar' and x.p_hoje = date '2026-11-24')
+      and case when to_regprocedure('public._agenda_explicar_placar(date, timestamp with time zone)') is null
+               then v_r = '{"rodou": false, "nada": true}'::jsonb
+                    and not exists (select 1 from public.agenda_vigia_rodadas x where x.rotina = 'explicar' and x.p_hoje = date '2026-11-26')
+               else v_r ->> 'rodou' = 'true' and v_r #>> '{contagens,placar,guardado}' is not null
+                    and (select count(*) from public.agenda_vigia_rodadas x where x.rotina = 'explicar' and x.p_hoje = date '2026-11-26') = 1 end,
+      v || ' | ' || v_r::text);
     -- K11i as portas: o admin com login não tem execute (42501 do grant); com o papel do service_role e o login de um técnico, a porta de dentro (42501); o
     -- service_role sem login roda
     update public.agenda_config set modo_porque = 'sombra' where id;

@@ -364,6 +364,10 @@ const TABELA_FASE2: Array<[string, ComandoDaAgenda]> = [
   ["dia parcial estimativa 02/11", dia("parcial", "estimativa", "02/11")],
   ["dia parcial urgência", dia("parcial", "urgencia_outra_os")],
   ["dia parcial esqueci", dia("parcial", "esqueci")],
+  // (Fase 7g, P6; AG7-27) faltou ferramenta ou carro: as 2 palavras, o mesmo código (o Q5 de agenda_fase7g_placar.sql confere o banco)
+  ["dia não carro", dia("nao_cumprido", "ferramenta")],
+  ["dia não ferramenta ontem", dia("nao_cumprido", "ferramenta", "ontem")],
+  ["dia parcial carro", dia("parcial", "ferramenta")],
   ["dia parcial", dia("parcial")],
   ["dia parcial sexta feira", dia("parcial", null, "sexta feira")],
   ["choveu", { comando: "choveu", quando: null }],
