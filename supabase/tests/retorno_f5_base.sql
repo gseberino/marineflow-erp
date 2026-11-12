@@ -2,7 +2,7 @@
 -- valores da F5, o item do cartão sem caso (só com o seu ponteiro) e os grants. Roda só pela bancada (grupo 8, F5_ONDA=1).
 -- Termina em ROLLBACK, e o bloco se desfaz sozinho. Só confere as próprias linhas sintéticas: chaves 000099xx, telefone
 -- inventado 55479000150xx (nesta parte nenhuma função liga um ao outro), nomes inventados (Ana, João). Nenhuma mensagem é
--- lida nem gravada.
+-- lida; uma só, inventada, é gravada (o caso sintético do 4f precisa de primeira_msg_id) e se desfaz no ROLLBACK.
 begin;
 create temp table if not exists _bancada (arquivo text, ok boolean, numeros jsonb, em timestamptz default clock_timestamp());
 
@@ -54,6 +54,8 @@ declare
   c_fone constant text := '5547900015001';
   c_chave constant text := '00009901';
   c_chave2 constant text := '00009902';
+  c_chave3 constant text := '00009903';          -- o caso sintético do 4f
+  c_fone3 constant text := '5547900015003';
   c_tabelas constant text[] := array['orcamento_envios', 'orcamento_acompanhamentos', 'orcamento_passos', 'orcamento_aceites'];
   c_colunas_os constant text[] := array['orcamento_enviado_em', 'orcamento_enviado_via', 'orcamento_enviado_chave', 'motivo_perda',
                                         'motivo_perda_em', 'motivo_perda_por', 'motivo_perda_nota'];
@@ -109,6 +111,8 @@ declare
   v_item_ac2 uuid;
   v_so uuid;
   v_aceite_do_item uuid;
+  v_msg uuid;
+  v_ab uuid;
   v_n integer;
   v_r record;
   v_n_fun integer := 0;
@@ -350,8 +354,25 @@ begin
   if v is distinct from 'passou' then
     raise exception '4e: item dados_nota com aceite_id falhou (%)', v;
   end if;
+  -- 4f. O tipo fora da lista, num item COM caso. Sem caso, o caso_ou_ponteiro falharia antes: o PostgreSQL confere os CHECKs
+  --     na ordem do nome e informa o 1º que falha, e 'caso_ou_ponteiro' vem antes de 'tipo_item_check'. O caso é sintético
+  --     e fechado (chave 000099xx), com uma mensagem inventada como primeira_msg_id (NOT NULL, FK); 4f0 prova que ele vale.
+  insert into public.whatsapp_messages (direction, phone_normalized, message_type, body, delivery_status, raw_payload, hora_real,
+                                        occurred_at)
+    values ('inbound', c_fone3, 'text', 'Mensagem inventada do teste base da F5', 'received', '{"data": {}}'::jsonb,
+            '2027-01-12 09:00-03', '2027-01-12 09:00-03') returning id into v_msg;
+  insert into public.retorno_aberturas (chave, phone_normalized, papel, quem, primeira_msg_id, ultima_msg_id, aberta_em, gravada_em,
+                                        ultima_em, ultima_gravada_em, nivel, modo, estado, fechada_em, fechada_motivo)
+    values (c_chave3, c_fone3, 'numero_novo', '{}'::jsonb, v_msg, v_msg, '2027-01-12 09:00-03', '2027-01-12 09:00-03',
+            '2027-01-12 09:00-03', '2027-01-12 09:00-03', 'recibo', 'sombra', 'fechada', '2027-01-12 13:00-03', 'dono')
+    returning id into v_ab;
   v := pg_temp.retorno_f5_base_erro(format($q$insert into public.retorno_cartao_itens (cartao_id, n, abertura_id, tipo_item, hash)
-                                              values (%L, 3, null, 'inventado', 'h-4f')$q$, v_cartao));
+                                              values (%L, 3, %L, 'livre', 'h-4f0')$q$, v_cartao, v_ab));
+  if v is distinct from 'passou' then
+    raise exception '4f0: item livre com o caso sintético falhou (%)', v;
+  end if;
+  v := pg_temp.retorno_f5_base_erro(format($q$insert into public.retorno_cartao_itens (cartao_id, n, abertura_id, tipo_item, hash)
+                                              values (%L, 3, %L, 'inventado', 'h-4f')$q$, v_cartao, v_ab));
   if v is distinct from '23514:retorno_cartao_itens_tipo_item_check' then
     raise exception '4f: tipo de item fora da lista passou (%)', v;
   end if;
@@ -453,8 +474,10 @@ begin
   end if;
 
   -- 7. Grants. As 4 tabelas: RLS, anon nada, authenticated só lê e só com is_admin_or_financial (login sem cargo lê 0 das
-  --    linhas sintéticas acima), service_role escreve. As colunas novas de service_orders fechadas ao anônimo. E a varredura
-  --    das funções do orçamento pelo nome (revogar de public não fecha o anon).
+  --    linhas sintéticas acima), service_role escreve. As colunas novas de service_orders: a leitura do anônimo é por coluna,
+  --    e elas nascem fechadas a ela; a escrita não é por coluna (o anon tem INSERT, UPDATE e DELETE na tabela, de antes da
+  --    F5), e quem a barra é a RLS, sem policy de escrita para ele (7i2). E a varredura das funções do orçamento pelo nome
+  --    (revogar de public não fecha o anon).
   if not exists (select 1 from public.orcamento_envios e where e.id = v_envio)
      or not exists (select 1 from public.orcamento_acompanhamentos a where a.id = v_acomp)
      or not exists (select 1 from public.orcamento_passos p where p.id = v_passo)
@@ -497,11 +520,27 @@ begin
     end if;
   end loop;
   foreach v_col in array c_colunas_os loop
-    if has_column_privilege('anon', 'public.service_orders', v_col, 'select')
-       or has_column_privilege('anon', 'public.service_orders', v_col, 'update') then
-      raise exception '7i: anon lê ou escreve service_orders.%', v_col;
+    if has_column_privilege('anon', 'public.service_orders', v_col, 'select') then
+      raise exception '7i: anon lê service_orders.%', v_col;
     end if;
   end loop;
+  -- 7i2. O anon tenta gravar as 7 colunas na ordem sintética: nenhuma linha muda (a RLS barra; sem o grant da tabela, 42501).
+  v := pg_temp.retorno_f5_base_como('anon', null, format($q$update public.service_orders
+                                                              set orcamento_enviado_em = '2027-01-12 10:00-03', orcamento_enviado_via = 'tela',
+                                                                  orcamento_enviado_chave = %L, motivo_perda = 'sumiu',
+                                                                  motivo_perda_em = '2027-01-20 10:00-03', motivo_perda_por = 'dono',
+                                                                  motivo_perda_nota = 'nota do anon'
+                                                            where id = %L returning id::text$q$, c_chave, v_os));
+  if v is not null and v is distinct from 'erro 42501' then
+    raise exception '7i2: o update do anon em service_orders voltou %', v;
+  end if;
+  if exists (select 1 from public.service_orders so
+              where so.id = v_os
+                and (so.orcamento_enviado_em is not null or so.orcamento_enviado_via is not null or so.orcamento_enviado_chave is not null
+                     or so.motivo_perda is not null or so.motivo_perda_em is not null or so.motivo_perda_por is not null
+                     or so.motivo_perda_nota is not null)) then
+    raise exception '7i2: o anon gravou uma coluna nova de service_orders';
+  end if;
   v := pg_temp.retorno_f5_base_como('anon', null, $q$select motivo_perda from public.service_orders limit 1$q$);
   if v is distinct from 'erro 42501' then
     raise exception '7j: anon leu service_orders.motivo_perda (%)', v;

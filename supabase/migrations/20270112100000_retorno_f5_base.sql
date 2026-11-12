@@ -15,8 +15,10 @@
 --    item do cartão sem caso (cadencia, aceite, dados_nota) existe só com o seu ponteiro, que o apaga junto (cascade); os 3
 --    tipos da cadência entram em retorno_modelo_tipos, desligados. orc_fechado e orc_dados_nota nunca entram: como o M07 da
 --    F3, só saem pela letra com *sim <PIN>*.
--- 7. RLS nas 4 tabelas: leitura só de admin e financeiro, escrita só do service_role; anon nada. O grant de anon em
---    service_orders é por coluna: as 7 colunas novas já nascem fechadas a ele.
+-- 7. RLS nas 4 tabelas: leitura só de admin e financeiro, escrita só do service_role; anon nada. Em service_orders, só a
+--    leitura do anon é por coluna: as 7 colunas novas já nascem fechadas a ela. A escrita não é por coluna (o anon tem
+--    INSERT, UPDATE e DELETE na tabela, de antes da F5): quem a barra é a RLS, que não tem policy de escrita para o anon.
+--    Revogar esse grant fica fora da F5.
 --
 -- Sem dado de cliente: só as 3 linhas de configuração dos tipos novos. DDL em service_orders e FK para whatsapp_messages: na
 -- bancada só de madrugada (seção 7.4, F5_DDL_QUENTE).
