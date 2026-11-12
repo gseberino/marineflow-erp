@@ -15,8 +15,12 @@
 // Pagamento dividido (resposta 4 do dono, 11/10/2026): o Pix das Diárias que veio do banco ganha
 // "Dividir: diárias e reembolso" quando há reembolso em aberto (a parte do reembolso vai para a
 // categoria de cada despesa; o saldo não muda) e, depois de dividido, "Desfazer a divisão".
+//
+// Prestador por serviço (12/11/2026, o Alex): não tem diária — recebe por serviço/OS, com valor
+// combinado ou percentual. O serviço entra no saldo quando o cliente paga a OS; antes fica em
+// "Aguardando o cliente pagar". Ele não entra na grade de dias nem no recibo de diárias.
 import { useState } from 'react';
-import { Banknote, CalendarPlus, FileDown, FileText, Lock, Pencil, Split, Trash2, Undo2, UserPlus } from 'lucide-react';
+import { Banknote, CalendarPlus, FileDown, FileText, Lock, Pencil, Split, Trash2, Undo2, UserPlus, Wrench } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -33,9 +37,11 @@ import {
 } from '@/lib/diarias';
 import {
   acertoQueTrava, comoTirarOReembolso, diaParaEditar, pagamentoDividido, pagamentoNaFila, pagamentoQueSeDivide, useAcertos, useContaCorrente,
-  useDividirPagamentoDoFreelancer, useExcluirDiaComDesfazer, usePropostaDeDivisao, useResumoFreelancers,
-  type Acerto, type DiaParaEditar, type FreelancerNoResumo,
+  useApagarServico, useDividirPagamentoDoFreelancer, useExcluirDiaComDesfazer, usePropostaDeDivisao, useResumoFreelancers,
+  useServicosDoPrestador,
+  type Acerto, type DiaParaEditar, type FreelancerNoResumo, type ServicoDoPrestador,
 } from '@/hooks/use-diarias';
+import { RegistrarServicoDialog, type ServicoParaEditar } from './RegistrarServicoDialog';
 import { useDocumentosDasDiarias } from '@/hooks/use-documentos-diarias';
 import { ROTULO_REEMBOLSO, ROTULO_REEMBOLSOS, descricaoDoReembolso, numeroDoRecibo } from '@/lib/extrato-diarias';
 import { AcertosDoFreelancer } from './AcertosDoFreelancer';
@@ -71,6 +77,11 @@ export function DiariasPanel({ aba, filtro, onFiltro, onVerExtrato }: Props) {
   const periodo = pedidoDoPeriodo(filtro.periodo, { de: filtro.de, ate: filtro.ate });
   const resumo = useResumoFreelancers(periodo.de, periodo.ate, periodo.atalho);
   const pessoas = resumo.data?.pessoas ?? [];
+  // 12/11/2026: quem recebe por serviço (o Alex) não tem dia para lançar nem lugar na grade
+  const diaristas = pessoas.filter((p) => p.modo !== 'servico');
+  const prestadores = pessoas.filter((p) => p.modo === 'servico');
+  /** undefined = fechado. */
+  const [servicando, setServicando] = useState<{ favorecidoId?: string | null; editar?: ServicoParaEditar } | undefined>(undefined);
   const [registrando, setRegistrando] = useState<Registrando | null>(null);
   const [cadastrando, setCadastrando] = useState(false);
   /** undefined = fechado; null = aberto sem pessoa escolhida. */
@@ -128,6 +139,12 @@ export function DiariasPanel({ aba, filtro, onFiltro, onVerExtrato }: Props) {
                 onClick={() => setPagando(aba === 'extrato' ? filtro.favorecidoId : null)}>
           <Banknote className="h-4 w-4" /> Registrar pagamento
         </Button>
+        {prestadores.length > 0 && (
+          <Button size="sm" variant="outline" className="gap-1.5"
+                  onClick={() => setServicando({ favorecidoId: aba === 'extrato' && prestadores.some((p) => p.id === filtro.favorecidoId) ? filtro.favorecidoId : null })}>
+            <Wrench className="h-4 w-4" /> Registrar serviço
+          </Button>
+        )}
         <Button size="sm" className="gap-1.5"
                 onClick={() => setRegistrando({ favorecidoId: aba === 'extrato' ? filtro.favorecidoId : null })}>
           <CalendarPlus className="h-4 w-4" /> Registrar dia
@@ -157,13 +174,14 @@ export function DiariasPanel({ aba, filtro, onFiltro, onVerExtrato }: Props) {
       ) : aba === 'resumo' ? (
         <Resumo pessoas={pessoas} total={resumo.data!} onVerExtrato={onVerExtrato}
                 onRegistrar={(id) => setRegistrando({ favorecidoId: id })}
+                onRegistrarServico={(id) => setServicando({ favorecidoId: id })}
                 gerandoPdf={documentos.gerando === 'pdf'}
                 porPessoa={!!periodo.atalho}
                 onPagar={(id) => setPagando(id)}
                 onPdf={(id) => { void documentos.extratoEmPdf(id, periodo); }} />
       ) : aba === 'grade' ? (
         <GradeDiarias
-          pessoas={pessoas}
+          pessoas={diaristas}
           mes={filtro.mes}
           onMes={(mes) => onFiltro({ ...filtro, mes })}
           onEditar={(d) => setRegistrando({ editar: d })}
@@ -172,13 +190,18 @@ export function DiariasPanel({ aba, filtro, onFiltro, onVerExtrato }: Props) {
       ) : (
         <Extrato favorecidoId={filtro.favorecidoId} periodo={periodo}
                  onEditar={(d) => setRegistrando({ editar: d })}
+                 onEditarServico={(s) => setServicando({ editar: s })}
                  gerandoPdf={documentos.gerando === 'pdf'}
                  onRecibo={(id, a) => { void documentos.reciboEmPdf(id, a); }} />
       )}
 
+      {servicando && (
+        <RegistrarServicoDialog pessoas={prestadores} favorecidoInicial={servicando.favorecidoId}
+                                editar={servicando.editar} onFechar={() => setServicando(undefined)} />
+      )}
       {registrando && (
         <RegistrarDiaDialog
-          pessoas={pessoas}
+          pessoas={diaristas}
           favorecidoInicial={registrando.favorecidoId}
           dataInicial={registrando.dataInicial}
           editar={registrando.editar}
@@ -201,11 +224,12 @@ function textoDoPeriodoDaPessoa(de: string | null, ate: string | null): string |
   return null;
 }
 
-function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPagar, onPdf, gerandoPdf, porPessoa }: {
+function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onRegistrarServico, onPagar, onPdf, gerandoPdf, porPessoa }: {
   pessoas: FreelancerNoResumo[];
   total: { trabalhado: number; pago: number; reembolsos: number; dias: number; deve: number; adiantado: number };
   onVerExtrato: (id: string) => void;
   onRegistrar: (id: string) => void;
+  onRegistrarServico: (id: string) => void;
   onPagar: (id: string) => void;
   onPdf: (id: string) => void;
   gerandoPdf: boolean;
@@ -236,13 +260,15 @@ function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPagar, onPdf, ger
       <div className="grid gap-3 md:grid-cols-2">
         {ordenadas.map((p) => {
           const estado = ESTADO_DO_SALDO[p.estado];
+          const porServico = p.modo === 'servico';
           return (
             <Card key={p.id} className="min-w-0 p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="truncate text-lg font-semibold">{p.nome}</p>
                   <p className="text-sm text-muted-foreground">
-                    {p.diaria != null ? <>Diária <span className="tabular-nums">{formatCurrency(p.diaria)}</span></> : 'Sem diária no cadastro'}
+                    {porServico ? 'Recebe por serviço (valor combinado ou percentual por OS)'
+                      : p.diaria != null ? <>Diária <span className="tabular-nums">{formatCurrency(p.diaria)}</span></> : 'Sem diária no cadastro'}
                     {porPessoa && textoDoPeriodoDaPessoa(p.de, p.ate) && <> · período {textoDoPeriodoDaPessoa(p.de, p.ate)}</>}
                   </p>
                 </div>
@@ -253,7 +279,9 @@ function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPagar, onPdf, ger
               </div>
               {/* Com reembolso são 5 campos: 3 por linha no celular grande, sem apertar a ponto de rolar de lado. */}
               <dl className={`mt-3 grid grid-cols-2 gap-2 border-t pt-3 text-sm ${p.reembolsos > 0 ? 'sm:grid-cols-3' : 'sm:grid-cols-4'}`}>
-                <div><dt className="text-xs text-muted-foreground">Dias</dt><dd className="font-medium tabular-nums">{p.dias.toLocaleString('pt-BR')}</dd></div>
+                {porServico
+                  ? <div><dt className="text-xs text-muted-foreground">Serviços</dt><dd className="font-medium tabular-nums">{p.n_servicos.toLocaleString('pt-BR')}</dd></div>
+                  : <div><dt className="text-xs text-muted-foreground">Dias</dt><dd className="font-medium tabular-nums">{p.dias.toLocaleString('pt-BR')}</dd></div>}
                 <div><dt className="text-xs text-muted-foreground">Trabalhado</dt><dd className="font-medium tabular-nums">{formatCurrency(p.trabalhado)}</dd></div>
                 {p.reembolsos > 0 && (
                   <div className="min-w-0" title="Despesas da empresa que ele pagou, com comprovante (CMP): entram no próximo acerto">
@@ -263,6 +291,11 @@ function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPagar, onPdf, ger
                 <div><dt className="text-xs text-muted-foreground">Pago</dt><dd className="font-medium tabular-nums">{formatCurrency(p.pago)}</dd></div>
                 <div><dt className="text-xs text-muted-foreground">Último pagamento</dt><dd className="font-medium tabular-nums">{p.ultimo_pagamento ? formatDate(p.ultimo_pagamento) : '—'}</dd></div>
               </dl>
+              {porServico && p.aguardando_cliente > 0 && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Aguardando o cliente pagar a OS: <span className="tabular-nums">{formatCurrency(p.aguardando_cliente)}</span> em serviço(s) — entra no saldo quando o cliente pagar.
+                </p>
+              )}
               {p.pago_aguardando_banco > 0 && (
                 <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
                   Inclui <span className="tabular-nums">{formatCurrency(p.pago_aguardando_banco)}</span> lançado(s) à mão, aguardando o banco confirmar.
@@ -277,7 +310,9 @@ function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPagar, onPdf, ger
                 className="mt-3 justify-start"
                 rotulo={p.nome}
                 rapidas={[
-                  { texto: 'Registrar dia', icone: CalendarPlus, onClick: () => onRegistrar(p.id) },
+                  porServico
+                    ? { texto: 'Registrar serviço', icone: Wrench, onClick: () => onRegistrarServico(p.id) }
+                    : { texto: 'Registrar dia', icone: CalendarPlus, onClick: () => onRegistrar(p.id) },
                   { texto: 'Pagar', icone: Banknote, onClick: () => onPagar(p.id) },
                   { texto: 'Lançamentos e recibo', icone: FileText, onClick: () => onVerExtrato(p.id) },
                 ]}
@@ -294,22 +329,34 @@ function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPagar, onPdf, ger
         extrato do banco; o Pix registrado à mão ("Registrar pagamento" ou "Lançar") aparece na hora como "aguardando o
         banco" e já desconta — não lance de novo quando a linha do banco chegar. O Pix que saiu do banco para o CPF dele
         também desconta, como "falta aprovar", até ser aprovado na fila. Só desconta o que é da categoria "Diárias de
-        freelancers" (ou ainda sem categoria): um Pix de almoço ou de peças para ele não entra aqui.
+        freelancers" (ou ainda sem categoria): um Pix de almoço ou de peças para ele não entra aqui. Quem recebe por
+        serviço (o Alex): cada serviço entra no saldo quando o cliente paga a OS, e o Pix em "Serviços de terceiros" desconta.
       </p>
     </div>
   );
 }
 
-function Extrato({ favorecidoId, periodo, onEditar, onRecibo, gerandoPdf }: {
+/** O serviço como o diálogo de correção recebe. */
+function servicoParaEditar(favorecidoId: string, s: ServicoDoPrestador): ServicoParaEditar {
+  return { favorecidoId, osId: s.os_id, modo: s.modo, valor: s.valor, percentual: s.percentual, base: s.base, descricao: s.descricao };
+}
+
+function Extrato({ favorecidoId, periodo, onEditar, onEditarServico, onRecibo, gerandoPdf }: {
   favorecidoId: string | null;
   periodo: PedidoDePeriodo;
   onEditar: (d: DiaParaEditar) => void;
+  onEditarServico: (s: ServicoParaEditar) => void;
   onRecibo: (favorecidoId: string, a: Acerto) => void;
   gerandoPdf: boolean;
 }) {
   const { formatCurrency } = useI18n();
   const conta = useContaCorrente(favorecidoId, periodo.de, periodo.ate, periodo.atalho);
   const acertos = useAcertos(favorecidoId);
+  // 12/11/2026: o prestador por serviço — os serviços dele (os da conta e os que esperam o cliente)
+  const porServico = conta.data?.favorecido.modo === 'servico';
+  const servicos = useServicosDoPrestador(porServico ? favorecidoId : null);
+  const apagarServico = useApagarServico();
+  const servicoPorId = new Map((servicos.data ?? []).map((s) => [s.id, s]));
   const { excluir, excluindo } = useExcluirDiaComDesfazer();
   const [dividindo, setDividindo] = useState<PagamentoParaDividir | null>(null);
   const juntar = useDividirPagamentoDoFreelancer();
@@ -332,7 +379,7 @@ function Extrato({ favorecidoId, periodo, onEditar, onRecibo, gerandoPdf }: {
   const estado = ESTADO_DO_SALDO[c.estado];
   const totais: Array<readonly [string, string]> = [
     [c.de ? 'Saldo antes do período' : 'Saldo inicial', formatCurrency(c.saldo_anterior)],
-    ['Trabalhado', formatCurrency(c.trabalhado)],
+    [porServico ? 'Serviços (OS pagas)' : 'Trabalhado', formatCurrency(c.trabalhado)],
     ...(c.reembolsos > 0 ? [[ROTULO_REEMBOLSOS, formatCurrency(c.reembolsos)] as const] : []),
     ['Pago', formatCurrency(c.pago)],
     ['Saldo no fim', formatCurrency(c.saldo_final)],
@@ -357,11 +404,51 @@ function Extrato({ favorecidoId, periodo, onEditar, onRecibo, gerandoPdf }: {
         </span>
       </div>
 
-      <AcertosDoFreelancer favorecidoId={c.favorecido.id} nome={c.favorecido.nome} acertos={acertos.data ?? []}
-                           gerandoPdf={gerandoPdf} onRecibo={(a) => onRecibo(c.favorecido.id, a)} />
+      {/* o recibo de diárias não vale para quem tem CNPJ e recebe por serviço: o comprovante é a nota dele */}
+      {!porServico && (
+        <AcertosDoFreelancer favorecidoId={c.favorecido.id} nome={c.favorecido.nome} acertos={acertos.data ?? []}
+                             gerandoPdf={gerandoPdf} onRecibo={(a) => onRecibo(c.favorecido.id, a)} />
+      )}
+
+      {porServico && c.servicos_aguardando_cliente.length > 0 && (
+        <Card className="space-y-2 p-3">
+          <p className="text-sm font-medium">
+            Aguardando o cliente pagar <span className="font-normal text-muted-foreground">(fora do saldo: entra quando o cliente pagar a OS)</span>
+          </p>
+          <div className="divide-y">
+            {c.servicos_aguardando_cliente.map((s) => (
+              <div key={s.id} className="flex min-w-0 items-start gap-3 py-2">
+                <div className="min-w-0 flex-1 text-sm">
+                  <p className="truncate"><span className="font-medium">{s.numero}</span>{s.cliente ? ` · ${s.cliente}` : ''}</p>
+                  <p className="truncate text-xs text-muted-foreground">{[s.rotulo, s.descricao].filter(Boolean).join(' · ')}</p>
+                </div>
+                <p className="shrink-0 font-semibold tabular-nums">{formatCurrency(s.valor)}</p>
+                <AcoesDaLinha
+                  rotulo={`serviço ${s.numero}`}
+                  ocupada={apagarServico.isPending}
+                  menu={[
+                    { texto: 'Corrigir o combinado', icone: Pencil, onClick: () => onEditarServico(servicoParaEditar(c.favorecido.id, s)) },
+                    {
+                      texto: 'Apagar o serviço', icone: Trash2, perigo: true,
+                      onClick: () => pedir({
+                        titulo: `Apagar o serviço da ${s.numero}?`,
+                        descricao: `${formatCurrency(s.valor)} (${s.rotulo}) deixa de ser devido a ${c.favorecido.nome}.`,
+                        confirmar: 'Apagar',
+                        acao: () => apagarServico.mutate(s.id),
+                      }),
+                    },
+                  ]}
+                />
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {c.linhas.length === 0 ? (
-        <Card className="p-6 text-center text-sm text-muted-foreground">Nenhum dia, reembolso nem pagamento neste período.</Card>
+        <Card className="p-6 text-center text-sm text-muted-foreground">
+          {porServico ? 'Nenhum serviço em OS paga nem pagamento neste período.' : 'Nenhum dia, reembolso nem pagamento neste período.'}
+        </Card>
       ) : (
         <Card className="divide-y p-0">
           {c.linhas.map((l) => (
@@ -389,6 +476,16 @@ function Extrato({ favorecidoId, periodo, onEditar, onRecibo, gerandoPdf }: {
                       {[descricaoDoReembolso(l), l.categoria, l.observacao].filter(Boolean).join(' · ')}
                     </p>
                     <p className="mt-0.5 text-xs text-muted-foreground">{comoTirarOReembolso(l.conta, acertoQueTrava(acertos.data, l.data))}</p>
+                  </>
+                ) : l.tipo === 'servico' ? (
+                  <>
+                    <div className="flex flex-wrap items-center gap-x-2 text-sm">
+                      <Badge variant="outline" className="text-success">Serviço</Badge>
+                      {l.os.length > 0 && <span className="min-w-0 truncate">{l.os.map((o) => o.numero).join(', ')}</span>}
+                    </div>
+                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                      {[l.jornada, l.descricao?.replace(/^Serviço [^—]*— /, ''), l.observacao].filter(Boolean).join(' · ')} · cliente pagou em {diaCurto(l.data).slice(4)}
+                    </p>
                   </>
                 ) : l.tipo === 'dia' ? (
                   <>
@@ -438,7 +535,27 @@ function Extrato({ favorecidoId, periodo, onEditar, onRecibo, gerandoPdf }: {
                 </p>
                 <p className="text-xs tabular-nums text-muted-foreground">saldo {formatCurrency(l.saldo)}</p>
               </div>
-              {l.tipo === 'dia' ? (
+              {l.tipo === 'servico' ? (
+                <AcoesDaLinha
+                  rotulo={`serviço ${l.os.map((o) => o.numero).join(', ')}`}
+                  ocupada={apagarServico.isPending}
+                  menu={[
+                    ...(servicoPorId.get(l.id) ? [{
+                      texto: 'Corrigir o combinado', icone: Pencil,
+                      onClick: () => onEditarServico(servicoParaEditar(c.favorecido.id, servicoPorId.get(l.id)!)),
+                    }] : []),
+                    {
+                      texto: 'Apagar o serviço', icone: Trash2, perigo: true,
+                      onClick: () => pedir({
+                        titulo: 'Apagar o serviço?',
+                        descricao: `${formatCurrency(l.trabalhado)} (${l.jornada ?? 'serviço'}) sai da conta de ${c.favorecido.nome}.`,
+                        confirmar: 'Apagar',
+                        acao: () => apagarServico.mutate(l.id),
+                      }),
+                    },
+                  ]}
+                />
+              ) : l.tipo === 'dia' ? (
                 <AcoesDaLinha
                   rotulo={`dia ${diaCurto(l.data)}`}
                   ocupada={excluindo}

@@ -29,6 +29,13 @@ export interface FreelancerNoResumo {
   pago_aguardando_banco: number;
   /** Pix que o banco já trouxe e espera a aprovação na fila — já está no "pago". */
   pago_falta_aprovar: number;
+  /** 12/11/2026: 'servico' = prestador que recebe por serviço/OS (o Alex), sem diária. */
+  modo: 'diaria' | 'servico';
+  /** Serviços que já entraram na conta (OS que o cliente pagou) e quantos. */
+  servicos: number;
+  n_servicos: number;
+  /** Serviços em OS que o cliente ainda não pagou — fora do saldo. */
+  aguardando_cliente: number;
 }
 
 export interface ResumoDosFreelancers {
@@ -50,7 +57,8 @@ export interface OSDoDia { id: string; numero: string }
  */
 export interface LinhaDaContaCorrente {
   data: string;
-  tipo: 'dia' | 'pagamento' | 'reembolso';
+  /** 'servico' (12/11/2026): o serviço do prestador, no dia em que o cliente pagou a OS; jornada = o combinado. */
+  tipo: 'dia' | 'pagamento' | 'reembolso' | 'servico';
   id: string;
   jornada: Jornada | null;
   fracao: number | null;
@@ -70,8 +78,28 @@ export interface LinhaDaContaCorrente {
   criado_em: string | null;
 }
 
+/** Serviço do prestador (12/11/2026, migration 20270105102000). */
+export interface ServicoDoPrestador {
+  id: string;
+  os_id: string;
+  numero: string;
+  cliente: string | null;
+  barco: string | null;
+  modo: 'valor' | 'percentual';
+  percentual: number | null;
+  base: 'mao_de_obra' | 'total' | 'lucro' | null;
+  /** "valor combinado", "30% da mão de obra" */
+  rotulo: string;
+  /** O combinado; no percentual antes de o cliente pagar, o valor de hoje. */
+  valor: number;
+  descricao: string | null;
+  data_servico: string | null;
+  cliente_pagou_em: string | null;
+  situacao: 'aguardando_cliente' | 'na_conta';
+}
+
 export interface ContaCorrente {
-  favorecido: { id: string; nome: string; desde: string | null; saldo_inicial: number; diaria: number | null };
+  favorecido: { id: string; nome: string; desde: string | null; saldo_inicial: number; diaria: number | null; modo: 'diaria' | 'servico' };
   atalho: string | null;
   de: string | null;
   ate: string | null;
@@ -86,6 +114,10 @@ export interface ContaCorrente {
   pago_falta_aprovar: number;
   saldo_final: number;
   estado: EstadoDoSaldo;
+  /** 12/11/2026: os serviços que já entraram e os que esperam o cliente pagar a OS (fora do saldo). */
+  servicos: number;
+  aguardando_cliente: number;
+  servicos_aguardando_cliente: ServicoDoPrestador[];
 }
 
 const num = (v: unknown) => (v == null ? 0 : Number(v));
@@ -104,6 +136,8 @@ export function useResumoFreelancers(de: string | null, ate: string | null, atal
           pago: num(p.pago), reembolsos: num(p.reembolsos), saldo_final: num(p.saldo_final),
           pago_aguardando_banco: num(p.pago_aguardando_banco), pago_falta_aprovar: num(p.pago_falta_aprovar),
           de: p.de ?? null, ate: p.ate ?? null,
+          modo: p.modo === 'servico' ? 'servico' : 'diaria', servicos: num(p.servicos), n_servicos: num(p.n_servicos),
+          aguardando_cliente: num(p.aguardando_cliente),
         })),
         trabalhado: num(r.trabalhado), pago: num(r.pago), reembolsos: num(r.reembolsos), dias: num(r.dias),
         deve: num(r.deve), adiantado: num(r.adiantado),
@@ -131,7 +165,12 @@ export async function lerContaCorrente(
     saldo_anterior: num(c.saldo_anterior), dias: num(c.dias), trabalhado: num(c.trabalhado),
     pago: num(c.pago), reembolsos: num(c.reembolsos), saldo_final: num(c.saldo_final),
     pago_aguardando_banco: num(c.pago_aguardando_banco), pago_falta_aprovar: num(c.pago_falta_aprovar),
-    favorecido: { ...c.favorecido, saldo_inicial: num(c.favorecido.saldo_inicial), diaria: numOuNulo(c.favorecido.diaria) },
+    favorecido: {
+      ...c.favorecido, saldo_inicial: num(c.favorecido.saldo_inicial), diaria: numOuNulo(c.favorecido.diaria),
+      modo: c.favorecido.modo === 'servico' ? 'servico' : 'diaria',
+    },
+    servicos: num(c.servicos), aguardando_cliente: num(c.aguardando_cliente),
+    servicos_aguardando_cliente: (c.servicos_aguardando_cliente ?? []).map(servicoLido),
     linhas: (c.linhas ?? []).map((l) => ({
       ...l, trabalhado: num(l.trabalhado), pago: num(l.pago), saldo: num(l.saldo),
       fracao: numOuNulo(l.fracao), valor_diaria: numOuNulo(l.valor_diaria),
@@ -758,4 +797,90 @@ export function pedidoParaDesfazer(a: DiariaApagada): PedidoDeDiaria {
     descontos: Number(a.descontos) || 0,
     valorDiaria: Number(a.valor_diaria),
   };
+}
+
+// ── Serviço do prestador (12/11/2026, migration 20270105102000) ────────────────────────────────────
+// O Alex recebe por serviço: valor combinado na OS ou um percentual (da mão de obra, do total ou do
+// lucro) que muda de serviço a serviço. Só entra no saldo quando o cliente paga a OS. As mesmas funções
+// do assistente (registrar_servico_prestador): a tela não calcula nada.
+
+function servicoLido(s: ServicoDoPrestador): ServicoDoPrestador {
+  return { ...s, valor: num(s.valor), percentual: numOuNulo(s.percentual) };
+}
+
+export function useServicosDoPrestador(favorecidoId: string | null) {
+  return useQuery({
+    queryKey: ['diarias', 'servicos', favorecidoId],
+    enabled: !!favorecidoId,
+    queryFn: async (): Promise<ServicoDoPrestador[]> => {
+      const { data, error } = await supabase.rpc('servicos_do_prestador' as never, { p_favorecido_id: favorecidoId } as never);
+      if (error) throw error;
+      return ((data ?? []) as unknown as ServicoDoPrestador[]).map(servicoLido);
+    },
+    staleTime: 30_000,
+  });
+}
+
+export interface PedidoDeServico {
+  favorecidoId: string;
+  osId: string;
+  modo: 'valor' | 'percentual';
+  valor: number;
+  percentual: number;
+  base: 'mao_de_obra' | 'total' | 'lucro';
+  descricao: string;
+  data: string;
+}
+
+export interface ResultadoDoServico {
+  ok: boolean;
+  id?: string;
+  valor: number;
+  entra_na_conta: boolean;
+  substituiu?: boolean;
+  message: string;
+}
+
+export function paramsDoServico(p: PedidoDeServico, simular: boolean) {
+  return {
+    p_favorecido_id: p.favorecidoId,
+    p_os_id: p.osId,
+    p_valor: p.modo === 'valor' ? p.valor : null,
+    p_percentual: p.modo === 'percentual' ? p.percentual : null,
+    p_base: p.modo === 'percentual' ? p.base : null,
+    p_descricao: p.descricao.trim() || null,
+    p_data: p.data || null,
+    p_simular: simular,
+  };
+}
+
+async function chamarServico(p: PedidoDeServico, simular: boolean): Promise<ResultadoDoServico> {
+  const { data, error } = await supabase.rpc('registrar_servico_prestador' as never, paramsDoServico(p, simular) as never);
+  if (error) throw error;
+  const r = data as unknown as ResultadoDoServico;
+  return { ...r, valor: num(r.valor), entra_na_conta: r.entra_na_conta === true };
+}
+
+/** O que o registro FARIA (valor de hoje, se já entra na conta, o que substitui) — nada é gravado. */
+export const simularServico = (p: PedidoDeServico) => chamarServico(p, true);
+
+export function useRegistrarServico() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (p: PedidoDeServico) => chamarServico(p, false),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['diarias'] }),
+  });
+}
+
+export function useApagarServico() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (servicoId: string) => {
+      const { data, error } = await supabase.rpc('apagar_servico_prestador' as never, { p_servico_id: servicoId } as never);
+      if (error) throw error;
+      return data as unknown as { apagado: boolean; message: string };
+    },
+    onSuccess: (r) => { toast.success(r.message); void qc.invalidateQueries({ queryKey: ['diarias'] }); },
+    onError: (e) => toast.error(mensagemDoErro(e)),
+  });
 }
