@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { assuntoDaResposta, cabecalhosDeResposta, pastaDeEnviados, podeResponder } from "./resposta.ts";
+import { assuntoDaResposta, cabecalhosDeResposta, ehEnderecoDaHbr, envioDaCaixa, pastaDeEnviados, podeResponder } from "./resposta.ts";
 
 const base = { from_address: "vendas@coremma.com.br", triage_class: null as string | null, muted: false, client_id: null, supplier_id: null };
 
@@ -27,4 +27,17 @@ Deno.test("pasta de Enviados: a marcada \\Sent vence o nome", () => {
   assertEquals(pastaDeEnviados([{ nome: "INBOX", atributos: [] }, { nome: "Itens Enviados", atributos: ["\\HasNoChildren", "\\Sent"] }]), "Itens Enviados");
   assertEquals(pastaDeEnviados([{ nome: "INBOX.Sent", atributos: [] }]), "INBOX.Sent");
   assertEquals(pastaDeEnviados([{ nome: "INBOX", atributos: [] }]), null);
+});
+
+Deno.test("Gmail hbr.boats@ (12/11/2026): é da própria HBR e responde pelo smtp.gmail.com, sem cópia por APPEND", () => {
+  assertEquals(ehEnderecoDaHbr("HBR.Boats@Gmail.com"), true);
+  assertEquals(ehEnderecoDaHbr("gustavo@hbrmarine.com.br"), true);
+  assertEquals(ehEnderecoDaHbr("@hbrmarine.com.br"), true);
+  assertEquals(ehEnderecoDaHbr("outro.boats@gmail.com"), false);
+  assertEquals(ehEnderecoDaHbr("vendas@coremma.com.br"), false);
+  assertEquals(podeResponder({ ...base, triage_class: "urgent", from_address: "hbr.boats@gmail.com" }).ok, false);
+
+  assertEquals(envioDaCaixa("imap.gmail.com", { host: "smtpout.secureserver.net", porta: "465" }), { host: "smtp.gmail.com", porta: 465, copiarEmEnviados: false });
+  assertEquals(envioDaCaixa("imap.secureserver.net", { host: "smtpout.secureserver.net", porta: "465" }), { host: "smtpout.secureserver.net", porta: 465, copiarEmEnviados: true });
+  assertEquals(envioDaCaixa(null, {}), { host: "smtpout.secureserver.net", porta: 465, copiarEmEnviados: true });
 });

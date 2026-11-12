@@ -3,9 +3,10 @@
 // Quem chama: a tool enviar_resposta_email, que é de risco ALTO — só roda depois do "sim" do dono
 // (pendência confirmada). Aqui não se decide nada: recebe o id do rascunho, confere que ele ainda é
 // rascunho e que o e-mail original pode ser respondido (_shared/email/resposta.ts), e envia pela
-// MESMA caixa que recebeu (SMTP da GoDaddy, senha do segredo da caixa), como resposta na mesma
-// conversa (In-Reply-To/References). Depois guarda uma cópia em Enviados (IMAP APPEND) para a
-// resposta aparecer no programa de e-mail do dono.
+// MESMA caixa que recebeu (SMTP da GoDaddy, ou smtp.gmail.com na caixa Gmail hbr.boats@ — ver
+// envioDaCaixa; senha do segredo da caixa), como resposta na mesma conversa (In-Reply-To/References).
+// Depois guarda uma cópia em Enviados (IMAP APPEND) para a resposta aparecer no programa de e-mail
+// do dono — menos no Gmail, que já guarda sozinho o que sai pelo SMTP dele.
 //
 // Autenticação: x-cron-secret (chamada interna do assistente) ou JWT de admin.
 
@@ -15,7 +16,7 @@ import MailComposer from "npm:nodemailer@6.9.10/lib/mail-composer/index.js";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 import { timingSafeEqual } from "../_shared/cron-auth.ts";
 import { ClienteImap } from "../_shared/email/imap.ts";
-import { cabecalhosDeResposta, pastaDeEnviados, podeResponder } from "../_shared/email/resposta.ts";
+import { cabecalhosDeResposta, envioDaCaixa, pastaDeEnviados, podeResponder } from "../_shared/email/resposta.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -69,12 +70,12 @@ servirComCors(async (req) => {
   });
   const bruto: Uint8Array = await new Promise((ok, falha) => mensagem.compile().build((e: Error | null, b: Uint8Array) => (e ? falha(e) : ok(b))));
 
+  const envio = envioDaCaixa(conta.imap_host, { host: Deno.env.get("SMTP_HOST"), porta: Deno.env.get("SMTP_PORT") });
   try {
-    const porta = Number(Deno.env.get("SMTP_PORT") || 465);
     const transporte = nodemailer.createTransport({
-      host: Deno.env.get("SMTP_HOST") || "smtpout.secureserver.net",
-      port: porta,
-      secure: porta === 465,
+      host: envio.host,
+      port: envio.porta,
+      secure: envio.porta === 465,
       auth: { user: conta.address, pass: senha },
     });
     await transporte.sendMail({ envelope: { from: conta.address, to: [r.para] }, raw: bruto });
@@ -85,7 +86,8 @@ servirComCors(async (req) => {
   }
   await admin.from("email_respostas").update({ status: "enviado", enviado_em: new Date().toISOString(), erro: null }).eq("id", id);
 
-  // Cópia em Enviados: se falhar, a resposta já saiu — só avisa.
+  // Cópia em Enviados: se falhar, a resposta já saiu — só avisa. Gmail guarda sozinho.
+  if (!envio.copiarEmEnviados) return jr({ ok: true, enviado_de: conta.address, para: r.para, copia_em: "Enviados (o Gmail guarda sozinho)" });
   let copia: string = "não guardada";
   let cli: ClienteImap | null = null;
   try {

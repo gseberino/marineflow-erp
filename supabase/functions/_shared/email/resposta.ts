@@ -14,6 +14,29 @@ export interface MensagemParaResponder {
 }
 
 /**
+ * Endereço (ou domínio "@...") da própria HBR: o domínio hbrmarine.com.br e o Gmail antigo
+ * hbr.boats@gmail.com (lido desde 12/11/2026). Nunca vira rascunho de resposta nem é silenciado.
+ */
+export function ehEnderecoDaHbr(endereco: string): boolean {
+  const e = String(endereco ?? "").trim().toLowerCase();
+  return /hbrmarine\.com\.br$/.test(e) || e === "hbr.boats@gmail.com";
+}
+
+/**
+ * Por onde a resposta sai, conforme o servidor da caixa (12/11/2026, Gmail hbr.boats@).
+ * Gmail: smtp.gmail.com:465 com a mesma senha de app, e o próprio Gmail já guarda o que sai por
+ * SMTP em "E-mails enviados" — a cópia por IMAP APPEND duplicaria. GoDaddy/Titan: o de sempre
+ * (SMTP_HOST/SMTP_PORT dos segredos) e a cópia em Enviados por APPEND.
+ */
+export function envioDaCaixa(
+  imapHost: string | null | undefined,
+  env: { host?: string | null; porta?: string | null },
+): { host: string; porta: number; copiarEmEnviados: boolean } {
+  if (/(^|\.)gmail\.com$/i.test(String(imapHost ?? "").trim())) return { host: "smtp.gmail.com", porta: 465, copiarEmEnviados: false };
+  return { host: env.host || "smtpout.secureserver.net", porta: Number(env.porta || 465), copiarEmEnviados: true };
+}
+
+/**
  * Pode escrever rascunho? Urgente e "esperando resposta" sempre; informativo/documento só de
  * cliente ou fornecedor cadastrado; sem classificação (histórico) só de cadastrado. Filtrado,
  * silenciado e remetente automático ("não responda"), nunca.
@@ -22,7 +45,7 @@ export function podeResponder(m: MensagemParaResponder): { ok: true } | { ok: fa
   if (m.muted) return { ok: false, motivo: "esse remetente está silenciado" };
   if (m.triage_class === "ignore") return { ok: false, motivo: "o e-mail foi filtrado como propaganda/automático" };
   if (isNoReplySender(m.from_address)) return { ok: false, motivo: "o remetente é automático (não aceita resposta)" };
-  if (/@hbrmarine\.com\.br$/i.test(m.from_address)) return { ok: false, motivo: "é um e-mail da própria HBR" };
+  if (ehEnderecoDaHbr(m.from_address)) return { ok: false, motivo: "é um e-mail da própria HBR" };
   const cadastrado = !!(m.client_id || m.supplier_id);
   if (m.triage_class === "urgent" || m.triage_class === "respond") return { ok: true };
   if (cadastrado) return { ok: true };

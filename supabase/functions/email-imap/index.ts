@@ -1,6 +1,6 @@
 // Edge Function: email-imap — lê as caixas de e-mail da HBR a cada 10 minutos (08/10/2026).
 //
-// Pedido do dono (07/10): o assistente lê financeiro@ e gustavo@hbrmarine.com.br. Etapas 1+2 do
+// Pedido do dono (07/10): o assistente lê financeiro@ e gustavo@hbrmarine.com.br (12/11: + Gmail hbr.boats@gmail.com, imap.gmail.com com senha de app). Etapas 1+2 do
 // plano (plans/marineflow-email-agente.md, agora pela rota IMAP):
 //   1. espelho — traz o que chegou desde a última leitura (na primeira vez, os últimos 90 dias),
 //      grava em email_messages com os anexos no bucket privado e liga o remetente ao cadastro;
@@ -233,7 +233,10 @@ servirComCors(async (req) => {
 
   const { data: contas, error: cErr } = await admin.from("email_accounts")
     .select("id, address, label, imap_host, imap_port, secret_name, history_days, imap_uidvalidity, imap_last_uid")
-    .eq("active", true).not("secret_name", "is", null).not("imap_host", "is", null);
+    .eq("active", true).not("secret_name", "is", null).not("imap_host", "is", null)
+    // Mais antiga primeiro (12/11/2026): a caixa nova (Gmail hbr.boats@) lê o histórico por último, sem
+    // tirar o tempo da rodada das caixas que já estão em dia.
+    .order("created_at", { ascending: true });
   if (cErr) return jr({ error: `não li as caixas: ${cErr.message}` }, 500);
 
   const { data: regras } = await admin.from("email_sender_rules").select("pattern, action");

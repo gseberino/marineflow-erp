@@ -1,12 +1,13 @@
 // Tools: o assistente consulta os e-mails das caixas da HBR (08/10/2026, etapa 3 do plano de e-mail,
-// mínima). As caixas são lidas pela função email-imap (financeiro@ e gustavo@hbrmarine.com.br).
+// mínima). As caixas são lidas pela função email-imap (financeiro@ e gustavo@hbrmarine.com.br e,
+// desde 12/11/2026, o Gmail antigo hbr.boats@gmail.com).
 //
 // Segurança (plans/marineflow-email-agente.md §6): o texto de um e-mail é escrito por QUALQUER UM.
 // Ele chega ao modelo só quando a pessoa pede para ler, delimitado e marcado como dado — nunca como
 // instrução — e as tools daqui não executam nada além de ler e silenciar um remetente (com OK).
 
 import { blockTechnician, type Role, type ToolCtx, type ToolDef } from "./registry.ts";
-import { assuntoDaResposta, podeResponder } from "../../email/resposta.ts";
+import { assuntoDaResposta, ehEnderecoDaHbr, podeResponder } from "../../email/resposta.ts";
 import { resumoDosDados } from "../../email/dados.ts";
 
 const reais = (n: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(n);
@@ -51,13 +52,13 @@ export const emailTools: ToolDef[] = [
   {
     name: "listar_emails",
     description:
-      "Lista e-mails recebidos nas caixas da HBR (financeiro@ e gustavo@hbrmarine.com.br), mais novos primeiro: 'tem e-mail " +
+      "Lista e-mails recebidos nas caixas da HBR (financeiro@ e gustavo@hbrmarine.com.br, e o Gmail antigo hbr.boats@gmail.com), mais novos primeiro: 'tem e-mail " +
       "novo?', 'o que chegou do fornecedor X?', 'e-mails urgentes de hoje', 'algum e-mail com boleto?'. Filtros opcionais. " +
       "Só leitura. Para o texto de um e-mail use ler_email.",
     input_schema: {
       type: "object",
       properties: {
-        caixa: { type: "string", enum: ["financeiro", "gustavo"], description: "Só uma das caixas." },
+        caixa: { type: "string", enum: ["financeiro", "gustavo", "hbr.boats"], description: "Só uma das caixas (hbr.boats = o Gmail antigo)." },
         classe: { type: "string", enum: ["urgente", "esperando resposta", "documento", "informativo", "filtrado"] },
         remetente: { type: "string", description: "Parte do nome ou do endereço de quem mandou (ou do cliente/fornecedor)." },
         busca: { type: "string", description: "Parte do assunto." },
@@ -242,7 +243,7 @@ export const emailTools: ToolDef[] = [
       if (b) return b;
       const alvo = String(args.remetente ?? "").trim().toLowerCase();
       if (!/^(@[a-z0-9.-]+\.[a-z]{2,}|[^@\s]+@[a-z0-9.-]+\.[a-z]{2,})$/.test(alvo)) return { error: "Passe um endereço (nome@empresa.com) ou um domínio (@empresa.com)." };
-      if (/hbrmarine\.com\.br$/.test(alvo)) return { error: "Não silencio endereços da própria HBR." };
+      if (ehEnderecoDaHbr(alvo)) return { error: "Não silencio endereços da própria HBR." };
       const { error } = await ctx.admin.from("email_sender_rules")
         .upsert({ pattern: alvo, action: "ignore_always", reason: args.motivo ?? "pedido pelo assistente", created_by: ctx.userId || null }, { onConflict: "pattern" });
       if (error) return { error: `Não consegui silenciar (${error.message}).` };
