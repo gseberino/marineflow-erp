@@ -566,7 +566,10 @@ begin
        select 'agenda_config_' || n || '_check'
          from unnest(array['modo_porque', 'modo_explicar', 'modo_placar', 'modo_rebaixar', 'porque_motivos_max', 'origens_do_dono', 'livre_semanas', 'como_pensei_perguntas',
                            'como_pensei_itens_max', 'correcao_janela_du', 'rebaixar_janela_semanas', 'rebaixar_n_min', 'rebaixar_taxa', 'rebaixar_amostra', 'voltar_n',
-                           'rebaixar_trava_dias', 'explicar_hora', 'placar_janela', 'placar_semanas_hist', 'placar_min_linhas', 'explicar_tempo_max']) n)));
+                           'rebaixar_trava_dias', 'explicar_hora', 'placar_janela', 'placar_semanas_hist', 'placar_min_linhas', 'explicar_tempo_max']) n)))
+     -- FASE 7g: fim
+     -- FASE 7g: (7g P5b, 20261112100700) os 2 de os_planejamento (o ok do dono) têm o caso deles em agenda_fase7g_ok_do_dono.sql (K0f e K0g, pelo nome).
+     and not (c.conname = any (array['os_planejamento_ok_coerente', 'os_planejamento_ok_do_dono_via_check']));
      -- FASE 7g: fim
   insert into _resultado values ('B todo CHECK das 6 tabelas tem um caso que ele recusa', v_sem_caso is null, v_sem_caso);
 end

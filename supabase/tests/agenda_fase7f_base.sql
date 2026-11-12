@@ -499,6 +499,12 @@ begin
     ('habilidade',          'recomendacao', 'nada',  'tipo',       null),
     ('local',               null,           null,    'cliente',    null),
     ('acesso',              'recomendacao', 'opcao', 'cliente',    1);
+  -- FASE 7g: (7g P5b) ok_marcacao (20261112100700): a recomendação, como nao_cabe; fora de veto_tipos (quem o põe é o dado 100990), espera tipo
+  if 'ok_marcacao' = any (v_tipos) then
+    insert into _esperado values ('ok_marcacao', 'recomendacao', 'opcao',
+                                  case when 'ok_marcacao' = any ((public._agenda_cfg()).veto_tipos) then null else 'tipo' end, 1);
+  end if;
+  -- FASE 7g: fim
 
   select string_agg(t, ',') into v_dif from unnest(v_tipos) t where t not in (select e.tipo from _esperado e);
   v_res := pg_temp.ok(v_res, format('B3a todo tipo da lista corrente está na tabela da prova (%s tipos): tipo novo sem linha reprova aqui', cardinality(v_tipos)),
@@ -825,6 +831,11 @@ begin
     -- FASE 7g: a 20261112100000 soma explicar depois de comunicar (agenda_fase7g_base.sql B4b confere a lista inteira)
     if r.nome = 'agenda_vigia_rodadas_rotina_check' and v_a[cardinality(v_a)] = 'explicar'
        and exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass and a.attname = 'modo_porque' and not a.attisdropped) then
+      v_a := v_a[1:cardinality(v_a) - 1];
+    end if;
+    -- FASE 7g: fim
+    -- FASE 7g: (7g P5b) a 20261112100700 soma nivel no fim das ações (agenda_fase7g_ok_do_dono.sql K0c confere)
+    if r.nome = 'agenda_acoes_tipo_check' and v_a[cardinality(v_a)] = 'nivel' and to_regprocedure('public._agenda_espera_ok(uuid)') is not null then
       v_a := v_a[1:cardinality(v_a) - 1];
     end if;
     -- FASE 7g: fim
@@ -1170,6 +1181,9 @@ begin
      and p.proname not in ('_agenda_acoes_porque')  -- 7g P2 (a zona da ação, §3.1 item 5: chama _agenda_zona, que não lê o freio)
      -- 7g P6 (o placar conta as perguntas assumidas, assumida_em; a saúde do rebaixar lê o veto por _agenda_fala_modo, R9.6)
      and p.proname not in ('_agenda_placar_numeros', '_agenda_saude_explicar')
+     -- 7g P5b (o "espera o seu ok", 20261112100700: _agenda_espera_ok lê modo_veto CRU, de propósito — R9.6, a reserva fica com o freio —; o nível de
+     -- _agenda_explicar_tipos lê o veto por _agenda_fala_modo, R9.6)
+     and p.proname not in ('_agenda_espera_ok', '_agenda_explicar_tipos')
      and not exists (select 1 from regexp_matches(coalesce(p.prosrc, ''), '-- FASE 7f:') x);
   v_res := pg_temp.ok(v_res, 'B10c nenhuma função de antes lê as colunas nem chama as funções novas: o gatilho é a única porta', v_dif is null, v_dif);
   v_res := pg_temp.ok(v_res, 'B10d sem dado: nenhuma ação assumir, rodada comunicar, mensagem previsto, mudanca, convite nem semana; ninguém assumida',

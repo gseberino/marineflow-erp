@@ -445,8 +445,11 @@ begin
             -- FASE 7c: fim
             -- FASE 7d: os tipos local, combinar e acesso (20261107100000), com o modo deles em _agenda_modo_da_pergunta
             + case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
-                                                             and a.attname = 'modo_bem' and not a.attisdropped) then 3 else 0 end,
+                                                             and a.attname = 'modo_bem' and not a.attisdropped) then 3 else 0 end
             -- FASE 7d: fim
+            -- FASE 7g: (7g P5b) o tipo ok_marcacao (20261112100700), com o modo dele (modo_rebaixar, cru) em _agenda_modo_da_pergunta
+            + case when to_regprocedure('public._agenda_espera_ok(uuid)') is null then 0 else 1 end,
+            -- FASE 7g: fim
     v_t);
   v_res := pg_temp.igual(v_res, 'S5 (c) o modo de cada grupo: crítica do plano, vigia, chegou? do fornecedor, material, diária, equipe, cliente, aprendizado',
     (select string_agg(public._agenda_modo_da_pergunta(t, c), ',' order by o)

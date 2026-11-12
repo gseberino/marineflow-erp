@@ -29,6 +29,22 @@ begin;
 
 create temp table _resultado (teste text, ok boolean, detalhe text) on commit drop;
 
+-- FASE 7g: (7g P5b, 20261112100700) o corpo sem os blocos do P5b (que recria agenda_decidir, agenda_desfazer e agenda_tela_semana): o tirador do montador
+create function pg_temp.sem_p5b(p text) returns text language plpgsql immutable as $f$
+declare
+  v_fora   text[] := '{}';
+  v_dentro boolean := false;
+  l        text;
+begin
+  foreach l in array string_to_array(p, E'\n') loop
+    if not v_dentro and l ~ '^\s*-- FASE 7g: \(7g P5b' then v_dentro := true; continue; end if;
+    if v_dentro and l ~ '^\s*-- FASE 7g: fim\s*$' then v_dentro := false; continue; end if;
+    if v_dentro then continue; end if;
+    v_fora := v_fora || l;
+  end loop;
+  return array_to_string(v_fora, E'\n');
+end $f$;
+-- FASE 7g: fim
 create function pg_temp.ok(p_res jsonb, p_nome text, p_ok boolean, p_detalhe text default null) returns jsonb
 language sql immutable as $f$
   select p_res || jsonb_build_array(jsonb_build_array(p_nome, coalesce(p_ok, false), p_detalhe))
@@ -238,7 +254,9 @@ begin
   select string_agg(p.proname, ', ') into v
     from pg_proc p
    where p.pronamespace = 'public'::regnamespace and p.proname in ('agenda_ver', 'agenda_tela_semana', 'os_plano_da_os')
-     and replace(p.prosrc, E'\r\n', E'\n') is distinct from pg_temp.corpo(v_mig, p.proname);
+     -- FASE 7g: (7g P5b) tirados os blocos do P5b (20261112100700 recria agenda_tela_semana; agenda_fase7g_ok_do_dono.sql K0b confere a cópia)
+     and pg_temp.sem_p5b(replace(p.prosrc, E'\r\n', E'\n')) is distinct from pg_temp.corpo(v_mig, p.proname);
+     -- FASE 7g: fim
   v_res := pg_temp.ok(v_res, 'T0c no banco está a desta migration', v is null, v);
   v := (select string_agg(format('%s:%s:%s', p.proname, p.prosecdef, p.provolatile), ' ' order by p.proname) from pg_proc p
          where p.pronamespace = 'public'::regnamespace and p.proname in ('agenda_ver', 'agenda_tela_semana', 'os_plano_da_os'));

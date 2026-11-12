@@ -742,6 +742,9 @@ select 'C3 a lista fechada dos tipos de pergunta: as 26 de antes e equipe_sem_di
            + case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
                                                             and a.attname = 'modo_bem' and not a.attisdropped) then 3 else 0 end
            -- FASE 7d: fim
+           -- FASE 7g: (7g P5b) o tipo ok_marcacao (20261112100700)
+           + case when to_regprocedure('public._agenda_espera_ok(uuid)') is null then 0 else 1 end
+           -- FASE 7g: fim
        and pg_get_constraintdef((select c.oid from pg_constraint c where c.conname = 'agenda_perguntas_tipo_check')) like '%''equipe_sem_dias''%'
        and pg_temp.erro_de($q$insert into public.agenda_perguntas (tipo, chave, texto, modo) values ('outro', 'outro:t', 'Pergunta?', 'sombra')$q$) = '23514',
        null;

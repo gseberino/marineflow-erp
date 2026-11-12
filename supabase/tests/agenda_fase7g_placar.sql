@@ -763,7 +763,11 @@ begin
     -- Q6a zerada: os modos desligados, nenhum zero acende (mesmo com marcação aberta antiga e sem rodada)
     v := public._agenda_saude_explicar(date '2027-03-11', timestamptz '2027-03-11 18:00-03');
     v_res := pg_temp.ok(v_res, 'Q6a a chave explicar zerada com os modos desligados (os zeros olham o modo deles): zeros_ok e os 5 zeros = 0',
-      v ->> 'zeros_ok' = 'true' and (v - 'zeros_ok' - 'numeros') = '{"erros_dia": 0, "placar_atrasado": 0, "rodada_atrasada": 0, "rebaixar_sem_veto": 0, "marcacao_aberta_vencida": 0}'::jsonb, v::text);
+      v ->> 'zeros_ok' = 'true' and (v - 'zeros_ok' - 'numeros'
+        -- FASE 7g: (7g P5b) os 2 zeros do ok do dono (20261112100700), também 0 (agenda_fase7g_ok_do_dono.sql K4r, K11a a K11c acendem cada um)
+        - 'ok_sem_pergunta' - 'nivel_sem_aviso') = '{"erros_dia": 0, "placar_atrasado": 0, "rodada_atrasada": 0, "rebaixar_sem_veto": 0, "marcacao_aberta_vencida": 0}'::jsonb
+        and coalesce(v ->> 'ok_sem_pergunta', '0') = '0' and coalesce(v ->> 'nivel_sem_aviso', '0') = '0', v::text);
+        -- FASE 7g: fim
     v_res := pg_temp.ok(v_res, 'Q6b agenda_saude tem a chave explicar (a mesma da função)',
       public.agenda_saude(date '2027-03-11', timestamptz '2027-03-11 18:00-03') -> 'explicar' = v, null);
     -- Q6c placar_atrasado: em sombra, na quinta, depois de explicar_hora + 1 h, sem a semana guardada = 1; antes da hora, outro dia ou com a semana = 0

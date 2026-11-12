@@ -284,7 +284,8 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
   {
     onde: 'agenda_explicar_rodar',
     casou: '1000',
-    vezes: 1,
+    // Fase 7g (P5b, 20261112100700): + 1 na recriada (a mesma cópia, com o passo ok a cada tique).
+    vezes: 2,
     porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_aprender); não é texto_max nem peca_embutida_acima',
   },
   // Fase 7g (P6, 20261112100500): o placar guardado cabe no CHECK da tabela (texto até 1000 letras, 20261112100000), e texto_max pode passar dele (até 3000).

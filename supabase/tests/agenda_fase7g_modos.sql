@@ -1,15 +1,15 @@
 -- Prova da migration de dado da Fase 7g da Agenda de Produção (pacote P7; 20261112100990_agenda_fase7g_modos.sql), que a bancada NÃO aplica (FORA_DA_BANCADA): aqui
 -- ela roda como está, numa subtransação desfeita, com o freio de produção (gestor_so_propor = true) — spec-fase7g §5.8 e §8.3 (agenda_fase7g_modos.sql) com R9.2,
--- R9.4-2, R9.13 e R9.14. Molde: agenda_fase7e_dado.sql.
--- bancada: depende de 20261112100600
+-- R9.4-2, R9.13 e R9.14. Molde: agenda_fase7e_dado.sql. P5b (20261112100700): o dado põe ok_marcacao em veto_tipos (§4.4, §5.8, AG7-15) e a trava conta 8.
+-- bancada: depende de 20261112100700
 --
---   S  os 4 interruptores da 7g: desligado → sombra; marcacoes_desde, nula → a hora do dado; o resto da linha igual (o freio, veto_tipos, os modos de antes, os
---      números da 7g); atualizado_por nulo e a hora nova; o dado sozinho não escreve mais nada; de novo não muda nada (nem a hora); ligado nunca é rebaixado e
+--   S  os 4 interruptores da 7g: desligado → sombra; marcacoes_desde, nula → a hora do dado; veto_tipos ganha ok_marcacao no fim (P5b); o resto da linha igual
+--      (o freio, os modos de antes, os números da 7g); atualizado_por nulo e a hora nova; o dado sozinho não escreve mais nada; de novo não muda nada (nem a hora); ligado nunca é rebaixado e
 --      sombra fica sombra; a hora já gravada fica
---   T  a trava: sem o código da 7g no banco (uma função de estrutura, ou agenda_ver sem os focos da 100600), recusa e nada muda; o cabeçalho diz quantas migrations
+--   T  a trava: sem o código da 7g no banco (uma função de estrutura, a do P5b também, ou agenda_ver sem os focos da 100600), recusa e nada muda; o cabeçalho diz quantas migrations
 --      de estrutura lista, e é o número da trava (T0)
 --   D  o DESFAZER do cabeçalho: um comando (o with … select, um UPDATE de agenda_config, nenhum DELETE nem outra tabela); volta os 4 a desligado e nada mais (a hora
---      fica, R9.14); não mexe no ligado e diz quais ficam ligados; com nada a voltar, não muda nada (nem a hora)
+--      fica, R9.14, e o ok_marcacao de veto_tipos também); não mexe no ligado e diz quais ficam ligados; com nada a voltar, não muda nada (nem a hora)
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -34,8 +34,12 @@ create function pg_temp.modos() returns text language sql stable as $f$
 $f$;
 -- A linha de agenda_config sem o que o dado grava e o carimbo (o que a migration não pode mexer).
 create function pg_temp.resto() returns jsonb language sql stable as $f$
-  select to_jsonb(c) - 'modo_porque' - 'modo_explicar' - 'modo_placar' - 'modo_rebaixar' - 'marcacoes_desde' - 'atualizado_em' - 'atualizado_por'
+  select to_jsonb(c) - 'modo_porque' - 'modo_explicar' - 'modo_placar' - 'modo_rebaixar' - 'marcacoes_desde' - 'veto_tipos' - 'atualizado_em' - 'atualizado_por'
     from public.agenda_config c where c.id
+$f$;
+-- veto_tipos (P5b: o dado põe ok_marcacao no fim)
+create function pg_temp.veto() returns text[] language sql stable as $f$
+  select c.veto_tipos from public.agenda_config c where c.id
 $f$;
 create function pg_temp.linha() returns jsonb language sql stable as $f$
   select to_jsonb(c) from public.agenda_config c where c.id
@@ -92,6 +96,7 @@ declare
   v_trv    text[];
   v_dt     record;
   v_hora   timestamptz;
+  v_veto   text[];
 begin
   if coalesce(v_mig, '') = '' then
     insert into _resultado values ('S0 a migration 20261112100990 como texto', true, 'PULADO: sem agenda_teste.mig_modos_fase7g (rode pela bancada)');
@@ -104,6 +109,7 @@ begin
   begin
     perform pg_temp.partida();
     v_resto := pg_temp.resto();
+    v_veto := pg_temp.veto();
     v_foto := pg_temp.foto();
     execute v_mig;
     v_linha := pg_temp.linha();
@@ -111,7 +117,9 @@ begin
                          pg_temp.modos() = 'sombra sombra sombra sombra', pg_temp.modos());
     v_res := pg_temp.res(v_res, 'S2 marcacoes_desde, nula, passa à hora do dado (R9.4-2: nada de antes entra na medida)',
                          (v_linha ->> 'marcacoes_desde')::timestamptz = now(), v_linha ->> 'marcacoes_desde');
-    v_res := pg_temp.res(v_res, 'S3 o resto da linha não muda (o freio, veto_tipos, os modos das Fases 1–6 e de 7a–7f, os números da 7g); atualizado_por nulo e a hora nova',
+    v_res := pg_temp.res(v_res, 'S3c (P5b) veto_tipos ganha ok_marcacao no fim e nada mais (a pergunta "Pode marcar assim?" pode vencer pelo prazo, AG7-15)',
+                         not ('ok_marcacao' = any (v_veto)) and pg_temp.veto() = v_veto || '{ok_marcacao}'::text[], array_to_string(pg_temp.veto(), ','));
+    v_res := pg_temp.res(v_res, 'S3 o resto da linha não muda (o freio, os modos das Fases 1–6 e de 7a–7f, os números da 7g); atualizado_por nulo e a hora nova',
                          pg_temp.resto() = v_resto and v_linha ->> 'atualizado_por' is null and (v_linha ->> 'atualizado_em')::timestamptz <> timestamptz '2026-11-01 12:00-03'
                          and (v_linha ->> 'gestor_so_propor')::boolean, pg_temp.resto()::text);
     v_res := pg_temp.res(v_res, 'S3b o dado sozinho não escreve mais nada: o plano, as propostas, as ações, as perguntas, as marcações, os tipos, o placar, os avisos, a fila e as rodadas iguais',
@@ -134,6 +142,15 @@ begin
     execute v_mig;
     v_res := pg_temp.res(v_res, 'S5d com os 4 fora de desligado e a hora nula, só a hora (a guarda olha os dois)',
                          (pg_temp.linha() ->> 'marcacoes_desde')::timestamptz = now() and pg_temp.modos() = 'ligado sombra sombra sombra', pg_temp.linha() ->> 'marcacoes_desde');
+    update public.agenda_config set veto_tipos = array_remove(veto_tipos, 'ok_marcacao'), atualizado_em = timestamptz '2026-11-01 12:00-03' where id;
+    v_resto := pg_temp.resto();
+    v_hora := (pg_temp.linha() ->> 'marcacoes_desde')::timestamptz;
+    execute v_mig;
+    v_res := pg_temp.res(v_res, 'S5e (P5b) com os 4 fora de desligado e a hora gravada, só falta ok_marcacao em veto_tipos: só ele volta (uma vez, no fim; a guarda olha os três)',
+                         pg_temp.veto() = array_remove(pg_temp.veto(), 'ok_marcacao') || '{ok_marcacao}'::text[]
+                         and (select count(*) from unnest(pg_temp.veto()) x where x = 'ok_marcacao') = 1
+                         and (pg_temp.linha() ->> 'marcacoes_desde')::timestamptz = v_hora and pg_temp.resto() = v_resto and pg_temp.modos() = 'ligado sombra sombra sombra',
+                         array_to_string(pg_temp.veto(), ','));
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
@@ -141,8 +158,8 @@ begin
   -- ── T: a trava ──
   v_cab := regexp_match(v_mig, 'Aplica DEPOIS das (\d+) migrations de estrutura da 7g \(([^)]*)\)');
   v_trv := regexp_match(v_mig, 'vem depois das (\d+) migrations de estrutura da 7g');
-  v_res := pg_temp.res(v_res, 'T0 o cabeçalho diz quantas migrations de estrutura lista, e é o número da frase da trava (7)',
-                       v_cab is not null and v_trv is not null and v_trv[1] = '7' and v_cab[1] = v_trv[1]
+  v_res := pg_temp.res(v_res, 'T0 o cabeçalho diz quantas migrations de estrutura lista, e é o número da frase da trava (8, com a do P5b)',
+                       v_cab is not null and v_trv is not null and v_trv[1] = '8' and v_cab[1] = v_trv[1]
                        and v_cab[1]::int = (select count(*) from regexp_matches(v_cab[2], '\m\d{6}(\d{8})?\M', 'g')),
                        format('cabeçalho %s (lista: %s); trava %s', v_cab[1], v_cab[2], v_trv[1]));
   begin
@@ -157,6 +174,16 @@ begin
     v_res := pg_temp.res(v_res, 'T1 sem uma função de estrutura da 7g (o placar, da 100500), recusa: diz o que falta, e nada muda',
                          v_err like 'O dado 20261112100990 vem depois%agenda_placar(date, date, timestamptz)%Nada mudou.' and pg_temp.linha() = v_linha, v_err);
     alter function public.agenda_placar_fora(date, date, timestamptz) rename to agenda_placar;
+    -- (P5b) sem a do P5b (o passo ok, da 20261112100700), recusa
+    alter function public._agenda_explicar_ok(date, timestamptz) rename to _agenda_explicar_ok_fora;
+    begin
+      execute v_mig;
+      v_err := 'passou';
+    exception when sqlstate 'P0001' then v_err := sqlerrm;
+    end;
+    v_res := pg_temp.res(v_res, 'T1b (P5b) sem a migration do P5b (o passo ok), recusa: diz o que falta, e nada muda',
+                         v_err like 'O dado 20261112100990 vem depois das 8%_agenda_explicar_ok(date, timestamptz)%Nada mudou.' and pg_temp.linha() = v_linha, v_err);
+    alter function public._agenda_explicar_ok_fora(date, timestamptz) rename to _agenda_explicar_ok;
     -- agenda_ver sem os focos (a de antes da 100600 por cima)
     execute pg_temp.inteira(current_setting('agenda_teste.mig_leituras_fase7d'), 'agenda_ver');
     begin
@@ -185,7 +212,7 @@ begin
     execute v_desf into v_dt;
     v_res := pg_temp.res(v_res, 'D1 volta a desligado só o que está em sombra; o ligado fica e é dito; a hora da medida fica (R9.14); o resto da linha igual',
                          pg_temp.modos() = 'desligado desligado ligado desligado' and v_dt.linha_mudou = 1 and v_dt.ficam_ligados = 'modo_placar'
-                         and (pg_temp.linha() ->> 'marcacoes_desde')::timestamptz = v_hora and pg_temp.resto() = v_resto,
+                         and (pg_temp.linha() ->> 'marcacoes_desde')::timestamptz = v_hora and pg_temp.resto() = v_resto and 'ok_marcacao' = any (pg_temp.veto()),
                          format('%s; %s; %s', pg_temp.modos(), v_dt.linha_mudou, v_dt.ficam_ligados));
     update public.agenda_config set modo_placar = 'desligado', atualizado_em = timestamptz '2026-11-01 12:00-03' where id;
     v_linha := pg_temp.linha();

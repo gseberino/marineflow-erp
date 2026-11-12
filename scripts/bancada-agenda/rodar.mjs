@@ -458,6 +458,8 @@ const FIXTURES_COMO_TEXTO = [
   // da medida; o agenda_fase7g_modos.sql o roda numa subtransação desfeita).
   ['agenda_teste.mig_tela_fase7g', '../../supabase/migrations/20261112100600_agenda_fase7g_tela.sql'],
   ['agenda_teste.mig_modos_fase7g', '../../supabase/migrations/20261112100990_agenda_fase7g_modos.sql'],
+  // Fase 7g (P5b): a migration do "espera o seu ok" (o K0i de agenda_fase7g_ok_do_dono.sql: cria só as 4 novas e recria só as 11).
+  ['agenda_teste.mig_ok_fase7g', '../../supabase/migrations/20261112100700_agenda_fase7g_ok_do_dono.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

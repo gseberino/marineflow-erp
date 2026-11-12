@@ -548,7 +548,10 @@ begin
     from unnest(pg_temp.lista('public.agenda_perguntas'::regclass, 'agenda_perguntas_tipo_check')) t
    where pg_temp.gerada('public.agenda_perguntas'::regclass, 'critica', t) = 'true';
   v_res := pg_temp.ok(v_res, 'B3f critica: os 12 de antes + acesso; local e combinar não são críticas (a expressão viva, tipo a tipo)',
-    v_t = 'acesso,aprendizado,atraso_longo,cliente_aviso,dia_avisado,dia_prometido,diaria,fixada_pelo_dono,nao_cabe,onda,remarcar_confirmado,sabado,segundo_atraso',
+    -- FASE 7g: (7g P5b) com a 20261112100700, também ok_marcacao (agenda_fase7g_ok_do_dono.sql K0d confere)
+    replace(v_t, 'ok_marcacao,', '') = 'acesso,aprendizado,atraso_longo,cliente_aviso,dia_avisado,dia_prometido,diaria,fixada_pelo_dono,nao_cabe,onda,remarcar_confirmado,sabado,segundo_atraso'
+    and (position('ok_marcacao' in v_t) > 0) = (to_regprocedure('public._agenda_espera_ok(uuid)') is not null),
+    -- FASE 7g: fim
     v_t);
 
   -- modelo: os 11 de antes iguais à expressão de antes; onde_fica = M11; o que não está na lista cai no else, como antes
@@ -778,7 +781,11 @@ begin
              modo_habilidade = r.m2, modo_habilidade_propor = r.m, modo_tarefas = r.m2, modo_cliente = r.m, modo_proposta = r.m2, modo_vigia = r.m,
              modo_local_calendario = r.m2, modo_local_autorizacao = r.m, modo_bem = r.m2, modo_patio = r.m, modo_viagem = r.m2, modo_mesmo_local = r.m
        where id;
-      select string_agg(t, ',' order by t) filter (where public._agenda_modo_da_pergunta(t, t || ':x') is distinct from pg_temp.modo_antes(t, t || ':x')),
+      select string_agg(t, ',' order by t) filter (where public._agenda_modo_da_pergunta(t, t || ':x') is distinct from pg_temp.modo_antes(t, t || ':x')
+                                                     -- FASE 7g: (7g P5b) ok_marcacao (20261112100700) também não tem o de antes; o K4n de agenda_fase7g_ok_do_dono.sql confere o dele
+                                                     and t <> 'ok_marcacao'
+                                                     -- FASE 7g: fim
+                                                     ),
              count(*)
         into v_a, v_n
         from unnest(pg_temp.lista('public.agenda_perguntas'::regclass, 'agenda_perguntas_tipo_check')) t;
@@ -787,6 +794,15 @@ begin
     end loop;
     -- a cópia: o corpo vivo = o desta migration; sem o bloco "-- FASE 7d:" é o de 20261102100550
     select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = 'public._agenda_modo_da_pergunta(text, text)'::regprocedure;
+    -- FASE 7g: (7g P5b) a 20261112100700 recria esta função com 1 bloco "-- FASE 7g:" (ok_marcacao): tirado ele, o corpo vivo é o desta migration
+    v_novo := array_to_string(array(
+                select l from (select l, o, sum(case when l ~ '^\s*-- FASE 7g:' and l !~ '^\s*-- FASE 7g: fim' then 1
+                                                     when l ~ '^\s*-- FASE 7g: fim' then -1 else 0 end)
+                                            over (order by o rows between unbounded preceding and current row) as dentro,
+                                      l ~ '^\s*-- FASE 7g: fim' as fecha
+                                 from unnest(string_to_array(v_novo, E'\n')) with ordinality u(l, o)) x
+                 where dentro = 0 and not fecha order by o), E'\n');
+    -- FASE 7g: fim
     select count(*) into v_n from regexp_matches(v_novo, '-- FASE 7d: fim', 'g');
     v_res := pg_temp.ok(v_res, 'B6j a cópia de _agenda_modo_da_pergunta: o corpo vivo é o desta migration; sem o bloco "-- FASE 7d:" (1), é o corpo de 20261102100550 (a mais nova antes da 7d), byte a byte',
       v_n = 1 and v_novo = pg_temp.corpo(v_esta, '_agenda_modo_da_pergunta') and pg_temp.corpo(v_mig, '_agenda_modo_da_pergunta') <> ''

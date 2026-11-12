@@ -607,6 +607,13 @@ select format('B3a %s: as de antes iguais e na mesma ordem, e habilidade no fim'
                     || case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
                                          and a.attname = 'modo_porque' and not a.attisdropped)
                             then case t.nome when 'agenda_vigia_rodadas_rotina_check' then '{explicar}'::text[] else '{}'::text[] end
+                            else '{}'::text[] end
+         -- FASE 7g: fim
+         -- FASE 7g: (7g P5b) a 20261112100700 soma ok_marcacao (pergunta), nivel (ação) e ok_do_dono (condição) no fim (agenda_fase7g_ok_do_dono.sql K0c confere)
+                    || case when to_regprocedure('public._agenda_espera_ok(uuid)') is not null
+                            then case t.nome when 'agenda_perguntas_tipo_check' then '{ok_marcacao}'::text[]
+                                             when 'agenda_acoes_tipo_check' then '{nivel}'::text[]
+                                             when 'agenda_alocacoes_condicao_tipo_check' then '{ok_do_dono}'::text[] else '{}'::text[] end
                             else '{}'::text[] end,
          -- FASE 7g: fim
        array_to_string(pg_temp.lista(t.tabela::regclass, t.nome), ',')
@@ -629,8 +636,11 @@ select 'B3b agenda_perguntas.critica: a expressão da 7a, igual (habilidade não
            = '{nao_cabe,segundo_atraso,atraso_longo,remarcar_confirmado,fixada_pelo_dono,diaria,cliente_aviso,aprendizado,onda,dia_avisado,dia_prometido,sabado}'::text[]
              -- FASE 7d: a 20261107100000 soma acesso no fim (agenda_fase7d_base.sql B3f confere a lista inteira)
              || case when exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
-                             and a.attname = 'modo_bem' and not a.attisdropped) then '{acesso}'::text[] else '{}'::text[] end,
+                             and a.attname = 'modo_bem' and not a.attisdropped) then '{acesso}'::text[] else '{}'::text[] end
              -- FASE 7d: fim
+             -- FASE 7g: (7g P5b) a 20261112100700 soma ok_marcacao no fim (agenda_fase7g_ok_do_dono.sql K0d confere)
+             || case when to_regprocedure('public._agenda_espera_ok(uuid)') is not null then '{ok_marcacao}'::text[] else '{}'::text[] end,
+             -- FASE 7g: fim
        pg_get_expr(d.adbin, d.adrelid)
   from pg_attribute a join pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
  where a.attrelid = 'public.agenda_perguntas'::regclass and a.attname = 'critica';
@@ -925,9 +935,11 @@ begin
            modo_habilidade = r.m2, modo_habilidade_propor = r.m
      where id;
     -- FASE 7d: local, combinar e acesso (20261107100000) não têm o de antes: ficam fora da comparação (o agenda_fase7d_base.sql B6i confere)
+    -- (7g P5b: e ok_marcacao, 20261112100700; o K4n de agenda_fase7g_ok_do_dono.sql confere o modo dele)
     select string_agg(t, ',' order by t) filter (where public._agenda_modo_da_pergunta(t, t || ':x') is distinct from pg_temp.modo_antes(t, t || ':x')
-                                                   and t not in ('local', 'combinar', 'acesso')),
-           count(*) filter (where t not in ('local', 'combinar', 'acesso'))
+                                                   and t not in ('local', 'combinar', 'acesso', 'ok_marcacao')),
+           count(*) filter (where t not in ('local', 'combinar', 'acesso', 'ok_marcacao'))
+    -- (7g: fim)
     -- FASE 7d: fim
       into v_a, v_n
       from unnest(pg_temp.lista('public.agenda_perguntas'::regclass, 'agenda_perguntas_tipo_check')) t;

@@ -486,12 +486,14 @@ select 'B4b agenda_vigia_rodadas.rotina: as 11 de antes (as de produção, wf7g_
        = '{vigia,rotina,material,cliente,aprender,gestor,equipe_semana,habilidade,tarefas,local,comunicar,explicar}'::text[],
        array_to_string(pg_temp.lista('public.agenda_vigia_rodadas'::regclass, 'agenda_vigia_rodadas_rotina_check'), ',');
 insert into _resultado
-select 'B4c nada do P5b (R9.4-4): nivel fora das ações, ok_marcacao fora das perguntas, ok_do_dono fora da condição, e os_planejamento sem espera_ok_desde/ok_do_dono_*',
-       not ('nivel' = any (pg_temp.lista('public.agenda_acoes'::regclass, 'agenda_acoes_tipo_check')))
-       and not ('ok_marcacao' = any (pg_temp.lista('public.agenda_perguntas'::regclass, 'agenda_perguntas_tipo_check')))
-       and not ('ok_do_dono' = any (pg_temp.lista('public.agenda_alocacoes'::regclass, 'agenda_alocacoes_condicao_tipo_check')))
-       and not exists (select 1 from pg_attribute a where a.attrelid = 'public.os_planejamento'::regclass and not a.attisdropped
-                         and a.attname in ('espera_ok_desde', 'ok_do_dono_em', 'ok_do_dono_via')), null;
+-- (P5b, 20261112100700: mudança deliberada) as listas e as colunas do ok do dono não são do P1 (R9.4-4): quem as põe é o P5b, que a bancada aplica depois; aqui, que
+-- estão lá e no fim de cada lista (o P1 não as pôs antes das outras).
+select 'B4c as listas do P5b (R9.4-4: não são do P1; a 20261112100700 as põe): nivel no fim das ações, ok_marcacao no fim das perguntas, ok_do_dono no fim da condição, e as 3 colunas de os_planejamento',
+       (pg_temp.lista('public.agenda_acoes'::regclass, 'agenda_acoes_tipo_check'))[cardinality(pg_temp.lista('public.agenda_acoes'::regclass, 'agenda_acoes_tipo_check'))] = 'nivel'
+       and (pg_temp.lista('public.agenda_perguntas'::regclass, 'agenda_perguntas_tipo_check'))[cardinality(pg_temp.lista('public.agenda_perguntas'::regclass, 'agenda_perguntas_tipo_check'))] = 'ok_marcacao'
+       and (pg_temp.lista('public.agenda_alocacoes'::regclass, 'agenda_alocacoes_condicao_tipo_check'))[cardinality(pg_temp.lista('public.agenda_alocacoes'::regclass, 'agenda_alocacoes_condicao_tipo_check'))] = 'ok_do_dono'
+       and (select count(*) from pg_attribute a where a.attrelid = 'public.os_planejamento'::regclass and not a.attisdropped
+             and a.attname in ('espera_ok_desde', 'ok_do_dono_em', 'ok_do_dono_via')) = 3, null;
 do $b4$
 declare
   v_res jsonb := '[]'::jsonb;
@@ -1118,7 +1120,10 @@ declare
     -- FASE 7g: (7g P6, 20261112100500) o placar lê placar_janela, placar_semanas_hist, modo_placar, agenda_marcacoes, agenda_tipos_os e agenda_placar_semanas;
     -- a saúde lê os 3 modos, marcacoes_desde, correcao_janela_du, explicar_hora e as 3 tabelas
     '_agenda_placar_periodo', '_agenda_mensagens_da_agenda', '_agenda_placar_numeros', '_agenda_placar_texto', 'agenda_placar', '_agenda_explicar_placar',
-    '_agenda_saude_explicar'
+    '_agenda_saude_explicar',
+    -- FASE 7g: fim
+    -- FASE 7g: (7g P5b, 20261112100700) o "espera o seu ok" lê modo_rebaixar, rebaixar_trava_dias, agenda_tipos_os e agenda_marcacoes
+    '_agenda_espera_ok', '_agenda_explicar_ok', '_agenda_ok_decidir', '_agenda_desfazer_nivel'
     -- FASE 7g: fim
     ];
 begin

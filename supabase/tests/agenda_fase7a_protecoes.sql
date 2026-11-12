@@ -590,7 +590,10 @@ begin
     -- confere o dele; e com tarefa, 20261102100550 (7c P8); o agenda_fase7c_tarefas.sql T18 confere a cópia. FASE 7d: e com local, combinar
     -- e acesso, 20261107100000; o agenda_fase7d_base.sql B6i confere o deles)
     select string_agg(t, ',' order by t) filter (where public._agenda_modo_da_pergunta(t, t || ':x') is distinct from pg_temp.modo_antes(t, t || ':x')
-                                                   and t not in ('dias_semana', 'habilidade', 'tarefa', 'local', 'combinar', 'acesso')),
+                                                   and t not in ('dias_semana', 'habilidade', 'tarefa', 'local', 'combinar', 'acesso')
+                                                   -- FASE 7g: (7g P5b) e com ok_marcacao, 20261112100700 (o modo_rebaixar, cru); o K4n de agenda_fase7g_ok_do_dono.sql confere o dele
+                                                   and t <> 'ok_marcacao'),
+                                                   -- FASE 7g: fim
            count(*)
       into v_a, v_n
       from (select unnest(regexp_matches(pg_get_constraintdef(c.oid), '''([a-z_]+)''', 'g')) as t

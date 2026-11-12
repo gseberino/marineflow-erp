@@ -79,6 +79,22 @@ create function pg_temp.sem_7f(p text) returns text language sql immutable as $f
                             from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n')
 $f$;
+-- FASE 7g: (7g P5b, 20261112100700) o corpo sem os blocos do P5b (que recria agenda_decidir, agenda_desfazer e agenda_tela_semana): o tirador do montador
+create function pg_temp.sem_p5b(p text) returns text language plpgsql immutable as $f$
+declare
+  v_fora   text[] := '{}';
+  v_dentro boolean := false;
+  l        text;
+begin
+  foreach l in array string_to_array(p, E'\n') loop
+    if not v_dentro and l ~ '^\s*-- FASE 7g: \(7g P5b' then v_dentro := true; continue; end if;
+    if v_dentro and l ~ '^\s*-- FASE 7g: fim\s*$' then v_dentro := false; continue; end if;
+    if v_dentro then continue; end if;
+    v_fora := v_fora || l;
+  end loop;
+  return array_to_string(v_fora, E'\n');
+end $f$;
+-- FASE 7g: fim
 create function pg_temp.adm() returns uuid language sql stable as $f$
   select id from public.app_users where role = 'admin' and active order by created_at limit 1
 $f$;
@@ -1563,7 +1579,9 @@ begin
     r := pg_temp.ok(r, format('P9a %s: tirados os blocos da 7f, a origem, byte a byte', x.nome),
       char_length(pg_temp.corpo(v_or, x.nome)) > 500 and pg_temp.sem_7f(pg_temp.corpo(v_mig, x.nome)) = replace(pg_temp.corpo(v_or, x.nome), E'\r\n', E'\n'), null);
     r := pg_temp.ok(r, format('P9b %s: a viva é a desta migration', x.nome),
-      (select replace(p.prosrc, E'\r\n', E'\n') from pg_proc p where p.oid = x.assin::regprocedure) = pg_temp.corpo(v_mig, x.nome), null);
+      -- FASE 7g: (7g P5b) tirados os blocos do P5b (20261112100700 recria agenda_decidir e agenda_desfazer; agenda_fase7g_ok_do_dono.sql K0b confere a cópia)
+      (select pg_temp.sem_p5b(replace(p.prosrc, E'\r\n', E'\n')) from pg_proc p where p.oid = x.assin::regprocedure) = pg_temp.corpo(v_mig, x.nome), null);
+      -- FASE 7g: fim
     r := pg_temp.ok(r, format('P9c %s: o tirador morde: a cópia tem bloco da 7f', x.nome), pg_temp.corpo(v_mig, x.nome) like '%-- FASE 7f:%', null);
   end loop;
   r := pg_temp.ok(r, 'P9d agenda_decisoes_abertas e _agenda_ver_decisoes não mudam nesta migration (R8.7)',
