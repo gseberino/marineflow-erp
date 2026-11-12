@@ -4,6 +4,7 @@
 -- *segura*, *libera*, *fora até* e *pessoal* falhavam pelo assistente (conserto: 20261112200000_retorno_update_com_where).
 -- Varre o corpo de TODAS as funções retorno*/_retorno*/parceiro*/_parceiro* do banco (o que está aplicado), sem
 -- comentários de linha; cada comando vai do UPDATE/DELETE ao próximo ';'.
+-- F5 (P1.2 nº 8): a varredura pega também orcamento*/_orcamento* (as funções do acompanhamento do orçamento).
 -- Run: npx supabase db query --linked -f supabase/tests/retorno_update_com_where.sql
 -- Só leitura; termina em ROLLBACK.
 begin;
@@ -16,10 +17,16 @@ begin
   select count(*) into v_funcoes
     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
    where n.nspname = 'public'
-     and (p.proname like 'retorno%' or p.proname like '\_retorno%' or p.proname like 'parceiro%' or p.proname like '\_parceiro%');
+     and (p.proname like 'retorno%' or p.proname like '\_retorno%' or p.proname like 'parceiro%' or p.proname like '\_parceiro%'
+          or p.proname like 'orcamento%' or p.proname like '\_orcamento%');
   -- 1. O teste olha alguma coisa: o retorno tem dezenas de funções no banco.
   if v_funcoes < 50 then
     raise exception '1: só % funções do retorno/parceiro no banco: o filtro do teste quebrou', v_funcoes;
+  end if;
+  -- 1b. E alcança as do orçamento (as do agrupar orçamentos já existem antes da F5).
+  if not exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                  where n.nspname = 'public' and (p.proname like 'orcamento%' or p.proname like '\_orcamento%')) then
+    raise exception '1b: nenhuma função orcamento*/_orcamento* no banco: o filtro do teste quebrou';
   end if;
 
   -- 2. Nenhum UPDATE/DELETE sem WHERE.
@@ -27,7 +34,8 @@ begin
     from (select p.oid::regprocedure::text as assinatura, regexp_replace(p.prosrc, '--[^\n]*', '', 'g') as corpo
             from pg_proc p join pg_namespace n on n.oid = p.pronamespace
            where n.nspname = 'public'
-             and (p.proname like 'retorno%' or p.proname like '\_retorno%' or p.proname like 'parceiro%' or p.proname like '\_parceiro%')) f,
+             and (p.proname like 'retorno%' or p.proname like '\_retorno%' or p.proname like 'parceiro%' or p.proname like '\_parceiro%'
+                  or p.proname like 'orcamento%' or p.proname like '\_orcamento%')) f,
          regexp_matches(f.corpo, '((?:update|delete\s+from)\s+(?:only\s+)?public\.[a-z_]+[^;]*);', 'gi') as m
    where m[1] !~* '\mwhere\M';
   if v_lista is not null then
