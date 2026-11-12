@@ -859,3 +859,15 @@ Deno.test("Fase 7f (P7) — agenda_ver: o foco decisoes diz o que fica sem respo
   assertEquals(ver.description.includes("agenda fica"), false);
   assertStringIncludes(ver.description, "Só lê: não marca nada");
 });
+
+// ───────── Fase 7g (P7, spec-fase7g.md §7.1): os 3 focos de agenda_ver (nenhuma ferramenta nova; o teto de 113 fica) ─────────
+Deno.test("Fase 7g (P7) — agenda_ver ganha os focos como_pensou, porque e placar, com o que cada um lê; simular_aprovacao diz pelo encaixe", () => {
+  const ver = porNome("agenda_ver");
+  const props = (ver.input_schema as { properties: { foco: { enum: string[] }; simular_aprovacao: { description: string } } }).properties;
+  for (const f of ["como_pensou", "porque", "placar"]) assert(props.foco.enum.includes(f), f);
+  assertStringIncludes(ver.description, "como a agenda pensou a semana: o que marcou e por quê, o que ficou de fora, a folga, os riscos e o que precisa do dono (foco como_pensou;");
+  assertStringIncludes(ver.description, "por que um serviço ficou assim ou ficou de fora (foco porque; precisa da os)");
+  assertStringIncludes(ver.description, "os números da semana: cobertura, correções do dono, plano cumprido, compras, perguntas, mensagens, dias perdidos (foco placar; só lê)");
+  assertStringIncludes(props.simular_aprovacao.description, "pelo encaixe da agenda");
+  assertEquals(agendaProducaoTools.filter((t) => t.name === "agenda_ver").length, 1);
+});

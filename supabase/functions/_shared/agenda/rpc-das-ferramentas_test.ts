@@ -746,3 +746,15 @@ Deno.test("Fase 7d (P7): as listas são as do banco (os CHECKs de os_planejament
   assertEquals([...BEM_EXIGE], ["agua", "seco", "tanto_faz"]);
   assertEquals([...VIAGENS], ["regional", "bate_volta", "pernoite"]);
 });
+
+Deno.test("Fase 7g (P7): agenda_ver aceita os focos como_pensou (com o período), porque (com a OS) e placar", () => {
+  for (const f of ["como_pensou", "porque", "placar"]) assertEquals((FOCOS as readonly string[]).includes(f), true, f);
+  const c = paraAgendaVer({ foco: "como_pensou", periodo: "semana" }, CTX);
+  assertEquals(c.ok && [c.params.p_foco, c.params.p_periodo], ["como_pensou", "semana"]);
+  const p = paraAgendaVer({ foco: "porque", os: "Nelson" }, CTX);
+  assertEquals(p.ok && [p.params.p_foco, p.params.p_os], ["porque", "Nelson"]);
+  const s = paraAgendaVer({ foco: "placar" }, CTX);
+  assertEquals(s.ok && [s.params.p_foco, s.params.p_periodo], ["placar", null]);
+  // o foco que não existe continua recusado aqui (o banco tem a mensagem dos 19)
+  assertEquals(paraAgendaVer({ foco: "porquee" }, CTX).ok, false);
+});

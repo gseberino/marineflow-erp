@@ -2,6 +2,9 @@
  * Um bloco do dia na Semana de produção (Fase 3, P7a): "OS · cliente · bem", quem vai, "dia n de N", "✔ cliente
  * confirmou" e o resultado do dia. A reserva vem listrada e diz "a confirmar" (lugar guardado, não compromisso). O texto
  * sai pronto do banco (agenda_tela_semana).
+ *
+ * Fase 7g (P7): uma linha pequena com quem marcou e o porquê ("marcado pelo gestor · 3 dias pelo orçamento (estimativa minha)"), o texto do banco; só com
+ * modo_porque ligado (as chaves ausentes, a linha some: o bloco de antes).
  */
 import { CheckCircle2 } from 'lucide-react';
 import type { BlocoDoDia } from '@/hooks/use-agenda-producao';
@@ -26,6 +29,11 @@ export function BlocoDaOs({ bloco, onAbrir }: { bloco: BlocoDoDia; onAbrir: (os:
         {bloco.hora && <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{bloco.hora}</span>}
       </div>
       {bloco.pessoas_texto && <p className="mt-0.5 break-words text-xs text-muted-foreground">{bloco.pessoas_texto}</p>}
+      {(bloco.quem_texto || bloco.porque_texto) && (
+        <p className="mt-0.5 break-words text-xs text-muted-foreground" data-testid={`bloco-porque-${bloco.numero}`}>
+          {[bloco.quem_texto, bloco.porque_texto].filter(Boolean).join(' · ')}
+        </p>
+      )}
       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs">
         {bloco.reserva_texto && <span className="font-medium text-amber-700 dark:text-amber-400">{bloco.reserva_texto}</span>}
         {bloco.condicao && <span className="break-words text-muted-foreground">{bloco.condicao}</span>}

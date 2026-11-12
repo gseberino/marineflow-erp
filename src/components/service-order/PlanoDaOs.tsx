@@ -24,6 +24,10 @@
  * aprovado), a estimativa diz os 2 números ("2,5 dias pelo valor do orçamento × 1,17 … = 3 dias") e entra no lugar do texto da duração, que diria o número sem o viés
  * (NOVO-agenda-221), também no resumo. Somem sem nada a dizer (a chave ausente) e no cartão de antes.
  *
+ * Fase 7g (P7): a linha "Por que assim" (rótulo acima, largura toda): quem marcou e a fonte da duração, o que contei (lista curta), por que essa pessoa e a última
+ * mudança — os textos do banco (os_plano_da_os.porque). Só com modo_porque ligado e na OS marcada ou reservada que ainda vai ser feita; sem a chave, some. Sem botão:
+ * o certo o dono diz na conversa.
+ *
  * Fase 5 (P6): o bloco "Cliente" — o que foi dito ao cliente (e se ainda vale), a confirmação e as mensagens desta OS
  * (lista curta, "em teste" quando o modo é sombra). Sem botão de mandar: a aprovação é pela palavra (*manda cliente
  * <nome>* / *segura cliente <nome>*) ou na conversa; a tela só cita a palavra que o banco escreve.
@@ -255,6 +259,23 @@ export function PlanoDaOs({ osId, status, className }: { osId: string; status: s
                 {data.local.notas.map((n) => (
                   <span key={n} className="mt-1 block break-words text-xs text-muted-foreground">{n}</span>
                 ))}
+              </Dado>
+            )}
+            {data.porque && (
+              <Dado rotulo="Por que assim" largo>
+                <span className="block break-words" data-testid="plano-porque">
+                  {[data.porque.quem_texto, data.porque.fonte_texto].filter(Boolean).join(' · ')}
+                </span>
+                {data.porque.suposicoes.length > 0 && <span className="mt-1 block text-xs text-muted-foreground">Contei:</span>}
+                {data.porque.suposicoes.map((s) => (
+                  <span key={s} className="block break-words text-xs text-muted-foreground" data-testid="plano-porque-contei">• {s}</span>
+                ))}
+                {data.porque.criterio_texto && (
+                  <span className="mt-1 block break-words text-xs text-muted-foreground">Por que essa pessoa: {data.porque.criterio_texto}</span>
+                )}
+                {data.porque.degrau_texto && (
+                  <span className="mt-1 block break-words text-xs text-muted-foreground">Última mudança: {data.porque.degrau_texto}</span>
+                )}
               </Dado>
             )}
             <Dado rotulo="Janela do bem">{janela.length > 0 ? janela.join(' · ') : 'Sem restrição'}</Dado>

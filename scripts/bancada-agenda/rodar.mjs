@@ -453,6 +453,11 @@ const FIXTURES_COMO_TEXTO = [
   // Fase 7g (P6): a migration do placar (o Q0 de agenda_fase7g_placar.sql: as 7 novas e as 6 recriadas; tiradas as marcas da 7g, as recriadas são as origens,
   // que já estão aqui como texto: mig_conferencia_fase2, mig_lote_fase7f e mig_rodada_fase7e).
   ['agenda_teste.mig_placar_fase7g', '../../supabase/migrations/20261112100500_agenda_fase7g_placar.sql'],
+  // Fase 7g (P7): a migration da conversa e da tela (o T0 de agenda_fase7g_tela.sql: as 3 recriadas, tirados os blocos da 7g, são as origens, que já estão aqui
+  // como texto: mig_leituras_fase7d, mig_telas_fase3 e mig_rodada_fase7e) e o dado 20261112100990 (FORA_DA_BANCADA: os 4 modos de desligado para sombra e a hora
+  // da medida; o agenda_fase7g_modos.sql o roda numa subtransação desfeita).
+  ['agenda_teste.mig_tela_fase7g', '../../supabase/migrations/20261112100600_agenda_fase7g_tela.sql'],
+  ['agenda_teste.mig_modos_fase7g', '../../supabase/migrations/20261112100990_agenda_fase7g_modos.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

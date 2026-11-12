@@ -70,6 +70,32 @@ describe('Agenda › Semana de produção', () => {
     expect(screen.getByText(/Responda no WhatsApp/)).toBeInTheDocument();
   });
 
+  it('Fase 7g (P7): com modo_porque ligado o bloco diz quem marcou e a linha do porquê; sem as chaves (fora de ligado), o bloco de antes', async () => {
+    const comPorque = {
+      ...SEMANA_DE_EXEMPLO,
+      dias: SEMANA_DE_EXEMPLO.dias.map((d) => ({
+        ...d,
+        blocos: d.blocos.map((b) => b.numero === 'OS-00069'
+          ? { ...b, quem: 'gestor' as const, quem_texto: 'marcado pelo gestor', porque_texto: '3 dias pelo orçamento (R$ 6.480 de mão de obra; estimativa minha)' }
+          : b.numero === 'OS-00203' ? { ...b, quem: 'gestor' as const, quem_texto: 'reservado pelo gestor', porque_texto: null } : b),
+      })),
+    };
+    h.rpc.mockResolvedValueOnce({ data: comPorque, error: null });
+    const a = montar(<SemanaProducao de="2026-11-02" onAbrirOs={() => {}} />);
+    const linha = await screen.findByTestId('bloco-porque-OS-00069');
+    expect(linha.textContent).toBe('marcado pelo gestor · 3 dias pelo orçamento (R$ 6.480 de mão de obra; estimativa minha)');
+    expect(within(screen.getByTestId('bloco-OS-00069')).getByTestId('bloco-porque-OS-00069')).toBe(linha);
+    expect(screen.getByTestId('bloco-porque-OS-00203').textContent).toBe('reservado pelo gestor');
+    expect(linha.className).toContain('break-words');
+    a.unmount();
+    h.rpc.mockResolvedValueOnce({ data: SEMANA_DE_EXEMPLO, error: null });
+    montar(<SemanaProducao de="2026-11-02" onAbrirOs={() => {}} />);
+    expect(await screen.findByTestId('bloco-OS-00069')).toBeInTheDocument();
+    expect(screen.queryByTestId('bloco-porque-OS-00069')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('bloco-porque-OS-00203')).not.toBeInTheDocument();
+    expect(screen.queryByText(/marcado pelo gestor/)).not.toBeInTheDocument();
+  });
+
   it('erro: a frase do banco e "Tentar de novo" (nunca "nada marcado")', async () => {
     h.rpc.mockResolvedValue({ data: null, error: { code: '42501', message: 'A agenda de produção é com o administrador.' } });
     montar(<SemanaProducao de="2026-11-02" onAbrirOs={() => {}} />);

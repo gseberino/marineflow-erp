@@ -163,6 +163,9 @@ export const agendaProducaoTools: ToolDef[] = [
       "quem faz o quê na equipe e o que cada OS pede (foco habilidades: o que cada um faz, o responsável de cada OS, o que a " +
       "agenda teria mudado em teste e as medidas; só lê), " +
       "onde é cada serviço, o que combinar com o cliente e a marina e as regras dos locais (foco locais; com os, só daquela OS; só lê), " +
+      "como a agenda pensou a semana: o que marcou e por quê, o que ficou de fora, a folga, os riscos e o que precisa do dono (foco como_pensou; " +
+      "periodo semana ou proxima_semana, sem = a que vem), por que um serviço ficou assim ou ficou de fora (foco porque; precisa da os), " +
+      "os números da semana: cobertura, correções do dono, plano cumprido, compras, perguntas, mensagens, dias perdidos (foco placar; só lê), " +
       "o dia de alguém da equipe (pessoa + periodo), uma OS (os), " +
       "\"se o cliente aprovar hoje, quando dá\" (os + simular_aprovacao) ou um serviço que ainda não existe (simular). " +
       "Datas, dias livres, capacidade e duração vêm SÓ daqui: repita o texto, sem calcular nem mudar número, data ou nome. " +
@@ -192,7 +195,7 @@ export const agendaProducaoTools: ToolDef[] = [
             dono: { type: "string", enum: [...PRESENCAS_DO_DONO] },
           },
         },
-        simular_aprovacao: { type: "boolean", description: "Com os: e se o cliente aprovar hoje, quando dá?" },
+        simular_aprovacao: { type: "boolean", description: "Com os: e se o cliente aprovar hoje, quando dá? (pelo encaixe da agenda)" },
       },
     },
     risk: "low",

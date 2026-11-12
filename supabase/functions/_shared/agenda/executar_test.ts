@@ -908,3 +908,13 @@ Deno.test("Fase 7f (P7) — camada: *agenda espera* só com a agenda automática
     assertEquals(x.c.executar.length, 0, t);
   }
 });
+
+Deno.test("Fase 7g (P7) — chamadaDoComando: como você pensou e o placar chegam ao agenda_ver com o foco novo (o mesmo mapeamento da ferramenta)", () => {
+  const ver = (t: string) => chamadaDoComando(lerComandoDaAgenda(t)!, AUTOR);
+  const base = { p_autor: AUTOR, p_os: null, p_simular: null, p_simular_aprovacao: false, p_pessoa: null };
+  for (const t of ["como você pensou a semana que vem?", "como você pensou?", "por que você marcou assim?"]) {
+    assertEquals(ver(t), { rpc: RPC_AGENDA_VER, params: { ...base, p_periodo: "proxima_semana", p_foco: "como_pensou" } }, t);
+  }
+  assertEquals(ver("agenda placar"), { rpc: RPC_AGENDA_VER, params: { ...base, p_periodo: null, p_foco: "placar" } });
+  assertEquals(chamadaDoComando(lerComandoDaAgenda("placar da semana")!, AUTOR, "2026-11-19").params.p_hoje, "2026-11-19");
+});

@@ -151,6 +151,14 @@ export interface BlocoDoDia {
   fixada: boolean;
   resultado: string | null;
   resultado_texto: string | null;
+  /**
+   * Fase 7g (P7): quem marcou o bloco (a 1ª alocação vigente do bloco no dia e a ação que a criou), o texto ("marcado pelo gestor", "marcado por você"; na reserva,
+   * "reservado pelo gestor", "reservado por você") e a linha do porquê (a fonte da duração e a suposição principal, cortada pelo banco). Só com modo_porque ligado
+   * (agenda_tela_semana, 20261112100600); fora dele, na sombra do motor e antes da migration, as chaves ficam ausentes.
+   */
+  quem?: 'gestor' | 'dono' | null;
+  quem_texto?: string | null;
+  porque_texto?: string | null;
 }
 
 export interface DiaDaSemana {
@@ -368,6 +376,19 @@ export interface LocalDoPlano {
   notas: string[];
 }
 
+/**
+ * Fase 7g (P7): "Por que assim" do cartão (os_plano_da_os.porque, 20261112100600) — os textos do banco: quem marcou, a fonte da duração ("de antes de eu guardar o
+ * porquê" na marcação de antes da 7g), o que contei e o critério da pessoa (só do gestor) e a última mudança.
+ */
+export interface PorqueDoPlano {
+  /** "marcado pelo gestor" | "marcado por você" | "reservado pelo gestor" | "reservado por você" */
+  quem_texto: string | null;
+  fonte_texto: string | null;
+  suposicoes: string[];
+  criterio_texto: string | null;
+  degrau_texto: string | null;
+}
+
 export interface PlanoDaOsDados {
   /** Fase 5 (P6): ausente antes da migration 20261028100600; null sem o cliente na OS */
   cliente?: ClienteDoPlano | null;
@@ -378,6 +399,11 @@ export interface PlanoDaOsDados {
   equipe?: EquipeDoPlano | null;
   /** Fase 7d (P8): ausente antes da migration 20261107100700; null com os 6 modos do local desligados e na OS concluída, faturada ou cancelada. */
   local?: LocalDoPlano | null;
+  /**
+   * Fase 7g (P7): só com modo_porque ligado e na OS marcada ou reservada que ainda vai ser feita; ausente sem nada a dizer, fora de ligado e antes da migration
+   * 20261112100600.
+   */
+  porque?: PorqueDoPlano;
   os: string;
   numero: string;
   status: string;

@@ -4145,3 +4145,11 @@ porque só o dono pode preenchê-las.
 - **Efeito:** desde o P6, *dia não carro* e *dia não ferramenta* gravam o motivo `ferramenta` (AG7-27), e a pergunta "hoje ou ontem?" de `agenda_conferir_dia` já diz *dia não ferramenta*. Mas quem erra o motivo recebe a ajuda de antes, sem "ferramenta": o dono só usa a palavra se lembrar que ela existe, e a medida que decide a 7h (dias perdidos por ferramenta ou carro, §11 "Parar") fica abaixo do real — o dia vira "imprevisto".
 - **Na Fase 7g:** não corrigido (texto ao dono sem interruptor: mudaria a resposta em todos os modos, fora da lista do P6). A menor mudança: recriar `_agenda_ajuda_do_motivo` com "ferramenta" no fim das duas frases, com a marca `-- FASE 7g:`, e o teste da frase.
 - **Origem:** Fase 7g, P6.
+
+### [NOVO-agenda-296] O porquê de uma OS só reservada diz "marcado pelo gestor" na chave quem_texto (o texto longo diz "reservei")
+
+- **Encontrado em:** Agenda de Produção, Fase 7g, P7 (12/11/2026), ao montar o "Por que assim" do cartão e a linha da Semana a partir de `_agenda_porque_da_os` (R9.12-9, "texto que afirma o que não aconteceu").
+- **Onde:** `_agenda_porque_da_os` (`20261112100200_agenda_fase7g_como_pensei.sql:431`, o `return` do fim): `quem_texto` é `case when v_quem = 'dono' then 'marcado por você' else 'marcado pelo gestor' end`, também com `estado = 'reservada'`. O `texto` da mesma função diz certo ("reservei", "você reservou").
+- **Efeito:** quem lê a chave e não o texto afirma uma marcação que é só reserva. A tela e o cartão do P7 não leem essa chave na reserva: escrevem "reservado pelo gestor" / "reservado por você" pelo estado (agenda_tela_semana pelo bloco; os_plano_da_os pelo `estado`), e o T1e, T1g e T2d de `agenda_fase7g_tela.sql` provam. Fica no foco *por que* com modo_explicar ligado: `dados.quem_texto` de uma OS reservada diz "marcado pelo gestor" (o assistente recebe o `texto`, que está certo).
+- **Na Fase 7g:** não corrigido (a função é do P3; recriá-la no P7 seria mais do que a linha pede). A menor mudança: no `return` de `_agenda_porque_da_os`, `quem_texto` pelo estado (reservada → "reservado …"), com o caso no C4c/C4k2 de `agenda_fase7g_como_pensei.sql`; aí o P7 pode ler a chave direto.
+- **Origem:** Fase 7g, P7.

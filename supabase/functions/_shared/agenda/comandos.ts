@@ -122,6 +122,17 @@
 //   modelo, que explica o silêncio). Age: dita com "?" vai ao modelo. Como o *desfaz*, só com a agenda automática fora de 'desligado'. "espera" não é
 //   palavra do secretário, dos comprovantes, da confirmação nem das palavras do 7a (comandos_test.ts), e "agenda espera" não começa nenhuma frase fixa.
 //
+// Fase 7g (P7, 12/11/2026; spec-fase7g.md §7.2 e R9.5-20) — como a agenda pensou e o placar:
+//   como voce pensou a semana que vem · como ficou a semana que vem · como ficou a agenda da semana que vem · como voce pensou a semana ·
+//   como voce pensou · por que voce marcou assim · por que marcou assim
+//                                               → foco como_pensou da semana que vem (o que marquei e por quê, o que ficou de fora, a folga, os riscos e o
+//                                                 que preciso de você); com modo_explicar desligado, a semana que vem de antes (a rota semana), byte a byte
+//   agenda placar · placar da semana · placar da agenda
+//                                               → foco placar (os números da semana); com modo_placar desligado, a frase que diz que ainda não está ligado
+//   De VER (valem com "?"); com a leitura fora de desligado, como as da Fase 1. "placar" sozinho é conversa (de futebol: vai ao modelo, que o prompt manda ao
+//   foco), e "por que o Nelson ficou de fora?" também (o modelo chama o foco porque com a OS). Nenhuma é palavra do secretário, dos comprovantes, da confirmação
+//   nem da pergunta ativa (comandos_test.ts).
+//
 // Correção de 29/10 (P1) — as frases naturais do dono que caíam no modelo sem roteiro (todas de VER, valem com "?"):
 //   quando tenho agenda livre · quando eu tenho agenda livre · tenho agenda livre · eu tenho agenda livre
 //   quando estou livre · quando eu estou livre · tem vaga na agenda · quando tem vaga na agenda      → livre (como *livre*)
@@ -168,7 +179,9 @@ export type FocoDoComando =
   // (Fase 7c, P4) quem faz o quê na equipe e o que cada OS pede
   | "habilidades"
   // (Fase 7d, P8) onde é cada serviço e o que combinar
-  | "locais";
+  | "locais"
+  // (Fase 7g, P7) como a agenda pensou a semana, por que uma OS ficou assim e o placar da semana
+  | "como_pensou" | "porque" | "placar";
 export type ResultadoDoDia = "cumprido" | "parcial" | "nao_cumprido";
 
 export type ComandoDaAgenda =
@@ -278,10 +291,17 @@ frases(
   ["quais estao agendados", "quais estao agendadas", "o que esta agendado", "o que ta agendado", "o que tem agendado", "o que voce marcou"],
   ver(null, "plano"),
 );
+// (Fase 7g, P7; spec-fase7g §7.2, R9.5-20) as 3 frases da semana que vem passam ao foco como_pensou (com modo_explicar desligado o banco devolve a leitura de
+// antes, a rota semana, byte a byte), e 4 novas vão ao mesmo foco
 frases(
-  ["como voce pensou a semana que vem", "como ficou a semana que vem", "como ficou a agenda da semana que vem"],
-  ver("proxima_semana"),
+  [
+    "como voce pensou a semana que vem", "como ficou a semana que vem", "como ficou a agenda da semana que vem",
+    "como voce pensou a semana", "como voce pensou", "por que voce marcou assim", "por que marcou assim",
+  ],
+  ver("proxima_semana", "como_pensou"),
 );
+// (Fase 7g, P7) o placar da semana ("placar" sozinho é de futebol: vai ao modelo, que o prompt manda ao foco)
+frases(["agenda placar", "placar da semana", "placar da agenda"], ver(null, "placar"));
 
 /** A maior frase da tabela: texto maior do que isto nunca é comando da tabela (custo zero na conversa comum). */
 const MAIOR = Math.max(...[...FRASES.keys()].map((f) => f.length));

@@ -117,6 +117,9 @@ NAO_SAO_TOOLS.add("nao_e_de_servico");
 NAO_SAO_TOOLS.add("servico_cliente");
 // Agenda de Produção (correção de 29/10, P1): valor do periodo de agenda_ver ("como você pensou a semana que vem?")
 NAO_SAO_TOOLS.add("proxima_semana");
+// Agenda de Produção (12/11/2026, Fase 7g, P7): valores do foco de agenda_ver (como a agenda pensou a semana) e o argumento do "se aprovar hoje"
+NAO_SAO_TOOLS.add("como_pensou");
+NAO_SAO_TOOLS.add("simular_aprovacao");
 // Agenda de Produção (31/10/2026, Fase 7b, P5): argumento de os_planejar ("dois no primeiro dia" = dupla inicio com dupla_meios 2)
 // e valor da situação de equipe_disponibilidade ("fulano saiu" = nao_vem com padrao)
 NAO_SAO_TOOLS.add("dupla_meios");
@@ -330,10 +333,13 @@ function secaoDaAgenda(): string {
 // *agenda fica* não existe ("pode deixar como você propôs" não grava nada) e nada é decidido pelo prazo sem o banco dizer; e a informação só quando o dono pergunta. Teto 33.
 // Fase 7e (P8): a margem (spec-fase7e.md §7 e R7.5-24: nenhuma linha nova, o teto fica 33) — tudo na linha do aprendizado que já existia: a margem no foco aprendizado, o prazo
 // real só para o dono (AG7-32: ao cliente não se diz data de pronto), o que é urgente e as palavras dias e semana do *desfaz aprendizado <coisa>*.
-Deno.test("agenda de produção: a seção é curta (≤ 33 linhas: custa tokens em toda mensagem) e fica no bloco estável", () => {
+// Fase 7g (P7): como pensou, por que e o placar (spec-fase7g.md §7.3 e R9.5-20: +1 linha, o teto sobe 1 a partir do vigente, 33) — entrou 1 linha: por que a agenda
+// ficou assim, como ela pensou a semana, o placar e o "se aprovar hoje" são agenda_ver (foco como_pensou, porque com a OS, placar, ou a OS com simular_aprovacao), e o
+// texto do banco vai como veio (sem motivo, data, número nem OS a mais). A frase da semana que vem, na linha do publicado, passa ao foco como_pensou. Teto 34.
+Deno.test("agenda de produção: a seção é curta (≤ 34 linhas: custa tokens em toda mensagem) e fica no bloco estável", () => {
   const secao = secaoDaAgenda();
   const linhas = secao.split("\n");
-  assertEquals(linhas.length <= 33, true, `a seção tem ${linhas.length} linhas`);
+  assertEquals(linhas.length <= 34, true, `a seção tem ${linhas.length} linhas`);
   // Estável = em cache. O volátil muda a cada turno e não pode carregar a seção.
   const volatil = buildSystemBlocks(CONVERSA_LIGADA, { userName: "Teste", userRole: "admin", channel: "whatsapp" })[1].text;
   assertEquals(volatil.includes(SECAO_AGENDA), false);
@@ -629,12 +635,13 @@ Deno.test("agenda de produção (Fase 7e, P8): a margem na linha do aprendizado,
 Deno.test("agenda de produção (correção 29/10, P1): as frases naturais vão ao foco plano, à semana que vem ou ao livre", () => {
   const secao = secaoDaAgenda();
   assertStringIncludes(secao, "\"Quais estão agendados?\", \"o que tem agendado?\", \"o que você marcou?\": foco plano sem periodo (de hoje ao sábado da semana que vem, com quem vai; com o dia dito, periodo = o dia como ele disse)");
-  assertStringIncludes(secao, "\"Como você pensou a semana que vem?\", \"como ficou a agenda da semana que vem?\": periodo proxima_semana sem foco (o plano e o porquê de quem ficou de fora)");
+  // (Fase 7g, P7) a frase da semana que vem passa ao foco como_pensou, o mesmo da palavra (mudança de propósito: com modo_explicar desligado, o banco devolve a leitura de antes)
+  assertStringIncludes(secao, "\"Como você pensou a semana que vem?\", \"como ficou a agenda da semana que vem?\": foco como_pensou com periodo proxima_semana (o que ela marcou e por quê e quem ficou de fora)");
   assertStringIncludes(secao, "\"Quando tenho agenda livre?\", \"quando estou livre?\", \"quando tem vaga?\": foco livre");
   // o que o prompt ensina é o que a palavra lê (a mesma leitura pelo modelo e sem ele): o foco e o período existem
   const agendaVer = porNome.get("agenda_ver")!;
   const focos = (agendaVer.input_schema as { properties: Record<string, { enum?: string[] }> }).properties.foco.enum ?? [];
-  for (const f of ["plano", "livre"]) assertEquals(focos.includes(f), true, `${f} não é foco de agenda_ver`);
+  for (const f of ["plano", "livre", "como_pensou"]) assertEquals(focos.includes(f), true, `${f} não é foco de agenda_ver`);
   const comoPalavra = (t: string) => {
     const c = lerComandoDaAgenda(t);
     return c?.comando === "ver" ? `${c.foco}/${c.periodo}` : null;
@@ -642,8 +649,8 @@ Deno.test("agenda de produção (correção 29/10, P1): as frases naturais vão 
   assertEquals(comoPalavra("Quais estão agendados?"), "plano/null");
   assertEquals(comoPalavra("o que tem agendado?"), "plano/null");
   assertEquals(comoPalavra("o que você marcou?"), "plano/null");
-  assertEquals(comoPalavra("Como você pensou a semana que vem?"), "tudo/proxima_semana");
-  assertEquals(comoPalavra("como ficou a agenda da semana que vem?"), "tudo/proxima_semana");
+  assertEquals(comoPalavra("Como você pensou a semana que vem?"), "como_pensou/proxima_semana");
+  assertEquals(comoPalavra("como ficou a agenda da semana que vem?"), "como_pensou/proxima_semana");
   assertEquals(comoPalavra("Quando tenho agenda livre?"), "livre/null");
   assertEquals(comoPalavra("quando estou livre?"), "livre/null");
   // "quando tem vaga?" sozinho não é palavra (vaga também é de marina): é o modelo que o leva ao foco livre
@@ -666,8 +673,8 @@ Deno.test("agenda de produção (correção 29/10, P2): o serviço novo depois d
   assertEquals(secao.includes("`"), false);
   // (Fase 7a, P7) o teto da seção passou a 25 (a linha do gestor da agenda); (Fase 7b, P5) a 27 (os dias de cada pessoa e a dupla);
   // (Fase 7c, P4) a 28 (quem faz o quê); (Fase 7c, P8) a 29 (as etapas de um serviço);
-  // (Fase 7d, P8) a 31 (o local e a regra de marina); (Fase 7f, P7) a 33 (o silêncio e o *agenda espera*)
-  assertEquals(secao.split("\n").length <= 33, true);
+  // (Fase 7d, P8) a 31 (o local e a regra de marina); (Fase 7f, P7) a 33 (o silêncio e o *agenda espera*); (Fase 7g, P7) a 34 (como pensou, por que e o placar)
+  assertEquals(secao.split("\n").length <= 34, true);
 });
 
 // Fase 7b (P5; spec-fase7b.md §7 e §R4.8): as 2 linhas novas ensinam o que as ferramentas têm de verdade — a semana de
@@ -874,4 +881,16 @@ Deno.test("ORÇAMENTO PELO CARTÃO: o prompt ensina as três ferramentas e as re
     "nunca create_vessel",
     "com client_id, nunca com nome",
   ]) assertEquals(trecho.includes(regra), true, regra);
+});
+
+// Fase 7g (P7, spec-fase7g.md §7.3): a linha de como pensou, por que, o placar e o "se aprovar hoje" — o que ela ensina é o que a ferramenta tem (os 3 focos e o
+// simular_aprovacao), e o texto do banco vai como veio. Sem crase.
+Deno.test("agenda de produção (Fase 7g, P7): por que, como pensou, o placar e o se aprovar hoje vão a agenda_ver, e o texto do banco vai como veio", () => {
+  const secao = secaoDaAgenda();
+  assertStringIncludes(secao, "Por que a agenda ficou assim, como ela pensou a semana, o placar da semana e se o cliente aprovar hoje: agenda_ver foco como_pensou, porque (com os), placar, ou os com simular_aprovacao. Repasse o texto do banco: não acrescente motivo, data, número nem OS que não esteja nele, e não resuma trocando números.");
+  const agendaVer = porNome.get("agenda_ver")!;
+  const props = (agendaVer.input_schema as { properties: Record<string, { enum?: string[] }> }).properties;
+  for (const f of ["como_pensou", "porque", "placar"]) assertEquals((props.foco.enum ?? []).includes(f), true, f);
+  assertEquals("simular_aprovacao" in props, true);
+  assertEquals(secao.includes("`"), false);
 });

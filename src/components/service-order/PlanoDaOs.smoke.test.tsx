@@ -371,6 +371,47 @@ describe('cartão Plano da OS', () => {
     expect(screen.queryByTestId('plano-local')).not.toBeInTheDocument();
   });
 
+  it('Fase 7g (P7): a linha "Por que assim" com o rótulo acima: quem marcou e a fonte, o que contei, por que essa pessoa e a última mudança; sem botão', async () => {
+    const user = userEvent.setup();
+    const porque = {
+      quem_texto: 'marcado pelo gestor', fonte_texto: '1 dia pelo orçamento (R$ 2.160 de mão de obra; estimativa minha)',
+      suposicoes: ['Cabo: contei 7 dias úteis de entrega (não sei de quem comprar)', 'na MP Motorhomes (supus pelo tipo do bem)'],
+      criterio_texto: 'só ele estava livre', degrau_texto: 'mudei o dia, dentro da semana combinada',
+    };
+    h.rpc.mockResolvedValueOnce({ data: { ...PLANO_DE_EXEMPLO, status: 'scheduled', pode_entregar: false, porque }, error: null });
+    montar(<PlanoDaOs osId="os-2" status="scheduled" />);
+    await user.click(await screen.findByRole('button', { name: /Ver o plano/ }));
+    const linha = screen.getByTestId('plano-porque');
+    const rotulo = screen.getByText('Por que assim');
+    expect(rotulo.tagName).toBe('DT');
+    expect(rotulo.nextElementSibling?.contains(linha)).toBe(true);
+    expect(linha.textContent).toBe('marcado pelo gestor · 1 dia pelo orçamento (R$ 2.160 de mão de obra; estimativa minha)');
+    expect(screen.getAllByTestId('plano-porque-contei').map((c) => c.textContent)).toEqual([
+      '• Cabo: contei 7 dias úteis de entrega (não sei de quem comprar)', '• na MP Motorhomes (supus pelo tipo do bem)',
+    ]);
+    expect(rotulo.nextElementSibling?.textContent).toContain('Por que essa pessoa: só ele estava livre');
+    expect(rotulo.nextElementSibling?.textContent).toContain('Última mudança: mudei o dia, dentro da semana combinada');
+    expect(within(rotulo.parentElement as HTMLElement).queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('Fase 7g (P7): a marcação sua, sem suposição nem critério: só quem e a fonte; sem a chave (fora de ligado, ou o cartão de antes), a linha some', async () => {
+    const user = userEvent.setup();
+    const porque = { quem_texto: 'marcado por você', fonte_texto: 'você disse 2 dias', suposicoes: [], criterio_texto: null, degrau_texto: null };
+    h.rpc.mockResolvedValueOnce({ data: { ...PLANO_DE_EXEMPLO, status: 'scheduled', pode_entregar: false, porque }, error: null });
+    const a = montar(<PlanoDaOs osId="os-2" status="scheduled" />);
+    await user.click(await screen.findByRole('button', { name: /Ver o plano/ }));
+    expect(screen.getByTestId('plano-porque').textContent).toBe('marcado por você · você disse 2 dias');
+    expect(screen.queryByText('Contei:')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('plano-porque-contei')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Por que essa pessoa/)).not.toBeInTheDocument();
+    a.unmount();
+    h.rpc.mockResolvedValueOnce({ data: PLANO_DE_EXEMPLO, error: null });
+    montar(<PlanoDaOs osId="os-69" status="completed" />);
+    await user.click(await screen.findByRole('button', { name: /Ver o plano/ }));
+    expect(screen.queryByTestId('plano-porque')).not.toBeInTheDocument();
+    expect(screen.queryByText('Por que assim')).not.toBeInTheDocument();
+  });
+
   it('Fase 7b (P5): sem a linha (nula ou o cartão de antes, sem a chave), o cartão fica como era', async () => {
     const user = userEvent.setup();
     h.rpc.mockResolvedValueOnce({ data: { ...PLANO_DE_EXEMPLO, equipe: null }, error: null });

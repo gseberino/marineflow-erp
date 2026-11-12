@@ -23,6 +23,9 @@ const semana: ComandoDaAgenda = { comando: "ver", periodo: "semana", foco: "tudo
 const hoje: ComandoDaAgenda = { comando: "ver", periodo: "hoje", foco: "tudo", pessoa: null };
 const amanha: ComandoDaAgenda = { comando: "ver", periodo: "amanha", foco: "tudo", pessoa: null };
 const proxima: ComandoDaAgenda = { comando: "ver", periodo: "proxima_semana", foco: "tudo", pessoa: null };
+// (Fase 7g, P7) como a agenda pensou a semana que vem e o placar
+const comoPensou: ComandoDaAgenda = { comando: "ver", periodo: "proxima_semana", foco: "como_pensou", pessoa: null };
+const verPlacar: ComandoDaAgenda = { comando: "ver", periodo: null, foco: "placar", pessoa: null };
 const livre: ComandoDaAgenda = { comando: "ver", periodo: null, foco: "livre", pessoa: null };
 const atrasos: ComandoDaAgenda = { comando: "ver", periodo: null, foco: "atrasos", pessoa: null };
 const oQueFazer: ComandoDaAgenda = { comando: "ver", periodo: null, foco: "o_que_fazer", pessoa: "eu" };
@@ -1016,10 +1019,11 @@ const TABELA_P1_2910: Array<[string, ComandoDaAgenda]> = [
   ["o que tem agendado", plano],
   ["O que você marcou?", plano],
   ["*o que você marcou*", plano],
-  ["Como você pensou a semana que vem?", proxima],
-  ["como ficou a semana que vem?", proxima],
-  ["Como ficou a agenda da semana que vem?", proxima],
-  ["🎤 Como você pensou a semana que vem.", proxima],
+  // (Fase 7g, P7; spec-fase7g §7.2) as 3 da semana que vem passam ao foco como_pensou: com modo_explicar desligado, o banco devolve a leitura de antes (a rota semana)
+  ["Como você pensou a semana que vem?", comoPensou],
+  ["como ficou a semana que vem?", comoPensou],
+  ["Como ficou a agenda da semana que vem?", comoPensou],
+  ["🎤 Como você pensou a semana que vem.", comoPensou],
 ];
 
 Deno.test("Correção 29/10 (P1) — as frases naturais viram a leitura da palavra curta (livre, plano, a semana que vem)", () => {
@@ -1037,7 +1041,7 @@ const CONVERSA_P1_2910 = [
   "quando tem vaga", "quando tem vaga?", "tem vaga", "tem vaga?", "tem vaga na marina?", "quando tem vaga na marina",
   "quando tem vaga pro Lenine?", "o que está agendado pra amanhã?", "o que está agendado pra terça", "o que você marcou pro Lenine?",
   "o que você marcou ontem?", "quais estão agendados amanhã?", "quais estão agendados pro Roberto", "o que tem agendado com o Nelson",
-  "quando o Roberto está livre?", "quando o Roberto fica livre", "como ficou a semana", "como ficou a semana?", "como você pensou a semana",
+  "quando o Roberto está livre?", "quando o Roberto fica livre", "como ficou a semana", "como ficou a semana?",
   "como ficou a semana que vem do Lenine", "como ficou a semana passada", "agenda livre", "você marcou?", "marcou?", "agendados",
   "agendado", "o que", "quais", "tenho agenda", "eu tenho", "estou livre", "como ficou",
 ];
@@ -1480,5 +1484,85 @@ Deno.test("Fase 7f (P7) — webhook: *agenda espera* vai ao assistente só com a
   }
   for (const modo of ["desligado", "erro", "sem_tabela"]) {
     assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(modo, "ligado"), "agenda espera Nelson"), false, modo);
+  }
+});
+
+// ─── Fase 7g (P7, spec-fase7g.md §7.2 e R9.5-20): como a agenda pensou a semana e o placar ──────────────────────────────────────────────────
+// De VER (valem com "?"). As 3 frases da semana que vem e 4 novas vão ao foco como_pensou (com modo_explicar desligado, o banco devolve a semana que vem de antes);
+// *agenda placar*, "placar da semana" e "placar da agenda" vão ao foco placar. "placar" sozinho é de futebol e "por que o Nelson ficou de fora?" tem a OS: conversa.
+
+const TABELA_F7G: Array<[string, ComandoDaAgenda]> = [
+  ["como você pensou a semana que vem?", comoPensou],
+  ["Como você pensou a semana?", comoPensou],
+  ["como você pensou", comoPensou],
+  ["Como você pensou?", comoPensou],
+  ["🎤 Como você pensou a semana.", comoPensou],
+  ["Por que você marcou assim?", comoPensou],
+  ["por que marcou assim", comoPensou],
+  ["*por que você marcou assim*", comoPensou],
+  ["agenda placar", verPlacar],
+  ["Agenda placar?", verPlacar],
+  ["*agenda placar*", verPlacar],
+  ["placar da semana", verPlacar],
+  ["Placar da agenda.", verPlacar],
+];
+
+Deno.test("Fase 7g (P7) — lerComandoDaAgenda: como você pensou (foco como_pensou da semana que vem) e o placar (foco placar)", () => {
+  for (const [texto, esperado] of TABELA_F7G) assertEquals(lerComandoDaAgenda(texto), esperado, texto);
+  for (const f of ["como voce pensou a semana", "como voce pensou", "por que voce marcou assim", "por que marcou assim", "agenda placar", "placar da semana", "placar da agenda"]) {
+    assert(frasesDaAgenda().includes(f), `fora da tabela: ${f}`);
+  }
+});
+
+// Com outro alvo, com palavra a mais ou sem dizer de agenda: conversa (vai ao modelo, que o prompt manda ao foco porque com a OS, ou ao placar).
+const CONVERSA_F7G = [
+  "placar", "placar?", "o placar", "qual o placar", "qual o placar do jogo?", "placar do jogo", "placar do mes", "agenda placar do mes",
+  "por que o Nelson ficou de fora?", "por que você marcou o Nelson na terça?", "por que", "por que?", "por que marcou", "por que você marcou",
+  "como você pensou o Nelson", "como pensou", "como você pensou isso?", "você pensou?", "pensou?", "como foi o placar da semana passada",
+];
+
+Deno.test("Fase 7g (P7) — o que fala de placar ou do porquê com outro alvo vai ao modelo, não é palavra", () => {
+  for (const t of CONVERSA_F7G) assertEquals(lerComandoDaAgenda(t), null, t);
+});
+
+Deno.test("Fase 7g (P7) — as frases novas e a conversa não são do secretário, da confirmação, do menu, do PDF, dos comprovantes nem da pergunta ativa", () => {
+  const formas = TABELA_F7G.map(([t]) => t);
+  for (const t of [...formas, ...CONVERSA_F7G]) {
+    assertEquals(lerComandoDoSecretario(t), null, `secretário: ${t}`);
+    assertEquals(parseConfirmationReply(t), null, `confirmação: ${t}`);
+    assertEquals(parseOptionReply(t, 9), null, `opção: ${t}`);
+    assertEquals(lerPedidoDePdf(t), null, `pdf: ${t}`);
+    assertEquals(lerComando(t), null, `comprovantes: ${t}`);
+    const n = normalizarResposta(t.replace(/[*_~]/g, ""));
+    assertEquals(lerSimNao(n), null, `sim/não: ${t}`);
+    assertEquals(lerNumero(n, 99), null, `número: ${t}`);
+    assertEquals(pareceRespostaCurta(t), false, `resposta curta: ${t}`);
+    const trava = travaDaConfirmacao(estadoComCmpNoConfirmar(), t, { pending_confirm_action_id: "pend-1" });
+    assertEquals(trava.travar, false, `trava do CMP: ${t}`);
+  }
+  // nenhuma frase fixa de antes, fora as 3 da semana que vem, passa a ser lida como os focos novos; "sim", "ok" e "1" continuam da confirmação
+  const novas = new Set(["como voce pensou a semana que vem", "como ficou a semana que vem", "como ficou a agenda da semana que vem", "como voce pensou a semana",
+    "como voce pensou", "por que voce marcou assim", "por que marcou assim", "agenda placar", "placar da semana", "placar da agenda"]);
+  for (const f of frasesDaAgenda().filter((x) => !novas.has(x))) {
+    const c = lerComandoDaAgenda(f);
+    assert(!(c?.comando === "ver" && ["como_pensou", "porque", "placar"].includes(c.foco)), f);
+  }
+  for (const t of ["sim", "ok", "1", "não", "2"]) assertEquals(lerComandoDaAgenda(t), null, t);
+  // as palavras de antes continuam lidas como eram
+  assertEquals(lerComandoDaAgenda("agenda semana que vem"), proxima);
+  assertEquals(lerComandoDaAgenda("como foi a semana"), { comando: "ver", periodo: null, foco: "ppc", pessoa: null });
+  assertEquals(lerComandoDaAgenda("agenda gestor"), { comando: "ver", periodo: null, foco: "gestor", pessoa: null });
+});
+
+Deno.test("Fase 7g (P7) — webhook: as frases novas vão ao assistente só com a leitura fora de desligado (como as de ver)", async () => {
+  for (const modo of ["sombra", "ligado"]) {
+    for (const t of ["como você pensou?", "agenda placar", "por que você marcou assim?"]) {
+      assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(modo), t), true, `${modo}: ${t}`);
+      // de ver: não depende da agenda automática
+      assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(modo, "desligado"), t), true, `${modo} sem a automática: ${t}`);
+    }
+  }
+  for (const modo of ["desligado", "erro", "sem_tabela"]) {
+    for (const t of ["como você pensou?", "agenda placar"]) assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(modo, "ligado"), t), false, `${modo}: ${t}`);
   }
 });
