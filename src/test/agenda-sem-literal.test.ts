@@ -344,7 +344,9 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     // Fase 7a, correção da revisão (20261031100980): recriada de novo, com o teto da equipe e o dono fora da conta (+1: a mesma cópia).
     // Fase 7b (P6, 20261101100500): recriada de novo, com a linha de quem chamar (+1: a mesma cópia).
     // Fase 7b, correção da revisão (20261101100800): recriada de novo, com a linha de quem chamar fora do corte (+1: a mesma cópia).
-    vezes: 6,
+    // Fase 7g (P4, 20261112100300): recriada de novo, com as livre_semanas semanas (+2: a mesma cópia, e o return de antes repetido no ramo de sombra,
+    // que devolve a resposta de antes byte a byte com dados.teste).
+    vezes: 8,
     porque: 'segundos → milissegundos (o custo da simulação no resultado, ms; a meta < 2 s é do teste); não é texto_max nem peca_embutida_acima',
   },
   {

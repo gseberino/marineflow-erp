@@ -1133,6 +1133,10 @@ insert into _definer_da_agenda values ('_agenda_acoes_porque');
 -- não abrir as peças do porquê a authenticated (agenda_fase7g_como_pensei.sql C0 e C6 provam a porta)
 insert into _definer_da_agenda values ('_agenda_porque_da_os');
 insert into _definer_da_agenda values ('agenda_como_pensei');
+-- Fase 7g (P4): o encaixe simulado e a entrada dele para uma OS, com a porta da agenda_encaixe_do_novo dentro (R9.4-6: agenda_ctp é invoker e o painel a chama com
+-- login; a grade do motor é só do service_role). agenda_fase7g_livre.sql L0 e L7 provam a porta
+insert into _definer_da_agenda values ('_agenda_encaixe_simulado');
+insert into _definer_da_agenda values ('_agenda_entrada_simulada_da_os');
   -- FASE 7f: fim
   -- FASE 7e: (7e P1, 20261111100000) nenhuma definer nova: o modo, a credibilidade, o z e a temporada são invoker, e o gatilho _agenda_medidas_compra_so_muda só mexe na própria linha. agenda_fase7e_base.sql prova as portas.
   -- FASE 7e: fim
