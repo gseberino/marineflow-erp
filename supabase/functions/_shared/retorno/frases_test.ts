@@ -15,11 +15,18 @@
 // Importa só ../secretario/palavras.ts, ../secretario/base.ts e ../whatsapp/contato-encerrou.ts: nada do
 // assistente (isolamento_test.ts confere a pasta inteira).
 // Reverter: apagar este arquivo (e o fixture, se a P2 sair junto).
+//
+// Retorno F5 (P4.2): a regressão da regra nova do validador (AFIRMA_APROVACAO, "o texto ao cliente não afirma aprovação
+// sem o aceite registrado"). O 4º teste tira das migrations todos os textos fixos da F1, da F2 e da F3 (os T, os M e as
+// legendas L01–L08: a última definição de cada função de texto, a mesma que está no banco, conferido por md5 do prosrc na
+// construção) e prova que nenhum casa: nenhum diz "aprovado", "fechado", "confirmado" ou "aceito". Se algum casar, muda a
+// regra, não o texto. Importa também ./validador.ts, que não importa nada.
 
 import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { pareceSoAgradecimento, pareceVendedor, PEDE_PRECO } from "../secretario/palavras.ts";
 import { paraBusca } from "../secretario/base.ts";
 import { contatoEncerrou } from "../whatsapp/contato-encerrou.ts";
+import { afirmaAprovacao } from "./validador.ts";
 
 type Valor = boolean | string | null;
 
@@ -122,4 +129,76 @@ Deno.test("o fixture de retorno_f1_sinais.sql é o mesmo de retorno_f1_frases.js
   const doSql = JSON.parse(sql.slice(inicio, fim));
   const doJson = JSON.parse(await leia(FIXTURE));
   assertEquals(doSql, doJson);
+});
+
+// ─── Retorno F5 (P4.2): nenhum texto fixo da F1 à F3 afirma aprovação ──────────────────────────────────────────────
+
+const MIGRATIONS = new URL("../../../migrations/", import.meta.url);
+
+/** As funções de texto da F1 à F3 e o mínimo de frases de cada uma (o teste nunca passa vazio). */
+const FUNCOES_DE_TEXTO: Record<string, number> = {
+  _retorno_texto: 34,              // F1: T01–T28 (com as variantes a) e o L01 do risco
+  _retorno_texto_f2: 7,            // F2: T29–T35
+  _retorno_abertura_do_modelo: 1,  // F2: a abertura dos modelos
+  _retorno_corpo_do_modelo: 7,     // F2 e F3: M01–M07 (a vigente é a da F3)
+  _retorno_texto_f3: 8,            // F3: L01–L08
+};
+
+/** O corpo da ÚLTIMA definição de cada função nas migrations (pela ordem do nome do arquivo). */
+async function corposVigentes(): Promise<Map<string, { arq: string; corpo: string }>> {
+  const arquivos: string[] = [];
+  for await (const e of Deno.readDir(MIGRATIONS)) if (e.isFile && e.name.endsWith(".sql")) arquivos.push(e.name);
+  arquivos.sort();
+  const achados = new Map<string, { arq: string; corpo: string }>();
+  for (const arq of arquivos) {
+    const sql = await leia(new URL(arq, MIGRATIONS));
+    for (const nome of Object.keys(FUNCOES_DE_TEXTO)) {
+      const re = new RegExp(`create or replace function public\\.${nome}\\(`, "gi");
+      for (const m of sql.matchAll(re)) {
+        const ini = sql.indexOf("$$", m.index ?? 0);
+        const fim = sql.indexOf("$$", ini + 2);
+        if (ini < 0 || fim < 0) throw new Error(`${nome}: corpo sem $$ em ${arq}`);
+        achados.set(nome, { arq, corpo: sql.slice(ini + 2, fim) });
+      }
+    }
+  }
+  return achados;
+}
+
+/** As frases do corpo: os literais entre aspas simples ('' é aspa) com 3 palavras ou mais, fora dos comentários. */
+function frasesDe(corpo: string): string[] {
+  const semComentario = corpo.split("\n").map((l) => {
+    let dentro = false;
+    for (let i = 0; i < l.length; i++) {
+      if (l[i] === "'") dentro = !dentro;
+      else if (!dentro && l.startsWith("--", i)) return l.slice(0, i);
+    }
+    return l;
+  }).join("\n");
+  const frases: string[] = [];
+  for (const m of semComentario.matchAll(/'((?:[^']|'')*)'/g)) {
+    const t = m[1].replace(/''/g, "'");
+    if ((t.match(/\p{L}+/gu) ?? []).length >= 3) frases.push(t);
+  }
+  return frases;
+}
+
+Deno.test("F5 (P4.2): nenhum texto fixo da F1, da F2 e da F3 afirma aprovação (regressão de AFIRMA_APROVACAO)", async () => {
+  const corpos = await corposVigentes();
+  const casaram: string[] = [];
+  let total = 0;
+  for (const [nome, minimo] of Object.entries(FUNCOES_DE_TEXTO)) {
+    const vigente = corpos.get(nome);
+    assert(vigente, `${nome}: não achei a definição nas migrations`);
+    const frases = frasesDe(vigente.corpo);
+    assert(frases.length >= minimo, `${nome} (${vigente.arq}): ${frases.length} frases, esperava ${minimo} ou mais`);
+    total += frases.length;
+    for (const f of frases) if (afirmaAprovacao(f)) casaram.push(`${nome}: ${f}`);
+  }
+  assertEquals(casaram, []);
+  assert(total >= 57, `só ${total} frases`);
+  // O detector casa o que deve casar (o teste não é vazio por um detector quebrado).
+  for (const f of ["Fechado, Ana!", "Recebi a aprovação.", "Está confirmado.", "Está aceito.", "Orçamento aprovado."]) {
+    assert(afirmaAprovacao(f), f);
+  }
 });

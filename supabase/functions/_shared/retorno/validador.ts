@@ -53,9 +53,17 @@
 // caracteres e 18 linhas, nomes_da_lista no que o banco escreveu (eco) e duas regras a mais: valor_a_parceiro e
 // data_de_pronto. validarSaida não muda: a audiência "parceiro" continua reprovada ali.
 //
+// F5 (P4.2, orçamento): ao cliente, uma regra a mais dentro de afirmacao_sem_dado: o texto não afirma aprovação
+// ("aprovado", "aprovação", "fechado", "confirmado", "aceito") sem a marca aceite_registrado, que só o "Fechado" (O13–O16)
+// traz. Ao parceiro, nada muda ("aguardando aprovação" passa). E o número do orçamento que o banco permitiu
+// (os_permitidas, a legenda O21) deixa de casar como placa em dado_pessoal: "ORÇ-00151" sem acento é "orc-00151", que a
+// placa ABC1D23 lia como "orc-0015". Só o trecho coberto por um número permitido; a placa de verdade continua barrada.
+//
 // Reverter: apagar este arquivo, validador_test.ts e isolamento_test.ts (a edge retorno-recibos
 // importa validarSaida daqui: sem ela, retirar também a edge). Só a F4: tirar validarSaidaAoParceiro,
-// ContextoAoParceiro, as duas regras e as opções de conferir, e apagar validador_parceiro_test.ts.
+// ContextoAoParceiro, as duas regras e as opções de conferir, e apagar validador_parceiro_test.ts. Só a F5: tirar
+// AFIRMA_APROVACAO, afirmaAprovacao, a marca aceite_registrado e PLACA_G (a placa volta para DADO_PESSOAL), e apagar
+// validador_aceite_test.ts e o 4º teste de frases_test.ts.
 
 export interface ContextoDoValidador {
   audiencia: "cliente";
@@ -66,7 +74,13 @@ export interface ContextoDoValidador {
   os_permitidas: string[]; // vazio na F1
   textos_do_cliente: string[]; // corpos das recebidas do caso (só para o eco; nunca entram no texto)
   trechos_do_modelo: string[]; // o texto fixo sem os {campos}
-  marcas: { tem_proposta: boolean; tem_topo: boolean; cliente_ouviu: boolean; conferida: boolean };
+  marcas: {
+    tem_proposta: boolean;
+    tem_topo: boolean;
+    cliente_ouviu: boolean;
+    conferida: boolean;
+    aceite_registrado?: boolean; // F5 (P4.2): só o "Fechado" do aceite registrado pelo dono; ausente = falso
+  };
 }
 
 /**
@@ -226,16 +240,20 @@ const DADO_PESSOAL: RegExp[] = [
   /(?<!\d)9?\d{4}[-.]\d{4}(?!\d)/u, // telefone local, sem DDD
   /\S@|@\S/u, // e-mail (ou @perfil)
   /[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}/u, // chave Pix aleatória (uuid)
-  /[a-z]{3}-?\d[a-z0-9]\d{2}/u, // placa: ABC-1234, ABC1D23
   /http|www\.|\.com|\.br|[\p{L}\p{N}]\.\p{L}{2,}/u, // link, domínio
 ];
+
+// A placa (ABC-1234, ABC1D23), à parte: passa só o trecho inteiro dentro de um número de documento que o banco permitiu
+// (os_permitidas). F5 (P4.2): sem isto, "ORÇ-00151" da legenda O21 ("orc-00151") casava como placa ("orc-0015").
+const PLACA_G = /[a-z]{3}-?\d[a-z0-9]\d{2}/gu;
 
 // Dígitos seguidos, com ou sem pontuação entre eles (ponto, traço, barra, espaço, parênteses, +).
 const SEQUENCIA_DE_DIGITOS = /\d(?:[\s.\-\/()+]*\d)*/gu;
 const MINIMO_DE_DIGITOS = 10; // telefone 10–13, CPF 11, CNPJ 14; mais que isso também
 
-function temDadoPessoal(t: string): boolean {
+function temDadoPessoal(t: string, osPermitidas: string[]): boolean {
   if (DADO_PESSOAL.some((r) => r.test(t))) return true;
+  if (algumForaDe(t, [PLACA_G], osPermitidas)) return true;
   for (const m of t.matchAll(SEQUENCIA_DE_DIGITOS)) {
     if (m[0].replace(/\D/g, "").length >= MINIMO_DE_DIGITOS) return true;
   }
@@ -313,6 +331,18 @@ const CONFERIDA = /conferid/u;
 const EM_PREPARACAO = new RegExp(ANTES + "em\\s+prepar", "u");
 const ABRE_A_LISTA = new RegExp(ANTES + "(?:abr(?:e|ir|imos|indo)\\s+a\\s+lista|primeir[oa]\\s+da\\s+lista)", "u");
 
+// F5 (P4.2): o texto ao cliente não afirma aprovação sem o aceite registrado pelo dono (plano: "o recibo não afirma aprovação").
+const AFIRMA_APROVACAO = new RegExp(ANTES + "(?:aprovad[oa]s?|aprovacao|fechad[oa]|confirmad[oa]s?|aceit[oa]s?)" + DEPOIS, "u");
+
+/**
+ * F5 (P4.2): o texto afirma aprovação ("aprovado", "aprovação", "fechado", "confirmado", "aceito")? Sem acento e em
+ * minúsculas, palavra inteira: "aprovar", "confirma" e "aceite" não casam. A regressão dos textos fixos da F1 à F3
+ * (frases_test.ts) pergunta aqui.
+ */
+export function afirmaAprovacao(texto: string): boolean {
+  return AFIRMA_APROVACAO.test(preparar(String(texto ?? ""), true));
+}
+
 const EMOJI = /[\p{Extended_Pictographic}\p{Regional_Indicator}\p{Emoji_Modifier}\u{FE0F}\u{20E3}]/u;
 
 const QUEBRA_DE_LINHA = /\r\n|\r|\n|\u000b|\u000c|\u0085|\u2028|\u2029/;
@@ -349,10 +379,12 @@ interface ContextoLido {
   // o que o banco escreveu (só para o eco): trechos do modelo, datas, horas e nome permitidos e as
   // listas fechadas dos {campos}, preparados sem acento
   escritoPeloBanco: string[];
-  marcas: { tem_proposta: boolean; tem_topo: boolean; cliente_ouviu: boolean; conferida: boolean };
+  marcas: { tem_proposta: boolean; tem_topo: boolean; cliente_ouviu: boolean; conferida: boolean; aceite_registrado: boolean };
 }
 
 const MARCAS = ["tem_proposta", "tem_topo", "cliente_ouviu", "conferida"] as const;
+// F5 (P4.2): marca opcional. Ausente = falso; presente e não booleana = contexto malformado.
+const MARCAS_OPCIONAIS = ["aceite_registrado"] as const;
 
 function ehListaDeTexto(v: unknown): v is string[] {
   return Array.isArray(v) && v.every((x) => typeof x === "string");
@@ -368,7 +400,7 @@ const PAPEIS_DO_PARCEIRO = new Set(["indicou", "contratante", "pagador"]);
 
 function lerContexto(ctx: unknown, opcoes: Opcoes): ContextoLido {
   const estado = { malformado: false };
-  const marcas = { tem_proposta: false, tem_topo: false, cliente_ouviu: false, conferida: false };
+  const marcas = { tem_proposta: false, tem_topo: false, cliente_ouviu: false, conferida: false, aceite_registrado: false };
   if (ctx === null || typeof ctx !== "object" || Array.isArray(ctx)) {
     return {
       malformado: true, audienciaErrada: false, datas: [], datasComAcento: [], horas: [], os: [],
@@ -405,6 +437,11 @@ function lerContexto(ctx: unknown, opcoes: Opcoes): ContextoLido {
     for (const k of MARCAS) {
       const v = lidas[k];
       if (typeof v !== "boolean") estado.malformado = true;
+      marcas[k] = v === true;
+    }
+    for (const k of MARCAS_OPCIONAIS) {
+      const v = lidas[k];
+      if (v !== undefined && typeof v !== "boolean") estado.malformado = true;
       marcas[k] = v === true;
     }
   }
@@ -475,11 +512,13 @@ function ecoaOCliente(t: string, textosDoCliente: string[], escritoPeloBanco: st
   return false;
 }
 
-function afirmaSemDado(t: string, marcas: ContextoLido["marcas"]): boolean {
+function afirmaSemDado(t: string, marcas: ContextoLido["marcas"], aoCliente: boolean): boolean {
   return (JA_AVISADO.test(t) && !marcas.cliente_ouviu) ||
     (CONFERIDA.test(t) && !marcas.conferida) ||
     (EM_PREPARACAO.test(t) && !marcas.tem_proposta) ||
-    (ABRE_A_LISTA.test(t) && !marcas.tem_topo);
+    (ABRE_A_LISTA.test(t) && !marcas.tem_topo) ||
+    // F5 (P4.2): só ao cliente; ao parceiro o painel pode dizer "aguardando aprovação".
+    (aoCliente && AFIRMA_APROVACAO.test(t) && !marcas.aceite_registrado);
 }
 
 // ─── Todas as regras ─────────────────────────────────────────────────────────────────────────────
@@ -498,7 +537,7 @@ function conferir(texto: unknown, ctx: unknown, opcoes: Opcoes): RegraDoValidado
   if (c.audienciaErrada) regras.push("audiencia");
   if (DINHEIRO.some((r) => r.test(t))) regras.push("dinheiro");
   if (aoParceiro && temValorAoParceiro(t)) regras.push("valor_a_parceiro");
-  if (temDadoPessoal(t)) regras.push("dado_pessoal");
+  if (temDadoPessoal(t, c.os)) regras.push("dado_pessoal");
   if (PROMESSA.test(t)) regras.push("promessa");
   if (
     algumForaDe(t, DATAS, c.datas) ||
@@ -508,7 +547,7 @@ function conferir(texto: unknown, ctx: unknown, opcoes: Opcoes): RegraDoValidado
   if (algumForaDe(t, HORAS, c.horas)) regras.push("hora_fora");
   if (algumForaDe(t, OS, c.os)) regras.push("os_de_outro");
   if (citaNome(t, c.nomesDeOutros)) regras.push("nome_de_outro");
-  if (afirmaSemDado(t, c.marcas)) regras.push("afirmacao_sem_dado");
+  if (afirmaSemDado(t, c.marcas, !aoParceiro)) regras.push("afirmacao_sem_dado");
   if (ecoaOCliente(t, c.textosDoCliente, c.escritoPeloBanco)) regras.push("eco_do_cliente");
   if (EMOJI.test(bruto)) regras.push("emoji");
   if (bruto.length > opcoes.limiteCaracteres || bruto.split(QUEBRA_DE_LINHA).length > opcoes.limiteLinhas) {
