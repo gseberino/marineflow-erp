@@ -1,23 +1,30 @@
 -- Retorno rápido ao cliente, F5 (P6): o aceite por texto (C9) e os dados da nota depois dele. Nada liga aqui.
 --
--- 1. _orcamento_aceite: um léxico estrito, sem IA, que erra para o lado de NÃO achar aceite. O "?" e o "R$" são lidos no
---    texto cru (o _retorno_busca tira a pontuação e o "$"); o resto, sobre _retorno_busca. Barreiras antes das formas fortes.
+-- 1. _orcamento_aceite: um léxico estrito, sem IA, que erra para o lado de NÃO achar aceite. O "?", o "R$", o número e o
+--    "%" são lidos no texto cru (o _retorno_busca tira a pontuação, o "$" e o "%"); o resto, sobre _retorno_busca. Barreiras
+--    antes das formas fortes: a contraproposta sem "R$" ("fecho em 4500", "pode fazer por quatro mil", "se for 4000 pode
+--    fazer", "pela metade") nunca vira aceite.
 -- 2. _orcamento_candidatos: os orçamentos enviados ao cliente na mesma chave ANTES da mensagem, com o 1º envio dentro de
 --    aceite_janela; abertos (rascunho, sem conversão e sem agrupamento). Os candidatos são os do instante da mensagem.
 -- 3. _orcamento_agenda_esperando: a agenda espera resposta deste cliente (mensagem enviada e sem resposta dentro de
 --    cliente_resposta_validade) ou já gravou esta mensagem como resposta dela (agenda_cliente_respostas, modo ligado).
 -- 4. _orcamento_aceites_detectar: a marca d'água retorno_config.orcamento_aceite_ate compara retorno_mensagens.processada_em,
 --    com 10 minutos de folga (a hora do início da transação do retorno_abrir, não a do commit) e avança até o maior lido.
---    Toda recebida de papel 'cliente', com ou sem caso: o papel vem do caso ou de quem_escreve com o telefone INTEIRO da
---    mensagem (nunca a chave). Áudio só com aceite_audio. A sombra vem antes da agenda: em sombra nada vai ao cartão, e
---    resultado.seria guarda o que seria (agenda, detectado ou duvida). Uma linha por mensagem; o corpo só é lido aqui dentro.
+--    Toda recebida de papel 'cliente', com ou sem caso, por _orcamento_cliente_do_telefone: o papel vem do caso só quando o
+--    telefone da mensagem é o mesmo do caso (o retorno_abrir junta a mensagem ao caso vivo só pela chave, e a de outro DDD
+--    com os mesmos 8 dígitos é outra pessoa); sem caso, de quem_escreve com o telefone INTEIRO da mensagem (nunca a chave).
+--    Áudio só com aceite_audio. A sombra vem antes da agenda: em sombra nada vai ao cartão, e resultado.seria guarda o que
+--    seria (agenda, detectado ou duvida). Uma linha por mensagem; o corpo só é lido aqui dentro.
 -- 5. _orcamento_cartao_aceites: a lista que o cartão lê (P7), vazia fora de aceite_modo = 'cartao'; o mais recente por
 --    cliente e tipo de item.
 -- 6. _orcamento_faltas_para_nota, _orcamento_documento_lido e _orcamento_cep_lido: o porte de faltasParaNota (paridade
 --    em src/lib/ficha-cliente-paridade.test.ts), o CPF/CNPJ com dígito verificador válido e o CEP junto da palavra "cep".
--- 7. _orcamento_dados_detectar: a resposta com CPF ou CEP depois do pedido de dados enviado, dentro de dados_nota_janela.
+-- 7. _orcamento_dados_detectar: a resposta com CPF ou CEP depois do pedido de dados enviado, dentro de dados_nota_janela,
+--    vinda do mesmo telefone da saída (_mesmo_telefone: os 8 dígitos e o mesmo DDD).
 -- 8. orcamento_aceite_com_sinal, orcamento_aceite_registrar (C-ACEITE-REG) e orcamento_dados_gravar: a letra A/C, o
---    registro com o "Fechado" (e o pedido de dados) em retorno_saidas, e a gravação só do que está vazio na ficha.
+--    registro com o "Fechado" (e o pedido de dados) em retorno_saidas, e a gravação só do que está vazio na ficha. O
+--    registro confere de novo, por _orcamento_cliente_do_telefone, que o número fala pelo cliente do aceite; senão nada
+--    sai (resultado.saida_nao_saiu = 'numero_compartilhado').
 -- 9. _orcamento_aceite_fechar_antigos: decidido o aceite mais recente, os mais antigos do mesmo cliente seguem a decisão
 --    (substituido) ou caem por pessoal; com orcamento_mudou ou sem_candidato, ficam.
 --
@@ -62,9 +69,14 @@ begin
     v_barrado := 'parar';
   elsif public._retorno_encerrou(v_cru) then
     v_barrado := 'encerrou';
-  elsif v_b ~ '\m(se|caso)\s+(voce|voces|vc|vcs|der|fizer|fizerem|fazer|baixar|conseguir|puder)' then
+  elsif v_b ~ '\m(se|caso)\s+(voce|voces|vc|vcs|der|fizer|fizerem|fazer|baixar|conseguir|puder|for|ficar|sair)' then
     v_barrado := 'condicional';
-  elsif v_b ~ '(desconto|abatimento|mais barato|parcel|\mpor\s+[0-9]|[0-9]+\s*mil\M|\mreais\M|valor|preco|caro)' then
+  -- A negociação: qualquer número ou "%" no texto cru (valor, contraproposta, prazo; aceite de verdade quase nunca traz
+  -- número, e errar aqui é não achar), o valor por extenso, a metade e o "menos".
+  elsif v_cru ~ '[0-9%]'
+     or v_b ~ ('(desconto|abatimento|mais barato|parcel|\mreais\M|valor|preco|caro|\m(mil|cem|cento|duzentos|trezentos|'
+               || 'quatrocentos|quinhentos|seiscentos|setecentos|oitocentos|novecentos|conto|contos|pila|pilas|metade|menos|'
+               || 'por cento)\M)') then
     v_barrado := 'negociacao';
   elsif v_b ~ '\m(nao|ainda nao|vou pensar|vou ver|vou analisar|depois (te )?(falo|aviso|retorno)|mais pra frente|outro momento)\M' then
     v_barrado := 'negacao';
@@ -87,7 +99,7 @@ end;
 $$;
 
 comment on function public._orcamento_aceite(text) is
-  'Retorno F5 (P6.1): {aceite, sinal, barrado} do texto do cliente, sem IA. Falso: vazio, mídia sem legenda, [audio]. Barreiras, na ordem: pergunta ("?" no texto cru), valor ("R$" no texto cru), parar, encerrou, condicional, negociacao, negacao, pedido_de_orcamento (as outras sobre _retorno_busca). Aceite: pode/podem/podemos fazer|seguir|executar|começar|iniciar|marcar|agendar|tocar|dar andamento|mandar ver; fechado|fechamos|vamos fechar|quero fechar|pode fechar|fecho; aprovado|aprovada|aprovo|aprovei; autorizo|autorizado|aceito|de acordo|topo; vamos fazer|quero fazer|bora fazer. sinal = o trecho que casou (até 40).';
+  'Retorno F5 (P6.1): {aceite, sinal, barrado} do texto do cliente, sem IA. Falso: vazio, mídia sem legenda, [audio]. Barreiras, na ordem: pergunta ("?" no texto cru), valor ("R$" no texto cru), parar, encerrou, condicional (se/caso + você, der, fizer, fazer, baixar, conseguir, puder, for, ficar, sair), negociacao (qualquer número ou "%" no texto cru; desconto, abatimento, mais barato, parcel, reais, valor, preço, caro, o valor por extenso, metade, menos, por cento), negacao, pedido_de_orcamento (as outras sobre _retorno_busca). Aceite: pode/podem/podemos fazer|seguir|executar|começar|iniciar|marcar|agendar|tocar|dar andamento|mandar ver; fechado|fechamos|vamos fechar|quero fechar|pode fechar|fecho; aprovado|aprovada|aprovo|aprovei; autorizo|autorizado|aceito|de acordo|topo; vamos fazer|quero fazer|bora fazer. sinal = o trecho que casou (até 40).';
 
 revoke all on function public._orcamento_aceite(text) from public, anon, authenticated;
 
@@ -322,6 +334,48 @@ revoke all on function public._orcamento_cep_lido(text) from public, anon, authe
 
 -- ── 6. A detecção do aceite ─────────────────────────────────────────────────────────────────────────────────────────────
 
+-- Por qual cliente o telefone fala. Com caso: o do caso (papel 'cliente'), só quando o telefone é o mesmo do caso
+-- (_mesmo_telefone: os 8 dígitos e o mesmo DDD). O retorno_abrir junta a mensagem ao caso vivo só pela chave: a de outro DDD
+-- com os mesmos 8 dígitos (outra pessoa) entra no caso do cliente, e o caso não fala por ela. O cliente que o dono escolheu
+-- para o caso vale para o telefone do caso. Sem caso (ou com o caso apagado): quem_escreve com o telefone inteiro, nunca a
+-- chave (com os 8 dígitos, o DDD sairia nulo). Só o papel 'cliente' dá o cliente; senão, nulo.
+create or replace function public._orcamento_cliente_do_telefone(p_abertura uuid, p_fone text)
+returns uuid
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_papel text;
+  v_cliente uuid;
+  v_fone_caso text;
+  v_q jsonb;
+begin
+  if p_abertura is not null then
+    select ab.papel, ab.client_id, ab.phone_normalized into v_papel, v_cliente, v_fone_caso
+      from public.retorno_aberturas ab
+     where ab.id = p_abertura;
+    if found then
+      if v_papel = 'cliente' and public._mesmo_telefone(v_fone_caso, p_fone) then
+        return v_cliente;
+      end if;
+      return null;
+    end if;
+  end if;
+  v_q := public.quem_escreve(p_fone);
+  if v_q ->> 'papel' = 'cliente' then
+    return nullif(v_q ->> 'cliente_id', '')::uuid;
+  end if;
+  return null;
+end;
+$$;
+
+comment on function public._orcamento_cliente_do_telefone(uuid, text) is
+  'Retorno F5 (P6.1): o cliente por quem p_fone fala. Com o caso p_abertura: o client_id do caso de papel cliente, só quando p_fone é o mesmo telefone do caso (_mesmo_telefone; o retorno_abrir junta a mensagem ao caso só pela chave, e outro DDD com os mesmos 8 dígitos é outra pessoa). Sem caso, ou com o caso apagado: quem_escreve(p_fone) com papel cliente. Senão, nulo.';
+
+revoke all on function public._orcamento_cliente_do_telefone(uuid, text) from public, anon, authenticated;
+
 create or replace function public._orcamento_aceites_detectar(p_agora timestamptz)
 returns integer
 language plpgsql
@@ -336,8 +390,6 @@ declare
   v_max timestamptz;
   v_r record;
   v_w public.whatsapp_messages;
-  v_q jsonb;
-  v_papel text;
   v_client uuid;
   v_lex jsonb;
   v_cands uuid[];
@@ -381,19 +433,10 @@ begin
       select * into v_w from public.whatsapp_messages w where w.id = v_r.whatsapp_message_id;
       continue when not found or v_w.direction is distinct from 'inbound';
 
-      -- O papel: o do caso, quando há; sem caso, quem_escreve com o telefone inteiro da mensagem (com a chave, o DDD sairia
-      -- nulo e um cadastro de outro DDD com os mesmos 8 dígitos viraria o cliente).
-      v_papel := null;
-      v_client := null;
-      if v_r.abertura_id is not null then
-        select ab.papel, ab.client_id into v_papel, v_client from public.retorno_aberturas ab where ab.id = v_r.abertura_id;
-      end if;
-      if v_papel is null then
-        v_q := public.quem_escreve(v_w.phone_normalized);
-        v_papel := v_q ->> 'papel';
-        v_client := nullif(v_q ->> 'cliente_id', '')::uuid;
-      end if;
-      continue when v_papel is distinct from 'cliente' or v_client is null;
+      -- O cliente: o do caso, quando há e o telefone da mensagem é o do caso; sem caso, quem_escreve com o telefone inteiro
+      -- da mensagem (com a chave, o DDD sairia nulo e um cadastro de outro DDD com os mesmos 8 dígitos viraria o cliente).
+      v_client := public._orcamento_cliente_do_telefone(v_r.abertura_id, v_w.phone_normalized);
+      continue when v_client is null;
 
       -- O áudio só com aceite_audio (dúvida 7). Sem transcrição ([audio]), o léxico dá falso; a transcrição traz a linha de
       -- volta pela marca (a reavaliação regrava processada_em).
@@ -445,7 +488,7 @@ end;
 $$;
 
 comment on function public._orcamento_aceites_detectar(timestamptz) is
-  'Retorno F5 (P6.1): grava orcamento_aceites a partir de retorno_mensagens com processada_em em (orcamento_aceite_ate − 10 min, p_agora] e recebida_em até p_agora, com ou sem caso. Papel cliente (do caso, ou de quem_escreve com o telefone inteiro da mensagem) e um client_id; áudio só com aceite_audio; _orcamento_aceite; candidatos de _orcamento_candidatos no instante da mensagem. Estado: sombra (com aceite_modo sombra, resultado.seria), agenda (consumida, agenda_ao_dono ou _orcamento_agenda_esperando; resultado.os_agenda), detectado (1 candidato, com total_visto e faltas_nota) ou duvida. Desligado ou 1ª vez: só avança a marca; senão avança até o maior processada_em lido. Devolve quantos gravou.';
+  'Retorno F5 (P6.1): grava orcamento_aceites a partir de retorno_mensagens com processada_em em (orcamento_aceite_ate − 10 min, p_agora] e recebida_em até p_agora, com ou sem caso. O cliente de _orcamento_cliente_do_telefone (o do caso de papel cliente, só com o telefone da mensagem igual ao do caso; sem caso, quem_escreve com o telefone inteiro da mensagem); áudio só com aceite_audio; _orcamento_aceite; candidatos de _orcamento_candidatos no instante da mensagem. Estado: sombra (com aceite_modo sombra, resultado.seria), agenda (consumida, agenda_ao_dono ou _orcamento_agenda_esperando; resultado.os_agenda), detectado (1 candidato, com total_visto e faltas_nota) ou duvida. Desligado ou 1ª vez: só avança a marca; senão avança até o maior processada_em lido. Devolve quantos gravou.';
 
 revoke all on function public._orcamento_aceites_detectar(timestamptz) from public, anon, authenticated;
 
@@ -490,8 +533,10 @@ revoke all on function public._orcamento_cartao_aceites(timestamptz) from public
 
 -- ── 8. A resposta com os dados da nota ──────────────────────────────────────────────────────────────────────────────────
 
--- O aceite esperando dados (a saída orc_dados_nota enviada, ou incerta, há até dados_nota_janela): a 1ª recebida da chave
--- depois dela, dentro da janela, com CPF/CNPJ válido ou CEP. Só o id da mensagem é gravado; nenhum dígito sai daqui.
+-- O aceite esperando dados (a saída orc_dados_nota enviada, ou incerta, há até dados_nota_janela): a 1ª recebida do mesmo
+-- telefone da saída (_mesmo_telefone: os 8 dígitos e o mesmo DDD; outro DDD com os mesmos 8 dígitos é outra pessoa, e o CPF
+-- dela iria à ficha do cliente) depois dela, dentro da janela, com CPF/CNPJ válido ou CEP. Só o id da mensagem é gravado;
+-- nenhum dígito sai daqui.
 create or replace function public._orcamento_dados_detectar(p_agora timestamptz)
 returns integer
 language plpgsql
@@ -509,9 +554,9 @@ begin
   select coalesce(c.dados_nota_janela, interval '7 days') into v_janela from public.retorno_config c where c.id;
   v_janela := coalesce(v_janela, interval '7 days');
   for v_r in
-    select a.id, a.chave, s.saiu
+    select a.id, a.chave, s.saiu, s.fone
       from public.orcamento_aceites a
-      join lateral (select coalesce(rs.enviada_em, rs.decidida_em) as saiu
+      join lateral (select coalesce(rs.enviada_em, rs.decidida_em) as saiu, rs.phone_normalized as fone
                       from public.retorno_saidas rs
                      where rs.emissor = 'orcamento' and rs.tipo = 'orc_dados_nota'
                        and rs.dados ->> 'aceite_id' = a.id::text
@@ -530,6 +575,7 @@ begin
         from public.whatsapp_messages w
        where w.direction = 'inbound'
          and public._agenda_chave_telefone(w.phone_normalized) = v_r.chave
+         and public._mesmo_telefone(w.phone_normalized, v_r.fone)
          and w.occurred_at > v_r.saiu - interval '1 day'
          and w.occurred_at <= v_agora
          and coalesce(w.hora_real, w.occurred_at) > v_r.saiu
@@ -554,7 +600,7 @@ end;
 $$;
 
 comment on function public._orcamento_dados_detectar(timestamptz) is
-  'Retorno F5 (P6.1): o aceite com dados_estado = esperando e a saída orc_dados_nota enviada (ou incerta) há até dados_nota_janela: a 1ª recebida da chave depois dela, até p_agora, em que _orcamento_documento_lido ou _orcamento_cep_lido não dá nulo vira dados_msg_id, com dados_estado = lidos. Nenhum dígito sai da função. Devolve quantos leu.';
+  'Retorno F5 (P6.1): o aceite com dados_estado = esperando e a saída orc_dados_nota enviada (ou incerta) há até dados_nota_janela: a 1ª recebida do mesmo telefone da saída (_mesmo_telefone: os 8 dígitos e o mesmo DDD) depois dela, até p_agora, em que _orcamento_documento_lido ou _orcamento_cep_lido não dá nulo vira dados_msg_id, com dados_estado = lidos. Nenhum dígito sai da função. Devolve quantos leu.';
 
 revoke all on function public._orcamento_dados_detectar(timestamptz) from public, anon, authenticated;
 
@@ -731,13 +777,20 @@ begin
    where a.id = p_aceite and a.estado = 'detectado';
   perform public._orcamento_aceite_fechar_antigos(p_aceite, v_agora);
 
-  -- O telefone de onde o cliente escreveu (já passou por quem_escreve com papel cliente).
+  -- O telefone de onde o cliente escreveu.
   select w.phone_normalized, coalesce(w.hora_real, w.occurred_at) into v_fone, v_recebida
     from public.whatsapp_messages w where w.id = v_a.whatsapp_message_id;
   if v_fone is null or public._agenda_chave_telefone(v_fone) is distinct from v_a.chave then
     update public.orcamento_aceites a set resultado = a.resultado || jsonb_build_object('saida_nao_saiu', 'sem_numero')
      where a.id = p_aceite;
     return jsonb_build_object('ok', true, 'fechado', null, 'dados', false, 'motivo', 'sem_numero');
+  end if;
+  -- E ele fala pelo cliente do aceite, conferido de novo agora (a mesma regra da detecção; o caso ou o cadastro podem ter
+  -- mudado): senão o "Fechado" e o pedido de dados iriam a outra pessoa com os mesmos 8 dígitos, e nada sai.
+  if public._orcamento_cliente_do_telefone(v_a.abertura_id, v_fone) is distinct from v_a.client_id then
+    update public.orcamento_aceites a set resultado = a.resultado || jsonb_build_object('saida_nao_saiu', 'numero_compartilhado')
+     where a.id = p_aceite;
+    return jsonb_build_object('ok', true, 'fechado', null, 'dados', false, 'motivo', 'numero_compartilhado');
   end if;
   v_modo := (case when v_cfg.modo = 'ligado' and v_cfg.orcamento_modo = 'ligado' and v_cfg.aceite_modo = 'cartao' then 'ligado'
                   else 'sombra' end);
@@ -776,7 +829,7 @@ end;
 $$;
 
 comment on function public.orcamento_aceite_registrar(uuid, boolean, jsonb, uuid, boolean, timestamptz) is
-  'Retorno F5 (P6.1, C-ACEITE-REG): pré-condição aceite detectado (e com executado_em quando escolha = sem_sinal), senão {ok: false, motivo: estado}. p_ok falso com adiado: executado_em nulo (volta à lista); p_ok falso: caiu, nada ao cliente. p_ok verdadeiro: com_sinal ou sem_sinal (escolha), decidido_em/por, resultado, _orcamento_aceite_fechar_antigos, e a saída orc_fechado em retorno_saidas (resposta_imediata, a chave do aceite, o telefone da mensagem do aceite, enviar_em = p_agora, modo ligado só com retorno, orcamento e aceite ligados/cartao, dedupe orcamento:aceite:<id>:fechado[:sombra], dados {aceite_id, os_id, dia_envio}); com p_pedir_dados, dados_nota_ligado e falta que o texto pede, também orc_dados_nota (+2 min, dados {aceite_id, os_id, faltas, documento}) e pedir_dados. {ok, fechado: agendada | sombra, dados}.';
+  'Retorno F5 (P6.1, C-ACEITE-REG): pré-condição aceite detectado (e com executado_em quando escolha = sem_sinal), senão {ok: false, motivo: estado}. p_ok falso com adiado: executado_em nulo (volta à lista); p_ok falso: caiu, nada ao cliente. p_ok verdadeiro: com_sinal ou sem_sinal (escolha), decidido_em/por, resultado, _orcamento_aceite_fechar_antigos; o telefone da mensagem fora da chave do aceite (resultado.saida_nao_saiu = sem_numero) ou que não fala pelo cliente do aceite (_orcamento_cliente_do_telefone; saida_nao_saiu = numero_compartilhado): nada sai; senão a saída orc_fechado em retorno_saidas (resposta_imediata, a chave do aceite, o telefone da mensagem do aceite, enviar_em = p_agora, modo ligado só com retorno, orcamento e aceite ligados/cartao, dedupe orcamento:aceite:<id>:fechado[:sombra], dados {aceite_id, os_id, dia_envio}); com p_pedir_dados, dados_nota_ligado e falta que o texto pede, também orc_dados_nota (+2 min, dados {aceite_id, os_id, faltas, documento}) e pedir_dados. {ok, fechado: agendada | sombra, dados}.';
 
 revoke all on function public.orcamento_aceite_registrar(uuid, boolean, jsonb, uuid, boolean, timestamptz) from public, anon, authenticated;
 grant execute on function public.orcamento_aceite_registrar(uuid, boolean, jsonb, uuid, boolean, timestamptz) to service_role;

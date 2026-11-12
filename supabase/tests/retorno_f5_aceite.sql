@@ -1,6 +1,7 @@
--- Retorno F5 (P6): o aceite por texto e os dados da nota. O léxico (as barreiras no texto cru e as formas fortes), a
--- detecção (com e sem caso, candidatos no instante da mensagem, a agenda na ordem de produção, a sombra antes da agenda, o
--- áudio pela chave aceite_audio, o papel pelo telefone inteiro), a marca d'água (a 1ª vez, a folga de 10 minutos, a
+-- Retorno F5 (P6): o aceite por texto e os dados da nota. O léxico (as barreiras no texto cru, a contraproposta sem "R$" e
+-- as formas fortes), a detecção (com e sem caso, candidatos no instante da mensagem, a agenda na ordem de produção, a sombra
+-- antes da agenda, o áudio pela chave aceite_audio, o papel pelo telefone inteiro, o caso só com o mesmo telefone dele; o
+-- registro e os dados da nota conferem o telefone do mesmo jeito), a marca d'água (a 1ª vez, a folga de 10 minutos, a
 -- mensagem gravada tarde, o áudio transcrito depois), o que falta para a nota (os mesmos casos do Vitest), o documento e o
 -- CEP lidos, a letra A/C, o registro com o "Fechado" e o pedido de dados, os dados gravados só no vazio, o dia do envio,
 -- dois aceites do mesmo cliente e o vigia medindo a sombra com a cadência desligada. Roda só pela bancada (grupo 8,
@@ -122,7 +123,7 @@ declare
                                    '_orcamento_cartao_aceites', '_orcamento_aceites_detectar', '_orcamento_faltas_para_nota',
                                    '_orcamento_documento_lido', '_orcamento_cep_lido', '_orcamento_dados_detectar',
                                    'orcamento_aceite_com_sinal', 'orcamento_aceite_registrar', 'orcamento_dados_gravar',
-                                   '_orcamento_aceite_fechar_antigos'];
+                                   '_orcamento_aceite_fechar_antigos', '_orcamento_cliente_do_telefone'];
   c_publicas constant text[] := array['orcamento_aceite_com_sinal', 'orcamento_aceite_registrar', 'orcamento_dados_gravar'];
   -- Os casos de faltasParaNota (os de src/lib/ficha-cliente.test.ts e as bordas do trim e dos dígitos). O Vitest
   -- ficha-cliente-paridade.test.ts lê este mesmo literal e confere o esperado no TS.
@@ -192,7 +193,17 @@ begin
       ('fechei com outra empresa', false, 'encerrou', null), ('PARAR', false, 'parar', null), ('ok', false, null, null),
       ('sim', false, null, null), ('beleza', false, null, null), ('pode ser', false, null, null), ('obrigado', false, null, null),
       ('[audio]', false, null, null), ('pode fazer o orçamento da bateria', false, 'pedido_de_orcamento', null),
-      ('consegue me mandar um orçamento', false, 'pedido_de_orcamento', null)
+      ('consegue me mandar um orçamento', false, 'pedido_de_orcamento', null),
+      -- A contraproposta sem "R$" (revisão das ondas 1 a 3): número solto, "k", "%", valor por extenso, "se for", a metade.
+      ('Fecho em 4500', false, 'negociacao', null), ('fechado em 4k', false, 'negociacao', null),
+      ('Pode fazer por quatro mil', false, 'negociacao', null), ('Fechado, 4.500 à vista', false, 'negociacao', null),
+      ('Se for 4000 pode fazer', false, 'condicional', null), ('pode fazer pela metade', false, 'negociacao', null),
+      ('fecho com 10% a menos', false, 'negociacao', null), ('fecho com dez por cento a menos', false, 'negociacao', null),
+      ('pode fazer, menos a pintura', false, 'negociacao', null), ('fecho por quinhentos', false, 'negociacao', null),
+      ('se ficar em quatro e quinhentos eu fecho', false, 'condicional', null), ('pode fazer se sair por cem', false, 'condicional', null),
+      -- E o aceite de verdade continua aceite.
+      ('Pode fazer, obrigado!', true, null, 'pode fazer'), ('Pode seguir com o serviço', true, null, 'pode seguir'),
+      ('de acordo', true, null, 'de acordo'), ('Bom dia! Aprovado', true, null, 'aprovado'), ('pode começar', true, null, 'pode comecar')
     ) as x(texto, aceite, barrado, sinal)
   loop
     v_r := public._orcamento_aceite(v_rec.texto);
@@ -777,8 +788,8 @@ begin
     end if;
   end;
 
-  -- ── 13. Os dados: a resposta com CPF e CEP → lidos; gravar com o CPF vazio grava; com o CPF preenchido, ja_tinha; o
-  --        audit_log sem dígito ──
+  -- ── 13. Os dados: a resposta de outro DDD com os mesmos 8 dígitos → continua esperando; a resposta com CPF e CEP do
+  --        número da saída → lidos; gravar com o CPF vazio grava; com o CPF preenchido, ja_tinha; o audit_log sem dígito ──
   begin
     v_ana := pg_temp.f5a_cli('Ana Dados F5 Teste', '5547900009954');
     v_os := pg_temp.f5a_enviado(v_ana, '5547900009954', 'ORÇ-99360', c_t);
@@ -792,6 +803,13 @@ begin
             'Ana, para emitir a nota, me passa o CPF e o endereço completo, com CEP? Pode ser por aqui mesmo.',
             jsonb_build_object('aceite_id', v_a), 'orcamento:aceite:' || v_a || ':dados');
     perform pg_temp.f5a_msg('5547900009954', 'Já te passo', c_t + interval '5 hours 10 minutes');
+    -- Outra pessoa, com os mesmos 8 dígitos e outro DDD, manda um CPF e um CEP: não é a resposta da Ana (continua esperando).
+    v_m3 := pg_temp.f5a_msg('5548900009954', 'CPF 264.983.017-40 e CEP 89000-000', c_t + interval '5 hours 15 minutes');
+    v_n := public._orcamento_dados_detectar(c_t + interval '5 hours 17 minutes');
+    if v_n is distinct from 0 or (pg_temp.f5a_ac(v_m)).dados_estado is distinct from 'esperando'
+       or (pg_temp.f5a_ac(v_m)).dados_msg_id is not null then
+      raise exception '13a0: a resposta de outro DDD com os mesmos 8 dígitos virou os dados da Ana (%)', to_jsonb(pg_temp.f5a_ac(v_m));
+    end if;
     v_m2 := pg_temp.f5a_msg('5547900009954', 'Meu CPF é 390.533.447-05 e o CEP 88330-000', c_t + interval '5 hours 20 minutes');
     v_n := public._orcamento_dados_detectar(c_t + interval '5 hours 30 minutes');
     v_ac := pg_temp.f5a_ac(v_m);
@@ -918,7 +936,8 @@ begin
   end;
 
   -- ── 18. Quem escreve, pelo telefone: sem caso, a mensagem do DDD 47 e um só cadastro com os mesmos 8 dígitos no DDD 48 →
-  --        nada (quem_escreve do telefone dá ambíguo por ddd_diferente; com a chave, o DDD sairia nulo) ──
+  --        nada (quem_escreve do telefone dá ambíguo por ddd_diferente; com a chave, o DDD sairia nulo); e o registro do
+  --        aceite gravado à mão não manda o "Fechado" a esse número (numero_compartilhado) ──
   begin
     perform pg_temp.f5a_marca(c_t + interval '4 hours');
     v_pedro := pg_temp.f5a_cli('Pedro Outro DDD F5 Teste', '5548900009918');
@@ -931,6 +950,60 @@ begin
     perform public._orcamento_aceites_detectar(c_t + interval '4 hours 10 minutes');
     if (pg_temp.f5a_ac(v_m)).id is not null then
       raise exception '18b: a mensagem de outro DDD virou aceite do cadastro';
+    end if;
+    -- O registro confere de novo (o aceite gravado à mão, sem caso): o "Fechado" não sai ao número de outro DDD.
+    v_a := pg_temp.f5a_aceite(v_m, v_pedro, '00009918', v_os);
+    v_r := public.orcamento_aceite_registrar(v_a, true, '{"escolha": "com_sinal"}'::jsonb, c_dono, false, c_t + interval '5 hours');
+    if v_r is distinct from '{"ok": true, "fechado": null, "dados": false, "motivo": "numero_compartilhado"}'::jsonb
+       or pg_temp.f5a_saidas(v_a) is distinct from ''
+       or (pg_temp.f5a_ac(v_m)).resultado ->> 'saida_nao_saiu' is distinct from 'numero_compartilhado' then
+      raise exception '18c: o registro sem caso mandou o "Fechado" a outro DDD (%; %)', v_r, pg_temp.f5a_saidas(v_a);
+    end if;
+    raise exception 'f5a_cenario' using errcode = 'P0001';
+  exception when others then
+    if sqlstate is distinct from 'P0001' or sqlerrm is distinct from 'f5a_cenario' then
+      raise;
+    end if;
+  end;
+
+  -- ── 18b. Com caso: a Ana (DDD 48) tem o caso vivo e o orçamento enviado, e de outro DDD com os mesmos 8 dígitos chega
+  --         "Pode fazer.". O retorno_abrir junta essa mensagem ao caso dela só pela chave; o aceite não nasce em nome dela, e o
+  --         registro (com o aceite gravado à mão) não manda o "Fechado" a esse número. A dela, do número dela, vira aceite ──
+  begin
+    v_ana := pg_temp.f5a_cli('Ana Caso DDD F5 Teste', '5548900009919');
+    v_os := pg_temp.f5a_enviado(v_ana, '5548900009919', 'ORÇ-99367', v_agora - interval '3 hours');
+    perform pg_temp.f5a_marca(v_agora - interval '5 minutes');
+    v_m := pg_temp.f5a_msg('5548900009919', 'A peça já chegou?', v_agora - interval '2 hours');
+    v_r := public.retorno_abrir(v_m, true, v_agora);
+    v_ab := (v_r ->> 'abertura_id')::uuid;
+    if v_ab is null
+       or not exists (select 1 from public.retorno_aberturas ab where ab.id = v_ab and ab.papel = 'cliente' and ab.client_id = v_ana) then
+      raise exception '18d: o caso da Ana não abriu com o papel cliente (%)', v_r;
+    end if;
+    v_m2 := pg_temp.f5a_msg('5547900009919', 'Pode fazer.', v_agora - interval '90 minutes');
+    perform public.retorno_abrir(v_m2, false, v_agora);
+    if (select rm.abertura_id from public.retorno_mensagens rm where rm.whatsapp_message_id = v_m2) is distinct from v_ab then
+      raise exception '18e: a premissa mudou: a mensagem do DDD 47 não entrou no caso da Ana pela chave';
+    end if;
+    v_m3 := pg_temp.f5a_msg('5548900009919', 'Fechado!', v_agora - interval '80 minutes');
+    perform public.retorno_abrir(v_m3, false, v_agora);
+    perform public._orcamento_aceites_detectar(v_agora + interval '1 minute');
+    if (pg_temp.f5a_ac(v_m2)).id is not null then
+      raise exception '18f: a mensagem de outro DDD no caso da Ana virou aceite dela (%)', to_jsonb(pg_temp.f5a_ac(v_m2));
+    end if;
+    v_ac := pg_temp.f5a_ac(v_m3);
+    if v_ac.estado is distinct from 'detectado' or v_ac.abertura_id is distinct from v_ab or v_ac.client_id is distinct from v_ana
+       or v_ac.service_order_id is distinct from v_os then
+      raise exception '18g: a mensagem da Ana, do número dela, no caso dela (%)', to_jsonb(v_ac);
+    end if;
+    -- O registro confere de novo, pelo caso: o aceite da mensagem do DDD 47 (gravado à mão, no caso da Ana) não manda nada.
+    v_a := pg_temp.f5a_aceite(v_m2, v_ana, '00009919', v_os);
+    update public.orcamento_aceites set abertura_id = v_ab where id = v_a;
+    v_r := public.orcamento_aceite_registrar(v_a, true, '{"escolha": "com_sinal"}'::jsonb, c_dono, true, v_agora + interval '2 minutes');
+    if v_r is distinct from '{"ok": true, "fechado": null, "dados": false, "motivo": "numero_compartilhado"}'::jsonb
+       or pg_temp.f5a_saidas(v_a) is distinct from ''
+       or (pg_temp.f5a_ac(v_m2)).resultado ->> 'saida_nao_saiu' is distinct from 'numero_compartilhado' then
+      raise exception '18h: o registro no caso da Ana mandou o "Fechado" ao DDD 47 (%; %)', v_r, pg_temp.f5a_saidas(v_a);
     end if;
     raise exception 'f5a_cenario' using errcode = 'P0001';
   exception when others then
@@ -978,8 +1051,8 @@ begin
       end if;
     end loop;
   end loop;
-  if v_n_fun is distinct from 13 then
-    raise exception '20d: achei % das 13 funções novas', v_n_fun;
+  if v_n_fun is distinct from 14 then
+    raise exception '20d: achei % das 14 funções novas', v_n_fun;
   end if;
   v_n_fun := 0;
   for v_rec in
