@@ -25,7 +25,8 @@
 //      cada versão registrada em
 //      supabase_migrations.schema_migrations como em produção. A semente 20261024161000 entra: na bancada vazia ela não
 //      acha diária e não semeia (a fixture semeia o dia 23/10). `ate` corta a lista (cada pacote testa até a sua). Na 2ª
-//      rodada, a view que uma migration mais nova recriou com colunas a mais sai antes da antiga (VIEWS_RECRIADAS_DEPOIS);
+//      rodada, a view que uma migration mais nova recriou com colunas a mais sai antes da antiga (VIEWS_RECRIADAS_DEPOIS),
+//      e a função a que uma mais nova deu default, também (FUNCOES_COM_DEFAULT_DEPOIS);
 //   5. com `fixture`, scripts/bancada-agenda/fixture-2310.sql (a carteira sintética de 23/10).
 //
 // O RELÓGIO DA BANCADA (correção C2 da Fase 5): o now() do PGlite é o Date.now() do Node, e a bancada o FIXA em
@@ -170,6 +171,10 @@ export const FORA_DA_BANCADA = new Set([
   '20261027200000_diarias_em_lote.sql',
   '20261027210000_diarias_recibo_assinado.sql',
   '20261028150000_diarias_anotacao_e_banco_pelo_cpf.sql',
+  // Main de 12/11 (831f9c00, outra sessão): os serviços do prestador na conta corrente — recria a conta corrente e o resumo dos
+  // freelancers (que a bancada não carrega: lê diarias_pagamentos_divididos, de 20261011301000, antes de PRIMEIRA) e põe colunas e
+  // gatilhos em commissions. Nenhuma função da agenda a chama; como as diárias acima, fica de fora.
+  '20270105102000_servicos_do_prestador.sql',
 ]);
 
 /**
@@ -183,6 +188,17 @@ export const FORA_DA_BANCADA = new Set([
  */
 export const VIEWS_RECRIADAS_DEPOIS = {
   '20261024150100_compras_reserva_propria_e_ja_pedido.sql': ['v_oc_itens_a_caminho'],
+};
+
+/**
+ * Funções que uma migration MAIS NOVA recriou com DEFAULT em parâmetros: na 2ª rodada, a migration antiga que as define (create or
+ * replace sem o default) esbarraria em "cannot remove parameter defaults from existing function" (42P13). Como nas views acima: só
+ * na 2ª rodada e só antes daquele arquivo, a função sai e a migration antiga a recria (com o comment e as portas dela); a mais nova,
+ * logo depois na mesma rodada, volta a pôr os defaults. [arquivo antigo]: [assinaturas].
+ *   · Consertos de 12/11: 20261112300000 dá default a p_hoje e p_agora de agenda_carona (Fase 3, 20261026100500; Fase 4, 20261027100300).
+ */
+export const FUNCOES_COM_DEFAULT_DEPOIS = {
+  '20261026100500_agenda_fase3_acompanhamento.sql': ['public.agenda_carona(uuid, text[], text, date, timestamptz)'],
 };
 
 /**
@@ -543,6 +559,7 @@ export async function criarBancada({ ate, fixture = true, log = () => {} } = {})
       try {
         if (rodada === 2) {
           for (const v of VIEWS_RECRIADAS_DEPOIS[m] ?? []) await db.exec(`drop view if exists public.${v}`);
+          for (const f of FUNCOES_COM_DEFAULT_DEPOIS[m] ?? []) await db.exec(`drop function if exists ${f}`);
         }
         await db.exec(ler(join(MIG, m)));
         await db.query(
