@@ -155,6 +155,8 @@ export const FORA_DA_BANCADA = new Set([
   '20270105100800_retorno_f4_mao.sql',
   '20270105100900_retorno_f4_c13.sql',
   '20270105101000_retorno_f4_medidas.sql',
+  // Retorno (12/11/2026): recria retorno_carona/retorno_dito/_retorno_dito_pessoal, que leem as tabelas da F0b-1.
+  '20261112200000_retorno_update_com_where.sql',
   // Merge do main (28/10/2026): migrations de OUTRAS sessões, já aplicadas em produção, que caíram depois de PRIMEIRA
   // pela data. Mexem em diárias (conta corrente, recibo, lote, anotação × CPF) e no agrupar OS — tabelas que a bancada
   // não modela (anotacoes_do_extrato, orcamento_agrupamentos, os_agrupamento_movidos…) e funções que a agenda não chama
