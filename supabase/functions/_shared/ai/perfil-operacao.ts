@@ -566,8 +566,7 @@ export const PERFIL_ADMIN: ReadonlySet<string> = new Set([
   //   o perfil enxuto tem teto de 100 ferramentas — pela rede, escrita pede "sim" do mesmo jeito —
   "registrar_pagamento_freelancer",
   "enviar_extrato_freelancer",
-  // 12/11/2026: o serviço do Alex pelo WhatsApp (valor combinado ou percentual por OS)
-  "registrar_servico_prestador",
+  // 12/11/2026: registrar_servico_prestador (o Alex) fica FORA (teto de 113): no admin, pela rede, com o "sim".
 
   // — (B) cotacao —
   "record_quote_response",

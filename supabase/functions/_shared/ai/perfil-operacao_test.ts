@@ -89,6 +89,8 @@ ACRESCENTADAS.push("listar_orcamentos_para_agrupar", "agrupar_orcamentos", "desa
 // agenda de produção (24/10/2026, Fase 1, P5): a leitura da agenda de produção do dono (só admin, pelos roles). As três
 // que anotam o rascunho ficam em SO_PELA_REDE (rodam direto: ESCRITAS_VERIFICADAS_DA_REDE).
 ACRESCENTADAS.push("agenda_ver");
+// serviço do prestador (12/11/2026): o Alex recebe por serviço (valor combinado ou percentual por OS).
+ACRESCENTADAS.push("registrar_servico_prestador");
 // converter sem sinal (27/10/2026, pedido do dono): orçamento vira OS com tudo na conclusão.
 ACRESCENTADAS.push("converter_sem_sinal");
 // agrupar OS (28/10/2026, pedido do dono): as mesmas três, para ordens de serviço.

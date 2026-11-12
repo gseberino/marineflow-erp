@@ -112,7 +112,10 @@ Deno.test("nove ferramentas: as que gravam ou mandam a terceiro pedem confirmaç
   assertEquals(diariasTools.map((t) => t.name).sort(), [
     "cadastrar_freelancer", "consultar_freelancer", "dividir_pagamento_freelancer", "enviar_acerto_ao_freelancer", "enviar_extrato_freelancer",
     "fechar_acerto_freelancer", "reabrir_acerto_freelancer", "registrar_diaria", "registrar_pagamento_freelancer",
+    "registrar_servico_prestador",
   ]);
+  assertEquals(tool("registrar_servico_prestador").risk, "medium");
+  assertEquals((tool("registrar_servico_prestador").input_schema as any).required, ["prestador", "os"]);
   for (const n of ["fechar_acerto_freelancer", "reabrir_acerto_freelancer", "enviar_acerto_ao_freelancer", "dividir_pagamento_freelancer"]) assertEquals(tool(n).risk, "medium");
   assertEquals(tool("registrar_diaria").risk, "medium");
   assertEquals(tool("cadastrar_freelancer").risk, "medium");
@@ -148,7 +151,7 @@ Deno.test("resolver: o nome acha só quem tem diária e está ativo; a data e a 
   assertEquals(p.os.map((o) => o.id), ["os60", "os61"]);
 
   const inativo = await resolverDiaria(c as never, { freelancer: "felipe", jornada: "inteiro" });
-  assertStringIncludes(String((inativo as { error: string }).error), "Os que têm diária: Roberto Daniel Rodrigues Correa, Mickael Fernando Gonzaga");
+  assertStringIncludes(String((inativo as { error: string }).error), "Os que têm conta corrente: Roberto Daniel Rodrigues Correa, Mickael Fernando Gonzaga");
 
   const dataRuim = await resolverDiaria(c as never, { freelancer: "mickael", data: "semana que vem", jornada: "meio" });
   assertStringIncludes(String((dataRuim as { error: string }).error), "Não entendi a data");

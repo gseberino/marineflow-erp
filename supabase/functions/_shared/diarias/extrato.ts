@@ -32,7 +32,7 @@ export const ROTULO_REEMBOLSO = 'Reembolso de despesa paga pelo técnico';
  */
 export interface LinhaDoExtrato {
   data: string;
-  tipo: 'dia' | 'pagamento' | 'reembolso';
+  tipo: 'dia' | 'pagamento' | 'reembolso' | 'servico';
   id: string;
   jornada: JornadaNoDocumento | null;
   fracao: number | null;
@@ -57,7 +57,7 @@ export const CONTA_FALTA_APROVAR = 'No banco — falta aprovar na fila';
 const lancadoAMao = (l: Pick<LinhaDoExtrato, 'aguardando' | 'conta'>) => !!l.aguardando && l.conta !== CONTA_FALTA_APROVAR;
 
 export interface ContaDoExtrato {
-  favorecido: { id: string; nome: string; desde: string | null; saldo_inicial: number; diaria: number | null };
+  favorecido: { id: string; nome: string; desde: string | null; saldo_inicial: number; diaria: number | null; modo?: 'diaria' | 'servico' };
   de: string | null;
   ate: string | null;
   saldo_anterior: number;
@@ -70,6 +70,8 @@ export interface ContaDoExtrato {
   reembolsos?: number;
   saldo_final: number;
   estado: EstadoNoDocumento;
+  /** 12/11/2026: os serviços do prestador em OS que o cliente ainda não pagou (fora do saldo). */
+  servicos_aguardando_cliente?: { numero: string; cliente: string | null; rotulo: string; valor: number; descricao: string | null }[];
 }
 
 export interface EmpresaNoDocumento {
@@ -173,6 +175,34 @@ export function montarExtratoHtml(p: {
   const dias = conta.linhas.filter((l) => l.tipo === 'dia');
   const pagamentos = conta.linhas.filter((l) => l.tipo === 'pagamento');
   const aguardando = pagamentos.some(lancadoAMao);
+  // 12/11/2026: o prestador por serviço (Alex). Sem serviço, o papel do diarista sai exatamente como antes.
+  const servicos = conta.linhas.filter((l) => (l.tipo as string) === 'servico');
+  const esperando = conta.servicos_aguardando_cliente ?? [];
+  const porServico = conta.favorecido.modo === 'servico' || servicos.length > 0;
+  const totalServicos = servicos.reduce((s, l) => s + (Number(l.trabalhado) || 0), 0);
+  const totalDias = porServico ? dias.reduce((s, l) => s + (Number(l.trabalhado) || 0), 0) : conta.trabalhado;
+  const linhaDoServico = (l: LinhaDoExtrato) => `
+      <tr>
+        <td>${dataBR(l.data)}</td><td>${esc(l.os.map((o) => o.numero).join(', '))}</td>
+        <td>${esc(l.descricao ?? '')}${l.observacao ? ` · ${esc(l.observacao)}` : ''}</td>
+        <td>${esc(String(l.jornada ?? ''))}</td>
+        <td class="n b">${brl(l.trabalhado)}</td>
+      </tr>`;
+  const secaoDosServicos = porServico ? `
+
+  <h2>Serviços (entram quando o cliente paga a OS)</h2>
+  <table>
+    <thead><tr><th>Cliente pagou</th><th>OS</th><th>Serviço</th><th>Combinado</th><th class="n">Valor</th></tr></thead>
+    <tbody>${servicos.length ? servicos.map(linhaDoServico).join('') : '<tr><td colspan="5" class="vazio">Nenhum serviço em OS paga no período.</td></tr>'}</tbody>
+    ${servicos.length ? `<tfoot><tr><td colspan="4">${servicos.length} serviço(s)</td><td class="n">${brl(totalServicos)}</td></tr></tfoot>` : ''}
+  </table>${esperando.length ? `
+
+  <h2>Aguardando o cliente pagar (fora do saldo)</h2>
+  <table>
+    <thead><tr><th>OS</th><th>Cliente</th><th>Combinado</th><th class="n">Valor hoje</th></tr></thead>
+    <tbody>${esperando.map((s) => `<tr><td>${esc(s.numero)}</td><td>${esc(s.cliente ?? '')}</td><td>${esc(s.rotulo)}</td><td class="n">${brl(s.valor)}</td></tr>`).join('')}</tbody>
+  </table>` : ''}` : '';
+
   // Reembolso de comprovante (F2b): coluna no total e seção própria SÓ quando há — sem ele, o
   // documento é byte a byte o de antes (teste em src/lib/extrato-diarias.test.ts).
   const reembolsos = reembolsosDe(conta.linhas);
@@ -215,7 +245,7 @@ export function montarExtratoHtml(p: {
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<title>Extrato de diárias — ${esc(freelancer.nome)}</title>
+<title>${porServico ? 'Extrato de serviços' : 'Extrato de diárias'} — ${esc(freelancer.nome)}</title>
 <style>
   @page { size: A4; margin: 12mm; }
   * { box-sizing: border-box; }
@@ -241,8 +271,8 @@ export function montarExtratoHtml(p: {
 <body>
   <div class="topo">
     <div>
-      <h1>Extrato de diárias</h1>
-      <div class="emp">Prestação de serviços por dia · ${esc(textoDoPeriodo(conta))}</div>
+      <h1>${porServico ? 'Extrato de serviços' : 'Extrato de diárias'}</h1>
+      <div class="emp">${porServico ? 'Prestação de serviços por OS' : 'Prestação de serviços por dia'} · ${esc(textoDoPeriodo(conta))}</div>
     </div>
     <div class="emp" style="text-align:right">
       <b>${esc(empresa.nome)}</b><br>${empresa.cnpj ? `CNPJ ${esc(documentoFormatado(empresa.cnpj))}` : ''}
@@ -251,32 +281,32 @@ export function montarExtratoHtml(p: {
 
   <div class="quem">
     <b>${esc(freelancer.nome)}</b><br>
-    ${freelancer.documento ? `<span>CPF ${esc(documentoFormatado(freelancer.documento))}</span>` : ''}
+    ${freelancer.documento ? `<span>${freelancer.documento.replace(/D/g, '').length > 11 ? 'CNPJ' : 'CPF'} ${esc(documentoFormatado(freelancer.documento))}</span>` : ''}
     ${conta.favorecido.diaria != null ? `<span>Diária ${brl(conta.favorecido.diaria)}</span>` : ''}
     ${freelancer.pix ? `<span>PIX ${esc(freelancer.pix)}</span>` : ''}
   </div>
 
   <table>
     <thead><tr>
-      <th class="n">${conta.de ? 'Saldo antes do período' : 'Saldo inicial'}</th><th class="n">Diárias</th>
+      <th class="n">${conta.de ? 'Saldo antes do período' : 'Saldo inicial'}</th><th class="n">${porServico ? 'Serviços' : 'Diárias'}</th>
       <th class="n">Trabalhado</th>${comReembolso ? `<th class="n" style="white-space:normal">${ROTULO_REEMBOLSOS}</th>` : ''}<th class="n">Pago</th><th class="n">Saldo no fim do período</th>
     </tr></thead>
     <tbody><tr>
-      <td class="n">${brl(conta.saldo_anterior)}</td><td class="n">${numero(conta.dias)}</td>
+      <td class="n">${brl(conta.saldo_anterior)}</td><td class="n">${porServico ? numero(servicos.length) : numero(conta.dias)}</td>
       <td class="n">${brl(conta.trabalhado)}</td>${comReembolso ? `<td class="n">${brl(totalReembolsos)}</td>` : ''}<td class="n">${brl(conta.pago)}</td>
       <td class="n b">${brl(conta.saldo_final)} (${ESTADO_NO_PAPEL[conta.estado]})</td>
     </tr></tbody>
   </table>
 
-  <h2>Dias trabalhados</h2>
+  ${porServico && !dias.length ? secaoDosServicos.trimStart() : `<h2>Dias trabalhados</h2>
   <table>
     <thead><tr>
       <th>Data</th><th>Dia</th><th>OS</th><th>Serviço / observação</th><th>Tipo</th>
       <th class="n">Diária</th><th class="n">Extras</th><th class="n">Desc.</th><th class="n">Total</th>
     </tr></thead>
     <tbody>${dias.length ? dias.map(linhaDoDia).join('') : '<tr><td colspan="9" class="vazio">Nenhum dia lançado no período.</td></tr>'}</tbody>
-    ${dias.length ? `<tfoot><tr><td colspan="8">${numero(conta.dias)} diária(s)</td><td class="n">${brl(conta.trabalhado)}</td></tr></tfoot>` : ''}
-  </table>${secaoDosReembolsos}
+    ${dias.length ? `<tfoot><tr><td colspan="8">${numero(conta.dias)} diária(s)</td><td class="n">${brl(totalDias)}</td></tr></tfoot>` : ''}
+  </table>${porServico ? secaoDosServicos : ''}`}${secaoDosReembolsos}
 
   <h2>Pagamentos recebidos</h2>
   <table>
@@ -687,7 +717,7 @@ export interface LinhaDoCsv {
 const dec = (v: number | null | undefined) => (v == null ? '' : (Number(v) || 0).toFixed(2).replace('.', ','));
 
 /** Ordem no mesmo dia: o dia, depois o reembolso (os dois a favor dele), depois o pagamento. */
-const ORDEM_NO_DIA: Record<LinhaDoExtrato['tipo'], number> = { dia: 0, reembolso: 1, pagamento: 2 };
+const ORDEM_NO_DIA: Record<LinhaDoExtrato['tipo'], number> = { dia: 0, servico: 0, reembolso: 1, pagamento: 2 };
 
 /**
  * Todos os dias, reembolsos e pagamentos das contas, em ordem de data (no mesmo dia: dia, reembolso,
@@ -700,19 +730,20 @@ export function linhasDoCsv(contas: Array<{ conta: ContaDoExtrato; documento: st
     for (const l of conta.linhas) {
       const dia = l.tipo === 'dia';
       const reembolso = l.tipo === 'reembolso';
+      const servico = l.tipo === 'servico';
       linhas.push({
         _ordem: `${l.data}|${ORDEM_NO_DIA[l.tipo] ?? 2}|${conta.favorecido.nome}`,
         data: dataBR(l.data),
-        tipo: dia ? 'Diária' : reembolso ? ROTULO_REEMBOLSO : lancadoAMao(l) ? 'Pagamento (aguardando o banco)' : l.aguardando ? 'Pagamento (falta aprovar na fila)' : 'Pagamento',
+        tipo: dia ? 'Diária' : servico ? 'Serviço' : reembolso ? ROTULO_REEMBOLSO : lancadoAMao(l) ? 'Pagamento (aguardando o banco)' : l.aguardando ? 'Pagamento (falta aprovar na fila)' : 'Pagamento',
         freelancer: conta.favorecido.nome,
         cpf: documentoFormatado(documento),
-        jornada: dia ? tipoDoDia(l.jornada) : '',
+        jornada: dia ? tipoDoDia(l.jornada) : servico ? String(l.jornada ?? '') : '',
         diarias: dia ? dec(l.fracao).replace(/,00$/, '').replace(/0$/, '') : '',
         valor_diaria: dia ? dec(l.valor_diaria) : '',
         extras: dia ? dec(l.extras) : '',
         descontos: dia ? dec(l.descontos) : '',
-        trabalhado: dia ? dec(l.trabalhado) : '',
-        pago: dia || reembolso ? '' : dec(l.pago),
+        trabalhado: dia || servico ? dec(l.trabalhado) : '',
+        pago: dia || reembolso || servico ? '' : dec(l.pago),
         conta: dia ? '' : l.conta ?? '',
         categoria: dia ? '' : l.categoria ?? '',
         os: l.os.map((o) => o.numero).join(', '),

@@ -138,6 +138,11 @@ export const TITULOS_DAS_ACOES_DIRETAS: Record<string, string> = {
 
 /** Rótulo dos campos que aparecem no resumo genérico ("- Rótulo: valor") das ações que podem virar cartão. */
 export const ROTULOS_DOS_CAMPOS: Record<string, string> = {
+  // Serviço do prestador (12/11/2026)
+  prestador: "Prestador",
+  percentual: "Percentual",
+  base: "Percentual sobre",
+  apagar: "Apagar",
   // Orçamento pelo cartão (Retorno F3, P8.3)
   unidade: "Unidade",
   trocas: "Linhas a trocar",
@@ -392,11 +397,12 @@ export const CAMPOS_EM_REAIS: ReadonlySet<string> = new Set([
 ]);
 
 /** Campos de porcentagem: o número sai com "%". */
-export const CAMPOS_EM_PORCENTO: ReadonlySet<string> = new Set(["card_fee_percent", "percentual_comissao", "profit_margin"]);
+export const CAMPOS_EM_PORCENTO: ReadonlySet<string> = new Set(["card_fee_percent", "percentual_comissao", "profit_margin", "percentual"]);
 
 /** Valores de enum em inglês que chegam ao cartão: "unit" vira "por unidade". */
 export const ROTULOS_DOS_VALORES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   billing_unit: { hour: "por hora", visit: "por visita", day: "por dia", unit: "por unidade" },
+  base: { mao_de_obra: "a mão de obra", total: "o total da OS", lucro: "o lucro da OS" },
   decision: { approve: "aprovar", reject: "rejeitar" },
   mode: { auto: "sozinho", confirm: "pedir confirmação" },
   direction: { up: "para antes", down: "para depois" },
