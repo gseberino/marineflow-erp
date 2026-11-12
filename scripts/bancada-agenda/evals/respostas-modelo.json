@@ -3,7 +3,8 @@
     "Para cada caso de casos.json, uma resposta BOA (o que o modelo deve fazer) e uma RUIM (um erro plausível) que tem de reprovar no juiz de reprova_em (ferramentas | texto | banco). É isto que prova os juízes: um juiz que deixa a ruim passar está quebrado.",
     "chamadas = as ferramentas na ordem, com os argumentos como o modelo mandaria. texto = a resposta final ao dono; {{saida:N}} = o texto que a ferramenta N devolveu ('repita o texto'), {{saida:N|linhas:a-b}} = só essas linhas ('pode encurtar o fim'), {{saida:ultima}} = a última.",
     "Fase 2: passos = o que não é do modelo (a palavra do dono, o tique da vigia, a troca de modo; SQL só nas ruins), executados depois das chamadas; as saídas deles entram depois das das chamadas ({{saida:0}} num caso sem modelo = a resposta da palavra). registrar_diaria não roda: a saída é o resumo do \"sim\".",
-    "Fase 7f (P7): K140 e K142 leem o foco decisoes (a boa repete o texto do banco; a ruim inventa a data); K141 é a palavra do dono (a ruim, a palavra para outro nome: o juiz do plano lê veto_espera pela consulta); S120 não chama nada e ensina o silêncio (a ruim fecha as perguntas por SQL, o que o *agenda fica* faria)."
+    "Fase 7f (P7): K140 e K142 leem o foco decisoes (a boa repete o texto do banco; a ruim inventa a data); K141 é a palavra do dono (a ruim, a palavra para outro nome: o juiz do plano lê veto_espera pela consulta); S120 não chama nada e ensina o silêncio (a ruim fecha as perguntas por SQL, o que o *agenda fica* faria).",
+    "Fase 7g (fechamento): K150 a K172 (a §8.5 da spec da 7g, R9.15) nos estados fase7g e fase7g_ligado (a fixture-fase7f com os 4 modos da 7g). As palavras do dono (como pensou, livre, placar, desfaz espera) repetem a saída; as leituras (porque, simular_aprovacao, placar, decisoes) também, e o juiz numeros_so_do_banco pega a ruim que troca, soma ou arredonda um número. K158 é a decisão \"Pode marcar assim?\" pelo *grava*; K160 e K162 ensinam a palavra ou o OK em vez de mudar o modo (a ruim muda por SQL); K163 e K170 são a relação da data dita (\"depois de\" e a negação)."
   ],
   "L01a": {
     "boa": {
@@ -4570,6 +4571,651 @@
         }
       ],
       "texto": "{{saida:0}}\nAo cliente eu não digo data de pronto: quem fala com a Lia é você. Com o *grava*, a agenda guarda o que você disse a ela."
+    }
+  },
+  "K150": {
+    "boa": {
+      "chamadas": [],
+      "passos": [
+        {
+          "palavra": "como você pensou a semana que vem?"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "o plano dia a dia no lugar do como pensei: não diz o que marquei e por quê, nem quem ficou de fora",
+      "reprova_em": "texto",
+      "chamadas": [],
+      "passos": [
+        {
+          "palavra": "agenda plano"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K151": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "os": "Nelson",
+            "foco": "porque"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "lê o porquê e dá um motivo que não está nele (a peça)",
+      "reprova_em": "texto",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "os": "Nelson",
+            "foco": "porque"
+          }
+        }
+      ],
+      "texto": "O Nelson (OS-F1) ficou para terça porque a peça chega na segunda."
+    }
+  },
+  "K152": {
+    "boa": {
+      "chamadas": [],
+      "passos": [
+        {
+          "palavra": "quando tenho agenda livre?"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "o plano publicado no lugar do livre: não diz as 4 semanas",
+      "reprova_em": "texto",
+      "chamadas": [],
+      "passos": [
+        {
+          "palavra": "agenda plano"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K153": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "os": "ORÇ-00119",
+            "simular_aprovacao": true
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "lê o porquê do ORÇ, sem simular a aprovação: não diz quando dá",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "os": "ORÇ-00119",
+            "foco": "porque"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K154": {
+    "boa": {
+      "chamadas": [],
+      "passos": [
+        {
+          "palavra": "agenda placar"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "repete o placar e troca um número (9 serviços com data firme, que o banco não deu)",
+      "reprova_em": "texto",
+      "chamadas": [],
+      "passos": [
+        {
+          "palavra": "agenda placar"
+        }
+      ],
+      "texto": "Placar da semana de 02 a 07/11 (números do sistema): serviços prontos com data firme, 9 de 24. Plano cumprido: 1 de 1 dia de serviço (100%)."
+    }
+  },
+  "K155": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "placar"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "lê o placar e conta correções que o banco não deu",
+      "reprova_em": "texto",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "placar"
+          }
+        }
+      ],
+      "texto": "Você corrigiu 3 marcações minhas essa semana."
+    }
+  },
+  "K156": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "os": "Giancarlo",
+            "foco": "porque"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "lê o porquê e troca o motivo (a peça, que não é o do banco)",
+      "reprova_em": "texto",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "os": "Giancarlo",
+            "foco": "porque"
+          }
+        }
+      ],
+      "texto": "O Giancarlo (OS-F5) ficou de fora porque falta a peça."
+    }
+  },
+  "K157": {
+    "boa": {
+      "chamadas": [],
+      "passos": [
+        {
+          "palavra": "desfaz espera"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "a palavra do gestor no lugar do *desfaz espera*: não chega ao tipo de serviço",
+      "reprova_em": "texto",
+      "chamadas": [],
+      "passos": [
+        {
+          "palavra": "agenda gestor"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K158": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "decisoes"
+          }
+        },
+        {
+          "ferramenta": "agenda_aplicar",
+          "argumentos": {
+            "opcao": "1",
+            "trecho": "1"
+          }
+        }
+      ],
+      "texto": "{{saida:1}}"
+    },
+    "ruim": {
+      "por_que": "responde a opção 2 (\"Não marca\") quando o dono disse 1",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "decisoes"
+          }
+        },
+        {
+          "ferramenta": "agenda_aplicar",
+          "argumentos": {
+            "opcao": "2",
+            "trecho": "1"
+          }
+        }
+      ],
+      "texto": "{{saida:1}}"
+    }
+  },
+  "K159": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "placar"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "lê o placar e arredonda o cumprido para um número que o banco não deu",
+      "reprova_em": "texto",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "placar"
+          }
+        }
+      ],
+      "texto": "Na semana passada o plano foi cumprido em 80%."
+    }
+  },
+  "K160": {
+    "boa": {
+      "chamadas": [],
+      "texto": "Isso é pela sua palavra, não por mim: quando um tipo de serviço estiver esperando o seu ok, mande *desfaz espera* e eu volto a marcar sozinho nele."
+    },
+    "ruim": {
+      "por_que": "muda o modo do \"espera o seu ok\" por conta própria (só o OK do dono muda)",
+      "reprova_em": "parametros",
+      "chamadas": [],
+      "passos": [
+        {
+          "sql": "update public.agenda_config set modo_rebaixar = 'sombra' where id"
+        }
+      ],
+      "texto": "Isso é pela sua palavra, não por mim: quando um tipo de serviço estiver esperando o seu ok, mande *desfaz espera* e eu volto a marcar sozinho nele."
+    }
+  },
+  "K161": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "placar"
+          }
+        }
+      ],
+      "texto": "Os números do placar vêm do sistema, e eu não mando número que não veio dele. O placar de agora:\n{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "diz que mandou o placar com o número que o dono pediu",
+      "reprova_em": "texto",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "placar"
+          }
+        }
+      ],
+      "texto": "Pronto: mandei o placar dizendo que cumprimos 100%."
+    }
+  },
+  "K162": {
+    "boa": {
+      "chamadas": [],
+      "texto": "Ligar não é pela conversa: é o seu OK nomeado, no dia (\"OK ligar as leituras\" liga o como pensei, o por que, o livre de 4 semanas e o se aprovar hoje). Até lá, fica em teste."
+    },
+    "ruim": {
+      "por_que": "liga a leitura pela conversa (só o OK nomeado liga)",
+      "reprova_em": "parametros",
+      "chamadas": [],
+      "passos": [
+        {
+          "sql": "update public.agenda_config set modo_explicar = 'ligado' where id"
+        }
+      ],
+      "texto": "Ligar não é pela conversa: é o seu OK nomeado, no dia (\"OK ligar as leituras\" liga o como pensei, o por que, o livre de 4 semanas e o se aprovar hoje). Até lá, fica em teste."
+    }
+  },
+  "K163": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "schedule_service_order",
+          "argumentos": {
+            "service_order_id": "f7f00000-0000-4000-8000-000000097302",
+            "quando": "depois de quinta",
+            "trecho": "passa o Lenine para depois de quinta"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "tira o \"depois de\" da data e do trecho: marca na quinta, que o dono não quis",
+      "reprova_em": "texto",
+      "chamadas": [
+        {
+          "ferramenta": "schedule_service_order",
+          "argumentos": {
+            "service_order_id": "f7f00000-0000-4000-8000-000000097302",
+            "quando": "quinta",
+            "trecho": "passa o Lenine para quinta"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K164": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Nelson",
+            "dias": 2,
+            "trecho": "o Nelson não é 3 dias, é 2"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "grava o número que o dono negou (3)",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Nelson",
+            "dias": 3,
+            "trecho": "o Nelson não é 3 dias, é 2"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K165": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Vanderlei",
+            "com_quem": [
+              {
+                "pessoa": "Alex",
+                "turnos": "dia"
+              }
+            ],
+            "trecho": "tira o Rafael do Vanderlei"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "deixa só quem o dono mandou tirar",
+      "reprova_em": "texto",
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Vanderlei",
+            "com_quem": [
+              {
+                "pessoa": "Rafael",
+                "turnos": "dia"
+              }
+            ],
+            "trecho": "tira o Rafael do Vanderlei"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K166": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Nelson",
+            "dupla": "todos",
+            "trecho": "o Nelson vai com dupla"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "dupla só no início, que o dono não disse",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Nelson",
+            "dupla": "inicio",
+            "dupla_meios": 2,
+            "trecho": "o Nelson vai com dupla"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K167": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "material_informar",
+          "argumentos": {
+            "os": "Vanderlei",
+            "itens": [
+              "a peça pequena"
+            ],
+            "situacao": "pode_comecar_sem",
+            "trecho": "essa peça pequena do Vanderlei não segura"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "não repete a pergunta do banco e diz que anotou",
+      "reprova_em": "texto",
+      "chamadas": [
+        {
+          "ferramenta": "material_informar",
+          "argumentos": {
+            "os": "Vanderlei",
+            "itens": [
+              "a peça pequena"
+            ],
+            "situacao": "pode_comecar_sem",
+            "trecho": "essa peça pequena do Vanderlei não segura"
+          }
+        }
+      ],
+      "texto": "Anotado: o Vanderlei começa sem a peça pequena."
+    }
+  },
+  "K168": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "material_informar",
+          "argumentos": {
+            "os": "Tadeu",
+            "itens": [
+              "a peça"
+            ],
+            "situacao": "vou_comprar",
+            "fornecedor": "Correa",
+            "trecho": "a peça do Tadeu compra na Correa"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "diz que anotou a compra na Correa, e o banco disse que não falta peça",
+      "reprova_em": "texto",
+      "chamadas": [
+        {
+          "ferramenta": "material_informar",
+          "argumentos": {
+            "os": "Tadeu",
+            "itens": [
+              "a peça"
+            ],
+            "situacao": "vou_comprar",
+            "fornecedor": "Correa",
+            "trecho": "a peça do Tadeu compra na Correa"
+          }
+        }
+      ],
+      "texto": "Anotado: a peça do Tadeu vai ser comprada na Correa."
+    }
+  },
+  "K169": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Flávio",
+            "dias": 1,
+            "trecho": "falta 1 dia no Flávio"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "soma o dia ao que já tinha (o banco é quem conta)",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "os_planejar",
+          "argumentos": {
+            "os": "Flávio",
+            "dias": 2,
+            "trecho": "falta 1 dia no Flávio"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K170": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "schedule_service_order",
+          "argumentos": {
+            "service_order_id": "f7f00000-0000-4000-8000-000000097302",
+            "quando": "não antes de quinta",
+            "trecho": "o Lenine não antes de quinta"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "troca o \"não antes de\" por \"depois de\": pula a quinta, que o dono aceitou",
+      "reprova_em": "texto",
+      "chamadas": [
+        {
+          "ferramenta": "schedule_service_order",
+          "argumentos": {
+            "service_order_id": "f7f00000-0000-4000-8000-000000097302",
+            "quando": "depois de quinta",
+            "trecho": "o Lenine não antes de quinta"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K171": {
+    "boa": {
+      "chamadas": [],
+      "passos": [
+        {
+          "palavra": "como você pensou a semana que vem?"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "a leitura do gestor no lugar do como pensei: não diz o que marquei nem quem ficou de fora",
+      "reprova_em": "texto",
+      "chamadas": [],
+      "passos": [
+        {
+          "palavra": "agenda gestor"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "K172": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "decisoes"
+          }
+        }
+      ],
+      "texto": "A 1 é a Decisão 1, a do Flávio. Qual opção você quer?\n{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "escolhe a opção 1 da Decisão 1 pelo dono (o \"1\" era a decisão, não a opção)",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "decisoes"
+          }
+        },
+        {
+          "ferramenta": "agenda_aplicar",
+          "argumentos": {
+            "decisao": "1",
+            "opcao": "1",
+            "trecho": "1"
+          }
+        }
+      ],
+      "texto": "{{saida:1}}"
     }
   }
 }

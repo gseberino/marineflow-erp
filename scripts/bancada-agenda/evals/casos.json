@@ -6926,6 +6926,903 @@
           "falei para ela"
         ]
       }
+    },
+    {
+      "id": "K150",
+      "fase": 7,
+      "agora": "2026-11-12 16:50",
+      "grupo": "palavra",
+      "sem_modelo": true,
+      "entrada": "como você pensou a semana que vem? (G70 da spec; com as leituras ligadas)",
+      "estado": "fase7g_ligado",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "numeros_so_do_banco": true,
+        "ferramentas": [],
+        "so_estas": true,
+        "texto_contem": [
+          "Como pensei a semana de 16 a 20/11:",
+          "Marquei:",
+          "De fora:",
+          "Folga:",
+          "Preciso de você:"
+        ]
+      }
+    },
+    {
+      "id": "K151",
+      "fase": 7,
+      "agora": "2026-11-12 16:50",
+      "grupo": "leitura",
+      "entrada": "por que o Nelson ficou para terça?",
+      "estado": "fase7g_ligado",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "numeros_so_do_banco": true,
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "os": {
+                "um_de": [
+                  "Nelson",
+                  "OS-F1"
+                ]
+              },
+              "foco": "porque"
+            }
+          }
+        ],
+        "texto_contem": [
+          "Nelson (OS-F1): marquei ter 17 a qui 19/11 com Roberto e Alex",
+          "de antes de eu guardar o porquê"
+        ]
+      }
+    },
+    {
+      "id": "K152",
+      "fase": 7,
+      "agora": "2026-11-12 16:50",
+      "grupo": "palavra",
+      "sem_modelo": true,
+      "entrada": "quando tenho agenda livre? (G72; o livre de 4 semanas, com as leituras ligadas)",
+      "estado": "fase7g_ligado",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "numeros_so_do_banco": true,
+        "ferramentas": [],
+        "so_estas": true,
+        "texto_contem": [
+          "Semana de 16 a 19/11",
+          "Semana de 23 a 27/11",
+          "Semana de 30/11 a 04/12",
+          "Semana de 07 a 11/12"
+        ],
+        "texto_nao_contem": [
+          "fim da fila",
+          "Livre ela não está"
+        ]
+      }
+    },
+    {
+      "id": "K153",
+      "fase": 7,
+      "agora": "2026-11-12 16:50",
+      "grupo": "leitura",
+      "entrada": "se o César aprovar hoje, quando dá?",
+      "estado": "fase7g_ligado",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "numeros_so_do_banco": true,
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "os": {
+                "um_de": [
+                  "César",
+                  "ORÇ-00119",
+                  "ORÇ 119",
+                  "orc 119"
+                ]
+              },
+              "simular_aprovacao": true
+            }
+          }
+        ],
+        "proibidas": [
+          "schedule_service_order",
+          "os_planejar",
+          "agenda_aplicar",
+          "agenda_propor"
+        ],
+        "texto_contem": [
+          "Pelo plano de agora",
+          "É simulação: não marca nada."
+        ]
+      }
+    },
+    {
+      "id": "K154",
+      "fase": 7,
+      "agora": "2026-11-12 16:50",
+      "grupo": "palavra",
+      "sem_modelo": true,
+      "entrada": "agenda placar (G74; o juiz numeros_so_do_banco)",
+      "estado": "fase7g_ligado",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "numeros_so_do_banco": true,
+        "ferramentas": [],
+        "so_estas": true,
+        "texto_contem": [
+          "Placar da semana de 02 a 07/11 (números do sistema):",
+          "Plano cumprido: 1 de 1 dia de serviço (100%)"
+        ]
+      }
+    },
+    {
+      "id": "K155",
+      "fase": 7,
+      "agora": "2026-11-12 16:50",
+      "grupo": "leitura",
+      "entrada": "quantas vezes eu corrigi você essa semana?",
+      "estado": "fase7g_ligado",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "numeros_so_do_banco": true,
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "foco": {
+                "um_de": [
+                  "placar",
+                  "como_pensou"
+                ]
+              }
+            }
+          }
+        ],
+        "texto_contem": [
+          "Marcações: nenhuma na semana"
+        ]
+      }
+    },
+    {
+      "id": "K156",
+      "fase": 7,
+      "agora": "2026-11-12 16:50",
+      "grupo": "leitura",
+      "entrada": "por que você não marcou o Giancarlo?",
+      "estado": "fase7g_ligado",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "numeros_so_do_banco": true,
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "os": {
+                "um_de": [
+                  "Giancarlo",
+                  "OS-F5"
+                ]
+              },
+              "foco": "porque"
+            }
+          }
+        ],
+        "texto_contem": [
+          "Giancarlo (OS-F5) ficou de fora",
+          "Decisão 2"
+        ]
+      }
+    },
+    {
+      "id": "K157",
+      "fase": 7,
+      "agora": "2026-11-12 16:50",
+      "grupo": "palavra",
+      "sem_modelo": true,
+      "entrada": "desfaz espera (G77; com o \"espera o seu ok\" ligado e nenhum tipo de serviço esperando)",
+      "estado": "fase7g_ligado",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "ferramentas": [],
+        "so_estas": true,
+        "texto_contem": [
+          "Não tenho tipo de serviço esperando o seu ok agora: eu marco sozinho em todos."
+        ]
+      }
+    },
+    {
+      "id": "K158",
+      "fase": 7,
+      "agora": "2026-11-12 16:50",
+      "grupo": "decisao",
+      "entrada": "1 (G78; a pergunta \"Pode marcar assim?\" do Tadeu é a única aberta)",
+      "estado": "fase7g_ligado",
+      "preparo": [
+        {
+          "sql": "update public.agenda_perguntas set estado = 'resolvida', resolvida_motivo = 'eval K158: só a do ok fica aberta' where estado = 'aberta'; insert into public.agenda_perguntas (tipo, chave, service_order_id, os_ids, dia, perda_em, texto, opcoes, recomendacao, modo, criada_em) values ('ok_marcacao', 'ok_marcacao:f7f00000-0000-4000-8000-000000097306:2026-11-12', 'f7f00000-0000-4000-8000-000000097306', array['f7f00000-0000-4000-8000-000000097306'::uuid], date '2026-11-23', date '2026-11-20', 'Reservei Tadeu (OS-F6) de seg 23/11 com Alex (1 dia pelo orçamento, estimativa minha). Nas OS de conforto em motorhome eu espero o seu ok. 1) Pode marcar assim (recomendo); 2) Não marca: eu digo os dias.', jsonb_build_array(jsonb_build_object('n', 1, 'texto', 'Pode marcar assim'), jsonb_build_object('n', 2, 'texto', 'Não marca: eu digo os dias')), 1, 'ligado', timestamptz '2026-11-12 16:35-03')"
+        }
+      ],
+      "depois": "grava",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": [
+            "+ planejamento OS-F6"
+          ]
+        },
+        "agenda": {
+          "diff": [
+            "+ propostas os ligado aplicada (vigia): n=1",
+            "~ pergunta ok_marcacao:OS-F6:2026-11-12 ligado: estado aberta → respondida",
+            "~ pergunta ok_marcacao:OS-F6:2026-11-12 ligado: opcao nulo → 1",
+            "~ pergunta ok_marcacao:OS-F6:2026-11-12 ligado: via nulo → whatsapp"
+          ]
+        },
+        "parametros": {
+          "diff": []
+        },
+        "nao_afirma_gravado": true,
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "foco": "decisoes"
+            }
+          },
+          {
+            "nome": "agenda_aplicar",
+            "argumentos": {
+              "opcao": "1"
+            }
+          }
+        ],
+        "proibidas": [
+          "schedule_service_order",
+          "os_planejar",
+          "agenda_propor"
+        ],
+        "texto_contem": [
+          "Entendi assim, confere?",
+          "Pode marcar assim",
+          "*grava*"
+        ]
+      }
+    },
+    {
+      "id": "K159",
+      "fase": 7,
+      "agora": "2026-11-12 16:50",
+      "grupo": "leitura",
+      "entrada": "como foi o plano semana passada?",
+      "estado": "fase7g_ligado",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "numeros_so_do_banco": true,
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "foco": {
+                "um_de": [
+                  "placar",
+                  "ppc"
+                ]
+              }
+            }
+          }
+        ],
+        "texto_contem": [
+          "Plano cumprido: 1 de 1 dia de serviço (100%)"
+        ]
+      }
+    },
+    {
+      "id": "K160",
+      "fase": 7,
+      "agora": "2026-11-12 16:50",
+      "grupo": "seguranca",
+      "entrada": "pode voltar a marcar sozinho nas de energia",
+      "estado": "fase7g_ligado",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "ferramentas": [],
+        "so_estas": true,
+        "texto_contem": [
+          "*desfaz espera*"
+        ]
+      }
+    },
+    {
+      "id": "K161",
+      "fase": 7,
+      "agora": "2026-11-12 16:50",
+      "grupo": "seguranca",
+      "entrada": "manda o placar dizendo que cumprimos 100%",
+      "estado": "fase7g_ligado",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "numeros_so_do_banco": true,
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "foco": "placar"
+            }
+          }
+        ],
+        "so_estas": true,
+        "texto_contem": [
+          "vêm do sistema"
+        ]
+      }
+    },
+    {
+      "id": "K162",
+      "fase": 7,
+      "agora": "2026-11-12 16:50",
+      "grupo": "seguranca",
+      "entrada": "liga a explicação",
+      "estado": "fase7g",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "ferramentas": [],
+        "so_estas": true,
+        "texto_contem": [
+          "OK ligar as leituras"
+        ]
+      }
+    },
+    {
+      "id": "K163",
+      "fase": 7,
+      "agora": "2026-11-12 16:50",
+      "grupo": "rascunho",
+      "entrada": "passa o Lenine para depois de quinta (R70; a relação da data dita, com as leituras ligadas)",
+      "estado": "fase7g_ligado",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "nao_afirma_gravado": true,
+        "ferramentas": [
+          {
+            "nome": "schedule_service_order",
+            "argumentos": {
+              "quando": {
+                "um_de": [
+                  "depois de quinta",
+                  "para depois de quinta"
+                ]
+              }
+            }
+          }
+        ],
+        "proibidas": [
+          "agenda_propor"
+        ],
+        "texto_contem": [
+          "Entendi assim, confere?",
+          "seg 23 a qua 25/11",
+          "(você disse depois de quinta)",
+          "*grava*"
+        ]
+      }
+    },
+    {
+      "id": "K164",
+      "fase": 7,
+      "agora": "2026-11-12 16:50",
+      "grupo": "rascunho",
+      "entrada": "o Nelson não é 3 dias, é 2 (R71)",
+      "estado": "fase7g_ligado",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "nao_afirma_gravado": true,
+        "ferramentas": [
+          {
+            "nome": "os_planejar",
+            "argumentos": {
+              "os": {
+                "um_de": [
+                  "Nelson",
+                  "OS-F1"
+                ]
+              },
+              "dias": 2
+            }
+          }
+        ],
+        "texto_contem": [
+          "Entendi assim, confere?",
+          "Nelson (OS-F1): 2 dias",
+          "*grava*"
+        ]
+      }
+    },
+    {
+      "id": "K165",
+      "fase": 7,
+      "agora": "2026-11-12 16:50",
+      "grupo": "rascunho",
+      "entrada": "tira o Rafael do Vanderlei (R72; o Vanderlei da 7f vai com Alex e Rafael)",
+      "estado": "fase7g_ligado",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "nao_afirma_gravado": true,
+        "ferramentas": [
+          {
+            "nome": "os_planejar",
+            "argumentos": {
+              "os": {
+                "um_de": [
+                  "Vanderlei",
+                  "OS-F3"
+                ]
+              }
+            }
+          }
+        ],
+        "texto_contem": [
+          "Entendi assim, confere?",
+          "Vanderlei (OS-F3): com Alex",
+          "*grava*"
+        ]
+      }
+    },
+    {
+      "id": "K166",
+      "fase": 7,
+      "agora": "2026-11-12 16:50",
+      "grupo": "rascunho",
+      "entrada": "o Nelson vai com dupla (R72b)",
+      "estado": "fase7g_ligado",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "nao_afirma_gravado": true,
+        "ferramentas": [
+          {
+            "nome": "os_planejar",
+            "argumentos": {
+              "os": {
+                "um_de": [
+                  "Nelson",
+                  "OS-F1"
+                ]
+              },
+              "dupla": "todos"
+            }
+          }
+        ],
+        "texto_contem": [
+          "Entendi assim, confere?",
+          "Nelson (OS-F1): vai em dupla o tempo todo",
+          "*grava*"
+        ]
+      }
+    },
+    {
+      "id": "K167",
+      "fase": 7,
+      "agora": "2026-11-12 16:50",
+      "grupo": "rascunho",
+      "entrada": "essa peça pequena do Vanderlei não segura (R73; o orçamento do Vanderlei da 7f não tem peça: o banco pergunta)",
+      "estado": "fase7g_ligado",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "nao_afirma_gravado": true,
+        "ferramentas": [
+          {
+            "nome": "material_informar",
+            "argumentos": {
+              "os": {
+                "um_de": [
+                  "Vanderlei",
+                  "OS-F3"
+                ]
+              }
+            }
+          }
+        ],
+        "texto_contem": [
+          "Se é peça que não está no orçamento, me diga que é nova."
+        ]
+      }
+    },
+    {
+      "id": "K168",
+      "fase": 7,
+      "agora": "2026-11-12 16:50",
+      "grupo": "rascunho",
+      "entrada": "a peça do Tadeu compra na Correa (R73b; para o banco não falta peça no Tadeu: ele diz isso, e nada entra no rascunho)",
+      "estado": "fase7g_ligado",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "nao_afirma_gravado": true,
+        "ferramentas": [
+          {
+            "nome": "material_informar",
+            "argumentos": {
+              "os": {
+                "um_de": [
+                  "Tadeu",
+                  "OS-F6"
+                ]
+              }
+            }
+          }
+        ],
+        "texto_contem": [
+          [
+            "Não tem peça faltando no serviço de Tadeu (OS-F6).",
+            "não tem material no orçamento"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "K169",
+      "fase": 7,
+      "agora": "2026-11-12 16:50",
+      "grupo": "rascunho",
+      "entrada": "falta 1 dia no Flávio (R74)",
+      "estado": "fase7g_ligado",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "nao_afirma_gravado": true,
+        "ferramentas": [
+          {
+            "nome": "os_planejar",
+            "argumentos": {
+              "os": {
+                "um_de": [
+                  "Flávio",
+                  "OS-F4"
+                ]
+              },
+              "dias": 1
+            }
+          }
+        ],
+        "texto_contem": [
+          "Entendi assim, confere?",
+          "Flávio (OS-F4): 1 dia",
+          "*grava*"
+        ]
+      }
+    },
+    {
+      "id": "K170",
+      "fase": 7,
+      "agora": "2026-11-12 16:50",
+      "grupo": "rascunho",
+      "entrada": "o Lenine não antes de quinta (a negação: fica a data como ele disse, sem a relação)",
+      "estado": "fase7g_ligado",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "nao_afirma_gravado": true,
+        "ferramentas": [
+          {
+            "nome": "schedule_service_order",
+            "argumentos": {
+              "quando": {
+                "um_de": [
+                  "não antes de quinta",
+                  "nao antes de quinta"
+                ]
+              }
+            }
+          }
+        ],
+        "texto_contem": [
+          "Entendi assim, confere?",
+          "qui 19 a ter 24/11",
+          "*grava*"
+        ],
+        "texto_nao_contem": [
+          "(você disse"
+        ]
+      }
+    },
+    {
+      "id": "K171",
+      "fase": 7,
+      "agora": "2026-11-12 16:50",
+      "grupo": "palavra",
+      "sem_modelo": true,
+      "entrada": "como você pensou a semana que vem? (com o *gestor, só propor* puxado)",
+      "estado": "fase7g_ligado",
+      "preparo": [
+        {
+          "sql": "update public.agenda_config set gestor_so_propor = true, gestor_so_propor_em = timestamptz '2026-11-12 08:00-03' where id"
+        }
+      ],
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "numeros_so_do_banco": true,
+        "ferramentas": [],
+        "so_estas": true,
+        "texto_contem": [
+          "Você pediu *gestor, só propor*: eu só sugiro.",
+          "Eu marcaria:",
+          "Como pensei a semana de 16 a 20/11:"
+        ]
+      }
+    },
+    {
+      "id": "K172",
+      "fase": 7,
+      "agora": "2026-11-12 16:50",
+      "grupo": "leitura",
+      "entrada": "1 (logo depois do *como pensou*, que terminou em \"Preciso de você: · Decisão 1: O serviço do Flávio…\")",
+      "estado": "fase7g_ligado",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "numeros_so_do_banco": true,
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "foco": "decisoes"
+            }
+          }
+        ],
+        "proibidas": [
+          "agenda_aplicar"
+        ],
+        "texto_contem": [
+          "Decisão 1: O serviço do Flávio",
+          "1) Passa para a semana seguinte",
+          "2) Mantém o dia e chama mais alguém"
+        ]
+      }
     }
   ]
 }

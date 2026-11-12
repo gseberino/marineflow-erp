@@ -180,6 +180,9 @@ export const FORA_DA_BANCADA = new Set([
   // freelancers (que a bancada não carrega: lê diarias_pagamentos_divididos, de 20261011301000, antes de PRIMEIRA) e põe colunas e
   // gatilhos em commissions. Nenhuma função da agenda a chama; como as diárias acima, fica de fora.
   '20270105102000_servicos_do_prestador.sql',
+  // Main de 12/11 (f291dd5a, outra sessão): o Gmail hbr.boats como 3ª caixa (insert em email_accounts com imap_host, coluna da 20261008100000, de antes de PRIMEIRA, que a
+  // bancada não carrega). Nenhuma função da agenda lê e-mail; sem isto, quem sobe a bancada sem `ate` (os evals) parava aqui: "column imap_host does not exist".
+  '20270105110000_email_gmail_hbr_boats.sql',
 ]);
 
 /**

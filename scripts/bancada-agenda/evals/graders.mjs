@@ -243,6 +243,23 @@ export function numerosDeOsDe(texto) {
     .map((m) => `${/^OS$/i.test(m[1]) ? 'OS' : 'ORÇ'}-${m[2].padStart(5, '0')}`);
 }
 
+/**
+ * (Fase 7g) Os números de um texto, como o dono os lê: inteiros, decimais com vírgula ("1,11"), percentuais ("50%": o 50), milhar com ponto ("2.300": 2300) e os dois de
+ * "N de M". Sem zeros à esquerda ("03" = "3"). Com p_resposta, tira antes o que outros juízes já julgam: as datas (dd/mm, dd/mm/aaaa), as horas (hh:mm, 17h, 17h30) e os números de
+ * OS/ORÇ. Sem p_resposta (a fonte), conta todo número, também os de dentro das datas e das OS: "qua 18" na resposta vale se o banco disse "18/11".
+ */
+export function numerosDe(texto, p_resposta = false) {
+  let t = String(texto ?? '');
+  if (p_resposta) {
+    t = t.replace(/\b(OS|ORÇ|ORC|OR[ÇC]AMENTO)\s*[-–]?\s*\d{1,5}\b/giu, ' ')
+      .replace(/(?<![\d/])\d{1,2}\/\d{1,2}(?:\/\d{2,4})?(?![\d/])/g, ' ')
+      .replace(/(?<![\d:])\d{1,2}:\d{2}(?![\d:])/g, ' ')
+      .replace(/(?<![\d])\d{1,2}h(?:\d{2})?\b/g, ' ');
+  }
+  return [...t.matchAll(/(?<![\d.,])\d{1,3}(?:\.\d{3})+(?:,\d+)?(?![\d])|(?<![\d.,])\d+(?:,\d+)?(?![\d])/g)]
+    .map((m) => m[0].replace(/\./g, '').replace(/^0+(?=\d)/, ''));
+}
+
 /** Tudo que as ferramentas do caso disseram ao modelo (o texto, a pergunta e as opções). */
 export function textoDasSaidas(saidas) {
   return saidas
@@ -281,6 +298,12 @@ export function gradeTexto(caso, texto, saidas) {
     const doBanco = new Set(numerosDeOsDe(fonte));
     const inventadas = [...new Set(numerosDeOsDe(t))].filter((n) => !doBanco.has(n));
     if (inventadas.length) falhas.push(`OS/ORÇ que nenhuma ferramenta deu: ${inventadas.join(', ')}`);
+  }
+  // (Fase 7g) numeros_so_do_banco: o placar, o como pensei e o porquê são números do banco; o modelo não soma, não arredonda nem inventa
+  if (espera.numeros_so_do_banco) {
+    const doBanco = new Set(numerosDe(fonte));
+    const inventados = [...new Set(numerosDe(t, true))].filter((n) => !doBanco.has(n));
+    if (inventados.length) falhas.push(`número que nenhuma ferramenta deu: ${inventados.join(', ')}`);
   }
   return { ok: falhas.length === 0, falhas };
 }

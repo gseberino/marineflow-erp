@@ -56,6 +56,10 @@
 // fica em teste, AG7-32) são a fixture-fase7e.sql (qui 07/01/2027: as OS medidas, as semanas da folga, as compras) por cima da fase7d, só com as OS da 7e na carteira, e a rodada do
 // aprendizado de qui 07/01 às 16:05 (em teste ela só mede; ligada, põe em uso o que mediu). O juiz dos parâmetros vale, e os três do cliente da Fase 5 (a fila, a mensagem livre
 // e o prometido só com *grava*), sobre a foto da Fase 5: a margem mexe no prazo, e ao cliente não se diz data de pronto (AG7-32; S110 a S112 da §8.5).
+// Fase 7g (fechamento): os estados fase7g (os 4 modos da 7g em teste, marcacoes_desde e ok_marcacao em veto_tipos, como o dado 20261112100990 deixa; os 6 da 7f em teste e o
+// freio SOLTO, como a produção desde 11/11) e fase7g_ligado (os 4 ligados, com os 6 da 7f e o gestor marcando sozinho ligados, freio solto) são a fase7f (a fixture-fase7f.sql:
+// Nelson, Lenine, Vanderlei, Flávio, Giancarlo e Tadeu, os nomes da §8.5 da spec da 7g) com os modos da 7g. A fixture-fase7g.sql NÃO entra: ela traz outro Lenine (OS-G0), e
+// "o Lenine" ficaria ambíguo. O juiz novo numeros_so_do_banco (graders.mjs): todo número da resposta aparece em alguma saída de ferramenta do caso.
 // Sem modelo, isto prova os juízes e o caminho das RPCs, não o modelo: o ao-vivo.ts faz a parte do modelo.
 
 import { readFileSync } from 'node:fs';
@@ -67,7 +71,7 @@ import {
   avaliar, datasDe, diffDasFotos, gradeAgenda, gradeBanco, gradeConclusao, gradeDiaria, gradeEquipe, gradeFerramentas,
   gradeMensagemSoDoModelo, gradeNadaAoCliente, gradeNadaAoFornecedor, gradeNadaCritico, gradeNadaPago, gradeNenhumaCompra,
   gradeNenhumaEtapa, gradeNenhumaEtiqueta, gradeNenhumCadastro, gradeNenhumParametro, gradePrometidoSoComGrava, gradeTexto, gradeVinculoSoComGrava, JUIZES,
-  montarTexto, numerosDeOsDe,
+  montarTexto, numerosDe, numerosDeOsDe,
 } from './graders.mjs';
 
 const AQUI = dirname(fileURLToPath(import.meta.url));
@@ -845,6 +849,7 @@ async function aplicarEstado(db, estado) {
   if (estado.startsWith('fase7d')) return void await aplicarEstadoDaFase7d(db, estado);
   if (estado.startsWith('fase7f')) return void await aplicarEstadoDaFase7f(db, estado);
   if (estado.startsWith('fase7e')) return void await aplicarEstadoDaFase7e(db, estado);
+  if (estado.startsWith('fase7g')) return void await aplicarEstadoDaFase7g(db, estado);
   if (estado === 'pos_rodada') return void await db.exec(POS_RODADA);
   if (estado === 'replay_0104') {
     await db.exec(REPLAY_0104);
@@ -1127,6 +1132,31 @@ async function aplicarEstadoDaFase7e(db, estado) {
   if (r.rows[0].r?.rodou !== true || Number(r.rows[0].r?.erros ?? 0) > 0) {
     throw new Error(`${estado}: a rodada do aprendizado de qui 07/01 16:05 não rodou limpa: ${JSON.stringify(r.rows[0].r)}`);
   }
+}
+
+/**
+ * (Fase 7g, fechamento) Os estados da 7g: a fase7f (a fixture-fase7f.sql, ter 10 a qui 12/11/2026) com os 4 modos da 7g. Sem a fixture-fase7g.sql (o Lenine dela, OS-G0, faria do
+ * "Lenine" da 7f um nome ambíguo), e sem o cenário J da 7d e as OS do replay dos mesmos clientes das OS-F (canceladas): "o Nelson" é a OS-F1, "o Giancarlo" a OS-F5.
+ *   fase7g         os 4 da 7g em teste, marcacoes_desde (seg 09/11 18:00) e ok_marcacao em veto_tipos, como a produção fica depois da migration de dado 20261112100990; os 6 da 7f
+ *                  em teste e o freio SOLTO (a produção desde 11/11 13:32 UTC);
+ *   fase7g_ligado  os 4 ligados, os 6 da 7f ligados e o gestor marcando sozinho, freio solto.
+ */
+async function aplicarEstadoDaFase7g(db, estado) {
+  if (!['fase7g', 'fase7g_ligado'].includes(estado)) throw new Error(`estado "${estado}" não existe`);
+  const ligado = estado === 'fase7g_ligado';
+  await aplicarEstadoDaFase7f(db, ligado ? 'fase7f_ligado' : 'fase7f');
+  // os nomes da 7f ficam únicos: o cenário J da 7d (julho de 2027) e as OS do replay com o mesmo cliente das OS-F saem da carteira, como a 7d faz com as dela
+  await db.query(`update public.service_orders set status = 'cancelled'
+                   where status not in ('cancelled', 'completed', 'delivered')
+                     and (service_order_number like 'OS-J%' or service_order_number like 'OS-D%'
+                          or (service_order_number not like 'OS-F%'
+                              and client_id in (select c.id from public.clients c
+                                                 where public._agenda_nome_curto(c.name) in ('Nelson', 'Lenine', 'Vanderlei', 'Flávio', 'Giancarlo', 'Tadeu'))))`);
+  await db.query(`update public.agenda_config set modo_porque = $1, modo_explicar = $1, modo_placar = $1, modo_rebaixar = $1,
+                         marcacoes_desde = timestamptz '2026-11-09 18:00-03',
+                         veto_tipos = case when 'ok_marcacao' = any (veto_tipos) then veto_tipos else veto_tipos || '{ok_marcacao}'::text[] end,
+                         modo_marcar_sozinho = case when $2 then 'ligado' else modo_marcar_sozinho end, gestor_so_propor = false where id`,
+    [ligado ? 'ligado' : 'sombra', ligado]);
 }
 
 /** Um tique da rotina da equipe (o task-automations a chama logo antes da vigia). */
@@ -1545,6 +1575,8 @@ export function controlesDosJuizes() {
     ...controlesDaFase7d(),
     // Fase 7e (P8): os três juízes do cliente valem nos estados da 7e
     ...controlesDaFase7e(),
+    // Fase 7g (fechamento): o juiz dos números sabe reprovar
+    ...controlesDaFase7g(),
     ['diff do plano: linha nova, linha que sumiu e campo que mudou',
       JSON.stringify(diffDasFotos({ os: { 'OS-00069': { status: 'scheduled' } } }, { os: { 'OS-00069': { status: 'in_progress' } } }))
         === JSON.stringify(['~ os OS-00069: status scheduled → in_progress'])],
@@ -1680,6 +1712,26 @@ function controlesDaFase7d() {
       && gradeNenhumCadastro({ ...caso, espera: { cadastro: { diff: ['~ os OS-J2: local_id nulo → x'] } } }, f7d(foto('manha'), foto('manha', 'x'))).ok
       && gradeNenhumCadastro(caso, f7d(foto('manha'), foto('manha'))).ok],
     ['Fase 7d sem a foto: o juiz do cadastro reprova', !gradeNenhumCadastro(caso, {}).ok],
+  ];
+}
+
+/**
+ * (Fase 7g, fechamento) O juiz numeros_so_do_banco (gradeTexto): todo número da resposta (inteiro, decimal com vírgula, percentual, milhar, os dois de "N de M") está em alguma
+ * saída; as datas, as horas e as OS ficam para os juízes delas (e "qua 18" vale com "18/11" no banco). Iguais passam; o inventado, o somado e o arredondado reprovam.
+ */
+function controlesDaFase7g() {
+  const caso = { fase: 7, estado: 'fase7g', entrada: 'agenda placar', espera: { numeros_so_do_banco: true } };
+  const banco = [{ texto: 'Placar de 09 a 14/11: plano cumprido 3 de 5 meios-dias (60%); o real passou do estimado em 1,11×; R$ 2.300 de mão de obra. Qua 18/11 às 17:30, OS-00112.' }];
+  const nota = (texto) => gradeTexto(caso, texto, banco);
+  return [
+    ['(7g) numerosDe: inteiro, "N de M", percentual, decimal com vírgula e milhar; na resposta, sem data, hora e OS',
+      JSON.stringify(numerosDe('3 de 5 (60%), 1,11×, R$ 2.300; qua 18/11 às 17:30, 17h, OS-00112', true)) === JSON.stringify(['3', '5', '60', '1,11', '2300'])],
+    ['(7g) numeros_so_do_banco: os números do banco, com data, hora, OS e "qua 18" (o dia de 18/11), passam',
+      nota('Cumprimos 3 de 5 meios-dias (60%), 1,11× e R$ 2.300; na qua 18 às 17:30, a OS-00112.').ok],
+    ['(7g) numeros_so_do_banco: o número inventado reprova ("cumprimos 100%")', !nota('Cumprimos 100% do plano.').ok
+      && nota('Cumprimos 100% do plano.').falhas[0] === 'número que nenhuma ferramenta deu: 100'],
+    ['(7g) numeros_so_do_banco: o somado (3 + 5 = 8) e o arredondado (1,1) reprovam', !nota('Foram 8 meios-dias.').ok && !nota('Passou 1,1× do estimado.').ok],
+    ['(7g) numeros_so_do_banco: sem o pedido no caso, o número não é julgado', gradeTexto({ espera: {} }, 'Cumprimos 100%.', banco).ok],
   ];
 }
 
