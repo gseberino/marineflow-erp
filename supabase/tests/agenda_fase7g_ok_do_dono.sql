@@ -13,7 +13,8 @@
 --   K1  _agenda_espera_ok: OS sem linha = não (ponto 2); modo cru (ponto 5: com o freio, sim); sem o veto ou sem o rebaixar ligado, não (K9); com o ok, não
 --   K4  a classe (pontos 1, 3, 4): só depois de nada mais segurar e com fonte orcamento; a condição (ponto 6); o motor reserva com ok_do_dono; a pergunta nasce 1 vez,
 --       com o padrão da 7f; a tela; a saúde (ok_sem_pergunta); a pergunta em *agenda pendências* (K10b); freio × espera (a reserva fica)
---   K5  decidir 1 (o ok e a reserva vira compromisso) e 2 (solta, pergunta os dias, não reserva de novo)
+--   K5  decidir 1 (o ok e a reserva vira compromisso) e 2 (solta, pergunta os dias, não reserva de novo); o *desfaz <nome>* depois do ok volta a reserva e o "espero o
+--       seu ok", sem a vigia promover de novo (K5k a K5n, NOVO-agenda-297)
 --   K6  o prazo da 7f vence → a opção 1 (ok_do_dono_via = prazo); sem ok_marcacao em veto_tipos, não vence
 --   K7  o tipo de OS: 3 de 4 corrigidas → espera_ok (a ação nivel, o espera_ok_desde das OS da classe sem dia, também a sem linha); 2× = 1×; a volta com 3 aceitas
 --   K8  *desfaz espera* depois de 24 h (ponto 7) e a trava; sem nenhuma em espera
@@ -378,6 +379,40 @@ begin
       || ' ' || public._agenda_espera_ok(v_os), 'respondida 1 whatsapp t false');
     v_r := public.agenda_decidir(v_q.id, 1::smallint, c_admin, 'whatsapp', '1', c_hoje, pg_temp.agora(c_hoje, '18:11'));
     v_res := pg_temp.igual(v_res, 'K5d de novo: já respondida, nada muda', v_r ->> 'texto', 'Essa pergunta já foi respondida ou resolvida.');
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- ── K5k a K5n (fechamento, NOVO-agenda-297): o *desfaz* depois do ok volta a reserva E o "espero o seu ok" ──
+  -- Antes, o ok ficava e a vigia promovia a reserva de novo no tique seguinte (com o mesmo "*desfaz <nome>* volta como estava"). A pergunta nasce às 14:00 de ter
+  -- 27/10: a reserva que o *desfaz* devolve nasce com criado_em = now(), que na bancada é o relógio fixo (27/10 15:00, andando); em produção o now() do *desfaz*
+  -- vem sempre depois da pergunta respondida, e é isso que deixa a pergunta nascer de novo.
+  begin
+    perform pg_temp.ligar();
+    v_os := pg_temp.os_nova(954, 'Rui');
+    update public.os_planejamento set espera_ok_desde = timestamptz '2026-10-27 10:00-03' where service_order_id = v_os;
+    perform public._agenda_propor_e_aplicar('os', array[v_os], 'vigia', null, c_hoje, pg_temp.agora(c_hoje, '17:40'));
+    perform public._agenda_explicar_ok(c_hoje, timestamptz '2026-10-27 14:00-03');
+    select * into v_q from public.agenda_perguntas where tipo = 'ok_marcacao' and service_order_id = v_os;
+    v_r := public.agenda_decidir(v_q.id, 1::smallint, c_admin, 'whatsapp', '1', c_hoje, pg_temp.agora(c_hoje, '18:10'));
+    v_res := pg_temp.igual(v_res, 'K5k0 (o cenário) decidir 1: a reserva virou compromisso', (v_r ->> 'texto') || ' | ' || pg_temp.alocs(v_os),
+      'Combinado: Rui (OS-00954) fica marcado de ter 03 e qua 04/11 com Roberto. | 2026-11-03 manha execucao - | 2026-11-03 tarde execucao - | 2026-11-04 manha execucao - | 2026-11-04 tarde execucao -');
+    v_r := public.agenda_desfazer_dito(c_admin, 'Rui', 'whatsapp', c_hoje, pg_temp.agora(c_hoje, '18:20'));
+    v_res := pg_temp.igual(v_res, 'K5k *desfaz Rui* depois do ok: a reserva volta e o texto diz que volto a esperar o ok', v_r ->> 'texto',
+      'Desfeito: a reserva do Rui (OS-00954) volta como estava. Volto a esperar o seu ok antes de marcar.');
+    v_res := pg_temp.igual(v_res, 'K5l o ok sai (ok_do_dono_em e ok_do_dono_via nulos), espera_ok_desde fica, a reserva ok_do_dono volta e a OS espera de novo (classe 3 espera)',
+      (select format('%s %s %s', ok_do_dono_em is null, ok_do_dono_via is null, espera_ok_desde is not null) from public.os_planejamento where service_order_id = v_os)
+      || ' ' || public._agenda_espera_ok(v_os) || ' ' || (public._agenda_classe_agora(v_os, c_hoje) ->> 'classe') || ' '
+      || (public._agenda_classe_agora(v_os, c_hoje) ->> 'motivo') || ' | ' || pg_temp.alocs(v_os),
+      't t t true 3 espera | 2026-11-03 manha reserva ok_do_dono | 2026-11-03 tarde reserva ok_do_dono | 2026-11-04 manha reserva ok_do_dono | 2026-11-04 tarde reserva ok_do_dono');
+    v_r := public._agenda_vigia_reservas(c_hoje, pg_temp.agora(c_hoje, '18:35'));
+    v_res := pg_temp.ok(v_res, 'K5m a vigia do tique seguinte não promove a reserva de novo (promovidas 0; a reserva fica)',
+      (v_r ->> 'promovidas')::int = 0 and pg_temp.alocs(v_os) like '2026-11-03 manha reserva ok_do_dono%', v_r::text || ' ' || pg_temp.alocs(v_os));
+    v_r := public._agenda_explicar_ok(c_hoje, pg_temp.agora(c_hoje, '18:36'));
+    v_res := pg_temp.igual(v_res, 'K5n o passo ok pergunta de novo "Pode marcar assim?" (1 criada, aberta, ligada) e a saúde fica sem ok_sem_pergunta',
+      v_r::text || ' ' || (select count(*) from public.agenda_perguntas q where q.tipo = 'ok_marcacao' and q.service_order_id = v_os and q.estado = 'aberta' and q.modo = 'ligado')
+      || ' ' || (public._agenda_saude_explicar(c_hoje, pg_temp.agora(c_hoje, '18:40')) ->> 'ok_sem_pergunta'),
+      '{"criadas": 1, "fechadas": 0} 1 0');
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
