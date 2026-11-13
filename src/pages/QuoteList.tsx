@@ -383,6 +383,7 @@ export default function QuoteList() {
                           grandTotal={so.grand_total || 0}
                           laborCost={so.labor_cost_total || 0}
                           partsCost={so.parts_cost_total || 0}
+                          motivoPerda={so.motivo_perda ?? null}
                         />
                       </td>
                       <td className="px-4 py-3 hidden md:table-cell">

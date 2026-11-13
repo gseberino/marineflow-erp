@@ -88,6 +88,8 @@ type SORow = {
   converted_to_os_at?: string | null;
   /** Na origem agrupada: "Agrupada em OS-N…" (OS, também a antiga sem converted_to_os_at) ou "Agrupado em…". */
   cancellation_reason?: string | null;
+  /** Retorno F5 (P12.3): o motivo do perdido, no selo do reprovado ("Reprovado · fechou com outro") */
+  motivo_perda?: string | null;
   customer_po_number?: string | null;
   customer_buyer_name?: string | null;
   requested_by_name?: string | null;
@@ -468,6 +470,7 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
               grandTotal={so.grand_total || 0}
               laborCost={so.labor_cost_total || 0}
               partsCost={so.parts_cost_total || 0}
+              motivoPerda={so.motivo_perda ?? null}
             />
           )}
           {(so.priority === 'urgent' || so.priority === 'high') && (

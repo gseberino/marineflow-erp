@@ -727,13 +727,37 @@ export const QUOTE_STATUS_TRANSITIONS: Record<string, string[]> = {
   rejected:          ['draft'],
 };
 
+/**
+ * Retorno F5 (3.4): por que o orçamento foi perdido — a lista fechada que a tela oferece (sem_motivo_antigo é só da migration
+ * de dado). O rótulo é o do seletor e o do selo ("Reprovado · fechou com outro").
+ */
+export const MOTIVOS_DA_PERDA = ['sumiu', 'fechou_com_outro', 'desistiu', 'preco', 'prazo', 'outro'] as const;
+export type MotivoDaPerda = (typeof MOTIVOS_DA_PERDA)[number];
+export const NOTA_DA_PERDA_MAX = 200;
+
 export function useUpdateQuoteStatus() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, quoteStatus }: { id: string; quoteStatus: string }) => {
+    mutationFn: async ({ id, quoteStatus, motivoPerda, notaPerda }: {
+      id: string;
+      quoteStatus: string;
+      /** (F5) obrigatório com 'rejected': o selo "Reprovado" quer dizer perdido, e sempre tem motivo */
+      motivoPerda?: MotivoDaPerda | string | null;
+      notaPerda?: string | null;
+    }) => {
+      // (F5, P12.1) perdido sempre com motivo; a tela não deixa chegar aqui sem ele (o botão fica desabilitado)
+      const perdido = quoteStatus === 'rejected';
+      if (perdido && !(MOTIVOS_DA_PERDA as readonly string[]).includes(String(motivoPerda ?? ''))) {
+        throw new Error('Diga o motivo da perda antes de marcar o orçamento como perdido.');
+      }
+      const nota = perdido ? (String(notaPerda ?? '').trim().slice(0, NOTA_DA_PERDA_MAX) || null) : null;
+      // O gatilho do quote_status carimba motivo_perda_em; sair de 'rejected' apaga o motivo (o audit_log guarda o anterior).
+      const mudanca = perdido
+        ? { quote_status: quoteStatus, motivo_perda: motivoPerda, motivo_perda_por: 'tela', motivo_perda_nota: nota }
+        : { quote_status: quoteStatus };
       const { data, error } = await supabase
         .from('service_orders')
-        .update({ quote_status: quoteStatus } as any)
+        .update(mudanca as any)
         .eq('id', id)
         .select()
         .single();
@@ -742,7 +766,7 @@ export function useUpdateQuoteStatus() {
         table_name: 'service_orders',
         record_id: id,
         action: 'update',
-        new_value: { quote_status: quoteStatus },
+        new_value: perdido ? { quote_status: quoteStatus, motivo_perda: motivoPerda } : { quote_status: quoteStatus },
       });
       return data;
     },
@@ -893,6 +917,10 @@ export function useDuplicateServiceOrder() {
         quote_status,
         // Retorno F3 (P10.3): a cópia não nasceu de um ato no cartão, e leva a validade da sua própria vez.
         quote_validity_date, origem, origem_chave8, origem_parceiro_id,
+        // Retorno F5 (P12.1): o envio e o desfecho são eventos da original. A cópia que os levasse nasceria "já enviada" (sem
+        // os 7 dias do envio, sem o gatilho e sem a cadência) e com o motivo do perdido.
+        orcamento_enviado_em, orcamento_enviado_via, orcamento_enviado_chave,
+        motivo_perda, motivo_perda_em, motivo_perda_por, motivo_perda_nota,
         service_order_parts, service_order_services, service_order_expenses,
         ...copyFields
       } = source as any;

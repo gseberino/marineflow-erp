@@ -80,6 +80,22 @@ describe('duplicar OS', () => {
     for (const campo of ['origem', 'origem_chave8', 'origem_parceiro_id', 'quote_validity_date']) expect(cabecalho, campo).not.toHaveProperty(campo);
   });
 
+  // Retorno F5 (P12.1): o envio e o desfecho são eventos da original. A cópia que os levasse nasceria "já enviada" (sem os 7
+  // dias do envio, sem o gatilho e sem a cadência) e com o motivo do perdido.
+  it('a cópia de um orçamento enviado e perdido não leva nenhuma das 7 colunas da F5', async () => {
+    const colunasDaF5 = {
+      orcamento_enviado_em: '2026-12-08T13:00:00Z', orcamento_enviado_via: 'tela', orcamento_enviado_chave: '00009901',
+      motivo_perda: 'preco', motivo_perda_em: '2026-12-16T13:00:00Z', motivo_perda_por: 'tela', motivo_perda_nota: 'achou caro',
+    };
+    Object.assign(fonte, { status: 'draft', quote_status: 'rejected', ...colunasDaF5 });
+    const { result } = renderHook(() => useDuplicateServiceOrder(), { wrapper });
+    result.current.mutate({ sourceId: 'os1', mode: 'quote' });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const cabecalho = (gravacoes.service_orders ?? [])[0] as Record<string, unknown>;
+    for (const campo of Object.keys(colunasDaF5)) expect(cabecalho, campo).not.toHaveProperty(campo);
+    expect(cabecalho).toMatchObject({ status: 'draft', quote_status: 'draft' });
+  });
+
   it('só despesa de comprovante: nenhuma despesa é gravada na OS nova', async () => {
     fonte.service_order_expenses = [despesa({ id: 'cmp', billable_to_client: false, origem_codigo: 'CMP-00124' })];
     const { result } = renderHook(() => useDuplicateServiceOrder(), { wrapper });

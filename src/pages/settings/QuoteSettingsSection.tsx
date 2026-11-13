@@ -35,9 +35,11 @@ export function QuoteSettingsSection() {
     // Texto, como digitado: o campo pode ficar vazio no meio da digitação, e só um inteiro
     // de 1 a 3650 é gravado (validadeGravavel, abaixo).
     quote_validity_days:      '15',
-    quote_followup_days:      7,
     survey_valor_limiar:      3000,
   });
+  // Retorno F5 (P12.4): `quote_followup_days` também saiu do que esta tela grava. O campo prometia um "WhatsApp de
+  // follow-up automático" que nunca existiu (o número era gravado e lido por ninguém); a cadência do orçamento enviado é a
+  // do K7 e é ligada pelo retorno. O valor fica no banco como está, como o quote_expiry_days.
   // `quote_expiry_days` saiu do que esta tela grava (26/09/2026): era o prazo em que a rotina
   // quote-reminders REJEITAVA o orçamento sozinha, e ela não o lê mais — o vencimento virou a
   // tarefa da R19. O valor fica no banco como estava (nem apagado, nem reescrito ao salvar) e
@@ -55,7 +57,6 @@ export function QuoteSettingsSection() {
       iss_rate_pct:             m.iss_rate_pct !== undefined && m.iss_rate_pct !== '' ? Number(m.iss_rate_pct) : 5,
       // O que o PDF e o aviso de vencimento usam de fato (inteiro >= 1, senão 15).
       quote_validity_days:      String(validadeDoOrcamento(null, m).days),
-      quote_followup_days:      Number(m.quote_followup_days)      || 7,
       // Mesmo padrão da função should_survey_service (3000) — a tela e o banco concordam.
       survey_valor_limiar:      Number(m.survey_valor_limiar)      || 3000,
     });
@@ -116,6 +117,9 @@ export function QuoteSettingsSection() {
             Pré-preenche a validade do orçamento e do PDF. Quando o orçamento não tem validade
             própria, é ela também que define quando aparece o aviso de orçamento vencido.
           </p>
+          <p className="text-xs text-muted-foreground">
+            Com a validade do envio ligada, o orçamento enviado vale 7 dias contados do envio; este número vale só para o rascunho.
+          </p>
         </div>
 
         {/* Default payment method */}
@@ -165,12 +169,12 @@ export function QuoteSettingsSection() {
           </p>
         </div>
 
-        {/* Follow-up days */}
+        {/* Retorno F5 (P12.4): no lugar do "Dias para lembrete de follow-up", só leitura (ver acima) */}
         <div className="space-y-1.5">
-          <Label>Dias para lembrete de follow-up</Label>
-          <Input type="number" min="1" value={cfg.quote_followup_days}
-            onChange={e => set('quote_followup_days', Number(e.target.value))} />
-          <p className="text-xs text-muted-foreground">WhatsApp de follow-up automático enviado após esse prazo sem resposta</p>
+          <Label className="text-muted-foreground">Acompanhamento do orçamento enviado</Label>
+          <p className="text-xs text-muted-foreground">
+            Acompanhamento do orçamento enviado: lembrete em 2 dias úteis, outro na véspera do vencimento e encerramento 1 dia útil depois. É ligado pelo retorno, não por esta tela.
+          </p>
         </div>
 
         {/* Limiar do levantamento técnico (NOVO-lev-32). Inteiro de propósito: o banco lê este

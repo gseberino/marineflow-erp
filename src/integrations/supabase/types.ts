@@ -6221,6 +6221,167 @@ export type Database = {
         }
         Relationships: []
       }
+      // ── Retorno F5 (P12.7): as tabelas do orçamento enviado (migration 20270112100000). Trecho escrito à mão até o
+      // próximo "gen types" depois de aplicar. A tela não as lê nem escreve hoje (RLS: só leitura para admin/financeiro).
+      orcamento_aceites: {
+        Row: {
+          abertura_id: string | null
+          candidatos: string[]
+          chave: string
+          client_id: string
+          criado_em: string
+          dados_estado: string | null
+          dados_msg_id: string | null
+          decidido_em: string | null
+          decidido_por: string | null
+          estado: string
+          executado_em: string | null
+          faltas_nota: string[]
+          id: string
+          pedir_dados: boolean
+          resultado: Json
+          saida_dados_id: string | null
+          saida_fechado_id: string | null
+          service_order_id: string | null
+          sinal_lido: string
+          total_visto: number | null
+          whatsapp_message_id: string
+        }
+        Insert: {
+          abertura_id?: string | null
+          candidatos: string[]
+          chave: string
+          client_id: string
+          criado_em?: string
+          dados_estado?: string | null
+          dados_msg_id?: string | null
+          decidido_em?: string | null
+          decidido_por?: string | null
+          estado: string
+          executado_em?: string | null
+          faltas_nota?: string[]
+          id?: string
+          pedir_dados?: boolean
+          resultado?: Json
+          saida_dados_id?: string | null
+          saida_fechado_id?: string | null
+          service_order_id?: string | null
+          sinal_lido: string
+          total_visto?: number | null
+          whatsapp_message_id: string
+        }
+        Update: {
+          abertura_id?: string | null
+          candidatos?: string[]
+          chave?: string
+          client_id?: string
+          criado_em?: string
+          dados_estado?: string | null
+          dados_msg_id?: string | null
+          decidido_em?: string | null
+          decidido_por?: string | null
+          estado?: string
+          executado_em?: string | null
+          faltas_nota?: string[]
+          id?: string
+          pedir_dados?: boolean
+          resultado?: Json
+          saida_dados_id?: string | null
+          saida_fechado_id?: string | null
+          service_order_id?: string | null
+          sinal_lido?: string
+          total_visto?: number | null
+          whatsapp_message_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "orcamento_aceites_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "orcamento_aceites_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      orcamento_acompanhamentos: {
+        Row: {
+          atualizado_em: string
+          chave: string
+          client_id: string
+          criado_em: string
+          desfecho_proposto: string | null
+          encerramento: string | null
+          enviado_em: string
+          estado: string
+          id: string
+          modo: string
+          parou_em: string | null
+          parou_msg_id: string | null
+          parou_por: string | null
+          refeito_em: string | null
+          service_order_id: string
+          validade_ate: string
+        }
+        Insert: {
+          atualizado_em?: string
+          chave: string
+          client_id: string
+          criado_em?: string
+          desfecho_proposto?: string | null
+          encerramento?: string | null
+          enviado_em: string
+          estado?: string
+          id?: string
+          modo: string
+          parou_em?: string | null
+          parou_msg_id?: string | null
+          parou_por?: string | null
+          refeito_em?: string | null
+          service_order_id: string
+          validade_ate: string
+        }
+        Update: {
+          atualizado_em?: string
+          chave?: string
+          client_id?: string
+          criado_em?: string
+          desfecho_proposto?: string | null
+          encerramento?: string | null
+          enviado_em?: string
+          estado?: string
+          id?: string
+          modo?: string
+          parou_em?: string | null
+          parou_msg_id?: string | null
+          parou_por?: string | null
+          refeito_em?: string | null
+          service_order_id?: string
+          validade_ate?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "orcamento_acompanhamentos_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "orcamento_acompanhamentos_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: true
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       orcamento_agrupamento_origens: {
         Row: {
           agrupamento_id: string
@@ -6319,6 +6480,119 @@ export type Database = {
             columns: ["saldo_criado_id"]
             isOneToOne: false
             referencedRelation: "receivables"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      orcamento_envios: {
+        Row: {
+          ao_cliente: boolean
+          chave: string | null
+          client_id: string | null
+          criado_em: string
+          em: string
+          id: string
+          marcou: boolean
+          service_order_id: string
+          via: string
+          whatsapp_message_id: string | null
+        }
+        Insert: {
+          ao_cliente: boolean
+          chave?: string | null
+          client_id?: string | null
+          criado_em?: string
+          em: string
+          id?: string
+          marcou?: boolean
+          service_order_id: string
+          via: string
+          whatsapp_message_id?: string | null
+        }
+        Update: {
+          ao_cliente?: boolean
+          chave?: string | null
+          client_id?: string | null
+          criado_em?: string
+          em?: string
+          id?: string
+          marcou?: boolean
+          service_order_id?: string
+          via?: string
+          whatsapp_message_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "orcamento_envios_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "orcamento_envios_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      orcamento_passos: {
+        Row: {
+          acompanhamento_id: string
+          aprovado_em: string | null
+          aprovado_por: string | null
+          ate: string
+          avisado_em: string | null
+          aviso_fila: string | null
+          dia: string
+          estado: string
+          id: string
+          motivo: string | null
+          passo: string
+          saida_id: string | null
+          texto_aprovado: string | null
+          tipo: string
+        }
+        Insert: {
+          acompanhamento_id: string
+          aprovado_em?: string | null
+          aprovado_por?: string | null
+          ate: string
+          avisado_em?: string | null
+          aviso_fila?: string | null
+          dia: string
+          estado?: string
+          id?: string
+          motivo?: string | null
+          passo: string
+          saida_id?: string | null
+          texto_aprovado?: string | null
+          tipo: string
+        }
+        Update: {
+          acompanhamento_id?: string
+          aprovado_em?: string | null
+          aprovado_por?: string | null
+          ate?: string
+          avisado_em?: string | null
+          aviso_fila?: string | null
+          dia?: string
+          estado?: string
+          id?: string
+          motivo?: string | null
+          passo?: string
+          saida_id?: string | null
+          texto_aprovado?: string | null
+          tipo?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "orcamento_passos_acompanhamento_id_fkey"
+            columns: ["acompanhamento_id"]
+            isOneToOne: false
+            referencedRelation: "orcamento_acompanhamentos"
             referencedColumns: ["id"]
           },
         ]
@@ -9910,7 +10184,14 @@ export type Database = {
           labor_hours_total: number | null
           marina_id: string | null
           merged_into_id: string | null
+          motivo_perda: string | null
+          motivo_perda_em: string | null
+          motivo_perda_nota: string | null
+          motivo_perda_por: string | null
           operational_cost_total: number | null
+          orcamento_enviado_chave: string | null
+          orcamento_enviado_em: string | null
+          orcamento_enviado_via: string | null
           origem: string | null
           origem_chave8: string | null
           origem_parceiro_id: string | null
@@ -10004,7 +10285,14 @@ export type Database = {
           labor_hours_total?: number | null
           marina_id?: string | null
           merged_into_id?: string | null
+          motivo_perda?: string | null
+          motivo_perda_em?: string | null
+          motivo_perda_nota?: string | null
+          motivo_perda_por?: string | null
           operational_cost_total?: number | null
+          orcamento_enviado_chave?: string | null
+          orcamento_enviado_em?: string | null
+          orcamento_enviado_via?: string | null
           origem?: string | null
           origem_chave8?: string | null
           origem_parceiro_id?: string | null
@@ -10098,7 +10386,14 @@ export type Database = {
           labor_hours_total?: number | null
           marina_id?: string | null
           merged_into_id?: string | null
+          motivo_perda?: string | null
+          motivo_perda_em?: string | null
+          motivo_perda_nota?: string | null
+          motivo_perda_por?: string | null
           operational_cost_total?: number | null
+          orcamento_enviado_chave?: string | null
+          orcamento_enviado_em?: string | null
+          orcamento_enviado_via?: string | null
           origem?: string | null
           origem_chave8?: string | null
           origem_parceiro_id?: string | null
@@ -13994,6 +14289,17 @@ export type Database = {
           p_origem?: string
           p_hoje?: string
           p_agora?: string
+        }
+        Returns: Json
+      }
+      // ── Retorno F5 (P12.5, C-VAL-ENVIO, migration 20270112100100): a validade contada do envio. Trecho escrito à mão até o
+      // próximo "gen types" depois de aplicar; para quem não é a service_role o p_agora é ignorado (o relógio é o do banco).
+      orcamento_validade_do_envio: {
+        Args: {
+          p_os: string
+          p_agora?: string
+          p_gravar?: boolean
+          p_esperada?: string | null
         }
         Returns: Json
       }

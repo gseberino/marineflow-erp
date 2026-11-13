@@ -55,9 +55,9 @@ describe('Configurações › Orçamentos — vencimento é aviso', () => {
     await userEvent.click(screen.getByRole('button', { name: /Salvar configurações de orçamento/ }));
     expect(estado.gravados).toHaveLength(1);
     expect(estado.gravados[0]).not.toHaveProperty('quote_expiry_days');
-    // o resto continua sendo salvo
+    // o resto continua sendo salvo (Retorno F5, P12.4: o quote_followup_days saiu da tela, como o quote_expiry_days)
     expect(estado.gravados[0].quote_validity_days).toBe('3');
-    expect(estado.gravados[0].quote_followup_days).toBe('5');
+    expect(estado.gravados[0]).not.toHaveProperty('quote_followup_days');
   });
 
   it('sem a chave no banco, o campo fica vazio e nada é criado ao salvar', async () => {
@@ -106,5 +106,30 @@ describe('Configurações › Orçamentos — validade padrão só grava inteiro
     estado.ajustes = { quote_validity_days: '-1' };
     render(<QuoteSettingsSection />);
     expect(campo().value).toBe('15');
+  });
+});
+
+// Retorno F5 (P12.4): o "Dias para lembrete de follow-up" prometia um WhatsApp automático que nunca existiu (o número era
+// gravado e lido por ninguém). A cadência do orçamento enviado é a do K7 e é ligada pelo retorno: o campo some, o texto só
+// de leitura explica, e salvar não escreve a chave (o valor fica no banco como está, como o quote_expiry_days).
+describe('Configurações › Orçamentos — o follow-up saiu da tela (F5)', () => {
+  it('o campo some, e não há mais promessa de WhatsApp automático', () => {
+    render(<QuoteSettingsSection />);
+    expect(screen.queryByText(/Dias para lembrete de follow-up/)).toBeNull();
+    expect(screen.queryByText(/WhatsApp de follow-up automático/)).toBeNull();
+    expect(screen.getByText(/Acompanhamento do orçamento enviado: lembrete em 2 dias úteis, outro na véspera do vencimento e encerramento 1 dia útil depois\. É ligado pelo retorno, não por esta tela\./)).toBeTruthy();
+  });
+
+  it('salvar não escreve quote_followup_days nem quote_expiry_days: o banco fica como estava', async () => {
+    render(<QuoteSettingsSection />);
+    await userEvent.click(screen.getByRole('button', { name: /Salvar configurações de orçamento/ }));
+    expect(estado.gravados).toHaveLength(1);
+    expect(estado.gravados[0]).not.toHaveProperty('quote_followup_days');
+    expect(estado.gravados[0]).not.toHaveProperty('quote_expiry_days');
+  });
+
+  it('a ajuda da validade diz que, com a validade do envio ligada, o enviado vale 7 dias contados do envio', () => {
+    render(<QuoteSettingsSection />);
+    expect(screen.getByText(/Com a validade do envio ligada, o orçamento enviado vale 7 dias contados do envio; este número vale só para o rascunho\./)).toBeTruthy();
   });
 });
