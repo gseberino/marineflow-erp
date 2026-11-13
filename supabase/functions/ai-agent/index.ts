@@ -98,6 +98,7 @@ import {
   modoDaDiariaNoBanco,
   modoDaLeituraNoBanco,
   modoDoClienteNoBanco,
+  modosDa7gNoBanco,
   modosDaAgendaNoBanco,
   rascunhoAbertoNoBanco,
 } from "../_shared/agenda/executar.ts";
@@ -862,6 +863,8 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
       modoDaDiaria: () => modoDaDiariaNoBanco(admin),
       // *manda cliente*, *segura cliente* e *agenda clientes* (Fase 5) só com a mensagem ao cliente fora de 'desligado'
       modoDoCliente: () => modoDoClienteNoBanco(admin),
+      // (consertos da revisão da 7g) "como você pensou", "por que você marcou assim", "placar da semana"… só com o modo da 7g LIGADO
+      modosDa7g: () => modosDa7gNoBanco(admin),
       executar: (cmd) => executarComandoDaAgenda(admin, cmd, { autor: appUser.id, log: admin, canal: "whatsapp" }),
       // agenda desligada: o *grava*/*descarta* do rascunho que ficou aberto ainda responde
       rascunhoAberto: () => rascunhoAbertoNoBanco(admin, appUser.id),
@@ -1626,6 +1629,7 @@ servirComCors(async (req) => {
         modosDaFase2: () => modosDaAgendaNoBanco(admin),
         modoDaDiaria: () => modoDaDiariaNoBanco(admin),
         modoDoCliente: () => modoDoClienteNoBanco(admin),
+        modosDa7g: () => modosDa7gNoBanco(admin),
         executar: (cmd) => executarComandoDaAgenda(sb, cmd, { autor: userId, log: admin, canal: "painel" }),
         rascunhoAberto: () => rascunhoAbertoNoBanco(admin, userId),
       })

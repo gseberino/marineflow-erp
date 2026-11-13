@@ -2,7 +2,7 @@
 // o que NÃO pode colidir: a confirmação do assistente (sim/ok/1 · não/2), as letras e os comandos do secretário, os
 // comandos e as respostas dos comprovantes e o registro de pergunta ativa.
 import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { type ComandoDaAgenda, frasesDaAgenda, lerComandoDaAgenda } from "./comandos.ts";
+import { type ComandoDaAgenda, frasesDaAgenda, fraseLivreDa7g, lerComandoDaAgenda } from "./comandos.ts";
 import { ehComandoDaAgendaLigada } from "./executar.ts";
 import { lerComandoDoSecretario } from "../secretario/comandos.ts";
 import { parseConfirmationReply, parseOptionReply } from "../ai/whatsapp-channel.ts";
@@ -256,21 +256,26 @@ const FONE = "5547999990000";
 
 /**
  * Um admin de mentira: agenda_config.modo_leitura (ou erro) e quantas vezes a chave foi lida. fase2 = modo_proposta (a
- * agenda automática; as palavras da Fase 2 só valem fora de 'desligado').
+ * agenda automática; as palavras da Fase 2 só valem fora de 'desligado'). (Consertos da revisão da 7g) m7g = modo_explicar e modo_placar (ausentes = a coluna
+ * que não existe: o SELECT delas dá 42703); `colunas` guarda o que cada SELECT pediu.
  */
-function adminDaAgenda(modo: string | "erro" | "sem_tabela", fase2 = "desligado") {
+function adminDaAgenda(modo: string | "erro" | "sem_tabela", fase2 = "desligado", m7g?: { modo_explicar: string; modo_placar: string }) {
   const lidas: string[] = [];
+  const colunas: string[] = [];
   return {
     lidas,
+    colunas,
     from(tabela: string) {
       lidas.push(tabela);
+      let pedidas = "";
       const q = {
-        select: () => q,
+        select: (c: string) => (pedidas = c, colunas.push(c), q),
         maybeSingle: () =>
           Promise.resolve(
             modo === "erro" ? { data: null, error: { code: "XX000" } }
             : modo === "sem_tabela" ? { data: null, error: { code: "42P01", message: "relation \"agenda_config\" does not exist" } }
-            : { data: { modo_leitura: modo, modo_proposta: fase2, modo_vigia: "desligado" }, error: null },
+            : pedidas.includes("modo_explicar") && !m7g ? { data: null, error: { code: "42703", message: "column agenda_config.modo_explicar does not exist" } }
+            : { data: { modo_leitura: modo, modo_proposta: fase2, modo_vigia: "desligado", ...(m7g ?? {}) }, error: null },
           ),
       };
       return q;
@@ -1554,15 +1559,112 @@ Deno.test("Fase 7g (P7) — as frases novas e a conversa não são do secretári
   assertEquals(lerComandoDaAgenda("agenda gestor"), { comando: "ver", periodo: null, foco: "gestor", pessoa: null });
 });
 
-Deno.test("Fase 7g (P7) — webhook: as frases novas vão ao assistente só com a leitura fora de desligado (como as de ver)", async () => {
+// (Consertos da revisão da 7g) Era "as frases novas vão ao assistente só com a leitura fora de desligado": as frases LIVRES passaram a pedir o modo delas ligado
+// (o teste de baixo); aqui ficam as que não dependem dele: *agenda placar* e as 3 da semana que vem (já eram palavra antes da 7g).
+Deno.test("Fase 7g (P7) — webhook: *agenda placar* e as 3 da semana que vem vão ao assistente só com a leitura fora de desligado (como as de ver)", async () => {
+  const fixas = ["agenda placar", "Agenda placar?", "como você pensou a semana que vem?", "como ficou a semana que vem", "Como ficou a agenda da semana que vem?"];
   for (const modo of ["sombra", "ligado"]) {
-    for (const t of ["como você pensou?", "agenda placar", "por que você marcou assim?"]) {
-      assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(modo), t), true, `${modo}: ${t}`);
-      // de ver: não depende da agenda automática
-      assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(modo, "desligado"), t), true, `${modo} sem a automática: ${t}`);
+    for (const t of fixas) {
+      // com os modos da 7g desligados, em teste ou sem as colunas (antes da 20261112100000): não depende deles, e nem os lê
+      for (const m7g of [undefined, { modo_explicar: "desligado", modo_placar: "desligado" }, { modo_explicar: "sombra", modo_placar: "sombra" }]) {
+        const admin = adminDaAgenda(modo, "desligado", m7g);
+        assertEquals(await ehComandoDaAgendaLigada(admin, t), true, `${modo} ${JSON.stringify(m7g)}: ${t}`);
+        assertEquals(admin.colunas.some((c) => c.includes("modo_explicar")), false, `${modo}: ${t} leu os modos da 7g`);
+      }
     }
   }
   for (const modo of ["desligado", "erro", "sem_tabela"]) {
-    for (const t of ["como você pensou?", "agenda placar"]) assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(modo, "ligado"), t), false, `${modo}: ${t}`);
+    for (const t of fixas) {
+      assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(modo, "ligado", { modo_explicar: "ligado", modo_placar: "ligado" }), t), false, `${modo}: ${t}`);
+    }
   }
+});
+
+// ─── Consertos da revisão da 7g (12/11), item 2: as frases LIVRES da 7g só são palavra com o modo delas LIGADO ──────────────────────────────────────────────
+// "como você pensou", "por que você marcou assim", "placar da semana"… antes da 7g iam ao modelo. Fora de ligado (desligado, em teste, sem a coluna ou com erro)
+// continuam indo: a camada devolve null (executar_test.ts) e o webhook não as marca como comando (aqui).
+const FRASES_LIVRES_F7G: Array<[string, "modo_explicar" | "modo_placar"]> = [
+  ["como você pensou a semana", "modo_explicar"],
+  ["Como você pensou a semana?", "modo_explicar"],
+  ["como você pensou", "modo_explicar"],
+  ["Como você pensou?", "modo_explicar"],
+  ["🎤 Como você pensou.", "modo_explicar"],
+  ["Por que você marcou assim?", "modo_explicar"],
+  ["*por que você marcou assim*", "modo_explicar"],
+  ["por que marcou assim", "modo_explicar"],
+  ["placar da semana", "modo_placar"],
+  ["Placar da semana?", "modo_placar"],
+  ["Placar da agenda.", "modo_placar"],
+];
+
+Deno.test("Consertos da revisão da 7g (2) — fraseLivreDa7g: as 6 frases livres e o modo de cada uma; as fixas e a conversa não são", () => {
+  for (const [t, m] of FRASES_LIVRES_F7G) assertEquals(fraseLivreDa7g(t), m, t);
+  // as 6, normalizadas, são frases da tabela (lerComandoDaAgenda continua lendo a forma: quem decide o modo é a camada)
+  for (const f of ["como voce pensou a semana", "como voce pensou", "por que voce marcou assim", "por que marcou assim", "placar da semana", "placar da agenda"]) {
+    assert(frasesDaAgenda().includes(f), `fora da tabela: ${f}`);
+    assert(lerComandoDaAgenda(f) !== null, f);
+  }
+  // *agenda placar*, as 3 da semana que vem e as palavras de antes não são livres; a conversa e o texto grande também não
+  for (const t of ["agenda placar", "*agenda placar*", "como você pensou a semana que vem?", "como ficou a semana que vem", "como ficou a agenda da semana que vem",
+    "agenda", "livre", "como foi a semana", "agenda gestor", ...CONVERSA_F7G, "x".repeat(201)]) {
+    assertEquals(fraseLivreDa7g(t), null, t);
+  }
+  // só 6: toda frase da tabela que é livre está na lista acima
+  assertEquals(frasesDaAgenda().filter((f) => fraseLivreDa7g(f) !== null).sort(),
+    ["como voce pensou", "como voce pensou a semana", "placar da agenda", "placar da semana", "por que marcou assim", "por que voce marcou assim"]);
+});
+
+Deno.test("Consertos da revisão da 7g (2) — webhook: a frase livre vai ao assistente só com o modo dela LIGADO (desligado, em teste, sem a coluna ou erro: não)", async () => {
+  const M = (explicar: string, placar: string) => ({ modo_explicar: explicar, modo_placar: placar });
+  for (const leitura of ["sombra", "ligado"]) {
+    for (const [t, m] of FRASES_LIVRES_F7G) {
+      const outro = m === "modo_explicar" ? "modo_placar" : "modo_explicar";
+      // ligado: é comando (vai ao assistente, como as de ver)
+      assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(leitura, "desligado", { ...M("desligado", "desligado"), [m]: "ligado" }), t), true, `${leitura} ${m} ligado: ${t}`);
+      // desligado e em teste: não é (o caminho de antes da 7g), também com o OUTRO modo ligado
+      for (const v of ["desligado", "sombra"]) {
+        assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(leitura, "ligado", { ...M("ligado", "ligado"), [m]: v }), t), false, `${leitura} ${m} ${v}: ${t}`);
+      }
+      assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(leitura, "ligado", { ...M("ligado", "ligado"), [outro]: "ligado", [m]: "sombra" }), t), false, `${leitura} só o outro: ${t}`);
+      // sem as colunas da 7g (42703): não é
+      assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda(leitura, "ligado"), t), false, `${leitura} sem as colunas: ${t}`);
+    }
+  }
+  // a leitura desligada, ou o erro dela, continua mandando (nem lê os modos da 7g)
+  for (const leitura of ["desligado", "erro", "sem_tabela"]) {
+    const admin = adminDaAgenda(leitura, "ligado", M("ligado", "ligado"));
+    assertEquals(await ehComandoDaAgendaLigada(admin, "como você pensou?"), false, leitura);
+    assertEquals(admin.colunas.some((c) => c.includes("modo_explicar")), false, leitura);
+  }
+  // o SELECT dos modos da 7g só acontece com a frase livre: a conversa e as outras palavras não leem
+  const admin = adminDaAgenda("sombra", "ligado", M("ligado", "ligado"));
+  for (const t of ["agenda", "livre", "agenda placar", "como você pensou a semana que vem?", "por que o Nelson ficou de fora?", "oi"]) await ehComandoDaAgendaLigada(admin, t);
+  assertEquals(admin.colunas.filter((c) => c.includes("modo_explicar")), []);
+  await ehComandoDaAgendaLigada(admin, "como você pensou?");
+  assertEquals(admin.colunas.filter((c) => c.includes("modo_explicar")), ["modo_explicar, modo_placar"]);
+});
+
+Deno.test("Consertos da revisão da 7g (2) — webhook inteiro: com o CMP no confirmar, a frase livre fora de ligado tem o destino de antes da 7g; ligada, vai ao assistente", async () => {
+  // o roteamento do texto do dono com a pergunta do CMP aberta. Antes da 7g, nenhuma destas era palavra (comandoDoSecretario = false): esse é o destino de antes.
+  // A forma em negrito ("*por que você marcou assim*") ia ao CMP; com a frase como palavra da agenda, iria ao assistente: só com o modo dela ligado.
+  const destino = async (t: string, m7g: { modo_explicar: string; modo_placar: string } | undefined, antesDa7g = false) => {
+    const admin = adminDaAgenda("sombra", "ligado", m7g);
+    const { d, c } = depsDoWebhook("sombra");
+    d.comandoDoSecretario = antesDa7g ? async () => false : async (x) => (lerComandoDoSecretario(x) !== null && false) || (await ehComandoDaAgendaLigada(admin, x));
+    const r = await rotearTextoDoDono(TEXTO(t), d);
+    return { r, chamar: c.chamar.length, despachos: c.despachos };
+  };
+  let diferentes = 0;
+  for (const [t, m] of FRASES_LIVRES_F7G) {
+    const antes = await destino(t, undefined, true);
+    for (const v of ["desligado", "sombra"]) {
+      assertEquals(await destino(t, { modo_explicar: "ligado", modo_placar: "ligado", [m]: v }), antes, `${m} ${v}: ${t}`);
+    }
+    assertEquals(await destino(t, undefined), antes, `sem as colunas: ${t}`);
+    const ligado = await destino(t, { modo_explicar: "desligado", modo_placar: "desligado", [m]: "ligado" });
+    assertEquals(ligado.r, "assistente", `${m} ligado: ${t}`);
+    if (antes.r !== "assistente") diferentes++;
+  }
+  // o controle: em pelo menos uma forma o destino de antes não é o assistente (o teste distingue ser ou não palavra)
+  assert(diferentes > 0);
 });

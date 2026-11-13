@@ -13,6 +13,7 @@ import {
   modoDaDiariaNoBanco,
   modoDaLeituraNoBanco,
   modoDoClienteNoBanco,
+  modosDa7gNoBanco,
   rascunhoAbertoNoBanco,
   modoDaPropostaNoBanco,
   modosDaAgendaNoBanco,
@@ -917,4 +918,90 @@ Deno.test("Fase 7g (P7) — chamadaDoComando: como você pensou e o placar chega
   }
   assertEquals(ver("agenda placar"), { rpc: RPC_AGENDA_VER, params: { ...base, p_periodo: null, p_foco: "placar" } });
   assertEquals(chamadaDoComando(lerComandoDaAgenda("placar da semana")!, AUTOR, "2026-11-19").params.p_hoje, "2026-11-19");
+});
+
+// ─── Consertos da revisão da 7g (12/11), item 2: a frase livre da 7g só com o modo dela LIGADO ─────────────────────────────────────────────────────────────
+// "como você pensou", "por que você marcou assim", "placar da semana"… antes da 7g iam ao modelo. Fora de ligado (desligado ou em teste), sem a dependência ou com
+// erro, a camada devolve null (o turno segue ao modelo, como antes da 7g) SEM chamar RPC nenhuma; ligado, é a palavra. *agenda placar* e as 3 da semana que vem
+// não dependem do modo da 7g (fora de ligado, o banco diz o de antes: a semana que vem de antes, ou que o placar ainda não está ligado).
+type ModoDoTeste = "desligado" | "sombra" | "ligado";
+const LIVRES_DA_7G: Array<[string, "modo_explicar" | "modo_placar"]> = [
+  ["como você pensou a semana", "modo_explicar"],
+  ["Como você pensou?", "modo_explicar"],
+  ["por que você marcou assim?", "modo_explicar"],
+  ["*por que marcou assim*", "modo_explicar"],
+  ["placar da semana", "modo_placar"],
+  ["Placar da agenda?", "modo_placar"],
+];
+
+function camadaDa7g(m7g: (() => Promise<{ modo_explicar: ModoDoTeste; modo_placar: ModoDoTeste }>) | undefined, leitura: ModoDoTeste = "sombra") {
+  const banco = cliente({ [RPC_AGENDA_VER]: { data: { ok: true, texto: "Texto do banco.", rota: "como_pensou" } } });
+  let lidas = 0;
+  const d: DependenciasDaCamada = {
+    ehDoDono: () => true,
+    modo: () => Promise.resolve(leitura),
+    modosDaFase2: () => Promise.resolve({ proposta: "ligado", vigia: "ligado" }),
+    ...(m7g ? { modosDa7g: () => (lidas++, m7g()) } : {}),
+    executar: (cmd) => executarComandoDaAgenda(banco, cmd, { autor: AUTOR }),
+  };
+  return { d, banco, lidas: () => lidas };
+}
+const MODOS7G = (modo_explicar: ModoDoTeste, modo_placar: ModoDoTeste) => () => Promise.resolve({ modo_explicar, modo_placar });
+
+Deno.test("Consertos da revisão da 7g (2) — camada: a frase livre fora de ligado (desligado ou em teste) segue ao modelo, sem RPC; ligada, é a palavra", async () => {
+  for (const [t, m] of LIVRES_DA_7G) {
+    const so = (v: ModoDoTeste, resto: ModoDoTeste) => MODOS7G(m === "modo_explicar" ? v : resto, m === "modo_placar" ? v : resto);
+    // desligado e em teste: null (o turno segue ao modelo) e nenhuma RPC — também com o OUTRO modo da 7g ligado
+    for (const v of ["desligado", "sombra"] as ModoDoTeste[]) {
+      const x = camadaDa7g(so(v, "ligado"));
+      assertEquals(await camadaDaAgenda(t, x.d), null, `${m} ${v}: ${t}`);
+      assertEquals(x.banco.chamadas.length, 0, `${m} ${v}: ${t}`);
+      assertEquals(x.lidas(), 1, `${m} ${v}: ${t}`);
+    }
+    // ligado: a palavra (uma RPC, o texto do banco), também com a leitura em teste ou ligada e o outro modo desligado
+    for (const leitura of ["sombra", "ligado"] as ModoDoTeste[]) {
+      const lig = camadaDa7g(so("ligado", "desligado"), leitura);
+      assertEquals(await camadaDaAgenda(t, lig.d), { comando: lerComandoDaAgenda(t)!, texto: "Texto do banco.", ok: true }, `${leitura}: ${t}`);
+      assertEquals(lig.banco.chamadas.map((c) => c.nome), [RPC_AGENDA_VER], t);
+    }
+    // a leitura desligada continua mandando: nem lê o modo da 7g
+    const desl = camadaDa7g(so("ligado", "ligado"), "desligado");
+    assertEquals(await camadaDaAgenda(t, desl.d), null, t);
+    assertEquals([desl.lidas(), desl.banco.chamadas.length], [0, 0], t);
+  }
+});
+
+Deno.test("Consertos da revisão da 7g (2) — camada: sem a dependência do modo da 7g, ou com erro nela, a frase livre segue ao modelo", async () => {
+  for (const [t] of LIVRES_DA_7G) {
+    for (const x of [camadaDa7g(undefined), camadaDa7g(() => Promise.reject(new Error("rede")))]) {
+      assertEquals(await camadaDaAgenda(t, x.d), null, t);
+      assertEquals(x.banco.chamadas.length, 0, t);
+    }
+  }
+});
+
+Deno.test("Consertos da revisão da 7g (2) — camada: *agenda placar* e as 3 da semana que vem respondem fora de ligado, sem ler o modo da 7g", async () => {
+  for (const t of ["agenda placar", "*agenda placar*", "como você pensou a semana que vem?", "como ficou a semana que vem", "Como ficou a agenda da semana que vem?"]) {
+    for (const m7g of [MODOS7G("desligado", "desligado"), MODOS7G("sombra", "sombra"), undefined]) {
+      const x = camadaDa7g(m7g);
+      assertEquals((await camadaDaAgenda(t, x.d))?.texto, "Texto do banco.", t);
+      assertEquals(x.banco.chamadas.map((c) => c.nome), [RPC_AGENDA_VER], t);
+      assertEquals(x.lidas(), 0, t);
+    }
+  }
+  // as outras palavras e a conversa também não leem o modo da 7g
+  const x = camadaDa7g(MODOS7G("ligado", "ligado"));
+  for (const t of ["agenda", "livre", "o que mudou", "agenda gestor", "por que o Nelson ficou de fora?", "placar", "como pensou"]) await camadaDaAgenda(t, x.d);
+  assertEquals(x.lidas(), 0);
+});
+
+Deno.test("Consertos da revisão da 7g (2) — modosDa7gNoBanco: um SELECT só das 2 colunas; erro, coluna ausente, sem linha ou exceção = desligados", async () => {
+  assertEquals(await modosDa7gNoBanco(adminDoModo({ data: { modo_explicar: "ligado", modo_placar: "sombra" } })), { modo_explicar: "ligado", modo_placar: "sombra" });
+  assertEquals(await modosDa7gNoBanco(adminDoModo({ data: { modo_explicar: " Ligado ", modo_placar: "desligado" } })), { modo_explicar: "ligado", modo_placar: "desligado" });
+  for (const r of [{ error: { code: "42703" } }, { data: null }, { lanca: true }, { data: { modo_explicar: "on" } }]) {
+    assertEquals(await modosDa7gNoBanco(adminDoModo(r)), { modo_explicar: "desligado", modo_placar: "desligado" }, JSON.stringify(r));
+  }
+  const a = adminDoModo({ data: { modo_explicar: "ligado", modo_placar: "ligado" } });
+  await modosDa7gNoBanco(a);
+  assertEquals(a.lidas, ["agenda_config"]);
 });

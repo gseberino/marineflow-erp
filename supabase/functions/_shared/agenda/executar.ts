@@ -58,12 +58,25 @@
 // nome passa a esperar o dono, sem prazo). Pede o dia e a hora, como o gestor. O nome que não casa é a resposta do banco (a lista das que podem esperar): não
 // segue ao modelo. Antes da migration 20261109100600 a função não existe (PGRST202/42883): a resposta é que ainda não está ligado, sem registro de erro.
 // *agenda fica* não existe.
+//
+// Consertos da revisão da 7g (12/11/2026): as FRASES LIVRES da 7g ("como você pensou", "por que você marcou assim", "placar da semana"… — fraseLivreDa7g,
+// comandos.ts) só são palavra com o modo da leitura delas LIGADO (modo_explicar; no placar, modo_placar), lido num SELECT à parte (modosDa7gNoBanco), como a
+// diária e o cliente, e só quando o texto É uma delas. Desligado, em teste, coluna ausente ou erro: o texto segue ao modelo (a camada devolve null e o webhook
+// não o marca como comando), exatamente como antes da 7g, sem RPC nenhuma. As 3 frases da semana que vem e *agenda placar* não dependem disso.
 
 import { diaBR } from "../agenda-dia.ts";
 import { ehPortaAusente } from "../porta-ausente.ts";
 import { logEdgeError } from "../log-error.ts";
 import { lerModoDaProposta, type ModoDaProposta, modoDaPropostaNoBanco } from "../agenda-modo.ts";
-import { type ComandoDaAgenda, ehPalavraDaDiaria, ehPalavraDaFase2, ehPalavraDoCliente, lerComandoDaAgenda } from "./comandos.ts";
+import {
+  type ComandoDaAgenda,
+  ehPalavraDaDiaria,
+  ehPalavraDaFase2,
+  ehPalavraDoCliente,
+  fraseLivreDa7g,
+  lerComandoDaAgenda,
+  type ModoDaFraseLivre,
+} from "./comandos.ts";
 import { paraAgendaVer, RPC_AGENDA_VER } from "./rpc-das-ferramentas.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -163,6 +176,25 @@ export async function modoDoClienteNoBanco(admin: Cliente): Promise<ModoDaLeitur
   }
 }
 
+/** (Consertos da revisão da 7g) Os 2 modos das leituras da 7g que fazem de uma frase livre palavra (só 'ligado' faz). */
+export type ModosDa7g = Record<ModoDaFraseLivre, ModoDaLeitura>;
+const MODOS_DA_7G_DESLIGADOS: ModosDa7g = Object.freeze({ modo_explicar: "desligado", modo_placar: "desligado" });
+
+/**
+ * (Consertos da revisão da 7g) agenda_config.modo_explicar e modo_placar (um SELECT só delas, à parte, como a diária e o cliente: as colunas da 7g não podem
+ * calar as palavras de antes). Só é lido quando o texto é uma frase livre da 7g. Nunca lança: erro, coluna ausente (antes da 20261112100000) ou linha ausente =
+ * os dois "desligado" — a frase segue ao modelo, como antes da 7g.
+ */
+export async function modosDa7gNoBanco(admin: Cliente): Promise<ModosDa7g> {
+  try {
+    const { data, error } = await admin.from("agenda_config").select("modo_explicar, modo_placar").maybeSingle();
+    if (error) return MODOS_DA_7G_DESLIGADOS;
+    return { modo_explicar: lerModoDaLeitura(data?.modo_explicar), modo_placar: lerModoDaLeitura(data?.modo_placar) };
+  } catch {
+    return MODOS_DA_7G_DESLIGADOS;
+  }
+}
+
 /**
  * Há rascunho da agenda aberto e dentro da validade (do autor, se vier)? Só para o *grava* ou *descarta* com a agenda
  * desligada. Nunca lança: erro, tabela ausente ou exceção = false (o caminho de hoje).
@@ -200,6 +232,9 @@ export async function ehComandoDaAgendaLigada(admin: Cliente, texto: string): Pr
   const cmd = lerComandoDaAgenda(texto);
   if (cmd === null) return false;
   if ((await modoDaLeituraNoBanco(admin)) !== "desligado") {
+    // (Consertos da revisão da 7g) a frase livre da 7g só com o modo dela ligado: fora de ligado, não é comando (o caminho de antes da 7g)
+    const livre = fraseLivreDa7g(texto);
+    if (livre) return (await modosDa7gNoBanco(admin))[livre] === "ligado";
     // (Fase 3, P4) a palavra *diária* só com a diária automática fora de 'desligado'
     if (ehPalavraDaDiaria(cmd)) return (await modoDaDiariaNoBanco(admin)) !== "desligado";
     // (Fase 5, P5) as palavras da mensagem ao cliente só com modo_cliente fora de 'desligado'
@@ -468,6 +503,11 @@ export interface DependenciasDaCamada {
    * *agenda clientes*. Ausente ou erro = 'desligado' (a palavra segue ao modelo).
    */
   modoDoCliente?(): Promise<ModoDaLeitura>;
+  /**
+   * (Consertos da revisão da 7g) agenda_config.modo_explicar e modo_placar (modosDa7gNoBanco). Só é chamado com uma frase livre da 7g (fraseLivreDa7g: "como
+   * você pensou", "por que você marcou assim", "placar da semana"…). Ausente ou erro = os dois 'desligado' (a frase segue ao modelo, como antes da 7g).
+   */
+  modosDa7g?(): Promise<ModosDa7g>;
   /** executarComandoDaAgenda com o cliente do canal. */
   executar(cmd: ComandoDaAgenda): Promise<RespostaDoComando>;
   /**
@@ -515,6 +555,17 @@ export async function camadaDaAgenda(texto: string, deps: DependenciasDaCamada):
       aberto = false;
     }
     if (!aberto) return null;
+  }
+  // (Consertos da revisão da 7g) a frase livre da 7g só com o modo dela LIGADO; desligado, em teste, ausente ou erro: segue ao modelo, sem RPC (como antes da 7g)
+  const livre = fraseLivreDa7g(texto);
+  if (livre) {
+    let m: ModosDa7g = MODOS_DA_7G_DESLIGADOS;
+    try {
+      m = (await deps.modosDa7g?.()) ?? MODOS_DA_7G_DESLIGADOS;
+    } catch {
+      m = MODOS_DA_7G_DESLIGADOS;
+    }
+    if (m[livre] !== "ligado") return null;
   }
   if (ehPalavraDaFase2(comando)) {
     let modos: ModosDaAgenda = { proposta: "desligado", vigia: "desligado" };

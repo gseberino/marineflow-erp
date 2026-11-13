@@ -132,6 +132,10 @@
 //   De VER (valem com "?"); com a leitura fora de desligado, como as da Fase 1. "placar" sozinho é conversa (de futebol: vai ao modelo, que o prompt manda ao
 //   foco), e "por que o Nelson ficou de fora?" também (o modelo chama o foco porque com a OS). Nenhuma é palavra do secretário, dos comprovantes, da confirmação
 //   nem da pergunta ativa (comandos_test.ts).
+//   (Consertos da revisão da 7g, 12/11) As FRASES LIVRES da 7g — as 6 que não começam por "agenda" e que antes da 7g iam ao modelo: como voce pensou a semana,
+//   como voce pensou, por que voce marcou assim, por que marcou assim (modo_explicar) e placar da semana, placar da agenda (modo_placar) — só são palavra com o
+//   modo da leitura delas LIGADO (fraseLivreDa7g; quem lê o modo é a camada, executar.ts). Desligado ou em teste, seguem ao modelo, exatamente como antes da 7g.
+//   As 3 da semana que vem (já eram palavra antes da 7g) e *agenda placar* (a palavra explícita: fora de ligado, "ainda não está ligado") não dependem disso.
 //
 // Correção de 29/10 (P1) — as frases naturais do dono que caíam no modelo sem roteiro (todas de VER, valem com "?"):
 //   quando tenho agenda livre · quando eu tenho agenda livre · tenho agenda livre · eu tenho agenda livre
@@ -302,6 +306,31 @@ frases(
 );
 // (Fase 7g, P7) o placar da semana ("placar" sozinho é de futebol: vai ao modelo, que o prompt manda ao foco)
 frases(["agenda placar", "placar da semana", "placar da agenda"], ver(null, "placar"));
+
+/** (Consertos da revisão da 7g) O modo da leitura que torna uma frase livre da 7g palavra (só com ele LIGADO). */
+export type ModoDaFraseLivre = "modo_explicar" | "modo_placar";
+
+/**
+ * (Consertos da revisão da 7g) As frases livres da 7g (normalizadas, as mesmas da tabela): antes da 7g iam ao modelo, e continuam indo fora de ligado. As 3 da
+ * semana que vem e *agenda placar* não estão aqui (não dependem do modo da 7g).
+ */
+const FRASES_LIVRES_DA_7G: ReadonlyMap<string, ModoDaFraseLivre> = new Map([
+  ["como voce pensou a semana", "modo_explicar"],
+  ["como voce pensou", "modo_explicar"],
+  ["por que voce marcou assim", "modo_explicar"],
+  ["por que marcou assim", "modo_explicar"],
+  ["placar da semana", "modo_placar"],
+  ["placar da agenda", "modo_placar"],
+]);
+
+/**
+ * (Consertos da revisão da 7g) O texto é uma frase livre da 7g? Devolve o modo que a faz palavra (a camada só a trata com ele 'ligado'), ou null. Puro: lê só a
+ * forma da frase, com a mesma normalização de lerComandoDaAgenda ("Como você pensou?", "*por que marcou assim*").
+ */
+export function fraseLivreDa7g(texto: string): ModoDaFraseLivre | null {
+  if (typeof texto !== "string" || texto.length > 200) return null;
+  return FRASES_LIVRES_DA_7G.get(normalizarComando(texto)) ?? null;
+}
 
 /** A maior frase da tabela: texto maior do que isto nunca é comando da tabela (custo zero na conversa comum). */
 const MAIOR = Math.max(...[...FRASES.keys()].map((f) => f.length));
