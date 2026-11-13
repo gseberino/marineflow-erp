@@ -33,6 +33,8 @@ export const ASSUNTO_DAS_ACOES: Readonly<Record<string, readonly string[]>> = {
   criar_regra_financeira: ["valor_de_busca", "reconhecer_por"],
   // OS: a OS (e, no item, o serviço)
   cancel_service_order: ["service_order_id"],
+  // Retorno F5 (P11.3): o orçamento e o motivo ("não, foi preço" corrige o pedido de marcar perdido)
+  update_quote_status: ["id", "quote_status", "motivo_perda"],
   reopen_service_order: ["service_order_id"],
   duplicate_service_order: ["service_order_id"],
   add_service_to_order: ["service_order_id", "service_name"],

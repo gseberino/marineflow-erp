@@ -571,6 +571,10 @@ export const soOpsTools: ToolDef[] = [
         original_quote_amount: _oq, survey_id: _sv, reminder_sent_at: _rs, quote_validity_date: _qvd,
         // Retorno F3 (P10.3): a cópia não nasceu de um ato no cartão, e a origem sujaria as medidas do portão.
         origem: _or, origem_chave8: _oc8, origem_parceiro_id: _opi,
+        // Retorno F5 (P11.7): o envio e o desfecho são eventos da original. A cópia que os levasse nasceria "já enviada" (sem
+        // os 7 dias do envio, sem o gatilho e sem a cadência) e com o motivo do perdido.
+        orcamento_enviado_em: _oee, orcamento_enviado_via: _oev, orcamento_enviado_chave: _oec,
+        motivo_perda: _mp, motivo_perda_em: _mpe, motivo_perda_por: _mpp, motivo_perda_nota: _mpn,
         client_confirmed_at: _cc, client_confirmed_for: _cf, client_confirmation_requested_at: _ccr,
         diagnosis: _dg, solution_applied: _sol, customer_visible_report: _cvr,
         service_order_parts: pecas, service_order_services: servicos,

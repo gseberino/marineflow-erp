@@ -235,6 +235,9 @@ async function assertEditableSo(sb: any, soId: string): Promise<{ error: string 
 // Espelha QUOTE_STATUS_TRANSITIONS de src/hooks/use-service-orders.ts — ciclo de vida
 // do orçamento (campo quote_status, separado do status geral da OS), válido enquanto
 // converted_to_os_at é nulo.
+/** Retorno F5 (3.4): a lista fechada de service_orders.motivo_perda que se escolhe (sem_motivo_antigo é só da migration de dado). */
+export const MOTIVOS_DA_PERDA = ["sumiu", "fechou_com_outro", "desistiu", "preco", "prazo", "outro"] as const;
+
 const QUOTE_STATUS_TRANSITIONS: Record<string, string[]> = {
   draft: ["sent", "awaiting_approval", "rejected"],
   sent: ["awaiting_approval", "rejected"],
@@ -1486,12 +1489,18 @@ export const serviceOrderTools: ToolDef[] = [
   {
     name: "update_quote_status",
     description:
-      "Altera o status do CICLO DE ORÇAMENTO (campo quote_status, separado do status geral da OS): draft → sent → awaiting_approval → approved → awaiting_deposit, ou rejected a qualquer momento (exceto de rejected, que só volta pra draft). Use para mover um orçamento no funil de aprovação do cliente — não confundir com update_service_order_status.",
+      "Altera o status do CICLO DE ORÇAMENTO (campo quote_status, separado do status geral da OS): draft → sent → awaiting_approval → approved → awaiting_deposit, ou rejected a qualquer momento (exceto de rejected, que só volta pra draft). Use para mover um orçamento no funil de aprovação do cliente — não confundir com update_service_order_status. " +
+      "rejected = perdido (o cliente não seguiu); vencer não é rejeitar. Com rejected, motivo_perda é obrigatório (sumiu = sem resposta, fechou_com_outro, desistiu, preco, prazo, outro).",
     input_schema: {
       type: "object",
       properties: {
         id: { type: "string", description: "UUID do orçamento" },
         quote_status: { type: "string", enum: ["draft", "sent", "awaiting_approval", "approved", "awaiting_deposit", "rejected"] },
+        // Retorno F5 (P11.3): o motivo da perda, obrigatório com rejected (3.4); sem_motivo_antigo é só da migration de dado
+        motivo_perda: {
+          type: "string", enum: [...MOTIVOS_DA_PERDA],
+          description: "Obrigatório quando quote_status = rejected: por que o orçamento foi perdido.",
+        },
       },
       required: ["id", "quote_status"],
     },
@@ -1501,13 +1510,24 @@ export const serviceOrderTools: ToolDef[] = [
       const blocked = blockTechnician(ctx);
       if (blocked) return blocked;
       const { sb } = ctx;
-      const { data: current } = await sb.from("service_orders").select("quote_status").eq("id", args.id).maybeSingle();
+      // (F5, P11.3) perdido sempre com motivo, antes de qualquer leitura ou gravação
+      const perdido = args.quote_status === "rejected";
+      if (perdido && !(MOTIVOS_DA_PERDA as readonly string[]).includes(String(args.motivo_perda ?? ""))) {
+        return { error: "Diga o motivo da perda: sumiu, fechou com outro, desistiu, preço, prazo ou outro." };
+      }
+      // (F5) a leitura que falha não vira "draft": a transição seria conferida contra o status errado
+      const { data: current, error: erroAtual } = await sb.from("service_orders").select("quote_status").eq("id", args.id).maybeSingle();
+      if (erroAtual) throw erroAtual;
       const currentStatus = current?.quote_status || "draft";
       const allowed = QUOTE_STATUS_TRANSITIONS[currentStatus] || [];
       if (!allowed.includes(args.quote_status)) {
         return { error: `Transição inválida: ${currentStatus} → ${args.quote_status}. Permitidas a partir de ${currentStatus}: ${allowed.join(", ") || "nenhuma"}.` };
       }
-      const { data, error } = await sb.from("service_orders").update({ quote_status: args.quote_status }).eq("id", args.id).select().single();
+      // O gatilho do quote_status carimba motivo_perda_em; sair de rejected apaga o motivo (P2.1).
+      const mudanca = perdido
+        ? { quote_status: "rejected", motivo_perda: String(args.motivo_perda), motivo_perda_por: "assistente" }
+        : { quote_status: args.quote_status };
+      const { data, error } = await sb.from("service_orders").update(mudanca).eq("id", args.id).select().single();
       if (error) throw error;
       return { ok: true, service_order: data };
     },

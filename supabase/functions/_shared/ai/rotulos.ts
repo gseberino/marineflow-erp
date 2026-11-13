@@ -138,6 +138,8 @@ export const TITULOS_DAS_ACOES_DIRETAS: Record<string, string> = {
 
 /** Rótulo dos campos que aparecem no resumo genérico ("- Rótulo: valor") das ações que podem virar cartão. */
 export const ROTULOS_DOS_CAMPOS: Record<string, string> = {
+  // Retorno F5 (P11.3): o motivo do orçamento perdido (update_quote_status)
+  motivo_perda: "Motivo da perda",
   // Serviço do prestador (12/11/2026)
   prestador: "Prestador",
   percentual: "Percentual",
@@ -411,4 +413,9 @@ export const ROTULOS_DOS_VALORES: Readonly<Record<string, Readonly<Record<string
   content_type: { text: "texto", image: "imagem", video: "vídeo" },
   send_mode: { text: "texto", link: "link" },
   product_type: { composto: "composto", kit: "kit" },
+  // Retorno F5 (P11.3)
+  motivo_perda: {
+    sumiu: "sumiu (sem resposta)", fechou_com_outro: "fechou com outro", desistiu: "desistiu", preco: "preço", prazo: "prazo",
+    outro: "outro",
+  },
 };

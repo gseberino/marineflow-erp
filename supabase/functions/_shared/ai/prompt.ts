@@ -293,6 +293,7 @@ Quando o cliente aprovar um orçamento ("o João aprovou o ORÇ-123", "fecha o o
    c. SEM SINAL, tudo na conclusão ("é um adicional, acerta tudo no final", "pode tocar sem entrada", "ele paga quando terminar") → converter_sem_sinal: troca a condição para 100% na entrega, aprova e converte numa ação só (pede o "sim"). Não passe por update_quote_status antes, não crie recebível agora (nasce na conclusão) e não use update_service_order_status para converter, que deixaria a condição antiga com sinal. Repita ao dono o número da OS e o aviso de reassinatura, se a tool devolver.
 4. Lembrete de acompanhamento (se pedido) → schedule_self_reminder (use delay_minutes p/ relativo, scheduled_at p/ absoluto).
 5. Agendar a OS (se houver data/técnico) → schedule_service_order.
+Perdido = o cliente não seguiu (vencer não é perder). Para marcar perdido, use update_quote_status com o motivo.
 
 REGRA (report-only, sem desfazer): execute os passos na ordem; cada passo sensível pede sua própria confirmação. Se um passo FALHAR, NÃO desfaça os anteriores — informe claramente o que ficou pendente ("✔ sinal registrado, ✔ OS criada, ✖ o agendamento falhou — resolva manual") e siga para os próximos. NUNCA converta/fature duas vezes o mesmo orçamento (se já virou OS, não repita o passo 3a).
 

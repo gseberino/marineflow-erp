@@ -242,6 +242,22 @@ Deno.test("a cópia sem amarra nasce com as três colunas nulas e quote_validity
   assertEquals(copia.service_order_number, "ORÇ-00151");
 });
 
+// Retorno F5 (P11.7): a cópia de um orçamento enviado e perdido nasce sem o envio e sem o motivo. Sem isso, nasceria "já
+// enviada" (sem os 7 dias do envio, sem gatilho e sem cadência) e levaria o motivo do perdido.
+Deno.test("F5: a cópia de um orçamento enviado e perdido não leva nenhuma das 7 colunas da F5", async () => {
+  const colunasDaF5 = {
+    orcamento_enviado_em: "2026-12-08T13:00:00Z", orcamento_enviado_via: "tela", orcamento_enviado_chave: "00009901",
+    motivo_perda: "preco", motivo_perda_em: "2026-12-16T13:00:00Z", motivo_perda_por: "tela", motivo_perda_nota: "achou caro",
+  };
+  const b = bancoFalso({ service_orders: [{ ...ORIGINAL, quote_status: "rejected", ...colunasDaF5 }] });
+  // deno-lint-ignore no-explicit-any
+  const r = await duplicar.execute({ service_order_id: "orc-1" }, ctxDe(b.db)) as any;
+  assert(!r.error, JSON.stringify(r));
+  const [copia] = b.linhas("service_orders");
+  for (const campo of Object.keys(colunasDaF5)) assertEquals(campo in copia, false, campo);
+  assertEquals(copia.quote_status, "draft");
+});
+
 
 // ─── create_service_order: o rastro do cartão não entra por argumento do modelo ──────────────
 
