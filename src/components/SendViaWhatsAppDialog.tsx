@@ -72,6 +72,61 @@ interface Props {
   target: SendViaWhatsAppTarget | null;
 }
 
+// ─── Retorno F5 (P12.5, C-VAL-ENVIO): a validade contada do envio, só no orçamento ─────────────────────────────────────
+// Ao abrir, a prévia (p_gravar falso: nada é gravado; o relógio é o do banco). A data dela vale só para "Enviar agora", com o
+// agendamento desligado: no PDF (validity em modo data), no resumo ("⏳ Proposta válida até …") e na linha O22, que vai numa
+// 2ª linha da legenda do PDF, fora da caixa editável. Ao enviar agora, a gravação com a data que a tela mostrou (p_esperada):
+// 'mudou' não envia. Vencida: nenhuma linha de validade. Com a chave desligada (o padrão), o banco diz 'desligada' e o
+// diálogo é o de antes.
+
+/** O que a tela usa da resposta de orcamento_validade_do_envio. */
+interface ValidadeDaTela {
+  /** aaaa-mm-dd; null = sem a data da F5 */
+  data: string | null;
+  /** a O22 ("Ele vale até terça (15/12)."); nunca na vencida */
+  linha: string | null;
+  /** fixou | previa | ja_enviado | vencida | mudou | desligada | funil | cargo | erro */
+  motivo: string;
+}
+
+const DIA_ISO = /^\d{4}-\d{2}-\d{2}$/;
+const SEM_A_F5 = new Set(['desligada', 'funil', 'cargo', 'erro', 'mudou', 'vencida']);
+const AVISO_DA_VALIDADE_QUE_MUDOU = 'A validade mudou de dia desde que você abriu: confira o texto e mande de novo.';
+const AVISO_DA_VALIDADE_SEM_FIXAR = 'Não consegui fixar a validade do envio; o PDF sai com a validade do cadastro.';
+
+function lerValidadeDaTela(r: { data: unknown; error: unknown } | null | undefined): ValidadeDaTela {
+  if (!r || r.error) return { data: null, linha: null, motivo: 'erro' };
+  const d = (r.data ?? {}) as Record<string, unknown>;
+  if (d.ok !== true) return { data: null, linha: null, motivo: d.motivo === 'cargo' ? 'cargo' : 'erro' };
+  const motivo = d.fixou === true ? 'fixou' : typeof d.motivo === 'string' && d.motivo ? d.motivo : 'erro';
+  const data = typeof d.data === 'string' && DIA_ISO.test(d.data) ? d.data : null;
+  const linha = motivo !== 'vencida' && typeof d.linha === 'string' && d.linha.trim() ? d.linha.trim() : null;
+  return { data, linha, motivo };
+}
+
+/** A prévia (gravar = false) ou a gravação com a data esperada. Nunca lança: erro = motivo 'erro'. */
+async function pedirValidadeDoEnvio(os: string, gravar: boolean, esperada?: string | null): Promise<ValidadeDaTela> {
+  try {
+    const r = await supabase.rpc('orcamento_validade_do_envio', gravar
+      ? { p_os: os, p_gravar: true, p_esperada: esperada ?? null }
+      : { p_os: os, p_gravar: false });
+    return lerValidadeDaTela(r as { data: unknown; error: unknown });
+  } catch {
+    return { data: null, linha: null, motivo: 'erro' };
+  }
+}
+
+/** A data da F5 vale (prévia, fixada ou a do 1º envio)? */
+function temDataDaF5(v: ValidadeDaTela | null | undefined): boolean {
+  return !!v && !!v.data && !SEM_A_F5.has(v.motivo);
+}
+
+/** "2026-12-15" → "15/12" (o dd/mm que a mensagem pode já trazer). */
+function ddmmDoDia(dia: string): string {
+  const [, m, d] = dia.split('-');
+  return `${d}/${m}`;
+}
+
 export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
   // O padrão é o PDF, sem link (pedido do dono, 20/10/2026 — a mesma decisão de 05/10 do
   // assistente). Até aqui o diálogo abria no modo Link: o link ia mesmo sem ele pedir.
@@ -197,10 +252,27 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
   // padrão): opcoesPadraoDoDocumento a acrescenta — a data fixa do orçamento, senão os dias
   // dele, senão os da empresa. Sem ela o PDF anexado saía "Válido por 15 dias" (o literal do
   // gerador) para qualquer orçamento, inclusive os de 3 dias (até 26/09/2026).
-  const pdfOptions = useMemo<PDFOptions>(
-    () => opcoesPadraoDoDocumento(appSettings, documentType, pdfData?.serviceOrder),
-    [appSettings, documentType, pdfData],
-  );
+  // (F5, P12.5) a validade contada do envio, só no orçamento: a prévia ao abrir (uma vez por abertura, nada gravado)
+  const osDoOrcamento = target?.kind === 'service_order' && documentType === 'quote' ? target.serviceOrderId : null;
+  const [validadeDoEnvio, setValidadeDoEnvio] = useState<ValidadeDaTela | null>(null);
+  const [avisoDaValidade, setAvisoDaValidade] = useState<string | null>(null);
+  useEffect(() => {
+    setValidadeDoEnvio(null);
+    setAvisoDaValidade(null);
+    if (!open || !osDoOrcamento) return;
+    let cancelado = false;
+    void pedirValidadeDoEnvio(osDoOrcamento, false).then((v) => { if (!cancelado) setValidadeDoEnvio(v); });
+    return () => { cancelado = true; };
+  }, [open, osDoOrcamento]);
+  // (F5) a data da F5 só para "Enviar agora": com o agendamento ligado, a validade do cadastro (o texto agendado nunca leva
+  // a data da abertura, que não iria para quote_validity_date). Ligar ou desligar o agendamento remonta o resumo.
+  const dataDaF5 = !!osDoOrcamento && !schedule.enabled && temDataDaF5(validadeDoEnvio) ? validadeDoEnvio!.data : null;
+  // (F5) vencida: nenhuma linha de validade no resumo
+  const semValidadeNoResumo = !!osDoOrcamento && validadeDoEnvio?.motivo === 'vencida';
+  const pdfOptions = useMemo<PDFOptions>(() => {
+    const base = opcoesPadraoDoDocumento(appSettings, documentType, pdfData?.serviceOrder);
+    return dataDaF5 ? { ...base, validity: { mode: 'date', date: dataDaF5 } } : base;
+  }, [appSettings, documentType, pdfData, dataDaF5]);
 
   // Os DOIS números do cadastro (whatsapp e telefone), os mesmos que o whatsapp-send confere
   // para marcar o orçamento como enviado. Quem abre o diálogo passa só um (whatsapp || phone);
@@ -398,6 +470,10 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
    * o PDF agendado só sai com a caixa marcada (aí vai a mensagem com o link, e a tela diz).
    */
   const agendamentoSemPdf = schedule.enabled && mode === 'document';
+  // (F5, P12.5) a O22 vai junto na legenda do PDF, numa 2ª linha, a não ser que a mensagem já traga o dd/mm da data
+  const linhaQueVaiJunto = dataDaF5 && mode === 'document' && validadeDoEnvio?.linha && !envio.mensagem.includes(ddmmDoDia(dataDaF5))
+    ? validadeDoEnvio.linha
+    : null;
   const agendarBloqueado = agendamentoSemPdf && !linkVai;
 
   /**
@@ -424,8 +500,9 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
       // A MESMA validade do PDF deste envio (pdfOptions): data fixa, senão os dias do orçamento,
       // senão os da empresa — já normalizados. Antes o texto lia so.quote_validity_days cru e,
       // com data fixa, dizia "7 dias" enquanto o PDF dizia "até 10/10".
-      validadeDias: pdfOptions.validity?.days ?? null,
-      validadeAte: pdfOptions.validity?.mode === 'date' && pdfOptions.validity.date ? dataBR(pdfOptions.validity.date) : null,
+      // (F5) vencida: nenhuma linha de validade (nem dias, nem data)
+      validadeDias: semValidadeNoResumo ? null : (pdfOptions.validity?.days ?? null),
+      validadeAte: semValidadeNoResumo ? null : (pdfOptions.validity?.mode === 'date' && pdfOptions.validity.date ? dataBR(pdfOptions.validity.date) : null),
       empresa: {
         nome: appSettings?.['company_name'],
         pixKey: appSettings?.['pix_key'],
@@ -435,7 +512,7 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
       },
       opcoes: pdfOptions,
     }));
-  }, [open, mode, pdfData, target, publicUrl, appSettings, pdfOptions]);
+  }, [open, mode, pdfData, target, publicUrl, appSettings, pdfOptions, semValidadeNoResumo]);
 
   useEffect(() => {
     if (!canSendLink && mode === 'link' && canSendDocument) setMode('document');
@@ -525,6 +602,29 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
       return;
     }
 
+    // (F5, P12.5) "Enviar agora" de orçamento (todo modo): a gravação com a data que a tela mostrou. 'mudou' não envia (a
+    // prévia é refeita e a tela avisa); funil e cargo enviam como a chave desligada; erro envia com a validade do cadastro e
+    // avisa. O texto que vai é o que a tela mostrou (o resumo já tem a data dele).
+    let opcoesDoEnvio = pdfOptions;
+    let legendaDoEnvio = caption;
+    if (osDoOrcamento) {
+      const v = await pedirValidadeDoEnvio(osDoOrcamento, true, validadeDoEnvio?.data ?? null);
+      if (v.motivo === 'mudou') {
+        setAvisoDaValidade(AVISO_DA_VALIDADE_QUE_MUDOU);
+        toast.error(AVISO_DA_VALIDADE_QUE_MUDOU);
+        setValidadeDoEnvio(await pedirValidadeDoEnvio(osDoOrcamento, false));
+        return;
+      }
+      const base = opcoesPadraoDoDocumento(appSettings, documentType, pdfData?.serviceOrder);
+      if (temDataDaF5(v)) {
+        opcoesDoEnvio = { ...base, validity: { mode: 'date', date: v.data! } };
+        if (mode === 'document' && v.linha && !envio.mensagem.includes(ddmmDoDia(v.data!))) legendaDoEnvio = `${caption}\n${v.linha}`;
+      } else {
+        opcoesDoEnvio = base;
+        if (v.motivo === 'erro') toast.error(AVISO_DA_VALIDADE_SEM_FIXAR);
+      }
+    }
+
     const ok = await send(
       {
         phone,
@@ -542,8 +642,8 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
         pdfData,
         documentType,
         filename,
-        caption,
-        pdfOptions,
+        caption: legendaDoEnvio,
+        pdfOptions: opcoesDoEnvio,
       },
       { autoRetry, maxAttempts },
     );
@@ -636,6 +736,9 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
               onTemplateChange={applyTemplate}
               usingClientDefault={!!clientSetting?.message_body}
             />
+            {linhaQueVaiJunto && (
+              <p className="text-xs text-muted-foreground">Vai junto na legenda: '{linhaQueVaiJunto}'</p>
+            )}
             {linkSaiDoTexto && (
               <p className="text-xs text-amber-700 dark:text-amber-400">
                 O link não vai: ele sai da mensagem ao enviar, porque a opção “Enviar também o link online” está desmarcada.
@@ -675,12 +778,26 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
             disabled={sending || createScheduled.isPending}
           />
 
+          {/* (F5) o agendado não leva a data contada do envio */}
+          {osDoOrcamento && schedule.enabled && temDataDaF5(validadeDoEnvio) && (
+            <p className="text-xs text-amber-700 dark:text-amber-400">O envio agendado não fixa a validade de 7 dias: para isso, envie agora.</p>
+          )}
+
           {agendamentoSemPdf && (
             <p className="text-xs text-amber-700 dark:text-amber-400">
               {agendarBloqueado
                 ? 'O envio agendado ainda não anexa o PDF: na hora marcada sairia o link online, e a opção do link está desmarcada. Para agendar, use o Resumo escrito ou marque “Enviar também o link online”; para mandar o PDF, envie agora.'
                 : 'O envio agendado ainda não anexa o PDF: na hora marcada sai a mensagem com o link online.'}
             </p>
+          )}
+          {/* (F5) vencida: nenhuma linha de validade sai, e o dono sabe antes de mandar */}
+          {osDoOrcamento && validadeDoEnvio?.motivo === 'vencida' && validadeDoEnvio.data && (
+            <p className="text-xs text-amber-700 dark:text-amber-400">
+              Este orçamento venceu em {ddmmDoDia(validadeDoEnvio.data)}: o PDF sai com essa data. Para renovar, mude a validade antes de mandar.
+            </p>
+          )}
+          {avisoDaValidade && (
+            <p role="alert" className="text-xs text-destructive">{avisoDaValidade}</p>
           )}
         </div>
 

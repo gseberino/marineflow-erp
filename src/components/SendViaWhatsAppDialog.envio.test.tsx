@@ -58,7 +58,9 @@ vi.mock('@/hooks/use-scheduled-sends', () => ({
 vi.mock('@/integrations/supabase/client', () => {
   const linha = { data: { whatsapp: '5547999990000', phone: null }, error: null };
   const q = { select: () => q, eq: () => q, maybeSingle: async () => linha };
-  return { supabase: { from: () => q, functions: { invoke: async () => ({ data: null, error: null }) } } };
+  // Retorno F5 (P12.5): a validade do envio, com a chave desligada (o padrão): o diálogo de antes
+  const rpc = async () => ({ data: { ok: true, fixou: false, motivo: 'desligada' }, error: null });
+  return { supabase: { from: () => q, functions: { invoke: async () => ({ data: null, error: null }) }, rpc } };
 });
 vi.mock('sonner', () => ({ toast: { success: () => {}, error: () => {}, loading: () => 't' } }));
 

@@ -16,7 +16,7 @@ import { buildHTMLDocument, type PDFData, type PDFDocumentType, type PDFOptions 
 import { ORCAMENTO } from '../../supabase/functions/_shared/pdf/amostras';
 import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from './SendViaWhatsAppDialog';
 
-type Envio = { pdfData: PDFData; pdfOptions: PDFOptions; documentType: PDFDocumentType; mode: string; link_title?: string; filename?: string };
+type Envio = { pdfData: PDFData; pdfOptions: PDFOptions; documentType: PDFDocumentType; mode: string; link_title?: string; filename?: string; caption?: string; message?: string };
 
 const estado = vi.hoisted(() => ({
   enviados: [] as Envio[],
@@ -26,6 +26,11 @@ const estado = vi.hoisted(() => ({
   // O padrão da empresa em produção hoje é 3 (app_settings.quote_validity_days).
   ajustes: { quote_validity_days: '3', company_name: 'HBR' } as Record<string, string>,
   vazio: [] as unknown[],
+  /** Retorno F5 (P12.5): as chamadas de orcamento_validade_do_envio e a resposta de cada uma (padrão: a chave desligada). */
+  rpcs: [] as Array<{ fn: string; args: Record<string, unknown> }>,
+  respostaDaRpc: null as null | ((args: Record<string, unknown>) => { data: unknown; error: unknown }),
+  agendados: [] as Array<Record<string, unknown>>,
+  avisos: [] as string[],
 }));
 
 vi.mock('@/hooks/use-pdf', () => ({ usePDFData: () => ({ data: estado.pdfData }) }));
@@ -46,7 +51,7 @@ vi.mock('@/hooks/use-whatsapp-send', () => ({
   useWhatsAppSend: () => ({ send: enviar, sending: false, attemptInfo: null }),
 }));
 vi.mock('@/hooks/use-scheduled-sends', () => ({
-  useCreateScheduledSend: () => ({ mutateAsync: async () => {}, isPending: false }),
+  useCreateScheduledSend: () => ({ mutateAsync: async (v: Record<string, unknown>) => { estado.agendados.push(v); }, isPending: false }),
 }));
 vi.mock('@/integrations/supabase/client', () => {
   const linha = { data: { whatsapp: '5547999990000', phone: null }, error: null };
@@ -55,9 +60,13 @@ vi.mock('@/integrations/supabase/client', () => {
     estado.pedidosAIA.push(opcoes);
     return { data: null, error: null };
   };
-  return { supabase: { from: () => q, functions: { invoke } } };
+  const rpc = async (fn: string, args: Record<string, unknown>) => {
+    estado.rpcs.push({ fn, args });
+    return estado.respostaDaRpc ? estado.respostaDaRpc(args) : { data: { ok: true, fixou: false, motivo: 'desligada' }, error: null };
+  };
+  return { supabase: { from: () => q, functions: { invoke }, rpc } };
 });
-vi.mock('sonner', () => ({ toast: { success: () => {}, error: () => {}, loading: () => 't' } }));
+vi.mock('sonner', () => ({ toast: { success: () => {}, error: (m: string) => { estado.avisos.push(m); }, loading: () => 't' } }));
 
 // Sem shareToken não há link público: o diálogo abre direto no modo "PDF anexado".
 const orcamentoAlvo: SendViaWhatsAppTarget = {
@@ -93,6 +102,10 @@ beforeEach(() => {
   estado.enviados.length = 0;
   estado.pedidosAIA.length = 0;
   estado.pdfData = ORCAMENTO; // quote_validity_days: 7, criado às 23h30 de 24/09 (Brasília)
+  estado.rpcs.length = 0;
+  estado.respostaDaRpc = null;
+  estado.agendados.length = 0;
+  estado.avisos.length = 0;
 });
 
 describe('Enviar via WhatsApp — validade no PDF anexado', () => {
@@ -166,5 +179,177 @@ describe('Enviar via WhatsApp — número da OS sem "OS " repetido', () => {
     const pedido = estado.pedidosAIA[0].body.messages[0].content;
     expect(pedido).toContain('sobre a OS-00100.');
     expect(pedido).not.toContain('OS OS-');
+  });
+});
+
+// ═══ Retorno F5 (P12.5): a validade contada do envio na tela ════════════════════════════════════════════════════════
+// Ao abrir, a prévia (p_gravar falso, não grava); ao "Enviar agora", a gravação com a data que a tela mostrou (p_esperada).
+// A data da F5 vale só para "Enviar agora": o agendado nunca a leva. A linha O22 vai só no PDF, numa 2ª linha da legenda,
+// fora da caixa editável. A data é inventada: a resposta do banco é simulada.
+const LINHA = 'Ele vale até sexta (20/11).';
+const PREVIA = { data: { ok: true, fixou: false, data: '2026-11-20', dias: 7, motivo: 'previa', legenda: 'Segue o ORÇ-00100, conforme solicitado. Ele vale até sexta (20/11). Qualquer dúvida, estamos à disposição.', linha: LINHA }, error: null };
+const FIXOU = { data: { ok: true, fixou: true, data: '2026-11-20', dias: 7, linha: LINHA }, error: null };
+const pelaGravacao = (previa: { data: unknown; error: unknown }, envio: { data: unknown; error: unknown }) =>
+  (a: Record<string, unknown>) => (a.p_gravar ? envio : previa);
+const caixa = () => (document.getElementById('msg-whatsapp') as HTMLTextAreaElement).value;
+
+function abrirOrcamento() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={qc}>
+      <SendViaWhatsAppDialog open onOpenChange={() => {}} target={orcamentoAlvo} />
+    </QueryClientProvider>,
+  );
+}
+
+async function irParaResumo() {
+  fireEvent.click(screen.getByRole('radio', { name: /Resumo escrito/i }));
+  await waitFor(() => expect(caixa()).toContain('*Orçamento ORÇ-00100*'));
+}
+
+describe('Enviar via WhatsApp — a validade do envio (F5)', () => {
+  it('ao abrir, a prévia é pedida uma vez, sem gravar', async () => {
+    estado.respostaDaRpc = pelaGravacao(PREVIA, FIXOU);
+    abrirOrcamento();
+    await screen.findByRole('button', { name: /Enviar agora/i });
+    await waitFor(() => expect(estado.rpcs).toHaveLength(1));
+    expect(estado.rpcs[0]).toEqual({ fn: 'orcamento_validade_do_envio', args: { p_os: 'os-1', p_gravar: false } });
+  });
+
+  it('com data: o PDF, o resumo e a linha "Vai junto" dizem a mesma data; a caixa editável não tem a linha', async () => {
+    estado.respostaDaRpc = pelaGravacao(PREVIA, FIXOU);
+    abrirOrcamento();
+    expect(await screen.findByText(`Vai junto na legenda: '${LINHA}'`)).toBeInTheDocument();
+    expect(caixa()).not.toContain('vale até');
+    await irParaResumo();
+    await waitFor(() => expect(caixa()).toContain('⏳ Proposta válida até 20/11/2026.'));
+    expect(caixa()).not.toContain('válida por');
+    expect(caixa().split('⏳').length).toBe(2);
+    // no resumo, nenhuma O22: a data já está na linha do resumo
+    expect(screen.queryByText(/Vai junto na legenda/)).not.toBeInTheDocument();
+  });
+
+  it('no envio do PDF: a legenda é a mensagem + a O22 numa 2ª linha, o PDF com a data do envio, e a gravação com p_esperada', async () => {
+    estado.respostaDaRpc = pelaGravacao(PREVIA, FIXOU);
+    abrirOrcamento();
+    await screen.findByText(`Vai junto na legenda: '${LINHA}'`);
+    const mensagem = caixa();
+    fireEvent.click(screen.getByRole('button', { name: /Enviar agora/i }));
+    await waitFor(() => expect(estado.enviados).toHaveLength(1));
+    const envio = estado.enviados[0];
+    expect(envio.caption).toBe(`${mensagem}\n${LINHA}`);
+    expect(envio.pdfOptions.validity).toEqual({ mode: 'date', date: '2026-11-20' });
+    expect(documentoGerado(envio)).toContain('Válido até 20/11/2026');
+    expect(estado.rpcs.map((c) => c.args)).toEqual([
+      { p_os: 'os-1', p_gravar: false },
+      { p_os: 'os-1', p_gravar: true, p_esperada: '2026-11-20' },
+    ]);
+  });
+
+  it('a mensagem que já traz o dd/mm da data vai sem a O22', async () => {
+    estado.respostaDaRpc = pelaGravacao(PREVIA, FIXOU);
+    abrirOrcamento();
+    await screen.findByText(`Vai junto na legenda: '${LINHA}'`);
+    fireEvent.change(document.getElementById('msg-whatsapp')!, { target: { value: 'Segue o orçamento, vale até 20/11.' } });
+    await waitFor(() => expect(screen.queryByText(/Vai junto na legenda/)).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /Enviar agora/i }));
+    await waitFor(() => expect(estado.enviados).toHaveLength(1));
+    expect(estado.enviados[0].caption).toBe('Segue o orçamento, vale até 20/11.');
+  });
+
+  it("'mudou' (abriu antes da meia-noite e mandou depois): nada é enviado, a data é refeita e a tela avisa", async () => {
+    const MUDOU = { data: { ok: true, fixou: false, data: '2026-11-21', antes: '2026-11-20', motivo: 'mudou' }, error: null };
+    const NOVA = { data: { ...PREVIA.data, data: '2026-11-21', linha: 'Ele vale até sábado (21/11).' }, error: null };
+    let previas = 0;
+    estado.respostaDaRpc = (a) => (a.p_gravar ? MUDOU : (++previas === 1 ? PREVIA : NOVA));
+    abrirOrcamento();
+    await screen.findByText(`Vai junto na legenda: '${LINHA}'`);
+    fireEvent.click(screen.getByRole('button', { name: /Enviar agora/i }));
+    expect(await screen.findByText('A validade mudou de dia desde que você abriu: confira o texto e mande de novo.')).toBeInTheDocument();
+    expect(estado.enviados).toHaveLength(0);
+    expect(await screen.findByText("Vai junto na legenda: 'Ele vale até sábado (21/11).'")).toBeInTheDocument();
+  });
+
+  it('vencida: nenhuma linha de validade (nem a O22, nem a do resumo) e o aviso na tela', async () => {
+    estado.respostaDaRpc = () => ({ data: { ok: true, fixou: false, data: '2026-11-10', motivo: 'vencida' }, error: null });
+    abrirOrcamento();
+    expect(await screen.findByText('Este orçamento venceu em 10/11: o PDF sai com essa data. Para renovar, mude a validade antes de mandar.')).toBeInTheDocument();
+    expect(screen.queryByText(/Vai junto na legenda/)).not.toBeInTheDocument();
+    await irParaResumo();
+    await waitFor(() => expect(caixa()).not.toContain('⏳ Proposta válida'));
+    fireEvent.click(screen.getByRole('button', { name: /Enviar agora/i }));
+    await waitFor(() => expect(estado.enviados).toHaveLength(1));
+    expect(estado.enviados[0].message).not.toContain('⏳ Proposta válida');
+  });
+
+  it('erro ao gravar: envia com a validade do cadastro, sem a linha, e avisa', async () => {
+    estado.respostaDaRpc = pelaGravacao(PREVIA, { data: null, error: { code: '57014', message: 'tempo esgotado' } });
+    abrirOrcamento();
+    await screen.findByText(`Vai junto na legenda: '${LINHA}'`);
+    const mensagem = caixa();
+    fireEvent.click(screen.getByRole('button', { name: /Enviar agora/i }));
+    await waitFor(() => expect(estado.enviados).toHaveLength(1));
+    expect(estado.enviados[0].pdfOptions.validity).toEqual({ mode: 'days', days: 7 });
+    expect(estado.enviados[0].caption).toBe(mensagem);
+    expect(estado.avisos).toContain('Não consegui fixar a validade do envio; o PDF sai com a validade do cadastro.');
+  });
+
+  it.each(['funil', 'cargo'])("%s ao gravar: envia como desligada (validade do cadastro, sem a linha)", async (motivo) => {
+    const resposta = motivo === 'cargo' ? { data: { ok: false, motivo }, error: null } : { data: { ok: true, fixou: false, motivo }, error: null };
+    estado.respostaDaRpc = pelaGravacao(PREVIA, resposta);
+    abrirOrcamento();
+    await screen.findByText(`Vai junto na legenda: '${LINHA}'`);
+    const mensagem = caixa();
+    fireEvent.click(screen.getByRole('button', { name: /Enviar agora/i }));
+    await waitFor(() => expect(estado.enviados).toHaveLength(1));
+    expect(estado.enviados[0].pdfOptions.validity).toEqual({ mode: 'days', days: 7 });
+    expect(estado.enviados[0].caption).toBe(mensagem);
+    expect(estado.avisos).toEqual([]);
+  });
+
+  it('agendado: sem gravar, o resumo agendado com a validade do cadastro e o aviso; desligar volta à data da F5', async () => {
+    estado.respostaDaRpc = pelaGravacao(PREVIA, FIXOU);
+    abrirOrcamento();
+    await screen.findByText(`Vai junto na legenda: '${LINHA}'`);
+    await irParaResumo();
+    await waitFor(() => expect(caixa()).toContain('⏳ Proposta válida até 20/11/2026.'));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Agendar envio/i }));
+    expect(await screen.findByText('O envio agendado não fixa a validade de 7 dias: para isso, envie agora.')).toBeInTheDocument();
+    await waitFor(() => expect(caixa()).toContain('⏳ Proposta válida por 7 dias.'));
+    fireEvent.click(screen.getByRole('button', { name: /^Agendar envio$/i }));
+    await waitFor(() => expect(estado.agendados).toHaveLength(1));
+    expect(String(estado.agendados[0].message)).toContain('⏳ Proposta válida por 7 dias.');
+    expect(String(estado.agendados[0].message)).not.toContain('20/11/2026');
+    // só a prévia da abertura: nenhuma gravação
+    expect(estado.rpcs.map((c) => c.args.p_gravar)).toEqual([false]);
+    // desligar o agendamento de novo: o resumo volta à data da F5
+    fireEvent.click(screen.getByRole('checkbox', { name: /Agendar envio/i }));
+    await waitFor(() => expect(caixa()).toContain('⏳ Proposta válida até 20/11/2026.'));
+  });
+
+  it('com a chave desligada: o diálogo é o de antes (sem "Vai junto", sem aviso, a validade do cadastro)', async () => {
+    abrirOrcamento();
+    await screen.findByRole('button', { name: /Enviar agora/i });
+    await waitFor(() => expect(estado.rpcs).toHaveLength(1));
+    expect(screen.queryByText(/Vai junto na legenda/)).not.toBeInTheDocument();
+    const mensagem = caixa();
+    fireEvent.click(screen.getByRole('button', { name: /Enviar agora/i }));
+    await waitFor(() => expect(estado.enviados).toHaveLength(1));
+    expect(estado.enviados[0].pdfOptions.validity).toEqual({ mode: 'days', days: 7 });
+    expect(estado.enviados[0].caption).toBe(mensagem);
+    fireEvent.click(screen.getByRole('checkbox', { name: /Agendar envio/i }));
+    expect(screen.queryByText(/O envio agendado não fixa a validade/)).not.toBeInTheDocument();
+  });
+
+  it('OS: nem pergunta ao banco', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <SendViaWhatsAppDialog open onOpenChange={() => {}} target={osAlvo} />
+      </QueryClientProvider>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: /Enviar agora/i }));
+    await waitFor(() => expect(estado.enviados).toHaveLength(1));
+    expect(estado.rpcs).toEqual([]);
   });
 });
