@@ -79,6 +79,7 @@ import {
 import { pinNoTexto, verifyPin } from "../_shared/ai/whatsapp-pin.ts";
 import { camadaDoRetorno, type CartaoVivo, type DependenciasDaCamada, ponteiroDoCartao } from "../_shared/retorno/camada.ts";
 import { camadaDoParceiro, type CartaoDoParceiroVivo, type DependenciasDoParceiro } from "../_shared/parceiro/camada.ts";
+import { camadaDoOrcamento, type DependenciasDoOrcamento } from "../_shared/orcamento/camada.ts";
 import { aplicarCarona, caronaDoTurno, comCarona, juntarCarona, osDoJob, osDoTurno } from "../_shared/agenda/carona.ts";
 import { caronaDoRetorno } from "../_shared/whatsapp/retorno-carona.ts";
 import { omitirResultadosDoRetorno } from "../_shared/ai/tools/retorno.ts";
@@ -598,6 +599,18 @@ function depsDoParceiro(admin: any, appUser: any, depsRetorno: DependenciasDaCam
   };
 }
 
+/**
+ * Retorno F5 (P10.1): o que a camada do orçamento precisa do turno. O dono é o da F2; a RPC vai como é (orcamento_dito já
+ * recebe p_autor, que a camada põe). Nunca há PIN por aqui.
+ */
+function depsDoOrcamento(admin: any, appUser: any, depsRetorno: DependenciasDaCamada): DependenciasDoOrcamento {
+  return {
+    autor: appUser.id,
+    ehDoDono: depsRetorno.ehDoDono,
+    rpc: (fn, args) => admin.rpc(fn, args),
+  };
+}
+
 /** O par da conversa: só rótulos e contagens, nunca o que o cliente escreveu. */
 async function gravarParDoRetorno(admin: any, sessionId: string, par: { user: string; assistant: string }): Promise<void> {
   try {
@@ -660,6 +673,15 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
   // ---- Camada determinística (custo $0): o vocabulário do retorno rápido (F2) ----
   // ANTES da trava e da confirmação: "não 2" rejeitaria o cartão inteiro, e "1 A sim <PIN>" levaria o PIN ao modelo.
   const depsRetorno = depsDoRetorno(admin, { appUser, phone: phoneNormalized, sessionId, toolCtx, texto: text, settings });
+  // Retorno F5 (P10.1): a camada do orçamento vem antes das do parceiro e do retorno. *segura 151*, *solta 151*, *segura
+  // orcamentos*, *solta orcamentos* e *motivo 151 B* (as três palavras não colidem, matriz 7.2; a ordem só garante que
+  // *segura 151* nunca chegue ao modelo). Só o dono; sem PIN; a resposta sai pronta de orcamento_dito.
+  const doOrcamento = await camadaDoOrcamento(text, depsDoOrcamento(admin, appUser, depsRetorno));
+  if (doOrcamento) {
+    await queueWhatsAppReply(admin, phoneNormalized, doOrcamento.texto);
+    await admin.from("ai_operator_sessions").update({ last_activity_at: new Date().toISOString() }).eq("id", sessionId);
+    return jr({ ok: true, orcamento: doOrcamento.comando });
+  }
   // Retorno F4 (P11.1): a camada do parceiro vem antes. *parceiro*, *parceiro 74*, *N tira L*, *N sabe L* e, com o cartão do
   // parceiro vivo (e sem o da F2), as letras do cartão. O *sim <PIN>* segue o caminho único (depsRetorno.confirmar). O texto
   // do cartão não vai à conversa: o SQL grava o par só com a contagem.

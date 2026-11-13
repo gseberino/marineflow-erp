@@ -28,6 +28,7 @@ import { formatoDoResumoNoBanco } from "../_shared/secretario/formato.ts";
 import { ehComandoDaAgendaLigada } from "../_shared/agenda/executar.ts";
 import { ehPalavraDoRetornoLigada } from "../_shared/retorno/camada.ts";
 import { ehPalavraDoParceiroLigada } from "../_shared/parceiro/camada.ts";
+import { ehPalavraDoOrcamentoLigada } from "../_shared/orcamento/camada.ts";
 import { respostaDaEquipe } from "../_shared/agenda/resposta-da-equipe.ts";
 import { respostaDoCliente } from "../_shared/agenda/resposta-do-cliente.ts";
 import { ehPedidoDeParar } from "../_shared/whatsapp/parar.ts";
@@ -460,7 +461,9 @@ export async function handler(req: Request): Promise<Response> {
                     (await ehComandoDaAgendaLigada(admin, t)) ||
                     (await ehPalavraDoRetornoLigada(admin, t)) ||
                     // Retorno F4 (P11.1): *parceiro*, *parceiro 74* e, com o cartão do parceiro vivo, as letras dele
-                    (await ehPalavraDoParceiroLigada(admin, t)),
+                    (await ehPalavraDoParceiroLigada(admin, t)) ||
+                    // Retorno F5 (P10.1): *segura 151*, *solta 151*, *segura orcamentos* e *motivo 151 B* (sem banco)
+                    ehPalavraDoOrcamentoLigada(t),
                 },
               );
             } catch (e) {
