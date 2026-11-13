@@ -160,8 +160,9 @@ begin
   if v is distinct from '23514:retorno_saidas_emissor_check' then
     raise exception '2g: emissor fora da lista passou (%)', v;
   end if;
+  -- A F5 (P1) pôs 'comercial' na lista (a cadência do orçamento): o valor fora da lista é um que nenhuma fase usa.
   v := pg_temp.retorno_f4_base_erro(format($q$insert into public.retorno_saidas (emissor, tipo, classe, chave, phone_normalized, modo, enviar_em, dedupe_key)
-                                              values ('parceiro', 'parceiro_recibo', 'comercial', %L, %L, 'sombra', '2027-01-05 09:30-03', 'teste-f4-base:2h')$q$,
+                                              values ('parceiro', 'parceiro_recibo', 'classe_inexistente', %L, %L, 'sombra', '2027-01-05 09:30-03', 'teste-f4-base:2h')$q$,
                                            c_chave, c_fone));
   if v is distinct from '23514:retorno_saidas_classe_check' then
     raise exception '2h: classe fora da lista passou (%)', v;
