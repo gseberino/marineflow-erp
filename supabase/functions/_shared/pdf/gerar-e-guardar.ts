@@ -125,11 +125,17 @@ export async function montarDocumentoDaOrdem(
  * com a condição de pagamento), as opções e a validade do documento (opcoesPadraoDoDocumento) e os
  * dados da empresa em app_settings. O texto em si sai do espelho resumo-whatsapp.ts, que um teste
  * de paridade mantém idêntico ao da tela.
+ *
+ * Retorno F5 (P11.8): `extra` é a validade do envio (opcoesDoResumo, a mesma no resumo do *sim* e no envio). Com
+ * `semValidade` (o orçamento vencido), o resumo sai sem a linha "⏳ Proposta válida…" (e ela vence a data). Com `validadeAte`
+ * (aaaa-mm-dd), a linha diz "válida até dd/mm/aaaa" no lugar da que vem da ordem, mesmo antes de o banco ter a data (a prévia
+ * do *sim* não grava): é o mesmo texto que a ordem daria depois. Sem o argumento, byte a byte o de antes.
  */
 export async function montarResumoDeValores(
   admin: LeitorDoBanco,
   ordem: { id: string; status: string | null },
   settings: Record<string, string>,
+  extra?: { semValidade?: boolean; validadeAte?: string | null },
 ): Promise<{ ok: true; texto: string; numero: string; rotulo: "Orçamento" | "Ordem de Serviço" } | { ok: false; motivo: string }> {
   let dados;
   try {
@@ -142,6 +148,9 @@ export async function montarResumoDeValores(
   if (opcoes.hideFinancials) return { ok: false, motivo: "o documento esconde os valores — não há resumo de valores para mandar" };
   // deno-lint-ignore no-explicit-any
   const so = dados.serviceOrder as Record<string, any>;
+  // (F5, P11.8) semValidade vence validadeAte; sem nenhum dos dois, a validade da ordem, como sempre
+  const semValidade = extra?.semValidade === true;
+  const ateDoEnvio = !semValidade && typeof extra?.validadeAte === "string" && extra.validadeAte ? dataBR(extra.validadeAte) : null;
   const texto = buildQuoteWhatsAppSummary({
     numero: so.service_order_number,
     clienteNome: dados.client?.name ?? null,
@@ -150,8 +159,10 @@ export async function montarResumoDeValores(
     orcamento: so,
     parcelas: so.payment_condition_installments ?? null,
     condicaoLabel: so.payment_condition_label ?? so.payment_conditions ?? null,
-    validadeDias: opcoes.validity?.days ?? null,
-    validadeAte: opcoes.validity?.mode === "date" && opcoes.validity.date ? dataBR(opcoes.validity.date) : null,
+    validadeDias: semValidade ? null : (opcoes.validity?.days ?? null),
+    validadeAte: semValidade
+      ? null
+      : (ateDoEnvio ?? (opcoes.validity?.mode === "date" && opcoes.validity.date ? dataBR(opcoes.validity.date) : null)),
     empresa: {
       nome: settings.company_name,
       pixKey: settings.pix_key,

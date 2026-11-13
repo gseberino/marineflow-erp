@@ -118,6 +118,8 @@ function montarAmbiente(opcoes: {
       if (fn === "parceiro_destino_do_pdf") {
         return Promise.resolve(opcoes.destinoErro ? { data: null, error: opcoes.destinoErro } : { data: opcoes.destino ?? DESTINO_OK, error: null });
       }
+      // Retorno F5 (P11.4): a validade do envio ao cliente, com a chave desligada (o padrão: nada muda)
+      if (fn === "orcamento_validade_do_envio") return Promise.resolve({ data: { ok: true, fixou: false, motivo: "desligada" }, error: null });
       return Promise.resolve({ data: null, error: null });
     },
     storage: {
@@ -364,7 +366,8 @@ Deno.test("resumo sem destino: o de sempre, sem ler o parceiro", async () => {
   const amb = montarAmbiente();
   const t = await resumirEnvioAoCliente(amb.admin, { service_order_id: ORC.id, formato: "pdf" }, ONZE_DA_MANHA, "u1");
   assertStringIncludes(t!, `Cliente: *${CLIENTE.name}*`);
-  assertEquals(amb.rpcs.length, 0);
+  // (F5) o resumo ao cliente pergunta a validade do envio (orcamento_validade_do_envio); o parceiro continua sem ser lido
+  assertEquals(amb.rpcs.filter((x) => x.fn !== "orcamento_validade_do_envio").length, 0);
   const semAutor = await resumirEnvioAoCliente(amb.admin, { service_order_id: ORC.id, formato: "pdf" }, ONZE_DA_MANHA);
   assertEquals(semAutor, t);
 });

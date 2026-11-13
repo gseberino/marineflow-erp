@@ -164,6 +164,8 @@ Deno.test("a pendência do cartão executa no *sim* como a do assistente: o tít
       };
       return q;
     },
+    // Retorno F5 (P11.4): o retrato da tool pergunta a validade do envio; com a chave desligada (o padrão), o retrato de antes
+    rpc: () => Promise.resolve({ data: { ok: true, fixou: false, motivo: "desligada" }, error: null }),
   };
   assertEquals(payload._retrato, await retratoDoEnvio(db, { service_order_id: "orc-113" }));
   // lida pela tool, continua PDF (tem _solicitante) e passa na validação com o dono (admin) aprovando

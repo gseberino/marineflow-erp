@@ -34,6 +34,9 @@ import { validarMensagem } from "./resposta.ts";
 import { agrupadoEm, ehOsAgrupada } from "./service-orders.ts";
 // Frente financeiro (07/10/2026): o lembrete enviado entra no histórico da cobrança, como na tela.
 import { registrarEnvioDaCobranca } from "./cobrancas.ts";
+// Retorno F5 (P11.4): a O21 e a O22 que o banco devolve passam pelo validador do retorno (o isolamento proíbe só o caminho
+// contrário: _shared/retorno/ nunca importa _shared/ai/).
+import { validarSaida } from "../../retorno/validador.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -166,6 +169,11 @@ export async function enviarOrdemAoCliente(p: {
   limiteMs?: number;
   /** Quem confirmou o envio (ctx.userId): fica na conversa como quem mandou (15/10/2026). */
   sentBy?: string;
+  /**
+   * Retorno F5 (P11.4, P11.9): o envio pelo cartão do retorno vai com orcamento_via "cartao", e o whatsapp-send o registra
+   * com essa via (viaDoOrcamento). Ausente = a via da origem (assistente).
+   */
+  viaDoOrcamento?: "cartao";
 }): Promise<
   | { ok: true; deduplicated?: boolean; messageId?: string | null }
   | { ok: false; error: string; semResposta?: boolean }
@@ -189,6 +197,7 @@ export async function enviarOrdemAoCliente(p: {
       service_order_id: p.serviceOrderId,
       dedupe_key: p.dedupeKey,
       ...(p.sentBy ? { sent_by: p.sentBy } : {}),
+      ...(p.viaDoOrcamento === "cartao" ? { orcamento_via: "cartao" } : {}),
     }, p.jwt, controle.signal);
     const data = await r.json().catch(() => ({}));
     if (!r.ok) {
@@ -333,23 +342,137 @@ export function mascararTelefone(telefone: unknown): string {
   return digitos.length >= 4 ? `••••${digitos.slice(-4)}` : "••••";
 }
 
+// (F5, P11.4) orcamento_enviado_em: a coluna da F5 (20270112100000), no ar antes desta edge (8.2: migrations, depois edges)
 const CAMPOS_DA_ORDEM_PARA_ENVIO =
-  "id, service_order_number, share_token, client_id, status, grand_total, quote_status, created_at, quote_validity_days, quote_validity_date, cancellation_reason, origem";
+  "id, service_order_number, share_token, client_id, status, grand_total, quote_status, created_at, quote_validity_days, quote_validity_date, cancellation_reason, origem, orcamento_enviado_em";
+
+// ─── Retorno F5 (P11.4, C-VAL-ENVIO): a validade contada do envio, em todo envio de orçamento ─────────────────────────
+// A data é a de orcamento_validade_do_envio (hoje + validade_orcamento_dias no 1º envio; a de antes no reenvio; vencida =
+// nenhuma linha), e a legenda (O21) e a linha (O22) vêm prontas do banco, conferidas aqui pelo validador do retorno. A chave
+// desligada (o padrão) devolve 'desligada': nada muda. A função ainda não publicada, também.
+
+/** O que o envio usa da validade: a data, o motivo, a O21 e a O22 (já conferidas; nulas quando reprovadas ou vencida). */
+export interface ValidadeDoEnvio {
+  /** aaaa-mm-dd; null = sem data da F5 (desligada, funil, cargo, erro) */
+  data: string | null;
+  /** fixou | previa | ja_enviado | vencida | mudou | desligada | funil | cargo | erro */
+  motivo: string;
+  legenda: string | null;
+  linha: string | null;
+  aviso?: string;
+}
+
+const AVISO_LINHA_REPROVADA = "A linha da validade não entrou na legenda: confira na tela.";
+const AVISO_VALIDADE_SEM_FIXAR = "Não consegui fixar a validade do envio; o PDF sai com a validade do cadastro.";
+const FUNCAO_AUSENTE_NA_VALIDADE = new Set(["PGRST202", "42883"]);
+const DIA_ISO = /^\d{4}-\d{2}-\d{2}$/;
+
+/** "2026-12-15" → "15/12" (o dd/mm que a frase do dono pode já trazer). */
+function ddmmDoDia(dia: string): string {
+  const [, m, d] = dia.split("-");
+  return `${d}/${m}`;
+}
+
+/**
+ * orcamento_validade_do_envio(p_os, p_agora, p_gravar, p_esperada), pela chave de serviço (o p_agora vale). A legenda e a
+ * linha passam por validarSaida com o contexto que o banco devolveu; reprovadas, saem nulas com o aviso. Nunca lança: erro =
+ * motivo 'erro', sem data, com o aviso de que o PDF sai com a validade do cadastro.
+ */
+export async function validadeDoEnvio(
+  admin: any,
+  so: { id: string },
+  opcoes: { agora: Date; gravar: boolean; esperada?: string | null },
+): Promise<ValidadeDoEnvio> {
+  const erro: ValidadeDoEnvio = { data: null, motivo: "erro", legenda: null, linha: null, aviso: AVISO_VALIDADE_SEM_FIXAR };
+  try {
+    const { data, error } = await admin.rpc("orcamento_validade_do_envio", {
+      p_os: so.id, p_agora: opcoes.agora.toISOString(), p_gravar: opcoes.gravar, p_esperada: opcoes.esperada ?? null,
+    });
+    if (error) {
+      // a F5 ainda não publicada: como a chave desligada (nada muda)
+      if (FUNCAO_AUSENTE_NA_VALIDADE.has(String(error.code ?? ""))) return { data: null, motivo: "desligada", legenda: null, linha: null };
+      return erro;
+    }
+    const r = (data ?? {}) as Record<string, unknown>;
+    if (r.ok !== true) return r.motivo === "cargo" ? { data: null, motivo: "cargo", legenda: null, linha: null } : erro;
+    const motivo = r.fixou === true ? "fixou" : typeof r.motivo === "string" && r.motivo ? r.motivo : "erro";
+    if (motivo === "erro") return erro;
+    const dia = typeof r.data === "string" && DIA_ISO.test(r.data) ? r.data : null;
+    const v: ValidadeDoEnvio = { data: dia, motivo, legenda: null, linha: null };
+    if (motivo === "vencida" || motivo === "mudou" || !dia) return v;
+    const legenda = typeof r.legenda === "string" && r.legenda.trim() ? r.legenda.trim() : null;
+    const linha = typeof r.linha === "string" && r.linha.trim() ? r.linha.trim() : null;
+    if (!legenda && !linha) return v;
+    // deno-lint-ignore no-explicit-any
+    const contexto = r.contexto as any;
+    const passa = (t: string | null) => t === null || validarSaida(t, contexto).ok;
+    if (!passa(legenda) || !passa(linha)) return { ...v, aviso: AVISO_LINHA_REPROVADA };
+    return { ...v, legenda, linha };
+  } catch {
+    return erro;
+  }
+}
+
+/**
+ * As opções do resumo de valores (montarResumoDeValores), as mesmas no resumo do *sim* e no envio: vencida → sem a linha da
+ * validade; com data e outro motivo (a prévia, a data fixada ou a do 1º envio) → "válida até" essa data; sem a F5 (sem
+ * validade, desligada, funil, cargo, erro) → undefined, o resumo de sempre, com a validade do cadastro.
+ */
+export function opcoesDoResumo(v?: ValidadeDoEnvio | null): { semValidade?: boolean; validadeAte?: string } | undefined {
+  if (!v) return undefined;
+  if (v.motivo === "vencida") return { semValidade: true };
+  if (v.data && v.motivo !== "mudou") return { validadeAte: v.data };
+  return undefined;
+}
+
+/** O *sim* chegou noutro dia e a data andou: nada sai (o *sim* é sobre o texto que sai). */
+function fraseDoDiaQueVirou(antes: string | null, depois: string | null): string {
+  const de = antes && DIA_ISO.test(antes) ? ddmmDoDia(antes) : "a data do pedido";
+  const para = depois && DIA_ISO.test(depois) ? ddmmDoDia(depois) : "a de hoje";
+  return `Desde o pedido, a validade do envio passou de ${de} para ${para} (o dia virou). Nada foi enviado ao cliente — peça de novo para confirmar com a data de agora.`;
+}
+
+/** As linhas que contam a verdade da validade no resumo do *sim* (P11.4); nenhuma sem a F5. */
+function linhasDaValidadeNoResumo(so: { service_order_number?: string | null }, v: ValidadeDoEnvio | null): string[] {
+  if (!v) return [];
+  if (v.motivo === "vencida" && v.data) {
+    return [`⚠️ O ${so.service_order_number} venceu em ${ddmmDoDia(v.data)}: o PDF sai com essa data. Para renovar, mude a validade na tela antes de mandar.`];
+  }
+  if (v.motivo === "previa" && v.data) {
+    return [`Validade: até ${dataBR(v.data)}, contada de hoje (a data conta do envio: se você confirmar noutro dia, eu peço de novo).`];
+  }
+  if (v.motivo === "ja_enviado" && v.data) return [`Validade: até ${dataBR(v.data)}, a data do 1º envio.`];
+  return v.aviso ? [`⚠️ ${v.aviso}`] : [];
+}
 
 /**
  * Retorno F3 (K6): 7 dias CONTADOS DO ENVIO, escritos no PDF. A data fica em quote_validity_date, que o PDF e a R19 já leem.
  * Vale para ORÇ do retorno e para o que sai pelo cartão, e é refeita a cada tentativa enquanto o orçamento está em rascunho:
- * PDF que falha não congela a data. Depois de 'sent' não renova (D13). Orçamento da tela e do assistente livre segue como
- * está até a F5. Nunca lança: erro aqui segue o envio e devolve o aviso.
+ * PDF que falha não congela a data. Depois de 'sent' não renova (D13). Nunca lança: erro aqui segue o envio e devolve o aviso.
+ *
+ * Retorno F5 (P11.4): o ramo da F3 (com origem ou data do cartão) fica como está. O ramo novo (sem origem e sem data do
+ * cartão, só orçamento) é validadeDoEnvio(gravar: true, esperada) e devolve `doEnvio` (mais o aviso_validade quando há aviso);
+ * a chave desligada devolve {}, como hoje. `aoParceiro`: só o ramo da F3 (o parceiro não é o cliente, R-12; a data é a do
+ * envio ao cliente). `soRamoNovo` (o link e o resumo): o ramo da F3 não roda (nunca rodou neles).
  */
 export async function fixarValidadeDoEnvio(
   admin: any,
-  so: { id: string; quote_status?: string | null; origem?: string | null },
+  so: { id: string; status?: string | null; quote_status?: string | null; origem?: string | null; quote_validity_date?: string | null },
   dataDoCartao?: string | null,
   agora: Date = new Date(),
-): Promise<{ aviso_validade?: string }> {
+  opcoes?: { aoParceiro?: boolean; soRamoNovo?: boolean; esperada?: string | null },
+): Promise<{ aviso_validade?: string; doEnvio?: ValidadeDoEnvio }> {
+  if (!dataDoCartao && !so.origem) {
+    if (opcoes?.aoParceiro) return {};
+    // OS não é orçamento: o banco diria 'ja_enviado' com a O21 ("Segue o OS-…")
+    if (documentTypeFor(String(so.status ?? "")) !== "quote") return {};
+    const doEnvio = await validadeDoEnvio(admin, so, { agora, gravar: true, esperada: opcoes?.esperada ?? null });
+    if (doEnvio.motivo === "desligada") return {};
+    return { doEnvio, ...(doEnvio.aviso ? { aviso_validade: doEnvio.aviso } : {}) };
+  }
+  if (opcoes?.soRamoNovo) return {};
   try {
-    if (so.quote_status !== "draft" || (!dataDoCartao && !so.origem)) return {};
+    if (so.quote_status !== "draft") return {};
     const { data: cfg } = await admin.from("retorno_config").select("validade_orcamento_dias").maybeSingle();
     const n = diasDeValidade(cfg?.validade_orcamento_dias) ?? 7;
     const data = dataDoCartao ?? somarDiasAoDia(diaBR(agora), n);
@@ -393,17 +516,27 @@ export function mensagemComLink(mensagem: string, link: string, shareToken: stri
 
 /**
  * A legenda do PDF no formato 'pdf' (decisão do dono, 20/10/2026): a frase dele (custom_message); sem ela, a
- * frase padrão — a MESMA da tela de envio (src/lib/whatsapp-mensagem-ao-cliente.ts, corpoPadrao), sem
+ * frase padrão — a mesma frase da tela de envio (src/lib/whatsapp-mensagem-ao-cliente.ts, corpoPadrao), sem
  * saudação, porque quase sempre ele já está conversando com o cliente; com sem_legenda ("só o arquivo"),
  * nenhuma. O resumo da confirmação e o envio usam esta função: o "sim" é sobre o texto que sai.
+ *
+ * Retorno F5 (P11.4): a linha da validade vem do banco (validadeDoEnvio), numa 2ª linha na tela e dentro da O21 no
+ * assistente. Sem o 3º argumento, byte a byte a de antes. Com ele: sem frase e sem sem_legenda, a O21 ("Segue o ORÇ-00123,
+ * conforme solicitado. Ele vale até terça (15/12). …"); com a frase do dono, ela inteira e, se não traz o dd/mm da data, a
+ * O22 numa 2ª linha; vencida (sem legenda nem linha) ou legenda nula → a de antes. Continua síncrona e pura.
  */
 export function legendaDoPdf(
   args: Record<string, unknown> | null | undefined,
   so: { service_order_number?: string | null; status?: string | null },
+  validade?: ValidadeDoEnvio | null,
 ): string {
   const frase = typeof args?.custom_message === "string" ? args.custom_message.trim() : "";
-  if (frase) return frase;
+  if (frase) {
+    const linha = validade?.linha && validade.data && validade.motivo !== "vencida" ? validade.linha : null;
+    return linha && !frase.includes(ddmmDoDia(validade!.data!)) ? `${frase}\n${linha}` : frase;
+  }
   if (args?.sem_legenda === true || args?.sem_legenda === "true") return "";
+  if (validade?.legenda && validade.motivo !== "vencida") return validade.legenda;
   const numero = String(so.service_order_number ?? "").trim();
   if (!numero) return "";
   return documentTypeFor(String(so.status ?? "")) === "quote"
@@ -434,7 +567,11 @@ export async function retratoDoEnvio(admin: any, args: Record<string, unknown>, 
     ? await admin.from("clients").select("whatsapp, phone").eq("id", so.client_id).maybeSingle()
     : { data: null };
   const digitos = String(c?.whatsapp || c?.phone || "").replace(/\D/g, "");
-  return { telefone: hashCurto(digitos), total: Number(so.grand_total) || 0 };
+  // Retorno F5 (P11.4): a data que o resumo do *sim* mostrou (a prévia, sem gravar); o execute a passa como p_esperada, e o
+  // *sim* de outro dia, com a data andando, não envia. Sem a F5 (desligada), o retrato de antes.
+  const v = documentTypeFor(so.status) === "quote" && !so.origem ? await validadeDoEnvio(admin, so, { agora: new Date(), gravar: false }) : null;
+  const daValidade = !v || v.motivo === "desligada" ? {} : v.data ? { validade: v.data } : { validade_motivo: v.motivo };
+  return { telefone: hashCurto(digitos), total: Number(so.grand_total) || 0, ...daValidade };
 }
 
 /** Retorno F4 (C-DESTINO): a resposta de parceiro_destino_do_pdf. */
@@ -537,6 +674,10 @@ export async function resumirEnvioAoCliente(
     : { data: null };
   const formato = formatoDoEnvio(args as { formato?: unknown });
   const rotulo = documentTypeFor(so.status) === "quote" ? "Orçamento" : "Ordem de Serviço";
+  // Retorno F5 (P11.4): uma chamada, sem gravar, para todo formato: o dono lê no *sim* a legenda e o resumo exatos do envio
+  // do mesmo dia (no dia seguinte, o 'mudou' impede o envio). Só orçamento sem origem (o do retorno segue o ramo da F3).
+  const v = documentTypeFor(so.status) === "quote" && !so.origem ? await validadeDoEnvio(admin, so, { agora, gravar: false }) : null;
+  const comF5 = !!v && !["desligada", "funil", "cargo", "erro"].includes(v.motivo);
   const telefone = c?.whatsapp || c?.phone;
   const linhas = [
     `Cliente: *${c?.name || "—"}*`,
@@ -558,7 +699,7 @@ export async function resumirEnvioAoCliente(
   // Só o PDF sem frase dele (20/10/2026): vai a frase padrão — ou nada, se ele pediu "só o arquivo". O dono
   // tem de ver no "sim" exatamente a legenda que o cliente vai ler.
   if (!mensagem && formato === "pdf") {
-    const legenda = legendaDoPdf(args, so);
+    const legenda = legendaDoPdf(args, so, v);
     linhas.push(legenda ? `Legenda: "${legenda}"` : "Legenda: nenhuma (só o arquivo)");
   }
   // Resumo: o "sim" é sobre o TEXTO que o cliente vai ler — ele vai inteiro na confirmação, com a
@@ -567,11 +708,13 @@ export async function resumirEnvioAoCliente(
     const { data: linhasDeConfig } = await admin.from("app_settings").select("key, value");
     const cfg: Record<string, string> = {};
     for (const r of (linhasDeConfig ?? []) as Array<{ key: string; value: unknown }>) cfg[r.key] = String(r.value ?? "");
-    const montado = await montarResumoDeValores(admin, so, cfg);
+    // (F5) com a mesma data do envio do mesmo dia (opcoesDoResumo): uma validade só no texto
+    const montado = await montarResumoDeValores(admin, so, cfg, opcoesDoResumo(v));
     linhas.push(montado.ok ? `\n${resumoComFrase(montado.texto, mensagem)}\n` : `⚠️ Não consegui montar o resumo (${montado.motivo}) — o envio será recusado.`);
   }
   if (mensagem && formato !== "resumo") {
-    linhas.push(`${formato === "pdf" ? "Legenda" : "Mensagem"}: "${mensagem}"`);
+    // (F5) no PDF, a legenda que sai de verdade: a frase do dono e, sem o dd/mm, a linha da validade numa 2ª linha
+    linhas.push(`${formato === "pdf" ? "Legenda" : "Mensagem"}: "${formato === "pdf" ? legendaDoPdf(args, so, v) : mensagem}"`);
     if (formato && mensagem.length > LIMITE_DA_MENSAGEM[formato]) {
       linhas.push(`⚠️ A mensagem tem ${mensagem.length} caracteres (limite ${LIMITE_DA_MENSAGEM[formato]}) — o envio será recusado.`);
     } else if (formato === "link" && so.share_token && !mensagem.includes(so.share_token)) {
@@ -579,10 +722,16 @@ export async function resumirEnvioAoCliente(
     }
   }
   if (so.status === "cancelled") linhas.push(frasesDaOrdemCancelada(so).aviso);
+  // (F5) no pdf_e_link, a linha da validade logo depois da abertura (a mesma regra do dd/mm da frase)
+  if (formato === "pdf_e_link" && v?.linha && v.data && !mensagem.includes(ddmmDoDia(v.data))) linhas.push(`Na legenda: "${v.linha}"`);
+  // (F5, P11.4) o resumo diz a verdade de cada caso: o 1º envio (a data conta do envio), o reenvio (a data do 1º envio) e
+  // o vencido (a data passada, uma vez só)
+  linhas.push(...linhasDaValidadeNoResumo(so, v));
   // A validade que o PDF vai imprimir, pela MESMA conta do documento e do aviso de vencimento
   // (vencimentoDoOrcamento). Não bloqueia: reenviar um orçamento vencido para reabrir a conversa é
   // legítimo — mas o dono tem de saber, antes do "sim", que o cliente vai ler uma data passada.
-  if (documentTypeFor(so.status) === "quote") {
+  // (F5) só sem a validade do envio (desligada, funil, cargo, erro): com ela, a data é a da F5 e a frase é a de cima.
+  if (documentTypeFor(so.status) === "quote" && !comF5) {
     const { data: padrao } = await admin.from("app_settings").select("value").eq("key", "quote_validity_days").maybeSingle();
     const ultimoDia = vencimentoDoOrcamento(so, { quote_validity_days: padrao?.value }, agora);
     if (ultimoDia) {
@@ -683,7 +832,9 @@ async function enviarPdfAoParceiro(args: Record<string, unknown>, ctx: ToolCtx):
   }
 
   // 3. o documento, em via reduzida quando o banco diz reduzir
-  const validade = await fixarValidadeDoEnvio(admin, so, ctx.validadeDoCartao);
+  // (F5, P11.4) ao parceiro, só o ramo da F3: nunca fixa "hoje + 7" (a data é a do envio ao cliente, K6; o parceiro não é o
+  // cliente, R-12), e nunca há doEnvio
+  const validade = await fixarValidadeDoEnvio(admin, so, ctx.validadeDoCartao, new Date(), { aoParceiro: true });
   const montado = await montarDocumentoDaOrdem(admin, so, settings, { ocultarDadosDoCliente: d.reduzir });
   if (!montado.ok) {
     await registrarEnvio(admin, { tipo: "os_link", audiencia: "parceiro", entityKind: "service_order", entityId: so.id, phone, preview: `${preview} não gerado`, status: "failed" });
@@ -1140,8 +1291,15 @@ export const whatsappTools: ToolDef[] = [
       // pode dizer "foi para o teste". Por isso a mesma função da edge (marcar-enviado.ts).
       const modoTeste = desviadoPorTeste(settings);
       const marcaDeTeste = modoTeste ? "teste" : null;
+      // Retorno F5 (P11.4): a data que o resumo do *sim* mostrou (retrato); o banco recusa ('mudou') se o dia virou.
+      const esperada = typeof retrato?.validade === "string" ? retrato.validade : null;
+      // (P11.9) o PDF do cartão do retorno chega ao whatsapp-send com orcamento_via "cartao"
+      const viaDoOrcamento = ctx.envioPeloCartao === true ? { viaDoOrcamento: "cartao" as const } : {};
 
       if (formato === "link") {
+        // (F5) o envio do orçamento conta os 7 dias em todo formato; no link, nenhuma linha (o portal mostra a data)
+        const { doEnvio, ...validade } = await fixarValidadeDoEnvio(admin, so, ctx.validadeDoCartao, new Date(), { soRamoNovo: true, esperada });
+        if (doEnvio?.motivo === "mudou") return { error: fraseDoDiaQueVirou(esperada, doEnvio.data), nada_enviado: true };
         const personalizada = typeof args.custom_message === "string" ? args.custom_message.trim() : "";
         const msg = personalizada
           ? mensagemComLink(personalizada, link, so.share_token)
@@ -1160,6 +1318,7 @@ export const whatsappTools: ToolDef[] = [
           dedupeKey: chaveDeEnvio("os-link", so.id, digitos, diaLocal(), marcaDeTeste),
           sentBy: ctx.userId,
           conteudo: { kind: "text", message: msg },
+          ...viaDoOrcamento,
         });
         // Mesmo formato de resposta de antes (sendWhatsapp), para o modelo ler igual.
         const r = !envio.ok
@@ -1168,12 +1327,16 @@ export const whatsappTools: ToolDef[] = [
           ? { ok: true, messageId: null, deduplicated: true, aviso: "Esta mesma mensagem já tinha sido enviada hoje para este número; não reenviei." }
           : { ok: true, messageId: envio.messageId ?? null };
         await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: msg, status: envio.ok ? "sent" : "failed" });
-        return { ...r, ...(g.avisos.length ? { avisos_estilo: g.avisos } : {}) };
+        // (F5) só o aviso_validade, nunca doEnvio (que traz a legenda e o motivo)
+        return { ...r, ...(g.avisos.length ? { avisos_estilo: g.avisos } : {}), ...validade };
       }
 
       // ── formato 'resumo': os valores em texto (05/10/2026) ─────────────────────────────
       if (formato === "resumo") {
-        const resumo = await montarResumoDeValores(admin, so, settings);
+        // (F5) a data do envio no texto ("⏳ Proposta válida até …"), a mesma do resumo do *sim* (opcoesDoResumo)
+        const { doEnvio, ...validade } = await fixarValidadeDoEnvio(admin, so, ctx.validadeDoCartao, new Date(), { soRamoNovo: true, esperada });
+        if (doEnvio?.motivo === "mudou") return { error: fraseDoDiaQueVirou(esperada, doEnvio.data), nada_enviado: true };
+        const resumo = await montarResumoDeValores(admin, so, settings, opcoesDoResumo(doEnvio));
         if (!resumo.ok) {
           await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: `[resumo] não montado: ${resumo.motivo}`, status: "failed" });
           return { error: `Não consegui montar o resumo de valores (${resumo.motivo}). Nada foi enviado ao cliente.`, nada_enviado: true };
@@ -1194,10 +1357,11 @@ export const whatsappTools: ToolDef[] = [
           dedupeKey: chaveDeEnvio("os-resumo", so.id, digitos, diaLocal(), hashCurto(texto), marcaDeTeste),
           sentBy: ctx.userId,
           conteudo: { kind: "text", message: texto },
+          ...viaDoOrcamento,
         });
         await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: `[resumo] ${texto}`, status: envio.ok ? "sent" : "failed" });
-        if (!envio.ok) return { error: `O WhatsApp não aceitou o resumo (${envio.error}). Nada foi confirmado como enviado.`, nada_enviado: !envio.semResposta };
-        if (envio.deduplicated) return { ok: true, deduplicated: true, aviso: `Este mesmo resumo (${resumo.rotulo} ${resumo.numero}) já foi enviado hoje para este cliente; não reenviei.` };
+        if (!envio.ok) return { error: `O WhatsApp não aceitou o resumo (${envio.error}). Nada foi confirmado como enviado.`, nada_enviado: !envio.semResposta, ...validade };
+        if (envio.deduplicated) return { ok: true, deduplicated: true, aviso: `Este mesmo resumo (${resumo.rotulo} ${resumo.numero}) já foi enviado hoje para este cliente; não reenviei.`, ...validade };
         return {
           ok: true,
           formato: "resumo",
@@ -1207,12 +1371,15 @@ export const whatsappTools: ToolDef[] = [
             ? "O modo de teste do WhatsApp está ligado: o resumo foi para o número de teste, NÃO para o cliente. Diga isso."
             : "O cliente recebeu o resumo de valores em texto (total, sinal, saldo e como pagar).",
           ...(gr.avisos.length ? { avisos_estilo: gr.avisos } : {}),
+          ...validade,
         };
       }
 
       // Retorno F3 (K6): a validade que sai no PDF é a do ENVIO. A data entra em quote_validity_date antes de montar, e o
       // montarDocumentoDaOrdem relê a ordem pelo id: `so` daqui em diante não usa os campos de validade.
-      const validade = await fixarValidadeDoEnvio(admin, so, ctx.validadeDoCartao);
+      // Retorno F5 (P11.4): o ramo novo (sem origem e sem data do cartão) fixa hoje + 7 pelo banco e devolve a O21/O22.
+      const { doEnvio, ...validade } = await fixarValidadeDoEnvio(admin, so, ctx.validadeDoCartao, new Date(), { esperada });
+      if (doEnvio?.motivo === "mudou") return { error: fraseDoDiaQueVirou(esperada, doEnvio.data), nada_enviado: true };
       // ── formato 'pdf_e_link': o arquivo do Baixar, com o link na legenda ──────────────
       const montado = await montarDocumentoDaOrdem(admin, so, settings);
       if (!montado.ok) {
@@ -1226,9 +1393,11 @@ export const whatsappTools: ToolDef[] = [
       // pdf_e_link: número, total e link vêm SEMPRE, mesmo com mensagem personalizada — o dono
       // aprovou o envio vendo esses três no resumo. pdf: a legenda é só a frase dele (ou nada), e
       // o resumo da confirmação mostrou exatamente isso.
+      // (F5) no pdf_e_link, a O22 logo depois da abertura, com a mesma regra do dd/mm da frase do dono
+      const linhaDaValidade = doEnvio?.linha && doEnvio.data && !abertura.includes(ddmmDoDia(doEnvio.data)) ? `\n${doEnvio.linha}` : "";
       const legenda = formato === "pdf"
-        ? legendaDoPdf(args, so)
-        : `${abertura}\n\n${doc.rotulo} ${doc.numero} — Total ${doc.total}\nPara ver online e aprovar: ${link}`;
+        ? legendaDoPdf(args, so, doEnvio)
+        : `${abertura}${linhaDaValidade}\n\n${doc.rotulo} ${doc.numero} — Total ${doc.total}\nPara ver online e aprovar: ${link}`;
       const marca = formato === "pdf" ? "[pdf]" : "[pdf+link]";
       // O whatsapp-send recusa legenda acima de 1024 caracteres (zod). Melhor dizer agora do
       // que gerar o PDF e ouvir um 400.
@@ -1260,6 +1429,7 @@ export const whatsappTools: ToolDef[] = [
             dedupeKey: chave,
             sentBy: ctx.userId,
             conteudo: { kind: "document", url, filename: doc.nomeDoArquivo, caption: legenda },
+            ...viaDoOrcamento,
           }),
       });
       if (!entrega.ok) {

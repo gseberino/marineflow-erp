@@ -143,6 +143,11 @@ function montarAmbiente(opcoes: {
   }, opcoes.erros);
   const admin = {
     from: (t: string) => banco.consulta(t),
+    // Retorno F5 (P11.4): a validade do envio pelo banco, com a chave desligada (o padrão): o envio de sempre, byte a byte
+    rpc: (fn: string) =>
+      Promise.resolve(fn === "orcamento_validade_do_envio"
+        ? { data: { ok: true, fixou: false, motivo: "desligada" }, error: null }
+        : { data: null, error: { code: "PGRST202", message: `função inesperada no teste: ${fn}` } }),
     storage: {
       from: (bucket: string) => ({
         upload: (caminho: string) => {

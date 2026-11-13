@@ -220,3 +220,23 @@ Deno.test("conversa de todo dia: 'quero fechar hoje' e a desistência acordam; o
   const soHoje = conversa({ diasComMensagemSua: 4, ultimaSaidaEm: br("04", "18:00"), recebidas: [{ em: br("05", "08:28"), body: "Tudo bem? Podemos conversar hoje?" }] });
   assertEquals(disparosDaConversa(soHoje, new Date(br("05", "09:00")), 30), []);
 });
+
+// Retorno F5 (P11.5, A-3 da F3): com a validade do envio (a O21 do banco), a legenda do PDF do acorde é a do envio do
+// orçamento, com "Ele vale até …" e sem "confirmo o início com o sinal". Sem ela (a chave desligada), a de antes.
+Deno.test("F5: a legenda do acorde com a validade do envio é a O21, sem prometer o início com o sinal; sem ela, a de antes", () => {
+  const o21 = "Segue o ORÇ-00113, conforme solicitado. Ele vale até terça (13/10). Qualquer dúvida, estamos à disposição.";
+  assertEquals(legendaDoPdf("Miguel", "ORÇ-00113"), "Miguel, segue a proposta completa (ORÇ-00113). Se estiver de acordo, confirmo o início com o sinal.");
+  assertEquals(legendaDoPdf("Miguel", "ORÇ-00113", null), legendaDoPdf("Miguel", "ORÇ-00113"));
+  assertEquals(legendaDoPdf("Miguel", "ORÇ-00113", { legenda: null }), legendaDoPdf("Miguel", "ORÇ-00113"));
+  assertEquals(legendaDoPdf("Miguel", "ORÇ-00113", { legenda: o21 }), o21);
+  assert(!legendaDoPdf("Miguel", "ORÇ-00113", { legenda: o21 }).includes("sinal"));
+  // o acorde inteiro: o cartão e o texto levam a mesma legenda
+  const c = conversa({ recebidas: [{ em: br("07", "09:02"), body: MIGUEL_0902 }] });
+  const agora = new Date(br("07", "09:45"));
+  const [d] = disparosDaConversa(c, agora, 30);
+  const a = textoDoAcordeDeCliente({ nome: "Miguel", disparo: d, orcamentos: ORCS, telefone: null, podeCartao: true, agora, validade: { legenda: o21 } });
+  assertEquals(a.cartao?.legenda, o21);
+  assertStringIncludes(a.texto, `com: "${o21}"`);
+  const antes = textoDoAcordeDeCliente({ nome: "Miguel", disparo: d, orcamentos: ORCS, telefone: null, podeCartao: true, agora });
+  assertEquals(antes.cartao?.legenda, legendaDoPdf("Miguel", "ORÇ-00113"));
+});

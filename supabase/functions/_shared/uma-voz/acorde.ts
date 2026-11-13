@@ -190,8 +190,16 @@ const CABECA: Record<Gatilho, string> = {
   desistencia: "disse que fechou com outra empresa ou desistiu",
 };
 
-/** A legenda do PDF que o *sim* manda (sem IA; o dono pode trocar respondendo com o texto dele). */
-export function legendaDoPdf(nome: string, numero: string): string {
+/**
+ * A legenda do PDF que o *sim* manda (sem IA; o dono pode trocar respondendo com o texto dele).
+ *
+ * Retorno F5 (P11.5, A-3 da F3): com a validade do envio (`validade.legenda`, a O21 de orcamento_validade_do_envio: "Segue o
+ * ORÇ-…, conforme solicitado. Ele vale até …"), a legenda é a do envio do orçamento, sem prometer "confirmo o início com o
+ * sinal". Sem ela (a F5 desligada, ou quem chama ainda não a pediu ao banco), a de antes, byte a byte. Este módulo não lê o
+ * banco: quem monta o acorde é que pergunta a validade e a passa.
+ */
+export function legendaDoPdf(nome: string, numero: string, validade?: { legenda: string | null } | null): string {
+  if (validade?.legenda) return validade.legenda;
   return `${primeiroNome(nome)}, segue a proposta completa (${numero}). Se estiver de acordo, confirmo o início com o sinal.`;
 }
 
@@ -213,6 +221,8 @@ export function textoDoAcordeDeCliente(p: {
   telefone: string | null;
   podeCartao: boolean;
   agora: Date;
+  /** Retorno F5 (P11.5): a validade do envio da proposta pronta (a O21); ausente = a legenda de antes */
+  validade?: { legenda: string | null } | null;
 }): AcordeDeCliente {
   const { disparo: d } = p;
   const nome = umaLinha(p.nome, 40);
@@ -243,7 +253,7 @@ export function textoDoAcordeDeCliente(p: {
   if (p.telefone) linhas.push(`Ligue agora: ${p.telefone}`);
   const comCartao = !!pronta && p.podeCartao && acordeComCartao(p.agora) && d.tipo !== "desistencia";
   if (comCartao) {
-    const legenda = legendaDoPdf(p.nome, pronta!.numero);
+    const legenda = legendaDoPdf(p.nome, pronta!.numero, p.validade);
     // (20/10/2026) o PDF ao cliente é de alto risco: a aprovação pelo WhatsApp é "sim <PIN>" (ai-agent,
     // resolveWhatsAppConfirmation) — o cartão diz isso, senão o "sim" sozinho voltaria pedindo o PIN
     linhas.push(`*sim <seu PIN>* = mando o PDF do ${pronta!.numero} com: "${legenda}" · *não* = deixo com você`);
