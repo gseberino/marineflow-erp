@@ -523,7 +523,8 @@ begin
     perform pg_temp.f5d_saida(v_ac2, 'encerramento', 'orc_encerramento', 'enviada', c_qui + interval '1 minute');
     update public.orcamento_acompanhamentos a set estado = 'encerrado', encerramento = 'enviado', desfecho_proposto = 'sumiu' where a.id = v_ac2;
     v_ac3 := pg_temp.f5d_cad('Ana Desfecho F5 Teste', '5547900009973', 'ORÇ-99573');
-    update public.orcamento_passos p set estado = 'pulado', motivo = 'sem_sim', ate = date '2027-01-14'
+    -- O passo de encerramento de hoje que caiu sem o *sim*: o dia e o prazo são hoje (o CHECK ate >= dia da tabela).
+    update public.orcamento_passos p set estado = 'pulado', motivo = 'sem_sim', dia = date '2027-01-14', ate = date '2027-01-14'
      where p.acompanhamento_id = v_ac3 and p.passo = 'encerramento';
     update public.orcamento_acompanhamentos a set estado = 'encerrado', encerramento = 'sem_mensagem', desfecho_proposto = 'sumiu' where a.id = v_ac3;
     v_r := public.orcamento_resumo_fechamento(c_fech);
