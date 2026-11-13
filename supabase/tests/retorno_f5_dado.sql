@@ -3,8 +3,9 @@
 -- (23514 com o nome dele) e o gatilho da P2 apagando o motivo ao reabrir; o padrão 3 → 7 só quando era 3; o histórico com
 -- prova (o whatsapp_send_api que deu certo e o eco do aparelho, o 1º ao número do cliente, uma linha 'historico' por ordem,
 -- nenhuma do gatilho, nenhum acompanhamento, e o candidato do aceite pela chave), sem a falha, o modo de teste, a recusa, o
--- outro número e o número de parceiro; rodada duas vezes, o mesmo resultado; e a trava "N ou 0". Roda só pela bancada (grupo
--- 8, F5_ONDA=8, F5_TESTES=retorno_f5_dado), de madrugada (o CHECK é DDL em service_orders). GERADO por
+-- outro número e o número de parceiro; rodada duas vezes, o mesmo resultado; a trava "N ou 0"; e (nº 8, revisão das ondas 4 a
+-- 9, achado banco-1) o desagrupar do reprovado reaberto com o CHECK no banco, com o motivo guardado e sem ele. Roda só pela
+-- bancada (grupo 8, F5_ONDA=8, F5_TESTES=retorno_f5_dado), de madrugada (o CHECK é DDL em service_orders). GERADO por
 -- scripts/gerar_f5_dado_teste.cjs do molde scripts/f5_sql/p9_teste_dado.sql: pg_temp.f5g_migracao() leva os comandos da
 -- migration, cópia fiel, e c_esperado vem dela; nunca edite este arquivo à mão.
 -- Este teste conta linhas reais de propósito (P9.2 nº 1 e 7): a migration mexe nos rejeitados reais, dentro da transação
@@ -57,6 +58,32 @@ language sql as $f$
           p_em, p_em)
   returning id
 $f$;
+
+-- O orçamento do agrupar (nº 8): no barco dado, com 1 serviço (2 h × R$ 150) e os totais pelo banco, como o _orc do teste do
+-- agrupar. O reprovado nasce com o motivo (o CHECK já está no banco): preço, pela tela, com a hora e a nota.
+create or replace function pg_temp.f5g_orc_barco(p_cliente uuid, p_barco uuid, p_numero text, p_em timestamptz, p_quote text)
+returns uuid
+language plpgsql as $f$
+declare
+  v_id uuid;
+begin
+  if p_quote = 'rejected' then
+    insert into public.service_orders (service_order_number, client_id, vessel_id, status, quote_status, created_at, motivo_perda,
+                                       motivo_perda_por, motivo_perda_em, motivo_perda_nota)
+    values (p_numero, p_cliente, p_barco, 'draft', 'rejected', p_em - interval '5 days', 'preco', 'tela', p_em - interval '3 days',
+            'caro')
+    returning id into v_id;
+  else
+    insert into public.service_orders (service_order_number, client_id, vessel_id, status, quote_status, created_at)
+    values (p_numero, p_cliente, p_barco, 'draft', p_quote, p_em - interval '5 days')
+    returning id into v_id;
+  end if;
+  insert into public.service_order_services (service_order_id, name_snapshot, billing_unit_snapshot, quantity, unit_price_snapshot,
+                                             line_total, discount_pct, discount_amount, created_at, updated_at)
+  values (v_id, 'Serviço de teste F5', 'hour', 2, 150, 300, 0, 0, p_em - interval '5 days', p_em - interval '5 days');
+  perform public.recalc_so_totals(v_id);
+  return v_id;
+end $f$;
 
 -- A migration 20270112100900_retorno_f5_dado.sql, comando por comando (gerado: cópia fiel).
 create or replace function pg_temp.f5g_migracao() returns void
@@ -148,6 +175,269 @@ select f.so_id, f.client_id, 'historico', f.chave, true, f.em, f.msg_id, false
   from primeiro f
   join gravados g on g.id = f.so_id
 on conflict do nothing$f5g6$;
+  execute $f5g7$do $$
+begin
+  if not exists (select 1 from pg_attribute
+                  where attrelid = 'public.orcamento_agrupamento_origens'::regclass and attname = 'motivo_perda_antes'
+                    and not attisdropped) then
+    alter table public.orcamento_agrupamento_origens add column motivo_perda_antes jsonb;
+  end if;
+end $$$f5g7$;
+  execute $f5g8$comment on column public.orcamento_agrupamento_origens.motivo_perda_antes is
+  'Retorno F5 (P9): o motivo do reprovado que o agrupar reabriu (motivo_perda, motivo_perda_por, motivo_perda_em e motivo_perda_nota, como estavam antes do reabrir). O desagrupar o devolve junto com o Reprovado. Nulo nas outras origens e nas reabertas antes da F5.'$f5g8$;
+  execute $f5g9$create or replace function public._agrupar_orcamentos_reabrindo(
+  p_ids uuid[],
+  p_reabrir uuid[],
+  p_base uuid,
+  p_numero text,
+  p_autor uuid,
+  p_total_esperado numeric
+)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_reabrir uuid[];
+  v_travados uuid[];
+  v_numeros text[];
+  v_quem text;
+  v_r jsonb;
+  r record;
+  v_f5_motivos jsonb;   -- F5 (P9)
+begin
+  if p_autor is null then
+    raise exception 'Faça login para agrupar orçamentos.' using errcode = '42501';
+  end if;
+  if not public.is_admin_or_financial(p_autor) then
+    raise exception 'Só administrador ou financeiro pode agrupar orçamentos.' using errcode = '42501';
+  end if;
+
+  v_reabrir := array(select distinct x from unnest(coalesce(p_reabrir, '{}'::uuid[])) x where x is not null);
+  if cardinality(v_reabrir) = 0 then
+    return public._agrupar_orcamentos_montar(p_ids, p_base, p_numero, p_autor, p_total_esperado);
+  end if;
+  if p_ids is null or not (v_reabrir <@ p_ids) then
+    raise exception 'O orçamento que volta para Em elaboração precisa estar entre os escolhidos.' using errcode = '22023';
+  end if;
+
+  -- Trava os escolhidos na mesma ordem do agrupar (por id) antes de mexer: dois pedidos simultâneos não se travam
+  select array_agg(t.id) into v_travados
+    from (select so.id from public.service_orders so where so.id = any(p_ids) order by so.id for update) t;
+
+  for r in select so.service_order_number, so.status, so.quote_status, so.converted_to_os_at, so.merged_into_id
+             from public.service_orders so where so.id = any(v_reabrir) order by so.created_at, so.id loop
+    if r.quote_status is distinct from 'rejected' or r.status <> 'draft'
+       or r.converted_to_os_at is not null or r.merged_into_id is not null then
+      raise exception '% não está mais como Reprovado em aberto. Nada foi agrupado: peça de novo.', r.service_order_number
+        using errcode = '22023';
+    end if;
+  end loop;
+  if (select count(*) from public.service_orders so where so.id = any(v_reabrir)) <> cardinality(v_reabrir) then
+    raise exception 'Algum orçamento escolhido não existe mais. Nada foi agrupado.' using errcode = 'P0002';
+  end if;
+
+  select u.full_name into v_quem from public.app_users u where u.id = p_autor;
+  select array_agg(so.service_order_number order by so.created_at, so.id) into v_numeros
+    from public.service_orders so where so.id = any(v_reabrir);
+
+  -- Auditoria como a tela grava a mudança de situação (action 'update', new_value com a situação nova)
+  insert into public.audit_log (table_name, record_id, action, changed_by, previous_value, new_value, reason)
+  select 'service_orders', so.id, 'update', coalesce(v_quem, 'sistema'),
+         jsonb_build_object('quote_status', 'rejected'), jsonb_build_object('quote_status', 'draft'),
+         'Saiu de Reprovado para Em elaboração para entrar no agrupamento (o dono disse que ele entra)'
+    from public.service_orders so where so.id = any(v_reabrir);
+
+  -- F5 (P9): o motivo do perdido, guardado antes de o gatilho da P2 apagá-lo (sair de rejected apaga os 4 campos); o
+  -- desagrupar o devolve junto com o Reprovado (o CHECK service_orders_rejeitado_tem_motivo exige o motivo).
+  select jsonb_object_agg(so.id::text, jsonb_build_object('motivo_perda', so.motivo_perda, 'motivo_perda_por', so.motivo_perda_por,
+                                                          'motivo_perda_em', so.motivo_perda_em, 'motivo_perda_nota', so.motivo_perda_nota))
+    into v_f5_motivos
+    from public.service_orders so
+   where so.id = any(v_reabrir) and so.motivo_perda is not null;
+
+  update public.service_orders so set quote_status = 'draft' where so.id = any(v_reabrir);
+
+  -- Recusa daqui desfaz o de cima: é a mesma transação
+  v_r := public._agrupar_orcamentos_montar(p_ids, p_base, p_numero, p_autor, p_total_esperado);
+
+  -- Desagrupar devolve como estava ANTES do pedido: Reprovado
+  update public.orcamento_agrupamento_origens x
+     set quote_status_antes = 'rejected', motivo_perda_antes = v_f5_motivos -> x.origem_id::text   -- F5 (P9)
+   where x.agrupamento_id = (v_r ->> 'agrupamento_id')::uuid
+     and x.origem_id = any(v_reabrir);
+
+  return v_r || jsonb_build_object('reabertos', to_jsonb(v_numeros));
+end $$$f5g9$;
+  execute $f5g10$create or replace function public._desagrupar_orcamentos_desfazer(p_agrupado uuid, p_autor uuid)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_ag public.service_orders;
+  v_grupo public.orcamento_agrupamentos;
+  v_destino text;
+  v_bloqueios text;
+  v_quem text;
+  v_numeros text[];
+  v_ids uuid[];
+  v_qtd integer;
+  v_motivo text;
+  n_envios integer := 0;
+  n_reativados integer := 0;
+  o record;
+begin
+  if p_autor is null then
+    raise exception 'Faça login para desagrupar orçamentos.' using errcode = '42501';
+  end if;
+  if not public.is_admin_or_financial(p_autor) then
+    raise exception 'Só administrador ou financeiro pode desagrupar orçamentos.' using errcode = '42501';
+  end if;
+  if p_agrupado is null then
+    raise exception 'Escolha o orçamento agrupado.' using errcode = '22023';
+  end if;
+
+  select so.* into v_ag from public.service_orders so where so.id = p_agrupado for update;
+  if v_ag.id is null then
+    raise exception 'Orçamento não encontrado. Recarregue a tela.' using errcode = 'P0002';
+  end if;
+
+  select g.* into v_grupo from public.orcamento_agrupamentos g
+   where g.agrupado_id = p_agrupado and g.desfeito_em is null
+   for update;
+  if v_grupo.id is null then
+    raise exception '% não é um orçamento agrupado (ou já foi desagrupado).', v_ag.service_order_number
+      using errcode = '22023';
+  end if;
+
+  -- O agrupado precisa ainda ser um orçamento em aberto, sem nada preso a ele
+  if v_ag.merged_into_id is not null then
+    select d.service_order_number into v_destino from public.service_orders d where d.id = v_ag.merged_into_id;
+    raise exception '% foi agrupado de novo em %. Desagrupe % primeiro.',
+      v_ag.service_order_number, coalesce(v_destino, 'outro orçamento'), coalesce(v_destino, 'esse')
+      using errcode = '22023';
+  end if;
+  if v_ag.status <> 'draft' or v_ag.converted_to_os_at is not null then
+    raise exception '% não é mais um orçamento em aberto (já virou OS ou foi cancelado): não dá mais para desagrupar.',
+      v_ag.service_order_number using errcode = '22023';
+  end if;
+  if v_ag.signed_at is not null
+     or exists (select 1 from public.service_order_signatures g where g.service_order_id = v_ag.id) then
+    raise exception '% já foi assinado pelo cliente: não dá para desagrupar.', v_ag.service_order_number
+      using errcode = '22023';
+  end if;
+  v_bloqueios := public._orcamento_vinculos_que_prendem(v_ag.id);
+  if v_bloqueios <> '' then
+    raise exception '% está ligado a: %. Resolva isso antes de desagrupar.', v_ag.service_order_number, v_bloqueios
+      using errcode = '22023';
+  end if;
+
+  -- Trava as origens (mesma ordem do agrupar) e confere que seguem presas a este agrupado
+  select array_agg(t.id) into v_ids
+    from (select so.id from public.service_orders so
+            join public.orcamento_agrupamento_origens x on x.origem_id = so.id and x.agrupamento_id = v_grupo.id
+           order by so.id for update of so) t;
+  select count(*) into v_qtd from public.orcamento_agrupamento_origens x where x.agrupamento_id = v_grupo.id;
+  if coalesce(cardinality(v_ids), 0) <> v_qtd or v_qtd = 0 then
+    raise exception 'Algum orçamento original deste agrupamento não existe mais. Nada foi desfeito.' using errcode = 'P0002';
+  end if;
+  if exists (select 1 from public.service_orders so where so.id = any(v_ids)
+              and (so.merged_into_id is distinct from v_ag.id or so.status <> 'cancelled')) then
+    raise exception 'Os originais de % não estão mais como o agrupamento deixou. Nada foi desfeito.',
+      v_ag.service_order_number using errcode = '22023';
+  end if;
+
+  select array_agg(x.numero order by x.ordem) into v_numeros
+    from public.orcamento_agrupamento_origens x where x.agrupamento_id = v_grupo.id;
+  select u.full_name into v_quem from public.app_users u where u.id = p_autor;
+  v_motivo := 'Desagrupado em ' || to_char(now() at time zone 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI')
+           || ' por ' || coalesce(v_quem, 'sistema') || ': voltou a ser ' || array_to_string(v_numeros, ', ');
+
+  -- Auditoria antes de mexer (guarda o "antes")
+  insert into public.audit_log (table_name, record_id, action, changed_by, previous_value, new_value, reason,
+                                triggered_by_table, triggered_by_id)
+  select 'service_orders', x.origem_id, 'reopen', coalesce(v_quem, 'sistema'),
+         jsonb_build_object('status', 'cancelled', 'merged_into_id', v_ag.id, 'merged_into_number', v_ag.service_order_number),
+         jsonb_build_object('status', 'draft', 'quote_status', x.quote_status_antes, 'link_publico', 'religado'),
+         'Desagrupado de ' || v_ag.service_order_number, 'service_orders', v_ag.id
+    from public.orcamento_agrupamento_origens x where x.agrupamento_id = v_grupo.id;
+  insert into public.audit_log (table_name, record_id, action, changed_by, previous_value, new_value, reason)
+  values ('service_orders', v_ag.id, 'cancel', coalesce(v_quem, 'sistema'),
+          jsonb_build_object('status', v_ag.status, 'quote_status', v_ag.quote_status, 'grand_total', v_ag.grand_total),
+          jsonb_build_object('status', 'cancelled', 'desagrupado', to_jsonb(v_numeros), 'link_publico', 'desligado'),
+          v_motivo);
+
+  -- Origens: voltam como estavam (situação, link, cancelamento)
+  perform set_config('marineflow.agrupar_orcamentos', 'on', true);
+  for o in select x.* from public.orcamento_agrupamento_origens x where x.agrupamento_id = v_grupo.id order by x.ordem loop
+    update public.service_orders so
+       set status = 'draft',
+           quote_status = o.quote_status_antes,
+           -- F5 (P9): o Reprovado volta com o motivo de antes do reabrir (motivo_perda_antes, que _agrupar_orcamentos_reabrindo
+           -- guarda); sem ele (reaberto antes da P9), como os antigos: 'sem_motivo_antigo', por 'migracao'. O CHECK
+           -- service_orders_rejeitado_tem_motivo exige o motivo, e o gatilho da P2 só carimba a hora que vier nula.
+           motivo_perda = (case when o.quote_status_antes = 'rejected' and so.motivo_perda is null
+                                then coalesce(o.motivo_perda_antes ->> 'motivo_perda', 'sem_motivo_antigo')
+                                else so.motivo_perda end),
+           motivo_perda_por = (case when o.quote_status_antes = 'rejected' and so.motivo_perda is null
+                                    then (case when o.motivo_perda_antes ->> 'motivo_perda' is null then 'migracao'
+                                               else o.motivo_perda_antes ->> 'motivo_perda_por' end)
+                                    else so.motivo_perda_por end),
+           motivo_perda_em = (case when o.quote_status_antes = 'rejected' and so.motivo_perda is null
+                                   then (o.motivo_perda_antes ->> 'motivo_perda_em')::timestamptz
+                                   else so.motivo_perda_em end),
+           motivo_perda_nota = (case when o.quote_status_antes = 'rejected' and so.motivo_perda is null
+                                     then o.motivo_perda_antes ->> 'motivo_perda_nota'
+                                     else so.motivo_perda_nota end),
+           cancelled_at = o.cancelled_at_antes,
+           cancellation_reason = o.cancellation_reason_antes,
+           share_token = coalesce(o.share_token_antes, gen_random_uuid()),
+           merged_into_id = null
+     where so.id = o.origem_id;
+  end loop;
+  -- Agrupado: cancelado como histórico, link desligado (a guarda do agrupado deixa passar só aqui)
+  update public.service_orders so
+     set status = 'cancelled',
+         cancelled_at = now(),
+         cancellation_reason = v_motivo,
+         share_token = null
+   where so.id = v_ag.id;
+  perform set_config('marineflow.agrupar_orcamentos', '', true);
+
+  -- Totais das origens pelo banco (alguém pode ter mexido numa linha enquanto estavam canceladas)
+  for o in select x.origem_id from public.orcamento_agrupamento_origens x where x.agrupamento_id = v_grupo.id loop
+    perform public.recalc_so_totals(o.origem_id);
+  end loop;
+
+  -- Envios agendados das origens que o agrupar cancelou voltam (o link deles voltou), se a hora ainda não
+  -- passou. O número do agrupado não muda enquanto o desagrupar é possível: o texto casa exatamente.
+  update public.whatsapp_scheduled_sends w
+     set status = 'pending', last_error = null, updated_at = now()
+   where w.service_order_id = any(v_ids) and w.status = 'cancelled'
+     and w.last_error = 'Cancelado: orçamento agrupado em ' || v_ag.service_order_number
+     and w.next_run_at > now();
+  get diagnostics n_reativados = row_count;
+
+  update public.whatsapp_scheduled_sends w
+     set status = 'cancelled', last_error = 'Cancelado: orçamento desagrupado', updated_at = now()
+   where w.service_order_id = v_ag.id and w.status in ('pending', 'processing');
+  get diagnostics n_envios = row_count;
+
+  update public.orcamento_agrupamentos g
+     set desfeito_em = now(), desfeito_por = p_autor
+   where g.id = v_grupo.id;
+
+  return jsonb_build_object(
+    'agrupado_id', v_ag.id, 'agrupado', v_ag.service_order_number,
+    'origens', to_jsonb(v_numeros), 'origens_ids', (select to_jsonb(array_agg(x.origem_id order by x.ordem))
+                                                      from public.orcamento_agrupamento_origens x where x.agrupamento_id = v_grupo.id),
+    'envios_cancelados', n_envios, 'envios_reativados', n_reativados);
+end $$$f5g10$;
 end $f$;
 
 -- As contagens que a migration mexe (as reais, de propósito: P9.2 nº 1 e 6).
@@ -176,6 +466,7 @@ do $dado$
 declare
   c_esperado constant integer := 46;   -- o mesmo da migration (bloco 0): o gerador o copia de lá
   c_t constant timestamptz := '2026-10-05 10:00-03';
+  c_admin constant uuid := 'b1600000-0000-4000-8000-0000000099e9';   -- o admin de teste do agrupar (nº 8)
   v_antes jsonb;
   v_depois jsonb;
   v_c jsonb;
@@ -418,6 +709,69 @@ begin
        or (select count(*) from public.service_orders so where so.motivo_perda = 'sem_motivo_antigo') is distinct from c_esperado::bigint
        or not exists (select 1 from pg_constraint c where c.conname = 'service_orders_rejeitado_tem_motivo' and c.convalidated) then
       raise exception '7e: com a contagem igual a c_esperado, a migration não fez o que devia';
+    end if;
+    raise exception 'f5g_cenario' using errcode = 'P0001';
+  exception when others then
+    if sqlstate is distinct from 'P0001' or sqlerrm is distinct from 'f5g_cenario' then
+      raise;
+    end if;
+  end;
+
+  -- ── 8. O desagrupar do reprovado reaberto, com o CHECK no banco (revisão das ondas 4 a 9, achado banco-1). O agrupar que
+  --       reabre o reprovado guarda o motivo (o gatilho da P2 o apaga no reabrir), e o desagrupar devolve o Reprovado com ele;
+  --       sem o motivo guardado (reaberto antes da P9), 'sem_motivo_antigo' por 'migracao'. Antes do conserto, o desagrupar
+  --       devolvia 'rejected' sem motivo e parava inteiro em 23514 (service_orders_rejeitado_tem_motivo). ──
+  begin
+    insert into public.app_users (id, full_name, email, role, active)
+    values (c_admin, 'TESTE F5 dado admin', 'teste-f5-dado-admin@teste.invalid', 'admin', true);
+    v_ana := pg_temp.f5g_cli('Ana Agrupar F5 Teste', '5547900009969');
+    insert into public.vessels (client_id, name, asset_type) values (v_ana, 'Unidade agrupar F5 Teste', 'Motorhome') returning id into v_x;
+    -- 8a. Com o motivo guardado: o ORÇ-99841 perdido (preço, pela tela, com a nota) entra reaberto com o ORÇ-99842.
+    v_oa := pg_temp.f5g_orc_barco(v_ana, v_x, 'ORÇ-99841', c_t, 'rejected');
+    v_ob := pg_temp.f5g_orc_barco(v_ana, v_x, 'ORÇ-99842', c_t, 'draft');
+    v_r := public._agrupar_orcamentos_reabrindo(array[v_oa, v_ob], array[v_oa], null, 'ORÇ-T99840', c_admin, null);
+    select so.status, so.quote_status, so.motivo_perda, so.motivo_perda_por into v_so from public.service_orders so where so.id = v_oa;
+    if v_so.status is distinct from 'cancelled' or v_so.quote_status is distinct from 'draft' or v_so.motivo_perda is not null
+       or v_so.motivo_perda_por is not null then
+      raise exception '8a: o reaberto não entrou no agrupamento sem o motivo (%)', row_to_json(v_so);
+    end if;
+    select x.motivo_perda_antes as m into v_e from public.orcamento_agrupamento_origens x
+     where x.agrupamento_id = (v_r ->> 'agrupamento_id')::uuid and x.origem_id = v_oa;
+    if v_e.m ->> 'motivo_perda' is distinct from 'preco' or v_e.m ->> 'motivo_perda_por' is distinct from 'tela'
+       or (v_e.m ->> 'motivo_perda_em')::timestamptz is distinct from c_t - interval '3 days'
+       or v_e.m ->> 'motivo_perda_nota' is distinct from 'caro' then
+      raise exception '8b: o motivo guardado na origem (%)', v_e.m;
+    end if;
+    if (select x.motivo_perda_antes from public.orcamento_agrupamento_origens x
+         where x.agrupamento_id = (v_r ->> 'agrupamento_id')::uuid and x.origem_id = v_ob) is not null then
+      raise exception '8c: a origem que não era reprovada guardou motivo';
+    end if;
+    perform public._desagrupar_orcamentos_desfazer((v_r ->> 'service_order_id')::uuid, c_admin);
+    select so.status, so.quote_status, so.motivo_perda, so.motivo_perda_por, so.motivo_perda_em, so.motivo_perda_nota, so.merged_into_id
+      into v_so from public.service_orders so where so.id = v_oa;
+    if v_so.status is distinct from 'draft' or v_so.quote_status is distinct from 'rejected' or v_so.merged_into_id is not null
+       or v_so.motivo_perda is distinct from 'preco' or v_so.motivo_perda_por is distinct from 'tela'
+       or v_so.motivo_perda_em is distinct from c_t - interval '3 days' or v_so.motivo_perda_nota is distinct from 'caro' then
+      raise exception '8d: o desagrupar não devolveu o Reprovado com o motivo de antes (%)', row_to_json(v_so);
+    end if;
+    select so.status, so.quote_status, so.motivo_perda into v_so from public.service_orders so where so.id = v_ob;
+    if v_so.status is distinct from 'draft' or v_so.quote_status is distinct from 'draft' or v_so.motivo_perda is not null then
+      raise exception '8e: o outro não voltou como Em elaboração, sem motivo (%)', row_to_json(v_so);
+    end if;
+    -- 8f. Sem o motivo guardado (o agrupamento reaberto antes desta migration): o Reprovado volta como os antigos.
+    v_oc := pg_temp.f5g_orc_barco(v_ana, v_x, 'ORÇ-99843', c_t, 'rejected');
+    v_od := pg_temp.f5g_orc_barco(v_ana, v_x, 'ORÇ-99844', c_t, 'draft');
+    v_r := public._agrupar_orcamentos_reabrindo(array[v_oc, v_od], array[v_oc], null, 'ORÇ-T99845', c_admin, null);
+    update public.orcamento_agrupamento_origens x
+       set motivo_perda_antes = null
+     where x.agrupamento_id = (v_r ->> 'agrupamento_id')::uuid and x.origem_id = v_oc;
+    perform public._desagrupar_orcamentos_desfazer((v_r ->> 'service_order_id')::uuid, c_admin);
+    select so.status, so.quote_status, so.motivo_perda, so.motivo_perda_por, so.motivo_perda_em, so.motivo_perda_nota
+      into v_so from public.service_orders so where so.id = v_oc;
+    if v_so.status is distinct from 'draft' or v_so.quote_status is distinct from 'rejected'
+       or v_so.motivo_perda is distinct from 'sem_motivo_antigo' or v_so.motivo_perda_por is distinct from 'migracao'
+       or v_so.motivo_perda_em is null or v_so.motivo_perda_nota is not null then
+      raise exception '8f: sem o motivo guardado, o Reprovado não voltou como os antigos (%)', row_to_json(v_so);
     end if;
     raise exception 'f5g_cenario' using errcode = 'P0001';
   exception when others then
