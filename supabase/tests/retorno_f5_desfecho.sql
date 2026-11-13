@@ -608,7 +608,13 @@ begin
     v_c := pg_temp.f5d_cli('Ana Desfecho F5 Teste', '5547900009980');
     for v_rec in select * from (values ('ORÇ-99580', 'rejected', date '2027-01-05'), ('ORÇ-99581', 'approved', date '2027-01-05'),
                                        ('ORÇ-99582', 'sent', date '2027-01-20')) as x(numero, quote, validade) loop
-      v_s1 := pg_temp.f5d_orc(v_c, v_rec.numero, c_qui - interval '12 days', v_rec.quote, v_rec.validade);
+      -- F5 (P9): o perdido nasce com motivo; com o CHECK service_orders_rejeitado_tem_motivo no banco, o insert direto em
+      -- rejected sem motivo daria 23514. Continua sendo um orçamento perdido, que a linha 4 não conta.
+      v_s1 := pg_temp.f5d_orc(v_c, v_rec.numero, c_qui - interval '12 days',
+                              (case when v_rec.quote = 'rejected' then 'sent' else v_rec.quote end), v_rec.validade);
+      if v_rec.quote = 'rejected' then
+        update public.service_orders set quote_status = 'rejected', motivo_perda = 'preco', motivo_perda_por = 'tela' where id = v_s1;
+      end if;
       insert into public.orcamento_envios (service_order_id, client_id, via, chave, ao_cliente, em)
       values (v_s1, v_c, 'tela', '00009980', true, '2027-01-02 13:00-03');
     end loop;
