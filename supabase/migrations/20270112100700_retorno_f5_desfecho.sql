@@ -10,12 +10,16 @@
 --    parado conclui (status_mudou) e as saídas agendadas dele caem; o encerrado fica encerrado (CHECK).
 -- 3. orcamento_dito (C-DITO-O): *segura 151*, *solta 151*, *segura orcamentos*, *solta orcamentos* e *motivo 151 B*, só do
 --    dono (is_admin_or_financial); a ordem pelo número (ORÇ-/OS-), nunca pelo nome. Nunca recebe PIN.
--- 4. orcamento_resumo_fechamento (C-FECH-O): {fixas, linhas, avisar}. Fixa: amanhã sai sozinho (até 3, com *segura N*).
---    Linhas (no máximo 4): amanhã esperam o seu *sim <PIN>*; os encerramentos desde o fechamento anterior; o "Fechado" ou o
---    pedido de dados que não saiu (e grava resultado.nao_saiu_fechado_em: o aviso sai da lista do cartão); os enviados
---    vencidos sem desfecho. Com orcamento_modo = 'desligado', só a dos vencidos. Nunca telefone nem documento.
+-- 4. orcamento_resumo_fechamento (C-FECH-O): {fixas, linhas, avisar, nao_saiu}. Fixa: amanhã sai sozinho (até 3, com
+--    *segura N*). Linhas (no máximo 4): amanhã esperam o seu *sim <PIN>*; os encerramentos desde o último fechamento que podia
+--    mostrá-los (a revisão não conta); o "Fechado" ou o pedido de dados que não saiu; os enviados vencidos sem desfecho. Com
+--    orcamento_modo = 'desligado', só a dos vencidos. Nunca telefone nem documento. Só lê: o aviso do que não saiu vai em
+--    nao_saiu ({aceite, linha}), e quem grava a marca é o 5b, depois de a tarde com a linha ir à fila.
 -- 5. orcamento_avisados (C-AVISO-O): grava avisado_em e aviso_fila nos passos previstos da linha fixa; sem a linha da fila,
 --    nada (o aviso vale pela entrega, e o vigia só deixa sair sozinho com a fila em sent).
+-- 5b. orcamento_nao_saiu_avisados (revisão das ondas 4 a 9, achados banco-2, seguranca-1 e edge-fechamento): grava
+--    resultado.nao_saiu_fechado_em (e nao_saiu_fila) nos aceites cujo aviso a tarde levou à fila; só então o aviso sai da
+--    lista do cartão (_orcamento_cartao_aceites). Sem a linha da fila, nada.
 -- 6. Gerados: retorno_carona (a lista da F5, _orcamento_cartao_lista, da P7, dentro de begin … exception when
 --    undefined_function: até a onda 5, a carona é a da F2), retorno_resumo_extra (o "Mandei sozinho" lista a saída sozinha do
 --    orçamento, com o rótulo dela) e _retorno_dito_errado (o *errado Z* de uma saída sem caso diz o nome do cliente).
@@ -334,9 +338,11 @@ grant execute on function public.orcamento_dito(jsonb, uuid, timestamptz) to ser
 
 -- ── 4. O fechamento do dono (C-FECH-O) ─────────────────────────────────────────────────────────────────────────────────
 
--- "Amanhã" é o próximo dia comercial (_orcamento_dia_util_mais). Os encerramentos contam desde o fechamento anterior
--- (_retorno_fechamento_anterior, a mesma régua do "Mandei sozinho"). O aviso do "Fechado" que não saiu aparece uma vez: a
--- linha grava resultado.nao_saiu_fechado_em, e o item sai da lista do cartão (_orcamento_cartao_aceites).
+-- "Amanhã" é o próximo dia comercial (_orcamento_dia_util_mais). Os encerramentos contam desde o último fechamento que podia
+-- mostrá-los: a revisão da semana e a do mês não mostram as linhas do orçamento (P10.2) e não contam (revisão das ondas 4 a 9,
+-- achado seguranca-1); o de outro dia diz o dia ("Encerrado seg 16/11"). O aviso do "Fechado" que não saiu volta em nao_saiu,
+-- com a linha exata; esta função não grava nada: a marca resultado.nao_saiu_fechado_em é de orcamento_nao_saiu_avisados,
+-- depois de a tarde com a linha ir à fila (antes, a marca era gravada aqui, e a linha que a tarde descartava sumia do cartão).
 create or replace function public.orcamento_resumo_fechamento(p_agora timestamptz default now())
 returns jsonb
 language plpgsql
@@ -361,7 +367,10 @@ declare
   v_linhas text[] := '{}'::text[];
   v_linha2 text;
   v_linha4 text;
-  v_marcar uuid[] := '{}'::uuid[];
+  v_linha text;
+  v_nao_saiu jsonb := '[]'::jsonb;
+  v_desde_enc timestamptz;
+  v_quando text;
   v_n integer := 0;
   v_k integer := 0;
   v_m integer := 0;
@@ -373,9 +382,16 @@ declare
   v_venc_n integer;
 begin
   if v_cfg.id is null then
-    return jsonb_build_object('fixas', '[]'::jsonb, 'linhas', '[]'::jsonb, 'avisar', '[]'::jsonb);
+    return jsonb_build_object('fixas', '[]'::jsonb, 'linhas', '[]'::jsonb, 'avisar', '[]'::jsonb, 'nao_saiu', '[]'::jsonb);
   end if;
   v_desde := public._retorno_fechamento_anterior(v_agora);
+  -- Os encerramentos: desde a última tarde de turno 'fechamento' que foi à fila (resumo_tarde.enviado) nos últimos 10 dias. A
+  -- revisão (da semana, do mês) e a tarde calada não mostram as linhas do orçamento; sem nenhum fechamento enviado, o anterior
+  -- de sempre. Num dia comum, é o mesmo instante de v_desde.
+  v_desde_enc := least(v_desde, coalesce((select (max(t.dia) + v_cfg.ponto_fechamento) at time zone c_fuso
+                                            from public.resumo_tarde t
+                                           where t.turno = 'fechamento' and t.enviado and t.dia < v_hoje
+                                             and t.dia >= v_hoje - 10), v_desde));
 
   if v_cfg.orcamento_modo is distinct from 'desligado' then
     v_amanha := public._orcamento_dia_util_mais(v_hoje, 1);
@@ -431,8 +447,9 @@ begin
       end if;
     end if;
 
-    -- 3. Os encerramentos desde o fechamento anterior (só do acompanhamento ligado: a sombra não fala com o dono). A hora do
-    --    encerramento é a da saída dele; sem saída, o fim do prazo do passo (sem o *sim*) ou o dia seguinte ao prazo.
+    -- 3. Os encerramentos desde o último fechamento que podia mostrá-los (v_desde_enc; só do acompanhamento ligado: a sombra não
+    --    fala com o dono). A hora do encerramento é a da saída dele; sem saída, o fim do prazo do passo (sem o *sim*) ou o dia
+    --    seguinte ao prazo. O de outro dia diz o dia no lugar do "hoje".
     for v_r in
       select x.*
         from (select a.encerramento, so.service_order_number as numero, so.status, so.converted_to_os_at, so.quote_status,
@@ -446,7 +463,7 @@ begin
                 left join public.orcamento_passos e on e.acompanhamento_id = a.id and e.passo = 'encerramento'
                 left join public.retorno_saidas es on es.id = e.saida_id
                where a.estado = 'encerrado' and a.modo = 'ligado' and a.encerramento in ('enviado', 'sem_mensagem')) x
-       where x.quando > v_desde and x.quando <= v_agora
+       where x.quando > v_desde_enc and x.quando <= v_agora
          and x.status = 'draft' and x.converted_to_os_at is null
        order by x.quando, x.numero
     loop
@@ -454,14 +471,18 @@ begin
                        then format(' · *motivo %s A* marca como perdido (sumiu)',
                                    coalesce(nullif(ltrim(substring(v_r.numero from '[0-9]+$'), '0'), ''), '0'))
                        else ' · para marcar como perdido, use a tela ou o assistente' end);
+      v_quando := (case when (v_r.quando at time zone c_fuso)::date = v_hoje then 'hoje'
+                        else c_dias[extract(isodow from (v_r.quando at time zone c_fuso))::integer] || ' '
+                             || to_char(v_r.quando at time zone c_fuso, 'DD/MM') end);
       if v_r.quote_status = 'rejected' then
-        v_meio := v_meio || format('Encerrado hoje: %s (%s), perdido (%s) · troque com *motivo %s B* %s', v_r.numero,
+        v_meio := v_meio || format('Encerrado %s: %s (%s), perdido (%s) · troque com *motivo %s B* %s', v_quando, v_r.numero,
                                    coalesce(v_r.nome, 'sem nome'),
                                    (case v_r.motivo_perda when 'fechou_com_outro' then 'fechou com outro' when 'preco' then 'preço'
                                                           else coalesce(v_r.motivo_perda, 'sem motivo') end),
                                    coalesce(nullif(ltrim(substring(v_r.numero from '[0-9]+$'), '0'), ''), '0'), c_legenda);
       elsif v_r.encerramento = 'enviado' then
-        v_meio := v_meio || (format('Encerrado hoje sem resposta: %s (%s)', v_r.numero, coalesce(v_r.nome, 'sem nome')) || v_cauda);
+        v_meio := v_meio || (format('Encerrado %s sem resposta: %s (%s)', v_quando, v_r.numero, coalesce(v_r.nome, 'sem nome'))
+                             || v_cauda);
       else
         v_meio := v_meio || (format('Encerrado sem mensagem (não saiu: %s): %s (%s)',
                                     (case v_r.passo_motivo when 'sem_sim' then 'sem o seu sim'
@@ -535,30 +556,27 @@ begin
     v_linhas := v_linhas || v_linha2;
   end if;
   for v_i in 1 .. least(coalesce(cardinality(v_meio), 0), v_lugar) loop
-    v_linhas := v_linhas || (v_meio[v_i]
-                             || (case when v_i = v_lugar and cardinality(v_meio) > v_lugar
-                                      then format(' (e mais %s)', cardinality(v_meio) - v_lugar) else '' end));
+    v_linha := v_meio[v_i]
+               || (case when v_i = v_lugar and cardinality(v_meio) > v_lugar
+                        then format(' (e mais %s)', cardinality(v_meio) - v_lugar) else '' end);
+    v_linhas := v_linhas || v_linha;
+    -- O aviso do que não saiu: o aceite e a linha exata. A marca é de orcamento_nao_saiu_avisados, depois de a tarde com
+    -- esta linha ir à fila; até lá, o aviso fica na lista do cartão (_orcamento_cartao_aceites) e volta no próximo fechamento.
     if v_meio_aceite[v_i] is not null then
-      v_marcar := array_append(v_marcar, v_meio_aceite[v_i]);
+      v_nao_saiu := v_nao_saiu || jsonb_build_array(jsonb_build_object('aceite', v_meio_aceite[v_i], 'linha', v_linha));
     end if;
   end loop;
   if v_linha4 is not null then
     v_linhas := v_linhas || v_linha4;
   end if;
 
-  -- O aviso do que não saiu aparece uma vez: sai da lista do cartão (a marca que _orcamento_cartao_aceites lê).
-  if cardinality(v_marcar) > 0 then
-    update public.orcamento_aceites a
-       set resultado = a.resultado || jsonb_build_object('nao_saiu_fechado_em', v_agora)
-     where a.id = any (v_marcar) and not (a.resultado ? 'nao_saiu_fechado_em');
-  end if;
-
-  return jsonb_build_object('fixas', to_jsonb(v_fixas), 'linhas', to_jsonb(v_linhas), 'avisar', to_jsonb(v_avisar));
+  return jsonb_build_object('fixas', to_jsonb(v_fixas), 'linhas', to_jsonb(v_linhas), 'avisar', to_jsonb(v_avisar),
+                            'nao_saiu', v_nao_saiu);
 end;
 $$;
 
 comment on function public.orcamento_resumo_fechamento(timestamptz) is
-  'Retorno F5 (P8.1, C-FECH-O): {fixas, linhas, avisar}. fixas: "Orçamentos: amanhã sai sozinho o lembrete do ORÇ-00151 (Ana) · *segura 151*" (até 3, "e mais N"; os passos citados vão em avisar). linhas (no máximo 4): amanhã N esperam o seu *sim <PIN>* (e os de hoje que ainda esperam); os encerramentos desde o fechamento anterior (perdido com *motivo N B* e a legenda; sem resposta; sem mensagem, com a razão), com *motivo N A* só com motivo_marca_aberto; o "Fechado" ou o pedido de dados que não saiu ou pode não ter saído (grava resultado.nao_saiu_fechado_em); os enviados vencidos sem desfecho. orcamento_modo desligado: só a dos vencidos. 1º nome do cadastro, nunca telefone nem documento.';
+  'Retorno F5 (P8.1, C-FECH-O): {fixas, linhas, avisar, nao_saiu}. Só lê. fixas: "Orçamentos: amanhã sai sozinho o lembrete do ORÇ-00151 (Ana) · *segura 151*" (até 3, "e mais N"; os passos citados vão em avisar). linhas (no máximo 4): amanhã N esperam o seu *sim <PIN>* (e os de hoje que ainda esperam); os encerramentos desde a última tarde de turno fechamento que foi à fila (a revisão não conta; o de outro dia diz o dia), perdido com *motivo N B* e a legenda, sem resposta, sem mensagem com a razão, e *motivo N A* só com motivo_marca_aberto; o "Fechado" ou o pedido de dados que não saiu ou pode não ter saído; os enviados vencidos sem desfecho. nao_saiu: [{aceite, linha}] dos avisos que entraram em linhas, para orcamento_nao_saiu_avisados depois do envio. orcamento_modo desligado: só a dos vencidos. 1º nome do cadastro, nunca telefone nem documento.';
 
 revoke all on function public.orcamento_resumo_fechamento(timestamptz) from public, anon, authenticated;
 grant execute on function public.orcamento_resumo_fechamento(timestamptz) to service_role;
@@ -592,6 +610,41 @@ comment on function public.orcamento_avisados(uuid[], uuid, timestamptz) is
 
 revoke all on function public.orcamento_avisados(uuid[], uuid, timestamptz) from public, anon, authenticated;
 grant execute on function public.orcamento_avisados(uuid[], uuid, timestamptz) to service_role;
+
+-- ── 5b. O aviso do que não saiu, mostrado (revisão das ondas 4 a 9: banco-2, seguranca-1, edge-fechamento) ─────────────────
+
+-- O aviso do "Fechado" (ou do pedido de dados) que não saiu sai da lista do cartão só depois de a tarde com a linha dele ir à
+-- fila: a edge chama com os aceites cujas linhas o texto enviado tem, e com o id da linha da fila da tarde. A tarde que
+-- descartou a linha (revisão, corte das extras, tentativa que falhou) não chama, e o aviso continua no cartão e no próximo
+-- fechamento.
+create or replace function public.orcamento_nao_saiu_avisados(p_aceites uuid[], p_fila uuid, p_agora timestamptz default now())
+returns integer
+language plpgsql
+volatile
+security definer
+set search_path = public
+as $$
+declare
+  v_n integer := 0;
+begin
+  -- Sem a linha da fila não há como saber se o fechamento chegou: nada é gravado.
+  if p_fila is null or p_aceites is null or coalesce(cardinality(p_aceites), 0) = 0 then
+    return 0;
+  end if;
+  update public.orcamento_aceites a
+     set resultado = a.resultado || jsonb_build_object('nao_saiu_fechado_em', coalesce(p_agora, now()), 'nao_saiu_fila', p_fila)
+   where a.id = any (p_aceites) and a.estado in ('com_sinal', 'sem_sinal')
+     and a.resultado ? 'saida_nao_saiu' and not (a.resultado ? 'nao_saiu_fechado_em');
+  get diagnostics v_n = row_count;
+  return v_n;
+end;
+$$;
+
+comment on function public.orcamento_nao_saiu_avisados(uuid[], uuid, timestamptz) is
+  'Retorno F5 (P8.1, revisão das ondas 4 a 9): depois de o fechamento com a linha do "Fechado" (ou do pedido de dados) que não saiu ir à fila, grava resultado.nao_saiu_fechado_em = p_agora e nao_saiu_fila = p_fila nos aceites com_sinal/sem_sinal de p_aceites que têm saida_nao_saiu e ainda não têm a marca; o aviso sai da lista do cartão. p_fila nulo: 0, nada gravado. Devolve quantos marcou. Só a service_role.';
+
+revoke all on function public.orcamento_nao_saiu_avisados(uuid[], uuid, timestamptz) from public, anon, authenticated;
+grant execute on function public.orcamento_nao_saiu_avisados(uuid[], uuid, timestamptz) to service_role;
 
 -- ── 6. Gerado do corpo vigente, com os trechos -- F5 ────────────────────────────────────────────────────────────────────
 

@@ -163,8 +163,9 @@ declare
   c_tec constant uuid := 'b1600000-0000-4000-8000-0000000099d2';
   c_legenda constant text := '(B fechou com outro · C desistiu · D preço · F prazo · G outro)';
   c_novas constant text[] := array['_orcamento_rotulo_da_saida', 'orcamento_marcar_perdido', 'orcamento_dito',
-                                   'orcamento_resumo_fechamento', 'orcamento_avisados'];
-  c_publicas constant text[] := array['orcamento_marcar_perdido', 'orcamento_dito', 'orcamento_resumo_fechamento', 'orcamento_avisados'];
+                                   'orcamento_resumo_fechamento', 'orcamento_avisados', 'orcamento_nao_saiu_avisados'];
+  c_publicas constant text[] := array['orcamento_marcar_perdido', 'orcamento_dito', 'orcamento_resumo_fechamento', 'orcamento_avisados',
+                                      'orcamento_nao_saiu_avisados'];
   v_ana uuid; v_joao uuid; v_pedro uuid; v_c uuid;
   v_os uuid; v_os2 uuid; v_os3 uuid;
   v_ac uuid; v_ac2 uuid; v_ac3 uuid; v_ac4 uuid;
@@ -553,7 +554,9 @@ begin
     end if;
   end;
   begin
-    -- 6e. O "Fechado" (ou o pedido de dados) que não saiu ou pode não ter saído: uma vez só, e sai da lista do cartão.
+    -- 6e. O "Fechado" (ou o pedido de dados) que não saiu ou pode não ter saído: a leitura não grava nada (revisão das ondas 4
+    --     a 9, achados banco-2, seguranca-1 e edge-fechamento: a tarde pode descartar a linha); o aviso volta até a tarde com a
+    --     linha ir à fila (orcamento_nao_saiu_avisados, com a linha da fila), e só então sai da lista do cartão, uma vez só.
     v_ana := pg_temp.f5d_cli('Ana Desfecho F5 Teste', '5547900009974');
     v_os := pg_temp.f5d_orc(v_ana, 'ORÇ-99574', c_qui, 'awaiting_deposit');
     v_a1 := pg_temp.f5d_aceite(v_ana, '5547900009974', v_os, '{"saida_nao_saiu": "canal", "saida_nao_saiu_tipo": "orc_fechado"}');
@@ -574,13 +577,68 @@ begin
          'O pedido de dados da nota do ORÇ-99576 (Pedro) não saiu: responda você') then
       raise exception '6e: os avisos (%)', v_r -> 'linhas';
     end if;
-    if (select count(*) from public.orcamento_aceites a where a.id in (v_a1, v_a2, v_a3) and a.resultado ? 'nao_saiu_fechado_em') is distinct from 3::bigint
-       or exists (select 1 from public._orcamento_cartao_aceites(c_fech) x where x.aceite_id in (v_a1, v_a2, v_a3)) then
+    if v_r -> 'nao_saiu' is distinct from jsonb_build_array(
+         jsonb_build_object('aceite', v_a1, 'linha', 'O ''Fechado'' do ORÇ-99574 (Ana) não saiu: responda você'),
+         jsonb_build_object('aceite', v_a2, 'linha', 'O ''Fechado'' do ORÇ-99575 (João) pode não ter saído: confira a conversa'),
+         jsonb_build_object('aceite', v_a3, 'linha', 'O pedido de dados da nota do ORÇ-99576 (Pedro) não saiu: responda você')) then
+      raise exception '6e: o nao_saiu com o aceite e a linha exata (%)', v_r -> 'nao_saiu';
+    end if;
+    if exists (select 1 from public.orcamento_aceites a where a.id in (v_a1, v_a2, v_a3) and a.resultado ? 'nao_saiu_fechado_em')
+       or (select count(*) from public._orcamento_cartao_aceites(c_fech) x where x.aceite_id in (v_a1, v_a2, v_a3)) is distinct from 3::bigint then
+      raise exception '6e: a leitura gravou a marca (o aviso saiu do cartão sem ir ao dono)';
+    end if;
+    -- A tarde que não levou a linha (a revisão, o corte das extras, a tentativa que falhou): o aviso volta no fechamento seguinte.
+    v_r := public.orcamento_resumo_fechamento(c_fech + interval '1 day');
+    if jsonb_array_length(v_r -> 'nao_saiu') is distinct from 3 or jsonb_array_length(v_r -> 'linhas') is distinct from 3 then
+      raise exception '6e: o aviso não voltou no fechamento seguinte (%)', v_r;
+    end if;
+    -- Sem a linha da fila, nada; com ela, os três saem da lista do cartão, com a hora e a fila; de novo, nada.
+    if public.orcamento_nao_saiu_avisados(array[v_a1, v_a2, v_a3], null, c_fech + interval '1 day') is distinct from 0
+       or exists (select 1 from public.orcamento_aceites a where a.id in (v_a1, v_a2, v_a3) and a.resultado ? 'nao_saiu_fechado_em') then
+      raise exception '6e: sem a linha da fila gravou a marca';
+    end if;
+    if public.orcamento_nao_saiu_avisados(array[v_a1, v_a2, v_a3], v_fila, c_fech + interval '1 day') is distinct from 3 then
+      raise exception '6e: o aviso mostrado não marcou os três';
+    end if;
+    if (select count(*) from public.orcamento_aceites a
+         where a.id in (v_a1, v_a2, v_a3) and (a.resultado ->> 'nao_saiu_fechado_em')::timestamptz = c_fech + interval '1 day'
+           and a.resultado ->> 'nao_saiu_fila' = v_fila::text) is distinct from 3::bigint
+       or exists (select 1 from public._orcamento_cartao_aceites(c_fech + interval '1 day') x where x.aceite_id in (v_a1, v_a2, v_a3)) then
       raise exception '6e: a marca nao_saiu_fechado_em';
     end if;
+    if public.orcamento_nao_saiu_avisados(array[v_a1], v_fila, c_fech + interval '2 days') is distinct from 0 then
+      raise exception '6e: marcou duas vezes';
+    end if;
     v_r := public.orcamento_resumo_fechamento(c_fech + interval '1 day');
-    if v_r -> 'linhas' is distinct from '[]'::jsonb then
-      raise exception '6e: o aviso voltou no fechamento seguinte (%)', v_r -> 'linhas';
+    if v_r -> 'linhas' is distinct from '[]'::jsonb or v_r -> 'nao_saiu' is distinct from '[]'::jsonb then
+      raise exception '6e: o aviso voltou depois de mostrado (%)', v_r;
+    end if;
+    raise exception 'f5d_cenario' using errcode = 'P0001';
+  exception when others then
+    if sqlstate is distinct from 'P0001' or sqlerrm is distinct from 'f5d_cenario' then
+      raise;
+    end if;
+  end;
+  begin
+    -- 6g. O encerramento de um dia de revisão (revisão das ondas 4 a 9, achado seguranca-1): a revisão não mostra as linhas do
+    --     orçamento (P10.2) e não conta como fechamento; o encerramento de qua 13/01 (dia da revisão da semana) sai no fechamento
+    --     de qui 14/01, com o dia no lugar do "hoje". Sem tarde de fechamento em resumo_tarde nos 10 dias, a régua de sempre
+    --     (o fechamento anterior, qua 17:30), e ele não aparece.
+    perform pg_temp.f5d_ligar();
+    v_ac := pg_temp.f5d_cad('João Desfecho F5 Teste', '5547900009981', 'ORÇ-99583');
+    perform pg_temp.f5d_saida(v_ac, 'encerramento', 'orc_encerramento', 'enviada', c_qui - interval '1 day');
+    update public.orcamento_acompanhamentos a set estado = 'encerrado', encerramento = 'enviado', desfecho_proposto = 'sumiu' where a.id = v_ac;
+    v_r := public.orcamento_resumo_fechamento(c_fech);
+    if strpos((v_r -> 'linhas')::text, 'ORÇ-99583') > 0 then
+      raise exception '6g: sem a tarde de fechamento gravada, o encerramento de ontem apareceu (%)', v_r -> 'linhas';
+    end if;
+    insert into public.resumo_tarde (dia, phone_normalized, turno, modo, formato, texto, calado, enviado)
+    values (date '2027-01-12', '5547900009982', 'fechamento', 'novo', 'ligado', 'Fechamento de teste (F5 desfecho)', false, true),
+           (date '2027-01-13', '5547900009982', 'revisao_semana', 'novo', 'ligado', 'Revisão de teste (F5 desfecho)', false, true);
+    v_r := public.orcamento_resumo_fechamento(c_fech);
+    if v_r -> 'linhas' is distinct from jsonb_build_array(
+         'Encerrado qua 13/01 sem resposta: ORÇ-99583 (João) · para marcar como perdido, use a tela ou o assistente') then
+      raise exception '6g: o encerramento do dia da revisão (%)', v_r -> 'linhas';
     end if;
     raise exception 'f5d_cenario' using errcode = 'P0001';
   exception when others then
@@ -817,8 +875,8 @@ begin
     raise exception '8b-3: os grants da view';
   end if;
 
-  -- ── 9. As funções novas: SECURITY DEFINER com search_path; as quatro públicas só à service_role; as geradas com os grants de
-  --        antes; nenhuma aberta a anon ou authenticated ──
+  -- ── 9. As funções novas: SECURITY DEFINER com search_path; as cinco públicas só à service_role (a 5ª, orcamento_nao_saiu_avisados,
+  --        da revisão das ondas 4 a 9); as geradas com os grants de antes; nenhuma aberta a anon ou authenticated ──
   foreach v in array c_novas loop
     for v_rec in
       select p.oid, p.oid::regprocedure::text as nome, p.prosecdef, coalesce(p.proconfig, '{}') as config
@@ -837,8 +895,8 @@ begin
       end if;
     end loop;
   end loop;
-  if v_n_fun is distinct from 5 then
-    raise exception '9d: achei % das 5 funções novas', v_n_fun;
+  if v_n_fun is distinct from 6 then
+    raise exception '9d: achei % das 6 funções novas', v_n_fun;
   end if;
   for v_rec in
     select x.f, x.servico, p.oid
