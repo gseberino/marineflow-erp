@@ -88,7 +88,7 @@ insert into _f values
   ('agenda_aviso_conferir(timestamp with time zone)', true, 'v', 'service_role', '8665c73034a74e0b89d1e3c6a91b51f0', '9cae4565a4d09039c4e692ea56b51e55'),
   -- (c) e (d): as linhas trocadas voltam no F3
   ('_agenda_porque_da_os(uuid,date,timestamp with time zone)', true, 's', 'authenticated service_role', '8cbcbd131425b64976d96b4e65dd6cb4', 'b25261435b91ff328b9fa85ad58b73e5'),
-  ('_agenda_rotulo_os(text,text,boolean,text,boolean)', false, 'i', 'authenticated service_role', '21b846be9aa019c82af42c31a0a3d47e', 'c5bd3e8e361e4b545d82bf8ab784c5cf');
+  ('_agenda_rotulo_os(text,text,boolean,text,boolean)', false, 'i', 'authenticated service_role', '726f8157bd6da7cc652013d341f84365', 'c5bd3e8e361e4b545d82bf8ab784c5cf');
 
 insert into _resultado
 select format('F1 %s: 1 assinatura, definer %s, volatilidade %s, search_path=public, portas (%s; anon e PUBLIC nunca)', r.f, r.definer, r.vol, coalesce(nullif(r.papeis, ''), 'ninguém')),
@@ -119,7 +119,7 @@ select format('F3 %s: tirado o conserto, é o corpo de produção de 13/11 (md5 
                                              $l$case when v_quem = 'dono' then 'marcado por você' else 'marcado pelo gestor' end,$l$)
                                       when r.f like '\_agenda\_rotulo\_os(%'
                                       then replace(replace(p.prosrc, chr(13), ''),
-                                             $l$then 'foi recusado' else 'recusado ou vencido' end  -- CONSERTO 13/11 (d): pedido A-2 da F5, vencer não é recusar$l$,
+                                             $l$then 'foi recusado' else 'recusado' end  -- CONSERTO 13/11 (d): pedido A-2 da F5, vencer não é recusar$l$,
                                              $l$then 'foi recusado (ou venceu)' else 'recusado ou vencido' end$l$)
                                       else pg_temp.sem_c13(p.prosrc) end) = r.antes,
        case when p.oid is null then 'NÃO EXISTE' end
@@ -197,9 +197,9 @@ select 'B3 o último fechamento guardado: o estado, quando saiu e quantas pergun
 
 -- ── D. (c) e (d) pelo resultado ────────────────────────────────────────────────────────────────────────────────────────────────────────
 insert into _resultado
-select 'D1 o orçamento recusado: a frase "foi recusado"; o rótulo curto "recusado ou vencido" (não muda)',
+select 'D1 o orçamento recusado: a frase "foi recusado"; o rótulo curto "recusado"',
        public._agenda_rotulo_os('draft', 'rejected', false, null, true) = 'foi recusado'
-       and public._agenda_rotulo_os('draft', 'rejected', false, null, false) = 'recusado ou vencido',
+       and public._agenda_rotulo_os('draft', 'rejected', false, null, false) = 'recusado',
        public._agenda_rotulo_os('draft', 'rejected', false, null, true);
 
 select teste, ok, detalhe from _resultado order by teste;

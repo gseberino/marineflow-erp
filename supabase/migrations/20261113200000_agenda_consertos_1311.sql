@@ -17,7 +17,7 @@
 --     agenda_aviso_conferir (recriada, o passo (4)). A linha da fila que falhou, sumiu ou não saiu em 1 dia cai, e as perguntas e as ações voltam no próximo
 --     fechamento. agenda_fechamento_registrar não muda. O TS (ai-daily-briefing) muda junto: chama agenda_fechamento_guardar com o id da fila.
 -- (c) NOVO-agenda-296: _agenda_porque_da_os dizia "marcado pelo gestor" / "marcado por você" na chave quem_texto de uma OS só reservada. Agora "reservado …".
--- (d) Pedido A-2 da F5 do retorno: _agenda_rotulo_os diz "foi recusado" (era "foi recusado (ou venceu)").
+-- (d) Pedido A-2 da F5 do retorno: _agenda_rotulo_os diz "foi recusado" (era "foi recusado (ou venceu)") e o rótulo curto "recusado" (era "recusado ou vencido").
 --
 -- AS RECRIADAS partem do corpo VIGENTE em produção (q0.sh, 13/11): o montador (agenda-pesquisa/c1311/montar.mjs) copia a definição mais nova do repo, confere o
 -- md5 do corpo (sem CR) e do comment contra o de produção e recusa se diferir; tirados os blocos "-- CONSERTO 13/11 (a|b):" (e, em (c) e (d), a linha marcada
@@ -683,7 +683,7 @@ as $function$
       when p_quote_status = 'awaiting_deposit' then 'esperando o sinal'
       when p_quote_status in ('sent', 'awaiting_approval') then
         case when p_frase then 'foi enviado e espera a aprovação do cliente' else 'enviado, esperando a aprovação' end
-      when p_quote_status = 'rejected' then case when p_frase then 'foi recusado' else 'recusado ou vencido' end  -- CONSERTO 13/11 (d): pedido A-2 da F5, vencer não é recusar
+      when p_quote_status = 'rejected' then case when p_frase then 'foi recusado' else 'recusado' end  -- CONSERTO 13/11 (d): pedido A-2 da F5, vencer não é recusar
       else case when p_frase then 'ainda é rascunho (não foi enviado ao cliente)' else 'rascunho' end end
     when p_status in ('open', 'approved') then 'aprovada'
     when p_status = 'scheduled' then 'agendada'
@@ -698,7 +698,7 @@ as $function$
 $function$;
 
 comment on function public._agenda_rotulo_os(text, text, boolean, text, boolean) is
-  'Agenda de Produção (Fase 1, P3): o status da OS/orçamento em português — rótulo curto (p_frase false) ou a frase de quem está fora da carteira (p_frase true). CONSERTO 13/11 (d), pedido A-2 da F5: a frase do orçamento recusado é "foi recusado" (era "foi recusado (ou venceu)").';
+  'Agenda de Produção (Fase 1, P3): o status da OS/orçamento em português — rótulo curto (p_frase false) ou a frase de quem está fora da carteira (p_frase true). CONSERTO 13/11 (d), pedido A-2 da F5: a frase do orçamento recusado é "foi recusado" (era "foi recusado (ou venceu)") e o rótulo curto, "recusado" (era "recusado ou vencido").';
 
 -- ── 7. As portas ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 -- As novas: a premissa e a conferência são internas (sem grant a ninguém; quem chama é definer ou o passo fila); a guarda, só o service_role (o Secretário).

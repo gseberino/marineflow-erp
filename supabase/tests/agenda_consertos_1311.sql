@@ -28,7 +28,7 @@
 --   B5  uma linha que não fecha cai com erro, uma vez, vai a app_error_logs e não derruba o aviso nem os outros fechamentos
 --   C1  (cenario_motor) o porquê: a reserva sua "reservado por você", a do gestor "reservado pelo gestor"; a marcada sua e a do gestor como antes; sem o
 --       conserto, a reserva dizia "marcado …" (morde)
---   D1  o rótulo: o orçamento recusado, na frase, "foi recusado"; o rótulo curto não muda; sem o conserto, "foi recusado (ou venceu)" (morde)
+--   D1  o rótulo: o orçamento recusado, na frase, "foi recusado"; o rótulo curto, "recusado"; sem o conserto, "foi recusado (ou venceu)" e "recusado ou vencido" (morde)
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -120,7 +120,7 @@ declare
   -- as 2 linhas trocadas em (c) e (d), como estão na migration (a de antes volta no lugar para conferir a origem)
   c_pq_novo  constant text := $l$                            'quem', v_quem, 'quem_texto', case when v_tipo = 'reserva' and v_quem = 'dono' then 'reservado por você' when v_tipo = 'reserva' then 'reservado pelo gestor' when v_quem = 'dono' then 'marcado por você' else 'marcado pelo gestor' end,  -- CONSERTO 13/11 (c): NOVO-agenda-296, a reserva não é marcação (R9.12-9)$l$;
   c_pq_antes constant text := $l$                            'quem', v_quem, 'quem_texto', case when v_quem = 'dono' then 'marcado por você' else 'marcado pelo gestor' end,$l$;
-  c_rot_novo  constant text := $l$      when p_quote_status = 'rejected' then case when p_frase then 'foi recusado' else 'recusado ou vencido' end  -- CONSERTO 13/11 (d): pedido A-2 da F5, vencer não é recusar$l$;
+  c_rot_novo  constant text := $l$      when p_quote_status = 'rejected' then case when p_frase then 'foi recusado' else 'recusado' end  -- CONSERTO 13/11 (d): pedido A-2 da F5, vencer não é recusar$l$;
   c_rot_antes constant text := $l$      when p_quote_status = 'rejected' then case when p_frase then 'foi recusado (ou venceu)' else 'recusado ou vencido' end$l$;
   v text;
   v_n int;
@@ -762,11 +762,12 @@ declare
   v_res jsonb := '[]'::jsonb;
   v_src text;
   v_antes text;
+  v_antes_curto text;
 begin
   v_res := pg_temp.ok(v_res, 'D1a a frase do orçamento recusado (fora da carteira): "foi recusado"',
     public._agenda_rotulo_os('draft', 'rejected', false, null, true) = 'foi recusado', public._agenda_rotulo_os('draft', 'rejected', false, null, true));
-  v_res := pg_temp.ok(v_res, 'D1b o rótulo curto não muda ("recusado ou vencido"), nem as outras frases (enviado, aprovado, concluída)',
-    public._agenda_rotulo_os('draft', 'rejected', false, null, false) = 'recusado ou vencido'
+  v_res := pg_temp.ok(v_res, 'D1b o rótulo curto é "recusado" (era "recusado ou vencido"), e as outras frases não mudam (enviado, aprovado, concluída)',
+    public._agenda_rotulo_os('draft', 'rejected', false, null, false) = 'recusado'
     and public._agenda_rotulo_os('draft', 'sent', false, null, true) = 'foi enviado e espera a aprovação do cliente'
     and public._agenda_rotulo_os('draft', 'approved', true, null, true) = 'orçamento assinado'
     and public._agenda_rotulo_os('completed', null, false, null, true) = 'já foi concluída',
@@ -778,15 +779,16 @@ begin
   end if;
   begin
     v_src := replace(pg_temp.src('public._agenda_rotulo_os(text, text, boolean, text, boolean)'),
-      $l$then 'foi recusado' else 'recusado ou vencido' end  -- CONSERTO 13/11 (d): pedido A-2 da F5, vencer não é recusar$l$,
+      $l$then 'foi recusado' else 'recusado' end  -- CONSERTO 13/11 (d): pedido A-2 da F5, vencer não é recusar$l$,
       $l$then 'foi recusado (ou venceu)' else 'recusado ou vencido' end$l$);
     execute format('create or replace function public._agenda_rotulo_os(p_status text, p_quote_status text, p_assinado boolean, p_juntado_em text, p_frase boolean) returns text language sql immutable set search_path to ''public'' as %L', v_src);
     v_antes := public._agenda_rotulo_os('draft', 'rejected', false, null, true);
+    v_antes_curto := public._agenda_rotulo_os('draft', 'rejected', false, null, false);
     raise exception 'desfaz' using errcode = 'P0098';
   exception when sqlstate 'P0098' then null;
   end;
-  v_res := pg_temp.ok(v_res, 'D1c sem o conserto (a linha de antes), a frase era "foi recusado (ou venceu)" (o teste morde)',
-    v_antes = 'foi recusado (ou venceu)', v_antes);
+  v_res := pg_temp.ok(v_res, 'D1c sem o conserto (a linha de antes), a frase era "foi recusado (ou venceu)" e o rótulo curto "recusado ou vencido" (o teste morde)',
+    v_antes = 'foi recusado (ou venceu)' and v_antes_curto = 'recusado ou vencido', v_antes || ' / ' || v_antes_curto);
   perform pg_temp.gravar(v_res);
 end
 $d$;
