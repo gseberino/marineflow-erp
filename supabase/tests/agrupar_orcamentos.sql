@@ -411,7 +411,14 @@ declare
   v uuid[];
 begin
   v := pg_temp._dupla();
-  update public.service_orders set quote_status = 'rejected' where id = v[2];
+  -- (Retorno F5, P9; revisão das ondas 4 a 9, achado banco-3) com o CHECK service_orders_rejeitado_tem_motivo no banco, o
+  -- reprovado leva motivo (preço, pela tela). Sem ele (antes da F5), o update de sempre: as colunas do motivo nem existem.
+  if exists (select 1 from pg_constraint
+              where conname = 'service_orders_rejeitado_tem_motivo' and conrelid = 'public.service_orders'::regclass) then
+    update public.service_orders set quote_status = 'rejected', motivo_perda = 'preco', motivo_perda_por = 'tela' where id = v[2];
+  else
+    update public.service_orders set quote_status = 'rejected' where id = v[2];
+  end if;
   perform pg_temp._bloqueio('B03 Desistência (quote_status rejected): recusa e nada muda',
     v, null, pg_temp._id('admin'), null, 'está como Reprovado');
 exception when others then

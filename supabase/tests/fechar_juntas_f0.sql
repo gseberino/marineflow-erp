@@ -94,11 +94,23 @@ returns uuid language plpgsql as $$
 declare
   v_os uuid;
 begin
-  insert into public.service_orders (service_order_number, client_id, vessel_id, status, quote_status, converted_to_os_at, created_at)
-  values (pg_temp._numero_livre(case when p_status = 'draft' then 'ORÇ-' else 'OS-' end), p_cli, p_ves, p_status,
-          coalesce(p_quote_status, case when p_status = 'draft' then 'draft' else 'approved' end),
-          case when p_status = 'draft' then null else now() end, clock_timestamp())
-  returning id into v_os;
+  -- (Retorno F5, P9; revisão das ondas 4 a 9, achado banco-3) com o CHECK service_orders_rejeitado_tem_motivo no banco, o
+  -- reprovado nasce com motivo (preço, pela tela). Sem ele (antes da F5), o insert de sempre: as colunas do motivo nem existem.
+  if p_quote_status = 'rejected' and exists (select 1 from pg_constraint
+                                              where conname = 'service_orders_rejeitado_tem_motivo'
+                                                and conrelid = 'public.service_orders'::regclass) then
+    insert into public.service_orders (service_order_number, client_id, vessel_id, status, quote_status, converted_to_os_at,
+                                       created_at, motivo_perda, motivo_perda_por)
+    values (pg_temp._numero_livre(case when p_status = 'draft' then 'ORÇ-' else 'OS-' end), p_cli, p_ves, p_status, p_quote_status,
+            case when p_status = 'draft' then null else now() end, clock_timestamp(), 'preco', 'tela')
+    returning id into v_os;
+  else
+    insert into public.service_orders (service_order_number, client_id, vessel_id, status, quote_status, converted_to_os_at, created_at)
+    values (pg_temp._numero_livre(case when p_status = 'draft' then 'ORÇ-' else 'OS-' end), p_cli, p_ves, p_status,
+            coalesce(p_quote_status, case when p_status = 'draft' then 'draft' else 'approved' end),
+            case when p_status = 'draft' then null else now() end, clock_timestamp())
+    returning id into v_os;
+  end if;
   insert into public.service_order_services (service_order_id, name_snapshot, billing_unit_snapshot, quantity,
                                              unit_price_snapshot, line_total, discount_pct, discount_amount)
   values (v_os, 'Serviço de teste', 'hour', 2, 150, 300, 0, 0);
