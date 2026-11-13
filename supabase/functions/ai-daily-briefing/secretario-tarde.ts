@@ -66,7 +66,9 @@ import { CHAVE_DA_PAPELADA, lerFormatoDaPapelada, linhaDoLote } from "../_shared
 import { contarRegrasGuardadas, montarLoteDaSemana, registrarLote } from "./secretario-papelada.ts";
 import { type ExtraDoFechamento, lerExtra, lerRetorno, linhasDoFechamento, type RetornoDoFechamento } from "./retorno.ts";
 import { lerParceiro } from "./parceiro.ts";
-import { type AvisoDoOrcamento, avisarOrcamentoNaTarde, lerOrcamento, type OrcamentoDoFechamento } from "./orcamento.ts";
+import {
+  type AvisoDoOrcamento, type AvisoNaoSaiu, avisarNaoSaiuNaTarde, avisarOrcamentoNaTarde, lerOrcamento, type OrcamentoDoFechamento,
+} from "./orcamento.ts";
 
 // deno-lint-ignore no-explicit-any
 type Admin = any;
@@ -147,6 +149,12 @@ export interface TardeMontada {
    * orcamento_avisados (só se o texto tem cada linha fixa, e com o id da linha da fila). Ausente = nenhuma linha fixa.
    */
   orcamento?: { fixas: string[]; avisar: string[] };
+  /**
+   * (F5, revisão das ondas 4 a 9) Os avisos do "Fechado" (ou do pedido de dados) que não saiu, com a linha de cada um, só no
+   * fechamento com texto: depois de gravada e ENVIADA a tarde, vão a orcamento_nao_saiu_avisados os que o texto tem (a linha
+   * cortada não marca). Ausente = nenhum.
+   */
+  orcamentoNaoSaiu?: AvisoNaoSaiu[];
 }
 
 /** (16/10/2026) O que a tarde-sombra recebe do portão: o guardado, os acordes de hoje e as regras do dono. */
@@ -218,6 +226,9 @@ export function montarTardeDosDados(p: {
   // (F5, P10.2) as linhas do orçamento, só no fechamento, depois das do parceiro (fixa = false: as primeiras a sair). O
   // ternário olha as duas: sem isso, as do orçamento sumiriam justo no caso comum (sem linha do parceiro) e com doDia nulo.
   const doOrcamentoLinhas = turno === "fechamento" ? (lido.orcamento?.linhas ?? []) : [];
+  // (F5, revisão das ondas 4 a 9) os avisos do que não saiu andam com as linhas: só no fechamento, e marcados depois do envio
+  // só se o texto enviado tem a linha (o 1º ramo de textoDaTarde tira as extras quando a tarde não cabe)
+  const doOrcamentoNaoSaiu = turno === "fechamento" ? (lido.orcamento?.naoSaiu ?? []) : [];
   const extrasNovas = [...doParceiro, ...doOrcamentoLinhas];
   const retorno = extrasNovas.length
     ? { ...(doDia ?? { esperando: null, resumo: null, fixa: false }), extras: [...(doDia?.extras ?? []), ...extrasNovas] }
@@ -290,6 +301,7 @@ export function montarTardeDosDados(p: {
     letras: t.letras,
     ...(linhasMostradas.length ? { agendaMostrou: linhasMostradas } : {}),
     ...(orcamento && t.texto ? { orcamento } : {}),
+    ...(doOrcamentoNaoSaiu.length && t.texto ? { orcamentoNaoSaiu: doOrcamentoNaoSaiu } : {}),
     detalhe: {
       ficaram: ficaram.length,
       // todos os parados (o texto mostra até 5)
@@ -523,6 +535,11 @@ export async function rodarTurnoDaTarde(admin: Admin, p: { agora: Date; pedido: 
   const orcamentoAviso: AvisoDoOrcamento | null = r.novo && r.enviado && m.orcamento
     ? await avisarOrcamentoNaTarde(admin, { texto: m.texto, fixas: m.orcamento.fixas, avisar: m.orcamento.avisar, hoje, phone: dono.phone, agora: p.agora })
     : null;
+  // (F5, revisão das ondas 4 a 9) o aviso do "Fechado" que não saiu sai do cartão só agora, na mesma condição (tarde gravada e
+  // ENVIADA, 1ª gravação do dia), só o que o texto enviado tem e com o id da linha da fila. Nunca lança.
+  const orcamentoNaoSaiu: AvisoDoOrcamento | null = r.novo && r.enviado && m.orcamentoNaoSaiu?.length
+    ? await avisarNaoSaiuNaTarde(admin, { texto: m.texto, naoSaiu: m.orcamentoNaoSaiu, hoje, phone: dono.phone, agora: p.agora })
+    : null;
 
   // o que foi enviado entra no histórico da conversa do assistente ("e o B?" tem a que se referir); falha só loga
   let historico = false;
@@ -546,6 +563,7 @@ export async function rodarTurnoDaTarde(admin: Admin, p: { agora: Date; pedido: 
     ...(loteGravado ? { lote: loteGravado } : {}),
     ...(agendaRegistrada ? { agenda_registrada: agendaRegistrada } : {}),
     ...(orcamentoAviso ? { orcamento_aviso: orcamentoAviso } : {}),
+    ...(orcamentoNaoSaiu ? { orcamento_nao_saiu: orcamentoNaoSaiu } : {}),
   });
 }
 

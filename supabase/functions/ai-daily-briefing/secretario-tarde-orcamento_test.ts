@@ -4,6 +4,7 @@
 // inventados (o falsoAdmin é o molde de secretario-tarde_test.ts).
 import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { type LidoDaTarde, montarTardeDosDados, rodarTurnoDaTarde } from "./secretario-tarde.ts";
+import { avisarNaoSaiuNaTarde } from "./orcamento.ts";
 import {
   type AgendaDoFechamento,
   type BlocoDaAgenda,
@@ -276,7 +277,7 @@ Deno.test("rodarTurnoDaTarde: sem o id da fila, ou na 2ª corrida (novo = false)
   assertEquals(segunda.chamadas.some((c) => c.nome === "orcamento_avisados"), false);
 });
 
-Deno.test("rodarTurnoDaTarde: na sombra, rebaixada ou no dry-run, nada do orçamento é lido nem avisado (o fechamento grava o 'não saiu' ao montar)", async () => {
+Deno.test("rodarTurnoDaTarde: na sombra, rebaixada ou no dry-run, nada do orçamento é lido nem avisado", async () => {
   for (const [b, dry] of [[banco({ formato: "sombra" }), false], [banco({ formato: "ligado", modo: "sombra" }), false], [banco(), true]] as const) {
     const f = falsoAdmin(b, rpcs(false));
     await rodarTurnoDaTarde(f.admin, { agora: AGORA, pedido: dry ? "fechamento" : "tarde", dry });
@@ -305,6 +306,57 @@ Deno.test("rodarTurnoDaTarde: o registro mandou e o texto não tem a linha fixa 
   assertStringIncludes(texto, FIXA);
   assert(!texto.includes(LINHA_ORC), texto);
   assertEquals(seg.chamadas.filter((c) => c.nome === "orcamento_avisados").length, 1);
+});
+
+// ─── O aviso do que não saiu (revisão das ondas 4 a 9: banco-2, seguranca-1, edge-fechamento) ──────────────────────
+// orcamento_resumo_fechamento só lê; a marca (orcamento_nao_saiu_avisados) vem depois do envio, só do que o texto tem.
+
+const ACEITE = "a1a1a1a1-3333-4a5b-9c7d-000000000001";
+const NAO_SAIU = "O 'Fechado' do ORÇ-00152 (Ana) não saiu: responda você";
+const ORC_NAO_SAIU = { ...ORC, linhas: [NAO_SAIU], nao_saiu: [{ aceite: ACEITE, linha: NAO_SAIU }] };
+
+Deno.test("rodarTurnoDaTarde: fechamento ENVIADO com o aviso do que não saiu → orcamento_nao_saiu_avisados com o aceite e a fila, depois de gravar", async () => {
+  const f = falsoAdmin(banco(), rpcs(true, true, ORC_NAO_SAIU));
+  const r = await rodarTurnoDaTarde(f.admin, { agora: AGORA, pedido: "tarde", dry: false });
+  assertEquals(r.status, 200);
+  assertStringIncludes(textoGravado(f.chamadas), NAO_SAIU);
+  const ns = f.chamadas.filter((c) => c.nome === "orcamento_nao_saiu_avisados");
+  assertEquals(ns.map((c) => c.args), [{ p_aceites: [ACEITE], p_fila: "fila-tarde", p_agora: AGORA.toISOString() }]);
+  assert(f.chamadas.findIndex((c) => c.nome === "resumo_tarde_registrar") < f.chamadas.findIndex((c) => c.nome === "orcamento_nao_saiu_avisados"),
+    "marca DEPOIS de gravar e enfileirar");
+  assertEquals(r.corpo.orcamento_nao_saiu, "avisado");
+  // na 2ª corrida (novo = false), na sombra e sem o id da fila, não marca
+  for (const [b, x] of [[banco(), rpcs(true, false, ORC_NAO_SAIU)], [banco({ formato: "sombra" }), rpcs(false, true, ORC_NAO_SAIU)], [banco({ fila: false }), rpcs(true, true, ORC_NAO_SAIU)]] as const) {
+    const g = falsoAdmin(b, x);
+    await rodarTurnoDaTarde(g.admin, { agora: AGORA, pedido: "tarde", dry: false });
+    assertEquals(g.chamadas.some((c) => c.nome === "orcamento_nao_saiu_avisados"), false);
+  }
+});
+
+Deno.test("rodarTurnoDaTarde: na revisão da semana o aviso do que não saiu não entra no texto e não é marcado (fica no cartão e volta no fechamento)", async () => {
+  const agoraSeg = new Date("2026-12-07T20:30:00.000Z");
+  const seg = falsoAdmin(banco({ dia: "2026-12-07" }), rpcs(true, true, ORC_NAO_SAIU));
+  const r = await rodarTurnoDaTarde(seg.admin, { agora: agoraSeg, pedido: "tarde", dry: false });
+  assertEquals(r.corpo.turno, "revisao_semana");
+  assert(!textoGravado(seg.chamadas).includes(NAO_SAIU), textoGravado(seg.chamadas));
+  assertEquals(seg.chamadas.some((c) => c.nome === "orcamento_nao_saiu_avisados"), false);
+  assertEquals(r.corpo.orcamento_nao_saiu, undefined);
+  // a montagem da revisão nem leva o aviso adiante
+  const m = montarTardeDosDados({ ...P, hoje: "2026-12-07", agora: agoraSeg, turno: "revisao_semana", lido: lido({ orcamento: { ...ORC, linhas: [NAO_SAIU], naoSaiu: ORC_NAO_SAIU.nao_saiu } }) });
+  assertEquals(m.orcamentoNaoSaiu, undefined);
+});
+
+Deno.test("fechamento acima de 1.000 com o aviso do que não saiu nas extras: a linha sai no corte e o aviso não é marcado", async () => {
+  const d = turno("fechamento", { ...CHEIO, retorno: { esperando: null, resumo: RESUMO, mandei: MANDEI, extras: [NAO_SAIU] } });
+  const t = textoDaTarde(comFixa(d)).texto!;
+  assert(!t.includes(NAO_SAIU), "a extra saiu no corte");
+  const chamadas: string[] = [];
+  const db = {
+    rpc: (fn: string) => (chamadas.push(fn), Promise.resolve({ data: 1, error: null })),
+    from: () => ({ select: () => ({ eq: () => ({ maybeSingle: () => (chamadas.push("fila"), Promise.resolve({ data: { id: "fila-tarde" }, error: null })) }) }) }),
+  };
+  assertEquals(await avisarNaoSaiuNaTarde(db, { texto: t, naoSaiu: [{ aceite: ACEITE, linha: NAO_SAIU }], hoje: HOJE, phone: DONO.phone, agora: AGORA }), "sem_linha");
+  assertEquals(chamadas, []);
 });
 
 Deno.test("rodarTurnoDaTarde: a função ausente ou com erro não derruba a tarde — sai como antes, sem aviso", async () => {

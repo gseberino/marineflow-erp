@@ -13,6 +13,10 @@
 //   avisar — os passos da linha fixa. Só viram "avisados" (orcamento_avisados) depois de a tarde com CADA linha fixa ir à
 //            fila, com o id da linha da fila; quem decide se o passo sai sozinho é o vigia, no dia seguinte, pela fila em
 //            'sent'. Sem isso, o passo vai ao cartão (falha fecha).
+//   naoSaiu — (revisão das ondas 4 a 9, achados banco-2, seguranca-1 e edge-fechamento) o aceite e a linha exata de cada
+//            aviso do "Fechado" (ou do pedido de dados) que não saiu. A leitura não grava nada; o aviso só sai da lista do
+//            cartão (orcamento_nao_saiu_avisados) depois de a tarde com AQUELA linha ir à fila, com o id da linha da fila. A
+//            tarde que descartou a linha (a revisão, o corte das extras, a tentativa que falhou) não marca, e o aviso volta.
 //
 // Uma fixa com forma errada, ou fixas sem passo, ou passo sem fixa: nenhuma fixa e nenhum aviso (a linha diria "sai sozinho"
 // e nada seria marcado, ou o passo seria marcado sem o dono ler).
@@ -30,10 +34,18 @@ import { chaveDaFilaDaTarde, idDaFilaPelaChave } from "../_shared/uma-voz/guarda
 // deno-lint-ignore no-explicit-any
 type Admin = any;
 
+/** O aviso do que não saiu: o aceite e a linha exata que o fechamento mostra (uma das `linhas`). */
+export interface AvisoNaoSaiu {
+  aceite: string;
+  linha: string;
+}
+
 export interface OrcamentoDoFechamento {
   fixas: string[];
   linhas: string[];
   avisar: string[];
+  /** os avisos do que não saiu entre as `linhas` (ausente ou torto na resposta = [], e nada é marcado; lerOrcamento sempre o põe) */
+  naoSaiu?: AvisoNaoSaiu[];
 }
 
 /** Quantas linhas do orçamento cabem no fechamento (o banco devolve no máximo 4; são extras: as primeiras a sair). */
@@ -62,7 +74,7 @@ function lista(v: unknown): unknown[] | undefined {
 
 function formaDe(data: unknown): OrcamentoDoFechamento | null {
   if (data === null || data === undefined || typeof data !== "object" || Array.isArray(data)) return null;
-  const d = data as { fixas?: unknown; linhas?: unknown; avisar?: unknown };
+  const d = data as { fixas?: unknown; linhas?: unknown; avisar?: unknown; nao_saiu?: unknown };
   const fixas = lista(d.fixas);
   const linhas = lista(d.linhas);
   const avisar = lista(d.avisar);
@@ -72,14 +84,32 @@ function formaDe(data: unknown): OrcamentoDoFechamento | null {
     .filter((l) => linhaBoa(l, LINHA_MAX))
     .map((l) => (l as string).trim())
     .slice(0, LINHAS_MAX_DO_ORCAMENTO);
+  const naoSaiu = avisosNaoSaiu(d.nao_saiu, linhasBoas);
 
   // A fixa e os passos dela andam juntos: qualquer defeito em um derruba os dois.
   const fixasBoas = fixas.every((f) => linhaBoa(f, FIXA_MAX));
   const avisarBom = avisar.every((p) => typeof p === "string" && UUID.test(p));
   if (!fixasBoas || !avisarBom || fixas.length === 0 || avisar.length === 0) {
-    return { fixas: [], linhas: linhasBoas, avisar: [] };
+    return { fixas: [], linhas: linhasBoas, avisar: [], naoSaiu };
   }
-  return { fixas: fixas.map((f) => (f as string).trim()), linhas: linhasBoas, avisar: avisar as string[] };
+  return { fixas: fixas.map((f) => (f as string).trim()), linhas: linhasBoas, avisar: avisar as string[], naoSaiu };
+}
+
+/**
+ * Os avisos do que não saiu que a tarde pode marcar: o aceite (uuid) e a linha, que tem de ser uma das linhas boas (a que a
+ * tarde mostra). Qualquer outra forma = de fora (falha fecha: o aviso fica no cartão e volta no próximo fechamento).
+ */
+function avisosNaoSaiu(v: unknown, linhasBoas: string[]): AvisoNaoSaiu[] {
+  if (!Array.isArray(v)) return [];
+  const out: AvisoNaoSaiu[] = [];
+  for (const x of v) {
+    if (x === null || typeof x !== "object" || Array.isArray(x)) continue;
+    const { aceite, linha } = x as { aceite?: unknown; linha?: unknown };
+    if (typeof aceite !== "string" || !UUID.test(aceite) || typeof linha !== "string") continue;
+    const l = linha.trim();
+    if (linhasBoas.includes(l)) out.push({ aceite, linha: l });
+  }
+  return out;
 }
 
 function codigoDe(e: unknown): string {
@@ -87,11 +117,12 @@ function codigoDe(e: unknown): string {
 }
 
 /**
- * orcamento_resumo_fechamento(p_agora) — contrato C-FECH-O. {fixas, linhas, avisar} já conferidos; listas vazias = nada do
- * orçamento hoje; null = erro, função ausente ou forma inesperada (a tarde de antes). Nunca lança.
+ * orcamento_resumo_fechamento(p_agora) — contrato C-FECH-O. {fixas, linhas, avisar, naoSaiu} já conferidos; listas vazias =
+ * nada do orçamento hoje; null = erro, função ausente ou forma inesperada (a tarde de antes). Nunca lança.
  *
- * ATENÇÃO (contrato da P8): a função grava resultado.nao_saiu_fechado_em nos aceites cuja linha ela devolve (o aviso do
- * "Fechado" que não saiu aparece uma vez). Por isso quem chama chama uma vez por tarde, e só na tarde que vai ao dono.
+ * A função só lê (revisão das ondas 4 a 9): antes ela gravava resultado.nao_saiu_fechado_em ao devolver a linha do aviso, e
+ * a linha que a tarde descartava (a revisão, o corte das extras) sumia do cartão sem chegar ao dono. A marca agora é de
+ * avisarNaoSaiuNaTarde, depois do envio.
  */
 export async function lerOrcamento(admin: Admin, agora: Date): Promise<OrcamentoDoFechamento | null> {
   try {
@@ -157,6 +188,44 @@ export async function avisarOrcamentoNaTarde(admin: Admin, p: {
       action: "orcamento:avisados",
       message: `orcamento: orcamento_avisados falhou; os passos de amanhã vão ao cartão: ${String((e as { message?: unknown })?.message ?? codigo).slice(0, 300)}`,
       details: { codigo, passos: p.avisar.length },
+      error: e,
+    });
+    return "erro";
+  }
+}
+
+/**
+ * (Revisão das ondas 4 a 9, achados banco-2, seguranca-1 e edge-fechamento) Depois de a tarde ir à fila (quem chama confere
+ * r.novo && r.enviado), marca como mostrado o aviso do que não saiu: só os aceites cuja linha o texto enviado tem, e só com o
+ * id da linha da fila da tarde (orcamento_nao_saiu_avisados). A linha que a tarde descartou (a revisão, o corte das extras)
+ * não marca: o aviso fica no cartão e volta no próximo fechamento. Sem o id da fila, não chama. Erro = app_error_logs (sem
+ * telefone), e o aviso também fica. Nunca lança.
+ */
+export async function avisarNaoSaiuNaTarde(admin: Admin, p: {
+  texto: string | null;
+  naoSaiu: AvisoNaoSaiu[];
+  hoje: string;
+  phone: string;
+  agora: Date;
+}): Promise<AvisoDoOrcamento> {
+  if (p.naoSaiu.length === 0) return "nada";
+  const texto = p.texto ?? "";
+  const aceites = [...new Set(p.naoSaiu.filter((n) => texto.includes(n.linha)).map((n) => n.aceite))];
+  if (aceites.length === 0) return "sem_linha";
+  try {
+    const fila = await idDaFilaPelaChave(admin, chaveDaFilaDaTarde(p.hoje, p.phone));
+    if (!fila) return "sem_fila";
+    const { error } = await admin.rpc("orcamento_nao_saiu_avisados", { p_aceites: aceites, p_fila: fila, p_agora: p.agora.toISOString() });
+    if (error) throw error;
+    return "avisado";
+  } catch (e) {
+    const codigo = codigoDe(e);
+    console.warn(JSON.stringify({ fn: "ai-daily-briefing", orcamento: "nao_saiu_falhou", codigo }));
+    await logEdgeError(admin, {
+      context: "ai-daily-briefing",
+      action: "orcamento:nao_saiu_avisados",
+      message: `orcamento: orcamento_nao_saiu_avisados falhou; o aviso do que não saiu fica no cartão: ${String((e as { message?: unknown })?.message ?? codigo).slice(0, 300)}`,
+      details: { codigo, aceites: aceites.length },
       error: e,
     });
     return "erro";
