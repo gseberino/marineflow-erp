@@ -1163,7 +1163,9 @@ begin
       if has_function_privilege('anon', v_rec.oid, 'execute') or has_function_privilege('authenticated', v_rec.oid, 'execute') then
         raise exception '14b: % aberta a anon ou authenticated', v_rec.nome;
       end if;
-      if (v = any (c_publicas)) is distinct from has_function_privilege('service_role', v_rec.oid, 'execute') then
+      -- A interna leva só o revoke (spec, regras gerais): no Supabase a service_role tem EXECUTE pelo padrão do esquema,
+      -- como todas as _retorno_*/_parceiro_* em produção (conferido 13/11). O que se exige é a pública aberta a ela.
+      if v = any (c_publicas) and not has_function_privilege('service_role', v_rec.oid, 'execute') then
         raise exception '14c: o grant da service_role em %', v_rec.nome;
       end if;
     end loop;
@@ -1173,7 +1175,8 @@ begin
   end if;
   for v_rec in
     select x.f, x.servico, p.oid
-      from (values ('public._retorno_janela(text, timestamptz, text)', false),
+      -- servico = o grant da service_role em produção antes da F5 (13/11: a interna _retorno_janela também tem, pelo padrão)
+      from (values ('public._retorno_janela(text, timestamptz, text)', true),
                    ('public.canal_pode_enviar(text, text, text, timestamptz, boolean, text)', true),
                    ('public.retorno_pegar(timestamptz)', true),
                    ('public.retorno_saida_autorizada(uuid, text, timestamptz)', true),
