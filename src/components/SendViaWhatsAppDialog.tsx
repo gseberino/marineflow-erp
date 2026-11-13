@@ -93,6 +93,9 @@ const DIA_ISO = /^\d{4}-\d{2}-\d{2}$/;
 const SEM_A_F5 = new Set(['desligada', 'funil', 'cargo', 'erro', 'mudou', 'vencida']);
 const AVISO_DA_VALIDADE_QUE_MUDOU = 'A validade mudou de dia desde que você abriu: confira o texto e mande de novo.';
 const AVISO_DA_VALIDADE_SEM_FIXAR = 'Não consegui fixar a validade do envio; o PDF sai com a validade do cadastro.';
+// (F5, revisão das ondas 4 a 9) o resumo cuja data a gravação não confirmou: nada sai, o texto é refeito e a tela pede para conferir
+const AVISO_DO_RESUMO_SEM_FIXAR = 'Não consegui fixar a validade do envio: refiz o resumo com a validade do cadastro. Confira o texto e mande de novo.';
+const AVISO_DO_RESUMO_REFEITO = 'A validade do envio não era a do resumo: refiz o resumo com a data de agora. Confira o texto e mande de novo.';
 
 function lerValidadeDaTela(r: { data: unknown; error: unknown } | null | undefined): ValidadeDaTela {
   if (!r || r.error) return { data: null, linha: null, motivo: 'erro' };
@@ -604,7 +607,8 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
 
     // (F5, P12.5) "Enviar agora" de orçamento (todo modo): a gravação com a data que a tela mostrou. 'mudou' não envia (a
     // prévia é refeita e a tela avisa); funil e cargo enviam como a chave desligada; erro envia com a validade do cadastro e
-    // avisa. O texto que vai é o que a tela mostrou (o resumo já tem a data dele).
+    // avisa. O texto que vai é o que a tela mostrou (o resumo já tem a data dele; se ela não é a gravada, o resumo é refeito
+    // e nada sai até o próximo clique).
     let opcoesDoEnvio = pdfOptions;
     let legendaDoEnvio = caption;
     if (osDoOrcamento) {
@@ -613,6 +617,18 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
         setAvisoDaValidade(AVISO_DA_VALIDADE_QUE_MUDOU);
         toast.error(AVISO_DA_VALIDADE_QUE_MUDOU);
         setValidadeDoEnvio(await pedirValidadeDoEnvio(osDoOrcamento, false));
+        return;
+      }
+      // (F5, revisão das ondas 4 a 9, achado edge-tela-resumo-data-nao-gravada) o resumo leva a data no próprio texto: se a
+      // gravação não confirmou a data com que ele foi montado (erro ao gravar, ou o clique antes de a prévia voltar e a
+      // gravação fixou uma data), nada sai. O resumo é refeito com a validade de agora (a do cadastro, no erro) e a tela pede
+      // para conferir, como no 'mudou'. No PDF e no link, a data vem de v logo abaixo: não há texto a refazer.
+      const dataGravada = temDataDaF5(v) ? v.data : null;
+      if (mode === 'resumo' && dataGravada !== dataDaF5) {
+        const aviso = v.motivo === 'erro' ? AVISO_DO_RESUMO_SEM_FIXAR : AVISO_DO_RESUMO_REFEITO;
+        setValidadeDoEnvio(v);
+        setAvisoDaValidade(aviso);
+        toast.error(aviso);
         return;
       }
       const base = opcoesPadraoDoDocumento(appSettings, documentType, pdfData?.serviceOrder);

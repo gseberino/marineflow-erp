@@ -294,6 +294,46 @@ describe('Enviar via WhatsApp — a validade do envio (F5)', () => {
     expect(estado.avisos).toContain('Não consegui fixar a validade do envio; o PDF sai com a validade do cadastro.');
   });
 
+  // (revisão das ondas 4 a 9, achado edge-tela-resumo-data-nao-gravada) o resumo traz a data no texto: ele nunca sai com uma
+  // data que não ficou gravada em quote_validity_date.
+  it('resumo com erro ao gravar: nada sai com a data da prévia; o resumo é refeito com a validade do cadastro e o próximo clique manda', async () => {
+    const ERRO = { data: null, error: { code: '57014', message: 'tempo esgotado' } };
+    estado.respostaDaRpc = pelaGravacao(PREVIA, ERRO);
+    abrirOrcamento();
+    await screen.findByText(`Vai junto na legenda: '${LINHA}'`);
+    await irParaResumo();
+    await waitFor(() => expect(caixa()).toContain('⏳ Proposta válida até 20/11/2026.'));
+    fireEvent.click(screen.getByRole('button', { name: /Enviar agora/i }));
+    expect(await screen.findByText('Não consegui fixar a validade do envio: refiz o resumo com a validade do cadastro. Confira o texto e mande de novo.')).toBeInTheDocument();
+    expect(estado.enviados).toHaveLength(0);
+    await waitFor(() => expect(caixa()).not.toContain('20/11/2026'));
+    expect(caixa()).toContain('⏳ Proposta válida por 7 dias.');
+    // de novo com erro: agora o texto e o PDF dizem a validade do cadastro, e sai
+    fireEvent.click(screen.getByRole('button', { name: /Enviar agora/i }));
+    await waitFor(() => expect(estado.enviados).toHaveLength(1));
+    expect(estado.enviados[0].message).not.toContain('20/11/2026');
+    expect(estado.enviados[0].message).toContain('⏳ Proposta válida por 7 dias.');
+  });
+
+  it('resumo clicado antes de a prévia voltar: a gravação fixa a data, nada sai com a validade do cadastro, e o resumo é refeito com ela', async () => {
+    let soltarPrevia: (v: { data: unknown; error: unknown }) => void = () => {};
+    const previaPresa = new Promise<{ data: unknown; error: unknown }>((r) => { soltarPrevia = r; });
+    // a prévia não volta (o mock do rpc é async: devolver a promessa a espera)
+    estado.respostaDaRpc = (a) => (a.p_gravar ? FIXOU : (previaPresa as unknown as { data: unknown; error: unknown }));
+    abrirOrcamento();
+    await screen.findByRole('button', { name: /Enviar agora/i });
+    await irParaResumo();
+    expect(caixa()).not.toContain('20/11/2026');
+    fireEvent.click(screen.getByRole('button', { name: /Enviar agora/i }));
+    expect(await screen.findByText('A validade do envio não era a do resumo: refiz o resumo com a data de agora. Confira o texto e mande de novo.')).toBeInTheDocument();
+    expect(estado.enviados).toHaveLength(0);
+    await waitFor(() => expect(caixa()).toContain('⏳ Proposta válida até 20/11/2026.'));
+    fireEvent.click(screen.getByRole('button', { name: /Enviar agora/i }));
+    await waitFor(() => expect(estado.enviados).toHaveLength(1));
+    expect(estado.enviados[0].message).toContain('⏳ Proposta válida até 20/11/2026.');
+    soltarPrevia(PREVIA);
+  });
+
   it.each(['funil', 'cargo'])("%s ao gravar: envia como desligada (validade do cadastro, sem a linha)", async (motivo) => {
     const resposta = motivo === 'cargo' ? { data: { ok: false, motivo }, error: null } : { data: { ok: true, fixou: false, motivo }, error: null };
     estado.respostaDaRpc = pelaGravacao(PREVIA, resposta);
