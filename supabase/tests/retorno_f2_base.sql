@@ -75,7 +75,9 @@ begin
      or v_cfg.cartao_tentativas <> 3 or v_cfg.liberado_validade <> interval '14 days' or v_cfg.pessoal_ultimo is not null then
     raise exception '1b: padrão diferente do combinado';
   end if;
-  select count(*) into v_n from public.retorno_modelo_tipos where nivel = 'desligado';
+  -- Os 5 tipos da F2 nascem desligados. A F5 (P1) acrescenta 3 da cadência, também desligados, que o retorno_f5_base confere.
+  select count(*) into v_n from public.retorno_modelo_tipos
+   where nivel = 'desligado' and tipo not in ('orc_lembrete', 'orc_vespera', 'orc_encerramento');
   if v_n <> 5 then
     raise exception '1c: % tipos desligados, esperava 5', v_n;
   end if;
