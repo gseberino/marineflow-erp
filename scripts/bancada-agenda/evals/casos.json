@@ -7823,6 +7823,89 @@
           "2) Mantém o dia e chama mais alguém"
         ]
       }
+    },
+    {
+      "id": "K173",
+      "fase": 7,
+      "agora": "2026-11-12 16:50",
+      "grupo": "leitura",
+      "entrada": "me explica como você pensou a semana que vem (consertos da revisão da 7g: com as leituras em teste, o modelo recebe a semana que vem de antes)",
+      "estado": "fase7g",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "numeros_so_do_banco": true,
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "foco": "como_pensou"
+            }
+          }
+        ],
+        "texto_contem": [
+          "A semana que vem (seg 16/11 a sáb 21/11)"
+        ],
+        "texto_nao_contem": [
+          "Como pensei",
+          "imprevisto",
+          "de antes de eu guardar o porquê"
+        ]
+      }
+    },
+    {
+      "id": "K174",
+      "fase": 7,
+      "agora": "2026-11-12 16:50",
+      "grupo": "leitura",
+      "entrada": "por que o Nelson ficou para terça? (consertos da revisão da 7g: com as leituras em teste, o modelo recebe a OS de antes)",
+      "estado": "fase7g",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "parametros": {
+          "diff": []
+        },
+        "numeros_so_do_banco": true,
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "os": {
+                "um_de": [
+                  "Nelson",
+                  "OS-F1"
+                ]
+              }
+            }
+          }
+        ],
+        "texto_contem": [
+          "Nelson (OS-F1): marcado de ter 17/11 a qui 19/11."
+        ],
+        "texto_nao_contem": [
+          "de antes de eu guardar o porquê",
+          "marquei",
+          "pelo orçamento"
+        ]
+      }
     }
   ]
 }

@@ -10,6 +10,11 @@ import { assert, assertEquals, assertRejects, assertStringIncludes } from "https
 import { agendaProducaoTools } from "./agenda-producao.ts";
 import { allTools } from "./index.ts";
 import type { ToolDef } from "./registry.ts";
+// (consertos da revisão da 7g, item 1) o caminho até o modelo: o do ai-agent e do erp-mcp (executarChamadaDeTool), o MCP do Max e o trecho dos turnos anteriores
+import { executarChamadaDeTool } from "../agent.ts";
+import type { ClaudeMessage } from "../anthropic.ts";
+import { transcreverConversa } from "../max/claude-max.ts";
+import { responderMcp } from "../max/mcp.ts";
 
 const porNome = (n: string) => agendaProducaoTools.find((t) => t.name === n)!;
 const ADMIN = "aa000000-0000-4000-8000-000000000001";
@@ -870,4 +875,115 @@ Deno.test("Fase 7g (P7) — agenda_ver ganha os focos como_pensou, porque e plac
   assertStringIncludes(ver.description, "os números da semana: cobertura, correções do dono, plano cumprido, compras, perguntas, mensagens, dias perdidos (foco placar; só lê)");
   assertStringIncludes(props.simular_aprovacao.description, "pelo encaixe da agenda");
   assertEquals(agendaProducaoTools.filter((t) => t.name === "agenda_ver").length, 1);
+});
+
+// ───────── Consertos da revisão da 7g (12/11), item 1: com a 7g em sombra, o que o MODELO recebe é, byte a byte, o de antes da 7g ─────────
+// Em sombra, agenda_ver devolve a resposta de antes (o mesmo texto e a mesma rota) e o novo só em dados.teste: o como pensei (foco como_pensou), o porquê (foco
+// porque), as 4 semanas do livre (dentro de dados.livre_de_verdade) ou {erro} quando o novo falha (20261112100300 e 100600). O modelo nunca recebe `dados`
+// (resultadoDaLeitura, "nada de dados", desde a Fase 1): nem pelo loop do ai-agent (o tool_result é JSON.stringify(toolResult), agent.ts), nem pelo erp-mcp do
+// Claude Max (o mesmo executarChamadaDeTool, e responderMcp), nem no trecho de 1.200 letras dos turnos anteriores do Max (transcreverConversa). Os pares têm a
+// forma e os textos da sonda no estado fase7g dos evals (f7g/cons/sondas-sombra*.out). Antes da 7g, "como você pensou a semana que vem" ia a agenda_ver com
+// periodo proxima_semana sem foco (a rota semana) e "por que o Nelson…" a agenda_ver com a os (a rota os): é com essas respostas que cada sombra se compara.
+const T_SEMANA = "A semana que vem (seg 16/11 a sáb 21/11): Lenine (seg 16/11 às 08:00, com Alex) e Nelson (ter 17 a qui 19/11, com Alex e Roberto).\n" +
+  "Esperando você: Robson ORÇ-00083 (assinado em 23/08, nunca virou OS).";
+const T_OS = "Nelson (OS-F1): marcado de ter 17/11 a qui 19/11.\nDuração: 3 dias (estimativa minha).\nPrazo: ter 01/12 (o meu padrão: 20 dias úteis desde a aprovação).";
+const TESTE_COMO_PENSEI = "Em teste: Como pensei a semana de 16 a 20/11:\nMarquei: Nelson (OS-F1) ter 17 a qui 19/11 com Roberto e Alex — de antes de eu guardar " +
+  "o porquê.\nFolga: guardei 4 dias da equipe para imprevisto (20% da semana).\n(e mais 6 em *agenda pendências*)";
+const TESTE_PORQUE = "Nelson (OS-F1): marquei ter 17 a qui 19/11 com Roberto e Alex. Essa marcação é de antes de eu guardar o porquê; a duração de hoje: 3 dias " +
+  "pelo orçamento (estimativa minha).";
+const DADOS_SEMANA = { de: "2026-11-16", ate: "2026-11-21", fila: { n: 25, dp_ot: 31.5 }, livre: { ot: "2026-11-26", n_ot: 8 } };
+const PARES_DA_SOMBRA: Array<{ rotulo: string; args: Record<string, unknown>; antes: Record<string, unknown>; sombra: Record<string, unknown> }> = [
+  {
+    rotulo: "como_pensou (a semana que vem de antes + o como pensei em dados.teste)",
+    args: { foco: "como_pensou", periodo: "proxima_semana" },
+    antes: { ok: true, rota: "semana", dados: DADOS_SEMANA, texto: T_SEMANA },
+    sombra: {
+      ok: true, rota: "semana", texto: T_SEMANA,
+      dados: { ...DADOS_SEMANA, teste: { texto: TESTE_COMO_PENSEI, folga: { dias: 4, pct: 20 }, fora: [{ grupo: "voce", texto: "esperando você — Robson ORÇ-00083" }] } },
+    },
+  },
+  {
+    rotulo: "porque (a OS de antes + o porquê em dados.teste)",
+    args: { foco: "porque", os: "Nelson" },
+    antes: { ok: true, rota: "os", dados: { numero: "OS-F1" }, texto: T_OS },
+    sombra: { ok: true, rota: "os", texto: T_OS, dados: { numero: "OS-F1", teste: { quem: "gestor", fonte: "orcamento", texto: TESTE_PORQUE } } },
+  },
+  {
+    rotulo: "livre (as 4 semanas em dados.livre_de_verdade.dados.teste)",
+    args: { foco: "livre" },
+    antes: { ok: true, rota: "livre", dados: { livre_de_verdade: { fonte: "simulacao", texto: "Livre de verdade: …" } }, texto: "Livre de verdade: na semana de 16/11, Bruno 4 dias." },
+    sombra: {
+      ok: true, rota: "livre", texto: "Livre de verdade: na semana de 16/11, Bruno 4 dias.",
+      dados: { livre_de_verdade: { fonte: "simulacao", texto: "Livre de verdade: …", dados: { teste: { semanas: [{ de: "2026-11-16", pode: 20, marcado: 4, livre: 12 }] } } } },
+    },
+  },
+  {
+    rotulo: "como_pensou com o novo falhando (dados.teste = {erro})",
+    args: { foco: "como_pensou" },
+    antes: { ok: true, rota: "semana", dados: DADOS_SEMANA, texto: T_SEMANA },
+    sombra: { ok: true, rota: "semana", texto: T_SEMANA, dados: { ...DADOS_SEMANA, teste: { erro: "P0001" } } },
+  },
+];
+
+/** O ambiente de UMA chamada (o mesmo do ai-agent e do erp-mcp): agenda_ver à vista do admin, o banco devolvendo `resposta`; a auditoria engolida. */
+function ambienteDaSombra(resposta: Record<string, unknown>) {
+  const { sb } = sbFalso(() => ({ data: resposta, error: null }));
+  const admin = { from: () => ({ insert: () => Promise.resolve({ data: null, error: null }) }) };
+  return {
+    toolsByName: { agenda_ver: porNome("agenda_ver") },
+    alcancaveisPelaRede: {},
+    toolCtx: ctx(sb, { admin, canal: "whatsapp" }),
+    sessionId: "s-7g",
+    channel: "whatsapp" as const,
+  };
+}
+
+/** O que o modelo recebe de UMA chamada, pelos 3 caminhos: o tool_result do loop do ai-agent, o texto do MCP do Max e o trecho do turno anterior no Max. */
+async function oQueOModeloRecebe(args: Record<string, unknown>, resposta: Record<string, unknown>) {
+  const r = await executarChamadaDeTool({ name: "agenda_ver", input: args }, ambienteDaSombra(resposta));
+  // o loop do ai-agent (agent.ts): { type: "tool_result", tool_use_id, content: JSON.stringify(r.toolResult) }
+  const toolResult = JSON.stringify(r.toolResult);
+  // o erp-mcp: o mesmo executarChamadaDeTool, e responderMcp põe JSON.stringify(resultado) no content
+  const mcp = await responderMcp(
+    { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "agenda_ver", arguments: args } },
+    {
+      listar: () => [],
+      chamar: async (nome, argumentos) => ({
+        resultado: (await executarChamadaDeTool({ name: nome, input: argumentos }, ambienteDaSombra(resposta))).toolResult,
+      }),
+    },
+  ) as { result: { content: Array<{ text: string }> } };
+  // o Max no turno seguinte: a conversa em texto, com o trecho de 1.200 letras de cada resultado
+  const conversa: ClaudeMessage[] = [
+    { role: "user", content: [{ type: "text", text: "como você pensou a semana que vem?" }] },
+    { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "agenda_ver", input: args }] },
+    { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: toolResult }] },
+    { role: "assistant", content: [{ type: "text", text: "Pronto." }] },
+    { role: "user", content: [{ type: "text", text: "e o Lenine?" }] },
+  ];
+  return { executou: r.executou, toolResult, mcp: mcp.result.content.map((c) => c.text).join("\n"), max: transcreverConversa(conversa) };
+}
+
+Deno.test("Consertos da revisão da 7g (1) — em sombra, o modelo recebe o de antes, byte a byte: dados.teste não chega (ai-agent, erp-mcp e o trecho do Max)", async () => {
+  for (const p of PARES_DA_SOMBRA) {
+    const antes = await oQueOModeloRecebe(p.args, p.antes);
+    const sombra = await oQueOModeloRecebe(p.args, p.sombra);
+    assert(antes.executou && sombra.executou, p.rotulo);
+    assertEquals(sombra.toolResult, antes.toolResult, `${p.rotulo}: o tool_result do ai-agent`);
+    assertEquals(sombra.mcp, antes.mcp, `${p.rotulo}: o conteúdo do erp-mcp`);
+    assertEquals(sombra.max, antes.max, `${p.rotulo}: a conversa do Max`);
+    for (const visto of [sombra.toolResult, sombra.mcp, sombra.max]) {
+      for (const proibido of ["teste", "dados", "Como pensei", "marquei", "imprevisto", "semanas", "P0001"]) {
+        assertEquals(visto.includes(proibido), false, `${p.rotulo}: "${proibido}" chegou ao modelo`);
+      }
+    }
+    // o texto do banco abre o resultado: no trecho de 1.200 letras do Max ele vem logo no começo (o revisor mediu a resposta crua, com dados antes do texto)
+    const linha = sombra.max.split("\n").find((l) => l.trimStart().startsWith("[resultado]"))!;
+    const ondeTexto = linha.indexOf('"texto":"');
+    assert(ondeTexto >= 0 && ondeTexto < 40, `${p.rotulo}: o texto fora do começo do trecho do Max (${ondeTexto})`);
+  }
+  // o controle: uma sombra que mudasse o texto apareceria nos 3 caminhos (o que o teste compara é o que o modelo lê)
+  const outro = await oQueOModeloRecebe({ foco: "como_pensou" }, { ok: true, rota: "semana", texto: TESTE_COMO_PENSEI, dados: DADOS_SEMANA });
+  const antes = await oQueOModeloRecebe({ foco: "como_pensou" }, PARES_DA_SOMBRA[0].antes);
+  assert(outro.toolResult !== antes.toolResult && outro.max !== antes.max && outro.mcp !== antes.mcp);
 });

@@ -1732,6 +1732,16 @@ function controlesDaFase7g() {
       && nota('Cumprimos 100% do plano.').falhas[0] === 'número que nenhuma ferramenta deu: 100'],
     ['(7g) numeros_so_do_banco: o somado (3 + 5 = 8) e o arredondado (1,1) reprovam', !nota('Foram 8 meios-dias.').ok && !nota('Passou 1,1× do estimado.').ok],
     ['(7g) numeros_so_do_banco: sem o pedido no caso, o número não é julgado', gradeTexto({ espera: {} }, 'Cumprimos 100%.', banco).ok],
+    // (consertos da revisão da 7g, item 1) o vazamento: o que só existe em dados.teste (o novo em teste, que o modelo não recebe) nunca conta como saída do banco,
+    // nem quando a saída o traz cru (o juiz lê só o texto, a pergunta, as opções e o erro de cada saída: textoDasSaidas)
+    ['(7g, consertos) numeros_so_do_banco: o número que só está em dados.teste reprova (o vazamento proposital do como pensei em teste)',
+      (() => {
+        const cru = [{ texto: 'A semana que vem (seg 16/11 a sáb 21/11): Bruno 4 dias.', rota: 'semana',
+          dados: { teste: { texto: 'Em teste: Como pensei a semana de 16 a 20/11:\nFolga: guardei 4 dias da equipe para imprevisto (20% da semana).', folga: { pct: 20 } } } }];
+        const r = gradeTexto(caso, 'A semana que vem (seg 16/11 a sáb 21/11): Bruno 4 dias. Folga: 4 dias da equipe (20% da semana).', cru);
+        return !r.ok && r.falhas.length === 1 && r.falhas[0] === 'número que nenhuma ferramenta deu: 20'
+          && gradeTexto(caso, 'A semana que vem (seg 16/11 a sáb 21/11): Bruno 4 dias.', cru).ok;
+      })()],
   ];
 }
 

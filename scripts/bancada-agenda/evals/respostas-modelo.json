@@ -5217,5 +5217,61 @@
       ],
       "texto": "{{saida:1}}"
     }
+  },
+  "K173": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "como_pensou",
+            "periodo": "proxima_semana"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "vazamento proposital: a folga do como pensei (20% da semana) só existe em dados.teste, que o modelo não recebe; o juiz numeros_so_do_banco morde",
+      "reprova_em": "texto",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "como_pensou",
+            "periodo": "proxima_semana"
+          }
+        }
+      ],
+      "texto": "{{saida:0|linhas:1-1}}\nFolga: 4 dias da equipe (20% da semana)."
+    }
+  },
+  "K174": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "os": "Nelson",
+            "foco": "porque"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "vazamento proposital: o porquê novo só existe em dados.teste, que o modelo não recebe",
+      "reprova_em": "texto",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "os": "Nelson",
+            "foco": "porque"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}\nEssa marcação é de antes de eu guardar o porquê; a duração de hoje: 3 dias pelo orçamento (estimativa minha)."
+    }
   }
 }
