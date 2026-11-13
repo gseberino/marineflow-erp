@@ -872,7 +872,7 @@ begin
       raise exception '11a: a decisão enviada (%)', v_r;
     end if;
     if pg_temp.f5k_px(v_ac, 'lembrete') is distinct from 'enviado/-'
-       or (date '2027-01-14' = any ((select t.aprovados_dias from public.retorno_modelo_tipos t where t.tipo = 'orc_lembrete'))) is not true then
+       or (date '2027-01-14' = any ((select t.aprovados_dias from public.retorno_modelo_tipos t where t.tipo = 'orc_lembrete')::date[])) is not true then
       raise exception '11a: o passo e a aprovação do dia (%)', pg_temp.f5k_px(v_ac, 'lembrete');
     end if;
     if (pg_temp.f5k_s(v_s1)).letra is not null then
