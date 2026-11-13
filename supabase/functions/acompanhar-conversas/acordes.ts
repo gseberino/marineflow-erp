@@ -25,10 +25,11 @@ import { ehClienteGenerico } from "../_shared/secretario/palavras.ts";
 import { expectedDepositAmount } from "../_shared/banking/quote-deposit.ts";
 import { donoOcupadoParaPerguntar, enviarComRegistro, resolveOrCreateWhatsAppSession } from "../_shared/ai/whatsapp-channel.ts";
 import { telefoneLegivel } from "../_shared/ai/tools/agendamento.ts";
+import { retratoDaValidade, type ValidadeDoEnvio, validadeDoEnvio } from "../_shared/ai/tools/whatsapp.ts";
 import { hashCurto } from "../_shared/whatsapp/idempotencia.ts";
 import {
   type AcordeDeCliente, avisoDoCliente, type ConversaDoAcorde, disparosDaConversa, mensagemNovaEFatoNovo, type OrcamentoAberto,
-  textoDoAcordeDeCliente,
+  propostaPronta, textoDoAcordeDeCliente,
 } from "../_shared/uma-voz/acorde.ts";
 import { acordeComCartao, podeAcordar } from "../_shared/uma-voz/janela.ts";
 import { horaDeAvisar } from "../_shared/ai/acompanhar.ts";
@@ -47,19 +48,26 @@ export const TITULO_DO_CARTAO = "Enviar orçamento/OS ao cliente (WhatsApp)";
  * (o dono, admin — a tool revalida o cargo de quem pediu) e o retrato do que o dono aprova (o telefone do cadastro em
  * hash e o total: mudou até o *sim*, não envia). As mesmas chaves que o runAgentLoop grava (_solicitante, _retrato) e
  * o mesmo retrato de retratoDoEnvio (_shared/ai/tools/whatsapp.ts — o teste compara os dois).
+ * Retorno F5 (P11.5, revisão das ondas 4 a 9): com a validade do envio da proposta (a prévia que montou a legenda do
+ * cartão), o retrato leva a data dela, como o da tool (retratoDaValidade): o execute a passa como p_esperada, e o *sim* de
+ * outro dia, com a data andando, não envia.
  */
 export function payloadDoCartao(p: {
   cartao: NonNullable<AcordeDeCliente["cartao"]>;
   dono: Dono;
   telefoneDoCadastro: string | null;
   total: number;
+  validade?: ValidadeDoEnvio | null;
 }): Record<string, unknown> {
   return {
     service_order_id: p.cartao.service_order_id,
     formato: "pdf",
     custom_message: p.cartao.legenda,
     _solicitante: { user_id: p.dono.id, nome: null, cargo: "admin" },
-    _retrato: { telefone: hashCurto(String(p.telefoneDoCadastro ?? "").replace(/\D/g, "")), total: Number(p.total) || 0 },
+    _retrato: {
+      telefone: hashCurto(String(p.telefoneDoCadastro ?? "").replace(/\D/g, "")), total: Number(p.total) || 0,
+      ...retratoDaValidade(p.validade),
+    },
   };
 }
 
@@ -81,6 +89,7 @@ async function criarPendenciaDoCartao(admin: Db, p: {
   sessao: string;
   dono: Dono;
   cartao: NonNullable<AcordeDeCliente["cartao"]>;
+  validade?: ValidadeDoEnvio | null;
 }): Promise<string | null> {
   try {
     const { data: so, error } = await admin.from("service_orders").select("id, service_order_number, client_id, grand_total, status")
@@ -98,7 +107,7 @@ async function criarPendenciaDoCartao(admin: Db, p: {
       risk_level: "high",
       title: TITULO_DO_CARTAO,
       summary: resumoDoCartao({ cliente: c?.name ?? null, telefoneDoCadastro: telefone, numero: so.service_order_number, total: Number(so.grand_total) || 0, legenda: p.cartao.legenda }),
-      payload: payloadDoCartao({ cartao: p.cartao, dono: p.dono, telefoneDoCadastro: telefone, total: Number(so.grand_total) || 0 }),
+      payload: payloadDoCartao({ cartao: p.cartao, dono: p.dono, telefoneDoCadastro: telefone, total: Number(so.grand_total) || 0, validade: p.validade }),
       status: "pending",
       expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
     }).select("id").single();
@@ -125,6 +134,8 @@ export async function enviarAcordeDeCliente(admin: Db, p: {
   avisoId: string;
   agora: Date;
   conversaLigada: boolean;
+  /** Retorno F5 (P11.5): a validade do envio que montou a legenda do cartão (vai ao retrato da pendência); ausente = sem a F5 */
+  validade?: ValidadeDoEnvio | null;
 }): Promise<{ ok: boolean; cartao: boolean; pendencia: string | null }> {
   try {
     const sessao = await resolveOrCreateWhatsAppSession(admin, p.dono.phone, p.dono.id);
@@ -135,7 +146,7 @@ export async function enviarAcordeDeCliente(admin: Db, p: {
         { session_id: sessao, role: "assistant", source: "whatsapp", created_at: new Date(t0 + 1).toISOString(), content: `${texto}${nota}` },
       ]);
     if (p.acorde.cartao) {
-      const pend = await criarPendenciaDoCartao(admin, { sessao, dono: p.dono, cartao: p.acorde.cartao });
+      const pend = await criarPendenciaDoCartao(admin, { sessao, dono: p.dono, cartao: p.acorde.cartao, validade: p.validade });
       if (pend) {
         const { data: s } = await admin.from("ai_operator_sessions").select("metadata").eq("id", sessao).maybeSingle();
         await admin.from("ai_operator_sessions").update({
@@ -192,7 +203,7 @@ export async function orcamentosAbertos(
       .select(`id, service_order_number, quote_status, grand_total, client_id, created_at, updated_at, quote_validity_days,
                quote_validity_date, labor_cost_total, parts_cost_total, operational_cost_total, travel_cost_total,
                subcontract_cost_total, is_travel_billable, discount_amount, tax_amount, custom_payment_installments,
-               payment_conditions, payment_condition_presets(label, installments)`)
+               payment_conditions, origem, payment_condition_presets(label, installments)`)
       .eq("status", "draft").in("quote_status", ["draft", "sent", "awaiting_approval", "awaiting_deposit"]).in("client_id", clientes)
       .order("updated_at", { ascending: false }).limit(100),
     admin.from("payment_condition_presets").select("label, installments"),
@@ -219,6 +230,8 @@ export async function orcamentosAbertos(
       validade: status === "awaiting_deposit" || status === "draft"
         ? null
         : ultimoDiaDaValidade(q as { created_at?: string | null; quote_validity_date?: string | null; quote_validity_days?: unknown }, settings),
+      // (F5, P11.5) o orçamento do retorno (com origem) segue o ramo da F3, sem a validade do envio
+      origem: typeof q.origem === "string" && q.origem ? q.origem : null,
     });
     porCliente.set(String(q.client_id), lista);
   }
@@ -346,13 +359,30 @@ export async function vigiarAcordes(admin: Db, p: {
     // 6. registra cada disparo no portão, com o texto que sairia; (20/10/2026) ligada, o que acordou SAI
     for (const { c, ds } of comDisparo) {
       const orcs = c.client_id ? orcamentos.get(c.client_id) ?? [] : [];
+      // Retorno F5 (P11.5, revisão das ondas 4 a 9, achados seguranca-2 e edge-acorde-legenda-sem-validade): a validade do
+      // envio da proposta pronta, sem gravar (a prévia, a mesma conta de retratoDoEnvio), perguntada uma vez por conversa e só
+      // quando pode haver cartão. Com ela, a legenda do cartão é a O21 e o retrato leva a data: o *sim* manda exatamente o
+      // texto que o dono leu (sem a O22 a mais) e, noutro dia, cai no 'mudou'. Sem a F5 (desligada ou ausente), a de antes.
+      let validadeDaPronta: ValidadeDoEnvio | null | undefined;
+      const validadeDoCartao = async (): Promise<ValidadeDoEnvio | null> => {
+        if (validadeDaPronta === undefined) {
+          const pronta = propostaPronta(orcs);
+          validadeDaPronta = pronta && !pronta.origem ? await validadeDoEnvio(admin, { id: pronta.id }, { agora, gravar: false }) : null;
+        }
+        return validadeDaPronta;
+      };
       for (const d of ds) {
         const acordes = await acordesDeHojeDoAssunto(admin, { phone: p.dono.phone, modo, dia: hoje, assunto: `contato:${c.phone}` });
         const novoFato = acordes !== null && mensagemNovaEFatoNovo(p.portao.regras, d.mensagem.em, acordes);
+        const v = donoLivre === true && acordeComCartao(agora) && orcs.length > 0 ? await validadeDoCartao() : null;
+        // A validade que não deu para prever (erro): sem cartão — o *sim* mandaria um texto que o dono não leu. Só a informação.
+        const semPrever = !!v && (v.motivo === "erro" || v.motivo === "cargo");
+        const comValidade = v && v.motivo !== "desligada" && !semPrever ? v : null;
         const montar = (podeCartao: boolean) => textoDoAcordeDeCliente({
           nome: c.nome, disparo: d, orcamentos: orcs,
           telefone: p.portao.regras.telefone_no_aviso ? telefoneLegivel(c.phone) : null,
-          podeCartao, agora,
+          podeCartao: podeCartao && !semPrever, agora,
+          ...(comValidade ? { validade: { legenda: comValidade.legenda } } : {}),
         });
         const acorde = montar(donoLivre === true);
         const resp = await registrarNoPortao(admin, modo, p.dono.phone,
@@ -367,7 +397,7 @@ export async function vigiarAcordes(admin: Db, p: {
           const semCartao = montar(false);
           const envio = await enviarAcordeDeCliente(admin, {
             dono: p.dono, nome: c.nome, gatilho: d.gatilho, acorde: resp.cartao === true ? acorde : semCartao, semCartao,
-            avisoId: resp.id, agora, conversaLigada: p.conversaLigada,
+            avisoId: resp.id, agora, conversaLigada: p.conversaLigada, validade: comValidade,
           });
           if (envio.ok) {
             r.enviados = (r.enviados ?? 0) + 1;

@@ -51,6 +51,8 @@ function banco(tabelas: Record<string, Linha[]>, opcoes: { esperando?: Linha[]; 
         const p = args.p;
         return Promise.resolve({ data: { ok: true, decisao: p.destino === "acorde" ? "acordar" : "guardar" }, error: null });
       }
+      // Retorno F5 (P11.5): a validade do envio da proposta pronta, com a chave desligada (o estado da publicação)
+      if (nome === "orcamento_validade_do_envio") return Promise.resolve({ data: { ok: true, fixou: false, motivo: "desligada" }, error: null });
       return Promise.resolve({ data: null, error: { message: `rpc inesperada ${nome}` } });
     },
   };
@@ -98,7 +100,9 @@ Deno.test("Miguel 07/10 09:45 (antes da conferência do dono: 09:45 pede cartão
   assertEquals(p.agora, new Date(br("07", "09:45")).toISOString());
   // nada além do portão: nenhuma fila, nenhuma pendência
   assert(!b.lidas.includes("whatsapp_send_queue") && !b.lidas.includes("ai_operator_pending_actions"));
-  assert(b.rpcs.every((x) => ["whatsapp_esperando_resposta", "aviso_registrar"].includes(x.nome)));
+  // (Retorno F5, P11.5) com cartão possível, a validade do envio da proposta é só pedida (a prévia: p_gravar falso, nada gravado)
+  assert(b.rpcs.every((x) => ["whatsapp_esperando_resposta", "aviso_registrar"].includes(x.nome) ||
+    (x.nome === "orcamento_validade_do_envio" && x.args.p_gravar === false)), JSON.stringify(b.rpcs.map((x) => x.nome)));
 });
 
 // Retorno F0b (06/11/2026): um lembrete automático (saida_humana = false) depois da mensagem do cliente não é resposta

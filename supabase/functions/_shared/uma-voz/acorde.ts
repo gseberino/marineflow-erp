@@ -162,6 +162,11 @@ export interface OrcamentoAberto {
   sinal: number | null;
   /** o último dia da validade (aaaa-mm-dd); null = não vence (aguardando sinal) ou sem data */
   validade: string | null;
+  /**
+   * Retorno F5 (P11.5): a origem do orçamento (service_orders.origem; o do retorno segue o ramo da F3 e não tem a validade do
+   * envio). Ausente ou nulo = o orçamento comum.
+   */
+  origem?: string | null;
 }
 
 /** A proposta "pronta": a enviada/aguardando mexida por último; sem enviada, o rascunho mais novo. */

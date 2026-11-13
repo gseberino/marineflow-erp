@@ -11,7 +11,7 @@
 import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { payloadDoCartao, TITULO_DO_CARTAO, vigiarAcordes } from "./acordes.ts";
 import { REGRAS_PADRAO } from "../_shared/uma-voz/portao.ts";
-import { lerPendenciaDoEnvio, retratoDoEnvio, validarPedidoDeEnvio } from "../_shared/ai/tools/whatsapp.ts";
+import { legendaDoPdf, lerPendenciaDoEnvio, retratoDoEnvio, validarPedidoDeEnvio } from "../_shared/ai/tools/whatsapp.ts";
 import { tituloDaAcao } from "../_shared/ai/agent.ts";
 
 const br = (dia: string, hm: string) => new Date(`2026-10-${dia}T${hm}:00-03:00`).toISOString();
@@ -22,7 +22,10 @@ const LIGADO = { voz: "ligado" as const, modo: "ligado" as const, regras: { ...R
 // deno-lint-ignore no-explicit-any
 type Linha = Record<string, any>;
 
-function banco(tabelas: Record<string, Linha[]>, opcoes: { esperando?: Linha[]; decisao?: Linha | null; erroNaFila?: boolean } = {}) {
+// Retorno F5 (P11.5): a validade do envio da proposta pronta. Padrão: a chave desligada (o estado da publicação).
+const DESLIGADA = { data: { ok: true, fixou: false, motivo: "desligada" }, error: null };
+
+function banco(tabelas: Record<string, Linha[]>, opcoes: { esperando?: Linha[]; decisao?: Linha | null; erroNaFila?: boolean; validade?: unknown } = {}) {
   // deno-lint-ignore no-explicit-any
   const rpcs: Array<{ nome: string; args: any }> = [];
   const inseridas: Array<{ tabela: string; linhas: unknown }> = [];
@@ -60,6 +63,7 @@ function banco(tabelas: Record<string, Linha[]>, opcoes: { esperando?: Linha[]; 
       if (nome === "whatsapp_esperando_resposta") return Promise.resolve({ data: opcoes.esperando ?? [], error: null });
       if (nome === "aviso_registrar") return Promise.resolve(opcoes.decisao === null ? { data: null, error: { message: "permission denied" } } : { data: opcoes.decisao ?? { ok: true, decisao: "acordar", id: "av-1", cartao: false }, error: null });
       if (nome === "aviso_reabrir") return Promise.resolve({ data: { ok: true, resultado: "reaberto" }, error: null });
+      if (nome === "orcamento_validade_do_envio") return Promise.resolve(opcoes.validade ?? DESLIGADA);
       return Promise.resolve({ data: null, error: { message: `rpc inesperada ${nome}` } });
     },
   };
@@ -211,6 +215,88 @@ Deno.test("ligado: guardado, repetido e portão ilegível não saem; a fila que 
   assertEquals(r.enviados ?? 0, 0);
   assert(recusa.rpcs.some((x) => x.nome === "aviso_reabrir" && x.args.p.id === "av-9"), "volta a guardado");
   assertEquals(recusa.inseridas.some((x) => x.tabela === "ai_operator_messages"), false, "o que não saiu não vai ao histórico");
+});
+
+// ═══ Retorno F5 (P11.5; revisão das ondas 4 a 9, achados seguranca-2 e edge-acorde-legenda-sem-validade) ═══════════════
+// Com a validade do envio ligada, o banco devolve a O21 e a O22 da prévia (qua 07/10 + 7 = qua 14/10), com o contexto do
+// validador (_orcamento_legenda), montado como em _shared/ai/tools/envio-com-validade_test.ts.
+const QUARTA = "quarta (14/10)";
+const O21 = `Segue o ORÇ-00113, conforme solicitado. Ele vale até ${QUARTA}. Qualquer dúvida, estamos à disposição.`;
+const O22 = `Ele vale até ${QUARTA}.`;
+const CONTEXTO = {
+  audiencia: "cliente", datas_permitidas: [QUARTA], horas_permitidas: [], nome_permitido: null, nomes_de_outros: [],
+  os_permitidas: ["ORÇ-00113"], textos_do_cliente: [],
+  trechos_do_modelo: ["Segue o ", ", conforme solicitado. Ele vale até ", ". Qualquer dúvida, estamos à disposição.", "Ele vale até ", "."],
+  marcas: { tem_proposta: false, tem_topo: false, cliente_ouviu: false, conferida: false, aceite_registrado: false },
+};
+const PREVIA = { data: { ok: true, fixou: false, data: "2026-10-14", dias: 7, motivo: "previa", legenda: O21, linha: O22, contexto: CONTEXTO }, error: null };
+const TABELAS_DO_CARTAO = () => ({
+  whatsapp_messages: MENSAGENS, service_orders: [ORC], payment_condition_presets: [], avisos_do_dono: [],
+  ai_operator_sessions: [SESSAO], clients: [{ id: "c-miguel", name: "Miguel", whatsapp: "+351 900 000 422", phone: null }],
+});
+
+Deno.test("F5: com a validade do envio ligada, o cartão mostra a O21, a pendência a leva com o retrato da tool, e o *sim* manda o texto que o dono leu", async () => {
+  const b = banco(TABELAS_DO_CARTAO(), { esperando: ESPERANDO_MIGUEL, decisao: { ok: true, decisao: "acordar", id: "av-5", cartao: true }, validade: PREVIA });
+  const { r } = await comFetch(() => vigiarAcordes(b.admin, {
+    agora: new Date(br("07", "09:45")), dono: DONO, portao: LIGADO, settings: {}, internos: new Set(), conversaLigada: false,
+  }));
+  assertEquals([r.enviados, r.com_cartao], [1, 1]);
+  const pend = b.inseridas.find((x) => x.tabela === "ai_operator_pending_actions")!.linhas as Linha;
+  assertEquals(pend.payload.custom_message, O21);
+  assertStringIncludes(pend.summary, `Legenda: "${O21}"`);
+  const hist = b.inseridas.find((x) => x.tabela === "ai_operator_messages")!.linhas as Linha[];
+  assertStringIncludes(hist[1].content, `*sim <seu PIN>* = mando o PDF do ORÇ-00113 com: "${O21}"`);
+  assert(!hist[1].content.includes("confirmo o início com o sinal"), hist[1].content);
+  // a validade só foi pedida (a prévia, nada gravado)
+  const pedidos = b.rpcs.filter((x) => x.nome === "orcamento_validade_do_envio");
+  assert(pedidos.length >= 1 && pedidos.every((x) => x.args.p_gravar === false && x.args.p_os === "orc-113"), JSON.stringify(pedidos));
+  // o retrato é o MESMO da tool (retratoDoEnvio com a mesma prévia): leva a data, e o *sim* de outro dia cai no 'mudou'
+  const db = {
+    from(t: string) {
+      // deno-lint-ignore no-explicit-any
+      const q: any = {
+        select: () => q, eq: () => q,
+        maybeSingle: () => Promise.resolve({
+          data: t === "service_orders"
+            ? { id: "orc-113", service_order_number: "ORÇ-00113", client_id: "c-miguel", status: "draft", grand_total: 105603.9, share_token: "tok", origem: null }
+            : { whatsapp: "+351 900 000 422", phone: null },
+          error: null,
+        }),
+      };
+      return q;
+    },
+    rpc: () => Promise.resolve(PREVIA),
+  };
+  assertEquals(pend.payload._retrato, await retratoDoEnvio(db, { service_order_id: "orc-113" }));
+  assertEquals(pend.payload._retrato.validade, "2026-10-14");
+  // no *sim* do mesmo dia o envio fixa a mesma data: a legenda que sai é a que o dono leu, byte a byte (sem a O22 a mais)
+  const doEnvio = { data: "2026-10-14", motivo: "fixou", legenda: O21, linha: O22 };
+  assertEquals(legendaDoPdf(lerPendenciaDoEnvio(pend.payload), { service_order_number: "ORÇ-00113", status: "draft" }, doEnvio), O21);
+});
+
+Deno.test("F5: a validade do envio que não deu para prever (erro) — o acorde vai sem cartão, só com a informação", async () => {
+  const erro = { data: null, error: { code: "XX000", message: "fora do ar" } };
+  const b = banco(TABELAS_DO_CARTAO(), { esperando: ESPERANDO_MIGUEL, decisao: { ok: true, decisao: "acordar", id: "av-6", cartao: true }, validade: erro });
+  const { r } = await comFetch(() => vigiarAcordes(b.admin, {
+    agora: new Date(br("07", "09:45")), dono: DONO, portao: LIGADO, settings: {}, internos: new Set(), conversaLigada: false,
+  }));
+  assertEquals([r.enviados, r.com_cartao ?? 0], [1, 0]);
+  assertEquals(b.inseridas.some((x) => x.tabela === "ai_operator_pending_actions"), false, "sem cartão não há pendência");
+  const fila = b.inseridas.filter((x) => x.tabela === "whatsapp_send_queue").map((x) => x.linhas as Linha);
+  assertEquals(fila.length, 1);
+  assert(!fila[0].message.includes("*sim"), fila[0].message);
+});
+
+Deno.test("F5: o orçamento do retorno (com origem) segue o ramo da F3 — nem pergunta a validade do envio, e a legenda é a de antes", async () => {
+  const tabelas = { ...TABELAS_DO_CARTAO(), service_orders: [{ ...ORC, origem: "retorno_previa" }] };
+  const b = banco(tabelas, { esperando: ESPERANDO_MIGUEL, decisao: { ok: true, decisao: "acordar", id: "av-7", cartao: true }, validade: PREVIA });
+  await comFetch(() => vigiarAcordes(b.admin, {
+    agora: new Date(br("07", "09:45")), dono: DONO, portao: LIGADO, settings: {}, internos: new Set(), conversaLigada: false,
+  }));
+  assertEquals(b.rpcs.some((x) => x.nome === "orcamento_validade_do_envio"), false);
+  const pend = b.inseridas.find((x) => x.tabela === "ai_operator_pending_actions")!.linhas as Linha;
+  assertEquals(pend.payload.custom_message, "Miguel, segue a proposta completa (ORÇ-00113). Se estiver de acordo, confirmo o início com o sinal.");
+  assertEquals(pend.payload._retrato.validade, undefined);
 });
 
 Deno.test("a vendedora sem cadastro (Ketelyn, 20/10) nem chega ao portão", async () => {

@@ -570,8 +570,16 @@ export async function retratoDoEnvio(admin: any, args: Record<string, unknown>, 
   // Retorno F5 (P11.4): a data que o resumo do *sim* mostrou (a prévia, sem gravar); o execute a passa como p_esperada, e o
   // *sim* de outro dia, com a data andando, não envia. Sem a F5 (desligada), o retrato de antes.
   const v = documentTypeFor(so.status) === "quote" && !so.origem ? await validadeDoEnvio(admin, so, { agora: new Date(), gravar: false }) : null;
-  const daValidade = !v || v.motivo === "desligada" ? {} : v.data ? { validade: v.data } : { validade_motivo: v.motivo };
-  return { telefone: hashCurto(digitos), total: Number(so.grand_total) || 0, ...daValidade };
+  return { telefone: hashCurto(digitos), total: Number(so.grand_total) || 0, ...retratoDaValidade(v) };
+}
+
+/**
+ * Retorno F5 (P11.4): o pedaço do retrato com a validade do envio que o resumo do *sim* mostrou (a prévia): a data, que o
+ * execute passa como p_esperada, ou o motivo de não ter data. Sem a F5 (desligada ou ausente), nada: o retrato de antes. O
+ * cartão do "me acorde se" (acompanhar-conversas/acordes.ts) usa o mesmo, para o retrato dele ser o da tool.
+ */
+export function retratoDaValidade(v: ValidadeDoEnvio | null | undefined): Record<string, unknown> {
+  return !v || v.motivo === "desligada" ? {} : v.data ? { validade: v.data } : { validade_motivo: v.motivo };
 }
 
 /** Retorno F4 (C-DESTINO): a resposta de parceiro_destino_do_pdf. */
