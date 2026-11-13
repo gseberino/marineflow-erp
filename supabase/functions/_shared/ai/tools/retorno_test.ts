@@ -1148,3 +1148,152 @@ Deno.test("F4: opcoes ausente é igual ao de hoje, byte a byte", async () => {
     assertEquals(f.nomes().some((n) => n.startsWith("parceiro_")), false);
   });
 });
+
+// ─── Retorno F5 (P11.2 e P11.9): os aceites do cartão e a via do PDF do cartão ────────────────────────────────────────
+
+const ACEITE_B = {
+  item_id: "i-7", aceite_id: "ac-1", service_order_id: "os-151", escolha: "sem_sinal", pedir_dados: false, total_visto: 9840,
+  msg_id: "wamid.TESTE01", numero: "ORÇ-00151",
+};
+const ACEITE_A = {
+  item_id: "i-8", aceite_id: "ac-2", service_order_id: "os-152", escolha: "com_sinal", feito: true,
+  registrado: { fechado: "agendada", dados: false }, pedir_dados: false, total_visto: 5000, msg_id: "wamid.TESTE02",
+  numero: "ORÇ-00152", quote_status: "awaiting_deposit",
+};
+
+type Conversao = { sb: unknown; ref: string; opcoes: Record<string, unknown> };
+function comConversor(d: DepsDoCartao, resposta: Record<string, unknown> | (() => Promise<Record<string, unknown>>), conversoes: Conversao[]) {
+  d.converter = ((sb: unknown, ref: string, opcoes: Record<string, unknown>) => {
+    conversoes.push({ sb, ref, opcoes });
+    return typeof resposta === "function" ? resposta() : Promise.resolve(resposta);
+  }) as unknown as DepsDoCartao["converter"];
+  return d;
+}
+const CONVERTEU = { ok: true, documento: "OS-00151", orcamento_era: "ORÇ-00151" };
+
+Deno.test("F5 aceite A ou C (feito): já registrado no banco — a ferramenta só relata, sem chamar nada", async () => {
+  const f = fluxo({ retorno_cartao_executar: { ok: true, aviso: "", ditados: [], aceites: [ACEITE_A] } });
+  const conv: Conversao[] = [];
+  const d = comConversor(depsFalsos(f).deps, CONVERTEU, conv);
+  const r = await executarCartao({ cartao_id: "c-1" }, f.c, undefined, d);
+  assertEquals(f.nomes(), ["retorno_cartao_executar"]);
+  assertEquals(conv.length, 0);
+  assertEquals(r, { ok: true, aviso: "ORÇ-00152 aprovado, aguardando o sinal. O 'Fechado' vai ao cliente.", so_texto: true });
+  // em sombra, ou sem número que fale pelo cliente: o dono responde
+  const sombra = fluxo({ retorno_cartao_executar: { ok: true, aceites: [{ ...ACEITE_A, registrado: { fechado: "sombra", dados: false } }] } });
+  assertStringIncludes(String((await executarCartao({ cartao_id: "c-1" }, sombra.c, undefined, depsFalsos(sombra).deps)).aviso),
+    "O 'Fechado' ficou em teste (não vai ao cliente): responda você mesmo.");
+  const semNumero = fluxo({ retorno_cartao_executar: { ok: true, aceites: [{ ...ACEITE_A, registrado: { fechado: null, dados: false } }] } });
+  assertStringIncludes(String((await executarCartao({ cartao_id: "c-1" }, semNumero.c, undefined, depsFalsos(semNumero).deps)).aviso),
+    "O 'Fechado' não vai sair: responda você mesmo.");
+  // C com o pedido dos dados
+  const comDados = fluxo({ retorno_cartao_executar: { ok: true, aceites: [{ ...ACEITE_A, pedir_dados: true, registrado: { fechado: "agendada", dados: true } }] } });
+  assertStringIncludes(String((await executarCartao({ cartao_id: "c-1" }, comDados.c, undefined, depsFalsos(comDados).deps)).aviso),
+    "O 'Fechado' vai ao cliente, e depois o pedido dos dados da nota.");
+});
+
+Deno.test("F5 aceite B: converte pela via do dono (motivo com a mensagem, total do cartão) e registra; D pede os dados", async () => {
+  for (const [aceite, pedir] of [[ACEITE_B, false], [{ ...ACEITE_B, pedir_dados: true }, true]] as const) {
+    const f = fluxo({
+      retorno_cartao_executar: { ok: true, aceites: [aceite] },
+      orcamento_aceite_registrar: { ok: true, fechado: "sombra", dados: pedir },
+    });
+    const conv: Conversao[] = [];
+    const d = comConversor(depsFalsos(f).deps, CONVERTEU, conv);
+    const r = await executarCartao({ cartao_id: "c-1" }, f.c, undefined, d);
+    assertEquals(conv.length, 1);
+    assertEquals(conv[0].sb, f.c.admin);
+    assertEquals(conv[0].ref, "os-151");
+    assertEquals(conv[0].opcoes, { via: "dono", autor: "dono", motivo: "Aceite por texto do cliente, mensagem wamid.TESTE01", totalVisto: 9840 });
+    assertEquals(f.nomes(), ["retorno_cartao_executar", "orcamento_aceite_registrar"]);
+    assertEquals(f.chamadas[1].args, {
+      p_aceite: "ac-1", p_ok: true, p_resultado: { escolha: "sem_sinal", numero: "OS-00151", convertido: true }, p_autor: "dono",
+      p_pedir_dados: pedir,
+    });
+    assertEquals(r.aviso, "ORÇ-00151 virou OS-00151, sem sinal. O 'Fechado' ficou em teste (não vai ao cliente): responda você mesmo.");
+  }
+});
+
+Deno.test("F5 aceite B: a conversão que falha (ou lança) registra a falha com o código, e o aviso diz que nada saiu", async () => {
+  const casos: Array<[Record<string, unknown> | (() => Promise<Record<string, unknown>>), string, string]> = [
+    [{ error: "O orçamento mudou desde o cartão.", codigo: "mudou" }, "mudou", "Não converti o ORÇ-00151: O orçamento mudou desde o cartão. Nada saiu ao cliente."],
+    [{ error: "ORÇ-00151 já é OS — não há o que converter.", codigo: "ja_os" }, "ja_os", "Não converti o ORÇ-00151: ORÇ-00151 já é OS — não há o que converter. Nada saiu ao cliente."],
+    [() => Promise.reject(new Error("rede")), "erro", "Não converti o ORÇ-00151: não consegui agora. Nada saiu ao cliente."],
+  ];
+  for (const [resposta, codigo, aviso] of casos) {
+    const f = fluxo({ retorno_cartao_executar: { ok: true, aceites: [ACEITE_B] }, orcamento_aceite_registrar: { ok: true, caiu: true } });
+    const d = comConversor(depsFalsos(f).deps, resposta, []);
+    const r = await executarCartao({ cartao_id: "c-1" }, f.c, undefined, d);
+    const reg = f.chamadas.find((c) => c.fn === "orcamento_aceite_registrar");
+    assertEquals(reg?.args, { p_aceite: "ac-1", p_ok: false, p_resultado: { erro: codigo }, p_autor: "dono", p_pedir_dados: false }, codigo);
+    assertEquals(r.aviso, aviso);
+  }
+});
+
+Deno.test("F5 aceite B: convertido, mas o registro falha — o aviso manda o dono responder (o vigia resolve em 30 min)", async () => {
+  for (const registro of [{ __erro: "57014" }, { ok: false, motivo: "estado" }]) {
+    const f = fluxo({ retorno_cartao_executar: { ok: true, aceites: [ACEITE_B] }, orcamento_aceite_registrar: registro });
+    const d = comConversor(depsFalsos(f).deps, CONVERTEU, []);
+    const r = await executarCartao({ cartao_id: "c-1" }, f.c, undefined, d);
+    assertEquals(r.aviso, "ORÇ-00151 virou OS-00151, sem sinal. O 'Fechado' não saiu: responda você mesmo.");
+  }
+});
+
+Deno.test("F5 aceites com o tempo estourado: cada B ou D que não começou é adiado, sem converter", async () => {
+  const t = new FakeTime(MEIO_DIA);
+  try {
+    const segundo = { ...ACEITE_B, item_id: "i-9", aceite_id: "ac-9", service_order_id: "os-160", numero: "ORÇ-00160" };
+    const f = fluxo({ retorno_cartao_executar: { ok: true, aceites: [ACEITE_B, segundo] }, orcamento_aceite_registrar: { ok: true, fechado: "agendada", dados: false } });
+    const conv: Conversao[] = [];
+    const d = comConversor(depsFalsos(f).deps, () => {
+      t.tick(91_000);
+      return Promise.resolve(CONVERTEU);
+    }, conv);
+    const r = await executarCartao({ cartao_id: "c-1" }, f.c, undefined, d);
+    assertEquals(conv.map((c) => c.ref), ["os-151"]);
+    const regs = f.chamadas.filter((c) => c.fn === "orcamento_aceite_registrar").map((c) => c.args);
+    assertEquals(regs[1], { p_aceite: "ac-9", p_ok: false, p_resultado: { adiado: true }, p_autor: "dono", p_pedir_dados: false });
+    assertStringIncludes(String(r.aviso), "O ORÇ-00160 ficou para o próximo *retorno*.");
+  } finally {
+    t.restore();
+  }
+});
+
+Deno.test("F5 a ordem: ditados, depois os aceites, depois os orçamentos da F3; o texto do cliente e o id da mensagem nunca vão ao aviso", async () => {
+  await comRelogio(MEIO_DIA, async () => {
+    const f = fluxo({
+      retorno_cartao_executar: { ok: true, aviso: "Vai sair 1: Paulo.", ditados: [DITADO], aceites: [ACEITE_B], orcamentos: [ORC()] },
+      orcamento_aceite_registrar: { ok: true, fechado: "agendada", dados: false },
+      retorno_previa_preparar: PRE_OK,
+    });
+    const d = comConversor(depsFalsos(f).deps, CONVERTEU, []);
+    const r = await executarCartao({ cartao_id: "c-1" }, f.c, () => Promise.resolve({ ok: true, messageId: "wa-1" }), d);
+    const nomes = f.nomes();
+    assert(nomes.indexOf("retorno_item_enviado") < nomes.indexOf("orcamento_aceite_registrar"), nomes.join(","));
+    assert(nomes.indexOf("orcamento_aceite_registrar") < nomes.indexOf("retorno_previa_preparar"), nomes.join(","));
+    assertEquals(r.aviso, "Vai sair 1: Paulo. ORÇ-00151 virou OS-00151, sem sinal. O 'Fechado' vai ao cliente. Orçamento ORÇ-00151 criado e PDF enviado a Ana.");
+    assert(!String(r.aviso).includes("wamid"));
+    assert(!String(r.aviso).includes("Pode buscar amanhã"));
+  });
+});
+
+Deno.test("F5 P11.9: o PDF do cartão sai com ctx.envioPeloCartao, que volta a undefined depois, também quando o envio lança", async () => {
+  await comRelogio(MEIO_DIA, async () => {
+    const f = fluxo({ retorno_previa_preparar: PRE_OK });
+    const d = depsFalsos(f);
+    let noEnvio: unknown = "não chamou";
+    const original = d.deps.enviarPdf;
+    d.deps.enviarPdf = (args, ctx) => {
+      noEnvio = ctx.envioPeloCartao;
+      return original(args, ctx);
+    };
+    await orcarEEnviar(ORC(), f.c, d.deps);
+    assertEquals(noEnvio, true);
+    assertEquals(f.c.envioPeloCartao, undefined);
+
+    const g = fluxo({ retorno_previa_preparar: PRE_OK });
+    const dg = depsFalsos(g, { envioLanca: true });
+    await assertRejects(() => orcarEEnviar(ORC(), g.c, dg.deps));
+    assertEquals(g.c.envioPeloCartao, undefined);
+  });
+});

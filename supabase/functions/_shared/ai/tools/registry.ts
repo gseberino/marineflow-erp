@@ -31,6 +31,12 @@ export interface ToolCtx {
   /** Retorno F3 (P9): a data da legenda do cartão. Fica no contexto para o modelo não alcançar. */
   validadeDoCartao?: string;
   /**
+   * Retorno F5 (P11.9): o PDF do cartão (orcarEEnviar) marca o envio, e o send_service_order_link manda ao whatsapp-send
+   * `orcamento_via: "cartao"` (sem a marca, o cartão seria "assistente": a ferramenta manda origem "assistente" em todo
+   * envio). Fica no contexto para o modelo não alcançar; o finally de orcarEEnviar a volta a undefined.
+   */
+  envioPeloCartao?: boolean;
+  /**
    * De onde veio o pedido (07/10/2026): no chat do app um documento pode voltar como link para
    * baixar; no WhatsApp ele vai como arquivo na conversa. Ausente = WhatsApp (o comportamento antigo).
    */

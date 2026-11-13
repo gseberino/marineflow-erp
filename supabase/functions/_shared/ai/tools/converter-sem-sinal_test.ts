@@ -4,7 +4,7 @@
 // (já é OS, reprovado, técnico). Depois do merge com a agenda (28/10/2026), a conversão é da porta única de status
 // (os_transicionar_status, via 'assistente'); sem a porta no banco, o PLANO B (porta-ausente.ts) com o mesmo número.
 import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { converterSemSinalTools, numeroDaOS } from "./converter-sem-sinal.ts";
+import { converterSemSinalNucleo, converterSemSinalTools, numeroDaOS } from "./converter-sem-sinal.ts";
 import { CHAVE_DO_RETRATO } from "./registry.ts";
 
 const tool = converterSemSinalTools[0];
@@ -152,4 +152,70 @@ Deno.test("retrato da pendência leva id, número e total", async () => {
 Deno.test("numeroDaOS troca só o prefixo", () => {
   assertEquals(numeroDaOS("ORÇ-00042"), "OS-00042");
   assertEquals(numeroDaOS("OS-00007"), "OS-00007");
+});
+
+// ─── Retorno F5 (P11.1, C-CONV): o núcleo exportado, a via do dono e o total do cartão ─────────────────────────────
+
+Deno.test("F5 núcleo, via dono: a porta recebe p_via 'dono', o autor e o motivo (até 200 caracteres)", async () => {
+  const b = banco(ORC);
+  const motivo = "Aceite por texto do cliente, mensagem wamid.ABC123";
+  // deno-lint-ignore no-explicit-any
+  const r = await converterSemSinalNucleo((b.ctx() as unknown as { sb: never }).sb, ORC.id, { via: "dono", autor: "u-dono", motivo, totalVisto: 4200 }) as any;
+  assertEquals(r.ok, true, JSON.stringify(r));
+  assertEquals(r.documento, "OS-00042");
+  assertEquals(b.rpcs, [{ nome: "os_transicionar_status",
+    params: { p_os: ORC.id, p_para: "approved", p_via: "dono", p_check_out: null, p_autor: "u-dono", p_motivo: motivo } }]);
+  assertEquals(b.updates[0].quote_status, "approved");
+  // o motivo longo é cortado em 200
+  const c = banco(ORC);
+  await converterSemSinalNucleo((c.ctx() as unknown as { sb: never }).sb, ORC.id, { via: "dono", autor: "u-dono", motivo: "x".repeat(300) });
+  assertEquals(String(c.rpcs[0].params.p_motivo).length, 200);
+});
+
+Deno.test("F5 núcleo: total do cartão diferente do atual (mais de R$ 0,01) recusa antes de mexer na condição", async () => {
+  for (const visto of [4199.98, 4200.02, 0, 5000]) {
+    const b = banco(ORC);
+    // deno-lint-ignore no-explicit-any
+    const r = await converterSemSinalNucleo((b.ctx() as unknown as { sb: never }).sb, ORC.id, { via: "dono", autor: "u-dono", totalVisto: visto }) as any;
+    assertEquals(r.error, "O orçamento mudou desde o cartão.", String(visto));
+    assertEquals(r.codigo, "mudou");
+    assertEquals(b.updates.length, 0, "a condição não foi tocada");
+    assertEquals(b.rpcs.length, 0);
+  }
+  // até R$ 0,01 de diferença, converte
+  for (const visto of [4200, 4200.01, 4199.99]) {
+    const b = banco(ORC);
+    // deno-lint-ignore no-explicit-any
+    const r = await converterSemSinalNucleo((b.ctx() as unknown as { sb: never }).sb, ORC.id, { via: "dono", autor: "u-dono", totalVisto: visto }) as any;
+    assertEquals(r.ok, true, String(visto));
+  }
+});
+
+Deno.test("F5 núcleo: as recusas trazem o código (já é OS, reprovado, não achou, só a condição)", async () => {
+  const casos: Array<[Record<string, unknown>, string, Porta | undefined]> = [
+    [{ ...ORC, status: "approved", converted_to_os_at: "2026-10-01T00:00:00Z" }, "ja_os", undefined],
+    [{ ...ORC, quote_status: "rejected" }, "reprovado", undefined],
+    [ORC, "so_condicao", { resposta: { ok: false, mudou: false, texto: "Não converti." } }],
+  ];
+  for (const [ordem, codigo, porta] of casos) {
+    const b = banco(ordem, porta ? { porta } : {});
+    // deno-lint-ignore no-explicit-any
+    const r = await converterSemSinalNucleo((b.ctx() as unknown as { sb: never }).sb, ORC.id, { via: "dono", autor: "u-dono" }) as any;
+    assertEquals(r.codigo, codigo, JSON.stringify(r));
+    assert(typeof r.error === "string" && r.error.length > 0);
+  }
+  const nada = banco(ORC);
+  // deno-lint-ignore no-explicit-any
+  const r = await converterSemSinalNucleo((nada.ctx() as unknown as { sb: never }).sb, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", { via: "dono", autor: "u-dono" }) as any;
+  assertEquals(r.codigo, "nao_encontrado");
+});
+
+Deno.test("F5 núcleo: a via do assistente é a de antes — o execute chama o núcleo e o resultado não ganha campo novo", async () => {
+  const b = banco({ ...ORC, quote_status: "rejected" });
+  // deno-lint-ignore no-explicit-any
+  const r = await tool.execute({ service_order_id: "ORÇ-00042" }, b.ctx()) as any;
+  assertEquals(Object.keys(r), ["error"], "o código fica só no núcleo");
+  const c = banco(ORC);
+  await converterSemSinalNucleo((c.ctx() as unknown as { sb: never }).sb, ORC.id, { via: "assistente", autor: "u1" });
+  assertEquals(c.rpcs[0].params, { p_os: ORC.id, p_para: "approved", p_via: "assistente", p_check_out: null, p_autor: "u1" }, "sem p_motivo");
 });

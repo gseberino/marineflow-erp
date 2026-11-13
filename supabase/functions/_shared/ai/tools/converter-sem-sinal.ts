@@ -58,6 +58,105 @@ export function numeroDaOS(numero: string | null): string | null {
   return numero.startsWith("ORÇ-") ? numero.replace("ORÇ-", "OS-") : numero;
 }
 
+/**
+ * Retorno F5 (P11.1, C-CONV): as opções do núcleo. `via: "assistente"` é o caminho de sempre (a ferramenta). `via: "dono"` é o
+ * *sim <PIN>* do cartão (o aceite por texto, B ou D): a porta recebe p_via = 'dono' e o motivo (até 200 caracteres), e o
+ * total que o dono viu no cartão (`totalVisto`) tem de ser o de agora (até R$ 0,01), senão recusa antes de tocar na condição.
+ * `retrato` é o do "sim" da ferramenta (o mesmo teste de sempre, com a frase de sempre).
+ */
+export interface OpcoesDoNucleo {
+  via: "assistente" | "dono";
+  autor: string | null;
+  motivo?: string;
+  totalVisto?: number | null;
+  retrato?: Record<string, unknown> | null;
+}
+
+/** O código da recusa, para quem chama o núcleo (o cartão). A ferramenta devolve só o `error`, como antes. */
+export type CodigoDoNucleo = "nao_encontrado" | "ja_os" | "reprovado" | "mudou" | "so_condicao";
+
+type ResultadoDoNucleo = Record<string, unknown> & { error?: string; codigo?: CodigoDoNucleo };
+
+const MOTIVO_MAX = 200;
+
+/** Mais de R$ 0,01 de diferença (em centavos, sem o erro do ponto flutuante). */
+function mudouMaisDeUmCentavo(a: number, b: number): boolean {
+  return Math.abs(Math.round(a * 100) - Math.round(b * 100)) > 1;
+}
+
+/**
+ * Retorno F5 (P11.1, C-CONV): o corpo da ferramenta, exportado. O mesmo caminho para o assistente (sem mudança de
+ * comportamento) e para o cartão do retorno (via dono). Lança no erro de leitura ou de gravação, como a ferramenta lançava.
+ */
+// deno-lint-ignore no-explicit-any
+export async function converterSemSinalNucleo(sb: any, ref: string, opcoes: OpcoesDoNucleo): Promise<ResultadoDoNucleo> {
+  const o = await lerOrcamento(sb, ref);
+  if (!o) return { error: `Orçamento não encontrado: "${ref}".`, codigo: "nao_encontrado" };
+  const recusa = recusaParaConverter(o);
+  if (recusa) return { ...recusa, codigo: o.converted_to_os_at || o.status !== "draft" ? "ja_os" : "reprovado" };
+
+  // O "sim" foi sobre este orçamento com este total.
+  const retrato = opcoes.retrato ?? null;
+  const total = Number(o.grand_total) || 0;
+  if (retrato && (retrato.id !== o.id || Math.abs(Number(retrato.total) - total) > 0.009)) {
+    return {
+      error: `${o.service_order_number} mudou desde o pedido (total era ${fmtCurrency(Number(retrato.total) || 0)}, agora ${fmtCurrency(total)}). Nada foi convertido — confirme de novo com o valor atual.`,
+      codigo: "mudou",
+    };
+  }
+  // (F5) o total que o dono viu no cartão: mudou, nada é tocado
+  if (opcoes.totalVisto !== undefined && opcoes.totalVisto !== null && mudouMaisDeUmCentavo(Number(opcoes.totalVisto), total)) {
+    return { error: "O orçamento mudou desde o cartão.", codigo: "mudou" };
+  }
+
+  const { data: presets, error: pErr } = await sb.from("payment_condition_presets").select("id, label, installments").eq("active", true);
+  if (pErr) throw pErr;
+  const condicao = condicaoTudoNaConclusao(presets ?? []);
+
+  const { error: cErr } = await sb
+    .from("service_orders")
+    .update({ ...condicao, quote_status: "approved" })
+    .eq("id", o.id);
+  if (cErr) throw cErr;
+
+  const soCondicao = (porque: string): ResultadoDoNucleo => ({
+    error: `A condição de ${o.service_order_number} foi trocada para "${condicao.payment_conditions}", mas a conversão não aconteceu (${porque}). Confira na tela.`,
+    codigo: "so_condicao",
+  });
+  // (F5) a via do dono leva o motivo (o id da mensagem do cliente); a do assistente, nada a mais
+  const extra: Record<string, unknown> = { p_autor: opcoes.autor ?? null };
+  if (opcoes.via === "dono" && opcoes.motivo) extra.p_motivo = opcoes.motivo.slice(0, MOTIVO_MAX);
+  let documento: string | null;
+  let convertido: boolean;
+  const { data: porta, error: erroPorta } = await sb.rpc("os_transicionar_status",
+    argumentosDaPortaCompleta(o.id, "approved", opcoes.via, extra));
+  if (erroPorta) {
+    if (ehSemDireitoNaPorta(erroPorta)) return soCondicao(String(erroPorta.message ?? "você não pode converter este orçamento"));
+    if (!ehPortaAusente(erroPorta)) throw erroPorta;
+    const antes = await statusPelaTelaSemAPorta(sb, o.id, "approved");
+    documento = antes.numero ?? numeroDaOS(o.service_order_number);
+    convertido = antes.convertido;
+  } else {
+    if (!porta?.ok) return soCondicao(String(porta?.texto ?? "o sistema recusou"));
+    documento = porta.numero ?? numeroDaOS(o.service_order_number);
+    convertido = porta.convertido === true;
+  }
+  if (!convertido) return soCondicao("alguém converteu ao mesmo tempo?");
+
+  const avisos: string[] = [];
+  if (o.signed_at) avisos.push("O orçamento estava ASSINADO com outra condição: o cliente precisa assinar de novo.");
+  return {
+    ok: true,
+    documento,
+    orcamento_era: o.service_order_number,
+    condicao: condicao.payment_conditions,
+    condicao_anterior: o.payment_conditions || null,
+    total: fmtCurrency(total),
+    quando_paga: "Valor inteiro na conclusão do serviço (a conta a receber nasce ao concluir).",
+    ...(avisos.length ? { avisos } : {}),
+  };
+}
+
 export const converterSemSinalTools: ToolDef[] = [
   {
     name: "converter_sem_sinal",
@@ -87,64 +186,12 @@ export const converterSemSinalTools: ToolDef[] = [
     async execute(args, ctx) {
       const blocked = blockTechnician(ctx);
       if (blocked) return blocked;
-      const { sb } = ctx;
       const ref = String(args.service_order_id ?? "").trim();
-      const o = await lerOrcamento(sb, ref);
-      if (!o) return { error: `Orçamento não encontrado: "${ref}".` };
-      const recusa = recusaParaConverter(o);
-      if (recusa) return recusa;
-
-      // O "sim" foi sobre este orçamento com este total.
-      const retrato = lerRetrato(args);
-      const total = Number(o.grand_total) || 0;
-      if (retrato && (retrato.id !== o.id || Math.abs(Number(retrato.total) - total) > 0.009)) {
-        return {
-          error: `${o.service_order_number} mudou desde o pedido (total era ${fmtCurrency(Number(retrato.total) || 0)}, agora ${fmtCurrency(total)}). Nada foi convertido — confirme de novo com o valor atual.`,
-        };
-      }
-
-      const { data: presets, error: pErr } = await sb.from("payment_condition_presets").select("id, label, installments").eq("active", true);
-      if (pErr) throw pErr;
-      const condicao = condicaoTudoNaConclusao(presets ?? []);
-
-      const { error: cErr } = await sb
-        .from("service_orders")
-        .update({ ...condicao, quote_status: "approved" })
-        .eq("id", o.id);
-      if (cErr) throw cErr;
-
-      const soCondicao = (porque: string) => ({
-        error: `A condição de ${o.service_order_number} foi trocada para "${condicao.payment_conditions}", mas a conversão não aconteceu (${porque}). Confira na tela.`,
+      // (F5, P11.1) o corpo virou o núcleo, sem mudança para o assistente; o código da recusa fica só no núcleo
+      const { codigo: _codigo, ...r } = await converterSemSinalNucleo(ctx.sb, ref, {
+        via: "assistente", autor: ctx.userId ?? null, retrato: lerRetrato(args),
       });
-      let documento: string | null;
-      let convertido: boolean;
-      const { data: porta, error: erroPorta } = await sb.rpc("os_transicionar_status",
-        argumentosDaPortaCompleta(o.id, "approved", "assistente", { p_autor: ctx.userId ?? null }));
-      if (erroPorta) {
-        if (ehSemDireitoNaPorta(erroPorta)) return soCondicao(String(erroPorta.message ?? "você não pode converter este orçamento"));
-        if (!ehPortaAusente(erroPorta)) throw erroPorta;
-        const antes = await statusPelaTelaSemAPorta(sb, o.id, "approved");
-        documento = antes.numero ?? numeroDaOS(o.service_order_number);
-        convertido = antes.convertido;
-      } else {
-        if (!porta?.ok) return soCondicao(String(porta?.texto ?? "o sistema recusou"));
-        documento = porta.numero ?? numeroDaOS(o.service_order_number);
-        convertido = porta.convertido === true;
-      }
-      if (!convertido) return soCondicao("alguém converteu ao mesmo tempo?");
-
-      const avisos: string[] = [];
-      if (o.signed_at) avisos.push("O orçamento estava ASSINADO com outra condição: o cliente precisa assinar de novo.");
-      return {
-        ok: true,
-        documento,
-        orcamento_era: o.service_order_number,
-        condicao: condicao.payment_conditions,
-        condicao_anterior: o.payment_conditions || null,
-        total: fmtCurrency(total),
-        quando_paga: "Valor inteiro na conclusão do serviço (a conta a receber nasce ao concluir).",
-        ...(avisos.length ? { avisos } : {}),
-      };
+      return r;
     },
   },
 ];
