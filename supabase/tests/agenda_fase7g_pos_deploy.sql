@@ -194,10 +194,17 @@ select format('F1 %s (%s): existe, 1 por nome, %s, %s, search_path=public, execu
                         has_function_privilege('authenticated', p.oid, 'execute'), has_function_privilege('service_role', p.oid, 'execute')) end
   from _pg_f r
   left join pg_proc p on p.oid = to_regprocedure('public.' || r.f);
+-- (consertos de 13/11) com a 20261113200000 registrada, _agenda_porque_da_os pode ser a do conserto do NOVO-agenda-296 (1 linha trocada: quem_texto na reserva;
+-- md5 do corpo dela, sem CR, 8cbcbd13…) ou, depois da volta dos consertos (que deixa o registro como rastro), a da ponta final da 7g; sem ela, só a da 7g, como
+-- antes. Que o corpo vivo é o do conserto quem prende é o F2 de agenda_consertos_1311_pos_deploy.sql
 insert into _resultado
-select format('F2 %s: o corpo é o da ponta final da 7g (md5 sem CR)', r.f), p.oid is not null and md5(replace(p.prosrc, chr(13), '')) = r.m,
-       case when p.oid is null then 'NÃO EXISTE' when md5(replace(p.prosrc, chr(13), '')) <> r.m then 'md5 ' || md5(replace(p.prosrc, chr(13), '')) || ' ≠ ' || r.m end
+select format('F2 %s: o corpo é o da ponta final da 7g (md5 sem CR)', r.f),
+       p.oid is not null and md5(replace(p.prosrc, chr(13), '')) in (r.m, coalesce(c13.m, r.m)),
+       case when p.oid is null then 'NÃO EXISTE' when md5(replace(p.prosrc, chr(13), '')) not in (r.m, coalesce(c13.m, r.m)) then 'md5 ' || md5(replace(p.prosrc, chr(13), '')) || ' ≠ ' || coalesce(c13.m || ' ou ', '') || r.m end
   from _pg_f r
+  left join lateral (select '8cbcbd131425b64976d96b4e65dd6cb4'::text as m
+                      where r.f like '\_agenda\_porque\_da\_os(%'
+                        and exists (select 1 from supabase_migrations.schema_migrations s where s.version = '20261113200000')) c13 on true
   left join pg_proc p on p.oid = to_regprocedure('public.' || r.f);
 -- as recriadas, tiradas as marcas da 7g ("-- FASE 7g: …" até "-- FASE 7g: fim"; "-- (7g …" até "-- (7g: fim)"), linha a linha: o corpo de antes da 7g, byte a byte (a 7g só acrescenta).
 -- A regra é a do pg_temp.sem_7g do F2 de agenda_fase7e_pos_deploy.sql.

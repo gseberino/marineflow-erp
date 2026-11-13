@@ -122,8 +122,16 @@ declare
   -- FASE 7d: (7d P6) os blocos da 7d também saem
   v_f7d boolean := false;
   -- FASE 7d: fim
+  -- (consertos de 13/11) os blocos "-- CONSERTO 13/11 (x): … -- CONSERTO 13/11 (x): fim" também saem
+  v_c13 boolean := false;
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
+    -- (consertos de 13/11) a 20261113200000 recria _agenda_cliente_fila copiando a definição mais nova (20261028100800) e só acrescenta os blocos dela
+    if not v_bloco and not v_c13 and l ~ '^\s*-- CONSERTO 13/11 \([a-z]\):' and l !~ '^\s*-- CONSERTO 13/11 \([a-z]\): fim' then v_c13 := true; continue; end if;
+    if v_c13 then
+      if l ~ '^\s*-- CONSERTO 13/11 \([a-z]\): fim' then v_c13 := false; end if;
+      continue;
+    end if;
     -- FASE 7d: (7d P6) os blocos "-- FASE 7d: … -- FASE 7d: fim" também saem (a 20261107100500 recria a função copiando a definição mais nova: só acréscimo)
     if not v_bloco and not v_f7d and l ~ '^\s*-- FASE 7[defg]:' and l !~ '^\s*-- FASE 7[defg]: fim' then v_f7d := true; continue; end if;
     if v_f7d then

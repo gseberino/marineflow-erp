@@ -183,6 +183,21 @@ export const FORA_DA_BANCADA = new Set([
   // Main de 12/11 (f291dd5a, outra sessão): o Gmail hbr.boats como 3ª caixa (insert em email_accounts com imap_host, coluna da 20261008100000, de antes de PRIMEIRA, que a
   // bancada não carrega). Nenhuma função da agenda lê e-mail; sem isto, quem sobe a bancada sem `ate` (os evals) parava aqui: "column imap_host does not exist".
   '20270105110000_email_gmail_hbr_boats.sql',
+  // Retorno F5 (session/retorno-f5, 2bab9f1b, de OUTRA sessão; vai à main em 13/11 à noite): como a F1 a F4, depende das tabelas do retorno (retorno_config,
+  // retorno_saidas, retorno_cartao_itens…) e de colunas em service_orders que a bancada não modela. Não recria nenhuma função da agenda (procurado nas 11 em 13/11:
+  // retorno_*, _retorno_*, orcamento_*, _orcamento_*, canal_pode_enviar, parceiro_detectar_pdf, _cliente_ja_apresentada, _agrupar_orcamentos_reabrindo,
+  // _desagrupar_orcamentos_desfazer). Os nomes entram antes de a F5 chegar (consertos de 13/11): com ou sem ela no worktree, a bancada sobe igual.
+  '20270112100000_retorno_f5_base.sql',
+  '20270112100100_retorno_f5_envio.sql',
+  '20270112100150_retorno_f5_pdf_mao_f4.sql',
+  '20270112100200_retorno_f5_cadencia.sql',
+  '20270112100300_retorno_f5_textos.sql',
+  '20270112100400_retorno_f5_canal.sql',
+  '20270112100500_retorno_f5_aceite.sql',
+  '20270112100600_retorno_f5_cartao.sql',
+  '20270112100700_retorno_f5_desfecho.sql',
+  '20270112100800_retorno_f5_medidas.sql',
+  '20270112100900_retorno_f5_dado.sql',
 ]);
 
 /**
