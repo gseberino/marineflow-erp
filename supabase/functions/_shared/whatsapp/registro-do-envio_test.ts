@@ -74,6 +74,7 @@ const SAIDA = "3f2b9c1e-7a4d-4e8b-9c0f-12ab34cd56ef";
 
 Deno.test("origem do retorno: aceita só em chamada de sistema; com JWT de usuário vira tela", () => {
   // F4 (P5.2): as duas origens do parceiro (o texto à MP e o aviso ao cliente final) entram no fim da lista.
+  // F5 (P5.2): a do orçamento (cadência, "Fechado" e dados da nota) entra depois delas.
   assertEquals([...ORIGENS_DO_RETORNO], [
     "retorno_recibo",
     "retorno_coleta",
@@ -81,6 +82,7 @@ Deno.test("origem do retorno: aceita só em chamada de sistema; com JWT de usuá
     "retorno_modelo",
     "retorno_parceiro",
     "retorno_aviso",
+    "retorno_orcamento",
   ]);
   for (const o of ORIGENS_DO_RETORNO) {
     assertEquals(origemDoEnvio(o, true), o, o);
@@ -135,6 +137,22 @@ Deno.test("F4: as origens do parceiro valem só em chamada de sistema e gravam v
   }
   // Grafia diferente não é do retorno.
   for (const o of ["retorno_parceiros", "Retorno_Aviso", "parceiro"]) assertEquals(ehOrigemDoRetorno(o), false, o);
+});
+
+Deno.test("F5: retorno_orcamento é origem do retorno só em chamada de sistema; com JWT vira tela; grava via retorno, sem sent_by", () => {
+  const o = "retorno_orcamento";
+  assertEquals(ehOrigemDoRetorno(o), true);
+  assertEquals(origemDoEnvio(o, true), o);
+  assertEquals(origemDoEnvio(o, false), "tela");
+  // Cabe no esquema do whatsapp-send (origem ≤ 20 caracteres).
+  assertEquals(o.length, 17);
+  const l = linhaDaMensagemEnviada({ kind: "text", message: "x" }, MIGUEL, null, DONO, o, `retorno:${SAIDA}`);
+  assertEquals(l.raw_payload, { origem: o, contexto: `retorno:${SAIDA}`, via: "retorno" });
+  assertEquals(l.sent_by, null);
+  // Grafia diferente não é do retorno.
+  for (const x of ["retorno_orcamentos", "Retorno_Orcamento", "orcamento", "retorno_orçamento"]) {
+    assertEquals(ehOrigemDoRetorno(x), false, x);
+  }
 });
 
 Deno.test("idDaSaidaDoRetorno: contexto bom dá o id; sem prefixo, uuid curto ou outro formato dá null", () => {

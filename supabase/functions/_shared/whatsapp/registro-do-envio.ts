@@ -32,9 +32,13 @@
 // caminho, com as mesmas três regras. O whatsapp-send confere a saída por retorno_saida_autorizada, que passa a do
 // parceiro a parceiro_saida_autorizada. A lista é compilada na edge: origem nova pede reimplantar o whatsapp-send.
 //
+// Retorno F5 (P5.2): o lembrete, a véspera e o encerramento do orçamento enviado, o "Fechado" e o pedido de dados da nota
+// (retorno_orcamento, 17 caracteres) também, com as mesmas três regras; retorno_saida_autorizada passa a saída do orçamento a
+// orcamento_saida_autorizada. Também pede reimplantar o whatsapp-send.
+//
 // Reverter: tirar OrigemDoRetorno de OrigemDoEnvio, ORIGENS_DO_RETORNO, ehOrigemDoRetorno,
 // idDaSaidaDoRetorno e os dois ternários de linhaDaMensagemEnviada (sent_by e via). Só a F4: tirar
-// retorno_parceiro e retorno_aviso das duas listas.
+// retorno_parceiro e retorno_aviso das duas listas. Só a F5: tirar retorno_orcamento das duas listas.
 import { mesmoTelefone } from "../ai/phone.ts";
 
 export type OrigemDoRetorno =
@@ -43,7 +47,8 @@ export type OrigemDoRetorno =
   | "retorno_adiamento"
   | "retorno_modelo"
   | "retorno_parceiro"
-  | "retorno_aviso";
+  | "retorno_aviso"
+  | "retorno_orcamento";
 export type OrigemDoEnvio = "assistente" | "tela" | "sistema" | OrigemDoRetorno;
 const ORIGENS: ReadonlyArray<OrigemDoEnvio> = ["assistente", "tela", "sistema"];
 export const ORIGENS_DO_RETORNO: ReadonlyArray<OrigemDoRetorno> = [
@@ -53,6 +58,7 @@ export const ORIGENS_DO_RETORNO: ReadonlyArray<OrigemDoRetorno> = [
   "retorno_modelo",
   "retorno_parceiro",
   "retorno_aviso",
+  "retorno_orcamento",
 ];
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -60,7 +66,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // "retorno:<uuid da saída>", como a edge retorno-recibos monta (o uuid do banco é sempre minúsculo).
 const CONTEXTO_DO_RETORNO = /^retorno:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
 
-/** A origem é uma das do retorno (recibo, coleta, adiamento)? */
+/** A origem é uma das do retorno (recibo, coleta, adiamento, modelo, as do parceiro e a do orçamento)? */
 export function ehOrigemDoRetorno(o: unknown): o is OrigemDoRetorno {
   return typeof o === "string" && (ORIGENS_DO_RETORNO as readonly string[]).includes(o);
 }

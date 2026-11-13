@@ -30,8 +30,9 @@
 //    sem recusado) vira recusada/provedor (o pedido não foi processado);
 //  - antes de enviar (e também na sombra, que simula o ligado), o item tem de ter modo "sombra" ou "ligado",
 //    origem do retorno (sem ela o whatsapp-send o trataria como automático comum, sem o portão
-//    retorno_saida_autorizada), telefone só de dígitos e dedupe_key "retorno:…" (chave de outro emissor
-//    já concluída faria o whatsapp-send responder "já enviado" sem nada sair). Item torto = recusada/validador
+//    retorno_saida_autorizada), telefone só de dígitos e dedupe_key com o prefixo do emissor que o devolveu
+//    ("retorno:…", "parceiro:…" ou "orcamento:…", PREFIXO_DA_CHAVE; chave de outro emissor já concluída faria o
+//    whatsapp-send responder "já enviado" sem nada sair). Item torto = recusada/validador
 //    com a regra 'contexto' e o código do problema: três na mesma hora rebaixam o tipo (vigia, passo 10);
 //  - item sem id de saída legível não tem como ser registrado: a rodada para (erro 'item_malformado') e o
 //    vigia devolve ou fecha a saída presa (passo 9). O mesmo item de volta na mesma rodada só é aceito depois
@@ -49,11 +50,23 @@
 // texto novo é validado uma vez só. {caiu: true}, erro ou resposta torta = recusada/validador, e o texto antigo nunca
 // sai. parceiro_pegar ausente (PGRST202, 42883: a edge subiu antes da migration) é silêncio.
 //
+// ═══ F5 (P5.2): as saídas do orçamento ═══
+//
+// O booleano deParceiro virou o emissor ('retorno' | 'parceiro' | 'orcamento'). A rodada pergunta aos três pegar nessa ordem
+// (ORDEM_DOS_EMISSORES), na mesma rodada e no mesmo orçamento de tempo: nulo passa ao próximo, e o emissor esgotado não é
+// chamado de novo. O prefixo da chave (PREFIXO_DA_CHAVE) e as origens (EMISSOR_DA_ORIGEM, a fonte única que substituiu
+// ORIGENS_DO_RETORNO e ORIGENS_DO_PARCEIRO) são de cada emissor: a chave ou a origem de um emissor no item de outro é item
+// torto. O item do orcamento_pegar (C-PEGAR-O: origem retorno_orcamento, chave "orcamento:…") passa em validarSaida
+// (audiência "cliente"), como o do retorno. orcamento_pegar ausente (PGRST202, 42883) também é silêncio; o retorno_pegar
+// ausente continua erro. O context do envio é "retorno:<id da saída>" para os três (é o que o whatsapp-send lê).
+//
 // Imports só do validador: nada de _shared/ai/ nem de _shared/agenda/ (isolamento_test.ts, J.1).
 //
 // Reverter: primeiro desligar o cron 'retorno-minuto' (P9; sem ele ninguém chama a edge), depois apagar a
 // pasta supabase/functions/retorno-recibos/ e o bloco [functions.retorno-recibos] do supabase/config.toml. Só a F4:
-// tirar RPC_PEGAR_PARCEIRO, RPC_SEM_LINHAS, as duas origens do parceiro e o ramo deParceiro da rodada.
+// tirar RPC_PEGAR_PARCEIRO, RPC_SEM_LINHAS, as duas origens do parceiro e o emissor 'parceiro' da rodada. Só a F5: tirar
+// RPC_PEGAR_ORCAMENTO, a origem retorno_orcamento e o emissor 'orcamento' (ORDEM_DOS_EMISSORES, RPC_DO_EMISSOR e
+// PREFIXO_DA_CHAVE); as chaves "retorno:", "parceiro:" e "orcamento:" continuam de um emissor cada.
 
 import {
   type ContextoAoParceiro,
@@ -67,6 +80,7 @@ import {
 
 export const RPC_PEGAR = "retorno_pegar";
 export const RPC_PEGAR_PARCEIRO = "parceiro_pegar";
+export const RPC_PEGAR_ORCAMENTO = "orcamento_pegar";
 export const RPC_SEM_LINHAS = "parceiro_saida_sem_linhas";
 export const RPC_DECISAO = "retorno_registrar_decisao";
 export const RPC_LOG = "log_app_error";
@@ -135,7 +149,8 @@ export interface ResumoDoCartao {
 
 /**
  * O item que retorno_pegar devolve (contrato C-PEGAR), ou parceiro_pegar (C-PEGAR-P, F4: origem do parceiro, chave
- * "parceiro:…", validador com audiência "cliente" ou "parceiro" e, no painel e no pátio, as linhas). A rodada o lê como
+ * "parceiro:…", validador com audiência "cliente" ou "parceiro" e, no painel e no pátio, as linhas), ou orcamento_pegar
+ * (C-PEGAR-O, F5: origem retorno_orcamento, chave "orcamento:…", validador com audiência "cliente"). A rodada o lê como
  * dado não confiável.
  */
 export interface ItemDoRetorno {
@@ -144,7 +159,14 @@ export interface ItemDoRetorno {
   dedupe_key: string;
   tipo: string;
   variante: string | null;
-  origem: "retorno_recibo" | "retorno_coleta" | "retorno_adiamento" | "retorno_modelo" | "retorno_parceiro" | "retorno_aviso";
+  origem:
+    | "retorno_recibo"
+    | "retorno_coleta"
+    | "retorno_adiamento"
+    | "retorno_modelo"
+    | "retorno_parceiro"
+    | "retorno_aviso"
+    | "retorno_orcamento";
   classe: string;
   modo: "sombra" | "ligado";
   phone: string;
@@ -153,12 +175,30 @@ export interface ItemDoRetorno {
   linhas?: Array<{ n: number; texto: string }>;
 }
 
-const ORIGENS_DO_RETORNO: ReadonlySet<string> = new Set(["retorno_recibo", "retorno_coleta", "retorno_adiamento", "retorno_modelo", "retorno_parceiro", "retorno_aviso"]);
+/** F5 (P5.2): quem devolveu o item. A ordem da rodada é esta: o retorno antes, depois o parceiro, depois o orçamento. */
+export type Emissor = "retorno" | "parceiro" | "orcamento";
+const ORDEM_DOS_EMISSORES: readonly Emissor[] = ["retorno", "parceiro", "orcamento"];
+const RPC_DO_EMISSOR: Record<Emissor, string> = { retorno: RPC_PEGAR, parceiro: RPC_PEGAR_PARCEIRO, orcamento: RPC_PEGAR_ORCAMENTO };
 
-// F4: as origens que só o parceiro_pegar devolve; as outras são do retorno_pegar.
-const ORIGENS_DO_PARCEIRO: ReadonlySet<string> = new Set(["retorno_parceiro", "retorno_aviso"]);
+/** O prefixo da dedupe_key de cada emissor (a chave do banco, 6.1). Chave de um emissor no item de outro = chave_invalida. */
+export const PREFIXO_DA_CHAVE: Record<Emissor, string> = { retorno: "retorno:", parceiro: "parceiro:", orcamento: "orcamento:" };
 
-// F4: a função do parceiro ainda não existe no banco (a edge subiu antes da migration): silêncio, nunca erro.
+/**
+ * A origem de cada emissor. Substitui ORIGENS_DO_RETORNO e ORIGENS_DO_PARCEIRO (uma fonte só); as chaves são, na mesma ordem,
+ * a lista ORIGENS_DO_RETORNO do whatsapp-send (_shared/whatsapp/registro-do-envio.ts).
+ */
+export const EMISSOR_DA_ORIGEM: Readonly<Record<string, Emissor>> = {
+  retorno_recibo: "retorno",
+  retorno_coleta: "retorno",
+  retorno_adiamento: "retorno",
+  retorno_modelo: "retorno",
+  retorno_parceiro: "parceiro",
+  retorno_aviso: "parceiro",
+  retorno_orcamento: "orcamento",
+};
+
+// F4 e F5: a função do parceiro ou do orçamento ainda não existe no banco (a edge subiu antes da migration): silêncio,
+// nunca erro. A do retorno ausente continua erro.
 const FUNCAO_AUSENTE: ReadonlySet<string> = new Set(["PGRST202", "42883"]);
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -283,13 +323,16 @@ export function envioPeloWhatsappSend(
 
 type Pegou = { erro: string } | { dado: unknown };
 
-/** retorno_pegar ou parceiro_pegar. A do parceiro ausente no banco (PGRST202, 42883) vale como fila vazia. */
+/**
+ * retorno_pegar, parceiro_pegar ou orcamento_pegar. A do parceiro ou a do orçamento ausente no banco (PGRST202, 42883) vale
+ * como fila vazia; a do retorno ausente é erro.
+ */
 async function pegar(db: Db, agora: Date, rpc: string = RPC_PEGAR): Promise<Pegou> {
   try {
     const { data, error } = await db.rpc(rpc, { p_agora: agora.toISOString() });
     if (error) {
       const codigo = codigoDoErro(error);
-      if (rpc === RPC_PEGAR_PARCEIRO && FUNCAO_AUSENTE.has(codigo)) return { dado: null };
+      if (rpc !== RPC_PEGAR && FUNCAO_AUSENTE.has(codigo)) return { dado: null };
       return { erro: codigo };
     }
     return { dado: data ?? null };
@@ -371,18 +414,15 @@ async function registrar(db: Db, saida: string, estado: string, detalhe: Record<
 // ─── O item ──────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * O problema do item que impede o envio (e o registro honesto na sombra), ou null. F4: o item de parceiro_pegar tem
- * origem do parceiro e chave "parceiro:…"; o de retorno_pegar, origem da F1–F3 e chave "retorno:…".
+ * O problema do item que impede o envio (e o registro honesto na sombra), ou null. Cada emissor tem as origens dele
+ * (EMISSOR_DA_ORIGEM) e o prefixo da chave dele (PREFIXO_DA_CHAVE): F1–F3 "retorno:…", F4 "parceiro:…", F5 "orcamento:…".
  */
-function problemaDoItem(item: Record<string, unknown>, deParceiro: boolean): string | null {
+function problemaDoItem(item: Record<string, unknown>, emissor: Emissor): string | null {
   if (item.modo !== "sombra" && item.modo !== "ligado") return "modo_desconhecido";
-  if (
-    typeof item.origem !== "string" || !ORIGENS_DO_RETORNO.has(item.origem) ||
-    ORIGENS_DO_PARCEIRO.has(item.origem) !== deParceiro
-  ) return "origem_invalida";
+  if (typeof item.origem !== "string" || EMISSOR_DA_ORIGEM[item.origem] !== emissor) return "origem_invalida";
   if (typeof item.phone !== "string" || !TELEFONE.test(item.phone)) return "telefone_invalido";
   const chave = item.dedupe_key;
-  const prefixo = deParceiro ? "parceiro:" : "retorno:";
+  const prefixo = PREFIXO_DA_CHAVE[emissor];
   if (typeof chave !== "string" || !chave.startsWith(prefixo) || chave.length <= prefixo.length || chave.length > 200) {
     return "chave_invalida";
   }
@@ -427,33 +467,32 @@ export async function rodada(db: Db, deps: DependenciasDaRodada): Promise<Resumo
   const resumo: ResumoDaRodada = { itens: 0, sombra: 0, enviadas: 0, incertas: 0, recusadas: 0, reagendadas: 0 };
   // saída → a chave com que foi tentada e se o desfecho foi reagendar (a única volta permitida)
   const tentadas = new Map<string, { chave: unknown; reagendada: boolean }>();
-  // F4: esgotado o retorno nesta rodada, só o parceiro (o retorno vem sempre antes).
-  let retornoEsgotado = false;
+  // F5 (P5.2): o índice do emissor da vez em ORDEM_DOS_EMISSORES. Esgotado um emissor nesta rodada, nunca se volta a ele.
+  let fila = 0;
   try {
     const inicio = deps.agora().getTime();
     while (resumo.itens < deps.maxItens && deps.agora().getTime() - inicio < deps.limiteMs) {
-      // 1. Pegar: o retorno antes; nulo, o parceiro (F4, no mesmo orçamento de tempo).
-      let deParceiro = retornoEsgotado;
+      // 1. Pegar: o retorno antes; nulo, o parceiro (F4); nulo, o orçamento (F5). Tudo no mesmo orçamento de tempo.
+      let emissor: Emissor = ORDEM_DOS_EMISSORES[0];
       let dado: unknown = null;
-      if (!retornoEsgotado) {
-        const doRetorno = await pegar(db, deps.agora());
-        if ("erro" in doRetorno) {
-          resumo.erro = doRetorno.erro;
+      let erroAoPegar: string | null = null;
+      while (fila < ORDEM_DOS_EMISSORES.length) {
+        emissor = ORDEM_DOS_EMISSORES[fila];
+        const pegou = await pegar(db, deps.agora(), RPC_DO_EMISSOR[emissor]);
+        if ("erro" in pegou) {
+          erroAoPegar = pegou.erro;
           break;
         }
-        dado = doRetorno.dado;
+        dado = pegou.dado;
+        if (dado !== null) break;
+        fila++;
       }
-      if (dado === null) {
-        retornoEsgotado = true;
-        deParceiro = true;
-        const doParceiro = await pegar(db, deps.agora(), RPC_PEGAR_PARCEIRO);
-        if ("erro" in doParceiro) {
-          resumo.erro = doParceiro.erro;
-          break;
-        }
-        dado = doParceiro.dado;
-        if (dado === null) break;
+      if (erroAoPegar !== null) {
+        resumo.erro = erroAoPegar;
+        break;
       }
+      if (dado === null) break;
+      const deParceiro = emissor === "parceiro";
       resumo.itens++;
 
       const item = dado;
@@ -472,7 +511,7 @@ export async function rodada(db: Db, deps: DependenciasDaRodada): Promise<Resumo
       }
 
       // 2. Validar (também na sombra).
-      let problema = antes && antes.chave !== item.dedupe_key ? "chave_trocada" : problemaDoItem(item, deParceiro);
+      let problema = antes && antes.chave !== item.dedupe_key ? "chave_trocada" : problemaDoItem(item, emissor);
       let texto: unknown = item.texto;
       let ctx: unknown = item.validador;
       // F4: o validador é escolhido pela origem (de parceiro_pegar, só o aviso ao cliente final, retorno_aviso, vai ao

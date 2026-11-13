@@ -24,11 +24,13 @@ import {
 import {
   type Db,
   type DependenciasDaRodada,
+  EMISSOR_DA_ORIGEM,
   type Envio,
   type EnvioAoDono,
   envioPeloWhatsappSend,
   estadoDoEnvio,
   type EstadoDoEnvio,
+  PREFIXO_DA_CHAVE,
   type RespostaDoBanco,
   type RespostaDoEnvio,
   rodada,
@@ -39,6 +41,7 @@ import {
   RPC_DECISAO,
   RPC_LOG,
   RPC_PEGAR,
+  RPC_PEGAR_ORCAMENTO,
   RPC_PEGAR_PARCEIRO,
   RPC_SEM_LINHAS,
   type ResumoDaRodada,
@@ -720,12 +723,11 @@ Deno.test("rodadaDoCartao: envio que falha registra p_ok falso; exceção e erro
   assertEquals(await rodadaDoCartao(erro.db, { agora: RELOGIO, enviarAoDono: () => Promise.resolve({ status: 200, body: null }) }), { acao: null, erro: "PGRST202" });
 });
 
+// F5 (P5.2): a lista de origens da rodada passou a ser as chaves de EMISSOR_DA_ORIGEM (uma fonte só para a origem e o
+// emissor); a comparação com a do whatsapp-send continua a mesma.
 Deno.test("as duas listas de origens do retorno são iguais", async () => {
   const { ORIGENS_DO_RETORNO } = await import("../_shared/whatsapp/registro-do-envio.ts");
-  const fonte = await Deno.readTextFile(new URL("./rodada.ts", import.meta.url));
-  const lista = /const ORIGENS_DO_RETORNO: ReadonlySet<string> = new Set\(\[([^\]]*)\]\)/.exec(fonte);
-  assert(lista, "a lista sumiu de rodada.ts");
-  assertEquals([...lista[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]), [...ORIGENS_DO_RETORNO]);
+  assertEquals(Object.keys(EMISSOR_DA_ORIGEM), [...ORIGENS_DO_RETORNO]);
 });
 
 // ─── F4 (P5.2): as saídas do parceiro ─────────────────────────────────────────────────────────────────────────────────
@@ -864,7 +866,8 @@ Deno.test("parceiro: retorno_pegar vem antes, e parceiro_pegar só quando ele de
     const r = await rodada(banco, deps(enviar));
     assertEquals(r, resumo({ itens: 1, sombra: 1 }));
     assertEquals(envios.length, 0);
-    assertEquals(banco.chamadas.map((c) => c.fn), [RPC_PEGAR, RPC_PEGAR_PARCEIRO, RPC_DECISAO, RPC_PEGAR_PARCEIRO]);
+    // F5 (P5.2): esgotado o parceiro, a rodada pergunta ao orçamento (aqui ausente no falso: silêncio).
+    assertEquals(banco.chamadas.map((c) => c.fn), [RPC_PEGAR, RPC_PEGAR_PARCEIRO, RPC_DECISAO, RPC_PEGAR_PARCEIRO, RPC_PEGAR_ORCAMENTO]);
     assertEquals(banco.de(RPC_PEGAR_PARCEIRO)[0], { p_agora: "2026-11-17T13:00:00.000Z" });
     assertEquals(banco.decisoes(), [{ p_saida: SAIDA_P(1), p_estado: "sombra", p_detalhe: { validador: { ok: true } } }]);
   }
@@ -883,6 +886,7 @@ Deno.test("parceiro: retorno_pegar vem antes, e parceiro_pegar só quando ele de
       RPC_PEGAR_PARCEIRO,
       RPC_DECISAO,
       RPC_PEGAR_PARCEIRO,
+      RPC_PEGAR_ORCAMENTO,   // F5 (P5.2): o último da fila
     ]);
     assertEquals(banco.decisoes().map((d) => d.p_saida), [SAIDA(1), SAIDA_P(2), SAIDA_P(3)]);
   }
@@ -1125,4 +1129,210 @@ Deno.test("parceiro: parceiro_pegar ausente (PGRST202, 42883) é silêncio; outr
   const { enviar } = envioFalso(NAO_ENVIA);
   assertEquals(await rodada(banco, deps(enviar)), resumo({ erro: "57014" }));
   assertEquals(banco.chamadas.map((c) => c.fn), [RPC_PEGAR, RPC_PEGAR_PARCEIRO]);
+});
+
+// ─── F5 (P5.2): as saídas do orçamento ────────────────────────────────────────────────────────────────────────────────
+//
+// orcamento_pegar (C-PEGAR-O) é o último da fila: só é chamado quando retorno_pegar e parceiro_pegar devolvem nulo, na mesma
+// rodada, e nenhum emissor esgotado é chamado de novo. Cada emissor tem o prefixo da chave (PREFIXO_DA_CHAVE) e as origens
+// dele (EMISSOR_DA_ORIGEM): a chave de um emissor no item de outro é chave_invalida, e a origem de outro emissor é
+// origem_invalida. O item do orçamento passa em validarSaida (audiência "cliente"). Nomes, telefones e números inventados.
+
+const SAIDA_O = (n: number) => `33333333-3333-4333-8333-${String(n).padStart(12, "0")}`;
+const ACOMP_O = "44444444-4444-4444-8444-000000000001";
+const LEMBRETE_O =
+  "Oi, Lenine! Conseguiu ver o orçamento que o Gustavo te mandou? Se tiver alguma dúvida ou quiser ajustar algo, é só responder por aqui que eu passo a ele.";
+// O contexto que orcamento_pegar monta (_orcamento_contexto_do_validador): o texto cortado no nome.
+const CTX_O: ContextoDoValidador = {
+  audiencia: "cliente",
+  datas_permitidas: [],
+  horas_permitidas: [],
+  nome_permitido: "Lenine",
+  nomes_de_outros: [],
+  os_permitidas: [],
+  textos_do_cliente: [],
+  trechos_do_modelo: LEMBRETE_O.split("Lenine").filter((s) => s !== ""),
+  marcas: { tem_proposta: false, tem_topo: false, cliente_ouviu: false, conferida: false },
+};
+
+/** Um item como o orcamento_pegar devolve (C-PEGAR-O); `extra` troca campos. */
+function itemOrcamento(n: number, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    saida_id: SAIDA_O(n),
+    tentativa: 1,
+    dedupe_key: `orcamento:${ACOMP_O}:lembrete:${n}`,
+    tipo: "orc_lembrete",
+    variante: "sem_servico",
+    origem: "retorno_orcamento",
+    classe: "comercial",
+    modo: "sombra",
+    phone: FONE(70 + n),
+    texto: LEMBRETE_O,
+    validador: structuredClone(CTX_O),
+    ...extra,
+  };
+}
+
+/** O banco falso com as três RPCs de pegar (o resto, como o BancoDoParceiro). */
+class BancoDoOrcamento extends BancoDoParceiro {
+  private pegadasOrcamento = 0;
+  constructor(pegarRetorno: Pegar, pegarParceiro: Pegar, private pegarOrcamento: Pegar, aoRegistrar: AoRegistrar = REGISTRA_OK) {
+    super(pegarRetorno, pegarParceiro, SEM_LINHAS_NAO_ESPERADO, aoRegistrar);
+  }
+  override rpc(fn: string, args: Record<string, unknown>): Promise<RespostaDoBanco> {
+    if (fn === RPC_PEGAR_ORCAMENTO) {
+      this.chamadas.push({ fn, args: structuredClone(args) });
+      return Promise.resolve(this.pegarOrcamento(this.pegadasOrcamento++));
+    }
+    return super.rpc(fn, args);
+  }
+}
+
+Deno.test("orçamento: premissa: o lembrete de exemplo passa no validador do cliente; os prefixos e as origens de cada emissor", () => {
+  assertEquals(validarSaida(LEMBRETE_O, CTX_O), { ok: true });
+  assertEquals(RPC_PEGAR_ORCAMENTO, "orcamento_pegar");
+  assertEquals(PREFIXO_DA_CHAVE, { retorno: "retorno:", parceiro: "parceiro:", orcamento: "orcamento:" });
+  assertEquals(EMISSOR_DA_ORIGEM, {
+    retorno_recibo: "retorno",
+    retorno_coleta: "retorno",
+    retorno_adiamento: "retorno",
+    retorno_modelo: "retorno",
+    retorno_parceiro: "parceiro",
+    retorno_aviso: "parceiro",
+    retorno_orcamento: "orcamento",
+  });
+});
+
+Deno.test("orçamento: a ordem é retorno, parceiro, orçamento; o emissor esgotado não é chamado de novo na mesma rodada", async () => {
+  const banco = new BancoDoOrcamento(daFila([item(1)]), daFila([reciboParceiro(2)]), daFila([itemOrcamento(3), itemOrcamento(4)]));
+  const { envios, enviar } = envioFalso(NAO_ENVIA);
+  const r = await rodada(banco, deps(enviar));
+  assertEquals(r, resumo({ itens: 4, sombra: 4 }));
+  assertEquals(envios.length, 0);
+  assertEquals(banco.chamadas.map((c) => c.fn), [
+    RPC_PEGAR,
+    RPC_DECISAO,
+    RPC_PEGAR,
+    RPC_PEGAR_PARCEIRO,
+    RPC_DECISAO,
+    RPC_PEGAR_PARCEIRO,
+    RPC_PEGAR_ORCAMENTO,
+    RPC_DECISAO,
+    RPC_PEGAR_ORCAMENTO,
+    RPC_DECISAO,
+    RPC_PEGAR_ORCAMENTO,
+  ]);
+  assertEquals(banco.de(RPC_PEGAR_ORCAMENTO)[0], { p_agora: "2026-11-17T13:00:00.000Z" });
+  assertEquals(banco.decisoes().map((d) => d.p_saida), [SAIDA(1), SAIDA_P(2), SAIDA_O(3), SAIDA_O(4)]);
+  assertEquals(banco.decisoes()[2], { p_saida: SAIDA_O(3), p_estado: "sombra", p_detalhe: { validador: { ok: true } } });
+  // Só o orçamento com item: o retorno e o parceiro, nulos, são perguntados uma vez cada.
+  const so = new BancoDoOrcamento(daFila([]), daFila([]), daFila([itemOrcamento(1)]));
+  const s = envioFalso(NAO_ENVIA);
+  assertEquals(await rodada(so, deps(s.enviar)), resumo({ itens: 1, sombra: 1 }));
+  assertEquals(so.chamadas.map((c) => c.fn), [RPC_PEGAR, RPC_PEGAR_PARCEIRO, RPC_PEGAR_ORCAMENTO, RPC_DECISAO, RPC_PEGAR_ORCAMENTO]);
+});
+
+Deno.test("orçamento: ligado, o envio leva a origem retorno_orcamento, o contexto retorno:<saída> e a chave orcamento:… do banco", async () => {
+  const banco = new BancoDoOrcamento(daFila([]), daFila([]), daFila([itemOrcamento(1, LIGADO)]));
+  const { envios, enviar } = envioFalso(() => TABELA[0][1]);
+  const r = await rodada(banco, deps(enviar));
+  assertEquals(r, resumo({ itens: 1, enviadas: 1 }));
+  assertEquals(envios, [{
+    phone: FONE(71),
+    message: LEMBRETE_O,
+    origem: "retorno_orcamento",
+    context: "retorno:" + SAIDA_O(1),
+    dedupe_key: `orcamento:${ACOMP_O}:lembrete:1`,
+  }]);
+  assertEquals(banco.decisoes()[0].p_estado, "enviada");
+  // A chave em sombra (:sombra) e a do "Fechado" (orcamento:aceite:…) também são do orçamento.
+  for (const dedupe_key of [`orcamento:${ACOMP_O}:lembrete:1:sombra`, `orcamento:aceite:${SAIDA_O(9)}:fechado`]) {
+    const b = new BancoDoOrcamento(daFila([]), daFila([]), daFila([itemOrcamento(1, { dedupe_key })]));
+    const e = envioFalso(NAO_ENVIA);
+    assertEquals(await rodada(b, deps(e.enviar)), resumo({ itens: 1, sombra: 1 }), dedupe_key);
+  }
+});
+
+Deno.test("orçamento: validador reprovado (dinheiro, ou contexto de audiência do parceiro) = recusada/validador, e nada sai", async () => {
+  const comDinheiro = LEMBRETE_O + " Custa R$ 100.";
+  const esperado = validarSaida(comDinheiro, CTX_O);
+  assert(!esperado.ok && esperado.regras.includes("dinheiro"));
+  for (const modo of ["sombra", "ligado"]) {
+    const banco = new BancoDoOrcamento(daFila([]), daFila([]), daFila([itemOrcamento(1, { modo, texto: comDinheiro })]));
+    const { envios, enviar } = envioFalso(NAO_ENVIA);
+    const r = await rodada(banco, deps(enviar));
+    assertEquals(r, resumo({ itens: 1, recusadas: 1 }), modo);
+    assertEquals(envios.length, 0, modo);
+    assertEquals(banco.decisoes(), [{
+      p_saida: SAIDA_O(1),
+      p_estado: "recusada",
+      p_detalhe: { motivo: "validador", regras: esperado.ok ? [] : esperado.regras },
+    }], modo);
+  }
+  // O item do orçamento vai ao validador do cliente: o contexto do parceiro reprova pela audiência.
+  const banco = new BancoDoOrcamento(daFila([]), daFila([]), daFila([itemOrcamento(1, { ...LIGADO, validador: structuredClone(CTX_RECIBO_P) })]));
+  const { envios, enviar } = envioFalso(NAO_ENVIA);
+  await rodada(banco, deps(enviar));
+  assertEquals(envios.length, 0);
+  const d = banco.decisoes()[0];
+  assertEquals(d.p_estado, "recusada");
+  assert((d.p_detalhe as { regras: string[] }).regras.includes("audiencia"), JSON.stringify(d.p_detalhe));
+});
+
+Deno.test("chave de um emissor no item de outro = chave_invalida; origem de outro emissor = origem_invalida (os três emissores)", async () => {
+  const chaveDoOrcamento = { dedupe_key: `orcamento:${ACOMP_O}:lembrete:1` };
+  const chaveDoRetorno = { dedupe_key: `retorno:${CASO(1)}:recibo` };
+  const chaveDoParceiro = { dedupe_key: `parceiro:recibo:${CASO(1)}` };
+  const casos: Array<[string, Record<string, unknown>, Record<string, unknown>, string]> = [
+    // [emissor que devolveu, item de base, troca, código]
+    ["retorno", item(1), chaveDoOrcamento, "chave_invalida"],
+    ["retorno", item(1), chaveDoParceiro, "chave_invalida"],
+    ["retorno", item(1), { origem: "retorno_orcamento" }, "origem_invalida"],
+    ["parceiro", reciboParceiro(1), chaveDoOrcamento, "chave_invalida"],
+    ["parceiro", reciboParceiro(1), chaveDoRetorno, "chave_invalida"],
+    ["parceiro", reciboParceiro(1), { origem: "retorno_orcamento" }, "origem_invalida"],
+    ["orcamento", itemOrcamento(1), chaveDoRetorno, "chave_invalida"],
+    ["orcamento", itemOrcamento(1), chaveDoParceiro, "chave_invalida"],
+    ["orcamento", itemOrcamento(1), { dedupe_key: "orcamento:" }, "chave_invalida"],
+    ["orcamento", itemOrcamento(1), { dedupe_key: "orcamento:" + "x".repeat(200) }, "chave_invalida"],
+    ["orcamento", itemOrcamento(1), { origem: "retorno_recibo" }, "origem_invalida"],
+    ["orcamento", itemOrcamento(1), { origem: "retorno_parceiro" }, "origem_invalida"],
+    ["orcamento", itemOrcamento(1), { origem: "assistente" }, "origem_invalida"],
+  ];
+  for (const [emissor, base, troca, codigo] of casos) {
+    const it = [{ ...base, ...LIGADO, ...troca }];
+    const banco = new BancoDoOrcamento(
+      daFila(emissor === "retorno" ? it : []),
+      daFila(emissor === "parceiro" ? it : []),
+      daFila(emissor === "orcamento" ? it : []),
+    );
+    const { envios, enviar } = envioFalso(NAO_ENVIA);
+    await rodada(banco, deps(enviar));
+    const rotulo = `${emissor} ${JSON.stringify(troca).slice(0, 60)}`;
+    assertEquals(envios.length, 0, rotulo);
+    assertEquals(banco.decisoes(), [{
+      p_saida: base.saida_id,
+      p_estado: "recusada",
+      p_detalhe: { motivo: "validador", regras: ["contexto"], codigo },
+    }], rotulo);
+  }
+});
+
+Deno.test("orçamento: orcamento_pegar ausente (PGRST202, 42883) é silêncio; outro erro para a rodada", async () => {
+  for (const code of ["PGRST202", "42883"]) {
+    const banco = new BancoDoOrcamento(daFila([item(1)]), daFila([]), () => ({ data: null, error: { code } }));
+    const { enviar } = envioFalso(NAO_ENVIA);
+    const r = await rodada(banco, deps(enviar));
+    assertEquals(r, resumo({ itens: 1, sombra: 1 }), code);
+    assertEquals(r.erro, undefined, code);
+  }
+  const banco = new BancoDoOrcamento(daFila([]), daFila([]), () => ({ data: null, error: { code: "57014" } }));
+  const { enviar } = envioFalso(NAO_ENVIA);
+  assertEquals(await rodada(banco, deps(enviar)), resumo({ erro: "57014" }));
+  assertEquals(banco.chamadas.map((c) => c.fn), [RPC_PEGAR, RPC_PEGAR_PARCEIRO, RPC_PEGAR_ORCAMENTO]);
+  // O retorno_pegar ausente continua erro (ele é a base da rodada).
+  const semRetorno = new BancoDoOrcamento(() => ({ data: null, error: { code: "PGRST202" } }), daFila([]), daFila([itemOrcamento(1)]));
+  const s = envioFalso(NAO_ENVIA);
+  assertEquals(await rodada(semRetorno, deps(s.enviar)), resumo({ erro: "PGRST202" }));
+  assertEquals(semRetorno.chamadas.map((c) => c.fn), [RPC_PEGAR]);
 });
