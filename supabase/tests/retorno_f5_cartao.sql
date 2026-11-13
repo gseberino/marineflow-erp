@@ -1586,6 +1586,15 @@ begin
     end;
   end loop;
 
+  -- ── 21b. A razão do que não saiu também para os cancelamentos por abertura_id da F1 e da F2 (revisão das ondas 4 a 9,
+  --         achado banco-4): o "Fechado" agendado que a resposta do dono, o caso fechado ou o caso que vira 'nada' cancelam não
+  --         diz mais "deu erro ao mandar" ──
+  perform pg_temp.f5c_igual('21b respondida_pelo_dono', public._orcamento_razao_nao_saiu('respondida_pelo_dono'), 'você já escreveu ao cliente');
+  perform pg_temp.f5c_igual('21b caso_fechado', public._orcamento_razao_nao_saiu('caso_fechado'), 'a conversa com o cliente foi encerrada');
+  perform pg_temp.f5c_igual('21b nivel_nada', public._orcamento_razao_nao_saiu('nivel_nada'), 'a conversa com o cliente foi encerrada');
+  perform pg_temp.f5c_igual('21b visita_a_combinar', public._orcamento_razao_nao_saiu('visita_a_combinar'), 'a visita ao cliente está para combinar');
+  perform pg_temp.f5c_igual('21b o resto', public._orcamento_razao_nao_saiu('motivo_que_nao_existe'), 'deu erro ao mandar');
+
   -- ── 20. As funções: as novas SECURITY DEFINER com search_path e fechadas a anon e authenticated; as geradas com os grants de
   --        antes; a C-LISTA com as colunas do contrato ──
   foreach v in array c_novas loop

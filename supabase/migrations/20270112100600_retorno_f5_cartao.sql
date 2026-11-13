@@ -91,12 +91,18 @@ as $$
             when 'texto' then 'o texto não se montou'
             when 'validador' then 'o texto não passou na conferência'
             when 'provedor' then 'o WhatsApp recusou'
+            -- (revisão das ondas 4 a 9, achado banco-4) os cancelamentos por abertura_id da F1 e da F2 (retorno_vigia,
+            -- _retorno_cartao_encerrar, o caso que vira 'nada'), que também alcançam a saída agendada do orçamento
+            when 'respondida_pelo_dono' then 'você já escreveu ao cliente'
+            when 'caso_fechado' then 'a conversa com o cliente foi encerrada'
+            when 'nivel_nada' then 'a conversa com o cliente foi encerrada'
+            when 'visita_a_combinar' then 'a visita ao cliente está para combinar'
             else 'deu erro ao mandar'
           end);
 $$;
 
 comment on function public._orcamento_razao_nao_saiu(text) is
-  'Retorno F5 (P7.1): o motivo de resultado.saida_nao_saiu (o "Fechado" ou o pedido de dados que não saiu) como o dono lê no cartão, sem nome nem número. A incerta tem frase própria no item ("pode não ter saído").';
+  'Retorno F5 (P7.1): o motivo de resultado.saida_nao_saiu (o "Fechado" ou o pedido de dados que não saiu) como o dono lê no cartão, sem nome nem número; inclui os cancelamentos por abertura_id da F1 e da F2 (respondida_pelo_dono, caso_fechado, nivel_nada, visita_a_combinar). A incerta tem frase própria no item ("pode não ter saído").';
 
 revoke all on function public._orcamento_razao_nao_saiu(text) from public, anon, authenticated;
 
