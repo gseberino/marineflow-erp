@@ -431,6 +431,18 @@ export interface DadosDaTarde {
    * ausente = fixa.
    */
   retorno?: { esperando: string | null; resumo: string | null; fixa?: boolean; mandei?: string | null; extras?: string[] } | null;
+  /**
+   * (Retorno F5, P10.2) A linha fixa do orçamento ("Orçamentos: amanhã sai sozinho o lembrete do ORÇ-00151 (Ana) · *segura
+   * 151*"), nos três turnos, logo depois do "Mandei sozinho". Não está nas extras e escapa dos três cortes (o 1º ramo de
+   * textoDaTarde, semOsExtras e o corte duro): o passo só sai sozinho se o dono leu o aviso. Conta como "há algo" no
+   * fechamento. Ausente, nulo ou vazio = a tarde de antes, byte a byte.
+   */
+  orcamento?: { fixas: string[] } | null;
+}
+
+/** (Retorno F5, P10.2) As linhas fixas do orçamento; nenhuma = []. */
+function fixasDoOrcamento(d: DadosDaTarde): string[] {
+  return d.orcamento?.fixas ?? [];
 }
 
 /** A linha do escritório da tarde: a do lote (no dia dele) ou a de sempre; o guardado do escritório vai à parte. */
@@ -562,9 +574,12 @@ function textoDoFechamento(d: DadosDaTarde, curto: boolean, semanaMax: number, l
   const esperando = d.retorno?.esperando ?? null;
   // (F2, P12) "Mandei sozinho hoje": a prestação de contas, junto de quem espera. Nunca sai e conta como "há algo"
   const mandei = d.retorno?.mandei ?? null;
+  // (Retorno F5, P10.2) a linha fixa do orçamento conta como "há algo": sem isso, uma tarde só com o aviso não sairia, e o
+  // passo iria ao cartão
+  const fixas = fixasDoOrcamento(d);
   const temAlgo = !!mandei || d.ficaram.length > 0 || (d.amanha?.itens.length ?? 0) > 0 || (d.amanha?.pagar?.n ?? 0) > 0 ||
     d.fornecedores.length > 0 || d.pergunta || topo.length > 0 || semanaToda.length > 0 || linhasContam(d, linhasTodas) ||
-    !!esperando;
+    !!esperando || fixas.length > 0;
   if (!temAlgo) return comAAgenda({ texto: null, letras: [] }, d, 0);
   const proxima = proximaRevisaoDaSemana(d.hoje);
   const abertura = d.ficaram.length
@@ -586,7 +601,7 @@ function textoDoFechamento(d: DadosDaTarde, curto: boolean, semanaMax: number, l
     d.pergunta ? PERGUNTA_DA_SEMANA : null,
   ].filter((l): l is string => !!l);
   return comAAgenda(
-    { texto: [abertura, ...(esperando ? [esperando] : []), ...(mandei ? [mandei] : []), ...topo, ...(itens.length ? ["", ...itens] : []), "", ...fim].join("\n"), letras: d.ficaram },
+    { texto: [abertura, ...(esperando ? [esperando] : []), ...(mandei ? [mandei] : []), ...fixas, ...topo, ...(itens.length ? ["", ...itens] : []), "", ...fim].join("\n"), letras: d.ficaram },
     d,
     semana.length,
     linhas,
@@ -626,7 +641,8 @@ function textoDaRevisaoDaSemana(d: DadosDaTarde, curto: boolean, linhasMax = Inf
   // cumpre o "hoje até as 19h" (o resumo do retorno é só do fechamento)
   const esperando = d.retorno?.esperando ?? null;
   const mandei = d.retorno?.mandei ?? null;
-  const blocos = [abertura, ...(esperando ? [esperando] : []), ...(mandei ? [mandei] : []), ...topoDaTarde(d, curto), ...(itens.length ? ["", ...itens, ...comoResponder] : []), ...(panorama.length ? ["", ...panorama] : [])];
+  // (Retorno F5, P10.2) a linha fixa do orçamento logo depois do "Mandei sozinho" (a véspera de um passo pode cair numa segunda)
+  const blocos = [abertura, ...(esperando ? [esperando] : []), ...(mandei ? [mandei] : []), ...fixasDoOrcamento(d), ...topoDaTarde(d, curto), ...(itens.length ? ["", ...itens, ...comoResponder] : []), ...(panorama.length ? ["", ...panorama] : [])];
   // (Passo 5) a linha do lote, no último dia útil da semana que caiu numa revisão
   const lote = d.lote ? linhaDoLote(d.lote) : null;
   if (lote) blocos.push("", lote);
@@ -647,7 +663,8 @@ function textoDaRevisaoDoMes(d: DadosDaTarde, curto: boolean, linhasMax = Infini
   // que cumpre o "hoje até as 19h" (o resumo do retorno é só do fechamento)
   const esperando = d.retorno?.esperando ?? null;
   const mandei = d.retorno?.mandei ?? null;
-  const blocos = [abertura, ...(esperando ? [esperando] : []), ...(mandei ? [mandei] : []), ...linhasDoMes.slice(1), ...topoDaTarde(d, curto)];
+  // (Retorno F5, P10.2) a linha fixa do orçamento logo depois do "Mandei sozinho" (a véspera pode cair no 1º dia útil do mês)
+  const blocos = [abertura, ...(esperando ? [esperando] : []), ...(mandei ? [mandei] : []), ...fixasDoOrcamento(d), ...linhasDoMes.slice(1), ...topoDaTarde(d, curto)];
   if (a && a.n > 0) {
     blocos.push("", `${a.n === 1 ? "1 cobrança vencida" : `${a.n} cobranças vencidas`} há 30 dias ou mais, ${brl(a.total)}. Cobrar, negociar ou dar baixa?`);
     blocos.push(...a.linhas.map((l) => linhaDaRevisao(l, curto ? 85 : 140)));
@@ -771,6 +788,8 @@ export function textoDaTarde(d: DadosDaTarde, semExtras: (d: DadosDaTarde) => Da
   // (P14, correção) com a linha que sustenta promessa, nunca o corte duro (ele comia o fim do texto e as linhas com letra,
   // que continuavam gravadas em letras): o enxuto, também sem linha da agenda; e, se nem assim couber, ele inteiro, acima do
   // limite (como a manhã acima da meta). O teto da linha (retorno.ts) deixa o texto abaixo dos 4.000 do banco
-  if (d.retorno?.esperando) return montar(true, 0, 0, true);
+  // (Retorno F5, P10.2) com a linha fixa do orçamento também: a tarde sai inteira, acima do limite (ela tem até 3 orçamentos
+  // e cerca de 120 caracteres; cortada, o passo iria ao cartão sem o dono ter lido o aviso)
+  if (d.retorno?.esperando || fixasDoOrcamento(d).length > 0) return montar(true, 0, 0, true);
   return { ...curto, texto: `${curto.texto.slice(0, LIMITE_DA_TARDE - 1).trimEnd()}…` };
 }

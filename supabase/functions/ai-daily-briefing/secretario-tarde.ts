@@ -66,6 +66,7 @@ import { CHAVE_DA_PAPELADA, lerFormatoDaPapelada, linhaDoLote } from "../_shared
 import { contarRegrasGuardadas, montarLoteDaSemana, registrarLote } from "./secretario-papelada.ts";
 import { type ExtraDoFechamento, lerExtra, lerRetorno, linhasDoFechamento, type RetornoDoFechamento } from "./retorno.ts";
 import { lerParceiro } from "./parceiro.ts";
+import { type AvisoDoOrcamento, avisarOrcamentoNaTarde, lerOrcamento, type OrcamentoDoFechamento } from "./orcamento.ts";
 
 // deno-lint-ignore no-explicit-any
 type Admin = any;
@@ -119,6 +120,11 @@ export interface LidoDaTarde {
   retornoExtra?: ExtraDoFechamento | null;
   /** (F4, P11.2) parceiro_resumo_fechamento: as linhas do parceiro, extras do fechamento; ausente, null ou [] = o texto de antes */
   parceiro?: string[] | null;
+  /**
+   * (F5, P10.2) orcamento_resumo_fechamento: a linha fixa (nos três turnos), as linhas (extras, só no fechamento) e os passos da
+   * linha fixa; ausente, null ou vazio = o texto de antes
+   */
+  orcamento?: OrcamentoDoFechamento | null;
 }
 
 export interface TardeMontada {
@@ -136,6 +142,11 @@ export interface TardeMontada {
    * ENVIADA a tarde, vão para agenda_fechamento_registrar (a pergunta conta uma vez mostrada; a ação fica contada).
    */
   agendaMostrou?: LinhaDaAgenda[];
+  /**
+   * (F5, P10.2) A linha fixa do orçamento que foi no texto e os passos dela: depois de gravada e ENVIADA a tarde, vão a
+   * orcamento_avisados (só se o texto tem cada linha fixa, e com o id da linha da fila). Ausente = nenhuma linha fixa.
+   */
+  orcamento?: { fixas: string[]; avisar: string[] };
 }
 
 /** (16/10/2026) O que a tarde-sombra recebe do portão: o guardado, os acordes de hoje e as regras do dono. */
@@ -204,9 +215,17 @@ export function montarTardeDosDados(p: {
   // (F4, P11.2) as linhas do parceiro, só no fechamento, depois dos extras do retorno (fixa = false: as primeiras a sair).
   // O fechamento pede, não abre: quem abre o cartão é o dono, com *parceiro*. Sem linhas, o texto de antes, byte a byte.
   const doParceiro = turno === "fechamento" ? (lido.parceiro ?? []) : [];
-  const retorno = doParceiro.length
-    ? { ...(doDia ?? { esperando: null, resumo: null, fixa: false }), extras: [...(doDia?.extras ?? []), ...doParceiro] }
+  // (F5, P10.2) as linhas do orçamento, só no fechamento, depois das do parceiro (fixa = false: as primeiras a sair). O
+  // ternário olha as duas: sem isso, as do orçamento sumiriam justo no caso comum (sem linha do parceiro) e com doDia nulo.
+  const doOrcamentoLinhas = turno === "fechamento" ? (lido.orcamento?.linhas ?? []) : [];
+  const extrasNovas = [...doParceiro, ...doOrcamentoLinhas];
+  const retorno = extrasNovas.length
+    ? { ...(doDia ?? { esperando: null, resumo: null, fixa: false }), extras: [...(doDia?.extras ?? []), ...extrasNovas] }
     : doDia;
+  // (F5, P10.2) a linha fixa do orçamento, nos três turnos (a véspera de um passo pode cair numa revisão), com os passos dela
+  const fixas = lido.orcamento?.fixas ?? [];
+  const avisar = lido.orcamento?.avisar ?? [];
+  const orcamento = fixas.length && avisar.length ? { fixas, avisar } : null;
   const dadosDoTexto = {
     hoje, turno, ficaram, amanha: lido.amanha, fornecedores, escritorio: lido.escritorio,
     parados, panorama: lido.panorama, antigas,
@@ -214,7 +233,8 @@ export function montarTardeDosDados(p: {
     pergunta: p.pergunta,
     guardado: planoDaTarde, semResposta, semRespostaMax: portao.regras.sem_resposta_hoje_max,
     ...(p.lote ? { lote: p.lote } : {}),
-    ...(retorno && (retorno.esperando || retorno.resumo || retorno.mandei || doParceiro.length > 0) ? { retorno } : {}),
+    ...(retorno && (retorno.esperando || retorno.resumo || retorno.mandei || extrasNovas.length > 0) ? { retorno } : {}),
+    ...(orcamento ? { orcamento: { fixas: orcamento.fixas } } : {}),
   };
   const t = textoDaTarde(dadosDoTexto);
   const e = lido.escritorio;
@@ -269,6 +289,7 @@ export function montarTardeDosDados(p: {
     texto: t.texto,
     letras: t.letras,
     ...(linhasMostradas.length ? { agendaMostrou: linhasMostradas } : {}),
+    ...(orcamento && t.texto ? { orcamento } : {}),
     detalhe: {
       ficaram: ficaram.length,
       // todos os parados (o texto mostra até 5)
@@ -302,6 +323,12 @@ export async function lerTudoDaTarde(admin: Admin, p: {
   cfg: Record<string, string>;
   /** (16/10/2026) as regras do dono (F3, F5); ausente = os padrões */
   regras?: RegrasDaVozUnica;
+  /**
+   * (Retorno F5, P10.2) lê o orçamento (orcamento_resumo_fechamento) nos três turnos. Só na tarde que vai ao dono: a função
+   * grava, ao montar, a marca do "Fechado" que não saiu (o aviso aparece uma vez e sai do cartão), e na sombra, na tarde
+   * rebaixada ou no dry-run ninguém o leria. Ausente = não lê.
+   */
+  orcamento?: boolean;
 }): Promise<LidoDaTarde> {
   const regras = p.regras ?? REGRAS_PADRAO;
   const { esperando, recebidas } = await lerEsperando(admin, p.agora);
@@ -332,6 +359,8 @@ export async function lerTudoDaTarde(admin: Admin, p: {
     retornoExtra: await lerExtra(admin, "fechamento", p.agora),
     // (F4, P11.2) lerParceiro nunca lança (erro = null = a tarde de antes); o texto só usa no fechamento
     ...(p.turno === "fechamento" ? { parceiro: await lerParceiro(admin, p.agora) } : {}),
+    // (F5, P10.2) lerOrcamento nunca lança (erro = null = a tarde de antes, sem aviso, e nada sai sozinho)
+    ...(p.orcamento ? { orcamento: await lerOrcamento(admin, p.agora) } : {}),
   };
 }
 
@@ -386,7 +415,10 @@ export async function rodarTurnoDaTarde(admin: Admin, p: { agora: Date; pedido: 
   //     perde); 'desligado' = nada lido, como antes; sem linha 'ligado' = nada muda. O guardado da sombra nunca vai na
   //     tarde enviada (as fontes já tinham avisado).
   const voz = await lerPortao(admin);
-  const lido = await lerTudoDaTarde(admin, { agora: p.agora, hoje, turno, dono, modo: manha.modo, cfg, regras: voz.regras });
+  // (F5, P10.2) o orçamento só na tarde que vai ao dono (não no dry-run, na sombra nem na rebaixada): ver lerTudoDaTarde
+  const lido = await lerTudoDaTarde(admin, {
+    agora: p.agora, hoje, turno, dono, modo: manha.modo, cfg, regras: voz.regras, orcamento: enviar && !p.dry,
+  });
   const pergunta = ehDiaDaPerguntaDaSemana(hoje);
   const modoDoGuardado = enviar ? (voz.voz !== "desligado" ? "ligado" : null) : voz.modo === "sombra" ? "sombra" : null;
   const doPortao: DoPortaoNaTarde = { modo: modoDoGuardado, regras: voz.regras, guardado: null, acordados: new Map() };
@@ -485,6 +517,13 @@ export async function rodarTurnoDaTarde(admin: Admin, p: { agora: Date; pedido: 
     ? await registrarAgendaDoFechamento(admin, hoje, m.agendaMostrou)
     : null;
 
+  // (F5, P10.2) o aviso do orçamento ("amanhã sai sozinho … · *segura 151*"): na mesma condição da agenda (tarde gravada e
+  // ENVIADA, 1ª gravação do dia), só se o texto tem cada linha fixa e com o id da linha da fila da tarde. r.enviado quer
+  // dizer enfileirado: quem decide se o passo sai sozinho é o vigia, amanhã, pela fila em 'sent'. Nunca lança.
+  const orcamentoAviso: AvisoDoOrcamento | null = r.novo && r.enviado && m.orcamento
+    ? await avisarOrcamentoNaTarde(admin, { texto: m.texto, fixas: m.orcamento.fixas, avisar: m.orcamento.avisar, hoje, phone: dono.phone, agora: p.agora })
+    : null;
+
   // o que foi enviado entra no histórico da conversa do assistente ("e o B?" tem a que se referir); falha só loga
   let historico = false;
   if (r.novo && r.enviado && m.texto) {
@@ -506,6 +545,7 @@ export async function rodarTurnoDaTarde(admin: Admin, p: { agora: Date; pedido: 
     ...(m.guardado?.modo === "ligado" ? { guardado_na_tarde: guardadoNaTarde } : {}),
     ...(loteGravado ? { lote: loteGravado } : {}),
     ...(agendaRegistrada ? { agenda_registrada: agendaRegistrada } : {}),
+    ...(orcamentoAviso ? { orcamento_aviso: orcamentoAviso } : {}),
   });
 }
 
