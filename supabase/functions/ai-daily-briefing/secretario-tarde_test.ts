@@ -486,30 +486,38 @@ const comLinhasDoPlano = (modo: "ligado" | "sombra") => ({
   ],
 });
 
-async function tardeComPlano(agenda: unknown, p: { formato: string; modo: "sombra" | "novo"; enviado: boolean }) {
-  const f = falsoAdmin(banco({ formato: p.formato, modo: p.modo }), {
+// (13/11/2026, consertos da agenda, (b)) o registro é a GUARDA com o id da linha da fila da tarde (agenda_fechamento_guardar): o banco só
+// conta quando a fila disser 'sent'. A linha da fila é achada pela chave secretario_tarde:<dia>:<telefone> (a mesma do guardado da voz).
+const FILA_DA_TARDE = { id: "fila-tarde", dedupe_key: `secretario_tarde:${HOJE}:${DONO.phone}` };
+const GUARDADA = { ok: true, estado: "esperando", id: "g-1", perguntas: 0, acoes: 0 };
+
+async function tardeComPlano(agenda: unknown, p: { formato: string; modo: "sombra" | "novo"; enviado: boolean; fila?: boolean; guardar?: unknown }) {
+  const f = falsoAdmin({ ...banco({ formato: p.formato, modo: p.modo }), whatsapp_send_queue: p.fila === false ? [] : [FILA_DA_TARDE] }, {
     ...RPCS,
     agenda_textos_do_fechamento: agenda,
     resumo_tarde_registrar: { ok: true, novo: true, enviado: p.enviado, calado: false },
     agenda_fechamento_registrar: { ok: true, perguntas: 1, acoes: 1 },
+    agenda_fechamento_guardar: p.guardar ?? GUARDADA,
   });
   const r = await rodarTurnoDaTarde(f.admin, { agora: AS_1730, pedido: "tarde", dry: false });
   return { r, p: registrar(f.chamadas)!, chamadas: f.chamadas };
 }
 
-Deno.test("Fase 2: tarde ENVIADA com as linhas do plano — saem depois do 'Amanhã' e o que saiu é registrado (pergunta e ação)", async () => {
+Deno.test("Fase 2: tarde ENVIADA com as linhas do plano — saem depois do 'Amanhã' e o que saiu é guardado com a linha da fila (pergunta e ação)", async () => {
   const { r, p, chamadas } = await tardeComPlano(comLinhasDoPlano("ligado"), { formato: "ligado", modo: "novo", enviado: true });
   const linhas = String(p.texto).split("\n");
   const i = linhas.findIndex((l) => l.startsWith("Amanhã (sexta, 16/10)"));
   assertEquals(linhas.slice(i + 1, i + 3), [DECISAO_DO_BANCO, MUDANCA_DO_BANCO]);
-  const reg = chamadas.find((c) => c.nome === "agenda_fechamento_registrar");
+  const reg = chamadas.find((c) => c.nome === "agenda_fechamento_guardar");
   assertEquals(reg?.args, {
-    p_hoje: HOJE, p_via: "fechamento",
+    p_hoje: HOJE, p_via: "fechamento", p_fila: "fila-tarde",
     p_linhas: [{ pergunta_id: "q-nelson", acao_ids: [] }, { pergunta_id: null, acao_ids: ["a-beatriz"] }],
   });
-  // o registro vem DEPOIS de gravar e enfileirar a tarde
-  assert(chamadas.findIndex((c) => c.nome === "resumo_tarde_registrar") < chamadas.findIndex((c) => c.nome === "agenda_fechamento_registrar"));
-  assertEquals(r.corpo.agenda_registrada, { perguntas: 1, acoes: 1 });
+  // (consertos 13/11, (b)) nunca conta direto: agenda_fechamento_registrar é do banco, quando a fila disser 'sent'
+  assert(!chamadas.some((c) => c.nome === "agenda_fechamento_registrar"));
+  // a guarda vem DEPOIS de gravar e enfileirar a tarde
+  assert(chamadas.findIndex((c) => c.nome === "resumo_tarde_registrar") < chamadas.findIndex((c) => c.nome === "agenda_fechamento_guardar"));
+  assertEquals(r.corpo.agenda_registrada, { estado: "esperando", perguntas: 0, acoes: 0 });
   const ag = (p.detalhe as { agenda: Record<string, unknown> }).agenda;
   assertEquals(ag.mostrou, true);
   assertEquals((ag.linhas_mostrou as unknown[]).length, 2);
@@ -518,7 +526,7 @@ Deno.test("Fase 2: tarde ENVIADA com as linhas do plano — saem depois do 'Aman
 Deno.test("Fase 2: tarde que NÃO sai (sombra ou rebaixada): o texto leva as linhas ligadas, mas nada é registrado", async () => {
   for (const p of [{ formato: "sombra", modo: "sombra" as const, enviado: false }, { formato: "ligado", modo: "sombra" as const, enviado: false }]) {
     const { r, chamadas } = await tardeComPlano(comLinhasDoPlano("ligado"), p);
-    assert(!chamadas.some((c) => c.nome === "agenda_fechamento_registrar"), JSON.stringify(p));
+    assert(!chamadas.some((c) => c.nome === "agenda_fechamento_registrar" || c.nome === "agenda_fechamento_guardar"), JSON.stringify(p));
     assert(!("agenda_registrada" in r.corpo), JSON.stringify(p));
   }
 });
@@ -527,7 +535,7 @@ Deno.test("Fase 2: as linhas em sombra: o texto é o de antes byte a byte, o que
   const antes = await tardeComPlano({ ...daAgenda("ligado"), cauda_amanha: null, semana_que_vem: [] }, { formato: "ligado", modo: "novo", enviado: true });
   const sombra = await tardeComPlano(comLinhasDoPlano("sombra"), { formato: "ligado", modo: "novo", enviado: true });
   assertEquals(sombra.p.texto, antes.p.texto);
-  assert(!sombra.chamadas.some((c) => c.nome === "agenda_fechamento_registrar"));
+  assert(!sombra.chamadas.some((c) => c.nome === "agenda_fechamento_registrar" || c.nome === "agenda_fechamento_guardar"));
   const ag = (sombra.p.detalhe as { agenda: Record<string, unknown> }).agenda;
   assertEquals(ag.linhas_diria, [
     { tipo: "decisao", perda: 50, modo: "sombra", texto: DECISAO_DO_BANCO },
@@ -542,11 +550,38 @@ Deno.test("Fase 2: o registro que falha não derruba o fechamento (só o aviso; 
     rpc: (_n: string, _a: unknown) => Promise.resolve({ data: null, error: { code: "XX000" } }),
   };
   const linhas = [{ tipo: "decisao" as const, texto: DECISAO_DO_BANCO, perda: 50, pergunta_id: "q", acao_ids: [], modo: "ligado" as const }];
-  assertEquals(await registrarAgendaDoFechamento(comErro, HOJE, linhas), "erro");
+  assertEquals(await registrarAgendaDoFechamento(comErro, HOJE, linhas, "fila-1"), "erro");
   const lanca = { rpc: () => { throw new Error("rede"); } };
-  assertEquals(await registrarAgendaDoFechamento(lanca, HOJE, linhas), "erro");
-  const ok = { rpc: () => Promise.resolve({ data: { ok: true, perguntas: 1, acoes: 0 }, error: null }) };
-  assertEquals(await registrarAgendaDoFechamento(ok, HOJE, linhas), { perguntas: 1, acoes: 0 });
+  assertEquals(await registrarAgendaDoFechamento(lanca, HOJE, linhas, "fila-1"), "erro");
+  // (consertos 13/11, (b)) a fila já tinha mandado: o banco contou na hora
+  const ok = { rpc: () => Promise.resolve({ data: { ok: true, estado: "registrada", id: "g-1", perguntas: 1, acoes: 0 }, error: null }) };
+  assertEquals(await registrarAgendaDoFechamento(ok, HOJE, linhas, "fila-1"), { estado: "registrada", perguntas: 1, acoes: 0 });
+});
+
+// (13/11/2026, consertos da agenda, (b)) O fechamento contava como mostrada a linha que só tinha ido para a FILA. Agora: guarda com o id da linha da
+// fila; sem ele, nada (a linha volta no próximo); a fila que sumiu entre a leitura e a guarda, idem; e o Secretário nunca conta direto.
+Deno.test("Consertos 13/11 (b): sem a linha da fila da tarde, nada é guardado nem contado (as linhas voltam no próximo fechamento)", async () => {
+  const { r, chamadas } = await tardeComPlano(comLinhasDoPlano("ligado"), { formato: "ligado", modo: "novo", enviado: true, fila: false });
+  assert(!chamadas.some((c) => c.nome === "agenda_fechamento_registrar" || c.nome === "agenda_fechamento_guardar"));
+  assertEquals(r.corpo.agenda_registrada, "sem_fila");
+  // direto na função: sem o id, nenhuma chamada ao banco
+  const nada: Array<string> = [];
+  const admin = { rpc: (n: string) => (nada.push(n), Promise.resolve({ data: null, error: null })) };
+  const linhas = [{ tipo: "decisao" as const, texto: DECISAO_DO_BANCO, perda: 50, pergunta_id: "q", acao_ids: [], modo: "ligado" as const }];
+  assertEquals(await registrarAgendaDoFechamento(admin, HOJE, linhas, null), "sem_fila");
+  assertEquals(nada, []);
+  // a linha da fila sumiu entre a leitura e a guarda: o banco diz sem_fila e nada fica guardado
+  const sumiu = { rpc: () => Promise.resolve({ data: { ok: false, motivo: "sem_fila", perguntas: 0, acoes: 0 }, error: null }) };
+  assertEquals(await registrarAgendaDoFechamento(sumiu, HOJE, linhas, "fila-x"), "sem_fila");
+});
+
+Deno.test("Consertos 13/11 (b): a fila já mandou quando a guarda chegou: o banco conta na hora e a resposta diz registrada", async () => {
+  const { r, chamadas } = await tardeComPlano(comLinhasDoPlano("ligado"), {
+    formato: "ligado", modo: "novo", enviado: true, guardar: { ok: true, estado: "registrada", id: "g-1", perguntas: 1, acoes: 1 },
+  });
+  assertEquals((chamadas.find((c) => c.nome === "agenda_fechamento_guardar")?.args as { p_fila: string }).p_fila, "fila-tarde");
+  assert(!chamadas.some((c) => c.nome === "agenda_fechamento_registrar"));
+  assertEquals(r.corpo.agenda_registrada, { estado: "registrada", perguntas: 1, acoes: 1 });
 });
 
 Deno.test("Fase 2: com a agenda automática ligada, o 'Amanhã' pede as OS do plano (agenda_linhas_do_dia) e o estado das OS", async () => {
@@ -594,9 +629,9 @@ Deno.test("Fase 3: diária, conclusão e comissão chegam do banco; as que cabem
   const i = linhas.findIndex((l) => l.startsWith("Amanhã (sexta, 16/10)"));
   assertEquals(linhas.slice(i + 1, i + 4), [DIARIA_DO_BANCO, CONCLUSAO_DO_BANCO, COMISSAO_DO_BANCO]);
   assert(!String(p.texto).includes("Secretário não conhece"), "o tipo desconhecido entrou");
-  const reg = chamadas.find((c) => c.nome === "agenda_fechamento_registrar");
+  const reg = chamadas.find((c) => c.nome === "agenda_fechamento_guardar");
   assertEquals(reg?.args, {
-    p_hoje: HOJE, p_via: "fechamento",
+    p_hoje: HOJE, p_via: "fechamento", p_fila: "fila-tarde",
     p_linhas: [{ pergunta_id: "q-diaria", acao_ids: [] }, { pergunta_id: null, acao_ids: ["a-concluir"] }, { pergunta_id: null, acao_ids: [] }],
   });
 });
@@ -611,7 +646,7 @@ Deno.test("Fase 3: as linhas novas em sombra: o texto é o de antes byte a byte 
     ],
   }, { formato: "ligado", modo: "novo", enviado: true });
   assertEquals(sombra.p.texto, antes.p.texto);
-  assert(!sombra.chamadas.some((c) => c.nome === "agenda_fechamento_registrar"));
+  assert(!sombra.chamadas.some((c) => (c.nome === "agenda_fechamento_registrar" || c.nome === "agenda_fechamento_guardar")));
   const ag = (sombra.p.detalhe as { agenda: Record<string, unknown> }).agenda;
   assertEquals((ag.linhas_diria as Array<{ tipo: string }>).map((l) => l.tipo), ["diaria", "comissao"]);
 });
@@ -623,7 +658,7 @@ Deno.test("Correção da 7a: o registro do fechamento manda as pergunta_ids da l
   const admin = {
     rpc: (nome: string, args: unknown) => {
       chamadas.push({ nome, args });
-      return Promise.resolve({ data: { ok: true, perguntas: 3, acoes: 0 }, error: null });
+      return Promise.resolve({ data: { ok: true, estado: "esperando", perguntas: 3, acoes: 0 }, error: null });
     },
   };
   const linhas = [
@@ -631,9 +666,9 @@ Deno.test("Correção da 7a: o registro do fechamento manda as pergunta_ids da l
       pergunta_ids: ["q-ficha", "q-nelson", "q-mp"], acao_ids: [], modo: "ligado" as const },
     { tipo: "decisao" as const, texto: DECISAO_DO_BANCO, perda: 50, pergunta_id: "q", acao_ids: [], modo: "ligado" as const },
   ];
-  assertEquals(await registrarAgendaDoFechamento(admin, HOJE, linhas), { perguntas: 3, acoes: 0 });
+  assertEquals(await registrarAgendaDoFechamento(admin, HOJE, linhas, "fila-1"), { estado: "esperando", perguntas: 3, acoes: 0 });
   assertEquals(chamadas[0].args, {
-    p_hoje: HOJE, p_via: "fechamento",
+    p_hoje: HOJE, p_via: "fechamento", p_fila: "fila-1",
     p_linhas: [{ pergunta_id: "q-ficha", acao_ids: [], pergunta_ids: ["q-ficha", "q-nelson", "q-mp"] }, { pergunta_id: "q", acao_ids: [] }],
   });
 });
@@ -659,7 +694,7 @@ Deno.test("Fase 7f, P3: bloco em sombra: o texto e o que se registra são os de 
   const s = await tardeComPlano({ ...comLinhasDoPlano("ligado"), bloco: blocoDoBanco("sombra") }, { formato: "ligado", modo: "novo", enviado: true });
   assertEquals(s.p.texto, antes.p.texto);
   assertEquals(s.p.letras, antes.p.letras);
-  assertEquals(s.chamadas.find((c) => c.nome === "agenda_fechamento_registrar")?.args, antes.chamadas.find((c) => c.nome === "agenda_fechamento_registrar")?.args);
+  assertEquals(s.chamadas.find((c) => c.nome === "agenda_fechamento_guardar")?.args, antes.chamadas.find((c) => c.nome === "agenda_fechamento_guardar")?.args);
   const ag = (s.p.detalhe as { agenda: Record<string, unknown> }).agenda;
   const diria = ag.bloco_diria as { modo: string; linhas: Array<{ parte: string; texto: string }> };
   assertEquals(diria.modo, "sombra");
@@ -681,7 +716,7 @@ Deno.test("Fase 7f, P3: bloco ligado: as linhas dele saem, e o registro leva a p
   assertEquals((ag.bloco_mostrou as Array<{ parte: string }>).map((x) => x.parte), ["veredito", "hoje", "mudou", "decisao", "decisao"]);
   assertEquals("bloco_seria" in ag, false);
   assertEquals(ag.mostrou, true);
-  const reg = l.chamadas.find((c) => c.nome === "agenda_fechamento_registrar")?.args as { p_linhas: Array<Record<string, unknown>> };
+  const reg = l.chamadas.find((c) => c.nome === "agenda_fechamento_guardar")?.args as { p_linhas: Array<Record<string, unknown>> };
   assertEquals(reg.p_linhas, [
     { pergunta_id: null, acao_ids: [] },
     { pergunta_id: "q-conf", acao_ids: [], pergunta_ids: ["q-conf"] },
@@ -693,5 +728,5 @@ Deno.test("Fase 7f, P3: bloco ligado: as linhas dele saem, e o registro leva a p
 
 Deno.test("Fase 7f, P3: bloco ligado com a tarde que não saiu (sombra, rebaixada): nada conta como mostrado, e o prazo não nasce", async () => {
   const s = await tardeComPlano({ ...comLinhasDoPlano("ligado"), bloco: blocoDoBanco("ligado") }, { formato: "sombra", modo: "novo", enviado: false });
-  assertEquals(s.chamadas.some((c) => c.nome === "agenda_fechamento_registrar"), false);
+  assertEquals(s.chamadas.some((c) => (c.nome === "agenda_fechamento_registrar" || c.nome === "agenda_fechamento_guardar")), false);
 });

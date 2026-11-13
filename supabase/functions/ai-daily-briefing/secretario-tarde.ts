@@ -525,8 +525,10 @@ export async function rodarTurnoDaTarde(admin: Admin, p: { agora: Date; pedido: 
 
   // (24/10/2026, Fase 2, P5) as linhas do plano que SAÍRAM (tarde enviada, 1ª gravação do dia): a pergunta conta uma vez
   // mostrada e a mudança fica contada (não volta amanhã). Na sombra ou rebaixada, nada (o dono não viu). Nunca lança.
+  // (13/11/2026, consertos da agenda, (b)) r.enviado quer dizer ENFILEIRADA: as linhas vão guardadas com o id da linha da fila da tarde e
+  // só contam quando a fila disser 'sent' (o banco confere no motor de 15 min); sem o id da fila, nada é guardado e elas voltam no próximo.
   const agendaRegistrada = r.novo && r.enviado && m.agendaMostrou?.length
-    ? await registrarAgendaDoFechamento(admin, hoje, m.agendaMostrou)
+    ? await registrarAgendaDoFechamento(admin, hoje, m.agendaMostrou, await idDaFilaPelaChave(admin, chaveDaFilaDaTarde(hoje, dono.phone)))
     : null;
 
   // (F5, P10.2) o aviso do orçamento ("amanhã sai sozinho … · *segura 151*"): na mesma condição da agenda (tarde gravada e
@@ -568,15 +570,23 @@ export async function rodarTurnoDaTarde(admin: Admin, p: { agora: Date; pedido: 
 }
 
 /**
- * (24/10/2026, Agenda de Produção Fase 2, P5) agenda_fechamento_registrar com as linhas do plano que saíram no fechamento
- * enviado ({pergunta_id, acao_ids} de cada uma). Erro = só o aviso no log: o fechamento já saiu, e a linha não registrada
- * volta no próximo (melhor repetir que calar). Nunca lança.
+ * (24/10/2026, Agenda de Produção Fase 2, P5) As linhas do plano que saíram no fechamento enviado ({pergunta_id, acao_ids} de
+ * cada uma). Erro = só o aviso no log: o fechamento já saiu, e a linha não registrada volta no próximo (melhor repetir que
+ * calar). Nunca lança.
+ * (13/11/2026, consertos da agenda, (b)) "Enviado" é enfileirado: as linhas vão a agenda_fechamento_guardar com o id da linha da
+ * fila da tarde, e o banco só as conta (a pergunta mostrada, o prazo, a ação) quando a fila disser 'sent' — na hora, se a fila já
+ * mandou; senão o motor de 15 min confere (agenda_aviso_conferir). A linha da fila que falha ou não sai não conta, e as linhas
+ * voltam no próximo fechamento. Sem o id da fila: nada é guardado ("sem_fila"), como o guardado da voz ligada (P4.5).
  */
 export async function registrarAgendaDoFechamento(
-  admin: Admin, hoje: string, linhas: LinhaDaAgenda[],
-): Promise<{ perguntas: number; acoes: number } | "erro"> {
+  admin: Admin, hoje: string, linhas: LinhaDaAgenda[], filaId: string | null,
+): Promise<{ estado: string; perguntas: number; acoes: number } | "sem_fila" | "erro"> {
+  if (!filaId) {
+    console.warn(JSON.stringify({ fn: "ai-daily-briefing", tarde: "agenda_sem_fila" }));
+    return "sem_fila";
+  }
   try {
-    const { data, error } = await admin.rpc("agenda_fechamento_registrar", {
+    const { data, error } = await admin.rpc("agenda_fechamento_guardar", {
       p_hoje: hoje,
       // (correção da 7a, 20261031100980) com as pergunta_ids da linha das perguntas do gestor, quando ela as traz
       // (Fase 7f, P3) o prazo escrito no texto e o que seria: só a linha do bloco os traz, e o banco grava no update que a mostra
@@ -584,11 +594,14 @@ export async function registrarAgendaDoFechamento(
         pergunta_id: l.pergunta_id, acao_ids: l.acao_ids, ...(l.pergunta_ids?.length ? { pergunta_ids: l.pergunta_ids } : {}),
         ...(l.veto_ate ? { veto_ate: l.veto_ate } : {}), ...(l.veto_diria ? { veto_diria: l.veto_diria } : {}),
       })),
+      p_fila: filaId,
       p_via: "fechamento",
     });
     if (error) throw error;
-    const r = (data ?? {}) as { perguntas?: unknown; acoes?: unknown };
-    return { perguntas: Number(r.perguntas ?? 0), acoes: Number(r.acoes ?? 0) };
+    const r = (data ?? {}) as { ok?: unknown; estado?: unknown; motivo?: unknown; perguntas?: unknown; acoes?: unknown };
+    // a linha da fila sumiu entre a leitura e a guarda: nada guardado, volta no próximo
+    if (r.ok !== true) return r.motivo === "sem_fila" ? "sem_fila" : "erro";
+    return { estado: String(r.estado ?? "esperando"), perguntas: Number(r.perguntas ?? 0), acoes: Number(r.acoes ?? 0) };
   } catch (e) {
     console.warn(JSON.stringify({ fn: "ai-daily-briefing", tarde: "agenda_registro_falhou", codigo: String((e as { code?: unknown })?.code ?? (e as Error)?.name ?? "erro") }));
     return "erro";
