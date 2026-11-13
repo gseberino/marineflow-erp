@@ -2,7 +2,7 @@
 // serviço" e o que espera o cliente pagar; o extrato mostra o serviço e a lista "aguardando o cliente
 // pagar"; "Registrar serviço" confere no banco (simula) antes de gravar. Simula só supabase.rpc.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { I18nProvider } from '@/i18n';
@@ -113,5 +113,22 @@ describe('Diárias com o prestador por serviço', () => {
     await user.click(screen.getByRole('button', { name: 'Registrar' }));
     await waitFor(() => expect(chamadas('registrar_servico_prestador')).toHaveLength(2));
     expect(chamadas('registrar_servico_prestador')[1]).toMatchObject({ p_simular: false, p_os_id: 'os119' });
+  });
+
+  // 13/11/2026: o "Registrar pagamento" da tela dava "Freelancer de diária não encontrado" para o Alex.
+  it('registrar pagamento ao prestador: sem proposta de reembolso, descrição "Pagamento de serviços"', async () => {
+    const user = userEvent.setup();
+    renderizar('resumo');
+    await user.click((await screen.findAllByRole('button', { name: /Registrar pagamento/ }))[0]);
+    const dialogo = await screen.findByRole('dialog');
+    await user.type(within(dialogo).getByLabelText('Valor (R$)'), '50000'); // o MoneyInput lê centavos
+    const botao = within(dialogo).getByRole('button', { name: 'Registrar pagamento' });
+    await waitFor(() => expect(botao).toBeEnabled());
+    await user.click(botao);
+    await waitFor(() => expect(chamadas('registrar_pagamento_do_freelancer')).toHaveLength(1));
+    expect(chamadas('registrar_pagamento_do_freelancer')[0]).toMatchObject({
+      p_favorecido_id: 'a', p_valor: 500, p_forma: 'pix', p_reembolsos: [], p_descricao: 'Pagamento de serviços — Alex',
+    });
+    expect(chamadas('proposta_de_divisao_do_pagamento')).toHaveLength(0);
   });
 });

@@ -122,7 +122,10 @@ export function RegistrarPagamentoDialog({ pessoas, favorecidoInicial, onFechar 
   const [observacao, setObservacao] = useState('');
 
   const valorAssentado = useValorAssentado(valor);
-  const proposta = usePropostaDeDivisao(favorecidoId, valorAssentado);
+  // O prestador por serviço (o Alex, 13/11/2026): o banco lança em "Serviços de terceiros" e não divide
+  // reembolso de comprovante — sem proposta de divisão para ele.
+  const ehPrestador = pessoas.find((p) => p.id === favorecidoId)?.modo === 'servico';
+  const proposta = usePropostaDeDivisao(ehPrestador ? null : favorecidoId, valorAssentado);
   // A proposta é a do valor que está na tela? (com o valor mudando, a de antes não vale; a chave da
   // consulta é o valor assentado, então o dado que veio é sempre o dele)
   const propostaAtual = valorAssentado === valor ? proposta.data : undefined;
@@ -130,7 +133,8 @@ export function RegistrarPagamentoDialog({ pessoas, favorecidoInicial, onFechar 
   const { ids, alternar } = useEscolhaDaProposta(propostaAtual);
   const divisao = divisaoEscolhida(emAberto, ids, valor);
   // Enquanto confere, não registra: um clique rápido gravaria tudo em Diárias sem o dono ver a divisão.
-  const conferindo = !!favorecidoId && valor > 0 && !proposta.error && (valorAssentado !== valor || proposta.isFetching || !proposta.data);
+  const conferindo = !ehPrestador && !!favorecidoId && valor > 0 && !proposta.error
+    && (valorAssentado !== valor || proposta.isFetching || !proposta.data);
 
   const pessoa = pessoas.find((p) => p.id === favorecidoId);
   const socioEscolhido = socio || (socios.length === 1 ? socios[0].id : '');
@@ -144,7 +148,7 @@ export function RegistrarPagamentoDialog({ pessoas, favorecidoInicial, onFechar 
 
   function salvar() {
     if (erro || conferindo || !pessoa) return;
-    const descricao = observacao.trim() || `Pagamento de diárias — ${pessoa.nome.split(' ')[0]}`;
+    const descricao = observacao.trim() || `${ehPrestador ? 'Pagamento de serviços' : 'Pagamento de diárias'} — ${pessoa.nome.split(' ')[0]}`;
     registrar.mutate({
       favorecidoId, valor, data, forma, socioId: forma === 'socio' ? socioEscolhido : null,
       reembolsos: divisao.marcados.map((r) => r.id), descricao,

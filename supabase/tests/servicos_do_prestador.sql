@@ -1,4 +1,5 @@
--- Prova: serviços do prestador na conta corrente (migration 20270105102000_servicos_do_prestador).
+-- Prova: serviços do prestador na conta corrente (migration 20270105102000_servicos_do_prestador) e o
+-- "Registrar pagamento" da tela para ele (T12–T16, migration 20270113100000_pagamento_do_prestador_pela_tela).
 --
 -- ═══ COMO RODAR ═══
 --
@@ -24,6 +25,9 @@ declare
   r jsonb;
   c jsonb;
   v_msg text;
+  v_antes numeric;
+  v_dia uuid;
+  v_sem uuid;
 begin
   select id into v_dono from public.app_users where role = 'admin' and active order by created_at limit 1;
   select so.id into v_paga from public.service_orders so
@@ -135,6 +139,55 @@ begin
       and not has_function_privilege('authenticated', 'public._base_do_servico(uuid, text)', 'execute')
       and has_function_privilege('authenticated', 'public.registrar_servico_prestador(uuid, uuid, numeric, numeric, text, text, date, uuid, boolean)', 'execute'),
     null);
+  -- T12. "Registrar pagamento" da tela (registrar_pagamento_do_freelancer, 13/11/2026): o prestador entra;
+  -- em dinheiro vai ao Caixa em "Serviços de terceiros", com "Pagamento de serviços", e desconta do saldo.
+  c := public.conta_corrente_freelancer(v_fav, null, null, v_dono);
+  v_antes := (c ->> 'saldo_final')::numeric;
+  r := public.registrar_pagamento_do_freelancer(v_fav, 123.45, v_hoje, 'dinheiro', null, '{}'::uuid[], null, v_dono);
+  c := public.conta_corrente_freelancer(v_fav, null, null, v_dono);
+  insert into _resultado values ('T12 pagamento do prestador pela tela: Servicos de terceiros e desconta',
+    coalesce((r ->> 'ok')::boolean, false)
+      and coalesce((select pa.expense_category = 'Serviços de terceiros' and pa.description like 'Pagamento de serviços — %'
+                      from public.payables pa where pa.id = (r ->> 'payable_id')::uuid), false)
+      and round((c ->> 'saldo_final')::numeric, 2) = round(v_antes - 123.45, 2),
+    format('msg=%s saldo %s -> %s', r ->> 'message', v_antes, c ->> 'saldo_final'));
+
+  -- T13. Pix do prestador: anotado em "Serviços de terceiros" (valor quebrado para não casar com linha real).
+  r := public.registrar_pagamento_do_freelancer(v_fav, 517.39, v_hoje, 'pix', null, '{}'::uuid[], null, v_dono);
+  insert into _resultado values ('T13 Pix do prestador anotado em Servicos de terceiros',
+    coalesce((r ->> 'ok')::boolean, false)
+      and coalesce((select an.categoria = 'Serviços de terceiros' and an.favorecido_id = v_fav
+                      from public.anotacoes_do_extrato an where an.id = (r ->> 'anotacao_id')::uuid), false),
+    r ->> 'message');
+
+  -- T14. Prestador não divide reembolso de comprovante: recusa com o caminho.
+  begin
+    r := public.registrar_pagamento_do_freelancer(v_fav, 100, v_hoje, 'dinheiro', null, array[gen_random_uuid()], null, v_dono);
+    v_msg := 'gravou';
+  exception when others then v_msg := sqlerrm;
+  end;
+  insert into _resultado values ('T14 prestador nao divide reembolso', v_msg like 'Reembolso de comprovante só se divide%', v_msg);
+
+  -- T15. Diarista: nada muda (Diárias de freelancers, "Pagamento de diárias").
+  insert into public.payees (name, kind, active, conta_corrente_desde)
+  values ('Diarista Teste ' || substr(md5(random()::text), 1, 6), 'diarista', true, v_hoje - 30) returning id into v_dia;
+  insert into public.work_profiles (payee_id, tipo_vinculo, modo_pagamento, valor_diaria, vigencia_inicio)
+  values (v_dia, 'freelancer', 'diaria', 300, v_hoje - 30);
+  r := public.registrar_pagamento_do_freelancer(v_dia, 80, v_hoje, 'dinheiro', null, '{}'::uuid[], null, v_dono);
+  insert into _resultado values ('T15 diarista continua em Diarias de freelancers',
+    coalesce((select pa.expense_category = 'Diárias de freelancers' and pa.description like 'Pagamento de diárias — Diarista%'
+                from public.payables pa where pa.id = (r ->> 'payable_id')::uuid), false),
+    r ->> 'message');
+
+  -- T16. Prestador SEM conta corrente continua recusado (só entra quem tem conta corrente).
+  insert into public.payees (name, kind, active) values ('Prestador Sem Conta ' || substr(md5(random()::text), 1, 6), 'prestador', true)
+  returning id into v_sem;
+  begin
+    r := public.registrar_pagamento_do_freelancer(v_sem, 50, v_hoje, 'dinheiro', null, '{}'::uuid[], null, v_dono);
+    v_msg := 'gravou';
+  exception when others then v_msg := sqlerrm;
+  end;
+  insert into _resultado values ('T16 prestador sem conta corrente continua recusado', v_msg like 'Freelancer de diária não encontrado%', v_msg);
 end $$;
 
 select teste, ok, detalhe from _resultado order by teste;
