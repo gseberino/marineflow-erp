@@ -451,7 +451,8 @@ begin
   -- ── 6. O fechamento ──
   -- 6a. Nada a dizer.
   v_r := public.orcamento_resumo_fechamento(c_fech);
-  if v_r is distinct from '{"fixas": [], "linhas": [], "avisar": []}'::jsonb then
+  -- nao_saiu: o aviso do "Fechado" que não saiu, devolvido sem gravar (revisão das ondas 4 a 9; spec seção 15, P8.1).
+  if v_r is distinct from '{"fixas": [], "linhas": [], "avisar": [], "nao_saiu": []}'::jsonb then
     raise exception '6a: sem nada a dizer (%)', v_r;
   end if;
   begin
