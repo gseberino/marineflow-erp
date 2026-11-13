@@ -25,6 +25,8 @@ import {
   linhaDaMensagemEnviada,
   origemDoEnvio,
   quemEnviou,
+  registrarEnvioDoOrcamento,
+  viaDoOrcamento,
 } from "../_shared/whatsapp/registro-do-envio.ts";
 import {
   decidirSaidaAutomatica,
@@ -69,6 +71,8 @@ const BodySchema = z.object({
   // envio: valor estranho vira null/padrão em registro-do-envio.ts, nunca 400.
   sent_by: z.string().max(64).optional(),
   origem: z.string().max(20).optional(),
+  // Retorno F5 (P11.6): o PDF do cartão do retorno (o assistente com ctx.envioPeloCartao) marca a via do envio de orçamento.
+  orcamento_via: z.enum(["cartao"]).optional(),
 });
 
 function jr(body: unknown, status = 200) {
@@ -400,12 +404,16 @@ servirComCors(async (req) => {
     // context='quote' — inclusive o dono mandando para si e o modo de teste —, e o "enviado"
     // falso levou a rotina quote-reminders a rejeitar orçamentos vivos.
     if (body.context === "quote" && body.service_order_id) {
+      // Retorno F5 (P11.6): a via do envio de orçamento (assistente, cartão do retorno ou tela) e se este envio marcou 'sent'
+      const via = viaDoOrcamento(origem, body.orcamento_via);
+      let marcou = false;
       try {
-        const { data: ordem } = await supabaseAdmin
+        const { data: ordem, error: erroDaOrdem } = await supabaseAdmin
           .from("service_orders")
           .select("status, quote_status, converted_to_os_at, clients(whatsapp, phone)")
           .eq("id", body.service_order_id)
           .maybeSingle();
+        if (erroDaOrdem) throw erroDaOrdem;
         const cliente = (ordem as any)?.clients ?? null;
         const decisao = decidirMarcarEnviado({
           context: body.context,
@@ -418,15 +426,19 @@ servirComCors(async (req) => {
         if (decisao.marcar) {
           // Os mesmos filtros no próprio UPDATE: se outra pessoa mexeu no funil entre a leitura
           // e aqui, não sobrescreve.
-          const { data: mudou } = await supabaseAdmin
+          // (F5) a via e a chave (os 8 últimos dígitos, a de _agenda_chave_telefone) junto do 'sent'; o gatilho grava
+          // orcamento_enviado_em = now(), a hora deste update, segundos depois do envio
+          const { data: mudou, error: erroDaMarca } = await supabaseAdmin
             .from("service_orders")
-            .update({ quote_status: "sent" } as any)
+            .update({ quote_status: "sent", orcamento_enviado_via: via, orcamento_enviado_chave: phoneClean.slice(-8) } as any)
             .eq("id", body.service_order_id)
             .eq("status", "draft")
             .in("quote_status" as any, ["draft", "awaiting_approval"])
             .is("converted_to_os_at" as any, null)
             .select("id");
-          if ((mudou ?? []).length > 0) {
+          if (erroDaMarca) throw erroDaMarca;
+          marcou = (mudou ?? []).length > 0;
+          if (marcou) {
             await supabaseAdmin.from("audit_log").insert({
               table_name: "service_orders",
               record_id: body.service_order_id,
@@ -444,6 +456,12 @@ servirComCors(async (req) => {
         // Não bloqueia — o envio já aconteceu.
         console.warn("quote_status update skipped:", _e);
       }
+      // Retorno F5 (P11.6, C-REG-ENVIO): todo envio de orçamento que saiu (os três kind, a qualquer número, no reenvio
+      // também), com ou sem a marcação, vai a orcamento_envios; no desvio do modo de teste, nada. O deduplicado e o que
+      // falhou já voltaram antes daqui. Nunca lança, e a resposta do envio não muda.
+      await registrarEnvioDoOrcamento(supabaseAdmin, {
+        serviceOrderId: body.service_order_id, via, telefone: phoneClean, marcou, desviadoPorTeste: foiDesviado,
+      });
     }
 
     return jr({

@@ -10,7 +10,9 @@ import {
   ORIGENS_DO_RETORNO,
   origemDoEnvio,
   quemEnviou,
+  registrarEnvioDoOrcamento,
   textoDoEnvio,
+  viaDoOrcamento,
 } from "./registro-do-envio.ts";
 
 const DONO = "6f1c1f0e-1111-4c4c-9a9a-0a0a0a0a0a0a";
@@ -174,4 +176,86 @@ Deno.test("idDaSaidaDoRetorno: contexto bom dá o id; sem prefixo, uuid curto ou
   assertEquals(idDaSaidaDoRetorno(undefined), null);
   assertEquals(idDaSaidaDoRetorno(null), null);
   assertEquals(idDaSaidaDoRetorno(42), null);
+});
+
+// ─── Retorno F5 (P11.6): a via do envio de orçamento e o registro de todo envio (orcamento_registrar_envio) ──────────
+
+Deno.test("F5 viaDoOrcamento: assistente, assistente pelo cartão, tela e o agendamento da tela (sistema)", () => {
+  assertEquals(viaDoOrcamento("assistente", undefined), "assistente");
+  assertEquals(viaDoOrcamento("assistente", "cartao"), "cartao");
+  assertEquals(viaDoOrcamento("tela", undefined), "tela");
+  // a marca do cartão só vale para o assistente: a tela que mandasse "cartao" continua tela
+  assertEquals(viaDoOrcamento("tela", "cartao"), "tela");
+  assertEquals(viaDoOrcamento("sistema", undefined), "tela");
+  assertEquals(viaDoOrcamento("assistente", "outra"), "assistente");
+});
+
+function adminDoRegistro(resposta: { data?: unknown; error?: unknown; lanca?: boolean } = {}) {
+  const rpcs: Array<{ fn: string; args: Record<string, unknown> }> = [];
+  const logs: Array<Record<string, unknown>> = [];
+  const admin = {
+    rpc: (fn: string, args: Record<string, unknown>) => {
+      if (fn === "log_app_error") {
+        logs.push(args);
+        return Promise.resolve({ data: null, error: null });
+      }
+      rpcs.push({ fn, args });
+      if (resposta.lanca) return Promise.reject(new Error("rede"));
+      return Promise.resolve({ data: resposta.data ?? { ok: true, ao_cliente: true, id: "e-1" }, error: resposta.error ?? null });
+    },
+  };
+  return { admin, rpcs, logs };
+}
+const OS = "a1a1a1a1-3333-4e4e-8c8c-2c2c2c2c2c2c";
+
+Deno.test("F5 registrarEnvioDoOrcamento: chama a função com a ordem, a via, os 8 últimos dígitos e se marcou", async () => {
+  const a = adminDoRegistro();
+  assertEquals(await registrarEnvioDoOrcamento(a.admin, { serviceOrderId: OS, via: "tela", telefone: "5547900009901", marcou: true, desviadoPorTeste: false }), "registrado");
+  assertEquals(a.rpcs, [{ fn: "orcamento_registrar_envio", args: { p_os: OS, p_via: "tela", p_chave: "00009901", p_marcou: true } }]);
+  // a outro número e no reenvio também (o banco decide se é ao cliente)
+  const b = adminDoRegistro({ data: { ok: true, ao_cliente: false, id: "e-2" } });
+  assertEquals(await registrarEnvioDoOrcamento(b.admin, { serviceOrderId: OS, via: "cartao", telefone: "5547900009955", marcou: false, desviadoPorTeste: false }), "registrado");
+  assertEquals(b.rpcs[0].args.p_marcou, false);
+});
+
+Deno.test("F5 registrarEnvioDoOrcamento: no desvio do modo de teste nada é registrado", async () => {
+  const a = adminDoRegistro();
+  assertEquals(await registrarEnvioDoOrcamento(a.admin, { serviceOrderId: OS, via: "tela", telefone: "5547900009901", marcou: false, desviadoPorTeste: true }), "desviado");
+  assertEquals(a.rpcs.length, 0);
+});
+
+Deno.test("F5 registrarEnvioDoOrcamento: erro ou exceção vão a log_app_error sem telefone, e nunca lança", async () => {
+  for (const r of [{ error: { code: "57014", message: "tempo esgotado" } }, { lanca: true }, { data: { ok: false } }]) {
+    const a = adminDoRegistro(r);
+    assertEquals(await registrarEnvioDoOrcamento(a.admin, { serviceOrderId: OS, via: "assistente", telefone: "5547900009901", marcou: false, desviadoPorTeste: false }), "erro", JSON.stringify(r));
+    assertEquals(a.logs.length, 1, JSON.stringify(r));
+    assertEquals(a.logs[0].p_source, "edge");
+    assertEquals(a.logs[0].p_context, "whatsapp-send");
+    assertEquals(a.logs[0].p_action, "orcamento_registrar_envio");
+    assert(!JSON.stringify(a.logs[0]).includes("9901"), "sem telefone no log");
+    assertEquals((a.logs[0].p_details as Record<string, unknown>).service_order_id, OS);
+  }
+});
+
+// A edge: o registro fica no bloco do orçamento, depois da marcação, e o deduplicado e o que falhou voltam antes dele.
+const fonteDaEdge = () => Deno.readTextFile(new URL("../../whatsapp-send/index.ts", import.meta.url));
+
+Deno.test("F5 whatsapp-send: a via e a chave junto do 'sent'; o registro em todo kind, depois da marcação e fora do desvio", async () => {
+  const edge = await fonteDaEdge();
+  assert(/orcamento_via:\s*z\.enum\(\["cartao"\]\)\.optional\(\)/.test(edge), "o campo orcamento_via no corpo");
+  const bloco = edge.indexOf('if (body.context === "quote" && body.service_order_id)');
+  assert(bloco > 0, "o bloco do orçamento");
+  const marca = edge.indexOf('quote_status: "sent", orcamento_enviado_via: via, orcamento_enviado_chave: phoneClean.slice(-8)', bloco);
+  assert(marca > bloco, "o update do 'sent' leva a via e a chave");
+  const registro = edge.indexOf("registrarEnvioDoOrcamento(supabaseAdmin", bloco);
+  assert(registro > marca, "o registro vem depois da marcação, no mesmo bloco");
+  assert(edge.slice(registro - 200, registro).includes("desviadoPorTeste: foiDesviado") || edge.slice(registro, registro + 300).includes("desviadoPorTeste: foiDesviado"), "o desvio vai ao registro");
+  assert(edge.slice(registro, registro + 300).includes("marcou"), "se marcou vai ao registro");
+  // o deduplicado e o que falhou voltam antes do bloco: nada se registra, porque nada saiu nesta chamada
+  const dedup = edge.indexOf("deduplicated: true");
+  const falhou = edge.indexOf("502,");
+  assert(dedup > 0 && dedup < bloco, "o deduplicado volta antes");
+  assert(falhou > 0 && falhou < bloco, "o que falhou volta antes");
+  // o bloco vale para os três kind: nenhuma condição de kind antes do registro
+  assert(!/body\.kind\s*===?\s*["']document["']/.test(edge.slice(bloco, registro)), "o registro não depende do kind");
 });

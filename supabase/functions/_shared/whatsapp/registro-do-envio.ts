@@ -40,6 +40,7 @@
 // idDaSaidaDoRetorno e os dois ternários de linhaDaMensagemEnviada (sent_by e via). Só a F4: tirar
 // retorno_parceiro e retorno_aviso das duas listas. Só a F5: tirar retorno_orcamento das duas listas.
 import { mesmoTelefone } from "../ai/phone.ts";
+import { logEdgeError } from "../log-error.ts";
 
 export type OrigemDoRetorno =
   | "retorno_recibo"
@@ -202,4 +203,50 @@ export function linhaDaMensagemDaFila(
     service_order_id: null,
     raw_payload: { origem: `fila:${item.source || "manual"}`, contexto: null, via: "whatsapp-queue-worker", fila_id: item.id },
   };
+}
+
+// ─── Retorno F5 (P11.6): o envio de orçamento (context 'quote') ─────────────────────────────────────────────────────────
+// Todo envio de orçamento que saiu (os três kind, a qualquer número, no reenvio também) vai a orcamento_envios pela função
+// do banco (C-REG-ENVIO): é o universo do desfecho (P13). A via diz por onde saiu: o assistente, o cartão do retorno (o
+// assistente com orcamento_via "cartao" no corpo) ou a tela. O único envio de sistema com context 'quote' é o agendamento
+// feito no diálogo da tela (a ferramenta de agendar grava sem context): por isso sistema = tela. As origens do retorno
+// nunca chegam aqui (o context delas é "retorno:<id>").
+
+export type ViaDoOrcamento = "assistente" | "tela" | "cartao";
+
+/** A via do envio de orçamento, pela origem do envio e pela marca do cartão no corpo. */
+export function viaDoOrcamento(origem: OrigemDoEnvio, doCorpo: unknown): ViaDoOrcamento {
+  if (origem === "assistente") return doCorpo === "cartao" ? "cartao" : "assistente";
+  return "tela";
+}
+
+/**
+ * orcamento_registrar_envio(p_os, p_via, p_chave, p_marcou): a chave são os 8 últimos dígitos do telefone (a de
+ * _agenda_chave_telefone). No desvio do modo de teste, nada (não foi ao contato). Erro ou exceção: log_app_error (sem
+ * telefone), e o envio segue como estava. Nunca lança.
+ */
+export async function registrarEnvioDoOrcamento(
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  p: { serviceOrderId: string; via: ViaDoOrcamento; telefone: string; marcou: boolean; desviadoPorTeste: boolean },
+): Promise<"registrado" | "desviado" | "erro"> {
+  if (p.desviadoPorTeste) return "desviado";
+  try {
+    const { data, error } = await admin.rpc("orcamento_registrar_envio", {
+      p_os: p.serviceOrderId, p_via: p.via, p_chave: String(p.telefone ?? "").replace(/\D/g, "").slice(-8), p_marcou: p.marcou,
+    });
+    if (error) throw error;
+    // a função nunca lança: {ok: false} já foi ao _retorno_log do banco; aqui fica o rastro da edge
+    if ((data as { ok?: unknown } | null)?.ok === false) throw Object.assign(new Error("orcamento_registrar_envio devolveu ok falso"), { code: "ok_falso" });
+    return "registrado";
+  } catch (e) {
+    const codigo = String((e as { code?: unknown })?.code ?? (e as Error)?.name ?? "erro");
+    await logEdgeError(admin, {
+      context: "whatsapp-send",
+      action: "orcamento_registrar_envio",
+      message: `whatsapp-send: o envio do orçamento não foi registrado (${codigo})`,
+      details: { service_order_id: p.serviceOrderId, codigo },
+    });
+    return "erro";
+  }
 }
