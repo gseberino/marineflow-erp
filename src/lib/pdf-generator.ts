@@ -5,13 +5,16 @@ import {
   buildPaymentSection,
   buildPDFFilename,
   companyHeaderHTML,
+  descontoDoItem,
   esc,
   fmtCurrency,
   fmtDate,
+  linhasDoResumo,
   pageWrapper,
   paragrafos,
   PAYMENT_METHOD_LABELS,
   PDF_ROOT_CLASS,
+  percentualDoDesconto,
   tituloParaImpressao,
   unidadeDoDocumento,
   type PDFData,
@@ -500,9 +503,17 @@ function buildInvoiceHTML(data: PDFData, options: PDFOptions): string {
     hour: 'hora', visit: 'visita', day: 'dia', unit: 'un.',
   };
 
+  // Na fatura a linha mostra o total já com o desconto do item; o desconto vai numa nota embaixo
+  // do nome, para que o cliente veja de onde saiu a diferença (14/11/2026).
+  const notaDeDesconto = (item: { quantity: number; unit_price: number; discount_amount?: number | null }) => {
+    if (!options.showDiscount || descontoDoItem(item) <= 0) return '';
+    const pct = percentualDoDesconto(item);
+    return `<div style="font-weight:400;color:#dc2626;font-size:9px;">${fmtCurrency(item.quantity * item.unit_price)} com desconto de ${fmtCurrency(descontoDoItem(item))}${pct ? ` (${pct})` : ''}</div>`;
+  };
+
   const serviceRows = data.services.map(s => `
     <tr>
-      <td style="font-weight:600;">${esc(s.name)}${s.description ? `<div style="font-weight:400;color:var(--pdf-text-muted);font-size:9px;">${esc(s.description)}</div>` : ''}</td>
+      <td style="font-weight:600;">${esc(s.name)}${s.description ? `<div style="font-weight:400;color:var(--pdf-text-muted);font-size:9px;">${esc(s.description)}</div>` : ''}${notaDeDesconto(s)}</td>
       <td style="text-align:center;">${s.quantity} ${esc(billingUnitLabel[s.billing_unit] || s.billing_unit)}</td>
       <td style="text-align:right;font-weight:600;">${fmtCurrency(s.line_total)}</td>
     </tr>
@@ -510,36 +521,16 @@ function buildInvoiceHTML(data: PDFData, options: PDFOptions): string {
 
   const partsRows = data.parts.map(p => `
     <tr>
-      <td style="font-weight:600;">${esc(p.name)}</td>
+      <td style="font-weight:600;">${esc(p.name)}${notaDeDesconto(p)}</td>
       <td style="text-align:center;">${p.quantity}</td>
       <td style="text-align:right;font-weight:600;">${fmtCurrency(p.line_total)}</td>
     </tr>
   `).join('');
 
-  const summaryRows = [
-    data.services.length > 0 ? `<tr><td>Serviços Executados</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.labor_cost_total)}</td></tr>` : '',
-    data.parts.length > 0 ? `<tr><td>Materiais e Peças</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.parts_cost_total)}</td></tr>` : '',
-    options.showTravelCost && data.serviceOrder.travel_cost_total > 0 ? `<tr><td>Custos de Deslocamento</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.travel_cost_total)}</td></tr>` : '',
-    (() => {
-      if (!options.showDiscount || data.serviceOrder.discount_amount <= 0) return '';
-      const sPct = data.serviceOrder.discount_services_pct ?? 0;
-      const pPct = data.serviceOrder.discount_parts_pct ?? 0;
-      const hasBreakdown = sPct > 0 || pPct > 0;
-      if (hasBreakdown) {
-        const dSvc = Math.round(data.serviceOrder.labor_cost_total * sPct / 100 * 100) / 100;
-        const dPts = Math.round(data.serviceOrder.parts_cost_total * pPct / 100 * 100) / 100;
-        return [
-          dSvc > 0 ? `<tr><td style="color:#dc2626;padding-left:16px;">↳ Desc. Serviços (${sPct}%)</td><td style="text-align:right;color:#dc2626;">− ${fmtCurrency(dSvc)}</td></tr>` : '',
-          dPts > 0 ? `<tr><td style="color:#dc2626;padding-left:16px;">↳ Desc. Peças (${pPct}%)</td><td style="text-align:right;color:#dc2626;">− ${fmtCurrency(dPts)}</td></tr>` : '',
-          `<tr><td style="color:#dc2626;font-weight:600;">Total Desconto</td><td style="text-align:right;color:#dc2626;font-weight:600;">− ${fmtCurrency(data.serviceOrder.discount_amount)}</td></tr>`,
-        ].filter(Boolean).join('');
-      }
-      return `<tr><td style="color:#dc2626;">Desconto Especial</td><td style="text-align:right;color:#dc2626;">− ${fmtCurrency(data.serviceOrder.discount_amount)}</td></tr>`;
-    })(),
-    options.showCardFee && (data.serviceOrder.card_fee_amount ?? 0) > 0
-      ? `<tr><td>Taxa de cartão${data.serviceOrder.card_installments ? ` (${data.serviceOrder.card_installments}x)` : ''}</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.card_fee_amount!)}</td></tr>`
-      : '',
-  ].filter(Boolean).join('');
+  // O mesmo quadro do orçamento e da OS (linhasDoResumo): impostos, terceiros e o desconto dos
+  // itens entravam no total da fatura sem linha nenhuma.
+  const resumo = linhasDoResumo(data, options);
+  const summaryRows = resumo.linhas;
 
   const bank = data.bank || {};
   const hasBank = !!(bank.bank_name || bank.bank_agency || bank.bank_account || bank.pix_key);
@@ -598,6 +589,7 @@ ${companyHeaderHTML(data.company, 'Fatura de Serviço', docNumber)}
         </tr>
       </tbody>
     </table>
+    ${resumo.descontosConcedidos ? `<div style="margin-top:-10px;">${resumo.descontosConcedidos}</div>` : ''}
   </div>
 </div>
 

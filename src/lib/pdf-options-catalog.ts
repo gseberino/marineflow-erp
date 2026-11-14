@@ -35,25 +35,33 @@ type CatalogEntry = {
   perDocumentOnly?: boolean;
   /** quando ligada, esvazia as demais: os outros toggles perdem efeito */
   overridesOthers?: boolean;
+  /** Bloco do diálogo: o que decide VALOR na folha, ou o que decide o resto do conteúdo. */
+  grupo: 'valores' | 'conteudo';
 };
 
 const QUOTE_LIKE: PDFDocumentType[] = ['quote', 'service_order'];
 
+// Revisão de 14/11/2026 — cada opção oferecida tem de mudar a folha do documento em que aparece:
+// - "Comissão e total líquido" saiu: nenhum gerador a lia, e comissão é dado interno — não tem por
+//   que ir para o cliente. A chave continua em PDFOptions (padrões gravados seguem válidos).
+// - "Impostos" passou a funcionar (linha "Impostos" no quadro de valores).
+// - "Dados bancários" entrou no orçamento e na OS: o card já saía neles, sem como desligar.
+// - Na fatura saíram "Preço dos serviços", "Termos" e "Fotos dos produtos": o desenho da fatura
+//   não tem nenhum dos três, e a caixa não mudava nada.
 export const PDF_OPTION_CATALOG: readonly CatalogEntry[] = [
-  { key: 'hideFinancials',         i18nKey: 'hideFinancials',    fallback: 'Via de execução (sem valores)', docTypes: ['service_order'], perDocumentOnly: true, overridesOthers: true },
-  { key: 'showServicePrices',      i18nKey: 'showServicePrices', fallback: 'Preço unitário dos serviços', docTypes: [...QUOTE_LIKE, 'invoice'] },
-  { key: 'showPartsPrices',        i18nKey: 'showPartsPrices',   fallback: 'Preço unitário das peças',    docTypes: [...QUOTE_LIKE] },
-  { key: 'showTravelCost',         i18nKey: 'showTravelCost',    fallback: 'Custo de deslocamento',       docTypes: [...QUOTE_LIKE, 'invoice'] },
-  { key: 'showDiscount',           i18nKey: 'showDiscount',      fallback: 'Desconto',                    docTypes: [...QUOTE_LIKE, 'invoice'] },
-  { key: 'showTax',                i18nKey: 'showTax',           fallback: 'Impostos',                    docTypes: [...QUOTE_LIKE, 'invoice'] },
-  { key: 'showCardFee',            i18nKey: 'showCardFee',       fallback: 'Mostrar taxa de cartão',      docTypes: [...QUOTE_LIKE, 'invoice'] },
-  { key: 'showCommission',         i18nKey: 'showCommission',    fallback: 'Comissão e total líquido',    docTypes: [...QUOTE_LIKE] },
-  { key: 'showBankDetails',        i18nKey: 'showBankDetails',   fallback: 'Mostrar dados bancários',     docTypes: ['invoice'] },
-  { key: 'showPaymentInstructions', i18nKey: 'showPaymentInstructions', fallback: 'Mostrar instruções de pagamento', docTypes: ['invoice'] },
-  { key: 'showExtraNotes',         i18nKey: 'showExtraNotes',    fallback: 'Observações para impressão',  docTypes: [...QUOTE_LIKE, 'invoice'] },
-  { key: 'showTerms',              i18nKey: 'showTerms',         fallback: 'Termos e condições',          docTypes: [...QUOTE_LIKE, 'invoice'] },
-  { key: 'showSignature',          i18nKey: 'showSignature',     fallback: 'Campo de assinatura',         docTypes: [...QUOTE_LIKE] },
-  { key: 'showProductImages',      i18nKey: 'showProductImages', fallback: 'Incluir fotos dos produtos',  docTypes: [...QUOTE_LIKE, 'invoice'], requiresProductImages: true },
+  { key: 'hideFinancials',         i18nKey: 'hideFinancials',    fallback: 'Via de execução (sem valores)', docTypes: ['service_order'], perDocumentOnly: true, overridesOthers: true, grupo: 'valores' },
+  { key: 'showServicePrices',      i18nKey: 'showServicePrices', fallback: 'Valores dos serviços (unitário e total)', docTypes: [...QUOTE_LIKE], grupo: 'valores' },
+  { key: 'showPartsPrices',        i18nKey: 'showPartsPrices',   fallback: 'Valores das peças (unitário e total)',    docTypes: [...QUOTE_LIKE], grupo: 'valores' },
+  { key: 'showDiscount',           i18nKey: 'showDiscount',      fallback: 'Descontos (por item e geral)', docTypes: [...QUOTE_LIKE, 'invoice'], grupo: 'valores' },
+  { key: 'showTravelCost',         i18nKey: 'showTravelCost',    fallback: 'Deslocamento',                docTypes: [...QUOTE_LIKE, 'invoice'], grupo: 'valores' },
+  { key: 'showTax',                i18nKey: 'showTax',           fallback: 'Impostos',                    docTypes: [...QUOTE_LIKE, 'invoice'], grupo: 'valores' },
+  { key: 'showCardFee',            i18nKey: 'showCardFee',       fallback: 'Taxa de cartão',              docTypes: [...QUOTE_LIKE, 'invoice'], grupo: 'valores' },
+  { key: 'showBankDetails',        i18nKey: 'showBankDetails',   fallback: 'Dados bancários e Pix',       docTypes: [...QUOTE_LIKE, 'invoice'], grupo: 'valores' },
+  { key: 'showPaymentInstructions', i18nKey: 'showPaymentInstructions', fallback: 'Instruções de pagamento', docTypes: ['invoice'], grupo: 'valores' },
+  { key: 'showExtraNotes',         i18nKey: 'showExtraNotes',    fallback: 'Observações para impressão',  docTypes: [...QUOTE_LIKE, 'invoice'], grupo: 'conteudo' },
+  { key: 'showTerms',              i18nKey: 'showTerms',         fallback: 'Termos e condições',          docTypes: [...QUOTE_LIKE], grupo: 'conteudo' },
+  { key: 'showSignature',          i18nKey: 'showSignature',     fallback: 'Campo de assinatura',         docTypes: [...QUOTE_LIKE], grupo: 'conteudo' },
+  { key: 'showProductImages',      i18nKey: 'showProductImages', fallback: 'Fotos dos produtos',          docTypes: [...QUOTE_LIKE], requiresProductImages: true, grupo: 'conteudo' },
 ];
 
 /** Todas as chaves booleanas conhecidas — usada por `resolvePdfOptions` para descartar
@@ -73,7 +81,7 @@ export function pdfOptionItems(
   documentType: PDFDocumentType,
   labels: Record<string, string> | undefined,
   opts?: { hasProductImages?: boolean; includeConditional?: boolean },
-): Array<{ key: PdfOptionKey; label: string; overridesOthers: boolean }> {
+): Array<{ key: PdfOptionKey; label: string; overridesOthers: boolean; grupo: 'valores' | 'conteudo' }> {
   const { hasProductImages = false, includeConditional = true } = opts ?? {};
   return PDF_OPTION_CATALOG
     .filter(e => e.docTypes.includes(documentType))
@@ -84,5 +92,6 @@ export function pdfOptionItems(
       key: e.key,
       label: labels?.[e.i18nKey] || e.fallback,
       overridesOthers: !!e.overridesOthers,
+      grupo: e.grupo,
     }));
 }

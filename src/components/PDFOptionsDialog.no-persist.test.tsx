@@ -87,7 +87,7 @@ describe('PDFOptionsDialog — não persiste preferência (MF-AUD-014)', () => {
   });
 
   it('herda o padrão da empresa como estado inicial dos checkboxes', async () => {
-    appSettingsRows.push({ key: 'pdf_options_quote', value: JSON.stringify({ showTerms: false, showCommission: true }) });
+    appSettingsRows.push({ key: 'pdf_options_quote', value: JSON.stringify({ showTerms: false, showTax: false }) });
     const { onGenerate } = renderDialog();
 
     // o padrão gravado chega pela query e alcança os checkboxes mesmo com o diálogo já aberto
@@ -95,7 +95,7 @@ describe('PDFOptionsDialog — não persiste preferência (MF-AUD-014)', () => {
     await waitFor(() => expect((termos as HTMLElement).getAttribute('data-state')).toBe('unchecked'));
 
     await userEvent.click(screen.getByRole('button', { name: /imprimir|print/i }));
-    expect(onGenerate.mock.calls[0][1]).toMatchObject({ showTerms: false, showCommission: true });
+    expect(onGenerate.mock.calls[0][1]).toMatchObject({ showTerms: false, showTax: false });
   });
 
   it('sem padrão gravado, usa o padrão de fábrica', async () => {
@@ -106,7 +106,7 @@ describe('PDFOptionsDialog — não persiste preferência (MF-AUD-014)', () => {
     expect(usadas).toMatchObject({
       showTerms: DEFAULT_PDF_OPTIONS.showTerms,
       showServicePrices: DEFAULT_PDF_OPTIONS.showServicePrices,
-      showCommission: DEFAULT_PDF_OPTIONS.showCommission,
+      showTax: DEFAULT_PDF_OPTIONS.showTax,
     });
   });
 
@@ -133,8 +133,10 @@ describe('PDFOptionsDialog — via de execução desabilita só os toggles de va
     renderDialog({ documentType: 'service_order', hasProductImages: true });
     await userEvent.click(await screen.findByLabelText(/via de execução|execution copy/i));
 
-    expect(screen.getByLabelText(/preço unitário dos serviços|service unit prices/i)).toBeDisabled();
-    expect(screen.getByLabelText(/^desconto$|^discount$/i)).toBeDisabled();
+    expect(screen.getByLabelText(/valores dos serviços|service amounts/i)).toBeDisabled();
+    expect(screen.getByLabelText(/^descontos|^discounts/i)).toBeDisabled();
+    expect(screen.getByLabelText(/^impostos$|^taxes$/i)).toBeDisabled();
+    expect(screen.getByLabelText(/dados bancários|bank details/i)).toBeDisabled();
     expect(screen.getByLabelText(/termos e condições|terms and conditions/i)).toBeEnabled();
     expect(screen.getByLabelText(/campo de assinatura|signature field/i)).toBeEnabled();
     expect(screen.getByLabelText(/fotos dos produtos|product photos/i)).toBeEnabled();

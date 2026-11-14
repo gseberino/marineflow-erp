@@ -174,22 +174,39 @@ export function PDFOptionsDialog({
               <p className="text-sm font-medium text-muted-foreground">{t.pdf.itemsToShow}</p>
               <p className="text-xs text-muted-foreground">{t.pdf.optionsScopeHint}</p>
             </div>
-            {checkboxItems.map(({ key, label, overridesOthers }) => {
-              const desabilitado = anulaOsOutros && !overridesOthers && isFinancialOption(key);
+            {/* Dois blocos (14/11/2026): o que decide VALOR na folha e o resto do conteúdo. Numa
+                lista só, "Termos" ficava entre "Taxa de cartão" e "Impostos", e não dava para
+                saber o que mexia na conta do cliente. */}
+            {(['valores', 'conteudo'] as const).map((grupo) => {
+              const itens = checkboxItems.filter(i => i.grupo === grupo);
+              if (itens.length === 0) return null;
               return (
-                <div key={key} className={`flex items-center gap-2${desabilitado ? ' opacity-50' : ''}`}>
-                  <Checkbox
-                    id={key}
-                    checked={!!options[key]}
-                    disabled={desabilitado}
-                    onCheckedChange={(checked) => {
-                      optionsTouched.current = true;
-                      setOptions(p => ({ ...p, [key]: !!checked }));
-                    }}
-                  />
-                  <Label htmlFor={key} className={`text-sm${desabilitado ? '' : ' cursor-pointer'}`}>
-                    {label}
-                  </Label>
+                <div key={grupo} className="space-y-2 rounded-lg border border-border p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {grupo === 'valores' ? t.pdf.valuesGroup : t.pdf.contentGroup}
+                  </p>
+                  {itens.map(({ key, label, overridesOthers }) => {
+                    const desabilitado = anulaOsOutros && !overridesOthers && isFinancialOption(key);
+                    return (
+                      <div key={key} className={`flex items-center gap-2${desabilitado ? ' opacity-50' : ''}`}>
+                        <Checkbox
+                          id={key}
+                          checked={!!options[key]}
+                          disabled={desabilitado}
+                          onCheckedChange={(checked) => {
+                            optionsTouched.current = true;
+                            setOptions(p => ({ ...p, [key]: !!checked }));
+                          }}
+                        />
+                        <Label htmlFor={key} className={`text-sm${desabilitado ? '' : ' cursor-pointer'}`}>
+                          {label}
+                        </Label>
+                      </div>
+                    );
+                  })}
+                  {grupo === 'valores' && !anulaOsOutros && (
+                    <p className="text-xs text-muted-foreground">{t.pdf.valuesHint}</p>
+                  )}
                 </div>
               );
             })}

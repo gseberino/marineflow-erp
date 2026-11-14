@@ -34,7 +34,11 @@ export type PDFOptions = {
   showDiscount: boolean;
   showTax: boolean;
   showCardFee: boolean;
-  showCommission: boolean;
+  /**
+   * Morto desde 14/11/2026: nenhum gerador o lia, e comissão é dado interno — nunca vai para o
+   * cliente. Fica opcional só para que um objeto antigo com a chave continue tipando.
+   */
+  showCommission?: boolean;
   showTerms: boolean;
   showSignature: boolean;
   // Optional: include product images in parts table
@@ -91,7 +95,6 @@ export const DEFAULT_PDF_OPTIONS: PDFOptions = {
   showDiscount: true,
   showTax: true,
   showCardFee: true,
-  showCommission: false,
   showTerms: true,
   showSignature: true,
   showProductImages: false,
@@ -313,6 +316,8 @@ export type PDFData = {
     labor_cost_total: number;
     parts_cost_total: number;
     travel_cost_total: number;
+    /** false = o deslocamento não entra no total (calc_so_totals); o PDF não o imprime. */
+    is_travel_billable?: boolean | null;
     travel_hours?: number;
     ferry_cost?: number;
     travel_type?: string;
@@ -378,14 +383,21 @@ export type PDFData = {
     billing_unit: string;
     quantity: number;
     unit_price: number;
+    /** Já LÍQUIDO do desconto do item: quantity × unit_price − discount_amount. */
     line_total: number;
+    /** Desconto do item em R$ (fonte da verdade). */
+    discount_amount?: number;
+    discount_pct?: number;
   }>;
   parts: Array<{
     name: string;
     sku?: string;
     quantity: number;
     unit_price: number;
+    /** Já LÍQUIDO do desconto do item: quantity × unit_price − discount_amount. */
     line_total: number;
+    discount_amount?: number;
+    discount_pct?: number;
     image_url?: string | null;
   }>;
   expenses?: Array<{
@@ -746,7 +758,8 @@ export function buildPaymentSection(so: PDFData['serviceOrder']): string {
     const servicesTotal = Number(so.labor_cost_total || 0);
     const partsTotal = Number(so.parts_cost_total || 0);
     const expensesTotal =
-      Number(so.travel_cost_total || 0) +
+      // Deslocamento não faturável não está no total (calc_so_totals): fora da base das parcelas.
+      (so.is_travel_billable === false ? 0 : Number(so.travel_cost_total || 0)) +
       Number(so.operational_cost_total || 0) +
       Number(so.subcontract_cost_total || 0);
     const grandTotal = Number(so.grand_total || 0);
@@ -944,6 +957,154 @@ export function buildPaymentHistorySection(so: PDFData['serviceOrder']): string 
   `;
 }
 
+// ============= VALORES: desconto por item e o quadro de totais =============
+//
+// ═══ A REGRA (14/11/2026) ═══
+//
+// O cliente confere a conta. Cada linha do item tem de fechar (qtd × unitário − desconto =
+// total), cada tabela termina com o seu total e a soma dos descontos dela, e o quadro de
+// valores tem de somar até o VALOR TOTAL com as mesmas parcelas que calc_so_totals usa:
+//   serviços + peças + despesas + deslocamento faturável + terceiros − desconto + impostos + taxa de cartão.
+// Até aqui o desconto do item não chegava ao PDF, os impostos e os serviços de terceiros entravam
+// no total sem linha nenhuma, e o deslocamento não faturável saía impresso sem estar no total.
+
+const arred2 = (v: number) => Math.round(v * 100) / 100;
+
+/** Desconto do item em R$; só o positivo conta. */
+export const descontoDoItem = (item: { discount_amount?: number | null }): number =>
+  Math.max(0, Number(item.discount_amount) || 0);
+
+/**
+ * "10%" / "12,5%": o percentual sai do VALOR (R$ é a fonte da verdade — o percentual gravado
+ * fica velho quando alguém edita o valor), sobre o bruto da linha. Vazio sem desconto.
+ */
+export function percentualDoDesconto(item: { quantity: number; unit_price: number; discount_amount?: number | null }): string {
+  const bruto = Number(item.quantity) * Number(item.unit_price);
+  const desconto = descontoDoItem(item);
+  if (!(bruto > 0) || desconto <= 0) return '';
+  const pct = Math.round((desconto / bruto) * 1000) / 10;
+  return `${String(pct).replace('.', ',')}%`;
+}
+
+/** Soma dos descontos dados item a item, por seção. */
+export function descontosDosItens(data: Pick<PDFData, 'services' | 'parts'>): { servicos: number; pecas: number; total: number } {
+  const servicos = arred2((data.services || []).reduce((s, i) => s + descontoDoItem(i), 0));
+  const pecas = arred2((data.parts || []).reduce((s, i) => s + descontoDoItem(i), 0));
+  return { servicos, pecas, total: arred2(servicos + pecas) };
+}
+
+/**
+ * O unitário que vai impresso. Com o desconto à mostra é o preço de tabela (a coluna Desconto
+ * explica a diferença); com o desconto oculto é o preço efetivo (total ÷ qtd), para que a linha
+ * ainda feche sem revelar o desconto.
+ */
+export function unitarioImpresso(
+  item: { quantity: number; unit_price: number; line_total: number; discount_amount?: number | null },
+  mostraDesconto: boolean,
+): number {
+  if (mostraDesconto || descontoDoItem(item) <= 0) return Number(item.unit_price) || 0;
+  const qtd = Number(item.quantity) || 0;
+  return qtd > 0 ? arred2(Number(item.line_total) / qtd) : Number(item.unit_price) || 0;
+}
+
+/** A célula da coluna Desconto: "− R$ 50,00" e o percentual embaixo; traço sem desconto. */
+export function celulaDeDesconto(item: { quantity: number; unit_price: number; discount_amount?: number | null }): string {
+  const desconto = descontoDoItem(item);
+  if (desconto <= 0) return `<td style="text-align:right;color:var(--pdf-text-muted);">—</td>`;
+  const pct = percentualDoDesconto(item);
+  return `<td style="text-align:right;color:#dc2626;white-space:nowrap;">− ${fmtCurrency(desconto)}${pct ? `<div style="font-size:8px;">(${pct})</div>` : ''}</td>`;
+}
+
+/**
+ * A última linha da tabela de itens: "Total dos serviços", a soma dos descontos (quando a coluna
+ * existe) e a soma dos totais. Fica no <tbody>, não no <tfoot>: o tfoot se repete em cada página
+ * impressa, e um total repetido no pé de cada folha confundiria mais do que ajudaria.
+ */
+export function linhaDeTotalDaTabela(
+  rotulo: string,
+  itens: Array<{ line_total: number; discount_amount?: number | null }>,
+  colunas: { unitario: boolean; desconto: boolean; total: boolean },
+): string {
+  if (!colunas.total) return '';
+  const somaTotal = arred2(itens.reduce((s, i) => s + (Number(i.line_total) || 0), 0));
+  const somaDesconto = arred2(itens.reduce((s, i) => s + descontoDoItem(i), 0));
+  const fundo = 'background:#EEF2F7;border-top:2px solid var(--pdf-primary);';
+  return `
+    <tr>
+      <td colspan="${2 + (colunas.unitario ? 1 : 0)}" style="${fundo}text-align:right;font-weight:700;color:var(--pdf-primary);">${esc(rotulo)}</td>
+      ${colunas.desconto ? `<td style="${fundo}text-align:right;font-weight:700;color:#dc2626;white-space:nowrap;">${somaDesconto > 0 ? `− ${fmtCurrency(somaDesconto)}` : '—'}</td>` : ''}
+      <td style="${fundo}text-align:right;font-weight:800;color:var(--pdf-primary);white-space:nowrap;">${fmtCurrency(somaTotal)}</td>
+    </tr>`;
+}
+
+/**
+ * As linhas do quadro de valores (acima do VALOR TOTAL) e a frase de descontos concedidos,
+ * para orçamento, OS e fatura. As seções de serviço e peça saem pelo total JÁ com o desconto
+ * dos itens — o mesmo número da última linha de cada tabela, que é o que o cliente confere.
+ *
+ * Desmarcar uma opção no diálogo (deslocamento, desconto, impostos, taxa de cartão) tira a LINHA
+ * da folha; o valor continua no total, porque o total é o do banco. O diálogo avisa isso.
+ */
+export function linhasDoResumo(data: PDFData, options: PDFOptions): { linhas: string; descontosConcedidos: string } {
+  const so = data.serviceOrder;
+  const linha = (rotulo: string, valor: number, estilo = '') =>
+    `<tr><td style="${estilo}">${rotulo}</td><td style="text-align:right;white-space:nowrap;${estilo}">${fmtCurrency(valor)}</td></tr>`;
+  const linhaNegativa = (rotulo: string, valor: number, estilo = '') =>
+    `<tr><td style="color:#dc2626;${estilo}">${rotulo}</td><td style="text-align:right;color:#dc2626;white-space:nowrap;${estilo}">− ${fmtCurrency(valor)}</td></tr>`;
+
+  const mostraDesconto = !!options.showDiscount;
+  const dosItens = descontosDosItens(data);
+  const descontoGeral = Math.max(0, Number(so.discount_amount) || 0);
+  const deslocamento = so.is_travel_billable === false ? 0 : Number(so.travel_cost_total) || 0;
+  const imposto = Number(so.tax_amount) || 0;
+  const taxaCartao = Number(so.card_fee_amount) || 0;
+
+  const linhasDoDescontoGeral = (): string => {
+    if (!mostraDesconto || descontoGeral <= 0) return '';
+    // Com desconto nos itens também, o do quadro é "adicional" — senão o cliente lê o mesmo
+    // desconto duas vezes.
+    const rotulo = dosItens.total > 0 ? 'Desconto adicional' : 'Desconto';
+    const sPct = so.discount_services_pct ?? 0;
+    const pPct = so.discount_parts_pct ?? 0;
+    if (sPct > 0 || pPct > 0) {
+      const dSvc = arred2(so.labor_cost_total * sPct / 100);
+      const dPts = arred2(so.parts_cost_total * pPct / 100);
+      return [
+        dSvc > 0 ? linhaNegativa(`↳ ${rotulo} em serviços (${sPct}%)`, dSvc, 'padding-left:16px;') : '',
+        dPts > 0 ? linhaNegativa(`↳ ${rotulo} em peças (${pPct}%)`, dPts, 'padding-left:16px;') : '',
+        linhaNegativa(rotulo, descontoGeral, 'font-weight:600;'),
+      ].filter(Boolean).join('');
+    }
+    return linhaNegativa(rotulo, descontoGeral);
+  };
+
+  const linhas = [
+    data.services.length > 0 ? linha('Serviços', so.labor_cost_total) : '',
+    data.parts.length > 0 ? linha('Peças e materiais', so.parts_cost_total) : '',
+    options.showTravelCost && deslocamento > 0 ? linha('Deslocamento / logística', deslocamento) : '',
+    (so.operational_cost_total ?? 0) > 0 ? linha('Outras despesas', so.operational_cost_total!) : '',
+    (so.subcontract_cost_total ?? 0) > 0 ? linha('Serviços de terceiros', so.subcontract_cost_total!) : '',
+    linhasDoDescontoGeral(),
+    options.showTax && imposto > 0 ? linha('Impostos', imposto) : '',
+    options.showCardFee && taxaCartao > 0
+      ? linha(`Taxa de cartão${so.card_installments ? ` (${so.card_installments}x)` : ''}`, taxaCartao)
+      : '',
+  ].filter(Boolean).join('');
+
+  // A economia inteira num lugar só: o desconto dos itens está espalhado pelas tabelas, e o
+  // geral fica no quadro. Só aparece quando há desconto nos itens (sem ele, a linha "Desconto"
+  // do quadro já diz tudo).
+  const economia = arred2(dosItens.total + descontoGeral);
+  const descontosConcedidos = mostraDesconto && dosItens.total > 0
+    ? `<div style="text-align:right;font-size:10px;font-weight:700;color:#16a34a;margin-top:4px;padding-right:12px;">
+        Total de descontos concedidos: ${fmtCurrency(economia)}
+        ${descontoGeral > 0 ? `<div style="font-size:8.5px;font-weight:500;color:var(--pdf-text-muted);">nos itens ${fmtCurrency(dosItens.total)} + adicional ${fmtCurrency(descontoGeral)}</div>` : ''}
+      </div>`
+    : '';
+
+  return { linhas, descontosConcedidos };
+}
+
 /** Orçamento ou OS — o documento que a tela baixa e que o assistente manda pelo WhatsApp. */
 export function buildOrderHTML(data: PDFData, options: PDFOptions): string {
   const isQuote = data.documentType === 'quote';
@@ -953,8 +1114,14 @@ export function buildOrderHTML(data: PDFData, options: PDFOptions): string {
   const docTypeLabel = isQuote ? 'Orçamento' : semValores ? 'Ordem de Serviço — Via de Execução' : 'Ordem de Serviço';
   const docNumber = data.serviceOrder.service_order_number;
 
-  const billingUnitLabel: Record<string, string> = {
-    hour: 'hora', visit: 'visita', day: 'dia', unit: 'un.',
+  // "8 horas", "1 hora": no singular só a quantidade 1 (14/11/2026 — saía "8 hora").
+  const billingUnitLabel = (unidade: string, quantidade: number): string => {
+    const umSo = Number(quantidade) === 1;
+    const rotulos: Record<string, [string, string]> = {
+      hour: ['hora', 'horas'], visit: ['visita', 'visitas'], day: ['dia', 'dias'], unit: ['un.', 'un.'],
+    };
+    const r = rotulos[unidade];
+    return r ? (umSo ? r[0] : r[1]) : unidade;
   };
 
   const getValidityText = (): string => {
@@ -983,18 +1150,39 @@ export function buildOrderHTML(data: PDFData, options: PDFOptions): string {
   // As larguras seguem a contagem de colunas para fecharem em 100%. Com literais, uma
   // coluna de valor a menos deixava 15% sem dono — e imprimir e baixar redistribuíam
   // a sobra de jeitos diferentes. Na via de execução não há coluna de valor nenhuma.
-  const colServico = itemColumnWidths(!semValores && vis.servicoUnitario, !semValores && vis.servicoTotal);
-  const colPeca = itemColumnWidths(!semValores && vis.pecaUnitario, !semValores && vis.pecaTotal);
+  // A coluna Desconto só existe na tabela que tem item com desconto, com o desconto à mostra e
+  // com os valores daquela seção à mostra (14/11/2026).
+  const mostraDesconto = !!options.showDiscount;
+  const colunasServico = {
+    unitario: !semValores && vis.servicoUnitario,
+    desconto: !semValores && vis.servicoTotal && mostraDesconto && data.services.some(s => descontoDoItem(s) > 0),
+    total: !semValores && vis.servicoTotal,
+  };
+  const colunasPeca = {
+    unitario: !semValores && vis.pecaUnitario,
+    desconto: !semValores && vis.pecaTotal && mostraDesconto && data.parts.some(p => descontoDoItem(p) > 0),
+    total: !semValores && vis.pecaTotal,
+  };
+  const colServico = itemColumnWidths(colunasServico.unitario, colunasServico.total, colunasServico.desconto);
+  const colPeca = itemColumnWidths(colunasPeca.unitario, colunasPeca.total, colunasPeca.desconto);
 
   const serviceRows = data.services.map(s => `
     <tr>
       <td style="font-weight:600;">${esc(s.name)}${s.description ? `<div style="font-weight:400;color:var(--pdf-text-muted);font-size:9px;margin-top:2px;">${esc(s.description)}</div>` : ''}</td>
-      <td style="text-align:center;">${s.quantity} ${esc(billingUnitLabel[s.billing_unit] || s.billing_unit)}</td>
-      ${semValores ? '' : `
-      ${vis.servicoUnitario ? `<td style="text-align:right;">${fmtCurrency(s.unit_price)}</td>` : ''}
-      ${vis.servicoTotal ? `<td style="text-align:right;font-weight:600;">${fmtCurrency(s.line_total)}</td>` : ''}`}
+      <td style="text-align:center;">${s.quantity} ${esc(billingUnitLabel(s.billing_unit, s.quantity))}</td>
+      ${colunasServico.unitario ? `<td style="text-align:right;white-space:nowrap;">${fmtCurrency(unitarioImpresso(s, mostraDesconto))}</td>` : ''}
+      ${colunasServico.desconto ? celulaDeDesconto(s) : ''}
+      ${colunasServico.total ? `<td style="text-align:right;font-weight:600;white-space:nowrap;">${fmtCurrency(s.line_total)}</td>` : ''}
     </tr>
   `).join('');
+  // A última linha de cada tabela: total e soma dos descontos. Com um item só e sem desconto ela
+  // repetiria a linha de cima, então fica de fora.
+  const totalDosServicos = data.services.length > 1 || colunasServico.desconto
+    ? linhaDeTotalDaTabela('Total dos serviços', data.services, colunasServico)
+    : '';
+  const totalDasPecas = data.parts.length > 1 || colunasPeca.desconto
+    ? linhaDeTotalDaTabela('Total das peças e materiais', data.parts, colunasPeca)
+    : '';
 
   const partsRows = data.parts.map(p => {
     const showImg = !!options.showProductImages && !!p.image_url;
@@ -1013,9 +1201,9 @@ export function buildOrderHTML(data: PDFData, options: PDFOptions): string {
     <tr>
       <td>${itemCell}</td>
       <td style="text-align:center;">${p.quantity}</td>
-      ${semValores ? '' : `
-      ${vis.pecaUnitario ? `<td style="text-align:right;">${fmtCurrency(p.unit_price)}</td>` : ''}
-      ${vis.pecaTotal ? `<td style="text-align:right;font-weight:600;">${fmtCurrency(p.line_total)}</td>` : ''}`}
+      ${colunasPeca.unitario ? `<td style="text-align:right;white-space:nowrap;">${fmtCurrency(unitarioImpresso(p, mostraDesconto))}</td>` : ''}
+      ${colunasPeca.desconto ? celulaDeDesconto(p) : ''}
+      ${colunasPeca.total ? `<td style="text-align:right;font-weight:600;white-space:nowrap;">${fmtCurrency(p.line_total)}</td>` : ''}
     </tr>
   `;}).join('');
 
@@ -1035,31 +1223,8 @@ export function buildOrderHTML(data: PDFData, options: PDFOptions): string {
     </div>
   ` : '';
 
-  const summaryRows = semValores ? '' : [
-    data.services.length > 0 ? `<tr><td>Subtotal Serviços</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.labor_cost_total)}</td></tr>` : '',
-    data.parts.length > 0 ? `<tr><td>Subtotal Peças</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.parts_cost_total)}</td></tr>` : '',
-    options.showTravelCost && data.serviceOrder.travel_cost_total > 0 ? `<tr><td>Deslocamento / Logística</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.travel_cost_total)}</td></tr>` : '',
-    (data.serviceOrder.operational_cost_total ?? 0) > 0 ? `<tr><td>Outras Despesas</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.operational_cost_total!)}</td></tr>` : '',
-    (() => {
-      if (!options.showDiscount || data.serviceOrder.discount_amount <= 0) return '';
-      const sPct = data.serviceOrder.discount_services_pct ?? 0;
-      const pPct = data.serviceOrder.discount_parts_pct ?? 0;
-      const hasBreakdown = (sPct > 0 || pPct > 0) && (sPct + pPct > 0);
-      if (hasBreakdown) {
-        const dSvc = Math.round(data.serviceOrder.labor_cost_total * sPct / 100 * 100) / 100;
-        const dPts = Math.round(data.serviceOrder.parts_cost_total * pPct / 100 * 100) / 100;
-        return [
-          dSvc > 0 ? `<tr><td style="color:#dc2626;padding-left:16px;">↳ Desc. Serviços (${sPct}%)</td><td style="text-align:right;color:#dc2626;">− ${fmtCurrency(dSvc)}</td></tr>` : '',
-          dPts > 0 ? `<tr><td style="color:#dc2626;padding-left:16px;">↳ Desc. Peças (${pPct}%)</td><td style="text-align:right;color:#dc2626;">− ${fmtCurrency(dPts)}</td></tr>` : '',
-          `<tr><td style="color:#dc2626;font-weight:600;">Total Desconto</td><td style="text-align:right;color:#dc2626;font-weight:600;">− ${fmtCurrency(data.serviceOrder.discount_amount)}</td></tr>`,
-        ].filter(Boolean).join('');
-      }
-      return `<tr><td style="color:#dc2626;">Desconto Especial</td><td style="text-align:right;color:#dc2626;">− ${fmtCurrency(data.serviceOrder.discount_amount)}</td></tr>`;
-    })(),
-    options.showCardFee && (data.serviceOrder.card_fee_amount ?? 0) > 0
-      ? `<tr><td>Taxa de cartão${data.serviceOrder.card_installments ? ` (${data.serviceOrder.card_installments}x)` : ''}</td><td style="text-align:right;">${fmtCurrency(data.serviceOrder.card_fee_amount!)}</td></tr>`
-      : '',
-  ].filter(Boolean).join('');
+  const resumo = semValores ? { linhas: '', descontosConcedidos: '' } : linhasDoResumo(data, options);
+  const summaryRows = resumo.linhas;
 
   // "Motorhome: Iveco Daily" / "Lancha: Netuno II". Modelo e placa/inscrição têm linha
   // própria logo abaixo, por isso ficam fora daqui.
@@ -1150,12 +1315,12 @@ ${data.services.length > 0 ? `
     <tr>
       <th style="width:${colServico.descricao}%;">Descrição Técnica</th>
       <th style="width:${colServico.quantidade}%;text-align:center;">Qtd/Unid</th>
-      ${semValores ? '' : `
-      ${vis.servicoUnitario ? `<th style="width:${colServico.valor}%;text-align:right;">Unitário</th>` : ''}
-      ${vis.servicoTotal ? `<th style="width:${colServico.valor}%;text-align:right;">Subtotal</th>` : ''}`}
+      ${colunasServico.unitario ? `<th style="width:${colServico.valor}%;text-align:right;">Unitário</th>` : ''}
+      ${colunasServico.desconto ? `<th style="width:${colServico.valor}%;text-align:right;">Desconto</th>` : ''}
+      ${colunasServico.total ? `<th style="width:${colServico.valor}%;text-align:right;">Total</th>` : ''}
     </tr>
   </thead>
-  <tbody>${serviceRows}</tbody>
+  <tbody>${serviceRows}${totalDosServicos}</tbody>
 </table>
 ` : ''}
 
@@ -1166,12 +1331,12 @@ ${data.parts.length > 0 ? `
     <tr>
       <th style="width:${colPeca.descricao}%;">Item / Especificação</th>
       <th style="width:${colPeca.quantidade}%;text-align:center;">Qtd</th>
-      ${semValores ? '' : `
-      ${vis.pecaUnitario ? `<th style="width:${colPeca.valor}%;text-align:right;">Unitário</th>` : ''}
-      ${vis.pecaTotal ? `<th style="width:${colPeca.valor}%;text-align:right;">Subtotal</th>` : ''}`}
+      ${colunasPeca.unitario ? `<th style="width:${colPeca.valor}%;text-align:right;">Unitário</th>` : ''}
+      ${colunasPeca.desconto ? `<th style="width:${colPeca.valor}%;text-align:right;">Desconto</th>` : ''}
+      ${colunasPeca.total ? `<th style="width:${colPeca.valor}%;text-align:right;">Total</th>` : ''}
     </tr>
   </thead>
-  <tbody>${partsRows}</tbody>
+  <tbody>${partsRows}${totalDasPecas}</tbody>
 </table>
 ` : ''}
 
@@ -1195,7 +1360,8 @@ ${vis.resumoFinanceiro ? `
         </tr>
       </tbody>
     </table>
-    ${isQuote ? `<div style="text-align:right;font-size:10px;font-weight:700;color:var(--pdf-secondary);margin-top:-10px;padding-right:12px;">${getValidityText()}</div>` : ''}
+    ${resumo.descontosConcedidos ? `<div style="margin-top:-10px;margin-bottom:12px;">${resumo.descontosConcedidos}</div>` : ''}
+    ${isQuote ? `<div style="text-align:right;font-size:10px;font-weight:700;color:var(--pdf-secondary);margin-top:${resumo.descontosConcedidos ? '0' : '-10px'};padding-right:12px;">${getValidityText()}</div>` : ''}
   </div>
 </div>` : ''}
 

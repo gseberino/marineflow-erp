@@ -23,10 +23,10 @@ describe('resolvePdfOptions — padrão da empresa', () => {
   });
 
   it('aplica o que está gravado por cima do padrão de fábrica', () => {
-    const settings = { pdf_options_quote: JSON.stringify({ showTerms: false, showCommission: true }) };
+    const settings = { pdf_options_quote: JSON.stringify({ showTerms: false, showTax: false }) };
     const opts = resolvePdfOptions(settings, 'quote');
     expect(opts.showTerms).toBe(false);
-    expect(opts.showCommission).toBe(true);
+    expect(opts.showTax).toBe(false);
     // o que não foi gravado continua vindo do padrão de fábrica
     expect(opts.showServicePrices).toBe(DEFAULT_PDF_OPTIONS.showServicePrices);
   });
@@ -125,13 +125,19 @@ describe('catálogo de opções de PDF', () => {
     expect(pdfOptionItems('service_order', labels).find(i => i.key === 'showTerms')?.overridesOthers).toBe(false);
   });
 
-  it('fatura tem dados bancários e instruções; orçamento não', () => {
+  it('dados bancários em todos (o card sai no orçamento e na OS também); instruções só na fatura', () => {
     const fatura = pdfOptionItems('invoice', labels).map(i => i.key);
     expect(fatura).toContain('showBankDetails');
     expect(fatura).toContain('showPaymentInstructions');
     const orcamento = pdfOptionItems('quote', labels).map(i => i.key);
-    expect(orcamento).not.toContain('showBankDetails');
+    expect(orcamento).toContain('showBankDetails');
     expect(orcamento).not.toContain('showPaymentInstructions');
+    // comissão é dado interno e nenhum gerador a lia: não é oferecida em documento nenhum
+    expect(orcamento).not.toContain('showCommission');
+    // a fatura não tem preço unitário, termos nem fotos: a caixa não mudaria nada
+    expect(fatura).not.toContain('showServicePrices');
+    expect(fatura).not.toContain('showTerms');
+    expect(fatura).not.toContain('showProductImages');
     // e o que é de orçamento não vaza para a fatura
     expect(fatura).not.toContain('showCommission');
     expect(fatura).not.toContain('showSignature');
@@ -155,7 +161,7 @@ describe('catálogo de opções de PDF', () => {
     const itens = pdfOptionItems('quote', { showTerms: 'Terms and conditions' });
     expect(itens.find(i => i.key === 'showTerms')?.label).toBe('Terms and conditions');
     // sem a chave no dicionário passado, cai na rede de segurança do catálogo
-    expect(itens.find(i => i.key === 'showCardFee')?.label).toBe('Mostrar taxa de cartão');
+    expect(itens.find(i => i.key === 'showCardFee')?.label).toBe('Taxa de cartão');
   });
 
   it('toda opção tem tradução nos DOIS idiomas — nenhuma sobra com texto fixo em português', () => {

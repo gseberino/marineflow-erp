@@ -191,7 +191,7 @@ describe('as colunas da tabela de itens somam 100% em qualquer combinação de t
     expect(html).toContain('<th style="width:55%;">Descrição Técnica</th>');
     expect(html).toContain('<th style="width:15%;text-align:center;">Qtd/Unid</th>');
     expect(html).toContain('<th style="width:15%;text-align:right;">Unitário</th>');
-    expect(html).toContain('<th style="width:15%;text-align:right;">Subtotal</th>');
+    expect(html).toContain('<th style="width:15%;text-align:right;">Total</th>');
   });
 
   it('sem preço das peças, a descrição da peça absorve a sobra e a de serviço não muda', () => {

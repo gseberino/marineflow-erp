@@ -51,8 +51,8 @@ export function valueVisibility(options: Partial<PDFOptions>): ValueVisibility {
  * Precisa bater com o número de `<td>` de cada linha, senão o `colspan` do
  * rodapé desalinha a tabela inteira — o tipo de defeito que só aparece no papel.
  */
-export function itemColumnCount(mostraUnitario: boolean, mostraTotal: boolean): number {
-  return 2 + (mostraUnitario ? 1 : 0) + (mostraTotal ? 1 : 0); // descrição + qtd
+export function itemColumnCount(mostraUnitario: boolean, mostraTotal: boolean, mostraDesconto = false): number {
+  return 2 + (mostraUnitario ? 1 : 0) + (mostraDesconto ? 1 : 0) + (mostraTotal ? 1 : 0); // descrição + qtd
 }
 
 export interface ItemColumnWidths {
@@ -75,8 +75,10 @@ export interface ItemColumnWidths {
  * ficam com a mesma largura em todas as combinações, para que a tabela de serviços e
  * a de peças alinhem entre si mesmo quando uma mostra preço e a outra não.
  */
-export function itemColumnWidths(mostraUnitario: boolean, mostraTotal: boolean): ItemColumnWidths {
-  const colunasDeValor = itemColumnCount(mostraUnitario, mostraTotal) - 2;
+export function itemColumnWidths(mostraUnitario: boolean, mostraTotal: boolean, mostraDesconto = false): ItemColumnWidths {
+  // A coluna "Desconto" (14/11/2026) só existe quando algum item da tabela tem desconto: é mais
+  // uma coluna de valor, da mesma largura das outras, e a sobra continua indo para a descrição.
+  const colunasDeValor = itemColumnCount(mostraUnitario, mostraTotal, mostraDesconto) - 2;
   const valor = 15;
   // Sem valor nenhum a quantidade ganha um pouco mais: é o que a via de execução já usava.
   const quantidade = colunasDeValor > 0 ? 15 : 20;

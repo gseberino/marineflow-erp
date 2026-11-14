@@ -301,6 +301,9 @@ export async function carregarPDFData(
       labor_cost_total: so.labor_cost_total || 0,
       parts_cost_total: so.parts_cost_total || 0,
       travel_cost_total: so.travel_cost_total || 0,
+      // calc_so_totals só soma o deslocamento quando ele é faturável; o PDF tem de seguir a mesma
+      // regra, senão imprime uma linha que não está no total (14/11/2026).
+      is_travel_billable: (so as any).is_travel_billable ?? null,
       travel_hours: (so as any).travel_hours || 0,
       ferry_cost: (so as any).ferry_cost || 0,
       travel_type: (so as any).travel_type || 'comercial',
@@ -375,6 +378,11 @@ export async function carregarPDFData(
       quantity: s.quantity || 1,
       unit_price: s.unit_price_snapshot || 0,
       line_total: s.line_total || 0,
+      // O desconto do item (R$ é a fonte da verdade; line_total já sai líquido dele). Até
+      // 14/11/2026 a consulta trazia as duas colunas e o mapeamento as descartava: a linha
+      // dizia "2 × R$ 500 = R$ 900" sem mostrar de onde saíram os R$ 100.
+      discount_amount: Number(s.discount_amount) || 0,
+      discount_pct: Number(s.discount_pct) || 0,
     })),
     parts: ((so as any).service_order_parts || []).map((p: any) => ({
       name: p.products?.name || '—',
@@ -382,6 +390,8 @@ export async function carregarPDFData(
       quantity: p.quantity || 1,
       unit_price: p.unit_sale_snapshot || 0,
       line_total: p.line_total_sale || 0,
+      discount_amount: Number(p.discount_amount) || 0,
+      discount_pct: Number(p.discount_pct) || 0,
       image_url: p.products?.image_url || null,
     })),
     // Pagas pela empresa, menos a despesa interna que nasceu de comprovante (ajustes do dono, 11/10/2026).
