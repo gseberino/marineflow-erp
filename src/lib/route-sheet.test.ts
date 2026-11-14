@@ -497,3 +497,17 @@ describe('via do técnico — segurança sem roteiro', () => {
     expect(faltasDaVia(completo, material, 0, true)).toEqual(['serviços']);
   });
 });
+
+describe('via do técnico no servidor (13/11/2026)', () => {
+  // A Edge Function roda em UTC: sem o fuso escrito, 08:00 de Brasília sairia 11:00 no PDF do WhatsApp.
+  it('escreve data e hora no fuso de Brasília mesmo com o relógio em UTC', () => {
+    const antes = process.env.TZ;
+    process.env.TZ = 'UTC';
+    try {
+      const html = buildRouteSheetHtml({ orderNumber: 'OS-1', scheduledAt: '2026-11-26T11:00:00Z' }, []);
+      expect(html).toContain('<b>26/11/2026, 08:00</b>');
+    } finally {
+      if (antes === undefined) delete process.env.TZ; else process.env.TZ = antes;
+    }
+  });
+});

@@ -47,6 +47,9 @@ export const ASSUNTO_DAS_ACOES: Readonly<Record<string, readonly string[]>> = {
   registrar_diaria: ["freelancer", "data", "data_ate", "dias"],
   registrar_pagamento_freelancer: ["freelancer", "data"],
   registrar_servico_prestador: ["prestador", "os"],
+  // a via do técnico (13/11/2026): outra OS ou outras pessoas = outro pedido
+  enviar_via_do_tecnico: ["documento", "para"],
+  definir_responsavel_do_servico: ["documento"],
   // o lote semanal da papelada (secretário): um lote novo substitui o anterior
   aprovar_lote_da_papelada: [],
   // o cartão do retorno: um cartão novo substitui o anterior; a resposta ditada é por caso

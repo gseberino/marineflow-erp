@@ -27,6 +27,8 @@ import { referenceDataTools } from "./reference-data.ts";
 import { whatsappTools } from "./whatsapp.ts";
 import { whatsappHistoryTools } from "./whatsapp-history.ts";
 import { documentoPdfTools } from "./documentos-pdf.ts";
+// A via do técnico pelo WhatsApp (13/11/2026): à equipe (com o SIM) e o responsável de cada serviço.
+import { viaDoTecnicoTools } from "./via-do-tecnico.ts";
 import { relatorioTools } from "./relatorios.ts";
 import { emailTools } from "./email.ts";
 import { uiTools } from "./ui.ts";
@@ -118,6 +120,7 @@ export const allTools: ToolDef[] = [
   ...whatsappHistoryTools,
   ...acompanhamentoTools,
   ...documentoPdfTools,
+  ...viaDoTecnicoTools,
   ...dropboxTools,
   ...relatorioTools,
   ...emailTools,

@@ -13,7 +13,8 @@
 //   · o PDF vai SÓ para quem pediu — não existe campo de telefone nem de cliente;
 //   · só admin e financeiro pedem (o PDF leva preço, PIX e dados do cliente);
 //   · pedir o PDF para si NÃO muda o status do orçamento;
-//   · orçamento e OS (via do cliente); a via de execução do técnico fica de fora;
+//   · orçamento e OS (via do cliente); a via de execução do técnico ficou de fora até 13/11/2026,
+//     quando o dono pediu para receber também a via do técnico (via='tecnico', tools/via-do-tecnico.ts);
 //   · o arquivo passa por um bucket PRIVADO, com URL de 10 minutos, e é apagado logo depois;
 //   · se falhar, o link de reserva é a página interna (exige login), nunca o link público.
 
@@ -21,6 +22,9 @@ import { blockTechnician, type Role, type ToolCtx, type ToolDef } from "./regist
 import { enviarDocumentoWhatsapp } from "./whatsapp.ts";
 import { chaveDeEnvio, liberarEnvio } from "../../whatsapp/idempotencia.ts";
 import { desviadoPorTeste } from "../../whatsapp/marcar-enviado.ts";
+// A via do técnico para si (13/11/2026). Import circular inofensivo: via-do-tecnico.ts usa localizarOrdem daqui e
+// esta tool usa mandarViaParaSi de lá, as duas só dentro de funções (nada roda na carga do módulo).
+import { mandarViaParaSi } from "./via-do-tecnico.ts";
 // O caminho do PDF (montar → renderizar → guardar → entregar → apagar) mora em
 // _shared/pdf/gerar-e-guardar.ts desde 26/09/2026, quando o envio ao CLIENTE passou a usar o
 // mesmo arquivo. Os dois nomes reexportados abaixo continuam saindo daqui: os testes e quem
@@ -128,12 +132,14 @@ export const documentoPdfTools: ToolDef[] = [
   {
     name: "send_document_pdf_to_self",
     description:
-      "Manda o PDF de um orçamento ou OS para o WhatsApp de QUEM ESTÁ PEDINDO (nunca para o cliente). Use quando o usuário pedir 'me manda o PDF', 'quero ver o PDF do orçamento 86', 'manda o orçamento pra mim'. Aceita o número (ORÇ-00086, OS-00075 ou só 86), o id, ou 'ultimo'. É o mesmo PDF do botão Baixar e não muda o status do orçamento. Para mandar ao CLIENTE use send_service_order_link.",
+      "Manda o PDF de um orçamento ou OS para o WhatsApp de QUEM ESTÁ PEDINDO (nunca para o cliente). Use quando o usuário pedir 'me manda o PDF', 'quero ver o PDF do orçamento 86', 'manda o orçamento pra mim'. Aceita o número (ORÇ-00086, OS-00075 ou só 86), o id, ou 'ultimo'. É o mesmo PDF do botão Baixar e não muda o status do orçamento. Com via='tecnico' manda a VIA DO TÉCNICO (a folha de serviço sem preço) — 'me manda a via do técnico da OS 119'; com pessoa='Alex', a via como o Alex a recebe (só os serviços dele). Para mandar ao CLIENTE use send_service_order_link; à EQUIPE, enviar_via_do_tecnico.",
     input_schema: {
       type: "object",
       properties: {
         documento: { type: "string", description: "Número (ORÇ-00086, OS-00075, 86), id (UUID) ou 'ultimo'." },
         tipo: { type: "string", enum: ["orcamento", "os"], description: "Se o usuário disse 'orçamento' ou 'OS' — resolve número solto e 'ultimo'." },
+        via: { type: "string", enum: ["cliente", "tecnico"], description: "'cliente' (padrão) = o PDF do Baixar; 'tecnico' = a via do técnico, sem preço." },
+        pessoa: { type: "string", description: "Só com via='tecnico': a via de uma pessoa da equipe (só os serviços dela). Vazio = a OS inteira." },
       },
       required: ["documento"],
     },
@@ -144,6 +150,8 @@ export const documentoPdfTools: ToolDef[] = [
       const bloqueado = blockTechnician(ctx);
       if (bloqueado) return bloqueado;
       if (!CARGOS_DO_PDF.includes(ctx.userRole as Role)) return { error: "Só administrador e financeiro podem pedir o PDF pelo assistente." };
+      // A via do técnico (13/11/2026): outra folha, mesmo destino (quem pediu).
+      if (args.via === "tecnico") return await mandarViaParaSi(args, ctx);
 
       const { admin } = ctx;
       const achado = await localizarOrdem(admin, String(args.documento ?? ""), args.tipo);

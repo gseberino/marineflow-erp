@@ -140,6 +140,9 @@ export const TITULOS_DAS_ACOES_DIRETAS: Record<string, string> = {
 export const ROTULOS_DOS_CAMPOS: Record<string, string> = {
   // Retorno F5 (P11.3): o motivo do orçamento perdido (update_quote_status)
   motivo_perda: "Motivo da perda",
+  // A via do técnico (13/11/2026)
+  para: "Para quem",
+  linhas: "Serviços e responsáveis",
   // Serviço do prestador (12/11/2026)
   prestador: "Prestador",
   percentual: "Percentual",

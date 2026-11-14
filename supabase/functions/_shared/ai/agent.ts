@@ -4,6 +4,7 @@ import {
   resumirServico,
 } from "./tools/diarias.ts";
 import { resumirEnvioAoCliente } from "./tools/whatsapp.ts";
+import { resumirEnvioDaVia, resumirResponsaveis } from "./tools/via-do-tecnico.ts";
 import { resumirPropostaDoCaso, resumirRespostaDoCaso, resumirUnidadeDoCaso, riscoDoEnvioLivre } from "./tools/retorno.ts";
 import { resumirOrcamentoLivre } from "./tools/quote-builder.ts";
 import { resumirAgendamento } from "./tools/agendamento.ts";
@@ -195,6 +196,9 @@ const TOOL_LABELS_PT: Record<string, string> = {
   registrar_diaria: "Registrar diária",
   cadastrar_freelancer: "Cadastrar freelancer",
   registrar_servico_prestador: "Registrar serviço do prestador",
+  // A via do técnico pelo WhatsApp (13/11/2026)
+  enviar_via_do_tecnico: "Mandar a via do técnico à equipe",
+  definir_responsavel_do_servico: "Marcar quem faz cada serviço da OS",
   registrar_pagamento_freelancer: "Pagamento a freelancer",
   fechar_acerto_freelancer: "Fechar acerto de diárias",
   reabrir_acerto_freelancer: "Reabrir acerto de diárias",
@@ -479,6 +483,9 @@ RESUMO_QUE_RESOLVE.add("retorno_responder_caso");
 RESUMO_QUE_RESOLVE.add("retorno_orcar_caso");
 RESUMO_QUE_RESOLVE.add("retorno_cadastrar_unidade");
 RESUMO_QUE_RESOLVE.add("create_quote_from_items");
+// A via do técnico (13/11/2026): OS que não existe, ninguém com telefone ou serviço/pessoa que não casa = recusa numa linha.
+RESUMO_QUE_RESOLVE.add("enviar_via_do_tecnico");
+RESUMO_QUE_RESOLVE.add("definir_responsavel_do_servico");
 
 export function resumoQueRecusa(toolName: string, resumo: string): { error: string; nada_registrado: true } | null {
   const t = resumo.trim();
@@ -567,6 +574,18 @@ export async function buildPendingSummary(
       const r = await resumirDiaria({ admin } as unknown as ToolCtx, args);
       if (r) return r;
     } catch { /* cai no resumo genérico */ }
+  }
+  // A via do técnico (13/11/2026): o "sim" é sobre QUEM recebe (o final do telefone do cadastro, quantos serviços vão
+  // no papel de cada um, os dias na agenda) e, na marcação, sobre cada linha e o responsável de antes.
+  if (toolName === "enviar_via_do_tecnico" || toolName === "definir_responsavel_do_servico") {
+    try {
+      return toolName === "enviar_via_do_tecnico"
+        ? await resumirEnvioDaVia(admin, args, quem.settings ?? {})
+        : await resumirResponsaveis(admin, args);
+    } catch (e) {
+      const motivo = String((e as { message?: string })?.message ?? e).replace(/s+/g, " ").trim();
+      return `⚠️ Não consegui montar a lista agora (${motivo}). Nada foi mandado nem gravado; tente de novo.`;
+    }
   }
   // Serviço do prestador (12/11/2026): o "sim" é sobre o que o banco VAI gravar — o valor de hoje, se já entra
   // na conta (o cliente já pagou a OS) e o que substitui.

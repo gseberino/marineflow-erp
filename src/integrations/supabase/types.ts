@@ -9605,6 +9605,7 @@ export type Database = {
           name_snapshot: string
           notes: string | null
           quantity: number
+          responsavel_payee_id: string | null
           service_id: string | null
           service_order_id: string
           service_system: string | null
@@ -9634,6 +9635,7 @@ export type Database = {
           name_snapshot: string
           notes?: string | null
           quantity?: number
+          responsavel_payee_id?: string | null
           service_id?: string | null
           service_order_id: string
           service_system?: string | null
@@ -9663,6 +9665,7 @@ export type Database = {
           name_snapshot?: string
           notes?: string | null
           quantity?: number
+          responsavel_payee_id?: string | null
           service_id?: string | null
           service_order_id?: string
           service_system?: string | null
@@ -9677,6 +9680,13 @@ export type Database = {
           warranty_months?: number | null
         }
         Relationships: [
+          {
+            foreignKeyName: "service_order_services_responsavel_payee_id_fkey"
+            columns: ["responsavel_payee_id"]
+            isOneToOne: false
+            referencedRelation: "payees"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "service_order_services_service_id_fkey"
             columns: ["service_id"]
@@ -11860,6 +11870,93 @@ export type Database = {
             columns: ["marina_id"]
             isOneToOne: false
             referencedRelation: "marinas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      via_tecnico_envios: {
+        Row: {
+          app_user_id: string | null
+          criado_em: string
+          destino: string | null
+          dia: string | null
+          estado: string
+          ficha_id: string | null
+          id: string
+          impressao: string | null
+          motivo: string | null
+          origem: string
+          payee_id: string | null
+          pedido_por: string | null
+          service_order_id: string
+          servicos: number | null
+        }
+        Insert: {
+          app_user_id?: string | null
+          criado_em?: string
+          destino?: string | null
+          dia?: string | null
+          estado: string
+          ficha_id?: string | null
+          id?: string
+          impressao?: string | null
+          motivo?: string | null
+          origem: string
+          payee_id?: string | null
+          pedido_por?: string | null
+          service_order_id: string
+          servicos?: number | null
+        }
+        Update: {
+          app_user_id?: string | null
+          criado_em?: string
+          destino?: string | null
+          dia?: string | null
+          estado?: string
+          ficha_id?: string | null
+          id?: string
+          impressao?: string | null
+          motivo?: string | null
+          origem?: string
+          payee_id?: string | null
+          pedido_por?: string | null
+          service_order_id?: string
+          servicos?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "via_tecnico_envios_app_user_id_fkey"
+            columns: ["app_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "via_tecnico_envios_ficha_id_fkey"
+            columns: ["ficha_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_equipe_mensagens"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "via_tecnico_envios_payee_id_fkey"
+            columns: ["payee_id"]
+            isOneToOne: false
+            referencedRelation: "payees"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "via_tecnico_envios_pedido_por_fkey"
+            columns: ["pedido_por"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "via_tecnico_envios_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
             referencedColumns: ["id"]
           },
         ]

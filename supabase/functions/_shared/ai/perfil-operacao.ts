@@ -201,6 +201,9 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   // Liberada em 26/09/2026 (migration 20260926173100) depois do teste real: "me manda o PDF
   // do ORÇ-86" deu "Tool desconhecida" em 25/09 porque o prompt ensinava e o perfil escondia.
   "send_document_pdf_to_self",
+  // 13/11/2026 (pedido do dono): a via do técnico à equipe (com o SIM) e quem faz cada serviço da OS.
+  "enviar_via_do_tecnico",
+  "definir_responsavel_do_servico",
   // 06/10/2026 (pedido do dono): "atualize o extrato" e "me manda o PDF das despesas de setembro".
   "atualizar_extrato",
   "enviar_relatorio_pdf",
@@ -567,6 +570,8 @@ export const PERFIL_ADMIN: ReadonlySet<string> = new Set([
   "registrar_pagamento_freelancer",
   "enviar_extrato_freelancer",
   // 12/11/2026: registrar_servico_prestador (o Alex) fica FORA (teto de 113): no admin, pela rede, com o "sim".
+  // 13/11/2026: enviar_via_do_tecnico e definir_responsavel_do_servico também FORA (teto): pela rede, com o "sim". A via
+  // para o próprio dono vai pela send_document_pdf_to_self (via='tecnico'), que já está aqui.
 
   // — (B) cotacao —
   "record_quote_response",

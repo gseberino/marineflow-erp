@@ -91,6 +91,8 @@ ACRESCENTADAS.push("listar_orcamentos_para_agrupar", "agrupar_orcamentos", "desa
 ACRESCENTADAS.push("agenda_ver");
 // serviço do prestador (12/11/2026): o Alex recebe por serviço (valor combinado ou percentual por OS).
 ACRESCENTADAS.push("registrar_servico_prestador");
+// a via do técnico pelo WhatsApp (13/11/2026, pedido do dono): à equipe com o SIM e quem faz cada serviço.
+ACRESCENTADAS.push("enviar_via_do_tecnico", "definir_responsavel_do_servico");
 // converter sem sinal (27/10/2026, pedido do dono): orçamento vira OS com tudo na conclusão.
 ACRESCENTADAS.push("converter_sem_sinal");
 // agrupar OS (28/10/2026, pedido do dono): as mesmas três, para ordens de serviço.
