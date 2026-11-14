@@ -130,11 +130,14 @@ export async function mandarViaParaSi(
   const { dados, ordem } = aberta;
 
   let pessoa: PessoaAchada | null = null;
+  let dias: string[] = [];
   const nome = String(args.pessoa ?? "").trim();
   if (nome) {
-    const achada = await acharPessoa(admin, nome, await pessoasDaOs(admin, dados));
+    const daOs = await pessoasDaOs(admin, dados);
+    const achada = await acharPessoa(admin, nome, daOs);
     if ("erro" in achada) return { error: achada.erro };
     pessoa = achada.pessoa;
+    dias = daOs.find((p) => p.id === achada.pessoa.id)?.dias ?? [];
   }
 
   // Destino: o telefone de quem pediu, do cadastro — nunca de um texto.
@@ -149,6 +152,7 @@ export async function mandarViaParaSi(
     telefone,
     contexto: CONTEXTO_DA_VIA_PARA_SI,
     enviar: enviarDocumentoWhatsapp,
+    diasNaAgenda: dias,
     chave: (impressao) => chaveDeEnvio("agente-via", ordem.id, pessoa?.id ?? "os", telefone, impressao, janelaDeDoisMinutos()),
   });
   await registrarEnvioDaVia(admin, {
@@ -402,6 +406,7 @@ export const viaDoTecnicoTools: ToolDef[] = [
           telefone: p.telefone,
           contexto: CONTEXTO_DA_VIA_A_EQUIPE,
           enviar: enviarDocumentoWhatsapp,
+          diasNaAgenda: p.dias,
           chave: (impressao) => chaveDeEnvio("via-equipe", ordem.id, p.id, p.telefone, impressao, janelaDeDoisMinutos()),
         });
         await registrarEnvioDaVia(admin, {

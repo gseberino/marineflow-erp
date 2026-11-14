@@ -111,6 +111,8 @@ export interface RouteSheetHeader {
   technicianName?: string | null;
   scheduledAt?: string | null;
   scheduledEndAt?: string | null;
+  /** Na via de uma pessoa: os dias dela na agenda (aaaa-mm-dd). Vêm antes da data da OS no campo Quando. */
+  diasNaAgenda?: string[] | null;
   /** O pedido do cliente (descrição da OS). Linhas com valor em R$ não saem. */
   problemDescription?: string | null;
   /** Instrução do escritório ao técnico (ressalvas, o que não fazer). Só sai aqui. */
@@ -372,9 +374,25 @@ function vehicleLine(h: RouteSheetHeader): { rotulo: string; valor: string } {
   });
 }
 
+const DIAS_DA_SEMANA = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+/** "qui 26/11" para aaaa-mm-dd. */
+function diaCurto(dia: string): string {
+  const [a, m, d] = dia.split('-').map(Number);
+  return `${DIAS_DA_SEMANA[new Date(Date.UTC(a, m - 1, d)).getUTCDay()]} ${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}`;
+}
+
 /** O fim só sai quando é depois do início — um término anterior ao começo só confunde. */
 function whenLine(h: RouteSheetHeader): string {
   const inicio = formatDateBr(h.scheduledAt);
+  // Na via de uma pessoa, os dias DELA na agenda vêm primeiro (13/11/2026): a OS-00119 não tinha data própria e
+  // a via dizia "a combinar" para quem tinha 11 dias marcados.
+  const dias = (h.diasNaAgenda ?? []).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
+  if (dias.length) {
+    const quando = dias.length === 1
+      ? diaCurto(dias[0])
+      : `${diaCurto(dias[0])} a ${diaCurto(dias[dias.length - 1])} · ${dias.length} dias na agenda`;
+    return `<b>${quando}</b>${inicio ? `<div class="acesso">Início marcado na OS: ${inicio}</div>` : ''}`;
+  }
   if (!inicio) return '<span class="vazio">A combinar com o escritório</span>';
   const fimValido = h.scheduledEndAt && h.scheduledAt
     && new Date(h.scheduledEndAt).getTime() > new Date(h.scheduledAt).getTime();
@@ -956,6 +974,8 @@ export interface OpcoesDaVia {
   pessoa?: { id: string; nome: string } | null;
   /** Caminho da foto → link temporário (a tela e o servidor assinam cada um do seu jeito). */
   linksDasFotos?: Record<string, string>;
+  /** Os dias da pessoa na agenda (aaaa-mm-dd): o campo Quando da via dela. */
+  diasNaAgenda?: string[] | null;
 }
 
 /**
@@ -1022,6 +1042,7 @@ export function montarViaDoTecnico(d: DadosDaVia, o: OpcoesDaVia = {}): ViaMonta
 
   const header: RouteSheetHeader = {
     ...d.header,
+    ...(o.diasNaAgenda?.length ? { diasNaAgenda: o.diasNaAgenda } : {}),
     orderNumber: d.header.orderNumber || 'OS',
     companyName: d.empresa.nome || null,
     companyLogoUrl: d.empresa.logoUrl || null,
@@ -1081,7 +1102,7 @@ export function htmlDaVia(m: ViaMontada): string {
 export function impressaoDaVia(d: DadosDaVia, o: OpcoesDaVia = {}): string {
   const m = montarViaDoTecnico(
     { ...d, header: { ...d.header, scheduledAt: null, scheduledEndAt: null } },
-    { ...o, linksDasFotos: {} },
+    { ...o, linksDasFotos: {}, diasNaAgenda: null },
   );
   const fotos = d.levantamento.map((a) => a.photo_path || '').join('|');
   return hashCurto(`${htmlDaVia(m)}\n${fotos}`);

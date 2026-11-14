@@ -6,6 +6,12 @@ import { Input } from '@/components/ui/input';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
+import { usePayees } from '@/hooks/use-payees';
+
+/** Quem pode fazer o serviço: a equipe de campo (comissionado é venda). O mesmo critério do assistente. */
+const TIPOS_DA_EQUIPE = new Set(['socio', 'funcionario', 'diarista', 'prestador']);
+/** O Select não aceita valor vazio: este é o "sem responsável". */
+const NINGUEM = '__ninguem__';
 
 /** As situações que a via mostra no cartão do serviço. As três últimas vêm do papel. */
 export const SITUACOES_NA_VIA: Array<{ value: string; label: string }> = [
@@ -21,18 +27,23 @@ export const SITUACOES_NA_VIA: Array<{ value: string; label: string }> = [
  * Como esta linha sai na via do técnico: a situação (a fazer, só levantar, aguarda peça…)
  * e uma instrução curta só para o técnico. Grava direto na linha, como a classificação
  * de sistema logo acima — não depende do Salvar da OS.
+ *
+ * 13/11/2026: e QUEM FAZ (o responsável da linha). A via do técnico que vai pelo WhatsApp a cada
+ * pessoa leva só os serviços dela e os sem responsável (decisão do dono).
  */
 export function LineViaTecnico({
   line, orderId,
 }: {
-  line: { id: string; field_status?: string | null; technician_instructions?: string | null };
+  line: { id: string; field_status?: string | null; technician_instructions?: string | null; responsavel_payee_id?: string | null };
   orderId: string;
 }) {
   const qc = useQueryClient();
+  const { data: favorecidos = [] } = usePayees(true);
+  const equipe = favorecidos.filter((p) => TIPOS_DA_EQUIPE.has(p.kind) || p.id === line.responsavel_payee_id);
   const [instrucao, setInstrucao] = useState(line.technician_instructions ?? '');
   useEffect(() => { setInstrucao(line.technician_instructions ?? ''); }, [line.id, line.technician_instructions]);
 
-  async function gravar(patch: { field_status?: string; technician_instructions?: string | null }) {
+  async function gravar(patch: { field_status?: string; technician_instructions?: string | null; responsavel_payee_id?: string | null }) {
     const { error } = await supabase.from('service_order_services').update(patch).eq('id', line.id);
     if (error) {
       toast.error(error.message || 'Não deu para gravar na linha');
@@ -51,6 +62,20 @@ export function LineViaTecnico({
         <SelectContent>
           {SITUACOES_NA_VIA.map((s) => (
             <SelectItem key={s.value} value={s.value} className="text-xs">{s.label}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select
+        value={line.responsavel_payee_id || NINGUEM}
+        onValueChange={(v) => gravar({ responsavel_payee_id: v === NINGUEM ? null : v })}
+      >
+        <SelectTrigger className="h-7 w-[190px] text-xs" aria-label="Quem faz este serviço">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={NINGUEM} className="text-xs">Quem faz: todos da OS</SelectItem>
+          {equipe.map((p) => (
+            <SelectItem key={p.id} value={p.id} className="text-xs">Quem faz: {p.name}</SelectItem>
           ))}
         </SelectContent>
       </Select>

@@ -23,6 +23,8 @@ import {
   hojeEmBrasilia,
   type LeituraDaVia,
   linksDasFotosDaVia,
+  type PessoaDaOs,
+  pessoasDaOs,
   prepararVia,
 } from "../_shared/pdf/via-do-tecnico-dados.ts";
 import {
@@ -187,6 +189,7 @@ export async function viaDaAgenda(
 
     const leituras = new Map<string, LeituraDaVia>();
     const fotos = new Map<string, Record<string, string>>();
+    const equipeDaOs = new Map<string, PessoaDaOs[]>();
     let enviadas = 0, falhas = 0, feitas = 0, vistos = 0;
     for (const item of fazer) {
       if (feitas >= VIAS_POR_TIQUE) break;
@@ -207,8 +210,10 @@ export async function viaDaAgenda(
         continue;
       }
       if (!fotos.has(os)) fotos.set(os, await linksDasFotosDaVia(db, lida.dados));
+      if (!equipeDaOs.has(os)) equipeDaOs.set(os, await pessoasDaOs(db, lida.dados, agora));
+      const dias = equipeDaOs.get(os)!.find((p) => p.id === ficha.payee_id)?.dias ?? [ficha.dia];
       const quem = { id: ficha.payee_id, nome: pessoa.nome };
-      const via = prepararVia(lida.dados, lida.ordem.numero, quem, fotos.get(os)!);
+      const via = prepararVia(lida.dados, lida.ordem.numero, quem, fotos.get(os)!, dias);
       if (via.semServicoDaPessoa) {
         await registrarEnvioDaVia(db, { ...base, estado: "pulado", motivo: "todos os serviços da OS estão com outra pessoa", destino: pessoa.telefone });
         puladas++;
@@ -229,7 +234,7 @@ export async function viaDaAgenda(
       feitas++;
       const r = await mandarVia({
         admin: db, settings, jwt: "", dados: lida.dados, ordem: lida.ordem, pessoa: quem, telefone: pessoa.telefone,
-        contexto: CONTEXTO_DA_VIA_DA_AGENDA, enviar, complementoDaLegenda: complemento, linksDasFotos: fotos.get(os)!,
+        contexto: CONTEXTO_DA_VIA_DA_AGENDA, enviar, complementoDaLegenda: complemento, linksDasFotos: fotos.get(os)!, diasNaAgenda: dias,
         chave: (impressao) => chaveDeEnvio("agenda-via", ficha.id, os, impressao),
       });
       await registrarEnvioDaVia(db, {

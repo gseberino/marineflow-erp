@@ -168,8 +168,10 @@ export function prepararVia(
   numero: string,
   pessoa: { id: string; nome: string } | null,
   linksDasFotos: Record<string, string>,
+  /** Os dias da pessoa na agenda: o campo Quando da via dela (não entram na impressão digital). */
+  diasNaAgenda?: string[] | null,
 ): ViaPronta {
-  const montada = montarViaDoTecnico(d, { modo: "via", pessoa, linksDasFotos });
+  const montada = montarViaDoTecnico(d, { modo: "via", pessoa, linksDasFotos, diasNaAgenda: diasNaAgenda ?? null });
   return {
     html: htmlDaVia(montada),
     nomeDoArquivo: nomeDoArquivoDaVia(numero, pessoa?.nome ?? null),

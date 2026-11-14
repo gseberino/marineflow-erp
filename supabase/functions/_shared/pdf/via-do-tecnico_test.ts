@@ -130,3 +130,18 @@ Deno.test("nome do arquivo sem acento nem espaço, com o primeiro nome da pessoa
   assertEquals(nomeDoArquivoDaVia("OS-00119", null), "Via-tecnico-OS-00119.pdf");
   assertEquals(nomeDoArquivoDaVia("ORÇ-00095", "João"), "Via-tecnico-ORC-00095-Joao.pdf");
 });
+
+Deno.test("Quando da via de uma pessoa: os dias dela na agenda (a OS-00119 dizia 'a combinar' com 11 dias marcados)", () => {
+  const semData = dados({ header: { ...dados().header, scheduledAt: null } });
+  const dias = ["2026-11-26", "2026-11-27", "2026-12-04"];
+  const html = htmlDaVia(montarViaDoTecnico(semData, { pessoa: ALEX, diasNaAgenda: dias }));
+  assertStringIncludes(html, "<b>qui 26/11 a sex 04/12 · 3 dias na agenda</b>");
+  assert(!html.includes("A combinar com o escritório"));
+  // um dia só, e a data da OS embaixo quando ela existe
+  const umDia = htmlDaVia(montarViaDoTecnico(dados(), { pessoa: ALEX, diasNaAgenda: ["2026-11-26"] }));
+  assertStringIncludes(umDia, "<b>qui 26/11</b><div class=\"acesso\">Início marcado na OS: 26/11/2026, 08:00</div>");
+  // sem dias, como sempre
+  assertStringIncludes(htmlDaVia(montarViaDoTecnico(semData, { pessoa: ALEX })), "A combinar com o escritório");
+  // os dias não mudam a impressão digital (a agenda remarca sem a OS mudar)
+  assertEquals(impressaoDaVia(semData, { pessoa: ALEX, diasNaAgenda: dias }), impressaoDaVia(semData, { pessoa: ALEX }));
+});

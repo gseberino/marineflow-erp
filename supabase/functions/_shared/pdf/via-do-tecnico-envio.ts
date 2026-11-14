@@ -84,13 +84,15 @@ export async function mandarVia(p: {
   chave: (impressao: string) => string;
   enviar: EnviarDocumento;
   complementoDaLegenda?: string | null;
-  /** A via já montada (a agenda monta antes para comparar a impressão): evita montar duas vezes. */
+  /** Links das fotos já assinados (a agenda assina uma vez por OS). */
   linksDasFotos?: Record<string, string>;
+  /** Os dias da pessoa na agenda: o campo Quando da via dela. */
+  diasNaAgenda?: string[] | null;
 }): Promise<ResultadoDoEnvio> {
   try {
     if (!p.ordem.shareToken) return { ok: false, motivo: "a OS não tem token de link (o PDF não tem como ser gerado)" };
     const links = p.linksDasFotos ?? await linksDasFotosDaVia(p.admin, p.dados);
-    const via = prepararVia(p.dados, p.ordem.numero, p.pessoa, links);
+    const via = prepararVia(p.dados, p.ordem.numero, p.pessoa, links, p.diasNaAgenda);
     if (via.semServicoDaPessoa) {
       return { ok: false, pulado: true, motivo: `todos os serviços da ${p.ordem.numero} estão com outra pessoa` };
     }
