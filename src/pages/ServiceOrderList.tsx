@@ -22,6 +22,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { useWhatsAppSendStatusMap } from '@/hooks/use-whatsapp-send-log';
 import { usePDFData, fetchPDFData } from '@/hooks/use-pdf';
 import { downloadPDF, opcoesPadraoDoDocumento, type PDFOptions } from '@/lib/pdf-generator';
+import { comValidadeDoDownload } from '@/lib/validade-do-download';
 import { printPDF } from '@/lib/pdf-print';
 import type { PDFAction } from '@/components/PDFOptionsDialog';
 import { normalizePhoneE164 } from '@/lib/masks';
@@ -121,7 +122,10 @@ export default function ServiceOrderList() {
   const handleGeneratePDF = (action: PDFAction, options: PDFOptions, validity?: any, dueDate?: string) => {
     if (!pdfData || !pdfTarget) return;
     if (action === 'download') {
-      downloadPDF({ ...pdfData, documentType: pdfTarget.type }, { ...options, validity, dueDate })
+      // F5 (dúvida 5): o orçamento ainda não enviado sai com a validade do envio (hoje + 7), gravada.
+      const payload = { ...pdfData, documentType: pdfTarget.type };
+      comValidadeDoDownload(pdfTarget.id, pdfTarget.type, { ...options, validity, dueDate })
+        .then((o) => downloadPDF(payload, o))
         .then(() => toast.success('PDF baixado com sucesso'))
         .catch((e: any) => { console.error(e); toast.error('Erro ao gerar o PDF'); });
       setPdfTarget(null);
@@ -138,7 +142,8 @@ export default function ServiceOrderList() {
       // Sem diálogo: o padrão da empresa e a validade do orçamento, o mesmo ponto de partida
       // do diálogo. Partia de DEFAULT_PDF_OPTIONS (fábrica), e o Baixar da lista saía diferente
       // do Baixar do formulário sempre que o padrão da empresa desligava alguma opção.
-      await downloadPDF({ ...data, documentType: type }, opcoesPadraoDoDocumento(appSettings, type, data.serviceOrder));
+      await downloadPDF({ ...data, documentType: type },
+        await comValidadeDoDownload(soId, type, opcoesPadraoDoDocumento(appSettings, type, data.serviceOrder)));
       toast.success('PDF baixado com sucesso');
     } catch (e: any) {
       console.error('PDF download failed:', e);

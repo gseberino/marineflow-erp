@@ -14,6 +14,7 @@ import { useWhatsAppSendStatusMap } from '@/hooks/use-whatsapp-send-log';
 import { useMultiFilter } from '@/hooks/use-multi-filter';
 import { usePDFData, fetchPDFData } from '@/hooks/use-pdf';
 import { downloadPDF, opcoesPadraoDoDocumento, type PDFOptions } from '@/lib/pdf-generator';
+import { comValidadeDoDownload } from '@/lib/validade-do-download';
 import { printPDF } from '@/lib/pdf-print';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { writeAuditLog } from '@/hooks/use-audit-log';
@@ -331,7 +332,10 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
     }
     const payload = { ...pdfData, documentType: pdfTarget.type };
     if (action === 'download') {
-      downloadPDF(payload, { ...options, validity, dueDate } as PDFOptions)
+      // F5 (dúvida 5): o orçamento ainda não enviado sai com a validade do envio (hoje + 7), gravada.
+      // O lote (handleBulkDownload) não fixa: baixar vários é arquivo, não envio.
+      comValidadeDoDownload(pdfTarget.id, pdfTarget.type, { ...options, validity, dueDate } as PDFOptions)
+        .then((o) => downloadPDF(payload, o))
         .then(() => toast.success('PDF baixado com sucesso'))
         .catch(() => toast.error('Erro ao gerar o PDF'));
     } else {

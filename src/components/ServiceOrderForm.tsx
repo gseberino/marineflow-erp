@@ -67,6 +67,7 @@ import { usePDFData } from '@/hooks/use-pdf';
 import { downloadPDF, DEFAULT_PDF_OPTIONS, validadeDoOrcamento } from '@/lib/pdf-generator';
 import { printPDF } from '@/lib/pdf-print';
 import type { PDFOptions } from '@/lib/pdf-generator';
+import { comValidadeDoDownload } from '@/lib/validade-do-download';
 import { PDFOptionsDialog } from '@/components/PDFOptionsDialog';
 import { RegisterDepositDialog } from '@/components/RegisterDepositDialog';
 import { useConverterSemSinal } from '@/components/ConverterSemSinal';
@@ -2978,7 +2979,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           const opts = { ...options, validity, dueDate };
           if (action === 'download') {
             try {
-              await downloadPDF(payload, opts);
+              // F5 (dúvida 5): o orçamento ainda não enviado sai com a validade do envio (hoje + 7), gravada.
+              await downloadPDF(payload, await comValidadeDoDownload(orderId, pdfDialogType, opts));
               toast.success('PDF baixado com sucesso');
               setPdfDialogType(null);
             } catch (e: any) {
