@@ -198,6 +198,9 @@ export const FORA_DA_BANCADA = new Set([
   '20270112100700_retorno_f5_desfecho.sql',
   '20270112100800_retorno_f5_medidas.sql',
   '20270112100900_retorno_f5_dado.sql',
+  // Retorno (baff4298, de OUTRA sessão; na main desde 13/11 à noite): recria só retorno_abrir (o fornecedor ativo sem OS não ganha recibo), que declara
+  // public.retorno_config: sem as tabelas do retorno, a bancada parava aqui ("type public.retorno_config does not exist"). Não toca em função da agenda.
+  '20270112101000_retorno_fornecedor_sem_os.sql',
 ]);
 
 /**
