@@ -10,6 +10,9 @@
  * preço não vai na via do técnico; assinatura de técnico e cliente no papel.
  * Decisões de 01/10/2026: o pedido do cliente (descrição da OS) sai na via; o link do
  * portal do cliente não sai (mostra preço).
+ * 13/11/2026: a montagem (dados → folha) é a mesma do PDF que o assistente e a agenda mandam pelo
+ * WhatsApp (montarViaDoTecnico, em supabase/functions/_shared/pdf/via-do-tecnico.ts). A tela
+ * imprime a via da OS inteira, com o responsável de cada serviço.
  */
 import { useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -19,63 +22,12 @@ import { useServiceOrderServices } from '@/hooks/use-service-orders';
 import { useServiceOrderSurvey } from '@/hooks/use-service-survey';
 import { useLinksDasFotos } from '@/lib/fotos-da-os';
 import { useAppSettings } from '@/hooks/use-app-settings';
-import { VESSEL_CONTACT_ROLES } from '@/hooks/use-vessel-contacts';
 import {
-  printRouteSheet, faltasDaVia, passosDeSeguranca, segurancaSemRoteiro,
-  type RouteSheetHeader, type RouteSheetExtras, type LinhaDeSeguranca,
+  printRouteSheet, faltasDaVia, passosDeSeguranca, montarViaDoTecnico,
+  type RouteSheetHeader, type LinhaDeSeguranca, type ViaDoTecnicoHeader, type LinhaDaVia,
 } from '@/lib/route-sheet';
 
-/** O que a via precisa saber da OS — tudo já está no detalhe que a tela carrega. */
-export type ViaDoTecnicoHeader = Omit<
-  RouteSheetHeader,
-  'orderNumber' | 'companyName' | 'companyLogoUrl' | 'companyAddress' | 'companyPhone'
-> & { orderNumber?: string | null };
-
-/**
- * Cabeçalho da via a partir do detalhe da OS (o mesmo objeto que a tela de OS carrega).
- * Um só lugar: o menu Ações e o painel de Roteiro não podem imprimir folhas diferentes.
- */
-export function viaHeaderFromOrder(order: any): ViaDoTecnicoHeader {
-  if (!order) return {};
-  return {
-    orderNumber: order.service_order_number ?? null,
-    clientName: order.clients?.name ?? null,
-    clientPhone: order.clients?.phone ?? null,
-    clientWhatsapp: order.clients?.whatsapp ?? null,
-    requestedBy: order.requested_by_name ?? null,
-    assetName: order.vessels?.name ?? null,
-    assetType: order.vessels?.asset_type ?? null,
-    assetMaker: order.vessels?.manufacturer ?? null,
-    assetModel: order.vessels?.model ?? null,
-    // Placa ou inscrição: só aparece quando o detalhe da OS a traz (SO_DETAIL_SELECT*).
-    assetRegistration: order.vessels?.hull_id_or_registration ?? null,
-    marinaName: order.marinas?.name ?? null,
-    dockPosition: order.vessels?.current_dock_position ?? null,
-    technicianName: order.service_order_technicians?.[0]?.app_users?.full_name ?? null,
-    scheduledAt: order.scheduled_start_at ?? null,
-    scheduledEndAt: order.scheduled_end_at ?? null,
-    problemDescription: order.problem_description ?? null,
-    technicianInstructions: order.technician_instructions ?? null,
-    // O local da OS manda; sem ele, vale o padrão do cadastro do veículo.
-    siteAccess: order.site_access || order.vessels?.access_notes || null,
-    onSiteContact: order.requested_by_contact
-      ? {
-          name: order.requested_by_contact.full_name ?? null,
-          role: VESSEL_CONTACT_ROLES.find((r) => r.value === order.requested_by_contact.role)?.label
-            ?? order.requested_by_contact.role ?? null,
-          phone: order.requested_by_contact.phone ?? null,
-        }
-      : null,
-    vehicleElectrical: order.vessels
-      ? {
-          batteryBank: order.vessels.battery_bank_summary ?? null,
-          inverterCharger: order.vessels.inverter_charger_summary ?? null,
-          shorePower: order.vessels.shore_power_type ?? null,
-          notes: order.vessels.electrical_system_notes ?? null,
-        }
-      : null,
-  };
-}
+export { viaHeaderFromOrder, type ViaDoTecnicoHeader } from '@/lib/route-sheet';
 
 export function useViaDoTecnico(serviceOrderId: string | undefined, header: ViaDoTecnicoHeader) {
   const { data: steps = [], isLoading: carregandoPassos } = useServiceOrderSteps(serviceOrderId);
@@ -104,47 +56,48 @@ export function useViaDoTecnico(serviceOrderId: string | undefined, header: ViaD
   });
   const temSegurancaNoRoteiro = passosDeSeguranca(steps).length > 0;
 
+  // O nome de quem faz cada serviço (13/11/2026): a via da OS inteira diz o responsável de cada um.
+  const idsDosResponsaveis = useMemo(
+    () => [...new Set(((services ?? []) as LinhaDaVia[]).map((s) => s.responsavel_payee_id).filter((id): id is string => !!id))].sort(),
+    [services],
+  );
+  const { data: nomesDosResponsaveis = {} } = useQuery({
+    queryKey: ['via-responsaveis', idsDosResponsaveis],
+    enabled: idsDosResponsaveis.length > 0,
+    queryFn: async (): Promise<Record<string, string>> => {
+      const { data, error } = await supabase.from('payees').select('id, name').in('id', idsDosResponsaveis);
+      if (error) throw error;
+      return Object.fromEntries(((data ?? []) as Array<{ id: string; name: string }>).map((p) => [p.id, p.name]));
+    },
+  });
+
   /**
    * `via` (menu Ações): a folha do técnico, com só a segurança de cada sistema do roteiro.
    * `roteiro` (painel Roteiro): a mesma folha com o roteiro completo, para testá-lo à parte.
    */
   const imprimir = useCallback((modo: 'via' | 'roteiro' = 'via'): boolean => {
-    const cabecalho: RouteSheetHeader = {
-      ...header,
-      orderNumber: header.orderNumber || 'OS',
-      companyName: settings?.company_name || null,
-      companyLogoUrl: settings?.company_logo_url || null,
-      companyAddress: settings?.company_address || null,
-      companyPhone: settings?.phone || null,
-    };
-    const extras: RouteSheetExtras = {
-      roteiro: modo === 'via' ? 'seguranca' : 'completo',
-      services: ((services ?? []) as any[]).map((s) => ({
-        id: s.id ?? null,
-        name: s.name_snapshot || s.services?.name || 'Serviço',
-        description: s.description_snapshot || null,
-        quantity: s.quantity ?? null,
-        unit: s.billing_unit_snapshot || null,
-        notes: s.notes || null,
-        technicianInstructions: s.technician_instructions || null,
-        fieldStatus: s.field_status || null,
-        fieldStatusNote: s.field_status_note || null,
-      })),
-      survey: (((survey as any)?.service_survey_answers ?? []) as any[])
-        .slice()
-        .sort((a, b) => Number(a.seq ?? 0) - Number(b.seq ?? 0))
-        .map((a) => ({
-          question: a.question_snapshot || '',
-          answer: a.answer_value ?? null,
-          skipped: a.skipped_reason ?? null,
-          photoUrl: a.photo_path ? linksDasFotos[a.photo_path] ?? null : null,
-        })),
-    };
-    const passos = modo === 'via' && !temSegurancaNoRoteiro && serviceOrderId
-      ? [...steps, ...segurancaSemRoteiro(serviceOrderId, linhasDeSeguranca)]
-      : steps;
-    return printRouteSheet(cabecalho, passos, materials, extras);
-  }, [header, settings, services, survey, steps, materials, linksDasFotos, temSegurancaNoRoteiro, linhasDeSeguranca, serviceOrderId]);
+    const montada = montarViaDoTecnico(
+      {
+        serviceOrderId: serviceOrderId ?? '',
+        header,
+        empresa: {
+          nome: settings?.company_name || null,
+          logoUrl: settings?.company_logo_url || null,
+          endereco: settings?.company_address || null,
+          telefone: settings?.phone || null,
+        },
+        linhas: (services ?? []) as LinhaDaVia[],
+        passos: steps,
+        materiais: materials,
+        levantamento: ((survey as any)?.service_survey_answers ?? []) as any[],
+        // Sem o id da OS a segurança não entra (como antes: o hook só a somava com o id).
+        seguranca: serviceOrderId ? linhasDeSeguranca : [],
+        nomesDosResponsaveis,
+      },
+      { modo, linksDasFotos },
+    );
+    return printRouteSheet(montada.header, montada.passos, montada.materiais, montada.extras);
+  }, [header, settings, services, survey, steps, materials, linksDasFotos, linhasDeSeguranca, serviceOrderId, nomesDosResponsaveis]);
 
   // O que vai faltar no papel, para o aviso antes de imprimir.
   const faltas = useMemo(

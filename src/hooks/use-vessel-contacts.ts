@@ -1,14 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 
-export const VESSEL_CONTACT_ROLES = [
-  { value: 'owner', label: 'Proprietário' },
-  { value: 'captain', label: 'Comandante' },
-  { value: 'sailor', label: 'Marinheiro' },
-  { value: 'manager', label: 'Administrador' },
-  { value: 'mechanic', label: 'Mecânico responsável' },
-  { value: 'contact', label: 'Contato geral' },
-];
+// O rótulo do papel também sai na via do técnico em PDF (servidor): mora no módulo da via.
+export { VESSEL_CONTACT_ROLES } from "../../supabase/functions/_shared/pdf/via-do-tecnico";
 
 export function useVesselContacts(vesselId: string | undefined) {
   return useQuery({

@@ -11,48 +11,16 @@ import { supabase } from '@/integrations/supabase/client';
  * entre si sem depender do tipo gerado.
  */
 
-export type StepStatus = 'pending' | 'in_progress' | 'done' | 'not_applicable' | 'blocked';
-export type StepKind = 'do' | 'check' | 'safety' | 'evidence' | 'handoff';
-export type StepMode = 'read_do' | 'do_confirm';
-/** 'composed' = veio dos blocos (abertura do sistema + corpo do verbo + fechamento). */
-export type StepOrigin = 'template' | 'ai' | 'manual' | 'client_request' | 'composed';
-
-export interface ServiceOrderStep {
-  id: string;
-  service_order_id: string;
-  service_order_service_id: string | null;
-  template_id: string | null;
-  seq: number;
-  block: string | null;
-  /** Chave estável do bloco: 'abertura:gas', 'linha:<uuid>', 'fechamento:gas'. */
-  block_key: string | null;
-  /** Escopo do bloco compartilhado: a quais serviços da OS ele se aplica. */
-  block_note: string | null;
-  title: string;
-  detail: string | null;
-  kind: StepKind;
-  mode: StepMode;
-  standard_minutes: number | null;
-  is_killer: boolean;
-  requires_photo: boolean;
-  requires_measure: string | null;
-  measure_unit: string | null;
-  measure_value: number | null;
-  status: StepStatus;
-  na_reason: string | null;
-  blocked_reason_code: string | null;
-  blocked_note: string | null;
-  assigned_user_id: string | null;
-  started_at: string | null;
-  completed_at: string | null;
-  actual_minutes: number | null;
-  origin: StepOrigin;
-  notes: string | null;
-  /** Preenchidos só quando origin='ai'. approved_at nulo = ainda é sugestão. */
-  ai_confidence?: number | null;
-  ai_source?: string | null;
-  approved_at?: string | null;
-}
+// Tipos e funções puras do roteiro moram em supabase/functions/_shared/pdf/via-do-tecnico.ts desde
+// 13/11/2026 (a via do técnico em PDF sai também do servidor). Reexportados para quem já os importava daqui.
+import {
+  groupStepsByBlock, isAiDraft,
+  type ServiceOrderStep, type RouteMaterial,
+} from "../../supabase/functions/_shared/pdf/via-do-tecnico";
+export { groupStepsByBlock, isAiDraft };
+export type {
+  StepStatus, StepKind, StepMode, StepOrigin, ServiceOrderStep, RouteMaterial,
+} from "../../supabase/functions/_shared/pdf/via-do-tecnico";
 
 export interface StopReason {
   code: string;
@@ -416,33 +384,7 @@ export function summarizeRoute(steps: ServiceOrderStep[]): RouteSummary {
   };
 }
 
-/** Agrupa por bloco preservando a ordem de seq. */
-export function groupStepsByBlock(
-  steps: ServiceOrderStep[],
-): Array<{ block: string; blockKey: string | null; note: string | null; steps: ServiceOrderStep[] }> {
-  const groups: Array<{ block: string; blockKey: string | null; note: string | null; steps: ServiceOrderStep[] }> = [];
-  for (const step of steps) {
-    const label = step.block || 'Roteiro';
-    const last = groups[groups.length - 1];
-    if (last && last.block === label) last.steps.push(step);
-    else groups.push({ block: label, blockKey: step.block_key ?? null, note: step.block_note ?? null, steps: [step] });
-  }
-  return groups;
-}
 
-/**
- * Material da OS, para a separação antes de sair e para a lista por etapa.
- *
- * `service_order_service_id` nulo = material da OS inteira (é o caso de todo
- * lançamento manual). Com dono, aparece dentro do bloco daquele serviço.
- */
-export interface RouteMaterial {
-  id: string;
-  quantity: number;
-  notes: string | null;
-  service_order_service_id: string | null;
-  products?: { name: string; sku: string | null; unit: string | null } | null;
-}
 
 export function useRouteMaterials(serviceOrderId: string | undefined) {
   return useQuery({
@@ -471,9 +413,6 @@ export function nextStep(steps: ServiceOrderStep[]): ServiceOrderStep | undefine
  * Passo proposto pela IA e ainda não julgado por um humano.
  * `approved_at` nulo com `origin='ai'` é o que separa sugestão de roteiro válido.
  */
-export function isAiDraft(step: ServiceOrderStep & { approved_at?: string | null }): boolean {
-  return step.origin === 'ai' && !step.approved_at;
-}
 
 /**
  * Aprova ou descarta um passo sugerido, registrando o veredito.
