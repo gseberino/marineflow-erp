@@ -4,7 +4,7 @@
 --      (a carência olha a saída humana a QUALQUER número);
 --   1. idempotência: a mesma mensagem duas vezes = 1 caso e 1 recibo ("repetida"); o '[audio]' fica pendente e a
 --      transcrição reavalia ("reavaliada"), com sinais novos, o recibo do número novo e a coleta;
---   2. papéis: cliente, ambíguo (client_id nulo), fornecedor ativo, fornecedor inativo com cliente ativo, equipe,
+--   2. papéis: cliente, ambíguo (client_id nulo), fornecedor ativo, fornecedor inativo com cliente ativo, fornecedor ativo com cliente sem OS (2d2) e com OS (2d3), equipe,
 --      contato conhecido, parceiro (o sintético e a MP real, pelo id da config), "Cliente Final"; dois leads do
 --      mesmo número (nenhum é escolhido);
 --   3. número novo: saudação; saudação substituída pelo recibo; recibo depois da saudação já decidida; vendedor;
@@ -139,7 +139,7 @@ declare
   v_q jsonb;
   -- cadastros
   v_c01 uuid; v_c03 uuid; v_c04a uuid; v_c04b uuid; v_c06 uuid; v_c09 uuid; v_c10 uuid; v_c23 uuid; v_c24 uuid;
-  v_c25 uuid; v_c26 uuid; v_c45 uuid; v_c33 uuid;
+  v_c25 uuid; v_c26 uuid; v_c45 uuid; v_c33 uuid; v_c55 uuid; v_ve55 uuid;
   v_lead02 uuid; v_lead44 uuid;
   -- mensagens, respostas e leituras
   v_m uuid; v_m2 uuid; v_m3 uuid; v_m4 uuid;
@@ -343,6 +343,34 @@ begin
     v_n := v_n + pg_temp.retorno_f1_abrir_confere('2d', v_r, 'nova', 'recibo', null, 'cliente');
     if (pg_temp.retorno_f1_abrir_caso((v_r ->> 'abertura_id')::uuid)).client_id is distinct from v_c06 then
       raise exception '2d: o fornecedor inativo tirou o cliente: %', v_r;
+    end if;
+
+    -- 2d2. 13/11 (20270112101000): fornecedor ATIVO e cadastro de cliente SEM nenhuma OS no mesmo número: é o
+    --      fornecedor (nada, sem saída). Achado na sombra do recibo: o recibo ao cliente sairia a um fornecedor.
+    insert into public.suppliers (name, phone, active) values ('Teste F1 abrir 9454 fornecedor', '(47) 90000-9454', true);
+    perform pg_temp.retorno_f1_abrir_cliente('9454', '(47) 90000-9454');
+    v_m := pg_temp.retorno_f1_abrir_msg('5547900009454', 'Bom dia, segue o orçamento da bateria que você pediu?',
+                                        c_d + interval '8 hours 32 minutes');
+    v_r := public.retorno_abrir(v_m, false, c_d + interval '8 hours 32 minutes 5 seconds');
+    v_n := v_n + pg_temp.retorno_f1_abrir_confere('2d2', v_r, 'nova', 'nada', 'fornecedor', 'fornecedor');
+    if pg_temp.retorno_f1_abrir_n_saidas((v_r ->> 'abertura_id')::uuid) <> 0
+       or (pg_temp.retorno_f1_abrir_caso((v_r ->> 'abertura_id')::uuid)).client_id is not null then
+      raise exception '2d2: o fornecedor com cadastro de cliente vazio ganhou saída ou cliente: %', v_r;
+    end if;
+
+    -- 2d3. O mesmo com o cliente tendo uma OS: o cliente vence (recibo_cliente), como antes.
+    insert into public.suppliers (name, phone, active) values ('Teste F1 abrir 9455 fornecedor', '(47) 90000-9455', true);
+    v_c55 := pg_temp.retorno_f1_abrir_cliente('9455', '(47) 90000-9455');
+    insert into public.vessels (client_id, name, asset_type) values (v_c55, 'Teste F1 abrir 9455', 'Motorhome')
+      returning id into v_ve55;
+    insert into public.service_orders (service_order_number, client_id, vessel_id, status)
+    values ('TESTE-F1-ABRIR-9455', v_c55, v_ve55, 'draft');
+    v_m := pg_temp.retorno_f1_abrir_msg('5547900009455', 'Preciso de orçamento para trocar a bomba do barco',
+                                        c_d + interval '8 hours 34 minutes');
+    v_r := public.retorno_abrir(v_m, false, c_d + interval '8 hours 34 minutes 5 seconds');
+    v_n := v_n + pg_temp.retorno_f1_abrir_confere('2d3', v_r, 'nova', 'recibo', null, 'cliente');
+    if (pg_temp.retorno_f1_abrir_caso((v_r ->> 'abertura_id')::uuid)).client_id is distinct from v_c55 then
+      raise exception '2d3: o fornecedor tirou o cliente com OS: %', v_r;
     end if;
 
     -- 2e. Número da equipe: ignorada, sem caso e sem linha.
