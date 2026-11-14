@@ -145,8 +145,16 @@ declare
   -- FASE 7d: (7d P6) os blocos da 7d também saem
   v_f7d boolean := false;
   -- FASE 7d: fim
+  -- (pedidos A-1, A-3 e A-5 da F5, 13/11) os blocos "-- PEDIDO A-x (F5): … -- PEDIDO A-x (F5): fim" também saem
+  v_ped boolean := false;
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
+    -- (pedidos A-1, A-3 e A-5 da F5, 13/11) a 20261113300000 recria _agenda_cliente_enfileirar copiando a definição mais nova (20261028100800) e só acrescenta os blocos dela
+    if not v_bloco and not v_ped and l ~ '^\s*-- PEDIDO A-[0-9]( e A-[0-9])? \(F5\):' and l !~ '\(F5\): fim\s*$' then v_ped := true; continue; end if;
+    if v_ped then
+      if l ~ '^\s*-- PEDIDO A-[0-9]( e A-[0-9])? \(F5\): fim\s*$' then v_ped := false; end if;
+      continue;
+    end if;
     -- FASE 7d: (7d P6) os blocos "-- FASE 7d: … -- FASE 7d: fim" também saem (a 20261107100500 recria a função copiando a definição mais nova: só acréscimo)
     if not v_bloco and not v_f7d and l ~ '^\s*-- FASE 7[defg]:' and l !~ '^\s*-- FASE 7[defg]: fim' then v_f7d := true; continue; end if;
     if v_f7d then

@@ -124,8 +124,16 @@ declare
   -- FASE 7d: fim
   -- (consertos de 13/11) os blocos "-- CONSERTO 13/11 (x): … -- CONSERTO 13/11 (x): fim" também saem
   v_c13 boolean := false;
+  -- (pedidos A-1, A-3 e A-5 da F5, 13/11) os blocos "-- PEDIDO A-x (F5): … -- PEDIDO A-x (F5): fim" também saem
+  v_ped boolean := false;
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
+    -- (pedidos A-1, A-3 e A-5 da F5, 13/11) a 20261113300000 recria _agenda_cliente_enfileirar copiando a definição mais nova (20261028100800) e só acrescenta os blocos dela
+    if not v_bloco and not v_ped and l ~ '^\s*-- PEDIDO A-[0-9]( e A-[0-9])? \(F5\):' and l !~ '\(F5\): fim\s*$' then v_ped := true; continue; end if;
+    if v_ped then
+      if l ~ '^\s*-- PEDIDO A-[0-9]( e A-[0-9])? \(F5\): fim\s*$' then v_ped := false; end if;
+      continue;
+    end if;
     -- (consertos de 13/11) a 20261113200000 recria _agenda_cliente_fila copiando a definição mais nova (20261028100800) e só acrescenta os blocos dela
     if not v_bloco and not v_c13 and l ~ '^\s*-- CONSERTO 13/11 \([a-z]\):' and l !~ '^\s*-- CONSERTO 13/11 \([a-z]\): fim' then v_c13 := true; continue; end if;
     if v_c13 then
