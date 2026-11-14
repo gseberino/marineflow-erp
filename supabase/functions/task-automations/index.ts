@@ -88,6 +88,7 @@ import { rodarSemanaDaEquipe } from "./agenda-equipe-semana.ts";
 import { habilidadeDaAgenda } from "./agenda-habilidade.ts";
 import { localDaAgenda } from "./agenda-local.ts";
 import { tarefasDaAgenda } from "./agenda-tarefas.ts";
+import { viaDaAgenda } from "./via-da-agenda.ts";
 import { expandOccurrences } from "../_shared/recurrence.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { logEdgeError } from "../_shared/log-error.ts";
@@ -638,6 +639,17 @@ servirComCors(async (req) => {
       agendaComunicar = { erro: String((e as any)?.message ?? e) };
     }
 
+    // A via do técnico com a ficha (13/11/2026, pedido do dono): por último entre as rodadas da agenda, para o render dos PDFs
+    // nunca atrasar nenhuma delas. Só lê a ficha que a fila já entregou; nada da agenda muda. Tem o próprio try/catch (viaDaAgenda
+    // nunca lança: devolve { erro } e grava em app_error_logs); o de fora é a segunda trava, para nada daqui parar as regras.
+    let agendaVia: unknown = null;
+    try {
+      agendaVia = await viaDaAgenda(db, settings, new Date());
+    } catch (e) {
+      console.error("agenda:via:", e);
+      agendaVia = { erro: String((e as any)?.message ?? e) };
+    }
+
     const rules = await runRules(db, settings);
     const r10 = await runTechnicianReminders(db, settings);
     const reminders = await processReminders(db);
@@ -647,7 +659,7 @@ servirComCors(async (req) => {
       identidade, fios, agenda_material: agendaMaterial, agenda_material_vigia: agendaMaterialVigia, agenda_rotina: agendaRotina,
       agenda_tarefas: agendaTarefas, agenda_equipe_semana: agendaEquipeSemana,
       agenda_aprender: agendaAprender, agenda_habilidade: agendaHabilidade, agenda_local: agendaLocal, agenda_vigia: agendaVigia, agenda_aviso: agendaAviso, agenda_cliente_vigia: agendaClienteVigia,
-      agenda_explicar: agendaExplicar, agenda_comunicar: agendaComunicar,
+      agenda_explicar: agendaExplicar, agenda_comunicar: agendaComunicar, agenda_via: agendaVia,
       rules, r10, reminders, recurrence,
     };
     // Regra que falhou também é motivo para auditar: sem isto, um tick em que TODAS as

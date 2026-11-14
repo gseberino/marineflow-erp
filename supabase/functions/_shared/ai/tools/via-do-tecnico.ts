@@ -26,18 +26,15 @@ import {
   type ToolDef,
 } from "./registry.ts";
 import { enviarDocumentoWhatsapp } from "./whatsapp.ts";
-import { chaveDeEnvio, liberarEnvio } from "../../whatsapp/idempotencia.ts";
+import { chaveDeEnvio } from "../../whatsapp/idempotencia.ts";
 import { desviadoPorTeste } from "../../whatsapp/marcar-enviado.ts";
-import { guardarEEntregar } from "../../pdf/gerar-e-guardar.ts";
 import {
   carregarDadosDaVia,
-  legendaDaVia,
-  linksDasFotosDaVia,
-  type OrdemDaVia,
   type PessoaDaOs,
   pessoasDaOs,
   prepararVia,
 } from "../../pdf/via-do-tecnico-dados.ts";
+import { estadoDoResultado, mandarVia, registrarEnvioDaVia } from "../../pdf/via-do-tecnico-envio.ts";
 import type { DadosDaVia } from "../../pdf/via-do-tecnico.ts";
 import { localizarOrdem } from "./documentos-pdf.ts";
 
@@ -111,95 +108,6 @@ export async function acharPessoa(
   return { erro: `Não achei "${nome}" na equipe (sócio, funcionário, diarista ou prestador ativos).` };
 }
 
-// ═══ Registro ══════════════════════════════════════════════════════════════════════════════════
-
-export interface LinhaDoRegistro {
-  service_order_id: string;
-  payee_id?: string | null;
-  app_user_id?: string | null;
-  origem: "agenda" | "assistente" | "para_si";
-  estado: "enviado" | "falhou" | "pulado";
-  motivo?: string | null;
-  destino?: string | null;
-  impressao?: string | null;
-  servicos?: number | null;
-  ficha_id?: string | null;
-  dia?: string | null;
-  pedido_por?: string | null;
-}
-
-/** Grava o envio. Falha ao gravar não desfaz o envio (o PDF já está no WhatsApp): só avisa no log. */
-export async function registrarEnvioDaVia(admin: Admin, linha: LinhaDoRegistro): Promise<boolean> {
-  const destino = linha.destino && /^[0-9]{8,15}$/.test(linha.destino) ? linha.destino : null;
-  const motivo = linha.estado === "enviado" ? (linha.motivo ?? null) : (linha.motivo || "sem motivo informado").slice(0, 300);
-  const { error } = await admin.from("via_tecnico_envios").insert({ ...linha, destino, motivo });
-  if (error) {
-    console.warn(`[via-do-tecnico] envio sem registro (${error.code ?? ""}): ${error.message}`);
-    return false;
-  }
-  return true;
-}
-
-// ═══ Mandar ════════════════════════════════════════════════════════════════════════════════════
-
-export type ResultadoDoEnvio =
-  | { ok: true; deduplicado?: boolean; servicos: number; impressao: string }
-  | { ok: false; motivo: string; pulado?: boolean };
-
-/**
- * Monta a via da pessoa (ou da OS inteira), renderiza e manda para o telefone. Quem chama decide o
- * contexto, a chave e o registro. Nunca lança.
- */
-export async function mandarVia(p: {
-  admin: Admin;
-  settings: Record<string, string>;
-  jwt: string;
-  dados: DadosDaVia;
-  ordem: OrdemDaVia;
-  pessoa: { id: string; nome: string } | null;
-  telefone: string;
-  contexto: string;
-  chave: (impressao: string) => string;
-  complementoDaLegenda?: string | null;
-}): Promise<ResultadoDoEnvio> {
-  try {
-    if (!p.ordem.shareToken) return { ok: false, motivo: "a OS não tem token de link (o PDF não tem como ser gerado)" };
-    const links = await linksDasFotosDaVia(p.admin, p.dados);
-    const via = prepararVia(p.dados, p.ordem.numero, p.pessoa, links);
-    if (via.semServicoDaPessoa) {
-      return { ok: false, pulado: true, motivo: `todos os serviços da ${p.ordem.numero} estão com outra pessoa` };
-    }
-    const chave = p.chave(via.impressao);
-    const entrega = await guardarEEntregar({
-      admin: p.admin,
-      doc: { html: via.html, nomeDoArquivo: via.nomeDoArquivo },
-      shareToken: p.ordem.shareToken,
-      baseUrl: p.settings.app_public_url || "",
-      rotuloDoLog: "via-do-tecnico",
-      entregar: (url) =>
-        enviarDocumentoWhatsapp({
-          phone: p.telefone,
-          url,
-          filename: via.nomeDoArquivo,
-          caption: legendaDaVia(p.ordem, p.complementoDaLegenda),
-          context: p.contexto,
-          jwt: p.jwt,
-          dedupeKey: chave,
-        }),
-    });
-    if (!entrega.ok) return { ok: false, motivo: entrega.motivo };
-    const envio = entrega.valor;
-    if (!envio.ok) {
-      // Sem resposta (tempo, rede): a reserva da chave ficaria de pé e o próximo pedido ouviria "já mandei".
-      if (envio.semResposta) await liberarEnvio(p.admin, chave).catch(() => {});
-      return { ok: false, motivo: envio.error };
-    }
-    return { ok: true, deduplicado: envio.deduplicated === true, servicos: via.servicos, impressao: via.impressao };
-  } catch (e) {
-    return { ok: false, motivo: e instanceof Error ? e.message : String(e) };
-  }
-}
-
 /** Lê a OS para a via; erro já em frase para o modelo. */
 async function abrirOs(admin: Admin, documento: string, settings: Record<string, string>) {
   const achado = await localizarOrdem(admin, documento, "os");
@@ -240,6 +148,7 @@ export async function mandarViaParaSi(
     pessoa: pessoa ? { id: pessoa.id, nome: pessoa.nome } : null,
     telefone,
     contexto: CONTEXTO_DA_VIA_PARA_SI,
+    enviar: enviarDocumentoWhatsapp,
     chave: (impressao) => chaveDeEnvio("agente-via", ordem.id, pessoa?.id ?? "os", telefone, impressao, janelaDeDoisMinutos()),
   });
   await registrarEnvioDaVia(admin, {
@@ -247,7 +156,7 @@ export async function mandarViaParaSi(
     app_user_id: ctx.userId || null,
     payee_id: pessoa?.id ?? null,
     origem: "para_si",
-    estado: r.ok ? "enviado" : (("pulado" in r && r.pulado) ? "pulado" : "falhou"),
+    estado: estadoDoResultado(r),
     motivo: r.ok ? (pessoa ? `a via de ${pessoa.nome}` : null) : r.motivo,
     destino: telefone,
     impressao: r.ok ? r.impressao : null,
@@ -492,13 +401,14 @@ export const viaDoTecnicoTools: ToolDef[] = [
           pessoa: { id: p.id, nome: p.nome },
           telefone: p.telefone,
           contexto: CONTEXTO_DA_VIA_A_EQUIPE,
+          enviar: enviarDocumentoWhatsapp,
           chave: (impressao) => chaveDeEnvio("via-equipe", ordem.id, p.id, p.telefone, impressao, janelaDeDoisMinutos()),
         });
         await registrarEnvioDaVia(admin, {
           service_order_id: ordem.id,
           payee_id: p.id,
           origem: "assistente",
-          estado: r.ok ? "enviado" : (("pulado" in r && r.pulado) ? "pulado" : "falhou"),
+          estado: estadoDoResultado(r),
           motivo: r.ok ? null : r.motivo,
           destino: p.telefone,
           impressao: r.ok ? r.impressao : null,
