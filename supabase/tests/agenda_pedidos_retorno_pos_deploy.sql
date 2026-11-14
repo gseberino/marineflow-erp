@@ -28,6 +28,24 @@ set local timezone = 'UTC';
 create temp table _pg on commit drop as
 select coalesce(current_setting('agenda_teste.feriados', true), '') <> '' as bancada;
 
+-- O corpo sem os blocos "-- PEDIDO A-3, VALIDADE (F5): … fim" (o conserto da validade, 20261113400000, acrescenta 2 ao enfileirar: o F2 confere o
+-- corpo desta migration por baixo dele).
+create function pg_temp.sem_validade(p text) returns text language plpgsql immutable as $f$
+declare
+  v_fora text[] := '{}';
+  v_dentro boolean := false;
+  l text;
+begin
+  foreach l in array string_to_array(replace(p, chr(13), ''), E'\n') loop
+    if not v_dentro and l ~ '^\s*-- PEDIDO A-3, VALIDADE \(F5\):' and l !~ '\(F5\): fim\s*$' then v_dentro := true; continue; end if;
+    if v_dentro then
+      if l ~ '^\s*-- PEDIDO A-3, VALIDADE \(F5\): fim\s*$' then v_dentro := false; end if;
+      continue;
+    end if;
+    v_fora := v_fora || l;
+  end loop;
+  return array_to_string(v_fora, E'\n');
+end $f$;
 -- O corpo sem os blocos "-- PEDIDO A-x (F5): … -- PEDIDO A-x (F5): fim".
 create function pg_temp.sem_pedido(p text) returns text language plpgsql immutable as $f$
 declare
@@ -97,8 +115,9 @@ select format('F1 %s: 1 assinatura, definer %s, volatilidade %s, search_path=pub
   from _f r
   left join pg_proc p on p.oid = to_regprocedure('public.' || r.f);
 insert into _resultado
-select format('F2 %s: o corpo é o da migration (md5 sem CR %s…)', r.f, left(r.m, 8)), p.oid is not null and md5(replace(p.prosrc, chr(13), '')) = r.m,
-       case when p.oid is null then 'NÃO EXISTE' when md5(replace(p.prosrc, chr(13), '')) <> r.m then 'md5 ' || md5(replace(p.prosrc, chr(13), '')) end
+select format('F2 %s: o corpo é o da migration (md5 sem CR %s…; com o conserto da validade por cima, tirados os blocos dele)', r.f, left(r.m, 8)),
+       p.oid is not null and md5(pg_temp.sem_validade(p.prosrc)) = r.m,
+       case when p.oid is null then 'NÃO EXISTE' when md5(pg_temp.sem_validade(p.prosrc)) <> r.m then 'md5 ' || md5(pg_temp.sem_validade(p.prosrc)) end
   from _f r
   left join pg_proc p on p.oid = to_regprocedure('public.' || r.f);
 insert into _resultado

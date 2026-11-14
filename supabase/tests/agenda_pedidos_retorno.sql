@@ -13,7 +13,8 @@
 --       a que vale só na sexta não tem como esperar e fica recusada pelo teto do dia; o aviso de atraso que não pode esperar vira a pergunta crítica ao
 --       dono (d13); sem saída hoje (a de ontem), a de antes; o que não conta (sombra, agendada, recusada, outro emissor, outro cliente, a de depois de agora);
 --       incerta e enviando contam; o passo fila de ponta a ponta; o *manda cliente* do dono responde a hora nova
---   A3  A-3: o "Fechado" de sex 30/10: a confirmação de sábado espera ter 03/11 (o dia útil: sábado, domingo e Finados fora), motivo orcamento_fechado; a
+--   A3  A-3: o "Fechado" de sex 30/10: para a confirmação de sábado vale ter 03/11 (o dia útil: sábado, domingo e Finados fora), motivo
+--       orcamento_fechado — o próprio dia do serviço, e desde o conserto da validade (20261113400000) ela cai em vez de ir para ele; a
 --       véspera não espera (o A-3 é só da confirmação); a confirmação que vale só no sábado fica recusada; o "Fechado" de hoje leva ao dia útil (não ao
 --       sábado); o "Fechado" antigo não segura; com sábado útil, o sábado já é o dia útil
 --   A5  A-5: o teto do dia a todos (cliente_total_dia_max 2) com 2 iniciadas do retorno de hoje a outro cliente recusa a confirmação (teto_total); o que
@@ -440,9 +441,11 @@ begin
     t := format('nasceu %s, sai %s, vale até %s', m.estado, pg_temp.br(m.enviar_em), pg_temp.br(m.valida_ate));
     r := public._agenda_cliente_enfileirar(v_m, pg_temp.em('2026-10-31 09:00'));
     m := pg_temp.msg(v_m);
-    v_res := pg_temp.ok(v_res, 'A3a o "Fechado" saiu sex 30/10 15:00: a confirmação de sáb 31/10 espera o dia útil seguinte — ter 03/11 08:00 (sábado, domingo e Finados fora), motivo orcamento_fechado; nada na fila',
-      r ->> 'estado' = 'registrada' and r ->> 'motivo' = 'orcamento_fechado' and m.estado = 'registrada' and m.recusa_motivo is null
-      and pg_temp.br(m.enviar_em) like '2026-11-03 08:0%' and not exists (select 1 from public.whatsapp_send_queue q where q.source_ref_id = v_m),
+    -- (conserto da validade, 20261113400000, (b)) o dia útil seguinte ao "Fechado" de sexta é ter 03/11 (sábado, domingo e Finados fora), o próprio
+    -- dia do serviço: a confirmação não vai para ele (antes: ia para ter 03/11 08:00); o caso salvo está em agenda_a3_validade.sql (V1)
+    v_res := pg_temp.ok(v_res, 'A3a o "Fechado" saiu sex 30/10 15:00: a confirmação de sáb 31/10 esperaria o dia útil seguinte, ter 03/11, que é o próprio dia do serviço — desde o conserto da validade ela cai (teto_dia), mesmo valendo até terça; nada na fila',
+      r ->> 'estado' = 'recusada' and r ->> 'motivo' = 'teto_dia' and m.recusa_motivo = 'teto_dia' and pg_temp.br(m.enviar_em) = '2026-10-31 09:00'
+      and not exists (select 1 from public.whatsapp_send_queue q where q.source_ref_id = v_m),
       format('%s; %s; agora sai %s', t, r, pg_temp.br(m.enviar_em)));
     v_res := pg_temp.ok(v_res, 'A3b a véspera do mesmo sábado não espera (o A-3 é só da confirmação; o "Fechado" foi ontem, não hoje)',
       public._agenda_cliente_orcamento_espera(c_cli, 'vespera', date '2026-10-31', pg_temp.em('2026-10-31 09:00')) is null
@@ -474,8 +477,11 @@ begin
     v_m := pg_temp.confirmar_flavio(pg_temp.em('2026-10-30 10:00'), public._agenda_cliente_fim_da_janela(date '2026-10-30', 2), pg_temp.em('2026-10-30 09:30'));
     r := public._agenda_cliente_enfileirar(v_m, pg_temp.em('2026-10-30 10:00'));
     m := pg_temp.msg(v_m);
-    v_res := pg_temp.ok(v_res, 'A3d o "Fechado" saiu hoje às 09:00: a confirmação de hoje espera o dia útil (ter 03/11, motivo orcamento_fechado), não o sábado; outra mensagem (a véspera) só o dia seguinte (sáb 31/10, orcamento_hoje)',
-      r ->> 'motivo' = 'orcamento_fechado' and pg_temp.br(m.enviar_em) like '2026-11-03 08:0%'
+    -- (conserto da validade, 20261113400000, (b)) o dia útil é ter 03/11, o dia do serviço: a confirmação cai em vez de ir para ele
+    v_res := pg_temp.ok(v_res, 'A3d o "Fechado" saiu hoje às 09:00: para a confirmação de hoje vale o dia útil (ter 03/11, orcamento_fechado), não o sábado — e, sendo o dia do serviço, ela cai (teto_dia); outra mensagem (a véspera) só o dia seguinte (sáb 31/10, orcamento_hoje)',
+      r ->> 'estado' = 'recusada' and r ->> 'motivo' = 'teto_dia' and pg_temp.br(m.enviar_em) = '2026-10-30 10:00'
+      and public._agenda_cliente_orcamento_espera(c_cli, 'confirmar', date '2026-10-30', pg_temp.em('2026-10-30 10:00'))
+          = jsonb_build_object('dia', '2026-11-03', 'motivo', 'orcamento_fechado')
       and public._agenda_cliente_orcamento_espera(c_cli, 'vespera', date '2026-10-30', pg_temp.em('2026-10-30 10:00'))
           = jsonb_build_object('dia', '2026-10-31', 'motivo', 'orcamento_hoje'),
       format('%s; sai %s', r, pg_temp.br(m.enviar_em)));
