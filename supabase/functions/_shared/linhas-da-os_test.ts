@@ -6,11 +6,13 @@ import {
   chaveDoInstante,
   comecaComAsPalavras,
   instantesEmSequencia,
+  linhaDitaForaDoNome,
   numeroDito,
   numerarLinhas,
   ordenarLinhas,
   ordinalDito,
   temAsPalavras,
+  temOOrdinalNoNome,
 } from "./linhas-da-os.ts";
 import {
   CASOS_DE_ORDEM,
@@ -176,6 +178,57 @@ Deno.test("ordinal por extenso: 'o quarto' é o 4, mas com 'quarto' (o cômodo) 
   // o nome com mais palavras continua pelo nome
   assertEquals(acharLinha(linhas, "ar-condicionado do quarto"), { linha: linhas[1] });
   assertEquals(acharLinha(linhas, "ar do quarto"), { linha: linhas[1] });
+});
+
+Deno.test("ordinal por extenso: o cômodo no PLURAL ('dos quartos') também pergunta; a OS curta pergunta em vez de 'não existe o 4' (revisão final, c-3)", () => {
+  // OS própria (não a LINHAS_DO_ACHADOR compartilhada com a F2)
+  const linhas = [
+    { id: "a", numero: 1, nome: "Instalação do inversor" },
+    { id: "b", numero: 2, nome: "Ar-condicionado dos quartos" },
+    { id: "c", numero: 3, nome: "Luz do quartinho" },
+    { id: "d", numero: 4, nome: "Troca do disjuntor" },
+  ];
+  // antes do conserto: o 4 · Troca do disjuntor, calado
+  for (const dito of ["o quarto", "quarto", "serviço do quarto"]) {
+    const r = acharLinha(linhas, dito);
+    assert("motivo" in r && r.motivo === "ambiguo", `${dito}: ${JSON.stringify(r)}`);
+    // "quartinho" não começa com "quarto": o mesmo critério do caminho do nome, que também não o acha
+    assertEquals(r.opcoes.map((l) => l.id), ["d", "b"], dito);
+    assertEquals(
+      r.erro,
+      `"${dito}" pode ser o serviço 4 (4 · Troca do disjuntor) ou o que tem "quarto" no nome: 2 · Ar-condicionado dos quartos. Use o número.`,
+    );
+  }
+  // OS de 2 linhas: antes, fora_da_faixa ("não existe o 4"); agora pergunta, com o cômodo como opção
+  const curta = acharLinha(linhas.slice(0, 2), "quarto");
+  assert("motivo" in curta && curta.motivo === "ambiguo", JSON.stringify(curta));
+  assertEquals(curta.opcoes.map((l) => l.id), ["b"]);
+  assertEquals(curta.erro, '"quarto" pode ser o serviço 4 (a OS tem 2) ou o que tem "quarto" no nome: 2 · Ar-condicionado dos quartos. Use o número.');
+  // sem o cômodo (só o "quartinho"), o ordinal continua sendo o número
+  const semComodo = [
+    { id: "a", numero: 1, nome: "Instalação do inversor" },
+    { id: "c", numero: 2, nome: "Luz do quartinho" },
+    { id: "e", numero: 3, nome: "Fita LED" },
+    { id: "d", numero: 4, nome: "Troca do disjuntor" },
+  ];
+  assertEquals(acharLinha(semComodo, "o quarto"), { linha: semComodo[3] });
+});
+
+Deno.test("temOOrdinalNoNome e linhaDitaForaDoNome (revisão final, c-3 e c-2)", () => {
+  assertEquals(temOOrdinalNoNome("Ar-condicionado do quarto", 4), true);
+  assertEquals(temOOrdinalNoNome("Ar-condicionado dos quartos", 4), true);
+  assertEquals(temOOrdinalNoNome("Quarta revisão do motor", 4), true);
+  assertEquals(temOOrdinalNoNome("Luz do quartinho", 4), false);
+  assertEquals(temOOrdinalNoNome("Troca do disjuntor", 4), false);
+  assertEquals(temOOrdinalNoNome("Segunda via do boleto", 2), true);
+  assertEquals(temOOrdinalNoNome("Qualquer coisa", 11), false);
+  // "linha" dito na frente e ausente do nome: remover/editar pergunta
+  assertEquals(linhaDitaForaDoNome("Filtro de combustível", "a linha de combustível"), true);
+  assertEquals(linhaDitaForaDoNome("Filtro de combustível", "linha de combustível"), true);
+  assertEquals(linhaDitaForaDoNome("Bomba d'água 12V", "a linha d'água"), true);
+  assertEquals(linhaDitaForaDoNome("Mangueira da linha de combustível", "a linha de combustível"), false);
+  assertEquals(linhaDitaForaDoNome("Filtro de combustível", "o filtro de combustível"), false);
+  assertEquals(linhaDitaForaDoNome("Instalação do inversor", "o serviço do inversor"), false);
 });
 
 Deno.test("comecaComAsPalavras: começo de palavra com 4 letras ou mais; curta só inteira; só número nunca (revisão da F0, achador-3)", () => {

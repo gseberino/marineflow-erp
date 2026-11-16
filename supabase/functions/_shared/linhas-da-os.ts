@@ -159,6 +159,28 @@ export function comecaComAsPalavras(nome: unknown, dito: unknown): boolean {
   return ditas.every((p) => doNome.includes(p) || (p.length >= 4 && doNome.some((w) => w.startsWith(p))));
 }
 
+/**
+ * O nome tem o ordinal `n` como palavra ("quarto", "quarta") ou como começo de palavra ("quartos")? É o cômodo que "o
+ * quarto" também pode querer dizer. O mesmo critério do caminho do nome (comecaComAsPalavras): só a palavra inteira
+ * deixava "Ar-condicionado dos quartos" de fora, e o ordinal escolhia calado o serviço 4 (revisão final, c-3).
+ */
+export function temOOrdinalNoNome(nome: unknown, n: number): boolean {
+  const ordinal = ORDINAIS[n - 1];
+  if (!ordinal) return false;
+  return [ordinal, ordinal.replace(/o$/, 'a')].some((forma) => comecaComAsPalavras(nome, forma));
+}
+
+/**
+ * A 1ª palavra dita (sem as vazias) é "linha" e o nome NÃO tem a palavra "linha"? O palavrasDitas tira o "linha" do
+ * começo como rótulo ("a linha do LED" acha "Fita LED externa"), mas em peça e serviço náutico "linha" é substantivo
+ * (linha de combustível, linha d'água, linha de ancoragem): sem ele, "combustível" sozinho acha o "Filtro de
+ * combustível". Remover/editar item usa isto para PERGUNTAR em vez de executar (revisão final, c-2).
+ */
+export function linhaDitaForaDoNome(nome: unknown, dito: unknown): boolean {
+  const ditas = palavras(dito).filter((p) => !PALAVRAS_VAZIAS.has(p));
+  return ditas[0] === 'linha' && !palavras(nome).includes('linha');
+}
+
 /** Uma linha numerada, com o nome como sai no papel. */
 export interface LinhaNumerada {
   id: string;
@@ -208,12 +230,12 @@ export function acharLinha<T extends LinhaNumerada>(linhas: readonly T[], dito: 
   }
 
   // "o quarto", "a segunda" (ordinal por extenso) é o número — mas se a palavra também está no nome de outra linha
-  // ("Ar-condicionado do quarto"), pergunta: nunca escolhe entre o 4º e o cômodo (revisão da F0, achador-2).
+  // ("Ar-condicionado do quarto", "… dos quartos"), pergunta: nunca escolhe entre o 4º e o cômodo (revisão da F0,
+  // achador-2; o plural pelo começo de palavra, revisão final c-3).
   const ord = ordinalDito(bruto);
   if (ord !== null) {
     const porNumero = linhas.find((x) => x.numero === ord);
-    const formas = new Set([ORDINAIS[ord - 1], ORDINAIS[ord - 1].replace(/o$/, 'a')]);
-    const porNome = linhas.filter((l) => l !== porNumero && palavras(l.nome).some((w) => formas.has(w)));
+    const porNome = linhas.filter((l) => l !== porNumero && temOOrdinalNoNome(l.nome, ord));
     if (!porNome.length) return porNumero ? { linha: porNumero } : foraDaFaixa(ord);
     return {
       motivo: 'ambiguo',

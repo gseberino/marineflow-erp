@@ -265,16 +265,140 @@ Deno.test("update_service_order_via: '200' numa OS de 2 → pergunta com a lista
 // ═══ Ordinal por extenso (revisão da F0, achador-2): "o quarto" é o 4º — e "quarto" também é o cômodo ═══════════
 
 for (const dito of ["o quarto", "quarto", "a quarta", "o quarto serviço"]) {
-  Deno.test(`remover: "${dito}" é ordinal → pergunta pelo serviço 4; "Ar-condicionado do quarto" fica`, async () => {
+  Deno.test(`remover: "${dito}" é ordinal → pergunta pelo serviço 4 E pelo "Ar-condicionado do quarto"; nada removido`, async () => {
     const db = bancoFalso(orcamentoComCabo4());
     const r = await tool(serviceOrderTools, "remove_service_order_item").execute({ service_order_id: OS, description: dito }, ctxCom(db)) as Linha;
     assertEquals(r.needs_choice, true, JSON.stringify(r));
     assertEquals(r.nada_alterado, true);
-    assertStringIncludes(r.message, 'O serviço 4 da via é "Troca do disjuntor"');
+    // o cômodo entra nas opções ao lado do serviço 4, como no acharLinha (revisão final, c-4)
+    assertStringIncludes(
+      r.message,
+      `"${dito}" pode ser o serviço 4 da via ("Troca do disjuntor") ou o que tem "quarto" no nome: 2 · Ar-condicionado do quarto.`,
+    );
+    assertEquals(r.options.map((o: Linha) => o.item_id), ["s4", "s2"]);
     assertEquals(db.gravacoes.length, 0);
     assertEquals(db.tabelas.service_order_services.map((s) => s.id), ["s1", "s2", "s3", "s4"]);
   });
 }
+
+// ═══ Revisão final, c-4: com o ordinal, a pergunta oferece também o item com a palavra no nome ═══════════════════════
+
+/** A OS da sonda (rev-final/sondas/c/remover.ts): o cômodo é o serviço 1 e o 4 é o disjuntor. */
+function orcamentoDoQuarto(servicos: string[], pecas: string[] = ["Disjuntor 125A"]) {
+  return {
+    service_orders: [{ id: OS, service_order_number: "OS-00990", status: "approved", grand_total: 1000 }],
+    service_order_parts: pecas.map((n, i) => ({
+      id: `p${i + 1}`, service_order_id: OS, created_at: T(i + 1), product_id: `pr${i + 1}`, quantity: 1, unit_sale_snapshot: 10, unit_cost_snapshot: 5, line_total_sale: 10, products: { name: n },
+    })),
+    service_order_services: servicos.map((n, i) => ({
+      id: `s${i + 1}`, service_order_id: OS, created_at: T(50 + i), name_snapshot: n, quantity: 1, unit_price_snapshot: 100, line_total: 100, field_status: null, field_status_note: null,
+    })),
+  };
+}
+
+Deno.test("remover/editar: 'o quarto' com o cômodo no serviço 1 → as opções têm o 4 E o 1; nada removido nem editado (c-4)", async () => {
+  const servicos = ["Ar-condicionado do quarto", "Fita LED", "Bomba", "Troca do disjuntor"];
+  const db = bancoFalso(orcamentoDoQuarto(servicos));
+  const r = await tool(serviceOrderTools, "remove_service_order_item").execute({ service_order_id: OS, description: "o quarto" }, ctxCom(db)) as Linha;
+  assertEquals(r.needs_choice, true, JSON.stringify(r));
+  assertEquals(r.nada_alterado, true);
+  assertEquals(r.options.map((o: Linha) => o.item_id), ["s4", "s1"]);
+  assertEquals(r.options.map((o: Linha) => o.descricao), ["4 · Troca do disjuntor", "1 · Ar-condicionado do quarto"]);
+  assertStringIncludes(r.message, 'pode ser o serviço 4 da via ("Troca do disjuntor") ou o que tem "quarto" no nome: 1 · Ar-condicionado do quarto');
+  assertStringIncludes(r.message, "item_id");
+  assertEquals(r.pecas.map((p: Linha) => p.descricao), ["Disjuntor 125A"]);
+  assertEquals(db.gravacoes.length, 0);
+  assertEquals(db.tabelas.service_order_services.map((s) => s.id), ["s1", "s2", "s3", "s4"]);
+  const ed = bancoFalso(orcamentoDoQuarto(servicos));
+  const r2 = await tool(serviceOrderTools, "edit_service_order_item").execute({ service_order_id: OS, description: "o quarto", unit_price: 1 }, ctxCom(ed)) as Linha;
+  assertEquals(r2.needs_choice, true, JSON.stringify(r2));
+  assertEquals(r2.options.map((o: Linha) => o.item_id), ["s4", "s1"]);
+  assertStringIncludes(r2.message, "editar");
+  assertEquals(ed.gravacoes.length, 0);
+  assertEquals(ed.tabelas.service_order_services.map((s) => s.unit_price_snapshot), [100, 100, 100, 100]);
+});
+
+Deno.test("remover: 'o quarto' sem o serviço 4 e com a PEÇA 'Luminária do quarto' → pergunta com a peça; nada removido (c-4)", async () => {
+  const db = bancoFalso(orcamentoDoQuarto(["Instalação do inversor", "Fita LED"], ["Luminária do quarto", "Terminal 50mm"]));
+  const r = await tool(serviceOrderTools, "remove_service_order_item").execute({ service_order_id: OS, description: "o quarto" }, ctxCom(db)) as Linha;
+  assertEquals(r.needs_choice, true, JSON.stringify(r));
+  assertEquals(r.nada_alterado, true);
+  assertEquals(r.options, [{ item_id: "p1", descricao: "Luminária do quarto", quantidade: 1, total: 10 }]);
+  assertStringIncludes(
+    r.message,
+    '"o quarto" pode ser o serviço 4 (este orçamento/OS tem 2 serviços) ou o que tem "quarto" no nome: Luminária do quarto.',
+  );
+  assertEquals(db.gravacoes.length, 0);
+  assertEquals(db.tabelas.service_order_parts.map((p) => p.id), ["p1", "p2"]);
+});
+
+// ═══ Revisão final, c-2: "linha" é substantivo em náutica — "a linha de combustível" nunca apaga o filtro calado ══════
+
+const DITOS_DA_LINHA: Array<[dito: string, pecas: string[]]> = [
+  ["linha de combustível", ["Filtro de combustível", "Abraçadeira inox"]],
+  ["a linha de combustível", ["Filtro de combustível", "Abraçadeira inox"]],
+  ["linha d'água", ["Bomba d'água 12V", "Abraçadeira inox"]],
+  ["a linha d'água", ["Bomba d'água 12V", "Abraçadeira inox"]],
+  ["linha de ancoragem", ["Cabo de ancoragem 10 mm", "Manilha"]],
+  ["a linha de ancoragem", ["Cabo de ancoragem 10 mm", "Manilha"]],
+];
+
+for (const [dito, pecas] of DITOS_DA_LINHA) {
+  Deno.test(`remover/editar: "${dito}" com a peça "${pecas[0]}" (sem "linha" no nome) → pergunta; nada apagado nem editado`, async () => {
+    const db = bancoFalso(orcamentoDoQuarto(["Revisão do motor"], pecas));
+    const r = await tool(serviceOrderTools, "remove_service_order_item").execute({ service_order_id: OS, description: dito }, ctxCom(db)) as Linha;
+    assertEquals(r.needs_choice, true, JSON.stringify(r));
+    assertEquals(r.nada_alterado, true);
+    assertEquals(r.options.map((o: Linha) => o.item_id), ["p1"]);
+    assertStringIncludes(r.message, `Não achei "${dito}" pelo nome inteiro. Parecido: ${pecas[0]}.`);
+    assertEquals(db.gravacoes.length, 0);
+    assertEquals(db.tabelas.service_order_parts.map((p) => p.id), ["p1", "p2"]);
+    const ed = bancoFalso(orcamentoDoQuarto(["Revisão do motor"], pecas));
+    const r2 = await tool(serviceOrderTools, "edit_service_order_item").execute({ service_order_id: OS, description: dito, unit_price: 1 }, ctxCom(ed)) as Linha;
+    assertEquals(r2.needs_choice, true, JSON.stringify(r2));
+    assertEquals(r2.options.map((o: Linha) => o.item_id), ["p1"]);
+    assertEquals(ed.gravacoes.length, 0);
+    assertEquals(ed.tabelas.service_order_parts.map((p) => p.unit_sale_snapshot), [10, 10]);
+  });
+}
+
+Deno.test("remover: 'a linha de combustível' com 'linha' no nome da peça remove direto (c-2 só pergunta quando o nome não tem 'linha')", async () => {
+  const db = bancoFalso(orcamentoDoQuarto(["Revisão do motor"], ["Mangueira da linha de combustível", "Abraçadeira inox"]));
+  const r = await tool(serviceOrderTools, "remove_service_order_item").execute({ service_order_id: OS, description: "a linha de combustível" }, ctxCom(db)) as Linha;
+  assert(r.ok, JSON.stringify(r));
+  assertEquals(r.removido.descricao, "Mangueira da linha de combustível");
+  assertEquals(db.tabelas.service_order_parts.map((p) => p.id), ["p2"]);
+});
+
+// ═══ Revisão final, c-5: a pergunta do update_service_order_via usa a frase do acharLinha ═══════════════════════════
+
+Deno.test("update_service_order_via: 'o quarto' numa OS de 2 com o cômodo na 2 → a frase diz o porquê (uma opção só), nada gravado", async () => {
+  const servicos = (nomes: string[]) => nomes.map((n, i) => ({
+    id: `l${i + 1}`, service_order_id: OS, created_at: T(i + 1), name_snapshot: n, field_status: "a_fazer", field_status_note: null,
+  }));
+  const os = (numero: string) => [{ id: OS, service_order_number: numero, status: "in_progress", technician_notes: null, internal_notes: null, check_in_at: null, check_out_at: null }];
+  const db = bancoFalso({ service_orders: os("OS-00906"), service_order_services: servicos(["Instalação do inversor", "Ar-condicionado do quarto"]) });
+  const r = await tool(fieldOpsTools, "update_service_order_via").execute(
+    { service_order_id: OS, servicos: [{ servico: "o quarto", situacao: "feito" }] },
+    ctxCom(db),
+  ) as Linha;
+  assertEquals(r.nada_gravado, true, JSON.stringify(r));
+  assertStringIncludes(
+    r.error,
+    '"o quarto" pode ser o serviço 4 (a OS tem 2) ou o que tem "quarto" no nome: 2 · Ar-condicionado do quarto. Use o número. (OS-00906)',
+  );
+  assert(!r.error.includes("serve para mais de um serviço"), r.error);
+  assertEquals(db.gravacoes.length, 0);
+  // a ambiguidade comum segue dizendo que casa com mais de um, com a lista
+  const duas = bancoFalso({ service_orders: os("OS-00907"), service_order_services: servicos(["Instalação do inversor", "Teste do inversor"]) });
+  const r2 = await tool(fieldOpsTools, "update_service_order_via").execute(
+    { service_order_id: OS, servicos: [{ servico: "inversor", situacao: "feito" }] },
+    ctxCom(duas),
+  ) as Linha;
+  assertEquals(r2.nada_gravado, true, JSON.stringify(r2));
+  assertStringIncludes(r2.error, '"inversor" casa com mais de um serviço: 1 · Instalação do inversor; 2 · Teste do inversor. Use o número. (OS-00907)');
+  assertEquals(duas.gravacoes.length, 0);
+});
 
 Deno.test("editar: 'o segundo' com preço novo → pergunta (o serviço 2 é o do quarto), nada alterado", async () => {
   const db = bancoFalso(orcamentoComCabo4());

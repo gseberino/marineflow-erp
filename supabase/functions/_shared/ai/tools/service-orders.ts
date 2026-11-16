@@ -12,7 +12,8 @@ import { canalDaRpc, ehDataCalculada, type ResultadoParaOModelo, resultadoDoRasc
 import { modoDaLeituraNoBanco } from "../../agenda/executar.ts";
 import { argumentosDaPortaCompleta, ehPortaAusente, ehSemDireitoNaPorta, statusPelaTelaSemAPorta } from "../../porta-ausente.ts";
 import {
-  comecaComAsPalavras, instantesEmSequencia, numeroDito, ordinalDito, semAcento as semAcentoDaLinha, temAsPalavras,
+  comecaComAsPalavras, instantesEmSequencia, linhaDitaForaDoNome, numeroDito, ORDINAIS, ordinalDito,
+  semAcento as semAcentoDaLinha, temAsPalavras, temOOrdinalNoNome,
 } from "../../linhas-da-os.ts";
 
 /** Os status que a porta única de status do banco decide (Agenda de Produção, Fase 2, P4). */
@@ -179,7 +180,9 @@ async function loadSoItems(sb: any, soId: string): Promise<SoItem[]> {
  */
 function perguntaDoNumero(items: SoItem[], descricao: unknown, acao: "remover" | "editar"): Record<string, unknown> | null {
   // O ordinal por extenso também ("o quarto" casava calado com "Ar-condicionado do quarto"; revisão da F0, achador-2).
-  const n = numeroDito(descricao) ?? ordinalDito(descricao);
+  const numero = numeroDito(descricao);
+  const ordinal = numero === null ? ordinalDito(descricao) : null;
+  const n = numero ?? ordinal;
   if (n === null) return null;
   const servicos = items.filter((i) => i.table === "service_order_services");
   const pecas = items.filter((i) => i.table === "service_order_parts");
@@ -188,12 +191,34 @@ function perguntaDoNumero(items: SoItem[], descricao: unknown, acao: "remover" |
   const avisoDasPecas = pecas.length
     ? ` As peças não têm número na via (o número do cartão da proposta conta peças e mão de obra juntas): se for uma peça, use o item_id dela em pecas.`
     : "";
+  const dito = String(descricao).trim();
+  // "o quarto" também é o cômodo: o item com a palavra no nome (serviço ou peça) entra nas opções ao lado do serviço N,
+  // como no acharLinha. Só com o serviço 4 nas opções, o modelo confirmava com o dono só ele e o "sim" saía para o item
+  // errado (revisão final, c-4).
+  const peloNome = ordinal === null ? [] : items.filter((i) => i !== servico && temOOrdinalNoNome(i.label, ordinal));
+  if (peloNome.length) {
+    const opcaoDoNome = (i: SoItem) => (i.table === "service_order_services"
+      ? opcao(i)
+      : { item_id: i.id, descricao: i.label, quantidade: i.quantity, total: i.total });
+    const doNumero = servico
+      ? `o serviço ${n} da via ("${servico.label}")`
+      : `o serviço ${n} (este orçamento/OS tem ${servicos.length} serviço${servicos.length === 1 ? "" : "s"})`;
+    return {
+      needs_choice: true,
+      nada_alterado: true,
+      message: `"${dito}" pode ser ${doNumero} ou o que tem "${ORDINAIS[n - 1]}" no nome: ` +
+        `${peloNome.map((i) => opcaoDoNome(i).descricao).join("; ")}. Pergunte ao dono qual é para ${acao} e passe o item_id — ` +
+        `não ${acao} sem a confirmação.${avisoDasPecas}`,
+      options: [...(servico ? [opcao(servico)] : []), ...peloNome.map(opcaoDoNome)],
+      pecas: pecas.map((p) => ({ item_id: p.id, descricao: p.label, quantidade: p.quantity, total: p.total })),
+    };
+  }
   return {
     needs_choice: true,
     nada_alterado: true,
     message: servico
-      ? `"${String(descricao).trim()}" é só um número. O serviço ${n} da via é "${servico.label}" — é esse que é para ${acao}? Confirme com o dono e passe o item_id.${avisoDasPecas}`
-      : `"${String(descricao).trim()}" é só um número, e este orçamento/OS tem ${servicos.length} serviço${servicos.length === 1 ? "" : "s"}: não existe o serviço ${n}. Pergunte qual item ${acao} e passe o item_id.${avisoDasPecas}`,
+      ? `"${dito}" é só um número. O serviço ${n} da via é "${servico.label}" — é esse que é para ${acao}? Confirme com o dono e passe o item_id.${avisoDasPecas}`
+      : `"${dito}" é só um número, e este orçamento/OS tem ${servicos.length} serviço${servicos.length === 1 ? "" : "s"}: não existe o serviço ${n}. Pergunte qual item ${acao} e passe o item_id.${avisoDasPecas}`,
     options: servico ? [opcao(servico)] : servicos.map(opcao),
     pecas: pecas.map((p) => ({ item_id: p.id, descricao: p.label, quantidade: p.quantity, total: p.total })),
   };
@@ -275,8 +300,9 @@ export async function applyStockDelta(
 
 // Resolve um item por id (exato) ou por descrição: nome igual (sem acento/caixa) ou todas as palavras ditas como
 // palavras INTEIRAS do nome (F0 da via v2: o `includes` fazia "4" achar "…LiFePO4" e apagá-la). Retorna { item }
-// quando há exatamente um; { matches } quando a descrição é ambígua (>1). Número sozinho nem chega aqui
-// (perguntaDoNumero).
+// quando há exatamente um; { matches } quando a descrição é ambígua (>1) — ou quando o único achado só casou porque o
+// "linha" do começo saiu como rótulo ("a linha de combustível" → "Filtro de combustível"): aí o handler pergunta
+// (perguntaDoNome), nunca apaga nem edita (revisão final, c-2). Número sozinho nem chega aqui (perguntaDoNumero).
 function resolveSoItem(items: SoItem[], itemId?: string, description?: string): { item?: SoItem; matches?: SoItem[] } {
   if (itemId) {
     const item = items.find((i) => i.id === itemId);
@@ -288,7 +314,7 @@ function resolveSoItem(items: SoItem[], itemId?: string, description?: string): 
     if (iguais.length === 1) return { item: iguais[0] };
     if (iguais.length > 1) return { matches: iguais };
     const matches = items.filter((i) => temAsPalavras(i.label, description));
-    if (matches.length === 1) return { item: matches[0] };
+    if (matches.length === 1 && !linhaDitaForaDoNome(matches[0].label, description)) return { item: matches[0] };
     return { matches };
   }
   return {};

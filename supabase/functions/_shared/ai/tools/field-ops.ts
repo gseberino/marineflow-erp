@@ -103,14 +103,16 @@ export function situacaoDita(valor: unknown): string | null {
  * (created_at, id): o número é a posição nela. Mais de uma candidata = pergunta ("N · nome"); nunca escolhe sozinho.
  * Embrulho de acharLinha (_shared/linhas-da-os.ts), o achador único das tools. Antes (07/10) o nome casava por pedaço
  * de texto: "4" marcava a linha "…LiFePO4" e "serviço 4" a "Serviço de…", sem perguntar.
+ * Na ambiguidade, o `erro` do acharLinha vai junto: é ele que explica o porquê ("pode ser o serviço 4 (a OS tem 2) ou o
+ * que tem "quarto" no nome"), e com o ordinal a lista pode ter uma opção só (revisão final, c-5).
  */
 export function acharServico<T extends { id: string; name_snapshot?: string | null }>(
   linhas: T[], dito: unknown,
-): { linha: T; numero: number } | { opcoes: string[] } | { erro: string } | null {
+): { linha: T; numero: number } | { opcoes: string[]; erro: string } | { erro: string } | null {
   const numeradas = numerarLinhas(linhas).map((l) => ({ id: l.id, numero: l.numero, nome: l.name_snapshot || "Serviço", original: l }));
   const r = acharLinha(numeradas, dito);
   if ("linha" in r) return { linha: r.linha.original, numero: r.linha.numero };
-  if (r.motivo === "ambiguo") return { opcoes: r.opcoes.map((l) => `${l.numero} · ${l.nome}`) };
+  if (r.motivo === "ambiguo") return { opcoes: r.opcoes.map((l) => `${l.numero} · ${l.nome}`), erro: r.erro };
   if (r.motivo === "fora_da_faixa") return { erro: r.erro };
   return null;
 }
@@ -369,8 +371,10 @@ export const fieldOpsTools: ToolDef[] = [
       for (const item of Array.isArray(args.servicos) ? args.servicos : []) {
         const achado = acharServico(servicosDaOS, item?.servico);
         if (!achado) { problemas.push(`Não achei o serviço "${item?.servico}" na ${achada.numero}. Serviços da OS: ${nomes.join("; ") || "nenhum"}.`); continue; }
+        // Fora da faixa e ambiguidade: a frase do acharLinha, que diz o porquê ("casa com mais de um serviço…", "pode ser o
+        // serviço 4 (a OS tem 2) ou o que tem "quarto" no nome…"). A frase fixa "serve para mais de um serviço" ficava
+        // falsa com uma opção só (revisão final, c-5).
         if ("erro" in achado) { problemas.push(`${achado.erro} (${achada.numero})`); continue; }
-        if ("opcoes" in achado) { problemas.push(`"${item?.servico}" serve para mais de um serviço: ${achado.opcoes.join("; ")}. Qual? Use o número.`); continue; }
         marcar(achado.linha, item?.situacao, item?.motivo);
       }
 
