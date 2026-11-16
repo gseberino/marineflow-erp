@@ -236,6 +236,9 @@ export interface LinhaDeSeguranca {
  * mesmos blocos que o gerador gravaria (seguranca_da_via, só leitura); aqui eles viram passos com
  * a mesma chave e o mesmo rótulo numerado, para a via imprimir igual. Quando o sistema saiu do
  * texto do serviço (e não do cadastro), a nota do bloco diz isso.
+ *
+ * Desde o porte da via v2 (F1, 16/11/2026) a via NÃO usa mais esta função: no lugar das páginas de
+ * segurança por sistema vai o quadro Atenção (via-atencao.ts). Fica exportada até a limpeza à parte.
  */
 export function segurancaSemRoteiro(serviceOrderId: string, linhas: LinhaDeSeguranca[]): ServiceOrderStep[] {
   const numeroDoBloco = new Map<string, number>();

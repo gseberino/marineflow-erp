@@ -4242,3 +4242,26 @@ conteúdo). Plano: bancada `porte/PLANO.md` §3. Ficam aqui porque estão fora d
 - **Efeito:** depois dos portões, `git status` mostra dois arquivos que ninguém mudou; um `git add` descuidado os levaria ao commit.
 - **Menor mudança:** decidir se o `deno.lock` regenerado entra no repo (ou usar `--frozen`/`--no-lock` nos scripts deno) e fixar o
   fim de linha dos snapshots no `.gitattributes`. Mexe em script de teste: tarefa dedicada (regra 5).
+
+## Via do técnico v2 — porte, F1 (16/11/2026) — achados laterais, NÃO corrigidos de passagem
+
+Achados durante a F1 do porte (a via aprovada nativa em `via-do-tecnico.ts`). Plano: bancada `porte/PLANO.md` §4.
+
+### [NOVO-via-04] O item "Via do técnico" espera serviços, material e cabeçalho, mas não o levantamento nem a empresa
+
+- **Onde:** `src/hooks/use-via-do-tecnico.ts` (`carregando`, F1 do porte). O plano (§4, "Tela") pede só serviços, materiais e
+  cabeçalho; o hook também lê o levantamento (`useServiceOrderSurvey`), os links das fotos (`useLinksDasFotos`), os dados da
+  empresa (`useAppSettings`) e os nomes dos responsáveis (consulta a `payees`), que continuam fora do `carregando`.
+- **Efeito:** clicar no primeiro segundo da tela ainda pode imprimir a via sem as respostas do levantamento (ou sem as fotos),
+  sem o logo/endereço/telefone do escritório e sem o "Responsável:" dos cartões. Raro (o menu só abre depois de a OS carregar),
+  e a folha sai completa no clique seguinte.
+- **Menor mudança:** somar ao `carregando` o `isLoading` dessas quatro leituras (a das fotos só quando há foto).
+
+### [NOVO-via-05] `npm run typecheck` deixa dois `.tsbuildinfo` na raiz, fora do `.gitignore`
+
+- **Onde:** `tsc -b` (script `typecheck`) grava `tsconfig.app.tsbuildinfo` e `tsconfig.node.tsbuildinfo` na raiz do repo; o
+  `.gitignore` não os cobre. Visto no worktree do porte e no checkout principal (os dois mostram `?? tsconfig.*.tsbuildinfo`).
+- **Efeito:** depois do portão, `git status` mostra dois arquivos novos; um `git add -A` (proibido aqui, mas comum) os levaria
+  ao commit. Mesma família do NOVO-via-03.
+- **Menor mudança:** `*.tsbuildinfo` no `.gitignore` (ou `tsBuildInfoFile` apontando para `node_modules/.tmp/`). Mexe em
+  configuração de portão: tarefa dedicada (regra 5).

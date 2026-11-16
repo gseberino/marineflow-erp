@@ -14,14 +14,22 @@ description: Quais documentos uma ordem de serviço gera, o que entra em cada um
 | **Recibo** | cliente, no pagamento | sim |
 | **Via do técnico** (a folha de roteiro terminada) | técnico, em campo | sim — menu Ações da OS e painel de Roteiro |
 
-### Via do técnico — como é montada hoje (01/10/2026)
+### Via do técnico — como é montada hoje (a via aprovada, 16/11/2026)
 
-`src/lib/route-sheet.ts` (`buildRouteSheetHtml`) + `src/hooks/use-via-do-tecnico.ts`
-(`viaHeaderFromOrder` é o único montador do cabeçalho; os dois botões usam o mesmo).
-Ordem da folha: rosto (veículo, quando, onde, com quem falar, pedido do cliente) → antes de
-sair (materiais, ou o aviso de que não há nenhum) → limite de escopo → um cartão por serviço
-com a volta (feito / parcial / não feito) → levantamento → roteiro, se houver → chegada e
-saída, relato, material extra, assinaturas com o que o cliente atesta. Número da OS e
+Uma folha só, em `supabase/functions/_shared/pdf/via-do-tecnico.ts` (`montarViaDoTecnico` →
+`buildRouteSheetHtml`): a tela imprime (`src/lib/route-sheet.ts` reexporta + `src/hooks/use-via-do-tecnico.ts`),
+e o assistente e a agenda mandam o MESMO HTML em PDF pelo WhatsApp (`/api/pdf`). `viaHeaderFromOrder` é o
+único montador do cabeçalho. A referência do desenho é a bancada aprovada pelo dono (`render-r3.ts`, base
+"limpa" + rodadas 1, 2 e 3; porte da via v2, F1). A ficha vai **pendurada no veículo**.
+
+Ordem da folha: cabeçalho (número da OS em 28 pt) → o veículo numa linha grande própria → aviso
+"Orçamento em aprovação" (só orçamento, `isQuoteStatus`) → rosto numa linha (Quando · Onde · Com quem falar;
+o Técnico embaixo) → pedido do cliente, instruções do escritório, o que já se sabe do sistema elétrico →
+antes de sair (materiais em 2 colunas, ou o aviso de que não há nenhum) → limite de escopo → um cartão por
+serviço (número da OS inteira, situação, Instrução na mesma linha do rótulo, a volta feito / parcial / não
+feito) → "com outra pessoa" (via de uma pessoa) → levantamento → quadro **Atenção** (1 linha por risco grave)
+→ fechamento num bloco que não se parte: chegada/saída com os telefones do cliente ao lado, relato, material
+extra, assinaturas, a faixa "No fim: fotografe todas as folhas preenchidas…" e o rodapé. Número da OS e
 "pág. X de Y" pelo `@page`.
 
 Regras que os testes guardam:
@@ -30,13 +38,27 @@ Regras que os testes guardam:
   algumas OS, valores. Ressalva técnica vai para a instrução ao técnico (fase 2 da avaliação).
 - **O link do portal do cliente (`/view/<token>`) não sai**: a página mostra preço e o botão
   "Aprovar e Assinar".
-- Sugestão da IA não aprovada não vai para o papel; passo já feito sai marcado.
-- Campo vazio vira frase para o técnico ("Local não informado na OS. Confirme com o
-  cliente"), nunca recado para o escritório.
+- Sugestão da IA não aprovada não vai para o papel; passo já feito sai marcado (modo roteiro).
+- **Sem segurança por sistema na via.** No lugar, o quadro Atenção (`_shared/pdf/via-atencao.ts`): as
+  energias vêm do sistema de cada linha (o gravado nela ou, na falta, o do cadastro do serviço — decisão 3A)
+  e de palavras inteiras no nome, notas, pedido e material. A via não lê mais a RPC `seguranca_da_via` (a
+  agenda continua usando). O painel Roteiro (modo `roteiro`, escondido) imprime o roteiro completo, sem quadro.
+- **Número do serviço = o da OS inteira** (`numerarLinhas`, ordem `created_at, id`), o mesmo da tela
+  "Lançar a via" e do "serviço N" do assistente — também na via de uma pessoa (2, 5, 7…).
+- **Cobrança não vai ao papel** (resposta 4A): frete, deslocamento e insumos no título curto
+  (`ehCobranca`, `_shared/pdf/via-texto.ts`; casos em `via-cobranca-casos.ts`) saem dos cartões e do "Lançar a
+  via"; os outros mantêm o número. A linha de cobrança conta para o quadro Atenção.
+- **Telefones fora da folha 1**: o rosto diz "telefone no fim da ficha"; os números vão ao fechamento. O
+  cabeçalho continua completo (o aviso antes de imprimir lê dele).
+- **Sem local na OS = "Oficina HBR"** (`ONDE_PADRAO`); campo vazio continua virando frase para o técnico
+  ("A combinar com o escritório", "sem telefone no cadastro"), nunca recado para o escritório.
+- **Nota interna do material não vai** ("Cadastrado pelo orçamento — confirmar preço…", `notaDoMaterial`).
+- **Nenhum caractere fora da Open Sans do servidor** (a única fonte do `/api/pdf`): nada de "⚠" (o triângulo é
+  SVG) nem "→" (entre as datas sai "até"). O teste usa as faixas de `_shared/pdf/open-sans-faixas.ts`.
+- **Mudou o desenho ou a regra do papel? Suba `VERSAO_DA_VIA`** (hoje 3) e regrave a trava de
+  `via-do-tecnico_test.ts`: a agenda só reenvia quando o DADO muda (`impressaoDaVia`).
 - Hora de agendamento: o formulário converte com `src/lib/datetime-local.ts`. Mandar o texto
   do `datetime-local` direto gravava a hora local como UTC (3 h de diferença).
-- Roteiro: a via (menu Ações) leva só a segurança de cada sistema (`passosDeSeguranca`);
-  o painel Roteiro imprime o roteiro completo.
 
 Fase 2 (01/10/2026), campos que só existem para a via:
 - `service_orders.technician_instructions` ("Instrução ao técnico") e `site_access` ("Local do
@@ -45,8 +67,12 @@ Fase 2 (01/10/2026), campos que só existem para a via:
   aguarda_peca, feito, parcial, nao_feito) e `field_status_note` — controle "Na via do
   técnico" embaixo de cada linha (`line-via-tecnico.tsx`).
 - Contato no local = `requested_by_contact_id` → `vessel_contacts` (nome, função, telefone).
-- Antes de imprimir, `faltasDaVia` lista o que vai faltar no papel (`aviso-antes-da-via.tsx`).
-- Volta do papel: "Lançar a via" (`ViaEntryDialog` + `use-lancar-via`). O relato entra
+- Antes de imprimir, `faltasDaVia` lista o que vai faltar no papel (`aviso-antes-da-via.tsx`):
+  telefone de contato, data e hora, serviços (sem contar a cobrança) e material. "Local e acesso" e
+  "segurança" saíram em 16/11/2026 (a via diz "Oficina HBR" e não imprime mais a segurança por sistema).
+  O item do menu fica desabilitado ("carregando…") até serviços, material e cabeçalho chegarem.
+- Volta do papel: "Lançar a via" (`ViaEntryDialog` + `use-lancar-via`), com o número de cada serviço igual ao
+  da via (cobrança escondida, os outros mantêm o número). O relato entra
   EMBAIXO das notas do técnico, com data; a tela da OS recebe as notas novas para o
   salvamento automático não desfazê-las.
 

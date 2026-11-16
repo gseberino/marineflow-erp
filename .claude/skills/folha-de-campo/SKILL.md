@@ -30,6 +30,14 @@ surpresa na execução. Declarado, vira contingência no preço.
 - **Cada bloco em menos de 90 segundos.** Passou disso, quem está em campo
   começa a pular etapa — e aí a folha inteira perde a confiança.
 - **Uma página quando possível**, sem cor decorativa, maiúscula e minúscula.
+- **Segurança curta, não procedimento.** Na via do técnico (aprovada em 16/11/2026), as páginas de passos
+  genéricos de "segurança por sistema" saíram: o dono achou a ficha confusa, com excesso de texto. No lugar,
+  um quadro **Atenção** com uma linha por risco grave (127/220 V, gás, combustível, altura, 12/24 V ou bateria
+  de lítio, volante/airbag, casco, furar, resina…), calculado dos serviços.
+- **Papel pendurado no veículo** (a via vai presa na unidade, na oficina): número da OS e veículo legíveis de
+  longe; telefone do cliente fora da folha 1 (vai ao fechamento); o fechamento inteiro nunca se parte.
+- **Só o que a fonte do PDF desenha.** O PDF do servidor tem uma fonte só (Open Sans): símbolo fora dela
+  ("⚠", "→", "☐") sai como quadradinho. Ícone vira SVG/CSS, seta vira palavra.
 
 ## O que só existe em papel de verdade
 
@@ -67,7 +75,10 @@ esquecimento, e some sem rastro. No lançamento da folha, branco vira
 ## Onde está no código
 
 - `src/lib/survey-sheet.ts` — folha de levantamento (antes de orçar)
-- `src/lib/route-sheet.ts` — folha de roteiro (durante a execução)
+- `src/lib/route-sheet.ts` — folha de roteiro (durante a execução); a via do técnico mora em
+  `supabase/functions/_shared/pdf/via-do-tecnico.ts` (com `via-atencao.ts` e `via-texto.ts`) — a tela e o PDF
+  do WhatsApp usam a mesma
+- `src/components/service-orders/ViaEntryDialog.tsx` — "Lançar a via" (a volta da via do técnico)
 - `src/components/service-orders/SurveySheetEntryDialog.tsx` — lançamento em lote
 - `src/components/service-orders/SheetEntryDialog.tsx` — lançamento do roteiro
 
