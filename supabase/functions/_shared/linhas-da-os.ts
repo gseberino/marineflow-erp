@@ -85,11 +85,21 @@ export function semAcento(s: unknown): string {
 /**
  * O número, quando o texto INTEIRO é uma referência a número: "4", "o 4", "serviço 4", "serviço número 4", "nº 4",
  * "n° 4", "no 4", "4º", "#4", "item 4", "linha 4". "LiFePO4", "bateria 200 Ah" e "220V" não são número.
+ * Outra grafia do mesmo número também é número: "serviço #4", "o serviço #4", "item #4", "No. 4", "(4)", "4️⃣" —
+ * tirando as palavras vazias, "serviço/item/linha" e "n/nr/num/número", sobra UM número só. Sem isso o texto caía no
+ * caminho do nome como a palavra "4" e casava com "Cabo flexível 4 mm" (revisão da F0, achador-1).
  */
 export function numeroDito(texto: unknown): number | null {
   const t = semAcento(texto).replace(/[.?!,;:]+$/, '').trim();
   const m = /^(?:(?:o|a)\s+)?(?:servico|serv\.?|item|linha|n[º°o.]?|numero|#)?\s*(?:numero|n[º°o.])?\s*(\d{1,3})\s*[º°ª]?$/.exec(t);
-  return m ? Number(m[1]) : null;
+  if (m) return Number(m[1]);
+  const resto = palavrasDitas(texto).filter((p) => !/^(n|no|nr|num|numero|servico|serv|item|linha)$/.test(p));
+  return resto.length === 1 && /^\d{1,3}$/.test(resto[0]) ? Number(resto[0]) : null;
+}
+
+/** Só números ("4", "4 e 5", "1000")? Número solto nunca casa nome por palavra: "4" não acha "Cabo flexível 4 mm". */
+function soNumeros(ditas: readonly string[]): boolean {
+  return ditas.every((p) => /^\d+$/.test(p));
 }
 
 /** As palavras que não identificam serviço nenhum (as mesmas do acharServico antigo). */
@@ -109,11 +119,12 @@ function palavrasDitas(texto: unknown): string[] {
 
 /**
  * Todas as palavras ditas (sem as vazias) são palavras INTEIRAS do nome? "DC-DC" casa com "conversor DC-DC"; "4" não
- * casa com "LiFePO4"; "do" sozinho não casa com nada. É a troca do `includes` (pedaço de texto) nas tools.
+ * casa com "LiFePO4"; "do" sozinho não casa com nada; só número ("4", "4 e 5") não casa com nada ("cabo 4" casa com
+ * "Cabo 4 mm"). É a troca do `includes` (pedaço de texto) nas tools.
  */
 export function temAsPalavras(nome: unknown, dito: unknown): boolean {
   const ditas = palavrasDitas(dito);
-  if (!ditas.length) return false;
+  if (!ditas.length || soNumeros(ditas)) return false;
   const doNome = new Set(palavras(nome));
   return ditas.every((p) => doNome.has(p));
 }
@@ -181,7 +192,7 @@ export function acharLinha<T extends LinhaNumerada>(linhas: readonly T[], dito: 
   if (iguais) return iguais;
 
   const ditas = palavrasDitas(bruto);
-  if (!ditas.length) return naoAchei;
+  if (!ditas.length || soNumeros(ditas)) return naoAchei;
   const inteiras = escolher(linhas.filter((l) => temAsPalavras(l.nome, bruto)));
   if (inteiras) return inteiras;
 

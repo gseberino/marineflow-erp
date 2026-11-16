@@ -136,6 +136,70 @@ Deno.test("remover pelo NOME: palavra inteira — 'LiFePO4' é a bateria; 'bater
   assertEquals(peloId.tabelas.service_order_services.find((s) => s.id === "s2")!.quantity, 2);
 });
 
+/** Revisão da F0 (achador-1): a peça tem a palavra "4" solta e há 4 serviços na via. */
+function orcamentoComCabo4() {
+  return {
+    service_orders: [{ id: OS, service_order_number: "ORÇ-00900", status: "draft", grand_total: 1000 }],
+    service_order_parts: [
+      { id: "p1", service_order_id: OS, created_at: T(1), product_id: "pr1", quantity: 1, unit_sale_snapshot: 10, unit_cost_snapshot: 5, line_total_sale: 10, products: { name: "Cabo flexível 4 mm" } },
+      { id: "p2", service_order_id: OS, created_at: T(2), product_id: "pr2", quantity: 1, unit_sale_snapshot: 10, unit_cost_snapshot: 5, line_total_sale: 10, products: { name: "Terminal 50mm" } },
+    ],
+    service_order_services: ["Instalação do inversor", "Ar-condicionado do quarto", "Fita LED externa", "Troca do disjuntor"].map((n, i) => ({
+      id: `s${i + 1}`, service_order_id: OS, created_at: T(100 + i), name_snapshot: n, quantity: 1, unit_price_snapshot: 100, line_total: 100, field_status: null, field_status_note: null,
+    })),
+  };
+}
+
+for (const dito of ["serviço #4", "o serviço #4", "No. 4", "4️⃣", "item #4", "linha #4", "(4)", '"4"', "serviço 4)"]) {
+  Deno.test(`remover: "${dito}" é o número 4 escrito de outro jeito → pergunta; a peça "Cabo flexível 4 mm" fica`, async () => {
+    const db = bancoFalso(orcamentoComCabo4());
+    const r = await tool(serviceOrderTools, "remove_service_order_item").execute({ service_order_id: OS, description: dito }, ctxCom(db)) as Linha;
+    assertEquals(r.needs_choice, true, JSON.stringify(r));
+    assertEquals(r.nada_alterado, true);
+    assertStringIncludes(r.message, 'O serviço 4 da via é "Troca do disjuntor"');
+    assertEquals(db.gravacoes.length, 0);
+    assertEquals(db.tabelas.service_order_parts.map((p) => p.id), ["p1", "p2"]);
+  });
+}
+
+Deno.test("editar: 'serviço #4' com preço novo → pergunta; o cabo de 4 mm não muda", async () => {
+  const db = bancoFalso(orcamentoComCabo4());
+  const r = await tool(serviceOrderTools, "edit_service_order_item").execute({ service_order_id: OS, description: "serviço #4", unit_price: 1 }, ctxCom(db)) as Linha;
+  assertEquals(r.needs_choice, true, JSON.stringify(r));
+  assertEquals(db.gravacoes.length, 0);
+  assertEquals(db.tabelas.service_order_parts.find((p) => p.id === "p1")!.unit_sale_snapshot, 10);
+});
+
+Deno.test("remover: '4 e 5' (só números) não casa nome por palavra; 'cabo 4' acha o cabo pelo nome", async () => {
+  const soNumeros = bancoFalso(orcamentoComCabo4());
+  const r = await tool(serviceOrderTools, "remove_service_order_item").execute({ service_order_id: OS, description: "4 e 5" }, ctxCom(soNumeros)) as Linha;
+  assertEquals(r.error, "Item não encontrado neste orçamento/OS.");
+  assertEquals(soNumeros.gravacoes.length, 0);
+  const peloNome = bancoFalso(orcamentoComCabo4());
+  const r2 = await tool(serviceOrderTools, "remove_service_order_item").execute({ service_order_id: OS, description: "cabo 4" }, ctxCom(peloNome)) as Linha;
+  assert(r2.ok, JSON.stringify(r2));
+  assertEquals(r2.removido.descricao, "Cabo flexível 4 mm");
+  assertEquals(peloNome.tabelas.service_order_parts.map((p) => p.id), ["p2"]);
+});
+
+Deno.test("update_service_order_via: 'serviço #4' com 'Troca de 4 pneus' na linha 2 marca a linha 4, não a 2", async () => {
+  const nomes = ["Alinhamento", "Troca de 4 pneus", "Balanceamento", "Revisão do freio"];
+  const db = bancoFalso({
+    service_orders: [{ id: OS, service_order_number: "OS-00900", status: "in_progress", technician_notes: null, internal_notes: null, check_in_at: null, check_out_at: null }],
+    service_order_services: nomes.map((n, i) => ({
+      id: `l${i + 1}`, service_order_id: OS, created_at: T(i + 1), name_snapshot: n, field_status: "a_fazer", field_status_note: null,
+    })),
+  });
+  const r = await tool(fieldOpsTools, "update_service_order_via").execute(
+    { service_order_id: OS, servicos: [{ servico: "serviço #4", situacao: "feito" }] },
+    ctxCom(db),
+  ) as Linha;
+  assert(r.ok, JSON.stringify(r));
+  assertEquals(r.servicos_atualizados.map((s: Linha) => [s.numero, s.servico]), [[4, "Revisão do freio"]]);
+  const linha = (id: string) => db.tabelas.service_order_services.find((l) => l.id === id)!;
+  assertEquals([linha("l2").field_status, linha("l4").field_status], ["a_fazer", "feito"]);
+});
+
 Deno.test("leitura das peças com erro LANÇA (não vira 'Item não encontrado'), e nada é apagado", async () => {
   const db = bancoFalso(orcamento(), { "select:service_order_parts": "timeout" });
   await assertRejects(

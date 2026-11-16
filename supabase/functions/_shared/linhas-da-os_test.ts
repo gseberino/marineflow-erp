@@ -8,6 +8,7 @@ import {
   numeroDito,
   numerarLinhas,
   ordenarLinhas,
+  temAsPalavras,
 } from "./linhas-da-os.ts";
 import { CASOS_DE_ORDEM, CASOS_DO_ACHADOR, CASOS_DO_NUMERO_DITO, LINHAS_DO_ACHADOR } from "./linhas-da-os-casos.ts";
 
@@ -102,4 +103,31 @@ Deno.test("acharLinha: palavra inteira — '4' não casa com LiFePO4 e 'DC-DC' c
   // "4" numa OS de 2: pergunta, nunca vira a bateria
   assertEquals((acharLinha(linhas, "4") as { motivo: string }).motivo, "fora_da_faixa");
   assertEquals((acharLinha(linhas, "lifepo") as { linha: { id: string } }).linha.id, "s2");
+});
+
+Deno.test("número solto nunca casa nome por palavra; 'cabo 4' continua achando 'Cabo 4 mm' (revisão da F0, achador-1)", () => {
+  assertEquals(temAsPalavras("Cabo flexível 4 mm", "4"), false);
+  assertEquals(temAsPalavras("Cabo flexível 4 mm", "4 e 5"), false);
+  assertEquals(temAsPalavras("Cabo flexível 4 mm", "serviço #4"), false);
+  assertEquals(temAsPalavras("Cabo flexível 4 mm", "cabo 4"), true);
+  assertEquals(temAsPalavras("Troca de 4 pneus", "4 pneus"), true);
+  const linhas = [
+    { id: "a", numero: 1, nome: "Alinhamento" },
+    { id: "b", numero: 2, nome: "Troca de 4 pneus" },
+    { id: "c", numero: 3, nome: "Balanceamento" },
+    { id: "d", numero: 4, nome: "Revisão do freio" },
+    { id: "e", numero: 5, nome: "Cabo 4 mm" },
+  ];
+  // outra grafia do 4 é o serviço 4, nunca a linha que tem a palavra "4"
+  for (const dito of ["serviço #4", "No. 4", "(4)", "4️⃣", "item #4", "linha #4", '"4"', "serviço 4)"]) {
+    assertEquals(acharLinha(linhas, dito), { linha: linhas[3] }, dito);
+  }
+  // fora da faixa continua perguntando
+  assertEquals((acharLinha(linhas, "serviço #9") as { motivo: string }).motivo, "fora_da_faixa");
+  // número sem palavra que não é número de serviço: não acha (pergunta), não casa por palavra
+  assertEquals((acharLinha(linhas, "4 e 5") as { motivo: string }).motivo, "nao_achei");
+  assertEquals((acharLinha(linhas, "1000") as { motivo: string }).motivo, "nao_achei");
+  // com uma palavra junto, o nome acha
+  assertEquals(acharLinha(linhas, "cabo 4"), { linha: linhas[4] });
+  assertEquals(acharLinha(linhas, "4 pneus"), { linha: linhas[1] });
 });

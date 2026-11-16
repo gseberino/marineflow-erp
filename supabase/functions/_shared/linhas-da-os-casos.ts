@@ -104,6 +104,19 @@ export const CASOS_DO_ACHADOR: Array<[dito: string, esperado: number | 'fora_da_
   ['pintura', 'nao_achei'],
   ['do', 'nao_achei'],
   ['', 'nao_achei'],
+  // outra grafia do mesmo número é o número (revisão da F0, achador-1)
+  ['serviço #4', 4],
+  ['o serviço #4', 4],
+  ['item #4', 4],
+  ['No. 4', 4],
+  ['(4)', 4],
+  ['4️⃣', 4],
+  ['serviço 4)', 4],
+  ['serviço #200', 'fora_da_faixa'],
+  // número solto nunca casa nome por palavra; com uma palavra junto, casa
+  ['4 e 5', 'nao_achei'],
+  ['3000', 'nao_achei'],
+  ['inversor 3000', 3],
 ];
 
 /** numeroDito: o texto inteiro é número? */
@@ -131,4 +144,19 @@ export const CASOS_DO_NUMERO_DITO: Array<[texto: string, numero: number | null]>
   ['4 baterias', null],
   ['serviço do inversor', null],
   ['', null],
+  // outra grafia do mesmo número (revisão da F0, achador-1)
+  ['serviço #4', 4],
+  ['o serviço #4', 4],
+  ['item #4', 4],
+  ['linha #4', 4],
+  ['No. 4', 4],
+  ['nr 4', 4],
+  ['(4)', 4],
+  ['"4"', 4],
+  ['serviço 4)', 4],
+  ['4️⃣', 4],
+  ['4 e 5', null],
+  ['1000', null],
+  ['cabo 4', null],
+  ['troca de 4 pneus', null],
 ];
