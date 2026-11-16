@@ -34,7 +34,10 @@ export function leiturasSemDesempate(codigo: string, tabela: string): { leituras
     if (!/\.select\(/.test(cadeia) || /\.(insert|update|upsert|delete)\(/.test(cadeia)) continue;
     if (/\.eq\(\s*['"]id['"]/.test(cadeia)) continue;
     leituras++;
-    if (!/\.order\(\s*['"]id['"]/.test(cadeia)) {
+    // `created_at` ascendente SEGUIDO de `id`, e nada descendente na cadeia: só "tem um .order('id')" deixava passar
+    // `.order('id')` sozinho (a ordem vira a do uuid), `id` antes de `created_at` e os dois descendentes (ordem-3).
+    const emOrdem = /\.order\(\s*['"]created_at['"](?:\s*,\s*\{\s*ascending:\s*true\s*\})?\s*\)\s*\.order\(\s*['"]id['"]/.test(cadeia);
+    if (!emOrdem || /ascending:\s*false/.test(cadeia)) {
       const linha = codigo.slice(0, m.index).split('\n').length;
       semId.push(`linha ${linha}: ${cadeia.replace(/\s+/g, ' ').slice(0, 140)}`);
     }
@@ -80,5 +83,18 @@ describe('ordem das linhas da OS: created_at, id onde se numera', () => {
     expect(r.leituras).toBe(2);
     expect(r.semId).toHaveLength(1);
     expect(r.semId[0]).toContain('linha 2');
+  });
+
+  it('a varredura exige created_at ASCENDENTE seguido de id: id sozinho, id antes e descendente não passam (revisão da F0, ordem-3)', () => {
+    const codigo = `
+      const e = await sb.from('service_order_services').select('*').eq('service_order_id', x).order('id');
+      const f = await sb.from('service_order_services').select('*').eq('service_order_id', x).order('id').order('created_at');
+      const g = await sb.from('service_order_services').select('*').eq('service_order_id', x).order('created_at', { ascending: false }).order('id', { ascending: false });
+      const h = await sb.from("service_order_services").select("*").eq("service_order_id", x)
+        .order("created_at", { ascending: true }).order("id", { ascending: true });
+      const i = await sb.from('service_order_services').select('*').eq('service_order_id', x).order('created_at').order('id', { ascending: false });`;
+    const r = leiturasSemDesempate(codigo, 'service_order_services');
+    expect(r.leituras).toBe(5);
+    expect(r.semId.map((s) => s.slice(0, s.indexOf(':')))).toEqual(['linha 2', 'linha 3', 'linha 4', 'linha 7']);
   });
 });
