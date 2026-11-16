@@ -159,8 +159,20 @@ export interface ViaPronta {
   nomeDoArquivo: string;
   impressao: string;
   servicos: number;
-  /** Todos os serviços da OS estão com outra pessoa: não se manda (a via dela estaria vazia). */
+  /**
+   * Nada desta OS vai ao papel da pessoa — os serviços dela estão com outra pessoa, ou a parte dela é só cobrança (frete,
+   * deslocamento: fora do papel, 4A). Não se manda (a via dela estaria vazia). Em palavras: motivoSemPapelDaPessoa.
+   */
   semServicoDaPessoa: boolean;
+}
+
+/**
+ * Por que a via da pessoa não vai (semServicoDaPessoa), na mesma frase no cartão do SIM, no envio e na agenda. Verdadeira
+ * nos dois casos — "todos os serviços estão com outra pessoa" era falso quando a parte dela é só cobrança (revisão da
+ * F1, consumidores-2). `daOs`: "desta OS" ou "da OS-00119".
+ */
+export function motivoSemPapelDaPessoa(daOs = "desta OS"): string {
+  return `nada ${daOs} vai ao papel dele (serviços com outra pessoa ou só cobrança)`;
 }
 
 /** Monta a via (da OS inteira ou de uma pessoa) com os links das fotos já assinados. */

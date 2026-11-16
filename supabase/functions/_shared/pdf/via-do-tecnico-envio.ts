@@ -7,7 +7,7 @@
 //     janela de horário (8h às 20h de Brasília), como em todo envio automático.
 
 import { guardarEEntregar } from "./gerar-e-guardar.ts";
-import { legendaDaVia, linksDasFotosDaVia, type OrdemDaVia, prepararVia } from "./via-do-tecnico-dados.ts";
+import { legendaDaVia, linksDasFotosDaVia, motivoSemPapelDaPessoa, type OrdemDaVia, prepararVia } from "./via-do-tecnico-dados.ts";
 import type { DadosDaVia } from "./via-do-tecnico.ts";
 import { liberarEnvio } from "../whatsapp/idempotencia.ts";
 
@@ -94,7 +94,7 @@ export async function mandarVia(p: {
     const links = p.linksDasFotos ?? await linksDasFotosDaVia(p.admin, p.dados);
     const via = prepararVia(p.dados, p.ordem.numero, p.pessoa, links, p.diasNaAgenda);
     if (via.semServicoDaPessoa) {
-      return { ok: false, pulado: true, motivo: `todos os serviços da ${p.ordem.numero} estão com outra pessoa` };
+      return { ok: false, pulado: true, motivo: motivoSemPapelDaPessoa(`da ${p.ordem.numero}`) };
     }
     const chave = p.chave(via.impressao);
     const entrega = await guardarEEntregar({

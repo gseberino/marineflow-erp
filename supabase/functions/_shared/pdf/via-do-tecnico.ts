@@ -1198,7 +1198,10 @@ export interface ViaMontada {
   extras: RouteSheetExtras;
   /** Quantos serviços vão no papel (sem as linhas de cobrança). */
   servicos: number;
-  /** A pessoa não tem serviço nesta OS: todos os da OS estão com outra pessoa. Não se manda via vazia. */
+  /**
+   * Nada desta OS vai ao papel da pessoa: os serviços dela estão com outra pessoa, ou a parte dela é só cobrança (4A).
+   * Não se manda via vazia (motivoSemPapelDaPessoa, via-do-tecnico-dados.ts, diz isso em palavras).
+   */
   semServicoDaPessoa: boolean;
 }
 

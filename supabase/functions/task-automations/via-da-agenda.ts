@@ -26,6 +26,7 @@ import {
   hojeEmBrasilia,
   type LeituraDaVia,
   linksDasFotosDaVia,
+  motivoSemPapelDaPessoa,
   type PessoaDaOs,
   pessoasDaOs,
   prepararVia,
@@ -257,7 +258,7 @@ export async function viaDaAgenda(
       const quem = { id: ficha.payee_id, nome: pessoa.nome };
       const via = prepararVia(lida.dados, lida.ordem.numero, quem, fotos.get(os)!, dias);
       if (via.semServicoDaPessoa) {
-        await registrarEnvioDaVia(db, { ...base, estado: "pulado", motivo: "todos os serviços da OS estão com outra pessoa", destino: pessoa.telefone });
+        await registrarEnvioDaVia(db, { ...base, estado: "pulado", motivo: motivoSemPapelDaPessoa(), destino: pessoa.telefone });
         puladas++;
         continue;
       }

@@ -30,6 +30,7 @@ import { chaveDeEnvio } from "../../whatsapp/idempotencia.ts";
 import { desviadoPorTeste } from "../../whatsapp/marcar-enviado.ts";
 import {
   carregarDadosDaVia,
+  motivoSemPapelDaPessoa,
   type PessoaDaOs,
   pessoasDaOs,
   prepararVia,
@@ -240,7 +241,7 @@ export async function resumirEnvioDaVia(admin: Admin, args: Record<string, unkno
   for (const p of dest.pessoas) {
     const via = prepararVia(dados, ordem.numero, { id: p.id, nome: p.nome }, {});
     if (!p.telefone) { linhas.push(`• ${p.nome} — sem telefone no cadastro: NÃO vai`); continue; }
-    if (via.semServicoDaPessoa) { linhas.push(`• ${p.nome} — todos os serviços estão com outra pessoa: NÃO vai`); continue; }
+    if (via.semServicoDaPessoa) { linhas.push(`• ${p.nome} — ${motivoSemPapelDaPessoa()}: NÃO vai`); continue; }
     algum = true;
     const extra = [`${via.servicos} serviço${via.servicos === 1 ? "" : "s"}`, diasCurtos(p.dias)].filter(Boolean).join(" · ");
     linhas.push(`• ${p.nome} (WhatsApp ${fimDoTelefone(p.telefone)}) — ${extra}`);
