@@ -286,8 +286,9 @@ Deno.test("TRAVA DE VERSÃO: o papel e o dado de 3 fixtures sintéticas (mudou? 
       impressaoDaVia(dadosComFrete(), { pessoa: ALEX }),
     ],
     // F1 (via aprovada): o PAPEL mudou e a versão subiu para 3; o DADO é o mesmo da F0 (a lista não mudou). Revisão da
-    // F1 (papel-1, nota dos materiais presa aos itens): só o CSS mudou, ainda na v3 — nenhuma v3 foi entregue.
-    ["v3.d1.1uhyv2v.ecrpvx", "v3.d1.1ll802l.1yfwp29", "v3.d1.fuf6ax.1lj2v6o"],
+    // F1 (papel-1, nota dos materiais presa aos itens; papel-4, texto sem espaço quebra): só o CSS mudou, ainda na v3 —
+    // nenhuma v3 foi entregue.
+    ["v3.d1.1uhyv2v.16qx61a", "v3.d1.1ll802l.c5wkea", "v3.d1.fuf6ax.1tnim3l"],
     "a regra do papel (ou a lista do dado) mudou: suba a versão e atualize o valor",
   );
 });
@@ -476,6 +477,13 @@ Deno.test("material: título e nota nunca sozinhos no pé da folha — a nota fi
   const html = htmlDaVia(montarViaDoTecnico(dados(), {}));
   assertStringIncludes(html, ".materiais .matnota { break-after: avoid; page-break-after: avoid; }");
   assertStringIncludes(html, '<div class="matnota">Confira item por item antes de sair.');
+});
+
+Deno.test("texto sem espaço (link longo do Maps) quebra em qualquer ponto, em todo o corpo (revisão da F1, papel-4)", () => {
+  // Sem isto, um pedaço maior que a coluna (rosto em fit-content, .uval, fechamento, instruções, levantamento) fazia o
+  // Chromium encolher a via inteira para caber: letra do corpo de 10 para ~6,7 pt, 2 folhas viravam 1.
+  const html = htmlDaVia(montarViaDoTecnico(dados(), {}));
+  assertStringIncludes(html, "body { overflow-wrap: anywhere; }");
 });
 
 Deno.test("fechamento num bloco só, com a faixa da foto no fim; a seta entre as datas virou 'até'", () => {

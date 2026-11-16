@@ -782,6 +782,9 @@ export function buildRouteSheetHtml(
   * { box-sizing: border-box; }
   body { font-family: ${FONTE}; color: #000; margin: 0; font-size: 11pt;
          -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  /* Texto sem espaço maior que a coluna (um link longo do Maps no acesso, na marina, nas instruções, no levantamento)
+     quebra em qualquer ponto: sem isto, o Chromium encolhia a folha INTEIRA para caber (letra de 10 para ~6,7 pt). */
+  body { overflow-wrap: anywhere; }
   p { margin: 0 0 1mm; }
 
   /* Cabeçalho: marca discreta — logo pequeno e um filete, sem faixa cheia. */
