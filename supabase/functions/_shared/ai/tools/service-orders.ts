@@ -11,7 +11,7 @@ import { modoDaPropostaNoBanco } from "../../agenda-modo.ts";
 import { canalDaRpc, ehDataCalculada, type ResultadoParaOModelo, resultadoDoRascunho } from "../../agenda/rpc-das-ferramentas.ts";
 import { modoDaLeituraNoBanco } from "../../agenda/executar.ts";
 import { argumentosDaPortaCompleta, ehPortaAusente, ehSemDireitoNaPorta, statusPelaTelaSemAPorta } from "../../porta-ausente.ts";
-import { numeroDito, semAcento as semAcentoDaLinha, temAsPalavras } from "../../linhas-da-os.ts";
+import { numeroDito, ordinalDito, semAcento as semAcentoDaLinha, temAsPalavras } from "../../linhas-da-os.ts";
 
 /** Os status que a porta única de status do banco decide (Agenda de Produção, Fase 2, P4). */
 const STATUS_DE_AGENDA = ["open", "approved", "scheduled", "in_progress", "awaiting_parts", "awaiting_client"];
@@ -170,13 +170,14 @@ async function loadSoItems(sb: any, soId: string): Promise<SoItem[]> {
 }
 
 /**
- * A descrição é só um número ("4", "o 4", "serviço 4")? Então remover/editar NÃO executa: pergunta. O cartão da proposta
+ * A descrição é só um número ("4", "o 4", "serviço 4", ou o ordinal "o quarto")? Então remover/editar NÃO executa: pergunta. O cartão da proposta
  * do assistente numera peças e mão de obra JUNTAS (quote-builder), e logo depois de aprovar, "tira o 4" quase sempre é
  * uma peça — já o número da via é só de serviço. Devolve a pergunta com o serviço N (se existir) e as peças à parte,
  * sem número; `null` = a descrição não é número (segue o caminho do nome).
  */
 function perguntaDoNumero(items: SoItem[], descricao: unknown, acao: "remover" | "editar"): Record<string, unknown> | null {
-  const n = numeroDito(descricao);
+  // O ordinal por extenso também ("o quarto" casava calado com "Ar-condicionado do quarto"; revisão da F0, achador-2).
+  const n = numeroDito(descricao) ?? ordinalDito(descricao);
   if (n === null) return null;
   const servicos = items.filter((i) => i.table === "service_order_services");
   const pecas = items.filter((i) => i.table === "service_order_parts");

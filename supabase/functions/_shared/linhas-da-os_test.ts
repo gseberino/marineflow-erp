@@ -8,9 +8,16 @@ import {
   numeroDito,
   numerarLinhas,
   ordenarLinhas,
+  ordinalDito,
   temAsPalavras,
 } from "./linhas-da-os.ts";
-import { CASOS_DE_ORDEM, CASOS_DO_ACHADOR, CASOS_DO_NUMERO_DITO, LINHAS_DO_ACHADOR } from "./linhas-da-os-casos.ts";
+import {
+  CASOS_DE_ORDEM,
+  CASOS_DO_ACHADOR,
+  CASOS_DO_NUMERO_DITO,
+  CASOS_DO_ORDINAL_DITO,
+  LINHAS_DO_ACHADOR,
+} from "./linhas-da-os-casos.ts";
 
 for (const c of CASOS_DE_ORDEM) {
   Deno.test(`ordem: ${c.caso}`, () => {
@@ -130,4 +137,42 @@ Deno.test("número solto nunca casa nome por palavra; 'cabo 4' continua achando 
   // com uma palavra junto, o nome acha
   assertEquals(acharLinha(linhas, "cabo 4"), { linha: linhas[4] });
   assertEquals(acharLinha(linhas, "4 pneus"), { linha: linhas[1] });
+});
+
+for (const [texto, numero] of CASOS_DO_ORDINAL_DITO) {
+  Deno.test(`ordinalDito: "${texto}" → ${numero}`, () => {
+    assertEquals(ordinalDito(texto), numero);
+  });
+}
+
+Deno.test("ordinal por extenso: 'o quarto' é o 4, mas com 'quarto' (o cômodo) no nome de outra linha PERGUNTA (revisão da F0, achador-2)", () => {
+  const linhas = [
+    { id: "a", numero: 1, nome: "Instalação do inversor" },
+    { id: "b", numero: 2, nome: "Ar-condicionado do quarto" },
+    { id: "c", numero: 3, nome: "Fita LED" },
+    { id: "d", numero: 4, nome: "Troca do disjuntor" },
+  ];
+  // antes: casava calado com "Ar-condicionado do quarto" (e o dono queria o serviço 4)
+  for (const dito of ["o quarto", "quarto", "a quarta", "o quarto serviço"]) {
+    const r = acharLinha(linhas, dito);
+    assert("motivo" in r && r.motivo === "ambiguo", `${dito}: ${JSON.stringify(r)}`);
+    assertEquals(r.opcoes.map((l) => l.id), ["d", "b"], dito);
+    assertEquals(
+      r.erro,
+      `"${dito}" pode ser o serviço 4 (4 · Troca do disjuntor) ou o que tem "quarto" no nome: 2 · Ar-condicionado do quarto. Use o número.`,
+    );
+  }
+  // sem a palavra no nome de ninguém, o ordinal é o número
+  assertEquals(acharLinha(linhas, "o terceiro"), { linha: linhas[2] });
+  assertEquals(acharLinha(linhas, "a primeira"), { linha: linhas[0] });
+  // OS de 2 linhas com o cômodo na 2: não existe o 4º e a linha do quarto não é escolhida sozinha
+  const r2 = acharLinha(linhas.slice(0, 2), "o quarto");
+  assert("motivo" in r2 && r2.motivo === "ambiguo", JSON.stringify(r2));
+  assertEquals(r2.opcoes.map((l) => l.id), ["b"]);
+  assertEquals(r2.erro, '"o quarto" pode ser o serviço 4 (a OS tem 2) ou o que tem "quarto" no nome: 2 · Ar-condicionado do quarto. Use o número.');
+  // nem a linha nem a palavra: fora da faixa
+  assertEquals((acharLinha(linhas, "o sétimo") as { motivo: string }).motivo, "fora_da_faixa");
+  // o nome com mais palavras continua pelo nome
+  assertEquals(acharLinha(linhas, "ar-condicionado do quarto"), { linha: linhas[1] });
+  assertEquals(acharLinha(linhas, "ar do quarto"), { linha: linhas[1] });
 });

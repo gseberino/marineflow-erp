@@ -257,3 +257,53 @@ Deno.test("update_service_order_via: '200' numa OS de 2 → pergunta com a lista
   assertEquals(r.servicos_da_os, ["1 · Bateria 200 Ah", "2 · Deslocamento"]);
   assertEquals(db.gravacoes.length, 0);
 });
+
+// ═══ Ordinal por extenso (revisão da F0, achador-2): "o quarto" é o 4º — e "quarto" também é o cômodo ═══════════
+
+for (const dito of ["o quarto", "quarto", "a quarta", "o quarto serviço"]) {
+  Deno.test(`remover: "${dito}" é ordinal → pergunta pelo serviço 4; "Ar-condicionado do quarto" fica`, async () => {
+    const db = bancoFalso(orcamentoComCabo4());
+    const r = await tool(serviceOrderTools, "remove_service_order_item").execute({ service_order_id: OS, description: dito }, ctxCom(db)) as Linha;
+    assertEquals(r.needs_choice, true, JSON.stringify(r));
+    assertEquals(r.nada_alterado, true);
+    assertStringIncludes(r.message, 'O serviço 4 da via é "Troca do disjuntor"');
+    assertEquals(db.gravacoes.length, 0);
+    assertEquals(db.tabelas.service_order_services.map((s) => s.id), ["s1", "s2", "s3", "s4"]);
+  });
+}
+
+Deno.test("editar: 'o segundo' com preço novo → pergunta (o serviço 2 é o do quarto), nada alterado", async () => {
+  const db = bancoFalso(orcamentoComCabo4());
+  const r = await tool(serviceOrderTools, "edit_service_order_item").execute({ service_order_id: OS, description: "o segundo", unit_price: 1 }, ctxCom(db)) as Linha;
+  assertEquals(r.needs_choice, true, JSON.stringify(r));
+  assertStringIncludes(r.message, 'O serviço 2 da via é "Ar-condicionado do quarto"');
+  assertEquals(db.gravacoes.length, 0);
+});
+
+Deno.test("update_service_order_via: 'o quarto' com o cômodo na linha 2 → pergunta, nada gravado; sem o cômodo, marca a 4", async () => {
+  const servicos = (nomes: string[]) => nomes.map((n, i) => ({
+    id: `l${i + 1}`, service_order_id: OS, created_at: T(i + 1), name_snapshot: n, field_status: "a_fazer", field_status_note: null,
+  }));
+  const comComodo = bancoFalso({
+    service_orders: [{ id: OS, service_order_number: "OS-00901", status: "in_progress", technician_notes: null, internal_notes: null, check_in_at: null, check_out_at: null }],
+    service_order_services: servicos(["Instalação do inversor", "Ar-condicionado do quarto", "Fita LED", "Troca do disjuntor"]),
+  });
+  const r = await tool(fieldOpsTools, "update_service_order_via").execute(
+    { service_order_id: OS, servicos: [{ servico: "o quarto", situacao: "feito" }] },
+    ctxCom(comComodo),
+  ) as Linha;
+  assertEquals(r.nada_gravado, true, JSON.stringify(r));
+  assertStringIncludes(r.error, "4 · Troca do disjuntor");
+  assertStringIncludes(r.error, "2 · Ar-condicionado do quarto");
+  assertEquals(comComodo.tabelas.service_order_services.map((l) => l.field_status), ["a_fazer", "a_fazer", "a_fazer", "a_fazer"]);
+  const semComodo = bancoFalso({
+    service_orders: [{ id: OS, service_order_number: "OS-00902", status: "in_progress", technician_notes: null, internal_notes: null, check_in_at: null, check_out_at: null }],
+    service_order_services: servicos(["Instalação do inversor", "Troca das baterias", "Fita LED", "Troca do disjuntor"]),
+  });
+  const r2 = await tool(fieldOpsTools, "update_service_order_via").execute(
+    { service_order_id: OS, servicos: [{ servico: "o quarto", situacao: "feito" }] },
+    ctxCom(semComodo),
+  ) as Linha;
+  assert(r2.ok, JSON.stringify(r2));
+  assertEquals(r2.servicos_atualizados.map((s: Linha) => [s.numero, s.servico]), [[4, "Troca do disjuntor"]]);
+});

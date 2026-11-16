@@ -5,8 +5,8 @@
 //     linhas gravadas num INSERT só (o mesmo `now()`) saíam na ordem física, que um UPDATE troca;
 //   · qual é o número do serviço? A posição na OS INTEIRA nessa ordem, contando as linhas de cobrança (regra 4A: a
 //     cobrança sai do papel, mas o número dos outros fica). Quem lê ordena; `numerarLinhas` só numera;
-//   · que linha o dono quis dizer com "o 4", "serviço 4", "nº 4", "LiFePO4"? `acharLinha`: id → número → nome igual →
-//     palavra inteira → começo de palavra. Mais de uma candidata = pergunta; nunca escolhe sozinho.
+//   · que linha o dono quis dizer com "o 4", "serviço 4", "nº 4", "o quarto", "LiFePO4"? `acharLinha`: id → número →
+//     ordinal → nome igual → palavra inteira → começo de palavra. Mais de uma candidata = pergunta; nunca escolhe sozinho.
 //
 // Puro (sem Deno, sem banco): a tela importa daqui também. Os casos de teste moram em linhas-da-os-casos.ts, para a
 // conta SQL da F2 (private._via_linhas_numeradas) rodar a MESMA lista.
@@ -102,6 +102,21 @@ function soNumeros(ditas: readonly string[]): boolean {
   return ditas.every((p) => /^\d+$/.test(p));
 }
 
+/** Os ordinais por extenso, sem acento, no masculino ("quarta" vira "quarto" antes de procurar). */
+export const ORDINAIS = ['primeiro', 'segundo', 'terceiro', 'quarto', 'quinto', 'sexto', 'setimo', 'oitavo', 'nono', 'decimo'];
+
+/**
+ * O número, quando o texto INTEIRO é um ordinal por extenso: "o quarto", "quarta", "o quarto serviço", "a segunda
+ * linha". Fica de fora do numeroDito de propósito: "quarto" também é cômodo ("Ar-condicionado do quarto") e "segundo"
+ * é palavra comum — quem chama decide quando perguntar (revisão da F0, achador-2).
+ */
+export function ordinalDito(texto: unknown): number | null {
+  const resto = palavrasDitas(texto).filter((p) => !/^(servico|serv|item|linha)$/.test(p));
+  if (resto.length !== 1) return null;
+  const i = ORDINAIS.indexOf(resto[0].replace(/a$/, 'o'));
+  return i >= 0 ? i + 1 : null;
+}
+
 /** As palavras que não identificam serviço nenhum (as mesmas do acharServico antigo). */
 const PALAVRAS_VAZIAS = new Set(['de', 'do', 'da', 'dos', 'das', 'o', 'a', 'os', 'as', 'e', 'em', 'no', 'na', 'com', 'para', 'pra', 'um', 'uma']);
 
@@ -153,8 +168,9 @@ export type Achado<T> =
 
 /**
  * A linha que o dono quis dizer. `linhas` já na ordem canônica e numeradas (`numerarLinhas`). Ordem de busca:
- * id exato → número dito → nome igual → todas as palavras ditas são palavras inteiras do nome → começo de palavra
- * (≥ 4 letras: "parametriz" acha "Parametrização"). Mais de uma candidata em qualquer passo = pergunta.
+ * id exato → número dito → ordinal por extenso ("o quarto") → nome igual → todas as palavras ditas são palavras
+ * inteiras do nome → começo de palavra (≥ 4 letras: "parametriz" acha "Parametrização"). Mais de uma candidata em
+ * qualquer passo = pergunta.
  */
 export function acharLinha<T extends LinhaNumerada>(linhas: readonly T[], dito: unknown): Achado<T> {
   const bruto = String(dito ?? '').trim();
@@ -164,14 +180,31 @@ export function acharLinha<T extends LinhaNumerada>(linhas: readonly T[], dito: 
   const porId = linhas.find((l) => l.id === bruto);
   if (porId) return { linha: porId };
 
+  const total = linhas.length;
+  const foraDaFaixa = (n: number) => ({
+    motivo: 'fora_da_faixa' as const,
+    erro: `A OS tem ${total} serviço${total === 1 ? '' : 's'}; não existe o ${n}. Serviços: ${lista || 'nenhum'}.`,
+  });
   const n = numeroDito(bruto);
   if (n !== null) {
     const l = linhas.find((x) => x.numero === n);
     if (l) return { linha: l };
-    const total = linhas.length;
+    return foraDaFaixa(n);
+  }
+
+  // "o quarto", "a segunda" (ordinal por extenso) é o número — mas se a palavra também está no nome de outra linha
+  // ("Ar-condicionado do quarto"), pergunta: nunca escolhe entre o 4º e o cômodo (revisão da F0, achador-2).
+  const ord = ordinalDito(bruto);
+  if (ord !== null) {
+    const porNumero = linhas.find((x) => x.numero === ord);
+    const formas = new Set([ORDINAIS[ord - 1], ORDINAIS[ord - 1].replace(/o$/, 'a')]);
+    const porNome = linhas.filter((l) => l !== porNumero && palavras(l.nome).some((w) => formas.has(w)));
+    if (!porNome.length) return porNumero ? { linha: porNumero } : foraDaFaixa(ord);
     return {
-      motivo: 'fora_da_faixa',
-      erro: `A OS tem ${total} serviço${total === 1 ? '' : 's'}; não existe o ${n}. Serviços: ${lista || 'nenhum'}.`,
+      motivo: 'ambiguo',
+      opcoes: porNumero ? [porNumero, ...porNome] : porNome,
+      erro: `"${bruto}" pode ser o serviço ${ord} (${porNumero ? rotuloDaLinha(porNumero) : `a OS tem ${total}`}) ou o que tem ` +
+        `"${ORDINAIS[ord - 1]}" no nome: ${listaDasLinhas(porNome)}. Use o número.`,
     };
   }
 

@@ -117,6 +117,30 @@ export const CASOS_DO_ACHADOR: Array<[dito: string, esperado: number | 'fora_da_
   ['4 e 5', 'nao_achei'],
   ['3000', 'nao_achei'],
   ['inversor 3000', 3],
+  // ordinal por extenso (revisão da F0, achador-2): nenhuma linha daqui tem a palavra, então é o número
+  ['o quarto', 4],
+  ['a quarta', 4],
+  ['o segundo serviço', 2],
+  ['quinto', 5],
+  ['o sétimo', 'fora_da_faixa'],
+];
+
+/** ordinalDito: o texto inteiro é um ordinal por extenso? */
+export const CASOS_DO_ORDINAL_DITO: Array<[texto: string, numero: number | null]> = [
+  ['o quarto', 4],
+  ['quarto', 4],
+  ['a quarta', 4],
+  ['o quarto serviço', 4],
+  ['a segunda linha', 2],
+  ['o primeiro', 1],
+  ['Terceiro?', 3],
+  ['o sétimo item', 7],
+  ['décimo', 10],
+  ['o quarto do fundo', null],
+  ['quartos', null],
+  ['ar-condicionado do quarto', null],
+  ['4', null],
+  ['', null],
 ];
 
 /** numeroDito: o texto inteiro é número? */
