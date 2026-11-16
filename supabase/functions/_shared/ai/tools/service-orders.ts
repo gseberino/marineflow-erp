@@ -11,6 +11,7 @@ import { modoDaPropostaNoBanco } from "../../agenda-modo.ts";
 import { canalDaRpc, ehDataCalculada, type ResultadoParaOModelo, resultadoDoRascunho } from "../../agenda/rpc-das-ferramentas.ts";
 import { modoDaLeituraNoBanco } from "../../agenda/executar.ts";
 import { argumentosDaPortaCompleta, ehPortaAusente, ehSemDireitoNaPorta, statusPelaTelaSemAPorta } from "../../porta-ausente.ts";
+import { numeroDito, semAcento as semAcentoDaLinha, temAsPalavras } from "../../linhas-da-os.ts";
 
 /** Os status que a porta única de status do banco decide (Agenda de Produção, Fase 2, P4). */
 const STATUS_DE_AGENDA = ["open", "approved", "scheduled", "in_progress", "awaiting_parts", "awaiting_client"];
@@ -88,6 +89,8 @@ type SoItem = {
   /** Só para peças (produtos) — necessário para mover estoque no editar/remover. */
   product_id?: string | null;
   unit_cost?: number;
+  /** Só para serviços: o número dele na via e na tela (posição em created_at, id). Peça não tem número. */
+  numero?: number;
 };
 
 // Peça identificável que entra como texto livre fica fora do estoque, do BI e da NF-e — o item
@@ -127,15 +130,21 @@ export function avisoDeItemFisico(nome: string): string | null {
   );
 }
 
+// Leitura que falha LANÇA (o agent.ts devolve { error }): engolida, uma falha virava "Item não encontrado", dito como
+// fato. Na ordem da via (created_at, id), e cada serviço com o número dele (porte da via v2, F0).
 async function loadSoItems(sb: any, soId: string): Promise<SoItem[]> {
-  const { data: parts } = await sb
+  const { data: parts, error: erroPecas } = await sb
     .from("service_order_parts")
     .select("id, product_id, quantity, unit_sale_snapshot, unit_cost_snapshot, line_total_sale, products(name)")
-    .eq("service_order_id", soId);
-  const { data: services } = await sb
+    .eq("service_order_id", soId)
+    .order("created_at", { ascending: true }).order("id", { ascending: true });
+  if (erroPecas) throw new Error(`Não consegui ler as peças do orçamento/OS: ${erroPecas.message}`);
+  const { data: services, error: erroServicos } = await sb
     .from("service_order_services")
     .select("id, name_snapshot, quantity, unit_price_snapshot, line_total")
-    .eq("service_order_id", soId);
+    .eq("service_order_id", soId)
+    .order("created_at", { ascending: true }).order("id", { ascending: true });
+  if (erroServicos) throw new Error(`Não consegui ler os serviços do orçamento/OS: ${erroServicos.message}`);
   const partItems: SoItem[] = (parts || []).map((p: any) => ({
     table: "service_order_parts",
     id: p.id,
@@ -146,7 +155,7 @@ async function loadSoItems(sb: any, soId: string): Promise<SoItem[]> {
     product_id: p.product_id ?? null,
     unit_cost: Number(p.unit_cost_snapshot) || 0,
   }));
-  const svcItems: SoItem[] = (services || []).map((s: any) => ({
+  const svcItems: SoItem[] = (services || []).map((s: any, i: number) => ({
     table: "service_order_services",
     id: s.id,
     label: s.name_snapshot || "Serviço",
@@ -155,8 +164,36 @@ async function loadSoItems(sb: any, soId: string): Promise<SoItem[]> {
     total: Number(s.line_total) || 0,
     product_id: null,
     unit_cost: 0,
+    numero: i + 1,
   }));
   return [...partItems, ...svcItems];
+}
+
+/**
+ * A descrição é só um número ("4", "o 4", "serviço 4")? Então remover/editar NÃO executa: pergunta. O cartão da proposta
+ * do assistente numera peças e mão de obra JUNTAS (quote-builder), e logo depois de aprovar, "tira o 4" quase sempre é
+ * uma peça — já o número da via é só de serviço. Devolve a pergunta com o serviço N (se existir) e as peças à parte,
+ * sem número; `null` = a descrição não é número (segue o caminho do nome).
+ */
+function perguntaDoNumero(items: SoItem[], descricao: unknown, acao: "remover" | "editar"): Record<string, unknown> | null {
+  const n = numeroDito(descricao);
+  if (n === null) return null;
+  const servicos = items.filter((i) => i.table === "service_order_services");
+  const pecas = items.filter((i) => i.table === "service_order_parts");
+  const servico = servicos.find((s) => s.numero === n);
+  const opcao = (s: SoItem) => ({ item_id: s.id, numero: s.numero, descricao: `${s.numero} · ${s.label}`, quantidade: s.quantity, total: s.total });
+  const avisoDasPecas = pecas.length
+    ? ` As peças não têm número na via (o número do cartão da proposta conta peças e mão de obra juntas): se for uma peça, use o item_id dela em pecas.`
+    : "";
+  return {
+    needs_choice: true,
+    nada_alterado: true,
+    message: servico
+      ? `"${String(descricao).trim()}" é só um número. O serviço ${n} da via é "${servico.label}" — é esse que é para ${acao}? Confirme com o dono e passe o item_id.${avisoDasPecas}`
+      : `"${String(descricao).trim()}" é só um número, e este orçamento/OS tem ${servicos.length} serviço${servicos.length === 1 ? "" : "s"}: não existe o serviço ${n}. Pergunte qual item ${acao} e passe o item_id.${avisoDasPecas}`,
+    options: servico ? [opcao(servico)] : servicos.map(opcao),
+    pecas: pecas.map((p) => ({ item_id: p.id, descricao: p.label, quantidade: p.quantity, total: p.total })),
+  };
 }
 
 // Espelha o movimento de estoque do frontend (use-service-orders.ts): baixa no add-da-peça,
@@ -195,16 +232,21 @@ export async function applyStockDelta(
   }
 }
 
-// Resolve um item por id (exato) ou por descrição (substring, case-insensitive). Retorna
-// { item } quando há exatamente um; { matches } quando a descrição é ambígua (>1).
+// Resolve um item por id (exato) ou por descrição: nome igual (sem acento/caixa) ou todas as palavras ditas como
+// palavras INTEIRAS do nome (F0 da via v2: o `includes` fazia "4" achar "…LiFePO4" e apagá-la). Retorna { item }
+// quando há exatamente um; { matches } quando a descrição é ambígua (>1). Número sozinho nem chega aqui
+// (perguntaDoNumero).
 function resolveSoItem(items: SoItem[], itemId?: string, description?: string): { item?: SoItem; matches?: SoItem[] } {
   if (itemId) {
     const item = items.find((i) => i.id === itemId);
     return item ? { item } : {};
   }
   if (description) {
-    const q = String(description).trim().toLowerCase();
-    const matches = items.filter((i) => i.label.toLowerCase().includes(q));
+    const q = semAcentoDaLinha(description);
+    const iguais = items.filter((i) => semAcentoDaLinha(i.label) === q);
+    if (iguais.length === 1) return { item: iguais[0] };
+    if (iguais.length > 1) return { matches: iguais };
+    const matches = items.filter((i) => temAsPalavras(i.label, description));
     if (matches.length === 1) return { item: matches[0] };
     return { matches };
   }
@@ -593,7 +635,7 @@ export const serviceOrderTools: ToolDef[] = [
   },
   {
     name: "get_service_order",
-    description: "Detalhes completos de uma OS incluindo itens e serviços — cada serviço com a situação na via do técnico (situacao_na_via: a_fazer, so_levantar, aguarda_peca, feito, parcial, nao_feito) e o motivo. Em cada peça, item_id serve para editar/remover a linha e product_id para get_product_price_history.",
+    description: "Detalhes completos de uma OS incluindo itens e serviços — cada serviço com a situação na via do técnico (situacao_na_via: a_fazer, so_levantar, aguarda_peca, feito, parcial, nao_feito) e o motivo, e o numero = o número do serviço na via do técnico e na tela (quando o dono disser 'serviço N', é esse numero, nunca a posição na lista). Em cada peça, item_id serve para editar/remover a linha e product_id para get_product_price_history.",
     input_schema: {
       type: "object",
       properties: { id: { type: "string", description: "UUID ou número (OS-00112 / ORÇ-00112)." } },
@@ -617,7 +659,9 @@ export const serviceOrderTools: ToolDef[] = [
       const { data: services, error: erroServicos } = await sb
         .from("service_order_services")
         .select("id, name_snapshot, quantity, unit_price_snapshot, line_total, field_status, field_status_note")
-        .eq("service_order_id", args.id);
+        .eq("service_order_id", args.id)
+        // A ordem da via (created_at, id): o numero de cada serviço é a posição nela.
+        .order("created_at", { ascending: true }).order("id", { ascending: true });
       if (erroServicos) throw new Error(`Não consegui ler os serviços da OS: ${erroServicos.message}`);
 
       // Resumo do roteiro: sem isto o agente afirmaria que não há nada pendente
@@ -658,8 +702,10 @@ export const serviceOrderTools: ToolDef[] = [
           quantidade: p.quantity,
           total: p.line_total_sale,
         })),
-        services: (services || []).map((s: any) => ({
+        services: (services || []).map((s: any, i: number) => ({
           item_id: s.id,
+          // F0 da via v2: o número do serviço na via e na tela ("serviço 4" do dono).
+          numero: i + 1,
           tipo: "service",
           servico: s.name_snapshot,
           quantidade: s.quantity,
@@ -1041,7 +1087,7 @@ export const serviceOrderTools: ToolDef[] = [
   {
     name: "remove_service_order_item",
     description:
-      "Remove um item (produto OU serviço/material) de um orçamento/OS. Identifique o item por item_id (campo item_id vindo de get_service_order) ou por descrição. Se a descrição casar com vários itens, a tool retorna a lista (needs_choice) para você perguntar qual — nunca adivinhe. Recalcula total e margem. Não funciona em OS cancelada ou faturada.",
+      "Remove um item (produto OU serviço/material) de um orçamento/OS. Identifique o item por item_id (campo item_id vindo de get_service_order) ou por descrição. Se a descrição casar com vários itens, a tool retorna a lista (needs_choice) para você perguntar qual — nunca adivinhe. Descrição que é só um número ('o 4') nunca remove: volta needs_choice com o serviço N da via e as peças à parte. Recalcula total e margem. Não funciona em OS cancelada ou faturada.",
     input_schema: {
       type: "object",
       properties: {
@@ -1058,6 +1104,9 @@ export const serviceOrderTools: ToolDef[] = [
       if (guard) return guard;
       const items = await loadSoItems(sb, args.service_order_id);
       if (items.length === 0) return { error: "Este orçamento/OS não tem itens para remover." };
+      // Número sozinho nunca apaga direto: pergunta (o "4" do cartão da proposta não é o serviço 4 da via).
+      const pergunta = args.item_id ? null : perguntaDoNumero(items, args.description, "remover");
+      if (pergunta) return pergunta;
       const { item, matches } = resolveSoItem(items, args.item_id, args.description);
       if (!item) {
         if (matches && matches.length > 1) {
@@ -1081,7 +1130,7 @@ export const serviceOrderTools: ToolDef[] = [
   {
     name: "edit_service_order_item",
     description:
-      "Edita a quantidade e/ou o preço unitário de um item (produto OU serviço/material) de um orçamento/OS. Identifique por item_id (de get_service_order) ou por descrição (ambígua → retorna needs_choice, pergunte qual). Recalcula total e margem. Rejeita quantidade <= 0 (para zerar, remova o item) e preço negativo. Desconto NÃO é por item: use apply_service_order_discount, que desconta no total da OS. Não funciona em OS cancelada ou faturada.",
+      "Edita a quantidade e/ou o preço unitário de um item (produto OU serviço/material) de um orçamento/OS. Identifique por item_id (de get_service_order) ou por descrição (ambígua → retorna needs_choice, pergunte qual; só um número → needs_choice, nunca altera direto). Recalcula total e margem. Rejeita quantidade <= 0 (para zerar, remova o item) e preço negativo. Desconto NÃO é por item: use apply_service_order_discount, que desconta no total da OS. Não funciona em OS cancelada ou faturada.",
     input_schema: {
       type: "object",
       properties: {
@@ -1112,6 +1161,9 @@ export const serviceOrderTools: ToolDef[] = [
       if (guard) return guard;
       const items = await loadSoItems(sb, args.service_order_id);
       if (items.length === 0) return { error: "Este orçamento/OS não tem itens para editar." };
+      // Número sozinho nunca altera direto: pergunta (o "4" do cartão da proposta não é o serviço 4 da via).
+      const pergunta = args.item_id ? null : perguntaDoNumero(items, args.description, "editar");
+      if (pergunta) return pergunta;
       const { item, matches } = resolveSoItem(items, args.item_id, args.description);
       if (!item) {
         if (matches && matches.length > 1) {

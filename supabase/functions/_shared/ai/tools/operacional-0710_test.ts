@@ -140,13 +140,22 @@ Deno.test("via: situação dita e horário dito viram o valor certo", () => {
   assertEquals(horarioDito(null, agora), null);
 });
 
-Deno.test("via: acha o serviço pelo pedaço do nome e pergunta quando serve para mais de um", () => {
+Deno.test("via: acha o serviço pelo nome (palavras inteiras) ou pelo número da via, e pergunta quando serve para mais de um", () => {
   const linhas = SERVICOS();
   assertEquals((acharServico(linhas, "DC-DC") as any).linha.id, "s1");
   assertEquals((acharServico(linhas, "parametrização") as any).linha.id, "s2");
   assertEquals((acharServico(linhas, "troca da bomba") as any).linha.id, "s3");
-  assertEquals((acharServico(linhas, "do") as any).opcoes?.length, 2);
+  // F0 da via v2: "do" é palavra vazia — antes casava por pedaço de texto com 2 serviços; agora não acha nada.
+  assertEquals(acharServico(linhas, "do"), null);
   assertEquals(acharServico(linhas, "pintura"), null);
+  // o número da via
+  assertEquals((acharServico(linhas, "serviço 3") as any).linha.id, "s3");
+  assertEquals((acharServico(linhas, "nº 2") as any).numero, 2);
+  assertEquals("erro" in (acharServico(linhas, "7") as any), true);
+  // começo de palavra (≥ 4 letras) e a pergunta com o número
+  assertEquals((acharServico(linhas, "parametriz") as any).linha.id, "s2");
+  const duas = [...linhas, { id: "s4", service_order_id: OS_112.id, name_snapshot: "Troca da bomba de água", field_status: "a_fazer", field_status_note: null }];
+  assertEquals((acharServico(duas, "troca da bomba") as any).opcoes, ["3 · Troca da bomba de porão", "4 · Troca da bomba de água"]);
 });
 
 Deno.test("via: feito limpa o motivo, parcial grava o motivo, chegada/saída e relato como a tela", async () => {
@@ -180,8 +189,11 @@ Deno.test("via: 'todos como feitos' marca todos; não feito sem motivo pergunta 
   const recusa = await t.execute({ os: "OS-00112", servicos: [{ servico: "DC-DC", situacao: "feito" }, { servico: "bomba", situacao: "não feito" }] }, ctxCom(db)) as any;
   assertStringIncludes(recusa.error, "qual o motivo");
   assertEquals(db.gravacoes.length, 0);
-  const ambigua = await t.execute({ os: "OS-00112", servicos: [{ servico: "do", situacao: "feito" }] }, ctxCom(db)) as any;
-  assertStringIncludes(ambigua.error, "mais de um");
+  // F0 da via v2: "do" é palavra vazia — antes casava por pedaço de texto com 2 serviços ("mais de um"); agora não
+  // acha nenhum. Continua sem gravar nada, e a resposta lista os serviços com o número da via.
+  const vazia = await t.execute({ os: "OS-00112", servicos: [{ servico: "do", situacao: "feito" }] }, ctxCom(db)) as any;
+  assertStringIncludes(vazia.error, 'Não achei o serviço "do"');
+  assertStringIncludes(vazia.error, "1 · Instalação do conversor DC-DC");
   assertEquals(db.gravacoes.length, 0);
   const r = await t.execute({ os: "OS-00112", todos: "feitos" }, ctxCom(db)) as any;
   assert(r.ok, JSON.stringify(r));

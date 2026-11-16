@@ -37,6 +37,7 @@ import {
 import { estadoDoResultado, mandarVia, registrarEnvioDaVia } from "../../pdf/via-do-tecnico-envio.ts";
 import type { DadosDaVia } from "../../pdf/via-do-tecnico.ts";
 import { localizarOrdem } from "./documentos-pdf.ts";
+import { acharLinha, numerarLinhas } from "../../linhas-da-os.ts";
 
 /** Quem manda a via a alguém da equipe e marca responsável: só o administrador. */
 export const CARGOS_DA_VIA_A_EQUIPE: Role[] = ["admin"];
@@ -270,22 +271,17 @@ async function retratoDoEnvio(args: Record<string, unknown>, ctx: ToolCtx): Prom
 
 const TIRAR = new Set(["", "ninguem", "nenhum", "sem responsavel", "tirar", "remover", "-"]);
 
-/** "1", "2", "linha 3", ou parte do nome do serviço → a linha. Número = a ordem da via (e da tela). */
+/**
+ * "1", "serviço 2", "nº 3", ou o nome (palavra inteira) → a linha. `linhas` na ordem da via (created_at, id): o número é
+ * o da via e da tela. O achador é um só para todas as tools (acharLinha, _shared/linhas-da-os.ts).
+ */
 export function escolherLinha(
   servico: string,
   linhas: Array<{ id: string; nome: string }>,
 ): { linha: { id: string; nome: string; n: number } } | { erro: string } {
-  const alvo = semAcento(servico).replace(/^(linha|servico|item)\s*/, "");
-  const numero = /^\d+$/.test(alvo) ? Number(alvo) : null;
-  const comN = linhas.map((l, i) => ({ ...l, n: i + 1 }));
-  if (numero !== null) {
-    const l = comN[numero - 1];
-    return l ? { linha: l } : { erro: `A OS tem ${linhas.length} serviço${linhas.length === 1 ? "" : "s"}; não existe o ${numero}.` };
-  }
-  const achadas = comN.filter((l) => semAcento(l.nome).includes(alvo));
-  if (achadas.length === 1) return { linha: achadas[0] };
-  if (achadas.length > 1) return { erro: `"${servico}" casa com mais de um serviço: ${achadas.map((l) => `${l.n} · ${l.nome}`).join("; ")}. Use o número.` };
-  return { erro: `Não achei o serviço "${servico}" nesta OS. Serviços: ${comN.map((l) => `${l.n} · ${l.nome}`).join("; ")}.` };
+  const r = acharLinha(numerarLinhas(linhas), servico);
+  if ("linha" in r) return { linha: { id: r.linha.id, nome: r.linha.nome, n: r.linha.numero } };
+  return { erro: r.erro };
 }
 
 type PedidoDeResponsavel = { servico: string; pessoa: string };
@@ -310,7 +306,7 @@ export async function planoDosResponsaveis(
   if (!pedidos.length) return { erro: "Diga qual serviço (número ou nome) e de quem é." };
   const { data: ls, error } = await admin.from("service_order_services")
     .select("id, name_snapshot, responsavel_payee_id, services(name)")
-    .eq("service_order_id", achado.ordem.id).order("created_at", { ascending: true });
+    .eq("service_order_id", achado.ordem.id).order("created_at", { ascending: true }).order("id", { ascending: true });
   if (error) return { erro: `Não consegui ler os serviços da OS: ${error.message}` };
   const linhas = ((ls ?? []) as Array<{ id: string; name_snapshot: string | null; responsavel_payee_id: string | null; services?: { name?: string | null } | null }>)
     .map((l) => ({ id: l.id, nome: l.name_snapshot || l.services?.name || "Serviço", atual: l.responsavel_payee_id }));

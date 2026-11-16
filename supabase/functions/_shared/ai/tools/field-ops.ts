@@ -5,6 +5,7 @@ import { ehErro } from "./caixa.ts";
 import { dayRangeBRT } from "./agenda.ts";
 import { filtroQueCruza } from "../../agenda-dia.ts";
 import { ehPortaAusente, ehSemDireitoNaPorta, statusSemAPorta } from "../../porta-ausente.ts";
+import { acharLinha, numerarLinhas, rotuloDaLinha } from "../../linhas-da-os.ts";
 
 // Operação de campo + agenda inteligente (Fase 2) — SEM schema novo.
 // O schema já tinha o necessário: service_orders.check_in_at / check_out_at / technician_notes,
@@ -96,32 +97,21 @@ export function situacaoDita(valor: unknown): string | null {
   return null;
 }
 
-const PALAVRAS_VAZIAS = new Set(["de", "do", "da", "dos", "das", "o", "a", "os", "as", "e", "em", "no", "na", "com", "para", "pra", "um", "uma"]);
-
 /**
- * Acha a linha de serviço pelo que foi dito: id, nome igual, nome contido, ou todas as palavras
- * do que foi dito no nome ("parametrização" acha "Parametrização do inversor"). Mais de uma
- * candidata = pergunta; nunca escolhe sozinho.
+ * Acha a linha de serviço pelo que foi dito: id, NÚMERO da via ("4", "serviço 4", "nº 4"), nome igual, palavras
+ * inteiras do nome ("DC-DC", "troca da bomba") ou começo de palavra ("parametriz"). `linhas` na ordem da via
+ * (created_at, id): o número é a posição nela. Mais de uma candidata = pergunta ("N · nome"); nunca escolhe sozinho.
+ * Embrulho de acharLinha (_shared/linhas-da-os.ts), o achador único das tools. Antes (07/10) o nome casava por pedaço
+ * de texto: "4" marcava a linha "…LiFePO4" e "serviço 4" a "Serviço de…", sem perguntar.
  */
 export function acharServico<T extends { id: string; name_snapshot?: string | null }>(
   linhas: T[], dito: unknown,
-): { linha: T } | { opcoes: string[] } | null {
-  const bruto = String(dito ?? "").trim();
-  if (!bruto) return null;
-  const porId = linhas.find((l) => l.id === bruto);
-  if (porId) return { linha: porId };
-  const alvo = semAcento(bruto);
-  const nome = (l: T) => semAcento(l.name_snapshot);
-  const iguais = linhas.filter((l) => nome(l) === alvo);
-  if (iguais.length === 1) return { linha: iguais[0] };
-  const contidos = linhas.filter((l) => nome(l).includes(alvo));
-  if (contidos.length === 1) return { linha: contidos[0] };
-  if (contidos.length > 1) return { opcoes: contidos.map((l) => String(l.name_snapshot ?? "Serviço")) };
-  const palavras = alvo.split(" ").filter((p) => p.length >= 3 && !PALAVRAS_VAZIAS.has(p));
-  if (palavras.length === 0) return null;
-  const porPalavra = linhas.filter((l) => palavras.every((p) => nome(l).includes(p)));
-  if (porPalavra.length === 1) return { linha: porPalavra[0] };
-  if (porPalavra.length > 1) return { opcoes: porPalavra.map((l) => String(l.name_snapshot ?? "Serviço")) };
+): { linha: T; numero: number } | { opcoes: string[] } | { erro: string } | null {
+  const numeradas = numerarLinhas(linhas).map((l) => ({ id: l.id, numero: l.numero, nome: l.name_snapshot || "Serviço", original: l }));
+  const r = acharLinha(numeradas, dito);
+  if ("linha" in r) return { linha: r.linha.original, numero: r.linha.numero };
+  if (r.motivo === "ambiguo") return { opcoes: r.opcoes.map((l) => `${l.numero} · ${l.nome}`) };
+  if (r.motivo === "fora_da_faixa") return { erro: r.erro };
   return null;
 }
 
@@ -296,8 +286,9 @@ export const fieldOpsTools: ToolDef[] = [
       "marca um, vários ou TODOS os serviços como feito, parcial, não feito, aguarda peça, só levantar ou a fazer (com o motivo quando parcial ou não feito), " +
       "e grava chegada e saída com o horário DITO (pode ser no passado), o relato (vai para as notas do técnico) e o material além do previsto (vai para as notas internas). " +
       "Use para 'na OS-00112 a instalação do DC-DC ficou feita e a parametrização parcial, falta o cabo', 'a troca da bomba não foi feita: cliente não liberou', " +
-      "'marca todos os serviços da OS-00108 como feitos', 'cheguei às 8h e saí às 17h na OS-00112'. Aceita o NÚMERO da OS. " +
-      "O serviço é achado pelo nome (ou parte dele); se o nome servir para mais de um, a tool devolve as opções e não grava nada. Não conclui nem fatura a OS.",
+      "'marca todos os serviços da OS-00108 como feitos', 'cheguei às 8h e saí às 17h na OS-00112', 'o serviço 3 ficou feito'. Aceita o NÚMERO da OS. " +
+      "O serviço é achado pelo NÚMERO dele na via ('3', 'serviço 3', 'nº 3' — o campo numero de get_service_order), pelo nome (palavras inteiras) ou pelo item_id; " +
+      "se servir para mais de um, a tool devolve as opções ('N · nome') e não grava nada. Não conclui nem fatura a OS.",
     input_schema: {
       type: "object",
       properties: {
@@ -309,7 +300,7 @@ export const fieldOpsTools: ToolDef[] = [
           items: {
             type: "object",
             properties: {
-              servico: { type: "string", description: "Nome do serviço como foi dito (ou parte dele), ou o item_id de get_service_order." },
+              servico: { type: "string", description: "O serviço como foi dito: o NÚMERO dele na via ('3', 'serviço 3', 'nº 3'), o nome (ou palavras dele) ou o item_id de get_service_order." },
               situacao: { type: "string", description: "feito | parcial | nao_feito | aguarda_peca | so_levantar | a_fazer (pode vir como se fala: 'não foi feito', 'ficou pela metade')." },
               motivo: { type: "string", description: "Obrigatório quando parcial ou não feito: o que faltou / por que não foi feito." },
             },
@@ -338,13 +329,18 @@ export const fieldOpsTools: ToolDef[] = [
       if (ehErro(achada)) return achada;
       if (achada.status === "cancelled") return { error: `${achada.numero} está cancelada — a via não se lança em OS cancelada.` };
 
+      // Na ordem da via (created_at, id): o "serviço 3" do dono é o 3 da via e da tela.
       const { data: linhas, error: erroLinhas } = await sb
         .from("service_order_services")
         .select("id, name_snapshot, field_status, field_status_note")
-        .eq("service_order_id", achada.id);
+        .eq("service_order_id", achada.id)
+        .order("created_at", { ascending: true }).order("id", { ascending: true });
       if (erroLinhas) return { error: `Não consegui ler os serviços da ${achada.numero}: ${erroLinhas.message}` };
       const servicosDaOS = (linhas ?? []) as Array<{ id: string; name_snapshot: string | null; field_status: string | null; field_status_note: string | null }>;
-      const nomes = servicosDaOS.map((l) => l.name_snapshot || "Serviço");
+      const numeradas = numerarLinhas(servicosDaOS);
+      const numeroDe = new Map(numeradas.map((l) => [l.id, l.numero]));
+      // "1 · Instalação…": a lista que acompanha toda pergunta, com o número da via.
+      const nomes = numeradas.map((l) => rotuloDaLinha({ numero: l.numero, nome: l.name_snapshot || "Serviço" }));
 
       // 1) Situação de cada serviço — tudo resolvido antes de gravar.
       const mudancas = new Map<string, { field_status: string; field_status_note?: string | null }>();
@@ -373,7 +369,8 @@ export const fieldOpsTools: ToolDef[] = [
       for (const item of Array.isArray(args.servicos) ? args.servicos : []) {
         const achado = acharServico(servicosDaOS, item?.servico);
         if (!achado) { problemas.push(`Não achei o serviço "${item?.servico}" na ${achada.numero}. Serviços da OS: ${nomes.join("; ") || "nenhum"}.`); continue; }
-        if ("opcoes" in achado) { problemas.push(`"${item?.servico}" serve para mais de um serviço: ${achado.opcoes.join("; ")}. Qual?`); continue; }
+        if ("erro" in achado) { problemas.push(`${achado.erro} (${achada.numero})`); continue; }
+        if ("opcoes" in achado) { problemas.push(`"${item?.servico}" serve para mais de um serviço: ${achado.opcoes.join("; ")}. Qual? Use o número.`); continue; }
         marcar(achado.linha, item?.situacao, item?.motivo);
       }
 
@@ -430,7 +427,10 @@ export const fieldOpsTools: ToolDef[] = [
         const m = mudancas.get(l.id);
         const situacao = m?.field_status ?? l.field_status ?? "a_fazer";
         const motivo = m && "field_status_note" in m ? m.field_status_note : l.field_status_note;
-        return { servico: l.name_snapshot || "Serviço", situacao: SITUACOES_DA_VIA[situacao] ?? situacao, ...(motivo ? { motivo } : {}), mudou: !!m };
+        return {
+          numero: numeroDe.get(l.id)!, servico: l.name_snapshot || "Serviço", situacao: SITUACOES_DA_VIA[situacao] ?? situacao,
+          ...(motivo ? { motivo } : {}), mudou: !!m,
+        };
       });
       return {
         ok: true,
