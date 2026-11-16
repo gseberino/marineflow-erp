@@ -4265,3 +4265,52 @@ Achados durante a F1 do porte (a via aprovada nativa em `via-do-tecnico.ts`). Pl
   ao commit. Mesma família do NOVO-via-03.
 - **Menor mudança:** `*.tsbuildinfo` no `.gitignore` (ou `tsBuildInfoFile` apontando para `node_modules/.tmp/`). Mexe em
   configuração de portão: tarefa dedicada (regra 5).
+
+## Via do técnico v2 — porte, revisão da F0 e da F1 (16/11/2026) — achados laterais, NÃO corrigidos de passagem
+
+Achados da revisão final (revisor + cético) que ficam fora do escopo das correções pequenas. Detalhes e sondas: bancada
+`porte/rev-final/baixas.json` (ids `impressao-4`, `consumidores-3`, `papel-6`). Hoje os três estão latentes.
+
+### [NOVO-via-06] Com o modo de teste do WhatsApp ligado, a via desviada para o número de teste conta como entregue à pessoa
+
+- **Onde:** a agenda (`supabase/functions/task-automations/via-da-agenda.ts:280-287`) e o envio à equipe
+  (`supabase/functions/_shared/ai/tools/via-do-tecnico.ts:409-419`) gravam em `via_tecnico_envios` `origem agenda/assistente`,
+  `estado: estadoDoResultado(r)` (= `enviado`) e o `payee_id` da pessoa, mesmo quando o `whatsapp-send` desviou o PDF para o
+  número de teste (`supabase/functions/whatsapp-send/index.ts:234-240`, `numeroDeTesteAtivo`). `ultimaViaEntregue`
+  (`via-da-agenda.ts:132`) conta essa linha. Anterior à F0 (já em `9a69bfac`); mesma família do `para_si`, por outro caminho.
+- **Efeito:** o dono liga o modo de teste para conferir e manda a via do Alex (ou a agenda manda): o PDF vai ao número de
+  teste e o registro diz "enviado" ao Alex. Com o teste desligado, a ficha seguinte tem a mesma impressão e a agenda dá
+  `{pular, "já recebeu esta via em dd/mm"}` — o Alex nunca recebe. Foge do padrão da casa: `marcar-enviado.ts:108` não marca
+  ("modo de teste: foi para o número de teste") e `registro-do-envio.ts:120` dá `deveRegistrarEnvio = false`. Latente em
+  16/11 (`wa_test_mode = 'false'`; 0 vias entregues pela agenda ou à equipe).
+- **Menor mudança:** nos dois registros, `estado: r.ok && desviadoPorTeste(settings) ? 'pulado' : estadoDoResultado(r)`, com o
+  motivo "modo de teste: foi para o número de teste". Na agenda, `pulado` fecha a ficha (`itensPendentes`),
+  `ultimaViaEntregue` deixa de contar a linha e a ficha seguinte manda de verdade.
+
+### [NOVO-via-07] A tela da OS mostra situação, instrução e responsável na linha de cobrança, que nunca vai ao papel
+
+- **Onde:** `src/components/service-order/services-section.tsx:276` monta o `LineViaTecnico` (controle "Na via do técnico":
+  situação, instrução e "Quem faz") em TODA linha, sem olhar `ehLinhaDeCobranca`. Pelo assistente também:
+  `update_service_order_via` com `todos` e `definir_responsavel_do_servico` pelo número. O plano (§4, "Tela") só mapeou o
+  `ViaEntryDialog` (consertado na revisão da F1, consumidores-1).
+- **Efeito:** desde a F1 (4A) a linha de cobrança (frete, deslocamento, insumos) não vai aos cartões nem ao quadro "com outra
+  pessoa". O escritório escreve na linha "Frete do equipamento" a instrução "levar a caixa do TM41 lacrada", achando que vai na
+  via, e ela não sai — nada avisa. A situação e a instrução só entram no `retratoDoDado`, e a agenda pula com "a OS mudou só
+  no que não vai ao papel" (sem reenvio à toa). O responsável é diferente: continua valendo (muda o recorte da pessoa, o
+  quadro Atenção dela e o `semServicoDaPessoa`). Hoje sem perda: as 6 linhas de cobrança em produção não têm instrução,
+  responsável nem situação diferente de `a_fazer` (`porte/sql/rev-f1-cobranca-com-dado-da-via.sql`).
+- **Menor mudança:** com `ehLinhaDeCobranca(s)`, trocar a situação e a instrução do `LineViaTecnico` pela frase discreta
+  "Cobrança — não vai à via do técnico"; o "Quem faz" fica. Somar um caso no `services-section.smoke.test.tsx`.
+
+### [NOVO-via-08] OS sem tipo de unidade, ou com tipo "Outro", cai no ramo náutico do quadro Atenção
+
+- **Onde:** `supabase/functions/_shared/unidade.ts:225` (`camposDoTipo`: "Barco ou sem tipo: tudo, como era", `:215`), usado por
+  `supabase/functions/_shared/pdf/via-atencao.ts:218` (`nautico`). Tipo nulo, "Outro" e qualquer tipo fora das listas caem
+  nesse ramo. Igual na bancada (fora do escopo da F1).
+- **Efeito:** numa OS sem embarcação nem veículo (ou com tipo "Outro"), "Instalação de antena no teto" sai como "Altura:
+  alguém junto e uma mão para se segurar; com o barco na água, colete." no lugar do "Teto", e "porão" vira "Combustível".
+  Hoje 0 OS abertas caem nesse ramo (Motorhome 53, Lancha 17, Camper 2, Trailer 2, Catamarã 1, Automóvel 1 —
+  `porte/rev-f1/cetico-papel/sql/cetico-tipos-abertas.sql`).
+- **Menor mudança:** no quadro Atenção, decidir "náutico" só por tipo náutico conhecido (lista das embarcações), e tratar sem
+  tipo / "Outro" como veículo ou com o texto neutro da altura — decisão de regra (texto aprovado pelo dono), com caso no
+  `via-atencao_test.ts`.
