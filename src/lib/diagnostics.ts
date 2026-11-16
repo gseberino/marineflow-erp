@@ -410,7 +410,8 @@ async function snapshotAuditLog(userId: string | null) {
     const { data, error } = await supabase
       .from('audit_log')
       .select('id, table_name, record_id, action, changed_at, changed_by, reason, new_value')
-      .eq('changed_by', userId)
+      // Desde o histórico de documentos (20270121100000) o banco carimba o autor em ator_id; changed_by é o nome.
+      .eq('ator_id', userId)
       .order('changed_at', { ascending: false })
       .limit(100);
     if (error) return [{ error: mask(error.message) }];

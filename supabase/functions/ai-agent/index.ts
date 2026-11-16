@@ -10,6 +10,7 @@ import { prepararFerramentasDoTurno, runAgentLoop, textoDoSim, type Proposal } f
 import { erroParaODono, respostaDoTurnoNoWhatsApp, textoAcimaDoCartao } from "../_shared/ai/whatsapp-resposta.ts";
 import { registrarFalhaDoAssistente } from "../_shared/ai/falhas-do-assistente.ts";
 import { logEdgeError } from "../_shared/log-error.ts";
+import { cabecalhosDoHistorico, clienteServicoComAtor } from "../_shared/historico-ator.ts";
 // aprovação em lote, Fase 1 (29/10/2026): o que o sistema diz do turno — decisão na conversa, desfecho real, conferido
 // das gravações diretas e a guarda da reserva do Claude Max.
 import {
@@ -667,8 +668,10 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
     if (r.key) settings[r.key] = String(r.value ?? "");
   });
 
-  // Sem JWT de usuário neste canal — sb e admin são o mesmo client service-role.
-  const toolCtx = { sb: admin, admin, userId: appUserId, userRole: (appUser.role as Role) || "unknown", jwt: "", appOrigin: settings.app_public_url || "", settings, sessaoId: sessionId, sessaoAmarrada: metadata.retorno_amarrada === true, casoAmarrado: casoAmarradoDaSessao(sessionRow) };
+  // Sem JWT de usuário neste canal — sb e admin são o mesmo client service-role, que leva quem pediu ao histórico
+  // de documentos (o gatilho do banco não tem auth.uid() aqui).
+  const adminDoTurno = clienteServicoComAtor(SUPABASE_URL, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, appUserId, "assistente_whatsapp");
+  const toolCtx = { sb: adminDoTurno, admin: adminDoTurno, userId: appUserId, userRole: (appUser.role as Role) || "unknown", jwt: "", appOrigin: settings.app_public_url || "", settings, sessaoId: sessionId, sessaoAmarrada: metadata.retorno_amarrada === true, casoAmarrado: casoAmarradoDaSessao(sessionRow) };
 
   // ---- Camada determinística (custo $0): o vocabulário do retorno rápido (F2) ----
   // ANTES da trava e da confirmação: "não 2" rejeitaria o cartão inteiro, e "1 A sim <PIN>" levaria o PIN ao modelo.
@@ -1193,7 +1196,8 @@ async function handleEntregaDoMax(body: Record<string, any>): Promise<Response> 
   }
   // Só aviso: a reserva ainda pode responder. Se ela falhar também, o turno abaixo registra a falha.
   await logEdgeError(admin, { context: "ai-agent", action: "max_falhou", level: "warn", message: `Turno do Claude Max falhou (${job.error_code ?? job.status}); refazendo pelo OpenRouter` });
-  const toolCtx = { sb: admin, admin, userId: appUser.id, userRole: (appUser.role as Role) || "unknown", jwt: "", appOrigin: settings.app_public_url || "", settings, sessaoId: sessionId, sessaoAmarrada: metadata.retorno_amarrada === true, casoAmarrado: casoAmarradoDaSessao(sessionRow) };
+  const adminDoTurno = clienteServicoComAtor(SUPABASE_URL, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, appUser.id, "assistente_whatsapp");
+  const toolCtx = { sb: adminDoTurno, admin: adminDoTurno, userId: appUser.id, userRole: (appUser.role as Role) || "unknown", jwt: "", appOrigin: settings.app_public_url || "", settings, sessaoId: sessionId, sessaoAmarrada: metadata.retorno_amarrada === true, casoAmarrado: casoAmarradoDaSessao(sessionRow) };
   return await turnoDoModeloNoWhatsApp({
     admin, sessionId, phoneNormalized, appUser, settings, toolCtx, metadata, effectiveText: texto, permitirMax: false,
   });
@@ -1416,8 +1420,9 @@ servirComCors(async (req) => {
     const jwt = authHeader.replace(/^Bearer\s+/i, "");
     if (!jwt) return jr({ error: "Não autenticado" }, 401);
 
+    // x-mf-origem: o histórico de documentos separa o que o assistente gravou do que a tela gravou (o autor é o JWT).
     const sb = createClient(SUPABASE_URL, ANON, {
-      global: { headers: { Authorization: `Bearer ${jwt}` } },
+      global: { headers: { Authorization: `Bearer ${jwt}`, ...cabecalhosDoHistorico(null, "assistente_painel") } },
     });
     const { data: userData, error: userErr } = await sb.auth.getUser(jwt);
     if (userErr || !userData?.user?.id) return jr({ error: "Não autenticado" }, 401);
@@ -1427,9 +1432,9 @@ servirComCors(async (req) => {
     const userRole = userProfile?.role || "unknown";
     const userName = userProfile?.full_name || "Usuário";
 
-    const admin = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+    // Algumas ferramentas gravam pelo service-role mesmo no painel (cancelar, reabrir...): o client leva quem pediu
+    // ao histórico de documentos.
+    const admin = clienteServicoComAtor(SUPABASE_URL, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, userId, "assistente_painel");
 
     // ---- Carrega TODAS as configuracoes do sistema uma unica vez ----
     const { data: settingsRows } = await admin.from("app_settings").select("key, value");

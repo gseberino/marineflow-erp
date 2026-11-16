@@ -10,6 +10,11 @@ const ACTION_COLORS: Record<string, string> = {
   reopen: 'bg-amber-100 text-amber-700',
   reversal: 'bg-purple-100 text-purple-700',
   cascade_update: 'bg-muted text-muted-foreground',
+  // Histórico de documentos (gatilho do banco, 16/11/2026)
+  insert: 'bg-emerald-100 text-emerald-700',
+  delete: 'bg-red-100 text-red-700',
+  versao: 'bg-slate-100 text-slate-700',
+  restore: 'bg-purple-100 text-purple-700',
 };
 
 interface RecordHistoryProps {

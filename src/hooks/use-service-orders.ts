@@ -262,13 +262,9 @@ export function useUpdateServiceOrder() {
         throw e;
       }
 
-      await writeAuditLog({
-        table_name: 'service_orders',
-        record_id: id,
-        action: 'update',
-        previous_value: prev,
-        new_value: values,
-      });
+      // O histórico desta edição é gravado pelo BANCO (gatilho trg_historico, migration
+      // 20270121100000): só o que mudou, com o autor real. A foto inteira que se gravava aqui
+      // saía com autor "sistema" e, em 70% das vezes, sem mudança nenhuma.
 
       return data;
     },

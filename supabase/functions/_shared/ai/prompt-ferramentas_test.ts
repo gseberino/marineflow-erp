@@ -131,6 +131,9 @@ NAO_SAO_TOOLS.add("nao_vem");
 // Agenda de Produção (01/11/2026, Fase 7c, P8): valor do foco de agenda_ver ("o que o Alex faz amanhã?" = pessoa e período no foco
 // o_que_fazer; as etapas de um serviço)
 NAO_SAO_TOOLS.add("o_que_fazer");
+// Histórico de documentos (16/11/2026): o modo ver_versao de consultar_historico_documento e os registro_ids que ela devolve
+// (vão em eventos de restaurar_documento)
+for (const campo of ["ver_versao", "registro_ids"]) NAO_SAO_TOOLS.add(campo);
 
 /** A conversa dos comprovantes ligada (F2): as linhas dos CMPs só entram no prompt assim. */
 const CONVERSA_LIGADA = { comprovante_fluxo: "dono", comprovante_conversa: "on" };

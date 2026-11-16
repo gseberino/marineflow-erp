@@ -5,7 +5,8 @@ import { ServiceOrderTimeline } from '@/components/ServiceOrderTimeline';
 import { Link } from 'react-router-dom';
 import { useI18n } from '@/i18n';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useRecordHistory } from '@/hooks/use-audit-log';
+import { useHistoricoDocumento } from '@/hooks/use-historico-documento';
+import { useOptionalAuth } from '@/hooks/use-auth';
 import { Badge } from '@/components/ui/badge';
 import { History, Link2, Check, ListChecks, Route, ClipboardCheck } from 'lucide-react';
 import { useState } from 'react';
@@ -19,8 +20,13 @@ import { useRoteiroVisivel } from '@/hooks/use-roteiro-visivel';
 import { PlanoDaOsNaOs } from '@/components/service-order/PlanoDaOs';
 
 function TimelineTab({ id }: { id: string }) {
-  const { data: history } = useRecordHistory('service_orders', id);
-  const count = history?.length ?? 0;
+  // O contador é o total de EVENTOS do histórico (o mesmo que a aba mostra), pedido com limite 1: o banco conta e não
+  // manda os retratos. Antes era o audit_log cru (select('*') sem limite): contava linhas, não eventos, e baixava tudo.
+  // Só administrador e financeiro leem o histórico — o técnico nem pergunta ao banco e fica sem contador.
+  const papel = useOptionalAuth()?.user?.role;
+  const leHistorico = papel === 'admin' || papel === 'financial';
+  const { data } = useHistoricoDocumento({ tipo: 'os', ref: id, modo: 'alteracoes', limite: 1, enabled: leHistorico });
+  const count = leHistorico ? data?.total_de_eventos ?? 0 : 0;
   return (
     <TabsTrigger value="timeline" className="flex items-center gap-1.5">
       <History className="h-3.5 w-3.5" />
@@ -183,9 +189,9 @@ export default function ServiceOrderDetail() {
         <div className="max-w-2xl">
           <h2 className="text-lg font-semibold mb-1">Histórico de alterações</h2>
           <p className="text-sm text-muted-foreground mb-6">
-            Todas as alterações registradas nesta OS em ordem cronológica.
+            Quem mudou o quê, quando e por onde — da mais recente para a mais antiga — e as versões guardadas.
           </p>
-          <ServiceOrderTimeline orderId={id} />
+          <ServiceOrderTimeline orderId={id} documento={order} />
         </div>
       </TabsContent>
     </Tabs>

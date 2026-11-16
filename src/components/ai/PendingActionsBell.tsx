@@ -45,6 +45,8 @@ function labelFor(name: string): string {
     // fiscal e compras (07/10/2026)
     send_fiscal_pdf_to_client: 'Enviar nota fiscal ao cliente (WhatsApp)',
     delete_purchase_order: 'Excluir ordem de compra',
+    // histórico de documentos (16/11/2026)
+    restaurar_documento: 'Restaurar orçamento/OS (desfazer ou voltar versão)',
   };
   return map[name] || name.replace(/_/g, ' ');
 }

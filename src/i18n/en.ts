@@ -794,6 +794,10 @@ export const en: DeepPartialStrings<TranslationKeys> = {
       reopen: 'Reopening',
       reversal: 'Reversal',
       cascade_update: 'Cascade update',
+      insert: 'Inserted',
+      delete: 'Removed',
+      versao: 'Version saved',
+      restore: 'Restored',
     },
     tables: {
       service_orders: 'Service Order',

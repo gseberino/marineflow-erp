@@ -4162,3 +4162,44 @@ porque só o dono pode preenchê-las.
 - **Efeito:** a frase da §6.4 diria ao dono que *desfaz Nelson* tira a marcação, e ela volta em 15 minutos. O P5b não escreve essa frase: a resposta pelo prazo termina em "Se não for assim, me diga os dias." (o caminho que de fato muda: o dono diz os dias e a fonte deixa de ser `orcamento`). Só com `modo_rebaixar` ligado; hoje desligado, e o "OK ligar o espera o seu ok" ainda não foi dado.
 - **Na Fase 7g:** corrigido no fechamento (12/11/2026), dentro da `20261112100700`, que já recriava `agenda_desfazer` (o "Não recriar" do R9.1 não vale aqui): o ramo genérico das alocações, quando a reserva que volta é `ok_do_dono`, limpa `ok_do_dono_em`/`ok_do_dono_via` na mesma transação (a OS volta a esperar o ok, a vigia não promove de novo e a pergunta "Pode marcar assim?" nasce de novo no próximo tique), e o texto diz "Desfeito: a reserva do Rui (OS-00954) volta como estava. Volto a esperar o seu ok antes de marcar.". Reproduzido antes do conserto e provado pelo K5k a K5n de `supabase/tests/agenda_fase7g_ok_do_dono.sql` (sem o conserto, os 4 reprovam: a vigia promove de novo). A resposta da decisão 1 continua sem prometer "*desfaz Nelson* tira" (o *desfaz* volta a reserva, não tira).
 - **Origem:** Fase 7g, P5b.
+
+## Histórico de documentos (16/11/2026) — achados laterais, NÃO corrigidos de passagem
+
+Achados pela varredura do histórico de documentos (migrations `20270121100000`..`20270121100300`). Ficam aqui porque
+mudam comportamento fora do escopo; cada um tem a menor mudança indicada.
+
+### [NOVO-historico-01] `edit_service_order_item` e a aplicação do preço do fornecedor gravam `line_total` ignorando o desconto da linha
+
+- **Onde:** `supabase/functions/_shared/ai/tools/service-orders.ts` (~1151 e ~1163, `edit_service_order_item`) e `src/hooks/use-quote-requests.ts:486`.
+- **Efeito:** total do item = preço × quantidade, sem o `discount_amount` da linha; o total da OS sai maior que o PDF (que imprime desconto por item desde 14/11). O histórico vai registrar esse total inconsistente.
+- **Menor mudança:** usar a mesma conta das telas de item (preço × qtd − desconto) nos dois pontos, com teste.
+
+### [NOVO-historico-02] `apply_service_order_discount` não confere se a OS pode ser editada
+
+- **Onde:** `supabase/functions/_shared/ai/tools/service-orders.ts` (~1305-1319): `update` direto em `service_orders.discount_amount` sem `assertEditableSo`.
+- **Efeito:** o assistente aplica desconto em OS cancelada ou faturada.
+- **Menor mudança:** chamar `assertEditableSo` antes do update, como as outras tools de item.
+
+### [NOVO-historico-03] `service_order_signatures` aceita UPDATE de qualquer usuário logado
+
+- **Onde:** policy `auth_update_signatures` (authenticated, sem condição de cargo).
+- **Efeito:** a prova de assinatura do cliente pode ser alterada pela API por técnico/vendedor. O histórico agora registra a mudança (trg_historico), mas não impede.
+- **Menor mudança:** restringir o UPDATE a admin (ou só ao gatilho/edge), provando com `set local role`.
+
+### [NOVO-historico-04] `app_settings` aceita UPDATE/DELETE de qualquer usuário logado
+
+- **Onde:** policies de `app_settings` (termos, PIX, dados bancários e `cron_worker_secret` na mesma tabela).
+- **Efeito:** qualquer logado troca a chave PIX ou os termos impressos no orçamento. O histórico registra as chaves do documento (lista fechada), não impede.
+- **Menor mudança:** escrita só para admin/financeiro (como `20260909201619_app_settings_escrita_admin_ou_financeiro` previa — conferir se foi revertida).
+
+### [NOVO-historico-05] Duplicar OS não copia o desconto das linhas
+
+- **Onde:** `src/hooks/use-service-orders.ts` (~953-981, `useDuplicateServiceOrder`).
+- **Efeito:** a cópia sai com o total sem desconto por item.
+- **Menor mudança:** copiar `discount_pct`/`discount_amount` das peças e serviços.
+
+### [NOVO-historico-06] Remover item que falhou volta com id NOVO
+
+- **Onde:** `src/hooks/use-service-orders.ts:609` e `:858` (`const { id: _oldId, ...reinsertData }`).
+- **Efeito:** a linha "desfeita" pela tela perde a identidade: o histórico mostra uma exclusão e uma inclusão de itens diferentes, e o material da agenda (os_material, CASCADE) não volta.
+- **Menor mudança:** reinserir com o mesmo id (a restauração do histórico já faz assim).

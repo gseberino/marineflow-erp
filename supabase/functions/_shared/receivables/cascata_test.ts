@@ -7,7 +7,7 @@ import { recalcularOSComCascata } from "./cascata.ts";
 // (30 linhas cascade_update em audit_log, todas da TELA; nenhuma "pelo agente").
 
 // Cliente falso: grava cada .from(tabela).insert(payload) e responde as leituras da cascata.
-function fakeSb(opts: { erroNoInsert?: string } = {}) {
+function fakeSb(opts: { erroNoInsert?: string; erroNoUpdate?: string } = {}) {
   const inserts: { tabela: string; payload: any }[] = [];
   const updates: { tabela: string; payload: any }[] = [];
   const rpcs: string[] = [];
@@ -34,7 +34,9 @@ function fakeSb(opts: { erroNoInsert?: string } = {}) {
           select: () => leitura([{ id: "r1", amount: 1000, paid_amount: 0, status: "pending" }]),
           update: (payload: any) => {
             updates.push({ tabela, payload });
-            return { eq: () => Promise.resolve({ data: null, error: null }) };
+            return {
+              eq: () => Promise.resolve({ data: null, error: opts.erroNoUpdate ? { message: opts.erroNoUpdate } : null }),
+            };
           },
         };
       }
@@ -72,4 +74,17 @@ Deno.test("falha da trilha não derruba a cascata nem esconde o recebível atual
   assertEquals(r.atualizados, 1);
   // O erro vira linha em app_error_logs (log_app_error), em vez de sumir.
   assertEquals(rpcs.includes("log_app_error"), true);
+});
+
+Deno.test("gravação do recebível que falha é contada em falhas (não some como 'nada precisou mudar')", async () => {
+  const { sb, inserts } = fakeSb({ erroNoUpdate: "permission denied for table receivables" });
+  const r = await recalcularOSComCascata(sb, "os-1");
+  assertEquals(r.bloqueado, false);
+  assertEquals(r.atualizados, 0);
+  assertEquals(r.falhas, 1);
+  // sem valor gravado, sem trilha
+  assertEquals(inserts.filter((i) => i.payload?.action === "cascade_update").length, 0);
+  // e o caminho feliz não acusa falha
+  const ok = await recalcularOSComCascata(fakeSb().sb, "os-1");
+  assertEquals(ok.falhas, 0);
 });

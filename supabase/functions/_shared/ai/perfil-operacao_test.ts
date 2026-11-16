@@ -294,7 +294,54 @@ const RPC_SO_LEITURA_CONFERIDAS = new Set([
   // Agrupar OS (28/10/2026): a leitura de listar_os_para_agrupar, conferida no texto da migration que a cria
   // (teste abaixo).
   "os_para_agrupar",
+  // Histórico de documentos (16/11/2026): a leitura de consultar_historico_documento, conferida no texto da migration
+  // 20270121100100 (teste abaixo).
+  "documento_historico",
 ]);
+
+/**
+ * documento_historico (histórico de documentos, 16/11/2026): a leitura que consultar_historico_documento chama e que a rede
+ * roda direto. A última migration que a cria tem de ser stable + security definer, não gravar, e as funções private.* que ela
+ * chama (direto ou uma dentro da outra) também: stable/immutable e sem insert/update/delete/perform.
+ */
+Deno.test("documento_historico só lê: stable, sem gravar, e as funções private.* que chama também só leem", () => {
+  const limpar = (sql: string) => sql.replace(/--[^\n]*/g, "");
+  const migrations = [...Deno.readDirSync(new URL("../../../migrations/", import.meta.url))]
+    .filter((e) => e.isFile && e.name.endsWith(".sql")).map((e) => e.name).sort().reverse()
+    .map((n) => limpar(Deno.readTextFileSync(new URL(`../../../migrations/${n}`, import.meta.url))));
+  /** O cabeçalho e o corpo da função na ÚLTIMA migration que a cria (esquema public ou private). */
+  const funcao = (esquema: string, nome: string) => {
+    const re = new RegExp(`create\\s+or\\s+replace\\s+function\\s+${esquema}\\.${nome}\\s*\\(`, "i");
+    const sql = migrations.find((m) => re.test(m));
+    assertEquals(!!sql, true, `nenhuma migration cria ${esquema}.${nome}`);
+    const resto = sql!.slice(sql!.search(re));
+    const abre = resto.match(/\$([a-z_]*)\$/i)!;
+    const ini = resto.indexOf(abre[0]) + abre[0].length;
+    return { cabecalho: resto.slice(0, ini).toLowerCase(), corpo: resto.slice(ini, resto.indexOf(abre[0], ini)).toLowerCase() };
+  };
+  const GRAVA_AQUI = /\b(insert\s+into|update\s+public\.|delete\s+from|perform\s+)/;
+  const principal = funcao("public", "documento_historico");
+  assertEquals(principal.corpo.length > 500, true, "corpo de documento_historico vazio — o recorte quebrou?");
+  assertEquals(/\bstable\b/.test(principal.cabecalho) && /security\s+definer/.test(principal.cabecalho), true,
+    "documento_historico tem de ser stable e security definer");
+  assertEquals(GRAVA_AQUI.test(principal.corpo), false, "documento_historico grava e a rede a roda sem confirmação");
+  assertEquals([...principal.corpo.matchAll(/public\.([a-z_0-9]+)\s*\(/g)].map((m) => m[1]), [], "documento_historico chama função public.*");
+  const vistas = new Set<string>();
+  const fila = [...principal.corpo.matchAll(/private\.([a-z_0-9]+)\s*\(/g)].map((m) => m[1]);
+  while (fila.length) {
+    const f = fila.shift()!;
+    if (vistas.has(f)) continue;
+    vistas.add(f);
+    const g = funcao("private", f);
+    assertEquals(/\b(stable|immutable)\b/.test(g.cabecalho), true, `private.${f} (chamada por documento_historico) não é stable`);
+    assertEquals(GRAVA_AQUI.test(g.corpo), false, `private.${f} (chamada por documento_historico) grava`);
+    for (const m of g.corpo.matchAll(/private\.([a-z_0-9]+)\s*\(/g)) fila.push(m[1]);
+    for (const m of g.corpo.matchAll(/public\.([a-z_0-9]+)\s*\(/g)) {
+      assertEquals(["is_admin_or_financial"].includes(m[1]), true, `private.${f} chama public.${m[1]}, que ninguém conferiu`);
+    }
+  }
+  assertEquals(vistas.size >= 5, true, `só ${vistas.size} funções private.* — o recorte quebrou?`);
+});
 
 /** O corpo ($$ … $$) da função `nome` no texto da migration, sem comentários, em minúsculas. */
 function corpoDaFuncao(sql: string, nome: string): { cabecalho: string; corpo: string } {

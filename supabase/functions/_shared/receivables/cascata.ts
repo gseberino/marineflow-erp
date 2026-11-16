@@ -30,6 +30,11 @@ export interface ResultadoDaCascata {
   motivo?: string;
   /** Quantos recebíveis tiveram valor alterado. */
   atualizados: number;
+  /**
+   * Quantos recebíveis DEVIAM mudar e a gravação falhou (o PostgREST devolveu erro). Quem mostra o resultado ao dono não
+   * pode dizer "nada precisou mudar" quando isto passa de zero (histórico de documentos, 16/11/2026).
+   */
+  falhas: number;
   novoTotal?: number;
 }
 
@@ -69,10 +74,11 @@ export async function recalcularOSComCascata(
   const plano = redistribuirRecebiveis(recebiveis ?? [], novoTotal);
 
   if (plano.bloqueado) {
-    return { bloqueado: true, motivo: plano.motivo, atualizados: 0, novoTotal };
+    return { bloqueado: true, motivo: plano.motivo, atualizados: 0, falhas: 0, novoTotal };
   }
 
   let atualizados = 0;
+  let falhas = 0;
   for (const alt of plano.alteracoes) {
     // Só grava o que de fato mudou: um UPDATE por recebível a cada recálculo encheria a
     // trilha de auditoria de linhas idênticas e esconderia as alterações reais.
@@ -90,7 +96,10 @@ export async function recalcularOSComCascata(
       })
       .eq("id", alt.id);
 
-    if (error) continue;
+    if (error) {
+      falhas++;
+      continue;
+    }
     atualizados++;
 
     // A tela grava trilha para cada redistribuição; o agente precisa gravar também, senão a
@@ -131,5 +140,5 @@ export async function recalcularOSComCascata(
     }
   }
 
-  return { bloqueado: false, atualizados, novoTotal };
+  return { bloqueado: false, atualizados, falhas, novoTotal };
 }

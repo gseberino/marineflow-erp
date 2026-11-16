@@ -11,6 +11,7 @@ const h = vi.hoisted(() => ({
   papel: 'admin',
   config: { data: null as unknown, error: null as unknown },
   rpc: vi.fn(),
+  historico: vi.fn(),
 }));
 
 vi.mock('@/hooks/use-app-settings', () => ({
@@ -23,7 +24,13 @@ vi.mock('@/hooks/use-service-orders', () => ({
     isLoading: false, error: null,
   }),
 }));
-vi.mock('@/hooks/use-audit-log', () => ({ useRecordHistory: () => ({ data: [] }) }));
+// O contador da aba Histórico: total_de_eventos do histórico (limite 1), só para administrador e financeiro.
+vi.mock('@/hooks/use-historico-documento', () => ({
+  useHistoricoDocumento: (p: Record<string, unknown>) => {
+    h.historico(p);
+    return { data: p.enabled ? { total_de_eventos: 7 } : undefined };
+  },
+}));
 vi.mock('@/hooks/use-auth', () => ({ useOptionalAuth: () => ({ user: { id: 'u1', role: h.papel } }) }));
 vi.mock('@/integrations/supabase/client', () => {
   const builder: Record<string, unknown> = {};
@@ -56,6 +63,7 @@ beforeEach(() => {
   h.papel = 'admin';
   h.config = { data: { jornada_horas: 8, carga_max: '0.80', modo_leitura: 'sombra', modo_proposta: 'ligado' }, error: null };
   h.rpc.mockReset();
+  h.historico.mockReset();
   h.rpc.mockResolvedValue({ data: { ...PLANO_DE_EXEMPLO, status: 'scheduled', pode_entregar: false }, error: null });
 });
 
@@ -84,5 +92,30 @@ describe('OS — o cartão Plano', () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(screen.queryByTestId('plano-da-os')).not.toBeInTheDocument();
     expect(h.rpc).not.toHaveBeenCalled();
+  });
+});
+
+describe('OS — contador da aba Histórico', () => {
+  it('administrador e financeiro: o total de eventos do histórico, pedido com limite 1', () => {
+    for (const papel of ['admin', 'financial']) {
+      h.papel = papel;
+      h.historico.mockReset();
+      const r = renderOs();
+      const aba = screen.getByRole('tab', { name: /Histórico/ });
+      expect(aba).toHaveTextContent('7');
+      expect(h.historico).toHaveBeenCalledWith(expect.objectContaining({
+        tipo: 'os', ref: 'os-69', modo: 'alteracoes', limite: 1, enabled: true,
+      }));
+      r.unmount();
+    }
+  });
+
+  it('técnico: não pergunta ao banco e fica sem contador', () => {
+    h.papel = 'technician';
+    renderOs();
+    const aba = screen.getByRole('tab', { name: /Histórico/ });
+    expect(aba).not.toHaveTextContent(/\d/);
+    expect(h.historico).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
+    expect(h.historico).not.toHaveBeenCalledWith(expect.objectContaining({ enabled: true }));
   });
 });

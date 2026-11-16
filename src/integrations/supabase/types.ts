@@ -2669,42 +2669,60 @@ export type Database = {
       audit_log: {
         Row: {
           action: string
+          ator_id: string | null
           changed_at: string | null
           changed_by: string
+          doc_id: string | null
+          doc_tabela: string | null
           id: string
           new_value: Json | null
+          origem: string | null
           previous_value: Json | null
           reason: string | null
           record_id: string
           table_name: string
           triggered_by_id: string | null
           triggered_by_table: string | null
+          versao: number | null
+          xact_id: unknown
         }
         Insert: {
           action: string
+          ator_id?: string | null
           changed_at?: string | null
           changed_by?: string
+          doc_id?: string | null
+          doc_tabela?: string | null
           id?: string
           new_value?: Json | null
+          origem?: string | null
           previous_value?: Json | null
           reason?: string | null
           record_id: string
           table_name: string
           triggered_by_id?: string | null
           triggered_by_table?: string | null
+          versao?: number | null
+          xact_id?: unknown
         }
         Update: {
           action?: string
+          ator_id?: string | null
           changed_at?: string | null
           changed_by?: string
+          doc_id?: string | null
+          doc_tabela?: string | null
           id?: string
           new_value?: Json | null
+          origem?: string | null
           previous_value?: Json | null
           reason?: string | null
           record_id?: string
           table_name?: string
           triggered_by_id?: string | null
           triggered_by_table?: string | null
+          versao?: number | null
+          xact_id?: unknown
         }
         Relationships: []
       }
@@ -14391,6 +14409,31 @@ export type Database = {
       }
       // ── Retorno F5 (P12.5, C-VAL-ENVIO, migration 20270112100100): a validade contada do envio. Trecho escrito à mão até o
       // próximo "gen types" depois de aplicar; para quem não é a service_role o p_agora é ignorado (o relógio é o do banco).
+      documento_historico: {
+        Args: {
+          p_ate?: string
+          p_desde?: string
+          p_limite?: number
+          p_modo?: string
+          p_ref: string
+          p_tipo: string
+          p_versao?: number
+          p_versao_b?: number
+        }
+        Returns: Json
+      }
+      documento_restaurar: {
+        Args: {
+          p_autor?: string
+          p_conferir_hash?: string
+          p_eventos?: string[]
+          p_motivo?: string
+          p_ref: string
+          p_simular?: boolean
+          p_versao?: number
+        }
+        Returns: Json
+      }
       orcamento_validade_do_envio: {
         Args: {
           p_os: string

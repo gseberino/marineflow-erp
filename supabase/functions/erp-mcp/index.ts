@@ -10,6 +10,7 @@
 // está 'processing' e por no máximo 20 min. O contexto (usuário, cargo, sessão, ferramentas) vem
 // do JOB — nunca do corpo da requisição.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { clienteServicoComAtor } from "../_shared/historico-ator.ts";
 import { executarChamadaDeTool, interrupcaoDaTool } from "../_shared/ai/agent.ts";
 import { osDoTurno } from "../_shared/agenda/carona.ts";
 import type { Role } from "../_shared/ai/tools/index.ts";
@@ -79,7 +80,9 @@ export async function handler(req: Request): Promise<Response> {
   const { data: sessao } = sessionId
     ? await admin.from("ai_operator_sessions").select("metadata, client_id, vessel_id").eq("id", sessionId).maybeSingle()
     : { data: null };
-  const toolCtx = { sb: admin, admin, userId: usuario.id, userRole: cargo, jwt: "", appOrigin: settings.app_public_url || "", settings, canal,
+  // O client das ferramentas leva quem pediu ao histórico de documentos (service-role não tem auth.uid()).
+  const adminDoTurno = clienteServicoComAtor(SUPABASE_URL, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, usuario.id, "assistente_max");
+  const toolCtx = { sb: adminDoTurno, admin: adminDoTurno, userId: usuario.id, userRole: cargo, jwt: "", appOrigin: settings.app_public_url || "", settings, canal,
     sessaoId: sessionId || undefined,
     sessaoAmarrada: (sessao?.metadata as Record<string, unknown> | null)?.retorno_amarrada === true,
     casoAmarrado: casoAmarradoDaSessao(sessao) };

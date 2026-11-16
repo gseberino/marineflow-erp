@@ -15,12 +15,20 @@ export type AuditAction =
   | 'whatsapp_send' | 'whatsapp_send_api' | 'whatsapp_received' | 'whatsapp_preview'
   | 'whatsapp_send_open' | 'whatsapp_unread_reminder_enqueued'
   | 'lead_created' | 'lead_matched' | 'lead_converted'
-  | 'import_xml' | 'confirm_import' | 'revert_import';
+  | 'import_xml' | 'confirm_import' | 'revert_import'
+  | 'insert' | 'delete' | 'versao' | 'restore';
+
+/**
+ * Ações que só o BANCO grava (histórico de documentos, migration 20270121100000): o gatilho
+ * trg_historico grava insert/update/delete de cada linha, `versao` é o retrato do documento num
+ * marco e `restore` é a restauração. Pela API o banco recusa estas quatro (42501).
+ */
+export type AcaoSoDoBanco = 'insert' | 'delete' | 'versao' | 'restore';
 
 export async function writeAuditLog(entry: {
   table_name: string;
   record_id: string;
-  action: AuditAction;
+  action: Exclude<AuditAction, AcaoSoDoBanco>;
   changed_by?: string;
   previous_value?: any;
   new_value?: any;
@@ -61,6 +69,15 @@ export async function writeAuditLog(entry: {
   }
 }
 
+/** O retrato do documento num marco (histórico de documentos): grande, e só faz sentido na aba Histórico da OS. */
+export const ACAO_FORA_DA_LISTAGEM = 'versao';
+
+/**
+ * As colunas que o histórico curto de um registro (RecordHistory, contador da aba) usa. Sem previous_value/new_value:
+ * a linha 'versao' guarda o documento inteiro, e ninguém aqui mostra o antes/depois.
+ */
+const COLUNAS_DO_HISTORICO_CURTO = 'id, table_name, record_id, action, changed_by, changed_at, reason';
+
 export function useAuditLog(filters?: {
   table_name?: string;
   action?: string;
@@ -77,7 +94,10 @@ export function useAuditLog(filters?: {
         .order('changed_at', { ascending: false })
         .limit(500);
       if (filters?.table_name) q = q.eq('table_name', filters.table_name);
+      // Sem filtro de ação, a listagem genérica deixa de fora o retrato de versão (o documento inteiro em new_value:
+      // 500 linhas disso pesam). Filtrar por 'versao' explicitamente continua trazendo.
       if (filters?.action) q = q.eq('action', filters.action);
+      else q = q.neq('action', ACAO_FORA_DA_LISTAGEM);
       if (filters?.dateFrom) q = q.gte('changed_at', filters.dateFrom);
       if (filters?.dateTo) q = q.lte('changed_at', filters.dateTo);
       if (filters?.record_id) q = q.eq('record_id', filters.record_id);
@@ -94,7 +114,7 @@ export function useRecordHistory(tableName: string, recordId: string | undefined
     queryFn: async () => {
       const { data, error } = await supabase
         .from('audit_log')
-        .select('*')
+        .select(COLUNAS_DO_HISTORICO_CURTO)
         .eq('table_name', tableName)
         .eq('record_id', recordId!)
         .order('changed_at', { ascending: false });

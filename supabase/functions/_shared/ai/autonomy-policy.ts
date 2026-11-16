@@ -82,6 +82,9 @@ export const NEVER_AUTONOMOUS = new Set<string>([
   "guardar_pagador_do_cliente",
   // Retorno F4 (P12.1): o cartão do parceiro liga cliente a parceiro e manda mensagem ao parceiro. Só pela pendência, com PIN.
   "parceiro_executar_cartao",
+  // histórico de documentos (16/11/2026): restaurar muda itens, valores e total do orçamento/OS (e as parcelas a receber), e
+  // a autonomia pularia o resumo — onde a simulação mostra o que muda, o que não se desfaz e a nova assinatura. Sempre com o "sim".
+  "restaurar_documento",
 ]);
 
 /**

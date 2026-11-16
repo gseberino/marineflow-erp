@@ -18,7 +18,8 @@ import '@/v2/tokens.css';
    da DataTable). Cores de ação e do diff agora por token. */
 
 const TABLE_OPTIONS = ['service_orders', 'receivables', 'payables', 'payments', 'bank_transactions', 'service_order_parts'] as const;
-const ACTION_OPTIONS = ['update', 'cancel', 'reopen', 'reversal', 'cascade_update'] as const;
+// 'versao' fica fora da lista sem filtro (o retrato é grande), mas dá para pedir explicitamente.
+const ACTION_OPTIONS = ['update', 'insert', 'delete', 'cancel', 'reopen', 'reversal', 'cascade_update', 'restore', 'versao'] as const;
 
 const ACTION_TONE: Record<string, StatusTone> = {
   update: 'info',
@@ -26,6 +27,10 @@ const ACTION_TONE: Record<string, StatusTone> = {
   reopen: 'warning',
   reversal: 'info',
   cascade_update: 'neutral',
+  insert: 'success',
+  delete: 'critical',
+  versao: 'neutral',
+  restore: 'warning',
 };
 
 const FIELD_MAP: Record<string, string> = {

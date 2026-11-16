@@ -1096,27 +1096,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         }
         toast.success('Ordem de serviço atualizada');
 
-        // Audit log for financial field changes
-        if (orderData) {
-          const financialFields = ['discount_amount', 'tax_amount', 'grand_total', 'commission_rate', 'commission_amount'] as const;
-          const changed: Record<string, { before: any; after: any }> = {};
-          for (const f of financialFields) {
-            const before = (orderData as any)[f];
-            const after = (payload as any)[f] ?? (form as any)[f];
-            if (before !== undefined && after !== undefined && Number(before) !== Number(after)) {
-              changed[f] = { before, after };
-            }
-          }
-          if (Object.keys(changed).length > 0) {
-            writeAuditLog({
-              table_name: 'service_orders',
-              record_id: orderId!,
-              action: 'update',
-              new_value: { financial_changes: changed },
-              reason: 'Campos financeiros alterados manualmente',
-            }).catch(() => {});
-          }
-        }
+        // Mudança de desconto, imposto, total e comissão: o histórico é gravado pelo banco
+        // (gatilho trg_historico), com o valor que de fato ficou gravado depois do recálculo.
 
         // M4: gerar cobranças do saldo ao concluir (preset de parcelamento) — SEM auto-envio.
         // Na conclusão o aviso ao cliente é OPT-IN (prompt abaixo), nunca WhatsApp automático.

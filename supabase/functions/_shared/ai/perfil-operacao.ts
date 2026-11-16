@@ -434,6 +434,13 @@ export const SO_PELA_REDE: ReadonlySet<string> = new Set([
   //   (NEVER_AUTONOMOUS). Cargos: admin e financeiro (CARGOS_FINANCEIRO) —
   "listar_pagadores_do_cliente",
   "guardar_pagador_do_cliente",
+
+  // — Histórico de documentos (16/11/2026): "o que mudou no ORÇ-00112", "como estava quando foi enviado", "quem mexeu no
+  //   desconto". Pergunta de vez em quando, nunca no fluxo do dia, e o perfil enxuto do admin está no teto (113): só pela
+  //   rede. É leitura pelo nome e roda direto (a função documento_historico só lê: conferida em perfil-operacao_test.ts).
+  //   restaurar_documento NÃO entra aqui: é de risco alto, entra sempre no turno de quem pode (admin e financeiro) e no
+  //   admin enxuto chega pela ferramenta_extra, sempre com o "sim" (NEVER_AUTONOMOUS). Cargos: admin e financeiro —
+  "consultar_historico_documento",
 ]);
 
 /**

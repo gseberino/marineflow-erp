@@ -17,7 +17,7 @@ vi.mock('@/hooks/use-service-orders', () => ({
     isLoading: false, error: null,
   }),
 }));
-vi.mock('@/hooks/use-audit-log', () => ({ useRecordHistory: () => ({ data: [] }) }));
+vi.mock('@/hooks/use-historico-documento', () => ({ useHistoricoDocumento: () => ({ data: undefined }) }));
 vi.mock('@/components/ServiceOrderForm', () => ({ ServiceOrderForm: () => <div>formulário</div> }));
 vi.mock('@/components/ServiceOrderTimeline', () => ({ ServiceOrderTimeline: () => null }));
 vi.mock('@/components/agenda/EntityTasksPanel', () => ({ EntityTasksPanel: () => null }));

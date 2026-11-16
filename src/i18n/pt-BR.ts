@@ -771,6 +771,10 @@ export const ptBR = {
       reopen: 'Reabertura',
       reversal: 'Estorno',
       cascade_update: 'Atualização em cascata',
+      insert: 'Incluído',
+      delete: 'Removido',
+      versao: 'Versão guardada',
+      restore: 'Restaurado',
     },
     tables: {
       service_orders: 'Ordem de Serviço',

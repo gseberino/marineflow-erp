@@ -83,6 +83,8 @@ import { parceiroSoPelaPendencia } from "./parceiro.ts";
 // Agenda de Produção, Fase 1 (24/10/2026): agenda_ver (a leitura com o texto pronto do banco) e as três que anotam o
 // rascunho da conversa (os_planejar, material_informar, equipe_disponibilidade) — só o *grava* do dono grava.
 import { agendaProducaoTools } from "./agenda-producao.ts";
+// Histórico de documentos (16/11/2026): o que mudou, quem mudou, as versões e restaurar (paridade com a linha do tempo da tela).
+import { historicoDocumentoTools } from "./historico-documento.ts";
 
 export type { ToolDef, ToolCtx, RiskLevel, Role } from "./registry.ts";
 
@@ -164,6 +166,8 @@ export const allTools: ToolDef[] = [
   ...cobrarJuntasTools,
   // o ditado do retorno rápido (F2)
   ...retornoTools,
+  // histórico de documentos (16/11/2026)
+  ...historicoDocumentoTools,
 ].sort((a, b) => a.name.localeCompare(b.name));
 
 /**

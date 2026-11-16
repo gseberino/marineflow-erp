@@ -20,6 +20,8 @@ import { resumirAgrupamento, resumirDesagrupamento } from "./tools/agrupar-orcam
 import { resumirAgrupamentoDeOS, resumirDesagrupamentoDeOS } from "./tools/agrupar-os.ts";
 // cobrar juntas (28/10/2026, Fase 0 do Fechar juntas): o resumo mostra cada OS com o saldo e a mensagem exata; trava vira recusa.
 import { resumirCobrancaConjunta } from "./tools/cobrar-juntas.ts";
+// histórico de documentos (16/11/2026): o cartão do "sim" é a simulação da restauração (o que muda, total, assinatura).
+import { resumirRestauracao } from "./tools/historico-documento.ts";
 import {
   callClaude,
   ClaudeApiError,
@@ -275,6 +277,9 @@ const TOOL_LABELS_PT: Record<string, string> = {
   listar_os_para_agrupar: "Listar OS para agrupar",
   // cobrar juntas (28/10/2026): o saldo de várias OS executadas do mesmo cliente numa mensagem só.
   cobrar_juntas: "Cobrar OS juntas (WhatsApp)",
+  // histórico de documentos (16/11/2026): paridade com a linha do tempo da tela (consultar roda direto; restaurar pede o "sim").
+  consultar_historico_documento: "Ver o histórico do documento",
+  restaurar_documento: "Restaurar orçamento/OS (desfazer ou voltar versão)",
 };
 // financeiro (07/10/2026): anotação de Pix, estorno, cobrança formal e favorecido.
 Object.assign(TOOL_LABELS_PT, TITULOS_DO_FINANCEIRO);
@@ -486,6 +491,9 @@ RESUMO_QUE_RESOLVE.add("create_quote_from_items");
 // A via do técnico (13/11/2026): OS que não existe, ninguém com telefone ou serviço/pessoa que não casa = recusa numa linha.
 RESUMO_QUE_RESOLVE.add("enviar_via_do_tecnico");
 RESUMO_QUE_RESOLVE.add("definir_responsavel_do_servico");
+// Histórico de documentos (16/11/2026): a simulação da restauração falhou (documento fechado, mudou, versão que não existe,
+// total abaixo do pago) ou nada mudaria — o resumo diz por quê numa linha "⚠️": é recusa, não pendência.
+RESUMO_QUE_RESOLVE.add("restaurar_documento");
 
 export function resumoQueRecusa(toolName: string, resumo: string): { error: string; nada_registrado: true } | null {
   const t = resumo.trim();
@@ -725,6 +733,16 @@ export async function buildPendingSummary(
     } catch (e) {
       const motivo = String((e as { message?: string })?.message ?? e).replace(/\s*\n+\s*/g, " ");
       return `⚠️ Não consegui conferir as contas das OS agora (${motivo}). Nada foi registrado; tente de novo.`;
+    }
+  }
+  // Restaurar orçamento/OS (16/11/2026): o "sim" é sobre a SIMULAÇÃO do banco — o que muda, o total antes e depois, o que
+  // não pôde ser desfeito e se o cliente terá de assinar de novo. Simulação que falha ou nada a mudar vira uma linha "⚠️".
+  if (toolName === "restaurar_documento") {
+    try {
+      return await resumirRestauracao(admin, args, quem.userId || null);
+    } catch (e) {
+      const motivo = String((e as { message?: string })?.message ?? e).replace(/\s*\n+\s*/g, " ");
+      return `⚠️ Não consegui simular a restauração agora (${motivo}). Nada foi alterado; tente de novo.`;
     }
   }
   // Macros de fluxo: a confirmação PRECISA mostrar o que vai acontecer de verdade (a lista

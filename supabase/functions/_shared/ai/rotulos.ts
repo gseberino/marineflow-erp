@@ -391,6 +391,9 @@ export const ROTULOS_DOS_CAMPOS: Record<string, string> = {
   vencimento: "Vencimento",
   verdict: "Veredito",
   vessel_id: "Embarcação ou veículo",
+  // histórico de documentos (16/11/2026): restaurar_documento
+  versao: "Versão",
+  eventos: "Alterações a desfazer",
   voltar_para_em_elaboracao: "Voltar para em elaboração",
   whatsapp: "WhatsApp",
 };

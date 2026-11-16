@@ -20,7 +20,6 @@ import {
 } from '@/components/ui/alert-dialog';
 import { supabase } from '@/integrations/supabase/client';
 import type { Json } from '@/integrations/supabase/types';
-import { writeAuditLog } from '@/hooks/use-audit-log';
 import { useUpdateServiceOrderStatus } from '@/hooks/use-service-orders';
 import { usePaymentConditionPresets } from '@/hooks/use-payment-conditions';
 import { usePurchaseNeedsPrompt } from '@/hooks/use-purchase-needs-prompt';
@@ -75,12 +74,8 @@ export function useConverterSemSinal({ aoConverter }: Opcoes = {}) {
         .eq('id', alvo.id);
       if (error) throw error;
       aoConverter?.(condicao);
-      await writeAuditLog({
-        table_name: 'service_orders',
-        record_id: alvo.id,
-        action: 'update',
-        new_value: { ...condicao, quote_status: 'approved', motivo: 'convertido sem sinal' },
-      });
+      // Sem writeAuditLog manual: o gatilho do histórico (migration 20270121100000) já grava este update com o valor de
+      // ANTES e quem fez — a linha manual só duplicava, e sem o antes.
 
       const res = await updateStatus.mutateAsync({ id: alvo.id, status: 'approved' });
       // Agenda (Fase 3): o status vai pela porta, que devolve o número depois da conversão em `numero` (só o prefixo troca).
