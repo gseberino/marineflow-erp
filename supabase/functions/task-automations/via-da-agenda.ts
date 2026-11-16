@@ -2,9 +2,12 @@
 //
 // Pedido do dono: o agente da agenda manda a via do técnico em PDF no acompanhamento diário. Decisões dele:
 //   · vai na véspera do 1º dia da pessoa naquela OS, e de novo só se a OS mudar (a via DELA: os serviços dela e os
-//     sem responsável — impressaoDaVia, que não muda com data, hora ou link de foto);
+//     sem responsável — impressaoDaVia, que não muda com data, hora ou link de foto, nem com o desenho da folha:
+//     v<versão>.d<versão do dado>.<dado>.<papel>, porte da via v2, F0);
 //   · ligado direto, sem sombra (a chave app_settings.via_tecnico_na_agenda = 'desligado' é só para parar);
-//   · a mesma via que o dono manda pelo assistente: se ele já mandou esta versão, a agenda não repete.
+//   · a mesma via que o dono manda à EQUIPE pelo assistente: se ele já mandou esta versão à pessoa, a agenda não repete.
+//     A via que o dono pede PARA SI ("me manda a via do Alex") foi para o dono, não para o Alex: não conta
+//     (ORIGENS_QUE_ENTREGAM).
 //
 // Não mexe em nada da agenda: só LÊ a ficha que a rotina registrou (agenda_equipe_mensagens, tipo 'ficha', modo
 // 'ligado') e espera a fila do WhatsApp entregá-la ('sent'). Ficha recusada (sem telefone, fora da janela, veto)
@@ -34,6 +37,7 @@ import {
   mandarVia,
   registrarEnvioDaVia,
 } from "../_shared/pdf/via-do-tecnico-envio.ts";
+import { lerImpressao } from "../_shared/pdf/via-do-tecnico.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -47,6 +51,12 @@ export const VIAS_POR_TIQUE = 4;
 export const FALHAS_ATE_DESISTIR = 3;
 /** A janela do envio automático do whatsapp-send (saida-automatica.ts): fora dela nem monta. */
 export const JANELA = { inicio: 8, fim: 20 };
+/**
+ * As origens em que a via chegou à PESSOA (via_tecnico_envios.origem). `para_si` fica de fora: lá o `payee_id` é a
+ * pessoa cuja via o dono pediu, mas o PDF foi para o dono. Lista fechada (e não "tudo menos para_si"): origem nova
+ * não passa a contar como entregue sem alguém decidir.
+ */
+export const ORIGENS_QUE_ENTREGAM = ["agenda", "assistente"] as const;
 
 export interface ResumoDaVia {
   rodou: boolean;
@@ -78,8 +88,16 @@ function ddmm(ts: string): string {
 
 /**
  * Manda ou não, para a pessoa e a OS (decisão do dono: no 1º dia e de novo só se a OS mudar). `ultima` = a última via
- * ENVIADA a ela desta OS (pela agenda ou pelo assistente). `recortada` = alguma linha da OS tem responsável (a legenda
- * avisa que a via é só a parte dela).
+ * ENTREGUE a ela desta OS (ultimaViaEntregue: pela agenda ou pelo dono à equipe). `recortada` = alguma linha da OS tem
+ * responsável (a legenda avisa que a via é só a parte dela).
+ *
+ * A impressão tem duas partes (porte da via v2, F0; a tabela do m2 §6.7): o `dado` (os campos crus da OS que a via lê)
+ * e o `papel` (o que a folha diz). Só o DADO diz se a OS mudou; o papel e a versão do desenho só filtram:
+ *   sem última                                         → manda ("Para qui 26/11, junto da ficha.")
+ *   última no formato antigo, ou outro contrato do dado → manda ("Esta via substitui a de dd/mm."), nunca "a OS mudou"
+ *   dado igual                                         → pula (mesmo com papel ou versão diferentes: mudou só a folha)
+ *   dado diferente e (papel ou versão diferentes)      → manda ("A OS mudou desde a via de dd/mm: …")
+ *   dado diferente, papel igual, mesma versão          → pula (a OS mudou só no que não vai ao papel)
  */
 export function decidirAVia(
   ultima: { impressao: string | null; criado_em: string } | null,
@@ -87,16 +105,40 @@ export function decidirAVia(
   dia: string,
   recortada: boolean,
 ): { acao: "pular"; motivo: string } | { acao: "mandar"; complemento: string } {
-  if (ultima?.impressao && ultima.impressao === impressao) {
-    return { acao: "pular", motivo: `já recebeu esta via em ${ddmm(ultima.criado_em)}` };
-  }
   const recorte = recortada ? " Só os seus serviços e os sem responsável." : "";
-  return {
-    acao: "mandar",
-    complemento: ultima
-      ? `A OS mudou desde a via de ${ddmm(ultima.criado_em)}: esta substitui a anterior.${recorte}`
-      : `Para ${rotuloDoDia(dia)}, junto da ficha.${recorte}`,
-  };
+  if (!ultima) return { acao: "mandar", complemento: `Para ${rotuloDoDia(dia)}, junto da ficha.${recorte}` };
+  const quando = ddmm(ultima.criado_em);
+  const antes = lerImpressao(ultima.impressao);
+  const agora = lerImpressao(impressao);
+  if (!antes || !agora || antes.versaoDoDado !== agora.versaoDoDado) {
+    return { acao: "mandar", complemento: `Esta via substitui a de ${quando}.${recorte}` };
+  }
+  if (antes.dado === agora.dado) {
+    if (antes.versao !== agora.versao) return { acao: "pular", motivo: `via em formato novo; a OS não mudou desde ${quando}` };
+    if (antes.papel !== agora.papel) return { acao: "pular", motivo: "a regra do papel mudou; a OS não" };
+    return { acao: "pular", motivo: `já recebeu esta via em ${quando}` };
+  }
+  if (antes.versao === agora.versao && antes.papel === agora.papel) {
+    return { acao: "pular", motivo: "a OS mudou só no que não vai ao papel" };
+  }
+  return { acao: "mandar", complemento: `A OS mudou desde a via de ${quando}: esta substitui a anterior.${recorte}` };
+}
+
+/**
+ * A última via ENTREGUE à pessoa nesta OS (origem agenda ou assistente, estado enviado). O "para si" não conta: o PDF
+ * foi para o dono, e contá-lo faria a agenda pular o Alex com "já recebeu" sem ele ter recebido nada.
+ */
+export async function ultimaViaEntregue(
+  db: Db,
+  payeeId: string,
+  os: string,
+): Promise<{ impressao: string | null; criado_em: string } | null> {
+  const { data, error } = await db.from("via_tecnico_envios")
+    .select("impressao, criado_em").eq("payee_id", payeeId).eq("service_order_id", os)
+    .in("origem", [...ORIGENS_QUE_ENTREGAM]).eq("estado", "enviado")
+    .order("criado_em", { ascending: false }).limit(1).maybeSingle();
+  if (error) throw new Error(`última via: ${error.message}`);
+  return data ?? null;
 }
 
 type Ficha = { id: string; payee_id: string; dia: string; fila_id: string; alocacao_ids: string[] | null };
@@ -219,12 +261,9 @@ export async function viaDaAgenda(
         puladas++;
         continue;
       }
-      // Já recebeu ESTA versão (pela agenda ou pelo dono, pelo assistente)? Então não repete.
-      const { data: ult, error: uErr } = await db.from("via_tecnico_envios")
-        .select("impressao, criado_em").eq("payee_id", ficha.payee_id).eq("service_order_id", os).eq("estado", "enviado")
-        .order("criado_em", { ascending: false }).limit(1).maybeSingle();
-      if (uErr) throw new Error(`última via: ${uErr.message}`);
-      const decisao = decidirAVia(ult ?? null, via.impressao, ficha.dia, lida.dados.linhas.some((l) => l.responsavel_payee_id));
+      // Já recebeu ESTA versão (pela agenda ou pelo dono, à equipe)? Então não repete. O "para si" não conta.
+      const ult = await ultimaViaEntregue(db, ficha.payee_id, os);
+      const decisao = decidirAVia(ult, via.impressao, ficha.dia, lida.dados.linhas.some((l) => l.responsavel_payee_id));
       if (decisao.acao === "pular") {
         await registrarEnvioDaVia(db, { ...base, estado: "pulado", motivo: decisao.motivo, destino: pessoa.telefone, impressao: via.impressao, servicos: via.servicos });
         puladas++;

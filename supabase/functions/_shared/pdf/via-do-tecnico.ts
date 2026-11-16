@@ -13,6 +13,8 @@
 
 import { camposDoTipo, campoDaUnidade, ehFeminino, rotuloDaUnidade } from '../unidade.ts';
 import { hashCurto } from '../whatsapp/idempotencia.ts';
+import { numerarLinhas, ordenarLinhas } from '../linhas-da-os.ts';
+import { isQuoteStatus } from './document-type.ts';
 
 // ── O roteiro de execução (tipos e funções puras que moravam em src/hooks/use-service-steps.ts) ──
 
@@ -85,6 +87,8 @@ export interface RouteMaterial {
   notes: string | null;
   service_order_service_id: string | null;
   products?: { name: string; sku: string | null; unit: string | null } | null;
+  /** Para a ordem canônica (created_at, id) na impressão digital; a folha usa a ordem em que o material chega. */
+  created_at?: string | null;
 }
 
 export function isAiDraft(step: ServiceOrderStep & { approved_at?: string | null }): boolean {
@@ -877,7 +881,18 @@ export const VESSEL_CONTACT_ROLES = [
 export type ViaDoTecnicoHeader = Omit<
   RouteSheetHeader,
   'orderNumber' | 'companyName' | 'companyLogoUrl' | 'companyAddress' | 'companyPhone'
-> & { orderNumber?: string | null };
+> & {
+  orderNumber?: string | null;
+  /** O status da OS (para a impressão saber se é orçamento em aprovação). Na F0 não é impresso. */
+  status?: string | null;
+  /** Todos os técnicos da OS, em ordem alfabética (o primeiro é o technicianName). Na F0 só entra na impressão. */
+  tecnicos?: string[] | null;
+};
+
+/** Ordem alfabética de nomes que não depende do embed (o banco devolve os técnicos sem ordem). */
+function compararNomes(a: string, b: string): number {
+  return a.localeCompare(b, 'pt-BR') || (a < b ? -1 : a > b ? 1 : 0);
+}
 
 /**
  * Cabeçalho da via a partir do detalhe da OS (o mesmo objeto que a tela de OS carrega, e o que
@@ -887,8 +902,16 @@ export type ViaDoTecnicoHeader = Omit<
 // deno-lint-ignore no-explicit-any
 export function viaHeaderFromOrder(order: any): ViaDoTecnicoHeader {
   if (!order) return {};
+  // service_order_technicians vem embutido sem ordem: com 2 ou mais técnicos, o [0] mudava de uma leitura para a
+  // outra. O nome impresso é o primeiro em ordem alfabética (porte da via v2, F0).
+  const tecnicos = ((order.service_order_technicians ?? []) as Array<{ app_users?: { full_name?: string | null } | null } | null>)
+    .map((t) => t?.app_users?.full_name ?? null)
+    .filter((n): n is string => !!n)
+    .sort(compararNomes);
   return {
     orderNumber: order.service_order_number ?? null,
+    status: order.status ?? null,
+    tecnicos,
     clientName: order.clients?.name ?? null,
     clientPhone: order.clients?.phone ?? null,
     clientWhatsapp: order.clients?.whatsapp ?? null,
@@ -901,7 +924,7 @@ export function viaHeaderFromOrder(order: any): ViaDoTecnicoHeader {
     assetRegistration: order.vessels?.hull_id_or_registration ?? null,
     marinaName: order.marinas?.name ?? null,
     dockPosition: order.vessels?.current_dock_position ?? null,
-    technicianName: order.service_order_technicians?.[0]?.app_users?.full_name ?? null,
+    technicianName: tecnicos[0] ?? null,
     scheduledAt: order.scheduled_start_at ?? null,
     scheduledEndAt: order.scheduled_end_at ?? null,
     problemDescription: order.problem_description ?? null,
@@ -927,11 +950,17 @@ export function viaHeaderFromOrder(order: any): ViaDoTecnicoHeader {
   };
 }
 
-/** Uma linha de service_order_services como a via a lê (select '*, services(name)'). */
+/** Uma linha de service_order_services como a via a lê (select '*, services(name, service_system)'). */
 export interface LinhaDaVia {
   id: string;
+  /** Para a ordem canônica (created_at, id): quem lê do banco já ordena; a impressão digital confere. */
+  created_at?: string | null;
   name_snapshot?: string | null;
-  services?: { name?: string | null } | null;
+  services?: { name?: string | null; service_system?: string | null } | null;
+  /** O sistema e o verbo da linha (a segurança lê): reclassificar muda o dado da via. Na F0 não são impressos. */
+  service_system?: string | null;
+  service_verb?: string | null;
+  service_id?: string | null;
   description_snapshot?: string | null;
   quantity?: number | null;
   billing_unit_snapshot?: string | null;
@@ -1092,20 +1121,116 @@ export function htmlDaVia(m: ViaMontada): string {
   return buildRouteSheetHtml(m.header, m.passos, m.materiais, m.extras);
 }
 
+// ═══ A impressão digital: DADO + PAPEL + VERSÃO (porte da via v2, F0, 16/11/2026) ═══════════════════
+
 /**
- * Impressão digital do CONTEÚDO da via de uma pessoa — para a agenda saber se a OS mudou desde
- * a última via que ela recebeu (decisão do dono: manda no 1º dia e de novo só se a OS mudar).
- *
- * Fica de fora o que muda sem a OS mudar: a data e a hora (a ficha das 19:30 já diz o dia, e a
- * agenda remarca sem ser mudança do serviço) e o link da foto (assinado a cada leitura).
+ * Sobe quando a REGRA ou o DESENHO do papel muda (o que o técnico lê ou como lê). Sozinha, não reenvia nada: a agenda
+ * só manda de novo quando o DADO muda (decidirAVia). 1 = hash do HTML, sem prefixo (até 16/11/2026); 2 = desenho de
+ * produção com a impressão por conteúdo; a F1 (via aprovada) sobe para 3. O teste-trava de via-do-tecnico_test.ts
+ * fixa o papel de fixtures: mudou a regra sem subir esta versão, ele falha.
+ */
+export const VERSAO_DA_VIA = 2;
+/** Sobe só quando muda a LISTA de campos de retratoDoDado (é contrato). Raro: subir faz a próxima via sair com o aviso neutro. */
+export const VERSAO_DO_DADO = 1;
+
+/** As respostas do levantamento na ordem do papel (seq), com desempate fixo para a impressão não oscilar. */
+function levantamentoNaOrdem(respostas: RespostaDaVia[]): RespostaDaVia[] {
+  const texto = (a: RespostaDaVia) => `${a.question_snapshot ?? ''}\u0000${a.answer_value ?? ''}\u0000${a.skipped_reason ?? ''}\u0000${a.photo_path ?? ''}`;
+  return respostas.slice().sort((a, b) => {
+    const s = Number(a.seq ?? 0) - Number(b.seq ?? 0);
+    if (s) return s;
+    const ta = texto(a);
+    const tb = texto(b);
+    return ta < tb ? -1 : ta > tb ? 1 : 0;
+  });
+}
+
+/**
+ * O DADO da via de uma pessoa: os campos crus da OS que a via lê. A lista é FECHADA e é contrato (mudar a lista pede
+ * subir VERSAO_DO_DADO). Fica de fora o que a via não lê (preço, desconto, total: editar preço não reenvia nada), o que
+ * muda sem a OS mudar (data e hora, dias da agenda, links das fotos) e a empresa. Tudo na ordem canônica (linhas e
+ * materiais por created_at, id; levantamento por seq; técnicos em ordem alfabética), e cada linha com o NÚMERO dela na
+ * OS inteira — a mesma conta da via e da tela. Das linhas de outra pessoa, só o que a via dela cita (número, nome, de quem).
+ */
+export function retratoDoDado(d: DadosDaVia, o: OpcoesDaVia = {}) {
+  const pessoa = o.pessoa ?? null;
+  const numeradas = numerarLinhas(ordenarLinhas(d.linhas));
+  const { minhas, outras } = pessoa ? recorteDaPessoa(numeradas, pessoa.id) : { minhas: numeradas, outras: [] as typeof numeradas };
+  const numeroDe = new Map(numeradas.map((l) => [l.id, l.numero]));
+  const idsMeus = new Set(minhas.map((l) => l.id));
+  const daParte = (id: string | null | undefined) => !pessoa || !id || idsMeus.has(id);
+  const linhaDe = (id: string | null | undefined) => (id ? numeroDe.get(id) ?? id : null);
+  const h = d.header;
+  const contato = h.onSiteContact;
+  const eletrico = h.vehicleElectrical;
+  return {
+    pessoa: pessoa?.id ?? null,
+    cabecalho: [
+      h.orderNumber ?? null,
+      isQuoteStatus(h.status),
+      h.assetType ?? null, h.assetName ?? null, h.assetMaker ?? null, h.assetModel ?? null, h.assetRegistration ?? null,
+      h.dockPosition ?? null, h.marinaName ?? null, h.siteAccess ?? null,
+      h.clientName ?? null, h.clientPhone ?? null, h.clientWhatsapp ?? null, h.requestedBy ?? null,
+      contato ? [contato.name ?? null, contato.role ?? null, contato.phone ?? null] : null,
+      h.problemDescription ?? null, h.technicianInstructions ?? null,
+      eletrico ? [eletrico.batteryBank ?? null, eletrico.inverterCharger ?? null, eletrico.shorePower ?? null, eletrico.notes ?? null] : null,
+      [...(h.tecnicos ?? (h.technicianName ? [h.technicianName] : []))].sort(compararNomes),
+    ],
+    linhas: minhas.map((l) => [
+      l.numero, l.name_snapshot || l.services?.name || null, l.description_snapshot ?? null, l.notes ?? null,
+      l.quantity ?? null, l.billing_unit_snapshot ?? null, l.technician_instructions ?? null,
+      l.field_status ?? null, l.field_status_note ?? null, l.responsavel_payee_id ?? null,
+      l.service_system ?? null, l.service_verb ?? null, l.service_id ?? null, l.services?.service_system ?? null,
+    ]),
+    outras: outras.map((l) => [l.numero, l.name_snapshot || l.services?.name || null, l.responsavel_payee_id ?? null]),
+    materiais: ordenarLinhas(d.materiais.filter((m) => daParte(m.service_order_service_id))).map((m) => [
+      m.products?.name ?? null, m.products?.sku ?? null, m.products?.unit ?? null, m.quantity ?? null, m.notes ?? null,
+      linhaDe(m.service_order_service_id),
+    ]),
+    levantamento: levantamentoNaOrdem(d.levantamento).map((a) => [
+      a.seq ?? null, a.question_snapshot ?? null, a.answer_value ?? null, a.skipped_reason ?? null, a.photo_path ?? null,
+    ]),
+    passos: d.passos.filter((p) => daParte(p.service_order_service_id)).map((p) => [
+      p.seq, p.block ?? null, p.block_key ?? null, p.block_note ?? null, p.title, p.detail ?? null, p.kind, p.mode,
+      p.is_killer, p.requires_photo, p.requires_measure ?? null, p.measure_unit ?? null, p.measure_value ?? null,
+      p.status, p.na_reason ?? null, p.blocked_note ?? null, isAiDraft(p), linhaDe(p.service_order_service_id),
+    ]),
+  };
+}
+
+/**
+ * Impressão digital da via de uma pessoa — para a agenda saber se a OS mudou desde a última via que ela recebeu
+ * (decisão do dono: manda no 1º dia e de novo só se a OS mudar). Formato `v<VERSAO_DA_VIA>.d<VERSAO_DO_DADO>.<dado>.<papel>`:
+ *   · `dado`  = hash do retratoDoDado (a OS mudou?);
+ *   · `papel` = hash da folha montada com a entrada na ordem canônica e sem o que muda sem a OS mudar: data e hora (a
+ *     ficha das 19:30 já diz o dia, e a agenda remarca sem ser mudança do serviço), dias da agenda, links das fotos
+ *     (assinados a cada leitura) e a empresa (trocar o telefone da empresa não é "a OS mudou"). As fotos entram pelo
+ *     caminho, na ordem do levantamento.
+ * Trocar o desenho da folha muda o papel e a versão, nunca o dado: a via não volta com "A OS mudou".
  */
 export function impressaoDaVia(d: DadosDaVia, o: OpcoesDaVia = {}): string {
+  const dado = hashCurto(JSON.stringify(retratoDoDado(d, o)));
+  const levantamento = levantamentoNaOrdem(d.levantamento);
   const m = montarViaDoTecnico(
-    { ...d, header: { ...d.header, scheduledAt: null, scheduledEndAt: null } },
+    {
+      ...d,
+      header: { ...d.header, scheduledAt: null, scheduledEndAt: null },
+      empresa: {},
+      linhas: ordenarLinhas(d.linhas),
+      materiais: ordenarLinhas(d.materiais),
+      levantamento,
+    },
     { ...o, linksDasFotos: {}, diasNaAgenda: null },
   );
-  const fotos = d.levantamento.map((a) => a.photo_path || '').join('|');
-  return hashCurto(`${htmlDaVia(m)}\n${fotos}`);
+  const fotos = levantamento.map((a) => a.photo_path || '').join('|');
+  const papel = hashCurto(`${htmlDaVia(m)}\n${fotos}`);
+  return `v${VERSAO_DA_VIA}.d${VERSAO_DO_DADO}.${dado}.${papel}`;
+}
+
+/** As partes da impressão; `null` = formato antigo (o hash do HTML inteiro, sem prefixo) ou vazio. */
+export function lerImpressao(s: string | null | undefined): { versao: number; versaoDoDado: number; dado: string; papel: string } | null {
+  const m = /^v(\d+)\.d(\d+)\.([0-9a-z]+)\.([0-9a-z]+)$/.exec(s ?? '');
+  return m ? { versao: Number(m[1]), versaoDoDado: Number(m[2]), dado: m[3], papel: m[4] } : null;
 }
 
 /** Nome do arquivo: "Via-tecnico-OS-00119-Alex.pdf" (sem acento e sem espaço). */
