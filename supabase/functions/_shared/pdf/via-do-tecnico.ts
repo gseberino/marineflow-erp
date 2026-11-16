@@ -830,6 +830,8 @@ export function buildRouteSheetHtml(
 
   /* Separação de materiais em 2 colunas (rodada 1, b). */
   .materiais .matnota { font-size: 8.5pt; color: #333; margin: -1mm 0 1mm; }
+  /* A nota presa aos itens: título e nota nunca sozinhos no pé da folha (o .sectitle só prende a nota). */
+  .materiais .matnota { break-after: avoid; page-break-after: avoid; }
   .matcols { columns: 2; column-gap: 7mm; }
   .matitem { display: flex; gap: 2mm; align-items: flex-start; break-inside: avoid; page-break-inside: avoid;
              padding: 1mm 0; border-bottom: .4pt dotted #999; font-size: 9.5pt; line-height: 1.3; }

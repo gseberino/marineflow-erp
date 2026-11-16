@@ -285,8 +285,9 @@ Deno.test("TRAVA DE VERSÃO: o papel e o dado de 3 fixtures sintéticas (mudou? 
       impressaoDaVia(dados(), { pessoa: ALEX }),
       impressaoDaVia(dadosComFrete(), { pessoa: ALEX }),
     ],
-    // F1 (via aprovada): o PAPEL mudou e a versão subiu para 3; o DADO é o mesmo da F0 (a lista não mudou).
-    ["v3.d1.1uhyv2v.16evwbx", "v3.d1.1ll802l.cn4n7l", "v3.d1.fuf6ax.11a3vpc"],
+    // F1 (via aprovada): o PAPEL mudou e a versão subiu para 3; o DADO é o mesmo da F0 (a lista não mudou). Revisão da
+    // F1 (papel-1, nota dos materiais presa aos itens): só o CSS mudou, ainda na v3 — nenhuma v3 foi entregue.
+    ["v3.d1.1uhyv2v.ecrpvx", "v3.d1.1ll802l.1yfwp29", "v3.d1.fuf6ax.1lj2v6o"],
     "a regra do papel (ou a lista do dado) mudou: suba a versão e atualize o valor",
   );
 });
@@ -467,6 +468,14 @@ Deno.test("material: em 2 colunas; a nota interna do sistema não vai, a nota es
   assert(!html.includes("Cadastrado pelo orçamento"));
   // sem material, o aviso de sempre
   assertStringIncludes(htmlDaVia(montarViaDoTecnico(dados({ materiais: [] }), {})), "Nenhum material lançado nesta OS.");
+});
+
+Deno.test("material: título e nota nunca sozinhos no pé da folha — a nota fica presa aos itens (revisão da F1, papel-1)", () => {
+  // O .sectitle prende o título à nota; sem isto, a nota quebrava antes das colunas e os itens iam sozinhos para a
+  // folha seguinte (pedido de 32 linhas e 8 materiais, no Chromium do /api/pdf).
+  const html = htmlDaVia(montarViaDoTecnico(dados(), {}));
+  assertStringIncludes(html, ".materiais .matnota { break-after: avoid; page-break-after: avoid; }");
+  assertStringIncludes(html, '<div class="matnota">Confira item por item antes de sair.');
 });
 
 Deno.test("fechamento num bloco só, com a faixa da foto no fim; a seta entre as datas virou 'até'", () => {
