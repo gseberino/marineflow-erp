@@ -11,7 +11,9 @@ import { modoDaPropostaNoBanco } from "../../agenda-modo.ts";
 import { canalDaRpc, ehDataCalculada, type ResultadoParaOModelo, resultadoDoRascunho } from "../../agenda/rpc-das-ferramentas.ts";
 import { modoDaLeituraNoBanco } from "../../agenda/executar.ts";
 import { argumentosDaPortaCompleta, ehPortaAusente, ehSemDireitoNaPorta, statusPelaTelaSemAPorta } from "../../porta-ausente.ts";
-import { comecaComAsPalavras, numeroDito, ordinalDito, semAcento as semAcentoDaLinha, temAsPalavras } from "../../linhas-da-os.ts";
+import {
+  comecaComAsPalavras, instantesEmSequencia, numeroDito, ordinalDito, semAcento as semAcentoDaLinha, temAsPalavras,
+} from "../../linhas-da-os.ts";
 
 /** Os status que a porta única de status do banco decide (Agenda de Produção, Fase 2, P4). */
 const STATUS_DE_AGENDA = ["open", "approved", "scheduled", "in_progress", "awaiting_parts", "awaiting_client"];
@@ -865,7 +867,20 @@ export const serviceOrderTools: ToolDef[] = [
           });
         }
         if (partsRows.length) {
-          await sb.from("service_order_parts").insert(partsRows);
+          // Na ordem do pedido, com created_at em sequência a partir do da OS nova (porte da via v2, E15; revisão da F0,
+          // ordem-2): num INSERT só, todas ganhariam o mesmo now() e o material da via sairia na ordem do uuid.
+          const quando = instantesEmSequencia((data as { created_at?: string | null }).created_at ?? null, partsRows.length);
+          const { error: erroPecas } = await sb.from("service_order_parts")
+            .insert(partsRows.map((row, i) => ({ ...row, created_at: quando[i] })));
+          // Sem as peças gravadas, nada sai do estoque e a resposta não diz que deu certo.
+          if (erroPecas) {
+            await recalcSoTotals(sb, data.id);
+            return {
+              error: `O orçamento/OS ${data.service_order_number} foi criado, mas as peças não foram gravadas (${erroPecas.message}). ` +
+                `Nada saiu do estoque. Adicione as peças com add_service_order_item.`,
+              service_order: data,
+            };
+          }
           // Baixa de estoque por peça — espelha o frontend (baixa no add).
           for (const row of partsRows) {
             await applyStockDelta(sb, row.product_id, -Number(row.quantity), data.id, row.unit_cost_snapshot);
