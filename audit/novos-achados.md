@@ -4221,7 +4221,8 @@ conteúdo). Plano: bancada `porte/PLANO.md` §3. Ficam aqui porque estão fora d
   `generate_service_order_steps` e `ai_orcamento_tecnico_pacote` ordenam só por `created_at`; `_ai_orcamento_tecnico_montar`
   (0 usos) não foi conferido quanto a INSERT de várias linhas com o mesmo `now()`.
 - **Efeito:** nos documentos com empate antigo (18 em produção, 3 abertos), a ordem dessas telas pode diferir da via e mudar
-  depois de um UPDATE. Documento novo do assistente e cópia de OS já não empatam (E15, gravação em sequência).
+  depois de um UPDATE. O orçamento do assistente (`quote-builder`), o `create_service_order` e a cópia de OS (assistente e
+  tela) já não empatam (E15, gravação em sequência); os escritores em lote do banco ainda empatam: ver NOVO-via-09.
 - **Menor mudança:** `.order('created_at').order('id')` no PostgREST; no embutido, `ordenarLinhas` (`_shared/linhas-da-os.ts`);
   nas funções SQL, `order by created_at, id` numa migração. Estender a varredura `src/test/ordem-das-linhas-da-os.test.ts`.
 
@@ -4269,7 +4270,8 @@ Achados durante a F1 do porte (a via aprovada nativa em `via-do-tecnico.ts`). Pl
 ## Via do técnico v2 — porte, revisão da F0 e da F1 (16/11/2026) — achados laterais, NÃO corrigidos de passagem
 
 Achados da revisão final (revisor + cético) que ficam fora do escopo das correções pequenas. Detalhes e sondas: bancada
-`porte/rev-final/baixas.json` (ids `impressao-4`, `consumidores-3`, `papel-6`). Hoje os três estão latentes.
+`porte/rev-final/baixas.json` (ids `impressao-4`, `consumidores-3`, `papel-6` e, para o NOVO-via-09, `ordem-2`). Hoje os
+quatro estão latentes.
 
 ### [NOVO-via-06] Com o modo de teste do WhatsApp ligado, a via desviada para o número de teste conta como entregue à pessoa
 
@@ -4314,3 +4316,23 @@ Achados da revisão final (revisor + cético) que ficam fora do escopo das corre
 - **Menor mudança:** no quadro Atenção, decidir "náutico" só por tipo náutico conhecido (lista das embarcações), e tratar sem
   tipo / "Outro" como veículo ou com o texto neutro da altura — decisão de regra (texto aprovado pelo dono), com caso no
   `via-atencao_test.ts`.
+
+### [NOVO-via-09] Três funções do banco gravam várias linhas da OS num INSERT só, com o mesmo `now()`
+
+- **Onde:** os escritores em lote que a E15 (gravação em sequência) não cobriu, porque pedem migração. Cada um faz um
+  `INSERT … SELECT` de várias linhas sem `created_at`, e todas ganham o mesmo `now()`:
+  - `convert_external_quote_to_so` (`supabase/migrations/20260514141003_975c2384-508c-467e-85ca-72a89f6e9d42.sql:87`
+    nas peças e `:95` nos SERVIÇOS, sem `order by`). É tool do assistente (`_shared/ai/tools/service-orders.ts`) e botão da
+    tela (`src/pages/ExternalQuoteDetailPage.tsx:27`);
+  - `apply_service_material_kit` (`supabase/migrations/20260731210000_roteiro_rotulos_e_materiais_por_etapa.sql:287`, peças).
+    É tool do assistente (`_shared/ai/tools/materials-ops.ts`);
+  - `apply_survey_materials` (`supabase/migrations/20260917100000_lev09_duplicata_por_linha_de_servico.sql:54`, peças).
+    Chamada pela tela (`src/hooks/use-survey-material-rules.ts:77`).
+  Antes só constavam na mensagem do commit `709d3e82` (revisão da F0, `ordem-2` em `porte/rev-final/baixas.json`).
+- **Efeito:** com o empate, quem decide a ordem é o `id` (uuid ao acaso), não a ordem do pedido. A ordem fica estável, porque o
+  desempate é por `id` desde a F0. Nos serviços da conversão isso muda o NÚMERO do serviço na via: uma cotação externa com 3
+  serviços pode sair numerada 2, 1, 3. Nas peças muda só a ordem do material. Em 16/11: 1 cotação externa convertida na
+  história; 0 peças de kit e 0 de levantamento em 120 dias (`porte/sql/rev-f0-ordem-extra.sql`).
+- **Menor mudança:** numa migração, `created_at = now() + row_number() over (order by …) * interval '1 millisecond'` em cada
+  `INSERT … SELECT`, ordenado pela ordem da origem (`created_at, id` da cotação externa; a ordem dos componentes do kit e das
+  regras do levantamento). É o precedente do `_agrupar_os_montar`. Na conversão, os serviços primeiro.
