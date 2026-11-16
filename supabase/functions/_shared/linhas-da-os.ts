@@ -1,0 +1,194 @@
+// A ordem e o número das linhas de uma OS, e o achador de "serviço N" (porte da via do técnico v2, F0, 16/11/2026).
+//
+// Um lugar só para três perguntas que estavam espalhadas:
+//   · em que ordem saem as linhas? `created_at`, depois `id` (a ordem que o banco já usa na agenda). Sem o `id`, as
+//     linhas gravadas num INSERT só (o mesmo `now()`) saíam na ordem física, que um UPDATE troca;
+//   · qual é o número do serviço? A posição na OS INTEIRA nessa ordem, contando as linhas de cobrança (regra 4A: a
+//     cobrança sai do papel, mas o número dos outros fica). Quem lê ordena; `numerarLinhas` só numera;
+//   · que linha o dono quis dizer com "o 4", "serviço 4", "nº 4", "LiFePO4"? `acharLinha`: id → número → nome igual →
+//     palavra inteira → começo de palavra. Mais de uma candidata = pergunta; nunca escolhe sozinho.
+//
+// Puro (sem Deno, sem banco): a tela importa daqui também. Os casos de teste moram em linhas-da-os-casos.ts, para a
+// conta SQL da F2 (private._via_linhas_numeradas) rodar a MESMA lista.
+
+/** O mínimo para ordenar uma linha. Sem `created_at` a linha vai para o fim (como NULLS LAST do Postgres). */
+export interface LinhaOrdenavel {
+  id?: string | null;
+  created_at?: string | null;
+}
+
+const INSTANTE = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.(\d+))?\s*(Z|[+-]\d{2}(?::?\d{2})?)?$/i;
+
+/**
+ * O instante como texto que ordena igual ao Postgres: segundos desde 1970 (12 dígitos) e a fração com 6 dígitos.
+ * Nunca `Date.parse` no instante inteiro: ele corta os microssegundos e cria empate falso ("…:00.12" e "…:00.1201"
+ * viram o mesmo milissegundo). O `Date.parse` aqui só lê os segundos, já com o fuso; a fração vem do texto.
+ */
+export function chaveDoInstante(ts: string | null | undefined): string | null {
+  const m = INSTANTE.exec(String(ts ?? '').trim());
+  if (!m) return null;
+  const [, dia, hora, fracao = '', fusoBruto] = m;
+  let fuso = (fusoBruto ?? 'Z').toUpperCase();
+  if (fuso !== 'Z') {
+    const digitos = fuso.slice(1).replace(':', '');
+    fuso = `${fuso[0]}${digitos.slice(0, 2)}:${(digitos.slice(2) || '00').padEnd(2, '0')}`;
+  }
+  const ms = Date.parse(`${dia}T${hora}${fuso}`);
+  if (Number.isNaN(ms)) return null;
+  const segundos = Math.floor(ms / 1000);
+  return `${String(segundos).padStart(12, '0')}.${(fracao + '000000').slice(0, 6)}`;
+}
+
+/** A comparação de `ordenarLinhas`: `created_at` (nulo por último), depois `id` em minúsculas (= ordem de bytes do uuid). */
+export function compararLinhas(a: LinhaOrdenavel, b: LinhaOrdenavel): number {
+  const ka = chaveDoInstante(a.created_at);
+  const kb = chaveDoInstante(b.created_at);
+  if (ka !== kb) {
+    if (ka === null) return 1;
+    if (kb === null) return -1;
+    return ka < kb ? -1 : 1;
+  }
+  const ia = String(a.id ?? '').toLowerCase();
+  const ib = String(b.id ?? '').toLowerCase();
+  return ia < ib ? -1 : ia > ib ? 1 : 0;
+}
+
+/** As linhas na ordem canônica (`created_at, id`). Devolve uma cópia; empate total mantém a ordem recebida. */
+export function ordenarLinhas<T extends LinhaOrdenavel>(linhas: readonly T[]): T[] {
+  return [...linhas].sort(compararLinhas);
+}
+
+/** Põe o número do serviço (1, 2, 3…) na ordem RECEBIDA — não reordena: quem lê do banco já ordenou. */
+export function numerarLinhas<T>(linhas: readonly T[]): Array<T & { numero: number }> {
+  return linhas.map((l, i) => ({ ...l, numero: i + 1 }));
+}
+
+/**
+ * `n` instantes em sequência depois de `base` (base + 1 ms, base + 2 ms…), para gravar várias linhas num INSERT só
+ * sem empatar (o precedente é `_agrupar_os_montar`: `v_ts + interval '1 millisecond'`). `base` = o `created_at` da OS
+ * que o banco devolveu; sem ele, o relógio de quem grava.
+ */
+export function instantesEmSequencia(base: string | null | undefined, n: number, agora: () => number = Date.now): string[] {
+  const ms = base ? Date.parse(String(base)) : NaN;
+  const inicio = Number.isNaN(ms) ? agora() : ms;
+  return Array.from({ length: n }, (_, i) => new Date(inicio + i + 1).toISOString());
+}
+
+// ═══ "Serviço N": o que foi dito → a linha ═════════════════════════════════════════════════════════
+
+/** Minúsculas, sem acento, espaços simples. */
+export function semAcento(s: unknown): string {
+  return String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/_/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * O número, quando o texto INTEIRO é uma referência a número: "4", "o 4", "serviço 4", "serviço número 4", "nº 4",
+ * "n° 4", "no 4", "4º", "#4", "item 4", "linha 4". "LiFePO4", "bateria 200 Ah" e "220V" não são número.
+ */
+export function numeroDito(texto: unknown): number | null {
+  const t = semAcento(texto).replace(/[.?!,;:]+$/, '').trim();
+  const m = /^(?:(?:o|a)\s+)?(?:servico|serv\.?|item|linha|n[º°o.]?|numero|#)?\s*(?:numero|n[º°o.])?\s*(\d{1,3})\s*[º°ª]?$/.exec(t);
+  return m ? Number(m[1]) : null;
+}
+
+/** As palavras que não identificam serviço nenhum (as mesmas do acharServico antigo). */
+const PALAVRAS_VAZIAS = new Set(['de', 'do', 'da', 'dos', 'das', 'o', 'a', 'os', 'as', 'e', 'em', 'no', 'na', 'com', 'para', 'pra', 'um', 'uma']);
+
+/** Palavras de um texto: separadas por tudo o que não é letra ou número ("DC-DC" → dc, dc). */
+function palavras(texto: unknown): string[] {
+  return semAcento(texto).split(/[^a-z0-9]+/).filter(Boolean);
+}
+
+/** As palavras do que foi dito, sem as vazias e sem o "serviço"/"item"/"linha" do começo ("serviço do inversor"). */
+function palavrasDitas(texto: unknown): string[] {
+  const todas = palavras(texto);
+  const sem = /^(servico|serv|item|linha)$/.test(todas[0] ?? '') && todas.length > 1 ? todas.slice(1) : todas;
+  return sem.filter((p) => !PALAVRAS_VAZIAS.has(p));
+}
+
+/**
+ * Todas as palavras ditas (sem as vazias) são palavras INTEIRAS do nome? "DC-DC" casa com "conversor DC-DC"; "4" não
+ * casa com "LiFePO4"; "do" sozinho não casa com nada. É a troca do `includes` (pedaço de texto) nas tools.
+ */
+export function temAsPalavras(nome: unknown, dito: unknown): boolean {
+  const ditas = palavrasDitas(dito);
+  if (!ditas.length) return false;
+  const doNome = new Set(palavras(nome));
+  return ditas.every((p) => doNome.has(p));
+}
+
+/** Uma linha numerada, com o nome como sai no papel. */
+export interface LinhaNumerada {
+  id: string;
+  numero: number;
+  nome: string;
+}
+
+/** "3 · Troca do inversor". */
+export function rotuloDaLinha(l: { numero: number; nome: string }): string {
+  return `${l.numero} · ${l.nome}`;
+}
+
+/** "1 · Instalação; 2 · Troca…" — a lista que acompanha toda pergunta. */
+export function listaDasLinhas(linhas: ReadonlyArray<{ numero: number; nome: string }>): string {
+  return linhas.map(rotuloDaLinha).join('; ');
+}
+
+export type Achado<T> =
+  | { linha: T }
+  | { motivo: 'ambiguo'; opcoes: T[]; erro: string }
+  | { motivo: 'fora_da_faixa' | 'nao_achei'; erro: string };
+
+/**
+ * A linha que o dono quis dizer. `linhas` já na ordem canônica e numeradas (`numerarLinhas`). Ordem de busca:
+ * id exato → número dito → nome igual → todas as palavras ditas são palavras inteiras do nome → começo de palavra
+ * (≥ 4 letras: "parametriz" acha "Parametrização"). Mais de uma candidata em qualquer passo = pergunta.
+ */
+export function acharLinha<T extends LinhaNumerada>(linhas: readonly T[], dito: unknown): Achado<T> {
+  const bruto = String(dito ?? '').trim();
+  const lista = listaDasLinhas(linhas);
+  const naoAchei = { motivo: 'nao_achei' as const, erro: `Não achei o serviço "${bruto}" nesta OS. Serviços: ${lista || 'nenhum'}.` };
+  if (!bruto) return naoAchei;
+  const porId = linhas.find((l) => l.id === bruto);
+  if (porId) return { linha: porId };
+
+  const n = numeroDito(bruto);
+  if (n !== null) {
+    const l = linhas.find((x) => x.numero === n);
+    if (l) return { linha: l };
+    const total = linhas.length;
+    return {
+      motivo: 'fora_da_faixa',
+      erro: `A OS tem ${total} serviço${total === 1 ? '' : 's'}; não existe o ${n}. Serviços: ${lista || 'nenhum'}.`,
+    };
+  }
+
+  const escolher = (candidatas: T[]): Achado<T> | null => {
+    if (candidatas.length === 1) return { linha: candidatas[0] };
+    if (candidatas.length > 1) {
+      return {
+        motivo: 'ambiguo',
+        opcoes: candidatas,
+        erro: `"${bruto}" casa com mais de um serviço: ${listaDasLinhas(candidatas)}. Use o número.`,
+      };
+    }
+    return null;
+  };
+
+  const alvo = semAcento(bruto);
+  const iguais = escolher(linhas.filter((l) => semAcento(l.nome) === alvo));
+  if (iguais) return iguais;
+
+  const ditas = palavrasDitas(bruto);
+  if (!ditas.length) return naoAchei;
+  const inteiras = escolher(linhas.filter((l) => temAsPalavras(l.nome, bruto)));
+  if (inteiras) return inteiras;
+
+  const comeco = escolher(linhas.filter((l) => {
+    const doNome = palavras(l.nome);
+    return ditas.every((p) => doNome.includes(p) || (p.length >= 4 && doNome.some((w) => w.startsWith(p))));
+  }));
+  if (comeco) return comeco;
+  return naoAchei;
+}
