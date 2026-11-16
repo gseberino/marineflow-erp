@@ -275,22 +275,151 @@ function dadosComFrete(): DadosDaVia {
   });
 }
 
-Deno.test("TRAVA DE VERSÃO: o papel e o dado de 3 fixtures sintéticas (mudou? suba VERSAO_DA_VIA ou VERSAO_DO_DADO)", () => {
-  // Se este teste falhar porque o PAPEL mudou: a regra ou o desenho da folha mudou — suba VERSAO_DA_VIA e atualize os
-  // valores (sem subir, a agenda PULA quem já recebeu: "a regra do papel mudou; a OS não"). Se o DADO mudou: a lista
-  // de retratoDoDado mudou — suba VERSAO_DO_DADO e atualize (sem subir, toda via pareceria "a OS mudou").
+/**
+ * Trava A (revisão da F0, impressao-3): uma lancha com tudo o que a via imprime HOJE no modo via — orçamento em
+ * aprovação, contato no local com telefone próprio, marina, vaga e acesso, elétrico completo, todas as situações (com
+ * nota), instrução de 2 linhas, responsáveis, cobrança, material ligado ao serviço com nota escrita por gente e nota
+ * interna, levantamento com foto e resposta pulada.
+ */
+function travaNautica(): DadosDaVia {
+  return {
+    serviceOrderId: "os-trava-a",
+    header: {
+      orderNumber: "ORÇ-00901", status: "draft", clientName: "Cliente Trava", clientPhone: "(47) 99100-0001",
+      clientWhatsapp: "(47) 99100-0002", requestedBy: "Marinheiro Trava",
+      onSiteContact: { name: "Comandante Trava", role: "Comandante", phone: "(47) 99100-0003" },
+      assetName: "Veleiro Trava", assetType: "Lancha", assetMaker: "Estaleiro T", assetModel: "T-36", assetRegistration: "4410900001",
+      marinaName: "Marina Trava", dockPosition: "Píer 9", siteAccess: "Portão 4 — falar com a portaria",
+      technicianName: "Alex Gonçalves Machado", tecnicos: ["Roberto Daniel", "Alex Gonçalves Machado"],
+      scheduledAt: "2026-11-27T12:00:00Z", scheduledEndAt: "2026-11-27T20:00:00Z",
+      problemDescription: "Trocar o banco de baterias e revisar o gerador.\nSinal: R$ 2.000",
+      technicianInstructions: "Não ligar o gerador sem o cliente.\nAvisar antes de furar.",
+      vehicleElectrical: { batteryBank: "2× AGM 100 Ah", inverterCharger: "Inversor 2000 W", shorePower: "Cais 30 A", notes: "Chave geral no paiol" },
+    },
+    empresa: { nome: "Empresa Trava", telefone: "(47) 3000-0000" },
+    linhas: [
+      { id: "ta1", created_at: "2026-11-16T18:00:00.001+00:00", name_snapshot: "Troca do banco de baterias", quantity: 2, billing_unit_snapshot: "un", technician_instructions: "Conferir a polaridade.\nApertar os bornes.", responsavel_payee_id: ALEX.id, service_system: "eletrico_dc" },
+      { id: "ta2", created_at: "2026-11-16T18:00:00.002+00:00", name_snapshot: "Revisão do gerador", field_status: "parcial", field_status_note: "faltou a correia", responsavel_payee_id: ROBERTO.id },
+      { id: "ta3", created_at: "2026-11-16T18:00:00.003+00:00", name_snapshot: "Deslocamento" },
+      { id: "ta4", created_at: "2026-11-16T18:00:00.004+00:00", name_snapshot: "Troca do volante", field_status: "so_levantar", description_snapshot: "Volante com folga.", notes: "Levar o sacador." },
+      { id: "ta5", created_at: "2026-11-16T18:00:00.005+00:00", name_snapshot: "Antena no arco do radar", field_status: "aguarda_peca", field_status_note: "antena chega dia 30" },
+      { id: "ta6", created_at: "2026-11-16T18:00:00.006+00:00", name_snapshot: "Troca do fogão", field_status: "nao_feito", field_status_note: "cliente não liberou" },
+      { id: "ta7", created_at: "2026-11-16T18:00:00.007+00:00", name_snapshot: "Teste final", field_status: "feito" },
+    ],
+    passos: [],
+    materiais: [
+      { id: "tm1", created_at: "2026-11-16T18:00:00.001+00:00", quantity: 2, notes: "Os dois da prateleira B", service_order_service_id: "ta1", products: { name: "Bateria AGM 100 Ah", sku: "AGM-100", unit: "un" } },
+      { id: "tm2", created_at: "2026-11-16T18:00:00.002+00:00", quantity: 1, notes: "Cadastrado pelo orçamento — confirmar preço.", service_order_service_id: null, products: { name: "Terminal de bateria", sku: null, unit: "pc" } },
+      { id: "tm3", created_at: "2026-11-16T18:00:00.003+00:00", quantity: 1, notes: null, service_order_service_id: "ta2", products: { name: "Correia do gerador", sku: "COR-1", unit: "un" } },
+    ],
+    levantamento: [
+      { seq: 1, question_snapshot: "Tensão do banco?", answer_value: "12,4 V", photo_path: "os-trava-a/banco.jpg" },
+      { seq: 2, question_snapshot: "Cabe a bateria maior?", skipped_reason: "paiol trancado" },
+    ],
+    nomesDosResponsaveis: { [ALEX.id]: ALEX.nome, [ROBERTO.id]: ROBERTO.nome },
+  };
+}
+
+/**
+ * Trava B (revisão da F0, impressao-3): um motorhome em andamento com o que a A não tem — "Pedido por" (sem contato no
+ * local), só WhatsApp, acesso sem marina, elétrico parcial, teto e peça que se move, serviço com quantidade em horas,
+ * descrição e notas, cobrança com responsável (fica fora do quadro de outra pessoa), material sem serviço, só resposta
+ * pulada; e um roteiro gravado (passo de segurança feito com tempo padrão, travado com nota, passo de serviço) e a
+ * segurança da RPC — fora do papel no modo via, mas o roteiro está no contrato do dado.
+ */
+function travaVeiculo(): DadosDaVia {
+  return {
+    serviceOrderId: "os-trava-b",
+    header: {
+      orderNumber: "OS-00902", status: "in_progress", clientName: "Cliente Estrada", clientWhatsapp: "(48) 99200-0001",
+      requestedBy: "Caseiro Estrada", assetName: "Motorhome Estrada", assetType: "Motorhome", assetRegistration: "ABC1D23",
+      siteAccess: "Garagem do cliente, rua sem saída", technicianName: "Roberto Daniel", tecnicos: ["Roberto Daniel"],
+      problemDescription: "Instalar a antena no teto e revisar o slide.",
+      vehicleElectrical: { batteryBank: "1× lítio 200 Ah", notes: "Disjuntor geral atrás do banco do motorista" },
+    },
+    empresa: { nome: "Empresa Trava" },
+    linhas: [
+      { id: "tb1", created_at: "2026-11-16T19:00:00.001+00:00", name_snapshot: "Instalação da antena Starlink no teto", quantity: 3, billing_unit_snapshot: "h", description_snapshot: "Passar o cabo pelo armário.", notes: "Usar a escada grande.", responsavel_payee_id: ROBERTO.id, service_system: "eletronico", service_verb: "instalar", service_id: "srv-antena" },
+      { id: "tb2", created_at: "2026-11-16T19:00:00.002+00:00", name_snapshot: "Revisão do slide-out", technician_instructions: "Não forçar o motor do slide.", services: { name: "Revisão de slide", service_system: "mecanico" } },
+      { id: "tb3", created_at: "2026-11-16T19:00:00.003+00:00", name_snapshot: "Frete do equipamento", responsavel_payee_id: ALEX.id },
+      { id: "tb4", created_at: "2026-11-16T19:00:00.004+00:00", name_snapshot: "Troca da tomada externa", field_status: "aguarda_peca", responsavel_payee_id: ALEX.id },
+    ],
+    passos: [
+      passo({ id: "tp1", seq: 1, title: "Desligar o disjuntor geral", block: "1 · Antes de mexer — Elétrico DC", block_key: "abertura:eletrico_dc", kind: "safety", is_killer: true, standard_minutes: 5, status: "done" }),
+      passo({ id: "tp2", seq: 2, title: "Prender a escada", block: "1 · Antes de mexer — Elétrico DC", block_key: "abertura:eletrico_dc", kind: "safety", standard_minutes: 10, status: "blocked", blocked_note: "sem ponto de amarração" }),
+      passo({ id: "tp3", seq: 3, title: "Furar o teto e vedar", service_order_service_id: "tb1", block: "Antena", block_key: "linha:tb1", requires_photo: true, requires_measure: "tensao", measure_unit: "V", status: "not_applicable", na_reason: "já furado" }),
+    ],
+    materiais: [
+      { id: "tn1", created_at: "2026-11-16T19:00:00.001+00:00", quantity: 1, notes: null, service_order_service_id: "tb1", products: { name: "Antena Starlink", sku: "STL-1", unit: "un" } },
+      { id: "tn2", created_at: "2026-11-16T19:00:00.002+00:00", quantity: 0.5, notes: "Sobra da OS anterior", service_order_service_id: null, products: { name: "Selante PU", sku: null, unit: "tubo" } },
+    ],
+    levantamento: [{ seq: 1, question_snapshot: "Altura livre no teto?", skipped_reason: "chuva" }],
+    seguranca: [{
+      papel: "abertura", sistema: "eletrico_dc", bloco: "Antes de mexer — Elétrico DC", escopo: "Vale para: antena.",
+      identificado_por: "texto da linha", seq: 1, title: "Isolar o banco", detail: null, kind: "safety", is_killer: true,
+      requires_photo: false, requires_measure: null, measure_unit: null, mode: "do_confirm", standard_minutes: 2,
+    }],
+    nomesDosResponsaveis: { [ALEX.id]: ALEX.nome, [ROBERTO.id]: ROBERTO.nome },
+  };
+}
+
+Deno.test("TRAVA DE VERSÃO: o papel e o dado de 5 fixtures sintéticas (mudou? suba VERSAO_DA_VIA ou VERSAO_DO_DADO)", () => {
+  // Falhou porque o PAPEL mudou (a regra ou o desenho da folha): suba VERSAO_DA_VIA e atualize os valores. A subida
+  // documenta, mas não muda nenhum "pular": com o dado igual a agenda pula com ou sem ela (só o motivo muda); a versão só
+  // decide no caso "dado diferente e papel igual", em que subir faz MANDAR. Antes do 1º deploy de uma versão, mudar o
+  // papel dentro dela não pede subir (nenhuma via dela foi entregue).
+  // Falhou porque o DADO mudou (a lista de retratoDoDado): suba VERSAO_DO_DADO e atualize. Sem subir, junto de uma subida
+  // de VERSAO_DA_VIA (ou de papel diferente), toda via já entregue volta com "A OS mudou", o que é falso; com a subida,
+  // sai a frase neutra ("Esta via substitui a de dd/mm"). Quem protege o "A OS mudou" é este contrato do dado — e ele só
+  // fica travado nos campos que as fixtures exercitam (por isso a A e a B, revisão da F0, impressao-3).
   assertEquals(
     [
       impressaoDaVia(dados(), {}),
       impressaoDaVia(dados(), { pessoa: ALEX }),
       impressaoDaVia(dadosComFrete(), { pessoa: ALEX }),
+      impressaoDaVia(travaNautica(), {}),
+      impressaoDaVia(travaNautica(), { pessoa: ALEX }),
+      impressaoDaVia(travaVeiculo(), {}),
+      impressaoDaVia(travaVeiculo(), { pessoa: ROBERTO }),
     ],
     // F1 (via aprovada): o PAPEL mudou e a versão subiu para 3; o DADO é o mesmo da F0 (a lista não mudou). Revisão da
     // F1 (papel-1, nota dos materiais presa aos itens; papel-4, texto sem espaço quebra): só o CSS mudou, ainda na v3 —
-    // nenhuma v3 foi entregue.
-    ["v3.d1.1uhyv2v.16qx61a", "v3.d1.1ll802l.c5wkea", "v3.d1.fuf6ax.1tnim3l"],
+    // nenhuma v3 foi entregue. As 4 últimas (trava A e B) entraram na revisão da F0 (impressao-3).
+    [
+      "v3.d1.1uhyv2v.16qx61a", "v3.d1.1ll802l.c5wkea", "v3.d1.fuf6ax.1tnim3l",
+      "v3.d1.1ogh0h6.lixmvc", "v3.d1.ccvoev.7ie2v6", "v3.d1.1w0aua7.e28zvz", "v3.d1.1g533zq.abpdaq",
+    ],
     "a regra do papel (ou a lista do dado) mudou: suba a versão e atualize o valor",
   );
+});
+
+Deno.test("trava: as fixtures A e B passam MESMO pelo que a via imprime no modo via (senão a trava não prova nada)", () => {
+  const a = htmlDaVia(montarViaDoTecnico(travaNautica(), { modo: "via" }));
+  for (const parte of [
+    '<div class="aviso orc">', "No local: <b>Comandante Trava</b>", "O que já sabemos do sistema elétrico desta lancha",
+    "Observações: Chave geral no paiol", "<b>Marina Trava · vaga Píer 9</b>", "Portão 4", "Instruções do escritório",
+    "PARCIAL", "faltou a correia", "SÓ LEVANTAR", "AGUARDA PEÇA", "antena chega dia 30", "NÃO FEITO NA ÚLTIMA VISITA",
+    "cliente não liberou", "JÁ FEITO", '<span class="lab">Instrução</span>Conferir a polaridade. Apertar os bornes.',
+    "Responsável: <b>Roberto Daniel</b>", "Material deste serviço:", '<div class="detail">Os dois da prateleira B</div>',
+    "pulada: paiol trancado", "Volante com folga.", "Levar o sacador.", "<b>Altura:</b>", '<div class="contatofim">',
+  ]) assertStringIncludes(a, parte);
+  assert(!a.includes("Deslocamento"), "a cobrança não vai ao papel");
+  assert(!a.includes("Cadastrado pelo orçamento"), "a nota interna não vai ao papel");
+  assertStringIncludes(htmlDaVia(montarViaDoTecnico(travaNautica(), { modo: "via", pessoa: ALEX })), "· Revisão do gerador — Roberto Daniel");
+  const b = htmlDaVia(montarViaDoTecnico(travaVeiculo(), { modo: "via" }));
+  for (const parte of [
+    "Pedido por: <b>Caseiro Estrada</b>", "WhatsApp (48) 99200-0001", '<span class="lab">Onde</span><div class="acesso"><p>Garagem do cliente',
+    "O que já sabemos do sistema elétrico deste motorhome", "Banco de baterias: 1× lítio 200 Ah", "<b>Teto:</b>",
+    "<b>Peça que se move:</b>", "× 3 h", "Passar o cabo pelo armário.", "Usar a escada grande.", "Não forçar o motor do slide.",
+    "pulada: chuva", "Selante PU", "<b>0,50 tubo</b>",
+  ]) assertStringIncludes(b, parte);
+  for (const fora of ["Desligar o disjuntor geral", "Isolar o banco", "Segurança por sistema", "Frete do equipamento"]) {
+    assert(!b.includes(fora), fora);
+  }
+  // na via do Roberto, o serviço do Alex sai pelo nome; o frete do Alex (cobrança) não
+  const doRoberto = htmlDaVia(montarViaDoTecnico(travaVeiculo(), { modo: "via", pessoa: ROBERTO }));
+  assertStringIncludes(doRoberto, "· Troca da tomada externa — Alex Gonçalves Machado");
+  assert(!doRoberto.includes("Frete do equipamento"));
 });
 
 // ═══ A via aprovada (porte da via v2, F1): base limpa + rodadas 1, 2 e 3 ═══════════════════════════════════════

@@ -1283,14 +1283,20 @@ export function htmlDaVia(m: ViaMontada): string {
 // ═══ A impressão digital: DADO + PAPEL + VERSÃO (porte da via v2, F0, 16/11/2026) ═══════════════════
 
 /**
- * Sobe quando a REGRA ou o DESENHO do papel muda (o que o técnico lê ou como lê). Sozinha, não reenvia nada: a agenda
- * só manda de novo quando o DADO muda (decidirAVia). 1 = hash do HTML, sem prefixo (até 16/11/2026); 2 = desenho de
- * produção com a impressão por conteúdo (F0); 3 = a via aprovada pelo dono (base limpa + rodadas 1, 2 e 3: quadro
- * Atenção, cartões numerados pela OS inteira sem a cobrança, veículo em linha própria, telefones no fechamento…).
- * O teste-trava de via-do-tecnico_test.ts fixa o papel de fixtures: mudou a regra sem subir esta versão, ele falha.
+ * Sobe quando a REGRA ou o DESENHO do papel muda (o que o técnico lê ou como lê). Documenta a mudança, mas não muda
+ * nenhum "pular": com o dado igual, a agenda pula com ou sem a subida (só o motivo muda); a versão só decide no caso
+ * "dado diferente e papel igual", em que subir faz MANDAR (decidirAVia). Quem protege contra o falso "A OS mudou" é o
+ * contrato do dado (VERSAO_DO_DADO). 1 = hash do HTML, sem prefixo (até 16/11/2026); 2 = desenho de produção com a
+ * impressão por conteúdo (F0); 3 = a via aprovada pelo dono (base limpa + rodadas 1, 2 e 3: quadro Atenção, cartões
+ * numerados pela OS inteira sem a cobrança, veículo em linha própria, telefones no fechamento…).
+ * O teste-trava de via-do-tecnico_test.ts fixa o papel e o dado de fixtures: mudou a regra sem subir esta versão, ele falha.
  */
 export const VERSAO_DA_VIA = 3;
-/** Sobe só quando muda a LISTA de campos de retratoDoDado (é contrato). Raro: subir faz a próxima via sair com o aviso neutro. */
+/**
+ * Sobe só quando muda a LISTA de campos de retratoDoDado (é contrato). Raro: subir faz a próxima via sair com o aviso
+ * neutro ("Esta via substitui a de dd/mm"). Sem subir, junto de uma subida de VERSAO_DA_VIA (ou de papel diferente), toda
+ * via já entregue voltaria com "A OS mudou" — falso.
+ */
 export const VERSAO_DO_DADO = 1;
 
 /** As respostas do levantamento na ordem do papel (seq), com desempate fixo para a impressão não oscilar. */
@@ -1308,7 +1314,8 @@ function levantamentoNaOrdem(respostas: RespostaDaVia[]): RespostaDaVia[] {
 /**
  * O DADO da via de uma pessoa: os campos crus da OS que a via lê. A lista é FECHADA e é contrato (mudar a lista pede
  * subir VERSAO_DO_DADO). Fica de fora o que a via não lê (preço, desconto, total: editar preço não reenvia nada), o que
- * muda sem a OS mudar (data e hora, dias da agenda, links das fotos) e a empresa. Tudo na ordem canônica (linhas e
+ * muda sem a OS mudar (data e hora, dias da agenda, links das fotos), a empresa e o NOME das pessoas da equipe (cadastro,
+ * não OS: da pessoa e do responsável de cada linha entra só o id). Tudo na ordem canônica (linhas e
  * materiais por created_at, id; levantamento por seq; técnicos em ordem alfabética), e cada linha com o NÚMERO dela na
  * OS inteira — a mesma conta da via e da tela. Das linhas de outra pessoa, só o que a via dela cita (número, nome, de quem).
  */
