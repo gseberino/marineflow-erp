@@ -147,6 +147,18 @@ export function temAsPalavras(nome: unknown, dito: unknown): boolean {
   return ditas.every((p) => doNome.has(p));
 }
 
+/**
+ * Toda palavra dita está no nome inteira ou, com 4 letras ou mais, é COMEÇO de uma palavra do nome ("parametriz" acha
+ * "Parametrização"; "abraçadeira" acha "Abraçadeiras nylon"). Só número nunca casa. É o último passo do acharLinha; em
+ * remover/editar item só SUGERE na pergunta — nunca executa por ele (revisão da F0, achador-3).
+ */
+export function comecaComAsPalavras(nome: unknown, dito: unknown): boolean {
+  const ditas = palavrasDitas(dito);
+  if (!ditas.length || soNumeros(ditas)) return false;
+  const doNome = palavras(nome);
+  return ditas.every((p) => doNome.includes(p) || (p.length >= 4 && doNome.some((w) => w.startsWith(p))));
+}
+
 /** Uma linha numerada, com o nome como sai no papel. */
 export interface LinhaNumerada {
   id: string;
@@ -240,10 +252,7 @@ export function acharLinha<T extends LinhaNumerada>(linhas: readonly T[], dito: 
   const inteiras = escolher(linhas.filter((l) => temAsPalavras(l.nome, bruto)));
   if (inteiras) return inteiras;
 
-  const comeco = escolher(linhas.filter((l) => {
-    const doNome = palavras(l.nome);
-    return ditas.every((p) => doNome.includes(p) || (p.length >= 4 && doNome.some((w) => w.startsWith(p))));
-  }));
+  const comeco = escolher(linhas.filter((l) => comecaComAsPalavras(l.nome, bruto)));
   if (comeco) return comeco;
   return naoAchei;
 }

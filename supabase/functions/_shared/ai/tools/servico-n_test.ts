@@ -127,7 +127,9 @@ Deno.test("editar: '4' com preço novo → needs_choice, nada alterado", async (
 Deno.test("remover pelo NOME: palavra inteira — 'LiFePO4' é a bateria; 'bater' (pedaço) não apaga nada", async () => {
   const pedaco = bancoFalso(orcamento());
   const r = await tool(serviceOrderTools, "remove_service_order_item").execute({ service_order_id: OS, description: "bater" }, ctxCom(pedaco)) as Linha;
-  assertEquals(r.error, "Item não encontrado neste orçamento/OS.");
+  // pedaço de palavra não executa: pergunta, com a bateria e o banco de baterias como parecidos (revisão da F0, achador-3)
+  assertEquals(r.needs_choice, true, JSON.stringify(r));
+  assertEquals(r.options.map((o: Linha) => o.descricao), ["Bateria LiFePO4 100Ah", "1 · Instalação do banco de baterias"]);
   assertEquals(pedaco.gravacoes.length, 0);
   // com o item_id o número não importa: é o caminho preferencial
   const peloId = bancoFalso(orcamento());
@@ -173,7 +175,9 @@ Deno.test("editar: 'serviço #4' com preço novo → pergunta; o cabo de 4 mm n�
 Deno.test("remover: '4 e 5' (só números) não casa nome por palavra; 'cabo 4' acha o cabo pelo nome", async () => {
   const soNumeros = bancoFalso(orcamentoComCabo4());
   const r = await tool(serviceOrderTools, "remove_service_order_item").execute({ service_order_id: OS, description: "4 e 5" }, ctxCom(soNumeros)) as Linha;
-  assertEquals(r.error, "Item não encontrado neste orçamento/OS.");
+  // sem parecido nenhum: pergunta com a lista inteira (revisão da F0, achador-3)
+  assertEquals(r.needs_choice, true, JSON.stringify(r));
+  assertEquals(r.options.length + r.pecas.length, 6);
   assertEquals(soNumeros.gravacoes.length, 0);
   const peloNome = bancoFalso(orcamentoComCabo4());
   const r2 = await tool(serviceOrderTools, "remove_service_order_item").execute({ service_order_id: OS, description: "cabo 4" }, ctxCom(peloNome)) as Linha;
@@ -339,4 +343,59 @@ Deno.test("update_service_order_via: '4 · Troca do disjuntor' (rótulo copiado)
   ) as Linha;
   assertEquals(r.nada_gravado, true, JSON.stringify(r));
   assertEquals(trocado.gravacoes.length, 0);
+});
+
+// ═══ Sem achar pelo nome inteiro: pergunta, nunca "Item não encontrado" seco (revisão da F0, achador-3) ═════════════
+
+/** Peças no plural e no singular, como o catálogo grava. */
+function orcamentoDoPlural() {
+  return {
+    service_orders: [{ id: OS, service_order_number: "ORÇ-00904", status: "draft", grand_total: 500 }],
+    service_order_parts: [
+      { id: "p1", service_order_id: OS, created_at: T(1), product_id: "pr1", quantity: 10, unit_sale_snapshot: 2, unit_cost_snapshot: 1, line_total_sale: 20, products: { name: "Abraçadeiras nylon" } },
+      { id: "p2", service_order_id: OS, created_at: T(2), product_id: "pr2", quantity: 5, unit_sale_snapshot: 30, unit_cost_snapshot: 20, line_total_sale: 150, products: { name: "Cabos 6 mm" } },
+    ],
+    service_order_services: [
+      { id: "s1", service_order_id: OS, created_at: T(3), name_snapshot: "Instalação do inversor", quantity: 1, unit_price_snapshot: 300, line_total: 300, field_status: null, field_status_note: null },
+    ],
+  };
+}
+
+Deno.test("remover: 'abraçadeira' com a peça 'Abraçadeiras nylon' → pergunta com ela como parecida; nada apagado nem estornado", async () => {
+  const db = bancoFalso(orcamentoDoPlural());
+  const r = await tool(serviceOrderTools, "remove_service_order_item").execute({ service_order_id: OS, description: "abraçadeira" }, ctxCom(db)) as Linha;
+  assertEquals(r.needs_choice, true, JSON.stringify(r));
+  assertEquals(r.nada_alterado, true);
+  assertEquals(r.options, [{ item_id: "p1", descricao: "Abraçadeiras nylon", quantidade: 10, total: 20 }]);
+  assertStringIncludes(r.message, 'Não achei "abraçadeira" pelo nome inteiro. Parecido: Abraçadeiras nylon.');
+  assertStringIncludes(r.message, "item_id");
+  assertEquals(db.gravacoes.length, 0);
+  assertEquals(db.tabelas.service_order_parts.map((p) => p.id), ["p1", "p2"]);
+});
+
+Deno.test("editar: 'cabo' com a peça 'Cabos 6 mm' → pergunta, preço não muda", async () => {
+  const db = bancoFalso(orcamentoDoPlural());
+  const r = await tool(serviceOrderTools, "edit_service_order_item").execute({ service_order_id: OS, description: "cabo", unit_price: 1 }, ctxCom(db)) as Linha;
+  assertEquals(r.needs_choice, true, JSON.stringify(r));
+  assertEquals(r.options.map((o: Linha) => o.item_id), ["p2"]);
+  assertStringIncludes(r.message, "editar");
+  assertEquals(db.gravacoes.length, 0);
+  assertEquals(db.tabelas.service_order_parts.find((p) => p.id === "p2")!.unit_sale_snapshot, 30);
+});
+
+Deno.test("remover: nada parecido ('pintura') → pergunta com todos os itens: serviços 'N · nome' e as peças à parte", async () => {
+  const db = bancoFalso(orcamentoDoPlural());
+  const r = await tool(serviceOrderTools, "remove_service_order_item").execute({ service_order_id: OS, description: "pintura" }, ctxCom(db)) as Linha;
+  assertEquals(r.needs_choice, true, JSON.stringify(r));
+  assertEquals(r.nada_alterado, true);
+  assertEquals(r.options, [{ item_id: "s1", numero: 1, descricao: "1 · Instalação do inversor", quantidade: 1, total: 300 }]);
+  assertEquals(r.pecas.map((p: Linha) => p.descricao), ["Abraçadeiras nylon", "Cabos 6 mm"]);
+  assertEquals(db.gravacoes.length, 0);
+});
+
+Deno.test("remover/editar pelo item_id que não existe: continua o erro (o id é exato, não há o que sugerir)", async () => {
+  const db = bancoFalso(orcamentoDoPlural());
+  const r = await tool(serviceOrderTools, "remove_service_order_item").execute({ service_order_id: OS, item_id: "nao-existe" }, ctxCom(db)) as Linha;
+  assertEquals(r.error, "Item não encontrado neste orçamento/OS.");
+  assertEquals(db.gravacoes.length, 0);
 });

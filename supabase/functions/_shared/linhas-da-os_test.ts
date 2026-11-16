@@ -4,6 +4,7 @@ import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.t
 import {
   acharLinha,
   chaveDoInstante,
+  comecaComAsPalavras,
   instantesEmSequencia,
   numeroDito,
   numerarLinhas,
@@ -175,4 +176,15 @@ Deno.test("ordinal por extenso: 'o quarto' é o 4, mas com 'quarto' (o cômodo) 
   // o nome com mais palavras continua pelo nome
   assertEquals(acharLinha(linhas, "ar-condicionado do quarto"), { linha: linhas[1] });
   assertEquals(acharLinha(linhas, "ar do quarto"), { linha: linhas[1] });
+});
+
+Deno.test("comecaComAsPalavras: começo de palavra com 4 letras ou mais; curta só inteira; só número nunca (revisão da F0, achador-3)", () => {
+  assertEquals(comecaComAsPalavras("Abraçadeiras nylon", "abraçadeira"), true);
+  assertEquals(comecaComAsPalavras("Cabos 6 mm", "cabo"), true);
+  assertEquals(comecaComAsPalavras("Cabos 6 mm", "cab"), false);
+  assertEquals(comecaComAsPalavras("Parametrização do carregador", "parametriz"), true);
+  assertEquals(comecaComAsPalavras("Cabos 6 mm", "cabo 6"), true);
+  assertEquals(comecaComAsPalavras("Cabos 6 mm", "6"), false);
+  assertEquals(comecaComAsPalavras("Cabos 6 mm", "pintura"), false);
+  assertEquals(comecaComAsPalavras("Cabos 6 mm", ""), false);
 });

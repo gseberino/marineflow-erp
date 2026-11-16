@@ -11,7 +11,7 @@ import { modoDaPropostaNoBanco } from "../../agenda-modo.ts";
 import { canalDaRpc, ehDataCalculada, type ResultadoParaOModelo, resultadoDoRascunho } from "../../agenda/rpc-das-ferramentas.ts";
 import { modoDaLeituraNoBanco } from "../../agenda/executar.ts";
 import { argumentosDaPortaCompleta, ehPortaAusente, ehSemDireitoNaPorta, statusPelaTelaSemAPorta } from "../../porta-ausente.ts";
-import { numeroDito, ordinalDito, semAcento as semAcentoDaLinha, temAsPalavras } from "../../linhas-da-os.ts";
+import { comecaComAsPalavras, numeroDito, ordinalDito, semAcento as semAcentoDaLinha, temAsPalavras } from "../../linhas-da-os.ts";
 
 /** Os status que a porta única de status do banco decide (Agenda de Produção, Fase 2, P4). */
 const STATUS_DE_AGENDA = ["open", "approved", "scheduled", "in_progress", "awaiting_parts", "awaiting_client"];
@@ -194,6 +194,44 @@ function perguntaDoNumero(items: SoItem[], descricao: unknown, acao: "remover" |
       : `"${String(descricao).trim()}" é só um número, e este orçamento/OS tem ${servicos.length} serviço${servicos.length === 1 ? "" : "s"}: não existe o serviço ${n}. Pergunte qual item ${acao} e passe o item_id.${avisoDasPecas}`,
     options: servico ? [opcao(servico)] : servicos.map(opcao),
     pecas: pecas.map((p) => ({ item_id: p.id, descricao: p.label, quantidade: p.quantity, total: p.total })),
+  };
+}
+
+/**
+ * Não achou pelo nome inteiro (nem nome igual nem palavra inteira): PERGUNTA, nunca "Item não encontrado" seco — que o
+ * modelo repassava ao dono como "o item não existe" ("tira a abraçadeira" com a peça "Abraçadeiras nylon"). Nas opções,
+ * os parecidos pelo começo de palavra (a mesma regra do último passo do acharLinha); sem nenhum, todos os itens:
+ * serviços como "N · nome" e peças à parte. Nunca executa pelo começo de palavra (revisão da F0, achador-3).
+ */
+function perguntaDoNome(items: SoItem[], descricao: unknown, acao: "remover" | "editar"): Record<string, unknown> {
+  const dito = String(descricao ?? "").trim();
+  const descricaoDe = (i: SoItem) => (i.table === "service_order_services" && i.numero ? `${i.numero} · ${i.label}` : i.label);
+  const opcao = (i: SoItem) => ({
+    item_id: i.id,
+    ...(i.table === "service_order_services" ? { numero: i.numero ?? null } : {}),
+    descricao: descricaoDe(i),
+    quantidade: i.quantity,
+    total: i.total,
+  });
+  const parecidos = items.filter((i) => comecaComAsPalavras(i.label, dito));
+  if (parecidos.length) {
+    return {
+      needs_choice: true,
+      nada_alterado: true,
+      message: `Não achei "${dito}" pelo nome inteiro. Parecido${parecidos.length === 1 ? "" : "s"}: ` +
+        `${parecidos.map(descricaoDe).join("; ")}. Pergunte ao dono se é ${parecidos.length === 1 ? "esse" : "um desses"} ` +
+        `o item a ${acao} e passe o item_id — não ${acao} sem a confirmação.`,
+      options: parecidos.map(opcao),
+    };
+  }
+  const servicos = items.filter((i) => i.table === "service_order_services");
+  const pecas = items.filter((i) => i.table === "service_order_parts");
+  return {
+    needs_choice: true,
+    nada_alterado: true,
+    message: `Não achei "${dito}" neste orçamento/OS. Mostre os itens ao dono, pergunte qual ${acao} e passe o item_id.`,
+    options: servicos.map(opcao),
+    pecas: pecas.map(opcao),
   };
 }
 
@@ -1117,7 +1155,8 @@ export const serviceOrderTools: ToolDef[] = [
             options: matches.map((m) => ({ item_id: m.id, descricao: m.label, quantidade: m.quantity, total: m.total })),
           };
         }
-        return { error: "Item não encontrado neste orçamento/OS." };
+        if (args.item_id) return { error: "Item não encontrado neste orçamento/OS." };
+        return perguntaDoNome(items, args.description, "remover");
       }
       const { error } = await sb.from(item.table).delete().eq("id", item.id).eq("service_order_id", args.service_order_id);
       if (error) throw error;
@@ -1174,7 +1213,8 @@ export const serviceOrderTools: ToolDef[] = [
             options: matches.map((m) => ({ item_id: m.id, descricao: m.label, quantidade: m.quantity, total: m.total })),
           };
         }
-        return { error: "Item não encontrado neste orçamento/OS." };
+        if (args.item_id) return { error: "Item não encontrado neste orçamento/OS." };
+        return perguntaDoNome(items, args.description, "editar");
       }
       const antes = { quantidade: item.quantity, preco_unitario: item.unit_price, total: item.total, descricao: item.label };
       const newQty = args.quantity != null ? Number(args.quantity) : item.quantity;
