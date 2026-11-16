@@ -5,10 +5,12 @@
 // das 19:30). A folha é a da tela: montarViaDoTecnico (via-do-tecnico.ts) com os mesmos dados que o
 // hook use-via-do-tecnico lê — as consultas daqui espelham as dele, uma a uma:
 //   detalhe da OS        → SO_DETAIL_SELECT (use-service-orders), só as colunas que a via usa
-//   serviços             → useServiceOrderServices ('*, services(name)', por created_at)
+//   serviços             → useServiceOrderServices ('*, services(name, service_system)', por created_at, id)
 //   passos               → useServiceOrderSteps (STEP_SELECT, por seq)
-//   material             → useRouteMaterials (service_order_parts, por created_at)
-//   levantamento         → useServiceOrderSurvey (o mais recente)
+//   material             → useRouteMaterials (service_order_parts, por created_at, id)
+//   levantamento         → useServiceOrderSurvey (o mais recente; as respostas por seq)
+// A ordem `created_at, id` (porte da via v2, F0): sem o `id`, as linhas gravadas num INSERT só saíam na ordem física,
+// que um UPDATE troca — o "3" da via podia virar outro serviço depois de gravar a situação ou a instrução.
 //   segurança sem roteiro→ seguranca_da_via
 //   empresa              → app_settings (company_name, company_logo_url, company_address, phone)
 
@@ -76,12 +78,12 @@ export async function carregarDadosDaVia(admin: Admin, serviceOrderId: string, s
   try {
     const [os, linhas, passos, materiais, levantamento, seguranca] = await Promise.all([
       admin.from("service_orders").select(SELECT_DA_OS_DA_VIA).eq("id", serviceOrderId).maybeSingle(),
-      admin.from("service_order_services").select("*, services(name)").eq("service_order_id", serviceOrderId)
-        .order("created_at", { ascending: true }),
+      admin.from("service_order_services").select("*, services(name, service_system)").eq("service_order_id", serviceOrderId)
+        .order("created_at", { ascending: true }).order("id", { ascending: true }),
       admin.from("service_order_steps").select(SELECT_DOS_PASSOS).eq("service_order_id", serviceOrderId)
         .order("seq", { ascending: true }),
-      admin.from("service_order_parts").select("id, quantity, notes, service_order_service_id, products(name, sku, unit)")
-        .eq("service_order_id", serviceOrderId).order("created_at"),
+      admin.from("service_order_parts").select("id, created_at, quantity, notes, service_order_service_id, products(name, sku, unit)")
+        .eq("service_order_id", serviceOrderId).order("created_at", { ascending: true }).order("id", { ascending: true }),
       admin.from("service_surveys")
         .select("id, service_survey_answers(seq, question_snapshot, answer_value, skipped_reason, photo_path)")
         .eq("service_order_id", serviceOrderId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
@@ -117,7 +119,9 @@ export async function carregarDadosDaVia(admin: Admin, serviceOrderId: string, s
       linhas: linhasDaVia,
       passos: (passos.data ?? []) as ServiceOrderStep[],
       materiais: (materiais.data ?? []) as RouteMaterial[],
-      levantamento: (levantamento.data?.service_survey_answers ?? []) as DadosDaVia["levantamento"],
+      // As respostas vêm embutidas, sem ordem: na ordem do levantamento (seq), como a folha as imprime.
+      levantamento: ((levantamento.data?.service_survey_answers ?? []) as DadosDaVia["levantamento"])
+        .slice().sort((a, b) => Number(a.seq ?? 0) - Number(b.seq ?? 0)),
       seguranca: (seguranca.data ?? []) as LinhaDeSeguranca[],
       nomesDosResponsaveis,
     };

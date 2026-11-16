@@ -10,6 +10,8 @@ import { useDuplicateServiceOrder } from './use-service-orders';
 /** O que cada tabela recebeu em insert, na ordem. */
 let gravacoes: Record<string, unknown[]> = {};
 let fonte: Record<string, unknown> = {};
+/** O created_at que o banco devolve no insert da OS nova (porte da via v2, F0: base da gravação em sequência). */
+let criadaEm: string | null = null;
 
 vi.mock('@/integrations/supabase/client', () => ({
   supabase: {
@@ -19,7 +21,7 @@ vi.mock('@/integrations/supabase/client', () => ({
       insert: (linhas: unknown) => {
         (gravacoes[tabela] ??= []).push(linhas);
         return Object.assign(Promise.resolve({ data: null, error: null }), {
-          select: () => ({ single: async () => ({ data: { id: 'nova' }, error: null }) }),
+          select: () => ({ single: async () => ({ data: { id: 'nova', ...(criadaEm ? { created_at: criadaEm } : {}) }, error: null }) }),
         });
       },
     }),
@@ -34,6 +36,7 @@ const despesa = (o: Record<string, unknown>) => ({
 
 beforeEach(() => {
   gravacoes = {};
+  criadaEm = null;
   fonte = {
     id: 'os1', service_order_number: 'OS-00112', status: 'completed', priority: 'normal', client_id: 'c1',
     service_order_parts: [], service_order_services: [],
@@ -94,6 +97,37 @@ describe('duplicar OS', () => {
     const cabecalho = (gravacoes.service_orders ?? [])[0] as Record<string, unknown>;
     for (const campo of Object.keys(colunasDaF5)) expect(cabecalho, campo).not.toHaveProperty(campo);
     expect(cabecalho).toMatchObject({ status: 'draft', quote_status: 'draft' });
+  });
+
+  // Porte da via v2, F0 (E15): o embutido vem sem ordem e um INSERT só dava o mesmo now() a todas as linhas — a ordem
+  // da via (created_at, id) ficava por conta do id, aleatório. A cópia sai na ordem da origem, em sequência a partir do
+  // created_at que o BANCO devolveu para a OS nova (não o relógio do navegador).
+  it('a cópia sai na ordem da origem (created_at, id), com created_at em sequência a partir do da OS nova', async () => {
+    criadaEm = '2026-11-16T18:00:00.123456+00:00';
+    const MESMO = '2026-11-10T12:00:00.5+00:00';
+    fonte.service_order_services = [
+      { id: '9-serv', created_at: MESMO, name_snapshot: 'Teste final' },
+      { id: '1-serv', created_at: MESMO, name_snapshot: 'Instalação' },
+      { id: '5-serv', created_at: '2026-11-10T11:00:00+00:00', name_snapshot: 'Levantamento' },
+    ];
+    fonte.service_order_parts = [
+      { id: 'b-peca', created_at: MESMO, product_id: 'pB' },
+      { id: 'a-peca', created_at: MESMO, product_id: 'pA' },
+    ];
+    const { result } = renderHook(() => useDuplicateServiceOrder(), { wrapper });
+    result.current.mutate({ sourceId: 'os1', mode: 'quote' });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const servicos = (gravacoes.service_order_services ?? []).flat() as Array<Record<string, unknown>>;
+    const pecas = (gravacoes.service_order_parts ?? []).flat() as Array<Record<string, unknown>>;
+    expect(servicos.map((s) => [s.name_snapshot, s.created_at])).toEqual([
+      ['Levantamento', '2026-11-16T18:00:00.124Z'],
+      ['Instalação', '2026-11-16T18:00:00.125Z'],
+      ['Teste final', '2026-11-16T18:00:00.126Z'],
+    ]);
+    expect(pecas.map((p) => [p.product_id, p.created_at])).toEqual([
+      ['pA', '2026-11-16T18:00:00.124Z'],
+      ['pB', '2026-11-16T18:00:00.125Z'],
+    ]);
   });
 
   it('só despesa de comprovante: nenhuma despesa é gravada na OS nova', async () => {

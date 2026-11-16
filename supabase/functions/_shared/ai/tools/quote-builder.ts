@@ -4,6 +4,7 @@ import { type ItemResolvido, resolverItens } from "../keyword-resolver.ts";
 import { validadePadraoDoOrcamento } from "../validade-orcamento.ts";
 import { recalcularOSComCascata } from "../../receivables/cascata.ts";
 import { mascararDadosPessoais } from "../../retorno/mascara.ts";
+import { instantesEmSequencia } from "../../linhas-da-os.ts";
 
 // MACRO — cria um orçamento INTEIRO numa única chamada (LLM orquestra, código executa).
 // Ver plans/marineflow-llm-orquestra-codigo-executa.md
@@ -395,12 +396,17 @@ export async function montarOrcamento(
         ? { origem: opcoes.origem.valor, origem_chave8: opcoes.origem.chave8, origem_parceiro_id: opcoes.origem.parceiro_id ?? null }
         : {}),
     })
-    .select("id, service_order_number")
+    .select("id, service_order_number, created_at")
     .single();
   if (soErr) {
     if (comOrigem) return { error: `Não consegui criar o orçamento: ${soErr.message}` };
     throw soErr;
   }
+  // F0 da via v2 (E15): peças e serviços gravados com created_at em sequência a partir do da OS (devolvido pelo banco;
+  // sem ele, o relógio da edge). Num INSERT só, todas as linhas ganhariam o mesmo now() e a ordem da via (created_at, id)
+  // ficaria por conta do id, que é aleatório: o "serviço 2" do orçamento podia não ser o 2º que o dono pediu.
+  const criadoEm = (so as { created_at?: string | null }).created_at ?? null;
+  const quandoDasPecas = instantesEmSequencia(criadoEm, resolvidos.length);
 
   // Retorno F3: gravação que falha no caminho da proposta desfaz o ORÇ. Sem isto, a linha cairia em "Valor provisório" e
   // sairia no PDF ao cliente com o total igual ao da proposta. O número fica queimado, como em duplicate_service_order.
@@ -414,8 +420,9 @@ export async function montarOrcamento(
   // 4. Peças resolvidas → service_order_parts (+ baixa de estoque, como o resto do sistema).
   const comProduto = resolvidos.filter((i) => i.product_id);
   if (comProduto.length) {
-    const partsRows = comProduto.map((i) => ({
+    const partsRows = comProduto.map((i, n) => ({
       service_order_id: so.id,
+      created_at: quandoDasPecas[n],
       product_id: i.product_id!,
       quantity: i.quantidade,
       unit_cost_snapshot: i.custo,
@@ -460,6 +467,8 @@ export async function montarOrcamento(
     // classe do estoque fantasma que já custou uma investigação neste sistema.
     const { error: erroPendente } = await sb.from("service_order_parts").insert({
       service_order_id: so.id,
+      // depois das peças do catálogo, na sequência (um insert por peça, mas a ordem fica explícita)
+      created_at: quandoDasPecas[comProduto.length + criados.length - 1],
       product_id: criado.id,
       quantity: p.quantidade,
       unit_cost_snapshot: 0,
@@ -500,6 +509,8 @@ export async function montarOrcamento(
     });
   }
   if (svcRows.length) {
+    const quandoDosServicos = instantesEmSequencia(criadoEm, svcRows.length);
+    svcRows.forEach((s, n) => { s.created_at = quandoDosServicos[n]; });
     const { error: erroServicos } = await sb.from("service_order_services").insert(svcRows);
     if (comOrigem && erroServicos) return await desfazer(`serviços: ${erroServicos.message}`);
   }

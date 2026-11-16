@@ -1,5 +1,6 @@
 import { NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
 import { recalcularOSComCascata } from "../../receivables/cascata.ts";
+import { instantesEmSequencia, ordenarLinhas } from "../../linhas-da-os.ts";
 import {
   conferirComprovantes, textoDaDespesaCobradaComCmpAberto, textoDaDespesaComCmpAberto, textoDaDespesaDoCmpNaoSai,
   textoDaDespesaInternaDoCmp, textoDaDespesaJaLancada,
@@ -594,10 +595,15 @@ export const soOpsTools: ToolDef[] = [
         priority: copia.priority || "normal",
         discount_amount: copia.discount_amount || 0,
         tax_amount: copia.tax_amount || 0,
-      }).select("id, service_order_number").single();
+      }).select("id, service_order_number, created_at").single();
       if (errNova) return { error: `Não consegui criar a cópia: ${errNova.message}` };
       // deno-lint-ignore no-explicit-any
       const novoId = (nova as any).id;
+      // F0 da via v2 (E15): a cópia sai na ordem da origem (created_at, id — o embutido vem sem ordem) e cada linha
+      // ganha created_at em sequência a partir do da OS nova (devolvido pelo banco; sem ele, o relógio da edge). Num
+      // INSERT só, todas ganhariam o mesmo now() e a ordem da via ficaria por conta do id (aleatório).
+      // deno-lint-ignore no-explicit-any
+      const criadaEm = (nova as any).created_at as string | null | undefined;
 
       const desfazer = async (motivo: string) => {
         await admin.from("service_order_parts").delete().eq("service_order_id", novoId);
@@ -606,11 +612,13 @@ export const soOpsTools: ToolDef[] = [
         return { error: `A cópia não foi feita (${motivo}). Nada ficou gravado.` };
       };
 
-      const listaDePecas = Array.isArray(pecas) ? pecas : [];
+      const listaDePecas = ordenarLinhas(Array.isArray(pecas) ? pecas : []);
       if (listaDePecas.length) {
+        const quando = instantesEmSequencia(criadaEm, listaDePecas.length);
         // deno-lint-ignore no-explicit-any
-        const { error } = await sb.from("service_order_parts").insert(listaDePecas.map((p: any) => ({
+        const { error } = await sb.from("service_order_parts").insert(listaDePecas.map((p: any, i: number) => ({
           service_order_id: novoId,
+          created_at: quando[i],
           product_id: p.product_id,
           quantity: p.quantity,
           unit_cost_snapshot: p.unit_cost_snapshot,
@@ -623,11 +631,13 @@ export const soOpsTools: ToolDef[] = [
         if (error) return await desfazer(`peças: ${error.message}`);
       }
 
-      const listaDeServicos = Array.isArray(servicos) ? servicos : [];
+      const listaDeServicos = ordenarLinhas(Array.isArray(servicos) ? servicos : []);
       if (listaDeServicos.length) {
+        const quando = instantesEmSequencia(criadaEm, listaDeServicos.length);
         // deno-lint-ignore no-explicit-any
-        const { error } = await sb.from("service_order_services").insert(listaDeServicos.map((s: any) => ({
+        const { error } = await sb.from("service_order_services").insert(listaDeServicos.map((s: any, i: number) => ({
           service_order_id: novoId,
+          created_at: quando[i],
           service_id: s.service_id,
           name_snapshot: s.name_snapshot,
           description_snapshot: s.description_snapshot,

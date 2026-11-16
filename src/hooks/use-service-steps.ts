@@ -386,6 +386,9 @@ export function summarizeRoute(steps: ServiceOrderStep[]): RouteSummary {
 
 
 
+// O material da via na ordem `created_at, id` (porte da via v2, F0): o material gravado num INSERT só empata no
+// created_at, e sem o id a ordem da separação mudava de uma leitura para a outra. A mesma do servidor
+// (via-do-tecnico-dados.ts).
 export function useRouteMaterials(serviceOrderId: string | undefined) {
   return useQuery({
     queryKey: ['route-materials', serviceOrderId],
@@ -395,7 +398,8 @@ export function useRouteMaterials(serviceOrderId: string | undefined) {
         .from('service_order_parts')
         .select('id, quantity, notes, service_order_service_id, products(name, sku, unit)')
         .eq('service_order_id', serviceOrderId!)
-        .order('created_at');
+        .order('created_at', { ascending: true })
+        .order('id', { ascending: true });
       if (error) throw error;
       return (data || []) as unknown as RouteMaterial[];
     },

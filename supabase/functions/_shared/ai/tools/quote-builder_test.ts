@@ -30,6 +30,8 @@ interface Opcoes {
   erroRecalc?: string;
   erroRascunho?: string;
   grand?: number;
+  /** created_at que o banco devolve no insert do orçamento (F0 da via v2: base da gravação em sequência). */
+  criadoEm?: string;
 }
 
 const CLIENTE = { id: "c-1", name: "João Silva", generico: false };
@@ -61,7 +63,12 @@ function bancoFalso(op: Opcoes = {}) {
       if (modo === "insert") {
         const erro = op.erroInsert?.[tabela];
         if (erro) return Promise.resolve({ data: null, error: { message: erro } });
-        if (tabela === "service_orders") return Promise.resolve({ data: { id: "orc-novo", service_order_number: "ORÇ-00151" }, error: null });
+        if (tabela === "service_orders") {
+          return Promise.resolve({
+            data: { id: "orc-novo", service_order_number: "ORÇ-00151", ...(op.criadoEm ? { created_at: op.criadoEm } : {}) },
+            error: null,
+          });
+        }
         if (tabela === "products") return Promise.resolve({ data: { id: "prod-novo" }, error: null });
         return Promise.resolve({ data: null, error: null });
       }
@@ -201,6 +208,37 @@ Deno.test("5. com origem, product_id ignora o resolvedor e grava o preço do pre
   assertEquals(r.itens_no_catalogo[0].item, "Bateria LiFePO4 100Ah");
   assertEquals(r.itens_no_catalogo[0].origem, "proposta do retorno");
   assertEquals(b.leituras.filter(([t]) => t === "products").every(([, c]) => !c.includes("sale_price")), true);
+});
+
+Deno.test("5b. F0 da via v2 (E15): peças e serviços com created_at em sequência a partir do da OS, na ordem do pedido", async () => {
+  // Num INSERT só, as linhas empatavam no now() e a via as ordenava pelo id (aleatório).
+  const b = bancoFalso({ criadoEm: "2026-11-16T18:00:00.123456+00:00" });
+  const args = {
+    ...BASE,
+    items: [
+      { product_id: "p-1", keyword: "Bateria", quantity: 1, unit_price: 2000 },
+      { keyword: "Cabo especial 35 mm", quantity: 3, unit_price: 320 },
+    ],
+    labor: [{ description: "Instalação", price: 800 }, { description: "Deslocamento", price: 100 }, { description: "Teste final", price: 50 }],
+  };
+  // deno-lint-ignore no-explicit-any
+  const r = await montarOrcamento(args, ctxDe(b.db), COM_ORIGEM) as any;
+  assertEquals(r.ok, true);
+  assertEquals(
+    b.linhas("service_order_parts").map((p) => [p.product_id, p.created_at]),
+    [["p-1", "2026-11-16T18:00:00.124Z"], ["prod-novo", "2026-11-16T18:00:00.125Z"]],
+  );
+  assertEquals(
+    b.linhas("service_order_services").map((s) => [s.name_snapshot, s.created_at]),
+    [["Instalação", "2026-11-16T18:00:00.124Z"], ["Deslocamento", "2026-11-16T18:00:00.125Z"], ["Teste final", "2026-11-16T18:00:00.126Z"]],
+  );
+  // sem o created_at do banco: o relógio da edge, estritamente crescente
+  const semBase = bancoFalso();
+  // deno-lint-ignore no-explicit-any
+  await montarOrcamento({ ...BASE, items: [], labor: args.labor }, ctxDe(semBase.db)) as any;
+  const ts = semBase.linhas("service_order_services").map((s) => Date.parse(s.created_at));
+  assertEquals(ts.length, 3);
+  assert(ts[0] < ts[1] && ts[1] < ts[2]);
 });
 
 Deno.test("6. com origem, product_id inexistente não cria nada", async () => {

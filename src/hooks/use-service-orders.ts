@@ -9,6 +9,7 @@ export { avisarSeNaoMudou, type ResultadoDoStatusPelaTela } from '@/lib/status-p
 import {
   argumentosDaPortaCompleta, ehPortaAusente, statusPelaTelaSemAPorta,
 } from '../../supabase/functions/_shared/porta-ausente';
+import { instantesEmSequencia, ordenarLinhas } from '../../supabase/functions/_shared/linhas-da-os';
 import type { QueryData } from '@supabase/supabase-js';
 import { useOptionalAuth } from '@/hooks/use-auth';
 import {
@@ -774,15 +775,19 @@ export function useUpdateQuoteStatus() {
 }
 
 // Service order services (labor lines)
+// Na ordem da via (created_at, id — porte da via v2, F0): a lista da OS, a via impressa e o "Lançar a via" numeram
+// sobre ela, e sem o id as linhas gravadas juntas saíam na ordem física, que um UPDATE troca. O sistema do catálogo
+// (services.service_system) vem para a via (DadosDaVia); na F0 não é impresso.
 export function useServiceOrderServices(serviceOrderId: string | undefined) {
   return useQuery({
     queryKey: ['so-services', serviceOrderId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('service_order_services')
-        .select('*, services(name)')
+        .select('*, services(name, service_system)')
         .eq('service_order_id', serviceOrderId!)
-        .order('created_at', { ascending: true });
+        .order('created_at', { ascending: true })
+        .order('id', { ascending: true });
       if (error) throw error;
       return data;
     },
@@ -943,11 +948,18 @@ export function useDuplicateServiceOrder() {
       if (createErr) throw createErr;
 
       const newId = (newSO as any).id;
+      // Porte da via v2, F0 (E15): a cópia sai na ordem da origem (created_at, id — o embutido vem sem ordem) e cada
+      // linha ganha created_at em sequência a partir do da OS nova, o que o BANCO devolveu (não o relógio do
+      // navegador). Num INSERT só, todas ganhariam o mesmo now() e a ordem da via ficaria por conta do id (aleatório).
+      const criadaEm = (newSO as any).created_at as string | null | undefined;
 
       // 3. Copy services
       if (source.service_order_services?.length > 0) {
-        const svcs = source.service_order_services.map((s: any) => ({
+        const origem = ordenarLinhas(source.service_order_services as any[]);
+        const quando = instantesEmSequencia(criadaEm, origem.length);
+        const svcs = origem.map((s: any, i: number) => ({
           service_order_id: newId,
+          created_at: quando[i],
           service_id: s.service_id,
           name_snapshot: s.name_snapshot,
           description_snapshot: s.description_snapshot,
@@ -963,8 +975,11 @@ export function useDuplicateServiceOrder() {
       // 4. Copy parts — NOTE: never deduct stock on a duplicate.
       // Stock is only affected when an OS is actually executed (via PurchaseNeedsDialog).
       if (source.service_order_parts?.length > 0) {
-        const parts = source.service_order_parts.map((p: any) => ({
+        const origem = ordenarLinhas(source.service_order_parts as any[]);
+        const quando = instantesEmSequencia(criadaEm, origem.length);
+        const parts = origem.map((p: any, i: number) => ({
           service_order_id: newId,
+          created_at: quando[i],
           product_id: p.product_id,
           quantity: p.quantity,
           unit_cost_snapshot: p.unit_cost_snapshot,
