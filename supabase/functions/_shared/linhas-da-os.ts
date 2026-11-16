@@ -125,11 +125,14 @@ function palavras(texto: unknown): string[] {
   return semAcento(texto).split(/[^a-z0-9]+/).filter(Boolean);
 }
 
-/** As palavras do que foi dito, sem as vazias e sem o "serviço"/"item"/"linha" do começo ("serviço do inversor"). */
+/**
+ * As palavras do que foi dito, sem as vazias e sem o "serviço"/"item"/"linha" do começo ("serviço do inversor"). As
+ * vazias saem PRIMEIRO: com artigo na frente ("o serviço do inversor") o "serviço" também sai — antes ele ficava e
+ * passava a ser exigido no nome (revisão da F0, achador-4).
+ */
 function palavrasDitas(texto: unknown): string[] {
-  const todas = palavras(texto);
-  const sem = /^(servico|serv|item|linha)$/.test(todas[0] ?? '') && todas.length > 1 ? todas.slice(1) : todas;
-  return sem.filter((p) => !PALAVRAS_VAZIAS.has(p));
+  const sem = palavras(texto).filter((p) => !PALAVRAS_VAZIAS.has(p));
+  return /^(servico|serv|item|linha)$/.test(sem[0] ?? '') && sem.length > 1 ? sem.slice(1) : sem;
 }
 
 /**
@@ -168,9 +171,9 @@ export type Achado<T> =
 
 /**
  * A linha que o dono quis dizer. `linhas` já na ordem canônica e numeradas (`numerarLinhas`). Ordem de busca:
- * id exato → número dito → ordinal por extenso ("o quarto") → nome igual → todas as palavras ditas são palavras
- * inteiras do nome → começo de palavra (≥ 4 letras: "parametriz" acha "Parametrização"). Mais de uma candidata em
- * qualquer passo = pergunta.
+ * id exato → número dito → ordinal por extenso ("o quarto") → rótulo "N · nome" (número E nome batem) → nome igual →
+ * todas as palavras ditas são palavras inteiras do nome → começo de palavra (≥ 4 letras: "parametriz" acha
+ * "Parametrização"). Mais de uma candidata em qualquer passo = pergunta.
  */
 export function acharLinha<T extends LinhaNumerada>(linhas: readonly T[], dito: unknown): Achado<T> {
   const bruto = String(dito ?? '').trim();
@@ -219,6 +222,14 @@ export function acharLinha<T extends LinhaNumerada>(linhas: readonly T[], dito: 
     }
     return null;
   };
+
+  // O rótulo que as próprias perguntas mostram ("4 · Fita LED externa", "4 - Fita LED externa"), copiado de volta: vale
+  // só se o nome bate com a linha 4; senão segue o caminho normal, que pergunta (revisão da F0, achador-4).
+  const rotulo = /^(\d{1,3})\s*[·.:\-–—]\s*(.+)$/.exec(bruto);
+  if (rotulo) {
+    const l = linhas.find((x) => x.numero === Number(rotulo[1]));
+    if (l && semAcento(l.nome) === semAcento(rotulo[2])) return { linha: l };
+  }
 
   const alvo = semAcento(bruto);
   const iguais = escolher(linhas.filter((l) => semAcento(l.nome) === alvo));

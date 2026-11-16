@@ -123,6 +123,16 @@ export const CASOS_DO_ACHADOR: Array<[dito: string, esperado: number | 'fora_da_
   ['o segundo serviço', 2],
   ['quinto', 5],
   ['o sétimo', 'fora_da_faixa'],
+  // "serviço" depois do artigo e o rótulo copiado da pergunta (revisão da F0, achador-4)
+  ['o serviço do inversor', 3],
+  ['a linha do LED', 4],
+  ['4 · Fita LED externa', 4],
+  ['4 - Fita LED externa', 4],
+  ['4 – fita led externa', 4],
+  ['4. Fita LED externa', 4],
+  ['3: Troca do inversor 3000 W', 3],
+  // número e nome que não batem: pergunta, nunca escolhe um dos dois
+  ['4 · Troca do inversor 3000 W', 'nao_achei'],
 ];
 
 /** ordinalDito: o texto inteiro é um ordinal por extenso? */

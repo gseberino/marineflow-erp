@@ -307,3 +307,36 @@ Deno.test("update_service_order_via: 'o quarto' com o cômodo na linha 2 → per
   assert(r2.ok, JSON.stringify(r2));
   assertEquals(r2.servicos_atualizados.map((s: Linha) => [s.numero, s.servico]), [[4, "Troca do disjuntor"]]);
 });
+
+// ═══ "o serviço do inversor" e o rótulo "N · nome" copiado da pergunta (revisão da F0, achador-4) ═══════════════════
+
+Deno.test("remover: 'o serviço do inversor' (com artigo) acha 'Instalação do inversor' como 'serviço do inversor' acha", async () => {
+  const db = bancoFalso(orcamentoComCabo4());
+  const r = await tool(serviceOrderTools, "remove_service_order_item").execute({ service_order_id: OS, description: "o serviço do inversor" }, ctxCom(db)) as Linha;
+  assert(r.ok, JSON.stringify(r));
+  assertEquals(r.removido.descricao, "Instalação do inversor");
+  assertEquals(db.tabelas.service_order_services.map((s) => s.id), ["s2", "s3", "s4"]);
+});
+
+Deno.test("update_service_order_via: '4 · Troca do disjuntor' (rótulo copiado) marca a 4; número e nome trocados perguntam", async () => {
+  const servicos = () => ["Instalação do inversor", "Ar-condicionado do quarto", "Fita LED externa", "Troca do disjuntor"].map((n, i) => ({
+    id: `l${i + 1}`, service_order_id: OS, created_at: T(i + 1), name_snapshot: n, field_status: "a_fazer", field_status_note: null,
+  }));
+  const os = () => [{ id: OS, service_order_number: "OS-00903", status: "in_progress", technician_notes: null, internal_notes: null, check_in_at: null, check_out_at: null }];
+  for (const dito of ["4 · Troca do disjuntor", "4 - Troca do disjuntor", "o serviço do disjuntor"]) {
+    const db = bancoFalso({ service_orders: os(), service_order_services: servicos() });
+    const r = await tool(fieldOpsTools, "update_service_order_via").execute(
+      { service_order_id: OS, servicos: [{ servico: dito, situacao: "feito" }] },
+      ctxCom(db),
+    ) as Linha;
+    assert(r.ok, `${dito}: ${JSON.stringify(r)}`);
+    assertEquals(r.servicos_atualizados.map((s: Linha) => [s.numero, s.servico]), [[4, "Troca do disjuntor"]], dito);
+  }
+  const trocado = bancoFalso({ service_orders: os(), service_order_services: servicos() });
+  const r = await tool(fieldOpsTools, "update_service_order_via").execute(
+    { service_order_id: OS, servicos: [{ servico: "3 · Troca do disjuntor", situacao: "feito" }] },
+    ctxCom(trocado),
+  ) as Linha;
+  assertEquals(r.nada_gravado, true, JSON.stringify(r));
+  assertEquals(trocado.gravacoes.length, 0);
+});
