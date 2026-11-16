@@ -58,22 +58,24 @@ export function ViaEntryDialog({
 }) {
   const lancar = useLancarVia();
 
+  // Os serviços como estão no papel: número da OS inteira, cobrança fora (numera ANTES de tirar).
+  const doPapel = useMemo(() => numerarLinhas(services).filter((s) => !ehLinhaDeCobranca(s)), [services]);
+
+  // Só as linhas do papel: a de cobrança escondida, com situação já gravada, acendia o Lançar sem nada marcado na tela
+  // e era regravada no clique (revisão da F1, consumidores-1).
   const inicial = useMemo((): LancamentoDaVia => ({
     chegada: isoParaInputLocal(checkInAt),
     saida: isoParaInputLocal(checkOutAt),
-    servicos: Object.fromEntries(services.map((s) => [s.id, {
+    servicos: Object.fromEntries(doPapel.map((s) => [s.id, {
       situacao: DA_VOLTA.has(s.field_status || '') ? (s.field_status as SituacaoDaVolta) : '',
       motivo: s.field_status_note || '',
     }])),
     relato: '',
     materialExtra: '',
-  }), [services, checkInAt, checkOutAt]);
+  }), [doPapel, checkInAt, checkOutAt]);
 
   const [l, setL] = useState<LancamentoDaVia>(inicial);
   useEffect(() => { if (open) setL(inicial); }, [open, inicial]);
-
-  // Os serviços como estão no papel: número da OS inteira, cobrança fora (numera ANTES de tirar).
-  const doPapel = useMemo(() => numerarLinhas(services).filter((s) => !ehLinhaDeCobranca(s)), [services]);
 
   const setServico = (id: string, patch: { situacao?: SituacaoDaVolta | ''; motivo?: string }) =>
     setL((p) => ({ ...p, servicos: { ...p.servicos, [id]: { ...p.servicos[id], ...patch } } }));

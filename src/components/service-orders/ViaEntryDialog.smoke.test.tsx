@@ -1,5 +1,5 @@
 // Smoke da tela "Lançar a via": o escritório passa o papel para o sistema.
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -38,6 +38,8 @@ function renderDialog(onSaved = vi.fn(), services: Array<{ id: string; name_snap
 }
 
 describe('ViaEntryDialog — Lançar a via', () => {
+  beforeEach(() => { chamadas.length = 0; });
+
   it('mostra os serviços da OS na ordem da folha', () => {
     renderDialog();
     expect(screen.getByText(/Lançar a via · OS-00104/)).toBeTruthy();
@@ -58,6 +60,21 @@ describe('ViaEntryDialog — Lançar a via', () => {
     expect(screen.getByText('4 · Retirada do carregador — inclui frete de ida e volta')).toBeTruthy();
     expect(screen.queryByText(/Frete do equipamento/)).toBeNull();
     expect(screen.queryByText(/^2 · /)).toBeNull();
+  });
+
+  it('linha de cobrança com situação gravada não acende o Lançar nem vai no lançamento (revisão da F1, consumidores-1)', async () => {
+    const user = userEvent.setup();
+    renderDialog(vi.fn(), [
+      { id: 'l1', name_snapshot: 'Conversão da geladeira para 12V', field_status: 'a_fazer' },
+      { id: 'l2', name_snapshot: 'Frete do equipamento', field_status: 'feito' },
+    ]);
+    // nada visível marcado e a OS sem chegada nem saída: o botão fica apagado
+    expect((screen.getByRole('button', { name: 'Lançar' }) as HTMLButtonElement).disabled).toBe(true);
+    // marcando o serviço do papel, o lançamento leva só ele (o frete escondido nunca é regravado)
+    const grupo = screen.getByRole('group', { name: /Conversão da geladeira/ });
+    await user.click(grupo.querySelectorAll('button')[0]); // Feito
+    await user.click(screen.getByRole('button', { name: 'Lançar' }));
+    expect(chamadas[chamadas.length - 1].lancamento.servicos).toEqual({ l1: { situacao: 'feito', motivo: '' } });
   });
 
   it('sem nada preenchido, o botão Lançar fica apagado', () => {
