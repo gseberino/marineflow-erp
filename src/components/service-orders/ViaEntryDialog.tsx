@@ -10,6 +10,8 @@ import {
 import { useLancarVia } from '@/hooks/use-lancar-via';
 import { isoParaInputLocal } from '@/lib/datetime-local';
 import { temAlgoParaLancar, type LancamentoDaVia, type SituacaoDaVolta } from '@/lib/lancar-via';
+import { ehLinhaDeCobranca } from '@/lib/route-sheet';
+import { numerarLinhas } from '../../../supabase/functions/_shared/linhas-da-os';
 
 const OPCOES: Array<{ valor: SituacaoDaVolta; rotulo: string }> = [
   { valor: 'feito', rotulo: 'Feito' },
@@ -22,6 +24,7 @@ const DA_VOLTA = new Set(['feito', 'parcial', 'nao_feito']);
 export interface ViaEntryService {
   id: string;
   name_snapshot?: string | null;
+  services?: { name?: string | null } | null;
   field_status?: string | null;
   field_status_note?: string | null;
 }
@@ -32,6 +35,10 @@ export interface ViaEntryService {
  * Quem lança é o escritório, com a folha na mão (escolha do dono, 01/10/2026). A ordem dos
  * campos é a ordem da folha: chegada e saída, a volta de cada serviço, o relato e o material
  * além do previsto. Campo em branco não muda nada.
+ *
+ * O número de cada serviço é o da via (porte da via v2, F1): a posição na OS inteira, na ordem em
+ * que as linhas chegam (created_at, id). A linha de cobrança (frete, deslocamento, insumos — 4A) não
+ * vai ao papel, então também não aparece aqui, e os outros mantêm o número ("1, 2, 3, 5").
  */
 export function ViaEntryDialog({
   open, onOpenChange, orderId, orderNumber, services, notasAtuais, notasInternasAtuais, checkInAt, checkOutAt, onSaved,
@@ -64,6 +71,9 @@ export function ViaEntryDialog({
 
   const [l, setL] = useState<LancamentoDaVia>(inicial);
   useEffect(() => { if (open) setL(inicial); }, [open, inicial]);
+
+  // Os serviços como estão no papel: número da OS inteira, cobrança fora (numera ANTES de tirar).
+  const doPapel = useMemo(() => numerarLinhas(services).filter((s) => !ehLinhaDeCobranca(s)), [services]);
 
   const setServico = (id: string, patch: { situacao?: SituacaoDaVolta | ''; motivo?: string }) =>
     setL((p) => ({ ...p, servicos: { ...p.servicos, [id]: { ...p.servicos[id], ...patch } } }));
@@ -104,14 +114,14 @@ export function ViaEntryDialog({
           </div>
         </div>
 
-        {services.length > 0 && (
+        {doPapel.length > 0 && (
           <div className="space-y-2">
             <Label>Serviços</Label>
-            {services.map((s, i) => {
+            {doPapel.map((s) => {
               const atual = l.servicos[s.id]?.situacao || '';
               return (
                 <div key={s.id} className="space-y-2 rounded-md border p-2.5">
-                  <div className="text-sm font-medium">{i + 1} · {s.name_snapshot || 'Serviço'}</div>
+                  <div className="text-sm font-medium">{s.numero} · {s.name_snapshot || s.services?.name || 'Serviço'}</div>
                   <div className="flex flex-wrap gap-1.5" role="group" aria-label={`Situação de ${s.name_snapshot || 'serviço'}`}>
                     {OPCOES.map((o) => (
                       <Button

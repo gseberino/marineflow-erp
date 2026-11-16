@@ -14,7 +14,12 @@ vi.mock('@/hooks/use-lancar-via', () => ({
   }),
 }));
 
-function renderDialog(onSaved = vi.fn()) {
+const SERVICOS = [
+  { id: 'l1', name_snapshot: 'Conversão da geladeira para 12V', field_status: 'a_fazer' },
+  { id: 'l2', name_snapshot: 'Tampa da boia', field_status: 'so_levantar' },
+];
+
+function renderDialog(onSaved = vi.fn(), services: Array<{ id: string; name_snapshot: string; field_status?: string }> = SERVICOS) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={qc}>
@@ -23,10 +28,7 @@ function renderDialog(onSaved = vi.fn()) {
         onOpenChange={() => {}}
         orderId="os1"
         orderNumber="OS-00104"
-        services={[
-          { id: 'l1', name_snapshot: 'Conversão da geladeira para 12V', field_status: 'a_fazer' },
-          { id: 'l2', name_snapshot: 'Tampa da boia', field_status: 'so_levantar' },
-        ]}
+        services={services}
         notasAtuais="antes"
         onSaved={onSaved}
       />
@@ -41,6 +43,21 @@ describe('ViaEntryDialog — Lançar a via', () => {
     expect(screen.getByText(/Lançar a via · OS-00104/)).toBeTruthy();
     expect(screen.getByText('1 · Conversão da geladeira para 12V')).toBeTruthy();
     expect(screen.getByText('2 · Tampa da boia')).toBeTruthy();
+  });
+
+  it('a linha de cobrança (frete, deslocamento, insumos) não aparece, e o próximo mantém o número da via', () => {
+    renderDialog(vi.fn(), [
+      { id: 'l1', name_snapshot: 'Conversão da geladeira para 12V' },
+      { id: 'l2', name_snapshot: 'Frete do equipamento' },
+      { id: 'l3', name_snapshot: 'Tampa da boia' },
+      { id: 'l4', name_snapshot: 'Retirada do carregador — inclui frete de ida e volta' },
+    ]);
+    expect(screen.getByText('1 · Conversão da geladeira para 12V')).toBeTruthy();
+    expect(screen.getByText('3 · Tampa da boia')).toBeTruthy();
+    // frete depois do travessão é detalhe do serviço: fica
+    expect(screen.getByText('4 · Retirada do carregador — inclui frete de ida e volta')).toBeTruthy();
+    expect(screen.queryByText(/Frete do equipamento/)).toBeNull();
+    expect(screen.queryByText(/^2 · /)).toBeNull();
   });
 
   it('sem nada preenchido, o botão Lançar fica apagado', () => {

@@ -2346,6 +2346,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   </DropdownMenuItem>
                   {orderId && (
                     <DropdownMenuItem
+                      // Só com serviços, material e cabeçalho carregados: imprimir antes saía com a folha pela metade.
+                      disabled={viaDoTecnico.carregando}
                       onClick={() => {
                         // O que vai faltar no papel aparece antes; o escritório decide.
                         if (viaDoTecnico.faltas.length) setFaltasDaVia(viaDoTecnico.faltas);
@@ -2354,6 +2356,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                       className="gap-2"
                     >
                       <Printer className="h-4 w-4" /> Via do técnico
+                      {viaDoTecnico.carregando && (
+                        <span className="ml-auto text-xs text-muted-foreground">carregando…</span>
+                      )}
                     </DropdownMenuItem>
                   )}
                   {orderId && (
