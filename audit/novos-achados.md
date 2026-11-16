@@ -4203,3 +4203,42 @@ mudam comportamento fora do escopo; cada um tem a menor mudança indicada.
 - **Onde:** `src/hooks/use-service-orders.ts:609` e `:858` (`const { id: _oldId, ...reinsertData }`).
 - **Efeito:** a linha "desfeita" pela tela perde a identidade: o histórico mostra uma exclusão e uma inclusão de itens diferentes, e o material da agenda (os_material, CASCADE) não volta.
 - **Menor mudança:** reinserir com o mesmo id (a restauração do histórico já faz assim).
+
+## Via do técnico v2 — porte, F0 (16/11/2026) — achados laterais, NÃO corrigidos de passagem
+
+Achados durante a F0 do porte (ordem `created_at, id` onde se numera, achador único de "serviço N", impressão por
+conteúdo). Plano: bancada `porte/PLANO.md` §3. Ficam aqui porque estão fora do escopo da F0.
+
+### [NOVO-via-01] Listas de serviço que não numeram ainda saem sem desempate (`created_at` só, ou sem ordem)
+
+- **Onde (não numeram; fora do porte por decisão do plano):** PDF do orçamento/OS (`supabase/functions/_shared/pdf/dados.ts:205`, `:214`, mapeado em `:374`);
+  detalhe embutido da OS e do técnico (`src/hooks/use-service-orders.ts` ~`:44` e ~`:84`, `SO_DETAIL_SELECT*`), "Ver OS rápido"
+  (`src/components/VerOSRapido.tsx:77`), link público (`src/pages/PublicServiceOrderView.tsx:106-109`), histórico do veículo
+  (`src/pages/VesselDetail.tsx:39`), NFS-e (`supabase/functions/fiscal-emit/index.ts:183-186`), follow-up
+  (`supabase/functions/ai-followup-runner/index.ts:96`, `.limit(4)` sem ordem = "os 4 primeiros" ao acaso), lembrete de revisão
+  (`supabase/functions/_shared/revisao/lembretes.ts:85-88`), cotação a fornecedor e rascunho de roteiro
+  (`supabase/functions/_shared/ai/tools/quotes.ts:31-33`, `route-drafting.ts:33-36`). No banco: `seguranca_da_via`,
+  `generate_service_order_steps` e `ai_orcamento_tecnico_pacote` ordenam só por `created_at`; `_ai_orcamento_tecnico_montar`
+  (0 usos) não foi conferido quanto a INSERT de várias linhas com o mesmo `now()`.
+- **Efeito:** nos documentos com empate antigo (18 em produção, 3 abertos), a ordem dessas telas pode diferir da via e mudar
+  depois de um UPDATE. Documento novo do assistente e cópia de OS já não empatam (E15, gravação em sequência).
+- **Menor mudança:** `.order('created_at').order('id')` no PostgREST; no embutido, `ordenarLinhas` (`_shared/linhas-da-os.ts`);
+  nas funções SQL, `order by created_at, id` numa migração. Estender a varredura `src/test/ordem-das-linhas-da-os.test.ts`.
+
+### [NOVO-via-02] Duplicar OS pela tela não confere o erro de gravar serviços, peças e despesas
+
+- **Onde:** `src/hooks/use-service-orders.ts`, `useDuplicateServiceOrder` (~`:953-1007`): `await supabase.from('service_order_services').insert(svcs)`,
+  o mesmo para `service_order_parts` e `service_order_expenses`, sem olhar o `error`.
+- **Efeito:** uma falha (RLS, coluna, rede) deixa a cópia sem as linhas e a tela diz que duplicou. É o defeito que o assistente
+  tinha até 06/10 (`so-ops.ts`, "a cópia perdia TODAS as peças… a resposta dizia 'copiei 2'") e lá foi consertado com o desfazer.
+- **Menor mudança:** conferir o `error` de cada insert e, havendo falha, apagar a cópia incompleta e lançar (molde do
+  `duplicate_service_order` em `supabase/functions/_shared/ai/tools/so-ops.ts`).
+
+### [NOVO-via-03] Rodar os portões suja a working copy: `deno.lock` reescrito e um snapshot com fim de linha trocado
+
+- **Onde:** `npm run test:edge` / `npm run check:edge` (deno) acrescentam ~4.960 linhas a `deno.lock` (os `specifiers` npm do
+  `package.json`); `npx vitest run` regrava `src/pages/__snapshots__/FiscalEmission.emissao.test.tsx.snap` só com outro fim de
+  linha (LF × CRLF). Visto no worktree do porte, em 16/11/2026, já na base `9a69bfac` (antes de qualquer mudança da F0).
+- **Efeito:** depois dos portões, `git status` mostra dois arquivos que ninguém mudou; um `git add` descuidado os levaria ao commit.
+- **Menor mudança:** decidir se o `deno.lock` regenerado entra no repo (ou usar `--frozen`/`--no-lock` nos scripts deno) e fixar o
+  fim de linha dos snapshots no `.gitattributes`. Mexe em script de teste: tarefa dedicada (regra 5).
