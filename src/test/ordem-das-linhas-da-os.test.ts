@@ -21,6 +21,11 @@ import { join } from 'node:path';
 const RAIZ = process.cwd();
 const ler = (arquivo: string) => readFileSync(join(RAIZ, arquivo), 'utf8').replace(/\r\n/g, '\n');
 
+/** `.order('created_at'[, { ascending: true }]).order('id'`: o par da regra. */
+const CREATED_AT_E_ID = /\.order\(\s*['"]created_at['"](?:\s*,\s*\{\s*ascending:\s*true\s*\})?\s*\)\s*\.order\(\s*['"]id['"]/;
+/** O mesmo par, mas a partir do 1º `.order(` da cadeia: um `.order()` antes dele muda a ordem primária (revisão final, c-6). */
+const CREATED_AT_E_ID_PRIMEIRO = new RegExp('^' + CREATED_AT_E_ID.source);
+
 /** Cada `.from('<tabela>')` de LEITURA (select sem insert/update/delete, e não a de uma linha só pelo id). */
 export function leiturasSemDesempate(codigo: string, tabela: string): { leituras: number; semId: string[] } {
   const re = new RegExp(`\\.from\\(\\s*['"]${tabela}['"]\\s*\\)`, 'g');
@@ -36,7 +41,10 @@ export function leiturasSemDesempate(codigo: string, tabela: string): { leituras
     leituras++;
     // `created_at` ascendente SEGUIDO de `id`, e nada descendente na cadeia: só "tem um .order('id')" deixava passar
     // `.order('id')` sozinho (a ordem vira a do uuid), `id` antes de `created_at` e os dois descendentes (ordem-3).
-    const emOrdem = /\.order\(\s*['"]created_at['"](?:\s*,\s*\{\s*ascending:\s*true\s*\})?\s*\)\s*\.order\(\s*['"]id['"]/.test(cadeia);
+    // E o par vem PRIMEIRO: achar o par em qualquer ponto deixava passar `.order('name_snapshot')` antes dele, e a
+    // numeração passava a seguir o nome (revisão final, c-6).
+    const i = cadeia.indexOf('.order(');
+    const emOrdem = i >= 0 && CREATED_AT_E_ID_PRIMEIRO.test(cadeia.slice(i));
     if (!emOrdem || /ascending:\s*false/.test(cadeia)) {
       const linha = codigo.slice(0, m.index).split('\n').length;
       semId.push(`linha ${linha}: ${cadeia.replace(/\s+/g, ' ').slice(0, 140)}`);
@@ -85,16 +93,19 @@ describe('ordem das linhas da OS: created_at, id onde se numera', () => {
     expect(r.semId[0]).toContain('linha 2');
   });
 
-  it('a varredura exige created_at ASCENDENTE seguido de id: id sozinho, id antes e descendente não passam (revisão da F0, ordem-3)', () => {
+  it('a varredura exige created_at ASCENDENTE seguido de id, como 1ª ordem: id sozinho, id antes, descendente e outro .order() antes do par não passam (ordem-3, c-6)', () => {
     const codigo = `
       const e = await sb.from('service_order_services').select('*').eq('service_order_id', x).order('id');
       const f = await sb.from('service_order_services').select('*').eq('service_order_id', x).order('id').order('created_at');
       const g = await sb.from('service_order_services').select('*').eq('service_order_id', x).order('created_at', { ascending: false }).order('id', { ascending: false });
       const h = await sb.from("service_order_services").select("*").eq("service_order_id", x)
         .order("created_at", { ascending: true }).order("id", { ascending: true });
-      const i = await sb.from('service_order_services').select('*').eq('service_order_id', x).order('created_at').order('id', { ascending: false });`;
+      const i = await sb.from('service_order_services').select('*').eq('service_order_id', x).order('created_at').order('id', { ascending: false });
+      const j = await sb.from('service_order_services').select('*').eq('service_order_id', x).order('name_snapshot').order('created_at', { ascending: true }).order('id', { ascending: true });
+      const k = await sb.from('service_order_services').select('*').eq('service_order_id', x).order('id').order('created_at').order('id');`;
     const r = leiturasSemDesempate(codigo, 'service_order_services');
-    expect(r.leituras).toBe(5);
-    expect(r.semId.map((s) => s.slice(0, s.indexOf(':')))).toEqual(['linha 2', 'linha 3', 'linha 4', 'linha 7']);
+    expect(r.leituras).toBe(7);
+    // j e k têm o par created_at → id, mas depois de outro .order(): a ordem primária é a do nome / do uuid (c-6)
+    expect(r.semId.map((s) => s.slice(0, s.indexOf(':')))).toEqual(['linha 2', 'linha 3', 'linha 4', 'linha 7', 'linha 8', 'linha 9']);
   });
 });
