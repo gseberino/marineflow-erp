@@ -15,6 +15,11 @@ import { camposDoTipo, campoDaUnidade, ehFeminino, rotuloDaUnidade } from '../un
 import { hashCurto } from '../whatsapp/idempotencia.ts';
 import { numerarLinhas, ordenarLinhas } from '../linhas-da-os.ts';
 import { isQuoteStatus } from './document-type.ts';
+import { ehCobranca, notaDoMaterial, semValores } from './via-texto.ts';
+import { type LinhaDeAtencao, linhasDeAtencao } from './via-atencao.ts';
+
+// semValores mora em via-texto.ts (porte da via v2, F1); continua saindo daqui para quem já importava.
+export { semValores };
 
 // ── O roteiro de execução (tipos e funções puras que moravam em src/hooks/use-service-steps.ts) ──
 
@@ -132,6 +137,11 @@ export interface RouteSheetHeader {
     shorePower?: string | null;
     notes?: string | null;
   } | null;
+  /**
+   * Orçamento ainda não aprovado (isQuoteStatus): a folha diz no topo que o técnico só executa com o OK do escritório
+   * (rodada 1, item c). montarViaDoTecnico preenche pelo status quando o cabeçalho não traz.
+   */
+  orcamentoEmAprovacao?: boolean | null;
   /** Identidade da empresa — a mesma do PDF do orçamento. */
   companyName?: string | null;
   companyLogoUrl?: string | null;
@@ -144,6 +154,11 @@ export interface RouteSheetExtras {
   services?: Array<{
     /** Id da linha da OS: liga o material lançado para este serviço ao cartão dele. */
     id?: string | null;
+    /**
+     * O número do serviço na OS INTEIRA (numerarLinhas): o mesmo da tela "Lançar a via" e do "serviço N" do
+     * assistente. A linha de cobrança sai do papel e os outros mantêm o número (4A). Sem ele, a posição na lista.
+     */
+    numero?: number | null;
     name: string;
     description?: string | null;
     quantity?: number | null;
@@ -177,6 +192,11 @@ export interface RouteSheetExtras {
    * imprime todos, para o roteiro continuar sendo testado à parte.
    */
   roteiro?: 'seguranca' | 'completo';
+  /**
+   * O quadro "Atenção" (via aprovada, 14–16/11/2026): uma linha curta por risco grave, no lugar das páginas de
+   * "Segurança por sistema". Só no modo `via` (montarViaDoTecnico, via-atencao.ts). Vazio ou ausente = sem quadro.
+   */
+  atencao?: LinhaDeAtencao[] | null;
 }
 
 /**
@@ -261,6 +281,16 @@ export function segurancaSemRoteiro(serviceOrderId: string, linhas: LinhaDeSegur
 /** Azul-marinho da HBR, o mesmo do PDF que o cliente já recebe. */
 const BRAND = '#002B5B';
 
+/**
+ * A fonte: "Open Sans" primeiro — é a ÚNICA fonte do Chromium do /api/pdf (@sparticuz/chromium); o PDF do WhatsApp
+ * sai nela e as contagens de folhas aprovadas foram medidas nela. No navegador do escritório cai na Arial.
+ * Ela NÃO tem "⚠" nem "→": o ⚠ é o desenho TRI e a seta entre as datas virou "até".
+ */
+const FONTE = '"Open Sans", Arial, Helvetica, sans-serif';
+
+/** O ⚠ como desenho (a fonte do servidor não tem o caractere U+26A0). */
+const TRI = '<svg class="tri" viewBox="0 0 20 18" role="img" aria-label="perigo"><path d="M10 1 19.3 17H.7Z" fill="#111"/><path d="M10 6.3v5.4" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/><circle cx="10" cy="14.3" r="1.25" fill="#fff"/></svg>';
+
 function escapeHtml(value: string | null | undefined): string {
   if (!value) return '';
   return value
@@ -284,35 +314,21 @@ function formatDateBr(iso: string | null | undefined): string {
 }
 
 /**
- * Tira do texto toda linha com valor em reais. A descrição da OS também vai para o
- * orçamento do cliente; se um dia alguém escrever condição de pagamento nela, o
- * técnico continua sem ver preço (decisão do dono, 12/08: preço não vai na via).
- */
-export function semValores(texto: string | null | undefined): string {
-  if (!texto) return '';
-  return texto
-    .split(/\r?\n/)
-    .filter((linha) => !/R\$/i.test(linha))
-    .join('\n')
-    .trim();
-}
-
-/**
  * O que vai faltar no papel — o aviso antes de imprimir. O escritório decide se completa ou
  * imprime assim; o técnico, sem poder ligar, é quem pagaria pela lacuna.
+ *
+ * Porte da via v2 (F1, escolha E19): saíram "local e acesso" (sem local, a via diz "Oficina HBR" — o
+ * serviço é na oficina quase sempre) e "segurança (nenhum sistema…)" (a via não imprime mais a segurança
+ * por sistema; o quadro Atenção vem dos serviços). "Telefone de contato" lê o cabeçalho COMPLETO: a folha
+ * leva os números no fechamento, mas o cabeçalho continua com eles.
  */
 export function faltasDaVia(
   h: RouteSheetHeader,
   materials: RouteMaterial[],
+  /** Quantos serviços vão ao papel (sem as linhas de cobrança). */
   quantidadeDeServicos: number,
-  /** A via não terá a parte de segurança: nem roteiro, nem sistema identificado nos serviços. */
-  semSeguranca = false,
 ): string[] {
   const faltas: string[] = [];
-  if (semSeguranca && quantidadeDeServicos > 0) faltas.push('segurança (nenhum sistema identificado nos serviços)');
-  // Vaga é de barco: no veículo o campo nem aparece no cadastro (22/10/2026).
-  const vaga = camposDoTipo(h.assetType).nauticos ? h.dockPosition : null;
-  if (!h.marinaName && !vaga && !(h.siteAccess || '').trim()) faltas.push('local e acesso');
   const temTelefone = (h.clientPhone || h.clientWhatsapp || h.onSiteContact?.phone || '').trim();
   if (!temTelefone) faltas.push('telefone de contato');
   if (!h.scheduledAt) faltas.push('data e hora');
@@ -400,8 +416,15 @@ function whenLine(h: RouteSheetHeader): string {
   if (!inicio) return '<span class="vazio">A combinar com o escritório</span>';
   const fimValido = h.scheduledEndAt && h.scheduledAt
     && new Date(h.scheduledEndAt).getTime() > new Date(h.scheduledAt).getTime();
-  return fimValido ? `<b>${inicio}</b> → ${formatDateBr(h.scheduledEndAt)}` : `<b>${inicio}</b>`;
+  // "até", não a seta: a Open Sans do servidor (a única fonte do PDF do WhatsApp) não tem o "→" — sairia um quadradinho.
+  return fimValido ? `<b>${inicio}</b> até ${formatDateBr(h.scheduledEndAt)}` : `<b>${inicio}</b>`;
 }
+
+/**
+ * Sem marina, vaga nem acesso na OS, o serviço é na oficina (rodada 2, item h: a ficha vai pendurada no veículo e o
+ * serviço é na oficina quase 100%). Antes dizia "Local não informado na OS. Confirme com o cliente antes de sair.".
+ */
+export const ONDE_PADRAO = 'Oficina HBR';
 
 function whereLine(h: RouteSheetHeader): string {
   const partes = [
@@ -409,9 +432,7 @@ function whereLine(h: RouteSheetHeader): string {
     camposDoTipo(h.assetType).nauticos && h.dockPosition && `vaga ${escapeHtml(h.dockPosition)}`,
   ].filter(Boolean);
   const acesso = semValores(h.siteAccess);
-  if (!partes.length && !acesso) {
-    return '<span class="vazio">Local não informado na OS. Confirme com o cliente antes de sair.</span>';
-  }
+  if (!partes.length && !acesso) return `<b>${ONDE_PADRAO}</b>`;
   return [
     partes.length ? `<b>${partes.join(' · ')}</b>` : '',
     acesso ? `<div class="acesso">${paragrafos(acesso)}</div>` : '',
@@ -427,27 +448,59 @@ const SITUACAO: Record<string, { selo: string; frase?: string; pede_volta: boole
   nao_feito: { selo: 'NÃO FEITO NA ÚLTIMA VISITA', pede_volta: true },
 };
 
-function contactLines(h: RouteSheetHeader): string {
-  const linhas: string[] = [];
+/** Os telefones do cliente e do contato no local, já decididos: o que vai ao fechamento e o que a folha 1 diz. */
+function telefonesDoContato(h: RouteSheetHeader) {
   const tel = (h.clientPhone || '').trim();
   const zap = (h.clientWhatsapp || '').trim();
-  const numeros = tel && zap && tel.replace(/\D/g, '') === zap.replace(/\D/g, '')
-    ? `tel./WhatsApp ${escapeHtml(tel)}`
-    : [tel && `tel. ${escapeHtml(tel)}`, zap && `WhatsApp ${escapeHtml(zap)}`].filter(Boolean).join(' · ');
+  const digitos = (s: string) => s.replace(/\D/g, '');
+  const span = (rotulo: string, n: string) => `<span class="tel">${rotulo} ${escapeHtml(n)}</span>`;
+  // Mesmo número no telefone e no WhatsApp sai uma vez só.
+  const numerosDoCliente = tel && zap && digitos(tel) === digitos(zap)
+    ? span('tel./WhatsApp', tel)
+    : [tel && span('tel.', tel), zap && span('WhatsApp', zap)].filter(Boolean).join(' · ');
+  const telDoLocal = (h.onSiteContact?.phone || '').trim();
+  // Contato no local com o mesmo número do cliente não repete o número.
+  const localRepete = !!telDoLocal && [tel, zap].some((n) => n && digitos(n) === digitos(telDoLocal));
+  return { numerosDoCliente, telDoLocal, localRepete, span };
+}
+
+/**
+ * "Com quem falar", na folha 1 (rodada 2, item g): quem é, sem os números — a ficha vai pendurada no veículo do
+ * cliente. No lugar do número, onde ele está ("telefone no fim da ficha"); sem número, "sem telefone no cadastro".
+ */
+function contactLines(h: RouteSheetHeader): string {
+  const linhas: string[] = [];
+  const { numerosDoCliente, telDoLocal, localRepete } = telefonesDoContato(h);
+  const noFim = '<span class="vazio">telefone no fim da ficha</span>';
   if (h.clientName) {
-    linhas.push(`Cliente: <b>${escapeHtml(h.clientName)}</b>${
-      numeros ? ` — ${numeros}` : ' — <span class="vazio">sem telefone no cadastro</span>'}`);
+    linhas.push(`Cliente: <b>${escapeHtml(h.clientName)}</b> — ${
+      numerosDoCliente ? noFim : '<span class="vazio">sem telefone no cadastro</span>'}`);
   }
   const contato = h.onSiteContact;
   if (contato?.name) {
     linhas.push(`No local: <b>${escapeHtml(contato.name)}</b>${
       contato.role ? ` (${escapeHtml(contato.role)})` : ''}${
-      contato.phone ? ` — tel. ${escapeHtml(contato.phone)}` : ''}`);
+      telDoLocal ? ` — ${localRepete ? '<span class="vazio">mesmo telefone do cliente</span>' : noFim}` : ''}`);
   } else if (h.requestedBy && h.requestedBy.trim() && h.requestedBy.trim() !== (h.clientName || '').trim()) {
     linhas.push(`Pedido por: <b>${escapeHtml(h.requestedBy)}</b>`);
   }
   if (h.companyPhone) linhas.push(`Escritório: <b>${escapeHtml(h.companyPhone)}</b>`);
   return linhas.map((l) => `<div>${l}</div>`).join('');
+}
+
+/**
+ * Os números do cliente e do contato no local, no fechamento, ao lado de Chegada/Saída (rodada 2, item g). Só o
+ * número que a folha 1 indicaria: cliente com nome e número; contato no local com nome, número e que não repete o
+ * do cliente. Cada um numa linha. Vazio = nada a mostrar.
+ */
+export function contatoDoFechamento(h: RouteSheetHeader): string {
+  const { numerosDoCliente, telDoLocal, localRepete, span } = telefonesDoContato(h);
+  const contato = h.onSiteContact;
+  return [
+    h.clientName && numerosDoCliente && `<b>Cliente:</b> ${escapeHtml(h.clientName)} — ${numerosDoCliente}`,
+    contato?.name && telDoLocal && !localRepete && `<b>No local:</b> ${escapeHtml(contato.name)}${
+      contato.role ? ` (${escapeHtml(contato.role)})` : ''} — ${span('tel.', telDoLocal)}`,
+  ].filter(Boolean).join('<br>');
 }
 
 /**
@@ -466,6 +519,14 @@ function contactLines(h: RouteSheetHeader): string {
  * Avaliação que orientou o desenho (01/10/2026): a via imprimia só o nome dos
  * serviços e deixava de fora o que já estava no sistema (pedido do cliente,
  * telefone, vaga, marca e modelo).
+ *
+ * A via aprovada pelo dono (14–16/11/2026; porte da via v2, F1 — a referência é a bancada
+ * render-r3.ts): a ficha vai PENDURADA no veículo. Número da OS grande, o veículo numa linha
+ * própria, o aviso de orçamento em aprovação, o rosto numa linha (quando · onde · com quem
+ * falar, sem os números do cliente — eles vão para o fechamento), a separação de materiais em
+ * 2 colunas, cartões mais baixos com o número da OS inteira (a cobrança não vai), o quadro
+ * Atenção no lugar das páginas de segurança por sistema e o fechamento inteiro num bloco que não
+ * se parte, terminando no "No fim: fotografe…". Nenhum caractere fora da Open Sans do servidor.
  */
 export function buildRouteSheetHtml(
   header: RouteSheetHeader,
@@ -503,13 +564,21 @@ export function buildRouteSheetHtml(
       <div class="sectitle">O que já sabemos do sistema elétrico ${escapeHtml(desteTipo)}</div>
       <div class="pedido">${linhasEletricas.map((l) => `<p>${l}</p>`).join('')}</div>
     </div>` : '';
+  // A ficha vai PENDURADA no veículo (rodada 2, item f): o veículo numa linha grande logo abaixo do cabeçalho, e o
+  // rosto numa linha só (quando · onde · com quem falar), com o técnico embaixo.
+  const unidadeHtml = `<div class="unidade"><span class="lab">${escapeHtml(veiculo.rotulo)}</span><div class="uval">${
+    veiculo.valor ? escapeHtml(veiculo.valor) : '<span class="vazio">não informado</span>'}</div></div>`;
+  // Orçamento ainda não aprovado pelo cliente (rodada 1, item c): o papel diz antes de tudo.
+  const avisoOrcamentoHtml = header.orcamentoEmAprovacao
+    ? `
+    <div class="aviso orc"><b>Orçamento em aprovação:</b> o técnico só executa com o OK do escritório.</div>`
+    : '';
   const rostoHtml = `
     <div class="rosto">
-      <div class="campo"><span class="lab">${escapeHtml(veiculo.rotulo)}</span>${veiculo.valor ? escapeHtml(veiculo.valor) : '<span class="vazio">não informado</span>'}</div>
       <div class="campo"><span class="lab">Quando</span>${whenLine(header)}</div>
       <div class="campo"><span class="lab">Onde</span>${whereLine(header)}</div>
-      <div class="campo"><span class="lab">Com quem falar</span>${contatos || '<span class="vazio">sem contato no cadastro</span>'}</div>
-      ${tecnico ? `<div class="campo"><span class="lab">Técnico</span><b>${escapeHtml(tecnico)}</b></div>` : ''}
+      <div class="campo contato"><span class="lab">Com quem falar</span>${contatos || '<span class="vazio">sem contato no cadastro</span>'}</div>
+      ${tecnico ? `<div class="campo tecnico"><span class="lab">Técnico</span><b>${escapeHtml(tecnico)}</b></div>` : ''}
     </div>
     ${pedido ? `
     <div class="secao">
@@ -524,22 +593,20 @@ export function buildRouteSheetHtml(
     ${eletricoHtml}`;
 
   // ── Antes de sair: separação de materiais (ou o aviso de que não há nenhum) ──
+  // Em 2 colunas, linhas baixas (rodada 1, item b). A nota interna do sistema ("Cadastrado pelo orçamento —
+  // confirmar preço…") não vai ao papel; a escrita por gente vai (rodada 3, item j).
   const materiaisHtml = materials.length ? `
-    <table class="block">
-      <thead>
-        <tr><th colspan="2" class="blockname">Antes de sair · separação de materiais</th></tr>
-        <tr class="cols"><th></th><th>Confira item por item antes de sair. Falta descoberta no local custa o dia.</th></tr>
-      </thead>
-      <tbody>
-        ${materials.map((m) => `
-          <tr>
-            <td class="box"><span class="check"></span></td>
-            <td class="mat">${materialLine(m)}${
-              m.notes ? `<div class="detail">${escapeHtml(m.notes)}</div>` : ''
-            }</td>
-          </tr>`).join('')}
-      </tbody>
-    </table>` : `
+    <div class="secao materiais">
+      <div class="sectitle">Antes de sair · separação de materiais</div>
+      <div class="matnota">Confira item por item antes de sair. Falta descoberta no local custa o dia.</div>
+      <div class="matcols">${materials.map((m) => {
+        const nota = notaDoMaterial(m.notes);
+        return `
+        <div class="matitem"><span class="check sm"></span><div>${materialLine(m)}${
+          nota ? `<div class="detail">${escapeHtml(nota)}</div>` : ''}</div></div>`;
+      }).join('')}
+      </div>
+    </div>` : `
     <div class="aviso">
       <b>Nenhum material lançado nesta OS.</b> Confirme com o escritório o que levar antes de sair.
     </div>`;
@@ -565,14 +632,16 @@ export function buildRouteSheetHtml(
         const instrucao = semValores(s.technicianInstructions);
         const situacao = SITUACAO[s.fieldStatus || ''];
         const notaSituacao = semValores(s.fieldStatusNote);
+        // O rótulo "Instrução" na mesma linha do texto (rodada 3, item k); 2 linhas viram uma, juntas por espaço.
+        const instrucaoNaLinha = instrucao.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map(escapeHtml).join(' ');
         return `
         <div class="svc">
-          <div class="svctitle">${i + 1} · ${escapeHtml(s.name)}${qtd}${
+          <div class="svctitle">${s.numero ?? i + 1} · ${escapeHtml(s.name)}${qtd}${
             situacao ? ` <span class="selo">${situacao.selo}</span>` : ''}</div>
           ${!pessoa && s.responsavel ? `<div class="resp">Responsável: <b>${escapeHtml(s.responsavel)}</b></div>` : ''}
           ${situacao?.frase ? `<div class="situacao">${situacao.frase}</div>` : ''}
           ${notaSituacao ? `<div class="situacao">${escapeHtml(notaSituacao)}</div>` : ''}
-          ${instrucao ? `<div class="instrucao sm"><span class="lab">Instrução</span>${paragrafos(instrucao)}</div>` : ''}
+          ${instrucaoNaLinha ? `<div class="instrucao sm"><span class="lab">Instrução</span>${instrucaoNaLinha}</div>` : ''}
           ${descricao ? `<div class="detail">${paragrafos(descricao)}</div>` : ''}
           ${notas ? `<div class="detail">${paragrafos(notas)}</div>` : ''}
           ${doServico.length ? `<div class="svcmat"><span class="matlabel">Material deste serviço:</span>
@@ -681,6 +750,16 @@ export function buildRouteSheetHtml(
     </div>
     ${blocksHtml}` : '';
 
+  // ── Atenção: uma linha curta por risco grave (no lugar das páginas de segurança por sistema) ───
+  // O ⚠ é desenho (TRI): a Open Sans do servidor não tem o caractere U+26A0 — no PDF sairia um quadradinho.
+  const atencao = (extras.atencao ?? []).filter((a) => a.rotulo && a.texto);
+  const atencaoHtml = atencao.length ? `
+    <div class="secao atencao-box"><div class="sectitle">${TRI}Atenção</div>${
+      atencao.map((a) => `<div class="at"><b>${escapeHtml(a.rotulo)}:</b> ${escapeHtml(a.texto)}</div>`).join('')}</div>` : '';
+
+  // ── Fechamento: os números do cliente ao lado de Chegada/Saída (a folha 1 não os mostra) ───
+  const contatoFim = contatoDoFechamento(header);
+
   const logoHtml = header.companyLogoUrl
     ? `<img class="logo" src="${escapeHtml(header.companyLogoUrl)}" alt="">`
     : '';
@@ -695,10 +774,10 @@ export function buildRouteSheetHtml(
   @page {
     size: A4; margin: 11mm 10mm 14mm;
     @bottom-right { content: "${numero} · pág. " counter(page) " de " counter(pages);
-                    font: 8pt Arial, Helvetica, sans-serif; color: #444; }
+                    font: 8pt ${FONTE}; color: #444; }
   }
   * { box-sizing: border-box; }
-  body { font-family: Arial, Helvetica, sans-serif; color: #000; margin: 0; font-size: 11pt;
+  body { font-family: ${FONTE}; color: #000; margin: 0; font-size: 11pt;
          -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   p { margin: 0 0 1mm; }
 
@@ -710,38 +789,56 @@ export function buildRouteSheetHtml(
   .coname { font-size: 11pt; font-weight: bold; color: ${BRAND}; letter-spacing: .01em; }
   .doctype { text-align: right; white-space: nowrap; }
   .doctype .kind { font-size: 8pt; letter-spacing: .1em; text-transform: uppercase; color: #444; }
-  .doctype .num { font-size: 14pt; font-weight: bold; color: ${BRAND}; }
+  /* Para pendurar: número da OS e veículo legíveis de longe (rodada 2, f). */
+  .doctype .num { font-size: 28pt; font-weight: bold; color: ${BRAND}; line-height: 1.05; letter-spacing: .01em; }
+  .unidade { margin: 0 0 3.5mm; page-break-inside: avoid; }
+  .unidade .uval { font-size: 16pt; font-weight: bold; line-height: 1.2; }
+  .unidade .uval .vazio { font-size: 11pt; font-weight: normal; }
 
-  /* Folha de rosto: o que decide se a viagem vale a pena. */
-  .rosto { display: grid; grid-template-columns: 1fr 1fr; gap: 2.5mm 8mm; margin-bottom: 4mm;
-           page-break-inside: avoid; }
+  /* Folha de rosto numa linha: quando · onde · com quem falar; o técnico embaixo. */
+  .rosto { display: grid; grid-template-columns: fit-content(66mm) fit-content(47mm) minmax(0, 1fr); gap: 2.5mm 7mm;
+           margin-bottom: 4mm; page-break-inside: avoid; }
+  .rosto > .campo.contato .vazio { white-space: nowrap; }
+  .rosto > .campo.tecnico { grid-column: span 2; }
   .campo { font-size: 10pt; line-height: 1.35; }
   .lab { display: block; font-size: 7.5pt; letter-spacing: .09em; text-transform: uppercase; color: #444; }
   .vazio { font-style: italic; color: #333; }
   .secao { margin-bottom: 4mm; }
+  /* Título de seção nunca sozinho no pé da folha. */
   .sectitle { font-size: 11pt; text-transform: uppercase; letter-spacing: .06em; font-weight: bold;
-              padding: 2mm 0 1mm; border-bottom: 1pt solid #000; margin-bottom: 2mm; }
+              padding: 2mm 0 1mm; border-bottom: 1pt solid #000; margin-bottom: 2mm;
+              break-after: avoid; page-break-after: avoid; }
   .pedido { font-size: 10pt; line-height: 1.4; }
   .acesso { font-size: 9.5pt; margin-top: .8mm; }
   .instrucao { border-left: 2.5pt solid #000; padding: 1.5mm 0 1.5mm 3mm; margin-bottom: 4mm;
                font-size: 10pt; line-height: 1.4; page-break-inside: avoid; }
-  .instrucao.sm { font-size: 9pt; margin: 1.5mm 0; border-left-width: 1.8pt; }
+  .instrucao.sm { font-size: 9pt; margin: 1mm 0 .5mm; border-left-width: 1.8pt; }
+  /* O rótulo "Instrução" na mesma linha do texto (rodada 3, k). */
+  .instrucao.sm .lab { display: inline; margin-right: 1.5mm; }
   .selo { font-size: 7.5pt; font-weight: bold; letter-spacing: .05em; border: 1pt solid #000;
           padding: 0 1.2mm; white-space: nowrap; vertical-align: 1px; }
   .situacao { font-size: 9pt; font-weight: bold; margin-top: .8mm; }
   .aviso { border: 1.2pt solid #000; padding: 2.5mm 3mm; margin-bottom: 4mm; font-size: 10pt;
            page-break-inside: avoid; }
+  /* Orçamento em aprovação (rodada 1, c). */
+  .aviso.orc { border-width: 1.6pt; font-size: 13pt; margin-bottom: 3.5mm; }
   .limite { border: 1pt dashed #000; padding: 2.5mm 3mm; margin-bottom: 5mm; font-size: 10pt;
             page-break-inside: avoid; }
 
-  /* Cartão de serviço: o que fazer e o que devolver, juntos. */
-  .svc { border: .8pt solid #555; padding: 2.5mm 3mm; margin-bottom: 3mm; page-break-inside: avoid; }
-  .svctitle { font-weight: bold; font-size: 10.5pt; line-height: 1.3; }
+  /* Separação de materiais em 2 colunas (rodada 1, b). */
+  .materiais .matnota { font-size: 8.5pt; color: #333; margin: -1mm 0 1mm; }
+  .matcols { columns: 2; column-gap: 7mm; }
+  .matitem { display: flex; gap: 2mm; align-items: flex-start; break-inside: avoid; page-break-inside: avoid;
+             padding: 1mm 0; border-bottom: .4pt dotted #999; font-size: 9.5pt; line-height: 1.3; }
+
+  /* Cartão de serviço: o que fazer e o que devolver, juntos (mais baixo, rodada 1, a). */
+  .svc { border: .8pt solid #555; padding: 1.6mm 2.5mm 1.8mm; margin-bottom: 2mm; page-break-inside: avoid; }
+  .svctitle { font-weight: bold; font-size: 10.5pt; line-height: 1.25; }
   .svcmat { font-size: 9pt; margin-top: 1.5mm; }
   .resp { font-size: 9pt; margin-top: .8mm; }
   .outros { border: 1pt dashed #000; padding: 2.5mm 3mm; margin-bottom: 4mm; font-size: 9.5pt;
             line-height: 1.4; page-break-inside: avoid; }
-  .volta { font-size: 9pt; margin-top: 2.5mm; padding-top: 1.5mm; border-top: .4pt dotted #999;
+  .volta { font-size: 9pt; margin-top: 1.2mm; padding-top: 0; border-top: 0;
            display: flex; align-items: center; flex-wrap: wrap; gap: 1mm; }
   .rule.inline { display: inline-block; flex: 1; min-width: 40mm; height: 3.5mm; }
 
@@ -761,6 +858,7 @@ export function buildRouteSheetHtml(
   .check { display: block; width: 5mm; height: 5mm; border: 1pt solid #000;
            font-size: 9pt; line-height: 4.6mm; text-align: center; font-weight: bold; }
   .check.sm { display: inline-block; width: 3.6mm; height: 3.6mm; vertical-align: -.6mm; }
+  .matitem .check.sm { flex: none; margin-top: .5mm; }
   .stnote { font-size: 8.5pt; font-style: italic; margin-top: .8mm; }
   td.seq { width: 7mm; font-size: 9pt; color: #444; }
   td.mat { font-size: 10pt; }
@@ -769,6 +867,8 @@ export function buildRouteSheetHtml(
   .marks { font-weight: normal; font-size: 7.5pt; letter-spacing: .05em; border: .5pt solid #000;
            padding: 0 1mm; white-space: nowrap; }
   .detail { font-size: 9pt; color: #333; margin-top: .8mm; line-height: 1.35; }
+  .svc .detail { margin-top: .5mm; }
+  .matitem .detail { margin-top: .3mm; }
   .measure { font-size: 9pt; margin-top: 1.2mm; }
   .roteironote { font-size: 9pt; color: #222; }
   td.std { width: 14mm; font-size: 9pt; text-align: right; white-space: nowrap; }
@@ -779,17 +879,32 @@ export function buildRouteSheetHtml(
   .cap { font-size: 8pt; text-transform: uppercase; letter-spacing: .07em; color: #444; }
   .lines i { display: block; border-bottom: .4pt solid #bbb; height: 5mm; }
 
-  .write { border: 1pt solid #000; padding: 2.5mm 3mm; margin-bottom: 4mm;
+  /* Atenção: uma linha curta por risco grave; o triângulo é desenho (a fonte do servidor não tem o caractere). */
+  .atencao-box { border: 1pt solid #000; border-left-width: 3pt; padding: 2mm 3mm 2.5mm; page-break-inside: avoid; }
+  .atencao-box .sectitle { border-bottom: 0; margin-bottom: 1mm; }
+  .atencao-box .at { font-size: 10pt; margin: .9mm 0; line-height: 1.3; }
+  .tri { display: inline-block; width: 1.05em; height: .95em; vertical-align: -.13em; margin-right: .3em; }
+
+  /* O fechamento (chegada/saída, relato, material, assinaturas, foto e rodapé) nunca se parte. */
+  .fechamento { break-inside: avoid; page-break-inside: avoid; }
+  .write { border: 1pt solid #000; padding: 2mm 3mm; margin-bottom: 3mm;
            page-break-inside: avoid; }
   .write .wcap { font-size: 10pt; font-weight: bold; text-transform: uppercase;
                  letter-spacing: .05em; }
   .write .wsub { font-size: 8.5pt; color: #444; margin: .5mm 0 1.5mm; }
-  .horas { display: flex; gap: 10mm; font-size: 10pt; margin-bottom: 4mm; page-break-inside: avoid; }
+  .horas { display: flex; align-items: baseline; gap: 7mm; font-size: 10pt; margin-bottom: 3mm; page-break-inside: avoid; }
+  .horas > div { flex: none; white-space: nowrap; }
   .horas span { display: inline-block; min-width: 22mm; border-bottom: .5pt solid #000; }
+  /* Os números do cliente, no espaço livre ao lado de chegada/saída (rodada 2, g). */
+  .horas > div.contatofim { flex: 1 1 0; min-width: 0; white-space: normal; text-align: right;
+                            font-size: 8.5pt; line-height: 1.3; }
+  .horas .contatofim span.tel { white-space: nowrap; display: inline; min-width: 0; border-bottom: 0; }
+  /* A volta por foto, numa faixa de 1 linha (rodada 1, d). */
+  .fotofim { border: 1pt solid #000; padding: 1.3mm 2.5mm; margin-top: 4mm; font-size: 9.5pt; line-height: 1.3; }
 
-  .foot { margin-top: 4mm; border-top: 1.2pt solid ${BRAND}; padding-top: 2.5mm; font-size: 8.5pt;
-          color: #333; display: flex; justify-content: space-between; gap: 6mm; flex-wrap: wrap; }
-  .sign { margin-top: 6mm; display: flex; gap: 10mm; page-break-inside: avoid; }
+  .foot { margin-top: 3mm; border-top: 1.2pt solid ${BRAND}; padding-top: 2mm; font-size: 8.5pt;
+          color: #333; display: flex; justify-content: space-between; gap: .8mm 6mm; flex-wrap: wrap; }
+  .sign { margin-top: 4mm; display: flex; gap: 10mm; page-break-inside: avoid; }
   .sign > div { flex: 1; font-size: 8.5pt; }
   .sign .atesta { font-size: 9pt; min-height: 8mm; }
   .sign .linha { border-top: .5pt solid #000; padding-top: 1.2mm; margin-top: 7mm; }
@@ -813,6 +928,7 @@ export function buildRouteSheetHtml(
     </div>
   </div>
 
+  ${unidadeHtml}${avisoOrcamentoHtml}
   ${rostoHtml}
   ${materiaisHtml}
   ${limitesHtml}
@@ -820,10 +936,13 @@ export function buildRouteSheetHtml(
   ${outrosHtml}
   ${levantamentoHtml}
   ${roteiroHtml}
+  ${atencaoHtml}
 
+  <div class="fechamento">
   <div class="horas">
     <div>Chegada: <span></span></div>
-    <div>Saída: <span></span></div>
+    <div>Saída: <span></span></div>${contatoFim ? `
+    <div class="contatofim">${contatoFim}</div>` : ''}
   </div>
 
   <div class="write">
@@ -853,6 +972,7 @@ export function buildRouteSheetHtml(
     </div>
   </div>
 
+  <div class="fotofim"><b>No fim:</b> fotografe todas as folhas preenchidas e mande no WhatsApp do escritório, com as fotos do serviço pronto.</div>
   <div class="foot">
     <span>${header.companyPhone
       ? `Dúvida ou imprevisto: ligue para o escritório — <b>${escapeHtml(header.companyPhone)}</b>`
@@ -860,6 +980,7 @@ export function buildRouteSheetHtml(
     ${header.companyAddress || header.companyName
       ? `<span>${escapeHtml([header.companyName, header.companyAddress].filter(Boolean).join(' · '))}</span>`
       : ''}
+  </div>
   </div>
 </body>
 </html>`;
@@ -883,7 +1004,7 @@ export type ViaDoTecnicoHeader = Omit<
   'orderNumber' | 'companyName' | 'companyLogoUrl' | 'companyAddress' | 'companyPhone'
 > & {
   orderNumber?: string | null;
-  /** O status da OS (para a impressão saber se é orçamento em aprovação). Na F0 não é impresso. */
+  /** O status da OS: orçamento em aprovação (isQuoteStatus) sai no topo da folha e entra na impressão. */
   status?: string | null;
   /** Todos os técnicos da OS, em ordem alfabética (o primeiro é o technicianName). Na F0 só entra na impressão. */
   tecnicos?: string[] | null;
@@ -911,6 +1032,7 @@ export function viaHeaderFromOrder(order: any): ViaDoTecnicoHeader {
   return {
     orderNumber: order.service_order_number ?? null,
     status: order.status ?? null,
+    orcamentoEmAprovacao: isQuoteStatus(order.status),
     tecnicos,
     clientName: order.clients?.name ?? null,
     clientPhone: order.clients?.phone ?? null,
@@ -957,7 +1079,10 @@ export interface LinhaDaVia {
   created_at?: string | null;
   name_snapshot?: string | null;
   services?: { name?: string | null; service_system?: string | null } | null;
-  /** O sistema e o verbo da linha (a segurança lê): reclassificar muda o dado da via. Na F0 não são impressos. */
+  /**
+   * O sistema e o verbo da linha: reclassificar muda o dado da via. O sistema (o da linha ou, na falta, o do cadastro
+   * do serviço — decisão 3A) entra no quadro Atenção (via-atencao.ts).
+   */
   service_system?: string | null;
   service_verb?: string | null;
   service_id?: string | null;
@@ -990,14 +1115,21 @@ export interface DadosDaVia {
   passos: ServiceOrderStep[];
   materiais: RouteMaterial[];
   levantamento: RespostaDaVia[];
-  /** seguranca_da_via (banco): a segurança por sistema quando a OS não tem roteiro. */
-  seguranca: LinhaDeSeguranca[];
+  /**
+   * seguranca_da_via (banco). IGNORADO desde o porte da via v2 (F1, escolha E14): a via não imprime mais a segurança por
+   * sistema — o quadro Atenção lê o sistema de cada linha. A função do banco fica (a agenda usa); quem lê a via não a
+   * chama mais. Fica opcional só para não quebrar quem ainda passa.
+   */
+  seguranca?: LinhaDeSeguranca[];
   /** Nome de cada responsável citado nas linhas (payees.id → nome). */
   nomesDosResponsaveis: Record<string, string>;
 }
 
 export interface OpcoesDaVia {
-  /** `via` (menu Ações, WhatsApp): só a segurança do roteiro. `roteiro` (painel Roteiro): o roteiro completo. */
+  /**
+   * `via` (menu Ações, WhatsApp, agenda): a via aprovada — sem passo de roteiro nenhum, com o quadro Atenção.
+   * `roteiro` (painel Roteiro, escondido): o roteiro completo gravado, como sempre, sem o quadro.
+   */
   modo?: 'via' | 'roteiro';
   /** A via de uma pessoa (payees.id e nome). Ausente = a OS inteira, com o responsável de cada serviço. */
   pessoa?: { id: string; nome: string } | null;
@@ -1028,6 +1160,14 @@ function nomeDaLinha(l: LinhaDaVia): string {
   return l.name_snapshot || l.services?.name || 'Serviço';
 }
 
+/**
+ * Linha de COBRANÇA (frete, deslocamento, insumos no título curto — resposta 4A do dono): não vai aos cartões da via
+ * nem à tela "Lançar a via"; os outros serviços mantêm o número. Ela continua contando para o quadro Atenção.
+ */
+export function ehLinhaDeCobranca(l: { name_snapshot?: string | null; services?: { name?: string | null } | null }): boolean {
+  return ehCobranca(l.name_snapshot || l.services?.name || '');
+}
+
 /** A linha da OS como cartão de serviço da via. */
 export function servicoDaVia(
   l: LinhaDaVia,
@@ -1053,7 +1193,7 @@ export interface ViaMontada {
   passos: ServiceOrderStep[];
   materiais: RouteMaterial[];
   extras: RouteSheetExtras;
-  /** Quantos serviços vão no papel. */
+  /** Quantos serviços vão no papel (sem as linhas de cobrança). */
   servicos: number;
   /** A pessoa não tem serviço nesta OS: todos os da OS estão com outra pessoa. Não se manda via vazia. */
   semServicoDaPessoa: boolean;
@@ -1063,16 +1203,23 @@ export interface ViaMontada {
 export function montarViaDoTecnico(d: DadosDaVia, o: OpcoesDaVia = {}): ViaMontada {
   const modo = o.modo ?? 'via';
   const pessoa = o.pessoa ?? null;
-  const { minhas, outras } = pessoa ? recorteDaPessoa(d.linhas, pessoa.id) : { minhas: d.linhas, outras: [] as LinhaDaVia[] };
+  // O número de cada serviço é a posição dele na OS INTEIRA, na ordem em que as linhas chegam (quem lê do banco já
+  // ordenou por created_at, id): o mesmo da tela "Lançar a via" e do "serviço N" do assistente — também na via de uma
+  // pessoa (os cartões dela podem sair 2, 5, 7).
+  const numeradas = numerarLinhas(d.linhas);
+  const { minhas, outras } = pessoa ? recorteDaPessoa(numeradas, pessoa.id) : { minhas: numeradas, outras: [] as typeof numeradas };
   const idsMeus = new Set(minhas.map((l) => l.id));
   // Na via de uma pessoa, material e passo de serviço de outra pessoa ficam de fora; o que é da OS
   // inteira (sem serviço) vai para todo mundo.
   const daParte = (id: string | null | undefined) => !pessoa || !id || idsMeus.has(id);
+  // 4A: a cobrança (frete, deslocamento, insumos) sai do papel DEPOIS de numerar — os outros mantêm o número.
+  const noPapel = minhas.filter((l) => !ehLinhaDeCobranca(l));
 
   const header: RouteSheetHeader = {
     ...d.header,
     ...(o.diasNaAgenda?.length ? { diasNaAgenda: o.diasNaAgenda } : {}),
     orderNumber: d.header.orderNumber || 'OS',
+    orcamentoEmAprovacao: d.header.orcamentoEmAprovacao ?? isQuoteStatus(d.header.status),
     companyName: d.empresa.nome || null,
     companyLogoUrl: d.empresa.logoUrl || null,
     companyAddress: d.empresa.endereco || null,
@@ -1081,7 +1228,7 @@ export function montarViaDoTecnico(d: DadosDaVia, o: OpcoesDaVia = {}): ViaMonta
   const links = o.linksDasFotos ?? {};
   const extras: RouteSheetExtras = {
     roteiro: modo === 'via' ? 'seguranca' : 'completo',
-    services: minhas.map((l) => servicoDaVia(l, d.nomesDosResponsaveis)),
+    services: noPapel.map((l) => ({ ...servicoDaVia(l, d.nomesDosResponsaveis), numero: l.numero })),
     survey: d.levantamento
       .slice()
       .sort((a, b) => Number(a.seq ?? 0) - Number(b.seq ?? 0))
@@ -1094,25 +1241,26 @@ export function montarViaDoTecnico(d: DadosDaVia, o: OpcoesDaVia = {}): ViaMonta
     ...(pessoa
       ? {
           pessoa: { nome: pessoa.nome },
-          outrosServicos: outras.map((l) => ({
+          outrosServicos: outras.filter((l) => !ehLinhaDeCobranca(l)).map((l) => ({
             name: nomeDaLinha(l),
             responsavel: l.responsavel_payee_id ? d.nomesDosResponsaveis[l.responsavel_payee_id] ?? null : null,
           })),
         }
       : {}),
+    // O quadro Atenção (só na via): as energias das linhas da parte, a de cobrança inclusive (via-atencao.ts).
+    ...(modo === 'via' ? { atencao: linhasDeAtencao(d, pessoa) } : {}),
   };
-  const temSegurancaNoRoteiro = passosDeSeguranca(d.passos).length > 0;
-  const passosDaParte = d.passos.filter((p) => daParte(p.service_order_service_id));
-  const passos = modo === 'via' && !temSegurancaNoRoteiro
-    ? [...passosDaParte, ...segurancaSemRoteiro(d.serviceOrderId, d.seguranca)]
-    : passosDaParte;
+  // Na via (base "limpa" aprovada em 14/11), nenhum passo: nem a segurança por sistema gerada sem roteiro, nem o
+  // roteiro gravado — no lugar, o quadro Atenção. O painel Roteiro (modo `roteiro`) continua com o roteiro completo.
+  const passos = modo === 'via' ? [] : d.passos.filter((p) => daParte(p.service_order_service_id));
   return {
     header,
     passos,
     materiais: d.materiais.filter((m) => daParte(m.service_order_service_id)),
     extras,
-    servicos: minhas.length,
-    semServicoDaPessoa: !!pessoa && d.linhas.length > 0 && minhas.length === 0,
+    servicos: noPapel.length,
+    // OS só de cobrança é como OS sem serviço: a via sai com o aviso de sempre, não "vazia de pessoa".
+    semServicoDaPessoa: !!pessoa && d.linhas.some((l) => !ehLinhaDeCobranca(l)) && noPapel.length === 0,
   };
 }
 
@@ -1126,10 +1274,11 @@ export function htmlDaVia(m: ViaMontada): string {
 /**
  * Sobe quando a REGRA ou o DESENHO do papel muda (o que o técnico lê ou como lê). Sozinha, não reenvia nada: a agenda
  * só manda de novo quando o DADO muda (decidirAVia). 1 = hash do HTML, sem prefixo (até 16/11/2026); 2 = desenho de
- * produção com a impressão por conteúdo; a F1 (via aprovada) sobe para 3. O teste-trava de via-do-tecnico_test.ts
- * fixa o papel de fixtures: mudou a regra sem subir esta versão, ele falha.
+ * produção com a impressão por conteúdo (F0); 3 = a via aprovada pelo dono (base limpa + rodadas 1, 2 e 3: quadro
+ * Atenção, cartões numerados pela OS inteira sem a cobrança, veículo em linha própria, telefones no fechamento…).
+ * O teste-trava de via-do-tecnico_test.ts fixa o papel de fixtures: mudou a regra sem subir esta versão, ele falha.
  */
-export const VERSAO_DA_VIA = 2;
+export const VERSAO_DA_VIA = 3;
 /** Sobe só quando muda a LISTA de campos de retratoDoDado (é contrato). Raro: subir faz a próxima via sair com o aviso neutro. */
 export const VERSAO_DO_DADO = 1;
 

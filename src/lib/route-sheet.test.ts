@@ -226,15 +226,18 @@ describe('via do técnico — folha de rosto e volta (avaliação 01/10)', () =>
 
   it('traz veículo, local, vaga e com quem falar — tudo que já está no cadastro', () => {
     const html = buildRouteSheetHtml(rosto, []);
-    // O rótulo é o próprio tipo (decisão 9, 21/10/2026); nome e modelo no valor.
-    expect(html).toContain('<span class="lab">Motorhome</span>Itapoã · Itapoã Sprinter');
+    // O rótulo é o próprio tipo (decisão 9, 21/10/2026); nome e modelo no valor. Desde a via aprovada (16/11/2026,
+    // rodada 2), o veículo sai numa linha grande própria, logo abaixo do cabeçalho (a ficha vai pendurada).
+    expect(html).toContain('<div class="unidade"><span class="lab">Motorhome</span><div class="uval">Itapoã · Itapoã Sprinter</div></div>');
     expect(html).not.toContain('<span class="lab">Veículo</span>');
     // Vaga é de barco (22/10/2026): no motorhome o campo nem aparece no cadastro, então não vai ao papel.
     expect(html).toContain('Marina Itajaí');
     expect(html).not.toContain('vaga B-12');
     expect(buildRouteSheetHtml({ ...rosto, assetType: 'Lancha' }, [])).toContain('Marina Itajaí · vaga B-12');
-    // Mesmo número no telefone e no WhatsApp sai uma vez só.
-    expect(html).toContain('tel./WhatsApp (47) 99999-0000');
+    // Mesmo número no telefone e no WhatsApp sai uma vez só — no fechamento, ao lado de Chegada/Saída (rodada 2, g);
+    // a folha 1 diz onde ele está.
+    expect(html).toContain('<div class="contatofim"><b>Cliente:</b> Flávio — <span class="tel">tel./WhatsApp (47) 99999-0000</span></div>');
+    expect(html).toContain('Cliente: <b>Flávio</b> — <span class="vazio">telefone no fim da ficha</span>');
     expect(html).toContain('Pedido por: <b>Marinheiro João</b>');
     expect(html).toContain('Escritório: <b>(47) 3333-0000</b>');
   });
@@ -269,7 +272,9 @@ describe('via do técnico — folha de rosto e volta (avaliação 01/10)', () =>
 
   it('diz onde falta informação, para o técnico confirmar antes de sair', () => {
     const html = buildRouteSheetHtml({ orderNumber: 'OS-1', clientName: 'Sem fone' }, []);
-    expect(html).toContain('Local não informado na OS');
+    // Sem marina, vaga nem acesso, o serviço é na oficina (rodada 2, h — era "Local não informado na OS").
+    expect(html).toContain('<span class="lab">Onde</span><b>Oficina HBR</b>');
+    expect(html).not.toContain('Local não informado na OS');
     expect(html).toContain('sem telefone no cadastro');
     expect(html).toContain('A combinar com o escritório');
   });
@@ -382,11 +387,14 @@ describe('via do técnico — fase 2: instrução, local, contato no local e sit
     expect(html).not.toContain('Local não informado na OS');
   });
 
-  it('contato no local sai com função e telefone', () => {
+  it('contato no local sai com função; o telefone vai ao fechamento (rodada 2, g)', () => {
     const html = buildRouteSheetHtml({
       ...base, onSiteContact: { name: 'Seu João', role: 'Marinheiro', phone: '(47) 98888-0000' },
     }, []);
-    expect(html).toContain('No local: <b>Seu João</b> (Marinheiro) — tel. (47) 98888-0000');
+    expect(html).toContain('No local: <b>Seu João</b> (Marinheiro) — <span class="vazio">telefone no fim da ficha</span>');
+    expect(html).toContain('<b>No local:</b> Seu João (Marinheiro) — <span class="tel">tel. (47) 98888-0000</span>');
+    const [folha1] = html.split('<div class="fechamento">');
+    expect(folha1).not.toContain('98888-0000');
   });
 
   it('o que já se sabe do sistema elétrico do veículo vai junto', () => {
@@ -413,12 +421,12 @@ describe('via do técnico — fase 2: instrução, local, contato no local e sit
       assetRegistration: 'ABC1D23',
     }, []);
     // Modelo igual ao nome não se repete; a placa entra com o nome certo para veículo.
-    expect(motorhome).toContain('<span class="lab">Motorhome</span>Iveco Daily · placa ABC1D23');
+    expect(motorhome).toContain('<span class="lab">Motorhome</span><div class="uval">Iveco Daily · placa ABC1D23</div>');
     expect(motorhome).not.toMatch(/Embarcação:|Ativo/);
     const lancha = buildRouteSheetHtml({ ...base, assetName: 'Netuno II', assetType: 'Lancha', assetRegistration: '4410123456' }, []);
-    expect(lancha).toContain('<span class="lab">Lancha</span>Netuno II · inscrição 4410123456');
+    expect(lancha).toContain('<span class="lab">Lancha</span><div class="uval">Netuno II · inscrição 4410123456</div>');
     const vazio = buildRouteSheetHtml(base, []);
-    expect(vazio).toContain('<span class="lab">Embarcação ou veículo</span><span class="vazio">não informado</span>');
+    expect(vazio).toContain('<span class="lab">Embarcação ou veículo</span><div class="uval"><span class="vazio">não informado</span></div>');
   });
 
   it('serviço "só levantar" diz para não executar; "já feito" não pede volta', () => {
@@ -437,9 +445,12 @@ describe('via do técnico — fase 2: instrução, local, contato no local e sit
   });
 
   it('aviso antes de imprimir: lista o que vai faltar no papel', () => {
+    // Sem "local e acesso" desde a via aprovada (16/11/2026, E19): sem local, a via diz "Oficina HBR".
     expect(faltasDaVia(base, [], 0)).toEqual([
-      'local e acesso', 'telefone de contato', 'data e hora', 'serviços', 'material (nenhum lançado)',
+      'telefone de contato', 'data e hora', 'serviços', 'material (nenhum lançado)',
     ]);
+    // O telefone lido é o do cabeçalho completo (o da folha 1 só diz onde ele está): contato no local basta.
+    expect(faltasDaVia({ ...base, onSiteContact: { name: 'Seu João', phone: '47 98888' } }, [], 0)).not.toContain('telefone de contato');
     const completo = {
       ...base, siteAccess: 'Marina', clientPhone: '47 9999', scheduledAt: '2026-10-02T12:00:00Z',
     };
@@ -486,15 +497,14 @@ describe('via do técnico — segurança sem roteiro', () => {
     expect(p.block_note).toContain('sistema identificado pelo texto do serviço');
   });
 
-  it('o aviso antes de imprimir diz quando a via vai sair sem segurança', () => {
+  it('o aviso antes de imprimir não fala mais de segurança: a via não imprime a segurança por sistema (E19)', () => {
     const completo = {
-      orderNumber: 'OS-1', siteAccess: 'Marina', clientPhone: '47 9999', scheduledAt: '2026-10-02T12:00:00Z',
+      orderNumber: 'OS-1', clientPhone: '47 9999', scheduledAt: '2026-10-02T12:00:00Z',
     };
     const material = [{ id: 'm', quantity: 1, notes: null, service_order_service_id: null }] as never;
-    expect(faltasDaVia(completo, material, 2, true)).toEqual(['segurança (nenhum sistema identificado nos serviços)']);
-    expect(faltasDaVia(completo, material, 2, false)).toEqual([]);
-    // Sem serviço nenhum, o aviso já é "serviços": não repete.
-    expect(faltasDaVia(completo, material, 0, true)).toEqual(['serviços']);
+    expect(faltasDaVia(completo, material, 2)).toEqual([]);
+    // Sem serviço nenhum, o aviso é "serviços".
+    expect(faltasDaVia(completo, material, 0)).toEqual(['serviços']);
   });
 });
 

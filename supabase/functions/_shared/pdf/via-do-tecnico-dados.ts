@@ -11,15 +11,15 @@
 //   levantamento         → useServiceOrderSurvey (o mais recente; as respostas por seq)
 // A ordem `created_at, id` (porte da via v2, F0): sem o `id`, as linhas gravadas num INSERT só saíam na ordem física,
 // que um UPDATE troca — o "3" da via podia virar outro serviço depois de gravar a situação ou a instrução.
-//   segurança sem roteiro→ seguranca_da_via
 //   empresa              → app_settings (company_name, company_logo_url, company_address, phone)
+// A segurança por sistema (RPC seguranca_da_via) não é mais lida (porte da via v2, F1, escolha E14): a via aprovada
+// traz o quadro Atenção, calculado do sistema de cada linha. A função do banco fica: a agenda usa.
 
 import {
   type DadosDaVia,
   htmlDaVia,
   impressaoDaVia,
   type LinhaDaVia,
-  type LinhaDeSeguranca,
   montarViaDoTecnico,
   nomeDoArquivoDaVia,
   type RouteMaterial,
@@ -76,7 +76,7 @@ function falhou(rotulo: string, e: { message?: string } | null | undefined): nev
 /** Lê tudo o que a via da OS precisa, numa ida só (as leituras correm juntas). */
 export async function carregarDadosDaVia(admin: Admin, serviceOrderId: string, settings: Record<string, string>): Promise<LeituraDaVia> {
   try {
-    const [os, linhas, passos, materiais, levantamento, seguranca] = await Promise.all([
+    const [os, linhas, passos, materiais, levantamento] = await Promise.all([
       admin.from("service_orders").select(SELECT_DA_OS_DA_VIA).eq("id", serviceOrderId).maybeSingle(),
       admin.from("service_order_services").select("*, services(name, service_system)").eq("service_order_id", serviceOrderId)
         .order("created_at", { ascending: true }).order("id", { ascending: true }),
@@ -87,7 +87,6 @@ export async function carregarDadosDaVia(admin: Admin, serviceOrderId: string, s
       admin.from("service_surveys")
         .select("id, service_survey_answers(seq, question_snapshot, answer_value, skipped_reason, photo_path)")
         .eq("service_order_id", serviceOrderId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
-      admin.rpc("seguranca_da_via", { p_service_order_id: serviceOrderId }),
     ]);
     if (os.error) falhou("a OS", os.error);
     if (!os.data) return { ok: false, motivo: "a OS não foi encontrada" };
@@ -95,7 +94,6 @@ export async function carregarDadosDaVia(admin: Admin, serviceOrderId: string, s
     if (passos.error) falhou("o roteiro", passos.error);
     if (materiais.error) falhou("o material", materiais.error);
     if (levantamento.error) falhou("o levantamento", levantamento.error);
-    if (seguranca.error) falhou("a segurança por sistema", seguranca.error);
 
     const linhasDaVia = (linhas.data ?? []) as LinhaDaVia[];
     const ids = [...new Set(linhasDaVia.map((l) => l.responsavel_payee_id).filter((id): id is string => !!id))];
@@ -122,7 +120,6 @@ export async function carregarDadosDaVia(admin: Admin, serviceOrderId: string, s
       // As respostas vêm embutidas, sem ordem: na ordem do levantamento (seq), como a folha as imprime.
       levantamento: ((levantamento.data?.service_survey_answers ?? []) as DadosDaVia["levantamento"])
         .slice().sort((a, b) => Number(a.seq ?? 0) - Number(b.seq ?? 0)),
-      seguranca: (seguranca.data ?? []) as LinhaDeSeguranca[],
       nomesDosResponsaveis,
     };
     return {

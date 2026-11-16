@@ -16,6 +16,7 @@ import {
   VERSAO_DO_DADO,
   viaHeaderFromOrder,
 } from "./via-do-tecnico.ts";
+import { temNaOpenSansDoServidor } from "./open-sans-faixas.ts";
 
 const ALEX = { id: "p-alex", nome: "Alex Gonçalves Machado" };
 const ROBERTO = { id: "p-roberto", nome: "Roberto Daniel" };
@@ -159,8 +160,9 @@ const partes = (s: string) => lerImpressao(s)!;
 Deno.test("impressão: formato v<versão>.d<versão do dado>.<dado>.<papel>; o formato antigo (hash do HTML) lê como null", () => {
   const imp = impressaoDaVia(dados(), { pessoa: ALEX });
   assert(new RegExp(`^v${VERSAO_DA_VIA}\\.d${VERSAO_DO_DADO}\\.[0-9a-z]+\\.[0-9a-z]+$`).test(imp), imp);
-  assertEquals(VERSAO_DA_VIA, 2);
-  assertEquals(partes(imp).versao, 2);
+  // 3 = a via aprovada (porte da via v2, F1). O dado não mudou de lista: VERSAO_DO_DADO continua 1.
+  assertEquals(VERSAO_DA_VIA, 3);
+  assertEquals(partes(imp).versao, 3);
   assertEquals(partes(imp).versaoDoDado, 1);
   assertEquals(lerImpressao("772aau"), null);
   assertEquals(lerImpressao(null), null);
@@ -218,12 +220,15 @@ Deno.test("dado: nota do material e sistema da linha mudam o dado; preço não m
   const base = partes(impressaoDaVia(dados(), { pessoa: ALEX }));
   const notaNoMaterial = dados({ materiais: dados().materiais.map((m) => m.id === "m1" ? { ...m, notes: "interno: comprar na Elétrica X" } : m) });
   assertNotEquals(partes(impressaoDaVia(notaNoMaterial, { pessoa: ALEX })).dado, base.dado);
-  // Reclassificar o sistema (o caso TV/Sky do ORÇ-00131): na F0 a folha não imprime o sistema, então só o dado muda
-  // — a agenda pula ("a OS mudou só no que não vai ao papel"); a segurança que muda vem da RPC, no papel.
+  // Reclassificar o sistema (o caso TV/Sky do ORÇ-00131): o sistema só chega ao papel pelo quadro Atenção. Aqui o
+  // sistema novo não muda o quadro (o nome "Instalação do inversor" já dá 127/220 V e 12/24 V): só o dado muda.
   const reclassificada = dados({ linhas: dados().linhas.map((l) => l.id === "l1" ? { ...l, service_system: "audio_video" } : l) });
   const r = partes(impressaoDaVia(reclassificada, { pessoa: ALEX }));
   assertNotEquals(r.dado, base.dado);
   assertEquals(r.papel, base.papel);
+  // Um sistema que acrescenta uma energia muda o quadro, e com ele o papel.
+  const comGas = dados({ linhas: dados().linhas.map((l) => l.id === "l3" ? { ...l, service_system: "gas" } : l) });
+  assertNotEquals(partes(impressaoDaVia(comGas, { pessoa: ALEX })).papel, base.papel);
   // do catálogo também
   const doCatalogo = dados({ linhas: dados().linhas.map((l) => l.id === "l1" ? { ...l, services: { name: null, service_system: "eletrica_dc" } } : l) });
   assertNotEquals(partes(impressaoDaVia(doCatalogo, { pessoa: ALEX })).dado, base.dado);
@@ -280,7 +285,266 @@ Deno.test("TRAVA DE VERSÃO: o papel e o dado de 3 fixtures sintéticas (mudou? 
       impressaoDaVia(dados(), { pessoa: ALEX }),
       impressaoDaVia(dadosComFrete(), { pessoa: ALEX }),
     ],
-    ["v2.d1.1uhyv2v.1pnp11g", "v2.d1.1ll802l.xda7ko", "v2.d1.fuf6ax.1dnm4r0"],
+    // F1 (via aprovada): o PAPEL mudou e a versão subiu para 3; o DADO é o mesmo da F0 (a lista não mudou).
+    ["v3.d1.1uhyv2v.16evwbx", "v3.d1.1ll802l.cn4n7l", "v3.d1.fuf6ax.11a3vpc"],
     "a regra do papel (ou a lista do dado) mudou: suba a versão e atualize o valor",
   );
+});
+
+// ═══ A via aprovada (porte da via v2, F1): base limpa + rodadas 1, 2 e 3 ═══════════════════════════════════════
+
+/** A parte do HTML antes do fechamento (a folha 1 e os cartões) e o fechamento (chegada/saída, assinaturas, rodapé). */
+function partesDaFolha(html: string): { antes: string; fechamento: string } {
+  const [antes, fechamento = ""] = html.split('<div class="fechamento">');
+  return { antes, fechamento };
+}
+
+Deno.test("via: sem 'Segurança por sistema' nem passo nenhum, mesmo com a segurança do banco e roteiro gravado", () => {
+  const d = dados({
+    passos: [
+      passo({ id: "s1", seq: 1, title: "Desligar a chave geral", block: "1 · Antes de mexer — Elétrico DC", block_key: "abertura:eletrico_dc", kind: "safety" }),
+      passo({ id: "s2", seq: 2, title: "Passo do inversor", service_order_service_id: "l1", block: "Inversor" }),
+    ],
+    seguranca: [{
+      papel: "abertura", sistema: "eletrico_dc", bloco: "Antes de mexer — Elétrico DC", escopo: "Vale para: Troca das baterias.",
+      identificado_por: "cadastro", seq: 1, title: "Isolar o banco", detail: null, kind: "safety", is_killer: true,
+      requires_photo: false, requires_measure: null, measure_unit: null, mode: "do_confirm", standard_minutes: 2,
+    }],
+  });
+  for (const pessoa of [null, ALEX]) {
+    const m = montarViaDoTecnico(d, { modo: "via", pessoa });
+    assertEquals(m.passos, []);
+    const html = htmlDaVia(m);
+    for (const fora of ["Segurança por sistema", "Roteiro de execução", "Desligar a chave geral", "Isolar o banco", "Passo do inversor"]) {
+      assert(!html.includes(fora), `${fora} (${pessoa?.nome ?? "OS inteira"})`);
+    }
+  }
+  // o painel Roteiro (modo roteiro) continua com o roteiro gravado, sem o quadro Atenção
+  const roteiro = htmlDaVia(montarViaDoTecnico(d, { modo: "roteiro" }));
+  assertStringIncludes(roteiro, "Desligar a chave geral");
+  assertStringIncludes(roteiro, "Passo do inversor");
+  assert(!roteiro.includes('<div class="secao atencao-box">'));
+});
+
+Deno.test("via: quadro Atenção com o ⚠ desenhado (nunca o caractere); só as energias da parte de cada pessoa", () => {
+  const html = htmlDaVia(montarViaDoTecnico(dados(), { modo: "via" }));
+  assertStringIncludes(html, '<div class="secao atencao-box"><div class="sectitle"><svg class="tri"');
+  assertStringIncludes(html, "Atenção</div>");
+  assertStringIncludes(html, "<b>127/220 V:</b>");
+  // a bateria de lítio é material do serviço do Roberto: na OS inteira, lítio
+  assertStringIncludes(html, "<b>Bateria de lítio:</b>");
+  assert(!html.includes("⚠"));
+  // na via do Alex, o material de lítio (do serviço do Roberto) não entra: 12/24 V
+  const doAlex = htmlDaVia(montarViaDoTecnico(dados(), { modo: "via", pessoa: ALEX }));
+  assertStringIncludes(doAlex, "<b>12/24 V:</b>");
+  assert(!doAlex.includes("Bateria de lítio"));
+  // o quadro vem depois dos serviços e antes do fechamento
+  const { antes, fechamento } = partesDaFolha(html);
+  assert(antes.indexOf('<div class="secao atencao-box">') > antes.indexOf("Serviços desta OS"));
+  assert(!fechamento.includes('<div class="secao atencao-box">'));
+});
+
+Deno.test("4A: frete, deslocamento e insumos saem dos cartões; os outros mantêm o número (1, 2, 3, 5)", () => {
+  const d = dados({
+    linhas: [
+      { id: "c1", name_snapshot: "Instalação do inversor" },
+      { id: "c2", name_snapshot: "Troca das baterias" },
+      { id: "c3", name_snapshot: "Teste final" },
+      { id: "c4", name_snapshot: "Frete do equipamento" },
+      { id: "c5", name_snapshot: "Retirada do carregador — inclui frete de ida e volta" },
+    ],
+    materiais: [],
+  });
+  const m = montarViaDoTecnico(d, { modo: "via" });
+  assertEquals(m.servicos, 4);
+  assertEquals(m.extras.services?.map((s) => s.numero), [1, 2, 3, 5]);
+  const html = htmlDaVia(m);
+  assertStringIncludes(html, '<div class="svctitle">3 · Teste final');
+  assertStringIncludes(html, '<div class="svctitle">5 · Retirada do carregador — inclui frete de ida e volta');
+  assert(!html.includes("Frete do equipamento"));
+  assert(!html.includes('<div class="svctitle">4 ·'));
+});
+
+Deno.test("via de uma pessoa: cartões com o número da OS inteira; cobrança de outra pessoa nem no quadro dela", () => {
+  const html = htmlDaVia(montarViaDoTecnico(dados(), { modo: "via", pessoa: ALEX }));
+  assertStringIncludes(html, '<div class="svctitle">1 · Instalação do inversor');
+  assertStringIncludes(html, '<div class="svctitle">3 · Teste final');
+  const comFrete = dados({
+    linhas: [...dados().linhas, { id: "l4", name_snapshot: "Deslocamento técnico", responsavel_payee_id: ROBERTO.id }],
+  });
+  const doAlex = htmlDaVia(montarViaDoTecnico(comFrete, { modo: "via", pessoa: ALEX }));
+  assertStringIncludes(doAlex, "· Troca das baterias — Roberto Daniel");
+  assert(!doAlex.includes("Deslocamento técnico"), "cobrança não vai ao quadro de outra pessoa");
+});
+
+Deno.test("via de uma pessoa: só cobrança na parte dela = via vazia (não se manda); OS só de cobrança, não", () => {
+  const d = dados({
+    linhas: [
+      { id: "l1", name_snapshot: "Instalação do inversor", responsavel_payee_id: ROBERTO.id },
+      { id: "l2", name_snapshot: "Deslocamento técnico", responsavel_payee_id: null },
+    ],
+  });
+  const m = montarViaDoTecnico(d, { pessoa: ALEX });
+  assertEquals(m.servicos, 0);
+  assertEquals(m.semServicoDaPessoa, true);
+  const soFrete = dados({ linhas: [{ id: "l1", name_snapshot: "Frete", responsavel_payee_id: null }] });
+  assertEquals(montarViaDoTecnico(soFrete, { pessoa: ALEX }).semServicoDaPessoa, false);
+});
+
+Deno.test("onde: sem marina, vaga nem acesso, 'Oficina HBR'; com marina, a marina", () => {
+  const html = htmlDaVia(montarViaDoTecnico(dados(), {}));
+  assertStringIncludes(html, '<span class="lab">Onde</span><b>Oficina HBR</b>');
+  assert(!html.includes("Local não informado"));
+  const comMarina = htmlDaVia(montarViaDoTecnico(dados({ header: { ...dados().header, marinaName: "Marina Sintética" } }), {}));
+  assertStringIncludes(comMarina, "<b>Marina Sintética</b>");
+  assert(!comMarina.includes("Oficina HBR"));
+});
+
+Deno.test("telefones: na folha 1 só 'telefone no fim da ficha'; os números no fechamento, ao lado de Chegada/Saída", () => {
+  const header = {
+    ...dados().header,
+    clientPhone: "(47) 99999-0000", clientWhatsapp: "47 99999-0000",
+    onSiteContact: { name: "Seu João", role: "Marinheiro", phone: "(47) 98888-0000" },
+  };
+  const html = htmlDaVia(montarViaDoTecnico(dados({ header }), {}));
+  const { antes, fechamento } = partesDaFolha(html);
+  assertStringIncludes(antes, 'Cliente: <b>Lenine</b> — <span class="vazio">telefone no fim da ficha</span>');
+  assertStringIncludes(antes, 'No local: <b>Seu João</b> (Marinheiro) — <span class="vazio">telefone no fim da ficha</span>');
+  assert(!antes.includes("99999-0000") && !antes.includes("98888-0000"), "número nenhum na folha 1");
+  assertStringIncludes(fechamento, '<div class="contatofim"><b>Cliente:</b> Lenine — <span class="tel">tel./WhatsApp (47) 99999-0000</span>');
+  assertStringIncludes(fechamento, '<b>No local:</b> Seu João (Marinheiro) — <span class="tel">tel. (47) 98888-0000</span>');
+  // contato no local com o mesmo número do cliente: não repete
+  const mesmo = htmlDaVia(montarViaDoTecnico(dados({ header: { ...header, onSiteContact: { name: "Seu João", phone: "47999990000" } } }), {}));
+  assertStringIncludes(mesmo, 'No local: <b>Seu João</b> — <span class="vazio">mesmo telefone do cliente</span>');
+  assert(!partesDaFolha(mesmo).fechamento.includes("<b>No local:</b>"));
+  // sem número nenhum: a folha 1 diz, e o fechamento não ganha a linha
+  const semFone = htmlDaVia(montarViaDoTecnico(dados(), {}));
+  assertStringIncludes(semFone, 'Cliente: <b>Lenine</b> — <span class="vazio">sem telefone no cadastro</span>');
+  assert(!semFone.includes('<div class="contatofim">'));
+});
+
+Deno.test("aviso de orçamento em aprovação: só com o status de orçamento (draft)", () => {
+  const AVISO = '<div class="aviso orc"><b>Orçamento em aprovação:</b> o técnico só executa com o OK do escritório.</div>';
+  const com = (status: string) => htmlDaVia(montarViaDoTecnico(dados({ header: { ...dados().header, status } }), {}));
+  assertStringIncludes(com("draft"), AVISO);
+  for (const status of ["scheduled", "in_progress", "cancelled", "awaiting_client"]) assert(!com(status).includes("aviso orc"), status);
+  // pelo cabeçalho que a tela e o servidor montam
+  assertEquals(viaHeaderFromOrder({ status: "draft" }).orcamentoEmAprovacao, true);
+  assertEquals(viaHeaderFromOrder({ status: "open" }).orcamentoEmAprovacao, false);
+  // a ordem do topo: cabeçalho → veículo → aviso → rosto
+  const html = com("draft");
+  assert(html.indexOf('<div class="unidade">') < html.indexOf('<div class="aviso orc">'));
+  assert(html.indexOf('<div class="aviso orc">') < html.indexOf('<div class="rosto">'));
+});
+
+Deno.test("veículo numa linha própria, fora do rosto; número da OS grande", () => {
+  const html = htmlDaVia(montarViaDoTecnico(dados(), {}));
+  assertStringIncludes(html, '<div class="unidade"><span class="lab">Motorhome</span><div class="uval">Itapoã</div></div>');
+  const rosto = html.slice(html.indexOf('<div class="rosto">'), html.indexOf("Serviços desta OS"));
+  assert(!rosto.includes('<span class="lab">Motorhome</span>'));
+  assertStringIncludes(html, ".doctype .num { font-size: 28pt;");
+});
+
+Deno.test("instrução do serviço: o rótulo na mesma linha; duas linhas viram uma, juntas por espaço", () => {
+  const d = dados({
+    linhas: dados().linhas.map((l) => l.id === "l1" ? { ...l, technician_instructions: "Desligar o banco antes.\nConferir o aperto." } : l),
+  });
+  const html = htmlDaVia(montarViaDoTecnico(d, {}));
+  assertStringIncludes(html, '<div class="instrucao sm"><span class="lab">Instrução</span>Desligar o banco antes. Conferir o aperto.</div>');
+});
+
+Deno.test("material: em 2 colunas; a nota interna do sistema não vai, a nota escrita por gente vai", () => {
+  const d = dados({
+    materiais: [
+      { id: "m1", quantity: 1, notes: "Cadastrado pelo orçamento — confirmar preço e completar cadastro fiscal.", service_order_service_id: null, products: { name: "Disjuntor 32 A", sku: null, unit: "un" } },
+      { id: "m2", quantity: 2, notes: "Levar o vermelho", service_order_service_id: null, products: { name: "Cabo 16 mm²", sku: "CB-16", unit: "m" } },
+    ],
+  });
+  const html = htmlDaVia(montarViaDoTecnico(d, {}));
+  assertStringIncludes(html, '<div class="secao materiais">');
+  assertStringIncludes(html, '<div class="matitem"><span class="check sm"></span><div><b>1 un</b> · Disjuntor 32 A</div></div>');
+  assertStringIncludes(html, '<div class="detail">Levar o vermelho</div>');
+  assert(!html.includes("Cadastrado pelo orçamento"));
+  // sem material, o aviso de sempre
+  assertStringIncludes(htmlDaVia(montarViaDoTecnico(dados({ materiais: [] }), {})), "Nenhum material lançado nesta OS.");
+});
+
+Deno.test("fechamento num bloco só, com a faixa da foto no fim; a seta entre as datas virou 'até'", () => {
+  const d = dados({ header: { ...dados().header, scheduledEndAt: "2026-11-27T20:00:00Z" } });
+  const html = htmlDaVia(montarViaDoTecnico(d, {}));
+  const { fechamento } = partesDaFolha(html);
+  for (const parte of ["Chegada:", "O que encontrei", "Material usado além do previsto", "Assinatura do cliente", 'class="foot"']) {
+    assertStringIncludes(fechamento, parte);
+  }
+  assertStringIncludes(fechamento, '<div class="fotofim"><b>No fim:</b> fotografe todas as folhas preenchidas e mande no WhatsApp do escritório, com as fotos do serviço pronto.</div>');
+  assertStringIncludes(html, "<b>26/11/2026, 08:00</b> até 27/11/2026, 17:00");
+  assert(!html.includes("→"));
+  assertStringIncludes(html, 'font-family: "Open Sans", Arial, Helvetica, sans-serif');
+});
+
+/** O texto que vai ao papel: o corpo sem marcação (o SVG do ⚠ é desenho) e as strings de `content:` do CSS (rodapé). */
+function textoDoPapel(html: string): string {
+  const css = (html.match(/<style>[\s\S]*?<\/style>/g) ?? []).join("");
+  const conteudo = [...css.matchAll(/content:\s*"([^"]*)"/g)].map((m) => m[1]).join(" ");
+  const corpo = html.replace(/<style>[\s\S]*?<\/style>/g, "").replace(/<svg[\s\S]*?<\/svg>/g, "").replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ").replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+  return `${corpo} ${conteudo}`;
+}
+
+/** Uma OS que passa por tudo o que a via escreve (cobrança, situações, instrução, material ligado, levantamento…). */
+function dadosCompletos(): DadosDaVia {
+  return dados({
+    header: {
+      orderNumber: "ORÇ-00999", status: "draft", clientName: "Cliente Sintético", clientPhone: "(47) 99999-0000",
+      clientWhatsapp: "(47) 97777-0000", requestedBy: "Marinheiro Sintético",
+      onSiteContact: { name: "Contato Sintético", role: "Comandante", phone: "(47) 98888-0000" },
+      assetName: "Mar Azul", assetType: "Lancha", assetMaker: "Fabricante X", assetModel: "Modelo 32", assetRegistration: "4410123456",
+      marinaName: "Marina Sintética", dockPosition: "Píer 3", siteAccess: "Portão 2 — chave na secretaria",
+      technicianName: "Alex Gonçalves Machado", tecnicos: ["Alex Gonçalves Machado"],
+      scheduledAt: "2026-11-26T11:00:00Z", scheduledEndAt: "2026-11-28T20:00:00Z",
+      problemDescription: "Trocar as baterias por lítio e revisar o gerador.\nSinal: R$ 3.000",
+      technicianInstructions: "Não mexer no quadro de 220 V sem avisar.",
+      vehicleElectrical: { batteryBank: "4× AGM 105 Ah", inverterCharger: "MultiPlus 12/3000", shorePower: "Cabo de cais 30 A", notes: "Chave geral atrás do banco" },
+    },
+    linhas: [
+      { id: "x1", name_snapshot: "Troca das baterias por LiFePO4 200 Ah", quantity: 4, billing_unit_snapshot: "un", technician_instructions: "Conferir a polaridade.\nApertar a 12 N·m.", responsavel_payee_id: ALEX.id },
+      { id: "x2", name_snapshot: "Revisão do gerador Onan", field_status: "parcial", field_status_note: "faltou o filtro", responsavel_payee_id: ROBERTO.id },
+      { id: "x3", name_snapshot: "Insumos elétricos" },
+      { id: "x4", name_snapshot: "Troca do volante e da buzina", field_status: "so_levantar", description_snapshot: "Volante com folga; medir antes.", notes: "Levar o extrator." },
+      { id: "x5", name_snapshot: "Furar o hardtop para a antena", field_status: "feito" },
+      { id: "x6", name_snapshot: "Pintura do casco com resina", field_status: "aguarda_peca" },
+      { id: "x7", name_snapshot: "Troca do fogão", field_status: "nao_feito" },
+    ],
+    materiais: [
+      { id: "y1", quantity: 4, notes: "Levar os quatro", service_order_service_id: "x1", products: { name: "Bateria LiFePO4 12,8 V 200 Ah", sku: "LFP-200", unit: "un" } },
+      { id: "y2", quantity: 1.5, notes: "Cadastrado pelo orçamento — confirmar preço.", service_order_service_id: null, products: { name: "Cabo 35 mm² vermelho", sku: null, unit: "m" } },
+      { id: "y3", quantity: 1, notes: null, service_order_service_id: "x2", products: { name: "Filtro de óleo", sku: "FO-1", unit: "un" } },
+    ],
+    levantamento: [
+      { seq: 1, question_snapshot: "Tensão do banco em repouso?", answer_value: "12,6 V", photo_path: "os/banco.jpg" },
+      { seq: 2, question_snapshot: "Há espaço para o shunt?", skipped_reason: "não deu para abrir o painel" },
+    ],
+  });
+}
+
+Deno.test("glifos: todo caractere que vai ao papel existe na Open Sans do servidor (⚠ e → não existem lá)", () => {
+  assert(!temNaOpenSansDoServidor("⚠".codePointAt(0)!));
+  assert(!temNaOpenSansDoServidor("→".codePointAt(0)!));
+  assert(temNaOpenSansDoServidor("ç".codePointAt(0)!) && temNaOpenSansDoServidor("—".codePointAt(0)!));
+  const d = dadosCompletos();
+  const vias = [
+    htmlDaVia(montarViaDoTecnico(d, { modo: "via", linksDasFotos: { "os/banco.jpg": "https://x/foto.jpg" } })),
+    htmlDaVia(montarViaDoTecnico(d, { modo: "via", pessoa: ALEX, diasNaAgenda: ["2026-11-26", "2026-11-27"] })),
+    htmlDaVia(montarViaDoTecnico(d, { modo: "via", pessoa: ROBERTO })),
+    htmlDaVia(montarViaDoTecnico(dados(), {})),
+  ];
+  // a OS completa passa mesmo pelo que a folha escreve (senão o teste não prova nada)
+  for (const parte of ['svg class="tri"', "Bateria de lítio:", "Volante:", "Altura:", '<div class="aviso orc">', '<div class="contatofim">', "SÓ LEVANTAR", "PARCIAL", "JÁ FEITO", "AGUARDA PEÇA", "NÃO FEITO", "Material deste serviço:", "pulada:", " até "]) {
+    assertStringIncludes(vias[0], parte);
+  }
+  assertStringIncludes(vias[1], "com outra pessoa");
+  for (const html of vias) {
+    const fora = [...new Set([...textoDoPapel(html)].filter((ch) => !/[\n\r\t]/.test(ch) && !temNaOpenSansDoServidor(ch.codePointAt(0)!)))];
+    assertEquals(fora, [], `fora da Open Sans: ${fora.map((c) => `U+${c.codePointAt(0)!.toString(16).toUpperCase()}`).join(", ")}`);
+  }
 });
