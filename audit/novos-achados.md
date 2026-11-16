@@ -4336,3 +4336,23 @@ quatro estão latentes.
 - **Menor mudança:** numa migração, `created_at = now() + row_number() over (order by …) * interval '1 millisecond'` em cada
   `INSERT … SELECT`, ordenado pela ordem da origem (`created_at, id` da cotação externa; a ordem dos componentes do kit e das
   regras do levantamento). É o precedente do `_agrupar_os_montar`. Na conversão, os serviços primeiro.
+
+### [NOVO-via-10] Na situação e no responsável da via, "a linha d'água" ainda acha calada uma linha sem "linha" no nome
+
+- **Onde:** `supabase/functions/_shared/linhas-da-os.ts:212` (`acharLinha`, que tira "serviço/item/linha" do começo em
+  `palavrasDitas`, `:133`), usado por `acharServico` (`_shared/ai/tools/field-ops.ts:109`, `update_service_order_via`) e
+  `escolherLinha` (`_shared/ai/tools/via-do-tecnico.ts:279`, `definir_responsavel_do_servico`). A revisão final (c-2,
+  commit `e38566f4`) fechou só o remover/editar (`resolveSoItem` + `linhaDitaForaDoNome`, `:179`), que apagam e mudam preço.
+- **Efeito:** numa OS só com "Troca da bomba d'água", "a linha d'água" marca a situação (ou o responsável) dessa linha sem
+  perguntar. Nada é apagado, a resposta da tool nomeia a linha marcada e a marcação se desfaz pelo mesmo caminho. Com
+  "Pintura da linha d'água" também na OS, ele pergunta. Em 16/11: 0 chamadas de `update_service_order_via` e de
+  `definir_responsavel_do_servico` em `ai_operator_audit` (`porte/sql/rev-final-cetico-c-eventos.sql`). Latente.
+- **Por que não agora:** o caso compartilhado `['a linha do LED', 4]` (`linhas-da-os-casos.ts:128`), que a conta SQL da F2
+  (`_via_linhas_numeradas`) vai repetir, usa "linha" como rótulo de linha. Aplicar o `linhaDitaForaDoNome` no `acharLinha`
+  troca esse caso para "ambiguo"; decidir junto com a F2, para o TS e o SQL mudarem no mesmo passo.
+- **Menor mudança:** no `acharLinha`, quando há um achado só pelo nome e `linhaDitaForaDoNome(achado.nome, dito)`, devolver
+  `ambiguo` com essa linha como opção (pergunta em vez de marcar). Trocar o caso compartilhado para `'ambiguo'` e somar
+  "a linha d'água" × "Troca da bomba d'água" → `ambiguo`.
+- **Não é defeito (registrado para não voltar):** "o quarto" numa OS com o serviço 4 e uma "Luz do quartinho" marca o
+  serviço 4. É a regra: o ordinal é o número impresso no cartão, e "quartinho" não é a palavra "quarto"
+  (`linhas-da-os_test.ts:195` e `:207`).
