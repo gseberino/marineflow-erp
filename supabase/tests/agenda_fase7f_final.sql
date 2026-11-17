@@ -281,6 +281,29 @@ begin
   end loop;
   return array_to_string(v_fora, E'\n');
 end $f$;
+-- (17/11/2026, prazo no bloco, 20270122100000) o texto sem os blocos "-- PRAZO NO BLOCO: (…) … -- PRAZO NO BLOCO: fim": aquela migration recria _agenda_saude_comunicacao
+-- depois desta com 1 bloco desses; tirado, a viva é a desta. Sem o bloco (antes dela), o texto como está.
+create function pg_temp.sem_prazo(p text) returns text language plpgsql immutable as $f$
+declare
+  v_fora   text[] := '{}';
+  v_dentro boolean := false;
+  l        text;
+begin
+  foreach l in array string_to_array(replace(p, E'\r\n', E'\n'), E'\n') loop
+    if not v_dentro and l ~ '^\s*-- PRAZO NO BLOCO:' and l !~ '^\s*-- PRAZO NO BLOCO: fim' then
+      v_dentro := true;
+      continue;
+    end if;
+    if v_dentro and l ~ '^\s*-- PRAZO NO BLOCO: fim' then
+      v_dentro := false;
+      continue;
+    end if;
+    if not v_dentro then
+      v_fora := v_fora || l;
+    end if;
+  end loop;
+  return array_to_string(v_fora, E'\n');
+end $f$;
 -- o código de uma migration, sem as linhas de comentário
 create function pg_temp.codigo(p text) returns text language sql immutable as $f$
   select string_agg(l, E'\n' order by o) from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o) where l !~ '^\s*--'
@@ -1119,9 +1142,10 @@ begin
       ('_agenda_saude_comunicacao', 'public._agenda_saude_comunicacao(date, timestamp with time zone)', 'mig_leituras_fase7f', 2)) t(nome, sig, fonte, blocos)
   loop
     select count(*) into v_n from regexp_matches(replace(pg_temp.corpo(v_mig, x.nome), E'\r\n', E'\n'), '-- (FASE 7f: \(7f P9|\(7f P9)', 'g');
-    r := pg_temp.ok(r, format('K9a %s: a viva é a desta migration; sem os %s blocos do P9, é o corpo da origem (agenda_teste.%s), byte a byte', x.nome, x.blocos, x.fonte),
+    -- (prazo no bloco, 20270122100000: a viva sem os blocos "-- PRAZO NO BLOCO:", que aquela migration põe em _agenda_saude_comunicacao depois desta)
+    r := pg_temp.ok(r, format('K9a %s: a viva é a desta migration (sem os blocos do prazo no bloco); sem os %s blocos do P9, é o corpo da origem (agenda_teste.%s), byte a byte', x.nome, x.blocos, x.fonte),
       coalesce(current_setting('agenda_teste.' || x.fonte, true), '') <> ''
-      and replace((select p.prosrc from pg_proc p where p.oid = x.sig::regprocedure), E'\r\n', E'\n') = pg_temp.corpo(v_mig, x.nome)
+      and pg_temp.sem_prazo(replace((select p.prosrc from pg_proc p where p.oid = x.sig::regprocedure), E'\r\n', E'\n')) = pg_temp.corpo(v_mig, x.nome)
       and v_n = x.blocos
       and pg_temp.sem_p9(pg_temp.corpo(v_mig, x.nome)) = replace(pg_temp.corpo(current_setting('agenda_teste.' || x.fonte, true), x.nome), E'\r\n', E'\n')
       and pg_temp.corpo(current_setting('agenda_teste.' || x.fonte, true), x.nome) <> '',
