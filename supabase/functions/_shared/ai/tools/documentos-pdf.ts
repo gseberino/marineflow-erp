@@ -144,7 +144,7 @@ export const documentoPdfTools: ToolDef[] = [
         pessoa: { type: "string", description: "Só com via='tecnico': a via de uma pessoa da equipe (só os serviços dela). Vazio = a OS inteira." },
         destino: { type: "string", enum: ["whatsapp", "impressora"], description: "'whatsapp' (padrão) = o arquivo no WhatsApp de quem pede; 'impressora' = imprime na impressora do escritório." },
         copias: { type: "integer", description: "Só com destino='impressora': quantas cópias (1 a 5; padrão 1)." },
-        colorido: { type: "boolean", description: "Só com destino='impressora': true = colorido; padrão preto e branco." },
+        colorido: { type: "boolean", description: "Só com destino='impressora': padrão colorido; false = preto e branco (só se a pessoa pedir)." },
       },
       required: ["documento"],
     },

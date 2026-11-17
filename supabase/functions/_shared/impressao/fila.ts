@@ -146,7 +146,7 @@ export function linhaDoJob(p: PedidoDeImpressao, agora: Date = new Date()) {
       versao: 1,
       arquivo: { url: p.url, nome: p.nome },
       copias: limitarCopias(p.copias),
-      colorido: p.colorido === true,
+      colorido: p.colorido !== false,
     },
     metadata: {
       tipo: TIPO_NO_METADATA,

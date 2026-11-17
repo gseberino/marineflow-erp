@@ -37,6 +37,12 @@ Deno.test("linhaDoJob: o contrato v1 do worker, uma tentativa só e prazo curto"
   assertEquals(l.deadline_at, "2026-11-17T10:02:00.000Z");
 });
 
+Deno.test("linhaDoJob: colorido por padrão; preto e branco só quando pedido", () => {
+  const agora = new Date("2026-11-17T10:00:00Z");
+  assertEquals(linhaDoJob({ ...PEDIDO, colorido: undefined }, agora).input.colorido, true);
+  assertEquals(linhaDoJob({ ...PEDIDO, colorido: false }, agora).input.colorido, false);
+});
+
 Deno.test("limitarCopias: 1 a 5", () => {
   assertEquals([limitarCopias(undefined), limitarCopias(0), limitarCopias("3"), limitarCopias(40), limitarCopias(2.7)], [1, 1, 3, 5, 2]);
 });

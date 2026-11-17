@@ -51,7 +51,7 @@ export async function imprimirOrdem(
     if (!montado.ok) return { oque, copias, resultado: { ok: false, motivo: montado.motivo } };
     const doc = montado.doc;
     oque = `o ${doc.rotulo} ${doc.numero} (${doc.cliente})`;
-    const chave = chaveDeEnvio("imprimir-doc", ordem.id, quem(o), impressaoDigitalDoDocumento(doc.html), copias, o.colorido ? "cor" : "pb");
+    const chave = chaveDeEnvio("imprimir-doc", ordem.id, quem(o), impressaoDigitalDoDocumento(doc.html), copias, o.colorido === false ? "pb" : "cor");
     const entrega = await guardarEEntregar({
       admin,
       doc,
@@ -100,7 +100,7 @@ export async function imprimirVia(
   const r = await mandarVia({
     admin, settings, jwt: "", dados, ordem, pessoa, telefone: "", contexto: "impressao",
     enviar: paraAImpressora, diasNaAgenda: dias,
-    chave: (impressao) => chaveDeEnvio("imprimir-via", ordem.id, pessoa?.id ?? "os", quem(o), impressao, copias, o.colorido ? "cor" : "pb"),
+    chave: (impressao) => chaveDeEnvio("imprimir-via", ordem.id, pessoa?.id ?? "os", quem(o), impressao, copias, o.colorido === false ? "pb" : "cor"),
   });
   if (caixa.r) return { oque, copias, resultado: caixa.r };
   if (!r.ok && r.pulado) return { oque, copias, semServicoDaPessoa: true, resultado: { ok: false, motivo: r.motivo } };

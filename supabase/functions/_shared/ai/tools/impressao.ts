@@ -45,7 +45,7 @@ export async function imprimirParaQuemPediu(args: Record<string, unknown>, ctx: 
 
   const opcoes: OpcoesDeImpressao = {
     copias: limitarCopias(args.copias),
-    colorido: args.colorido === true,
+    colorido: args.colorido !== false,
     pedidoPor: { usuario: ctx.userId || null },
   };
   const documento = String(args.documento ?? "").trim();
