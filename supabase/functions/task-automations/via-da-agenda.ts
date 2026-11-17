@@ -9,10 +9,17 @@
 //     A via que o dono pede PARA SI ("me manda a via do Alex") foi para o dono, não para o Alex: não conta
 //     (ORIGENS_QUE_ENTREGAM).
 //
-// Não mexe em nada da agenda: só LÊ a ficha que a rotina registrou (agenda_equipe_mensagens, tipo 'ficha', modo
-// 'ligado') e espera a fila do WhatsApp entregá-la ('sent'). Ficha recusada (sem telefone, fora da janela, veto)
-// ou ainda na fila = nada aqui. Assim a via nunca chega sem a ficha, e o modo da equipe (desligado/sombra/ligado)
-// vale para a via também. A ficha sai às 19:30; a fila a entrega em até 5 min; a via vai no tique seguinte (19:45).
+// Não mexe em nada da agenda: só LÊ a ficha que a rotina registrou (agenda_equipe_mensagens, modo 'ligado': a 'ficha'
+// das 19:30, ou o 'como_foi' das 17:00 que leva a ficha de amanhã em `leva_ficha_de`) e espera a fila do WhatsApp
+// entregá-la ('sent'). Ficha recusada (sem telefone, fora da janela, veto) ou ainda na fila = nada aqui. Assim a via
+// nunca chega sem a ficha, e o modo da equipe (desligado/sombra/ligado) vale para a via também. A ficha sai às 19:30;
+// a fila a entrega em até 5 min; a via vai no tique seguinte (19:45).
+//
+// As OS da ficha (NOVO-via-11, 17/11): a rotina NÃO grava `alocacao_ids` na ficha (até 17/11 a via dependia delas e
+// nunca saía). A via acha as OS pelo mesmo critério que monta a ficha (agenda_equipe_ficha): as alocações da pessoa
+// no dia, `estado in ('publicada','fixada')`, `tipo <> 'reserva'`, como estão AGORA. A agenda replaneja cancelando e
+// recriando a alocação (agenda_alocacoes é imutável): ler o plano de agora não perde a OS num replanejamento entre a
+// ficha e a via, e a OS que saiu do dia não recebe via.
 //
 // O envio é AUTOMÁTICO (whatsapp-send como sistema): para a equipe de campo, que não tem login, o whatsapp-send
 // confere o bloqueio do número e a janela das 8h às 20h — fora dela, a via espera o próximo tique na janela.
@@ -142,17 +149,78 @@ export async function ultimaViaEntregue(
   return data ?? null;
 }
 
-type Ficha = { id: string; payee_id: string; dia: string; fila_id: string; alocacao_ids: string[] | null };
+/** Uma ficha registrada: a mensagem (a 'ficha' ou o 'como_foi' que a leva) e o DIA DE TRABALHO que ela anuncia. */
+export type Ficha = { id: string; payee_id: string; dia: string; fila_id: string };
 type Item = { ficha: Ficha; os: string };
 
+/** Chave do dia de trabalho de uma pessoa (casa a ficha com as alocações). */
+export function chaveDoDia(payeeId: string, dia: string): string {
+  return `${payeeId}|${dia}`;
+}
+
 /**
- * O que falta fazer: cada (ficha entregue, OS da ficha) sem via enviada nem pulada. As que já falharam
+ * As fichas de hoje em diante que a rotina registrou de verdade (modo 'ligado') e mandou para a fila: a 'ficha' das
+ * 19:30 (o dia de trabalho é `dia`) e o 'como_foi' das 17:00 que leva a ficha de amanhã (o dia de trabalho é
+ * `leva_ficha_de`; NOVO-via-12). Quem diz se foi ENTREGUE é a fila (viaDaAgenda). Lança se a leitura falhar.
+ */
+export async function fichasDaEquipe(db: Db, hoje: string): Promise<Ficha[]> {
+  const [fichas, comoFoi] = await Promise.all([
+    db.from("agenda_equipe_mensagens")
+      .select("id, payee_id, dia, fila_id")
+      .eq("tipo", "ficha").eq("modo", "ligado").gte("dia", hoje)
+      .not("fila_id", "is", null)
+      .order("dia", { ascending: true }).limit(60),
+    db.from("agenda_equipe_mensagens")
+      .select("id, payee_id, leva_ficha_de, fila_id")
+      .eq("tipo", "como_foi").eq("modo", "ligado").gte("leva_ficha_de", hoje)
+      .not("fila_id", "is", null)
+      .order("leva_ficha_de", { ascending: true }).limit(60),
+  ]);
+  if (fichas.error) throw new Error(`fichas: ${fichas.error.message}`);
+  if (comoFoi.error) throw new Error(`fichas no como foi: ${comoFoi.error.message}`);
+  const todas: Ficha[] = [
+    ...((fichas.data ?? []) as Array<{ id: string; payee_id: string | null; dia: string | null; fila_id: string | null }>)
+      .map((f) => ({ id: f.id, payee_id: f.payee_id ?? "", dia: f.dia ?? "", fila_id: f.fila_id ?? "" })),
+    ...((comoFoi.data ?? []) as Array<{ id: string; payee_id: string | null; leva_ficha_de: string | null; fila_id: string | null }>)
+      .map((f) => ({ id: f.id, payee_id: f.payee_id ?? "", dia: f.leva_ficha_de ?? "", fila_id: f.fila_id ?? "" })),
+  ];
+  return todas.filter((f) => f.payee_id && f.dia && f.fila_id);
+}
+
+/**
+ * As OS de cada (pessoa, dia) das fichas, pelo critério da ficha (agenda_equipe_ficha): alocações `publicada`/`fixada`
+ * da pessoa no dia, menos as de reserva, como estão agora. Duas alocações na mesma OS (manhã e tarde) = uma OS.
+ * Devolve chaveDoDia → OS em ordem. Lança se a leitura falhar.
+ */
+export async function osDasFichas(db: Db, fichas: Ficha[]): Promise<Map<string, string[]>> {
+  const porDia = new Map<string, string[]>();
+  if (!fichas.length) return porDia;
+  const { data, error } = await db.from("agenda_alocacoes")
+    .select("payee_id, dia, service_order_id")
+    .in("payee_id", [...new Set(fichas.map((f) => f.payee_id))])
+    .in("dia", [...new Set(fichas.map((f) => f.dia))])
+    .in("estado", ["publicada", "fixada"])
+    .neq("tipo", "reserva");
+  if (error) throw new Error(`alocações: ${error.message}`);
+  const juntas = new Map<string, Set<string>>();
+  for (const a of (data ?? []) as Array<{ payee_id: string | null; dia: string | null; service_order_id: string | null }>) {
+    if (!a.payee_id || !a.dia || !a.service_order_id) continue;
+    const k = chaveDoDia(a.payee_id, a.dia);
+    if (!juntas.has(k)) juntas.set(k, new Set());
+    juntas.get(k)!.add(a.service_order_id);
+  }
+  for (const [k, oss] of juntas) porDia.set(k, [...oss].sort());
+  return porDia;
+}
+
+/**
+ * O que falta fazer: cada (ficha entregue, OS do dia da ficha) sem via enviada nem pulada. As que já falharam
  * FALHAS_ATE_DESISTIR vezes viram desistência.
  */
 export function itensPendentes(
   fichas: Ficha[],
   entregues: Set<string>,
-  osDaAlocacao: Map<string, string>,
+  osDoDia: Map<string, string[]>,
   registros: Array<{ ficha_id: string; service_order_id: string; estado: string }>,
 ): { fazer: Item[]; desistir: Item[] } {
   const fechados = new Set<string>();
@@ -166,8 +234,7 @@ export function itensPendentes(
   const desistir: Item[] = [];
   for (const f of fichas) {
     if (!entregues.has(f.fila_id)) continue;
-    const oss = [...new Set((f.alocacao_ids ?? []).map((a) => osDaAlocacao.get(a)).filter((o): o is string => !!o))].sort();
-    for (const os of oss) {
+    for (const os of osDoDia.get(chaveDoDia(f.payee_id, f.dia)) ?? []) {
       const k = `${f.id}:${os}`;
       if (fechados.has(k)) continue;
       if ((falhas.get(k) ?? 0) >= FALHAS_ATE_DESISTIR) desistir.push({ ficha: f, os });
@@ -177,42 +244,49 @@ export function itensPendentes(
   return { fazer, desistir };
 }
 
+/** As peças que montam e mandam a via (os testes trocam por falsas; em produção, as de verdade). */
+export interface PecasDaVia {
+  carregar: typeof carregarDadosDaVia;
+  fotos: typeof linksDasFotosDaVia;
+  equipe: typeof pessoasDaOs;
+  preparar: typeof prepararVia;
+  mandar: typeof mandarVia;
+}
+const PECAS_DE_VERDADE: PecasDaVia = {
+  carregar: carregarDadosDaVia,
+  fotos: linksDasFotosDaVia,
+  equipe: pessoasDaOs,
+  preparar: prepararVia,
+  mandar: mandarVia,
+};
+
 export async function viaDaAgenda(
   db: Db,
   settings: Record<string, string>,
   agora: Date = new Date(),
   enviar: EnviarDocumento = enviarDocumentoComoSistema,
+  trocas: Partial<PecasDaVia> = {},
 ): Promise<ResumoDaVia> {
+  const pecas: PecasDaVia = { ...PECAS_DE_VERDADE, ...trocas };
   try {
     if ((settings[CHAVE_DA_VIA_NA_AGENDA] ?? "ligado") === "desligado") return { rodou: false, motivo: "desligada" };
     const hora = horaEmBrasilia(agora);
     if (hora < JANELA.inicio || hora >= JANELA.fim) return { rodou: false, motivo: "fora da janela" };
     const hoje = hojeEmBrasilia(agora);
 
-    // As fichas de hoje em diante que a rotina registrou de verdade e mandou para a fila.
-    const { data: fs, error: fErr } = await db.from("agenda_equipe_mensagens")
-      .select("id, payee_id, dia, fila_id, alocacao_ids")
-      .eq("tipo", "ficha").eq("modo", "ligado").gte("dia", hoje)
-      .not("fila_id", "is", null)
-      .order("dia", { ascending: true }).limit(60);
-    if (fErr) throw new Error(`fichas: ${fErr.message}`);
-    const fichas = ((fs ?? []) as Ficha[]).filter((f) => f.payee_id && (f.alocacao_ids ?? []).length);
+    // As fichas de hoje em diante que a rotina registrou de verdade e mandou para a fila (a das 19:30 e a do "como foi").
+    const fichas = await fichasDaEquipe(db, hoje);
     if (!fichas.length) return { rodou: true, enviadas: 0, puladas: 0, falhas: 0, restantes: 0 };
 
-    const [fila, regs, alocs] = await Promise.all([
+    const [fila, regs, osDoDia] = await Promise.all([
       db.from("whatsapp_send_queue").select("id, status").in("id", fichas.map((f) => f.fila_id)),
       db.from("via_tecnico_envios").select("ficha_id, service_order_id, estado").in("ficha_id", fichas.map((f) => f.id)),
-      db.from("agenda_alocacoes").select("id, service_order_id, tipo").in("id", [...new Set(fichas.flatMap((f) => f.alocacao_ids ?? []))]),
+      osDasFichas(db, fichas),
     ]);
     if (fila.error) throw new Error(`fila: ${fila.error.message}`);
     if (regs.error) throw new Error(`registro: ${regs.error.message}`);
-    if (alocs.error) throw new Error(`alocações: ${alocs.error.message}`);
     const entregues = new Set(((fila.data ?? []) as Array<{ id: string; status: string }>).filter((q) => q.status === "sent").map((q) => q.id));
-    const osDaAlocacao = new Map(
-      ((alocs.data ?? []) as Array<{ id: string; service_order_id: string; tipo: string }>)
-        .filter((a) => a.tipo !== "reserva").map((a) => [a.id, a.service_order_id]),
-    );
-    const { fazer, desistir } = itensPendentes(fichas, entregues, osDaAlocacao, (regs.data ?? []) as Array<{ ficha_id: string; service_order_id: string; estado: string }>);
+    const { fazer, desistir } = itensPendentes(fichas, entregues, osDoDia, (regs.data ?? []) as Array<{ ficha_id: string; service_order_id: string; estado: string }>);
 
     let puladas = 0;
     for (const d of desistir) {
@@ -245,18 +319,18 @@ export async function viaDaAgenda(
         puladas++;
         continue;
       }
-      if (!leituras.has(os)) leituras.set(os, await carregarDadosDaVia(db, os, settings));
+      if (!leituras.has(os)) leituras.set(os, await pecas.carregar(db, os, settings));
       const lida = leituras.get(os)!;
       if (!lida.ok) {
         await registrarEnvioDaVia(db, { ...base, estado: "falhou", motivo: lida.motivo, destino: pessoa.telefone });
         falhas++;
         continue;
       }
-      if (!fotos.has(os)) fotos.set(os, await linksDasFotosDaVia(db, lida.dados));
-      if (!equipeDaOs.has(os)) equipeDaOs.set(os, await pessoasDaOs(db, lida.dados, agora));
+      if (!fotos.has(os)) fotos.set(os, await pecas.fotos(db, lida.dados));
+      if (!equipeDaOs.has(os)) equipeDaOs.set(os, await pecas.equipe(db, lida.dados, agora));
       const dias = equipeDaOs.get(os)!.find((p) => p.id === ficha.payee_id)?.dias ?? [ficha.dia];
       const quem = { id: ficha.payee_id, nome: pessoa.nome };
-      const via = prepararVia(lida.dados, lida.ordem.numero, quem, fotos.get(os)!, dias);
+      const via = pecas.preparar(lida.dados, lida.ordem.numero, quem, fotos.get(os)!, dias);
       if (via.semServicoDaPessoa) {
         await registrarEnvioDaVia(db, { ...base, estado: "pulado", motivo: motivoSemPapelDaPessoa(), destino: pessoa.telefone });
         puladas++;
@@ -272,7 +346,7 @@ export async function viaDaAgenda(
       }
       const complemento = decisao.complemento;
       feitas++;
-      const r = await mandarVia({
+      const r = await pecas.mandar({
         admin: db, settings, jwt: "", dados: lida.dados, ordem: lida.ordem, pessoa: quem, telefone: pessoa.telefone,
         contexto: CONTEXTO_DA_VIA_DA_AGENDA, enviar, complementoDaLegenda: complemento, linksDasFotos: fotos.get(os)!, diasNaAgenda: dias,
         chave: (impressao) => chaveDeEnvio("agenda-via", ficha.id, os, impressao),

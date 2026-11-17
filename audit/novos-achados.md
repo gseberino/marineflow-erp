@@ -4357,7 +4357,14 @@ quatro estão latentes.
   serviço 4. É a regra: o ordinal é o número impresso no cartão, e "quartinho" não é a palavra "quarto"
   (`linhas-da-os_test.ts:195` e `:207`).
 
-### [NOVO-via-11] A via da agenda nunca sai: a ficha não grava `alocacao_ids` e a via descarta toda ficha sem elas
+### [NOVO-via-11] A via da agenda nunca sai: a ficha não grava `alocacao_ids` e a via descarta toda ficha sem elas — RESOLVIDO em 17/11
+
+- **Resolvido (17/11, só `task-automations`, sem migração):** `viaDaAgenda` acha as OS da ficha pelo critério de
+  `agenda_equipe_ficha` (`osDasFichas`: alocações da pessoa no dia, `publicada`/`fixada`, `tipo <> 'reserva'`), **como estão na
+  hora do envio**, em vez de `alocacao_ids`. Sem o recorte `criado_em <= ficha.criada_em` proposto abaixo: a agenda replaneja
+  cancelando e recriando a alocação (`agenda_alocacoes` é imutável; a do Alex para 18/11 foi recriada em 16/11 22:00), e o recorte
+  perderia a OS num replanejamento entre a ficha e a via. A OS que saiu do dia não recebe via. Teste do caminho inteiro com a ficha no
+  formato do banco (`via-da-agenda_test.ts`, "caminho inteiro").
 
 - **Onde:** `supabase/functions/task-automations/via-da-agenda.ts:199`
   (`.filter((f) => f.payee_id && (f.alocacao_ids ?? []).length)`, desde `c81da888`, 13/11). No banco, `_agenda_rotina_ficha` chama
@@ -4374,7 +4381,11 @@ quatro estão latentes.
   existiam quando a ficha foi registrada (`criado_em <= ficha.criada_em`), em vez de `alocacao_ids`. Teste com `alocacao_ids` nulo,
   como vem do banco. (Alternativa com migração: a rotina passar `p_alocacoes` e o registrar gravar na ficha.)
 
-### [NOVO-via-12] A ficha que vai junto do "como foi" das 17:00 nunca leva a via
+### [NOVO-via-12] A ficha que vai junto do "como foi" das 17:00 nunca leva a via — RESOLVIDO em 17/11
+
+- **Resolvido (17/11, junto do NOVO-via-11):** `fichasDaEquipe` lê também `tipo = 'como_foi'` com `leva_ficha_de >= hoje` (o dia
+  de trabalho é `leva_ficha_de`; o filtro por `leva_ficha_de`, e não por `dia`, mantém a ficha viva se a fila só a entregar no dia
+  seguinte).
 
 - **Onde:** `via-da-agenda.ts` filtra `.eq("tipo", "ficha")`; `_agenda_rotina_como_foi` registra `como_foi` com
   `leva_ficha_de = <amanhã>` e `_agenda_rotina_ficha` pula quem já tem esse `como_foi`.
