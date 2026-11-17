@@ -5,7 +5,7 @@
 -- NÃO APLICADA. Existe para revisão e espera o OK na hora de aplicar.
 -- ANTES DE APLICAR, uma escolha do dono (a revisão achou que a resposta 2A não a cobre): a linha do gestor ocupa 1 das bloco_decisoes_max vagas (como está aqui: o bloco
 --   não cresce, e uma decisão da ordem sai da vista) ou não ocupa (o bloco ganha 1 linha). A outra opção é trocar a condição de v_ges_pos ("as vagas e a conta") e os casos
---   P2m, P2p, P2q e P2s de supabase/tests/agenda_prazo_no_bloco.sql (a troca pronta: agenda-pesquisa/perguntas-com-prazo-1711/f1-rev/variante-nao-ocupa.patch).
+--   P2m, P2p, P2q e P2s de supabase/tests/agenda_prazo_no_bloco.sql (a troca pronta: agenda-pesquisa/perguntas-com-prazo-1711/rev3/impl/variante-nao-ocupa.patch).
 --
 -- ═══ POR QUÊ ═══
 --   Em 14/11 09:58 o bloco da agenda (7f, R8.4) foi ligado no fechamento das 17:30. No bloco, toda linha tipo pergunta tem destino 'ordem' (_agenda_bloco_destino) e o laço
@@ -19,8 +19,9 @@
 --   1. A linha (m) — tipo pergunta, ligada, perda 76, com pergunta_ids — vira uma decisão do bloco (1A). As outras linhas pergunta (a (n) da equipe, perda 75/77; a (m) sem
 --      prazo e a pergunta de fato, perda 30) continuam descartadas: a (n) é a F1b, com OK à parte.
 --   2. Com ela no bloco, saem da ordem as perguntas que ela leva e TODA aberta ligada de situacao, estimativa, reestimar e ficha_estimativa com veto_ate (o acordo de antes do
---      bloco: pela ordem elas sairiam só com o título, sem "Sem resposta até …", e o prazo as decidiria sem o dono ter lido a data). A sobra fica no "(e mais N em *agenda
---      gestor*)" da própria linha.
+--      bloco: pela ordem elas sairiam só com o título, sem "Sem resposta até …", e o prazo as decidiria sem o dono ter lido a data). As que saem da ordem e ela não
+--      escreve não entram em nenhum "(e mais N …)" do bloco: o veredito as conta, e elas ficam em *agenda pendências* (que lista os 4 tipos abertos) e *agenda gestor*.
+--      Só a forma inteira avisa a sobra da linha ("(e mais N em *agenda gestor*)", do texto da (m)); a curta não tem esse aviso.
 --   3. Ela entra logo depois das críticas que perdem até amanhã e antes da mensagem ao cliente (2A: o prazo 1º, o cliente 2º). Ela e a do cliente nunca saem (nivel_de_corte
 --      nulo); as outras seguem a regra de hoje (a 1ª nunca sai; das outras, a última sai primeiro, uma por nível a partir do 3). Ela ocupa 1 das bloco_decisoes_max vagas,
 --      como qualquer decisão — o bloco não cresce —, e só passa das vagas quando a ordem a deixaria de fora (críticas demais antes dela). O veredito conta as perguntas que
@@ -33,11 +34,15 @@
 --   6. Parte 'decisao'; veto_ate da linha nulo (os 4 tipos esperam pelo tipo — veto_espera 'tipo' — e o prazo deles já está gravado; quem decide é _agenda_gestor_vetos, com
 --      a pergunta mostrada antes do prazo).
 --   Na saúde (_agenda_saude_comunicacao; achado da revisão da F1):
---   7. O zero bloco_grande (um dos zeros do ok de agenda_saude, aceite 4 da 7f) contava o fechamento acima de texto_max com mais de 2 linhas de decisão: a regra supunha que
---      no mínimo o bloco é o veredito e a 1ª decisão. Com a linha do gestor, o mínimo pode ter 3 decisões que nunca saem (a 1ª, a do gestor e a do cliente), e o fechamento
---      que já estava no mínimo contaria como bloco grande — o ok cairia sem motivo. Agora, com a linha do gestor (a (m) ligada de perda 76 em detalhe.agenda.linhas_diria e
---      uma decisão sem número à vista), a tolerância de 2 ganha +1 quando a 1ª decisão é uma crítica numerada ("Decisão N:"; sem crítica, a 1ª é a do gestor) e +1 com a
---      mensagem ao cliente à vista ("Mensagem para …"). Sem a linha do gestor, a conta de antes, byte a byte.
+--   7. O zero bloco_grande (um dos zeros do ok de agenda_saude, aceite 4 da 7f) contava o fechamento acima de texto_max com mais de 2 linhas de decisão. A tolerância é
+--      "as fixas + 1": no nivel_min só ficam as decisões que nunca saem (o "(e mais N)" sai nele), e o +1 é o nível logo acima, que ainda tem o "(e mais N)"; antes, 1
+--      fixa (a 1ª). Com a linha do gestor, o mínimo pode ter 3 decisões que nunca saem (a 1ª, a do gestor e a do cliente), e o fechamento que já estava no mínimo contaria
+--      como bloco grande — o ok cairia sem motivo. Agora, com a do gestor no fechamento, a tolerância de 2 ganha +1 quando a 1ª decisão é uma crítica (sempre numerada,
+--      "Decisão N:"; sem crítica, a 1ª é a do gestor) e +1 com a do cliente à vista. As marcas presas às linhas certas (revisão 3): a do gestor está no fechamento quando a
+--      (m) ligada de perda 76 está em detalhe.agenda.linhas_diria e uma decisão à vista é a forma inteira dela ou a curta (que começa pelo trecho da ficha antes de
+--      " 1) Mande" e " Para segurar, me diga.", ou por "Sem resposta até …, conto: "); a do cliente conta quando a linha cliente ligada de linhas_diria, escrita como o
+--      bloco a escreve, é igual a uma decisão à vista (uma cliente_aprovar da ordem, "Mensagem para …" que pode sair, não conta). Sem a do gestor à vista, a conta de
+--      antes, byte a byte — também nos fechamentos de antes de aplicar, que a janela de 7 dias ainda lê.
 --
 -- ═══ O QUE NÃO MUDA ═══ Sem a linha (m) ligada de perda 76 — o bloco desligado ou em sombra, a vigia em sombra, nenhuma pergunta de prazo — a saída do bloco é a de antes,
 --   byte a byte, e a saúde também. Não muda _agenda_linhas_do_fechamento (as linhas são as mesmas), agenda_textos_do_fechamento, o registro, a ordem, agenda_saude nem o TS
@@ -46,7 +51,7 @@
 -- ═══ CÓPIA ═══ agenda_bloco_do_fechamento é a de 20261109100200_agenda_fase7f_bloco.sql (a única migration que a define), que é a de produção em 17/11 (md5 do corpo
 --   69b35d93a6031f5b40a94e9b1aec94f9). _agenda_saude_comunicacao é a de 20261109101200_agenda_fase7f_mudou.sql (a mais recente que a define), que é a de produção em 17/11
 --   (md5 do corpo 6288e345b16e1692b39dd8032ec304ea; o comentário também). Tirados os blocos "-- PRAZO NO BLOCO:", cada corpo é o dela, byte a byte
---   (supabase/tests/agenda_prazo_no_bloco.sql, P0). Montada por agenda-pesquisa/perguntas-com-prazo-1711/f1-rev/montar.mjs. Quem recriar de novo copia DESTA.
+--   (supabase/tests/agenda_prazo_no_bloco.sql, P0). Montada por agenda-pesquisa/perguntas-com-prazo-1711/rev3/impl/montar.mjs. Quem recriar de novo copia DESTA.
 --
 -- ═══ ORDEM DE LIGAR ═══ Sozinha: nada de dado nem de modo muda; vale na próxima tarde depois de aplicada. Não depende de edge function. O dono aceitou (2A) a tarde passar de
 --   1.000 e cair no enxuto (o Secretário tira fornecedores, escritório e "Sem resposta desde hoje" antes de cortar a agenda).
@@ -54,9 +59,15 @@
 -- PROVA: supabase/tests/agenda_prazo_no_bloco.sql (begin/rollback; na bancada: node scripts/bancada-agenda/rodar.mjs). As cópias antigas da saúde tiram os blocos do prazo
 --   no bloco: agenda_fase7f_final.sql (K9a) e agenda_fase7f_pos_deploy_final.sql (F2).
 --
--- APLICAR (só com o OK na hora):
+-- APLICAR (só com o OK na hora). Do repo PRINCIPAL (D:/HBR-Storage-Redirects/Documents-Claude-Code/marineflow-erp), que é o linkado — o worktree não tem
+--   supabase/.temp/project-ref —, depois do merge deste branch (o arquivo tem de estar naquele checkout):
+--   PONTA=<hash de main com o merge> D:/IA-HBR/agenda-pesquisa/publicar/exec/aplicar.sh 20270122100000_agenda_prazo_no_bloco
+--   (o script entra no repo principal, confere que a versão não está registrada, aplica com "db query --linked -f supabase/migrations/<arquivo>" e registra a versão
+--   com o insert como argumento posicional de "db query --linked"; para na 1ª falha e escreve em publicar/exec/aplicar.log). À mão, o mesmo, do repo principal:
 --   npx supabase@2.111.0 db query --linked -f supabase/migrations/20270122100000_agenda_prazo_no_bloco.sql
---   npx supabase@2.111.0 db query --linked -e "insert into supabase_migrations.schema_migrations (version, name) values ('20270122100000', 'agenda_prazo_no_bloco');"
+--   npx supabase@2.111.0 db query --linked "insert into supabase_migrations.schema_migrations (version, name) values ('20270122100000', 'agenda_prazo_no_bloco');"
+--   (o CLI 2.111.0 não tem -e: o SQL vai como argumento posicional). O roteiro conferido, num commit só e com a fumaça antes e depois:
+--   agenda-pesquisa/perguntas-com-prazo-1711/rev2/aplicar/APLICAR.md (aplicar.sql = esta migration entre begin/commit, com o registro da versão dentro).
 --
 -- DESFAZER: reaplicar a definição, o comentário e os grants de agenda_bloco_do_fechamento de 20261109100200_agenda_fase7f_bloco.sql (a seção "3. O bloco" dela, do
 --   create or replace function public.agenda_bloco_do_fechamento ao comment on function) e os de _agenda_saude_comunicacao de 20261109101200_agenda_fase7f_mudou.sql (a
@@ -277,8 +288,10 @@ begin
   end;
   -- PRAZO NO BLOCO: (o acordo de antes do bloco: 7a correção, achado 15) com a linha do gestor no bloco, saem da ordem as perguntas que ela leva e TODA aberta ligada
   -- de situacao, estimativa, reestimar e ficha_estimativa com prazo, não só as da linha: pela ordem elas sairiam só com o título, sem o "Sem resposta até …", e o
-  -- prazo as decidiria sem o dono ter lido a data. A sobra da linha fica no "(e mais N em *agenda gestor*)" dela. A forma curta escreve a 1ª pergunta (a ficha, quando
-  -- há) e as que não são ficha_estimativa: a 2ª ficha em diante não aparece nela e não conta como mostrada (a rotina das 19:30 a segura, como antes). Falha aqui:
+  -- prazo as decidiria sem o dono ter lido a data. As que saem da ordem e a linha não escreve não entram em nenhum "(e mais N …)" do bloco: o veredito as conta, e
+  -- elas ficam em *agenda pendências* (que lista os 4 tipos abertos) e *agenda gestor*; só a forma inteira avisa a sobra da linha ("(e mais N em *agenda gestor*)",
+  -- do texto da (m)), a curta não. A forma curta escreve a 1ª pergunta (a ficha, quando há) e as que não são ficha_estimativa: a 2ª ficha em diante não aparece
+  -- nela e não conta como mostrada (a rotina das 19:30 a segura, como antes). Falha aqui:
   -- incompleto, e o bloco de antes, sem a linha do gestor.
   if v_ges is not null then
     begin
@@ -329,7 +342,8 @@ begin
   v_mos := least(v_tot, cf.bloco_decisoes_max);
   -- PRAZO NO BLOCO: (as vagas e a conta) a linha do gestor ocupa 1 das bloco_decisoes_max vagas, como qualquer decisão: o bloco não cresce. Ela e a do cliente nunca
   -- saem (2A): se a ordem as deixasse fora das vagas (críticas demais antes delas), elas entram assim mesmo, além das vagas. O veredito conta as perguntas que a linha
-  -- cobre, como contava quando elas vinham pela ordem; o "(e mais N em *agenda pendências*)" conta só as da ordem (a sobra da linha está no "(e mais N em *agenda gestor*)").
+  -- cobre, como contava quando elas vinham pela ordem; o "(e mais N em *agenda pendências*)" conta só as da ordem (as que a linha não escreve ficam em *agenda
+  -- pendências* e *agenda gestor*; só a forma inteira avisa a sobra dela, "(e mais N em *agenda gestor*)").
   if v_ges is not null then
     v_tot := v_ges_ord + v_ges_n;
     select coalesce(jsonb_agg(jsonb_build_object('d', e, 'fixa', o = 1 or (e ? 'gestor') or (e ->> 'id') is not distinct from (v_cli ->> 'pergunta_id')) order by o), '[]'::jsonb)
@@ -588,24 +602,43 @@ begin
     $q$ into v_bloco, v_bgrande using p_hoje - c_semana + 1, p_hoje, cf.texto_max;
     -- PRAZO NO BLOCO: (17/11/2026, 20270122100000; revisão da F1) o mínimo do bloco com a linha das perguntas do gestor. Com ela no bloco, as que nunca saem são a 1ª
     -- decisão, a do gestor e a do cliente (2A): no mínimo ele pode ter 3 decisões, e acima de texto_max já não tem o que ceder — isso não é bloco grande. A conta de cima
-    -- vale, com a tolerância de 2 decisões (a 1ª e o "e mais N") acrescida de 1 quando a 1ª é uma crítica numerada ("Decisão N:"; sem crítica, a 1ª é a do gestor) e de 1
-    -- com a mensagem ao cliente à vista ("Mensagem para …"). A linha do gestor está no bloco quando a (m) ligada de perda 76 está em linhas_diria (o que a agenda diria)
-    -- e há à vista uma decisão sem número que não é a do cliente nem o "(e mais N …)". Sem ela, a tolerância é a de antes (2) e a conta sai a mesma.
+    -- vale, com a tolerância "as fixas + 1": no nivel_min só ficam as que nunca saem — o "(e mais N)" sai nele (o corte dele é o nivel_min; o "com o e mais N" do
+    -- comentário de cima não vale para o mínimo) — e o +1 é o nível logo acima, que ainda tem o "(e mais N)". Antes, 1 fixa: 2. Com a do gestor no fechamento, +1
+    -- quando a 1ª é uma crítica (sempre numerada, "Decisão N:"; sem crítica, a 1ª é a do gestor) e +1 com a do cliente à vista. (revisão 3) As marcas presas às linhas
+    -- certas, com os espaços juntados como o Secretário os junta (blocoDaAgenda e linhasDaAgenda, secretario-tarde-coleta.ts):
+    --   a do gestor: a (m) ligada de perda 76 está em linhas_diria e uma decisão à vista é a forma inteira dela ('· ' e o texto sem o "Agenda: ", igual) ou a curta.
+    --   linhas_diria não grava a curta; _agenda_linhas_do_fechamento a monta das mesmas perguntas: com a ficha em 1º, ela começa pelo trecho do texto da ficha antes de
+    --   " 1) Mande" (o mesmo começo da inteira) e " Para segurar, me diga."; sem a ficha, a 1ª tem prazo (perda 76: a ordem é ficha, prazo, sem prazo) e a curta começa
+    --   por "Sem resposta até <dia hora>, conto: ". Nenhuma linha da ordem nem a do cliente começa assim (as 4 da ordem saem numeradas);
+    --   a do cliente (v_cli, fixa): a linha cliente ligada de linhas_diria, escrita como o bloco a escreve ('· ' e _agenda_corta do texto sem a mensagem, 220), é igual
+    --   a uma decisão à vista — uma cliente_aprovar da ordem ("Mensagem para …", que pode sair) não casa.
+    -- Sem a do gestor à vista, a tolerância é a de antes (2) e a conta sai a mesma, também nos fechamentos de antes de aplicar (a janela de 7 dias ainda os lê).
     execute $q$
       select count(*) filter (where t.detalhe -> 'agenda' ? 'bloco_mostrou' and (t.detalhe ->> 'caracteres')::int > $3
                                 and ((select count(*) from jsonb_array_elements(t.detalhe #> '{agenda,bloco_mostrou}') l where l ->> 'parte' not in ('veredito', 'decisao')) > 0
                                      or (select count(*) from jsonb_array_elements(t.detalhe #> '{agenda,bloco_mostrou}') l where l ->> 'parte' = 'decisao')
-                                        > 2 + case when exists (select 1 from jsonb_array_elements(case when jsonb_typeof(t.detalhe #> '{agenda,linhas_diria}') = 'array'
-                                                                                                        then t.detalhe #> '{agenda,linhas_diria}' else '[]'::jsonb end) x
-                                                                 where x ->> 'tipo' = 'pergunta' and x ->> 'perda' = '76' and x ->> 'modo' = 'ligado')
-                                                    and exists (select 1 from jsonb_array_elements(t.detalhe #> '{agenda,bloco_mostrou}') l
-                                                                 where l ->> 'parte' = 'decisao' and l ->> 'texto' is not null
-                                                                   and l ->> 'texto' !~ '^(· Decisão [0-9]+: |· Mensagem para |\(e mais )')
+                                        > 2 + case when exists (select 1
+                                                                  from jsonb_array_elements(t.detalhe #> '{agenda,bloco_mostrou}') l,
+                                                                       jsonb_array_elements(case when jsonb_typeof(t.detalhe #> '{agenda,linhas_diria}') = 'array'
+                                                                                                 then t.detalhe #> '{agenda,linhas_diria}' else '[]'::jsonb end) x,
+                                                                       lateral (select btrim(regexp_replace(l ->> 'texto', '\s+', ' ', 'g')) as v,
+                                                                                       '· ' || regexp_replace(btrim(regexp_replace(x ->> 'texto', '\s+', ' ', 'g')), '^Agenda: ', '') as i) z
+                                                                 where l ->> 'parte' = 'decisao' and x ->> 'tipo' = 'pergunta' and x ->> 'perda' = '76' and x ->> 'modo' = 'ligado'
+                                                                   and (z.v = z.i
+                                                                        or starts_with(z.v, split_part(z.i, ' 1) Mande', 1) || ' Para segurar, me diga.')
+                                                                        or z.v ~ '^· Sem resposta até [^,]+, conto: '))
                                                     then coalesce((select case when l ->> 'texto' ~ '^· Decisão [0-9]+: ' then 1 else 0 end
                                                                      from jsonb_array_elements(t.detalhe #> '{agenda,bloco_mostrou}') with ordinality u(l, o)
                                                                     where l ->> 'parte' = 'decisao' order by o limit 1), 0)
-                                                         + case when exists (select 1 from jsonb_array_elements(t.detalhe #> '{agenda,bloco_mostrou}') l
-                                                                              where l ->> 'parte' = 'decisao' and l ->> 'texto' ~ '^· Mensagem para ') then 1 else 0 end
+                                                         + case when exists (select 1
+                                                                               from jsonb_array_elements(t.detalhe #> '{agenda,bloco_mostrou}') l,
+                                                                                    jsonb_array_elements(case when jsonb_typeof(t.detalhe #> '{agenda,linhas_diria}') = 'array'
+                                                                                                              then t.detalhe #> '{agenda,linhas_diria}' else '[]'::jsonb end) x
+                                                                              where l ->> 'parte' = 'decisao' and x ->> 'tipo' = 'cliente' and x ->> 'modo' = 'ligado'
+                                                                                and btrim(regexp_replace(l ->> 'texto', '\s+', ' ', 'g'))
+                                                                                    = btrim(regexp_replace('· ' || public._agenda_corta(regexp_replace(x ->> 'texto',
+                                                                                        ': ".*"( \(\*agenda clientes\* mostra inteira\))?\. \*manda', '. *manda'), 220), '\s+', ' ', 'g')))
+                                                                then 1 else 0 end
                                                     else 0 end))::int
         from public.resumo_tarde t
        where t.dia between $1 and $2 and t.detalhe -> 'agenda' ? 'bloco_diria'
@@ -781,7 +814,7 @@ end;
 $function$;
 
 comment on function public._agenda_saude_comunicacao(date, timestamptz) is
-  'Agenda de Produção (Fase 7f, P7; §11, R8.5-27, R8.5-29, R8.6): a saúde da comunicação — {modos (os 6, crus), freio, ultima_rodada e rodadas_24h (rotina comunicar), erros_24h (comunicar:%), falhas_lote_guardaria_24h, zeros_ok, numeros} e os zeros: assumida_sem_prazo_mostrado, assumida_que_esperava, assumida_tipo_proibido, teto_passou_sem_motivo, bloco_grande, excecao_acima_do_teto. numeros só com algum modo fora de desligado: perguntas (abertas, teto, com prazo, esperam você, respondidas, assumidas por prazo e por teto, teria, idade média em dias úteis, complacência de 2 semanas), excecoes (hoje, cota livre, os ids distintos acima da cota; em sombra o que o lote levaria e guardaria), quinta (a que saiu; em sombra a que diria), bloco (resumo_tarde de 7 dias), mensagens_hoje por origem (aviso = agenda-dono, acorde = agenda; só contagens). A porta de _agenda_saude_local: administrador, financeiro ou service_role; o resto 42501. FASE 7f (P9): os zeros da equipe (equipe_fora_da_janela, equipe_acima_do_teto, ficha_sem_sim, mudanca_19h_repetida; aceite 6) e do cliente (dia_exato_cedo, promessa_mudou_sem_dono, semana_como_dia_ouvido; aceite 7), só do que a 7f manda de verdade, no zeros_ok; numeros.equipe (com o previsto ou o convite fora de desligado: previstos, mudanças, convites com SIM, NÃO e sem resposta, recusadas, em teste, "não vou" depois de mudança ou convite, na semana) e numeros.cliente (com as camadas fora de desligado: as semanas registradas, enviadas, seguradas, vencidas e em teste, a semana que mudou mandada, segurada, vencida e enviada, e as mudanças que chegaram ao cliente, na semana). PRAZO NO BLOCO (17/11/2026, 20270122100000; plano perguntas-com-prazo-1711, F1, revisão): bloco_grande não conta o fechamento que está no mínimo do bloco com a linha das perguntas do gestor (a (m) ligada de perda 76 em detalhe.agenda.linhas_diria e uma decisão sem número à vista): no mínimo ficam a 1ª decisão, a do gestor e a do cliente, e a tolerância de 2 decisões ganha +1 com a 1ª numerada (uma crítica antes da do gestor) e +1 com a mensagem ao cliente à vista. Sem a linha do gestor, a conta de antes.';
+  'Agenda de Produção (Fase 7f, P7; §11, R8.5-27, R8.5-29, R8.6): a saúde da comunicação — {modos (os 6, crus), freio, ultima_rodada e rodadas_24h (rotina comunicar), erros_24h (comunicar:%), falhas_lote_guardaria_24h, zeros_ok, numeros} e os zeros: assumida_sem_prazo_mostrado, assumida_que_esperava, assumida_tipo_proibido, teto_passou_sem_motivo, bloco_grande, excecao_acima_do_teto. numeros só com algum modo fora de desligado: perguntas (abertas, teto, com prazo, esperam você, respondidas, assumidas por prazo e por teto, teria, idade média em dias úteis, complacência de 2 semanas), excecoes (hoje, cota livre, os ids distintos acima da cota; em sombra o que o lote levaria e guardaria), quinta (a que saiu; em sombra a que diria), bloco (resumo_tarde de 7 dias), mensagens_hoje por origem (aviso = agenda-dono, acorde = agenda; só contagens). A porta de _agenda_saude_local: administrador, financeiro ou service_role; o resto 42501. FASE 7f (P9): os zeros da equipe (equipe_fora_da_janela, equipe_acima_do_teto, ficha_sem_sim, mudanca_19h_repetida; aceite 6) e do cliente (dia_exato_cedo, promessa_mudou_sem_dono, semana_como_dia_ouvido; aceite 7), só do que a 7f manda de verdade, no zeros_ok; numeros.equipe (com o previsto ou o convite fora de desligado: previstos, mudanças, convites com SIM, NÃO e sem resposta, recusadas, em teste, "não vou" depois de mudança ou convite, na semana) e numeros.cliente (com as camadas fora de desligado: as semanas registradas, enviadas, seguradas, vencidas e em teste, a semana que mudou mandada, segurada, vencida e enviada, e as mudanças que chegaram ao cliente, na semana). PRAZO NO BLOCO (17/11/2026, 20270122100000; plano perguntas-com-prazo-1711, F1, revisão): bloco_grande não conta o fechamento que está no mínimo do bloco com a linha das perguntas do gestor: no mínimo ficam a 1ª decisão, a do gestor e a do cliente. A tolerância é as fixas + 1 (no nivel_min só ficam as decisões que nunca saem, sem o "(e mais N)"; o +1 é o nível logo acima, com ele): a de antes, 2 (a 1ª e mais 1), ganha +1 com a 1ª numerada (uma crítica antes da do gestor) e +1 com a do cliente à vista. A do gestor está no fechamento quando a (m) ligada de perda 76 está em detalhe.agenda.linhas_diria e uma decisão à vista é a forma inteira dela (o texto sem o "Agenda: ", com os espaços juntados) ou a curta (que começa pelo trecho da ficha antes de " 1) Mande" e " Para segurar, me diga.", ou por "Sem resposta até …, conto: "); a do cliente, quando a linha cliente ligada de linhas_diria, escrita como o bloco a escreve (_agenda_corta, 220), é igual a uma decisão à vista (uma cliente_aprovar da ordem não conta). Sem a do gestor à vista, a conta de antes.';
 
 revoke all on function public._agenda_saude_comunicacao(date, timestamptz) from public, anon;
 grant execute on function public._agenda_saude_comunicacao(date, timestamptz) to authenticated, service_role;

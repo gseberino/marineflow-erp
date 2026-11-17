@@ -16,7 +16,9 @@
 --       depois do prazo, também não. Roda logo depois do P0, antes de a fixture da 7f entrar (o replay puro, como no Y1 de agenda_fase77a_correcao2.sql).
 --   P6  a saúde (revisão da F1): o fechamento acima de 1.000 no mínimo do bloco com a linha do gestor (a crítica, a do gestor e a do cliente, as 3 que nunca saem) não é
 --       bloco_grande (na saúde de antes era: o achado); acima do mínimo, com uma decisão da ordem que ainda podia sair, é, nas duas; com a do gestor em 1º, a tolerância
---       é 1 a menos; sem a linha do gestor, a saúde é a de antes, byte a byte (a função de 20261109101200 rodando como pg_temp); e nunca conta mais que a de antes
+--       é 1 a menos; sem a linha do gestor, a saúde é a de antes, byte a byte (a função de 20261109101200 rodando como pg_temp), também nos fechamentos de antes de
+--       aplicar; (revisão 3) as marcas presas às linhas certas, um fechamento por vez: a do gestor só pela forma inteira ou pela curta (com a ficha em 1º e sem ela), a
+--       do cliente só pela linha cliente de linhas_diria (uma cliente_aprovar da ordem que pode sair não ganha o +1), e o corte de 220 da linha do cliente
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -803,9 +805,201 @@ begin
     end loop;
     sn := public._agenda_saude_comunicacao(c_h, c_a);
     sa := pg_temp.saude_7f(c_h, c_a);
-    r := pg_temp.ok(r, 'P6g os fechamentos de antes de aplicar (a (m) ligada nas linhas, o bloco de antes sem ela): a saúde nova nunca conta mais bloco_grande que a de antes, e o resto é o mesmo',
-      (sn ->> 'bloco_grande')::int <= (sa ->> 'bloco_grande')::int and (sa ->> 'bloco_grande')::int > 0 and (sn - 'bloco_grande' - 'zeros_ok') = (sa - 'bloco_grande' - 'zeros_ok'),
+    r := pg_temp.ok(r, 'P6g os fechamentos de antes de aplicar (a (m) ligada nas linhas, o bloco de antes sem ela): a saúde nova é a de antes, byte a byte (como no P6f)',
+      sn::text = sa::text and (sa ->> 'bloco_grande')::int > 0,
       format('agora %s, antes %s', sn ->> 'bloco_grande', sa ->> 'bloco_grande'));
+    perform pg_temp.desfaz();
+  exception when sqlstate 'P0001' then
+    if sqlerrm <> '__desfaz__' then raise; end if;
+  end;
+  update public.agenda_config set modo_bloco_agenda = 'desligado' where id;
+  perform pg_temp.gravar(r);
+end
+$p$;
+
+-- ── P6 (revisão 3). As marcas da saúde presas às linhas certas, um fechamento por vez ─────────
+-- (P6h a P6m) As decisões à vista num nível, por classe: n = "· Decisão N:", g = a do gestor (pergunta_id b10c…, sem número), c = "· Mensagem para", e = "(e mais",
+-- s = outra sem número.
+create function pg_temp.classes(p_b jsonb, p_n int) returns text language sql immutable as $f$
+  select string_agg(case when l ->> 'texto' ~ '^· Decisão [0-9]+: ' then 'n'
+                         when l ->> 'pergunta_id' like 'b10c0000%' then 'g'
+                         when l ->> 'texto' ~ '^· Mensagem para ' then 'c'
+                         when l ->> 'texto' ~ '^\(e mais ' then 'e' else 's' end, '' order by o)
+    from jsonb_array_elements(pg_temp.no_nivel(p_b, p_n)) with ordinality t(l, o) where l ->> 'parte' = 'decisao'
+$f$;
+-- Um fechamento só em resumo_tarde (no nível p_n; com p_so, só o veredito e as decisões): 'antes/agora' do bloco_grande (a saúde de 20261109101200 / a nova).
+create function pg_temp.um_fechamento(p_lin jsonb, p_b jsonb, p_n int, p_so boolean, p_chars int default 1100) returns text language plpgsql as $f$
+begin
+  delete from public.resumo_tarde;
+  perform pg_temp.tarde(date '2026-11-10', p_chars, p_lin, p_b, p_n, p_so);
+  return (pg_temp.saude_7f(date '2026-11-10', timestamptz '2026-11-10 18:00-03') ->> 'bloco_grande') || '/'
+         || (public._agenda_saude_comunicacao(date '2026-11-10', timestamptz '2026-11-10 18:00-03') ->> 'bloco_grande');
+end $f$;
+-- Todos os níveis de um bloco, nas 2 formas, um fechamento por vez: {dif: quantos a nova conta diferente da de antes, det: "k<n>[<classes>]=antes/agora s=antes/agora; …"}.
+create function pg_temp.varre(p_lin jsonb, p_b jsonb, p_chars int default 1100) returns jsonb language plpgsql as $f$
+declare
+  k     int;
+  x     text;
+  y     text;
+  v     text := '';
+  v_dif int := 0;
+begin
+  for k in 0 .. (p_b ->> 'nivel_min')::int loop
+    x := pg_temp.um_fechamento(p_lin, p_b, k, false, p_chars);
+    y := pg_temp.um_fechamento(p_lin, p_b, k, true, p_chars);
+    v_dif := v_dif + (split_part(x, '/', 1) <> split_part(x, '/', 2))::int + (split_part(y, '/', 1) <> split_part(y, '/', 2))::int;
+    v := v || format('k%s[%s]=%s s=%s; ', k, pg_temp.classes(p_b, k), x, y);
+  end loop;
+  return jsonb_build_object('dif', v_dif, 'det', v);
+end $f$;
+
+do $p$
+declare
+  r       jsonb := '[]';
+  v_lin   jsonb;
+  a       jsonb;
+  b       jsonb;
+  v       jsonb;
+  v_x     text;
+  v_y     text;
+  v_g     jsonb;
+  c_cid   constant uuid := 'c0ffee00-0000-4000-8000-000000000001';
+  c_txt   constant text := 'Mensagem para Vera (véspera), sai qua 11/11 às 09:00: "Amanhã estamos aí às 8h. Está confirmado? Responda SIM.". *manda cliente Vera* ou *segura cliente Vera*. E mais 1: *agenda clientes* mostra; *manda cliente* manda todas.';
+  -- a do cliente que o bloco corta em 220 (sem a mensagem entre aspas ela ainda passa de 220): a linha à vista termina em "…"
+  c_longo constant text := 'Mensagem para Vera (véspera), sai qua 11/11 às 09:00: "Amanhã estamos aí às 8h.". *manda cliente Vera* ou *segura cliente Vera*. E mais 3: *agenda clientes* mostra; *manda cliente* manda todas. As outras 3 saem amanhã cedo, antes do serviço, e cada uma espera o seu sim ou o seu não por aqui.';
+  c_msg   constant text := 'Mensagem para Vanderlei (aviso), sai sex 13/11 às 09:00: "Seguimos na quinta.". *manda cliente Vanderlei* ou *segura cliente Vanderlei*.';
+begin
+  if not pg_temp.na_bancada() then return; end if;
+  if to_regclass('public.resumo_tarde') is null then
+    create table public.resumo_tarde (id uuid primary key default gen_random_uuid(), dia date not null, phone_normalized text not null, turno text not null,
+                                      modo text not null, formato text not null, texto text, detalhe jsonb not null default '{}'::jsonb,
+                                      criado_em timestamptz not null default now());
+  end if;
+
+  -- P6h (X1) os fechamentos de antes de aplicar, um por vez: a (m) ligada em linhas_diria, o bloco de antes (que a descartava) com a crítica, a do cliente e uma
+  -- decisão da ordem sem número à vista ("A Correa …", que a marca frouxa tomava pela do gestor). Nível a nível, nas 2 formas, a nova conta o mesmo que a de antes.
+  begin
+    perform pg_temp.liga();
+    perform pg_temp.perguntas_de_prazo();
+    v_lin := pg_temp.linhas() || jsonb_build_array(pg_temp.l('cliente', c_txt, jsonb_build_object('pergunta_id', pg_temp.q('04'))));
+    a := pg_temp.antes(v_lin);
+    v := pg_temp.varre(v_lin, a);
+    r := pg_temp.ok(r, 'P6h (X1) antes de aplicar, um fechamento por vez: com a (m) ligada em linhas_diria e uma decisão da ordem sem número à vista, a saúde nova conta o mesmo que a de antes em cada nível',
+      (v ->> 'dif')::int = 0 and position('s' in pg_temp.classes(a, 0)) > 0 and v ->> 'det' like '%=1/1%'
+      and exists (select 1 from jsonb_array_elements(v_lin) l where l ->> 'tipo' = 'pergunta' and l -> 'perda' = '76'::jsonb and l ->> 'modo' = 'ligado'),
+      v ->> 'det');
+    perform pg_temp.desfaz();
+  exception when sqlstate 'P0001' then
+    if sqlerrm <> '__desfaz__' then raise; end if;
+  end;
+
+  -- P6i (X3, X3b) depois de aplicar, SEM a mensagem ao cliente de amanhã (sem v_cli) e com uma cliente_aprovar da ordem que sai "· Mensagem para …" sem número e PODE
+  -- sair (como as da ordem de produção em 17/11). Sem crítica: a do gestor é a 1ª, a única fixa — a tolerância é a de antes (2). A "Mensagem para" da ordem não ganha o
+  -- +1 do cliente: nível a nível, a nova conta o mesmo que a de antes, com texto_max 1.000 (fechamento de 1.100) e 900 (fechamento de 950).
+  begin
+    perform pg_temp.liga();
+    perform pg_temp.perguntas_de_prazo();
+    update public.agenda_perguntas set estado = 'resolvida', resolvida_motivo = 'teste do prazo' where id in (pg_temp.q('06'), pg_temp.q('01'), pg_temp.q('02'), pg_temp.q('03'));
+    insert into public.agenda_perguntas (id, tipo, chave, service_order_id, os_ids, texto, opcoes, modo, criada_em, destrava)
+    values (c_cid, 'cliente_aprovar', 'cliente_aprovar:teste-prazo-no-bloco', null, '{}'::uuid[], c_msg, '[]'::jsonb, 'ligado', timestamptz '2026-11-02 09:00-03', 9000);
+    v_lin := pg_temp.linhas();
+    b := pg_temp.sobre(v_lin);
+    v := pg_temp.varre(v_lin, b);
+    update public.agenda_config set texto_max = 900 where id;
+    a := pg_temp.varre(v_lin, b, 950);
+    v := jsonb_build_object('dif', (v ->> 'dif')::int + (a ->> 'dif')::int, 'det', (v ->> 'det') || '| 900/950: ' || (a ->> 'det'));
+    r := pg_temp.ok(r, 'P6i (X3, X3b) depois de aplicar, sem a do cliente, com uma cliente_aprovar da ordem ("Mensagem para", que pode sair) à vista: não ganha o +1 — nível a nível a nova conta o mesmo que a de antes (texto_max 1.000 e 900)',
+      (v ->> 'dif')::int = 0 and v ->> 'det' like '%=1/1%'
+      and pg_temp.classes(b, 0) like 'g%c%' and not exists (select 1 from jsonb_array_elements(v_lin) l where l ->> 'tipo' = 'cliente' and l ->> 'pergunta_id' is not null)
+      and exists (select 1 from jsonb_array_elements(b -> 'linhas') l where l ->> 'parte' = 'decisao' and l ->> 'pergunta_id' = c_cid::text
+                                                                        and l ->> 'texto' like '· Mensagem para %' and l ->> 'nivel_de_corte' is not null),
+      v ->> 'det');
+    perform pg_temp.desfaz();
+  exception when sqlstate 'P0001' then
+    if sqlerrm <> '__desfaz__' then raise; end if;
+  end;
+
+  -- P6j a curta SEM a ficha (a 1ª é a situacao com prazo: "· Sem resposta até qua 11/11 18:00, conto: …"), com a crítica e a do cliente: no mínimo (as 3 fixas) e no
+  -- nível de antes dele (só o veredito e as decisões, com o "(e mais N)") não é bloco_grande; na de antes era
+  begin
+    perform pg_temp.liga();
+    perform pg_temp.perguntas_de_prazo();
+    update public.agenda_perguntas set estado = 'resolvida', resolvida_motivo = 'teste do prazo' where id = pg_temp.g('01');
+    v_lin := pg_temp.linhas() || jsonb_build_array(pg_temp.l('cliente', c_txt, jsonb_build_object('pergunta_id', pg_temp.q('04'))));
+    b := pg_temp.sobre(v_lin);
+    v_g := (select l from jsonb_array_elements(pg_temp.no_nivel(b, (b ->> 'nivel_min')::int)) l where l ->> 'pergunta_id' like 'b10c0000%');
+    v_x := pg_temp.um_fechamento(v_lin, b, (b ->> 'nivel_min')::int, false);
+    v_y := pg_temp.um_fechamento(v_lin, b, (b ->> 'nivel_min')::int - 1, true);
+    r := pg_temp.ok(r, 'P6j a curta sem a ficha ("Sem resposta até …, conto:") no mínimo, com a crítica e a do cliente: não é bloco_grande, nem no nível de antes dele (antes era)',
+      v_g ->> 'texto' ~ '^· Sem resposta até [^,]+, conto: ' and v_g ->> 'pergunta_id' = pg_temp.g('03')::text
+      and pg_temp.classes(b, (b ->> 'nivel_min')::int) = 'ngc' and pg_temp.classes(b, (b ->> 'nivel_min')::int - 1) = 'ngce' and v_x = '1/0' and v_y = '1/0',
+      format('mínimo %s, antes dele %s; %s', v_x, v_y, v_g ->> 'texto'));
+    perform pg_temp.desfaz();
+  exception when sqlstate 'P0001' then
+    if sqlerrm <> '__desfaz__' then raise; end if;
+  end;
+
+  -- P6k a INTEIRA no mínimo (a linha sem a curta: a curta não seria menor, e a inteira nunca sai), com a crítica e a do cliente cortada em 220 ("…"): não é
+  -- bloco_grande, nem no nível de antes dele; na de antes era
+  begin
+    perform pg_temp.liga();
+    perform pg_temp.perguntas_de_prazo();
+    update public.agenda_perguntas set estado = 'resolvida', resolvida_motivo = 'teste do prazo' where id in (pg_temp.g('01'), pg_temp.g('03'), pg_temp.g('04'));
+    insert into public.agenda_perguntas (id, tipo, chave, service_order_id, os_ids, perda_em, texto, opcoes, recomendacao, opcao_padrao, modo, criada_em, expira_em, veto_ate)
+    values (pg_temp.g('07'), 'situacao', 'situacao:' || pg_temp.osf('305') || ':teste-curta', pg_temp.osf('305'), array[pg_temp.osf('305')], date '2026-11-11',
+            'O Giancarlo (OS-F5) começou?',
+            '[{"n": 1, "texto": "Conta 1 dia", "efeito": {"dias": 1, "feito": "contei 1 dia"}}, {"n": 2, "texto": "Eu digo os dias", "efeito": {"dizer": true}}]', 1, 1, 'ligado',
+            timestamptz '2026-11-10 16:51-03', timestamptz '2026-11-12 18:00-03', timestamptz '2026-11-11 18:00-03');
+    v_lin := pg_temp.linhas() || jsonb_build_array(pg_temp.l('cliente', c_longo, jsonb_build_object('pergunta_id', pg_temp.q('04'))));
+    b := pg_temp.sobre(v_lin);
+    v_g := (select l from jsonb_array_elements(pg_temp.no_nivel(b, (b ->> 'nivel_min')::int)) l where l ->> 'pergunta_id' like 'b10c0000%');
+    v_x := pg_temp.um_fechamento(v_lin, b, (b ->> 'nivel_min')::int, false);
+    v_y := pg_temp.um_fechamento(v_lin, b, (b ->> 'nivel_min')::int - 1, true);
+    r := pg_temp.ok(r, 'P6k a inteira no mínimo (sem a curta), com a crítica e a do cliente cortada em 220: não é bloco_grande, nem no nível de antes dele (antes era)',
+      v_g ->> 'texto' = '· O Giancarlo (OS-F5) começou?' and v_g ->> 'nivel_de_corte' is null
+      and (select count(*) from jsonb_array_elements(b -> 'linhas') l where l ->> 'pergunta_id' like 'b10c0000%') = 1
+      and exists (select 1 from jsonb_array_elements(pg_temp.no_nivel(b, (b ->> 'nivel_min')::int)) l where l ->> 'texto' like '· Mensagem para Vera%…')
+      and pg_temp.classes(b, (b ->> 'nivel_min')::int) = 'ngc' and pg_temp.classes(b, (b ->> 'nivel_min')::int - 1) = 'ngce' and v_x = '1/0' and v_y = '1/0',
+      format('mínimo %s, antes dele %s; %s', v_x, v_y, v_g ->> 'texto'));
+    perform pg_temp.desfaz();
+  exception when sqlstate 'P0001' then
+    if sqlerrm <> '__desfaz__' then raise; end if;
+  end;
+
+  -- P6m a premissa do P6a (a crítica, a do gestor e a do cliente no mínimo): ali a do gestor sai na forma CURTA, a da ficha em 1º ("… pela minha estimativa. Para
+  -- segurar, me diga. Sem resposta até …"), que linhas_diria não grava; e, um fechamento por vez, não é bloco_grande no mínimo nem no nível de antes dele
+  begin
+    perform pg_temp.liga();
+    perform pg_temp.perguntas_de_prazo();
+    v_lin := pg_temp.linhas() || jsonb_build_array(pg_temp.l('cliente', c_txt, jsonb_build_object('pergunta_id', pg_temp.q('04'))));
+    b := pg_temp.sobre(v_lin);
+    v_g := (select l from jsonb_array_elements(pg_temp.no_nivel(b, (b ->> 'nivel_min')::int)) l where l ->> 'pergunta_id' like 'b10c0000%');
+    v_x := pg_temp.um_fechamento(v_lin, b, (b ->> 'nivel_min')::int, false);
+    v_y := pg_temp.um_fechamento(v_lin, b, (b ->> 'nivel_min')::int - 1, true);
+    r := pg_temp.ok(r, 'P6m a premissa do P6a: no mínimo a do gestor sai na forma curta com a ficha em 1º ("… Para segurar, me diga."), e nem ali nem no nível de antes é bloco_grande (antes era)',
+      v_g ->> 'texto' like '· Hoje às 19:30 a ficha de amanhã vai para Alex: % pela minha estimativa. Para segurar, me diga. Sem resposta até %'
+      and v_g ->> 'texto' not like '%1) Mande%' and pg_temp.classes(b, (b ->> 'nivel_min')::int) = 'ngc' and v_x = '1/0' and v_y = '1/0',
+      format('mínimo %s, antes dele %s; %s', v_x, v_y, v_g ->> 'texto'));
+    perform pg_temp.desfaz();
+  exception when sqlstate 'P0001' then
+    if sqlerrm <> '__desfaz__' then raise; end if;
+  end;
+
+  -- P6n (revisão 3, baixo B1) o +1 da crítica olha só a 1ª decisão à vista: sem crítica e sem a do cliente, a do gestor é a 1ª (sem número) e uma decisão numerada
+  -- da ordem, que ainda pode sair, fica à vista. Esse nível não está no mínimo: é bloco_grande nas duas (a regra "qualquer numerada à vista" daria 1/0 e esconderia)
+  begin
+    perform pg_temp.liga();
+    perform pg_temp.perguntas_de_prazo();
+    update public.agenda_perguntas set estado = 'resolvida', resolvida_motivo = 'teste do prazo'
+     where id in (pg_temp.q('01'), pg_temp.q('02'), pg_temp.q('03'), pg_temp.q('04'), pg_temp.q('05'), pg_temp.q('06'));
+    v_lin := pg_temp.linhas();
+    b := pg_temp.sobre(v_lin);
+    v_x := pg_temp.classes(b, (b ->> 'nivel_min')::int - 2);
+    v_y := pg_temp.um_fechamento(v_lin, b, (b ->> 'nivel_min')::int - 2, true);
+    r := pg_temp.ok(r, 'P6n o +1 da crítica olha só a 1ª decisão: com a do gestor em 1º e uma numerada da ordem à vista (sem cliente), acima do mínimo é bloco_grande nas duas',
+      v_x = 'gne' and v_y = '1/1'
+      and not exists (select 1 from jsonb_array_elements(v_lin) l where l ->> 'tipo' = 'cliente' and l ->> 'pergunta_id' is not null),
+      format('nível %s [%s] = %s', (b ->> 'nivel_min')::int - 2, v_x, v_y));
     perform pg_temp.desfaz();
   exception when sqlstate 'P0001' then
     if sqlerrm <> '__desfaz__' then raise; end if;
