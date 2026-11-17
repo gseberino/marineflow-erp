@@ -4356,3 +4356,40 @@ quatro estão latentes.
 - **Não é defeito (registrado para não voltar):** "o quarto" numa OS com o serviço 4 e uma "Luz do quartinho" marca o
   serviço 4. É a regra: o ordinal é o número impresso no cartão, e "quartinho" não é a palavra "quarto"
   (`linhas-da-os_test.ts:195` e `:207`).
+
+### [NOVO-via-11] A via da agenda nunca sai: a ficha não grava `alocacao_ids` e a via descarta toda ficha sem elas
+
+- **Onde:** `supabase/functions/task-automations/via-da-agenda.ts:199`
+  (`.filter((f) => f.payee_id && (f.alocacao_ids ?? []).length)`, desde `c81da888`, 13/11). No banco, `_agenda_rotina_ficha` chama
+  `_agenda_equipe_registrar(..., 'ficha', ...)` sem `p_alocacoes`, e o ramo `ficha`/`como_foi` do registrar grava só `dias`
+  (definições vivas em `porte/pos-deploy/critico/def__agenda_*.sql`). As fixtures de `via-da-agenda_test.ts` trazem
+  `alocacao_ids` preenchido, o que o dado real nunca tem.
+- **Efeito:** quando a primeira ficha da equipe for de fato à fila, a via não vai junto, e nada avisa (sem erro, sem linha em
+  `via_tecnico_envios`). Em 16/11: 5 fichas na história, todas `recusada` por `veto` (janela de veto do dono até 23/11), 0 com
+  `alocacao_ids`; `via_tecnico_envios` só tem 2 `para_si`. Ou seja, latente até a 1ª ficha sair (a partir de 17/11 19:30 se o dono
+  não vetar; de 23/11 em diante, sozinha). O prompt (`_shared/ai/prompt.ts:218`) diz ao dono que "a agenda já manda a via
+  sozinha".
+- **Menor mudança (sem migração):** em `viaDaAgenda`, achar as OS da ficha pelo mesmo critério de `agenda_equipe_ficha`
+  (`agenda_alocacoes` da pessoa no dia, `estado in ('publicada','fixada')`, `tipo <> 'reserva'`), limitado às alocações que já
+  existiam quando a ficha foi registrada (`criado_em <= ficha.criada_em`), em vez de `alocacao_ids`. Teste com `alocacao_ids` nulo,
+  como vem do banco. (Alternativa com migração: a rotina passar `p_alocacoes` e o registrar gravar na ficha.)
+
+### [NOVO-via-12] A ficha que vai junto do "como foi" das 17:00 nunca leva a via
+
+- **Onde:** `via-da-agenda.ts` filtra `.eq("tipo", "ficha")`; `_agenda_rotina_como_foi` registra `como_foi` com
+  `leva_ficha_de = <amanhã>` e `_agenda_rotina_ficha` pula quem já tem esse `como_foi`.
+- **Efeito:** quem trabalha dois dias seguidos recebe a ficha de amanhã pelo "como foi" e fica sem via, mesmo com o NOVO-via-11
+  consertado. Em 16/11: 4 `como_foi`, todos com `leva_ficha_de` nulo (nenhum caso real ainda).
+- **Menor mudança:** ler também `tipo = 'como_foi'` com `leva_ficha_de` não nulo, usando `leva_ficha_de` como o dia da ficha
+  (mesmo conserto do NOVO-via-11).
+
+### [NOVO-via-13] Envio da via sem resposta em 25 s libera a chave e pode repetir; o assistente não olha envios anteriores
+
+- **Onde:** `_shared/pdf/via-do-tecnico-envio.ts:121` (`if (envio.semResposta) await liberarEnvio(...)`) e `_shared/idempotencia.ts`
+  (`liberarEnvio` faz `delete().eq("chave", chave)` sem olhar `concluido_em`). No assistente, `enviar_via_do_tecnico`
+  (`_shared/ai/tools/via-do-tecnico.ts:158`, `:407`) só deduplica numa janela de 2 minutos e o cartão do SIM não mostra a última via
+  entregue.
+- **Efeito:** um envio que chegou mas demorou mais de 25 s pode ser repetido no tique seguinte; e o dono, sem saber que a pessoa
+  já recebeu, pode mandar de novo (com SIM). Baixo: exige SIM ou timeout; hoje 0 envios da agenda e 0 do assistente.
+- **Menor mudança:** `liberarEnvio` apagar só a reserva sem `concluido_em`; no cartão do SIM, mostrar "já recebeu em dd/mm"
+  (`ultimaViaEntregue`).
