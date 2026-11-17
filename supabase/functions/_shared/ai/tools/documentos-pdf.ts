@@ -25,6 +25,8 @@ import { desviadoPorTeste } from "../../whatsapp/marcar-enviado.ts";
 // A via do técnico para si (13/11/2026). Import circular inofensivo: via-do-tecnico.ts usa localizarOrdem daqui e
 // esta tool usa mandarViaParaSi de lá, as duas só dentro de funções (nada roda na carga do módulo).
 import { mandarViaParaSi } from "./via-do-tecnico.ts";
+// A impressora do escritório (17/11/2026): o mesmo PDF, outro destino (tools/impressao.ts). Mesmo import circular inofensivo.
+import { imprimirParaQuemPediu } from "./impressao.ts";
 // O caminho do PDF (montar → renderizar → guardar → entregar → apagar) mora em
 // _shared/pdf/gerar-e-guardar.ts desde 26/09/2026, quando o envio ao CLIENTE passou a usar o
 // mesmo arquivo. Os dois nomes reexportados abaixo continuam saindo daqui: os testes e quem
@@ -132,7 +134,7 @@ export const documentoPdfTools: ToolDef[] = [
   {
     name: "send_document_pdf_to_self",
     description:
-      "Manda o PDF de um orçamento ou OS para o WhatsApp de QUEM ESTÁ PEDINDO (nunca para o cliente). Use quando o usuário pedir 'me manda o PDF', 'quero ver o PDF do orçamento 86', 'manda o orçamento pra mim'. Aceita o número (ORÇ-00086, OS-00075 ou só 86), o id, ou 'ultimo'. É o mesmo PDF do botão Baixar e não muda o status do orçamento. Com via='tecnico' manda a VIA DO TÉCNICO (a folha de serviço sem preço) — 'me manda a via do técnico da OS 119'; com pessoa='Alex', a via como o Alex a recebe (só os serviços dele). Para mandar ao CLIENTE use send_service_order_link; à EQUIPE, enviar_via_do_tecnico.",
+      "Manda o PDF de um orçamento ou OS para o WhatsApp de QUEM ESTÁ PEDINDO (nunca para o cliente). Use quando o usuário pedir 'me manda o PDF', 'quero ver o PDF do orçamento 86', 'manda o orçamento pra mim'. Aceita o número (ORÇ-00086, OS-00075 ou só 86), o id, ou 'ultimo'. É o mesmo PDF do botão Baixar e não muda o status do orçamento. Com via='tecnico' manda a VIA DO TÉCNICO (a folha de serviço sem preço) — 'me manda a via do técnico da OS 119'; com pessoa='Alex', a via como o Alex a recebe (só os serviços dele). Com destino='impressora' o papel sai na IMPRESSORA DO ESCRITÓRIO em vez do WhatsApp — 'imprime o orçamento 86', 'imprime a via do técnico da 136' (via='tecnico'), 'imprime as vias de hoje' (documento='hoje'); copias até 5; preto e branco salvo colorido=true. Para mandar ao CLIENTE use send_service_order_link; à EQUIPE, enviar_via_do_tecnico.",
     input_schema: {
       type: "object",
       properties: {
@@ -140,6 +142,9 @@ export const documentoPdfTools: ToolDef[] = [
         tipo: { type: "string", enum: ["orcamento", "os"], description: "Se o usuário disse 'orçamento' ou 'OS' — resolve número solto e 'ultimo'." },
         via: { type: "string", enum: ["cliente", "tecnico"], description: "'cliente' (padrão) = o PDF do Baixar; 'tecnico' = a via do técnico, sem preço." },
         pessoa: { type: "string", description: "Só com via='tecnico': a via de uma pessoa da equipe (só os serviços dela). Vazio = a OS inteira." },
+        destino: { type: "string", enum: ["whatsapp", "impressora"], description: "'whatsapp' (padrão) = o arquivo no WhatsApp de quem pede; 'impressora' = imprime na impressora do escritório." },
+        copias: { type: "integer", description: "Só com destino='impressora': quantas cópias (1 a 5; padrão 1)." },
+        colorido: { type: "boolean", description: "Só com destino='impressora': true = colorido; padrão preto e branco." },
       },
       required: ["documento"],
     },
@@ -150,6 +155,8 @@ export const documentoPdfTools: ToolDef[] = [
       const bloqueado = blockTechnician(ctx);
       if (bloqueado) return bloqueado;
       if (!CARGOS_DO_PDF.includes(ctx.userRole as Role)) return { error: "Só administrador e financeiro podem pedir o PDF pelo assistente." };
+      // A impressora do escritório (17/11/2026): mesma folha, outro destino.
+      if (args.destino === "impressora") return await imprimirParaQuemPediu(args, ctx);
       // A via do técnico (13/11/2026): outra folha, mesmo destino (quem pediu).
       if (args.via === "tecnico") return await mandarViaParaSi(args, ctx);
 

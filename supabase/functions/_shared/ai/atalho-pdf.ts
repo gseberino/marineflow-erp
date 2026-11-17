@@ -9,7 +9,13 @@
 // vocabulário abaixo, com "pdf" e um documento. Qualquer outra palavra ("pro cliente",
 // "com desconto", "e o da OS") devolve null e a mensagem segue para o modelo, como antes.
 
-export type PedidoDePdf = { documento: string; tipo?: "orcamento" | "os" };
+export type PedidoDePdf = {
+  documento: string;
+  tipo?: "orcamento" | "os";
+  /** (17/11/2026) "imprime o orçamento 86": o mesmo pedido, para a impressora do escritório. */
+  destino?: "impressora";
+  via?: "tecnico";
+};
 
 const VOCABULARIO = new Set([
   "me", "manda", "mande", "mandar", "envia", "envie", "enviar", "passa", "passe", "quero", "preciso",
@@ -65,8 +71,68 @@ export function lerPedidoDePdf(texto: string): PedidoDePdf | null {
   return tipo ? { documento, tipo } : { documento };
 }
 
+// ═══ Imprimir (17/11/2026) ═════════════════════════════════════════════════════════════════════
+// "imprime o orçamento 86", "imprimir OS 136", "imprime a via do técnico da 136", "imprime as vias de hoje". Mesmo
+// leitor estrito: palavra fora do vocabulário (cópias, colorido, um nome) = null, e o modelo decide.
+
+const VERBOS_DE_IMPRIMIR = new Set(["imprime", "imprima", "imprimir", "imprimi", "impressao", "imprimam"]);
+const VOCABULARIO_DE_IMPRESSAO = new Set([...VOCABULARIO, "as", "os", "vias", "via", "tecnico", "do", "das", "dos", "hoje", "pode", "ai", "la"]);
+
+/** O pedido de impressão, se a mensagem for SÓ isso; null para qualquer outra coisa. */
+export function lerPedidoDeImpressao(texto: string): PedidoDePdf | null {
+  const t = normalizar(texto);
+  if (!t || t.length > 80) return null;
+  const palavras = t.split(/\s+/);
+  if (!palavras.some((p) => VERBOS_DE_IMPRIMIR.has(p))) return null;
+  const viaDoTecnico = palavras.includes("via") || palavras.includes("vias") || palavras.includes("tecnico");
+  if (palavras.includes("hoje")) {
+    // "imprime as vias de hoje" (só com via/vias: "imprime o de hoje" é ambíguo)
+    if (!palavras.includes("vias") && !palavras.includes("via")) return null;
+    if (palavras.some((p) => !VERBOS_DE_IMPRIMIR.has(p) && !VOCABULARIO_DE_IMPRESSAO.has(p))) return null;
+    return { documento: "hoje", via: "tecnico", destino: "impressora" };
+  }
+  let documento: string | null = null;
+  let tipo: PedidoDePdf["tipo"];
+  for (const p of palavras) {
+    if (VERBOS_DE_IMPRIMIR.has(p)) continue;
+    const codigo = p.match(/^(orc|os)-?0*(\d{1,6})$/);
+    if (codigo) {
+      if (documento) return null;
+      documento = codigo[2];
+      tipo = codigo[1] === "os" ? "os" : "orcamento";
+      continue;
+    }
+    if (/^\d{1,6}$/.test(p)) {
+      if (documento) return null;
+      documento = String(Number(p));
+      continue;
+    }
+    if (PALAVRAS_DE_ULTIMO.has(p)) {
+      if (documento) return null;
+      documento = "ultimo";
+      continue;
+    }
+    if (PALAVRAS_DE_ORCAMENTO.has(p)) { if (tipo === "os" || viaDoTecnico) return null; tipo = "orcamento"; continue; }
+    if (PALAVRAS_DE_OS.has(p)) { if (tipo === "orcamento" && p !== "servico") return null; tipo = tipo ?? "os"; continue; }
+    if (VOCABULARIO_DE_IMPRESSAO.has(p) || p === "pdf") continue;
+    return null;
+  }
+  if (!documento) return null;
+  if (viaDoTecnico) return { documento, tipo: "os", via: "tecnico", destino: "impressora" };
+  return tipo ? { documento, tipo, destino: "impressora" } : { documento, destino: "impressora" };
+}
+
 /** Resposta ao dono a partir do resultado da tool (mesma forma que o modelo recebe). */
-export function textoDoAtalhoPdf(r: Record<string, unknown>): string {
+export function textoDoAtalhoPdf(r: Record<string, unknown>, pedido?: PedidoDePdf | null): string {
+  // (17/11/2026) A impressão já traz a frase pronta (o que saiu e o que não saiu).
+  if (pedido?.destino === "impressora") {
+    if (typeof r.frase === "string" && r.frase) return [r.frase, typeof r.aviso === "string" ? r.aviso : ""].filter(Boolean).join("\n");
+    if (Array.isArray(r.opcoes) && r.opcoes.length > 0) {
+      return `Achei mais de um com esse número: ${(r.opcoes as unknown[]).join(" e ")}. Qual deles? Mande de novo com o número completo (ex.: "imprime ${String(r.opcoes[0])}").`;
+    }
+    const erro = String(r.error ?? r.motivo ?? "erro desconhecido").replace(/^Não dá para imprimir agora: /, "");
+    return `Não consegui imprimir: ${erro.replace(/\.$/, "")}.`;
+  }
   if (r.ok === true && r.deduplicated === true) return String(r.aviso ?? "Esse PDF já foi mandado há instantes; não reenviei.");
   if (r.ok === true) {
     const doc = String(r.documento ?? "o documento");

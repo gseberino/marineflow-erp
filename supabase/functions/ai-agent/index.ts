@@ -88,7 +88,7 @@ import { STATUS_INJETAVEL, colunaDaEntidade } from "../_shared/ai/memory-scope.t
 import { podarHistoricoParaLLM } from "../_shared/ai/context-pruning.ts";
 import { filtrarPorCanal } from "../_shared/ai/channel-scope.ts";
 import { carregarJanela, marcarResultadosAnteriores } from "../_shared/ai/history-window.ts";
-import { lerPedidoDePdf, textoDoAtalhoPdf } from "../_shared/ai/atalho-pdf.ts";
+import { lerPedidoDeImpressao, lerPedidoDePdf, textoDoAtalhoPdf } from "../_shared/ai/atalho-pdf.ts";
 import { lerComandoDoSecretario } from "../_shared/secretario/comandos.ts";
 import { executarComandoDoSecretario } from "../_shared/secretario/executar.ts";
 import { abrirConfirmacaoDoSecretario } from "../_shared/secretario/confirmar.ts";
@@ -918,7 +918,10 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
   // a mais segue para o modelo), vai direto à mesma tool que o modelo chamaria. Decisão do dono,
   // 29/09/2026: o pedido mais comum não precisa de ~17 s nem de uma chamada ao modelo.
   // Interruptor: app_settings.ai_atalho_pdf = 'off'.
-  const pedidoDePdf = (settings.ai_atalho_pdf || "").trim().toLowerCase() === "off" ? null : lerPedidoDePdf(effectiveText);
+  // (17/11/2026) "imprime o orçamento 86" / "imprime as vias de hoje": o mesmo atalho, destino impressora do escritório.
+  const pedidoDePdf = (settings.ai_atalho_pdf || "").trim().toLowerCase() === "off"
+    ? null
+    : (lerPedidoDePdf(effectiveText) ?? lerPedidoDeImpressao(effectiveText));
   const toolDoPdf = pedidoDePdf ? toolsByName["send_document_pdf_to_self"] : undefined;
   if (pedidoDePdf && toolDoPdf && (!toolDoPdf.roles || toolDoPdf.roles.includes(appUser.role as Role))) {
     let resultado: Record<string, unknown>;
@@ -927,7 +930,7 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
     } catch (e) {
       resultado = { error: e instanceof Error ? e.message : String(e) };
     }
-    const resposta = textoDoAtalhoPdf(resultado);
+    const resposta = textoDoAtalhoPdf(resultado, pedidoDePdf);
     // No histórico como um turno comum: a próxima mensagem ao modelo sabe que o PDF já foi.
     try {
       await admin.from("ai_operator_messages").insert([
@@ -941,7 +944,7 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
       .update({ metadata, last_activity_at: new Date().toISOString() })
       .eq("id", sessionId);
     await queueWhatsAppReply(admin, phoneNormalized, resposta);
-    return jr({ ok: true, atalho: "pdf" });
+    return jr({ ok: true, atalho: pedidoDePdf.destino === "impressora" ? "impressao" : "pdf" });
   }
 
   return await turnoDoModeloNoWhatsApp({

@@ -30,6 +30,7 @@ import { ehPalavraDoRetornoLigada } from "../_shared/retorno/camada.ts";
 import { ehPalavraDoParceiroLigada } from "../_shared/parceiro/camada.ts";
 import { ehPalavraDoOrcamentoLigada } from "../_shared/orcamento/camada.ts";
 import { respostaDaEquipe } from "../_shared/agenda/resposta-da-equipe.ts";
+import { pedidoDeImpressaoDaEquipe } from "../_shared/impressao/pedido-da-equipe.ts";
 import { respostaDoCliente } from "../_shared/agenda/resposta-do-cliente.ts";
 import { ehPedidoDeParar } from "../_shared/whatsapp/parar.ts";
 import { abrirNoRetorno, consumidaPelosLeitores, identificarCliente, noFundo } from "./retorno.ts";
@@ -638,7 +639,12 @@ export async function handler(req: Request): Promise<Response> {
         // foi hoje?" (só com agenda_config.modo_equipe fora de desligado e o telefone de alguém da equipe; o banco lê, decide
         // e enfileira a resposta dele). Consumida = a confirmação do cliente e a conferência do recibo abaixo não leem o
         // mesmo texto (o "ok" tem um dono só, NOVO-agenda-17). Até 500 caracteres; erro = segue como hoje (nunca lança).
-        const daEquipe = await respostaDaEquipe(admin, { phone, body, messageId: event.messageId || msg?.id || null });
+        // Impressão (17/11/2026): "imprime minha via" de alguém da equipe vai à impressora do escritório (texto, sem modelo;
+        // o trabalho corre no fundo). Reconhecido = a agenda recebe texto vazio (que ela ignora sem ir ao banco) e a
+        // mensagem conta como consumida pela equipe: os leitores abaixo não leem o mesmo texto.
+        const daImpressao = await pedidoDeImpressaoDaEquipe(admin, { phone, body, messageId: msg?.id ?? null, noFundo });
+        const daEquipe = await respostaDaEquipe(admin, { phone, body: daImpressao ? null : body, messageId: event.messageId || msg?.id || null }) ||
+          daImpressao;
         // Agenda de Produção (Fase 5, P4, 27/10/2026): a resposta do CLIENTE a uma mensagem da agenda (o SIM, "pode ser
         // sexta?", "não dá terça", o acesso, o "PARAR", o áudio — que vai ao dono e nunca confirma). Só com
         // agenda_config.modo_cliente ligado e uma mensagem da agenda esperando resposta o banco consome (em teste só registra);

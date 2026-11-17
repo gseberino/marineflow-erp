@@ -20,6 +20,8 @@ import type { ModoDoPortao, RegrasDaVozUnica } from "../_shared/uma-voz/portao.t
 import { lerPortao, type PortaoDaRodada } from "../_shared/uma-voz/registrar.ts";
 import { type DadosDeHoje, type DadosDoEscritorio, linhaDoItem, type NaRua, textoDaManha, textoDoEscritorio } from "./secretario-texto.ts";
 import { type ExtraDaManha, lerExtra, lerRetorno, linhasDaManha, type RetornoDaManha } from "./retorno.ts";
+import { impressoraNoAr } from "../_shared/impressao/fila.ts";
+import { osDaAgendaDoDia } from "../_shared/impressao/agenda.ts";
 
 // deno-lint-ignore no-explicit-any
 type Admin = any;
@@ -134,6 +136,31 @@ export function itensParaGravar(sel: Selecao): ItemParaGravar[] {
   return itens;
 }
 
+/**
+ * (17/11/2026) A sugestão de imprimir as vias do dia (decisão do dono: nada automático, só a sugestão na hora certa).
+ * Uma linha no fim, só em dia útil e só com OS na agenda de hoje; o comando sugerido é lido sem modelo (atalho-pdf.ts).
+ */
+export function comSugestaoDeImpressao(texto: string, tipo: ReturnType<typeof tipoDoDia>, vias: number): string {
+  if (tipo !== "util" || !(vias > 0)) return texto;
+  const quantas = vias === 1 ? "a via de hoje" : `as ${vias} vias de hoje`;
+  return `${texto}\n🖨️ Quer ${quantas} no papel? Responda: *imprime as vias de hoje*`;
+}
+
+/**
+ * Quantas OS a agenda de hoje tem, se a impressora do escritório está no ar e a sugestão não foi desligada
+ * (app_settings.impressao_sugestao_manha = 'off'). Nunca lança: qualquer erro = 0 (a manhã sai como antes).
+ */
+export async function viasParaImprimirHoje(admin: Admin, hoje: string): Promise<number> {
+  try {
+    const { data: chave } = await admin.from("app_settings").select("value").eq("key", "impressao_sugestao_manha").maybeSingle();
+    if (String(chave?.value ?? "").trim().toLowerCase() === "off") return 0;
+    if (!(await impressoraNoAr(admin)).ok) return 0;
+    return (await osDaAgendaDoDia(admin, hoje)).length;
+  } catch {
+    return 0;
+  }
+}
+
 /** A parte pura: dos dados lidos ao texto e aos itens. */
 export function montarDosDados(p: {
   hoje: string;
@@ -151,6 +178,11 @@ export function montarDosDados(p: {
   retorno?: RetornoDaManha | null;
   /** (F2, P12) retorno_resumo_extra ('manha'); ausente ou null = o texto de antes */
   retornoExtra?: ExtraDaManha | null;
+  /**
+   * (17/11/2026, impressão) Quantas OS a agenda de hoje tem com a impressora do escritório no ar: > 0 = a manhã sugere
+   * "imprime as vias de hoje" numa linha no fim. Ausente ou 0 = o texto de antes, byte a byte.
+   */
+  viasParaImprimir?: number;
 }): ManhaNova {
   const tipo = tipoDoDia(p.hoje);
   const opcoes = p.opcoes ?? OPCOES_PADRAO;
@@ -167,9 +199,9 @@ export function montarDosDados(p: {
     : null;
   // (P14) "Clientes esperando" e "Para conferir": os sem prazo que já têm letra na manhã não repetem
   const retorno = p.retorno ? linhasDaManha(p.retorno, fonesDaManha(selecao), p.agora, p.retornoExtra ?? null) : null;
-  const texto = textoDaManha({
+  const texto = comSugestaoDeImpressao(textoDaManha({
     hoje: p.hoje, tipoDoDia: tipo, feriado: feriadoDoDia(p.hoje), selecao, naRua: p.naRua, deHoje: p.deHoje, guardado: plano, retorno,
-  });
+  }), tipo, p.viasParaImprimir ?? 0);
   return {
     texto,
     tipoDoDia: tipo,
@@ -244,9 +276,11 @@ export async function montarManhaNova(admin: Admin, p: {
   // Domingo e feriado a manhã é uma linha só (nada a ler)
   const retorno = tipoDoDia(p.hoje) === "util" ? await lerRetorno(admin, "manha", p.agora) : null;
   const retornoExtra = tipoDoDia(p.hoje) === "util" ? await lerExtra(admin, "manha", p.agora) : null;
+  // (17/11/2026) a sugestão de imprimir as vias de hoje; viasParaImprimirHoje nunca lança (erro = 0 = sem a linha)
+  const viasParaImprimir = tipoDoDia(p.hoje) === "util" ? await viasParaImprimirHoje(admin, p.hoje) : 0;
   return montarDosDados({
     hoje: p.hoje, agora: p.agora, ...lido, escritorio: p.escritorio,
-    opcoes: { semanaVoltaComFatoNovo: portao.regras.semana_volta_com_fato_novo }, guardado, retorno, retornoExtra,
+    opcoes: { semanaVoltaComFatoNovo: portao.regras.semana_volta_com_fato_novo }, guardado, retorno, retornoExtra, viasParaImprimir,
   });
 }
 
