@@ -201,6 +201,15 @@ export const FORA_DA_BANCADA = new Set([
   // Retorno (baff4298, de OUTRA sessão; na main desde 13/11 à noite): recria só retorno_abrir (o fornecedor ativo sem OS não ganha recibo), que declara
   // public.retorno_config: sem as tabelas do retorno, a bancada parava aqui ("type public.retorno_config does not exist"). Não toca em função da agenda.
   '20270112101000_retorno_fornecedor_sem_os.sql',
+  // Histórico de documentos (50fc9f78, de OUTRA sessão; na main desde 16/11): cria o schema private, as funções private.historico_* e documento_*, e gatilhos em
+  // audit_log, service_orders, service_order_parts, service_order_services e orcamento_envios. A bancada não modela o schema private: sem isto ela parava na 1ª
+  // ("schema private does not exist", 17/11). Não recria nenhuma função da agenda (procurado nas 5 em 17/11: só private.*, documento_historico e
+  // documento_restaurar); os gatilhos novos ficam de fora da bancada, como os do retorno.
+  '20270121100000_historico_de_documentos_captura.sql',
+  '20270121100100_historico_de_documentos_consulta.sql',
+  '20270121100200_historico_de_documentos_restaurar.sql',
+  '20270121100300_historico_retrato_inicial.sql',
+  '20270121100400_historico_mudanca_so_no_formato.sql',
 ]);
 
 /**
