@@ -88,8 +88,14 @@ end $f$;
 create function pg_temp.sem_p8(p_corpo text) returns text language plpgsql as $f$
 declare
   v_b text[] := '{}'; v_bloco boolean := false; l text;
+  v_fpb int := 0;  -- FICHA PAGA B (20270126100000): o nível dentro dos blocos "-- FICHA PAGA B:"
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
+    -- FICHA PAGA B (20270126100000; F2b v2): a F2b recria _agenda_gestor_decidir com blocos "-- FICHA PAGA B: … -- FICHA PAGA B: fim"; eles
+    -- saem antes de tudo (contados: um B pode estar dentro de um bloco desta fase)
+    if l ~ '^\s*-- FICHA PAGA B: fim' then v_fpb := v_fpb - 1; continue; end if;
+    if l ~ '^\s*-- FICHA PAGA B:' then v_fpb := v_fpb + 1; continue; end if;
+    if v_fpb > 0 then continue; end if;
     -- FASE 7b: (7b P4) e os blocos "-- FASE 7b: … fim" (a 20261101100300 recria o motor de novo, só acréscimo): a régua aceita "7b"
     -- FASE 7b: fim
     -- FASE 7c: (7c P2) e os blocos "-- FASE 7c: … fim" (a 20261102100100 recria o motor de novo, só acréscimo): a régua aceita "7c"

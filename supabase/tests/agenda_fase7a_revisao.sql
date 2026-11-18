@@ -118,8 +118,14 @@ end $f$;
 create function pg_temp.sem_p9(p_corpo text) returns text language plpgsql as $f$
 declare
   v_b text[] := '{}'; v_bloco boolean := false; l text;
+  v_fpb int := 0;  -- FICHA PAGA B (20270126100000): o nível dentro dos blocos "-- FICHA PAGA B:"
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
+    -- FICHA PAGA B (20270126100000; F2b v2): a F2b recria _agenda_gestor_decidir com blocos "-- FICHA PAGA B: … -- FICHA PAGA B: fim"; eles
+    -- saem antes de tudo (contados: um B pode estar dentro de um bloco desta fase)
+    if l ~ '^\s*-- FICHA PAGA B: fim' then v_fpb := v_fpb - 1; continue; end if;
+    if l ~ '^\s*-- FICHA PAGA B:' then v_fpb := v_fpb + 1; continue; end if;
+    if v_fpb > 0 then continue; end if;
     -- FASE 7e (P3): agenda_aplicar ganhou blocos da 7e, que também saem da comparação
     if not v_bloco and l ~ '^\s*-- FASE 7(: \(7a P(9|11|12)|e:)' then v_bloco := true; continue; end if;
     if v_bloco then

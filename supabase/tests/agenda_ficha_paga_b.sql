@@ -5,34 +5,41 @@
 -- qui 29/10 16:46, a janela da ficha de 21 dias).
 -- bancada: depende de 20270126100000
 --
---   B0 as portas e o que é (sem fixture; roda também em produção depois de aplicar): as 2 leituras novas invoker, STABLE, authenticated e
---      service_role, nunca anon; as 5 recriadas com as portas de antes; a OS que não existe não começou; tiradas os blocos "-- FICHA PAGA B:",
---      as 5 são as da F2 (e a saúde, a de produção de 18/11), byte a byte, pelo md5; tirados também os da F2, a liberada, as fichas e a
---      ficha das 19:30 são as de antes da F2; os comentários são os da F2 com o "FICHA PAGA B" no fim
---   B1 o começou só por EVIDÊNCIA de serviço feito (revisão do coordenador, 18/11): o dia só planejado nunca conta (o caso OS-00129); o
---      dia de antes "cumprido" ou "parcial" conta, "não cumprido" e o "sem registro" da vigia não; check-in antes do dia e "em andamento"
---      contam; a confirmação da manhã respondida "sim" por quem estava na OS; a diária lançada (aprovada) na OS; horas apontadas ou passo
---      da execução iniciado. O próprio dia nunca conta
+--   B0 as portas e o que é (sem fixture; roda também em produção depois de aplicar): as 3 leituras novas invoker, STABLE, authenticated e
+--      service_role, nunca anon; as 7 recriadas com as portas de antes; a OS que não existe não começou; tirados os blocos "-- FICHA PAGA B:",
+--      as 7 são as de produção (a F2; a saúde, a resposta da equipe e o decidir de 18/11), byte a byte, pelo md5; tirados também os da F2,
+--      a liberada, as fichas e a ficha das 19:30 são as de antes da F2; os comentários são os de antes com o "FICHA PAGA B" no fim
+--   B1 o começou só por PROVA DE TRABALHO do técnico (revisões do coordenador e respostas do dono P1 e P4, 18/11): o dia só planejado nunca
+--      conta (o caso OS-00129); o dia de antes "cumprido" ou "parcial" conta, "não cumprido" e o "sem registro" da vigia não; o check-in,
+--      o "em andamento" e a reabertura com check-in NÃO contam (com o "como foi" OK, sim); a confirmação da manhã respondida "sim" sem
+--      divergência por quem estava na OS num turno que confirmou; a diária lançada (aprovada) na OS; horas apontadas ou passo iniciado. O
+--      próprio dia nunca conta
 --   B2 a OS paga que AINDA NÃO começou fica segurada: a pergunta de sex 30/10 para a ficha de ter 03/11 (o dia 1) diz "já está PAGA e
 --      ainda não começou: o serviço ainda vai ser feito?" (padrão e recomendação 2); às 19:30 a ficha fica, o porquê ao dono, a pergunta
---      fecha com o motivo dela; com o dia 1 só planejado (sem registro, sem confirmação, sem "como foi"), o dia 2 continua segurado (B2c)
---   B3 a OS paga que JÁ começou (o dia 1 e o 2 feitos, o "como foi") volta à regra de antes: dentro da janela, a pergunta de sempre (padrão
---      1, sem o PAGA) e, mostrada, a ficha sai sem *mande*; fora da janela e sem o ligar do gestor, nenhuma pergunta e a ficha sai
---   B4 a OS concluída ou faturada nunca manda a ficha: sem pergunta, a ficha fica (recusada, veto), o porquê "a OS já está concluída" (ou
---      "faturada"), por concluida; nem com o *mande*; fora da janela e sem o ligar; de qualquer alocação (não só a da estimativa); a
---      confirmação da manhã e a ficha do "como foi" também ficam; a pergunta aberta fecha com o motivo dela; o dono sempre tem a ficha
---   B5 o dia misto: o parêntese cita TODAS as OS do dia e o porquê nomeia a concluída ou a paga; a concluída vence a paga; duas OS pagas
+--      fecha com o motivo dela; com o dia 1 só planejado, o dia 2 continua segurado (B2c); só o check-in e "em andamento" seguram (B2d); a
+--      reabertura com check-in segura (B2e)
+--   B3 a OS paga que JÁ começou (o "como foi" do dia 1 e do 2 respondido) volta à regra de antes: dentro da janela, a pergunta de sempre
+--      (padrão 1, sem o PAGA) e, mostrada, a ficha sai sem *mande*; fora da janela e sem o ligar do gestor, nenhuma pergunta e a ficha sai
+--   B4 a OS concluída, faturada ou cancelada nunca manda a ficha: sem pergunta, a ficha fica (recusada, veto), o porquê "a OS já está
+--      concluída" ("faturada", "cancelada"), por concluida; nem com o *mande*; fora da janela e sem o ligar; de qualquer alocação; a
+--      confirmação da manhã e a ficha do "como foi" também ficam; a pergunta aberta fecha com o motivo dela; o dono sempre tem a ficha;
+--      (P3) a cancelada; (correção da revisão) o *mande* depois da conclusão responde "A OS-… já está concluída: a ficha não sai."
+--   B5 o dia misto: o parêntese cita TODAS as OS do dia e o porquê nomeia a encerrada ou a paga; a encerrada vence a paga; duas OS pagas
 --      no dia: a pergunta no plural ("As … já estão PAGAS e ainda não começaram: os serviços ainda vão ser feitos?")
 --   B6 a saúde (C4 da revisão da F2): um fechamento ligado de 1.100 letras com a crítica numerada, a do gestor na CURTA da ficha paga
 --      ("… eu seguro a ficha. Para mandar, me diga *mande*.") e a do cliente não é bloco_grande; na saúde de produção (sem o bloco B) era;
 --      com a curta de antes ("Para segurar, me diga.") as duas não contam. (O mesmo pelo caminho de verdade, com a fixture da 7f: P6p de
 --      agenda_prazo_no_bloco.sql.)
+--   B7 (P2) "o que tem pra amanhã?" com a ficha segurada: "Vou ver com <dono> e te falo." e a pergunta equipe_resposta ao dono (OS paga sem
+--      *mande*; OS concluída); com a ficha liberada, o plano como antes
+--   X  os casos da revisão adversarial (X01–X08: quem estava na OS, a alocação cancelada, "presença", a diária paga, folga e falta, a de
+--      outra OS, o passo no próprio dia, as horas de outra OS, o dia feito de outra OS, o fuso, o dia misto com *mande*)
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
 --   Em produção, só DEPOIS de aplicar a migration, com o OK nomeado do dono:
 --     npx supabase@2.111.0 db query --linked -f supabase/tests/agenda_ficha_paga_b.sql
---   Seguro em produção: B0 só lê; B1 a B6 usam o replay e só rodam na bancada (fora dela saem PULADO). Termina em ROLLBACK.
+--   Seguro em produção: B0 só lê; B1 a B7 e X usam o replay e só rodam na bancada (fora dela saem PULADO). Termina em ROLLBACK.
 --
 -- A tabela final tem de mostrar ok = true em todas as linhas. Uma linha false é defeito.
 begin;
@@ -139,24 +146,28 @@ create function pg_temp.acao(p_payee uuid) returns text language sql stable as $
 $f$;
 
 -- ── B0. As portas e o que é (sem fixture) ───────────────────────────────────────────────────────────────
-with f(assinatura, quem, vol, definer) as (values
-  ('public._agenda_os_comecou(uuid, date)', 'leitura', 's', false),
-  ('public._agenda_ficha_os_concluidas(uuid, date)', 'leitura', 's', false),
-  ('public._agenda_ficha_os_pagas(uuid, date)', 'leitura', 's', false),
-  ('public._agenda_ficha_liberada(uuid, date, timestamptz)', 'leitura', 's', false),
-  ('public._agenda_gestor_fichas(date, timestamptz)', 'ninguem', 'v', false),
-  ('public._agenda_rotina_ficha(date, timestamptz)', 'ninguem', 'v', false),
-  ('public._agenda_saude_comunicacao(date, timestamptz)', 'leitura', 's', true))
+with f(assinatura, auth, srv, vol, definer) as (values
+  ('public._agenda_os_comecou(uuid, date)', true, true, 's', false),
+  ('public._agenda_ficha_os_concluidas(uuid, date)', true, true, 's', false),
+  ('public._agenda_ficha_os_concluidas_texto(uuid[])', true, true, 's', false),
+  ('public._agenda_ficha_os_pagas(uuid, date)', true, true, 's', false),
+  ('public._agenda_ficha_liberada(uuid, date, timestamptz)', true, true, 's', false),
+  ('public._agenda_gestor_fichas(date, timestamptz)', false, false, 'v', false),
+  ('public._agenda_rotina_ficha(date, timestamptz)', false, false, 'v', false),
+  ('public._agenda_saude_comunicacao(date, timestamptz)', true, true, 's', true),
+  ('public.agenda_resposta_da_equipe(text, text, text, timestamptz)', false, true, 'v', true),
+  ('public._agenda_gestor_decidir(uuid, smallint, uuid, text, text, date, timestamptz)', false, false, 'v', true))
 insert into _resultado
-select 'B0a as portas: as 2 leituras novas invoker, STABLE, para authenticated e service_role; as 5 recriadas como eram (a saúde definer); nunca anon; search_path fixo',
+select 'B0a as portas: as 3 leituras novas invoker, STABLE, para authenticated e service_role; as 7 recriadas como eram (a saúde, a resposta da equipe e o decidir definer; a resposta só service_role); nunca anon; search_path fixo',
        bool_and(not has_function_privilege('anon', f.assinatura, 'execute')
                 and not has_function_privilege('public', f.assinatura, 'execute')
-                and has_function_privilege('authenticated', f.assinatura, 'execute') = (f.quem = 'leitura')
-                and has_function_privilege('service_role', f.assinatura, 'execute') = (f.quem = 'leitura')
+                and has_function_privilege('authenticated', f.assinatura, 'execute') = f.auth
+                and has_function_privilege('service_role', f.assinatura, 'execute') = f.srv
                 and p.prosecdef = f.definer and p.provolatile::text = f.vol
                 and coalesce(array_to_string(p.proconfig, ','), '') like '%search_path=%'),
        string_agg(f.assinatura, ', ') filter (where has_function_privilege('anon', f.assinatura, 'execute')
-                                              or has_function_privilege('authenticated', f.assinatura, 'execute') <> (f.quem = 'leitura')
+                                              or has_function_privilege('authenticated', f.assinatura, 'execute') <> f.auth
+                                              or has_function_privilege('service_role', f.assinatura, 'execute') <> f.srv
                                               or p.prosecdef <> f.definer or p.provolatile::text <> f.vol)
   from f join pg_proc p on p.oid = f.assinatura::regprocedure;
 
@@ -168,16 +179,19 @@ declare
   v_t   text := '';
   v_ok  boolean := true;
 begin
-  v_res := pg_temp.ok(v_res, 'B0b a OS que não existe (ou nula) não começou; a pessoa sem alocação não tem OS concluída',
+  v_res := pg_temp.ok(v_res, 'B0b a OS que não existe (ou nula) não começou; a pessoa sem alocação não tem OS encerrada; sem OS encerrada, o texto do estado é nulo',
     not public._agenda_os_comecou(gen_random_uuid(), date '2026-11-05') and not public._agenda_os_comecou(null, date '2026-11-05')
-    and public._agenda_ficha_os_concluidas(gen_random_uuid(), date '2026-11-05') = '{}'::uuid[], null);
-  -- tirados os blocos B: a F2 (os md5 "depois" dela) e a saúde de produção de 18/11; tirados também os da F2: as de antes da F2
+    and public._agenda_ficha_os_concluidas(gen_random_uuid(), date '2026-11-05') = '{}'::uuid[]
+    and public._agenda_ficha_os_concluidas_texto(array[gen_random_uuid()]) is null and public._agenda_ficha_os_concluidas_texto('{}'::uuid[]) is null, null);
+  -- tirados os blocos B: a F2 (os md5 "depois" dela) e as de produção de 18/11; tirados também os da F2: as de antes da F2
   for r in select * from (values
       ('public._agenda_ficha_os_pagas(uuid, date)', '9b51d37226c72ec40dca7758460e6995', null, 1),
       ('public._agenda_ficha_liberada(uuid, date, timestamptz)', '46b2eaa697100267c9c66888738dc2fd', 'ec5ad2b9c7015dd67adf286846dbf285', 1),
       ('public._agenda_gestor_fichas(date, timestamptz)', '61b60204be07e8d91a93df3f3485731c', 'b652c8f60de5d8795391e89e3b814031', 3),
       ('public._agenda_rotina_ficha(date, timestamptz)', 'c0f0f48b02e4a7b80888d3112fa7cc40', '592d7ce112fa55352963cce9262406b5', 5),
-      ('public._agenda_saude_comunicacao(date, timestamptz)', '00926f7360872e00e572b5dd5fce6a6c', null, 1)) x(sig, f2, antes, blocos)
+      ('public._agenda_saude_comunicacao(date, timestamptz)', '00926f7360872e00e572b5dd5fce6a6c', null, 1),
+      ('public.agenda_resposta_da_equipe(text, text, text, timestamptz)', 'f572cd9e2068d952b3c862be24c9d46a', null, 2),
+      ('public._agenda_gestor_decidir(uuid, smallint, uuid, text, text, date, timestamptz)', 'ed6693488bfa2c8a7c30583c2c5f0478', null, 2)) x(sig, f2, antes, blocos)
   loop
     select replace(p.prosrc, E'\r\n', E'\n') into v from pg_proc p where p.oid = r.sig::regprocedure;
     v_ok := v_ok and md5(pg_temp.sem_b(v)) = r.f2 and (r.antes is null or md5(pg_temp.sem_b(v, true)) = r.antes)
@@ -186,15 +200,16 @@ begin
                          case when r.antes is null then '' else '/' || left(md5(pg_temp.sem_b(v, true)), 8) end,
                          (select count(*) from regexp_matches(v, '-- FICHA PAGA B: fim', 'g')));
   end loop;
-  v_res := pg_temp.ok(v_res, 'B0c a F2b só acrescenta: sem os blocos "-- FICHA PAGA B:" as 5 são as da F2 (a saúde, a de produção de 18/11), byte a byte; sem esses e os da F2, a liberada, as fichas e a ficha das 19:30 são as de antes da F2',
+  v_res := pg_temp.ok(v_res, 'B0c a F2b só acrescenta: sem os blocos "-- FICHA PAGA B:" as 7 são as de produção (a F2; a saúde, a resposta da equipe e o decidir de 18/11), byte a byte; sem esses e os da F2, a liberada, as fichas e a ficha das 19:30 são as de antes da F2',
     v_ok, v_t);
-  v_res := pg_temp.ok(v_res, 'B0d as 2 novas são as da migration (md5 do corpo) e só as 5 recriadas têm blocos "-- FICHA PAGA B:"',
-    (select md5(replace(p.prosrc, E'\r\n', E'\n')) from pg_proc p where p.oid = 'public._agenda_os_comecou(uuid, date)'::regprocedure) = 'b2933cdbf26fb67b3e2319645b953c18'
-    and (select md5(replace(p.prosrc, E'\r\n', E'\n')) from pg_proc p where p.oid = 'public._agenda_ficha_os_concluidas(uuid, date)'::regprocedure) = '9475ab93d995bf85fe742d58814b094c'
+  v_res := pg_temp.ok(v_res, 'B0d as 3 novas são as da migration (md5 do corpo) e só as 7 recriadas têm blocos "-- FICHA PAGA B:"',
+    (select md5(replace(p.prosrc, E'\r\n', E'\n')) from pg_proc p where p.oid = 'public._agenda_os_comecou(uuid, date)'::regprocedure) = 'be56ca4d90c597912d1586c04ae6ee1c'
+    and (select md5(replace(p.prosrc, E'\r\n', E'\n')) from pg_proc p where p.oid = 'public._agenda_ficha_os_concluidas(uuid, date)'::regprocedure) = '7f95cd1c57df9bed990fda7d430aefc3'
+    and (select md5(replace(p.prosrc, E'\r\n', E'\n')) from pg_proc p where p.oid = 'public._agenda_ficha_os_concluidas_texto(uuid[])'::regprocedure) = 'b9ba37f0ab5e3f5cdcc69c2b12b34c8d'
     and (select string_agg(p.proname, ',' order by p.proname) from pg_proc p where p.pronamespace = 'public'::regnamespace and p.prosrc like '%-- FICHA PAGA B:%')
-        = '_agenda_ficha_liberada,_agenda_ficha_os_pagas,_agenda_gestor_fichas,_agenda_rotina_ficha,_agenda_saude_comunicacao',
+        = '_agenda_ficha_liberada,_agenda_ficha_os_pagas,_agenda_gestor_decidir,_agenda_gestor_fichas,_agenda_rotina_ficha,_agenda_saude_comunicacao,agenda_resposta_da_equipe',
     (select string_agg(p.proname, ',' order by p.proname) from pg_proc p where p.pronamespace = 'public'::regnamespace and p.prosrc like '%-- FICHA PAGA B:%'));
-  -- os comentários: o da F2 (ou o de produção, na saúde) inteiro, e o "FICHA PAGA B" no fim
+  -- os comentários: o de antes inteiro (o da F2; o de produção) e o "FICHA PAGA B" no fim
   v_t := '';
   v_ok := true;
   for r in select * from (values
@@ -202,18 +217,20 @@ begin
       ('public._agenda_ficha_liberada(uuid, date, timestamptz)', '777a166856bbc702a80769c14a4ab486'),
       ('public._agenda_gestor_fichas(date, timestamptz)', '7e8b518fa1323c08c8825537ff77688b'),
       ('public._agenda_rotina_ficha(date, timestamptz)', '79bae61929ea3f7987efe9c0bb313da7'),
-      ('public._agenda_saude_comunicacao(date, timestamptz)', '99581f277e07b814f39c73233418ba79')) x(sig, antes)
+      ('public._agenda_saude_comunicacao(date, timestamptz)', '99581f277e07b814f39c73233418ba79'),
+      ('public.agenda_resposta_da_equipe(text, text, text, timestamptz)', 'fbefa808f7ed57b9200e2fc5a0181fca'),
+      ('public._agenda_gestor_decidir(uuid, smallint, uuid, text, text, date, timestamptz)', 'd2fcc43fed6ccf2e548899749834b915')) x(sig, antes)
   loop
     v := obj_description(r.sig::regprocedure, 'pg_proc');
     v_ok := v_ok and md5(split_part(v, ' FICHA PAGA B (18/11/2026, 20270126100000', 1)) = r.antes and v like '% FICHA PAGA B (18/11/2026, 20270126100000%';
     v_t := v_t || left(md5(split_part(v, ' FICHA PAGA B (18/11/2026, 20270126100000', 1)), 8) || ' ';
   end loop;
-  v_res := pg_temp.ok(v_res, 'B0e os comentários das 5: o de antes inteiro (o da F2; na saúde, o de produção) e o "FICHA PAGA B (18/11/2026, 20270126100000…" no fim', v_ok, v_t);
+  v_res := pg_temp.ok(v_res, 'B0e os comentários das 7: o de antes inteiro (o da F2; o de produção) e o "FICHA PAGA B (18/11/2026, 20270126100000…" no fim', v_ok, v_t);
   perform pg_temp.gravar(v_res);
 end
 $b0$;
 
--- ── B1 a B5. Com o replay de 29/10 ───────────────────────────────────────────────────────────────────────
+-- ── B1 a B5 e B7. Com o replay de 29/10 ───────────────────────────────────────────────────────────────────────
 do $bx$
 declare
   v_res   jsonb := '[]'::jsonb;
@@ -240,6 +257,7 @@ declare
   v_t2    text;
   v_n     int;
   v_ok    boolean;
+  v_dono_nome text;
 begin
   if coalesce(current_setting('agenda_teste.replay2910', true), '') = '' then
     insert into _resultado values ('B1 a B5 (o replay de 29/10)', true, 'PULADO: sem agenda_teste.replay2910 (rode pela bancada)');
@@ -254,7 +272,7 @@ begin
     v_dono := public._agenda_dono(null);
     select u.id into v_adm from public.app_users u where u.role = 'admin' order by u.id limit 1;
 
-    -- ── B1. O começou: só EVIDÊNCIA de serviço feito (revisão do coordenador, 18/11: o dia só planejado nunca conta) ──
+    -- ── B1. O começou: só PROVA DE TRABALHO do técnico antes do dia (revisões do coordenador e respostas do dono P1 e P4, 18/11) ──
     v_res := pg_temp.ok(v_res, 'B1a o dia só PLANEJADO nunca conta (o caso OS-00129): o Lenine tem dias vigentes em 03 e 04/11 sem resultado e não começou em 03, 04, 05 nem 11/11; o Vanderlei, em 13/11',
       not public._agenda_os_comecou(v_len, c_t03) and not public._agenda_os_comecou(v_len, c_q04) and not public._agenda_os_comecou(v_len, c_q05)
       and not public._agenda_os_comecou(v_len, date '2026-11-11') and not public._agenda_os_comecou(v_van, date '2026-11-13'),
@@ -276,32 +294,40 @@ begin
     exception when sqlstate 'P0098' then null;
     end;
     begin
+      -- (P1, P4) o check-in e o "em andamento" sozinhos NÃO provam: a porta os grava ao abrir e ao REABRIR a OS
       perform pg_temp.status(v_len, 'scheduled', pg_temp.em(date '2026-11-02', '08:00'));
-      v_t := public._agenda_os_comecou(v_len, c_t03)::text;
-      alter table public.service_orders disable trigger user;
-      update public.service_orders set check_in_at = pg_temp.em(c_t03, '08:00') where id = v_len;
-      alter table public.service_orders enable trigger user;
-      v_t := v_t || ',' || public._agenda_os_comecou(v_len, c_t03) || ',' || public._agenda_os_comecou(v_len, c_q04);
+      v_t := public._agenda_os_comecou(v_len, c_t03) || ',' || public._agenda_os_comecou(v_len, c_q04);
       perform pg_temp.status(v_len, 'in_progress');
-      alter table public.service_orders disable trigger user;
-      update public.service_orders set check_in_at = null where id = v_len;
-      alter table public.service_orders enable trigger user;
-      v_t := v_t || ',' || public._agenda_os_comecou(v_len, c_t03);
-      v_res := pg_temp.ok(v_res, 'B1c o check-in antes do dia conta (o do próprio dia, não); "em andamento" conta, mesmo no dia 1', v_t = 'true,false,true,true', v_t);
+      v_t := v_t || ',' || public._agenda_os_comecou(v_len, c_q04);
+      -- a reabertura: a OS concluída volta a em andamento com o check-in gravado (como a OS-00104 e a OS-00134 em 16/11)
+      perform pg_temp.status(v_len, 'completed');
+      perform pg_temp.status(v_len, 'in_progress', pg_temp.em(date '2026-11-02', '11:22'));
+      v_t := v_t || ',' || public._agenda_os_comecou(v_len, c_q04);
+      -- o check-in com o "como foi" do dia 1 respondido OK: aí sim
+      perform pg_temp.aloc(v_len, c_t03, 'resultado = ''cumprido'', resultado_via = ''equipe'', resultado_em = now()', v_joao);
+      v_t := v_t || ',' || public._agenda_os_comecou(v_len, c_q04);
+      v_res := pg_temp.ok(v_res, 'B1c (P1, P4) o check-in sozinho não conta, nem o "em andamento", nem a reabertura com check-in; o check-in com o "como foi" OK do dia 1, sim',
+        v_t = 'false,false,false,false,true', v_t);
       raise exception 'desfaz' using errcode = 'P0098';
     exception when sqlstate 'P0098' then null;
     end;
     begin
-      -- a confirmação da manhã de ter 03/11 do João (que estava na OS-00074 nesse dia), respondida
+      -- a confirmação da manhã de ter 03/11 do João (que estava na OS-00074 o dia todo), respondida
       v_t := '';
       alter table public.agenda_equipe_mensagens disable trigger user;
       insert into public.agenda_equipe_mensagens (payee_id, dia, tipo, modo, texto, enviar_em, estado, dedupe_key, criada_em, resposta_texto, resposta_em, leitura)
       values (v_joao, c_t03, 'confirmar', 'ligado', 'Confirmação de teste da ficha paga B', pg_temp.em(c_t03, '07:45'), 'respondida',
               'teste-f2b:confirmar:' || v_joao || ':' || c_t03, pg_temp.em(c_t03, '07:45'), 'ok', pg_temp.em(c_t03, '07:50'), '{"tipo": "ok"}');
       v_t := v_t || public._agenda_os_comecou(v_len, c_q04) || ',' || public._agenda_os_comecou(v_len, c_t03) || ',' || public._agenda_os_comecou(v_van, date '2026-11-13') || ',';
-      update public.agenda_equipe_mensagens set leitura = '{"tipo": "turnos", "turnos": ["manha", "tarde"], "ok": true}' where dedupe_key like 'teste-f2b:confirmar:%';
+      update public.agenda_equipe_mensagens set leitura = '{"tipo": "turnos", "turnos": ["tarde", "manha"], "ok": true}' where dedupe_key like 'teste-f2b:confirmar:%';
       v_t := v_t || public._agenda_os_comecou(v_len, c_q04) || ',';
-      update public.agenda_equipe_mensagens set leitura = '{"tipo": "turnos", "turnos": ["manha"]}' where dedupe_key like 'teste-f2b:confirmar:%';
+      -- (C3 da revisão) "ok, só de manhã" com o dia todo no plano: o tratador vê divergência e manda ao dono — não confirma
+      update public.agenda_equipe_mensagens set leitura = '{"tipo": "turnos", "turnos": ["manha"], "ok": true}' where dedupe_key like 'teste-f2b:confirmar:%';
+      v_t := v_t || public._agenda_os_comecou(v_len, c_q04) || ',';
+      -- "meio" com os dois turnos no plano também diverge
+      update public.agenda_equipe_mensagens set leitura = '{"tipo": "turnos", "turnos": ["meio"], "ok": true}' where dedupe_key like 'teste-f2b:confirmar:%';
+      v_t := v_t || public._agenda_os_comecou(v_len, c_q04) || ',';
+      update public.agenda_equipe_mensagens set leitura = '{"tipo": "turnos", "turnos": ["manha", "tarde"]}' where dedupe_key like 'teste-f2b:confirmar:%';
       v_t := v_t || public._agenda_os_comecou(v_len, c_q04) || ',';
       update public.agenda_equipe_mensagens set leitura = '{"tipo": "nao_entendi"}' where dedupe_key like 'teste-f2b:confirmar:%';
       v_t := v_t || public._agenda_os_comecou(v_len, c_q04) || ',';
@@ -309,8 +335,29 @@ begin
        where dedupe_key like 'teste-f2b:confirmar:%';
       v_t := v_t || public._agenda_os_comecou(v_len, c_q04);
       alter table public.agenda_equipe_mensagens enable trigger user;
-      v_res := pg_temp.ok(v_res, 'B1d a confirmação da manhã de um dia antes, respondida "sim" (ok; turnos com ok) por quem estava na OS, conta; o próprio dia, outra OS, turnos sem ok, "não entendi" e sem resposta, não',
-        v_t = 'true,false,false,true,false,false,false', v_t);
+      v_res := pg_temp.ok(v_res, 'B1d a confirmação da manhã de um dia antes, respondida "sim" sem divergência (ok; os turnos do plano com ok) por quem estava na OS, conta; o próprio dia, outra OS, turnos diferentes do plano ("ok, só de manhã"; "meio" com os dois turnos), turnos sem ok, "não entendi" e sem resposta, não',
+        v_t = 'true,false,false,true,false,false,false,false,false', v_t);
+      raise exception 'desfaz' using errcode = 'P0098';
+    exception when sqlstate 'P0098' then null;
+    end;
+    begin
+      -- o turno que ele confirmou: o João em ter 03/11 com a OS-00074 de manhã e a OS-00069 à tarde
+      v_t := '';
+      perform pg_temp.aloc(v_len, c_t03, format('service_order_id = %L', v_van), v_joao, 'tarde');
+      alter table public.agenda_equipe_mensagens disable trigger user;
+      insert into public.agenda_equipe_mensagens (payee_id, dia, tipo, modo, texto, enviar_em, estado, dedupe_key, criada_em, resposta_texto, resposta_em, leitura)
+      values (v_joao, c_t03, 'confirmar', 'ligado', 'Confirmação de teste da ficha paga B', pg_temp.em(c_t03, '07:45'), 'respondida',
+              'teste-f2b:confirmar:' || v_joao || ':' || c_t03, pg_temp.em(c_t03, '07:45'), 'ok, de tarde', pg_temp.em(c_t03, '07:50'),
+              '{"tipo": "ok", "turnos": ["tarde"]}');
+      -- "ok" com só a tarde dita: a OS da tarde (OS-00069) conta, a da manhã (OS-00074), não
+      v_t := v_t || public._agenda_os_comecou(v_len, c_q04) || ',' || public._agenda_os_comecou(v_van, c_q04) || ',';
+      -- com um turno só no plano (a tarde dele cancelada), "meio" é esse turno
+      perform pg_temp.aloc(v_van, c_t03, 'estado = ''cancelada'', cancelada_em = now(), cancelada_motivo = ''replanejado''', v_joao);
+      update public.agenda_equipe_mensagens set leitura = '{"tipo": "turnos", "turnos": ["meio"], "ok": true}' where dedupe_key like 'teste-f2b:confirmar:%';
+      v_t := v_t || public._agenda_os_comecou(v_len, c_q04) || ',' || public._agenda_os_comecou(v_van, c_q04);
+      alter table public.agenda_equipe_mensagens enable trigger user;
+      v_res := pg_temp.ok(v_res, 'B1d2 a confirmação conta só para a OS de um turno que ele confirmou ("ok, de tarde": a OS da tarde sim, a da manhã não); "meio" com um turno só no plano é esse turno',
+        v_t = 'false,true,true,false', v_t);
       raise exception 'desfaz' using errcode = 'P0098';
     exception when sqlstate 'P0098' then null;
     end;
@@ -332,7 +379,7 @@ begin
       v_t := v_t || public._agenda_os_comecou(v_len, c_q04);
       alter table public.work_shifts enable trigger user;
       alter table public.work_shift_os enable trigger user;
-      v_res := pg_temp.ok(v_res, 'B1e a diária lançada (aprovada) num dia antes, na OS (pela OS da diária ou por work_shift_os), conta; o próprio dia, a em rascunho, a falta e a de outra OS, não',
+      v_res := pg_temp.ok(v_res, 'B1e a diária lançada (aprovada) num dia antes, na OS (pela OS da diária ou por work_shift_os), conta; o próprio dia, a em rascunho, a falta e a diária sem OS (sem service_order_id e sem work_shift_os), não',
         v_t = 'true,false,false,false,false,true', v_t);
       raise exception 'desfaz' using errcode = 'P0098';
     exception when sqlstate 'P0098' then null;
@@ -395,8 +442,37 @@ begin
     exception when sqlstate 'P0098' then null;
     end;
 
+    begin
+      -- (P1) a OS paga com check-in e "em andamento", sem prova de trabalho: segura a ficha do dia 1 e a do dia 2
+      perform pg_temp.pagar(v_len);
+      perform pg_temp.status(v_len, 'in_progress', pg_temp.em(date '2026-11-02', '08:00'));
+      v_ok := public._agenda_ficha_liberada(v_joao, c_t03, pg_temp.em(c_s30, '19:31')) or public._agenda_ficha_liberada(v_joao, c_q04, pg_temp.em(c_t03, '19:31'));
+      v_res := pg_temp.ok(v_res, 'B2d (P1) a OS paga só com o check-in e "em andamento" (sem prova de trabalho) segura a ficha do dia 1 e a do dia 2',
+        public._agenda_os_paga_por_inteiro(v_len) and public._agenda_ficha_os_pagas(v_joao, c_t03) = array[v_len]
+        and public._agenda_ficha_os_pagas(v_joao, c_q04) = array[v_len] and not v_ok,
+        format('pagas03=%s pagas04=%s liberada=%s', public._agenda_ficha_os_pagas(v_joao, c_t03), public._agenda_ficha_os_pagas(v_joao, c_q04), v_ok));
+      raise exception 'desfaz' using errcode = 'P0098';
+    exception when sqlstate 'P0098' then null;
+    end;
+    begin
+      -- (P4) a reabertura: a OS concluída e reaberta (em andamento, check-in da reabertura), paga: segura
+      perform pg_temp.status(v_len, 'completed');
+      perform pg_temp.pagar(v_len);
+      perform pg_temp.status(v_len, 'in_progress', pg_temp.em(date '2026-11-02', '11:22'));
+      r := public._agenda_gestor_fichas(c_t03, pg_temp.em(c_t03, '16:52'));
+      v_q := (select (x ->> 'pergunta_id')::uuid from jsonb_array_elements(r -> 'pessoas') x where x ->> 'nome' = 'João');
+      v_t := (select q.opcao_padrao || '|' || q.texto from public.agenda_perguntas q where q.id = v_q);
+      perform public._agenda_rotina_ficha(c_t03, pg_temp.em(c_t03, '19:32'));
+      v_res := pg_temp.ok(v_res, 'B2e (P4) a OS reaberta com check-in e paga: a pergunta é a da paga não começada e às 19:30 a ficha do dia 2 fica',
+        v_t like '2|%A OS-00074 já está PAGA e ainda não começou%' and pg_temp.equipe(v_joao) = 'ficha 2026-11-04 recusada/veto',
+        coalesce(v_t, '-') || ' | ' || coalesce(pg_temp.equipe(v_joao), '-'));
+      raise exception 'desfaz' using errcode = 'P0098';
+    exception when sqlstate 'P0098' then null;
+    end;
+
     -- ── B3. A OS paga que já começou (o João fez o dia 1 e o 2: o "como foi" respondido): a regra de antes ──
     begin
+      perform pg_temp.status(v_len, 'scheduled', pg_temp.em(date '2026-11-02', '08:00'));  -- e o check-in: com o "como foi", começou
       perform pg_temp.aloc(v_len, c_t03, 'resultado = ''cumprido'', resultado_via = ''equipe'', resultado_em = now()', v_joao);
       perform pg_temp.aloc(v_len, c_q04, 'resultado = ''cumprido'', resultado_via = ''equipe'', resultado_em = now()', v_joao);
       perform pg_temp.pagar(v_len);
@@ -486,9 +562,9 @@ begin
       v_q := (r -> 'pessoas' -> 0 ->> 'pergunta_id')::uuid;
       perform pg_temp.status(v_len, 'completed');
       perform public._agenda_rotina_ficha(c_q04, pg_temp.em(c_q04, '19:30'));
-      v_res := pg_temp.ok(v_res, 'B4d a pergunta aberta de quem tem OS concluída fecha às 19:30 com o motivo dela ("a OS já estava concluída ou faturada: a ficha não saiu")',
+      v_res := pg_temp.ok(v_res, 'B4d a pergunta aberta de quem tem OS concluída fecha às 19:30 com o motivo dela ("a OS já estava concluída, faturada ou cancelada: a ficha não saiu")',
         (select q.estado || ':' || q.resolvida_motivo from public.agenda_perguntas q where q.id = v_q)
-          = 'resolvida:a OS já estava concluída ou faturada: a ficha não saiu' and pg_temp.acao(v_rob) = c_conc,
+          = 'resolvida:a OS já estava concluída, faturada ou cancelada: a ficha não saiu' and pg_temp.acao(v_rob) = c_conc,
         (select q.estado || ':' || coalesce(q.resolvida_motivo, '-') from public.agenda_perguntas q where q.id = v_q) || ' | ' || coalesce(pg_temp.acao(v_rob), '-'));
       raise exception 'desfaz' using errcode = 'P0098';
     exception when sqlstate 'P0098' then null;
@@ -527,6 +603,56 @@ begin
         cardinality(public._agenda_ficha_os_concluidas(v_dono, date '2026-11-10')) > 0
         and public._agenda_ficha_liberada(v_dono, date '2026-11-10', pg_temp.em(date '2026-11-09', '19:30')),
         public._agenda_ficha_os_concluidas(v_dono, date '2026-11-10')::text);
+      raise exception 'desfaz' using errcode = 'P0098';
+    exception when sqlstate 'P0098' then null;
+    end;
+
+    begin
+      -- (P3) a OS cancelada entra no "nunca"
+      perform pg_temp.status(v_len, 'cancelled');
+      r := public._agenda_gestor_fichas(c_q04, pg_temp.em(c_q04, '16:52'));
+      v_ok := public._agenda_ficha_liberada(v_rob, c_q05, pg_temp.em(c_q04, '19:30'));
+      perform public._agenda_rotina_ficha(c_q04, pg_temp.em(c_q04, '19:30'));
+      v_res := pg_temp.ok(v_res, 'B4g (P3) cancelada: sem pergunta, a ficha fica (recusada, veto) e o porquê é "a OS já está cancelada"',
+        not v_ok and (r ->> 'perguntas')::int = 0 and public._agenda_ficha_os_concluidas(v_rob, c_q05) = array[v_len]
+        and pg_temp.equipe(v_rob) = 'ficha 2026-11-05 recusada/veto'
+        and pg_temp.acao(v_rob) = 'Não mandei a ficha de qui 05/11 a Roberto (OS-00074 Lenine): a OS já está cancelada. Fale com Roberto. [concluida]',
+        r::text || ' | ' || coalesce(pg_temp.equipe(v_rob), '-') || ' | ' || coalesce(pg_temp.acao(v_rob), '-'));
+      raise exception 'desfaz' using errcode = 'P0098';
+    exception when sqlstate 'P0098' then null;
+    end;
+    begin
+      -- (correção da revisão) a pergunta nasceu, a OS foi concluída, e DEPOIS o dono disse *mande*: a resposta diz que a ficha não sai
+      r := public._agenda_gestor_fichas(c_q04, pg_temp.em(c_q04, '16:52'));
+      v_q := (r -> 'pessoas' -> 0 ->> 'pergunta_id')::uuid;
+      perform pg_temp.status(v_len, 'completed');
+      r2 := public.agenda_decidir(v_q, 1::smallint, v_adm, 'whatsapp', 'mande', c_q04, pg_temp.em(c_q04, '17:40'));
+      v_t := (select q.estado || ':' || coalesce(q.opcao_escolhida::text, '-') from public.agenda_perguntas q where q.id = v_q);
+      v_ok := public._agenda_ficha_liberada(v_rob, c_q05, pg_temp.em(c_q04, '19:30'));
+      perform public._agenda_rotina_ficha(c_q04, pg_temp.em(c_q04, '19:30'));
+      v_res := pg_temp.ok(v_res, 'B4h o *mande* depois da conclusão responde "A OS-00074 já está concluída: a ficha não sai." (a resposta fica gravada; a ficha fica, com o porquê da concluída)',
+        r2 ->> 'texto' = 'A OS-00074 já está concluída: a ficha não sai.' and v_t = 'respondida:1' and not v_ok
+        and pg_temp.equipe(v_rob) = 'ficha 2026-11-05 recusada/veto' and pg_temp.acao(v_rob) = c_conc,
+        coalesce(r2 ->> 'texto', '-') || ' | ' || coalesce(v_t, '-') || ' | ' || coalesce(pg_temp.equipe(v_rob), '-'));
+      raise exception 'desfaz' using errcode = 'P0098';
+    exception when sqlstate 'P0098' then null;
+    end;
+    begin
+      -- o *segure* depois da conclusão e o *mande* com a OS em aberto: o de antes
+      r := public._agenda_gestor_fichas(c_q04, pg_temp.em(c_q04, '16:52'));
+      v_q := (r -> 'pessoas' -> 0 ->> 'pergunta_id')::uuid;
+      perform pg_temp.status(v_len, 'invoiced');
+      r2 := public.agenda_decidir(v_q, 2::smallint, v_adm, 'whatsapp', 'segure', c_q04, pg_temp.em(c_q04, '17:40'));
+      -- o texto do estado (cada leitura no seu comando: o auxiliar é STABLE)
+      v_t := public._agenda_ficha_os_concluidas_texto(array[v_len]);
+      perform pg_temp.status(v_van, 'cancelled');
+      v_t := v_t || '|' || public._agenda_ficha_os_concluidas_texto(array[v_len, v_van]);
+      perform pg_temp.status(v_len, 'completed');
+      v_t := v_t || '|' || public._agenda_ficha_os_concluidas_texto(array[v_len, v_van]) || '|' || public._agenda_ficha_os_concluidas_texto(array[v_van]);
+      v_res := pg_temp.ok(v_res, 'B4i o *segure* da OS encerrada é o de antes ("Combinado: não mando …"); o texto do estado: faturada; faturadas ou canceladas; concluídas ou canceladas; cancelada',
+        r2 ->> 'texto' = 'Combinado: não mando a ficha de qui 05/11 para Roberto, nem a confirmação da manhã. Fale com Roberto.'
+        and v_t = 'faturada|faturadas ou canceladas|concluídas ou canceladas|cancelada',
+        coalesce(r2 ->> 'texto', '-') || ' | ' || coalesce(v_t, '-'));
       raise exception 'desfaz' using errcode = 'P0098';
     exception when sqlstate 'P0098' then null;
     end;
@@ -588,6 +714,50 @@ begin
         and pg_temp.equipe(v_joao) = 'ficha 2026-11-03 recusada/veto'
         and pg_temp.acao(v_joao) = 'Não mandei a ficha de ter 03/11 a João (OS-00074 Lenine e OS-00069 Vanderlei): a OS-00069 já está concluída. Fale com João. [concluida]',
         r::text || ' | ' || coalesce(pg_temp.acao(v_joao), '-'));
+      raise exception 'desfaz' using errcode = 'P0098';
+    exception when sqlstate 'P0098' then null;
+    end;
+
+    -- ── B7. (P2) "o que tem pra amanhã?" com a ficha segurada ──
+    v_dono_nome := (select public._agenda_nome_curto(py.name) from public.payees py where py.id = v_dono);
+    begin
+      -- o João pergunta na seg 02/11 às 10:00 o que tem amanhã (ter 03/11, o dia 1 da OS-00074, paga e sem o *mande*)
+      perform pg_temp.pagar(v_len);
+      r := public.agenda_resposta_da_equipe('5547900000004', 'o que tem pra amanhã?', 'wa-f2b-b7a', pg_temp.em(date '2026-11-02', '10:00'));
+      v_t := (select string_agg(m.texto, ' | ') from public.agenda_equipe_mensagens m where m.payee_id = v_joao and m.tipo = 'resposta' and m.dia = c_t03);
+      v_t2 := (select string_agg(q.texto, ' | ') from public.agenda_perguntas q where q.chave = format('equipe_resposta:%s:%s:pergunta', v_joao, c_t03));
+      v_res := pg_temp.ok(v_res, 'B7a (P2) a ficha segurada por OS paga sem *mande*: a resposta é "Vou ver com <dono> e te falo." (não o plano) e o dono recebe a pergunta: "O João perguntou o que tem amanhã (ter 03/11), e a ficha dele está segurada: a OS-00074 já está paga e você não disse *mande*. …"',
+        r ->> 'tipo' = 'pergunta' and coalesce((r ->> 'ficha_segurada')::boolean, false)
+        and v_t = format('Vou ver com %s e te falo.', v_dono_nome)
+        and v_t2 like 'O João perguntou o que tem amanhã (ter 03/11), e a ficha dele está segurada: a OS-00074 já está paga e você não disse *mande*. Diga a ele o que fazer.%',
+        r::text || ' | ' || coalesce(v_t, '-') || ' | ' || coalesce(v_t2, '-'));
+      raise exception 'desfaz' using errcode = 'P0098';
+    exception when sqlstate 'P0098' then null;
+    end;
+    begin
+      -- o Roberto pergunta na qua 04/11 às 10:00 o que tem amanhã (qui 05/11), com a OS-00074 concluída
+      perform pg_temp.status(v_len, 'completed');
+      r := public.agenda_resposta_da_equipe('5547900000002', 'o que tem pra amanhã?', 'wa-f2b-b7b', pg_temp.em(c_q04, '10:00'));
+      v_t := (select string_agg(m.texto, ' | ') from public.agenda_equipe_mensagens m where m.payee_id = v_rob and m.tipo = 'resposta' and m.dia = c_q05);
+      v_t2 := (select string_agg(q.texto, ' | ') from public.agenda_perguntas q where q.chave = format('equipe_resposta:%s:%s:pergunta', v_rob, c_q05));
+      v_res := pg_temp.ok(v_res, 'B7b (P2) a ficha segurada por OS concluída: "Vou ver com <dono> e te falo." e a pergunta ao dono diz "a OS-00074 já está concluída"',
+        coalesce((r ->> 'ficha_segurada')::boolean, false) and v_t = format('Vou ver com %s e te falo.', v_dono_nome)
+        and v_t2 like 'O Roberto perguntou o que tem amanhã (qui 05/11), e a ficha dele está segurada: a OS-00074 já está concluída. Diga a ele o que fazer.%',
+        r::text || ' | ' || coalesce(v_t, '-') || ' | ' || coalesce(v_t2, '-'));
+      raise exception 'desfaz' using errcode = 'P0098';
+    exception when sqlstate 'P0098' then null;
+    end;
+    begin
+      -- sem a ficha segurada (sem o ligar do gestor e sem OS paga nem encerrada): o plano, como antes, e nenhuma pergunta ao dono
+      update public.agenda_config set marcar_sozinho_desde = null where id;
+      v_t2 := public.agenda_equipe_ficha(v_joao, c_t03, date '2026-11-02') ->> 'texto_resposta';
+      r := public.agenda_resposta_da_equipe('5547900000004', 'o que tem pra amanhã?', 'wa-f2b-b7c', pg_temp.em(date '2026-11-02', '10:00'));
+      v_t := (select string_agg(m.texto, ' | ') from public.agenda_equipe_mensagens m where m.payee_id = v_joao and m.tipo = 'resposta' and m.dia = c_t03);
+      v_res := pg_temp.ok(v_res, 'B7c (P2) com a ficha liberada a resposta é o plano, como antes (agenda_equipe_ficha.texto_resposta), sem "Vou ver" e sem pergunta ao dono',
+        r ->> 'tipo' = 'pergunta' and not coalesce((r ->> 'ficha_segurada')::boolean, false)
+        and v_t = v_t2 and v_t not like 'Vou ver%' and length(v_t) > 20
+        and not exists (select 1 from public.agenda_perguntas q where q.chave = format('equipe_resposta:%s:%s:pergunta', v_joao, c_t03)),
+        r::text || ' | ' || coalesce(v_t, '-'));
       raise exception 'desfaz' using errcode = 'P0098';
     exception when sqlstate 'P0098' then null;
     end;
@@ -654,6 +824,178 @@ begin
   perform pg_temp.gravar(v_res);
 end
 $b6$;
+
+-- ── X. Os casos da revisão adversarial da F2b (revisao/forca-testes/extra/casos-extra.sql; cada um mira um mutante que sobrevivia) ──
+-- (X07 vale agora para as horas apontadas: o check-in saiu da régua, P1 do dono)
+do $xx$
+declare
+  v_res   jsonb := '[]'::jsonb;
+  c_s30   constant date := date '2026-10-30';
+  c_t03   constant date := date '2026-11-03';
+  c_q04   constant date := date '2026-11-04';
+  v_len   uuid;
+  v_van   uuid;
+  v_rob   uuid;
+  v_joao  uuid;
+  v_adm   uuid;
+  v_q     uuid;
+  r       jsonb;
+  r2      jsonb;
+  v_t     text;
+  v_ok    boolean;
+begin
+  if coalesce(current_setting('agenda_teste.replay2910', true), '') = '' then
+    insert into _resultado values ('X (o replay de 29/10)', true, 'PULADO: rode pela bancada');
+    return;
+  end if;
+  begin
+    perform pg_temp.fixtures();
+    v_len := pg_temp.os('OS-00074');
+    v_van := pg_temp.os('OS-00069');
+    v_rob := pg_temp.pessoa('Roberto');
+    v_joao := pg_temp.pessoa('João');
+    select u.id into v_adm from public.app_users u where u.role = 'admin' order by u.id limit 1;
+
+    -- X01 (N01) a confirmação de OUTRA pessoa (o Roberto, que não estava na OS-00074 em ter 03/11) não conta, mesmo com o João na OS
+    begin
+      alter table public.agenda_equipe_mensagens disable trigger user;
+      insert into public.agenda_equipe_mensagens (payee_id, dia, tipo, modo, texto, enviar_em, estado, dedupe_key, criada_em, resposta_texto, resposta_em, leitura)
+      values (v_rob, c_t03, 'confirmar', 'ligado', 'Confirmação de teste (revisão)', pg_temp.em(c_t03, '07:45'), 'respondida',
+              'rev-f2b:confirmar:' || v_rob || ':' || c_t03, pg_temp.em(c_t03, '07:45'), 'ok', pg_temp.em(c_t03, '07:50'), '{"tipo": "ok"}');
+      alter table public.agenda_equipe_mensagens enable trigger user;
+      v_t := format('rob_na_os=%s joao_na_os=%s comecou=%s',
+        exists (select 1 from public.agenda_alocacoes a where a.payee_id = v_rob and a.dia = c_t03 and a.service_order_id = v_len and a.estado in ('publicada', 'fixada')),
+        exists (select 1 from public.agenda_alocacoes a where a.payee_id = v_joao and a.dia = c_t03 and a.service_order_id = v_len and a.estado in ('publicada', 'fixada')),
+        public._agenda_os_comecou(v_len, c_q04));
+      v_res := pg_temp.ok(v_res, 'X01 (N01) confirmação "ok" de quem NÃO estava na OS no dia não conta (outra pessoa na OS)',
+        v_t = 'rob_na_os=f joao_na_os=t comecou=f', v_t);
+      raise exception 'desfaz' using errcode = 'P0098';
+    exception when sqlstate 'P0098' then null;
+    end;
+
+    -- X02 (N02) a confirmação do João em ter 03/11 com a alocação dele CANCELADA (a vigia moveu o dia, como o 18/11 da OS-00129) não conta
+    begin
+      perform pg_temp.aloc(v_len, c_t03, 'estado = ''cancelada'', cancelada_em = now(), cancelada_motivo = ''replanejado''', v_joao);
+      alter table public.agenda_equipe_mensagens disable trigger user;
+      insert into public.agenda_equipe_mensagens (payee_id, dia, tipo, modo, texto, enviar_em, estado, dedupe_key, criada_em, resposta_texto, resposta_em, leitura)
+      values (v_joao, c_t03, 'confirmar', 'ligado', 'Confirmação de teste (revisão)', pg_temp.em(c_t03, '07:45'), 'respondida',
+              'rev-f2b:confirmar:' || v_joao || ':' || c_t03, pg_temp.em(c_t03, '07:45'), 'ok', pg_temp.em(c_t03, '07:50'), '{"tipo": "ok"}');
+      alter table public.agenda_equipe_mensagens enable trigger user;
+      v_t := format('cancelada=%s comecou=%s',
+        exists (select 1 from public.agenda_alocacoes a where a.payee_id = v_joao and a.dia = c_t03 and a.service_order_id = v_len and a.estado = 'cancelada'),
+        public._agenda_os_comecou(v_len, c_q04));
+      v_res := pg_temp.ok(v_res, 'X02 (N02) confirmação "ok" num dia em que a alocação da pessoa na OS foi cancelada não conta',
+        v_t = 'cancelada=t comecou=f', v_t);
+      raise exception 'desfaz' using errcode = 'P0098';
+    exception when sqlstate 'P0098' then null;
+    end;
+
+    -- X03 (N11) a confirmação respondida "presença" ("cheguei", "a caminho") conta
+    begin
+      alter table public.agenda_equipe_mensagens disable trigger user;
+      insert into public.agenda_equipe_mensagens (payee_id, dia, tipo, modo, texto, enviar_em, estado, dedupe_key, criada_em, resposta_texto, resposta_em, leitura)
+      values (v_joao, c_t03, 'confirmar', 'ligado', 'Confirmação de teste (revisão)', pg_temp.em(c_t03, '07:45'), 'respondida',
+              'rev-f2b:confirmar:' || v_joao || ':' || c_t03, pg_temp.em(c_t03, '07:45'), 'cheguei', pg_temp.em(c_t03, '07:58'),
+              public._agenda_ler_resposta_da_equipe('cheguei'));
+      alter table public.agenda_equipe_mensagens enable trigger user;
+      v_t := format('leitura=%s comecou=%s', public._agenda_ler_resposta_da_equipe('cheguei') ->> 'tipo', public._agenda_os_comecou(v_len, c_q04));
+      v_res := pg_temp.ok(v_res, 'X03 (N11) confirmação respondida "cheguei" (presenca) conta', v_t = 'leitura=presenca comecou=t', v_t);
+      raise exception 'desfaz' using errcode = 'P0098';
+    exception when sqlstate 'P0098' then null;
+    end;
+
+    -- X04 (N05, N06, N07) a diária: PAGA conta; folga e falta sem fração (as que o CHECK permite) na OS não contam; work_shift_os de OUTRA OS não conta
+    begin
+      v_t := '';
+      alter table public.work_shifts disable trigger user;
+      alter table public.work_shift_os disable trigger user;
+      insert into public.work_shifts (id, work_profile_id, data, tipo, origem, status, aprovado_por, aprovado_em, fracao, valor_diaria, service_order_id)
+      values ('f2bfe000-0000-4000-8000-000000000001', gen_random_uuid(), c_t03, 'diaria', 'painel', 'pago', v_adm, now(), 1, 200, v_len);
+      v_t := v_t || 'pago=' || public._agenda_os_comecou(v_len, c_q04);
+      update public.work_shifts set tipo = 'folga', fracao = null, valor_diaria = null, status = 'aprovado' where id = 'f2bfe000-0000-4000-8000-000000000001';
+      v_t := v_t || ' folga=' || public._agenda_os_comecou(v_len, c_q04);
+      update public.work_shifts set tipo = 'falta' where id = 'f2bfe000-0000-4000-8000-000000000001';
+      v_t := v_t || ' falta_sem_fracao=' || public._agenda_os_comecou(v_len, c_q04);
+      update public.work_shifts set tipo = 'diaria', fracao = 1, valor_diaria = 200, service_order_id = null where id = 'f2bfe000-0000-4000-8000-000000000001';
+      insert into public.work_shift_os (shift_id, service_order_id) values ('f2bfe000-0000-4000-8000-000000000001', v_van);
+      v_t := v_t || ' wso_outra_os=' || public._agenda_os_comecou(v_len, c_q04) || '/' || public._agenda_os_comecou(v_van, c_q04);
+      alter table public.work_shifts enable trigger user;
+      alter table public.work_shift_os enable trigger user;
+      v_res := pg_temp.ok(v_res, 'X04 (N05 N06 N07) diária PAGA conta; folga e falta sem fração na OS não contam; a diária ligada (work_shift_os) a OUTRA OS não conta para esta (e conta para aquela)',
+        v_t = 'pago=true folga=false falta_sem_fracao=false wso_outra_os=false/true', v_t);
+      raise exception 'desfaz' using errcode = 'P0098';
+    exception when sqlstate 'P0098' then null;
+    end;
+
+    -- X05 (N08, N09) o passo iniciado NO PRÓPRIO dia não conta; horas apontadas em OUTRA OS não contam
+    begin
+      v_t := '';
+      alter table public.service_order_steps disable trigger user;
+      insert into public.service_order_steps (service_order_id, seq, title, status, started_at) values (v_len, 991, 'Passo de teste (revisão)', 'in_progress', pg_temp.em(c_q04, '10:00'));
+      v_t := v_t || 'passo_no_dia=' || public._agenda_os_comecou(v_len, c_q04);
+      delete from public.service_order_steps where service_order_id = v_len and seq = 991;
+      alter table public.service_order_steps enable trigger user;
+      alter table public.time_entries disable trigger user;
+      insert into public.time_entries (service_order_id, technician_user_id, started_at) values (v_van, v_adm, pg_temp.em(c_t03, '09:00'));
+      v_t := v_t || ' horas_outra_os=' || public._agenda_os_comecou(v_len, c_q04) || '/' || public._agenda_os_comecou(v_van, c_q04);
+      alter table public.time_entries enable trigger user;
+      v_res := pg_temp.ok(v_res, 'X05 (N08 N09) passo iniciado no próprio dia não conta; horas apontadas em OUTRA OS não contam para esta (e contam para aquela)',
+        v_t = 'passo_no_dia=false horas_outra_os=false/true', v_t);
+      raise exception 'desfaz' using errcode = 'P0098';
+    exception when sqlstate 'P0098' then null;
+    end;
+
+    -- X06 (N10) o dia "cumprido" de OUTRA OS não conta
+    begin
+      perform pg_temp.aloc(v_len, c_t03, 'resultado = ''cumprido'', resultado_via = ''equipe'', resultado_em = now()', v_joao);
+      v_t := format('len=%s van=%s', public._agenda_os_comecou(v_len, c_q04), public._agenda_os_comecou(v_van, date '2026-11-13'));
+      v_res := pg_temp.ok(v_res, 'X06 (N10) o dia "cumprido" da OS-00074 conta para ela e não para a OS-00069', v_t = 'len=t van=f', v_t);
+      raise exception 'desfaz' using errcode = 'P0098';
+    exception when sqlstate 'P0098' then null;
+    end;
+
+    -- X07 (N14) horas apontadas tarde da noite da véspera (02/11 23:30 de Brasília = 03/11 02:30 UTC) contam para o dia 03/11, também com a
+    -- sessão em UTC (o dia é o de Brasília)
+    begin
+      alter table public.time_entries disable trigger user;
+      insert into public.time_entries (service_order_id, technician_user_id, started_at) values (v_len, v_adm, pg_temp.em(date '2026-11-02', '23:30'));
+      alter table public.time_entries enable trigger user;
+      v_t := format('tz_bancada=%s comecou=%s', current_setting('TimeZone'), public._agenda_os_comecou(v_len, c_t03));
+      perform set_config('TimeZone', 'UTC', true);
+      v_t := v_t || format(' tz=%s comecou=%s', current_setting('TimeZone'), public._agenda_os_comecou(v_len, c_t03));
+      perform set_config('TimeZone', 'Etc/GMT+3', true);
+      v_res := pg_temp.ok(v_res, 'X07 (N14) horas apontadas às 23:30 da véspera (Brasília) contam para o dia seguinte, também com a sessão em UTC', v_t like '%comecou=t tz=UTC comecou=t', v_t);
+      raise exception 'desfaz' using errcode = 'P0098';
+    exception when sqlstate 'P0098' then null;
+    end;
+
+    -- X08 (N12) dia misto: OS-00074 PAGA (não começou) de manhã e OS-00069 à tarde; o dono diz *mande* às 17:40 e DEPOIS a OS-00069 é
+    -- concluída: às 19:30 a ficha NÃO sai (a concluída vence o *mande* da paga)
+    begin
+      perform pg_temp.aloc(v_len, c_t03, format('service_order_id = %L', v_van), v_joao, 'tarde');
+      perform pg_temp.pagar(v_len);
+      r := public._agenda_gestor_fichas(c_s30, pg_temp.em(c_s30, '16:52'));
+      v_q := (select (x ->> 'pergunta_id')::uuid from jsonb_array_elements(r -> 'pessoas') x where x ->> 'nome' = 'João');
+      r2 := public.agenda_decidir(v_q, 1::smallint, v_adm, 'whatsapp', 'mande', c_s30, pg_temp.em(c_s30, '17:40'));
+      perform pg_temp.status(v_van, 'completed');
+      v_ok := public._agenda_ficha_liberada(v_joao, c_t03, pg_temp.em(c_s30, '19:31'));
+      perform public._agenda_rotina_ficha(c_s30, pg_temp.em(c_s30, '19:32'));
+      v_t := format('pergunta=%s mande=%s liberada=%s equipe=%s acao=%s', v_q is not null, coalesce(r2 ->> 'texto', '-'), v_ok,
+                    coalesce(pg_temp.equipe(v_joao), '-'), coalesce(pg_temp.acao(v_joao), '-'));
+      v_res := pg_temp.ok(v_res, 'X08 (N12) dia misto: *mande* dado na paga e a outra OS concluída depois: a ficha fica, porquê da concluída',
+        v_q is not null and not v_ok and pg_temp.equipe(v_joao) = 'ficha 2026-11-03 recusada/veto'
+        and pg_temp.acao(v_joao) like '%a OS-00069 já está concluída%[concluida]', v_t);
+      raise exception 'desfaz' using errcode = 'P0098';
+    exception when sqlstate 'P0098' then null;
+    end;
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+            when others then
+    v_res := pg_temp.ok(v_res, 'X sem erro', false, sqlstate || ': ' || sqlerrm);
+  end;
+  perform pg_temp.gravar(v_res);
+end
+$xx$;
 
 select teste, ok, detalhe from _resultado order by ok, teste;
 rollback;
