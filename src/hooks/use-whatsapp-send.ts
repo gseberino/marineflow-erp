@@ -31,6 +31,13 @@ export interface WhatsAppSendPayload {
   caption?: string;
   // Opções do PDF (mostrar termos, preços, etc.) — se omitido, usa DEFAULT_PDF_OPTIONS.
   pdfOptions?: PDFOptions;
+  /**
+   * PDF já pronto (o do conjunto do "Agrupar para o cliente": capa + documentos). Com ele, pdfData não é usado e o
+   * arquivo sai com `filename` como está (cada documento dentro já tem a revisão dele).
+   */
+  pdfBlob?: Blob;
+  /** Os outros orçamentos do conjunto, que o whatsapp-send também marca como enviados (mesmas regras). */
+  conjunto_orcamento_ids?: string[];
 }
 
 export interface RetryConfig {
@@ -109,9 +116,18 @@ export function useWhatsAppSend() {
     };
     if (payload.service_order_id) invokeBody.service_order_id = payload.service_order_id;
     if (payload.receivable_id) invokeBody.receivable_id = payload.receivable_id;
+    if (payload.conjunto_orcamento_ids?.length) invokeBody.conjunto_orcamento_ids = payload.conjunto_orcamento_ids;
 
     let arquivo: string | null = null;
-    if (payload.mode === 'text') {
+    if (payload.mode === 'document' && payload.pdfBlob) {
+      const filename = payload.filename || 'documento.pdf';
+      const { path, url } = await uploadPdfBlob(payload.pdfBlob, filename);
+      arquivo = path;
+      invokeBody.kind = 'document';
+      invokeBody.document_url = url;
+      invokeBody.document_filename = filename;
+      invokeBody.document_caption = payload.caption || payload.message;
+    } else if (payload.mode === 'text') {
       invokeBody.kind = 'text';
     } else if (payload.mode === 'link') {
       if (!payload.publicUrl) throw new Error('Sem link público disponível.');

@@ -14391,6 +14391,18 @@ export type Database = {
       }
     }
     Functions: {
+      // ── Agrupar para o cliente (migration 20270124100000_agrupar_para_cliente). Trecho escrito à mão até o próximo
+      // "gen types" depois de aplicar.
+      agrupar_para_cliente: {
+        Args: { p_autor?: string; p_ids: string[]; p_principal?: string }
+        Returns: Json
+      }
+      conjunto_do_documento: { Args: { p_os: string }; Returns: Json }
+      desfazer_conjunto: {
+        Args: { p_autor?: string; p_conjunto: string }
+        Returns: Json
+      }
+      documentos_para_conjunto: { Args: { p_os: string }; Returns: Json }
       // ── Agenda de Produção, Fase 2 (P4): as RPCs que a tela chama (migrations 20261025100100 e 100200). Trecho
       // escrito à mão até o próximo "gen types" depois de aplicar; o retorno é o jsonb pronto do banco.
       agenda_marcar_os: {

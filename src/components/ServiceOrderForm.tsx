@@ -124,8 +124,13 @@ import { DesagruparOrcamentoDialog } from '@/components/service-order/Desagrupar
 import { AgruparOsDialog } from '@/components/service-order/AgruparOsDialog';
 import { DesagruparOsDialog } from '@/components/service-order/DesagruparOsDialog';
 import { FaixaOsAgrupadaEm, FaixaOsQueReune } from '@/components/service-order/FaixasDoAgrupamentoOs';
-import { STATUS_AGRUPAVEIS_OS, origemAgrupadaDeOs, osAgrupadaDesagrupavel } from '@/lib/agrupar-os';
+import { origemAgrupadaDeOs, osAgrupadaDesagrupavel } from '@/lib/agrupar-os';
 import { useDesagrupavelDaOsAgrupada } from '@/hooks/use-agrupar-os';
+import { useConjuntoDoDocumento } from '@/hooks/use-conjunto';
+import type { Conjunto } from '@/lib/conjunto';
+import { AgruparDialog } from '@/components/service-order/AgruparDialog';
+import { EnviarConjuntoDialog } from '@/components/service-order/EnviarConjuntoDialog';
+import { FaixaDoConjunto } from '@/components/service-order/FaixaDoConjunto';
 import { Combine, Ungroup } from 'lucide-react';
 
 interface Props {
@@ -505,6 +510,12 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   });
   const [agruparAberto, setAgruparAberto] = useState(false);
   const [desagruparAberto, setDesagruparAberto] = useState(false);
+  // "Agrupar" único (decisão 4B, 18/11/2026): a janela escolhe entre apresentar junto (conjunto) e juntar de vez
+  // (a fusão de sempre). Juntar de vez abre o diálogo antigo com os escolhidos (fusaoAlvo).
+  const conjuntoDoDocumento = useConjuntoDoDocumento(orderId);
+  const [agruparUnicoAberto, setAgruparUnicoAberto] = useState(false);
+  const [fusaoAlvo, setFusaoAlvo] = useState<{ tipo: 'orcamentos' | 'os'; ids: string[]; principal: string } | null>(null);
+  const [conjuntoParaEnviar, setConjuntoParaEnviar] = useState<Conjunto | null>(null);
   const [faturarOsOpen, setFaturarOsOpen] = useState(false);
   const [completionPendente, setCompletionPendente] = useState<typeof completionSend | null>(null);
   // [NOVO-nfse-03] Navegação pedida pelo assistente, adiada até o aviso de saldo fechar.
@@ -1868,8 +1879,6 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   // Em aberto = o que o banco aceita agrupar/desagrupar: rascunho, não convertido, não assinado.
   const orcamentoAbertoSalvo = !isNew && orderData?.status === 'draft' && !orderData?.converted_to_os_at
     && !orderData?.signed_at;
-  const podeAgrupar = cargoAgrupa && orcamentoAbertoSalvo && !orderData?.merged_into_id
-    && orderData?.quote_status !== 'rejected';
   const comoAgrupado = agrupamento.comoAgrupado;
   const comoOrigem = agrupamento.comoOrigem;
   // O agrupamento pode ser de orçamentos (agrupar_orcamentos) ou de OS (agrupar_os, 28/10/2026): faixas,
@@ -1880,12 +1889,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   // Origem de OS: a própria linha diz (converted_to_os_at ou o motivo "Agrupada em…" — origemAgrupadaDeOs).
   const origemDeOs = comoOrigem ? comoOrigem.tipo === 'os' : origemAgrupadaDeOs(orderData);
   const podeDesagrupar = cargoAgrupa && orcamentoAbertoSalvo && !!comoAgrupadoOrc;
-  // OS: agrupa a que ainda não começou (seção 9 do agrupar_os) — o resto (hora apontada, foto, nota…)
-  // o banco confere e recusa com a frase pronta. Sem exigir converted_to_os_at: há OS antigas sem ele e o
-  // banco as agrupa (a situação já tira o rascunho).
-  const osAgrupavelSalva = !isNew
-    && (STATUS_AGRUPAVEIS_OS as readonly string[]).includes(orderData?.status ?? '');
-  const podeAgruparOs = cargoAgrupa && osAgrupavelSalva && !orderData?.merged_into_id;
+  // Agrupar (juntar de vez ou apresentar junto) é decidido na janela única (AgruparDialog), com a régua do banco
+  // por documento (documentos_para_conjunto → motivo / motivo_juntar).
   // A leitura do banco vale para a agrupada (esta OS reúne outras) ou para o destino desta origem.
   const leituraDaAgrupadaOs = comoAgrupadoOs ? (desagrupavelNoBanco.data ?? null) : null;
   const leituraDoDestinoOs = !comoAgrupadoOs && comoOrigem?.tipo === 'os' ? (desagrupavelNoBanco.data ?? null) : null;
@@ -1928,8 +1933,13 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       toast.info('Salve as alterações antes de agrupar.');
       return;
     }
-    setAgruparAberto(true);
+    setAgruparUnicoAberto(true);
   };
+  // O "Agrupar…" do menu: qualquer documento gravado que não está cancelado, fundido ou já num conjunto (a janela diz,
+  // por documento, o que o banco recusaria).
+  const conjuntoAtivo = conjuntoDoDocumento.data?.ativo ? conjuntoDoDocumento.data : null;
+  const podeAgruparUnico = cargoAgrupa && !isNew && !!orderId && !orderData?.merged_into_id
+    && orderData?.status !== 'cancelled' && !conjuntoAtivo;
 
   /**
    * Salva sozinho, sem atrapalhar.
@@ -2097,15 +2107,41 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         </div>
       )}
 
-      {agruparAberto && orderId && podeAgrupar && orderData?.client_id && orderData?.vessel_id && (
+      {agruparUnicoAberto && orderId && (
+        <AgruparDialog
+          aberto={agruparUnicoAberto}
+          onFechar={() => setAgruparUnicoAberto(false)}
+          documentoId={orderId}
+          onJuntarDeVez={(tipo, ids, principal) => {
+            setAgruparUnicoAberto(false);
+            setFusaoAlvo({ tipo, ids, principal });
+            setAgruparAberto(true);
+          }}
+          onAgrupado={(c) => setConjuntoParaEnviar(c)}
+        />
+      )}
+
+      {conjuntoParaEnviar && (
+        <EnviarConjuntoDialog
+          aberto={!!conjuntoParaEnviar}
+          onFechar={() => setConjuntoParaEnviar(null)}
+          conjunto={conjuntoParaEnviar}
+        />
+      )}
+
+      {!isNew && orderId && conjuntoAtivo && (
+        <FaixaDoConjunto conjunto={conjuntoAtivo} documentoId={orderId} podeMexer={cargoAgrupa} />
+      )}
+
+      {agruparAberto && fusaoAlvo?.tipo === 'orcamentos' && orderData?.client_id && orderData?.vessel_id && (
         <AgruparOrcamentosDialog
           aberto={agruparAberto}
-          onFechar={() => setAgruparAberto(false)}
+          onFechar={() => { setAgruparAberto(false); setFusaoAlvo(null); }}
           clientId={orderData.client_id}
           vesselId={orderData.vessel_id}
           unidade={allVessels?.find((v) => v.id === orderData.vessel_id)}
-          preSelecionados={[orderId]}
-          principalSugerido={orderId}
+          preSelecionados={fusaoAlvo.ids}
+          principalSugerido={fusaoAlvo.principal}
         />
       )}
 
@@ -2119,15 +2155,15 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         />
       )}
 
-      {agruparAberto && orderId && podeAgruparOs && orderData?.client_id && orderData?.vessel_id && (
+      {agruparAberto && fusaoAlvo?.tipo === 'os' && orderData?.client_id && orderData?.vessel_id && (
         <AgruparOsDialog
           aberto={agruparAberto}
-          onFechar={() => setAgruparAberto(false)}
+          onFechar={() => { setAgruparAberto(false); setFusaoAlvo(null); }}
           clientId={orderData.client_id}
           vesselId={orderData.vessel_id}
           unidade={allVessels?.find((v) => v.id === orderData.vessel_id)}
-          preSelecionados={[orderId]}
-          principalSugerido={orderId}
+          preSelecionados={fusaoAlvo.ids}
+          principalSugerido={fusaoAlvo.principal}
         />
       )}
 
@@ -2412,14 +2448,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   <DropdownMenuItem onClick={handleDuplicate} disabled={duplicate.isPending} className="gap-2">
                     <Copy className="h-4 w-4" /> Duplicar
                   </DropdownMenuItem>
-                  {podeAgrupar && (
+                  {podeAgruparUnico && (
                     <DropdownMenuItem onClick={abrirAgrupar} className="gap-2">
-                      <Combine className="h-4 w-4" /> Agrupar com outros orçamentos…
-                    </DropdownMenuItem>
-                  )}
-                  {podeAgruparOs && (
-                    <DropdownMenuItem onClick={abrirAgrupar} className="gap-2">
-                      <Combine className="h-4 w-4" /> Agrupar com outras OS…
+                      <Combine className="h-4 w-4" /> Agrupar…
                     </DropdownMenuItem>
                   )}
                   {(podeDesagrupar || podeDesagruparOs) && (

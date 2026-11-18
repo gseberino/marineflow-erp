@@ -18,6 +18,7 @@ import {
   urlDeDocumentoPermitida,
 } from "../_shared/whatsapp/marcar-enviado.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
+import { outrosOrcamentosDoConjunto } from "../_shared/whatsapp/conjunto-do-envio.ts";
 import {
   deveRegistrarEnvio,
   ehOrigemDoRetorno,
@@ -73,6 +74,9 @@ const BodySchema = z.object({
   origem: z.string().max(20).optional(),
   // Retorno F5 (P11.6): o PDF do cartão do retorno (o assistente com ctx.envioPeloCartao) marca a via do envio de orçamento.
   orcamento_via: z.enum(["cartao"]).optional(),
+  // "Agrupar para o cliente" (20270124100000): o PDF do conjunto leva vários orçamentos. Os OUTROS orçamentos do conjunto
+  // de service_order_id, marcados como enviados pelas mesmas regras. Id fora do conjunto ativo é ignorado (nunca 400).
+  conjunto_orcamento_ids: z.array(z.string().uuid()).max(9).optional(),
 });
 
 function jr(body: unknown, status = 200) {
@@ -406,62 +410,69 @@ servirComCors(async (req) => {
     if (body.context === "quote" && body.service_order_id) {
       // Retorno F5 (P11.6): a via do envio de orçamento (assistente, cartão do retorno ou tela) e se este envio marcou 'sent'
       const via = viaDoOrcamento(origem, body.orcamento_via);
-      let marcou = false;
-      try {
-        const { data: ordem, error: erroDaOrdem } = await supabaseAdmin
-          .from("service_orders")
-          .select("status, quote_status, converted_to_os_at, clients(whatsapp, phone)")
-          .eq("id", body.service_order_id)
-          .maybeSingle();
-        if (erroDaOrdem) throw erroDaOrdem;
-        const cliente = (ordem as any)?.clients ?? null;
-        const decisao = decidirMarcarEnviado({
-          context: body.context,
-          serviceOrderId: body.service_order_id,
-          desviadoPorTeste: foiDesviado,
-          telefoneDestino: phoneClean,
-          telefonesDoCliente: [cliente?.whatsapp, cliente?.phone],
-          ordem: ordem as any,
-        });
-        if (decisao.marcar) {
-          // Os mesmos filtros no próprio UPDATE: se outra pessoa mexeu no funil entre a leitura
-          // e aqui, não sobrescreve.
-          // (F5) a via e a chave (os 8 últimos dígitos, a de _agenda_chave_telefone) junto do 'sent'; o gatilho grava
-          // orcamento_enviado_em = now(), a hora deste update, segundos depois do envio
-          const { data: mudou, error: erroDaMarca } = await supabaseAdmin
+      // "Agrupar para o cliente": o PDF do conjunto leva também os outros orçamentos do conjunto (só os que estão nele).
+      const orcamentosDoEnvio = [
+        body.service_order_id,
+        ...(await outrosOrcamentosDoConjunto(supabaseAdmin, body.service_order_id, body.conjunto_orcamento_ids)),
+      ];
+      for (const orcamentoId of orcamentosDoEnvio) {
+        let marcou = false;
+        try {
+          const { data: ordem, error: erroDaOrdem } = await supabaseAdmin
             .from("service_orders")
-            .update({ quote_status: "sent", orcamento_enviado_via: via, orcamento_enviado_chave: phoneClean.slice(-8) } as any)
-            .eq("id", body.service_order_id)
-            .eq("status", "draft")
-            .in("quote_status" as any, ["draft", "awaiting_approval"])
-            .is("converted_to_os_at" as any, null)
-            .select("id");
-          if (erroDaMarca) throw erroDaMarca;
-          marcou = (mudou ?? []).length > 0;
-          if (marcou) {
-            await supabaseAdmin.from("audit_log").insert({
-              table_name: "service_orders",
-              record_id: body.service_order_id,
-              action: "update",
-              changed_by: callerIdentity,
-              previous_value: { quote_status: (ordem as any).quote_status },
-              new_value: { quote_status: "sent" },
-              reason: `Marcado como enviado: ${decisao.motivo} (${body.kind}).`,
-            });
+            .select("status, quote_status, converted_to_os_at, clients(whatsapp, phone)")
+            .eq("id", orcamentoId)
+            .maybeSingle();
+          if (erroDaOrdem) throw erroDaOrdem;
+          const cliente = (ordem as any)?.clients ?? null;
+          const decisao = decidirMarcarEnviado({
+            context: body.context,
+            serviceOrderId: orcamentoId,
+            desviadoPorTeste: foiDesviado,
+            telefoneDestino: phoneClean,
+            telefonesDoCliente: [cliente?.whatsapp, cliente?.phone],
+            ordem: ordem as any,
+          });
+          if (decisao.marcar) {
+            // Os mesmos filtros no próprio UPDATE: se outra pessoa mexeu no funil entre a leitura
+            // e aqui, não sobrescreve.
+            // (F5) a via e a chave (os 8 últimos dígitos, a de _agenda_chave_telefone) junto do 'sent'; o gatilho grava
+            // orcamento_enviado_em = now(), a hora deste update, segundos depois do envio
+            const { data: mudou, error: erroDaMarca } = await supabaseAdmin
+              .from("service_orders")
+              .update({ quote_status: "sent", orcamento_enviado_via: via, orcamento_enviado_chave: phoneClean.slice(-8) } as any)
+              .eq("id", orcamentoId)
+              .eq("status", "draft")
+              .in("quote_status" as any, ["draft", "awaiting_approval"])
+              .is("converted_to_os_at" as any, null)
+              .select("id");
+            if (erroDaMarca) throw erroDaMarca;
+            marcou = (mudou ?? []).length > 0;
+            if (marcou) {
+              await supabaseAdmin.from("audit_log").insert({
+                table_name: "service_orders",
+                record_id: orcamentoId,
+                action: "update",
+                changed_by: callerIdentity,
+                previous_value: { quote_status: (ordem as any).quote_status },
+                new_value: { quote_status: "sent" },
+                reason: `Marcado como enviado: ${decisao.motivo} (${body.kind}).`,
+              });
+            }
+          } else {
+            console.info(`[whatsapp-send] orçamento não marcado como enviado: ${decisao.motivo}`);
           }
-        } else {
-          console.info(`[whatsapp-send] orçamento não marcado como enviado: ${decisao.motivo}`);
+        } catch (_e) {
+          // Não bloqueia — o envio já aconteceu.
+          console.warn("quote_status update skipped:", _e);
         }
-      } catch (_e) {
-        // Não bloqueia — o envio já aconteceu.
-        console.warn("quote_status update skipped:", _e);
+        // Retorno F5 (P11.6, C-REG-ENVIO): todo envio de orçamento que saiu (os três kind, a qualquer número, no reenvio
+        // também), com ou sem a marcação, vai a orcamento_envios; no desvio do modo de teste, nada. O deduplicado e o que
+        // falhou já voltaram antes daqui. Nunca lança, e a resposta do envio não muda.
+        await registrarEnvioDoOrcamento(supabaseAdmin, {
+          serviceOrderId: orcamentoId, via, telefone: phoneClean, marcou, desviadoPorTeste: foiDesviado,
+        });
       }
-      // Retorno F5 (P11.6, C-REG-ENVIO): todo envio de orçamento que saiu (os três kind, a qualquer número, no reenvio
-      // também), com ou sem a marcação, vai a orcamento_envios; no desvio do modo de teste, nada. O deduplicado e o que
-      // falhou já voltaram antes daqui. Nunca lança, e a resposta do envio não muda.
-      await registrarEnvioDoOrcamento(supabaseAdmin, {
-        serviceOrderId: body.service_order_id, via, telefone: phoneClean, marcou, desviadoPorTeste: foiDesviado,
-      });
     }
 
     return jr({

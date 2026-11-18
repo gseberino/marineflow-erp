@@ -41,6 +41,9 @@ import { FaturarOsDialog } from '@/components/fiscal/FaturarOsDialog';
 import { OrcamentoTecnicoIADialog } from '@/components/orcamento-tecnico/OrcamentoTecnicoIADialog';
 import { AgruparOrcamentosDialog } from '@/components/service-order/AgruparOrcamentosDialog';
 import { AgruparOsDialog } from '@/components/service-order/AgruparOsDialog';
+import { AgruparDialog } from '@/components/service-order/AgruparDialog';
+import { EnviarConjuntoDialog } from '@/components/service-order/EnviarConjuntoDialog';
+import type { Conjunto } from '@/lib/conjunto';
 import { origemAgrupadaDeOs } from '@/lib/agrupar-os';
 import { useOptionalAuth } from '@/hooks/use-auth';
 import { exportToCSV } from '@/lib/export';
@@ -156,7 +159,14 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
   const podeAgrupar = auth?.user?.role === 'admin' || auth?.user?.role === 'financial';
   const [agruparAlvo, setAgruparAlvo] = useState<{
     clientId: string; vesselId: string; unidade: UnidadeResumo | null; ids: string[]; principal: string;
+    tipo: 'orcamentos' | 'os';
   } | null>(null);
+  // "Agrupar" único (decisão 4B, 18/11/2026): a janela decide entre apresentar junto e juntar de vez; juntar de vez
+  // cai no diálogo de sempre (agruparAlvo).
+  const [agruparUnico, setAgruparUnico] = useState<{
+    documentoId: string; ids: string[]; clientId: string; vesselId: string; unidade: UnidadeResumo | null;
+  } | null>(null);
+  const [conjuntoParaEnviar, setConjuntoParaEnviar] = useState<Conjunto | null>(null);
   const pdfGenCountRef = useRef(0);
   const { data: pdfData, error: pdfError } = usePDFData(pdfTarget?.id);
   // Padrão da empresa: as opções do documento (pdf_options_<tipo>) e a validade do orçamento
@@ -627,7 +637,9 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
     const maisAntiga = [...linhas].sort((a, b) =>
       (a.created_at ?? '').localeCompare(b.created_at ?? '') || a.id.localeCompare(b.id))[0];
     // A unidade vai junto para o diálogo dizer "do mesmo motorhome", como pela tela da OS.
-    setAgruparAlvo({ clientId: primeira.client_id!, vesselId: primeira.vessel_id!, unidade: primeira.vessels ?? null, ids, principal: maisAntiga.id });
+    setAgruparUnico({
+      documentoId: maisAntiga.id, ids, clientId: primeira.client_id!, vesselId: primeira.vessel_id!, unidade: primeira.vessels ?? null,
+    });
   };
 
   // Origem agrupada sai com a situação dita ("Agrupado em ORÇ-X", "Agrupada em OS-X"), não com o quote_status
@@ -810,7 +822,7 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
                     </Button>
                     {podeAgrupar && keys.length >= 2 && (
                       <Button size="sm" variant="secondary" disabled={bulkDownloading} onClick={() => abrirAgrupar(keys)} className="gap-1.5">
-                        <Combine className="h-4 w-4" /> {isOrders ? 'Agrupar OS' : 'Agrupar'}
+                        <Combine className="h-4 w-4" /> Agrupar
                       </Button>
                     )}
                     <button type="button" className="ml-auto text-xs underline-offset-2 hover:underline" onClick={clear} disabled={bulkDownloading}>
@@ -963,7 +975,24 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
 
       {podeUsarIA && <OrcamentoTecnicoIADialog aberto={iaAberto} onFechar={() => setIaAberto(false)} />}
       {/* Sucesso: o diálogo abre o orçamento/OS novo (sai desta lista, e a seleção vai junto). */}
-      {podeAgrupar && agruparAlvo && isOrders && (
+      {podeAgrupar && agruparUnico && (
+        <AgruparDialog
+          aberto
+          onFechar={() => setAgruparUnico(null)}
+          documentoId={agruparUnico.documentoId}
+          preSelecionados={agruparUnico.ids}
+          onJuntarDeVez={(tipo, ids, principal) => {
+            const u = agruparUnico;
+            setAgruparUnico(null);
+            setAgruparAlvo({ clientId: u.clientId, vesselId: u.vesselId, unidade: u.unidade, ids, principal, tipo });
+          }}
+          onAgrupado={(c) => setConjuntoParaEnviar(c)}
+        />
+      )}
+      {conjuntoParaEnviar && (
+        <EnviarConjuntoDialog aberto onFechar={() => setConjuntoParaEnviar(null)} conjunto={conjuntoParaEnviar} />
+      )}
+      {podeAgrupar && agruparAlvo && agruparAlvo.tipo === 'os' && (
         <AgruparOsDialog
           aberto
           onFechar={() => setAgruparAlvo(null)}
@@ -974,7 +1003,7 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
           principalSugerido={agruparAlvo.principal}
         />
       )}
-      {podeAgrupar && agruparAlvo && !isOrders && (
+      {podeAgrupar && agruparAlvo && agruparAlvo.tipo === 'orcamentos' && (
         <AgruparOrcamentosDialog
           aberto
           onFechar={() => setAgruparAlvo(null)}

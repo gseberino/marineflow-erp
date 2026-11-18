@@ -60,6 +60,18 @@ vi.mock('@/components/service-order/AgruparOsDialog', () => ({
     return <div>janela-agrupar-os</div>;
   },
 }));
+// A janela única (decisão 4B, 18/11/2026): a de verdade tem o seu próprio teste (AgruparDialog.smoke.test.tsx). Aqui ela
+// só registra o que recebeu e simula o "Juntar de vez", que tem de cair na janela de fusão de sempre.
+const unico = vi.hoisted(() => ({ props: [] as Array<{ documentoId: string; preSelecionados?: string[] }> }));
+vi.mock('@/components/service-order/AgruparDialog', () => ({
+  AgruparDialog: (p: {
+    documentoId: string; preSelecionados?: string[];
+    onJuntarDeVez: (tipo: 'orcamentos' | 'os', ids: string[], principal: string) => void;
+  }) => {
+    unico.props.push(p);
+    return <button onClick={() => p.onJuntarDeVez('os', p.preSelecionados ?? [], p.documentoId)}>simular-juntar-de-vez</button>;
+  },
+}));
 vi.mock('@/components/service-order/AgruparOrcamentosDialog', () => ({
   AgruparOrcamentosDialog: () => {
     estado.dialogoOrc += 1;
@@ -144,30 +156,35 @@ describe('OrdersListV2 · agrupar OS', () => {
     expect(screen.queryAllByText('OS-00100')).toHaveLength(0);
   });
 
-  it('a barra de seleção da aba de OS abre a janela de agrupar OS, com a mais antiga como principal', async () => {
+  it('a barra abre a janela única com a mais antiga como documento; "Juntar de vez" cai na janela de agrupar OS', async () => {
+    unico.props = [];
     montar('orders');
     await userEvent.click(screen.getByRole('checkbox', { name: 'Selecionar a' }));
     await userEvent.click(screen.getByRole('checkbox', { name: 'Selecionar b' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Agrupar OS' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Agrupar' }));
+    expect(unico.props.at(-1)).toMatchObject({ documentoId: 'b', preSelecionados: ['a', 'b'] });
+    expect(screen.queryByText('janela-agrupar-os')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'simular-juntar-de-vez' }));
     expect(await screen.findByText('janela-agrupar-os')).toBeInTheDocument();
     expect(estado.dialogoOrc).toBe(0);
     expect(estado.dialogoOs.at(-1)).toMatchObject({ clientId: 'cli-1', vesselId: 'ves-1', preSelecionados: ['a', 'b'], principalSugerido: 'b' });
   });
 
   it('embarcações diferentes: recusa antes de abrir, com a frase de OS', async () => {
+    unico.props = [];
     montar('orders');
     await userEvent.click(screen.getByRole('checkbox', { name: 'Selecionar a' }));
     await userEvent.click(screen.getByRole('checkbox', { name: 'Selecionar c' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Agrupar OS' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Agrupar' }));
     expect(estado.erros).toContain('Para agrupar, escolha OS do mesmo cliente e da mesma embarcação ou veículo.');
-    expect(screen.queryByText('janela-agrupar-os')).not.toBeInTheDocument();
+    expect(unico.props).toHaveLength(0);
   });
 
-  it('técnico não vê o Agrupar OS', async () => {
+  it('técnico não vê o Agrupar', async () => {
     estado.auth = { user: { id: 'u-2', role: 'technician' } };
     montar('orders');
     await userEvent.click(screen.getByRole('checkbox', { name: 'Selecionar a' }));
     await userEvent.click(screen.getByRole('checkbox', { name: 'Selecionar b' }));
-    expect(screen.queryByRole('button', { name: 'Agrupar OS' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Agrupar' })).not.toBeInTheDocument();
   });
 });

@@ -91,21 +91,36 @@ beforeEach(() => {
 });
 
 describe('ServiceOrderForm — agrupar OS', () => {
-  it('OS que ainda não começou: o menu oferece "Agrupar com outras OS…" (não o de orçamentos)', async () => {
+  // Desde 18/11/2026 (decisão 4B do dono) o menu tem UM "Agrupar…": a janela decide entre apresentar junto (conjunto)
+  // e juntar de vez (a fusão de antes), com a régua do banco por documento.
+  it('OS que ainda não começou: o menu oferece o "Agrupar…" único', async () => {
     renderiza(OS);
     await abrirAcoes();
-    expect(await screen.findByRole('menuitem', { name: /Agrupar com outras OS…/ })).toBeInTheDocument();
-    expect(screen.queryByRole('menuitem', { name: /Agrupar com outros orçamentos…/ })).not.toBeInTheDocument();
+    expect(await screen.findByRole('menuitem', { name: /^Agrupar…/ })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /Agrupar com outr/ })).not.toBeInTheDocument();
     // OS comum (não agrupada) cancela normalmente — contraprova do caso da agrupada abaixo
     expect(screen.getByRole('menuitem', { name: /Cancelar OS/ })).toBeInTheDocument();
     expect(screen.queryByRole('menuitem', { name: /Desagrupar…/ })).not.toBeInTheDocument();
   });
 
-  it('OS em execução: não oferece agrupar', async () => {
+  it('OS em execução: também agrupa (apresentar junto não mexe na execução)', async () => {
     renderiza({ ...OS, status: 'in_progress' });
     await abrirAcoes();
+    expect(await screen.findByRole('menuitem', { name: /^Agrupar…/ })).toBeInTheDocument();
+  });
+
+  it('técnico ou OS cancelada: sem "Agrupar…"', async () => {
+    estado.cargo = 'technician';
+    const { unmount } = renderiza(OS);
+    await abrirAcoes();
     expect(await screen.findByRole('menuitem', { name: /Duplicar/ })).toBeInTheDocument();
-    expect(screen.queryByRole('menuitem', { name: /Agrupar com outras OS…/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /^Agrupar…/ })).not.toBeInTheDocument();
+    unmount();
+    estado.cargo = 'admin';
+    renderiza({ ...OS, status: 'cancelled' });
+    await abrirAcoes();
+    expect(await screen.findByRole('menuitem', { name: /Duplicar/ })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /^Agrupar…/ })).not.toBeInTheDocument();
   });
 
   it('agrupada desfazível: faixa de OS com a assinatura das originais, Desagrupar no menu e sem Cancelar', async () => {

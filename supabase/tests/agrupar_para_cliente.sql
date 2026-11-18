@@ -184,6 +184,39 @@ exception when others then
   insert into _resultado values ('A3 concluída entra com aviso; principal escolhido vem primeiro', false, 'erro: ' || sqlstate || ' ' || sqlerrm);
 end $$;
 
+-- ── A4: motivo de não poder JUNTAR DE VEZ (decisão 4B) ───────────────────────────────────────────────────
+do $$
+declare
+  v_cli uuid := pg_temp._cliente(); v_ves uuid; os_ok uuid; os_chegou uuid; orc_ok uuid; orc_assin uuid; r jsonb; v_falhas text;
+begin
+  v_ves := pg_temp._barco(v_cli);
+  -- Total 0 = o das linhas (nenhuma): a régua da fusão recusa total gravado desatualizado.
+  os_ok := pg_temp._doc(v_cli, v_ves, 'approved', 0);
+  os_chegou := pg_temp._doc(v_cli, v_ves, 'awaiting_client', 0);
+  update public.service_orders set check_in_at = now() where id = os_chegou;
+  orc_ok := pg_temp._doc(v_cli, v_ves, 'draft');
+  orc_assin := pg_temp._doc(v_cli, v_ves, 'draft');
+  update public.service_orders set signed_at = now() where id = orc_assin;
+  r := public.documentos_para_conjunto(os_ok);
+  v_falhas := concat_ws(', ',
+    pg_temp._se(r -> 'documento' ->> 'motivo_juntar' is null and r -> 'documento' ->> 'tipo' = 'os', 'OS livre funde'),
+    pg_temp._se(exists (select 1 from jsonb_array_elements(r -> 'candidatos') e where (e ->> 'id')::uuid = os_chegou
+                         and e ->> 'motivo' is null and e ->> 'motivo_juntar' like '%já começou%'), 'OS com chegada: conjunto sim, fusão não'),
+    pg_temp._se(exists (select 1 from jsonb_array_elements(r -> 'candidatos') e where (e ->> 'id')::uuid = orc_ok
+                         and e ->> 'motivo_juntar' is null), 'ORÇ livre funde'),
+    pg_temp._se(exists (select 1 from jsonb_array_elements(r -> 'candidatos') e where (e ->> 'id')::uuid = orc_assin
+                         and e ->> 'motivo' is null and e ->> 'motivo_juntar' like '%assinado%'), 'ORÇ assinado: conjunto sim, fusão não'));
+  perform public._conjunto_montar(array[os_ok, orc_ok], null, pg_temp._id('admin'));
+  r := public.documentos_para_conjunto(os_chegou);
+  v_falhas := concat_ws(', ', nullif(v_falhas, ''),
+    pg_temp._se(exists (select 1 from jsonb_array_elements(r -> 'candidatos') e where (e ->> 'id')::uuid = orc_ok
+                         and e ->> 'motivo_juntar' like '%está no conjunto%'), 'em conjunto não funde'));
+  insert into _resultado values ('A4 motivo_juntar: chegada/assinado só conjunto; livres fundem; em conjunto não funde', v_falhas = '',
+    case when v_falhas = '' then 'ok' else 'falhou: ' || v_falhas || ' | ' || r::text end);
+exception when others then
+  insert into _resultado values ('A4 motivo_juntar', false, 'erro: ' || sqlstate || ' ' || sqlerrm);
+end $$;
+
 -- ── B: recusas ───────────────────────────────────────────────────────────────────────────────────────────
 do $$
 declare

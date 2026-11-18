@@ -131,6 +131,56 @@ begin
   return null;
 end $$;
 
+-- 3b) Por que UM documento não pode ser JUNTADO DE VEZ (a fusão de hoje: agrupar_orcamentos / agrupar_os). Nulo =
+--     pode, em princípio (a fusão ainda confere o que compara os documentos entre si: total, deslocamento, vínculos).
+--     Serve para a tela decidir (decisão 4B do dono): só pergunta "juntar de vez ou apresentar junto" quando a fusão
+--     também é possível; senão vai direto ao conjunto e diz por quê.
+create or replace function public._conjunto_motivo_juntar_de_vez(p_os uuid)
+returns text
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  r public.service_orders;
+  v_txt text;
+begin
+  select so.* into r from public.service_orders so where so.id = p_os;
+  if r.id is null then
+    return 'Documento não encontrado.';
+  end if;
+  select public._conjunto_nome(i.conjunto_id) into v_txt
+    from public.documento_conjunto_itens i where i.service_order_id = p_os and i.ativo;
+  if v_txt is not null then
+    return format('%s está no conjunto %s.', r.service_order_number, v_txt);
+  end if;
+  if r.status <> 'draft' then
+    return public._os_impedimento_para_agrupar(p_os);  -- a régua do agrupar_os (execução, nota, comissão…)
+  end if;
+  -- Orçamento: a régua do agrupar_orcamentos que depende só dele.
+  if r.merged_into_id is not null then
+    return format('%s já foi agrupado.', r.service_order_number);
+  end if;
+  if r.converted_to_os_at is not null then
+    return format('%s já virou OS.', r.service_order_number);
+  end if;
+  if r.quote_status = 'rejected' then
+    return format('%s está como Reprovado.', r.service_order_number);
+  end if;
+  if r.signed_at is not null or exists (select 1 from public.service_order_signatures g where g.service_order_id = p_os) then
+    return format('%s já foi assinado pelo cliente.', r.service_order_number);
+  end if;
+  v_txt := public._cliente_generico(r.client_id);
+  if v_txt is not null then
+    return format('%s é do cadastro genérico "%s".', r.service_order_number, v_txt);
+  end if;
+  if coalesce(r.card_fee_passthrough_enabled, false) then
+    return format('%s repassa a taxa do cartão ao cliente.', r.service_order_number);
+  end if;
+  return null;
+end $$;
+
 -- 4) Montar o conjunto (só pelas portas abaixo) ----------------------------------------------------------------------
 create or replace function public._conjunto_montar(p_ids uuid[], p_principal uuid, p_autor uuid)
 returns jsonb
@@ -384,7 +434,13 @@ begin
   end if;
   return jsonb_build_object(
     'documento', jsonb_build_object('id', r.id, 'numero', r.service_order_number,
-                                    'motivo', public._conjunto_impedimento(r.id)),
+                                    'tipo', case when r.status = 'draft' then 'orcamento' else 'os' end,
+                                    'status', r.status,
+                                    'quote_status', r.quote_status,
+                                    'grand_total', coalesce(r.grand_total, 0),
+                                    'criado_em', r.created_at,
+                                    'motivo', public._conjunto_impedimento(r.id),
+                                    'motivo_juntar', public._conjunto_motivo_juntar_de_vez(r.id)),
     'candidatos', coalesce((
       select jsonb_agg(jsonb_build_object(
                'id', so.id,
@@ -394,7 +450,8 @@ begin
                'quote_status', so.quote_status,
                'grand_total', coalesce(so.grand_total, 0),
                'criado_em', so.created_at,
-               'motivo', public._conjunto_impedimento(so.id)
+               'motivo', public._conjunto_impedimento(so.id),
+               'motivo_juntar', public._conjunto_motivo_juntar_de_vez(so.id)
              ) order by so.created_at desc)
         from public.service_orders so
        where so.id <> r.id
@@ -510,6 +567,8 @@ create trigger trg_conjunto_fecha_del
 -- 9) Privilégios + prova -------------------------------------------------------------------------------------------
 revoke all on function public._conjunto_nome(uuid) from public, anon, authenticated;
 revoke all on function public._conjunto_impedimento(uuid) from public, anon, authenticated;
+revoke all on function public._conjunto_motivo_juntar_de_vez(uuid) from public, anon, authenticated;
+grant execute on function public._conjunto_motivo_juntar_de_vez(uuid) to service_role;
 revoke all on function public._conjunto_montar(uuid[], uuid, uuid) from public, anon, authenticated;
 revoke all on function public._conjunto_desfazer(uuid, uuid, text) from public, anon, authenticated;
 revoke all on function public._conjunto_ler(uuid) from public, anon, authenticated;
@@ -535,6 +594,7 @@ declare
   f text;
 begin
   foreach f in array array['public._conjunto_nome(uuid)', 'public._conjunto_impedimento(uuid)',
+                           'public._conjunto_motivo_juntar_de_vez(uuid)',
                            'public._conjunto_montar(uuid[], uuid, uuid)', 'public._conjunto_desfazer(uuid, uuid, text)',
                            'public._conjunto_ler(uuid)', 'public._conjunto_guarda_documento()',
                            'public._conjunto_documento_cancelado()', 'public._conjunto_fecha_se_sobrar_um()'] loop
