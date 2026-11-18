@@ -164,6 +164,16 @@ as $function$
     -- _agenda_ficha_os_concluidas) nunca tem a ficha, nem com o *mande* do dono (respostas "Nunca mandar" e P3)
     when p_payee is distinct from public._agenda_dono(null)
          and cardinality(public._agenda_ficha_os_concluidas(p_payee, p_dia)) > 0 then false
+    -- (v3, revisão da v2) o "2) Segure" dado pelo dono (não pelo prazo) vale SEMPRE no dia com OS paga por inteiro pela estimativa, comece
+    -- a OS ou não depois da resposta: a OS que começa sai de _agenda_ficha_os_pagas, e fora da janela a regra de antes soltaria a ficha
+    -- sem ler a resposta, contra o "Combinado: não mando a ficha …" que o decidir já disse
+    when p_payee is distinct from public._agenda_dono(null)
+         and exists (select 1 from public.agenda_perguntas q
+                      where q.chave = format('ficha_estimativa:%s:%s', p_payee, p_dia) and q.modo = 'ligado'
+                        and q.opcao_escolhida = 2 and q.respondida_via is distinct from 'prazo' and q.respondida_em <= p_agora)
+         and exists (select 1 from public.agenda_alocacoes a
+                      where a.payee_id = p_payee and a.dia = p_dia and a.estado in ('publicada', 'fixada') and a.tipo <> 'reserva'
+                        and a.duracao_fonte = 'orcamento' and public._agenda_os_paga_por_inteiro(a.service_order_id)) then false
     -- FICHA PAGA B: fim
     -- FICHA PAGA: (18/11/2026) a pessoa (não o dono) com OS paga por inteiro no dia, pela estimativa, só tem a ficha com o *mande* do
     -- DONO de verdade: a pergunta respondida com a 1 por um canal dele (nunca o prazo). O silêncio nunca solta. Dentro e fora da
@@ -191,7 +201,7 @@ as $function$
 $function$;
 
 comment on function public._agenda_ficha_liberada(uuid, date, timestamptz) is
-  'Agenda de Produção (Fase 7a, P11; AG7-15): a ficha (e a confirmação da manhã) da pessoa no dia pode sair? true fora da janela de veto (marcar_sozinho_desde nulo, ou p_dia fora de [o dia do ligar, + ficha_veto_dias)), para o dono e para o dia sem alocação vigente da pessoa com duracao_fonte orcamento; senão só com a pergunta ficha_estimativa:<pessoa>:<dia> de verdade (modo ligado) mostrada ao dono até p_agora e não segurada (opcao_escolhida distinta de 2). Lida por _agenda_rotina_ficha, _agenda_rotina_como_foi e _agenda_rotina_confirmar (recriadas pelo P11). STABLE, invoker; authenticated e service_role. FICHA PAGA (18/11/2026, 20270125100000; o caso OS-00129): a pessoa (não o dono) com OS paga por inteiro no dia pela estimativa (_agenda_ficha_os_pagas) só tem a ficha, a confirmação da manhã e a ficha do "como foi" com o *mande* do dono de verdade — a pergunta ficha_estimativa:<pessoa>:<dia> de verdade respondida com a 1 por um canal do dono (respondida_via distinta de prazo) até p_agora; o silêncio nunca solta; vale dentro e fora da janela e sem o ligar do gestor. Sem OS paga, o de antes. FICHA PAGA B (18/11/2026, 20270126100000; respostas do dono "Nunca mandar" e P3): a pessoa (não o dono) com OS concluída, faturada ou cancelada no dia, em qualquer alocação vigente (_agenda_ficha_os_concluidas), nunca tem a ficha, a confirmação da manhã nem a ficha do "como foi", com ou sem o *mande*. A OS paga só segura antes de começar (_agenda_ficha_os_pagas).';
+  'Agenda de Produção (Fase 7a, P11; AG7-15): a ficha (e a confirmação da manhã) da pessoa no dia pode sair? true fora da janela de veto (marcar_sozinho_desde nulo, ou p_dia fora de [o dia do ligar, + ficha_veto_dias)), para o dono e para o dia sem alocação vigente da pessoa com duracao_fonte orcamento; senão só com a pergunta ficha_estimativa:<pessoa>:<dia> de verdade (modo ligado) mostrada ao dono até p_agora e não segurada (opcao_escolhida distinta de 2). Lida por _agenda_rotina_ficha, _agenda_rotina_como_foi e _agenda_rotina_confirmar (recriadas pelo P11). STABLE, invoker; authenticated e service_role. FICHA PAGA (18/11/2026, 20270125100000; o caso OS-00129): a pessoa (não o dono) com OS paga por inteiro no dia pela estimativa (_agenda_ficha_os_pagas) só tem a ficha, a confirmação da manhã e a ficha do "como foi" com o *mande* do dono de verdade — a pergunta ficha_estimativa:<pessoa>:<dia> de verdade respondida com a 1 por um canal do dono (respondida_via distinta de prazo) até p_agora; o silêncio nunca solta; vale dentro e fora da janela e sem o ligar do gestor. Sem OS paga, o de antes. FICHA PAGA B (18/11/2026, 20270126100000; respostas do dono "Nunca mandar" e P3): a pessoa (não o dono) com OS concluída, faturada ou cancelada no dia, em qualquer alocação vigente (_agenda_ficha_os_concluidas), nunca tem a ficha, a confirmação da manhã nem a ficha do "como foi", com ou sem o *mande*. A OS paga só segura antes de começar (_agenda_ficha_os_pagas); mas o "2) Segure" dado pelo dono (não pelo prazo) vale SEMPRE no dia com OS paga por inteiro pela estimativa, comece a OS ou não depois da resposta (v3, revisão da v2).';
 
 -- ── 4. A pergunta da ficha ──────────────────────────────────────────────────────────────────────────────
 -- _agenda_gestor_fichas (de 20270125100000 (F2); md5 do corpo de antes 61b60204be07e8d91a93df3f3485731c sem CR)
