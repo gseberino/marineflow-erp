@@ -80,6 +80,8 @@ begin
     if not dentro and l ~ '^\s*-- (FASE 7[eg]:|\(7[eg] |PRAZO NO BLOCO:|FICHA PAGA:)' and l !~ '^\s*-- (FASE 7[eg]: fim|\(7[eg]: fim\)|PRAZO NO BLOCO: fim|FICHA PAGA: fim)' then dentro := true; continue; end if;
     if dentro then
       if l ~ '^\s*-- (FASE 7[eg]: fim|\(7[eg]: fim\)|PRAZO NO BLOCO: fim|FICHA PAGA: fim)' then dentro := false; end if;
+      -- FICHA PAGA (20270125100000): a linha de antes que o bloco trocou volta ("--antes:" na coluna 0)
+      if l ~ '^--antes:' then fora := fora || substr(l, 9); end if;
       continue;
     end if;
     fora := fora || l;

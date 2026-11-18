@@ -39,16 +39,19 @@
 --
 -- A tabela final tem de mostrar ok = true em todas as linhas. Uma linha false é defeito.
 begin;
--- FICHA PAGA (18/11/2026, 20270124100000): a função viva sem os blocos "-- FICHA PAGA: … -- FICHA PAGA: fim" (só acréscimos: a ficha
--- de OS paga) é a de antes; as conferências de cópia abaixo a leem assim.
+-- FICHA PAGA (18/11/2026, 20270125100000): a função viva sem os blocos "-- FICHA PAGA: … -- FICHA PAGA: fim" (só acréscimos: a ficha
+-- de OS paga), com a linha de antes devolvida onde o bloco a trocou ("--antes:" na coluna 0, dentro dele), é a de antes; as
+-- conferências de cópia abaixo a leem assim.
 create function pg_temp.sem_ficha_paga(p text) returns text language sql immutable as $fp$
   select array_to_string(array(
-           select l from (select l, o, sum(case when l ~ '^\s*-- FICHA PAGA:' and l !~ '^\s*-- FICHA PAGA: fim' then 1
-                                                when l ~ '^\s*-- FICHA PAGA: fim' then -1 else 0 end)
-                                       over (order by o rows between unbounded preceding and current row) as dentro,
-                                 l ~ '^\s*-- FICHA PAGA: fim' as fecha
-                            from unnest(string_to_array(p, E'\n')) with ordinality u(l, o)) x
-            where dentro = 0 and not fecha order by o), E'\n')
+           select case when dentro > 0 and l ~ '^--antes:' then substr(l, 9) else l end
+             from (select l, o, sum(case when l ~ '^\s*-- FICHA PAGA:' and l !~ '^\s*-- FICHA PAGA: fim' then 1
+                                         when l ~ '^\s*-- FICHA PAGA: fim' then -1 else 0 end)
+                                over (order by o rows between unbounded preceding and current row) as dentro,
+                          l ~ '^\s*-- FICHA PAGA: fim' as fecha
+                     from unnest(string_to_array(p, E'\n')) with ordinality u(l, o)) x
+            where (dentro = 0 and not fecha) or (dentro > 0 and l ~ '^--antes:')
+            order by o), E'\n')
 $fp$;
 
 
