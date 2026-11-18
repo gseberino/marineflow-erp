@@ -81,6 +81,14 @@ describe('useUpdateServiceOrderStatus — pela porta (via tela)', () => {
     expect(h.auditoria).toHaveBeenCalledWith(expect.objectContaining({ record_id: 'os-1', new_value: { status: 'completed', via: 'tela' } }));
   });
 
+  it('o serviço já feito (Converter sem sinal): a saída do dia vai em p_check_out; sem ela, nulo como sempre', async () => {
+    h.estado.porta = { ok: true, mudou: true, de: 'draft', para: 'completed', convertido: true, numero: 'OS-00119', texto: 'concluída' };
+    const { result } = renderHook(() => useUpdateServiceOrderStatus(), { wrapper });
+    const r = await result.current.mutateAsync({ id: 'os-1', status: 'completed', checkOut: '2026-10-31T17:00:00-03:00' });
+    expect(portas()).toEqual([{ p_os: 'os-1', p_para: 'completed', p_via: 'tela', p_check_out: '2026-10-31T17:00:00-03:00' }]);
+    expect(r).toMatchObject({ mudou: true, status: 'completed', justConverted: true, numero: 'OS-00119' });
+  });
+
   it('a conversão é da porta: justConverted e o número com o prefixo trocado vêm dela', async () => {
     h.estado.porta = { ok: true, mudou: true, de: 'draft', para: 'approved', convertido: true, numero: 'OS-00119', texto: 'Orçamento ORÇ-00119 virou a OS-00119 (aprovada).' };
     const r = await mudarStatusPelaTela('os-1', 'approved');

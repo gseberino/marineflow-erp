@@ -39,6 +39,8 @@ import { lerComandoDaAgenda } from "../agenda/comandos.ts";
  * confira a grafia contra allTools; se for campo ou valor, acrescente aqui.
  */
 const NAO_SAO_TOOLS = new Set<string>([
+  // argumentos de converter_sem_sinal: o serviço que já foi feito nasce concluído (18/11/2026, OS-00129)
+  "ja_concluida", "concluida_em",
   // ferramenta montada por turno (perfil enxuto do admin, 05/10/2026): não está em allTools
   "ferramenta_extra",
   // argumento de schedule_whatsapp_message para contato novo (05/10/2026)

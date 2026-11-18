@@ -299,12 +299,18 @@ export function useUpdateServiceOrder() {
  * falta dele vira PortaPedeMotivo (quem chama abre a janela do motivo).
  * Exportada para o teste.
  */
-export async function mudarStatusPelaTela(id: string, status: string, motivo?: string | null): Promise<ResultadoDoStatusPelaTela> {
+export async function mudarStatusPelaTela(
+  id: string, status: string, motivo?: string | null, checkOut?: string | null,
+): Promise<ResultadoDoStatusPelaTela> {
   if (status === 'cancelled') {
     throw new Error('Use o botão "Cancelar OS" para cancelar com estorno completo.');
   }
   const comMotivo = motivo?.trim() ? { p_motivo: motivo.trim() } : {};
-  const { data, error } = await supabase.rpc('os_transicionar_status', argumentosDaPortaCompleta(id, status, 'tela', comMotivo) as any);
+  // (18/11/2026) "o serviço já foi feito" no Converter sem sinal: a saída é a do dia em que foi feito (a porta usa
+  // coalesce(check_out_at, p_check_out, agora)). Sem ela, p_check_out nulo, como sempre.
+  const comSaida = checkOut ? { p_check_out: checkOut } : {};
+  const { data, error } = await supabase.rpc('os_transicionar_status',
+    argumentosDaPortaCompleta(id, status, 'tela', { ...comMotivo, ...comSaida }) as any);
   if (error) {
     if (!ehPortaAusente(error)) throw new Error((error as { message?: string }).message || 'O banco não mudou o status desta OS.');
     const antes = await statusPelaTelaSemAPorta(supabase, id, status, {
@@ -334,8 +340,8 @@ export async function mudarStatusPelaTela(id: string, status: string, motivo?: s
 export function useUpdateServiceOrderStatus() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, status, motivo }: { id: string; status: string; motivo?: string | null }) => {
-      const r = await mudarStatusPelaTela(id, status, motivo);
+    mutationFn: async ({ id, status, motivo, checkOut }: { id: string; status: string; motivo?: string | null; checkOut?: string | null }) => {
+      const r = await mudarStatusPelaTela(id, status, motivo, checkOut);
       if (r.mudou) {
         await writeAuditLog({
           table_name: 'service_orders',

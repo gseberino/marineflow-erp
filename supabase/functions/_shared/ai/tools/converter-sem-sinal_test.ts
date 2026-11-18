@@ -4,8 +4,11 @@
 // (já é OS, reprovado, técnico). Depois do merge com a agenda (28/10/2026), a conversão é da porta única de status
 // (os_transicionar_status, via 'assistente'); sem a porta no banco, o PLANO B (porta-ausente.ts) com o mesmo número.
 import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { converterSemSinalNucleo, converterSemSinalTools, numeroDaOS } from "./converter-sem-sinal.ts";
+import {
+  converterSemSinalNucleo, converterSemSinalTools, numeroDaOS, recusaDoJaFeito, resumirConversaoSemSinal,
+} from "./converter-sem-sinal.ts";
 import { CHAVE_DO_RETRATO } from "./registry.ts";
+import { diaFeitoValido, motivoDoAviso, sinaisDeJaFeito } from "../../sinais-de-ja-feito.ts";
 
 const tool = converterSemSinalTools[0];
 
@@ -218,4 +221,169 @@ Deno.test("F5 núcleo: a via do assistente é a de antes — o execute chama o n
   const c = banco(ORC);
   await converterSemSinalNucleo((c.ctx() as unknown as { sb: never }).sb, ORC.id, { via: "assistente", autor: "u1" });
   assertEquals(c.rpcs[0].params, { p_os: ORC.id, p_para: "approved", p_via: "assistente", p_check_out: null, p_autor: "u1" }, "sem p_motivo");
+});
+
+// ── JÁ FOI FEITO (18/11/2026, OS-00129) ──────────────────────────────────────────────────────────────────────────────────────
+// O orçamento de 28/10 tinha diagnóstico, nota técnica e o Pix inteiro; foi convertido sem sinal em 16/11 22:00 e entrou na
+// agenda. O cartão avisa antes e, com ja_concluida, a porta vai de orçamento direto a concluída.
+const NOITE_DA_129 = new Date("2026-11-17T01:00:00Z"); // 16/11 22:00 em Brasília
+
+Deno.test("sinais: a OS-00129 no dia da conversão avisa com a data e os 3 sinais fortes", () => {
+  const s = sinaisDeJaFeito({
+    criadoEm: "2026-10-28T13:09:39Z", diagnosis: "Diagnóstico do sistema...", technicianNotes: "Foi necessário instalar um conversor",
+    checkInAt: null, checkOutAt: null, recebido: 750,
+  }, NOITE_DA_129);
+  assertEquals(s.idadeDias, 19);
+  assertEquals(s.dataDoOrcamento, "28/10");
+  assertEquals(s.antigo, true);
+  assertEquals(s.avisar, true);
+  assertEquals(s.fortes.length, 3);
+  const m = motivoDoAviso(s)!;
+  assertStringIncludes(m, "orçamento de 28/10 (há 19 dias), já com diagnóstico, nota técnica e R$");
+  assertStringIncludes(m, "750,00 já recebido");
+});
+
+Deno.test("sinais: orçamento novo sem nada não avisa; 13 dias não é antigo, 14 é; só sinal forte avisa mesmo novo", () => {
+  const hoje = new Date("2026-11-18T15:00:00Z");
+  const novo = sinaisDeJaFeito({ criadoEm: "2026-11-18T12:00:00Z", recebido: 0, technicianNotes: "  " }, hoje);
+  assertEquals([novo.idadeDias, novo.avisar, motivoDoAviso(novo)], [0, false, null]);
+  assertEquals(sinaisDeJaFeito({ criadoEm: "2026-11-05T12:00:00Z" }, hoje).antigo, false, "13 dias");
+  assertEquals(sinaisDeJaFeito({ criadoEm: "2026-11-04T12:00:00Z" }, hoje).antigo, true, "14 dias");
+  const pago = sinaisDeJaFeito({ criadoEm: "2026-11-17T12:00:00Z", recebido: 100 }, hoje);
+  assertEquals(pago.avisar, true);
+  assertStringIncludes(motivoDoAviso(pago)!, "orçamento de 17/11 (há 1 dia), já com R$");
+  // dia em Brasília: 02:00 UTC de 18/11 ainda é 17/11 às 23:00
+  assertEquals(sinaisDeJaFeito({ criadoEm: "2026-11-18T02:00:00Z" }, hoje).dataDoOrcamento, "17/11");
+  // sem dinheiro conferido (null) não vira sinal
+  assertEquals(sinaisDeJaFeito({ criadoEm: "2026-11-18T12:00:00Z", recebido: null }, hoje).avisar, false);
+});
+
+Deno.test("dia feito: AAAA-MM-DD de verdade, até hoje em Brasília", () => {
+  const hoje = new Date("2026-11-18T02:00:00Z"); // 17/11 23:00 em Brasília
+  assertEquals(diaFeitoValido("2026-10-31", hoje), true);
+  assertEquals(diaFeitoValido("2026-11-17", hoje), true);
+  assertEquals(diaFeitoValido("2026-11-18", hoje), false, "amanhã em Brasília");
+  assertEquals(diaFeitoValido("2026-02-30", hoje), false);
+  assertEquals(diaFeitoValido("31/10/2026", hoje), false);
+});
+
+Deno.test("recusaDoJaFeito: ja_concluida não booleano, dia no futuro ou torto recusam; sem ja_concluida o dia é ignorado", () => {
+  const hoje = new Date("2026-11-18T15:00:00Z");
+  assert(recusaDoJaFeito({ ja_concluida: "sim" }, hoje));
+  assert(recusaDoJaFeito({ ja_concluida: true, concluida_em: "2026-12-01" }, hoje));
+  assert(recusaDoJaFeito({ ja_concluida: true, concluida_em: "ontem" }, hoje));
+  assertEquals(recusaDoJaFeito({ ja_concluida: true, concluida_em: "2026-10-31" }, hoje), null);
+  assertEquals(recusaDoJaFeito({ ja_concluida: true }, hoje), null);
+  assertEquals(recusaDoJaFeito({ concluida_em: "ontem" }, hoje), null);
+  assertEquals(recusaDoJaFeito({}, hoje), null);
+  // o preValidar usa a mesma regra (o dono não vê no sino um pedido que a execução recusaria)
+  assert(tool.preValidar!({ service_order_id: "ORÇ-00042", ja_concluida: true, concluida_em: "2099-01-01" }, { userRole: "admin" } as never));
+});
+
+const PORTA_CONCLUIU = { ok: true, mudou: true, de: "draft", para: "completed", convertido: true, numero: "OS-00042",
+  numero_antes: "ORÇ-00042", check_out_at: "2026-10-31T20:00:00+00:00",
+  texto: "Fulano: concluída — saída sex 31/10 17:00. Cobrança: R$ 4.200,00 vence hoje.",
+  cobrancas_texto: "Cobrança: R$ 4.200,00 vence hoje." };
+
+Deno.test("já feito: a porta vai de orçamento a concluída, com a saída às 17:00 do dia; o resultado diz que não entra na agenda", async () => {
+  const b = banco(ORC, { porta: { resposta: PORTA_CONCLUIU } });
+  // deno-lint-ignore no-explicit-any
+  const r = await tool.execute({ service_order_id: "ORÇ-00042", ja_concluida: true, concluida_em: "2026-10-31" }, b.ctx()) as any;
+  assertEquals(r.ok, true, JSON.stringify(r));
+  assertEquals(b.rpcs, [{ nome: "os_transicionar_status", params: {
+    p_os: ORC.id, p_para: "completed", p_via: "assistente", p_check_out: "2026-10-31T17:00:00-03:00", p_autor: "u1" } }]);
+  assertEquals(b.updates.length, 1, "a condição + aprovado, como sempre");
+  assertEquals(r.concluida, true);
+  assertEquals(r.documento, "OS-00042");
+  assertStringIncludes(r.agenda, "não entra na agenda");
+  assertEquals(r.cobranca, "Cobrança: R$ 4.200,00 vence hoje.");
+  assertStringIncludes(r.quando_paga, "ligue o pagamento");
+});
+
+Deno.test("já feito sem o dia: a saída é a de agora (p_check_out nulo, a porta usa o relógio)", async () => {
+  const b = banco(ORC, { porta: { resposta: PORTA_CONCLUIU } });
+  await tool.execute({ service_order_id: "ORÇ-00042", ja_concluida: true }, b.ctx());
+  assertEquals(b.rpcs[0].params, { p_os: ORC.id, p_para: "completed", p_via: "assistente", p_check_out: null, p_autor: "u1" });
+});
+
+Deno.test("já feito: a porta recusa a conclusão (levantamento) = nada convertido, só a condição, e o texto diz por quê", async () => {
+  const b = banco(ORC, { porta: { resposta: { ok: false, mudou: false, de: "draft", para: "draft",
+    texto: "Antes de concluir, responda o levantamento do serviço X." } } });
+  // deno-lint-ignore no-explicit-any
+  const r = await tool.execute({ service_order_id: "ORÇ-00042", ja_concluida: true }, b.ctx()) as any;
+  assertEquals(r.ok, undefined);
+  assertStringIncludes(r.error, "a conversão não aconteceu");
+  assertStringIncludes(r.error, "levantamento");
+});
+
+Deno.test("já feito sem a porta no banco (PLANO B): converte e avisa que NÃO concluiu", async () => {
+  const b = banco(ORC, { porta: { ausente: true } });
+  // deno-lint-ignore no-explicit-any
+  const r = await tool.execute({ service_order_id: "ORÇ-00042", ja_concluida: true }, b.ctx()) as any;
+  assertEquals(r.ok, true, JSON.stringify(r));
+  assertEquals(r.concluida, undefined);
+  assert((r.avisos as string[]).some((a) => a.includes("NÃO concluí")), JSON.stringify(r.avisos));
+});
+
+Deno.test("já feito: dia no futuro recusa sem tocar em nada", async () => {
+  const b = banco(ORC, { porta: { resposta: PORTA_CONCLUIU } });
+  // deno-lint-ignore no-explicit-any
+  const r = await tool.execute({ service_order_id: "ORÇ-00042", ja_concluida: true, concluida_em: "2099-01-01" }, b.ctx()) as any;
+  assert(r.error);
+  assertEquals([b.updates.length, b.rpcs.length], [0, 0]);
+});
+
+// O cartão: um banco só de leitura com o orçamento e as contas a receber.
+function bancoDoCartao(o: Record<string, unknown> | null, recebiveis: { paid_amount: number | null; status: string }[] | "erro") {
+  return {
+    from(tabela: string) {
+      // deno-lint-ignore no-explicit-any
+      const q: any = {
+        select: () => q,
+        eq: () => q,
+        maybeSingle: () => Promise.resolve({ data: o, error: null }),
+        then: (ok: (v: unknown) => unknown) => Promise.resolve(
+          tabela === "receivables" && recebiveis === "erro" ? { data: null, error: { message: "falhou" } }
+            : { data: tabela === "receivables" ? recebiveis : null, error: null },
+        ).then(ok),
+      };
+      return q;
+    },
+  };
+}
+const ORC_129 = { ...ORC, service_order_number: "ORÇ-00129", grand_total: 750, created_at: "2026-10-28T13:09:39Z",
+  diagnosis: "Diagnóstico...", technician_notes: "Foi necessário instalar um conversor", check_in_at: null, check_out_at: null,
+  clients: { name: "Cliente Teste" } };
+
+Deno.test("cartão: a OS-00129 mostra a data, o aviso com os sinais e o que dizer — e não vira recusa", async () => {
+  const r = (await resumirConversaoSemSinal(
+    bancoDoCartao(ORC_129, [{ paid_amount: 750, status: "paid" }, { paid_amount: 50, status: "cancelled" }]),
+    { service_order_id: "ORÇ-00129" }, NOITE_DA_129))!;
+  const linhas = r.split("\n");
+  assertEquals(linhas[0], "Converter ORÇ-00129 em OS sem sinal");
+  assertEquals(linhas[1], "Cliente: Cliente Teste");
+  assert(linhas.includes("Orçamento de 28/10 (há 19 dias)."), r);
+  const atencao = linhas.find((l) => l.startsWith("Atenção:"))!;
+  assertStringIncludes(atencao, "já com diagnóstico, nota técnica e R$");
+  assertStringIncludes(atencao, "750,00 já recebido");
+  assertStringIncludes(atencao, "diga *já foi feito*");
+  assert(!r.trim().startsWith("⚠️"), "linha única com ⚠️ viraria recusa (resumoQueRecusa)");
+});
+
+Deno.test("cartão: com ja_concluida diz JÁ CONCLUÍDA, o dia e que não entra na agenda (sem o aviso)", async () => {
+  const r = (await resumirConversaoSemSinal(bancoDoCartao(ORC_129, [{ paid_amount: 750, status: "paid" }]),
+    { service_order_id: "ORÇ-00129", ja_concluida: true, concluida_em: "2026-10-31" }, NOITE_DA_129))!;
+  assertStringIncludes(r, "Converter ORÇ-00129 em OS JÁ CONCLUÍDA (serviço feito em 31/10)");
+  assertStringIncludes(r, "Não entra na agenda");
+  assert(!r.includes("Atenção:"));
+});
+
+Deno.test("cartão: orçamento novo e limpo não avisa; leitura do dinheiro que falha é dita (não vira R$ 0); não achou = genérico", async () => {
+  const novo = { ...ORC_129, created_at: "2026-11-16T12:00:00Z", diagnosis: null, technician_notes: null };
+  const limpo = (await resumirConversaoSemSinal(bancoDoCartao(novo, []), { service_order_id: "ORÇ-00129" }, NOITE_DA_129))!;
+  assert(!limpo.includes("Atenção:"), limpo);
+  assertStringIncludes(limpo, "Orçamento de 16/11 (de hoje).");
+  const semDinheiro = (await resumirConversaoSemSinal(bancoDoCartao(novo, "erro"), { service_order_id: "ORÇ-00129" }, NOITE_DA_129))!;
+  assertStringIncludes(semDinheiro, "Não consegui conferir se já entrou dinheiro");
+  assertEquals(await resumirConversaoSemSinal(bancoDoCartao(null, []), { service_order_id: "ORÇ-00999" }, NOITE_DA_129), null);
 });

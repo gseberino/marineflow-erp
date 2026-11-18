@@ -9,6 +9,7 @@ import { resumirPropostaDoCaso, resumirRespostaDoCaso, resumirUnidadeDoCaso, ris
 import { resumirOrcamentoLivre } from "./tools/quote-builder.ts";
 import { resumirAgendamento } from "./tools/agendamento.ts";
 import { resumirMensagem } from "./tools/resposta.ts";
+import { resumirConversaoSemSinal } from "./tools/converter-sem-sinal.ts";
 // fiscal e compras (07/10/2026): resumos da confirmação (nota ao cliente, receber e excluir OC).
 import { resumirEnvioDaNota } from "./tools/nota-fiscal-pdf.ts";
 import { resumirExclusaoDeOC, resumirRecebimento } from "./tools/compras-ciclo.ts";
@@ -299,6 +300,9 @@ export const tituloDaAcao = humanizeToolNamePt;
 // Nomes técnicos de parâmetro -> rótulo pt-BR. Cobre os campos usados pelas tools gated
 // (financial.ts, purchasing.ts, service-orders.ts, whatsapp.ts).
 const FIELD_LABELS_PT: Record<string, string> = {
+  // converter_sem_sinal (18/11/2026): o serviço que já foi feito nasce concluído
+  ja_concluida: "Serviço já feito",
+  concluida_em: "Feito em",
   receivable_id: "Recebível",
   payable_id: "Conta a pagar",
   service_order_id: "OS/Orçamento",
@@ -594,6 +598,15 @@ export async function buildPendingSummary(
       const motivo = String((e as { message?: string })?.message ?? e).replace(/s+/g, " ").trim();
       return `⚠️ Não consegui montar a lista agora (${motivo}). Nada foi mandado nem gravado; tente de novo.`;
     }
+  }
+  // Converter sem sinal (18/11/2026, OS-00129): o "sim" mostra o orçamento resolvido e a data dele; com sinal de serviço já
+  // feito (nota técnica, diagnóstico, check-in/saída, dinheiro recebido, 14 dias ou mais), avisa ANTES — com ja_concluida a
+  // OS nasce concluída e não entra na agenda. Leitura que falha cai no genérico (a execução confere tudo de novo).
+  if (toolName === "converter_sem_sinal") {
+    try {
+      const r = await resumirConversaoSemSinal(admin, args);
+      if (r) return r;
+    } catch { /* cai no resumo genérico */ }
   }
   // Serviço do prestador (12/11/2026): o "sim" é sobre o que o banco VAI gravar — o valor de hoje, se já entra
   // na conta (o cliente já pagou a OS) e o que substitui.

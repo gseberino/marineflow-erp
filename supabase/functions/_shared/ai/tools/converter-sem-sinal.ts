@@ -11,11 +11,17 @@
 //
 // Risco médio: troca a condição de pagamento e compromete o serviço, então pede o "sim". O retrato
 // guarda o total que o dono viu; se o orçamento mudar até o "sim", a execução recusa.
+//
+// JÁ FOI FEITO (18/11/2026, OS-00129): o cartão do "sim" (resumirConversaoSemSinal) mostra a data do orçamento e, com sinal
+// de serviço já feito (_shared/sinais-de-ja-feito.ts), avisa antes. Com ja_concluida, a porta vai de orçamento DIRETO a
+// concluída numa chamada só (ela já sabia: converte e conclui, e se a conclusão recusar a conversão também não fica): a OS
+// nunca entra na carteira da agenda (nenhum dia, nenhuma ficha) e a cobrança nasce na conclusão, como sempre.
 
 import { blockTechnician, lerRetrato, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
 import { condicaoTudoNaConclusao } from "../../banking/condicao-na-conclusao.ts";
 import { fmtCurrency } from "../../pdf/documento.ts";
 import { argumentosDaPortaCompleta, ehPortaAusente, ehSemDireitoNaPorta, statusPelaTelaSemAPorta } from "../../porta-ausente.ts";
+import { dataComIdade, diaFeitoValido, motivoDoAviso, saidaDoDia, sinaisDeJaFeito } from "../../sinais-de-ja-feito.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -70,6 +76,10 @@ export interface OpcoesDoNucleo {
   motivo?: string;
   totalVisto?: number | null;
   retrato?: Record<string, unknown> | null;
+  /** (18/11/2026) o serviço JÁ FOI FEITO: a porta converte direto em concluída (não entra na agenda). */
+  jaConcluida?: boolean;
+  /** O dia em que foi feito (AAAA-MM-DD) — a saída fica às 17:00 desse dia. Sem ele, agora. */
+  concluidaEm?: string | null;
 }
 
 /** O código da recusa, para quem chama o núcleo (o cartão). A ferramenta devolve só o `error`, como antes. */
@@ -126,13 +136,18 @@ export async function converterSemSinalNucleo(sb: any, ref: string, opcoes: Opco
   // (F5) a via do dono leva o motivo (o id da mensagem do cliente); a do assistente, nada a mais
   const extra: Record<string, unknown> = { p_autor: opcoes.autor ?? null };
   if (opcoes.via === "dono" && opcoes.motivo) extra.p_motivo = opcoes.motivo.slice(0, MOTIVO_MAX);
+  // (18/11/2026) já feito: orçamento → concluída na mesma chamada da porta, com a saída no dia em que foi feito
+  const concluir = opcoes.jaConcluida === true;
+  if (concluir && opcoes.concluidaEm) extra.p_check_out = saidaDoDia(opcoes.concluidaEm);
   let documento: string | null;
   let convertido: boolean;
+  let concluida = false;
   const { data: porta, error: erroPorta } = await sb.rpc("os_transicionar_status",
-    argumentosDaPortaCompleta(o.id, "approved", opcoes.via, extra));
+    argumentosDaPortaCompleta(o.id, concluir ? "completed" : "approved", opcoes.via, extra));
   if (erroPorta) {
     if (ehSemDireitoNaPorta(erroPorta)) return soCondicao(String(erroPorta.message ?? "você não pode converter este orçamento"));
     if (!ehPortaAusente(erroPorta)) throw erroPorta;
+    // sem a porta no banco (caminho de antes): só converte; concluir fica para a tela (o aviso abaixo diz)
     const antes = await statusPelaTelaSemAPorta(sb, o.id, "approved");
     documento = antes.numero ?? numeroDaOS(o.service_order_number);
     convertido = antes.convertido;
@@ -140,11 +155,31 @@ export async function converterSemSinalNucleo(sb: any, ref: string, opcoes: Opco
     if (!porta?.ok) return soCondicao(String(porta?.texto ?? "o sistema recusou"));
     documento = porta.numero ?? numeroDaOS(o.service_order_number);
     convertido = porta.convertido === true;
+    concluida = concluir && porta.para === "completed";
   }
   if (!convertido) return soCondicao("alguém converteu ao mesmo tempo?");
 
   const avisos: string[] = [];
   if (o.signed_at) avisos.push("O orçamento estava ASSINADO com outra condição: o cliente precisa assinar de novo.");
+  if (concluir && !concluida) {
+    avisos.push(`Converti, mas NÃO concluí: conclua a ${documento} pela tela, senão a agenda vai marcar dia para ela.`);
+  }
+  if (concluida) {
+    return {
+      ok: true,
+      documento,
+      orcamento_era: o.service_order_number,
+      concluida: true,
+      saida: porta?.check_out_at ?? null,
+      agenda: "Nasceu concluída: não entra na agenda (nenhum dia marcado, nenhuma ficha, nenhuma via).",
+      condicao: condicao.payment_conditions,
+      condicao_anterior: o.payment_conditions || null,
+      total: fmtCurrency(total),
+      cobranca: String(porta?.cobrancas_texto ?? "").trim() || null,
+      quando_paga: "A cobrança nasceu agora, na conclusão. Se o cliente já pagou, ligue o pagamento a ela.",
+      ...(avisos.length ? { avisos } : {}),
+    };
+  }
   return {
     ok: true,
     documento,
@@ -157,17 +192,94 @@ export async function converterSemSinalNucleo(sb: any, ref: string, opcoes: Opco
   };
 }
 
+/** A recusa do ja_concluida/concluida_em, ou null. Sem banco: preValidar e execute usam a mesma. */
+export function recusaDoJaFeito(args: Record<string, unknown> | null | undefined, hoje: Date): { error: string } | null {
+  const ja = args?.ja_concluida;
+  if (ja !== undefined && ja !== null && typeof ja !== "boolean") return { error: "ja_concluida é sim ou não (true/false)." };
+  const dia = args?.concluida_em;
+  if (ja === true && dia !== undefined && dia !== null && String(dia).trim() !== ""
+      && !diaFeitoValido(String(dia).trim(), hoje)) {
+    return { error: `Não entendi o dia em que o serviço foi feito ("${String(dia)}"): diga no formato AAAA-MM-DD, até hoje.` };
+  }
+  return null;
+}
+
+// deno-lint-ignore no-explicit-any
+async function lerRecebido(sb: any, osId: string): Promise<number | null> {
+  const { data, error } = await sb.from("receivables").select("paid_amount, status").eq("service_order_id", osId);
+  if (error) return null; // não deu para conferir: o cartão diz, em vez de mostrar R$ 0
+  return ((data ?? []) as { paid_amount: number | null; status: string | null }[])
+    .filter((r) => r.status !== "cancelled")
+    .reduce((s, r) => s + (Number(r.paid_amount) || 0), 0);
+}
+
+/**
+ * O cartão do "sim" (buildPendingSummary): o orçamento resolvido (número, cliente, total, a data com a idade) e, com sinal de
+ * serviço já feito, o aviso ANTES do "sim" — a OS-00129 entrou na agenda porque ninguém perguntou. Com ja_concluida, o cartão
+ * diz que ela nasce concluída e não entra na agenda. Não começa com "⚠️" (isso viraria recusa: resumoQueRecusa).
+ * null = não achou (o genérico segue; a execução recusa).
+ */
+// deno-lint-ignore no-explicit-any
+export async function resumirConversaoSemSinal(sb: any, args: Record<string, unknown>, hoje: Date = new Date()): Promise<string | null> {
+  const ref = String(args?.service_order_id ?? "").trim();
+  if (!ref) return null;
+  let q = sb.from("service_orders")
+    .select(`${COLUNAS}, created_at, technician_notes, diagnosis, check_in_at, check_out_at, clients(name)`);
+  q = UUID_RE.test(ref) ? q.eq("id", ref) : q.eq("service_order_number", ref);
+  const { data: o, error } = await q.maybeSingle();
+  if (error) throw error;
+  if (!o) return null;
+  const recebido = await lerRecebido(sb, o.id);
+  const s = sinaisDeJaFeito({
+    criadoEm: o.created_at, technicianNotes: o.technician_notes, diagnosis: o.diagnosis,
+    checkInAt: o.check_in_at, checkOutAt: o.check_out_at, recebido,
+  }, hoje);
+  const ja = args?.ja_concluida === true;
+  const dia = ja && args?.concluida_em ? String(args.concluida_em).trim() : null;
+  const diaCurto = dia ? `${dia.slice(8, 10)}/${dia.slice(5, 7)}` : null;
+  const cliente = (o.clients as { name?: string } | null)?.name?.trim();
+  const total = fmtCurrency(Number(o.grand_total) || 0);
+  const data = dataComIdade(s);
+  const linhas = [
+    ja
+      ? `Converter ${o.service_order_number} em OS JÁ CONCLUÍDA${diaCurto ? ` (serviço feito em ${diaCurto})` : " (concluída agora)"}`
+      : `Converter ${o.service_order_number} em OS sem sinal`,
+    ...(cliente ? [`Cliente: ${cliente}`] : []),
+    ja
+      ? `Total: ${total}, 100% na entrega: a cobrança nasce agora, ao concluir.`
+      : `Total: ${total}, 100% na entrega: a cobrança nasce na conclusão.`,
+    ...(data ? [`Orçamento de ${data}.`] : []),
+  ];
+  if (ja) {
+    linhas.push("Não entra na agenda: nenhum dia marcado, nenhuma ficha, nenhuma via ao técnico.");
+  } else {
+    const motivo = motivoDoAviso(s);
+    if (motivo) {
+      linhas.push(`Atenção: ${motivo}. Se o serviço JÁ FOI FEITO, não responda sim: diga *já foi feito* (e o dia, se lembrar) e eu converto a OS já concluída, sem entrar na agenda.`);
+    }
+  }
+  if (recebido === null) linhas.push("Não consegui conferir se já entrou dinheiro neste orçamento.");
+  if (o.signed_at) linhas.push("O orçamento está assinado com outra condição: o cliente vai precisar assinar de novo.");
+  return linhas.join("\n");
+}
+
 export const converterSemSinalTools: ToolDef[] = [
   {
     name: "converter_sem_sinal",
     description:
       "Converte um ORÇAMENTO em OS SEM sinal: o cliente paga o valor inteiro na CONCLUSÃO do serviço (ex.: orçamento adicional de quem já tem serviço em andamento, 'acerta tudo no final', 'pode tocar sem entrada'). " +
       "Numa ação só: troca a condição de pagamento para '100% na entrega', marca o orçamento como aprovado e converte (ORÇ-00042 vira OS-00042). A conta a receber nasce na conclusão, vencendo no dia. " +
+      "Serviço que JÁ FOI FEITO (o dono diz 'já foi feito', 'já fizemos', 'já entregamos'): ja_concluida=true e, se ele disser, concluida_em — a OS nasce concluída e não entra na agenda. " +
       "NÃO use quando houver sinal: sinal já pago → register_deposit_and_convert; sinal a cobrar → siga o playbook de aprovação. Pede confirmação.",
     input_schema: {
       type: "object",
       properties: {
         service_order_id: { type: "string", description: "UUID ou número do orçamento (ORÇ-00112)." },
+        ja_concluida: {
+          type: "boolean",
+          description: "true SÓ quando o dono disser que o serviço JÁ FOI FEITO: converte direto em concluída (a cobrança nasce agora) e a OS não entra na agenda.",
+        },
+        concluida_em: { type: "string", description: "Com ja_concluida: o dia em que o serviço foi feito (AAAA-MM-DD), se o dono disser. Sem ele, hoje." },
       },
       required: ["service_order_id"],
     },
@@ -176,7 +288,7 @@ export const converterSemSinalTools: ToolDef[] = [
     preValidar(args, ctx) {
       if (ctx.userRole === "technician") return { error: "Cargo não autorizado para esta ação." };
       if (!String(args?.service_order_id ?? "").trim()) return { error: "Diga qual orçamento converter (o número ORÇ)." };
-      return null;
+      return recusaDoJaFeito(args, new Date());
     },
     async retratoDaPendencia(args, ctx) {
       const o = await lerOrcamento(ctx.sb, String(args.service_order_id ?? "").trim());
@@ -187,9 +299,14 @@ export const converterSemSinalTools: ToolDef[] = [
       const blocked = blockTechnician(ctx);
       if (blocked) return blocked;
       const ref = String(args.service_order_id ?? "").trim();
+      const recusa = recusaDoJaFeito(args, new Date());
+      if (recusa) return recusa;
+      const jaConcluida = args.ja_concluida === true;
+      const concluidaEm = jaConcluida && String(args.concluida_em ?? "").trim() ? String(args.concluida_em).trim() : null;
       // (F5, P11.1) o corpo virou o núcleo, sem mudança para o assistente; o código da recusa fica só no núcleo
       const { codigo: _codigo, ...r } = await converterSemSinalNucleo(ctx.sb, ref, {
         via: "assistente", autor: ctx.userId ?? null, retrato: lerRetrato(args),
+        ...(jaConcluida ? { jaConcluida, concluidaEm } : {}),
       });
       return r;
     },
