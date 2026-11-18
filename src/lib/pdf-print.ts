@@ -1,5 +1,6 @@
 import { toast } from 'sonner';
-import { generatePDF, type PDFData, type PDFOptions } from './pdf-generator';
+import { comRevisaoSeFaltar, generatePDF, type PDFData, type PDFOptions } from './pdf-generator';
+import { precisaDeRevisao } from '../../supabase/functions/_shared/pdf/revisao';
 
 /**
  * Imprimir avisando quando não dá.
@@ -12,10 +13,31 @@ import { generatePDF, type PDFData, type PDFOptions } from './pdf-generator';
  *
  * Fica separado de pdf-generator.ts porque aquele arquivo é lib pura, testada
  * sem browser e sem UI; o toast é decisão de interface.
+ *
+ * Revisão (17/11/2026): o documento de uma ordem leva a Rev. N, que vem do banco. A janela abre AQUI, ainda no
+ * clique — `window.open` depois de esperar a resposta cairia no bloqueador de pop-up — e recebe o documento quando
+ * a revisão chega. Sem resposta, o documento sai sem a revisão, como antes.
  */
 export function printPDF(data: PDFData, options: PDFOptions): void {
+  if (!precisaDeRevisao(data)) {
+    imprimir(data, options);
+    return;
+  }
+  const janela = window.open('', '_blank');
+  if (janela) {
+    janela.document.write(
+      '<p style="font-family:system-ui,sans-serif;padding:24px;color:#64748B">Preparando o documento…</p>',
+    );
+  }
+  void comRevisaoSeFaltar(data).then(
+    (comRevisao) => imprimir(comRevisao, options, janela),
+    () => imprimir({ ...data, revisao: null }, options, janela),
+  );
+}
+
+function imprimir(data: PDFData, options: PDFOptions, janela?: Window | null): void {
   try {
-    generatePDF(data, options);
+    generatePDF(data, options, janela);
   } catch (e) {
     console.error('[printPDF] falhou:', e);
     toast.error(e instanceof Error ? e.message : 'Não deu para abrir a impressão.');

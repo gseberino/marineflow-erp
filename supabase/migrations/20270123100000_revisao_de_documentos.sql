@@ -72,7 +72,9 @@ returns jsonb language sql stable security definer set search_path = public, pg_
       'payment_condition_preset_id', 'custom_payment_installments', 'payment_method_preferred',
       'quote_validity_days', 'quote_validity_date']
       -- Só a OS e a fatura imprimem a data agendada e as notas do técnico: reagendar não muda o orçamento.
-      || case when p_tipo <> 'quote' then array['scheduled_start_at', 'technician_notes'] else array[]::text[] end),
+      || case when p_tipo <> 'quote' then array['scheduled_start_at', 'technician_notes'] else array[]::text[] end
+      -- E só a fatura imprime as observações financeiras.
+      || case when p_tipo = 'invoice' then array['financial_notes'] else array[]::text[] end),
     'cliente', (select private.revisao_campos(to_jsonb(c), array['name', 'cpf_cnpj', 'phone', 'email',
                                                                   'address_line_1', 'city', 'state'])
                   from public.clients c where c.id = so.client_id),

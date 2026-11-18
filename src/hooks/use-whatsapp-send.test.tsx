@@ -48,6 +48,8 @@ vi.mock('@/integrations/supabase/client', () => ({
 }));
 vi.mock('@/lib/pdf-generator', () => ({
   generatePDFBlob: async () => new Blob(['%PDF-1.7'], { type: 'application/pdf' }),
+  // A revisão (Rev. N) é pedida antes do blob; aqui o documento segue sem ela (o nome do arquivo não muda).
+  comRevisaoSeFaltar: async (d: unknown) => ({ ...(d as object), revisao: null }),
   DEFAULT_PDF_OPTIONS: {},
 }));
 vi.mock('sonner', () => ({

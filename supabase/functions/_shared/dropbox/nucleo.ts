@@ -223,10 +223,17 @@ export function dataEmSaoPaulo(agora = new Date()): string {
   return p; // en-CA já sai AAAA-MM-DD
 }
 
-/** "2026-10-08 ORÇ-00112 v2.pdf" — o número fica com o Ç (o cabeçalho escapa). */
-export function nomeDoPdf(data: string, numero: string, versao: number): string {
+/**
+ * "2026-11-17 ORÇ-00112 Rev3.pdf" — o número fica com o Ç (o cabeçalho escapa).
+ *
+ * Desde 17/11/2026 o nome leva a REVISÃO do documento (a mesma impressa nele, no Baixar e no WhatsApp). O `vN` próprio
+ * do Dropbox continua contando as cópias guardadas (e decidindo o "sem mudança"), e volta ao nome só quando o
+ * documento saiu sem revisão. Mesma revisão guardada de novo no mesmo dia (mudou só o histórico de pagamentos, que
+ * não sobe a revisão): o Dropbox renomeia ("… Rev3 (1).pdf"), nada se sobrescreve.
+ */
+export function nomeDoPdf(data: string, numero: string, versao: number, revisao?: number | null): string {
   const n = (numero || "documento").replace(/[\/:*?"<>|]+/g, "-").trim();
-  return `${data} ${n} v${versao}.pdf`;
+  return revisao ? `${data} ${n} Rev${revisao}.pdf` : `${data} ${n} v${versao}.pdf`;
 }
 
 export function nomeDoPdfAssinado(data: string, numero: string): string {

@@ -4,7 +4,8 @@ import { extractInvokeErrorBody } from '@/lib/invoke-error';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
-import { generatePDFBlob, DEFAULT_PDF_OPTIONS, type PDFDocumentType, type PDFOptions } from '@/lib/pdf-generator';
+import { comRevisaoSeFaltar, generatePDFBlob, DEFAULT_PDF_OPTIONS, type PDFDocumentType, type PDFOptions } from '@/lib/pdf-generator';
+import { linhaDaRevisaoNaLegenda, nomeComRevisao } from '../../supabase/functions/_shared/pdf/revisao';
 
 export interface WhatsAppSendPayload {
   phone: string;
@@ -120,17 +121,21 @@ export function useWhatsAppSend() {
       invokeBody.link_description = payload.link_description || '';
     } else {
       if (!payload.pdfData) throw new Error('Dados do documento ainda carregando — tente novamente.');
-      const blob = await generatePDFBlob(
+      // A revisão (Rev. N) carimbada antes, para o documento, o nome do arquivo e a legenda dizerem a mesma.
+      const dados = await comRevisaoSeFaltar(
         { ...payload.pdfData, documentType: payload.documentType } as any,
-        payload.pdfOptions ?? DEFAULT_PDF_OPTIONS,
       );
-      const filename = payload.filename || 'documento.pdf';
+      const blob = await generatePDFBlob(dados, payload.pdfOptions ?? DEFAULT_PDF_OPTIONS);
+      const filename = nomeComRevisao(payload.filename || 'documento.pdf', dados.revisao);
       const { path, url } = await uploadPdfBlob(blob, filename);
       arquivo = path;
       invokeBody.kind = 'document';
       invokeBody.document_url = url;
       invokeBody.document_filename = filename;
-      invokeBody.document_caption = payload.caption || payload.message;
+      // Da Rev. 2 em diante a legenda diz qual revisão ela substitui (o cliente pode ter a anterior na conversa).
+      const linhaRevisao = linhaDaRevisaoNaLegenda(dados.revisao);
+      const legenda = payload.caption || payload.message;
+      invokeBody.document_caption = linhaRevisao ? `${legenda}\n${linhaRevisao}` : legenda;
     }
 
     // Idempotência: clique duplo ou repetição automática após resposta perdida não

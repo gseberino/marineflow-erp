@@ -135,10 +135,11 @@ async function processar(admin: Admin, dbx: Dropbox, e: Envio, settings: Record<
   });
   if (!render.ok) throw new Repetir(render.motivo);
 
-  const m = await dbx.enviar(`${destino}/${nomeDoPdf(hoje, ordem.service_order_number, versao)}`, new Uint8Array(render.pdf));
+  const rev = montado.doc.revisao?.numero ?? null;
+  const m = await dbx.enviar(`${destino}/${nomeDoPdf(hoje, ordem.service_order_number, versao, rev)}`, new Uint8Array(render.pdf));
   return {
     status: "feito",
-    resultado: `${montado.doc.rotulo} v${versao} guardado`,
+    resultado: `${montado.doc.rotulo} ${rev ? `Rev. ${rev}` : `v${versao}`} guardado`,
     dropbox_id: m.id,
     caminho: m.path_display,
     versao,

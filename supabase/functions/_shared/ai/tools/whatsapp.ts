@@ -1405,7 +1405,7 @@ export const whatsappTools: ToolDef[] = [
       const linhaDaValidade = doEnvio?.linha && doEnvio.data && !abertura.includes(ddmmDoDia(doEnvio.data)) ? `\n${doEnvio.linha}` : "";
       const legenda = formato === "pdf"
         ? legendaDoPdf(args, so, doEnvio)
-        : `${abertura}${linhaDaValidade}\n\n${doc.rotulo} ${doc.numero} — Total ${doc.total}\nPara ver online e aprovar: ${link}`;
+        : `${abertura}${linhaDaValidade}\n\n${doc.rotulo} ${doc.numero}${doc.revisao ? ` · Rev. ${doc.revisao.numero}` : ""} — Total ${doc.total}\nPara ver online e aprovar: ${link}`;
       const marca = formato === "pdf" ? "[pdf]" : "[pdf+link]";
       // O whatsapp-send recusa legenda acima de 1024 caracteres (zod). Melhor dizer agora do
       // que gerar o PDF e ouvir um 400.

@@ -30,6 +30,7 @@
   @media print {
     .mf-pdf-doc .container { padding: 0; }
     @page { margin: 12mm; size: A4; }
+    @page { @bottom-right { content: "ORÇ-00087 · Rev. 3 · pág. " counter(page) "/" counter(pages); font-family: 'Inter', -apple-system, 'Segoe UI', Roboto, sans-serif; font-size: 7pt; color: #94A3B8; } }
   }
 
   .mf-pdf-doc h1, .mf-pdf-doc h2, .mf-pdf-doc h3 { color: var(--pdf-primary); font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
@@ -133,7 +134,7 @@
       </div>
       <div style="text-align:right;">
         <h1 style="font-size:24px;margin-bottom:4px;color:var(--pdf-primary);">Orçamento</h1>
-        <div style="font-size:16px;font-weight:700;color:var(--pdf-secondary);">ORÇ-00087</div>
+        <div style="font-size:16px;font-weight:700;color:var(--pdf-secondary);">ORÇ-00087</div><div style="margin-top:1px;font-size:10px;font-weight:600;color:var(--pdf-text-muted);">Revisão 3</div><div style="font-size:9px;color:var(--pdf-text-muted);">Substitui a Rev. 2 de 24/09/2026</div>
         <div style="margin-top:8px;font-size:10px;color:var(--pdf-text-muted);">
           Emissão: 24/09/2026
         </div>
@@ -400,8 +401,8 @@ Equipamentos conforme o fabricante.</p>
 
 
 <footer style="margin-top:30px;text-align:center;font-size:9px;color:var(--pdf-text-muted);border-top:1px solid var(--pdf-border);padding-top:10px; display:flex; justify-content:space-between; align-items:center;">
-  <span>MarineFlow ERP · Documento Digital Autenticado</span>
-  <span>Emitido em 25/09/2026, 23:45:00</span>
+  <span>Código de conferência 7F3A-21C9</span>
+  <span>ORÇ-00087 · Rev. 3 · Emitido em 25/09/2026, 23:45:00</span>
 </footer>
 </div></div>
 </body>

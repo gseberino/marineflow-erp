@@ -15,12 +15,14 @@ import {
   PAYMENT_METHOD_LABELS,
   PDF_ROOT_CLASS,
   percentualDoDesconto,
+  rodapeDaPaginaCss,
   tituloParaImpressao,
   unidadeDoDocumento,
   type PDFData,
   type PDFOptions,
 } from '../../supabase/functions/_shared/pdf/documento';
 import { linhaDaUnidade } from './unidade';
+import { precisaDeRevisao } from '../../supabase/functions/_shared/pdf/revisao';
 import { documentoMascarado, nomeSemCpf } from '../../supabase/functions/_shared/banking/contraparte';
 
 // O documento da ordem (tipos, opções, nome do arquivo e desenho) mora em
@@ -45,7 +47,22 @@ export {
   validadeGravavel,
 } from '../../supabase/functions/_shared/dias-de-validade';
 
-export function generatePDF(data: PDFData, options: PDFOptions): void {
+/**
+ * A revisão do documento (Rev. N), pedida ao banco só quando o documento é de uma ordem real e ainda não a tem.
+ * Import sob demanda: este arquivo é lib pura, e os testes que geram documento de mentira nunca chegam ao Supabase.
+ */
+export async function comRevisaoSeFaltar(data: PDFData, ctx?: { shareToken?: string }): Promise<PDFData> {
+  if (!precisaDeRevisao(data)) return data;
+  const { comRevisao } = await import('./pdf-revisao');
+  return comRevisao(data, ctx);
+}
+
+/**
+ * `janela`: a janela de impressão já aberta por quem chamou. O Imprimir precisa pedir a revisão ao banco ANTES de
+ * montar o documento, e `window.open` depois de um `await` cai no bloqueador de pop-up — então quem chama abre a
+ * janela no clique e passa para cá (pdf-print.ts). Sem ela, abre aqui, como sempre.
+ */
+export function generatePDF(data: PDFData, options: PDFOptions, janela?: Window | null): void {
   // O título da janela é o nome que "Salvar como PDF" sugere. Com "ORÇAMENTO ORÇ-00100"
   // o arquivo salvo pela impressão não batia com o do botão Baixar; agora é o mesmo nome.
   const html = buildHTMLDocument(data, options).replace(
@@ -56,7 +73,7 @@ export function generatePDF(data: PDFData, options: PDFOptions): void {
   // Primary: open in a dedicated window so the OS always prints/saves from the
   // right context. The iframe approach causes iPadOS to save the main ERP page
   // instead of the generated PDF when the user taps "Save" in the share sheet.
-  const win = window.open('', '_blank');
+  const win = janela === undefined ? window.open('', '_blank') : janela;
   if (win) {
     // A janela imprime A SI MESMA, por um script dentro do próprio documento.
     //
@@ -79,6 +96,8 @@ export function generatePDF(data: PDFData, options: PDFOptions): void {
       // Um quadro depois do load, para o layout assentar antes do diálogo.
       'requestAnimationFrame(function(){setTimeout(function(){window.print();},50);});' +
       '});</script>';
+    // open() explícito: a janela aberta no clique já tem o "Preparando o documento…" (pdf-print.ts).
+    win.document.open();
     win.document.write(html.replace('</body>', `${autoPrint}</body>`));
     win.document.close();
     win.focus();
@@ -158,10 +177,12 @@ async function importHtml2Pdf(): Promise<any> {
  * Usa html2pdf.js (jsPDF + html2canvas) renderizando o HTML montado por buildHTMLDocument.
  */
 export async function generatePDFBlob(
-  data: PDFData,
+  dadosRecebidos: PDFData,
   options: PDFOptions,
   ctx?: { shareToken?: string },
 ): Promise<Blob> {
+  // A revisão (Rev. N) é pedida na GERAÇÃO — aqui passam o Baixar, o anexo do WhatsApp e o portal do cliente.
+  const data = await comRevisaoSeFaltar(dadosRecebidos, ctx);
   const html = buildHTMLDocument(data, options);
 
   // Primeiro o servidor (/api/pdf, Chromium): texto real, o mesmo motor da impressão, sem
@@ -412,7 +433,9 @@ export async function generatePDFBlob(
  * de forma idêntica em desktop, celular e tablet — não depende do diálogo
  * de impressão do navegador.
  */
-export async function downloadPDF(data: PDFData, options: PDFOptions, ctx?: { shareToken?: string }): Promise<void> {
+export async function downloadPDF(dadosRecebidos: PDFData, options: PDFOptions, ctx?: { shareToken?: string }): Promise<void> {
+  // Carimbada aqui para o NOME do arquivo levar a mesma revisão que o documento (o blob não pede de novo).
+  const data = await comRevisaoSeFaltar(dadosRecebidos, ctx);
   const blob = await generatePDFBlob(data, options, ctx);
   const filename = buildPDFFilename(data, options);
   const url = URL.createObjectURL(blob);
@@ -543,7 +566,7 @@ function buildInvoiceHTML(data: PDFData, options: PDFOptions): string {
   const duasColunas = mostraDadosBancarios && mostraInstrucoes;
 
   const body = `
-${companyHeaderHTML(data.company, 'Fatura de Serviço', docNumber)}
+${companyHeaderHTML(data.company, 'Fatura de Serviço', docNumber, { revisao: data.revisao })}
 
 <div class="grid">
   <div class="card" style="border-left:4px solid var(--pdf-secondary);">
@@ -646,11 +669,11 @@ ${(mostraDadosBancarios || mostraInstrucoes) && hasBank ? `
 ` : ''}
 
 <footer style="margin-top:50px;text-align:center;font-size:9px;color:var(--pdf-text-muted);">
-  Referente à Ordem de Serviço ${esc(data.serviceOrder.service_order_number)} · Gerado em ${new Date().toLocaleString('pt-BR')}
+  Referente à Ordem de Serviço ${esc(data.serviceOrder.service_order_number)}${data.revisao ? ` · Rev. ${data.revisao.numero} · Código de conferência ${esc(data.revisao.codigo)}` : ''} · Gerado em ${new Date().toLocaleString('pt-BR')}
 </footer>
 `;
 
-  return pageWrapper(`FATURA ${docNumber}`, body);
+  return pageWrapper(`FATURA ${docNumber}`, body, rodapeDaPaginaCss(docNumber, data.revisao));
 }
 
 

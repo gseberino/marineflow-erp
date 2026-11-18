@@ -28,6 +28,7 @@ import {
   tituloParaImpressao,
 } from "./documento.ts";
 import { renderizarPdf } from "./renderizar.ts";
+import { carimbarRevisao, type ChamadorDeRpc, type RevisaoDoDocumento } from "./revisao.ts";
 import { buildQuoteWhatsAppSummary } from "./resumo-whatsapp.ts";
 import { dataBR } from "./datas.ts";
 import { hashCurto } from "../whatsapp/idempotencia.ts";
@@ -61,6 +62,8 @@ export type DocumentoDaOrdem = {
   embarcacao: string | null;
   /** Já formatado em reais ("R$ 18.450,50"). */
   total: string;
+  /** A revisão impressa no documento (null: o banco não a deu e o documento saiu sem ela). */
+  revisao: RevisaoDoDocumento | null;
 };
 
 /**
@@ -91,6 +94,11 @@ export async function montarDocumentoDaOrdem(
   }
   const tipoDoc = documentTypeFor(ordem.status);
   dados.documentType = tipoDoc;
+  // A revisão (Rev. N): pedida aqui, na geração, pelo mesmo banco que a tela usa (./revisao.ts). Sem ela o
+  // documento sai como antes — nunca deixa de sair.
+  if (typeof (admin as Partial<ChamadorDeRpc>).rpc === "function") {
+    dados = await carimbarRevisao(admin as unknown as ChamadorDeRpc, dados);
+  }
   // O padrão da empresa, a via do CLIENTE (hideFinancials: false) e a validade do próprio
   // orçamento — data fixa, senão dias, senão os da empresa. É a MESMA função das listas, do
   // envio pela tela e do portal ("três fontes para o mesmo padrão", 24 e 26/09/2026).
@@ -115,6 +123,7 @@ export async function montarDocumentoDaOrdem(
       // A legenda leva o tipo ("· Motorhome Iveco Daily"), como o documento — decisão 9, 21/10/2026.
       embarcacao: dados.vessel?.name ? nomeDaUnidade({ name: dados.vessel.name, asset_type: dados.vessel.type }) : null,
       total: fmtCurrency(Number(dados.serviceOrder.grand_total) || 0),
+      revisao: dados.revisao ?? null,
     },
   };
 }

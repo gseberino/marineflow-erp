@@ -181,7 +181,8 @@ export const documentoPdfTools: ToolDef[] = [
       const doc = montado.doc;
       const { rotulo, numero, cliente, total } = doc;
       const barco = doc.embarcacao ? ` · ${doc.embarcacao}` : "";
-      const legenda = `📄 ${rotulo} ${numero} — ${cliente}${barco}\nTotal: ${total}`;
+      const rev = doc.revisao ? ` · Rev. ${doc.revisao.numero}` : "";
+      const legenda = `📄 ${rotulo} ${numero}${rev} — ${cliente}${barco}\nTotal: ${total}`;
 
       // Mesmo documento, mesma versão, MESMO DESTINATÁRIO, mesma janela de 2 min: não manda
       // duas vezes. Sem o telefone na chave, o financeiro que pedisse o mesmo PDF logo depois

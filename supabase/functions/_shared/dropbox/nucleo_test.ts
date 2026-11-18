@@ -111,6 +111,11 @@ Deno.test("nome do PDF: data, número com Ç e versão", () => {
   assertEquals(nomeDoPdfAssinado("2026-10-08", "OS-00112"), "2026-10-08 OS-00112 assinado.pdf");
 });
 
+Deno.test("nome do PDF: com a revisão do documento, ela manda; sem, o vN de antes", () => {
+  assertEquals(nomeDoPdf("2026-11-17", "ORÇ-00136", 5, 3), "2026-11-17 ORÇ-00136 Rev3.pdf");
+  assertEquals(nomeDoPdf("2026-11-17", "ORÇ-00136", 5, null), "2026-11-17 ORÇ-00136 v5.pdf");
+});
+
 Deno.test("data em São Paulo: 02:00 UTC ainda é o dia anterior", () => {
   assertEquals(dataEmSaoPaulo(new Date("2026-10-08T02:00:00Z")), "2026-10-07");
   assertEquals(dataEmSaoPaulo(new Date("2026-10-08T15:00:00Z")), "2026-10-08");

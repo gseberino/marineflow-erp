@@ -30,6 +30,7 @@
   @media print {
     .mf-pdf-doc .container { padding: 0; }
     @page { margin: 12mm; size: A4; }
+    @page { @bottom-right { content: "ORÇ-00086 · pág. " counter(page) "/" counter(pages); font-family: 'Inter', -apple-system, 'Segoe UI', Roboto, sans-serif; font-size: 7pt; color: #94A3B8; } }
   }
 
   .mf-pdf-doc h1, .mf-pdf-doc h2, .mf-pdf-doc h3 { color: var(--pdf-primary); font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
@@ -400,8 +401,8 @@ Equipamentos conforme o fabricante.</p>
 
 
 <footer style="margin-top:30px;text-align:center;font-size:9px;color:var(--pdf-text-muted);border-top:1px solid var(--pdf-border);padding-top:10px; display:flex; justify-content:space-between; align-items:center;">
-  <span>MarineFlow ERP · Documento Digital Autenticado</span>
-  <span>Emitido em 25/09/2026, 23:45:00</span>
+  <span>MarineFlow ERP</span>
+  <span>ORÇ-00086 · Emitido em 25/09/2026, 23:45:00</span>
 </footer>
 </div></div>
 </body>

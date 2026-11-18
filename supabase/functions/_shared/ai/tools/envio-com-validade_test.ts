@@ -453,8 +453,11 @@ Deno.test("F5 execute pdf: a O21 na legenda; a frase do dono + a O22; o resultad
   const r = await executar(amb, { service_order_id: ORC.id, formato: "pdf", _retrato: { validade: "2026-10-03" } });
   assertEquals(r.ok, true, JSON.stringify(r));
   assertEquals(amb.envios[0].document_caption, O21("ORÇ-00123", SABADO));
-  assertEquals(amb.rpcs.map((c) => c.args.p_gravar), [true]);
-  assertEquals(amb.rpcs[0].args.p_esperada, "2026-10-03");
+  // Só a validade (a geração também pede a revisão do documento, documento_revisao_emitir — 17/11/2026).
+  const daValidade = amb.rpcs.filter((c) => c.fn === "orcamento_validade_do_envio");
+  assertEquals(daValidade.map((c) => c.args.p_gravar), [true]);
+  assertEquals(daValidade[0].args.p_esperada, "2026-10-03");
+  assertEquals(amb.rpcs.filter((c) => c.fn === "documento_revisao_emitir").map((c) => c.args.p_tipo), ["quote"]);
   assert(!("doEnvio" in r) && !JSON.stringify(r).includes("trechos_do_modelo"), JSON.stringify(r));
   const frase = montarAmbiente({ ordem: SEM_ORIGEM, rpc: pelaGravacao(PREVIA, FIXOU) });
   await executar(frase, { service_order_id: ORC.id, formato: "pdf", custom_message: "Oi! Segue o orçamento." });

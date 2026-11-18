@@ -288,6 +288,8 @@ export async function carregarPDFData(
       pix_key: get('pix_key') || undefined,
     },
     serviceOrder: {
+      // Por ele a geração pede a revisão (./revisao.ts). O link do cliente lê `id` (OS_PUBLICA).
+      id: so.id ?? serviceOrderId,
       service_order_number: so.service_order_number,
       status: so.status,
       created_at: so.created_at,

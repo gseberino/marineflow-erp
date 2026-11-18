@@ -24,6 +24,7 @@ import { itemColumnWidths, valueVisibility } from './pdf-visibility.ts';
 import { dataBR, dataHoraBR, diaBR, diaDeCalendario, horaBR, somarDiasAoDia, somarDiasBR } from './datas.ts';
 import { primeiraValidade } from '../dias-de-validade.ts';
 import { campoDaUnidade, grupoDoTipo, rotuloDaIdentificacao, type UnidadeResumo } from '../unidade.ts';
+import type { RevisaoDoDocumento } from './revisao.ts';
 
 export type PDFDocumentType = 'quote' | 'service_order' | 'invoice' | 'receipt';
 
@@ -302,7 +303,15 @@ export type PDFData = {
       hasPhoto?: boolean;
     }>;
   };
+  /**
+   * A revisão impressa (Rev. N, código de conferência, "substitui a Rev. N-1"). Pedida ao banco na hora de GERAR
+   * (./revisao.ts), nunca na montagem dos dados. undefined = ainda não pedida; null = pedida e não veio (o PDF sai
+   * sem ela, como antes de 17/11/2026).
+   */
+  revisao?: RevisaoDoDocumento | null;
   serviceOrder: {
+    /** Id da ordem: é por ele que a revisão é pedida. Os PDFs de teste e de amostra não têm. */
+    id?: string;
     service_order_number: string;
     status: string;
     created_at: string;
@@ -473,6 +482,9 @@ export function buildPDFFilename(data: PDFData, options?: PDFOptions): string {
   if (options?.hideFinancials && data.documentType === 'service_order') parts.push('Via-Execucao');
   const soNumber = data.serviceOrder?.service_order_number;
   if (soNumber) parts.push(slugifyForFilename(String(soNumber)));
+  // A revisão logo depois do número (17/11/2026): duas revisões do mesmo orçamento na mesma pasta de downloads
+  // ou na mesma conversa do WhatsApp se distinguem pelo nome. Sem revisão (não veio do banco), o nome de sempre.
+  if (data.revisao) parts.push(`Rev${data.revisao.numero}`);
   // Retorno F4 (P12.2): na via reduzida, o arquivo não leva o nome do cliente nem o da unidade
   if (options?.ocultarDadosDoCliente) return `${parts.filter(Boolean).join('_')}.pdf`;
   const clientName = slugifyForFilename(data.client?.name || '');
@@ -562,12 +574,21 @@ export function companyHeaderHTML(
   company: PDFData['company'],
   docTypeLabel: string,
   docNumber: string,
-  datas: { emissao?: string | null; agendado?: string | null } = {},
+  datas: { emissao?: string | null; agendado?: string | null; revisao?: RevisaoDoDocumento | null } = {},
 ): string {
   // D14 (17/09/2026): a OS impressa mostra a data agendada quando houver.
   const agendado = datas.agendado ? new Date(datas.agendado) : null;
   const linhaAgendado = agendado && !Number.isNaN(agendado.getTime())
     ? `<div style="margin-top:2px;font-size:10px;color:var(--pdf-text-muted);">Agendado para: ${dataBR(agendado)} ${horaBR(agendado)}</div>`
+    : '';
+  // A revisão, discreta, logo abaixo do número (17/11/2026). Da Rev. 2 em diante, a que ela substitui — a prática
+  // de proposta técnica: quem tem duas na mão sabe qual vale sem comparar item por item.
+  const rev = datas.revisao;
+  const linhaRevisao = rev
+    ? `<div style="margin-top:1px;font-size:10px;font-weight:600;color:var(--pdf-text-muted);">Revisão ${rev.numero}</div>` +
+      (rev.substitui
+        ? `<div style="font-size:9px;color:var(--pdf-text-muted);">Substitui a Rev. ${rev.substitui.numero} de ${dataBR(rev.substitui.emitidaEm)}</div>`
+        : '')
     : '';
   const logoHtml = company.logo_url
     // Fundo em vez de <img>: um logo que não carrega (URL do projeto antigo, rede fora) não
@@ -592,7 +613,7 @@ export function companyHeaderHTML(
       </div>
       <div style="text-align:right;">
         <h1 style="font-size:24px;margin-bottom:4px;color:var(--pdf-primary);">${docTypeLabel}</h1>
-        <div style="font-size:16px;font-weight:700;color:var(--pdf-secondary);">${esc(docNumber)}</div>
+        <div style="font-size:16px;font-weight:700;color:var(--pdf-secondary);">${esc(docNumber)}</div>${linhaRevisao}
         <div style="margin-top:8px;font-size:10px;color:var(--pdf-text-muted);">
           Emissão: ${dataCurta(datas.emissao)}
         </div>${linhaAgendado}
@@ -611,7 +632,25 @@ export function companyHeaderHTML(
  */
 export const PDF_ROOT_CLASS = 'mf-pdf-doc';
 
-export function pageWrapper(title: string, body: string): string {
+/** Texto seguro dentro de uma string CSS ("..."): sem aspas, barra invertida nem quebra de linha soltas. */
+function textoCss(v: string): string {
+  return v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\r\n]+/g, ' ');
+}
+
+/**
+ * O rodapé de CADA página ("ORÇ-00136 · Rev. 3 · pág. 1/2"), numa caixa de margem do `@page` (17/11/2026).
+ *
+ * Folha solta de um documento de várias páginas não diz de onde veio; com o número, a revisão e a página em toda
+ * folha, ela diz. Caixa de margem é do motor de impressão do Chromium — o servidor (/api/pdf) e o Imprimir do
+ * navegador. O plano B do Baixar (html2pdf, captura de tela) não a desenha: lá fica só o rodapé do fim.
+ */
+export function rodapeDaPaginaCss(docNumber: string, revisao?: RevisaoDoDocumento | null): string {
+  const prefixo = textoCss([docNumber, revisao ? `Rev. ${revisao.numero}` : ''].filter(Boolean).join(' · '));
+  return `@page { @bottom-right { content: "${prefixo} · pág. " counter(page) "/" counter(pages); ` +
+    `font-family: 'Inter', -apple-system, 'Segoe UI', Roboto, sans-serif; font-size: 7pt; color: #94A3B8; } }`;
+}
+
+export function pageWrapper(title: string, body: string, rodapeDaPagina = ''): string {
   // O CSS sai preso à raiz do documento. É isto que impede as regras globais
   // (`*`, `body`, `h1`) de repintarem o app enquanto o html2canvas captura —
   // o solavanco visual de um segundo ao clicar em Baixar.
@@ -642,6 +681,7 @@ export function pageWrapper(title: string, body: string): string {
   @media print {
     .container { padding: 0; }
     @page { margin: 12mm; size: A4; }
+    ${rodapeDaPagina}
   }
 
   h1, h2, h3 { color: var(--pdf-primary); font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
@@ -1240,6 +1280,7 @@ ${companyHeaderHTML(data.company, docTypeLabel, docNumber, {
   // D13: a emissão é a data em que o documento nasceu, não a de cada reimpressão.
   emissao: data.serviceOrder.created_at,
   agendado: isQuote ? null : data.serviceOrder.scheduled_start_at,
+  revisao: data.revisao,
 })}
 
 ${semValores ? `
@@ -1431,10 +1472,12 @@ ${options.showTerms && data.terms ? `
 ` : ''}
 
 <footer style="margin-top:30px;text-align:center;font-size:9px;color:var(--pdf-text-muted);border-top:1px solid var(--pdf-border);padding-top:10px; display:flex; justify-content:space-between; align-items:center;">
-  <span>MarineFlow ERP · Documento Digital Autenticado</span>
-  <span>Emitido em ${dataHoraBR(new Date())}</span>
+  <span>${data.revisao ? `Código de conferência ${esc(data.revisao.codigo)}` : 'MarineFlow ERP'}</span>
+  <span>${esc(docNumber)}${data.revisao ? ` · Rev. ${data.revisao.numero}` : ''} · Emitido em ${dataHoraBR(new Date())}</span>
 </footer>
 `;
 
-  return pageWrapper(`${docTypeLabel} ${docNumber}`, body);
+  // "Documento Digital Autenticado" saiu (17/11/2026): nada autenticava. O código de conferência, sim — o
+  // assistente diz de que documento e revisão ele é, e se ainda é a revisão em vigor (documento_revisao_conferir).
+  return pageWrapper(`${docTypeLabel} ${docNumber}`, body, rodapeDaPaginaCss(docNumber, data.revisao));
 }

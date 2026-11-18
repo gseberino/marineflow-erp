@@ -103,6 +103,14 @@ export const ORCAMENTO: PDFData = {
  */
 export const ORCAMENTO_COM_PARCELAS: PDFData = {
   ...ORCAMENTO,
+  // A revisão impressa (17/11/2026): a Rev. 3, que substitui a Rev. 2. As outras amostras ficam sem revisão — o
+  // documento que sai quando o banco não a deu, igual ao de antes salvo o rodapé.
+  revisao: {
+    numero: 3,
+    codigo: '7F3A-21C9',
+    emitidaEm: '2026-09-25T18:00:00.000Z',
+    substitui: { numero: 2, emitidaEm: '2026-09-24T14:00:00.000Z' },
+  },
   serviceOrder: {
     ...ORCAMENTO.serviceOrder,
     service_order_number: 'ORÇ-00087',
