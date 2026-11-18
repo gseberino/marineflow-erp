@@ -25,7 +25,8 @@
 --      duas pessoas fora da janela, só a da OS paga ganha a pergunta; a alocação da OS paga cancelada não conta; faturada e cancelada
 --      não são pagas; a alocação que não é pela estimativa não conta; a pergunta em teste (sombra) e a fechada sem opção não soltam;
 --      o dono sempre tem a ficha; o porquê em 3 casos (sem pergunta, não mostrada, mostrada sem resposta); na linha (m), a ficha paga
---      vem antes da outra ficha do dia
+--      vem antes da outra ficha do dia; (conferência) a respondida SEM opção não solta (F8f2) e a OS paga de quem não tem telefone diz o
+--      porquê de antes, sem_telefone (F8n)
 --   F9 (revisão adversarial) o caminho real do dono: a ferramenta agenda_aplicar (agenda_rascunho_aplicar, decisão e opção) e o
 --      *grava* (agenda_rascunho_gravar) soltam a ficha paga; com duas decisões esperando, sem dizer qual, recusa; com os números, sai
 --
@@ -644,9 +645,10 @@ begin
       raise exception 'desfaz' using errcode = 'P0098';
     exception when sqlstate 'P0098' then null;
     end;
-    -- F8f (M16) a pergunta da OS paga fechada sem opção (resolvida) não solta. O mutante M16 ("resolvida e não segurada solta") é
-    -- equivalente por causa da constraint respondida_coerente ((estado = 'respondida') = (respondida_em is not null), da Fase 2): uma
-    -- resolvida nunca tem hora de resposta, e a liberada exige respondida_em <= p_agora. O teste confere também que a constraint está lá.
+    -- F8f (M16) a pergunta da OS paga fechada sem opção (resolvida) não solta. A constraint respondida_coerente ((estado = 'respondida')
+    -- = (respondida_em is not null), da Fase 2) faz toda resolvida ter respondida_em nulo — o teste confere que ela segue lá. O M16
+    -- ("respondida ou resolvida, e não segurada, solta") NÃO é equivalente: uma respondida com a opção nula é possível (a ficha_estimativa
+    -- não é crítica, e critica_decidida só vale para crítica) — o F8f2 abaixo o mata (conferência independente de 18/11, achado 4).
     begin
       perform pg_temp.pagar(v_len);
       r := public._agenda_gestor_fichas(c_qua, pg_temp.em(c_qua, '16:52'));
@@ -658,6 +660,20 @@ begin
         and exists (select 1 from pg_constraint c where c.conrelid = 'public.agenda_perguntas'::regclass and c.conname = 'respondida_coerente'
                      and pg_get_constraintdef(c.oid) like '%(estado = ''respondida''::text) = (respondida_em IS NOT NULL)%'),
         (select pg_get_constraintdef(c.oid) from pg_constraint c where c.conrelid = 'public.agenda_perguntas'::regclass and c.conname = 'respondida_coerente'));
+      raise exception 'desfaz' using errcode = 'P0098';
+    exception when sqlstate 'P0098' then null;
+    end;
+    -- F8f2 (M16; o CONF-1 da conferência) respondida SEM opção (opção nula, pelo painel, com hora de resposta): não solta — só a 1 solta
+    begin
+      perform pg_temp.pagar(v_len);
+      r := public._agenda_gestor_fichas(c_qua, pg_temp.em(c_qua, '16:52'));
+      v_q := (r -> 'pessoas' -> 0 ->> 'pergunta_id')::uuid;
+      update public.agenda_perguntas set estado = 'respondida', opcao_escolhida = null, respondida_via = 'painel',
+             respondida_em = pg_temp.em(c_qua, '17:40'), mostrada_vezes = 1, mostrada_em = pg_temp.em(c_qua, '17:30'), mostrada_via = 'fechamento'
+       where id = v_q;
+      v_res := pg_temp.ok(v_res, 'F8f2 (M16) respondida sem opção (opção nula, pelo painel, com hora de resposta) não solta a ficha da OS paga',
+        not public._agenda_ficha_liberada(v_rob, c_q05, pg_temp.em(c_qua, '19:30')),
+        (select q.estado || ':' || coalesce(q.opcao_escolhida::text, 'nula') || ':' || q.critica from public.agenda_perguntas q where q.id = v_q));
       raise exception 'desfaz' using errcode = 'P0098';
     exception when sqlstate 'P0098' then null;
     end;
@@ -766,6 +782,21 @@ begin
         and exists (select 1 from jsonb_array_elements(v_lin) x where x ->> 'pergunta_id' = v_q::text
                      and x ->> 'texto_curto' like '%eu seguro a ficha. Para mandar, me diga *mande*.%'),
         'abertas=' || v_n || ' | ' || coalesce(left(v_t, 260), '-'));
+      raise exception 'desfaz' using errcode = 'P0098';
+    exception when sqlstate 'P0098' then null;
+    end;
+    -- F8n (M19; o CONF-2 da conferência) OS paga e a pessoa sem telefone: a ficha fica e o porquê é o de antes ("Roberto não tem telefone
+    -- no cadastro", por sem_telefone) — sem telefone o gestor nem pergunta, e a ficha não sairia de todo jeito
+    begin
+      perform pg_temp.pagar(v_len);
+      update public.payees set phone = null where id = v_rob;
+      r := public._agenda_gestor_fichas(c_qua, pg_temp.em(c_qua, '16:52'));
+      perform public._agenda_rotina_ficha(c_qua, pg_temp.em(c_qua, '19:30'));
+      v_t := (select a.texto || ' [' || (a.depois ->> 'por') || ']' from public.agenda_acoes a
+               where a.tipo = 'equipe' and a.payee_id = v_rob and a.depois ->> 'motivo' = 'ficha_segurada');
+      v_res := pg_temp.ok(v_res, 'F8n (M19) OS paga e a pessoa sem telefone: a ficha fica e o porquê é o de antes ("Roberto não tem telefone no cadastro", sem_telefone)',
+        pg_temp.equipe(v_rob) = 'ficha 2026-11-05 recusada/veto' and v_t like '%Roberto não tem telefone no cadastro%[sem_telefone]',
+        coalesce(pg_temp.equipe(v_rob), '-') || ' | ' || coalesce(v_t, '-'));
       raise exception 'desfaz' using errcode = 'P0098';
     exception when sqlstate 'P0098' then null;
     end;
