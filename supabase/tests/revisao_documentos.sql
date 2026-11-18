@@ -14,7 +14,8 @@
 --   R12 conferir código: acha o documento, diz se é a atual
 --   R13 cliente do link: com o token certo emite; sem token, recusado
 --   R14 recibo não tem revisão (null)
---   R15 privilégios: anon sem EXECUTE em situação/conferir; ninguém lê a tabela direto
+--   R15 privilégios: anon sem EXECUTE em situação/conferir/revisões; ninguém lê a tabela direto
+--   R16 revisões pelo número (assistente): as do orçamento e a da OS, com a aprovada e o retrato do histórico
 --
 -- ═══ COMO RODAR ═══ (DEPOIS da migration aplicada; a partir do repositório principal, que é o linkado)
 --   npx supabase@2.111.0 db query --linked -f supabase/tests/revisao_documentos.sql --output json
@@ -154,8 +155,18 @@ begin
   perform pg_temp._req(v_admin, 'authenticated');
   insert into _resultado values ('R14 recibo sem revisão', public.documento_revisao_emitir(v_os, 'receipt') is null, '');
 
+  -- R16
+  v_s := public.documento_revisoes((select service_order_number from public.service_orders where id = v_os));
+  insert into _resultado values ('R16 revisões pelo número', jsonb_array_length(v_s -> 'revisoes') = 5
+    and v_s ->> 'tipo_atual' = 'OS' and v_s -> 'revisoes' -> 0 ->> 'tipo' = 'orçamento'
+    and (v_s -> 'revisoes' -> 3 ->> 'revisao')::int = 4 and v_s -> 'revisoes' -> 3 ->> 'aprovada_em' is not null
+    and (v_s -> 'revisoes' -> 3 ->> 'versao_do_historico') is not null
+    and v_s -> 'revisoes' -> 4 ->> 'tipo' = 'OS' and (v_s -> 'revisoes' -> 4 ->> 'revisao')::int = 1,
+    left(v_s::text, 400));
+
   -- R15
   insert into _resultado values ('R15 privilégios',
+    not has_function_privilege('anon', 'public.documento_revisoes(text)', 'execute') and
     not has_function_privilege('anon', 'public.documento_revisao_situacao(uuid, text)', 'execute')
     and not has_function_privilege('anon', 'public.documento_revisao_conferir(text)', 'execute')
     and has_function_privilege('anon', 'public.documento_revisao_emitir(uuid, text)', 'execute')

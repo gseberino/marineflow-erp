@@ -299,6 +299,45 @@ begin
        where r.codigo = v_cod), '[]'::jsonb));
 end $$;
 
+-- ─── 6b. Todas as revisões de um documento, pelo número (assistente: consultar_historico_documento, modo revisoes) ──
+-- Mesmo resolvedor e mesma porta do histórico (20270121100100): administrador e financeiro, ou o servidor.
+-- versao_do_historico liga cada revisão ao retrato: "o que mudou da Rev. 2 para a 3" = comparar esses dois retratos.
+create or replace function public.documento_revisoes(p_ref text)
+returns jsonb language plpgsql stable security definer set search_path = public, pg_temp as $$
+declare
+  v_doc    record;
+  v_status text;
+  v_tipo   text;
+  v_ult    public.documento_revisoes;
+  v_hora   constant text := 'DD/MM/YYYY HH24:MI';
+begin
+  if not private.historico_pode_ler() then
+    raise exception 'As revisões do documento são só para administrador e financeiro.' using errcode = '42501';
+  end if;
+  select * into v_doc from private.historico_resolver('os', p_ref);
+  select so.status into v_status from public.service_orders so where so.id = v_doc.doc_id;
+  v_tipo := private.revisao_tipo_da_ordem(v_status);
+  select * into v_ult from public.documento_revisoes r
+   where r.service_order_id = v_doc.doc_id and r.tipo = v_tipo order by r.revisao desc limit 1;
+  return jsonb_build_object(
+    'documento', v_doc.rotulo,
+    'tipo_atual', case v_tipo when 'quote' then 'orçamento' else 'OS' end,
+    'revisoes', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'tipo', case r.tipo when 'quote' then 'orçamento' when 'invoice' then 'fatura' else 'OS' end,
+               'revisao', r.revisao, 'codigo', r.codigo,
+               'emitida_em', to_char(r.emitida_em at time zone 'America/Sao_Paulo', v_hora),
+               'enviada_ao_cliente_em', to_char(r.enviada_em at time zone 'America/Sao_Paulo', v_hora),
+               'enviada_por', r.enviada_via,
+               'aprovada_em', to_char(r.aprovada_em at time zone 'America/Sao_Paulo', v_hora),
+               'assinada_em', to_char(r.assinada_em at time zone 'America/Sao_Paulo', v_hora),
+               'versao_do_historico', r.versao_historico)
+             order by r.tipo, r.revisao)
+        from public.documento_revisoes r where r.service_order_id = v_doc.doc_id), '[]'::jsonb),
+    'mudou_desde_a_ultima', v_ult.id is not null
+                            and v_ult.hash <> md5(private.documento_conteudo_impresso(v_doc.doc_id, v_tipo)::text));
+end $$;
+
 -- ─── 7. A revisão que o cliente RECEBEU (registro de envio da F5, só o que foi ao cliente) ─────────
 create or replace function private.revisao_marcar_envio()
 returns trigger language plpgsql security definer set search_path = public, pg_temp as $$
@@ -366,3 +405,5 @@ revoke all on function public.documento_revisao_situacao(uuid, text) from public
 grant execute on function public.documento_revisao_situacao(uuid, text) to authenticated, service_role;
 revoke all on function public.documento_revisao_conferir(text) from public, anon;
 grant execute on function public.documento_revisao_conferir(text) to authenticated, service_role;
+revoke all on function public.documento_revisoes(text) from public, anon;
+grant execute on function public.documento_revisoes(text) to authenticated, service_role;

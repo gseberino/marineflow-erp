@@ -145,6 +145,33 @@ const rpcs = (db: any, nome: string) => db.chamadas.rpc.filter(([n]: [string]) =
 /** "não houve alteração" dito de qualquer jeito. */
 const SEM_ALTERACAO = /sem altera|nenhuma altera|não houve|nao houve/i;
 
+// ── revisões do documento (Rev. N impressa no PDF, 17/11/2026) ───────────────────────────────
+
+Deno.test("revisoes: pede documento_revisoes pelo número, devolve o que o banco disse e a instrução de comparar", async () => {
+  const doBanco = { documento: "ORÇ-00112", tipo_atual: "orçamento", revisoes: [{ revisao: 2, versao_do_historico: 5 }], mudou_desde_a_ultima: true };
+  const { db, ctx } = ambiente({ documento_revisoes: () => ({ data: doBanco }) });
+  const r = await tool("consultar_historico_documento").execute({ documento: "ORÇ-00112", modo: "revisoes" }, ctx) as any;
+  assertEquals(rpcs(db, "documento_revisoes"), [{ p_ref: "ORÇ-00112" }]);
+  assertEquals(rpcs(db, "documento_historico"), [], "revisão não passa pelo histórico de alterações");
+  assertEquals(r.revisoes, doBanco.revisoes);
+  assertEquals(r.mudou_desde_a_ultima, true);
+  assertStringIncludes(r.instrucao, "versao_do_historico");
+});
+
+Deno.test("conferir_codigo: o código vai inteiro; falha de leitura nunca vira 'não há revisão'", async () => {
+  const { db, ctx } = ambiente({ documento_revisao_conferir: () => ({ data: { achou: true, documentos: [] } }) });
+  const r = await tool("consultar_historico_documento").execute({ documento: "7F3A-21C9", modo: "conferir_codigo" }, ctx) as any;
+  assertEquals(rpcs(db, "documento_revisao_conferir"), [{ p_codigo: "7F3A-21C9" }]);
+  assertEquals(r.achou, true);
+  const falha = ambiente({ documento_revisoes: () => ({ error: { message: "function does not exist" } }) });
+  const f = await tool("consultar_historico_documento").execute({ documento: "ORÇ-00112", modo: "revisoes" }, falha.ctx) as any;
+  assertStringIncludes(f.error, "Não consegui ler as revisões");
+  assertStringIncludes(f.instrucao, "FALHOU");
+  // revisão só existe para orçamento/OS
+  const compra = await tool("consultar_historico_documento").execute({ documento: "PC-1", tipo: "compra", modo: "revisoes" }, ctx) as any;
+  assertStringIncludes(compra.error, "só existe para orçamento/OS");
+});
+
 // ── consultar ────────────────────────────────────────────────────────────────────────────────
 
 Deno.test("consultar: chama documento_historico com o pedido e devolve uma linha por evento, os registro_ids e o aviso de corte", async () => {

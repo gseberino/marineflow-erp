@@ -14422,6 +14422,23 @@ export type Database = {
         }
         Returns: Json
       }
+      // ── Revisão do documento (migration 20270123100000): Rev. N impressa no PDF. Escrito à mão até o próximo "gen types".
+      documento_revisao_emitir: {
+        Args: { p_os: string; p_tipo: string }
+        Returns: Json
+      }
+      documento_revisao_situacao: {
+        Args: { p_os: string; p_tipo?: string }
+        Returns: Json
+      }
+      documento_revisao_conferir: {
+        Args: { p_codigo: string }
+        Returns: Json
+      }
+      documento_revisoes: {
+        Args: { p_ref: string }
+        Returns: Json
+      }
       documento_restaurar: {
         Args: {
           p_autor?: string

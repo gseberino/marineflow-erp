@@ -18,7 +18,31 @@ const SEM_CARGO = "O histórico de documentos é só para administrador e financ
 export const TIPOS_DE_DOCUMENTO = [
   "os", "compra", "cotacao", "orcamento_externo", "cliente", "embarcacao", "produto", "servico", "configuracao",
 ] as const;
-export const MODOS_DO_HISTORICO = ["alteracoes", "versoes", "ver_versao", "comparar"] as const;
+export const MODOS_DO_HISTORICO = ["alteracoes", "versoes", "ver_versao", "comparar", "revisoes", "conferir_codigo"] as const;
+
+/**
+ * Revisão do documento (17/11/2026): a Rev. N impressa no PDF. `revisoes` lista as de um orçamento/OS (emitida, enviada
+ * ao cliente, aprovada/assinada) e diz se a tela já mudou desde a última; `conferir_codigo` diz de que documento e
+ * revisão é o código do rodapé ("7F3A-21C9") e se ainda é a revisão em vigor.
+ */
+const INSTRUCAO_DAS_REVISOES =
+  "A revisão (Rev. N) só sobe quando muda o que o cliente lê, na hora de gerar o PDF. 'enviada_ao_cliente_em' diz qual " +
+  "revisão o cliente recebeu; se ela for menor que a última, o cliente tem uma versão antiga — diga isso. " +
+  "mudou_desde_a_ultima = o documento já mudou e o próximo PDF sai com a revisão seguinte. Para 'o que mudou da Rev. 2 " +
+  "para a 3': modo comparar com versao = versao_do_historico da Rev. 2 e versao_b = a da Rev. 3.";
+
+async function consultarRevisoes(ctx: ToolCtx, modo: "revisoes" | "conferir_codigo", documento: string) {
+  const { data, error } = modo === "revisoes"
+    ? await ctx.sb.rpc("documento_revisoes", { p_ref: documento })
+    : await ctx.sb.rpc("documento_revisao_conferir", { p_codigo: documento });
+  if (error || !data || typeof data !== "object") {
+    return {
+      error: `Não consegui ler as revisões de ${documento}: ${error ? umaLinha(mensagemDoBanco(error)) : "o banco não devolveu nada"}`,
+      instrucao: "A leitura FALHOU: diga ao dono que não conseguiu ler. Nunca diga que não há revisão.",
+    };
+  }
+  return { modo, ...(data as Record<string, unknown>), instrucao: INSTRUCAO_DAS_REVISOES };
+}
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Uma restauração desfaz no máximo isto de alterações de uma vez (um evento grande tem dezenas de linhas). */
@@ -278,7 +302,10 @@ export const historicoDocumentoTools: ToolDef[] = [
       "depois de cada campo, as versões guardadas (criação, envio ao cliente, aprovação, assinatura), o conteúdo de uma versão e a " +
       "comparação entre versões. Use para 'o que mudou no ORÇ-00112', 'como estava quando foi enviado', 'quem mexeu no desconto', " +
       "'o que foi mandado ao cliente'. Valores já vêm formatados. modo alteracoes devolve uma linha por evento e, para orçamento/OS, " +
-      "os registro_ids desfazíveis de cada evento (para restaurar_documento; vazio = aquele evento não se desfaz). Versões só existem para orçamento/OS. Só leitura; administrador e financeiro.",
+      "os registro_ids desfazíveis de cada evento (para restaurar_documento; vazio = aquele evento não se desfaz). Versões só existem para orçamento/OS. " +
+      "modo revisoes: as revisões impressas no PDF (Rev. 1, 2, 3…) — qual o cliente recebeu, qual aprovou e se o documento mudou " +
+      "depois da última ('o cliente tem a revisão certa do ORÇ-00136?'). modo conferir_codigo: documento = o código do rodapé do " +
+      "PDF (7F3A-21C9); diz de que documento e revisão ele é e se ainda vale. Só leitura; administrador e financeiro.",
     input_schema: {
       type: "object",
       properties: {
@@ -292,7 +319,8 @@ export const historicoDocumentoTools: ToolDef[] = [
           type: "string",
           enum: [...MODOS_DO_HISTORICO],
           description: "alteracoes (padrão: quem mudou o quê), versoes (lista das versões), ver_versao (o conteúdo de uma versão; sem " +
-            "versao = a última) ou comparar (versao × versao_b; sem versao_b = o estado atual).",
+            "versao = a última), comparar (versao × versao_b; sem versao_b = o estado atual), revisoes (as Rev. N impressas no PDF: " +
+            "emitida, enviada ao cliente, aprovada) ou conferir_codigo (documento = o código do rodapé do PDF).",
         },
         versao: { type: "integer", description: "Número da versão (ver_versao e comparar)." },
         versao_b: { type: "integer", description: "Segunda versão de comparar. Vazio = o estado atual." },
@@ -321,6 +349,10 @@ export const historicoDocumentoTools: ToolDef[] = [
       const modo = texto(args?.modo) || "alteracoes";
       if (!(MODOS_DO_HISTORICO as readonly string[]).includes(modo)) {
         return { error: `Modo "${modo}" não existe. Use: ${MODOS_DO_HISTORICO.join(", ")}.` };
+      }
+      if (modo === "revisoes" || modo === "conferir_codigo") {
+        if (modo === "revisoes" && tipo !== "os") return { error: "Revisão só existe para orçamento/OS." };
+        return await consultarRevisoes(ctx, modo, documento);
       }
       const versao = inteiroPositivo(args?.versao);
       const versaoB = inteiroPositivo(args?.versao_b);

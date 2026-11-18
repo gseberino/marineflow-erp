@@ -141,6 +141,7 @@ import { ExpensesTimeDialogs } from './service-order/expenses-time-dialogs';
 import { ServicesSection } from './service-order/services-section';
 import { TravelDialog } from './service-order/travel-dialog';
 import { FinancialSection } from './service-order/financial-section';
+import { textoDaRevisao, useRevisaoDoDocumento } from '@/hooks/use-revisao-do-documento';
 export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const navigate = useNavigate();
   const { t, formatCurrency, formatDateTime, formatDate } = useI18n();
@@ -650,6 +651,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   /* Salvamento automático — estado e a memória do que já está gravado. */
   const [salvandoAuto, setSalvandoAuto] = useState(false);
   const [salvoEm, setSalvoEm] = useState<string | null>(null);
+  // A revisão do documento (Rev. N) na linha sob o número: a atual, a que o cliente tem, e se a tela já mudou.
+  const { data: situacaoDaRevisao } = useRevisaoDoDocumento(isNew ? undefined : orderId, salvoEm);
+  const revisaoNaTela = textoDaRevisao(situacaoDaRevisao);
   const ultimoSalvoRef = useRef<string | null>(null);
   const bottomSaveRef = useRef<HTMLDivElement | null>(null);
   const [topVisible, setTopVisible] = useState(true);
@@ -2299,6 +2303,15 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 {(t.status as Record<string, string>)[currentStatus]}
                 {salvandoAuto && ' · salvando…'}
                 {!salvandoAuto && salvoEm && ` · salvo ${salvoEm}`}
+                {revisaoNaTela && (
+                  <span
+                    title={revisaoNaTela.completo}
+                    className={revisaoNaTela.alerta ? 'text-amber-600 dark:text-amber-400' : undefined}
+                    data-testid="revisao-do-documento"
+                  >
+                    {` · ${revisaoNaTela.curto}`}
+                  </span>
+                )}
               </p>
             )}
           </div>
