@@ -33,6 +33,18 @@
 --
 -- A tabela final tem de mostrar ok = true em todas as linhas. Uma linha false é defeito.
 begin;
+-- FICHA PAGA (18/11/2026, 20270124100000): a função viva sem os blocos "-- FICHA PAGA: … -- FICHA PAGA: fim" (só acréscimos: a ficha
+-- de OS paga) é a de antes; as conferências de cópia abaixo a leem assim.
+create function pg_temp.sem_ficha_paga(p text) returns text language sql immutable as $fp$
+  select array_to_string(array(
+           select l from (select l, o, sum(case when l ~ '^\s*-- FICHA PAGA:' and l !~ '^\s*-- FICHA PAGA: fim' then 1
+                                                when l ~ '^\s*-- FICHA PAGA: fim' then -1 else 0 end)
+                                       over (order by o rows between unbounded preceding and current row) as dentro,
+                                 l ~ '^\s*-- FICHA PAGA: fim' as fecha
+                            from unnest(string_to_array(p, E'\n')) with ordinality u(l, o)) x
+            where dentro = 0 and not fecha order by o), E'\n')
+$fp$;
+
 
 create temp table _resultado (teste text, ok boolean, detalhe text) on commit drop;
 
@@ -222,7 +234,7 @@ begin
       insert into _resultado values (format('X0 %s: a cópia', f.nome), true, format('PULADO: sem agenda_teste.%s (rode pela bancada)', f.mig));
       continue;
     end if;
-    select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = f.sig::regprocedure;
+    select pg_temp.sem_ficha_paga(replace(p.prosrc, E'\r\n', E'\n')) into v_novo from pg_proc p where p.oid = f.sig::regprocedure;
     v_novo := pg_temp.sem_7c(v_novo);  -- FASE 7c: (7c P2) os blocos da 20261102100100 saem antes de tudo
     v_novo := pg_temp.sem_c2(v_novo);  -- (correção 2 da 7b, achado 26) os blocos da 20261101100850 saem antes
     v_novo := pg_temp.sem_c3(v_novo);  -- (correção 3 da 7b) e os da 20261101100860

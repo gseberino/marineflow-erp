@@ -38,6 +38,18 @@
 --
 -- A tabela final tem de mostrar ok = true em todas as linhas. Uma linha false é defeito.
 begin;
+-- FICHA PAGA (18/11/2026, 20270124100000): a função viva sem os blocos "-- FICHA PAGA: … -- FICHA PAGA: fim" (só acréscimos: a ficha
+-- de OS paga) é a de antes; as conferências de cópia abaixo a leem assim.
+create function pg_temp.sem_ficha_paga(p text) returns text language sql immutable as $fp$
+  select array_to_string(array(
+           select l from (select l, o, sum(case when l ~ '^\s*-- FICHA PAGA:' and l !~ '^\s*-- FICHA PAGA: fim' then 1
+                                                when l ~ '^\s*-- FICHA PAGA: fim' then -1 else 0 end)
+                                       over (order by o rows between unbounded preceding and current row) as dentro,
+                                 l ~ '^\s*-- FICHA PAGA: fim' as fecha
+                            from unnest(string_to_array(p, E'\n')) with ordinality u(l, o)) x
+            where dentro = 0 and not fecha order by o), E'\n')
+$fp$;
+
 
 create temp table _resultado (teste text, ok boolean, detalhe text) on commit drop;
 
@@ -1722,7 +1734,7 @@ begin
     if (select count(*) from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = f.nome) <> 1
        -- FASE 7c: (correção da revisão, 20261102100580) a viva sem os blocos e as marcas da correção (ela recria 2 das 9 só com
        -- acréscimos: agenda_dia_da_pessoa e _agenda_linhas_do_fechamento; o K0 de agenda_fase77c_correcao.sql confere)
-       or pg_temp.sem_corr(pg_temp.sem_7d((select replace(p.prosrc, E'\r\n', E'\n') from pg_proc p
+       or pg_temp.sem_corr(pg_temp.sem_7d((select pg_temp.sem_ficha_paga(replace(p.prosrc, E'\r\n', E'\n')) from pg_proc p
                                            where p.pronamespace = 'public'::regnamespace and p.proname = f.nome)))
           is distinct from pg_temp.corpo(v_mig, f.nome) then
        -- FASE 7c: fim

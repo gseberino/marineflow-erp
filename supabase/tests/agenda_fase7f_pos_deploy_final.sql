@@ -77,9 +77,9 @@ declare
   dentro boolean := false;
 begin
   foreach l in array string_to_array(p, E'\n') loop
-    if not dentro and l ~ '^\s*-- (FASE 7[eg]:|\(7[eg] |PRAZO NO BLOCO:)' and l !~ '^\s*-- (FASE 7[eg]: fim|\(7[eg]: fim\)|PRAZO NO BLOCO: fim)' then dentro := true; continue; end if;
+    if not dentro and l ~ '^\s*-- (FASE 7[eg]:|\(7[eg] |PRAZO NO BLOCO:|FICHA PAGA:)' and l !~ '^\s*-- (FASE 7[eg]: fim|\(7[eg]: fim\)|PRAZO NO BLOCO: fim|FICHA PAGA: fim)' then dentro := true; continue; end if;
     if dentro then
-      if l ~ '^\s*-- (FASE 7[eg]: fim|\(7[eg]: fim\)|PRAZO NO BLOCO: fim)' then dentro := false; end if;
+      if l ~ '^\s*-- (FASE 7[eg]: fim|\(7[eg]: fim\)|PRAZO NO BLOCO: fim|FICHA PAGA: fim)' then dentro := false; end if;
       continue;
     end if;
     fora := fora || l;

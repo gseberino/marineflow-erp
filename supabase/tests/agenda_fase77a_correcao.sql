@@ -38,6 +38,18 @@
 --
 -- A tabela final tem de mostrar ok = true em todas as linhas. Uma linha false é defeito.
 begin;
+-- FICHA PAGA (18/11/2026, 20270124100000): a função viva sem os blocos "-- FICHA PAGA: … -- FICHA PAGA: fim" (só acréscimos: a ficha
+-- de OS paga) é a de antes; as conferências de cópia abaixo a leem assim.
+create function pg_temp.sem_ficha_paga(p text) returns text language sql immutable as $fp$
+  select array_to_string(array(
+           select l from (select l, o, sum(case when l ~ '^\s*-- FICHA PAGA:' and l !~ '^\s*-- FICHA PAGA: fim' then 1
+                                                when l ~ '^\s*-- FICHA PAGA: fim' then -1 else 0 end)
+                                       over (order by o rows between unbounded preceding and current row) as dentro,
+                                 l ~ '^\s*-- FICHA PAGA: fim' as fecha
+                            from unnest(string_to_array(p, E'\n')) with ordinality u(l, o)) x
+            where dentro = 0 and not fecha order by o), E'\n')
+$fp$;
+
 
 create temp table _resultado (teste text, ok boolean, detalhe text) on commit drop;
 
@@ -207,7 +219,7 @@ begin
       ('os_duracao_sugerida', 'public.os_duracao_sugerida(uuid)', 'agenda_teste.mig_os_fase6')
     ) t(nome, assinatura, guc)
   loop
-    select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = r.assinatura::regprocedure;
+    select pg_temp.sem_ficha_paga(replace(p.prosrc, E'\r\n', E'\n')) into v_novo from pg_proc p where p.oid = r.assinatura::regprocedure;
     if coalesce(current_setting(r.guc, true), '') = '' or pg_temp.corpo(current_setting(r.guc, true), r.nome) = ''
        or pg_temp.sem_fase7(v_novo) <> pg_temp.corpo(current_setting(r.guc, true), r.nome)
        or position(format('create or replace function public.%s(', r.nome) in v_me) = 0 then
@@ -429,7 +441,7 @@ begin
     perform public._agenda_gestor_perguntas(c_hoje, pg_temp.em(c_hoje, '16:53'));
     -- a ficha de amanhã de um dia pela estimativa (o P11): a 1ª da linha, por inteiro
     perform public._agenda_gestor_perguntar('ficha_estimativa', format('ficha_estimativa:%s:%s', v_jo, c_sex), v_len,
-      'Hoje às 19:30 a ficha de amanhã vai para João: Lenine, sex 30/10 o dia todo — dia 1 de 6, pela minha estimativa. 1) Mande (recomendo); 2) Segure a ficha: eu não mando e você fala com ele.',
+      'Hoje às 19:30 a ficha de amanhã vai para João: OS-00074 Lenine, sex 30/10 o dia todo — dia 1 de 6, pela minha estimativa. 1) Mande (recomendo); 2) Segure a ficha: eu não mando e você fala com ele.',
       '[{"n": 1, "texto": "Mande"}, {"n": 2, "texto": "Segure a ficha"}]'::jsonb, 1::smallint, pg_temp.em(c_hoje, '19:30'),
       1::smallint, 'ligado', pg_temp.em(c_hoje, '16:53'));
     v_lin := (select jsonb_agg(l) from jsonb_array_elements(public._agenda_linhas_do_fechamento(c_hoje)) l
@@ -458,7 +470,7 @@ begin
   -- (correção 2 da 7a, 20261031100985: perda 76 — ganha o desempate das que perdem hoje —, e o "Espero você" diz o porquê)
   v_res := pg_temp.ok(v_res, 'Z11a (achados 15 e 18) uma linha só com as perguntas do gestor que esperam o dono: perda 76, a ficha de hoje primeiro e por inteiro, depois as com prazo (Nelson, Flávio, MP) agrupadas pelo prazo, e o Giancarlo (sem prazo) em "Espero você (não marco sozinho)"; pergunta_ids com as 5',
     jsonb_array_length(v_lin) = 1 and (x ->> 'perda')::int = 76
-    and x ->> 'texto' like 'Agenda: Hoje às 19:30 a ficha de amanhã vai para João: Lenine, sex 30/10 o dia todo — dia 1 de 6, pela minha estimativa. 1) Mande (recomendo); 2) Segure a ficha: eu não mando e você fala com ele. Também, sem resposta até sex 30/10 18:00: %'
+    and x ->> 'texto' like 'Agenda: Hoje às 19:30 a ficha de amanhã vai para João: OS-00074 Lenine, sex 30/10 o dia todo — dia 1 de 6, pela minha estimativa. 1) Mande (recomendo); 2) Segure a ficha: eu não mando e você fala com ele. Também, sem resposta até sex 30/10 18:00: %'
     and x ->> 'texto' like '%Nelson (OS-00112) 4 dias%' and x ->> 'texto' like '%Espero você (não marco sozinho): Giancarlo (OS-00130).'
     and cardinality(v_ids) = 5 and char_length(x ->> 'texto') <= 640,
     coalesce(x::text, '-'));

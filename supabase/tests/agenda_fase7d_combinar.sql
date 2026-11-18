@@ -24,6 +24,18 @@
 --
 -- A tabela final tem de mostrar ok = true em todas as linhas. Uma linha false é defeito.
 begin;
+-- FICHA PAGA (18/11/2026, 20270124100000): a função viva sem os blocos "-- FICHA PAGA: … -- FICHA PAGA: fim" (só acréscimos: a ficha
+-- de OS paga) é a de antes; as conferências de cópia abaixo a leem assim.
+create function pg_temp.sem_ficha_paga(p text) returns text language sql immutable as $fp$
+  select array_to_string(array(
+           select l from (select l, o, sum(case when l ~ '^\s*-- FICHA PAGA:' and l !~ '^\s*-- FICHA PAGA: fim' then 1
+                                                when l ~ '^\s*-- FICHA PAGA: fim' then -1 else 0 end)
+                                       over (order by o rows between unbounded preceding and current row) as dentro,
+                                 l ~ '^\s*-- FICHA PAGA: fim' as fecha
+                            from unnest(string_to_array(p, E'\n')) with ordinality u(l, o)) x
+            where dentro = 0 and not fecha order by o), E'\n')
+$fp$;
+
 
 create temp table _resultado (teste text, ok boolean, detalhe text) on commit drop;
 
@@ -1886,7 +1898,7 @@ begin
       ('_agenda_ver_decisoes', current_setting('agenda_teste.mig_acompanhamento_fase3'))) t(nome, origem) loop
     v_org := pg_temp.corpo(c.origem, c.nome);
     v_txt := pg_temp.corpo(v_mig, c.nome);
-    select replace(p.prosrc, E'\r\n', E'\n') into v_viva from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    select pg_temp.sem_ficha_paga(replace(p.prosrc, E'\r\n', E'\n')) into v_viva from pg_proc p join pg_namespace n on n.oid = p.pronamespace
      where n.nspname = 'public' and p.proname = c.nome;
     if v_org = '' or v_txt = '' or pg_temp.sem_7d(v_txt) <> v_org or pg_temp.sem_7d(v_viva) <> v_org or v_txt = v_org then
       v_dif := concat_ws('; ', v_dif, c.nome);

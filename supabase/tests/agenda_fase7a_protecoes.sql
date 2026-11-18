@@ -198,9 +198,9 @@ declare
   c_qua   constant date := date '2026-11-04';
   c_q05   constant date := date '2026-11-05';
   c_s06   constant date := date '2026-11-06';
-  c_perg  constant text := 'Hoje às 19:30 a ficha de amanhã vai para Roberto: Lenine, qui 05/11 o dia todo — dia 3 de 6, pela minha estimativa. 1) Mande (recomendo); 2) Segure a ficha: eu não mando e você fala com ele.';
-  c_seg   constant text := 'Hoje às 19:30 a ficha de segunda vai para Roberto: Lenine, seg 09/11 o dia todo — dia 5 de 6, pela minha estimativa. 1) Mande (recomendo); 2) Segure a ficha: eu não mando e você fala com ele.';
-  c_ter   constant text := 'Hoje às 19:30 a ficha de terça vai para João: Lenine, ter 03/11 o dia todo — dia 1 de 6, pela minha estimativa. 1) Mande (recomendo); 2) Segure a ficha: eu não mando e você fala com ele.';
+  c_perg  constant text := 'Hoje às 19:30 a ficha de amanhã vai para Roberto: OS-00074 Lenine, qui 05/11 o dia todo — dia 3 de 6, pela minha estimativa. 1) Mande (recomendo); 2) Segure a ficha: eu não mando e você fala com ele.';
+  c_seg   constant text := 'Hoje às 19:30 a ficha de segunda vai para Roberto: OS-00074 Lenine, seg 09/11 o dia todo — dia 5 de 6, pela minha estimativa. 1) Mande (recomendo); 2) Segure a ficha: eu não mando e você fala com ele.';
+  c_ter   constant text := 'Hoje às 19:30 a ficha de terça vai para João: OS-00074 Lenine, ter 03/11 o dia todo — dia 1 de 6, pela minha estimativa. 1) Mande (recomendo); 2) Segure a ficha: eu não mando e você fala com ele.';
   c_acao  constant text := 'Não mandei a ficha de qui 05/11 a Roberto (Lenine): o dia é pela minha estimativa e você não viu a pergunta antes das 19:30. Fale com Roberto.';
   v_len   uuid;
   v_van   uuid;
@@ -363,7 +363,7 @@ begin
              q.texto
         into v_t, v_t2 from public.agenda_perguntas q where q.id = v_q;
       r2 := public._agenda_gestor_fichas(c_qua, pg_temp.em(c_qua, '17:07'));
-      v_res := pg_temp.ok(v_res, 'P3a a pergunta da ficha (qua 04/11 16:52, o Roberto amanhã no Lenine): o texto da §6.3 ("Hoje às 19:30 a ficha de amanhã vai para Roberto: Lenine, qui 05/11 o dia todo — dia 3 de 6, pela minha estimativa. …"), chave ficha_estimativa:<pessoa>:<dia>, não crítica, de verdade, prazo qua 04/11 19:30, padrão e recomendação 1; o tique seguinte não repete',
+      v_res := pg_temp.ok(v_res, 'P3a a pergunta da ficha (qua 04/11 16:52, o Roberto amanhã no Lenine): o texto da §6.3 ("Hoje às 19:30 a ficha de amanhã vai para Roberto: OS-00074 Lenine, qui 05/11 o dia todo — dia 3 de 6, pela minha estimativa. …"), chave ficha_estimativa:<pessoa>:<dia>, não crítica, de verdade, prazo qua 04/11 19:30, padrão e recomendação 1; o tique seguinte não repete',
         (r ->> 'perguntas')::int = 1 and (r ->> 'novas')::int = 1 and v_t = 'ficha_estimativa|t|f|ligado|t|1|1|t'
         and v_t2 = c_perg and (r2 ->> 'novas')::int = 0 and r2 -> 'pessoas' -> 0 ->> 'pergunta_id' = v_q::text
         and (select count(*) from public.agenda_perguntas q where q.tipo = 'ficha_estimativa') = 1,
@@ -495,7 +495,7 @@ begin
       r := public._agenda_gestor_fichas(date '2026-10-30', pg_temp.em(date '2026-10-30', '16:52'));
       r2 := public.agenda_decidir((r -> 'pessoas' -> 0 ->> 'pergunta_id')::uuid, 1::smallint, v_adm, 'whatsapp', 'manda',
                                   date '2026-10-30', pg_temp.em(date '2026-10-30', '17:40'));
-      v_res := pg_temp.ok(v_res, 'P3j com *gestor, só propor*, a proteção continua: a pergunta nasce de verdade ("Hoje às 19:30 a ficha de terça vai para João: Lenine, ter 03/11 o dia todo — dia 1 de 6, …", sex 30/10 com o Finados no meio) e o dono a responde',
+      v_res := pg_temp.ok(v_res, 'P3j com *gestor, só propor*, a proteção continua: a pergunta nasce de verdade ("Hoje às 19:30 a ficha de terça vai para João: OS-00074 Lenine, ter 03/11 o dia todo — dia 1 de 6, …", sex 30/10 com o Finados no meio) e o dono a responde',
         r -> 'pessoas' -> 0 ->> 'texto' = c_ter and r ->> 'modo' = 'ligado' and (r2 ->> 'ok')::boolean
         and r2 ->> 'texto' = 'Combinado: mando a ficha de ter 03/11 para João.', r::text || ' | ' || r2::text);
       raise exception 'desfaz' using errcode = 'P0098';

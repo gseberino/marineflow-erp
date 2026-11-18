@@ -32,6 +32,18 @@
 --
 -- A tabela final tem de mostrar ok = true em todas as linhas. Uma linha false é defeito.
 begin;
+-- FICHA PAGA (18/11/2026, 20270124100000): a função viva sem os blocos "-- FICHA PAGA: … -- FICHA PAGA: fim" (só acréscimos: a ficha
+-- de OS paga) é a de antes; as conferências de cópia abaixo a leem assim.
+create function pg_temp.sem_ficha_paga(p text) returns text language sql immutable as $fp$
+  select array_to_string(array(
+           select l from (select l, o, sum(case when l ~ '^\s*-- FICHA PAGA:' and l !~ '^\s*-- FICHA PAGA: fim' then 1
+                                                when l ~ '^\s*-- FICHA PAGA: fim' then -1 else 0 end)
+                                       over (order by o rows between unbounded preceding and current row) as dentro,
+                                 l ~ '^\s*-- FICHA PAGA: fim' as fecha
+                            from unnest(string_to_array(p, E'\n')) with ordinality u(l, o)) x
+            where dentro = 0 and not fecha order by o), E'\n')
+$fp$;
+
 
 create temp table _resultado (teste text, ok boolean, detalhe text) on commit drop;
 
@@ -176,7 +188,7 @@ begin
       ('_agenda_aprontar_de', 'public._agenda_aprontar_de(jsonb, integer)', 'agenda_teste.mig_leituras_fase1')
     ) t(nome, assinatura, guc)
   loop
-    select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = r.assinatura::regprocedure;
+    select pg_temp.sem_ficha_paga(replace(p.prosrc, E'\r\n', E'\n')) into v_novo from pg_proc p where p.oid = r.assinatura::regprocedure;
     if coalesce(current_setting(r.guc, true), '') = '' or pg_temp.corpo(current_setting(r.guc, true), r.nome) = ''
        or pg_temp.sem_fase7(v_novo) <> pg_temp.corpo(current_setting(r.guc, true), r.nome)
        or position(format('create or replace function public.%s(', r.nome) in v_me) = 0
@@ -317,7 +329,7 @@ begin
   end;
   v_res := pg_temp.ok(v_res, 'Y3a o gestor só pergunta a ficha de quem tem telefone: o Alex sem telefone, nenhuma pergunta ("Hoje às 19:30 a ficha de amanhã vai para Alex" era falso); com telefone, a pergunta de sempre',
     (r ->> 'perguntas')::int = 0 and (r2 ->> 'perguntas')::int = 1
-    and r2 -> 'pessoas' -> 0 ->> 'texto' like 'Hoje às 19:30 a ficha de amanhã vai para Alex: Lenine, qua 04/11 o dia todo — dia 1 de 6, pela minha estimativa.%',
+    and r2 -> 'pessoas' -> 0 ->> 'texto' like 'Hoje às 19:30 a ficha de amanhã vai para Alex: OS-00074 Lenine, qua 04/11 o dia todo — dia 1 de 6, pela minha estimativa.%',
     coalesce(r::text, '-') || ' | ' || coalesce(r2 ->> 'perguntas', '-'));
   v_res := pg_temp.ok(v_res, 'Y3b às 19:30 a ficha de quem não tem telefone fica segurada e o dono fica sabendo o porquê: "… Alex não tem telefone no cadastro. Fale com Alex." (por sem_telefone)',
     v_t = 'Não mandei a ficha de qua 04/11 a Alex (Lenine): o dia é pela minha estimativa e Alex não tem telefone no cadastro. Fale com Alex.'

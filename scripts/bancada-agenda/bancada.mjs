@@ -210,6 +210,11 @@ export const FORA_DA_BANCADA = new Set([
   '20270121100200_historico_de_documentos_restaurar.sql',
   '20270121100300_historico_retrato_inicial.sql',
   '20270121100400_historico_mudanca_so_no_formato.sql',
+  // Revisão de documentos (55b94f39, de OUTRA sessão; na main desde 17/11 à noite): usa o schema private (private.revisao_* e documento_*), cria
+  // public.documento_revisoes e os gatilhos trg_revisao_envio (orcamento_envios) e trg_revisao_aprovacao (service_orders). Sem o schema private a bancada
+  // parava nela (18/11). Não recria nenhuma função da agenda (procurado em 18/11: só private.*, documento_revisao_* e documento_revisoes); os gatilhos
+  // novos ficam de fora da bancada, como os do Histórico.
+  '20270123100000_revisao_de_documentos.sql',
 ]);
 
 /**

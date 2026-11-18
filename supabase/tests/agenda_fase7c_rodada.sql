@@ -42,6 +42,18 @@
 --
 -- A tabela final tem de mostrar ok = true em todas as linhas. Uma linha false é defeito.
 begin;
+-- FICHA PAGA (18/11/2026, 20270124100000): a função viva sem os blocos "-- FICHA PAGA: … -- FICHA PAGA: fim" (só acréscimos: a ficha
+-- de OS paga) é a de antes; as conferências de cópia abaixo a leem assim.
+create function pg_temp.sem_ficha_paga(p text) returns text language sql immutable as $fp$
+  select array_to_string(array(
+           select l from (select l, o, sum(case when l ~ '^\s*-- FICHA PAGA:' and l !~ '^\s*-- FICHA PAGA: fim' then 1
+                                                when l ~ '^\s*-- FICHA PAGA: fim' then -1 else 0 end)
+                                       over (order by o rows between unbounded preceding and current row) as dentro,
+                                 l ~ '^\s*-- FICHA PAGA: fim' as fecha
+                            from unnest(string_to_array(p, E'\n')) with ordinality u(l, o)) x
+            where dentro = 0 and not fecha order by o), E'\n')
+$fp$;
+
 
 create temp table _resultado (teste text, ok boolean, detalhe text) on commit drop;
 
@@ -211,7 +223,7 @@ begin
   end if;
   v_fonte := pg_temp.corpo(v_mig, '_agenda_linhas_do_fechamento');
   v_da_mig := pg_temp.corpo(v_esta, '_agenda_linhas_do_fechamento');
-  select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.oid = 'public._agenda_linhas_do_fechamento(date)'::regprocedure;
+  select pg_temp.sem_ficha_paga(replace(p.prosrc, E'\r\n', E'\n')) into v_novo from pg_proc p where p.oid = 'public._agenda_linhas_do_fechamento(date)'::regprocedure;
   -- FASE 7c: (correção da revisão, 20261102100580) a correção recria o fechamento só com acréscimos (1 bloco no declare, 1 antes do
   -- return e 2 marcas na linha (n): o K0 de agenda_fase77c_correcao.sql confere): a viva sem eles é a do P8
   v_novo := pg_temp.sem_corr(pg_temp.sem_7d(v_novo));

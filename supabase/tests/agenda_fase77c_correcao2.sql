@@ -33,6 +33,18 @@
 --
 -- A tabela final tem de mostrar ok = true em todas as linhas. Uma linha false é defeito.
 begin;
+-- FICHA PAGA (18/11/2026, 20270124100000): a função viva sem os blocos "-- FICHA PAGA: … -- FICHA PAGA: fim" (só acréscimos: a ficha
+-- de OS paga) é a de antes; as conferências de cópia abaixo a leem assim.
+create function pg_temp.sem_ficha_paga(p text) returns text language sql immutable as $fp$
+  select array_to_string(array(
+           select l from (select l, o, sum(case when l ~ '^\s*-- FICHA PAGA:' and l !~ '^\s*-- FICHA PAGA: fim' then 1
+                                                when l ~ '^\s*-- FICHA PAGA: fim' then -1 else 0 end)
+                                       over (order by o rows between unbounded preceding and current row) as dentro,
+                                 l ~ '^\s*-- FICHA PAGA: fim' as fecha
+                            from unnest(string_to_array(p, E'\n')) with ordinality u(l, o)) x
+            where dentro = 0 and not fecha order by o), E'\n')
+$fp$;
+
 
 create temp table _resultado (teste text, ok boolean, detalhe text) on commit drop;
 
@@ -165,7 +177,7 @@ begin
           is distinct from (pg_temp.cabeca(current_setting(f.origem), f.nome) like '%security definer%') then
       v_sec := concat_ws(', ', v_sec, f.nome);
     end if;
-    select replace(p.prosrc, E'\r\n', E'\n') into v_novo from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = f.nome;
+    select pg_temp.sem_ficha_paga(replace(p.prosrc, E'\r\n', E'\n')) into v_novo from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = f.nome;
     if (select count(*) from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = f.nome) <> 1
        or pg_temp.sem_7d(v_novo) is distinct from pg_temp.corpo(v_mig, f.nome) then
       v_viva := concat_ws(', ', v_viva, f.nome);

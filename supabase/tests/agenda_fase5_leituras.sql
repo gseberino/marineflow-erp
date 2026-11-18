@@ -32,6 +32,18 @@
 --
 -- A tabela final tem de mostrar ok = true em todas as linhas. Uma linha false é defeito.
 begin;
+-- FICHA PAGA (18/11/2026, 20270124100000): a função viva sem os blocos "-- FICHA PAGA: … -- FICHA PAGA: fim" (só acréscimos: a ficha
+-- de OS paga) é a de antes; as conferências de cópia abaixo a leem assim.
+create function pg_temp.sem_ficha_paga(p text) returns text language sql immutable as $fp$
+  select array_to_string(array(
+           select l from (select l, o, sum(case when l ~ '^\s*-- FICHA PAGA:' and l !~ '^\s*-- FICHA PAGA: fim' then 1
+                                                when l ~ '^\s*-- FICHA PAGA: fim' then -1 else 0 end)
+                                       over (order by o rows between unbounded preceding and current row) as dentro,
+                                 l ~ '^\s*-- FICHA PAGA: fim' as fecha
+                            from unnest(string_to_array(p, E'\n')) with ordinality u(l, o)) x
+            where dentro = 0 and not fecha order by o), E'\n')
+$fp$;
+
 
 create temp table _resultado (teste text, ok boolean, detalhe text) on commit drop;
 
@@ -624,7 +636,7 @@ begin
       ('agenda_rascunho_planejar', 'public.agenda_rascunho_planejar(uuid, text, text, jsonb, text, date)', 'mig_rascunho_fase2', 3),
       ('_agenda_aplicar_planejar', 'public._agenda_aplicar_planejar(uuid, uuid, jsonb, text, date)', 'mig_rascunho_fase2', 4))
       as x(nome, sig, mig, blocos) loop
-    v_src := (select p.prosrc from pg_proc p where p.oid = f.sig::regprocedure);
+    v_src := (select pg_temp.sem_ficha_paga(p.prosrc) from pg_proc p where p.oid = f.sig::regprocedure);
     if pg_temp.sem_fase5(v_src) is distinct from string_to_array(pg_temp.corpo(current_setting('agenda_teste.' || f.mig), f.nome), E'\n')
        or (select count(*) from regexp_matches(v_src, '-- FASE 5: fim', 'g')) <> f.blocos then
       v_ruins := v_ruins || f.nome || ' ';
