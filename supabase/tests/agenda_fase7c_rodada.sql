@@ -44,14 +44,15 @@
 begin;
 -- FICHA PAGA (18/11/2026, 20270125100000): a função viva sem os blocos "-- FICHA PAGA: … -- FICHA PAGA: fim" (só acréscimos: a ficha
 -- de OS paga), com a linha de antes devolvida onde o bloco a trocou ("--antes:" na coluna 0, dentro dele), é a de antes; as
--- conferências de cópia abaixo a leem assim.
+-- conferências de cópia abaixo a leem assim. (F2b, 18/11/2026, 20270126100000: e os blocos "-- FICHA PAGA B: … -- FICHA PAGA B: fim",
+-- do mesmo jeito; um bloco B pode estar dentro de um da F2: a conta é por nível.)
 create function pg_temp.sem_ficha_paga(p text) returns text language sql immutable as $fp$
   select array_to_string(array(
            select case when dentro > 0 and l ~ '^--antes:' then substr(l, 9) else l end
-             from (select l, o, sum(case when l ~ '^\s*-- FICHA PAGA:' and l !~ '^\s*-- FICHA PAGA: fim' then 1
-                                         when l ~ '^\s*-- FICHA PAGA: fim' then -1 else 0 end)
+             from (select l, o, sum(case when l ~ '^\s*-- FICHA PAGA( B)?:' and l !~ '^\s*-- FICHA PAGA( B)?: fim' then 1
+                                         when l ~ '^\s*-- FICHA PAGA( B)?: fim' then -1 else 0 end)
                                 over (order by o rows between unbounded preceding and current row) as dentro,
-                          l ~ '^\s*-- FICHA PAGA: fim' as fecha
+                          l ~ '^\s*-- FICHA PAGA( B)?: fim' as fecha
                      from unnest(string_to_array(p, E'\n')) with ordinality u(l, o)) x
             where (dentro = 0 and not fecha) or (dentro > 0 and l ~ '^--antes:')
             order by o), E'\n')

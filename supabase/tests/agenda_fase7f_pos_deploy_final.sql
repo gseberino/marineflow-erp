@@ -75,11 +75,17 @@ declare
   l      text;
   fora   text[] := '{}';
   dentro boolean := false;
+  -- FICHA PAGA B (20270126100000): o bloco aberto é um "-- FICHA PAGA B:" (só o fim dele o fecha); dentro de outro bloco, o B é parte dele
+  -- (o "-- FICHA PAGA B: fim" não casa os fins de baixo)
+  dentro_b boolean := false;
 begin
   foreach l in array string_to_array(p, E'\n') loop
+    if not dentro and l ~ '^\s*-- FICHA PAGA B:' and l !~ '^\s*-- FICHA PAGA B: fim' then dentro := true; dentro_b := true; continue; end if;
     if not dentro and l ~ '^\s*-- (FASE 7[eg]:|\(7[eg] |PRAZO NO BLOCO:|FICHA PAGA:)' and l !~ '^\s*-- (FASE 7[eg]: fim|\(7[eg]: fim\)|PRAZO NO BLOCO: fim|FICHA PAGA: fim)' then dentro := true; continue; end if;
     if dentro then
-      if l ~ '^\s*-- (FASE 7[eg]: fim|\(7[eg]: fim\)|PRAZO NO BLOCO: fim|FICHA PAGA: fim)' then dentro := false; end if;
+      if dentro_b then
+        if l ~ '^\s*-- FICHA PAGA B: fim' then dentro := false; dentro_b := false; end if;
+      elsif l ~ '^\s*-- (FASE 7[eg]: fim|\(7[eg]: fim\)|PRAZO NO BLOCO: fim|FICHA PAGA: fim)' then dentro := false; end if;
       -- FICHA PAGA (20270125100000): a linha de antes que o bloco trocou volta ("--antes:" na coluna 0)
       if l ~ '^--antes:' then fora := fora || substr(l, 9); end if;
       continue;

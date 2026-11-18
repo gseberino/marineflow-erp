@@ -19,6 +19,9 @@
 --       é 1 a menos; sem a linha do gestor, a saúde é a de antes, byte a byte (a função de 20261109101200 rodando como pg_temp), também nos fechamentos de antes de
 --       aplicar; (revisão 3) as marcas presas às linhas certas, um fechamento por vez: a do gestor só pela forma inteira ou pela curta (com a ficha em 1º e sem ela), a
 --       do cliente só pela linha cliente de linhas_diria (uma cliente_aprovar da ordem que pode sair não ganha o +1), e o corte de 220 da linha do cliente
+--   (F2b, 18/11/2026, 20270126100000; C4 da revisão da F2) P0k a saúde viva, sem os blocos "-- FICHA PAGA B:", é a de produção de 18/11 (md5 00926f73…); P6p a
+--       ficha de OS PAGA em 1º (padrão e recomendação 2), no mínimo com a crítica e a do cliente, acima de 1.000: a curta dela ("… eu seguro a ficha. Para mandar, me
+--       diga *mande*.") conta como a do gestor e não é bloco_grande; na saúde de produção (a viva sem os blocos B) era
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -52,6 +55,16 @@ create function pg_temp.sem_prazo(p text) returns text language sql immutable as
                                                 when l ~ '^\s*-- PRAZO NO BLOCO: fim' then -1 else 0 end)
                                        over (order by o rows between unbounded preceding and current row) as dentro,
                                  l ~ '^\s*-- PRAZO NO BLOCO: fim' as fecha
+                            from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
+            where dentro = 0 and not fecha order by o), E'\n')
+$f$;
+-- (F2b, 20270126100000) o texto sem os blocos "-- FICHA PAGA B: … -- FICHA PAGA B: fim" (contados por nível): a saúde da F2b vira a de produção de 18/11.
+create function pg_temp.sem_b(p text) returns text language sql immutable as $f$
+  select array_to_string(array(
+           select l from (select l, o, sum(case when l ~ '^\s*-- FICHA PAGA B:' and l !~ '^\s*-- FICHA PAGA B: fim' then 1
+                                                when l ~ '^\s*-- FICHA PAGA B: fim' then -1 else 0 end)
+                                       over (order by o rows between unbounded preceding and current row) as dentro,
+                                 l ~ '^\s*-- FICHA PAGA B: fim' as fecha
                             from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n')
 $f$;
@@ -211,6 +224,11 @@ begin
     execute format('create function pg_temp.saude_7f(p_hoje date, p_agora timestamptz) returns jsonb language plpgsql stable set search_path to ''public'' as %L',
                    pg_temp.corpo(current_setting('agenda_teste.mig_mudou_fase7f'), '_agenda_saude_comunicacao'));
   end if;
+  -- (P6p, F2b) a saúde de produção de 18/11 (20270122100000) = a viva sem os blocos "-- FICHA PAGA B:", do mesmo jeito
+  if exists (select 1 from pg_proc p where p.oid = 'public._agenda_saude_comunicacao(date, timestamptz)'::regprocedure and p.prosrc like '%-- FICHA PAGA B:%') then
+    execute format('create function pg_temp.saude_sem_b(p_hoje date, p_agora timestamptz) returns jsonb language plpgsql stable set search_path to ''public'' as %L',
+                   pg_temp.sem_b((select p.prosrc from pg_proc p where p.oid = 'public._agenda_saude_comunicacao(date, timestamptz)'::regprocedure)));
+  end if;
 end
 $c$;
 
@@ -266,6 +284,10 @@ begin
     (select string_agg(p.proname, ',' order by p.proname) from pg_proc p where p.pronamespace = 'public'::regnamespace and p.prosrc like '%-- PRAZO NO BLOCO:%')
       = '_agenda_saude_comunicacao,agenda_bloco_do_fechamento',
     (select string_agg(p.proname, ',' order by p.proname) from pg_proc p where p.pronamespace = 'public'::regnamespace and p.prosrc like '%-- PRAZO NO BLOCO:%'));
+  -- (F2b, 20270126100000) a saúde da F2b só acrescenta: tirados os blocos "-- FICHA PAGA B:" (1, dentro do "-- PRAZO NO BLOCO:"), é a de produção de 18/11
+  r := pg_temp.ok(r, 'P0k (F2b) a saúde viva, sem o bloco "-- FICHA PAGA B:" (1, dentro do do prazo no bloco), é a de produção de 18/11 (md5 00926f73…), byte a byte',
+    (select count(*) from regexp_matches(v, '-- FICHA PAGA B: fim', 'g')) = 1 and md5(pg_temp.sem_b(v)) = '00926f7360872e00e572b5dd5fce6a6c',
+    md5(pg_temp.sem_b(v)));
   perform pg_temp.gravar(r);
 end
 $p$;
@@ -1000,6 +1022,40 @@ begin
       v_x = 'gne' and v_y = '1/1'
       and not exists (select 1 from jsonb_array_elements(v_lin) l where l ->> 'tipo' = 'cliente' and l ->> 'pergunta_id' is not null),
       format('nível %s [%s] = %s', (b ->> 'nivel_min')::int - 2, v_x, v_y));
+    perform pg_temp.desfaz();
+  exception when sqlstate 'P0001' then
+    if sqlerrm <> '__desfaz__' then raise; end if;
+  end;
+
+  -- P6p (F2b, 20270126100000; C4 da revisão da F2) a ficha de OS PAGA em 1º: a pergunta da F2/F2b (padrão e recomendação 2, "… já está PAGA e ainda não
+  -- começou: o serviço ainda vai ser feito? Sem resposta até 19:30, eu seguro a ficha. 1) Mande; 2) Segure … (recomendo).") no lugar da g01, com a crítica e a do
+  -- cliente, fechamento de 1.100 letras. No mínimo a do gestor sai na curta "… eu seguro a ficha. Para mandar, me diga *mande*." (a linha (m) da F2): a saúde da
+  -- F2b a conta como a do gestor (0); a de produção (a viva sem o bloco B) não a reconhecia (1) — o mesmo no nível de antes dele, só com as decisões
+  begin
+    perform pg_temp.liga();
+    perform pg_temp.perguntas_de_prazo();
+    update public.agenda_perguntas set estado = 'resolvida', resolvida_motivo = 'teste do prazo: a ficha paga no lugar' where id = pg_temp.g('01');
+    insert into public.agenda_perguntas (id, tipo, chave, service_order_id, os_ids, perda_em, texto, opcoes, recomendacao, opcao_padrao, modo, criada_em, expira_em, veto_ate)
+    select pg_temp.g('07'), q.tipo, q.chave, q.service_order_id, q.os_ids, q.perda_em,
+           format('Hoje às 19:30 a ficha de amanhã vai para Alex: %1$s Vanderlei, qua 11/11 de manhã — dia 2 de 2, pela minha estimativa. A %1$s já está PAGA e ainda não começou: o serviço ainda vai ser feito? Sem resposta até 19:30, eu seguro a ficha. 1) Mande; 2) Segure a ficha: eu não mando e você fala com ele (recomendo).',
+                  (select so.service_order_number from public.service_orders so where so.id = pg_temp.osf('303'))),
+           q.opcoes, 2, 2, 'ligado', timestamptz '2026-11-10 16:50:45-03', q.expira_em, q.veto_ate
+      from public.agenda_perguntas q where q.id = pg_temp.g('01');
+    v_lin := pg_temp.linhas() || jsonb_build_array(pg_temp.l('cliente', c_txt, jsonb_build_object('pergunta_id', pg_temp.q('04'))));
+    b := pg_temp.sobre(v_lin);
+    v_g := (select l from jsonb_array_elements(pg_temp.no_nivel(b, (b ->> 'nivel_min')::int)) l where l ->> 'pergunta_id' like 'b10c0000%');
+    -- (cada leitura no seu comando: a saúde é STABLE e, no mesmo comando, não veria o fechamento que o um_fechamento acabou de gravar)
+    v_x := pg_temp.um_fechamento(v_lin, b, (b ->> 'nivel_min')::int, false);
+    v_x := v_x || '/' || (pg_temp.saude_sem_b(date '2026-11-10', timestamptz '2026-11-10 18:00-03') ->> 'bloco_grande');
+    v_y := pg_temp.um_fechamento(v_lin, b, (b ->> 'nivel_min')::int - 1, true);
+    v_y := v_y || '/' || (pg_temp.saude_sem_b(date '2026-11-10', timestamptz '2026-11-10 18:00-03') ->> 'bloco_grande');
+    r := pg_temp.ok(r, 'P6p (F2b) a ficha de OS paga em 1º, no mínimo com a crítica e a do cliente: a curta "… eu seguro a ficha. Para mandar, me diga *mande*." conta como a do gestor — não é bloco_grande na saúde da F2b, nem no nível de antes; na de produção (sem o bloco B) era (7f/F2b/produção)',
+      v_g ->> 'pergunta_id' = pg_temp.g('07')::text
+      and v_g ->> 'texto' like '· Hoje às 19:30 a ficha de amanhã vai para Alex: % já está PAGA e ainda não começou: % eu seguro a ficha. Para mandar, me diga *mande*.%'
+      and v_g ->> 'texto' not like '%1) Mande%' and pg_temp.classes(b, (b ->> 'nivel_min')::int) = 'ngc'
+      and pg_temp.decs(b, (b ->> 'nivel_min')::int) = 'q06,g07,q04'
+      and v_x = '1/0/1' and v_y = '1/0/1',
+      format('mínimo %s [%s %s], antes dele %s [%s]; %s', v_x, pg_temp.classes(b, (b ->> 'nivel_min')::int), pg_temp.decs(b, (b ->> 'nivel_min')::int), v_y, pg_temp.classes(b, (b ->> 'nivel_min')::int - 1), v_g ->> 'texto'));
     perform pg_temp.desfaz();
   exception when sqlstate 'P0001' then
     if sqlerrm <> '__desfaz__' then raise; end if;

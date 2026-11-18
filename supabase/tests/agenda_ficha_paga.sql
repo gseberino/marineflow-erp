@@ -3,6 +3,11 @@
 -- estimativa — o João em ter 03 e qua 04, o Roberto de qui 05 a ter 10/11; o ligar do gestor qui 29/10 16:46, a janela da ficha
 -- até qua 18/11).
 -- bancada: depende de 20270125100000
+-- F2b (18/11/2026, 20270126100000; resposta do dono "Só antes de começar"): a ficha de OS paga fica segurada só se a OS ainda não
+-- começou — só por EVIDÊNCIA de serviço feito (_agenda_os_comecou). O OS-00074 do replay não tem nenhuma (sem check-in, sem dia feito,
+-- sem confirmação, sem diária, sem horas): os dias dele só planejados não contam, e este teste prova a regra da F2 com a régua de
+-- verdade. A régua tem o teste dela: agenda_ficha_paga_b.sql. E a pergunta da OS paga diz "já está PAGA e ainda não começou" (a F2 dizia
+-- "já está PAGA por inteiro").
 --
 --   F0 as portas e o que é (sem fixture): as 2 leituras novas invoker, STABLE, authenticated e service_role, nunca anon; as 4
 --      recriadas com as portas de antes; a OS que não existe não está paga; sem o ligar, a ficha de quem não tem OS paga sai
@@ -153,8 +158,8 @@ declare
   c_q05   constant date := date '2026-11-05';
   c_s06   constant date := date '2026-11-06';
   c_nao   constant text := 'Hoje às 19:30 a ficha de amanhã vai para Roberto: OS-00074 Lenine, qui 05/11 o dia todo — dia 3 de 6, pela minha estimativa. 1) Mande (recomendo); 2) Segure a ficha: eu não mando e você fala com ele.';
-  c_paga  constant text := 'Hoje às 19:30 a ficha de amanhã vai para Roberto: OS-00074 Lenine, qui 05/11 o dia todo — dia 3 de 6, pela minha estimativa. A OS-00074 já está PAGA por inteiro: o serviço ainda vai ser feito? Sem resposta até 19:30, eu seguro a ficha. 1) Mande; 2) Segure a ficha: eu não mando e você fala com ele (recomendo).';
-  c_curta constant text := 'Agenda: Hoje às 19:30 a ficha de amanhã vai para Roberto: OS-00074 Lenine, qui 05/11 o dia todo — dia 3 de 6, pela minha estimativa. A OS-00074 já está PAGA por inteiro: o serviço ainda vai ser feito? Sem resposta até 19:30, eu seguro a ficha. Para mandar, me diga *mande*.';
+  c_paga  constant text := 'Hoje às 19:30 a ficha de amanhã vai para Roberto: OS-00074 Lenine, qui 05/11 o dia todo — dia 3 de 6, pela minha estimativa. A OS-00074 já está PAGA e ainda não começou: o serviço ainda vai ser feito? Sem resposta até 19:30, eu seguro a ficha. 1) Mande; 2) Segure a ficha: eu não mando e você fala com ele (recomendo).';
+  c_curta constant text := 'Agenda: Hoje às 19:30 a ficha de amanhã vai para Roberto: OS-00074 Lenine, qui 05/11 o dia todo — dia 3 de 6, pela minha estimativa. A OS-00074 já está PAGA e ainda não começou: o serviço ainda vai ser feito? Sem resposta até 19:30, eu seguro a ficha. Para mandar, me diga *mande*.';
   c_acao  constant text := 'Não mandei a ficha de qui 05/11 a Roberto (OS-00074 Lenine): a OS já está paga por inteiro e você não disse *mande*. Fale com Roberto.';
   v_len   uuid;
   v_rob   uuid;
@@ -198,7 +203,7 @@ begin
       v_q := (r -> 'pessoas' -> 0 ->> 'pergunta_id')::uuid;
       select format('%s|%s|%s|%s', q.opcao_padrao, q.recomendacao, q.veto_ate = pg_temp.em(c_qua, '19:30'), q.texto) into v_t
         from public.agenda_perguntas q where q.id = v_q;
-      v_res := pg_temp.ok(v_res, 'F2a paga por inteiro (dentro da janela): "… A OS-00074 já está PAGA por inteiro: o serviço ainda vai ser feito? Sem resposta até 19:30, eu seguro a ficha. 1) Mande; 2) Segure … (recomendo)." — padrão e recomendação 2, prazo 19:30',
+      v_res := pg_temp.ok(v_res, 'F2a paga por inteiro (dentro da janela): "… A OS-00074 já está PAGA e ainda não começou: o serviço ainda vai ser feito? Sem resposta até 19:30, eu seguro a ficha. 1) Mande; 2) Segure … (recomendo)." — padrão e recomendação 2, prazo 19:30',
         public._agenda_os_paga_por_inteiro(v_len) and public._agenda_ficha_os_pagas(v_rob, c_q05) = array[v_len]
         and v_t = '2|2|t|' || c_paga, coalesce(v_t, '-'));
       v_lin := public._agenda_linhas_do_fechamento(c_qua);
@@ -778,7 +783,7 @@ begin
       v_lin := public._agenda_linhas_do_fechamento(c_qua);
       v_t := (select x ->> 'texto' from jsonb_array_elements(v_lin) x where x ->> 'tipo' = 'pergunta' and (x ->> 'perda')::int = 76 limit 1);
       v_res := pg_temp.ok(v_res, 'F8m na linha (m), a ficha da OS paga vem antes da outra ficha do dia (inteira, com o aviso), e a curta é a dela',
-        v_n = 2 and v_t like 'Agenda: Hoje às 19:30 a ficha de amanhã vai para Roberto: OS-00074 Lenine, qui 05/11%já está PAGA por inteiro%'
+        v_n = 2 and v_t like 'Agenda: Hoje às 19:30 a ficha de amanhã vai para Roberto: OS-00074 Lenine, qui 05/11%já está PAGA e ainda não começou%'
         and exists (select 1 from jsonb_array_elements(v_lin) x where x ->> 'pergunta_id' = v_q::text
                      and x ->> 'texto_curto' like '%eu seguro a ficha. Para mandar, me diga *mande*.%'),
         'abertas=' || v_n || ' | ' || coalesce(left(v_t, 260), '-'));
