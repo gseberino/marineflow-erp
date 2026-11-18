@@ -127,8 +127,8 @@ begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
     -- FICHA PAGA B (20270126100000; F2b v2): a F2b recria _agenda_gestor_decidir com blocos "-- FICHA PAGA B: … -- FICHA PAGA B: fim"; eles
     -- saem antes de tudo (contados: um B pode estar dentro de um bloco desta fase)
-    if l ~ '^\s*-- FICHA PAGA B: fim' then v_fpb := v_fpb - 1; continue; end if;
-    if l ~ '^\s*-- FICHA PAGA B:' then v_fpb := v_fpb + 1; continue; end if;
+    if l ~ '^\s*-- FICHA PAGA [BC]: fim' then v_fpb := v_fpb - 1; continue; end if;
+    if l ~ '^\s*-- FICHA PAGA [BC]:' then v_fpb := v_fpb + 1; continue; end if;
     if v_fpb > 0 then continue; end if;
     -- (Fase 7e, P4: as marcas "-- (7e ... -- (7e: fim)" dentro de bloco de antes saem também, R7.2; dentro de bloco tirado, o laço de baixo as engole)
     if not v_bloco and not v_7e and l ~ '^\s*-- \(7e ' then v_7e := true; continue; end if;

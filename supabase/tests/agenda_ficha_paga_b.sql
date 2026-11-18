@@ -854,6 +854,7 @@ declare
   v_ok    boolean;
   v_n     int;
   v_dono_nome text;
+  v_f2c   boolean;
 begin
   if coalesce(current_setting('agenda_teste.replay2910', true), '') = '' then
     insert into _resultado values ('V3 (o replay de 29/10)', true, 'PULADO: rode pela bancada');
@@ -1053,7 +1054,9 @@ begin
     -- B9a e B9b DOCUMENTAM o comportamento atual (C3 e C5 de revisao-v2/cetico-comecou; a causa é de antes da F2b: _agenda_rotina_como_foi
     -- manda o "como foi" sem olhar a liberada). Fora da janela, a OS paga, o dia 1 segurado (sem *mande*): o "ok" do João ao "como foi" do
     -- dia 1 marca o dia cumprido (via equipe), a OS começa, e a ficha do dia 2 (17:30) ou a confirmação da manhã (19:45) SAI sem o *mande*.
-    -- NÃO é o que a F2b quer mudar agora: vai ao dono num cartão (F2c). Se a F2c mudar isto, estes dois casos mudam junto.
+    -- NÃO é o que a F2b quer mudar agora: vai ao dono num cartão (F2c). Com a F2c no ar (20270127100000, o "como foi" do dia segurado não sai),
+    -- os dois casos mostram o comportamento novo: o "ok" não chega a existir, nada vira prova, e o dia 2 fica.
+    v_f2c := exists (select 1 from pg_proc p where p.oid = 'public._agenda_rotina_como_foi(date, timestamptz)'::regprocedure and p.prosrc like '%-- FICHA PAGA C:%');
     for v_st in select unnest(array['17:30', '19:45']) loop
       begin
         perform pg_temp.pagar(v_len);
@@ -1073,7 +1076,15 @@ begin
         end if;
         v_t := pg_temp.equipe(v_joao);
         v_t2 := 'comecou(04/11)=' || public._agenda_os_comecou(v_len, c_q04);
-        if v_st = '17:30' then
+        if v_st = '17:30' and v_f2c then
+          v_res := pg_temp.ok(v_res, 'B9a (com a F2c no ar) fora da janela, o dia 1 segurado: sem o "como foi", o "ok" das 17:30 não vira prova e a ficha do dia 2 fica',
+            v_t2 = 'comecou(04/11)=false' and v_t = 'ficha 2026-11-03 recusada/veto | confirmar 2026-11-03 recusada/veto | ficha 2026-11-04 recusada/veto',
+            v_t2 || ' | ' || coalesce(v_t, '-'));
+        elsif v_st = '19:45' and v_f2c then
+          v_res := pg_temp.ok(v_res, 'B9b (com a F2c no ar) fora da janela, o dia 1 segurado: sem o "como foi", o "ok" das 19:45 não vira prova e a confirmação do dia 2 fica',
+            v_t2 = 'comecou(04/11)=false' and v_t = 'ficha 2026-11-03 recusada/veto | confirmar 2026-11-03 recusada/veto | ficha 2026-11-04 recusada/veto | confirmar 2026-11-04 recusada/veto',
+            v_t2 || ' | ' || coalesce(v_t, '-'));
+        elsif v_st = '17:30' then
           v_res := pg_temp.ok(v_res, 'B9a (DOCUMENTA, C3; muda na F2c) fora da janela, o dia 1 segurado: o "ok" ao "como foi" às 17:30 vira prova e a ficha do dia 2 SAI sem o *mande*',
             v_t2 = 'comecou(04/11)=true' and v_t like 'ficha 2026-11-03 recusada/veto | confirmar 2026-11-03 recusada/veto | como_foi 2026-11-03 respondida | ficha 2026-11-04 enfileirada%',
             v_t2 || ' | ' || coalesce(v_t, '-'));
