@@ -55,10 +55,22 @@ const AJUSTES = [
 
 // Um construtor de consulta que responde a qualquer encadeamento e termina
 // devolvendo o que a tabela pedida tem. Sem isto seria um mock por chamada.
+/** Tabelas cuja leitura deve falhar (19/11/2026: itens ilegíveis não podem virar orçamento vazio). */
+const FALHAS = new Set<string>();
+
 function fazerCliente(porTabela: Record<string, any>) {
   const cliente = {
     from: (tabela: string) => {
       const dados = porTabela[tabela] ?? [];
+      if (FALHAS.has(tabela)) {
+        const erro = { data: null, error: { message: 'tempo esgotado' } };
+        const qe: any = {
+          select: () => qe, eq: () => qe, is: () => qe, not: () => qe, in: () => qe, order: () => qe, limit: () => qe,
+          maybeSingle: async () => erro, single: async () => erro,
+          then: (r: any) => Promise.resolve(erro).then(r),
+        };
+        return qe;
+      }
       const q: any = {
         select: () => q,
         eq: () => q,
@@ -120,6 +132,18 @@ describe('PublicServiceOrderView — smoke de render', () => {
 
   // O botão existe e diz o que faz. Chamava printPDF, que abre a janela de
   // impressão — no celular do cliente, é onde a pessoa desiste (NOVO-lev-15).
+  it('itens ilegíveis: a página não abre (e não há como assinar um orçamento vazio)', async () => {
+    FALHAS.add('service_order_parts');
+    try {
+      abrir();
+      expect(await screen.findByText(/Não consegui carregar os itens deste documento/)).toBeTruthy();
+      expect(screen.queryByText(/ORÇ-00074/)).toBeNull();
+      expect(screen.queryByRole('button', { name: /assinar/i })).toBeNull();
+    } finally {
+      FALHAS.clear();
+    }
+  });
+
   it('oferece baixar o PDF', async () => {
     abrir();
     await waitFor(() => expect(screen.getByText(/Baixar PDF/i)).toBeTruthy());

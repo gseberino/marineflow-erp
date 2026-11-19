@@ -47,8 +47,10 @@ function useAddRelated(serviceOrderId?: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (item: RelatedMaterial) => {
-      const { data: prod } = await supabase
+      // Preço ilegível NÃO vira peça a R$ 0,00 na OS (19/11/2026): para e avisa.
+      const { data: prod, error: prodErr } = await supabase
         .from('products').select('cost_price, sale_price').eq('id', item.product_id).single();
+      if (prodErr || !prod) throw new Error('Não consegui ler o preço desta peça — nada foi lançado. Tente de novo.');
       const custo = Number(prod?.cost_price ?? 0);
       const venda = Number(prod?.sale_price ?? 0);
 

@@ -2,11 +2,18 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { recalcTotals } from '@/hooks/use-service-orders';
 
-async function recalcExpenseTotals(soId: string) {
-  const { data: expenses } = await supabase
+/**
+ * Recalcula o custo operacional faturável da OS a partir das despesas.
+ *
+ * Leitura que falha LANÇA: "sem despesas" por erro gravava operational_cost_total = 0 e o
+ * total da OS caía sem ninguém mexer (19/11/2026). A gravação também confere o erro.
+ */
+export async function recalcExpenseTotals(soId: string) {
+  const { data: expenses, error: lerErr } = await supabase
     .from('service_order_expenses')
     .select('amount, billable_to_client')
     .eq('service_order_id', soId);
+  if (lerErr) throw new Error('Não consegui ler as despesas da OS para recalcular o total. Tente de novo.');
   // Só despesas faturáveis entram no custo repassado ao cliente (Onda 1D).
   // Despesas internas continuam salvas na tabela para controle de margem/reembolso.
   const opCost = (expenses || [])
@@ -16,9 +23,10 @@ async function recalcExpenseTotals(soId: string) {
   // D15 (17/09/2026): grava só o INSUMO (custo operacional faturável) e deixa a fórmula do
   // total com o banco — recalcTotals pergunta a calc_so_totals, aplica a cascata dos
   // recebíveis e manda gravar. Antes esta função tinha a terceira cópia da fórmula.
-  await supabase.from('service_orders').update({
+  const { error: gravarErr } = await supabase.from('service_orders').update({
     operational_cost_total: Math.round(opCost * 100) / 100,
   }).eq('id', soId);
+  if (gravarErr) throw new Error('Não consegui atualizar o custo operacional da OS. Tente de novo.');
   await recalcTotals(soId);
 }
 
@@ -67,7 +75,7 @@ export function useAddServiceOrderExpense() {
       if (error) throw error;
 
       if (also_create_payable) {
-        const { data: payable } = await supabase.from('payables').insert({
+        const { data: payable, error: payErr } = await supabase.from('payables').insert({
           description: expense.description,
           expense_category: expense.category,
           amount: expense.amount,
@@ -80,18 +88,26 @@ export function useAddServiceOrderExpense() {
           paid_amount: 0,
           origin: 'service_order_expense',
         }).select().single();
-
-        if (payable) {
-          await supabase.from('service_order_expenses')
-            .update({ linked_payable_id: payable.id })
-            .eq('id', inserted.id);
+        // A despesa já está gravada: o aviso diz o que faltou, em vez de sumir calado.
+        if (payErr || !payable) {
+          await recalcExpenseTotals(expense.service_order_id).catch(() => {});
+          throw new Error('A despesa foi gravada, mas a conta a pagar NÃO foi criada. Lance-a em Contas a pagar.');
         }
+        const { error: vinculoErr } = await supabase.from('service_order_expenses')
+          .update({ linked_payable_id: payable.id })
+          .eq('id', inserted.id);
+        if (vinculoErr) console.warn('vínculo despesa → conta a pagar não gravado:', vinculoErr.message);
       }
 
-      await recalcExpenseTotals(expense.service_order_id);
+      try {
+        await recalcExpenseTotals(expense.service_order_id);
+      } catch (e) {
+        throw new Error(`A despesa foi gravada, mas o total da OS não foi atualizado. ${(e as Error).message}`);
+      }
       return inserted;
     },
-    onSuccess: (_d, vars) => {
+    // onSettled: com falha depois do insert, a despesa gravada tem de aparecer na lista.
+    onSettled: (_d, _e, vars) => {
       qc.invalidateQueries({ queryKey: ['so-expenses', vars.service_order_id] });
       qc.invalidateQueries({ queryKey: ['service-orders', vars.service_order_id] });
       qc.invalidateQueries({ queryKey: ['payables'] });

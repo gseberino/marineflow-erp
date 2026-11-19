@@ -125,6 +125,13 @@ export default function PublicServiceOrderView() {
             : Promise.resolve({ data: null, error: null }),
         ]);
 
+        // Itens ilegíveis NÃO viram "orçamento sem itens": o cliente via (e podia ASSINAR) um
+        // documento vazio, e o hash da assinatura cobria a lista vazia (19/11/2026). Sem os
+        // itens, a página não abre — e sem página não há botão de assinar.
+        if (partsRes.error || servicesRes.error) {
+          throw new Error('Não consegui carregar os itens deste documento. Atualize a página para tentar de novo.');
+        }
+
         const company: Record<string, string> = {};
         for (const row of (settingsRes.data || []) as Array<{ key: string; value: string }>) {
           if (row.key) company[row.key] = String(row.value || '');

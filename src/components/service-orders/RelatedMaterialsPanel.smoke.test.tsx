@@ -11,7 +11,7 @@ import { I18nProvider } from '@/i18n';
 import { RelatedMaterialsPanel } from './RelatedMaterialsPanel';
 
 const { estado, recalcTotals, inseridas } = vi.hoisted(() => ({
-  estado: { itens: [] as unknown[] },
+  estado: { itens: [] as unknown[], falhaNoPreco: false },
   recalcTotals: vi.fn(async (_soId: string) => {}),
   inseridas: [] as unknown[],
 }));
@@ -20,7 +20,9 @@ vi.mock('@/integrations/supabase/client', () => ({
   supabase: {
     rpc: async () => ({ data: estado.itens, error: null }),
     from: () => ({
-      select: () => ({ eq: () => ({ single: async () => ({ data: { cost_price: 1, sale_price: 2 } }) }) }),
+      select: () => ({ eq: () => ({ single: async () => (estado.falhaNoPreco
+        ? { data: null, error: { message: 'tempo esgotado' } }
+        : { data: { cost_price: 1, sale_price: 2 }, error: null }) }) }),
       insert: async (linha: unknown) => { inseridas.push(linha); return { error: null }; },
     }),
   },
@@ -39,7 +41,7 @@ function renderPanel() {
   );
 }
 
-beforeEach(() => { estado.itens = []; inseridas.length = 0; recalcTotals.mockClear(); });
+beforeEach(() => { estado.itens = []; estado.falhaNoPreco = false; inseridas.length = 0; recalcTotals.mockClear(); });
 
 describe('materiais que costumam entrar junto', () => {
   it('sem sugestão, não ocupa espaço', async () => {
@@ -81,5 +83,19 @@ describe('materiais que costumam entrar junto', () => {
     await userEvent.setup().click(await screen.findByRole('button', { name: /Incluir/ }));
     await waitFor(() => expect(recalcTotals).toHaveBeenCalledWith('os1'));
     expect(inseridas).toEqual([expect.objectContaining({ service_order_id: 'os1', product_id: 'p1', quantity: 1 })]);
+  });
+
+  // 19/11/2026: preço ilegível lançava a peça a R$ 0,00.
+  it('preço ilegível: não lança a peça', async () => {
+    estado.itens = [{
+      product_id: 'p1', product_name: 'Tela GX Touch 50', unit: 'UN', sale_price: 3200,
+      por_causa_de: 'CENTRAL DE CONTROLE CERBO GX', juntos: 5, de_total: 5, pct: 100,
+    }];
+    estado.falhaNoPreco = true;
+    renderPanel();
+    await userEvent.setup().click(await screen.findByRole('button', { name: /Incluir/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Incluir/ })).not.toBeDisabled());
+    expect(inseridas).toEqual([]);
+    expect(recalcTotals).not.toHaveBeenCalled();
   });
 });
