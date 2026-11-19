@@ -15,6 +15,7 @@ import type { BankTx } from "../../banking/types.ts";
 import { montarSugestoes } from "../../banking/sugestoes.ts";
 import { documentoMascarado } from "../../banking/contraparte.ts";
 import { CARGOS_DO_FINANCEIRO, mascararCpfNoTexto, semAcessoDoFinanceiro } from "./financeiro-comum.ts";
+import { mensagemDoBanco } from "./lancamentos.ts";
 
 // Ler o extrato pelo assistente (leva 8, 23/10/2026 — LGPD): CPF de terceiro só para administrador e financeiro, e
 // mascarado (***.456.789-**; CNPJ inteiro). O cargo é conferido DENTRO do execute: no WhatsApp e no Claude Max o
@@ -130,7 +131,8 @@ export const bankingTools: ToolDef[] = [
   {
     name: "conciliar_transacao",
     description:
-      "Registra o pagamento de uma transação do extrato contra uma conta a receber/pagar ou o sinal de um orçamento. Conciliar o sinal APROVA o orçamento e o converte em OS. Use somente após confirmar a correspondência com sugerir_conciliacao.",
+      "Registra o pagamento de uma transação do extrato contra uma conta a receber/pagar ou o sinal de um orçamento. Conciliar o sinal APROVA o orçamento e o converte em OS. Use somente após confirmar a correspondência com sugerir_conciliacao. " +
+      "Conta já paga: a linha casa com o pagamento que já existe (nenhuma receita nova). Linha maior que o saldo: só o saldo vira pagamento. Entrada só casa com conta a receber; saída, com conta a pagar.",
     input_schema: {
       type: "object",
       properties: {
@@ -157,18 +159,49 @@ export const bankingTools: ToolDef[] = [
 
       const { data: tx, error: txErr } = await ctx.sb
         .from("bank_transactions")
-        .select("id, transaction_date, description, amount, reconciled")
+        .select("id, transaction_date, description, amount, reconciled, transaction_type")
         .eq("id", args.transaction_id)
-        .single();
+        .maybeSingle();
       if (txErr) throw txErr;
       if (!tx) return { error: "Transação não encontrada." };
       if (tx.reconciled) return { error: "Esta transação já foi conciliada." };
+
+      // Conta a receber/pagar: pela MESMA função do banco que a tela de Conciliação e casar_lancamento_com_extrato
+      // usam (19/11/2026). Antes a tool registrava o valor INTEIRO da linha com register_payment_and_update_balance e
+      // marcava a linha à parte: conta já paga ganhava um segundo pagamento (receita em dobro), o valor acima do saldo
+      // virava pagamento a mais, a conta não guardava bank_transaction_id e entrada casava com conta a pagar.
+      // conciliar_lancamento confere tudo isso numa transação só (já paga = casa com o pagamento que existe; paga só
+      // até o saldo; crédito ↔ receber, débito ↔ pagar; linha já vinculada recusa) e aceita p_autor sem sessão
+      // (pelo WhatsApp/Max): _autor_do_financeiro usa auth.uid() quando há sessão e, sem ela, confere o cargo do p_autor.
+      if (args.tipo === "receivable" || args.tipo === "payable") {
+        const { data, error } = await ctx.sb.rpc("conciliar_lancamento", {
+          p_tipo: args.tipo, p_id: args.alvo_id, p_transacao: args.transaction_id, p_autor: ctx.userId || null,
+        });
+        if (error) return { error: `Não conciliei: ${mensagemDoBanco(error)}` };
+        const r = (data ?? {}) as { ok?: boolean; pagamento_registrado?: boolean; valor_pago?: number; message?: string };
+        if (r.ok !== true) return { error: r.message || "Não conciliei: o banco não confirmou." };
+        const valorPago = Number(r.valor_pago) || 0;
+        const sobra = Math.round((Number(tx.amount) - valorPago) * 100) / 100;
+        return {
+          ok: true,
+          pagamento_registrado: r.pagamento_registrado === true,
+          valor_pago: valorPago,
+          mensagem: r.message || "Conciliado.",
+          ...(r.pagamento_registrado && sobra > 0.009
+            ? { aviso: `A linha do extrato tem R$ ${sobra.toFixed(2)} a mais que o saldo da conta: só o saldo foi registrado como pagamento.` }
+            : {}),
+        };
+      }
+      if (args.tipo !== "quote_deposit") return { error: "tipo deve ser receivable, payable ou quote_deposit." };
+      if (tx.transaction_type && tx.transaction_type !== "credit") {
+        return { error: "Sinal de orçamento só casa com ENTRADA no banco; esta linha é uma saída." };
+      }
 
       const notas = `Conciliação pelo agente — ${tx.description}`.slice(0, 500);
       let paymentId: string | null = null;
       let serviceOrderId: string | null = null;
 
-      if (args.tipo === "quote_deposit") {
+      {
         const { data, error } = await ctx.sb.rpc("register_deposit_and_convert", {
           p_service_order_id: args.alvo_id,
           p_amount: Number(tx.amount),
@@ -180,40 +213,31 @@ export const bankingTools: ToolDef[] = [
         if (error) throw error;
         paymentId = (data as any)?.payment_id ?? null;
         serviceOrderId = args.alvo_id;
-      } else {
-        const { data, error } = await ctx.sb.rpc("register_payment_and_update_balance", {
-          p_receivable_id: args.tipo === "receivable" ? args.alvo_id : null,
-          p_payable_id: args.tipo === "payable" ? args.alvo_id : null,
-          p_amount: Number(tx.amount),
-          p_payment_date: tx.transaction_date,
-          p_payment_method: "bank_transfer",
-          p_installments: 1,
-          p_card_fee_percent: 0,
-          p_net_amount: Number(tx.amount),
-          p_notes: notas,
-          // Pelo WhatsApp não há sessão: quem pediu vai junto e o banco confere o cargo (06/10/2026).
-          p_autor: ctx.userId || null,
-        });
-        if (error) throw error;
-        paymentId = (data as any)?.payment_id ?? null;
       }
 
-      const { error: updErr } = await ctx.sb
+      // A linha do extrato marca o pagamento (o gatilho _pagamento_segue_a_linha grava payments.bank_transaction_id).
+      const { data: marcou, error: updErr } = await ctx.sb
         .from("bank_transactions")
         .update({
           reconciled: true,
           reconciled_payment_id: paymentId,
           reconciled_service_order_id: serviceOrderId,
         })
-        .eq("id", args.transaction_id);
-      if (updErr) throw updErr;
+        .eq("id", args.transaction_id)
+        .select("id");
+      if (updErr || !Array.isArray(marcou) || marcou.length === 0) {
+        return {
+          ok: false,
+          payment_id: paymentId,
+          error: "O sinal foi registrado e o orçamento convertido, mas a linha do extrato NÃO ficou marcada como conciliada" +
+            `${updErr ? ` (${mensagemDoBanco(updErr)})` : ""}. Marque-a na tela de Conciliação para não registrar o mesmo dinheiro duas vezes.`,
+        };
+      }
 
       return {
         ok: true,
         payment_id: paymentId,
-        mensagem: args.tipo === "quote_deposit"
-          ? "Sinal registrado; o orçamento foi aprovado e convertido em OS."
-          : "Pagamento registrado e saldo atualizado.",
+        mensagem: "Sinal registrado; o orçamento foi aprovado e convertido em OS.",
       };
     },
   },

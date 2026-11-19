@@ -282,3 +282,48 @@ Deno.test("fakes 6c. leitura das cobranças com erro não vira 'não encontrada'
   try { await resolverCobrancasDoLote(b.db, ["col-1"]); } catch (e) { erro = (e as Error).message; }
   assertStringIncludes(erro, "Não consegui ler as cobranças");
 });
+
+// ─── 7. conciliar_transacao ─────────────────────────────────────────────────────────────────
+import { bankingTools } from "./banking.ts";
+
+const LINHA = { id: "tx-1", transaction_date: "2026-11-10", description: "PIX RECEBIDO", amount: 1200, reconciled: false, transaction_type: "credit" };
+
+Deno.test("fakes 7a. conta a receber: vai pela conciliar_lancamento (com p_autor) e não registra pagamento à parte", async () => {
+  const b = bancoFalso({ bank_transactions: [{ ...LINHA }] }, {}, {
+    conciliar_lancamento: () => ({ data: { ok: true, pagamento_registrado: true, valor_pago: 1000, message: "Conciliado. Pagamento de R$ 1.000,00 registrado." }, error: null }),
+  });
+  // deno-lint-ignore no-explicit-any
+  const r = await ferramenta(bankingTools, "conciliar_transacao").execute({ transaction_id: "tx-1", tipo: "receivable", alvo_id: "rec-1" }, ctxDe(b.db, { userRole: "admin" })) as any;
+  assertEquals(r.ok, true);
+  assertEquals(r.valor_pago, 1000);
+  assertStringIncludes(r.aviso, "200.00 a mais");
+  assertEquals(b.chamadas.map(([n]) => n), ["conciliar_lancamento"]);
+  assertEquals(b.chamadas[0][1], { p_tipo: "receivable", p_id: "rec-1", p_transacao: "tx-1", p_autor: "dono-1" });
+  assertEquals(b.gravacoes, [], "a linha do extrato é marcada pela função, não por um update solto");
+});
+
+Deno.test("fakes 7b. a recusa do banco (conta já casada, saída x receber) volta como erro, sem 'ok'", async () => {
+  const b = bancoFalso({ bank_transactions: [{ ...LINHA }] }, {}, {
+    conciliar_lancamento: () => ({ data: null, error: { message: "Este lançamento já está casado com outra linha do extrato. Desfaça o vínculo antes." } }),
+  });
+  // deno-lint-ignore no-explicit-any
+  const r = await ferramenta(bankingTools, "conciliar_transacao").execute({ transaction_id: "tx-1", tipo: "receivable", alvo_id: "rec-1" }, ctxDe(b.db, { userRole: "admin" })) as any;
+  assertEquals(r.ok, undefined);
+  assertStringIncludes(r.error, "já está casado");
+});
+
+Deno.test("fakes 7c. sinal de orçamento: saída do banco é recusada; marcação da linha que não grava é dita", async () => {
+  const saida = bancoFalso({ bank_transactions: [{ ...LINHA, transaction_type: "debit" }] });
+  // deno-lint-ignore no-explicit-any
+  const r1 = await ferramenta(bankingTools, "conciliar_transacao").execute({ transaction_id: "tx-1", tipo: "quote_deposit", alvo_id: "os-1" }, ctxDe(saida.db, { userRole: "admin" })) as any;
+  assertStringIncludes(r1.error, "ENTRADA");
+  assertEquals(saida.chamadas, []);
+
+  const semMarca = bancoFalso({ bank_transactions: [{ ...LINHA }] }, { "update:bank_transactions": "RLS" }, {
+    register_deposit_and_convert: () => ({ data: { payment_id: "pay-1" }, error: null }),
+  });
+  // deno-lint-ignore no-explicit-any
+  const r2 = await ferramenta(bankingTools, "conciliar_transacao").execute({ transaction_id: "tx-1", tipo: "quote_deposit", alvo_id: "os-1" }, ctxDe(semMarca.db, { userRole: "admin" })) as any;
+  assertEquals(r2.ok, false);
+  assertStringIncludes(r2.error, "NÃO ficou marcada");
+});
