@@ -76,8 +76,11 @@ export const emailTools: ToolDef[] = [
         .gte("received_at", new Date(Date.now() - dias * 86400_000).toISOString())
         .order("received_at", { ascending: false }).limit(25);
       if (args.caixa) {
-        const { data: c } = await ctx.admin.from("email_accounts").select("id").ilike("address", `${String(args.caixa)}@%`).maybeSingle();
-        if (c?.id) q = q.eq("account_id", c.id);
+        const { data: c, error: erroCaixa } = await ctx.admin.from("email_accounts").select("id").ilike("address", `${String(args.caixa)}@%`).maybeSingle();
+        // Caixa não lida ou não achada: antes listava TODAS as caixas como se fossem a pedida.
+        if (erroCaixa) return { error: `Não consegui achar a caixa "${String(args.caixa)}" (${erroCaixa.message}). Diga que a consulta falhou.` };
+        if (!c?.id) return { error: `Não existe caixa de e-mail "${String(args.caixa)}" conectada.` };
+        q = q.eq("account_id", c.id);
       }
       const classe = Object.entries(CLASSE).find(([, v]) => v === args.classe)?.[0];
       if (classe) q = q.eq("triage_class", classe);

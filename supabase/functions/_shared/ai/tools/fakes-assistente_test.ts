@@ -1,8 +1,24 @@
 // Fakes do assistente (19/11/2026): tools que respondiam "feito" sem ter feito. Cada teste prova que a
 // resposta diz a verdade sobre o que ficou gravado. Banco falso em memória, sem rede; dados inventados.
 import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { bancoFalso, ctxDe, type Linha } from "./banco-falso-fakes_test.ts";
+import { bancoFalso, ctxDe } from "./banco-falso-fakes_test.ts";
 import { anexarNota, BUCKET_DAS_FOTOS_DA_OS, copiarFotoParaAOS, fieldOpsTools } from "./field-ops.ts";
+import { contactTools } from "./contacts.ts";
+import { autonomiaValeNoPerfil, autonomyTools, perfilDeTools, registrarCatalogoDaAutonomia } from "./autonomy.ts";
+import { PERFIL_ADMIN } from "../perfil-operacao.ts";
+import { flowMacroTools, resolverCobrancasDoLote } from "./flow-macros.ts";
+import { bankingTools } from "./banking.ts";
+import { financeRulesTools } from "./finance-rules.ts";
+import { serviceOrderTools } from "./service-orders.ts";
+import { soOpsTools } from "./so-ops.ts";
+import { quoteTools } from "./quotes.ts";
+import { commsTools } from "./comms-tools.ts";
+import { getConflicts } from "./agenda.ts";
+import { whatsappTools } from "./whatsapp.ts";
+import { referenceDataTools } from "./reference-data.ts";
+import { toquesEnviadosHoje } from "./followups.ts";
+import { emailTools } from "./email.ts";
+import { learningTools } from "./learning.ts";
 
 // deno-lint-ignore no-explicit-any
 const ferramenta = (lista: any[], nome: string) => lista.find((t) => t.name === nome)!;
@@ -102,11 +118,7 @@ Deno.test("fakes 2d. attach_photo_to_service_order: a descrição não promete m
   assertEquals((t.input_schema.properties as any).photo_type.enum, ["before", "progress", "after", "problem"]);
 });
 
-// mantém Linha em uso para o lint de import
-export type _L = Linha;
-
 // ─── 4. link_contact_to_entity ──────────────────────────────────────────────────────────────
-import { contactTools } from "./contacts.ts";
 
 const MSGS_DO_NUMERO = () => [
   { id: "w1", phone_normalized: "5511987654321", client_id: null },
@@ -167,8 +179,6 @@ Deno.test("fakes 4d. identify_contact: leitura com erro não vira 'número desco
 });
 
 // ─── 5. set_tool_autonomy ───────────────────────────────────────────────────────────────────
-import { autonomiaValeNoPerfil, autonomyTools, perfilDeTools, registrarCatalogoDaAutonomia } from "./autonomy.ts";
-import { PERFIL_ADMIN } from "../perfil-operacao.ts";
 
 const FALSA = (name: string, risk: "low" | "medium" | "high") => ({ name, risk, description: "", input_schema: {}, execute: () => Promise.resolve({}) });
 // deno-lint-ignore no-explicit-any
@@ -246,7 +256,6 @@ Deno.test("fakes 5f. tools/index.ts registra o catálogo real (set_tool_autonomy
 });
 
 // ─── 6. send_bulk_collection_reminders ──────────────────────────────────────────────────────
-import { flowMacroTools, resolverCobrancasDoLote } from "./flow-macros.ts";
 
 const COBRANCAS = () => [
   { id: "col-1", receivable_id: "rec-1", status: "pending", amount: 500, due_date: "2026-11-01", contact_name: "Ana", contact_whatsapp: null, phone: null, client_id: null, created_at: "2026-11-01" },
@@ -284,7 +293,6 @@ Deno.test("fakes 6c. leitura das cobranças com erro não vira 'não encontrada'
 });
 
 // ─── 7. conciliar_transacao ─────────────────────────────────────────────────────────────────
-import { bankingTools } from "./banking.ts";
 
 const LINHA = { id: "tx-1", transaction_date: "2026-11-10", description: "PIX RECEBIDO", amount: 1200, reconciled: false, transaction_type: "credit" };
 
@@ -329,7 +337,6 @@ Deno.test("fakes 7c. sinal de orçamento: saída do banco é recusada; marcaçã
 });
 
 // ─── 8. mudar_situacao_da_regra ─────────────────────────────────────────────────────────────
-import { financeRulesTools } from "./finance-rules.ts";
 
 Deno.test("fakes 8. mudar_situacao_da_regra: id errado não responde ok", async () => {
   const b = bancoFalso({ finance_rules: [{ id: "regra-1", status: "active" }] });
@@ -344,8 +351,6 @@ Deno.test("fakes 8. mudar_situacao_da_regra: id errado não responde ok", async 
 });
 
 // ─── 9. get_service_order traz os ids de despesa e hora ─────────────────────────────────────
-import { serviceOrderTools } from "./service-orders.ts";
-import { soOpsTools } from "./so-ops.ts";
 
 const OS_COMPLETA = () => ({
   service_orders: [{ id: "os-1", service_order_number: "OS-00129", status: "in_progress" }],
@@ -389,7 +394,6 @@ Deno.test("fakes 9b. remove_service_order_hours: delete que não apaga linha (pe
 });
 
 // ─── 10. apply_quote_price ──────────────────────────────────────────────────────────────────
-import { quoteTools } from "./quotes.ts";
 
 const COTACAO = () => ({
   quote_responses: [{ id: "resp-1", quote_request_id: "qr-1", supplier_id: "sup-1", quote_request_item_id: "qi-1", unit_price: 100, confirmed: false }],
@@ -421,7 +425,6 @@ Deno.test("fakes 10. apply_quote_price: recálculo e marca da escolhida com erro
 });
 
 // ─── 11. check_followup_cadence / get_comms_metrics ─────────────────────────────────────────
-import { commsTools } from "./comms-tools.ts";
 
 Deno.test("fakes 11. check_followup_cadence: erro de leitura BLOQUEIA; get_comms_metrics pagina além de 1000", async () => {
   const b = bancoFalso({ ai_comms_log: [] }, { "select:ai_comms_log": "timeout" });
@@ -436,7 +439,6 @@ Deno.test("fakes 11. check_followup_cadence: erro de leitura BLOQUEIA; get_comms
 });
 
 // ─── 12. getConflicts ───────────────────────────────────────────────────────────────────────
-import { getConflicts } from "./agenda.ts";
 
 Deno.test("fakes 12. getConflicts: erro da RPC lança (não vira 'sem conflito')", async () => {
   const b = bancoFalso({}, {}, { get_agenda_conflicts: () => ({ data: null, error: { message: "timeout" } }) });
@@ -450,7 +452,6 @@ Deno.test("fakes 12. getConflicts: erro da RPC lança (não vira 'sem conflito')
 });
 
 // ─── 13. cancel_scheduled_whatsapp ──────────────────────────────────────────────────────────
-import { whatsappTools } from "./whatsapp.ts";
 
 Deno.test("fakes 13. cancel_scheduled_whatsapp: id errado e envio já feito não respondem ok; pendente cancela", async () => {
   const b = bancoFalso({ whatsapp_scheduled_sends: [{ id: "ag-1", status: "sent" }, { id: "ag-2", status: "pending" }] });
@@ -466,4 +467,43 @@ Deno.test("fakes 13. cancel_scheduled_whatsapp: id errado e envio já feito não
   const pendente = await t.execute({ scheduled_id: "ag-2" }, ctxDe(b.db)) as any;
   assertEquals(pendente.ok, true);
   assertEquals(b.tabelas.whatsapp_scheduled_sends[1].status, "cancelled");
+});
+
+// ─── 14. leituras sem error ─────────────────────────────────────────────────────────────────
+
+Deno.test("fakes 14a. list_reference_data: lista não lida não vira lista vazia", async () => {
+  const b = bancoFalso({ financial_categories: [], cost_centers: [{ id: "cc-1", name: "Oficina", type: "x", active: true }] }, { "select:financial_categories": "timeout" });
+  // deno-lint-ignore no-explicit-any
+  const r = await ferramenta(referenceDataTools, "list_reference_data").execute({ which: ["financial_categories", "cost_centers"] }, ctxDe(b.db)) as any;
+  assertEquals(r.categorias_financeiras, undefined);
+  assertEquals(r.centros_de_custo.length, 1);
+  assertStringIncludes(r.nao_consegui_ler[0], "categorias financeiras");
+});
+
+Deno.test("fakes 14b. followup: contagem do teto com erro fecha (não vira 0)", async () => {
+  const b = bancoFalso({ ai_followup_events: [] }, { "select:ai_followup_events": "timeout" });
+  let erro = "";
+  try { await toquesEnviadosHoje(b.db); } catch (e) { erro = (e as Error).message; }
+  assertStringIncludes(erro, "nada foi enviado");
+});
+
+Deno.test("fakes 14c. listar_emails: caixa que não existe não lista todas as caixas", async () => {
+  const b = bancoFalso({ email_accounts: [], email_messages: [{ id: "e-1" }] });
+  // deno-lint-ignore no-explicit-any
+  const r = await ferramenta(emailTools, "listar_emails").execute({ caixa: "gustavo" }, ctxDe(b.db)) as any;
+  assertStringIncludes(r.error, "Não existe caixa");
+});
+
+Deno.test("fakes 14d. link_contact_identity: cadastro com outro número não é trocado e a resposta diz isso", async () => {
+  const b = bancoFalso({
+    clients: [{ id: "c-1", name: "Maria Teste", whatsapp: "5511900001111" }],
+    whatsapp_messages: [{ id: "w1", phone_normalized: "5511987654321", client_id: null }],
+    agenda_suggestions: [],
+  });
+  // deno-lint-ignore no-explicit-any
+  const r = await ferramenta(learningTools, "link_contact_identity").execute({ phone: "5511987654321", entity_type: "client", entity_id: "c-1" }, ctxDe(b.db)) as any;
+  assertEquals(r.ok, true);
+  assertEquals(r.mensagens_vinculadas, 1);
+  assertStringIncludes(r.numero_no_cadastro, "NÃO foi trocado");
+  assertEquals(b.tabelas.clients[0].whatsapp, "5511900001111");
 });

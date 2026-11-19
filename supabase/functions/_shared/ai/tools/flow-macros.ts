@@ -19,7 +19,7 @@ const hojeISODate = () => new Date().toISOString().slice(0, 10);
 
 const CAMPOS_DA_COBRANCA = "id, amount, due_date, contact_whatsapp, phone, contact_name, client_id, last_auto_sent_at, status, receivable_id";
 
-export type ItemDoLote = { pedido: string; cobranca?: Record<string, any>; motivo?: string; repetida?: boolean };
+export type ItemDoLote = { pedido: string; cobranca?: { id: string; [campo: string]: any }; motivo?: string; repetida?: boolean };
 
 /**
  * Os ids do lote → a cobrança de cada um (19/11/2026). O prompt manda levantar a lista com get_delinquency_plan, que

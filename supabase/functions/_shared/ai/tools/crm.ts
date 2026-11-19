@@ -23,13 +23,15 @@ function mesesDesde(iso: string | null): number | null {
 
 /** Último serviço concluído por chave (vessel_id ou client_id), em uma passada. */
 async function ultimoServicoPor(sb: any, campo: "vessel_id" | "client_id"): Promise<Record<string, string>> {
-  const { data } = await sb
+  const { data, error } = await sb
     .from("service_orders")
     .select(`${campo}, check_out_at, scheduled_end_at, updated_at`)
     .in("status", STATUS_FEITO)
     .not(campo, "is", null)
     .order("updated_at", { ascending: false })
     .limit(1000);
+  // Erro lança: engolido, todo ativo virava "nunca atendido" e a lista sugeria abordar quem acabou de ser atendido.
+  if (error) throw new Error(`Não consegui ler os serviços já feitos: ${error.message}`);
   const out: Record<string, string> = {};
   for (const so of (data as any[]) || []) {
     const chave = String(so[campo]);
@@ -157,11 +159,12 @@ export const crmTools: ToolDef[] = [
       const soComCliente = args.only_with_client !== false;
 
       // Uma passada nas OS: quem já foi atendido e quem já está em negociação.
-      const { data: oss } = await sb
+      const { data: oss, error: erroOss } = await sb
         .from("service_orders")
         .select("vessel_id, status, quote_status")
         .not("vessel_id", "is", null)
         .limit(2000);
+      if (erroOss) throw new Error(`Não consegui ler as OS: ${erroOss.message}`);
       const atendidos = new Set<string>();
       const emNegociacao = new Set<string>();
       for (const s of (oss as any[]) || []) {

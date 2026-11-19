@@ -23,9 +23,11 @@ export const learningTools: ToolDef[] = [
     },
     risk: "low",
     async execute(args, { sb, userId }) {
-      const { data: existing } = await sb.from("ai_learned_routines")
+      const { data: existing, error: erroExistente } = await sb.from("ai_learned_routines")
         .select("id, observations").eq("pattern_key", args.pattern_key)
         .eq("user_id", userId).maybeSingle();
+      // Sem conferir, a leitura que falha virava "padrão novo" e duplicava a rotina (contagem de vezes zerada).
+      if (erroExistente) throw new Error(`Não consegui ler as rotinas aprendidas: ${erroExistente.message}`);
 
       if (existing) {
         const { error } = await sb.from("ai_learned_routines").update({
@@ -176,7 +178,7 @@ export const learningTools: ToolDef[] = [
   {
     name: "link_contact_identity",
     description:
-      "Liga um telefone a um cliente, fornecedor ou lead JÁ CADASTRADO, depois que o dono disser quem é. Grava o número no cadastro (campo whatsapp) e vincula retroativamente todas as mensagens e sugestões daquele telefone — o histórico inteiro passa a fazer sentido de uma vez.",
+      "Liga um telefone a um cliente, fornecedor ou lead JÁ CADASTRADO, depois que o dono disser quem é. Grava o número no cadastro (campo whatsapp) se ele ainda não tem número — se já tem OUTRO, não troca e a resposta diz isso — e vincula retroativamente as mensagens e sugestões daquele telefone.",
     input_schema: {
       type: "object",
       properties: {
@@ -199,17 +201,29 @@ export const learningTools: ToolDef[] = [
         .select(`id, name, ${campo}`).eq("id", args.entity_id).maybeSingle();
       if (entErr) throw entErr;
       if (!ent) return { error: "Cadastro não encontrado." };
-      if (!(ent as any)[campo]) {
-        await sb.from(table).update({ [campo]: phone }).eq("id", args.entity_id);
+      // O que aconteceu com o número no cadastro, dito na resposta (19/11/2026): antes o update não era conferido e o
+      // cadastro com OUTRO número ficava como estava, calado — e as próximas mensagens chegavam sem dono.
+      const atual = String((ent as any)[campo] ?? "").replace(/\D/g, "");
+      let numeroNoCadastro: string;
+      if (!atual) {
+        const { data: gravou, error: erroNumero } = await sb.from(table).update({ [campo]: phone }).eq("id", args.entity_id).select("id");
+        numeroNoCadastro = erroNumero || !Array.isArray(gravou) || gravou.length === 0
+          ? `NÃO consegui gravar o número no cadastro (${erroNumero?.message ?? "sem permissão"}); as próximas mensagens chegam sem dono.`
+          : "Número gravado no cadastro: as próximas mensagens chegam ligadas.";
+      } else if (atual.slice(-8) === phone.slice(-8)) {
+        numeroNoCadastro = "O número já estava no cadastro.";
+      } else {
+        numeroNoCadastro = "O cadastro já tem OUTRO número e ele NÃO foi trocado: as próximas mensagens deste telefone só chegam ligadas se o dono trocar ou adicionar o número. Pergunte se quer trocar.";
       }
 
       // 2) Vincula retroativamente mensagens e sugestões daquele telefone
       const col = args.entity_type === "client" ? "client_id"
         : args.entity_type === "supplier" ? "supplier_id" : "lead_id";
-      const { data: msgs } = await sb.from("whatsapp_messages")
+      const { data: msgs, error: erroMsgs } = await sb.from("whatsapp_messages")
         .update({ [col]: args.entity_id })
         .eq("phone_normalized", phone).is(col, null).select("id");
-      const { data: suggs } = await sb.from("agenda_suggestions")
+      if (erroMsgs) return { error: `Não consegui ligar as mensagens (${erroMsgs.message}). ${numeroNoCadastro}` };
+      const { data: suggs, error: erroSuggs } = await sb.from("agenda_suggestions")
         .update({
           contact_label: (ent as any).name,
           ...(args.entity_type === "client"
@@ -223,6 +237,8 @@ export const learningTools: ToolDef[] = [
         contato: (ent as any).name,
         mensagens_vinculadas: ((msgs as any[]) || []).length,
         sugestoes_atualizadas: ((suggs as any[]) || []).length,
+        numero_no_cadastro: numeroNoCadastro,
+        ...(erroSuggs ? { aviso: `As sugestões da agenda desse telefone NÃO foram atualizadas (${erroSuggs.message}).` } : {}),
       };
     },
   },
@@ -235,8 +251,10 @@ export const learningTools: ToolDef[] = [
     async execute(_args, { sb }) {
       const since = new Date(Date.now() - 30 * 86400000).toISOString();
 
-      const { data: sugg } = await sb.from("agenda_suggestions")
+      const { data: sugg, error: erroSugg } = await sb.from("agenda_suggestions")
         .select("detector, status").gte("created_at", since).limit(1000);
+      // Leitura que falha lança: zerada, o relatório diria "nada pronto para automatizar" como fato.
+      if (erroSugg) throw new Error(`Não consegui ler as sugestões: ${erroSugg.message}`);
       const porDetector: Record<string, { aceitas: number; descartadas: number; pendentes: number }> = {};
       for (const s of ((sugg as any[]) || [])) {
         const d = s.detector;
@@ -249,14 +267,16 @@ export const learningTools: ToolDef[] = [
         .filter(([, v]) => v.aceitas + v.descartadas >= 5 && v.aceitas / Math.max(1, v.aceitas + v.descartadas) >= 0.8)
         .map(([k, v]) => ({ detector: k, taxa_aceite: Math.round((v.aceitas / (v.aceitas + v.descartadas)) * 100) }));
 
-      const { data: tasks } = await sb.from("agenda_tasks")
+      const { data: tasks, error: erroTasks } = await sb.from("agenda_tasks")
         .select("source, status").gte("created_at", since).limit(1000);
+      if (erroTasks) throw new Error(`Não consegui ler as tarefas: ${erroTasks.message}`);
       const porOrigem: Record<string, number> = {};
       for (const t of ((tasks as any[]) || [])) porOrigem[t.source] = (porOrigem[t.source] || 0) + 1;
 
-      const { data: routines } = await sb.from("ai_learned_routines")
+      const { data: routines, error: erroRoutines } = await sb.from("ai_learned_routines")
         .select("title, observations, status, suggested_automation")
         .neq("status", "rejected").order("observations", { ascending: false }).limit(20);
+      if (erroRoutines) throw new Error(`Não consegui ler as rotinas aprendidas: ${erroRoutines.message}`);
 
       const maduras = ((routines as any[]) || [])
         .filter((r) => r.observations >= 3 && r.suggested_automation && r.status === "observed");

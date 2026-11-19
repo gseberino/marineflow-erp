@@ -85,30 +85,49 @@ export const referenceDataTools: ToolDef[] = [
         ? args.which
         : ["financial_categories", "cost_centers", "payment_conditions", "whatsapp_templates"];
       const out: Record<string, unknown> = {};
+      // Lista que não foi lida não é "lista vazia" (19/11/2026): sem isto, o modelo dizia "não há categorias" e criava
+      // uma duplicada.
+      const naoLidas: string[] = [];
+      const conferir = (lista: string, error: { message?: string } | null) => {
+        if (error) naoLidas.push(`${lista} (${error.message ?? "erro"})`);
+        return !error;
+      };
 
       if (pedidas.includes("financial_categories")) {
-        const { data } = await sb.from("financial_categories").select("id, name, type").eq("active", true).order("name");
-        out.categorias_financeiras = ((data as any[]) || []).map((c) => ({ id: c.id, nome: c.name, tipo: c.type }));
+        const { data, error } = await sb.from("financial_categories").select("id, name, type").eq("active", true).order("name");
+        if (conferir("categorias financeiras", error)) {
+          out.categorias_financeiras = ((data as any[]) || []).map((c) => ({ id: c.id, nome: c.name, tipo: c.type }));
+        }
       }
       if (pedidas.includes("cost_centers")) {
-        const { data } = await sb.from("cost_centers").select("id, name, type").eq("active", true).order("name");
-        out.centros_de_custo = ((data as any[]) || []).map((c) => ({ id: c.id, nome: c.name, tipo: c.type }));
+        const { data, error } = await sb.from("cost_centers").select("id, name, type").eq("active", true).order("name");
+        if (conferir("centros de custo", error)) {
+          out.centros_de_custo = ((data as any[]) || []).map((c) => ({ id: c.id, nome: c.name, tipo: c.type }));
+        }
       }
       if (pedidas.includes("payment_conditions")) {
-        const { data } = await sb
+        const { data, error } = await sb
           .from("payment_condition_presets")
           .select("id, label, installments, auto_generate_collections")
           .eq("active", true)
           .order("sort_order");
-        out.condicoes_de_pagamento = ((data as any[]) || []).map((p) => ({
-          id: p.id, texto: p.label, parcelas: p.installments ?? null, gera_cobrancas: !!p.auto_generate_collections,
-        }));
+        if (conferir("condições de pagamento", error)) {
+          out.condicoes_de_pagamento = ((data as any[]) || []).map((p) => ({
+            id: p.id, texto: p.label, parcelas: p.installments ?? null, gera_cobrancas: !!p.auto_generate_collections,
+          }));
+        }
       }
       if (pedidas.includes("whatsapp_templates")) {
-        const { data } = await sb.from("whatsapp_templates").select("id, name, category, body").eq("active", true).order("sort_order");
-        out.modelos_de_mensagem = ((data as any[]) || []).map((t) => ({
-          id: t.id, nome: t.name, categoria: t.category || null, texto: t.body ? String(t.body).slice(0, 300) : null,
-        }));
+        const { data, error } = await sb.from("whatsapp_templates").select("id, name, category, body").eq("active", true).order("sort_order");
+        if (conferir("modelos de mensagem", error)) {
+          out.modelos_de_mensagem = ((data as any[]) || []).map((t) => ({
+            id: t.id, nome: t.name, categoria: t.category || null, texto: t.body ? String(t.body).slice(0, 300) : null,
+          }));
+        }
+      }
+      if (naoLidas.length) {
+        out.nao_consegui_ler = naoLidas;
+        out.atencao = "As listas em nao_consegui_ler NÃO foram lidas: não diga que estão vazias nem crie item novo por causa disso.";
       }
       return out;
     },

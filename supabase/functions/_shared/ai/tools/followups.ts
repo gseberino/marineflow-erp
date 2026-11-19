@@ -23,11 +23,13 @@ export async function toquesEnviadosHoje(admin: any, agora = new Date()): Promis
   const { dataISO } = partesBrasilia(agora);
   // O dia de Brasília começa às 03:00Z; contar a partir daí evita misturar dois dias.
   const inicio = new Date(`${dataISO}T03:00:00Z`).toISOString();
-  const { count } = await admin
+  const { count, error } = await admin
     .from("ai_followup_events")
     .select("id", { count: "exact", head: true })
     .eq("tipo", "touch_sent")
     .gte("created_at", inicio);
+  // Fecha no erro (19/11/2026): contagem que falha virava 0 e furava o teto diário do número.
+  if (error) throw new Error(`Não consegui contar os toques de hoje (${error.message}); nada foi enviado.`);
   return count ?? 0;
 }
 
@@ -35,7 +37,9 @@ async function contatoComOptOut(admin: any, tipo: string, id: string | null): Pr
   if (!id) return false;
   const tabela = tipo === "supplier" ? "suppliers" : tipo === "client" ? "clients" : null;
   if (!tabela) return false;
-  const { data } = await admin.from(tabela).select("opt_out_whatsapp").eq("id", id).maybeSingle();
+  const { data, error } = await admin.from(tabela).select("opt_out_whatsapp").eq("id", id).maybeSingle();
+  // Fecha no erro: leitura que falha virava "sem opt-out" e a mensagem ia para quem pediu para não receber.
+  if (error) throw new Error(`Não consegui conferir se o contato pediu para não receber mensagens (${error.message}); nada foi enviado.`);
   return Boolean((data as any)?.opt_out_whatsapp);
 }
 
@@ -80,9 +84,11 @@ export const followupTools: ToolDef[] = [
       if (!texto) return { error: "O rascunho está vazio." };
 
       // O mesmo rascunho não sai duas vezes (aprovação repetida, retry do gateway).
-      const { data: jaSaiu } = await admin
+      const { data: jaSaiu, error: erroJaSaiu } = await admin
         .from("ai_followup_events").select("id").eq("mission_id", args.mission_id).eq("tipo", "touch_sent")
         .contains("meta", { draft_event_id: args.event_id }).limit(1);
+      // Sem conferir, o mesmo rascunho podia sair duas vezes (a leitura que falha parecia "ainda não saiu").
+      if (erroJaSaiu) return { error: `Não consegui conferir se este toque já saiu (${erroJaSaiu.message}); nada foi enviado.` };
       if ((jaSaiu as any[])?.length) return { error: "Este toque já foi enviado." };
 
       if (await contatoComOptOut(admin, missao.contraparte_tipo, missao.contraparte_id)) {
