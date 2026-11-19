@@ -114,7 +114,9 @@ export function recebiveisDaConclusao(
 export async function ensureCompletionReceivables(
   input: EnsureInput,
 ): Promise<{ created: number; skipped: boolean }> {
-  const { data: so } = await supabase
+  // Leitura que falha PARA (19/11/2026): seguir com "nada" pulava a cobrança da conclusão
+  // sem aviso, ou — pior — gerava o plano de novo em cima do que já existia.
+  const { data: so, error: soErr } = await supabase
     .from('service_orders')
     .select(`
       id, client_id, service_order_number, grand_total,
@@ -124,6 +126,7 @@ export async function ensureCompletionReceivables(
     `)
     .eq('id', input.serviceOrderId)
     .maybeSingle();
+  if (soErr) throw new Error('Não consegui ler a OS para gerar as contas a receber da conclusão. Tente de novo.');
   if (!so) return { created: 0, skipped: true };
   const o = so as any;
 
@@ -142,21 +145,26 @@ export async function ensureCompletionReceivables(
    *
    * O sinal É recebível da OS. Contá-lo aqui é o que fecha a porta.
    */
-  const { data: existing } = await supabase
+  const { data: existing, error: existingErr } = await supabase
     .from('receivables')
     .select('id')
     .eq('service_order_id', input.serviceOrderId)
     .neq('status', 'cancelled');
+  if (existingErr) {
+    throw new Error('Não consegui conferir as contas a receber que já existem desta OS — nenhuma foi criada. Tente de novo.');
+  }
   if (existing && existing.length > 0) return { created: 0, skipped: true };
 
   // Resolve as parcelas da condição (preset ou custom).
   let doPreset: unknown = null;
   if (o.payment_condition_preset_id) {
-    const { data: preset } = await supabase
+    const { data: preset, error: presetErr } = await supabase
       .from('payment_condition_presets')
       .select('installments')
       .eq('id', o.payment_condition_preset_id)
       .maybeSingle();
+    // Sem o preset, as parcelas cairiam no "à vista" — outra condição que não a combinada.
+    if (presetErr) throw new Error('Não consegui ler a condição de pagamento desta OS — nenhuma conta a receber foi criada. Tente de novo.');
     doPreset = (preset as any)?.installments;
   }
   const installments = parcelasDaCondicao(doPreset, o.custom_payment_installments);

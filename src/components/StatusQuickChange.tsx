@@ -141,7 +141,7 @@ export function StatusQuickChange({ orderId, currentStatus }: Props) {
 
       // Conclusão pela lista → mesmo prompt opt-in de "avisar o cliente + saldo" do formulário.
       if (ficou === 'completed') {
-        const [{ data: so }, { data: recRows }] = await Promise.all([
+        const [{ data: so, error: soErr }, { data: recRows, error: recErr }] = await Promise.all([
           supabase.from('service_orders')
             .select('service_order_number, clients(name, whatsapp, phone)')
             .eq('id', orderId).maybeSingle(),
@@ -149,6 +149,15 @@ export function StatusQuickChange({ orderId, currentStatus }: Props) {
             .select('balance_amount, due_date, is_deposit, status')
             .eq('service_order_id', orderId).neq('status', 'cancelled'),
         ]);
+        // Leitura que falha não é "sem saldo": o aviso ao cliente sumia calado (19/11/2026).
+        if (soErr || recErr) {
+          toast({
+            title: 'Não consegui conferir o saldo desta OS',
+            description: 'O status mudou, mas o aviso ao cliente (e a nota) não foram oferecidos. Abra a OS para fazer isso.',
+            variant: 'destructive',
+          });
+          return;
+        }
         const pend = (recRows || []).filter((r: any) => !r.is_deposit && r.status !== 'paid');
         const outstanding = pend.reduce((s: number, r: any) => s + Number(r.balance_amount || 0), 0);
         const osNumber = (so as any)?.service_order_number || '';

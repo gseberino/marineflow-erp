@@ -62,8 +62,13 @@ function saveReadIds(ids: Set<string>) {
   localStorage.setItem(READ_KEY, JSON.stringify(Array.from(ids)));
 }
 
-async function generateNotifications(userId: string, role: string): Promise<AppNotification[]> {
+/**
+ * Os avisos calculados na hora. `incompleto`: alguma leitura falhou — o sino diz isso em vez de
+ * "Nenhuma notificação" (antes cada erro virava lista vazia, calado; 19/11/2026).
+ */
+async function generateNotifications(userId: string, role: string): Promise<{ lista: AppNotification[]; incompleto: boolean }> {
   const notifications: AppNotification[] = [];
+  let incompleto = false;
   const now = Date.now();
   const today = new Date().toISOString().split('T')[0];
   const tomorrow = new Date(now + 86400000).toISOString().split('T')[0];
@@ -80,13 +85,14 @@ async function generateNotifications(userId: string, role: string): Promise<AppN
 
   // 1) Quote status changes (Only for external seller or admin)
   if (isExternal || isAdmin) {
-    const { data: quotes } = await supabase
+    const { data: quotes, error: quotesErr } = await supabase
       .from('external_quotes')
       .select('id, quote_number, status, updated_at, lead:external_quote_leads(name)')
       .eq('created_by', userId)
       .in('status', ['approved', 'cancelled'])
       .order('updated_at', { ascending: false })
       .limit(10);
+    if (quotesErr) incompleto = true;
 
     (quotes || []).forEach((q: any) => {
       const isApproved = q.status === 'approved';
@@ -103,12 +109,13 @@ async function generateNotifications(userId: string, role: string): Promise<AppN
 
   // 2) Overdue receivables (Financial/Admin)
   if (isAdmin || isFinancial) {
-    const { data: overdue } = await supabase
+    const { data: overdue, error: overdueErr } = await supabase
       .from('receivables')
       .select('id, balance_amount, due_date, clients(name)')
       .not('status', 'in', '("paid","cancelled")')
       .lt('due_date', threeDaysAgo)
       .limit(5);
+    if (overdueErr) incompleto = true;
 
     (overdue || []).forEach((r: any) => {
       notifications.push({
@@ -126,12 +133,13 @@ async function generateNotifications(userId: string, role: string): Promise<AppN
 
   // 3) Low stock (Staff - mostly Admin/Financial/Inventory)
   if (isAdmin || isFinancial) {
-    const { data: products } = await supabase
+    const { data: products, error: productsErr } = await supabase
       .from('products')
       .select('id, name, stock_quantity, minimum_stock')
       .eq('active', true)
       .gt('minimum_stock', 0)
       .limit(20);
+    if (productsErr) incompleto = true;
 
     (products || [])
       .filter((p: any) => (p.stock_quantity || 0) < (p.minimum_stock || 0))
@@ -149,13 +157,14 @@ async function generateNotifications(userId: string, role: string): Promise<AppN
 
   // 4) Upcoming OS (Internal Staff only)
   if (isStaff && !isExternal) {
-    const { data: upcoming } = await supabase
+    const { data: upcoming, error: upcomingErr } = await supabase
       .from('service_orders')
       .select('id, service_order_number, scheduled_start_at, clients(name)')
       .in('status', ['scheduled', 'open'])
       .gte('scheduled_start_at', today)
       .lte('scheduled_start_at', tomorrow + 'T23:59:59')
       .limit(5);
+    if (upcomingErr) incompleto = true;
 
     (upcoming || []).forEach((o: any) => {
       const dt = o.scheduled_start_at ? new Date(o.scheduled_start_at) : null;
@@ -174,7 +183,7 @@ async function generateNotifications(userId: string, role: string): Promise<AppN
   }
 
   notifications.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
-  return notifications.slice(0, 20);
+  return { lista: notifications.slice(0, 20), incompleto };
 }
 
 export function useNotifications() {
@@ -199,7 +208,8 @@ export function useNotifications() {
         .select('id, type, title, body, navigate_to, read_at, created_at')
         .order('created_at', { ascending: false })
         .limit(30);
-      if (error) return [];
+      // Erro LANÇA (o sino avisa "não consegui carregar"), em vez de parecer sino vazio.
+      if (error) throw error;
       return data || [];
     },
   });
@@ -258,7 +268,7 @@ export function useNotifications() {
 
   const markAllAsRead = useCallback(() => {
     const all = new Set(readIds);
-    (query.data || []).forEach(n => all.add(n.id));
+    (query.data?.lista || []).forEach(n => all.add(n.id));
     saveReadIds(all);
     setReadIds(all);
     if (dbUnread.size > 0) {
@@ -270,7 +280,7 @@ export function useNotifications() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query.data, readIds, dbUnread.size]);
 
-  const items = [...dbItems, ...(query.data || [])]
+  const items = [...dbItems, ...(query.data?.lista || [])]
     .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
     .slice(0, 30);
   const unreadCount = items.filter(n =>
@@ -280,6 +290,8 @@ export function useNotifications() {
     notifications: items,
     unreadCount,
     isLoading: query.isLoading,
+    /** Alguma leitura falhou: a lista pode estar faltando avisos. */
+    incompleto: !!query.data?.incompleto || query.isError || dbQuery.isError,
     isRead: (id: string) => (id.startsWith('db:') ? !dbUnread.has(id) : readIds.has(id)),
     markAsRead,
     markAllAsRead,

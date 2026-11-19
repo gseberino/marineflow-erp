@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { lerEmPaginas } from '@/lib/ler-em-paginas';
 
 /** Espelha os tipos de `supabase/functions/_shared/banking/types.ts`. */
 export type CandidateKind =
@@ -229,12 +230,17 @@ export function useReconciliationHealth() {
   return useQuery({
     queryKey: ['reconciliation-health'],
     queryFn: async (): Promise<ReconciliationHealth> => {
-      const [todas, memoria] = await Promise.all([
-        supabase.from('bank_transactions').select('amount, reconciled, transaction_date'),
+      // Em páginas e conferindo o erro (19/11/2026): o extrato passa de 1.000 linhas e o servidor
+      // cortava o resto sem avisar (taxa e pendências de uma fatia), e uma leitura que falhava
+      // virava "0 pendentes" — a rotina parecia em dia sem ter lido nada.
+      const [linhas, memoria] = await Promise.all([
+        lerEmPaginas<{ amount: number | null; reconciled: boolean | null; transaction_date: string }>((de, ate) => supabase
+          .from('bank_transactions').select('amount, reconciled, transaction_date')
+          .order('id').range(de, ate)),
         supabase.from('reconciliation_memory').select('id', { count: 'exact', head: true }),
       ]);
+      if (memoria.error) throw new Error(`Não consegui ler os padrões aprendidos: ${memoria.error.message}`);
 
-      const linhas = todas.data || [];
       const pendentes = linhas.filter(l => !l.reconciled);
       const conciliadas = linhas.length - pendentes.length;
 

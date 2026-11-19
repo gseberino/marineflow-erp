@@ -181,7 +181,7 @@ export function FaturarOsDialog({ open, onOpenChange, serviceOrderId, orderNumbe
   const abrirEmissaoDetalhada = async () => {
     if (!serviceOrderId) return;
     try {
-      const [{ data: so }, { data: parts }] = await Promise.all([
+      const [{ data: so, error: soErr }, { data: parts, error: partsErr }] = await Promise.all([
         supabase.from('service_orders')
           .select('id, client_id, customer_po_number, customer_buyer_name, requested_by_name, service_order_number')
           .eq('id', serviceOrderId).maybeSingle(),
@@ -189,6 +189,11 @@ export function FaturarOsDialog({ open, onOpenChange, serviceOrderId, orderNumbe
           .select('product_id, quantity, unit_sale_snapshot')
           .eq('service_order_id', serviceOrderId),
       ]);
+      // Leitura que falha não é "OS sem produtos" nem nota sem cliente (19/11/2026).
+      if (soErr || partsErr || !so) {
+        toast.error('Não consegui carregar a OS e os produtos dela. Tente de novo.');
+        return;
+      }
       const items = (parts ?? [])
         .filter((p) => p.product_id)
         .map((p) => ({

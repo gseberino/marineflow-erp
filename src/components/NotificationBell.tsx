@@ -43,7 +43,7 @@ function timeAgo(iso: string): string {
 export function NotificationBell() {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
-  const { notifications, unreadCount, isRead, markAsRead, markAllAsRead } = useNotifications();
+  const { notifications, unreadCount, isRead, markAsRead, markAllAsRead, incompleto } = useNotifications();
 
   const handleClick = (n: AppNotification) => {
     markAsRead(n.id);
@@ -84,10 +84,15 @@ export function NotificationBell() {
             </Button>
           )}
         </div>
+        {incompleto && (
+          <p role="alert" className="border-b px-3 py-2 text-xs text-destructive">
+            Não consegui carregar todos os avisos — tente de novo daqui a pouco.
+          </p>
+        )}
         <ScrollArea className="max-h-[420px]">
           {notifications.length === 0 ? (
             <div className="py-8 text-center text-sm text-muted-foreground">
-              Nenhuma notificação
+              {incompleto ? 'Nenhum aviso carregado' : 'Nenhuma notificação'}
             </div>
           ) : (
             <ul className="divide-y">
