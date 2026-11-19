@@ -63,6 +63,87 @@ export interface ManhaNova {
    * depois (marcarNaMensagem: os resolvidos somem, os mostrados ficam "incluido" — não "entregue"). null = sem guardado.
    */
   guardado?: { modo: ModoDoPortao; plano: PlanoDoGuardado } | null;
+  /**
+   * (19/11/2026, agenda, Opção A) As perguntas cliente_aprovar que o texto mostrou (o bloco "Mensagens ao cliente esperando o
+   * seu sim"). Quem enfileira a manhã ENVIADA as guarda com o id da linha da fila do dono (guardarAprovacoesDaManha): contam
+   * como mostradas quando a fila disser 'sent'. null/ausente = sem o bloco.
+   */
+  aprovacoes?: { perguntaIds: string[] } | null;
+}
+
+/**
+ * (19/11/2026, agenda, Opção A — decisão do dono: "o pedido de aprovação entra no resumo da manhã, com prazo") O bloco pronto
+ * do banco (agenda_aprovacoes_da_manha: as mensagens ao cliente esperando o *manda cliente*, a que vence primeiro em cima, o
+ * prazo de valida_ate) e as perguntas que ele escreveu.
+ */
+export interface AprovacoesDaManha {
+  texto: string;
+  perguntaIds: string[];
+}
+
+/** A resposta de agenda_aprovacoes_da_manha → o bloco; sem bloco (nada esperando, modo_cliente fora de ligado) = null. Forma errada LANÇA. */
+export function aprovacoesDaResposta(data: unknown): AprovacoesDaManha | null {
+  if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("agenda_aprovacoes_da_manha respondeu fora da forma");
+  const d = data as { texto?: unknown; linhas?: unknown };
+  if (d.texto === null || d.texto === undefined) return null;
+  if (typeof d.texto !== "string" || !Array.isArray(d.linhas)) throw new Error("agenda_aprovacoes_da_manha respondeu fora da forma");
+  const perguntaIds = d.linhas.map((l) => {
+    const id = (l as { pergunta_id?: unknown })?.pergunta_id;
+    if (typeof id !== "string" || !id) throw new Error("agenda_aprovacoes_da_manha respondeu uma linha sem a pergunta");
+    return id;
+  });
+  const texto = d.texto.trim();
+  return texto && perguntaIds.length ? { texto, perguntaIds } : null;
+}
+
+/** O bloco das aprovações ao cliente no fim da manhã (antes da sugestão de imprimir). Só em dia útil; sem bloco = o texto de antes, byte a byte. */
+export function comAprovacoesAoCliente(texto: string, tipo: ReturnType<typeof tipoDoDia>, a: AprovacoesDaManha | null | undefined): string {
+  if (tipo !== "util" || !a?.texto) return texto;
+  return `${texto}\n\n${a.texto}`;
+}
+
+/** Lê o bloco das aprovações. Nunca lança: erro = null (a manhã sai sem o bloco; a pergunta segue no fechamento e em *agenda clientes*). */
+export async function lerAprovacoesDaManha(admin: Admin, hoje: string, agora: Date): Promise<AprovacoesDaManha | null> {
+  try {
+    const { data, error } = await admin.rpc("agenda_aprovacoes_da_manha", { p_hoje: hoje, p_agora: agora.toISOString() });
+    if (error) throw error;
+    return aprovacoesDaResposta(data);
+  } catch (e) {
+    console.warn(JSON.stringify({ fn: "ai-daily-briefing", secretario: "aprovacoes_falhou", codigo: String((e as { code?: unknown })?.code ?? (e as Error)?.name ?? "erro") }));
+    return null;
+  }
+}
+
+/**
+ * Depois de enfileirar a manhã ENVIADA (1ª gravação do dia): as perguntas do bloco vão a agenda_fechamento_guardar (via 'manha')
+ * com o id da linha da fila do dono — o mesmo caminho do fechamento: contam (mostrada_vezes, mostrada_em, mostrada_via='manha')
+ * só quando a fila disser 'sent' (agora, se já mandou; senão o motor de 15 min confere). Sem o id da fila nada é guardado.
+ * Nunca lança.
+ */
+export async function guardarAprovacoesDaManha(admin: Admin, p: {
+  hoje: string;
+  perguntaIds: string[];
+  filaId: string | null;
+  agora: Date;
+}): Promise<{ estado: string; perguntas: number } | "sem_fila" | "erro" | null> {
+  if (!p.perguntaIds.length) return null;
+  if (!p.filaId) return "sem_fila";
+  try {
+    const { data, error } = await admin.rpc("agenda_fechamento_guardar", {
+      p_hoje: p.hoje,
+      p_linhas: p.perguntaIds.map((id) => ({ pergunta_id: id, acao_ids: [] })),
+      p_fila: p.filaId,
+      p_via: "manha",
+      p_agora: p.agora.toISOString(),
+    });
+    if (error) throw error;
+    const r = (data ?? {}) as { ok?: unknown; estado?: unknown; motivo?: unknown; perguntas?: unknown };
+    if (r.ok !== true) return r.motivo === "sem_fila" ? "sem_fila" : "erro";
+    return { estado: String(r.estado ?? "esperando"), perguntas: Number(r.perguntas ?? 0) };
+  } catch (e) {
+    console.warn(JSON.stringify({ fn: "ai-daily-briefing", secretario: "aprovacoes_guarda_falhou", codigo: String((e as { code?: unknown })?.code ?? (e as Error)?.name ?? "erro") }));
+    return "erro";
+  }
 }
 
 /** (16/10/2026) O guardado lido para a manhã (avisos_para_a_mensagem) e o que deixou de ser verdade (D8). */
@@ -183,6 +264,11 @@ export function montarDosDados(p: {
    * "imprime as vias de hoje" numa linha no fim. Ausente ou 0 = o texto de antes, byte a byte.
    */
   viasParaImprimir?: number;
+  /**
+   * (19/11/2026, agenda, Opção A) O bloco das mensagens ao cliente esperando o *manda cliente* (lerAprovacoesDaManha). Entra
+   * depois do texto da manhã e antes da sugestão de imprimir, só em dia útil. Ausente ou null = o texto de antes, byte a byte.
+   */
+  aprovacoes?: AprovacoesDaManha | null;
 }): ManhaNova {
   const tipo = tipoDoDia(p.hoje);
   const opcoes = p.opcoes ?? OPCOES_PADRAO;
@@ -199,9 +285,10 @@ export function montarDosDados(p: {
     : null;
   // (P14) "Clientes esperando" e "Para conferir": os sem prazo que já têm letra na manhã não repetem
   const retorno = p.retorno ? linhasDaManha(p.retorno, fonesDaManha(selecao), p.agora, p.retornoExtra ?? null) : null;
-  const texto = comSugestaoDeImpressao(textoDaManha({
+  const aprovacoes = tipo === "util" && p.aprovacoes?.texto ? p.aprovacoes : null;
+  const texto = comSugestaoDeImpressao(comAprovacoesAoCliente(textoDaManha({
     hoje: p.hoje, tipoDoDia: tipo, feriado: feriadoDoDia(p.hoje), selecao, naRua: p.naRua, deHoje: p.deHoje, guardado: plano, retorno,
-  }), tipo, p.viasParaImprimir ?? 0);
+  }), tipo, aprovacoes), tipo, p.viasParaImprimir ?? 0);
   return {
     texto,
     tipoDoDia: tipo,
@@ -211,6 +298,7 @@ export function montarDosDados(p: {
     itensLista: selecao.lista.filter((g) => g.letra).length,
     semLetra: selecao.semLetra,
     guardado: plano && p.guardado ? { modo: p.guardado.modo, plano } : null,
+    aprovacoes: aprovacoes ? { perguntaIds: aprovacoes.perguntaIds } : null,
   };
 }
 
@@ -278,9 +366,11 @@ export async function montarManhaNova(admin: Admin, p: {
   const retornoExtra = tipoDoDia(p.hoje) === "util" ? await lerExtra(admin, "manha", p.agora) : null;
   // (17/11/2026) a sugestão de imprimir as vias de hoje; viasParaImprimirHoje nunca lança (erro = 0 = sem a linha)
   const viasParaImprimir = tipoDoDia(p.hoje) === "util" ? await viasParaImprimirHoje(admin, p.hoje) : 0;
+  // (19/11/2026, agenda, Opção A) as mensagens ao cliente esperando o *manda cliente*; lerAprovacoesDaManha nunca lança (erro = sem o bloco)
+  const aprovacoes = tipoDoDia(p.hoje) === "util" ? await lerAprovacoesDaManha(admin, p.hoje, p.agora) : null;
   return montarDosDados({
     hoje: p.hoje, agora: p.agora, ...lido, escritorio: p.escritorio,
-    opcoes: { semanaVoltaComFatoNovo: portao.regras.semana_volta_com_fato_novo }, guardado, retorno, retornoExtra, viasParaImprimir,
+    opcoes: { semanaVoltaComFatoNovo: portao.regras.semana_volta_com_fato_novo }, guardado, retorno, retornoExtra, viasParaImprimir, aprovacoes,
   });
 }
 

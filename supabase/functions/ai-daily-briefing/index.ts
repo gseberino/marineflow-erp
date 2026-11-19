@@ -37,7 +37,7 @@ import { conversaEncerradaPeloContato } from "../_shared/whatsapp/contato-encerr
 import { resolveOrCreateWhatsAppSession } from "../_shared/ai/whatsapp-channel.ts";
 import { lerFormatoDoResumo } from "../_shared/secretario/formato.ts";
 import { type Dono, donoDoWhatsApp } from "../_shared/whatsapp/dono.ts";
-import { contarPropostas, type ManhaNova, marcarGuardadoDaManha, montarManhaNova, registrarManha } from "./secretario.ts";
+import { contarPropostas, guardarAprovacoesDaManha, type ManhaNova, marcarGuardadoDaManha, montarManhaNova, registrarManha } from "./secretario.ts";
 import type { DadosDoEscritorio } from "./secretario-texto.ts";
 import { rodarTurnoDaTarde } from "./secretario-tarde.ts";
 
@@ -1078,10 +1078,20 @@ servirComCors(async (req) => {
     // disser 'sent'; se a manhã não sair, a próxima mensagem fixa os leva de novo. Só na 1ª gravação do dia (num 2º
     // disparo o texto enviado é o da 1ª vez) e só se o dono recebeu o texto novo. Sem guardado: não chama nada.
     let guardadoNaManha = 0;
+    const filaDoDono = donoDaManha
+      ? ((inserted ?? []) as Array<{ id: string; phone_normalized: string }>).find((l) => String(l.phone_normalized) === donoDaManha!.phone)?.id ?? null
+      : null;
     if (manhaNova?.guardado?.modo === "ligado" && donoDaManha && formato === "novo" && textoNovoDoDono && manhaGravadaAgora) {
-      const filaDoDono = ((inserted ?? []) as Array<{ id: string; phone_normalized: string }>)
-        .find((l) => String(l.phone_normalized) === donoDaManha!.phone)?.id ?? null;
       guardadoNaManha = await marcarGuardadoDaManha(admin, { dono: donoDaManha, manha: manhaNova, novo: true, filaId: filaDoDono });
+    }
+    // (19/11/2026, agenda, Opção A) as mensagens ao cliente que a manhã ENVIADA pediu ao dono: guardadas com o id da linha da
+    // fila dele (via 'manha'); contam como mostradas quando a fila disser 'sent'. Só na 1ª gravação do dia (num 2º disparo o
+    // texto é o da 1ª vez, já guardado) e só se o dono recebeu o texto novo. Sem bloco: não chama nada. Nunca lança.
+    let aprovacoesNaManha: Awaited<ReturnType<typeof guardarAprovacoesDaManha>> = null;
+    if (manhaNova?.aprovacoes?.perguntaIds.length && donoDaManha && formato === "novo" && textoNovoDoDono && manhaGravadaAgora) {
+      aprovacoesNaManha = await guardarAprovacoesDaManha(admin, {
+        hoje: hojeBR, perguntaIds: manhaNova.aprovacoes.perguntaIds, filaId: filaDoDono, agora: now,
+      });
     }
 
     // 'sombra': o de sempre já está na fila; o novo é só guardado (para a comparação lado a lado).
@@ -1136,6 +1146,7 @@ servirComCors(async (req) => {
           secretario: {
             formato, montada: !!manhaNova, enviada_ao_dono: !!textoNovoDoDono, sombra_gravada: sombraGravada, guardado_na_sombra: guardadoNaSombra,
             ...(guardadoNaManha ? { guardado_na_manha: guardadoNaManha } : {}),
+            ...(aprovacoesNaManha ? { aprovacoes_na_manha: aprovacoesNaManha } : {}),
           },
         }
         : {}),
