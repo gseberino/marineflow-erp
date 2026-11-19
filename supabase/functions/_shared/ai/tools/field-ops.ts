@@ -6,6 +6,7 @@ import { dayRangeBRT } from "./agenda.ts";
 import { filtroQueCruza } from "../../agenda-dia.ts";
 import { ehPortaAusente, ehSemDireitoNaPorta, statusSemAPorta } from "../../porta-ausente.ts";
 import { acharLinha, numerarLinhas, rotuloDaLinha } from "../../linhas-da-os.ts";
+import { baixarMidia, type ResultadoDoDownload, tipoReal } from "../../comprovantes/midia.ts";
 
 // Operação de campo + agenda inteligente (Fase 2) — SEM schema novo.
 // O schema já tinha o necessário: service_orders.check_in_at / check_out_at / technician_notes,
@@ -22,13 +23,83 @@ function carimbo(): string {
   return `[${data} ${hora}]`;
 }
 
-/** Anexa uma linha ao technician_notes preservando o que já estava lá. */
-async function anexarNota(sb: any, soId: string, linha: string): Promise<string> {
-  const { data: so } = await sb.from("service_orders").select("technician_notes").eq("id", soId).maybeSingle();
-  const atual = (so?.technician_notes || "").trim();
+/** Teto de technician_notes (o mesmo da via). */
+const TETO_DAS_NOTAS = 8000;
+
+/**
+ * Anexa uma linha ao technician_notes preservando o que já estava lá. Devolve { error } quando NÃO gravou:
+ * leitura com erro (antes sobrescrevia as notas com só a linha nova), OS sumida, notas no teto (o slice cortava
+ * justamente a linha nova) ou update sem linha afetada (RLS).
+ */
+export async function anexarNota(sb: any, soId: string, linha: string): Promise<{ ok: true } | { error: string }> {
+  const { data: so, error: erroLeitura } = await sb.from("service_orders").select("technician_notes").eq("id", soId).maybeSingle();
+  if (erroLeitura) return { error: `Não consegui ler as notas da OS (${erroLeitura.message}); a nota NÃO foi gravada.` };
+  if (!so) return { error: "OS não encontrada; a nota NÃO foi gravada." };
+  const atual = (so.technician_notes || "").trim();
   const novo = atual ? `${atual}\n${linha}` : linha;
-  await sb.from("service_orders").update({ technician_notes: novo.slice(0, 8000) }).eq("id", soId);
-  return novo;
+  if (novo.length > TETO_DAS_NOTAS) {
+    return { error: `As notas do técnico desta OS estão no limite (${TETO_DAS_NOTAS} caracteres); a nota NÃO foi gravada.` };
+  }
+  const { data: gravou, error: erroGravar } = await sb.from("service_orders").update({ technician_notes: novo }).eq("id", soId).select("id");
+  if (erroGravar) return { error: `A nota NÃO foi gravada (${erroGravar.message}).` };
+  if (!Array.isArray(gravou) || gravou.length === 0) return { error: "A nota NÃO foi gravada (sem permissão para alterar esta OS)." };
+  return { ok: true };
+}
+
+// ─── Foto do WhatsApp → aba Fotos da OS (19/11/2026) ───────────────────────────────────────
+
+/** O bucket da aba Fotos (src/components/ServiceOrderPhotos.tsx), privado desde 04/10/2026. */
+export const BUCKET_DAS_FOTOS_DA_OS = "service-order-photos";
+/** CHECK service_order_photos_photo_type_check. */
+export const TIPOS_DE_FOTO_DA_OS = ["before", "progress", "after", "problem"];
+const ROTULO_DO_TIPO_DE_FOTO: Record<string, string> = { before: "antes", progress: "durante", after: "depois", problem: "problema" };
+/** O que a galeria mostra em qualquer navegador (HEIC não abre no Chrome; vídeo e PDF não são foto). */
+const MIMES_DE_FOTO = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+const MOTIVO_DO_DOWNLOAD: Record<string, string> = {
+  sem_chave: "a mensagem não tem a referência do WhatsApp para baixar o arquivo",
+  midia_indisponivel: "o WhatsApp não tem mais esse arquivo (a mídia expira em cerca de 2 semanas)",
+  evolution_fora: "o WhatsApp do sistema não respondeu agora; tente de novo daqui a pouco",
+  arquivo_grande: "o arquivo passa de 15 MB",
+};
+
+/**
+ * Copia a foto de uma mensagem do WhatsApp para a aba Fotos da OS: baixa pela Evolution (o mesmo download dos
+ * comprovantes), confere pelos BYTES que é foto, sobe no bucket privado e grava service_order_photos com o caminho
+ * (como a tela faz). Se o registro falhar, apaga o arquivo para não deixar órfão. `baixar` é para o teste.
+ */
+export async function copiarFotoParaAOS(
+  ctx: { sb: any; admin: any; userId?: string | null },
+  msg: { message_type?: string | null; raw_payload?: unknown },
+  soId: string,
+  opcoes: { photoType: string; legenda?: string | null; baixar?: (raw: unknown) => Promise<ResultadoDoDownload> },
+): Promise<{ ok: true; storage_path: string } | { ok: false; motivo: string }> {
+  const tipoMsg = String(msg.message_type ?? "");
+  if (tipoMsg !== "image" && tipoMsg !== "document") {
+    return { ok: false, motivo: `a mensagem é do tipo "${tipoMsg || "desconhecido"}", não uma foto` };
+  }
+  const baixado = await (opcoes.baixar ?? baixarMidia)(msg.raw_payload);
+  if (!baixado.ok) return { ok: false, motivo: MOTIVO_DO_DOWNLOAD[baixado.erro] ?? "não consegui baixar o arquivo" };
+  const tipo = tipoReal(baixado.bytes);
+  if (!tipo || !MIMES_DE_FOTO.has(tipo.mime)) {
+    return { ok: false, motivo: "o arquivo não é uma foto JPEG, PNG ou WebP" };
+  }
+  const caminho = `${soId}/${crypto.randomUUID()}.${tipo.ext}`;
+  const armazem = ctx.admin.storage.from(BUCKET_DAS_FOTOS_DA_OS);
+  const { error: erroUpload } = await armazem.upload(caminho, baixado.bytes, { contentType: tipo.mime });
+  if (erroUpload) return { ok: false, motivo: `não consegui guardar a foto (${erroUpload.message})` };
+  const { error: erroRegistro } = await ctx.sb.from("service_order_photos").insert({
+    service_order_id: soId,
+    storage_path: caminho,
+    photo_type: opcoes.photoType,
+    caption: opcoes.legenda ? String(opcoes.legenda).slice(0, 500) : null,
+    uploaded_by: ctx.userId ?? null,
+  });
+  if (erroRegistro) {
+    try { await armazem.remove([caminho]); } catch { /* o arquivo órfão não muda a resposta: a foto não entrou */ }
+    return { ok: false, motivo: `não consegui registrar a foto na OS (${erroRegistro.message})` };
+  }
+  return { ok: true, storage_path: caminho };
 }
 
 // ─── Frente operacional (07/10/2026): via do técnico e horário dito ─────────────────────────
@@ -216,13 +287,15 @@ export const fieldOpsTools: ToolDef[] = [
       }
 
       const hora = dito ? ` (chegada às ${horaBR(quando)})` : "";
-      if (args.note) await anexarNota(sb, so.id, `${carimbo()} Check-in${hora}: ${args.note}`);
-      else await anexarNota(sb, so.id, `${carimbo()} Check-in do técnico${hora}.`);
+      const nota = await anexarNota(
+        sb, so.id, args.note ? `${carimbo()} Check-in${hora}: ${args.note}` : `${carimbo()} Check-in do técnico${hora}.`,
+      );
 
       return {
         ok: true, os: so.service_order_number, check_in_em: quando, status: statusFinal,
         ...(so.check_in_at ? { corrigido_de: so.check_in_at } : {}),
         ...(aviso ? { aviso } : {}),
+        ...("error" in nota ? { nota_nao_gravada: `A chegada foi registrada, mas ${nota.error}` } : {}),
       };
     },
   },
@@ -264,7 +337,7 @@ export const fieldOpsTools: ToolDef[] = [
 
       const hora = dito ? ` (saída às ${horaBR(agora)})` : "";
       const linha = args.note ? `${carimbo()} Check-out${hora}: ${args.note}` : `${carimbo()} Check-out do técnico${hora}.`;
-      await anexarNota(sb, so.id, linha);
+      const nota = await anexarNota(sb, so.id, linha);
 
       // Duração só faz sentido se houve check-in.
       let duracao: string | null = null;
@@ -277,6 +350,7 @@ export const fieldOpsTools: ToolDef[] = [
         os: so.service_order_number,
         check_out_em: agora,
         duracao_no_local: duracao,
+        ...("error" in nota ? { nota_nao_gravada: `A saída foi registrada, mas ${nota.error}` } : {}),
         lembrete: "A OS continua no status atual — concluir/faturar é decisão de quem administra.",
       };
     },
@@ -468,39 +542,71 @@ export const fieldOpsTools: ToolDef[] = [
       const { data: so } = await sb.from("service_orders").select("id, service_order_number, status").eq("id", args.service_order_id).maybeSingle();
       if (!so) return { error: "OS não encontrada." };
       if (so.status === "cancelled") return { error: "OS cancelada — não aceita novas notas." };
-      await anexarNota(sb, so.id, `${carimbo()} ${args.note}`);
+      const nota = await anexarNota(sb, so.id, `${carimbo()} ${args.note}`);
+      if ("error" in nota) return nota;
       return { ok: true, os: so.service_order_number, registrado: args.note };
     },
   },
   {
     name: "attach_photo_to_service_order",
     description:
-      "Vincula uma FOTO/arquivo recebido no WhatsApp a uma OS (fica anexado ao serviço, ex.: 'antes' e 'depois'). Use o message_id que veio de read_supplier_messages ou da conversa. Não copia o arquivo — apenas amarra a mensagem à OS.",
+      "Coloca uma FOTO recebida no WhatsApp na aba FOTOS da OS (antes / durante / depois / problema): baixa a imagem do WhatsApp, guarda no arquivo de fotos da OS e liga a mensagem à OS. " +
+      "Use o message_id que veio de read_supplier_messages ou da conversa. Só foto (JPEG/PNG/WebP): vídeo, áudio e PDF não entram na aba Fotos. " +
+      "Se a foto não puder ser baixada (o WhatsApp apaga a mídia em cerca de 2 semanas), a resposta diz que ela NÃO entrou na aba Fotos — repita isso ao usuário, não diga que anexou.",
     input_schema: {
       type: "object",
       properties: {
-        message_id: { type: "string", description: "UUID da mensagem do WhatsApp que contém a foto/arquivo." },
+        message_id: { type: "string", description: "UUID da mensagem do WhatsApp que contém a foto." },
         service_order_id: { type: "string", description: "UUID da OS." },
+        photo_type: {
+          type: "string",
+          enum: ["before", "progress", "after", "problem"],
+          description: "before = antes, progress = durante (padrão), after = depois, problem = problema encontrado.",
+        },
         note: { type: "string", description: "Legenda opcional (ex.: 'antes da troca')." },
       },
       required: ["message_id", "service_order_id"],
     },
     risk: "low",
-    async execute(args, { sb }) {
-      const { data: msg } = await sb
+    async execute(args, ctx) {
+      const { sb } = ctx;
+      const { data: msg, error: erroMsg } = await sb
         .from("whatsapp_messages")
-        .select("id, message_type, body, service_order_id")
+        .select("id, message_type, service_order_id, raw_payload")
         .eq("id", args.message_id)
         .maybeSingle();
+      if (erroMsg) return { error: `Não consegui ler a mensagem (${erroMsg.message}).` };
       if (!msg) return { error: "Mensagem não encontrada." };
-      const { data: so } = await sb.from("service_orders").select("id, service_order_number").eq("id", args.service_order_id).maybeSingle();
+      const { data: so, error: erroOS } = await sb
+        .from("service_orders").select("id, service_order_number").eq("id", args.service_order_id).maybeSingle();
+      if (erroOS) return { error: `Não consegui ler a OS (${erroOS.message}).` };
       if (!so) return { error: "OS não encontrada." };
+      const tipoDeFoto = TIPOS_DE_FOTO_DA_OS.includes(String(args.photo_type)) ? String(args.photo_type) : "progress";
 
-      const { error } = await sb.from("whatsapp_messages").update({ service_order_id: so.id }).eq("id", msg.id);
-      if (error) throw error;
-      if (args.note) await anexarNota(sb, so.id, `${carimbo()} Foto anexada: ${args.note}`);
+      // De verdade (19/11): antes só gravava whatsapp_messages.service_order_id e dizia "anexado ao serviço", mas a
+      // aba Fotos da OS lê service_order_photos — a foto nunca aparecia lá.
+      const copia = await copiarFotoParaAOS(ctx, msg, so.id, { photoType: tipoDeFoto, legenda: args.note ?? null });
+      const { error: erroLigar } = await sb.from("whatsapp_messages").update({ service_order_id: so.id }).eq("id", msg.id);
 
-      return { ok: true, os: so.service_order_number, tipo: msg.message_type, legenda: args.note || null };
+      if (!copia.ok) {
+        return {
+          ok: false,
+          os: so.service_order_number,
+          error: `A foto NÃO entrou na aba Fotos da ${so.service_order_number}: ${copia.motivo}.` +
+            (erroLigar ? "" : " A mensagem ficou ligada à OS só no histórico do WhatsApp."),
+          ligada_no_historico_do_whatsapp: !erroLigar,
+        };
+      }
+      const nota = args.note ? await anexarNota(sb, so.id, `${carimbo()} Foto anexada: ${args.note}`) : null;
+      return {
+        ok: true,
+        os: so.service_order_number,
+        na_aba_fotos: true,
+        tipo_de_foto: ROTULO_DO_TIPO_DE_FOTO[tipoDeFoto],
+        legenda: args.note || null,
+        ...(erroLigar ? { aviso: "A foto está na aba Fotos, mas a mensagem não ficou ligada à OS no histórico do WhatsApp." } : {}),
+        ...(nota && "error" in nota ? { nota_nao_gravada: nota.error } : {}),
+      };
     },
   },
   {
