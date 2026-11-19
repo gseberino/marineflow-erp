@@ -2,7 +2,6 @@ import { blockTechnician, lerRetrato, NON_TECHNICIAN_ROLES, type ToolCtx, type T
 import { applyStockDelta, resolverServicoDaLinha } from "./service-orders.ts";
 import { type ItemResolvido, resolverItens } from "../keyword-resolver.ts";
 import { validadePadraoDoOrcamento } from "../validade-orcamento.ts";
-import { recalcularOSComCascata } from "../../receivables/cascata.ts";
 import { mascararDadosPessoais } from "../../retorno/mascara.ts";
 import { instantesEmSequencia } from "../../linhas-da-os.ts";
 
@@ -417,8 +416,13 @@ export async function montarOrcamento(
     return { error: `O orçamento não foi feito (${motivo}). Nada ficou gravado.` };
   };
 
+  // Fora do caminho da proposta a gravação não desfaz o ORÇ, mas também não esconde o que não entrou: cada insert é
+  // conferido, a peça que não gravou não mexe no estoque e o retorno lista o que ficou de fora (antes era "ok" com
+  // a linha faltando no orçamento e o estoque baixado).
+  const naoEntrou: Array<{ item: string; lista: "PEÇAS" | "SERVIÇOS"; motivo: string }> = [];
+
   // 4. Peças resolvidas → service_order_parts (+ baixa de estoque, como o resto do sistema).
-  const comProduto = resolvidos.filter((i) => i.product_id);
+  let comProduto = resolvidos.filter((i) => i.product_id);
   if (comProduto.length) {
     const partsRows = comProduto.map((i, n) => ({
       service_order_id: so.id,
@@ -433,7 +437,13 @@ export async function montarOrcamento(
     }));
     const { error: erroPecas } = await sb.from("service_order_parts").insert(partsRows);
     if (comOrigem && erroPecas) return await desfazer(`peças: ${erroPecas.message}`);
-    for (const row of partsRows) await applyStockDelta(sb, row.product_id, -Number(row.quantity), so.id, row.unit_cost_snapshot);
+    if (erroPecas) {
+      // Um INSERT só: se falhou, nenhuma das peças entrou, e nenhuma pode baixar estoque.
+      for (const i of comProduto) naoEntrou.push({ item: i.nome || String(i.keyword || ""), lista: "PEÇAS", motivo: erroPecas.message });
+      comProduto = [];
+    } else {
+      for (const row of partsRows) await applyStockDelta(sb, row.product_id, -Number(row.quantity), so.id, row.unit_cost_snapshot);
+    }
   }
 
   // 5. Provisórios (sem cadastro) → PRODUTO PENDENTE + service_order_parts.
@@ -461,14 +471,13 @@ export async function montarOrcamento(
     const criado = await produtoProvisorio(sb, nome, p.preco_venda);
     if (comOrigem && !criado) return await desfazer(`não consegui cadastrar "${nome}"`);
     if (!criado) { naoCadastrados.push(naoDeu); continue; }
-    criados.push({ item: nome, product_id: criado.id, preco: p.preco_venda, quantidade: p.quantidade });
     // SEM baixa de estoque, ao contrário das peças resolvidas: este produto acabou de nascer
     // com estoque zero e não foi comprado. Dar baixa aqui criaria saldo negativo — a mesma
     // classe do estoque fantasma que já custou uma investigação neste sistema.
     const { error: erroPendente } = await sb.from("service_order_parts").insert({
       service_order_id: so.id,
       // depois das peças do catálogo, na sequência (um insert por peça, mas a ordem fica explícita)
-      created_at: quandoDasPecas[comProduto.length + criados.length - 1],
+      created_at: quandoDasPecas[comProduto.length + criados.length],
       product_id: criado.id,
       quantity: p.quantidade,
       unit_cost_snapshot: 0,
@@ -479,6 +488,8 @@ export async function montarOrcamento(
       notes: "Cadastrado pelo orçamento — confirmar preço e completar cadastro fiscal.",
     });
     if (comOrigem && erroPendente) return await desfazer(`peça pendente: ${erroPendente.message}`);
+    if (erroPendente) { naoEntrou.push({ item: nome, lista: "PEÇAS", motivo: erroPendente.message }); continue; }
+    criados.push({ item: nome, product_id: criado.id, preco: p.preco_venda, quantidade: p.quantidade });
   }
 
   const svcRows: any[] = [];
@@ -513,6 +524,10 @@ export async function montarOrcamento(
     svcRows.forEach((s, n) => { s.created_at = quandoDosServicos[n]; });
     const { error: erroServicos } = await sb.from("service_order_services").insert(svcRows);
     if (comOrigem && erroServicos) return await desfazer(`serviços: ${erroServicos.message}`);
+    if (erroServicos) {
+      for (const s of svcRows) naoEntrou.push({ item: String(s.name_snapshot), lista: "SERVIÇOS", motivo: erroServicos.message });
+      svcRows.length = 0;
+    }
   }
 
   // 6. Imposto e comissão (subtotal = peças + serviços já inseridos).
@@ -533,31 +548,51 @@ export async function montarOrcamento(
     encargos.comissao_pct = Number(args.commission_rate);
     encargos.comissao_valor = patch.commission_amount;
   }
-  if (Object.keys(patch).length) await sb.from("service_orders").update(patch).eq("id", so.id);
+  const problemas: string[] = [];
+  if (Object.keys(patch).length) {
+    const { error: erroEncargos } = await sb.from("service_orders").update(patch).eq("id", so.id);
+    if (erroEncargos) {
+      problemas.push(`imposto/comissão NÃO foram gravados (${erroEncargos.message})`);
+      for (const k of Object.keys(encargos)) delete encargos[k];
+    }
+  }
 
   // 7. Recalcula o total oficial e lê a margem.
-  if (comOrigem) {
-    // Com o erro conferido: o total do PDF confere contra o da proposta. Orçamento recém-criado não tem recebível, e a
-    // cascata não teria o que redistribuir.
-    const { error: erroRecalculo } = await sb.rpc("recalc_so_totals", { so_id: so.id });
-    if (erroRecalculo) return await desfazer(`recálculo: ${erroRecalculo.message}`);
-  } else {
-    try { await recalcularOSComCascata(sb, so.id); } catch { /* best-effort */ }
-  }
+  // Com o erro conferido nos dois caminhos: o total do PDF confere contra o da proposta. Orçamento recém-criado não
+  // tem recebível, e a cascata não teria o que redistribuir (recalcularOSComCascata engolia o erro do recálculo).
+  const { error: erroRecalculo } = await sb.rpc("recalc_so_totals", { so_id: so.id });
+  if (comOrigem && erroRecalculo) return await desfazer(`recálculo: ${erroRecalculo.message}`);
+  if (erroRecalculo) problemas.push(`o total NÃO foi recalculado (${erroRecalculo.message}); confira o total na tela da OS`);
   const { data: soFinal, error: erroTotal } = await sb.from("service_orders").select("grand_total").eq("id", so.id).maybeSingle();
   if (comOrigem && (erroTotal || !soFinal)) return await desfazer("não consegui ler o total");
+  if (!erroRecalculo && (erroTotal || !soFinal)) problemas.push("não consegui ler o total depois de gravar; confira na tela da OS");
   const custoPecas = comProduto.reduce((a, i) => a + i.custo * i.quantidade, 0);
+  const totalConfiavel = !erroRecalculo && !erroTotal && !!soFinal;
   const grand = Number(soFinal?.grand_total) || 0;
-  const margem = grand > 0 ? r2(((grand - custoPecas) / grand) * 100) : null;
+  const margem = totalConfiavel && grand > 0 ? r2(((grand - custoPecas) / grand) * 100) : null;
+  const incompleto = naoEntrou.length > 0 || problemas.length > 0;
+  // Nenhuma linha entrou: um orçamento vazio não é "feito". Desfaz e diz por quê.
+  if (naoEntrou.length && !comProduto.length && !criados.length && !svcRows.length) {
+    return await desfazer(`nenhum item gravou: ${[...new Set(naoEntrou.map((n) => n.motivo))].join("; ")}`);
+  }
 
   // 8. Resumo COMPACTO (o LLM narra isso, não repete tabela).
   return {
     ok: true,
+    ...(incompleto
+      ? {
+        incompleto: true,
+        atencao: `O orçamento ${so.service_order_number} foi criado, mas NÃO está completo. Diga ao usuário exatamente o que ficou de fora ` +
+          "(lista nao_entrou e problemas) e ofereça incluir com add_service_order_item. NÃO diga que está tudo certo.",
+        nao_entrou: naoEntrou,
+        problemas,
+      }
+      : {}),
     orcamento: so.service_order_number,
     service_order_id: so.id,
     cliente: cli.nome,
     ativo: ativo.nome,
-    total: grand,
+    total: totalConfiavel ? grand : null,
     margem_bruta_pct: margem,
     encargos: Object.keys(encargos).length ? encargos : null,
     // `pedido` ao lado de `item` é o que permite ver a TROCA (NOVO-agente-07): o retorno só

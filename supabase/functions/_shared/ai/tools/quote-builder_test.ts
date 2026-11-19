@@ -32,6 +32,10 @@ interface Opcoes {
   grand?: number;
   /** created_at que o banco devolve no insert do orçamento (F0 da via v2: base da gravação em sequência). */
   criadoEm?: string;
+  /** stock_model_v2 desligado: applyStockDelta mexe no estoque (grava inventory_movements). */
+  estoqueV1?: boolean;
+  /** erro no UPDATE de service_orders (imposto/comissão). */
+  erroUpdate?: string;
 }
 
 const CLIENTE = { id: "c-1", name: "João Silva", generico: false };
@@ -59,7 +63,9 @@ function bancoFalso(op: Opcoes = {}) {
         exclusoes.push([tabela, campoDelete?.[0] ?? "", campoDelete?.[1]]);
         return Promise.resolve({ data: null, error: null });
       }
-      if (modo === "update") return Promise.resolve({ data: null, error: null });
+      if (modo === "update") {
+        return Promise.resolve({ data: null, error: op.erroUpdate && tabela === "service_orders" ? { message: op.erroUpdate } : null });
+      }
       if (modo === "insert") {
         const erro = op.erroInsert?.[tabela];
         if (erro) return Promise.resolve({ data: null, error: { message: erro } });
@@ -92,7 +98,7 @@ function bancoFalso(op: Opcoes = {}) {
               : [],
             error: null,
           });
-        case "app_settings": return Promise.resolve({ data: [{ value: f.key === "stock_model_v2" ? "on" : "3" }], error: null });
+        case "app_settings": return Promise.resolve({ data: [{ value: f.key === "stock_model_v2" ? (op.estoqueV1 ? "off" : "on") : "3" }], error: null });
         default: return Promise.resolve({ data: [], error: null });
       }
     };
@@ -646,4 +652,60 @@ Deno.test("resumo amarrado recusa título com valor, documento ou telefone, e co
     assertEquals(await resumirOrcamentoLivre(bancoFalso().db, { ...ARGS_LIVRES, title }, {}), recusa, title);
   }
   assertEquals(await resumirOrcamentoLivre(bancoFalso().db, { ...ARGS_LIVRES, payment_conditions: "y".repeat(301) }, {}), "⚠️ A condição de pagamento passou de 300 letras: diga mais curto.");
+});
+
+// ─── Fluxo livre: o que não gravou não é "feito" (fakes do assistente, 19/11) ─────────────
+
+Deno.test("fakes 1a. peça que não gravou não baixa estoque e aparece em nao_entrou", async () => {
+  const b = bancoFalso({ estoqueV1: true, erroInsert: { service_order_parts: "violou a chave" } });
+  // deno-lint-ignore no-explicit-any
+  const r = await montarOrcamento({ ...BASE, items: [{ keyword: "Bateria LiFePO4 100Ah", quantity: 2 }], labor: [{ description: "Instalação", price: 500 }] }, ctxDe(b.db)) as any;
+  assertEquals(r.ok, true);
+  assertEquals(r.incompleto, true);
+  assertEquals(r.nao_entrou.length, 1);
+  assertEquals(r.nao_entrou[0].lista, "PEÇAS");
+  assertStringIncludes(r.nao_entrou[0].motivo, "violou a chave");
+  assertEquals(r.itens_no_catalogo, []);
+  assertEquals(b.linhas("inventory_movements"), []);
+  assertStringIncludes(r.atencao, "NÃO está completo");
+});
+
+Deno.test("fakes 1b. peça que gravou continua baixando estoque (stock v1) e o retorno não fala em incompleto", async () => {
+  const b = bancoFalso({ estoqueV1: true });
+  // deno-lint-ignore no-explicit-any
+  const r = await montarOrcamento({ ...BASE, items: [{ keyword: "Bateria LiFePO4 100Ah", quantity: 2 }] }, ctxDe(b.db)) as any;
+  assertEquals(r.ok, true);
+  assertEquals(r.incompleto, undefined);
+  assertEquals(b.linhas("inventory_movements").length, 1);
+  assertEquals(b.linhas("inventory_movements")[0].quantity_delta, -2);
+});
+
+Deno.test("fakes 1c. serviços que não gravaram entram em nao_entrou; recálculo com erro vira problema e total null", async () => {
+  const b = bancoFalso({ erroInsert: { service_order_services: "sem permissão" }, erroRecalc: "deadlock" });
+  // deno-lint-ignore no-explicit-any
+  const r = await montarOrcamento({ ...BASE, items: [{ keyword: "Bateria LiFePO4 100Ah" }], labor: [{ description: "Instalação", price: 500 }] }, ctxDe(b.db)) as any;
+  assertEquals(r.ok, true);
+  assertEquals(r.incompleto, true);
+  assertEquals(r.nao_entrou.map((n: Linha) => [n.item, n.lista]), [["Instalação", "SERVIÇOS"]]);
+  assertEquals(r.total, null);
+  assertEquals(r.margem_bruta_pct, null);
+  assert(r.problemas.some((p: string) => p.includes("deadlock")));
+});
+
+Deno.test("fakes 1d. nada gravou: o orçamento vazio é desfeito e a resposta é erro", async () => {
+  const b = bancoFalso({ erroInsert: { service_order_parts: "x", service_order_services: "y" } });
+  // deno-lint-ignore no-explicit-any
+  const r = await montarOrcamento({ ...BASE, items: [{ keyword: "Bateria LiFePO4 100Ah" }], labor: [{ description: "Instalação", price: 500 }] }, ctxDe(b.db)) as any;
+  assertEquals(r.ok, undefined);
+  assertStringIncludes(r.error, "Nada ficou gravado");
+  assert(b.exclusoes.some(([t, , v]) => t === "service_orders" && v === "orc-novo"));
+});
+
+Deno.test("fakes 1e. imposto que não gravou é dito, e encargos não finge o valor", async () => {
+  const b = bancoFalso({ erroUpdate: "trigger recusou" });
+  // deno-lint-ignore no-explicit-any
+  const r = await montarOrcamento({ ...BASE, items: [{ keyword: "Bateria LiFePO4 100Ah" }], tax_percent: 6 }, ctxDe(b.db)) as any;
+  assertEquals(r.incompleto, true);
+  assertEquals(r.encargos, null);
+  assert(r.problemas.some((p: string) => p.includes("imposto/comissão")));
 });
