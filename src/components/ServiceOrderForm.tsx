@@ -714,8 +714,13 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       });
       if (result.skipped) {
         toast.info('Cobranças já existem para esta OS ou valor é zero.');
+      } else if (result.created === 0) {
+        toast.error('Nenhuma cobrança foi gravada. Tente de novo.');
       } else {
-        toast.success(`${result.created} cobrança(s) gerada(s) e enviadas por WhatsApp!`);
+        // O WhatsApp sai em segundo plano depois daqui: dizer "enviadas" antes de enviar era
+        // prometer o que ainda não aconteceu (19/11/2026).
+        const faltou = result.failed > 0 ? ` ${result.failed} parcela(s) não gravaram — confira em Cobranças.` : '';
+        toast.success(`${result.created} cobrança(s) gerada(s). O aviso pelo WhatsApp sai em seguida.${faltou}`);
       }
     } catch (err: any) {
       toast.error(err?.message || 'Erro ao gerar cobranças');
@@ -1128,8 +1133,15 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               if (res.created > 0) {
                 toast.success(`${res.created} cobrança(s) do saldo registrada(s).`);
               }
+              if (res.failed > 0) {
+                toast.error(`${res.failed} cobrança(s) do saldo não gravaram — confira em Cobranças.`);
+              }
             })
-            .catch((err) => console.error('auto-generate-collections (completed) failed', err));
+            // Antes só ia para o console: a OS salvava e o dono não sabia que faltou a cobrança.
+            .catch((err) => {
+              console.error('auto-generate-collections (completed) failed', err);
+              toast.error(err?.message || 'Não consegui gerar as cobranças do saldo. Gere pelo botão de cobranças da OS.');
+            });
         }
 
         // (O prompt opt-in de conclusão fica no handleStatusChange — onde a conclusão realmente
@@ -1147,8 +1159,14 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               if (res.created > 0) {
                 toast.success(`${res.created} cobrança(s) gerada(s) automaticamente.`);
               }
+              if (res.failed > 0) {
+                toast.error(`${res.failed} cobrança(s) não gravaram — confira em Cobranças.`);
+              }
             })
-            .catch((err) => console.error('auto-generate-collections (invoice) failed', err));
+            .catch((err) => {
+              console.error('auto-generate-collections (invoice) failed', err);
+              toast.error(err?.message || 'Não consegui gerar as cobranças. Gere pelo botão de cobranças da OS.');
+            });
         }
       }
     } catch (e: any) {
@@ -1412,11 +1430,13 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         // resultado. prodData vinha null SEMPRE, available caía para 0 e o alerta de
         // falta disparava mesmo com o estoque cheio. Um embed só, trazendo lead_time_days
         // junto — os dois embeds da mesma relação também eram redundantes.
-        const { data: prodData } = await (supabase as any)
+        const { data: prodData, error: prodErr } = await (supabase as any)
           .from('products')
           .select('stock_quantity, reserved_quantity, minimum_stock, product_suppliers(supplier_id, lead_time_days, suppliers(id, name))')
           .eq('id', productId)
           .maybeSingle();
+        // Leitura que falha não é "estoque zero": o alerta de falta abria à toa (19/11/2026).
+        if (prodErr) throw new Error('Não consegui conferir o estoque desta peça — ela não foi adicionada. Tente de novo.');
         // No modelo v2, disponível = físico − reservado (o físico não é pré-baixado por orçamentos).
         const v2 = await isStockModelV2();
         const available = v2

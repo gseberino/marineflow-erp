@@ -34,9 +34,12 @@ export function OnMyWayButton({ order }: { order: any }) {
       const phone = String((os as any).clients?.whatsapp || (os as any).clients?.phone || '').replace(/\D/g, '');
       if (!phone || phone.length < 10) { toast.error('Cliente sem telefone cadastrado.'); return; }
 
-      const { data: settings } = await supabase
+      const { data: settings, error: cfgErr } = await supabase
         .from('app_settings').select('key, value')
         .in('key', ['wa_test_mode', 'wa_test_number', 'zapi_test_mode', 'zapi_test_number']);
+      // Sem saber se o modo de teste está ligado, NÃO envia: tratar a falha como "não é teste"
+      // mandaria a mensagem ao cliente de verdade durante um teste (19/11/2026).
+      if (cfgErr) throw new Error('Não consegui conferir o modo de teste do WhatsApp — nada foi enviado. Tente de novo.');
       const map = Object.fromEntries((settings || []).map((s: any) => [s.key, s.value]));
       const testMode = (map['wa_test_mode'] ?? map['zapi_test_mode']) === 'true';
       const testNumber = String(map['wa_test_number'] ?? map['zapi_test_number'] ?? '').replace(/\D/g, '');

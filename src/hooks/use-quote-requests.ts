@@ -293,12 +293,15 @@ export function useSendQuoteRequest() {
       if (itErr) throw itErr;
       if (!items?.length) throw new Error('Esta cotação não tem itens para enviar.');
 
-      const [{ data: suppliers, error: supErr }, { data: settings }] = await Promise.all([
+      const [{ data: suppliers, error: supErr }, { data: settings, error: cfgErr }] = await Promise.all([
         supabase.from('suppliers').select('id, name, trade_name, phone, opt_out_whatsapp').in('id', supplierIds),
         supabase.from('app_settings').select('key, value')
           .in('key', ['company_name', 'wa_test_mode', 'wa_test_number', 'zapi_test_mode', 'zapi_test_number']),
       ]);
       if (supErr) throw supErr;
+      // Sem saber se o modo de teste está ligado, NÃO envia: "não é teste" por erro de leitura
+      // dispararia a cotação ao fornecedor de verdade (19/11/2026).
+      if (cfgErr) throw new Error('Não consegui conferir o modo de teste do WhatsApp — nada foi enviado. Tente de novo.');
 
       const cfg = Object.fromEntries((settings || []).map((s: any) => [s.key, s.value]));
       const company = cfg['company_name'] || 'nossa empresa';
@@ -624,7 +627,10 @@ export function useCloseQuoteRequest() {
         closed_at: new Date().toISOString(),
       };
       if (note) {
-        const { data: cur } = await supabase.from('quote_requests').select('notes').eq('id', id).single();
+        // Sem conferir o erro, uma leitura que falha virava "sem notas" e o update APAGAVA as
+        // anotações anteriores da cotação, trocando-as só pela nova (19/11/2026).
+        const { data: cur, error: curErr } = await supabase.from('quote_requests').select('notes').eq('id', id).single();
+        if (curErr) throw new Error('Não consegui ler as anotações da cotação — nada foi alterado. Tente de novo.');
         const prev = (cur as any)?.notes;
         patch.notes = prev ? `${prev}\n${note}` : note;
       }

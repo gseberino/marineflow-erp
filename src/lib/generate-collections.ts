@@ -17,7 +17,7 @@ interface Installment {
 
 export async function generateCollectionsFromOS(
   input: GenerateInput
-): Promise<{ created: number; skipped: boolean }> {
+): Promise<{ created: number; skipped: boolean; failed: number }> {
   // 1. Fetch the service order with client and payment condition
   const { data: so, error: soErr } = await supabase
     .from('service_orders')
@@ -31,30 +31,40 @@ export async function generateCollectionsFromOS(
   if (soErr || !so) throw soErr || new Error('OS não encontrada');
 
   // 2. Skip if collections already exist (non-cancelled)
-  const { data: existing } = await supabase
+  // Leitura que falha NÃO é "não há cobranças": seguir em frente gerava cobrança em dobro
+  // (19/11/2026). Sem saber o que já existe, para e avisa.
+  const { data: existing, error: existingErr } = await supabase
     .from('collections')
     .select('id')
     .eq('service_order_id', input.serviceOrderId)
     .neq('status', 'cancelled');
+  if (existingErr) {
+    throw new Error('Não consegui conferir as cobranças que já existem desta OS — nenhuma cobrança foi gerada. Tente de novo.');
+  }
   if (existing && existing.length > 0) {
-    return { created: 0, skipped: true };
+    return { created: 0, skipped: true, failed: 0 };
   }
 
   const total = Number((so as any).grand_total || 0);
-  if (total <= 0) return { created: 0, skipped: true };
+  if (total <= 0) return { created: 0, skipped: true, failed: 0 };
 
   // 3. Find payment condition preset
   let installments: Installment[] = [];
   const presetId = (so as any).payment_condition_preset_id;
   if (presetId) {
-    const { data: preset } = await supabase
+    // Preset ilegível: sem ele não se sabe se "gerar cobranças" está DESLIGADO nem quais são as
+    // parcelas — cair no "total à vista" ignorava auto_generate_collections=false (19/11/2026).
+    const { data: preset, error: presetErr } = await supabase
       .from('payment_condition_presets')
       .select('installments, auto_generate_collections')
       .eq('id', presetId)
       .maybeSingle();
+    if (presetErr) {
+      throw new Error('Não consegui ler a condição de pagamento desta OS — nenhuma cobrança foi gerada. Tente de novo.');
+    }
 
     if ((preset as any)?.auto_generate_collections === false) {
-      return { created: 0, skipped: true };
+      return { created: 0, skipped: true, failed: 0 };
     }
     const ins = (preset as any)?.installments;
     if (Array.isArray(ins)) installments = ins as Installment[];
@@ -66,9 +76,12 @@ export async function generateCollectionsFromOS(
   }
 
   // 4. Get app settings for auto-rule config
-  const { data: settingsRows } = await supabase
+  const { data: settingsRows, error: settingsErr } = await supabase
     .from('app_settings')
     .select('key, value');
+  if (settingsErr) {
+    throw new Error('Não consegui ler as configurações de cobrança — nenhuma cobrança foi gerada. Tente de novo.');
+  }
   const settings: Record<string, string> = {};
   for (const r of settingsRows || []) {
     if (r.key) settings[r.key] = String(r.value || '');
@@ -78,6 +91,7 @@ export async function generateCollectionsFromOS(
   // 5. Create one collection per installment
   const approvalDate = new Date(input.approvalDate);
   const created: string[] = [];
+  let failed = 0;
 
   for (const inst of installments) {
     const amount = Math.round((total * inst.percent / 100) * 100) / 100;
@@ -105,7 +119,9 @@ export async function generateCollectionsFromOS(
       .select('id')
       .single();
 
+    // A parcela que não gravou é CONTADA: quem chamou avisa que faltou, em vez de "geradas".
     if (!collErr && coll) created.push((coll as any).id);
+    else failed += 1;
   }
 
   // 6. Auto-send WhatsApp (fire-and-forget) — só quando autoSend !== false.
@@ -113,7 +129,7 @@ export async function generateCollectionsFromOS(
     void autoSendCollectionWhatsApp(created);
   }
 
-  return { created: created.length, skipped: false };
+  return { created: created.length, skipped: false, failed };
 }
 
 async function autoSendCollectionWhatsApp(collectionIds: string[]) {
@@ -148,9 +164,11 @@ async function autoSendCollectionWhatsApp(collectionIds: string[]) {
       const template = templates?.[0];
       if (!template) continue;
 
-      const { data: settingsRows } = await supabase
+      // Sem as configurações a mensagem sai sem chave Pix/dados de pagamento: não envia.
+      const { data: settingsRows, error: settingsErr } = await supabase
         .from('app_settings')
         .select('key, value');
+      if (settingsErr) throw settingsErr;
       const settings: Record<string, string> = {};
       for (const r of settingsRows || []) {
         if (r.key) settings[r.key] = String(r.value || '');
@@ -170,9 +188,12 @@ async function autoSendCollectionWhatsApp(collectionIds: string[]) {
         settings,
       });
 
-      await supabase.functions.invoke('whatsapp-send', {
+      // Envio que falhou não vira "enviada": sem isto a cobrança ficava 'sent' e com contato
+      // registrado sem ter saído mensagem nenhuma (19/11/2026).
+      const { error: sendErr } = await supabase.functions.invoke('whatsapp-send', {
         body: { phone: normalized, message, context: 'billing', kind: 'text' },
       });
+      if (sendErr) throw sendErr;
 
       await supabase.from('collection_contacts').insert({
         collection_id: id,
