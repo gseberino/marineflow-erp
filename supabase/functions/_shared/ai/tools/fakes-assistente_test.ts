@@ -244,3 +244,41 @@ Deno.test("fakes 5f. tools/index.ts registra o catálogo real (set_tool_autonomy
   const r = await setAuto.execute({ action_name: "duplicate_service_order", mode: "auto" }, ctxDe(b.db)) as any;
   assertEquals(r.ok, true, JSON.stringify(r));
 });
+
+// ─── 6. send_bulk_collection_reminders ──────────────────────────────────────────────────────
+import { flowMacroTools, resolverCobrancasDoLote } from "./flow-macros.ts";
+
+const COBRANCAS = () => [
+  { id: "col-1", receivable_id: "rec-1", status: "pending", amount: 500, due_date: "2026-11-01", contact_name: "Ana", contact_whatsapp: null, phone: null, client_id: null, created_at: "2026-11-01" },
+  { id: "col-2", receivable_id: "rec-2", status: "paid", amount: 300, due_date: "2026-11-01", contact_name: "Bia", contact_whatsapp: "5511999990000", client_id: null, created_at: "2026-11-01" },
+];
+
+Deno.test("fakes 6a. o lote aceita receivable_id (de get_delinquency_plan) e acha a cobrança aberta da conta", async () => {
+  const b = bancoFalso({ collections: COBRANCAS(), receivables: [{ id: "rec-1" }, { id: "rec-2" }, { id: "rec-3" }] });
+  const lote = await resolverCobrancasDoLote(b.db, ["rec-1", "col-1", "rec-2", "rec-3", "nada"]);
+  assertEquals(lote.map((i) => [i.pedido, i.cobranca?.id ?? null, i.motivo ?? null]), [
+    ["rec-1", "col-1", null],
+    ["col-1", null, "mesma cobrança repetida no lote"],
+    // rec-2 só tem cobrança paga: não é cobrança aberta
+    ["rec-2", null, "conta a receber sem cobrança aberta (crie com criar_cobranca antes de mandar o lembrete)"],
+    ["rec-3", null, "conta a receber sem cobrança aberta (crie com criar_cobranca antes de mandar o lembrete)"],
+    ["nada", null, "cobrança não encontrada"],
+  ]);
+});
+
+Deno.test("fakes 6b. nenhum envio: ok:false com o motivo (antes: ok:true com 0 enviados)", async () => {
+  const b = bancoFalso({ collections: COBRANCAS(), receivables: [], clients: [] });
+  // deno-lint-ignore no-explicit-any
+  const r = await ferramenta(flowMacroTools, "send_bulk_collection_reminders").execute({ collection_ids: ["rec-1", "zzz"] }, ctxDe(b.db)) as any;
+  assertEquals(r.ok, false);
+  assertStringIncludes(r.error, "Nenhum lembrete foi enviado");
+  assertStringIncludes(r.error, "sem telefone");
+  assertStringIncludes(r.error, "cobrança não encontrada");
+});
+
+Deno.test("fakes 6c. leitura das cobranças com erro não vira 'não encontrada'", async () => {
+  const b = bancoFalso({ collections: COBRANCAS() }, { "select:collections": "timeout" });
+  let erro = "";
+  try { await resolverCobrancasDoLote(b.db, ["col-1"]); } catch (e) { erro = (e as Error).message; }
+  assertStringIncludes(erro, "Não consegui ler as cobranças");
+});

@@ -3,7 +3,7 @@ import { ESQUEMA_DA_FORMA, formaDePagamento, validarForma } from "./forma-de-pag
 import { horariosDeBrasilia } from "../fuso.ts";
 import { sendWhatsapp } from "./whatsapp.ts";
 import { descreverSaldo, parcelasDoSaldo } from "./saldo-do-sinal.ts";
-import { registrarEnvioDaCobranca } from "./cobrancas.ts";
+import { registrarEnvioDaCobranca, SITUACOES_ABERTAS } from "./cobrancas.ts";
 import { vincularTecnico } from "./service-orders.ts";
 import { statusAoAgendar } from "../../service-order-status.ts";
 import { diaBR } from "../../agenda-dia.ts";
@@ -17,19 +17,71 @@ import { favorecidoDoLogin, modoDaPropostaNoBanco } from "../../agenda-modo.ts";
 const fmtBRL = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 const hojeISODate = () => new Date().toISOString().slice(0, 10);
 
+const CAMPOS_DA_COBRANCA = "id, amount, due_date, contact_whatsapp, phone, contact_name, client_id, last_auto_sent_at, status, receivable_id";
+
+export type ItemDoLote = { pedido: string; cobranca?: Record<string, any>; motivo?: string; repetida?: boolean };
+
+/**
+ * Os ids do lote → a cobrança de cada um (19/11/2026). O prompt manda levantar a lista com get_delinquency_plan, que
+ * devolve `receivable_id` (a conta a receber), mas o lote só procurava em collections.id: tudo virava "cobrança não
+ * encontrada" e a tool respondia ok com 0 enviados. Agora aceita os dois: id da cobrança, ou id da conta a receber
+ * (a cobrança ABERTA mais recente dela). Conta sem cobrança aberta diz isso. Leitura com erro lança.
+ */
+export async function resolverCobrancasDoLote(sb: any, ids: readonly string[]): Promise<ItemDoLote[]> {
+  const unicos = [...new Set(ids.map(String).filter(Boolean))];
+  if (!unicos.length) return [];
+  const { data: porId, error: erroPorId } = await sb.from("collections").select(CAMPOS_DA_COBRANCA).in("id", unicos);
+  if (erroPorId) throw new Error(`Não consegui ler as cobranças: ${erroPorId.message}`);
+  const diretas = new Map<string, any>(((porId ?? []) as any[]).map((c) => [String(c.id), c]));
+  const faltam = unicos.filter((id) => !diretas.has(id));
+
+  const daConta = new Map<string, any>();
+  const contasSemCobranca = new Set<string>();
+  if (faltam.length) {
+    const { data: porConta, error: erroPorConta } = await sb
+      .from("collections").select(`${CAMPOS_DA_COBRANCA}, created_at`)
+      .in("receivable_id", faltam).in("status", SITUACOES_ABERTAS)
+      .order("created_at", { ascending: false });
+    if (erroPorConta) throw new Error(`Não consegui ler as cobranças das contas a receber: ${erroPorConta.message}`);
+    for (const c of (porConta ?? []) as any[]) if (!daConta.has(String(c.receivable_id))) daConta.set(String(c.receivable_id), c);
+    const semNada = faltam.filter((id) => !daConta.has(id));
+    if (semNada.length) {
+      const { data: contas, error: erroContas } = await sb.from("receivables").select("id").in("id", semNada);
+      if (erroContas) throw new Error(`Não consegui ler as contas a receber: ${erroContas.message}`);
+      for (const r of (contas ?? []) as any[]) contasSemCobranca.add(String(r.id));
+    }
+  }
+
+  const vistas = new Set<string>();
+  return unicos.map((pedido) => {
+    const cobranca = diretas.get(pedido) ?? daConta.get(pedido);
+    if (!cobranca) {
+      return {
+        pedido,
+        motivo: contasSemCobranca.has(pedido)
+          ? "conta a receber sem cobrança aberta (crie com criar_cobranca antes de mandar o lembrete)"
+          : "cobrança não encontrada",
+      };
+    }
+    if (vistas.has(String(cobranca.id))) return { pedido, motivo: "mesma cobrança repetida no lote", repetida: true };
+    vistas.add(String(cobranca.id));
+    return { pedido, cobranca };
+  });
+}
+
 export const flowMacroTools: ToolDef[] = [
   // ───────────────────────── COBRANÇA EM LOTE ─────────────────────────
   {
     name: "send_bulk_collection_reminders",
     description:
-      "Envia lembrete de cobrança por WhatsApp para VÁRIOS clientes de uma vez (ex.: 'cobra todos os vencidos', 'manda a cobrança da lista'). Levante a lista ANTES (get_delinquency_plan / list_pending_collections) e passe os collection_ids escolhidos — a confirmação vai mostrar quem, quanto e o atraso, e você aprova o lote de uma vez. Quem já foi cobrado hoje é PULADO automaticamente. Envio externo: pede confirmação. Report-only: se um envio falhar, os outros seguem.",
+      "Envia lembrete de cobrança por WhatsApp para VÁRIOS clientes de uma vez (ex.: 'cobra todos os vencidos', 'manda a cobrança da lista'). Levante a lista ANTES (get_delinquency_plan / list_pending_collections) e passe os ids escolhidos em collection_ids — vale o id de list_pending_collections ou o receivable_id de get_delinquency_plan (o sistema acha a cobrança aberta da conta) — a confirmação vai mostrar quem, quanto e o atraso, e você aprova o lote de uma vez. Quem já foi cobrado hoje é PULADO automaticamente. Envio externo: pede confirmação. Report-only: se um envio falhar, os outros seguem.",
     input_schema: {
       type: "object",
       properties: {
         collection_ids: {
           type: "array",
           items: { type: "string" },
-          description: "UUIDs das cobranças (campo id de get_delinquency_plan/list_pending_collections). Passe só os que você escolheu cobrar.",
+          description: "UUIDs: o id da cobrança (list_pending_collections) ou o receivable_id (get_delinquency_plan). Passe só os que você escolheu cobrar.",
         },
         custom_message: {
           type: "string",
@@ -52,13 +104,11 @@ export const flowMacroTools: ToolDef[] = [
       const pulados: Array<Record<string, unknown>> = [];
       const falhas: Array<Record<string, unknown>> = [];
 
-      for (const id of ids) {
-        const { data: col } = await sb
-          .from("collections")
-          .select("id, amount, due_date, contact_whatsapp, phone, contact_name, client_id, last_auto_sent_at, status")
-          .eq("id", id)
-          .maybeSingle();
-        if (!col) { falhas.push({ id, motivo: "cobrança não encontrada" }); continue; }
+      const lote = await resolverCobrancasDoLote(sb, ids);
+      for (const item of lote) {
+        if (item.repetida) { pulados.push({ id: item.pedido, motivo: item.motivo }); continue; }
+        const col = item.cobranca;
+        if (!col) { falhas.push({ id: item.pedido, motivo: item.motivo }); continue; }
         // Paga ou cancelada não se cobra (07/10/2026).
         if (col.status === "paid" || col.status === "cancelled") {
           pulados.push({ cliente: col.contact_name || null, motivo: col.status === "paid" ? "cobrança paga" : "cobrança cancelada" });
@@ -92,6 +142,19 @@ export const flowMacroTools: ToolDef[] = [
         }
       }
 
+      if (enviados.length === 0) {
+        // Nenhum envio não é "feito": antes voltava ok:true com 0 enviados, e o modelo dizia que cobrou.
+        const motivos = [...new Set([...falhas, ...pulados].map((f) => String(f.motivo)))];
+        return {
+          ok: false,
+          error: `Nenhum lembrete foi enviado (${ids.length} pedido(s)). Motivo(s): ${motivos.join("; ") || "nenhum envio saiu"}.`,
+          total_solicitado: ids.length,
+          enviados: 0,
+          pulados: pulados.length,
+          falhas: falhas.length,
+          detalhe: { pulados, falhas },
+        };
+      }
       return {
         ok: true,
         total_solicitado: ids.length,
@@ -99,7 +162,8 @@ export const flowMacroTools: ToolDef[] = [
         pulados: pulados.length,
         falhas: falhas.length,
         detalhe: { enviados, pulados, falhas },
-        ...(pulados.length ? { nota: "Pulei quem já tinha sido cobrado hoje." } : {}),
+        ...(pulados.length ? { nota: "Alguns foram pulados (já cobrados hoje, pagos, cancelados ou repetidos): veja detalhe.pulados." } : {}),
+        ...(falhas.length ? { atencao: `${falhas.length} lembrete(s) NÃO saíram: diga quais (detalhe.falhas).` } : {}),
       };
     },
   },

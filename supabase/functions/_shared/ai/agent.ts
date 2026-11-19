@@ -52,6 +52,7 @@ import {
   CAMPOS_EM_PORCENTO, CAMPOS_EM_REAIS, ROTULOS_DOS_CAMPOS, ROTULOS_DOS_VALORES, TITULOS_DA_REDE_DO_ADMIN, TITULOS_DAS_ACOES_DIRETAS,
 } from "./rotulos.ts";
 import { resumirServicoNovo } from "./tools/products.ts";
+import { resolverCobrancasDoLote } from "./tools/flow-macros.ts";
 
 export interface Proposal {
   pending_action_id: string;
@@ -765,8 +766,9 @@ export async function buildPendingSummary(
     if (ids.length === 0) return "Nenhuma cobrança selecionada.";
     let rows: any[] = [];
     try {
-      const { data } = await admin.from("collections").select("contact_name, amount, due_date").in("id", ids);
-      rows = (data as any[]) || [];
+      // O mesmo resolvedor do envio (id da cobrança OU receivable_id de get_delinquency_plan): o resumo mostra o lote
+      // que vai sair de verdade.
+      rows = (await resolverCobrancasDoLote(admin, ids)).flatMap((i) => (i.cobranca ? [i.cobranca] : []));
     } catch { /* best-effort */ }
     if (rows.length === 0) return `Enviar cobrança para ${ids.length} cliente(s) selecionado(s).`;
     const hoje = Date.now();
