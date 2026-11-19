@@ -5,16 +5,18 @@ import { createElement, type ReactNode } from 'react';
 import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-const { lerExtrato } = vi.hoisted(() => ({ lerExtrato: vi.fn() }));
+const { lerExtrato, falhaNaTabela } = vi.hoisted(() => ({ lerExtrato: vi.fn(), falhaNaTabela: { nome: '' } }));
 
 vi.mock('@/integrations/supabase/client', () => {
-  const builder = (): any => {
+  const builder = (tabela: string): any => {
     const o: any = {};
     for (const k of ['select', 'not', 'lt', 'gt', 'gte', 'lte', 'eq', 'in', 'order', 'limit']) o[k] = () => o;
-    o.then = (ok: any, erro: any) => Promise.resolve({ data: [], error: null }).then(ok, erro);
+    o.then = (ok: any, erro: any) => Promise.resolve(
+      tabela === falhaNaTabela.nome ? { data: null, error: { message: 'tempo esgotado' } } : { data: [], error: null },
+    ).then(ok, erro);
     return o;
   };
-  return { supabase: { from: () => builder() } };
+  return { supabase: { from: (t: string) => builder(t) } };
 });
 
 vi.mock('@/hooks/use-fluxo-de-caixa', () => ({ lerExtratoDoFluxo: lerExtrato }));
@@ -68,6 +70,19 @@ function renderPainel() {
 }
 
 describe('painel inicial e o extrato', () => {
+  it('leitura de contas que falha: o painel dá erro, não R$ 0,00 (19/11/2026)', async () => {
+    lerExtrato.mockReset();
+    lerExtrato.mockResolvedValue({ linhas: [], opcoes: {} });
+    falhaNaTabela.nome = 'receivables';
+    try {
+      const { result } = renderPainel();
+      await waitFor(() => expect(result.current.isError).toBe(true));
+      expect(String(result.current.error)).toMatch(/Não consegui carregar o painel/);
+    } finally {
+      falhaNaTabela.nome = '';
+    }
+  });
+
   it('falha ao ler o extrato apaga só os números do extrato, não o painel', async () => {
     lerExtrato.mockReset();
     lerExtrato.mockRejectedValue(new Error('tempo esgotado'));

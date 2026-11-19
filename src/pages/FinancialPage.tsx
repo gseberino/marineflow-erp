@@ -35,6 +35,7 @@ import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { Send, Pencil } from 'lucide-react';
 import { AcoesDaLinha } from '@/components/AcoesDaLinha';
+import { ErroAoCarregar } from '@/components/ErroAoCarregar';
 import { LinkDoArquivo } from '@/lib/arquivo-privado';
 
 function getStatusBadgeClass(status: string, dueDate: string) {
@@ -140,7 +141,7 @@ export default function FinancialPage() {
   const [groupBy, setGroupBy] = useState<'none' | 'category' | 'supplier' | 'month'>('none');
   const { data: pendingReimb } = usePendingReimbursements();
 
-  const { data: cashflow } = useQuery({
+  const { data: cashflow, isError: cashflowComErro, isFetching: cashflowCarregando, refetch: recarregarCashflow } = useQuery({
     queryKey: ['cashflow-projection'],
     queryFn: async () => {
       const today = new Date();
@@ -158,6 +159,9 @@ export default function FinancialPage() {
           .gte('due_date', todayStr)
           .lte('due_date', in60),
       ]);
+      // Contas ilegíveis não viram gráfico zerado/sumido em silêncio (19/11/2026).
+      if (recv.error) throw new Error(`Não consegui carregar as contas a receber: ${recv.error.message}`);
+      if (pay.error) throw new Error(`Não consegui carregar as contas a pagar: ${pay.error.message}`);
       const weeks: Record<string, { in: number; out: number; label: string }> = {};
       const addWeek = (date: string, amount: number, type: 'in' | 'out') => {
         const d = new Date(date);
@@ -380,6 +384,9 @@ export default function FinancialPage() {
     <div className="space-y-6 animate-fade-in">
       <PageHeader title={t.financial.title} description={t.financial.description} />
 
+      {cashflowComErro && !cashflow && (
+        <ErroAoCarregar oQue="o fluxo de caixa projetado" tentando={cashflowCarregando} onTentarDeNovo={() => recarregarCashflow()} />
+      )}
       {cashflow && cashflow.length > 0 && (
         <div className="rounded-xl border bg-card p-4">
           <h3 className="font-semibold text-sm mb-3">

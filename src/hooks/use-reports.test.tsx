@@ -5,7 +5,9 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
-const { tabelas } = vi.hoisted(() => ({
+const { tabelas, falhas } = vi.hoisted(() => ({
+  /** Leitura em páginas (.range) que deve falhar: a do gráfico dos 6 meses. */
+  falhas: { leituraPaginada: false },
   tabelas: {
     payments: [] as unknown[],
     service_orders: [
@@ -28,16 +30,20 @@ vi.mock('@/integrations/supabase/client', () => {
   const builder = (tabela: string): any => {
     const filtros: Array<(l: Record<string, unknown>) => boolean> = [];
     const o: any = {};
+    let paginada = false;
     for (const k of ['select', 'gte', 'lte', 'order', 'in', 'is', 'limit', 'neq']) o[k] = () => o;
+    o.range = () => { paginada = true; return o; };
     o.eq = (col: string, v: unknown) => { filtros.push((l) => l[col] === v); return o; };
     o.not = (col: string, op: string, v: unknown) => {
       if (op === 'is' && v === null) filtros.push((l) => l[col] != null);
       return o;
     };
-    o.then = (res: any) => Promise.resolve({
-      data: ((tabelas[tabela] ?? []) as Record<string, unknown>[]).filter((l) => filtros.every((f) => f(l))),
-      error: null,
-    }).then(res);
+    o.then = (res: any) => Promise.resolve(paginada && falhas.leituraPaginada
+      ? { data: null, error: { message: 'tempo esgotado' } }
+      : {
+        data: ((tabelas[tabela] ?? []) as Record<string, unknown>[]).filter((l) => filtros.every((f) => f(l))),
+        error: null,
+      }).then(res);
     return o;
   };
   return { supabase: { from: (t: string) => builder(t) } };
@@ -67,6 +73,18 @@ describe('critério da Operação: só OS aprovada', () => {
     expect(d.topClients.map((c) => c.name)).toEqual(['Marina Azul', 'Iate Clube']);
     // 1.000 + 500 de OS aprovadas, menos só as peças delas (100) — a peça do rascunho não conta.
     expect(d.margin).toBe(1400);
+  });
+});
+
+describe('gráfico dos 6 meses: leitura que falha', () => {
+  it('dá erro em vez de seis meses de R$ 0,00 (19/11/2026)', async () => {
+    falhas.leituraPaginada = true;
+    try {
+      const { result } = renderHook(() => useRevenueReport(30), { wrapper });
+      await waitFor(() => expect(result.current.isError).toBe(true));
+    } finally {
+      falhas.leituraPaginada = false;
+    }
   });
 });
 

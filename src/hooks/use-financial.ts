@@ -421,6 +421,10 @@ export function useCashForecast(semanas: number = 8) {
           .not('status', 'in', '("paid","cancelled")')
           .lte('due_date', limiteISO),
       ]);
+      // Contas ilegíveis não são "nada a receber/pagar": a previsão LANÇA e a tela mostra o
+      // erro, em vez de semanas zeradas (19/11/2026).
+      if (recRes.error) throw new Error(`Não consegui carregar as contas a receber: ${recRes.error.message}`);
+      if (payRes.error) throw new Error(`Não consegui carregar as contas a pagar: ${payRes.error.message}`);
       const hojeLocal = hojeEmBrasilia();
       const { extras, pagoNoMes } = await lerExtrasDaPrevisao(hojeLocal);
 

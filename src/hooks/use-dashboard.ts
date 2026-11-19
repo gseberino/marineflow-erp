@@ -102,6 +102,15 @@ export function useDashboardData() {
         .order('name')
         .limit(50);
 
+      // Leitura que falha LANÇA (a tela já mostra o erro com "tentar de novo"): antes cada uma
+      // virava lista vazia e o painel mostrava R$ 0,00 a receber/pagar como se fosse verdade
+      // (19/11/2026). O extrato segue à parte: falha nele apaga só os números dele.
+      const falhou = [
+        receivablesRes, payablesRes, overdueReceivablesRes, openOrdersRes, ordersByStatusRes,
+        completedThisMonthRes, upcomingOrdersRes, lowStockRes,
+      ].find((r) => r.error);
+      if (falhou?.error) throw new Error(`Não consegui carregar o painel: ${falhou.error.message}`);
+
       const lowStock = (lowStockRes.data || [])
         .filter(p => (p.stock_quantity ?? 0) < (p.minimum_stock ?? 0))
         .slice(0, 5);

@@ -6,7 +6,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { I18nProvider } from '@/i18n';
 import { CashForecastPanel } from './CashForecastPanel';
 
-const { forecast, duplicadas } = vi.hoisted(() => ({
+const { forecast, duplicadas, estado } = vi.hoisted(() => ({
+  estado: { erro: false },
   forecast: {
     weeks: [
       { inicio: '2026-07-27', rotulo: 'Esta semana', entradas: 5000, saidas: 12000, liquido: -7000, acumulado: -7000, contemAtrasados: true,
@@ -40,7 +41,9 @@ const { forecast, duplicadas } = vi.hoisted(() => ({
 }));
 
 vi.mock('@/hooks/use-financial', () => ({
-  useCashForecast: () => ({ data: forecast, isLoading: false }),
+  useCashForecast: () => (estado.erro
+    ? { data: undefined, isLoading: false, isError: true, isFetching: false, refetch: () => {} }
+    : { data: forecast, isLoading: false }),
   useDuplicatePayables: () => ({ data: duplicadas }),
 }));
 
@@ -56,6 +59,18 @@ function renderPainel(saldoInicial?: number | null) {
 }
 
 describe('CashForecastPanel', () => {
+  // 19/11/2026: leitura que falhava aparecia como "Nada programado para as próximas semanas".
+  it('leitura que falha mostra o erro, não "nada programado"', async () => {
+    estado.erro = true;
+    try {
+      renderPainel();
+      expect(await screen.findByText(/Não consegui carregar a programação do caixa/)).toBeInTheDocument();
+      expect(screen.queryByText(/Nada programado/)).toBeNull();
+    } finally {
+      estado.erro = false;
+    }
+  });
+
   it('mostra os totais do período', async () => {
     renderPainel();
     expect(await screen.findByText(/A receber \(8 semanas\)/)).toBeInTheDocument();

@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { lerEmPaginas } from '@/lib/ler-em-paginas';
 
 function daysAgo(days: number): string {
   const d = new Date();
@@ -78,12 +79,16 @@ export function useRevenueReport(periodDays: number) {
       sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5);
       sixMonthsAgo.setDate(1);
 
-      const { data: allPayments } = await supabase
+      // Em páginas e conferindo o erro: antes, falha aqui virava 6 meses de R$ 0,00 no gráfico,
+      // e mais de 1.000 recebimentos cortavam o fim sem aviso (19/11/2026).
+      const allPayments = await lerEmPaginas<{ amount: number | null; payment_date: string | null; status: string | null }>((de, ate) => supabase
         .from('payments')
         .select('amount, payment_date, status')
         .eq('status', 'confirmed')
         .not('receivable_id', 'is', null)
-        .gte('payment_date', sixMonthsAgo.toISOString().slice(0, 10));
+        .gte('payment_date', sixMonthsAgo.toISOString().slice(0, 10))
+        .order('id')
+        .range(de, ate));
 
       (allPayments ?? []).forEach(p => {
         const key = String(p.payment_date).slice(0, 7);

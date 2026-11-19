@@ -1,6 +1,7 @@
 import { useI18n } from '@/i18n';
 import { useCashForecast, useDuplicatePayables, type ForecastWeek } from '@/hooks/use-financial';
 import { StatusBadge } from '@/components/StatusBadge';
+import { ErroAoCarregar } from '@/components/ErroAoCarregar';
 import { DataTable, type DataColumn } from '@/v2/components/DataTable';
 import { AlertTriangle, TrendingDown, TrendingUp } from 'lucide-react';
 
@@ -21,11 +22,15 @@ type Semana = ForecastWeek & { saldoPrevisto: number | null };
  */
 export function CashForecastPanel({ saldoInicial = null }: { saldoInicial?: number | null } = {}) {
   const { formatCurrency } = useI18n();
-  const { data: forecast, isLoading } = useCashForecast(8);
+  const { data: forecast, isLoading, isError, isFetching, refetch } = useCashForecast(8);
   const { data: duplicadas } = useDuplicatePayables();
 
   if (isLoading) {
     return <p className="py-4 text-sm text-muted-foreground">Calculando a programação...</p>;
+  }
+  // Falha na leitura não é "nada programado" (19/11/2026).
+  if (isError && !forecast) {
+    return <ErroAoCarregar className="my-2" oQue="a programação do caixa" tentando={isFetching} onTentarDeNovo={() => refetch()} />;
   }
   if (!forecast || forecast.weeks.length === 0) {
     return <p className="py-4 text-sm text-muted-foreground">Nada programado para as próximas semanas.</p>;
