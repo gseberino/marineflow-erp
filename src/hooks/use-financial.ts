@@ -675,7 +675,9 @@ export function useReconcile() {
       if (input.receivableId || input.payableId) {
         const table = input.receivableId ? 'receivables' : 'payables';
         const parentId = (input.receivableId || input.payableId)!;
-        const { data: parent } = await supabase.from(table).select('balance_amount').eq('id', parentId).single();
+        const { data: parent, error: parentErr } = await supabase.from(table).select('balance_amount').eq('id', parentId).single();
+        // Sem o saldo, "R$ 0 em aberto" recusaria com motivo falso (19/11/2026).
+        if (parentErr) throw new Error('Não consegui ler o saldo desta conta — nada foi conciliado. Tente de novo.');
         const openBalance = Number(parent?.balance_amount || 0);
         if (input.amount > openBalance + 0.005) {
           throw new Error(`Valor R$ ${input.amount.toFixed(2)} excede o saldo em aberto de R$ ${openBalance.toFixed(2)}`);
@@ -690,9 +692,17 @@ export function useReconcile() {
         payment_method: input.paymentMethod || 'bank_transfer',
       });
 
-      await supabase.from('bank_transactions').update({
+      // A baixa já aconteceu; se a marcação do extrato falha, a tela não pode dizer
+      // "Conciliado" — diz o que ficou e o que faltou (19/11/2026).
+      const { error: extratoErr } = await supabase.from('bank_transactions').update({
         reconciled: true, reconciled_payment_id: payment.id,
       }).eq('id', input.bankTransactionId);
+      if (extratoErr) {
+        throw new Error(
+          `O pagamento de R$ ${input.amount.toFixed(2)} foi registrado na conta, mas a linha do extrato NÃO ficou ` +
+          'marcada como conciliada. Abra a linha de novo e vincule à mesma conta (ela já mostra o pagamento).',
+        );
+      }
 
       /**
        * O vínculo de volta, da conta para a transação — sem ele a despesa volta a ser
@@ -719,7 +729,9 @@ export function useReconcile() {
 
       return payment;
     },
-    onSuccess: () => {
+    // onSettled, não onSuccess: com falha no meio (pagamento gravado, extrato não), a lista
+    // precisa mostrar o que ficou gravado.
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: ['bank-transactions'] });
       qc.invalidateQueries({ queryKey: ['receivables'] });
       qc.invalidateQueries({ queryKey: ['payables'] });

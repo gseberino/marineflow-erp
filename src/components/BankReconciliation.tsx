@@ -14,6 +14,7 @@ import { useClients } from '@/hooks/use-clients';
 import { useSuppliers } from '@/hooks/use-suppliers';
 import { CategoriaDespesaSelect } from '@/components/CategoriaDespesaSelect';
 import { parseFile, decodeStatementFile, type BankTransaction } from '@/lib/bank-parser';
+import { lancarEConciliar, ConciliacaoIncompleta } from '@/lib/conciliar-com-lancamento-novo';
 import {
   useReconcileSuggestions, useAutoReconcile, useApplySuggestion, useApplyGroup, useAnalyzeWithAI,
   useReconciliationHealth,
@@ -359,13 +360,16 @@ export function BankReconciliation() {
       // recebimento à mão e depois quer fechar o rastro com o extrato: o pagamento existe,
       // falta apenas dizer de qual transação ele veio.
       if (record.status === 'paid') {
-        const { data: pagamento } = await supabase
+        const { data: pagamento, error: pagErr } = await supabase
           .from('payments')
           .select('id')
           .eq(isReceivable ? 'receivable_id' : 'payable_id', record.id)
           .order('payment_date', { ascending: false })
           .limit(1)
           .maybeSingle();
+        // Leitura que falha não é "não havia pagamento": amarraria o extrato a nada e diria
+        // que nada foi baixado (19/11/2026).
+        if (pagErr) throw new Error('Não consegui ler o pagamento desta conta — nada foi vinculado. Tente de novo.');
 
         const { error } = await supabase
           .from('bank_transactions')
@@ -415,20 +419,40 @@ export function BankReconciliation() {
       // Diferença pequena vira despesa de tarifa, com nome — e não um "desconto" anônimo
       // que ninguém consegue explicar no fim do mês.
       if (dentroDaTolerancia && diferenca > 0.005) {
-        await supabase.from('payables').insert({
+        // A baixa do valor recebido JÁ aconteceu (acima). Daqui em diante, erro não pode
+        // virar "Conciliado e quitado": diz o que ficou e o que faltou (19/11/2026).
+        const { error: tarifaErr } = await supabase.from('payables').insert({
           description: `Tarifa/diferença na conciliação — ${record.description ?? 'recebimento'}`,
           issue_date: bankTx.transaction_date, due_date: bankTx.transaction_date,
           amount: diferenca, paid_amount: diferenca, balance_amount: 0, status: 'paid',
           expense_category: CATEGORIA_DA_DIFERENCA,
           origin: 'bank_reconciliation',
         } as never);
+        if (tarifaErr) {
+          setReconcileId(null);
+          invalidateAll();
+          toast.error(
+            `Conciliado: ${formatCurrency(recebido)} baixados. Mas a diferença de ${formatCurrency(diferenca)} NÃO foi lançada ` +
+            `como ${CATEGORIA_DA_DIFERENCA} e a conta continua com esse saldo em aberto. Lance a tarifa à mão.`,
+          );
+          return;
+        }
 
         // E FECHA a conta. Lançar a tarifa e deixar o saldo aberto pelo mesmo valor seria
         // o pior dos dois mundos: a despesa aparece e a conta segue cobrando o cliente.
         // Baixar a diferença é justamente o que a tolerância existe para autorizar.
-        await supabase.from(isReceivable ? 'receivables' : 'payables').update({
+        const { error: fecharErr } = await supabase.from(isReceivable ? 'receivables' : 'payables').update({
           paid_amount: saldo, balance_amount: 0, status: 'paid',
         } as never).eq('id', record.id);
+        if (fecharErr) {
+          setReconcileId(null);
+          invalidateAll();
+          toast.error(
+            `Conciliado e a tarifa de ${formatCurrency(diferenca)} foi lançada, mas a conta NÃO foi fechada: ` +
+            `continua com ${formatCurrency(diferenca)} em aberto. Quite a diferença na própria conta.`,
+          );
+          return;
+        }
 
         toast.success(
           `Conciliado e quitado. A diferença de ${formatCurrency(diferenca)} virou ${CATEGORIA_DA_DIFERENCA}.`,
@@ -446,7 +470,7 @@ export function BankReconciliation() {
       }
       setReconcileId(null);
       invalidateAll();
-    } catch { toast.error('Erro ao conciliar'); }
+    } catch (e: any) { toast.error(erroDeConciliacao(e)); }
   };
 
   const getFilteredSOs = (isCredit: boolean) => {
@@ -535,53 +559,49 @@ export function BankReconciliation() {
     setIsProcessing(true);
     try {
       const isCredit = bankTx.transaction_type === 'credit';
+      // Cada passo confere o erro (lancarEConciliar): antes, "Conciliado" saía mesmo com a conta
+      // ou o pagamento sem gravar (19/11/2026).
       if (isCredit) {
-        const { data: rec } = await supabase.from('receivables').insert({
-          client_id: so.client_id, service_order_id: so.id,
-          description: `Pagamento ${so.service_order_number}`,
-          issue_date: bankTx.transaction_date, due_date: bankTx.transaction_date,
-          amount: Number(bankTx.amount), paid_amount: Number(bankTx.amount),
-          balance_amount: 0, status: 'paid',
-          // O vínculo com o extrato, sem o qual o mesmo dinheiro pode ser lançado de novo
-          // por outro caminho. Ver DUPLICIDADE, no topo do arquivo.
-          bank_transaction_id: bankTx.id,
-        }).select().single();
-        if (rec) {
-          const { data: payment } = await supabase.from('payments').insert({
-            receivable_id: rec.id, payment_date: bankTx.transaction_date,
-            amount: Number(bankTx.amount), payment_method: 'bank_transfer',
-          }).select().single();
-          await supabase.from('bank_transactions').update({
-            reconciled: true, reconciled_payment_id: payment?.id,
-            reconciled_service_order_id: so.id,
-          }).eq('id', bankTx.id);
-        }
+        await lancarEConciliar({
+          tabela: 'receivables',
+          conta: {
+            client_id: so.client_id, service_order_id: so.id,
+            description: `Pagamento ${so.service_order_number}`,
+            issue_date: bankTx.transaction_date, due_date: bankTx.transaction_date,
+            amount: Number(bankTx.amount), paid_amount: Number(bankTx.amount),
+            balance_amount: 0, status: 'paid',
+            // O vínculo com o extrato, sem o qual o mesmo dinheiro pode ser lançado de novo
+            // por outro caminho. Ver DUPLICIDADE, no topo do arquivo.
+            bank_transaction_id: bankTx.id,
+          },
+          bankTransactionId: bankTx.id, dataDoPagamento: bankTx.transaction_date, valor: Number(bankTx.amount),
+          extratoExtra: { reconciled_service_order_id: so.id },
+        });
       } else {
-        const { data: pay } = await supabase.from('payables').insert({
-          // O número já traz o prefixo ("OS-00060"): "Despesa OS-00060", como o
-          // "Pagamento OS-00060" do crédito acima — nunca "Despesa OS OS-00060".
-          description: `Despesa ${so.service_order_number}`,
-          linked_service_order_id: so.id, amount: Number(bankTx.amount),
-          issue_date: bankTx.transaction_date, due_date: bankTx.transaction_date,
-          paid_amount: Number(bankTx.amount), balance_amount: 0, status: 'paid',
-          origin: 'bank_reconciliation',
-          bank_transaction_id: bankTx.id,
-        }).select().single();
-        if (pay) {
-          const { data: payment } = await supabase.from('payments').insert({
-            payable_id: pay.id, payment_date: bankTx.transaction_date,
-            amount: Number(bankTx.amount), payment_method: 'bank_transfer',
-          }).select().single();
-          await supabase.from('bank_transactions').update({
-            reconciled: true, reconciled_payment_id: payment?.id,
-            reconciled_service_order_id: so.id,
-          }).eq('id', bankTx.id);
-        }
+        await lancarEConciliar({
+          tabela: 'payables',
+          conta: {
+            // O número já traz o prefixo ("OS-00060"): "Despesa OS-00060", como o
+            // "Pagamento OS-00060" do crédito acima — nunca "Despesa OS OS-00060".
+            description: `Despesa ${so.service_order_number}`,
+            linked_service_order_id: so.id, amount: Number(bankTx.amount),
+            issue_date: bankTx.transaction_date, due_date: bankTx.transaction_date,
+            paid_amount: Number(bankTx.amount), balance_amount: 0, status: 'paid',
+            origin: 'bank_reconciliation',
+            bank_transaction_id: bankTx.id,
+          },
+          bankTransactionId: bankTx.id, dataDoPagamento: bankTx.transaction_date, valor: Number(bankTx.amount),
+          extratoExtra: { reconciled_service_order_id: so.id },
+        });
       }
-      toast.success(t.financial.confirmReconciliation);
+      toast.success('Conciliado');
       setReconcileId(null);
       invalidateAll();
-    } catch (e: any) { toast.error(erroDeConciliacao(e)); }
+    } catch (e: any) {
+      toast.error(erroDeConciliacao(e));
+      // Passo do meio falhou: algo foi gravado; a lista precisa mostrar o que ficou.
+      if (e instanceof ConciliacaoIncompleta) invalidateAll();
+    }
     setIsProcessing(false);
   };
 
@@ -632,53 +652,46 @@ export function BankReconciliation() {
           setIsProcessing(false);
           return;
         }
-        const { data: rec } = await supabase.from('receivables').insert({
-          client_id: clientId, service_order_id: newForm.service_order_id || null,
-          description: newForm.description, issue_date: bankTx.transaction_date,
-          due_date: bankTx.transaction_date, amount: Number(bankTx.amount),
-          paid_amount: Number(bankTx.amount), balance_amount: 0, status: 'paid',
-          // Sem isto, TODA receita criada por aqui nascia sem categoria — e os 16
-          // recebíveis existentes provam: 16 de 16 estão em branco, logo invisíveis
-          // para qualquer leitura de resultado por categoria.
-          category: newForm.expense_category || 'Serviços prestados',
-          notes: newForm.notes || null,
-          bank_transaction_id: bankTx.id,
-        }).select().single();
-        if (rec) {
-          const { data: payment } = await supabase.from('payments').insert({
-            receivable_id: rec.id, payment_date: bankTx.transaction_date,
-            amount: Number(bankTx.amount), payment_method: 'bank_transfer',
-          }).select().single();
-          await supabase.from('bank_transactions').update({
-            reconciled: true, reconciled_payment_id: payment?.id,
-          }).eq('id', bankTx.id);
-        }
+        await lancarEConciliar({
+          tabela: 'receivables',
+          conta: {
+            client_id: clientId, service_order_id: newForm.service_order_id || null,
+            description: newForm.description, issue_date: bankTx.transaction_date,
+            due_date: bankTx.transaction_date, amount: Number(bankTx.amount),
+            paid_amount: Number(bankTx.amount), balance_amount: 0, status: 'paid',
+            // Sem isto, TODA receita criada por aqui nascia sem categoria — e os 16
+            // recebíveis existentes provam: 16 de 16 estão em branco, logo invisíveis
+            // para qualquer leitura de resultado por categoria.
+            category: newForm.expense_category || 'Serviços prestados',
+            notes: newForm.notes || null,
+            bank_transaction_id: bankTx.id,
+          },
+          bankTransactionId: bankTx.id, dataDoPagamento: bankTx.transaction_date, valor: Number(bankTx.amount),
+        });
       } else {
-        const { data: pay } = await supabase.from('payables').insert({
-          description: newForm.description, expense_category: newForm.expense_category || null,
-          supplier_id: newForm.supplier_id || null,
-          linked_service_order_id: newForm.service_order_id || null,
-          amount: Number(bankTx.amount), issue_date: bankTx.transaction_date,
-          due_date: bankTx.transaction_date, paid_amount: Number(bankTx.amount),
-          balance_amount: 0, status: 'paid', notes: newForm.notes || null,
-          origin: 'bank_reconciliation',
-          bank_transaction_id: bankTx.id,
-        }).select().single();
-        if (pay) {
-          const { data: payment } = await supabase.from('payments').insert({
-            payable_id: pay.id, payment_date: bankTx.transaction_date,
-            amount: Number(bankTx.amount), payment_method: 'bank_transfer',
-          }).select().single();
-          await supabase.from('bank_transactions').update({
-            reconciled: true, reconciled_payment_id: payment?.id,
-          }).eq('id', bankTx.id);
-        }
+        await lancarEConciliar({
+          tabela: 'payables',
+          conta: {
+            description: newForm.description, expense_category: newForm.expense_category || null,
+            supplier_id: newForm.supplier_id || null,
+            linked_service_order_id: newForm.service_order_id || null,
+            amount: Number(bankTx.amount), issue_date: bankTx.transaction_date,
+            due_date: bankTx.transaction_date, paid_amount: Number(bankTx.amount),
+            balance_amount: 0, status: 'paid', notes: newForm.notes || null,
+            origin: 'bank_reconciliation',
+            bank_transaction_id: bankTx.id,
+          },
+          bankTransactionId: bankTx.id, dataDoPagamento: bankTx.transaction_date, valor: Number(bankTx.amount),
+        });
       }
-      toast.success(t.financial.confirmReconciliation);
+      toast.success('Conciliado');
       setReconcileId(null);
       setNewForm({ description: '', client_id: '', supplier_id: '', expense_category: '', service_order_id: '', notes: '' });
       invalidateAll();
-    } catch (e: any) { toast.error(erroDeConciliacao(e)); }
+    } catch (e: any) {
+      toast.error(erroDeConciliacao(e));
+      if (e instanceof ConciliacaoIncompleta) invalidateAll();
+    }
     setIsProcessing(false);
   };
 
