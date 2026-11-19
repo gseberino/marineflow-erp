@@ -10,6 +10,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
 import { useAppUsers } from '@/hooks/use-app-users';
 import { Bell, BellOff, Send, Info, ShieldAlert } from 'lucide-react';
+import { ErroAoCarregar } from '@/components/ErroAoCarregar';
 
 const KEYS = {
   enabled: 'whatsapp_reminder_enabled',
@@ -19,11 +20,15 @@ const KEYS = {
 };
 
 export function WhatsAppReminderSettings() {
-  const [enabled, setEnabled] = useState(true);
+  // Padrão DESLIGADO, igual ao webhook (whatsapp-webhook só envia com 'true'): a tela mostrava
+  // ligado quando a chave não existia, e o servidor tratava como desligado (19/11/2026).
+  const [enabled, setEnabled] = useState(false);
   const [minutes, setMinutes] = useState('30');
   const [cooldown, setCooldown] = useState('60');
   const [recipients, setRecipients] = useState('');
   const [loading, setLoading] = useState(true);
+  const [erroLeitura, setErroLeitura] = useState(false);
+  const [tentativa, setTentativa] = useState(0);
   const [saving, setSaving] = useState(false);
   const [togglingKill, setTogglingKill] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -31,18 +36,21 @@ export function WhatsAppReminderSettings() {
 
   useEffect(() => {
     (async () => {
-      const { data } = await supabase
+      setLoading(true);
+      const { data, error } = await supabase
         .from('app_settings')
         .select('key, value')
         .in('key', [KEYS.enabled, KEYS.minutes, KEYS.cooldown, KEYS.recipients]);
+      setErroLeitura(!!error);
+      if (error) { setLoading(false); return; }
       const map = Object.fromEntries((data || []).map((r: any) => [r.key, r.value]));
-      setEnabled((map[KEYS.enabled] ?? 'true') === 'true');
+      setEnabled((map[KEYS.enabled] ?? 'false') === 'true');
       setMinutes(map[KEYS.minutes] || '30');
       setCooldown(map[KEYS.cooldown] || '60');
       setRecipients(map[KEYS.recipients] || '');
       setLoading(false);
     })();
-  }, []);
+  }, [tentativa]);
 
   const persistEnabled = async (next: boolean) => {
     setTogglingKill(true);
@@ -60,7 +68,7 @@ export function WhatsAppReminderSettings() {
       toast({
         title: next ? 'Lembretes ATIVADOS' : 'Lembretes DESATIVADOS',
         description: next
-          ? 'O sistema voltará a enviar lembretes via WhatsApp.'
+          ? 'O botão "Executar agora" e o aviso de número novo voltam a enviar.'
           : 'Nenhum lembrete será enviado até você reativar.',
         variant: next ? 'default' : 'destructive',
       });
@@ -122,6 +130,9 @@ export function WhatsAppReminderSettings() {
   );
 
   if (loading) return <div className="text-sm text-muted-foreground">Carregando…</div>;
+  if (erroLeitura) {
+    return <ErroAoCarregar oQue="os lembretes de mensagens" onTentarDeNovo={() => setTentativa((n) => n + 1)} />;
+  }
 
   return (
     <Card>
@@ -130,8 +141,11 @@ export function WhatsAppReminderSettings() {
           <Bell className="h-4 w-4" /> Lembretes de mensagens não respondidas
         </CardTitle>
         <CardDescription>
-          O sistema verifica a cada 15 minutos e envia um resumo via WhatsApp para os responsáveis
-          quando há conversas WhatsApp recebidas sem resposta.
+          {/* Não existe agendamento para whatsapp-unread-reminder: dizer "a cada 15 minutos" era
+              prometer o que não roda (19/11/2026). */}
+          O lembrete automático de conversas sem resposta <strong>não está agendado</strong>: hoje ele só
+          roda quando você clica em <strong>Executar agora</strong>, que confere as conversas e envia o
+          resumo na hora para os responsáveis.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -156,7 +170,7 @@ export function WhatsAppReminderSettings() {
                 </p>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   {enabled
-                    ? 'O sistema enviará lembretes automaticamente conforme as regras abaixo.'
+                    ? 'Ligado: "Executar agora" envia o resumo, e um número novo que escrever gera um aviso na hora para os telefones da lista abaixo.'
                     : 'Nenhuma mensagem automática será enviada até você reativar este interruptor.'}
                 </p>
               </div>
@@ -257,7 +271,7 @@ export function WhatsAppReminderSettings() {
           </Button>
           <Button onClick={handleTest} disabled={testing} variant="outline">
             <Send className="h-4 w-4 mr-2" />
-            {testing ? 'Executando…' : 'Executar agora (teste)'}
+            {testing ? 'Executando…' : 'Executar agora'}
           </Button>
         </div>
       </CardContent>

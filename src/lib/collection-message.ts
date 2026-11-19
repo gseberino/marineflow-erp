@@ -77,7 +77,9 @@ export function buildCollectionMessage(args: BuildArgs): string {
   } else if (paymentMethod === 'boleto') {
     message = renderTemplate(template, { ...baseCtx, pix: '' });
     message += `\n\n🏦 *Forma de pagamento: Boleto Bancário*`;
-    message += `\nO boleto será enviado em breve ao seu email.`;
+    // Não há emissão de boleto no sistema: prometer "enviado em breve ao seu email" era mentira
+    // (19/11/2026). O boleto sai à mão, quando o cliente pede.
+    message += `\nPara receber o boleto, é só responder esta mensagem.`;
   } else {
     message = renderTemplate(template, { ...baseCtx, pix: pixKey });
   }
