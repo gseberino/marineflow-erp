@@ -76,8 +76,9 @@ servirComCors(async (req) => {
 
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE);
 
-    // Kill switch: se desativado globalmente, não envia nada
-    const enabled = await getSetting(admin, "whatsapp_reminder_enabled", "true");
+    // Kill switch: se desativado globalmente, não envia nada.
+    // Chave ausente = desligado, igual ao webhook e à tela (WhatsAppReminderSettings).
+    const enabled = await getSetting(admin, "whatsapp_reminder_enabled", "false");
     if (enabled !== "true") {
       return jr({
         ok: true,
