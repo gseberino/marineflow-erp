@@ -285,6 +285,8 @@ export const ROTULOS_DOS_CAMPOS: Record<string, string> = {
   nota: "Nota",
   note: "Observação",
   note_id: "Nota",
+  // attach_photo_to_service_order (19/11/2026): a foto vai para a aba Fotos com o tipo
+  photo_type: "Tipo da foto",
   nova_categoria: "Nova categoria",
   nova_data: "Nova data",
   nova_situacao: "Nova situação",
@@ -410,6 +412,7 @@ export const CAMPOS_EM_PORCENTO: ReadonlySet<string> = new Set(["card_fee_percen
 /** Valores de enum em inglês que chegam ao cartão: "unit" vira "por unidade". */
 export const ROTULOS_DOS_VALORES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   billing_unit: { hour: "por hora", visit: "por visita", day: "por dia", unit: "por unidade" },
+  photo_type: { before: "antes", progress: "durante", after: "depois", problem: "problema" },
   base: { mao_de_obra: "a mão de obra", total: "o total da OS", lucro: "o lucro da OS" },
   decision: { approve: "aprovar", reject: "rejeitar" },
   mode: { auto: "sozinho", confirm: "pedir confirmação" },

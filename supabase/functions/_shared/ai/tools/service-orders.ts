@@ -702,7 +702,7 @@ export const serviceOrderTools: ToolDef[] = [
   },
   {
     name: "get_service_order",
-    description: "Detalhes completos de uma OS incluindo itens e serviços — cada serviço com a situação na via do técnico (situacao_na_via: a_fazer, so_levantar, aguarda_peca, feito, parcial, nao_feito) e o motivo, e o numero = o número do serviço na via do técnico e na tela (quando o dono disser 'serviço N', é esse numero, nunca a posição na lista). Em cada peça, item_id serve para editar/remover a linha e product_id para get_product_price_history. Quando houver, traz despesas (expense_id, para remove_service_order_expense) e horas apontadas (time_entry_id, para remove_service_order_hours).",
+    description: "Detalhes completos de uma OS incluindo itens e serviços — cada serviço com a situação na via do técnico (situacao_na_via: a_fazer, so_levantar, aguarda_peca, feito, parcial, nao_feito) e o motivo, e o numero = o número do serviço na via do técnico e na tela (quando o dono disser 'serviço N', é esse numero, nunca a posição na lista). Em cada peça, item_id serve para editar/remover a linha e product_id para get_product_price_history. Quando houver, traz despesas (expense_id, para remove_service_order_expense) e horas apontadas (time_entry_id, o id de cada apontamento).",
     input_schema: {
       type: "object",
       properties: { id: { type: "string", description: "UUID ou número (OS-00112 / ORÇ-00112)." } },
@@ -740,7 +740,7 @@ export const serviceOrderTools: ToolDef[] = [
         .order("seq", { ascending: true });
       if (erroRoteiro) throw new Error(`Não consegui ler o roteiro da OS: ${erroRoteiro.message}`);
 
-      // Os ids de despesa e de hora (19/11/2026): remove_service_order_expense e remove_service_order_hours mandam
+      // Os ids de despesa e de hora (19/11/2026): as ferramentas que removem despesa e apontamento de hora mandam
       // "pegar o id em get_service_order", e eles não vinham aqui. Enxuto: só o que identifica a linha. Despesa é
       // dinheiro: técnico não recebe. Leitura que falha não derruba a OS: vira um aviso (a lista fica de fora).
       const avisosDasListas: string[] = [];
