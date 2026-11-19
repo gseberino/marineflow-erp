@@ -327,3 +327,143 @@ Deno.test("fakes 7c. sinal de orçamento: saída do banco é recusada; marcaçã
   assertEquals(r2.ok, false);
   assertStringIncludes(r2.error, "NÃO ficou marcada");
 });
+
+// ─── 8. mudar_situacao_da_regra ─────────────────────────────────────────────────────────────
+import { financeRulesTools } from "./finance-rules.ts";
+
+Deno.test("fakes 8. mudar_situacao_da_regra: id errado não responde ok", async () => {
+  const b = bancoFalso({ finance_rules: [{ id: "regra-1", status: "active" }] });
+  const t = ferramenta(financeRulesTools, "mudar_situacao_da_regra");
+  // deno-lint-ignore no-explicit-any
+  const errado = await t.execute({ regra_id: "nao-existe", nova_situacao: "pausada" }, ctxDe(b.db)) as any;
+  assertStringIncludes(errado.error, "Regra não encontrada");
+  // deno-lint-ignore no-explicit-any
+  const certo = await t.execute({ regra_id: "regra-1", nova_situacao: "pausada" }, ctxDe(b.db)) as any;
+  assertEquals(certo.ok, true);
+  assertEquals(b.tabelas.finance_rules[0].status, "paused");
+});
+
+// ─── 9. get_service_order traz os ids de despesa e hora ─────────────────────────────────────
+import { serviceOrderTools } from "./service-orders.ts";
+import { soOpsTools } from "./so-ops.ts";
+
+const OS_COMPLETA = () => ({
+  service_orders: [{ id: "os-1", service_order_number: "OS-00129", status: "in_progress" }],
+  service_order_parts: [], service_order_services: [], service_order_steps: [],
+  service_order_expenses: [{ id: "desp-1", service_order_id: "os-1", description: "Pedágio", amount: 12.5, expense_date: "2026-11-18", origem_codigo: null }],
+  time_entries: [{ id: "hora-1", service_order_id: "os-1", started_at: "2026-11-18T12:00:00Z", duration_minutes: 90, billable: true }],
+});
+
+Deno.test("fakes 9a. get_service_order devolve expense_id e time_entry_id; técnico não vê despesa", async () => {
+  const t = ferramenta(serviceOrderTools, "get_service_order");
+  // deno-lint-ignore no-explicit-any
+  const r = await t.execute({ id: "os-1" }, ctxDe(bancoFalso(OS_COMPLETA()).db)) as any;
+  assertEquals(r.despesas, [{ expense_id: "desp-1", descricao: "Pedágio", valor: 12.5, data: "2026-11-18" }]);
+  assertEquals(r.horas, [{ time_entry_id: "hora-1", inicio: "2026-11-18T12:00:00Z", minutos: 90, cobravel: true }]);
+  // deno-lint-ignore no-explicit-any
+  const tec = await t.execute({ id: "os-1" }, ctxDe(bancoFalso(OS_COMPLETA()).db, { userRole: "technician" })) as any;
+  assertEquals(tec.despesas, undefined);
+  assertEquals(tec.horas.length, 1);
+  // leitura das horas com erro não derruba a OS: vira aviso
+  // deno-lint-ignore no-explicit-any
+  const comErro = await t.execute({ id: "os-1" }, ctxDe(bancoFalso(OS_COMPLETA(), { "select:time_entries": "timeout" }).db)) as any;
+  assertEquals(comErro.service_order.service_order_number, "OS-00129");
+  assertStringIncludes(comErro.aviso, "apontamentos de hora");
+});
+
+Deno.test("fakes 9b. remove_service_order_hours: delete que não apaga linha (permissão) não diz que removeu", async () => {
+  const banco = bancoFalso(OS_COMPLETA());
+  const de = banco.db.from;
+  // A linha some entre a leitura e o delete: é o que a RLS faz (lê, mas não apaga).
+  // deno-lint-ignore no-explicit-any
+  (banco.db as any).from = (tabela: string) => {
+    const q = de(tabela);
+    if (tabela !== "time_entries") return q;
+    const apagarOriginal = q.delete;
+    q.delete = () => { banco.tabelas.time_entries = []; return apagarOriginal(); };
+    return q;
+  };
+  // deno-lint-ignore no-explicit-any
+  const r = await ferramenta(soOpsTools, "remove_service_order_hours").execute({ time_entry_id: "hora-1" }, ctxDe(banco.db)) as any;
+  assertStringIncludes(r.error, "NÃO foi removido");
+});
+
+// ─── 10. apply_quote_price ──────────────────────────────────────────────────────────────────
+import { quoteTools } from "./quotes.ts";
+
+const COTACAO = () => ({
+  quote_responses: [{ id: "resp-1", quote_request_id: "qr-1", supplier_id: "sup-1", quote_request_item_id: "qi-1", unit_price: 100, confirmed: false }],
+  quote_request_items: [{ id: "qi-1", description: "Bomba de porão", service_order_part_id: "part-1", service_order_service_id: null }],
+  quote_requests: [{ id: "qr-1", code: "COT-00007", service_order_id: "os-1" }],
+  service_orders: [{ id: "os-1", status: "draft", grand_total: 300 }],
+  service_order_parts: [{ id: "part-1", service_order_id: "os-1", quantity: 2, unit_cost_snapshot: 80, unit_sale_snapshot: 150, line_total_cost: 160 }],
+  suppliers: [{ id: "sup-1", name: "Fornecedor Teste" }],
+  receivables: [],
+});
+
+Deno.test("fakes 10. apply_quote_price: recálculo e marca da escolhida com erro viram avisos, total null", async () => {
+  const b = bancoFalso(COTACAO(), { "update:quote_responses": "RLS" }, { recalc_so_totals: () => ({ data: null, error: { message: "deadlock" } }) });
+  // deno-lint-ignore no-explicit-any
+  const r = await ferramenta(quoteTools, "apply_quote_price").execute({ response_id: "resp-1" }, ctxDe(b.db)) as any;
+  assertEquals(r.ok, true);
+  assertEquals(r.total_orcamento, null);
+  assertEquals(r.margem_bruta_pct, null);
+  assert(r.avisos.some((a: string) => a.includes("NÃO ficou marcada")));
+  assert(r.avisos.some((a: string) => a.includes("NÃO foi recalculado")));
+  assertEquals(b.tabelas.service_order_parts[0].unit_cost_snapshot, 100, "o preço foi aplicado de verdade");
+
+  const ok = bancoFalso(COTACAO());
+  // deno-lint-ignore no-explicit-any
+  const r2 = await ferramenta(quoteTools, "apply_quote_price").execute({ response_id: "resp-1" }, ctxDe(ok.db)) as any;
+  assertEquals(r2.avisos, undefined);
+  assertEquals(r2.total_orcamento, 300);
+  assertEquals(ok.tabelas.quote_responses[0].confirmed, true);
+});
+
+// ─── 11. check_followup_cadence / get_comms_metrics ─────────────────────────────────────────
+import { commsTools } from "./comms-tools.ts";
+
+Deno.test("fakes 11. check_followup_cadence: erro de leitura BLOQUEIA; get_comms_metrics pagina além de 1000", async () => {
+  const b = bancoFalso({ ai_comms_log: [] }, { "select:ai_comms_log": "timeout" });
+  // deno-lint-ignore no-explicit-any
+  const r = await ferramenta(commsTools, "check_followup_cadence").execute({ entity_id: "c-1", tipo: "cobranca" }, ctxDe(b.db)) as any;
+  assertEquals(r.pode_tocar_agora, false);
+  assertStringIncludes(r.error, "NÃO mande");
+  const muitas = Array.from({ length: 1500 }, (_, i) => ({ id: `l${i}`, created_at: "2026-11-18T10:00:00Z", tipo: "cobranca", status: "sent", responded_at: null }));
+  // deno-lint-ignore no-explicit-any
+  const m = await ferramenta(commsTools, "get_comms_metrics").execute({ days: 3650 }, ctxDe(bancoFalso({ ai_comms_log: muitas }).db)) as any;
+  assertEquals(m.enviados, 1500);
+});
+
+// ─── 12. getConflicts ───────────────────────────────────────────────────────────────────────
+import { getConflicts } from "./agenda.ts";
+
+Deno.test("fakes 12. getConflicts: erro da RPC lança (não vira 'sem conflito')", async () => {
+  const b = bancoFalso({}, {}, { get_agenda_conflicts: () => ({ data: null, error: { message: "timeout" } }) });
+  let erro = "";
+  try {
+    await getConflicts(b.db, "u-1", "2026-11-20T12:00:00Z", "2026-11-20T13:00:00Z");
+  } catch (e) {
+    erro = (e as Error).message;
+  }
+  assertStringIncludes(erro, "nada foi gravado");
+});
+
+// ─── 13. cancel_scheduled_whatsapp ──────────────────────────────────────────────────────────
+import { whatsappTools } from "./whatsapp.ts";
+
+Deno.test("fakes 13. cancel_scheduled_whatsapp: id errado e envio já feito não respondem ok; pendente cancela", async () => {
+  const b = bancoFalso({ whatsapp_scheduled_sends: [{ id: "ag-1", status: "sent" }, { id: "ag-2", status: "pending" }] });
+  const t = ferramenta(whatsappTools, "cancel_scheduled_whatsapp");
+  // deno-lint-ignore no-explicit-any
+  const errado = await t.execute({ scheduled_id: "zzz" }, ctxDe(b.db)) as any;
+  assertStringIncludes(errado.error, "não encontrado");
+  // deno-lint-ignore no-explicit-any
+  const enviado = await t.execute({ scheduled_id: "ag-1" }, ctxDe(b.db)) as any;
+  assertStringIncludes(enviado.error, "já foi ENVIADO");
+  assertEquals(b.tabelas.whatsapp_scheduled_sends[0].status, "sent");
+  // deno-lint-ignore no-explicit-any
+  const pendente = await t.execute({ scheduled_id: "ag-2" }, ctxDe(b.db)) as any;
+  assertEquals(pendente.ok, true);
+  assertEquals(b.tabelas.whatsapp_scheduled_sends[1].status, "cancelled");
+});

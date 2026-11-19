@@ -1171,10 +1171,17 @@ export const financeRulesTools: ToolDef[] = [
       const bloqueio = bloqueiaSemAcesso(ctx);
       if (bloqueio) return bloqueio;
       const mapa: Record<string, string> = { ativa: "active", pausada: "paused", recusada: "rejected" };
-      const { error } = await ctx.sb.from("finance_rules")
-        .update({ status: mapa[String(args.nova_situacao)] })
-        .eq("id", args.regra_id);
+      const status = mapa[String(args.nova_situacao)];
+      if (!status) return { error: "nova_situacao deve ser ativa, pausada ou recusada." };
+      // Com .select(): id errado (ou sem permissão) atualiza 0 linhas sem erro, e a tool dizia ok.
+      const { data, error } = await ctx.sb.from("finance_rules")
+        .update({ status })
+        .eq("id", args.regra_id)
+        .select("id");
       if (error) return { error: error.message };
+      if (!Array.isArray(data) || data.length === 0) {
+        return { error: "Regra não encontrada; nada foi alterado. Confira o id em listar_regras_financeiras." };
+      }
       return { ok: true, situacao: args.nova_situacao };
     },
   },

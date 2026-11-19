@@ -1641,8 +1641,27 @@ export const whatsappTools: ToolDef[] = [
       const blocked = blockTechnician(ctx);
       if (blocked) return blocked;
       const { admin } = ctx;
-      const { error } = await admin.from("whatsapp_scheduled_sends").update({ status: "cancelled" }).eq("id", args.scheduled_id);
+      // Só o que ainda está na fila (19/11/2026): antes, id errado respondia ok, e um envio já 'sent' era regravado como
+      // 'cancelled' — o histórico dizia que não saiu uma mensagem que o cliente recebeu.
+      const { data: cancelados, error } = await admin.from("whatsapp_scheduled_sends")
+        .update({ status: "cancelled" })
+        .eq("id", args.scheduled_id)
+        .eq("status", "pending")
+        .select("id");
       if (error) return { error: error.message };
+      if (!Array.isArray(cancelados) || cancelados.length === 0) {
+        const { data: atual, error: erroLeitura } = await admin.from("whatsapp_scheduled_sends")
+          .select("status").eq("id", args.scheduled_id).maybeSingle();
+        if (erroLeitura) return { error: `Não cancelei e não consegui conferir o agendamento (${erroLeitura.message}).` };
+        if (!atual) return { error: "Agendamento não encontrado; nada foi cancelado. Confira o id em list_scheduled_whatsapp." };
+        const situacao: Record<string, string> = {
+          sent: "já foi ENVIADO — não dá mais para cancelar",
+          processing: "está sendo enviado AGORA — não dá para cancelar",
+          cancelled: "já estava cancelado",
+          failed: "falhou e não será reenviado",
+        };
+        return { error: `Nada foi cancelado: o agendamento ${situacao[String(atual.status)] ?? `está como ${atual.status}`}.` };
+      }
       return { ok: true, cancelled_id: args.scheduled_id };
     },
   },

@@ -605,17 +605,39 @@ export const quoteTools: ToolDef[] = [
         depois = { preco_venda: precoVenda, custo_cotado: preco };
       }
 
+      // O preço JÁ foi gravado: daqui para baixo, o que falhar vira aviso dito (antes era engolido e a resposta dizia
+      // que estava tudo certo, com o total antigo e a cotação sem a escolhida marcada).
+      const avisos: string[] = [];
+
       // Marca a escolhida e desmarca as concorrentes do MESMO item.
-      await sb.from("quote_responses").update({ confirmed: false }).eq("quote_request_item_id", item.id);
-      await sb.from("quote_responses").update({ confirmed: true }).eq("id", resp.id);
+      const { error: erroDesmarcar } = await sb.from("quote_responses").update({ confirmed: false }).eq("quote_request_item_id", item.id);
+      const { error: erroMarcar } = await sb.from("quote_responses").update({ confirmed: true }).eq("id", resp.id);
+      if (erroDesmarcar || erroMarcar) {
+        avisos.push(`O preço foi aplicado, mas a resposta escolhida NÃO ficou marcada na cotação (${(erroMarcar ?? erroDesmarcar)!.message}).`);
+      }
 
-      try { await recalcularOSComCascata(sb, soId); } catch { /* best-effort */ }
+      // O recálculo com o erro conferido (recalcularOSComCascata engole o erro do recalc_so_totals); depois a cascata,
+      // que redistribui os recebíveis da OS.
+      const { error: erroRecalculo } = await sb.rpc("recalc_so_totals", { so_id: soId });
+      let totalConfiavel = !erroRecalculo;
+      if (erroRecalculo) {
+        avisos.push(`O total da OS NÃO foi recalculado (${erroRecalculo.message}): confira o total na tela da OS.`);
+      } else {
+        try {
+          const cascata = await recalcularOSComCascata(sb, soId);
+          if (cascata.bloqueado) avisos.push(`As contas a receber da OS NÃO foram ajustadas ao novo total: ${cascata.motivo ?? "ficaria abaixo do já pago"}.`);
+          else if (cascata.falhas > 0) avisos.push(`${cascata.falhas} conta(s) a receber da OS NÃO foram ajustadas ao novo total.`);
+        } catch (e) {
+          avisos.push(`As contas a receber da OS NÃO foram ajustadas ao novo total (${(e as Error)?.message ?? "erro"}).`);
+        }
+      }
 
-      const { data: soAfter } = await sb.from("service_orders").select("grand_total").eq("id", soId).maybeSingle();
-      const { data: partsCost } = await sb.from("service_order_parts").select("line_total_cost").eq("service_order_id", soId);
+      const { data: soAfter, error: erroTotal } = await sb.from("service_orders").select("grand_total").eq("id", soId).maybeSingle();
+      const { data: partsCost, error: erroCusto } = await sb.from("service_order_parts").select("line_total_cost").eq("service_order_id", soId);
+      if (erroTotal || !soAfter) totalConfiavel = false;
       const custoPecas = (partsCost || []).reduce((a: number, p: any) => a + (Number(p.line_total_cost) || 0), 0);
       const grand = Number(soAfter?.grand_total) || 0;
-      const margem = grand > 0 ? Math.round(((grand - custoPecas) / grand) * 1000) / 10 : null;
+      const margem = totalConfiavel && !erroCusto && grand > 0 ? Math.round(((grand - custoPecas) / grand) * 1000) / 10 : null;
 
       const { data: sup } = await sb.from("suppliers").select("name").eq("id", resp.supplier_id).maybeSingle();
 
@@ -626,8 +648,9 @@ export const quoteTools: ToolDef[] = [
         fornecedor: sup?.name || resp.supplier_id,
         antes,
         depois,
-        total_orcamento: grand,
+        total_orcamento: totalConfiavel ? grand : null,
         margem_bruta_pct: margem,
+        ...(avisos.length ? { avisos, atencao: "Diga ao usuário os avisos: parte do que a ferramenta faz NÃO foi feita." } : {}),
       };
     },
   },

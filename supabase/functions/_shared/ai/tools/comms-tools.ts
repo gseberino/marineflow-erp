@@ -49,14 +49,21 @@ export const commsTools: ToolDef[] = [
       const blocked = blockTechnician(ctx);
       if (blocked) return blocked;
       const { admin } = ctx;
-      let toques = 0;
-      let ultimo: string | null = null;
+      // Erro de leitura BLOQUEIA (19/11/2026): antes virava "0 toques", e a cadência liberava cobrar de novo quem já
+      // tinha sido cobrado — exatamente o que esta ferramenta existe para impedir.
+      let rows: any[] = [];
       try {
-        const { data } = await admin.from("ai_comms_log").select("created_at").eq("entity_id", args.entity_id).eq("tipo", args.tipo).eq("status", "sent").order("created_at", { ascending: false });
-        const rows = (data as any[]) || [];
-        toques = rows.length;
-        ultimo = rows[0]?.created_at ?? null;
-      } catch { /* best-effort */ }
+        const { data, error } = await admin.from("ai_comms_log").select("created_at").eq("entity_id", args.entity_id).eq("tipo", args.tipo).eq("status", "sent").order("created_at", { ascending: false });
+        if (error) throw error;
+        rows = (data as any[]) || [];
+      } catch (e) {
+        return {
+          error: `Não consegui conferir os toques já feitos (${(e as Error)?.message ?? "erro"}). NÃO mande outro follow-up/cobrança agora: tente de novo depois.`,
+          pode_tocar_agora: false,
+        };
+      }
+      const toques = rows.length;
+      const ultimo: string | null = rows[0]?.created_at ?? null;
       const d = podeTocarAgora(toques, ultimo);
       return { toques, teto: MAX_TOQUES, pode_tocar_agora: d.permitido, motivo: d.motivo, esperar_ate: d.esperarAte ?? null };
     },
@@ -86,7 +93,8 @@ export const commsTools: ToolDef[] = [
         .select("created_at, tipo, audiencia, entity_kind, entity_id, status, block_code, responded_at, reply_intent, message_preview")
         .gte("created_at", desde).order("created_at", { ascending: false }).limit(lim);
       if (args.entity_id) q = q.eq("entity_id", args.entity_id);
-      const { data } = await q;
+      const { data, error } = await q;
+      if (error) return { error: `Não consegui ler o histórico de comunicação (${error.message}).` };
       const rows = (data as any[]) || [];
       const enviados = rows.filter((r) => r.status === "sent").length;
       const responderam = rows.filter((r) => r.responded_at).length;
@@ -115,8 +123,16 @@ export const commsTools: ToolDef[] = [
       const { admin } = ctx;
       const days = Number(args.days) || 30;
       const desde = new Date(Date.now() - days * 86400000).toISOString();
-      const { data } = await admin.from("ai_comms_log").select("tipo, status, responded_at, reply_intent, block_code").gte("created_at", desde);
-      const rows = (data as any[]) || [];
+      // Paginado (19/11/2026): o PostgREST corta em 1000 linhas (max-rows), e as métricas saíam de uma amostra calada.
+      const rows: any[] = [];
+      for (let de = 0; ; de += 1000) {
+        const { data, error } = await admin.from("ai_comms_log").select("tipo, status, responded_at, reply_intent, block_code")
+          .gte("created_at", desde).order("created_at", { ascending: true }).order("id", { ascending: true }).range(de, de + 999);
+        if (error) return { error: `Não consegui ler o histórico de comunicação (${error.message}).` };
+        const pagina = (data as any[]) || [];
+        rows.push(...pagina);
+        if (pagina.length < 1000 || de >= 50_000) break;
+      }
       const enviados = rows.filter((r) => r.status === "sent");
       const responderam = enviados.filter((r) => r.responded_at);
       const porTipo: Record<string, { enviados: number; responderam: number }> = {};

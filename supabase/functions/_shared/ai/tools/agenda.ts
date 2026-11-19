@@ -340,13 +340,15 @@ function visibleTo(t: any, userId: string, role: string) {
 }
 
 async function getConflicts(sb: any, userId: string, startISO: string, endISO: string, opts?: { excludeTask?: string; excludeSo?: string }) {
-  const { data } = await sb.rpc("get_agenda_conflicts", {
+  const { data, error } = await sb.rpc("get_agenda_conflicts", {
     p_user_id: userId,
     p_start: startISO,
     p_end: endISO,
     p_exclude_task: opts?.excludeTask ?? null,
     p_exclude_so: opts?.excludeSo ?? null,
   });
+  // Erro LANÇA (19/11/2026): engolido, virava "sem conflito" e o compromisso entrava por cima de outro.
+  if (error) throw new Error(`Não consegui conferir a agenda do responsável (${error.message}); nada foi gravado.`);
   return (data || []).map((c: any) => ({
     tipo: c.source === "service_order" ? "OS" : "compromisso",
     rotulo: c.label,
@@ -380,10 +382,11 @@ export async function dayOverloadNotice(
     });
   }
   const jornada = lida.jornada ?? JORNADA_PADRAO_HORAS;
-  const { data } = await sb.rpc("get_agenda_conflicts", {
+  const { data, error } = await sb.rpc("get_agenda_conflicts", {
     p_user_id: userId, p_start: de, p_end: ate,
     p_exclude_task: excl?.excludeTask ?? null, p_exclude_so: excl?.excludeSo ?? null,
   });
+  if (error) return "Aviso: não consegui conferir a carga do dia do responsável; confira a agenda antes de confirmar ao usuário.";
   const ocupadas = ((data as any[]) || []).reduce((s, c) => s + horasNoDia(c.starts_at, c.ends_at, dia, jornada), 0);
   const totalH = ocupadas + horasNoDia(startISO, endISO, dia, jornada);
   return totalH > jornada

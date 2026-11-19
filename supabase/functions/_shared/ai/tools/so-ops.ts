@@ -141,7 +141,7 @@ export const soOpsTools: ToolDef[] = [
     name: "remove_service_order_expense",
     description:
       "Remove uma despesa lançada na OS e recalcula o total. Use quando disserem 'apaga aquela despesa', 'lancei errado'. " +
-      "Precisa do id da despesa — pegue em get_service_order, que traz as despesas. A despesa que nasceu de um comprovante " +
+      "Precisa do id da despesa — pegue em get_service_order (lista despesas, campo expense_id). A despesa que nasceu de um comprovante " +
       "(CMP, custo interno) não sai por aqui: sai cancelando o comprovante.",
     input_schema: {
       type: "object",
@@ -341,7 +341,7 @@ export const soOpsTools: ToolDef[] = [
     name: "remove_service_order_hours",
     description:
       "Remove um apontamento de hora da OS e recalcula o total. Use com 'apaga aquela hora', 'apontei errado'. " +
-      "O id vem de get_service_order.",
+      "O id vem de get_service_order (lista horas, campo time_entry_id).",
     input_schema: {
       type: "object",
       properties: { time_entry_id: { type: "string", description: "UUID do apontamento." } },
@@ -349,13 +349,16 @@ export const soOpsTools: ToolDef[] = [
     },
     risk: "medium",
     async execute(args, { sb }) {
-      const { data: entrada } = await sb
+      const { data: entrada, error: erroLeitura } = await sb
         .from("time_entries").select("id, service_order_id, duration_minutes")
         .eq("id", args.time_entry_id).maybeSingle();
-      if (!entrada) return { error: "Apontamento não encontrado." };
+      if (erroLeitura) throw new Error(`Não consegui ler o apontamento: ${erroLeitura.message}`);
+      if (!entrada) return { error: "Apontamento não encontrado (o time_entry_id vem em get_service_order, campo horas)." };
 
-      const { error } = await sb.from("time_entries").delete().eq("id", args.time_entry_id);
+      // Com .select(): sem permissão o delete apaga 0 linhas sem erro, e a tool dizia que removeu.
+      const { data: apagadas, error } = await sb.from("time_entries").delete().eq("id", args.time_entry_id).select("id");
       if (error) throw error;
+      if (!Array.isArray(apagadas) || apagadas.length === 0) return { error: "O apontamento NÃO foi removido (sem permissão)." };
       // O total da OS conta hora cobrável — remover sem recalcular deixaria o valor
       // do serviço maior do que o trabalho registrado.
       await recalcularOSComCascata(sb, (entrada as any).service_order_id);

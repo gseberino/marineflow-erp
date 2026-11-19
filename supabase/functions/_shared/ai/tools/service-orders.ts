@@ -702,14 +702,14 @@ export const serviceOrderTools: ToolDef[] = [
   },
   {
     name: "get_service_order",
-    description: "Detalhes completos de uma OS incluindo itens e serviços — cada serviço com a situação na via do técnico (situacao_na_via: a_fazer, so_levantar, aguarda_peca, feito, parcial, nao_feito) e o motivo, e o numero = o número do serviço na via do técnico e na tela (quando o dono disser 'serviço N', é esse numero, nunca a posição na lista). Em cada peça, item_id serve para editar/remover a linha e product_id para get_product_price_history.",
+    description: "Detalhes completos de uma OS incluindo itens e serviços — cada serviço com a situação na via do técnico (situacao_na_via: a_fazer, so_levantar, aguarda_peca, feito, parcial, nao_feito) e o motivo, e o numero = o número do serviço na via do técnico e na tela (quando o dono disser 'serviço N', é esse numero, nunca a posição na lista). Em cada peça, item_id serve para editar/remover a linha e product_id para get_product_price_history. Quando houver, traz despesas (expense_id, para remove_service_order_expense) e horas apontadas (time_entry_id, para remove_service_order_hours).",
     input_schema: {
       type: "object",
       properties: { id: { type: "string", description: "UUID ou número (OS-00112 / ORÇ-00112)." } },
       required: ["id"],
     },
     risk: "low",
-    async execute(args, { sb }) {
+    async execute(args, { sb, userRole }) {
       const { data: so, error } = await sb
         .from("service_orders")
         .select("*, clients(name), vessels(name, asset_type)")
@@ -739,6 +739,30 @@ export const serviceOrderTools: ToolDef[] = [
         .eq("service_order_id", args.id)
         .order("seq", { ascending: true });
       if (erroRoteiro) throw new Error(`Não consegui ler o roteiro da OS: ${erroRoteiro.message}`);
+
+      // Os ids de despesa e de hora (19/11/2026): remove_service_order_expense e remove_service_order_hours mandam
+      // "pegar o id em get_service_order", e eles não vinham aqui. Enxuto: só o que identifica a linha. Despesa é
+      // dinheiro: técnico não recebe. Leitura que falha não derruba a OS: vira um aviso (a lista fica de fora).
+      const avisosDasListas: string[] = [];
+      let despesas: any[] = [];
+      if (userRole !== "technician") {
+        const { data, error: erroDespesas } = await sb
+          .from("service_order_expenses")
+          .select("id, description, category, amount, expense_date, origem_codigo")
+          .eq("service_order_id", args.id)
+          .order("expense_date", { ascending: true })
+          .limit(50);
+        if (erroDespesas) avisosDasListas.push(`não consegui ler as despesas (${erroDespesas.message})`);
+        despesas = (data as any[]) ?? [];
+      }
+      const { data: horasLidas, error: erroHoras } = await sb
+        .from("time_entries")
+        .select("id, started_at, duration_minutes, billable")
+        .eq("service_order_id", args.id)
+        .order("started_at", { ascending: true })
+        .limit(50);
+      if (erroHoras) avisosDasListas.push(`não consegui ler os apontamentos de hora (${erroHoras.message})`);
+      const horas = (horasLidas as any[]) ?? [];
 
       const roteiro = (steps || []).length === 0
         ? { tem_roteiro: false }
@@ -783,6 +807,22 @@ export const serviceOrderTools: ToolDef[] = [
           situacao_na_via: s.field_status || "a_fazer",
           ...(s.field_status_note ? { motivo_na_via: s.field_status_note } : {}),
         })),
+        ...(despesas.length
+          ? {
+            despesas: despesas.map((d) => ({
+              expense_id: d.id, descricao: d.description || d.category || null, valor: Number(d.amount) || 0, data: d.expense_date,
+              ...(d.origem_codigo ? { do_comprovante: d.origem_codigo } : {}),
+            })),
+          }
+          : {}),
+        ...(horas.length
+          ? {
+            horas: horas.map((h) => ({
+              time_entry_id: h.id, inicio: h.started_at, minutos: h.duration_minutes, cobravel: h.billable !== false,
+            })),
+          }
+          : {}),
+        ...(avisosDasListas.length ? { aviso: avisosDasListas.join("; ") } : {}),
       };
     },
   },
