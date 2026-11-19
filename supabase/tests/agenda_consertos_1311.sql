@@ -57,6 +57,18 @@ $f$;
 create function pg_temp.src(p_assinatura text) returns text language sql stable as $f$
   select replace(p.prosrc, chr(13), '') from pg_proc p where p.oid = to_regprocedure(p_assinatura)
 $f$;
+-- (19/11/2026) Tira os blocos "-- OPÇÃO A: … -- OPÇÃO A: fim" (a 20270128100000, a manhã), devolvendo as linhas "--antes:" de dentro deles: o corpo de antes.
+create function pg_temp.sem_opcao_a(p text) returns text language sql immutable as $oa$
+  select array_to_string(array(
+           select case when dentro > 0 and l ~ '^--antes:' then substr(l, 9) else l end
+             from (select l, o, sum(case when l ~ '^\s*-- OPÇÃO A:' and l !~ '^\s*-- OPÇÃO A: fim' then 1
+                                         when l ~ '^\s*-- OPÇÃO A: fim' then -1 else 0 end)
+                                over (order by o rows between unbounded preceding and current row) as dentro,
+                          l ~ '^\s*-- OPÇÃO A: fim' as fecha
+                     from unnest(string_to_array(replace(p, chr(13), ''), E'\n')) with ordinality u(l, o)) x
+            where (dentro = 0 and not fecha) or (dentro > 0 and l ~ '^--antes:')
+            order by o), E'\n')
+$oa$;
 -- Tira os blocos "-- CONSERTO 13/11 (x): … -- CONSERTO 13/11 (x): fim" (o que a 20261113200000 acrescentou).
 create function pg_temp.sem_c13(p text) returns text language plpgsql immutable as $f$
 declare
@@ -177,9 +189,9 @@ begin
     and pg_temp.porta(c_rot) = 'f i | f t t f',
     md5(replace(v, c_rot_novo, c_rot_antes)) || ' ' || pg_temp.porta(c_rot));
   v_res := pg_temp.ok(v_res, 'P0i agenda_fechamento_registrar não muda (md5 de produção de 13/11, 9a035e2b…; definer, só service_role): quem conta continua sendo ela',
-    md5(pg_temp.src('public.agenda_fechamento_registrar(date, jsonb, text, timestamptz)')) = '9a035e2b8afd1ac0ac48b794ae344daf'
+    md5(pg_temp.sem_opcao_a(pg_temp.src('public.agenda_fechamento_registrar(date, jsonb, text, timestamptz)'))) = '9a035e2b8afd1ac0ac48b794ae344daf'
     and pg_temp.porta('public.agenda_fechamento_registrar(date, jsonb, text, timestamptz)') = 't v | f f t f',
-    md5(pg_temp.src('public.agenda_fechamento_registrar(date, jsonb, text, timestamptz)')));
+    md5(pg_temp.sem_opcao_a(pg_temp.src('public.agenda_fechamento_registrar(date, jsonb, text, timestamptz)'))));
   select count(*) into v_n
     from unnest(array[c_prem, c_conf, c_guar, c_fila, c_aviso, c_pq, c_rot]) a(f), pg_temp.sem_where(pg_temp.src(a.f)) s;
   v_res := pg_temp.ok(v_res, 'P0j nenhum UPDATE/DELETE sem WHERE no nível de cima das 7 (o pg_safeupdate do PostgREST recusaria); o detector acusa um sem WHERE (controle)',

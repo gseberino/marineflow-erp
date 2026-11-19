@@ -1151,6 +1151,9 @@ insert into _definer_da_agenda values ('_agenda_saude_explicar');
 -- pela agenda_fechamento_registrar; só o service_role). A conferência (_agenda_fechamento_conferir) e a premissa (_agenda_cliente_premissa) são invoker e sem
 -- grant. agenda_consertos_1311.sql P0 prova as portas
 insert into _definer_da_agenda values ('agenda_fechamento_guardar');
+-- Opção A (19/11/2026), 20270128100000: a leitura das aprovações ao cliente para o resumo da manhã (só lê; só o service_role, o ai-daily-briefing).
+-- agenda_aprovacao_na_manha.sql P0 prova a porta
+insert into _definer_da_agenda values ('agenda_aprovacoes_da_manha');
   -- FASE 7f: fim
   -- FASE 7e: (7e P1, 20261111100000) nenhuma definer nova: o modo, a credibilidade, o z e a temporada são invoker, e o gatilho _agenda_medidas_compra_so_muda só mexe na própria linha. agenda_fase7e_base.sql prova as portas.
   -- FASE 7e: fim

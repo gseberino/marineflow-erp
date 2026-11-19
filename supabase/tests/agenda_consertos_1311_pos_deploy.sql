@@ -32,6 +32,18 @@ create temp table _pg on commit drop as
 select coalesce(current_setting('agenda_teste.feriados', true), '') <> '' as bancada;
 
 -- O corpo sem os blocos "-- CONSERTO 13/11 (x): … -- CONSERTO 13/11 (x): fim".
+-- (19/11/2026) Tira os blocos "-- OPÇÃO A: … -- OPÇÃO A: fim" (a 20270128100000, a manhã), devolvendo as linhas "--antes:" de dentro deles: o corpo de antes.
+create function pg_temp.sem_opcao_a(p text) returns text language sql immutable as $oa$
+  select array_to_string(array(
+           select case when dentro > 0 and l ~ '^--antes:' then substr(l, 9) else l end
+             from (select l, o, sum(case when l ~ '^\s*-- OPÇÃO A:' and l !~ '^\s*-- OPÇÃO A: fim' then 1
+                                         when l ~ '^\s*-- OPÇÃO A: fim' then -1 else 0 end)
+                                over (order by o rows between unbounded preceding and current row) as dentro,
+                          l ~ '^\s*-- OPÇÃO A: fim' as fecha
+                     from unnest(string_to_array(replace(p, chr(13), ''), E'\n')) with ordinality u(l, o)) x
+            where (dentro = 0 and not fecha) or (dentro > 0 and l ~ '^--antes:')
+            order by o), E'\n')
+$oa$;
 create function pg_temp.sem_c13(p text) returns text language plpgsql immutable as $f$
 declare
   v_fora text[] := '{}';
@@ -106,8 +118,9 @@ select format('F1 %s: 1 assinatura, definer %s, volatilidade %s, search_path=pub
   from _f r
   left join pg_proc p on p.oid = to_regprocedure('public.' || r.f);
 insert into _resultado
-select format('F2 %s: o corpo é o da migration (md5 sem CR %s…)', r.f, left(r.m, 8)), p.oid is not null and md5(replace(p.prosrc, chr(13), '')) = r.m,
-       case when p.oid is null then 'NÃO EXISTE' when md5(replace(p.prosrc, chr(13), '')) <> r.m then 'md5 ' || md5(replace(p.prosrc, chr(13), '')) end
+-- (19/11/2026) sem os blocos da Opção A (20270128100000: a guarda aceita a via 'manha'), que não mexem no que esta migration fez
+select format('F2 %s: o corpo é o da migration (md5 sem CR %s…)', r.f, left(r.m, 8)), p.oid is not null and md5(pg_temp.sem_opcao_a(p.prosrc)) = r.m,
+       case when p.oid is null then 'NÃO EXISTE' when md5(pg_temp.sem_opcao_a(p.prosrc)) <> r.m then 'md5 ' || md5(pg_temp.sem_opcao_a(p.prosrc)) end
   from _f r
   left join pg_proc p on p.oid = to_regprocedure('public.' || r.f);
 -- as recriadas, tirado o conserto (os blocos de (a) e (b); a linha marcada de (c) e (d) de volta à de antes): o corpo de produção de 13/11
@@ -128,7 +141,7 @@ select format('F3 %s: tirado o conserto, é o corpo de produção de 13/11 (md5 
  where r.antes is not null;
 insert into _resultado
 select 'F4 agenda_fechamento_registrar intacta (md5 9a035e2b…, o de produção de 13/11): quem conta continua sendo ela',
-       md5(replace(p.prosrc, chr(13), '')) = '9a035e2b8afd1ac0ac48b794ae344daf', md5(replace(p.prosrc, chr(13), ''))
+       md5(pg_temp.sem_opcao_a(p.prosrc)) = '9a035e2b8afd1ac0ac48b794ae344daf', md5(pg_temp.sem_opcao_a(p.prosrc))
   from pg_proc p where p.oid = to_regprocedure('public.agenda_fechamento_registrar(date, jsonb, text, timestamptz)');
 insert into _resultado
 select 'F5 nenhum UPDATE/DELETE sem WHERE no nível de cima das 7 (o pg_safeupdate do PostgREST recusaria)',

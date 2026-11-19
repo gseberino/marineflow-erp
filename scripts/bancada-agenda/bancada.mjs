@@ -26,7 +26,9 @@
 //      supabase_migrations.schema_migrations como em produção. A semente 20261024161000 entra: na bancada vazia ela não
 //      acha diária e não semeia (a fixture semeia o dia 23/10). `ate` corta a lista (cada pacote testa até a sua). Na 2ª
 //      rodada, a view que uma migration mais nova recriou com colunas a mais sai antes da antiga (VIEWS_RECRIADAS_DEPOIS),
-//      e a função a que uma mais nova deu default, também (FUNCOES_COM_DEFAULT_DEPOIS);
+//      e a função a que uma mais nova deu default, também (FUNCOES_COM_DEFAULT_DEPOIS); (19/11/2026) a migration que termina
+//      com o próprio registro ("insert into supabase_migrations.schema_migrations …;", sem on conflict, como o dono aplica)
+//      roda na 2ª rodada sem essa linha (a bancada já registrou a versão: a linha repetida só daria chave duplicada);
 //   5. com `fixture`, scripts/bancada-agenda/fixture-2310.sql (a carteira sintética de 23/10).
 //
 // O RELÓGIO DA BANCADA (correção C2 da Fase 5): o now() do PGlite é o Date.now() do Node, e a bancada o FIXA em
@@ -601,7 +603,9 @@ export async function criarBancada({ ate, fixture = true, log = () => {} } = {})
           for (const v of VIEWS_RECRIADAS_DEPOIS[m] ?? []) await db.exec(`drop view if exists public.${v}`);
           for (const f of FUNCOES_COM_DEFAULT_DEPOIS[m] ?? []) await db.exec(`drop function if exists ${f}`);
         }
-        await db.exec(ler(join(MIG, m)));
+        const sql = ler(join(MIG, m));
+        // (19/11/2026) o registro no fim da migration só vale uma vez: na 2ª rodada a linha sai (a versão já está registrada)
+        await db.exec(rodada === 2 ? sql.replace(/^insert into supabase_migrations\.schema_migrations \(version, name\) values \([^;]*\);[ \t]*\r?$/gim, '') : sql);
         await db.query(
           `insert into supabase_migrations.schema_migrations (version, name) values ($1, $2) on conflict (version) do nothing`,
           [m.slice(0, 14), m.slice(15, -4)],

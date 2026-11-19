@@ -62,6 +62,18 @@ begin
   return left(v, position('$function$' in v) - 1);
 end $f$;
 -- O texto sem os blocos "-- FASE 7f: … -- FASE 7f: fim" e, dentro de bloco de antes, "-- (7f … -- (7f: fim)" (as linhas de abrir e de fechar saem junto).
+-- (19/11/2026) Tira os blocos "-- OPÇÃO A: … -- OPÇÃO A: fim" (a 20270128100000, a manhã), devolvendo as linhas "--antes:" de dentro deles: o corpo de antes.
+create function pg_temp.sem_opcao_a(p text) returns text language sql immutable as $oa$
+  select array_to_string(array(
+           select case when dentro > 0 and l ~ '^--antes:' then substr(l, 9) else l end
+             from (select l, o, sum(case when l ~ '^\s*-- OPÇÃO A:' and l !~ '^\s*-- OPÇÃO A: fim' then 1
+                                         when l ~ '^\s*-- OPÇÃO A: fim' then -1 else 0 end)
+                                over (order by o rows between unbounded preceding and current row) as dentro,
+                          l ~ '^\s*-- OPÇÃO A: fim' as fecha
+                     from unnest(string_to_array(replace(p, chr(13), ''), E'\n')) with ordinality u(l, o)) x
+            where (dentro = 0 and not fecha) or (dentro > 0 and l ~ '^--antes:')
+            order by o), E'\n')
+$oa$;
 create function pg_temp.sem_7f(p text) returns text language sql immutable as $f$
   select array_to_string(array(
            select l from (select l, o, sum(case when l ~ '^\s*-- (FASE 7f:|\(7f )' and l !~ '^\s*-- (FASE 7f: fim|\(7f: fim\))' then 1
@@ -698,7 +710,8 @@ begin
     r := pg_temp.ok(r, format('L7a %s: tirados os blocos da 7f, a origem, byte a byte', x.nome),
       char_length(pg_temp.corpo(v_or, x.nome)) > 500 and pg_temp.sem_7f(pg_temp.corpo(v_mig, x.nome)) = replace(pg_temp.corpo(v_or, x.nome), E'\r\n', E'\n'), null);
     r := pg_temp.ok(r, format('L7b %s: a viva é a desta migration', x.nome),
-      (select replace(p.prosrc, E'\r\n', E'\n') from pg_proc p where p.oid = x.assin::regprocedure) = pg_temp.corpo(v_mig, x.nome), null);
+      -- (19/11/2026) sem os blocos da Opção A (20270128100000: o registro aceita a via 'manha'), que vieram depois
+      (select pg_temp.sem_opcao_a(p.prosrc) from pg_proc p where p.oid = x.assin::regprocedure) = replace(pg_temp.corpo(v_mig, x.nome), E'\r\n', E'\n'), null);
     r := pg_temp.ok(r, format('L7c %s: o tirador morde: a cópia tem bloco da 7f', x.nome), pg_temp.corpo(v_mig, x.nome) like '%-- FASE 7f:%', null);
     r := pg_temp.ok(r, format('L7c2 %s: nenhum bloco da 7f aberto dentro de outro: os tiradores das etapas de antes não fecham no fim de um bloco de dentro', x.nome),
       not exists (select 1 from (select l, sum(case when l ~ '^\s*-- FASE 7[bcdeg]?:' and l !~ ': fim' then 1 when l ~ '^\s*-- FASE 7[bcdeg]?: fim' then -1 else 0 end) over (order by o) as prof
