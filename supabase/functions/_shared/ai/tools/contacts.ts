@@ -1,5 +1,6 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
-import { chaveTelefone, padraoLikeTelefone } from "../phone.ts";
+import { chaveTelefone, padraoLikeTelefone, somenteDigitos } from "../phone.ts";
+import { normalizePhoneNumber } from "../../whatsapp/normalize.ts";
 
 // Resolução de contato: de quem é este número? (Fase 3 · Etapa 2)
 // Ver plans/marineflow-contexto-unificado-escopo.md
@@ -8,29 +9,35 @@ import { chaveTelefone, padraoLikeTelefone } from "../phone.ts";
 // já existia em whatsapp_messages; `supplier_id` foi adicionado (migration aditiva). Ensinar o
 // vínculo UMA vez passa a valer também para as mensagens ANTERIORES daquele número.
 
-type Achado = { tipo: "cliente" | "fornecedor" | "equipe"; id: string; nome: string; motivo: string };
+type Achado = { tipo: "cliente" | "fornecedor" | "equipe"; id: string; nome: string; motivo: string; ativo?: boolean };
 
-/** Procura o dono do número em clientes, fornecedores e equipe. Pode achar mais de um. */
+/**
+ * Procura o dono do número em clientes, fornecedores e equipe. Pode achar mais de um. Leitura com erro LANÇA: antes
+ * virava "número desconhecido", e o modelo pedia ao dono para ensinar um número que já estava cadastrado.
+ */
 async function resolverTelefone(sb: any, telefone: string): Promise<Achado[]> {
   const chave = chaveTelefone(telefone);
   if (!chave) return [];
   const achados: Achado[] = [];
 
-  const { data: clientes } = await sb.from("clients").select("id, name, phone, whatsapp").limit(2000);
+  const { data: clientes, error: erroClientes } = await sb.from("clients").select("id, name, phone, whatsapp, active").limit(2000);
+  if (erroClientes) throw new Error(`Não consegui ler os clientes: ${erroClientes.message}`);
   for (const c of (clientes as any[]) || []) {
     if (chaveTelefone(c.whatsapp) === chave || chaveTelefone(c.phone) === chave) {
-      achados.push({ tipo: "cliente", id: c.id, nome: c.name, motivo: "telefone bate com o cadastro do cliente" });
+      achados.push({ tipo: "cliente", id: c.id, nome: c.name, motivo: "telefone bate com o cadastro do cliente", ativo: c.active !== false });
     }
   }
 
-  const { data: forns } = await sb.from("suppliers").select("id, name, phone").limit(2000);
+  const { data: forns, error: erroForns } = await sb.from("suppliers").select("id, name, phone").limit(2000);
+  if (erroForns) throw new Error(`Não consegui ler os fornecedores: ${erroForns.message}`);
   for (const f of (forns as any[]) || []) {
     if (chaveTelefone(f.phone) === chave) {
       achados.push({ tipo: "fornecedor", id: f.id, nome: f.name, motivo: "telefone bate com o cadastro do fornecedor" });
     }
   }
 
-  const { data: users } = await sb.from("app_users").select("id, full_name, phone_normalized").eq("active", true).limit(200);
+  const { data: users, error: erroUsers } = await sb.from("app_users").select("id, full_name, phone_normalized").eq("active", true).limit(200);
+  if (erroUsers) throw new Error(`Não consegui ler a equipe: ${erroUsers.message}`);
   for (const u of (users as any[]) || []) {
     if (chaveTelefone(u.phone_normalized) === chave) {
       achados.push({ tipo: "equipe", id: u.id, nome: u.full_name || "(sem nome)", motivo: "é um usuário do sistema" });
@@ -39,9 +46,69 @@ async function resolverTelefone(sb: any, telefone: string): Promise<Achado[]> {
   return achados;
 }
 
+/**
+ * As próximas mensagens do número chegam ligadas ao cadastro? Só se o número estiver nele (o webhook identifica o
+ * cliente pelo telefone/whatsapp). Cadastro sem número nenhum: grava este (o pedido do dono é a confirmação).
+ * Cadastro com OUTRO número: não troca ("vínculo sempre pergunta") e devolve a pergunta. Outro cliente com o mesmo
+ * número: não grava — dois cadastros com o mesmo número deixam a chegada ambígua (quem_escreve não escolhe).
+ */
+async function numeroNoCadastro(
+  sb: any,
+  tabela: "clients" | "suppliers",
+  cad: { id: string; phone?: string | null; whatsapp?: string | null },
+  telefone: string,
+  ehCliente: boolean,
+): Promise<Record<string, unknown>> {
+  const chave = chaveTelefone(telefone);
+  const numeros = ehCliente ? [cad.whatsapp, cad.phone] : [cad.phone];
+  const doFornecedor = ehCliente
+    ? ""
+    : " Atenção: na chegada o WhatsApp só reconhece CLIENTE; mensagens novas deste número são reconhecidas como do fornecedor pelo identify_contact, mas não ganham o fornecedor sozinhas.";
+
+  if (ehCliente && chave) {
+    const outros = (await resolverTelefone(sb, telefone)).filter((a) => a.tipo === "cliente" && a.ativo !== false && a.id !== cad.id);
+    if (outros.length) {
+      return {
+        numero_no_cadastro: "nao_gravado",
+        proximas_mensagens:
+          `As mensagens antigas foram ligadas, mas o número também está no cadastro de ${outros.map((o) => o.nome).join(", ")}. ` +
+          "Enquanto dois cadastros tiverem o mesmo número, as PRÓXIMAS mensagens chegam sem dono. Pergunte ao usuário de qual cadastro tirar o número.",
+      };
+    }
+  }
+  if (chave && numeros.some((n) => chaveTelefone(n) === chave)) {
+    return { numero_no_cadastro: "ja_estava", proximas_mensagens: "O número já está no cadastro: as próximas mensagens chegam ligadas a ele." + doFornecedor };
+  }
+  if (numeros.some((n) => somenteDigitos(n).length > 0)) {
+    return {
+      numero_no_cadastro: "nao_trocado",
+      numero_atual_no_cadastro: (ehCliente ? cad.whatsapp || cad.phone : cad.phone) ?? null,
+      proximas_mensagens:
+        "As mensagens antigas foram ligadas, mas o cadastro já tem OUTRO número e ele não foi trocado. As PRÓXIMAS mensagens deste número " +
+        `só chegam ligadas se o número for trocado ou adicionado no cadastro. Pergunte ao usuário se quer trocar (${ehCliente ? "update_client" : "update_supplier"}).`,
+    };
+  }
+  const campo = ehCliente ? "whatsapp" : "phone";
+  const numero = normalizePhoneNumber(telefone);
+  const { data: gravou, error } = await sb.from(tabela).update({ [campo]: numero }).eq("id", cad.id).select("id");
+  if (error || !Array.isArray(gravou) || gravou.length === 0) {
+    return {
+      numero_no_cadastro: "falhou",
+      proximas_mensagens:
+        `As mensagens antigas foram ligadas, mas NÃO consegui gravar o número no cadastro (${error?.message ?? "sem permissão"}); ` +
+        "as próximas mensagens chegam sem dono até o número estar no cadastro.",
+    };
+  }
+  return {
+    numero_no_cadastro: `gravado (${campo})`,
+    proximas_mensagens: `O cadastro não tinha número: gravei ${numero} nele, e as próximas mensagens chegam ligadas.` + doFornecedor,
+  };
+}
+
 /** Resolve o telefone a partir de um message_id (quando o agente só tem a mensagem em mãos). */
 async function telefoneDaMensagem(sb: any, messageId: string): Promise<string | null> {
-  const { data } = await sb.from("whatsapp_messages").select("phone_normalized").eq("id", messageId).maybeSingle();
+  const { data, error } = await sb.from("whatsapp_messages").select("phone_normalized").eq("id", messageId).maybeSingle();
+  if (error) throw new Error(`Não consegui ler a mensagem: ${error.message}`);
   return data?.phone_normalized || null;
 }
 
@@ -102,7 +169,8 @@ export const contactTools: ToolDef[] = [
   {
     name: "link_contact_to_entity",
     description:
-      "ENSINA de quem é um número de WhatsApp, gravando o vínculo. Vale para as mensagens futuras E para as anteriores daquele número (por isso 'ensinar uma vez' resolve de vez). Informe client_id OU supplier_id. Use depois que o usuário disser de quem é o número.",
+      "ENSINA de quem é um número de WhatsApp: liga ao cadastro as mensagens ANTERIORES daquele número e, se o cadastro ainda não tem telefone nem WhatsApp, grava este número nele (é o que faz as PRÓXIMAS mensagens chegarem já ligadas). " +
+      "Se o cadastro já tem OUTRO número, ele NÃO é trocado: a resposta diz isso — repita ao usuário e pergunte se quer trocar ou adicionar o número (update_client / update_supplier). Informe client_id OU supplier_id. Use depois que o usuário disser de quem é o número.",
     input_schema: {
       type: "object",
       properties: {
@@ -129,19 +197,19 @@ export const contactTools: ToolDef[] = [
       const like = padraoLikeTelefone(telefone);
       if (!like) return { error: "Telefone curto demais para casar mensagens." };
 
-      let nome = "";
-      if (args.client_id) {
-        const { data: c } = await sb.from("clients").select("name").eq("id", args.client_id).maybeSingle();
-        if (!c) return { error: "Cliente não encontrado." };
-        nome = c.name;
-      } else {
-        const { data: f } = await sb.from("suppliers").select("name").eq("id", args.supplier_id).maybeSingle();
-        if (!f) return { error: "Fornecedor não encontrado." };
-        nome = f.name;
-      }
+      const ehCliente = !!args.client_id;
+      const tabela = ehCliente ? "clients" : "suppliers";
+      const { data: cad, error: erroCad } = await sb
+        .from(tabela)
+        .select(ehCliente ? "id, name, phone, whatsapp" : "id, name, phone")
+        .eq("id", ehCliente ? args.client_id : args.supplier_id)
+        .maybeSingle();
+      if (erroCad) return { error: `Não consegui ler o cadastro (${erroCad.message}); nada foi vinculado.` };
+      if (!cad) return { error: ehCliente ? "Cliente não encontrado." : "Fornecedor não encontrado." };
+      const nome = cad.name;
 
-      // Grava o vínculo em TODAS as mensagens daquele número (inclusive as antigas).
-      const patch = args.client_id ? { client_id: args.client_id } : { supplier_id: args.supplier_id };
+      // Grava o vínculo em TODAS as mensagens daquele número (as antigas).
+      const patch = ehCliente ? { client_id: args.client_id } : { supplier_id: args.supplier_id };
       const { data: atualizadas, error } = await sb
         .from("whatsapp_messages")
         .update(patch)
@@ -149,12 +217,17 @@ export const contactTools: ToolDef[] = [
         .select("id");
       if (error) throw error;
 
+      // As PRÓXIMAS mensagens: o webhook identifica o cliente pelo telefone/whatsapp do cadastro (whatsapp-webhook,
+      // retorno_identificar → quem_escreve, ou o ILIKE em clients.phone/whatsapp). Antes a tool dizia "vale para as
+      // próximas" sem mexer no cadastro — a próxima mensagem chegava sem dono de novo.
+      const futuras = await numeroNoCadastro(sb, tabela, cad, telefone, ehCliente);
+
       return {
         ok: true,
         telefone,
-        vinculado_a: { tipo: args.client_id ? "cliente" : "fornecedor", nome },
+        vinculado_a: { tipo: ehCliente ? "cliente" : "fornecedor", nome },
         mensagens_atualizadas: (atualizadas as any[])?.length ?? 0,
-        efeito: "Vale para as próximas mensagens e também para as anteriores desse número.",
+        ...futuras,
       };
     },
   },

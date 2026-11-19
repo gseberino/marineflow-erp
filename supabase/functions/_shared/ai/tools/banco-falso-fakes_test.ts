@@ -70,6 +70,11 @@ export function bancoFalso(
       gt: (c: string, v: unknown) => { filtros.push((l) => l[c] != null && String(l[c]) > String(v)); return q; },
       lte: (c: string, v: unknown) => { filtros.push((l) => l[c] != null && String(l[c]) <= String(v)); return q; },
       lt: (c: string, v: unknown) => { filtros.push((l) => l[c] != null && String(l[c]) < String(v)); return q; },
+      like: (c: string, padrao: string) => {
+        const re = new RegExp(`^${padrao.split("%").map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`);
+        filtros.push((l) => re.test(String(l[c] ?? "")));
+        return q;
+      },
       not: () => q, or: () => q, ilike: () => q, order: () => q,
       limit: (n: number) => { limite = n; return q; },
       range: (a: number, b: number) => { faixa = [a, b]; return q; },

@@ -104,3 +104,64 @@ Deno.test("fakes 2d. attach_photo_to_service_order: a descrição não promete m
 
 // mantém Linha em uso para o lint de import
 export type _L = Linha;
+
+// ─── 4. link_contact_to_entity ──────────────────────────────────────────────────────────────
+import { contactTools } from "./contacts.ts";
+
+const MSGS_DO_NUMERO = () => [
+  { id: "w1", phone_normalized: "5511987654321", client_id: null },
+  { id: "w2", phone_normalized: "5511987654321", client_id: null },
+  { id: "w3", phone_normalized: "5521911112222", client_id: null },
+];
+
+Deno.test("fakes 4a. cadastro sem número: liga as antigas E grava o número (as próximas chegam ligadas)", async () => {
+  const b = bancoFalso({ whatsapp_messages: MSGS_DO_NUMERO(), clients: [{ id: "c-1", name: "Maria Teste", phone: null, whatsapp: "", active: true }], suppliers: [], app_users: [] });
+  // deno-lint-ignore no-explicit-any
+  const r = await ferramenta(contactTools, "link_contact_to_entity").execute({ phone: "(11) 98765-4321", client_id: "c-1" }, ctxDe(b.db)) as any;
+  assertEquals(r.ok, true);
+  assertEquals(r.mensagens_atualizadas, 2);
+  assertEquals(b.tabelas.clients[0].whatsapp, "5511987654321");
+  assertStringIncludes(r.proximas_mensagens, "chegam ligadas");
+});
+
+Deno.test("fakes 4b. cadastro com OUTRO número: não troca e diz a verdade sobre as próximas", async () => {
+  const b = bancoFalso({ whatsapp_messages: MSGS_DO_NUMERO(), clients: [{ id: "c-1", name: "Maria Teste", phone: "5511900001111", whatsapp: null, active: true }], suppliers: [], app_users: [] });
+  // deno-lint-ignore no-explicit-any
+  const r = await ferramenta(contactTools, "link_contact_to_entity").execute({ phone: "11987654321", client_id: "c-1" }, ctxDe(b.db)) as any;
+  assertEquals(r.ok, true);
+  assertEquals(r.numero_no_cadastro, "nao_trocado");
+  assertEquals(b.tabelas.clients[0].phone, "5511900001111");
+  assertEquals(b.tabelas.clients[0].whatsapp, null);
+  assertStringIncludes(r.proximas_mensagens, "Pergunte ao usuário se quer trocar");
+  assert(!JSON.stringify(r).includes("Vale para as próximas"));
+});
+
+Deno.test("fakes 4c. número já no cadastro: nada é gravado no cadastro; outro cliente com o número: não grava e avisa", async () => {
+  const ja = bancoFalso({ whatsapp_messages: MSGS_DO_NUMERO(), clients: [{ id: "c-1", name: "Maria Teste", phone: null, whatsapp: "11 98765-4321", active: true }], suppliers: [], app_users: [] });
+  // deno-lint-ignore no-explicit-any
+  const r = await ferramenta(contactTools, "link_contact_to_entity").execute({ phone: "5511987654321", client_id: "c-1" }, ctxDe(ja.db)) as any;
+  assertEquals(r.numero_no_cadastro, "ja_estava");
+  assertEquals(ja.gravacoes.filter((g) => g.tabela === "clients"), []);
+
+  const dois = bancoFalso({
+    whatsapp_messages: MSGS_DO_NUMERO(),
+    clients: [{ id: "c-1", name: "Maria Teste", phone: null, whatsapp: null, active: true }, { id: "c-2", name: "José Outro", phone: "11987654321", whatsapp: null, active: true }],
+    suppliers: [], app_users: [],
+  });
+  // deno-lint-ignore no-explicit-any
+  const r2 = await ferramenta(contactTools, "link_contact_to_entity").execute({ phone: "5511987654321", client_id: "c-1" }, ctxDe(dois.db)) as any;
+  assertEquals(r2.numero_no_cadastro, "nao_gravado");
+  assertStringIncludes(r2.proximas_mensagens, "José Outro");
+  assertEquals(dois.tabelas.clients[0].whatsapp, null);
+});
+
+Deno.test("fakes 4d. identify_contact: leitura com erro não vira 'número desconhecido'", async () => {
+  const b = bancoFalso({ clients: [], suppliers: [], app_users: [], whatsapp_messages: [] }, { "select:clients": "timeout" });
+  let erro = "";
+  try {
+    await ferramenta(contactTools, "identify_contact").execute({ phone: "5511987654321" }, ctxDe(b.db));
+  } catch (e) {
+    erro = (e as Error).message;
+  }
+  assertStringIncludes(erro, "Não consegui ler os clientes");
+});
