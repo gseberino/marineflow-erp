@@ -21,27 +21,15 @@ import {
   type ReminderInput,
 } from '@/hooks/use-agenda';
 import { useClients } from '@/hooks/use-clients';
-import { useQuery } from '@tanstack/react-query';
+import { useChecklistTemplates } from '@/hooks/use-checklist-templates';
 import { FollowupMissionButton } from '@/components/followups/FollowupMissionDialog';
 import {
   descreverRepeticao, lerRepeticao, LETRA_DO_DIA, montarRrule, NOME_DO_DIA,
 } from '@/lib/regra-de-repeticao';
 import { TERMO_GERAL, nomeDaUnidade } from '@/lib/unidade';
 
-/** Modelos de checklist (app_settings.task_checklist_templates) — padrão ServiceM8/FieldPulse. */
-export function useChecklistTemplates() {
-  return useQuery({
-    queryKey: ['task-checklist-templates'],
-    queryFn: async () => {
-      const { data } = await supabase.from('app_settings')
-        .select('value').eq('key', 'task_checklist_templates').maybeSingle();
-      try {
-        const parsed = JSON.parse((data as any)?.value || '[]');
-        return Array.isArray(parsed) ? parsed as { name: string; items: string[] }[] : [];
-      } catch { return []; }
-    },
-  });
-}
+/** Modelos de checklist (app_settings.task_checklist_templates): a leitura vive em use-checklist-templates. */
+export { useChecklistTemplates } from '@/hooks/use-checklist-templates';
 
 function toLocalDateInput(d: Date) {
   const y = d.getFullYear();
@@ -178,7 +166,7 @@ export function AgendaTaskDialog({
   const { data: users = [] } = useActiveUsers();
   const { data: clients = [] } = useClients();
   const { data: existingReminders = [] } = useTaskReminders(existing?.id);
-  const { data: templates = [] } = useChecklistTemplates();
+  const { data: templates = [], isError: templatesComErro } = useChecklistTemplates();
 
   const [kind, setKind] = useState<'task' | 'appointment'>('task');
   const [title, setTitle] = useState('');
@@ -483,6 +471,9 @@ export function AgendaTaskDialog({
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label>Checklist</Label>
+              {templatesComErro && (
+                <span className="text-xs text-destructive">Não consegui carregar os modelos — tente de novo depois.</span>
+              )}
               {templates.length > 0 && (
                 <Select value="" onValueChange={(name) => {
                   const t = templates.find((x) => x.name === name);

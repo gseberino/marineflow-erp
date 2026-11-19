@@ -9,11 +9,15 @@ import { LogoCropDialog } from '@/components/LogoCropDialog';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { maskCNPJ, maskPhone, maskCEP } from '@/lib/masks';
+import { ErroAoCarregar } from '@/components/ErroAoCarregar';
 
 export function CompanyTab() {
   const { t } = useI18n();
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  /** A leitura falhou: o formulário NÃO abre vazio (salvar apagaria nome, CNPJ, Pix… gravados). */
+  const [erroLeitura, setErroLeitura] = useState(false);
+  const [tentativa, setTentativa] = useState(0);
   const [logoUrl, setLogoUrl] = useState<string>('');
   const [logoUploading, setLogoUploading] = useState(false);
   const [cropFile, setCropFile] = useState<File | null>(null);
@@ -48,10 +52,12 @@ export function CompanyTab() {
 
   useEffect(() => {
     (async () => {
-      const { data } = await supabase
+      setLoading(true);
+      const { data, error } = await supabase
         .from('app_settings')
         .select('key, value');
-      if (data) {
+      setErroLeitura(!!error);
+      if (!error && data) {
         const map: Record<string, string> = {};
         for (const row of data) {
           if (row.key && row.value !== null) map[row.key] = String(row.value);
@@ -88,7 +94,7 @@ export function CompanyTab() {
       }
       setLoading(false);
     })();
-  }, []);
+  }, [tentativa]);
 
   const handleLogoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -153,7 +159,8 @@ export function CompanyTab() {
       await supabase.storage.from('company-assets').remove(
         exts.map(x => `company/logo.${x}`)
       );
-      await supabase.from('app_settings').delete().eq('key', 'company_logo_url');
+      const { error: delErr } = await supabase.from('app_settings').delete().eq('key', 'company_logo_url');
+      if (delErr) throw new Error('Não consegui remover o logo. Tente de novo.');
       setLogoUrl('');
       toast.success('Logo removido');
     } catch (err: any) {
@@ -167,6 +174,7 @@ export function CompanyTab() {
     setForm(prev => ({ ...prev, [key]: value }));
 
   const handleSave = async () => {
+    if (erroLeitura) return;
     setSaving(true);
     try {
       const results = await Promise.all(
@@ -194,6 +202,9 @@ export function CompanyTab() {
   };
 
   if (loading) return <p className="text-sm text-muted-foreground">{t.common.loading}</p>;
+  if (erroLeitura) {
+    return <ErroAoCarregar className="max-w-2xl" oQue="os dados da empresa" onTentarDeNovo={() => setTentativa((n) => n + 1)} />;
+  }
 
   return (
     <div className="space-y-6 max-w-2xl">

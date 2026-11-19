@@ -9,12 +9,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { CSOSN_OPTIONS, FISCAL_ORIGIN_OPTIONS } from '@/lib/price-calculator';
+import { ErroAoCarregar } from '@/components/ErroAoCarregar';
 
 export function FiscalTab() {
   const { t } = useI18n();
   const st = t.settings as any;
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  /** A leitura falhou: o formulário NÃO abre com os padrões (salvar gravaria o padrão por cima do que existe). */
+  const [erroLeitura, setErroLeitura] = useState(false);
+  const [tentativa, setTentativa] = useState(0);
   const [fiscal, setFiscal] = useState<Record<string, any>>({
     simples_aliquota: 6,
     default_profit_margin: 30,
@@ -29,8 +33,10 @@ export function FiscalTab() {
 
   useEffect(() => {
     (async () => {
-      const { data } = await supabase.from('app_settings').select('key, value');
-      if (data) {
+      setLoading(true);
+      const { data, error } = await supabase.from('app_settings').select('key, value');
+      setErroLeitura(!!error);
+      if (!error && data) {
         const map: Record<string, string> = {};
         for (const row of data) {
           if (row.key) map[row.key] = String(row.value || '');
@@ -49,9 +55,10 @@ export function FiscalTab() {
       }
       setLoading(false);
     })();
-  }, []);
+  }, [tentativa]);
 
   const handleSave = async () => {
+    if (erroLeitura) return;
     setSaving(true);
     try {
       const entries = [
@@ -65,10 +72,21 @@ export function FiscalTab() {
         ['default_pis_rate', String(fiscal.default_pis_rate)],
         ['default_cofins_rate', String(fiscal.default_cofins_rate)],
       ];
+      // Cada gravação confere o erro: antes, "salvas com sucesso" saía mesmo sem gravar nada.
+      const falharam: string[] = [];
       for (const [key, value] of entries) {
-        await supabase
+        const { error } = await supabase
           .from('app_settings')
           .upsert({ key, value }, { onConflict: 'key' });
+        if (error) falharam.push(key);
+      }
+      if (falharam.length) {
+        toast.error(
+          falharam.length === entries.length
+            ? 'Não consegui salvar as configurações fiscais. Tente de novo.'
+            : `Salvei só parte das configurações fiscais (${falharam.length} de ${entries.length} não gravaram). Tente de novo.`,
+        );
+        return;
       }
       toast.success('Configurações fiscais salvas com sucesso');
     } catch (e: any) {
@@ -79,6 +97,9 @@ export function FiscalTab() {
   };
 
   if (loading) return <p className="text-sm text-muted-foreground">{t.common.loading}</p>;
+  if (erroLeitura) {
+    return <ErroAoCarregar className="max-w-2xl" oQue="as configurações fiscais" onTentarDeNovo={() => setTentativa((n) => n + 1)} />;
+  }
 
   return (
     <div className="space-y-6 max-w-2xl">

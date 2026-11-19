@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useCardFees, useUpdateCardFee } from '@/hooks/use-card-fees';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { ErroAoCarregar } from '@/components/ErroAoCarregar';
 import { CompanyTab } from './settings/CompanyTab';
 import { FiscalTab } from './settings/FiscalTab';
 import { CategoriesTab } from './settings/CategoriesTab';
@@ -68,28 +69,36 @@ export default function SettingsPage() {
   // Terms state
   const [terms, setTerms] = useState<Record<string, string>>({});
   const [termsLoading, setTermsLoading] = useState(true);
+  /** Leitura dos termos falhou: sem formulário vazio (salvar apagaria os termos gravados). */
+  const [termsErro, setTermsErro] = useState(false);
+  const [termsTentativa, setTermsTentativa] = useState(0);
 
   useEffect(() => {
     (async () => {
+      setTermsLoading(true);
       const keys = TERM_KEYS.map((t) => t.key);
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('app_settings')
         .select('key, value')
         .in('key', keys);
+      setTermsErro(!!error);
       const map: Record<string, string> = {};
       (data || []).forEach((r) => { map[r.key] = r.value; });
       setTerms(map);
       setTermsLoading(false);
     })();
-  }, []);
+  }, [termsTentativa]);
 
   const handleSaveTerms = async () => {
+    if (termsErro) return;
     try {
+      // Cada gravação confere o erro: antes, "salvos" saía mesmo sem gravar (19/11/2026).
       for (const tk of TERM_KEYS) {
-        await supabase.from('app_settings').upsert(
+        const { error } = await supabase.from('app_settings').upsert(
           { key: tk.key, value: terms[tk.key] || '' },
           { onConflict: 'key' }
         );
+        if (error) throw new Error('Não consegui salvar os termos. Tente de novo.');
       }
       toast.success(t.settings.termsSaved);
     } catch (e: any) {
@@ -195,6 +204,8 @@ export default function SettingsPage() {
       <h3 className="text-sm font-semibold mb-4 flex items-center gap-2"><FileText className="h-4 w-4" /> {t.settings.terms}</h3>
       {termsLoading ? (
         <p className="text-sm text-muted-foreground">{t.common.loading}</p>
+      ) : termsErro ? (
+        <ErroAoCarregar oQue="os termos" onTentarDeNovo={() => setTermsTentativa((n) => n + 1)} />
       ) : (
         <div className="space-y-4">
           {TERM_KEYS.map((tk) => (

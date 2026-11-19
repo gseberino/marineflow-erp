@@ -9,6 +9,8 @@ import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { CHAVE_CAMPANHA_TEMPORADA, CHAVE_LEMBRETES_REVISAO } from '@/hooks/use-planos-manutencao';
 import { interruptorLigado } from '@/lib/planos-manutencao';
+import { useChecklistTemplates } from '@/hooks/use-checklist-templates';
+import { ErroAoCarregar } from '@/components/ErroAoCarregar';
 
 /**
  * Lembretes de revisão (07/10/2026). Decisão do dono: mensagem ao cliente sai SEMPRE com o "sim"
@@ -80,17 +82,9 @@ function RevisoesSettings() {
 function ChecklistTemplatesEditor() {
   const qc = useQueryClient();
   const [draft, setDraft] = useState('');
-  const { data: templates = [] } = useQuery({
-    queryKey: ['task-checklist-templates'],
-    queryFn: async () => {
-      const { data } = await supabase.from('app_settings')
-        .select('value').eq('key', 'task_checklist_templates').maybeSingle();
-      try {
-        const parsed = JSON.parse((data as any)?.value || '[]');
-        return Array.isArray(parsed) ? parsed as { name: string; items: string[] }[] : [];
-      } catch { return []; }
-    },
-  });
+  // Leitura que falha BLOQUEIA o editor: com a lista "vazia" por erro, adicionar um modelo
+  // gravava só ele e apagava os outros (19/11/2026).
+  const { data: templates = [], isError: leituraFalhou, isFetching, refetch } = useChecklistTemplates();
 
   const save = useMutation({
     mutationFn: async (next: { name: string; items: string[] }[]) => {
@@ -105,6 +99,7 @@ function ChecklistTemplatesEditor() {
   });
 
   const addTemplate = () => {
+    if (leituraFalhou) return;
     // Formato: "Nome do modelo: item 1; item 2; item 3"
     const [name, rest] = draft.split(':');
     const items = (rest || '').split(';').map((s) => s.trim()).filter(Boolean);
@@ -124,10 +119,14 @@ function ChecklistTemplatesEditor() {
       <p className="text-xs text-muted-foreground">
         Aplicáveis em qualquer tarefa pelo dialog. Formato: <code>Revisão de motor: óleo; filtros; correia; teste</code>
       </p>
+      {leituraFalhou && (
+        <ErroAoCarregar oQue="os modelos de checklist" tentando={isFetching} onTentarDeNovo={() => refetch()} />
+      )}
       {templates.map((t) => (
         <div key={t.name} className="flex items-center justify-between text-xs bg-muted/40 rounded px-2 py-1">
           <span><b>{t.name}</b> — {t.items.join(' · ')}</span>
           <Button aria-label="Remover este modelo de checklist" size="icon" variant="ghost" className="h-5 w-5"
+            disabled={leituraFalhou || save.isPending}
             onClick={() => save.mutate(templates.filter((x) => x.name !== t.name))}>
             <X className="h-3 w-3" />
           </Button>
@@ -135,9 +134,9 @@ function ChecklistTemplatesEditor() {
       ))}
       <div className="flex gap-2">
         <Input value={draft} onChange={(e) => setDraft(e.target.value)} className="h-8 text-xs"
-          placeholder="Nome: item 1; item 2; item 3"
+          placeholder="Nome: item 1; item 2; item 3" aria-label="Novo modelo de checklist" disabled={leituraFalhou}
           onKeyDown={(e) => { if (e.key === 'Enter') addTemplate(); }} />
-        <Button size="sm" variant="outline" onClick={addTemplate} disabled={save.isPending}>Adicionar</Button>
+        <Button size="sm" variant="outline" onClick={addTemplate} disabled={save.isPending || leituraFalhou}>Adicionar</Button>
       </div>
     </div>
   );
@@ -169,13 +168,15 @@ const RULE_DEFS: { id: string; label: string; description: string; defaultEnable
 export function TaskAutomationSettings() {
   const qc = useQueryClient();
 
-  const { data: settings = {} } = useQuery({
+  // Leitura que falha não mostra os interruptores no padrão como se fossem o gravado (19/11/2026).
+  const { data: settings = {}, isError: regrasComErro, isFetching: regrasCarregando, refetch: recarregarRegras } = useQuery({
     queryKey: ['task-automation-settings'],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('app_settings')
         .select('key, value')
         .like('key', 'task_rule_%');
+      if (error) throw new Error('Não consegui ler as automações de tarefas.');
       return Object.fromEntries((data || []).map((s: any) => [s.key, s.value]));
     },
   });
@@ -210,6 +211,9 @@ export function TaskAutomationSettings() {
         </div>
       </div>
       <ChecklistTemplatesEditor />
+      {regrasComErro && (
+        <ErroAoCarregar oQue="as automações de tarefas" tentando={regrasCarregando} onTentarDeNovo={() => recarregarRegras()} />
+      )}
       <div className="space-y-3">
         {RULE_DEFS.map((def) => (
           <div key={def.id} className="flex items-start justify-between gap-4">
@@ -220,6 +224,7 @@ export function TaskAutomationSettings() {
             <Switch
               checked={isEnabled(def)}
               aria-label={def.label}
+              disabled={regrasComErro}
               onCheckedChange={(v) => toggle.mutate({ id: def.id, enabled: v })}
             />
           </div>
