@@ -165,3 +165,82 @@ Deno.test("fakes 4d. identify_contact: leitura com erro não vira 'número desco
   }
   assertStringIncludes(erro, "Não consegui ler os clientes");
 });
+
+// ─── 5. set_tool_autonomy ───────────────────────────────────────────────────────────────────
+import { autonomiaValeNoPerfil, autonomyTools, perfilDeTools, registrarCatalogoDaAutonomia } from "./autonomy.ts";
+import { PERFIL_ADMIN } from "../perfil-operacao.ts";
+
+const FALSA = (name: string, risk: "low" | "medium" | "high") => ({ name, risk, description: "", input_schema: {}, execute: () => Promise.resolve({}) });
+// deno-lint-ignore no-explicit-any
+const catalogoDeTeste = () => registrarCatalogoDaAutonomia([FALSA("duplicate_service_order", "medium"), FALSA("adjust_inventory", "medium"), FALSA("search_clients", "low")] as any);
+const setAuto = ferramenta(autonomyTools, "set_tool_autonomy");
+const getAuto = ferramenta(autonomyTools, "get_autonomy_settings");
+
+Deno.test("fakes 5a. nome inexistente: recusa e nada é gravado", async () => {
+  catalogoDeTeste();
+  const b = bancoFalso({ app_settings: [{ key: "ai_tool_profile", value: "admin_enxuto" }] });
+  // deno-lint-ignore no-explicit-any
+  const r = await setAuto.execute({ action_name: "enviar_tudo_sozinho", mode: "auto" }, ctxDe(b.db)) as any;
+  assertStringIncludes(r.error, "Não existe ação");
+  assertEquals(b.gravacoes, []);
+});
+
+Deno.test("fakes 5b. admin_enxuto: fora do PERFIL_ADMIN recusa com a explicação; dentro grava", async () => {
+  catalogoDeTeste();
+  assert(!PERFIL_ADMIN.has("adjust_inventory"));
+  const b = bancoFalso({ app_settings: [{ key: "ai_tool_profile", value: "admin_enxuto" }] });
+  // deno-lint-ignore no-explicit-any
+  const fora = await setAuto.execute({ action_name: "adjust_inventory", mode: "auto" }, ctxDe(b.db)) as any;
+  assertEquals(fora.fora_do_perfil, true);
+  assertStringIncludes(fora.error, "não teria efeito");
+  assertEquals(b.gravacoes, []);
+
+  // deno-lint-ignore no-explicit-any
+  const dentro = await setAuto.execute({ action_name: "duplicate_service_order", mode: "auto" }, ctxDe(b.db)) as any;
+  assertEquals(dentro.ok, true);
+  assertEquals(b.tabelas.app_settings.find((l) => l.key === "ai_autonomy_duplicate_service_order")?.value, "auto");
+});
+
+Deno.test("fakes 5c. revogar chave antiga de ferramenta que sumiu é aceito; risco baixo não grava", async () => {
+  catalogoDeTeste();
+  const b = bancoFalso({ app_settings: [{ key: "ai_tool_profile", value: "admin_enxuto" }, { key: "ai_autonomy_tool_antiga", value: "auto" }] });
+  // deno-lint-ignore no-explicit-any
+  const r = await setAuto.execute({ action_name: "tool_antiga", mode: "confirm" }, ctxDe(b.db)) as any;
+  assertEquals(r.ok, true);
+  assertEquals(b.tabelas.app_settings[1].value, "confirm");
+  // deno-lint-ignore no-explicit-any
+  const baixo = await setAuto.execute({ action_name: "search_clients", mode: "auto" }, ctxDe(bancoFalso({ app_settings: [] }).db)) as any;
+  assertEquals(baixo.alterado, false);
+});
+
+Deno.test("fakes 5d. get_autonomy_settings separa o 'auto' sem efeito", async () => {
+  catalogoDeTeste();
+  const b = bancoFalso({
+    app_settings: [
+      { key: "ai_tool_profile", value: "admin_enxuto" },
+      { key: "ai_autonomy_duplicate_service_order", value: "auto" },
+      { key: "ai_autonomy_adjust_inventory", value: "auto" },
+    ],
+  });
+  // deno-lint-ignore no-explicit-any
+  const r = await getAuto.execute({}, ctxDe(b.db)) as any;
+  assertEquals(r.agindo_sozinho, ["duplicate_service_order"]);
+  assertEquals(r.liberadas_sem_efeito, ["adjust_inventory"]);
+});
+
+Deno.test("fakes 5e. perfis: o mesmo filtro do agent.ts para o admin", () => {
+  assertEquals(perfilDeTools("admin_enxuto"), "admin_enxuto");
+  assertEquals(perfilDeTools(null), "todas");
+  assertEquals(autonomiaValeNoPerfil({ name: "qualquer", risk: "medium" }, "todas"), true);
+  assertEquals(autonomiaValeNoPerfil({ name: "adjust_inventory", risk: "high" }, "operacao"), true);
+  assertEquals(autonomiaValeNoPerfil({ name: "adjust_inventory", risk: "medium" }, "operacao"), false);
+});
+
+Deno.test("fakes 5f. tools/index.ts registra o catálogo real (set_tool_autonomy reconhece as tools de verdade)", async () => {
+  const { allTools } = await import("./index.ts");
+  registrarCatalogoDaAutonomia(allTools);
+  const b = bancoFalso({ app_settings: [{ key: "ai_tool_profile", value: "admin_enxuto" }] });
+  // deno-lint-ignore no-explicit-any
+  const r = await setAuto.execute({ action_name: "duplicate_service_order", mode: "auto" }, ctxDe(b.db)) as any;
+  assertEquals(r.ok, true, JSON.stringify(r));
+});

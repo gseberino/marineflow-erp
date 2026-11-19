@@ -17,7 +17,7 @@ import { soOpsTools } from "./so-ops.ts";
 import { surveyOpsTools } from "./survey-ops.ts";
 import { routeDraftingTools } from "./route-drafting.ts";
 import { materialsOpsTools } from "./materials-ops.ts";
-import { autonomyTools } from "./autonomy.ts";
+import { autonomyTools, registrarCatalogoDaAutonomia } from "./autonomy.ts";
 import { contactTools } from "./contacts.ts";
 import { entityMemoryTools } from "./entity-memory.ts";
 import { fiscalEmitTools } from "./fiscal-emit.ts";
@@ -180,3 +180,7 @@ export const toolsSoPelaPendencia: ToolDef[] = [...papeladaTools, ...retornoSoPe
 export const toolsByName: Record<string, ToolDef> = Object.fromEntries(
   [...allTools, ...toolsSoPelaPendencia].map((t) => [t.name, t]),
 );
+
+// set_tool_autonomy confere o nome contra o catálogo (19/11/2026). Injetado daqui porque autonomy.ts importar este
+// arquivo seria ciclo (este importa autonomy.ts), e o ciclo daria TDZ em autonomyTools.
+registrarCatalogoDaAutonomia(allTools);
