@@ -217,6 +217,12 @@ export const FORA_DA_BANCADA = new Set([
   // parava nela (18/11). Não recria nenhuma função da agenda (procurado em 18/11: só private.*, documento_revisao_* e documento_revisoes); os gatilhos
   // novos ficam de fora da bancada, como os do Histórico.
   '20270123100000_revisao_de_documentos.sql',
+  // Retorno, decisões do dono de 20/11/2026 (ramo session/retorno-decisoes-2011): retorno_config, retorno_f3_medidas, retorno_previa, retorno_saidas e as
+  // funções do retorno (recria _retorno_item_montar, _retorno_triar, retorno_pegar, _retorno_texto e _retorno_pedido_de_servico). Não recria função da
+  // agenda; o retorno tem a bancada própria.
+  '20270214100000_retorno_f3_meta_e_medidas.sql',
+  '20270214100100_retorno_f3_audio_cria_orc.sql',
+  '20270214100200_retorno_f1_formulario_numero_novo.sql',
 ]);
 
 /**
