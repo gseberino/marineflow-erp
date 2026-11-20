@@ -1,9 +1,9 @@
--- Prova: NOVO-historico-03 — só admin (e o sistema) altera a assinatura do cliente
--- (migration 20270211100000_assinaturas_so_admin_altera).
+-- Prova: NOVO-historico-03 — só admin e financeiro (e o sistema) alteram a assinatura do cliente
+-- (migration 20270211100000_assinaturas_admin_financeiro_altera; decisão do dono: "Admin e financeiro").
 --
 --   A1  técnico tenta alterar a assinatura pela API: recusado (0 linhas, a assinatura fica como estava)
 --   A2  vendedor externo idem
---   A3  financeiro idem (o dono escolheu admin, não admin+financeiro)
+--   A3  financeiro altera: aceito (mesmo cargo dos termos e do PIX, is_admin_or_financial)
 --   A4  admin altera: aceito
 --   A5  anon não grava (sem permissão na tabela)
 --   A6  fluxo real do cliente (edge submit-signature, service_role): grava a assinatura e substitui a anterior
@@ -14,7 +14,7 @@
 --   A10 privilégios: a policy é só de authenticated e o gatilho não é executável por anon/authenticated
 --
 -- ═══ COMO RODAR ═══ (DEPOIS da migration aplicada; a partir do repositório principal, que é o linkado)
---   npx supabase@2.111.0 db query --linked -f supabase/tests/assinaturas_so_admin_altera.sql --output json
+--   npx supabase@2.111.0 db query --linked -f supabase/tests/assinaturas_admin_financeiro_altera.sql --output json
 -- Ensaio ANTES de aplicar: begin + a migration + este arquivo (sem o begin dele) — termina em ROLLBACK.
 -- Seguro em produção: usuários, cliente, barco, OS e assinaturas de teste nascem aqui; termina em ROLLBACK.
 -- A tabela final tem de mostrar ok = true em todas as linhas.
@@ -78,7 +78,7 @@ declare
   v_os uuid := current_setting('teste.os1')::uuid;
   v_quem text; v_n int; v_nome text;
 begin
-  foreach v_quem in array array['tec', 'vend', 'fin'] loop
+  foreach v_quem in array array['tec', 'vend'] loop
     perform pg_temp._req(current_setting('teste.' || v_quem)::uuid, 'authenticated');
     set local role authenticated;
     update public.service_order_signatures set accepted_name = 'Nome Forjado', document_hash = 'hash-forjado'
@@ -88,18 +88,21 @@ begin
     select accepted_name into v_nome from public.service_order_signatures where service_order_id = v_os;
     insert into _resultado values (
       case v_quem when 'tec' then 'A1 técnico não altera a assinatura'
-                  when 'vend' then 'A2 vendedor externo não altera a assinatura'
-                  else 'A3 financeiro não altera a assinatura' end,
+                  else 'A2 vendedor externo não altera a assinatura' end,
       v_n = 0 and v_nome = 'Cliente Que Assinou', format('linhas=%s nome=%s', v_n, v_nome));
   end loop;
 
-  perform pg_temp._req(current_setting('teste.admin')::uuid, 'authenticated');
-  set local role authenticated;
-  update public.service_order_signatures set superseded_reason = 'correção do admin' where service_order_id = v_os;
-  get diagnostics v_n = row_count;
-  reset role;
-  select superseded_reason into v_nome from public.service_order_signatures where service_order_id = v_os;
-  insert into _resultado values ('A4 admin altera', v_n = 1 and v_nome = 'correção do admin', format('linhas=%s motivo=%s', v_n, v_nome));
+  foreach v_quem in array array['fin', 'admin'] loop
+    perform pg_temp._req(current_setting('teste.' || v_quem)::uuid, 'authenticated');
+    set local role authenticated;
+    update public.service_order_signatures set superseded_reason = 'correção do ' || v_quem where service_order_id = v_os;
+    get diagnostics v_n = row_count;
+    reset role;
+    select superseded_reason into v_nome from public.service_order_signatures where service_order_id = v_os;
+    insert into _resultado values (
+      case v_quem when 'fin' then 'A3 financeiro altera' else 'A4 admin altera' end,
+      v_n = 1 and v_nome = 'correção do ' || v_quem, format('linhas=%s motivo=%s', v_n, v_nome));
+  end loop;
 end $$;
 
 -- A5: anon (portador da chave pública) nem com o token do link grava.
@@ -187,7 +190,7 @@ end $$;
 -- A10: privilégios.
 insert into _resultado
 select 'A10a policy de UPDATE só de authenticated e por cargo',
-       roles = '{authenticated}' and qual ilike '%is_admin(%' and with_check ilike '%is_admin(%',
+       roles = '{authenticated}' and qual ilike '%is_admin_or_financial(%' and with_check ilike '%is_admin_or_financial(%',
        format('roles=%s qual=%s', roles, qual)
   from pg_policies where tablename = 'service_order_signatures' and policyname = 'auth_update_signatures';
 insert into _resultado
