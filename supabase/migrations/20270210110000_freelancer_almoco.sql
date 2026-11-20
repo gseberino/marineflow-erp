@@ -445,3 +445,5 @@ begin
 end;
 $function$;
 
+
+insert into supabase_migrations.schema_migrations (version, name) values ('20270210110000','freelancer_almoco');

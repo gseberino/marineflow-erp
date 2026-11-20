@@ -426,3 +426,5 @@ begin
   );
 end;
 $function$;
+
+insert into supabase_migrations.schema_migrations (version, name) values ('20270210100000','freelancer_saida_da_equipe');
