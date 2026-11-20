@@ -6,6 +6,9 @@
 //                                                     o marcado, as tarefas do dia e as atrasadas, pelo título)
 //   agenda amanhã · agenda de amanhã · agenda pra/para amanhã · o que tem pra/para amanhã   → amanhã
 //   agenda semana que vem · agenda da semana que vem · agenda (da) próxima semana          → a semana que vem
+//   agenda do mês · agenda (d)este/(d)esse mês · agenda mês (20/11/2026)                     → de hoje ao fim do mês
+//   agenda (do) mês que vem · agenda (do) próximo mês (20/11/2026)                          → o mês que vem inteiro
+//                                                     (o banco resolve: _agenda_periodo, migration 20270213100000)
 //   livre · quando fica livre · quando fico livre · quando a gente fica livre              → quando fica livre
 //   atrasado(s/as) · o que está atrasado · o que tá atrasado                               → o que passou do prazo
 //   o que (eu) tenho que/pra/para/de fazer · o que tem pra/para fazer (+ "hoje" no fim)     → o que eu tenho que fazer
@@ -167,7 +170,7 @@
 
 import { normalizarComando } from "../secretario/comandos.ts";
 
-export type PeriodoDoComando = "semana" | "hoje" | "amanha" | "proxima_semana";
+export type PeriodoDoComando = "semana" | "hoje" | "amanha" | "proxima_semana" | "mes" | "proximo_mes";
 export type FocoDoComando =
   | "tudo" | "livre" | "atrasos" | "o_que_fazer" | "mudancas" | "decisoes" | "plano"
   // (Fase 3, P6) a semana medida, o que a equipe respondeu e a comissão do mês
@@ -243,6 +246,10 @@ frases(
   ["agenda semana que vem", "agenda da semana que vem", "agenda proxima semana", "agenda da proxima semana"],
   ver("proxima_semana"),
 );
+// (20/11/2026, decisão do dono) o mês: de hoje ao fim do mês; e o mês que vem inteiro. Só com "agenda" na frente: "este mês"
+// sozinho é conversa (gasto, comissão...) e vai ao modelo, que passa o período como o dono disse (o banco entende os dois).
+frases(["agenda do mes", "agenda deste mes", "agenda desse mes", "agenda este mes", "agenda esse mes", "agenda mes"], ver("mes"));
+frases(["agenda mes que vem", "agenda do mes que vem", "agenda proximo mes", "agenda do proximo mes"], ver("proximo_mes"));
 frases(["livre", "quando fica livre", "quando fico livre", "quando a gente fica livre"], ver(null, "livre"));
 frases(
   ["atrasado", "atrasados", "atrasadas", "o que esta atrasado", "o que ta atrasado"],
