@@ -15187,7 +15187,7 @@ export type Database = {
           p_cliente: string
           p_contas: string[]
           p_nota?: string
-          p_os: string[]
+          p_os: string[] | null
         }
         Returns: Json
       }
