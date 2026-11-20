@@ -12,9 +12,15 @@
 // cadastro genérico (sem CPF/CNPJ), que nunca entra em cobrança conjunta (dono, 28/10/2026), e os
 // limites de 2 a 10 OS da tool cobrar_juntas.
 //
-// O registro do envio (last_auto_sent_at) só existe quando a conta tem cobrança formal
-// (collections). Sem ela — o caso da MP em 28/10/2026 — nada fica registrado e o plano de
-// inadimplência, que lê collections, pode sugerir cobrar de novo no mesmo dia: SEM_COBRANCA_FORMAL.
+// O registro do envio (last_auto_sent_at) mora na cobrança formal (collections). Até 20/11/2026,
+// conta sem cobrança — o caso da MP — ficava sem registro e o plano de inadimplência podia sugerir
+// cobrar de novo no mesmo dia. Decisão do dono (20/11/2026): "Criar a cobrança junto" — depois do
+// envio confirmado, a função do banco cobrar_juntas_registrar_envio (migration 20270212100000) cria a
+// cobrança das contas que não têm nenhuma e registra o envio em todas, tudo ou nada.
+//
+// A mesma conferência vale para o "Enviar extrato" da ficha do cliente (dono, 20/11/2026: "Sim, as
+// mesmas travas"): travaDoCobrarJuntas sem a contagem de OS, o destino do cadastro, a releitura do
+// saldo e a chave do dia (chaveDoCobrarJuntas com tipo 'extrato').
 
 /**
  * OS que entram no "Cobrar juntas": já começaram (em execução, concluída ou faturada). As que não
@@ -128,16 +134,36 @@ export function horaEmBrasilia(d: Date = new Date()): number {
   return Number(h) % 24;
 }
 
-/** Aviso quando nenhuma conta escolhida tem cobrança formal: o envio não fica registrado. */
-export const SEM_COBRANCA_FORMAL =
-  'Nenhuma cobrança formal ligada a estas contas: o envio não fica registrado, e o plano de inadimplência '
-  + 'pode sugerir cobrar este cliente de novo hoje.';
+/**
+ * As contas que vão GANHAR cobrança no envio — a mesma regra de cobrar_juntas_registrar_envio (banco):
+ * conta sem cobrança aberta ligada a ela, e cuja OS não tem cobrança aberta sem conta (a "Total" da
+ * aprovação). `cobrancas`: as cobranças ABERTAS das contas e das OS (como a tela e a tool já leem).
+ */
+export function contasSemCobranca(
+  contas: Array<{ id: string; service_order_id?: string | null }>,
+  cobrancas: Array<{ receivable_id?: string | null; service_order_id?: string | null }>,
+): string[] {
+  return (contas || [])
+    .filter((c) => !cobrancas.some((k) => k.receivable_id === c.id))
+    .filter((c) => !cobrancas.some((k) => !k.receivable_id && !!k.service_order_id && k.service_order_id === c.service_order_id))
+    .map((c) => c.id);
+}
+
+/** Aviso antes do envio quando alguma conta não tem cobrança: ela é criada junto (dono, 20/11/2026). */
+export function avisoDaCobrancaCriada(qtd: number): string | null {
+  if (!(qtd > 0)) return null;
+  return `${qtd === 1 ? '1 conta não tem cobrança registrada: ela é criada' : `${qtd} contas não têm cobrança registrada: elas são criadas`} `
+    + 'junto com o envio (aparecem em Cobranças), e o lembrete não repete hoje.';
+}
 
 export interface EntradaDasTravas {
   clienteNome?: string | null;
   /** clients.generico: o cadastro de balcão ("Cliente Final"), sem CPF/CNPJ. */
   generico?: boolean | null;
-  /** Quantas OS entram (2 a 10). Ausente = não confere (a tool confere antes, com a frase dela). */
+  /**
+   * Quantas OS entram (2 a 10). Ausente = não confere (a tool confere antes, com a frase dela; o
+   * "Enviar extrato" manda o cliente inteiro, sem escolha de OS).
+   */
   quantidadeOs?: number | null;
   /** Hora em Brasília (0-23). Ausente = não confere (a tool aplica o portão guardaDeEnvio no envio). */
   horaBrasilia?: number | null;
@@ -169,7 +195,12 @@ export function travaDoCobrarJuntas(e: EntradaDasTravas): string | null {
     if (e.quantidadeOs > MAX_COBRAR_JUNTAS) return `Cobre no máximo ${MAX_COBRAR_JUNTAS} OS de uma vez: desmarque algumas.`;
   }
   const total = centavos(n(e.totalEmAberto));
-  if (!(total > 0)) return 'As OS escolhidas não têm saldo em aberto: não há o que cobrar.';
+  if (!(total > 0)) {
+    // Sem a contagem de OS é o "Enviar extrato" (o cliente inteiro), não uma escolha de OS.
+    return e.quantidadeOs != null
+      ? 'As OS escolhidas não têm saldo em aberto: não há o que cobrar.'
+      : 'Este cliente não tem saldo em aberto: não há o que cobrar.';
+  }
   const piso = n(e.piso);
   if (piso > 0 && total < piso) {
     return `Cobrança de ${brlDoLembrete(total)} fica abaixo do piso de R$ ${piso} (Configurações): só listar, não cobrar por WhatsApp.`;
@@ -194,22 +225,25 @@ export function travaDoCobrarJuntas(e: EntradaDasTravas): string | null {
  * O que mudou nas contas desde que a tela abriu, em português; null = nada. `antes`: as contas
  * (id e saldo) que a mensagem mostra; `agora`: as contas relidas do banco, das mesmas OS e do
  * mesmo cliente. Mesmo critério de oQueMudouNaCobrancaConjunta (tool): conjunto e saldo de cada uma.
+ * tipo 'extrato': o "Enviar extrato" (o cliente inteiro, sem escolha de OS) — as mesmas regras.
  */
 export function mudancaNasContas(
   antes: Array<{ id: string; saldo: number }>,
   agora: Array<Pick<ContaDoCliente, 'id' | 'status' | 'amount' | 'paid_amount' | 'balance_amount'>>,
+  tipo: 'cobrar-juntas' | 'extrato' = 'cobrar-juntas',
 ): string | null {
   const abertas = (agora || []).filter((c) => saldoDaConta(c) > 0);
   const idsAntes = antes.map((c) => c.id).sort().join('|');
   const idsAgora = abertas.map((c) => c.id).sort().join('|');
   const totalAntes = centavos(antes.reduce((s, c) => s + n(c.saldo), 0));
   const totalAgora = centavos(abertas.reduce((s, c) => s + saldoDaConta(c), 0));
-  const fecheEAbra = 'Nada foi enviado: feche e abra o Cobrar juntas de novo para conferir a mensagem.';
+  const extrato = tipo === 'extrato';
+  const fecheEAbra = `Nada foi enviado: feche e abra ${extrato ? 'o extrato' : 'o Cobrar juntas'} de novo para conferir a mensagem.`;
   if (idsAntes !== idsAgora) {
-    return `As contas em aberto destas OS mudaram desde que a tela abriu (era ${brl(totalAntes)}, agora ${brl(totalAgora)}). ${fecheEAbra}`;
+    return `As contas em aberto ${extrato ? 'do cliente' : 'destas OS'} mudaram desde que a tela abriu (era ${brl(totalAntes)}, agora ${brl(totalAgora)}). ${fecheEAbra}`;
   }
   const mexida = abertas.find((c) => Math.round(saldoDaConta(c) * 100) !== Math.round(n(antes.find((a) => a.id === c.id)?.saldo) * 100));
-  if (mexida) return `O saldo das OS mudou desde que a tela abriu (era ${brl(totalAntes)}, agora ${brl(totalAgora)}). ${fecheEAbra}`;
+  if (mexida) return `O saldo ${extrato ? 'do cliente' : 'das OS'} mudou desde que a tela abriu (era ${brl(totalAntes)}, agora ${brl(totalAgora)}). ${fecheEAbra}`;
   return null;
 }
 
@@ -224,6 +258,8 @@ function hashCurto(s: string): string {
  * dedupe_key do whatsapp-send: o mesmo cliente, as mesmas contas e o mesmo texto no mesmo dia
  * saem uma vez só (clique duplo, tela e assistente ao mesmo tempo).
  *
+ * tipo 'extrato': o "Enviar extrato" da ficha (20/11/2026) — mesma regra, outro prefixo.
+ *
  * desviadoPorTeste: o whatsapp-send vai desviar o envio para o número de teste (a pergunta é a de
  * _shared/whatsapp/marcar-enviado.ts, não só o interruptor). Aí a chave ganha ":teste", como as
  * chaves do envio ao cliente (chaveDeEnvio): sem a marca, o teste reservava a chave do CLIENTE e o
@@ -231,9 +267,10 @@ function hashCurto(s: string): string {
  */
 export function chaveDoCobrarJuntas(
   clientId: string, contaIds: string[], dia: string, mensagem: string, desviadoPorTeste = false,
+  tipo: 'cobrar-juntas' | 'extrato' = 'cobrar-juntas',
 ): string {
   const contas = [...contaIds].sort().join(',');
-  const chave = `cobrar-juntas:${clientId}:${dia}:${hashCurto(`${contas}|${mensagem.trim()}`)}`;
+  const chave = `${tipo}:${clientId}:${dia}:${hashCurto(`${contas}|${mensagem.trim()}`)}`;
   return desviadoPorTeste ? `${chave}:teste` : chave;
 }
 
