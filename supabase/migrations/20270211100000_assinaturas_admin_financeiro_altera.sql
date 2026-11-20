@@ -1,4 +1,5 @@
--- NOVO-historico-03 (decisão do dono, 20/11/2026: "Restringir a admin e ao sistema").
+-- NOVO-historico-03 (decisão do dono, 20/11/2026: "Admin e financeiro" — o mesmo cargo que já mexe nos termos e no
+-- PIX, app_settings/NOVO-historico-04; o sistema continua gravando como sempre).
 --
 -- A policy auth_update_signatures de service_order_signatures deixava QUALQUER usuário logado (técnico, vendedor)
 -- alterar a prova de assinatura do cliente pela API: nome aceito, hash do documento, imagem, "substituída em".
@@ -19,8 +20,8 @@
 --     agrupar-os só leem.
 --
 -- O QUE MUDA
---   1. auth_update_signatures: UPDATE só para admin (is_admin, o mesmo padrão de cargo das outras tabelas — a
---      app_settings, NOVO-historico-04, ficou com is_admin_or_financial; aqui o dono escolheu admin).
+--   1. auth_update_signatures: UPDATE só para admin e financeiro (is_admin_or_financial, o mesmo helper de cargo da
+--      app_settings — termos e PIX —, NOVO-historico-04). Técnico e vendedor externo ficam de fora.
 --   2. detect_so_change_after_signature: SECURITY DEFINER, search_path fixo, EXECUTE só do dono (gatilho não
 --      precisa de EXECUTE de quem dispara; ninguém a chama pela API).
 --   3. Segunda barreira: anon perde INSERT/UPDATE/DELETE na tabela (nenhuma policy deixava; o portal só LÊ pelo
@@ -29,13 +30,13 @@
 -- O QUE NÃO MUDA: leitura (auth_read_signatures, anon_read_signatures_by_token), submit-signature, os gatilhos
 -- trg_historico e trg_dropbox_assinatura, private.linha_pede_nova_assinatura.
 --
--- PROVA: supabase/tests/assinaturas_so_admin_altera.sql (begin … rollback).
+-- PROVA: supabase/tests/assinaturas_admin_financeiro_altera.sql (begin … rollback).
 
 drop policy if exists "auth_update_signatures" on public.service_order_signatures;
 create policy "auth_update_signatures" on public.service_order_signatures
   for update to authenticated
-  using (public.is_admin((select auth.uid())))
-  with check (public.is_admin((select auth.uid())));
+  using (public.is_admin_or_financial((select auth.uid())))
+  with check (public.is_admin_or_financial((select auth.uid())));
 
 alter function public.detect_so_change_after_signature() security definer;
 alter function public.detect_so_change_after_signature() set search_path = public, pg_temp;
