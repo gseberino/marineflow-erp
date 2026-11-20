@@ -361,6 +361,39 @@ begin
     perform pg_temp.f3m_item(v_caso, v_id, 'feito', '2026-02-11 09:00-03');
     v_caso := pg_temp.f3m_caso(32, v_cli, '2026-02-11 09:00-03');   -- pedido sem proposta nem PDF
 
+    -- ═══ 15c. rr-f3-1b (20/11/2026): a meta é de até 3 itens corrigidos (22/06/26). 3 alterados entram; 4 ficam de fora.
+    v_cli := pg_temp.f3m_cli('Bel Medidas Meta');
+    v_un := pg_temp.f3m_un(v_cli, 'Brisa Meta');
+    v_caso := pg_temp.f3m_caso(180, v_cli, '2026-06-22 09:00-03');
+    v_so := pg_temp.f3m_orc('TF3M-180', v_cli, v_un, '2026-06-22 11:00-03', 'retorno_previa');
+    perform pg_temp.f3m_peca(v_so, v_p4, 1, 100, '2026-06-22 11:00-03');
+    v_id := pg_temp.f3m_prop(v_caso, v_cli, v_un, 'virou_orc', 'ligado',
+                             jsonb_build_array(pg_temp.f3m_lp(v_p1, 1, 100), pg_temp.f3m_lp(v_p2, 1, 100), pg_temp.f3m_lp(v_p3, 1, 100)), v_so, 'historico',
+                             '2026-06-22 10:00-03', '2026-06-22 11:30-03', pg_temp.f3m_chave(v_caso));
+    perform pg_temp.f3m_item(v_caso, v_id, 'feito', '2026-06-22 11:00-03');
+    v_cli := pg_temp.f3m_cli('Beto Medidas Meta');
+    v_un := pg_temp.f3m_un(v_cli, 'Brisa Meta 2');
+    v_caso := pg_temp.f3m_caso(181, v_cli, '2026-06-23 09:00-03');
+    v_so := pg_temp.f3m_orc('TF3M-181', v_cli, v_un, '2026-06-23 11:00-03', 'retorno_previa');
+    perform pg_temp.f3m_peca(v_so, v_p5, 1, 100, '2026-06-23 11:00-03');
+    v_id := pg_temp.f3m_prop(v_caso, v_cli, v_un, 'virou_orc', 'ligado',
+                             jsonb_build_array(pg_temp.f3m_lp(v_p1, 1, 100), pg_temp.f3m_lp(v_p2, 1, 100), pg_temp.f3m_lp(v_p3, 1, 100), pg_temp.f3m_lp(v_p4, 1, 100)),
+                             v_so, 'historico', '2026-06-23 10:00-03', '2026-06-23 11:30-03', pg_temp.f3m_chave(v_caso));
+    perform pg_temp.f3m_item(v_caso, v_id, 'feito', '2026-06-23 11:00-03');
+
+    -- ═══ 15d. rr-f3-2b (29/06/26): o ORÇ que o áudio do dono criou (orc_pelo_audio_em) é ato do dono; o mesmo ORÇ sem a marca, não.
+    v_cli := pg_temp.f3m_cli('Ciro Medidas Audio');
+    v_un := pg_temp.f3m_un(v_cli, 'Brisa Audio');
+    v_caso := pg_temp.f3m_caso(182, v_cli, '2026-06-29 09:00-03');
+    v_so := pg_temp.f3m_orc('TF3M-182', v_cli, v_un, '2026-06-29 11:00-03', 'retorno_ditado');
+    v_id := pg_temp.f3m_prop(v_caso, v_cli, v_un, 'virou_orc', 'ligado', '[]'::jsonb, v_so, 'ditado', '2026-06-29 10:00-03');
+    update public.retorno_previa p set dados = p.dados || jsonb_build_object('orc_pelo_audio_em', '2026-06-29 11:00-03') where p.id = v_id;
+    v_cli := pg_temp.f3m_cli('Cleo Medidas Audio');
+    v_un := pg_temp.f3m_un(v_cli, 'Brisa Audio 2');
+    v_caso := pg_temp.f3m_caso(183, v_cli, '2026-06-30 09:00-03');
+    v_so := pg_temp.f3m_orc('TF3M-183', v_cli, v_un, '2026-06-30 11:00-03', 'retorno_ditado');
+    perform pg_temp.f3m_prop(v_caso, v_cli, v_un, 'virou_orc', 'ligado', '[]'::jsonb, v_so, 'ditado', '2026-06-30 10:00-03');
+
     -- ═══ 16. O percentual só aparece com 20 mostradas ou mais (04/05/26): 15 de 20 viraram PDF.
     v_cli := pg_temp.f3m_cli('Caio Medidas Vinte');
     v_un := pg_temp.f3m_un(v_cli, 'Brisa Vinte');
@@ -484,7 +517,11 @@ begin
     -- 2 dos 3 pedidos sem PDF: nula.
     perform pg_temp.f3m_igual('14 mediana du', v_m.pedido_pdf_mediana_du::text, null);
     perform pg_temp.f3m_igual('14 mostradas', v_m.propostas_mostradas::text, '1');
-    perform pg_temp.f3m_igual('14 viraram', v_m.viraram_pdf_ate_1_linha::text, '1');
+    perform pg_temp.f3m_igual('14 viraram', v_m.viraram_pdf_na_meta::text, '1');
+    -- rr-f3-1b: a meta vem da linha de configuração (o prelúdio da bancada põe o padrão: 3 itens, 60%).
+    perform pg_temp.f3m_igual('14 meta_linhas', v_m.meta_linhas::text, '3');
+    perform pg_temp.f3m_igual('14 meta_pct', v_m.meta_pct::text, '60');
+    perform pg_temp.f3m_igual('14 meta_atingida com menos de 20', v_m.meta_atingida::text, null);
 
     select * into v_m from _f3m_v m where m.semana = date '2026-06-08';
     if not found then
@@ -495,9 +532,9 @@ begin
     perform pg_temp.f3m_igual('14b mediana h', v_m.pedido_proposta_mediana_h::text, '1.00');
     perform pg_temp.f3m_igual('14b mediana du', v_m.pedido_pdf_mediana_du::text, '0.00');
     perform pg_temp.f3m_igual('14b mostradas', v_m.propostas_mostradas::text, '1');
-    perform pg_temp.f3m_igual('14b viraram', v_m.viraram_pdf_ate_1_linha::text, '1');
+    perform pg_temp.f3m_igual('14b viraram', v_m.viraram_pdf_na_meta::text, '1');
     perform pg_temp.f3m_igual('17b orc_sem_ato', (select m.orc_sem_ato::text from _f3m_v m where m.semana = date '2026-06-15'), '2');
-    perform pg_temp.f3m_igual('14 pct com menos de 20', v_m.viraram_pdf_ate_1_linha_pct::text, null);
+    perform pg_temp.f3m_igual('14 pct com menos de 20', v_m.viraram_pdf_na_meta_pct::text, null);
     perform pg_temp.f3m_igual('14 orc_sem_ato', v_m.orc_sem_ato::text, '0');
     perform pg_temp.f3m_igual('14 orc_duplicado', v_m.orc_duplicado::text, '0');
     perform pg_temp.f3m_igual('14 cadastro_duplicado', v_m.cadastro_duplicado::text, '0');
@@ -510,12 +547,27 @@ begin
     select * into v_m from _f3m_v m where m.semana = date '2026-02-09';
     perform pg_temp.f3m_igual('15 mediana du', v_m.pedido_pdf_mediana_du::text, '1.00');
     perform pg_temp.f3m_igual('15 mostradas', v_m.propostas_mostradas::text, '2');
-    perform pg_temp.f3m_igual('15 viraram', v_m.viraram_pdf_ate_1_linha::text, '1');
+    -- rr-f3-1b: as 2 linhas alteradas do caso 31 agora ficam dentro da meta de 3 (antes: só a do caso 30).
+    perform pg_temp.f3m_igual('15 viraram', v_m.viraram_pdf_na_meta::text, '2');
+
+    select * into v_m from _f3m_v m where m.semana = date '2026-06-22';
+    perform pg_temp.f3m_igual('15c mostradas', v_m.propostas_mostradas::text, '2');
+    perform pg_temp.f3m_igual('15c 3 entram, 4 não', v_m.viraram_pdf_na_meta::text, '1');
+
+    perform pg_temp.f3m_igual('15d orc_sem_ato', (select m.orc_sem_ato::text from _f3m_v m where m.semana = date '2026-06-29'), '1');
 
     select * into v_m from _f3m_v m where m.semana = date '2026-05-04';
     perform pg_temp.f3m_igual('16 mostradas', v_m.propostas_mostradas::text, '20');
-    perform pg_temp.f3m_igual('16 viraram', v_m.viraram_pdf_ate_1_linha::text, '15');
-    perform pg_temp.f3m_igual('16 pct', v_m.viraram_pdf_ate_1_linha_pct::text, '75.0');
+    perform pg_temp.f3m_igual('16 viraram', v_m.viraram_pdf_na_meta::text, '15');
+    perform pg_temp.f3m_igual('16 pct', v_m.viraram_pdf_na_meta_pct::text, '75.0');
+    perform pg_temp.f3m_igual('16 meta_atingida (75 >= 60)', v_m.meta_atingida::text, 'true');
+
+    -- rr-f3-1b: uma fonte só. Com a configuração em 1 item e 80%, o caso 31 (2 alterados) e o de 3 saem da meta, e 75% não atinge.
+    update public.retorno_config c set previa_meta_linhas = 1, previa_meta_pct = 80 where c.id;
+    create temp table _f3m_v1 on commit drop as select * from public.retorno_f3_medidas;
+    perform pg_temp.f3m_igual('15e meta 1: 09/02', (select m.viraram_pdf_na_meta::text from _f3m_v1 m where m.semana = date '2026-02-09'), '1');
+    perform pg_temp.f3m_igual('15e meta 1: 22/06', (select m.viraram_pdf_na_meta::text from _f3m_v1 m where m.semana = date '2026-06-22'), '0');
+    perform pg_temp.f3m_igual('16b meta 80%', (select m.meta_atingida::text from _f3m_v1 m where m.semana = date '2026-05-04'), 'false');
 
     select * into v_m from _f3m_v m where m.semana = date '2026-03-02';
     perform pg_temp.f3m_igual('17 orc_sem_ato', v_m.orc_sem_ato::text, '3');
