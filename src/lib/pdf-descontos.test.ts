@@ -143,9 +143,102 @@ describe('o quadro de valores soma o VALOR TOTAL', () => {
     expect(rotulos).toEqual(['Serviços', 'Peças e materiais', 'Deslocamento / logística', 'Serviços de terceiros', 'Impostos']);
   });
 
-  it('"Impostos" desmarcado tira a linha (o total continua o do banco)', () => {
+  it('"Impostos" desmarcado tira a linha própria (o total continua o do banco)', () => {
     const html = buildHTMLDocument(ordem({ tax_amount: 30 }), { ...OPCOES, showTax: false });
     expect(linhasDoQuadro(html).map(l => l.rotulo)).not.toContain('Impostos');
+  });
+});
+
+/**
+ * Decisão do dono (20/11/2026): "Juntar numa linha 'Outros encargos' para a soma fechar (total
+ * igual)". Antes, desmarcar Deslocamento num orçamento de peças R$ 2.000 + deslocamento R$ 300
+ * mostrava linhas que somavam R$ 2.000 e um total de R$ 2.300.
+ */
+describe('o que foi desmarcado volta numa linha neutra, e a soma fecha', () => {
+  const soma = (html: string) => Math.round(linhasDoQuadro(html).reduce((s, l) => s + l.valor, 0) * 100) / 100;
+
+  it('o exemplo do cartão: peças R$ 2.000 + deslocamento R$ 300, Deslocamento desmarcado', () => {
+    const dados = ordem({ travel_cost_total: 300 }, {
+      services: [],
+      parts: [{ name: 'Bomba de porão', quantity: 1, unit_price: 2000, line_total: 2000 }],
+    });
+    const html = buildHTMLDocument(dados, { ...OPCOES, showTravelCost: false });
+    expect(linhasDoQuadro(html)).toEqual([
+      { rotulo: 'Peças e materiais', valor: 2000 },
+      { rotulo: 'Outros encargos', valor: 300 },
+    ]);
+    expect(dados.serviceOrder.grand_total).toBe(2300);
+    expect(totalDoQuadro(html)).toBe(2300);
+    expect(html).not.toContain('Deslocamento / logística');
+  });
+
+  it('deslocamento, impostos e taxa desmarcados viram UMA linha com a soma', () => {
+    const dados = ordem({ tax_amount: 30, card_fee_amount: 15.5, card_installments: 3 });
+    const html = buildHTMLDocument(dados, { ...OPCOES, showTravelCost: false, showTax: false, showCardFee: false });
+    const linhas = linhasDoQuadro(html);
+    expect(linhas.filter(l => l.rotulo === 'Outros encargos')).toEqual([{ rotulo: 'Outros encargos', valor: 245.5 }]);
+    expect(linhas.map(l => l.rotulo)).not.toContain('Impostos');
+    expect(html).not.toContain('Taxa de cartão');
+    expect(soma(html)).toBe(dados.serviceOrder.grand_total);
+  });
+
+  it('só um desmarcado: os outros continuam com a linha própria', () => {
+    const dados = ordem({ tax_amount: 30, card_fee_amount: 15 });
+    const html = buildHTMLDocument(dados, { ...OPCOES, showTax: false });
+    const rotulos = linhasDoQuadro(html).map(l => l.rotulo);
+    expect(rotulos).toContain('Deslocamento / logística');
+    expect(rotulos).toContain('Taxa de cartão');
+    expect(linhasDoQuadro(html).find(l => l.rotulo === 'Outros encargos')?.valor).toBe(30);
+    expect(soma(html)).toBe(dados.serviceOrder.grand_total);
+  });
+
+  it('deslocamento não faturável desmarcado não vira encargo (não está no total)', () => {
+    const dados = ordem({ is_travel_billable: false });
+    const html = buildHTMLDocument(dados, { ...OPCOES, showTravelCost: false });
+    expect(linhasDoQuadro(html).map(l => l.rotulo)).not.toContain('Outros encargos');
+    expect(soma(html)).toBe(dados.serviceOrder.grand_total);
+  });
+
+  it('tudo marcado (o padrão): nenhuma linha nova', () => {
+    const html = buildHTMLDocument(ordem({ tax_amount: 30, discount_amount: 60, card_fee_amount: 15 }), OPCOES);
+    const rotulos = linhasDoQuadro(html).map(l => l.rotulo);
+    expect(rotulos).not.toContain('Outros encargos');
+    expect(rotulos).not.toContain('Ajustes');
+  });
+
+  it('desconto desmarcado: itens com preço líquido e o desconto geral numa linha "Ajustes"', () => {
+    const dados = ordem({ discount_amount: 60, tax_amount: 30 });
+    const html = buildHTMLDocument(dados, { ...OPCOES, showDiscount: false });
+    const linhas = linhasDoQuadro(html);
+    expect(linhas.find(l => l.rotulo === 'Ajustes')?.valor).toBe(-60);
+    expect(linhas.map(l => l.rotulo)).not.toContain('Desconto');
+    expect(linhas.map(l => l.rotulo)).not.toContain('Desconto adicional');
+    expect(html).not.toContain('descontos concedidos');
+    expect(soma(html)).toBe(dados.serviceOrder.grand_total);
+  });
+
+  it('desconto só nos itens, desmarcado: nada de "Ajustes" (o preço já é o líquido)', () => {
+    const dados = ordem();
+    const html = buildHTMLDocument(dados, { ...OPCOES, showDiscount: false });
+    expect(linhasDoQuadro(html).map(l => l.rotulo)).not.toContain('Ajustes');
+    expect(soma(html)).toBe(dados.serviceOrder.grand_total);
+  });
+
+  it('tudo desmarcado de uma vez: encargos e ajuste, e a soma fecha', () => {
+    const dados = ordem({ tax_amount: 30, subcontract_cost_total: 100, operational_cost_total: 20, discount_amount: 60, card_fee_amount: 15 });
+    const html = buildHTMLDocument(dados, { ...OPCOES, showTravelCost: false, showTax: false, showCardFee: false, showDiscount: false });
+    const linhas = linhasDoQuadro(html);
+    expect(linhas.find(l => l.rotulo === 'Outros encargos')?.valor).toBe(245);
+    expect(linhas.find(l => l.rotulo === 'Ajustes')?.valor).toBe(-60);
+    expect(soma(html)).toBe(dados.serviceOrder.grand_total);
+    expect(totalDoQuadro(html)).toBe(dados.serviceOrder.grand_total);
+  });
+
+  it('a fatura segue a mesma regra', () => {
+    const dados = { ...ordem({ tax_amount: 30 }), documentType: 'invoice' as const };
+    const html = buildHTMLDocument(dados, { ...OPCOES, showTravelCost: false, showTax: false });
+    expect(linhasDoQuadro(html).find(l => l.rotulo === 'Outros encargos')?.valor).toBe(230);
+    expect(soma(html)).toBe(dados.serviceOrder.grand_total);
   });
 
   it('deslocamento não faturável não sai impresso', () => {

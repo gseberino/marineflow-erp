@@ -1083,7 +1083,13 @@ export function linhaDeTotalDaTabela(
  * dos itens — o mesmo número da última linha de cada tabela, que é o que o cliente confere.
  *
  * Desmarcar uma opção no diálogo (deslocamento, desconto, impostos, taxa de cartão) tira a LINHA
- * da folha; o valor continua no total, porque o total é o do banco. O diálogo avisa isso.
+ * própria dela, mas o valor continua no total, porque o total é o do banco. Para a soma da folha
+ * fechar com o VALOR TOTAL (decisão do dono, 20/11/2026):
+ *  - deslocamento, impostos e taxa de cartão desmarcados viram UMA linha "Outros encargos" com a
+ *    soma deles;
+ *  - desconto desmarcado: o desconto de cada item já sai embutido no preço (unitário efetivo, ver
+ *    unitarioImpresso), e o desconto GERAL vira uma linha neutra "Ajustes" (negativa). Encargo
+ *    negativo não existe, e somar desconto com encargo numa linha só esconderia os dois.
  */
 export function linhasDoResumo(data: PDFData, options: PDFOptions): { linhas: string; descontosConcedidos: string } {
   const so = data.serviceOrder;
@@ -1118,6 +1124,20 @@ export function linhasDoResumo(data: PDFData, options: PDFOptions): { linhas: st
     return linhaNegativa(rotulo, descontoGeral);
   };
 
+  // O que foi desmarcado continua no total do banco; aqui volta à folha com rótulo neutro.
+  const linhasDoQueFoiOcultado = (): string[] => {
+    const encargos = arred2(
+      (options.showTravelCost ? 0 : Math.max(0, deslocamento))
+      + (options.showTax ? 0 : imposto)
+      + (options.showCardFee ? 0 : taxaCartao),
+    );
+    const ajuste = mostraDesconto ? 0 : descontoGeral;
+    return [
+      encargos > 0 ? linha('Outros encargos', encargos) : '',
+      ajuste > 0 ? linhaNegativa('Ajustes', ajuste) : '',
+    ];
+  };
+
   const linhas = [
     data.services.length > 0 ? linha('Serviços', so.labor_cost_total) : '',
     data.parts.length > 0 ? linha('Peças e materiais', so.parts_cost_total) : '',
@@ -1129,6 +1149,7 @@ export function linhasDoResumo(data: PDFData, options: PDFOptions): { linhas: st
     options.showCardFee && taxaCartao > 0
       ? linha(`Taxa de cartão${so.card_installments ? ` (${so.card_installments}x)` : ''}`, taxaCartao)
       : '',
+    ...linhasDoQueFoiOcultado(),
   ].filter(Boolean).join('');
 
   // A economia inteira num lugar só: o desconto dos itens está espalhado pelas tabelas, e o

@@ -853,7 +853,7 @@ export const ptBR = {
     optionsScopeHint: 'Vale só para este documento. O padrão da empresa fica em Configurações › Documentos.',
     valuesGroup: 'Valores',
     contentGroup: 'Conteúdo',
-    valuesHint: 'Desmarcar tira a linha da folha; o valor continua somado no total.',
+    valuesHint: 'O total não muda. Deslocamento, Impostos e Taxa de cartão desmarcados vão juntos numa linha "Outros encargos"; com Descontos desmarcado, os itens saem com o preço já descontado e o desconto geral numa linha "Ajustes".',
     showServicePrices: 'Valores dos serviços (unitário e total)',
     showPartsPrices: 'Valores das peças (unitário e total)',
     showTravelCost: 'Deslocamento',
