@@ -44,6 +44,40 @@ const casos: ResumoDeOrcamentoInput[] = [
   { ...nelson, ativoTipo: 'Lancha' },
 ];
 
+// O quadro de valores do PDF no texto (20/11/2026, "mesma regra do PDF"): impostos e taxa de cartão
+// com linha; deslocamento, impostos e taxa ocultos → "Outros encargos"; desconto geral oculto →
+// "Ajustes". Total pela fórmula de calc_so_totals: 2.000 + 1.000 + 300 + 100 + 200 − 150 + 250 + 80.
+const completo: ResumoDeOrcamentoInput = {
+  numero: 'ORÇ-00999', clienteNome: 'Cliente Teste', empresa, parcelas: null,
+  orcamento: {
+    labor_cost_total: 2000, parts_cost_total: 1000, travel_cost_total: 300, is_travel_billable: true,
+    operational_cost_total: 100, subcontract_cost_total: 200, discount_amount: 150, tax_amount: 250,
+    card_fee_amount: 80, card_installments: 3, grand_total: 3780,
+  },
+};
+const variantes: Array<[string, ResumoDeOrcamentoInput]> = [
+  ['tudo visível', completo],
+  ['deslocamento oculto', { ...completo, opcoes: { showTravelCost: false } }],
+  ['impostos ocultos', { ...completo, opcoes: { showTax: false } }],
+  ['desconto geral oculto', { ...completo, opcoes: { showDiscount: false } }],
+  ['tudo oculto', { ...completo, opcoes: { showTravelCost: false, showTax: false, showCardFee: false, showDiscount: false } }],
+  ['com desconto nos itens', { ...completo, descontoDosItens: 40 }],
+];
+casos.push(...variantes.map(([, c]) => c));
+
+/** Soma as linhas "• Rótulo: R$ x" / "• Rótulo: −R$ x" e lê o *Total*. */
+function somaDoTexto(texto: string): { soma: number; total: number } {
+  const reais = (v: string) => Number(v.replace(/\./g, '').replace(',', '.'));
+  const linhas = texto.replace(/ /g, ' ').split('\n');
+  let soma = 0;
+  for (const l of linhas) {
+    const m = l.match(/^• (.+): (−?)R\$ ([\d.,]+)$/);
+    if (m) soma += (m[2] ? -1 : 1) * reais(m[3]);
+  }
+  const t = linhas.find((l) => l.startsWith('*Total: '))!.match(/R\$ ([\d.,]+)/)!;
+  return { soma: Math.round(soma * 100) / 100, total: reais(t[1]) };
+}
+
 describe('resumo de valores: tela × assistente', () => {
   it('o texto é idêntico nos dois caminhos', () => {
     for (const c of casos) {
@@ -57,6 +91,23 @@ describe('resumo de valores: tela × assistente', () => {
     expect(texto).toContain('Sinal para iniciar: R$ 7.610,32');
     expect(texto).toContain('Serviços: R$ 2.889,68 — na entrega');
     expect(texto).toContain('Chave PIX: *12.345.678/0001-90*');
+  });
+
+  it.each(variantes)('%s: as linhas do texto da tela somam o total', (_nome, c) => {
+    const { soma, total } = somaDoTexto(daTela(c));
+    expect(total).toBe(3780);
+    expect(soma).toBe(total);
+  });
+
+  it('impostos visíveis têm linha; ocultos entram em "Outros encargos"; desconto oculto vira "Ajustes"', () => {
+    const t = (c: ResumoDeOrcamentoInput) => daTela(c).replace(/ /g, ' ');
+    expect(t(completo)).toContain('• Impostos: R$ 250,00');
+    expect(t(completo)).toContain('• Taxa de cartão (3x): R$ 80,00');
+    expect(t({ ...completo, opcoes: { showTax: false } })).not.toContain('Impostos');
+    expect(t({ ...completo, opcoes: { showTax: false } })).toContain('• Outros encargos: R$ 250,00');
+    expect(t({ ...completo, opcoes: { showTravelCost: false } })).toContain('• Outros encargos: R$ 300,00');
+    expect(t({ ...completo, opcoes: { showDiscount: false } })).toContain('• Ajustes: −R$ 150,00');
+    expect(t({ ...completo, descontoDosItens: 40 })).toContain('• Desconto adicional: −R$ 150,00');
   });
 
   it('o tipo da unidade sai igual nos dois caminhos', () => {

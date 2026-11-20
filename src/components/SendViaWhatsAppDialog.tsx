@@ -8,7 +8,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Loader2, Send, CalendarClock, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { normalizePhoneE164 } from '@/lib/masks';
-import { type PDFDocumentType, type PDFOptions, opcoesPadraoDoDocumento } from '@/lib/pdf-generator';
+import { type PDFDocumentType, type PDFOptions, descontosDosItens, opcoesPadraoDoDocumento } from '@/lib/pdf-generator';
 import { usePDFData } from '@/hooks/use-pdf';
 import { useAppSettings } from '@/hooks/use-app-settings';
 import { useWhatsAppTemplates, applyTemplateVariables } from '@/hooks/use-whatsapp-templates';
@@ -498,6 +498,8 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
       ativoNome: (pdfData as any)?.vessel?.name ?? null,
       ativoTipo: (pdfData as any)?.vessel?.type ?? null,
       orcamento: so,
+      // "Desconto adicional" quando há desconto nos itens, como no PDF (quadro-de-valores.ts).
+      descontoDosItens: descontosDosItens(pdfData).total,
       parcelas: so.payment_condition_installments ?? null,
       condicaoLabel: so.payment_condition_label ?? so.payment_conditions ?? null,
       // A MESMA validade do PDF deste envio (pdfOptions): data fixa, senão os dias do orçamento,

@@ -25,6 +25,7 @@ import { dataBR, dataHoraBR, diaBR, diaDeCalendario, horaBR, somarDiasAoDia, som
 import { primeiraValidade } from '../dias-de-validade.ts';
 import { campoDaUnidade, grupoDoTipo, rotuloDaIdentificacao, type UnidadeResumo } from '../unidade.ts';
 import type { RevisaoDoDocumento } from './revisao.ts';
+import { linhasDoQuadroDeValores } from './quadro-de-valores.ts';
 
 export type PDFDocumentType = 'quote' | 'service_order' | 'invoice' | 'receipt';
 
@@ -1090,6 +1091,8 @@ export function linhaDeTotalDaTabela(
  *  - desconto desmarcado: o desconto de cada item já sai embutido no preço (unitário efetivo, ver
  *    unitarioImpresso), e o desconto GERAL vira uma linha neutra "Ajustes" (negativa). Encargo
  *    negativo não existe, e somar desconto com encargo numa linha só esconderia os dois.
+ * As linhas saem de linhasDoQuadroDeValores (quadro-de-valores.ts), a mesma do resumo em texto do
+ * WhatsApp ("mesma regra do PDF", dono, 20/11/2026).
  */
 export function linhasDoResumo(data: PDFData, options: PDFOptions): { linhas: string; descontosConcedidos: string } {
   const so = data.serviceOrder;
@@ -1101,56 +1104,21 @@ export function linhasDoResumo(data: PDFData, options: PDFOptions): { linhas: st
   const mostraDesconto = !!options.showDiscount;
   const dosItens = descontosDosItens(data);
   const descontoGeral = Math.max(0, Number(so.discount_amount) || 0);
-  const deslocamento = so.is_travel_billable === false ? 0 : Number(so.travel_cost_total) || 0;
-  const imposto = Number(so.tax_amount) || 0;
-  const taxaCartao = Number(so.card_fee_amount) || 0;
 
-  const linhasDoDescontoGeral = (): string => {
-    if (!mostraDesconto || descontoGeral <= 0) return '';
-    // Com desconto nos itens também, o do quadro é "adicional" — senão o cliente lê o mesmo
-    // desconto duas vezes.
-    const rotulo = dosItens.total > 0 ? 'Desconto adicional' : 'Desconto';
-    const sPct = so.discount_services_pct ?? 0;
-    const pPct = so.discount_parts_pct ?? 0;
-    if (sPct > 0 || pPct > 0) {
-      const dSvc = arred2(so.labor_cost_total * sPct / 100);
-      const dPts = arred2(so.parts_cost_total * pPct / 100);
-      return [
-        dSvc > 0 ? linhaNegativa(`↳ ${rotulo} em serviços (${sPct}%)`, dSvc, 'padding-left:16px;') : '',
-        dPts > 0 ? linhaNegativa(`↳ ${rotulo} em peças (${pPct}%)`, dPts, 'padding-left:16px;') : '',
-        linhaNegativa(rotulo, descontoGeral, 'font-weight:600;'),
-      ].filter(Boolean).join('');
-    }
-    return linhaNegativa(rotulo, descontoGeral);
-  };
-
-  // O que foi desmarcado continua no total do banco; aqui volta à folha com rótulo neutro.
-  const linhasDoQueFoiOcultado = (): string[] => {
-    const encargos = arred2(
-      (options.showTravelCost ? 0 : Math.max(0, deslocamento))
-      + (options.showTax ? 0 : imposto)
-      + (options.showCardFee ? 0 : taxaCartao),
-    );
-    const ajuste = mostraDesconto ? 0 : descontoGeral;
-    return [
-      encargos > 0 ? linha('Outros encargos', encargos) : '',
-      ajuste > 0 ? linhaNegativa('Ajustes', ajuste) : '',
-    ];
-  };
-
-  const linhas = [
-    data.services.length > 0 ? linha('Serviços', so.labor_cost_total) : '',
-    data.parts.length > 0 ? linha('Peças e materiais', so.parts_cost_total) : '',
-    options.showTravelCost && deslocamento > 0 ? linha('Deslocamento / logística', deslocamento) : '',
-    (so.operational_cost_total ?? 0) > 0 ? linha('Outras despesas', so.operational_cost_total!) : '',
-    (so.subcontract_cost_total ?? 0) > 0 ? linha('Serviços de terceiros', so.subcontract_cost_total!) : '',
-    linhasDoDescontoGeral(),
-    options.showTax && imposto > 0 ? linha('Impostos', imposto) : '',
-    options.showCardFee && taxaCartao > 0
-      ? linha(`Taxa de cartão${so.card_installments ? ` (${so.card_installments}x)` : ''}`, taxaCartao)
-      : '',
-    ...linhasDoQueFoiOcultado(),
-  ].filter(Boolean).join('');
+  // O quadro (o que entra, rótulos, "Outros encargos" e "Ajustes") sai de quadro-de-valores.ts —
+  // o mesmo que o resumo em texto do WhatsApp usa, para os dois nunca divergirem. Aqui, só o HTML.
+  const linhas = linhasDoQuadroDeValores(so, {
+    servicos: data.services.length > 0,
+    pecas: data.parts.length > 0,
+    deslocamento: !!options.showTravelCost,
+    impostos: !!options.showTax,
+    taxaCartao: !!options.showCardFee,
+    desconto: mostraDesconto,
+    descontoDosItens: dosItens.total,
+  }).map((l) => {
+    const estilo = l.tipo === 'detalhe' ? 'padding-left:16px;' : l.tipo === 'destaque' ? 'font-weight:600;' : '';
+    return l.negativo ? linhaNegativa(l.rotulo, l.valor, estilo) : linha(l.rotulo, l.valor, estilo);
+  }).join('');
 
   // A economia inteira num lugar só: o desconto dos itens está espalhado pelas tabelas, e o
   // geral fica no quadro. Só aparece quando há desconto nos itens (sem ele, a linha "Desconto"

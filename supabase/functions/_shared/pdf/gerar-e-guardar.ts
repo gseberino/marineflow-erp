@@ -20,6 +20,7 @@ import { documentTypeFor, type OrderDocumentType } from "./document-type.ts";
 import {
   buildOrderHTML,
   buildPDFFilename,
+  descontosDosItens,
   esc,
   fmtCurrency,
   nomeReduzidoDoCliente,
@@ -166,6 +167,8 @@ export async function montarResumoDeValores(
     ativoNome: dados.vessel?.name ?? null,
     ativoTipo: dados.vessel?.type ?? null,
     orcamento: so,
+    // "Desconto adicional" quando há desconto nos itens, como no PDF (quadro-de-valores.ts).
+    descontoDosItens: descontosDosItens(dados).total,
     parcelas: so.payment_condition_installments ?? null,
     condicaoLabel: so.payment_condition_label ?? so.payment_conditions ?? null,
     validadeDias: semValidade ? null : (opcoes.validity?.days ?? null),
