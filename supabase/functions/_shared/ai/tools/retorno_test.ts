@@ -9,6 +9,7 @@ import {
   executarCartao,
   NOME_DA_TOOL_DO_CARTAO,
   omitirResultadosDoRetorno,
+  criarOrcamentoDoAudio,
   orcarCaso,
   orcarEEnviar,
   planoDaProposta,
@@ -21,7 +22,7 @@ import {
   riscoDoEnvioLivre,
 } from "./retorno.ts";
 import { allTools, toolsByName } from "./index.ts";
-import { textoDoSim } from "../agent.ts";
+import { buildPendingSummary, resumoQueRecusa, textoDoSim } from "../agent.ts";
 import { rodaDiretoPelaRede } from "../perfil-operacao.ts";
 import { isAutonomyGranted } from "../autonomy-policy.ts";
 import type { ToolCtx } from "./registry.ts";
@@ -510,6 +511,9 @@ const VER = (extra: Record<string, unknown> = {}) => ({
 });
 const DESTINO_OK = { item_id: "i-1", abertura_id: "a-1", phone: "5547900001234", rotulo: "Ana", ok: true, texto: null };
 
+/** rr-f3-2b: o retorno de retorno_orc_do_audio_marcar (o ORÇ que o áudio criou), com impressão inventada. */
+const MARCA_OK = { ok: true, service_order_id: "os-1", numero: "ORÇ-00151", total: 8040, impressao: "imp-1", linhas: [] };
+
 function rotasDoDitado(extra: Record<string, unknown> = {}) {
   return {
     retorno_previa_ver: VER(),
@@ -519,18 +523,31 @@ function rotasDoDitado(extra: Record<string, unknown> = {}) {
       error: null,
     }),
     search_products_trgm: [],
+    // rr-f3-2b: o áudio cria o ORÇ quando a pendência nasce
+    retorno_orc_do_audio_do_caso: null,
+    retorno_previa_aplicar: { previa_id: "pv-1", hash: "h" },
+    retorno_previa_preparar: PRE_OK,
+    retorno_orc_do_audio_marcar: MARCA_OK,
     ...extra,
   };
 }
 
-Deno.test("resumo literal do exemplo, com o título", async () => {
+/** O que o dono lê quando o áudio é entendido: o retrato (o ORÇ criado) e o resumo dele, ao meio-dia. */
+async function resumoDoAudio(f: ReturnType<typeof fluxo>, args: Record<string, unknown>): Promise<string> {
+  return await comRelogio(MEIO_DIA, async () => {
+    const retrato = await criarOrcamentoDoAudio(args, f.c, depsFalsos(f).deps);
+    return await resumirPropostaDoCaso(f.c.admin, args, "dono", retrato as Record<string, unknown>);
+  });
+}
+
+Deno.test("resumo literal do exemplo, com o título: o ORÇ já nasceu e o PIN só manda o PDF (rr-f3-2b)", async () => {
   const f = fluxo(rotasDoDitado());
-  const r = await resumirPropostaDoCaso(f.c.admin, {
+  const r = await resumoDoAudio(f, {
     n: 1, titulo: "Troca do controlador", condicao_pagamento: "50% de sinal",
     trocas: [{ linha: 1, preco: 1320 }, { linha: 2, preco: 1800 }],
-  }, "dono");
+  });
   assertEquals(r, [
-    "Proposta de *Ana* · Brisa (WhatsApp ••1234, o contato do caso) · 4 itens · R$ 8.040",
+    "Orçamento *ORÇ-00151* criado em rascunho para *Ana* · Brisa (WhatsApp ••1234, o contato do caso) · 4 itens · R$ 8.040",
     "Título no PDF: Troca do controlador",
     "1. Controlador MPPT 60A · 1 × R$ 1.320 · você disse",
     "2. Instalação elétrica · 1 × R$ 1.800 · você disse",
@@ -538,33 +555,34 @@ Deno.test("resumo literal do exemplo, com o título", async () => {
     "4. Cabos e terminais · 1 × R$ 320 · orçado em 12/08/26 (não aprovado)",
     "Vale até terça (15/12), contado do envio.",
     "Condição: 50% de sinal",
-    "*sim <PIN>* cria o orçamento e manda o PDF a Ana · ou diga o que mudar",
-    "*não* cancela o ditado inteiro. Para só criar, diga *cria sem mandar*.",
+    "*sim <PIN>* manda o PDF do ORÇ-00151 a Ana",
+    "*não* não manda nada: o ORÇ-00151 fica em rascunho na lista. Para mudar algo, ajuste na tela antes do *sim <PIN>*.",
   ].join("\n"));
   assertEquals(f.chamadas[0].fn, "retorno_destino_do_item");
+  assertEquals(f.nomes().includes("enviar_pdf"), false, "nada vai ao cliente antes do PIN");
 });
 
-Deno.test("com sem_enviar, o rodapé diz que não manda e some a última linha", async () => {
+Deno.test("com sem_enviar, o ORÇ nasce e não há PIN: a recusa de uma linha diz o número e como mandar depois", async () => {
   const f = fluxo(rotasDoDitado());
-  const r = await resumirPropostaDoCaso(f.c.admin, { n: 1, sem_enviar: true }, "dono");
-  assert(r.includes("*sim <PIN>* cria o orçamento e não manda nada"));
-  assertEquals(r.includes("cancela o ditado"), false);
+  const r = await resumoDoAudio(f, { n: 1, sem_enviar: true });
+  assertEquals(r, "⚠️ Criei o ORÇ-00151 em rascunho, e nada foi ao cliente. Para mandar depois: *retorno* e o *sim <PIN>* do caso.");
+  assertEquals(f.nomes().includes("montar"), true);
 });
 
 Deno.test("resumo sem título ditado não mostra a linha do título; 1 item no singular", async () => {
   const f = fluxo(rotasDoDitado({ retorno_previa_ver: VER({ linhas: [LINHAS_VER[0]] }) }));
-  const r = await resumirPropostaDoCaso(f.c.admin, { n: 1 }, "dono");
+  const r = await resumoDoAudio(f, { n: 1 });
   assertEquals(r.includes("Título no PDF"), false);
   assert(r.split("\n")[0].includes("· 1 item ·"));
 });
 
 Deno.test("resumo: recusa da F2 pelo destino, sem chamar o plano; n inválido não chega ao banco", async () => {
   const f = fluxo(rotasDoDitado({ retorno_destino_do_item: { ...DESTINO_OK, ok: false, texto: "o 1 pediu para não receber mensagem automática" } }));
-  assertEquals(await resumirPropostaDoCaso(f.c.admin, { n: 1 }, "dono"), "⚠️ o 1 pediu para não receber mensagem automática");
+  assertEquals(await resumoDoAudio(f, { n: 1 }), "⚠️ o 1 pediu para não receber mensagem automática");
   assertEquals(f.nomes(), ["retorno_destino_do_item"]);
 
   const g = fluxo(rotasDoDitado());
-  assertEquals(await resumirPropostaDoCaso(g.c.admin, { n: "x" }, "dono"), "⚠️ Não há caso x no cartão.");
+  assertEquals(await resumoDoAudio(g, { n: "x" }), "⚠️ Não há caso x no cartão.");
   assertEquals(g.nomes(), []);
 });
 
@@ -648,19 +666,19 @@ Deno.test("assumido traz nome_pedido e 'você disse' no resumo; provisório com 
   assertEquals(nova.estado, "assumido");
   assertEquals(nova.nome_pedido, "controlador 60A marca nova");
   assertEquals(nova.nome, "Controlador MPPT 60A Blue");
-  const resumo = await resumirPropostaDoCaso(f.c.admin, { n: 1, novas: [{ nome: "controlador 60A marca nova", preco: 1320 }] }, "dono");
+  const resumo = await resumoDoAudio(f, { n: 1, novas: [{ nome: "controlador 60A marca nova", preco: 1320 }] });
   assertStringIncludes(resumo, '5. Controlador MPPT 60A Blue (você disse "controlador 60A marca nova", confira) · 1 × R$ 1.320 · você disse');
 
   const g = fluxo(rotasDoDitado());
   const semCatalogo = await planoDaProposta(g.c.admin, { n: 1, novas: [{ nome: "Cabo especial 35 mm", preco: 320 }] }, "dono") as PlanoDaProposta;
   assertEquals(semCatalogo.linhas.at(-1)!.estado, "assumido");
   assertEquals(semCatalogo.linhas.at(-1)!.motivo, "sem_catalogo");
-  assertStringIncludes(await resumirPropostaDoCaso(g.c.admin, { n: 1, novas: [{ nome: "Cabo especial 35 mm", preco: 320 }] }, "dono"), "5. Cabo especial 35 mm (não está no catálogo: entra como produto pendente) · 1 × R$ 320 · você disse");
+  assertStringIncludes(await resumoDoAudio(g, { n: 1, novas: [{ nome: "Cabo especial 35 mm", preco: 320 }] }), "5. Cabo especial 35 mm (não está no catálogo: entra como produto pendente) · 1 × R$ 320 · você disse");
 
   const h = fluxo(rotasDoDitado());
   const semPreco = await planoDaProposta(h.c.admin, { n: 1, novas: [{ nome: "Cabo especial 35 mm" }] }, "dono") as PlanoDaProposta;
   assertEquals(semPreco.provisorios[0].motivo, "sem_preco");
-  assertEquals(await resumirPropostaDoCaso(h.c.admin, { n: 1, novas: [{ nome: "Cabo especial 35 mm" }] }, "dono"), "⚠️ Falta preço em Cabo especial 35 mm: dite o valor.");
+  assertEquals(await resumoDoAudio(h, { n: 1, novas: [{ nome: "Cabo especial 35 mm" }] }), "⚠️ Falta preço em Cabo especial 35 mm: dite o valor.");
 });
 
 Deno.test("troca com nome em serviço zera o service_id, e a linha fica na mesma posição", async () => {
@@ -679,7 +697,7 @@ Deno.test("Serviço a descrever com só preço continua provisório e recusa; co
   const p = await planoDaProposta(f.c.admin, { n: 1, trocas: [{ linha: 1, preco: 500 }] }, "dono") as PlanoDaProposta;
   assertEquals(p.linhas[0].estado, "provisorio");
   assertEquals(p.linhas[0].preco, null);
-  assertEquals(await resumirPropostaDoCaso(f.c.admin, { n: 1, trocas: [{ linha: 1, preco: 500 }] }, "dono"), "⚠️ Falta dizer o que é o serviço da linha 1: diga o nome e o preço juntos.");
+  assertEquals(await resumoDoAudio(f, { n: 1, trocas: [{ linha: 1, preco: 500 }] }), "⚠️ Falta dizer o que é o serviço da linha 1: diga o nome e o preço juntos.");
 
   const g = fluxo(rotas);
   const ok = await planoDaProposta(g.c.admin, { n: 1, trocas: [{ linha: 1, nome: "Revisão do motor", preco: 500 }] }, "dono") as PlanoDaProposta;
@@ -692,7 +710,7 @@ Deno.test("inativo com só preço não adianta: só troca com nome ou remover", 
   const inativo = { ...LINHAS_VER[0], estado: "provisorio", motivo: "inativo", preco: null };
   const rotas = rotasDoDitado({ retorno_previa_ver: VER({ linhas: [inativo] }) });
   const f = fluxo(rotas);
-  assertEquals(await resumirPropostaDoCaso(f.c.admin, { n: 1, trocas: [{ linha: 1, preco: 500 }] }, "dono"), "⚠️ Controlador MPPT 60A está fora de linha no cadastro: troque ou tire.");
+  assertEquals(await resumoDoAudio(f, { n: 1, trocas: [{ linha: 1, preco: 500 }] }), "⚠️ Controlador MPPT 60A está fora de linha no cadastro: troque ou tire.");
 });
 
 Deno.test("linha nova sem preço chama retorno_previa_precos uma vez só; preco_venda 0 de assumido dá provisório", async () => {
@@ -721,7 +739,7 @@ Deno.test("RPC de preço com erro recusa, e orçado aparece como orçado no resu
     search_products_trgm: [CATALOGO_NOVO],
     retorno_previa_precos: (a: Record<string, unknown>) => ({ data: (a.p_itens as Array<Record<string, unknown>>).map((i) => ({ chave: i.chave, preco: 2000, fonte: "orcado_outro", em: "2026-08-12", rotulo: "orçado a outro cliente em 12/08/26 (não aprovado)" })), error: null }),
   }));
-  const r = await resumirPropostaDoCaso(orcado.c.admin, { n: 1, novas: [{ nome: "Controlador MPPT 100A" }] }, "dono");
+  const r = await resumoDoAudio(orcado, { n: 1, novas: [{ nome: "Controlador MPPT 100A" }] });
   assertStringIncludes(r, "orçado a outro cliente em 12/08/26 (não aprovado)");
 });
 
@@ -767,7 +785,7 @@ Deno.test("unidade: 2 ou mais sem unidade recusa e lista os números; unidade 2 
   const r = await planoDaProposta(f.c.admin, { n: 1, unidade: 2 }, "dono") as PlanoDaProposta;
   assertEquals(r.vessel_id, "v-2");
   assertEquals(r.unidade_nome, "Netuno");
-  assertStringIncludes(await resumirPropostaDoCaso(f.c.admin, { n: 1, unidade: 2 }, "dono"), "Proposta de *Ana* · Netuno (");
+  assertStringIncludes(await resumoDoAudio(f, { n: 1, unidade: 2 }), "criado em rascunho para *Ana* · Netuno (");
 
   const g = fluxo(rotasDoDitado({ retorno_previa_ver: VER({ unidades, vessel_id: null, unidade_nome: null }) }));
   assertEquals(await planoDaProposta(g.c.admin, { n: 1, unidade: 9 }, "dono"), { recusa: "⚠️ Esse cliente não tem a unidade 9." });
@@ -820,74 +838,169 @@ const PLANO_GUARDADO: PlanoDaProposta = {
   titulo: "Troca", condicao: null, sem_enviar: false, total: 1320, hash: "h-plano", previa_hash: "h-efetivo", provisorios: [],
   linhas: [{ linha: 1, tipo: "peca", product_id: "p-c", nome: "Controlador", quantidade: 1, preco: 1320, fonte: "dito", em: null, rotulo: "você disse", estado: "ok", dito: true }],
 };
-const RETRATO_OK = { abertura_id: "a-1", phone: "5547900001234", previa_id: "pv-1", previa_hash: "h-efetivo", plano: PLANO_GUARDADO };
+/** rr-f3-2b: o retrato é o ORÇ que o áudio criou, com a impressão digital que o PIN confere. */
+const RETRATO_OK = {
+  ja_existia: false, abertura_id: "a-1", phone: "5547900001234", rotulo: "Ana", unidade_nome: "Brisa", validade: "terça (15/12)",
+  previa_id: "pv-1", service_order_id: "os-1", numero: "ORÇ-00151", total: 8040, impressao: "imp-1", plano: PLANO_GUARDADO,
+};
+const PRE_PDF = { ...PRE_OK, acao: "pdf", numero: "ORÇ-00151", args: undefined };
 
-Deno.test("execute do ditado: sem retrato ou com a base mudada recusa, com a frase certa; desligado diz desligado", async () => {
+Deno.test("execute do ditado (rr-f3-2b): sem retrato, retrato antigo, ORÇ mudado, enviado ou desligado recusam, e nada vai ao cliente", async () => {
   const f = fluxo({});
   const d = depsFalsos(f);
   assertEquals(await orcarCaso({ n: 1 }, f.c, d.deps), { error: "O cartão mudou: mande *retorno* e dite de novo." });
+  // a pendência de antes da mudança guardava o plano, não o ORÇ
+  assertEquals(await orcarCaso({ n: 1, _retrato: { abertura_id: "a-1", phone: "5547900001234", previa_id: "pv-1", previa_hash: "h", plano: PLANO_GUARDADO } }, f.c, d.deps),
+    { error: "O cartão mudou: mande *retorno* e dite de novo." });
   assertEquals(f.nomes(), []);
 
-  const m = fluxo({ retorno_previa_retrato: { ok: false, motivo: "mudou" } });
-  assertEquals(await orcarCaso({ n: 1, _retrato: RETRATO_OK }, m.c, depsFalsos(m).deps), { error: "O cartão mudou: mande *retorno* e dite de novo." });
+  const m = fluxo({ retorno_orc_do_audio_conferir: { ok: false, motivo: "mudou" } });
+  assertEquals(await orcarCaso({ n: 1, _retrato: RETRATO_OK }, m.c, depsFalsos(m).deps),
+    { error: "O ORÇ-00151 mudou desde o resumo, ou o caso fechou: nada foi ao cliente. Mande *retorno* para ver de novo." });
+  assertEquals(m.chamadas[0].args, { p_abertura: "a-1", p_so: "os-1", p_impressao: "imp-1", p_phone: "5547900001234", p_autor: "dono" });
 
-  const dl = fluxo({ retorno_previa_retrato: { ok: false, motivo: "desligado" } });
-  assertEquals(await orcarCaso({ n: 1, _retrato: RETRATO_OK }, dl.c, depsFalsos(dl).deps), { error: "O ditado do orçamento está desligado. Nada foi criado." });
+  const e = fluxo({ retorno_orc_do_audio_conferir: { ok: false, motivo: "enviado" } });
+  assertEquals(await orcarCaso({ n: 1, _retrato: RETRATO_OK }, e.c, depsFalsos(e).deps), { error: "O ORÇ-00151 já tinha sido enviado; não mandei de novo." });
 
-  const prov = fluxo({ retorno_previa_retrato: { ok: true, item_id: "i-1", n: 1 } });
-  const plano = { ...PLANO_GUARDADO, provisorios: [{ linha: 1, nome: "Cabo", motivo: "sem_preco" }] };
-  assertEquals(await orcarCaso({ n: 1, _retrato: { ...RETRATO_OK, plano } }, prov.c, depsFalsos(prov).deps), { error: "Falta completar Cabo: nada foi criado." });
+  const dl = fluxo({ retorno_orc_do_audio_conferir: { ok: false, motivo: "desligado" } });
+  assertEquals(await orcarCaso({ n: 1, _retrato: RETRATO_OK }, dl.c, depsFalsos(dl).deps),
+    { error: "O ditado do orçamento está desligado. O ORÇ-00151 fica em rascunho; nada foi ao cliente." });
+
+  for (const x of [m, e, dl]) assertEquals(x.nomes(), ["retorno_orc_do_audio_conferir"]);
 });
 
-Deno.test("execute do ditado: cartão caído não recusa, usa o plano guardado e cria e manda", async () => {
+Deno.test("execute do ditado (rr-f3-2b): o PIN só manda o PDF do ORÇ do retrato, sem criar nada", async () => {
   await comRelogio(MEIO_DIA, async () => {
-    const f = fluxo({ retorno_previa_retrato: { ok: true, item_id: null, n: null }, retorno_previa_aplicar: { previa_id: "pv-2", hash: "h2" }, retorno_previa_preparar: { ...PRE_OK, previa_id: "pv-2" } });
+    const f = fluxo({ retorno_orc_do_audio_conferir: { ok: true, item_id: "i-1", n: 1, numero: "ORÇ-00151" }, retorno_previa_preparar: PRE_PDF });
     const d = depsFalsos(f);
     const r = await orcarCaso({ n: 1, _retrato: RETRATO_OK }, f.c, d.deps);
-    assertEquals(f.chamadas[1].fn, "retorno_previa_aplicar");
-    assertEquals(f.chamadas[1].args.p_previa, "pv-1");
-    assertEquals(f.chamadas[1].args.p_item, null);
-    assertEquals(f.chamadas[2].args.p_previa, "pv-2");
-    assertEquals(f.chamadas[2].args.p_item, null);
-    assertEquals(d.montados.length, 1);
-    assertEquals(d.enviados.length, 1);
-    assertEquals(r.so_texto, true);
-    assertStringIncludes(String(r.aviso), "PDF enviado a Ana");
+    assertEquals(f.nomes(), ["retorno_orc_do_audio_conferir", "retorno_previa_preparar", "enviar_pdf", "retorno_previa_pdf", "retorno_item_enviado"]);
+    assertEquals(f.chamadas[1].args, { p_previa: "pv-1", p_item: "i-1", p_autor: "dono", p_so: "os-1" });
+    assertEquals(d.montados.length, 0);
+    assertEquals(d.enviados[0].service_order_id, "os-1");
+    assertEquals(r, { ok: true, aviso: "PDF do ORÇ-00151 enviado a Ana.", so_texto: true });
+
+    // cartão caído: o item é nulo e o PDF ainda sai (retorno_previa_pdf fecha o caso)
+    const g = fluxo({ retorno_orc_do_audio_conferir: { ok: true, item_id: null, n: null }, retorno_previa_preparar: PRE_PDF });
+    const dg = depsFalsos(g);
+    const r2 = await orcarCaso({ n: 1, _retrato: RETRATO_OK }, g.c, dg.deps);
+    assertEquals(dg.enviados.length, 1);
+    assertEquals(g.nomes().includes("retorno_item_enviado"), false);
+    assertStringIncludes(String(r2.aviso), "PDF do ORÇ-00151 enviado a Ana");
   });
 });
 
-Deno.test("execute do ditado: de noite aplica o plano com p_item e não chama montar", async () => {
+Deno.test("execute do ditado (rr-f3-2b): de noite o PIN não manda, e a frase não diz que nada foi criado", async () => {
   await comRelogio(NOITE, async () => {
-    const f = fluxo({ retorno_previa_retrato: { ok: true, item_id: "i-1", n: 1 }, retorno_previa_aplicar: { previa_id: "pv-1", hash: "h" } });
+    const f = fluxo({ retorno_orc_do_audio_conferir: { ok: true, item_id: "i-1", n: 1 }, retorno_previa_preparar: PRE_PDF });
     const d = depsFalsos(f);
     const r = await orcarCaso({ n: 1, _retrato: RETRATO_OK }, f.c, d.deps);
-    assertEquals(f.nomes(), ["retorno_previa_retrato", "retorno_previa_aplicar"]);
-    assertEquals(f.chamadas[1].args.p_item, "i-1");
-    assertEquals(r, { ok: true, aviso: "Guardei as linhas na proposta. Mande *retorno* a partir das 8h e o *sim <PIN>* cria e manda.", so_texto: true });
-  });
-});
-
-Deno.test("execute do ditado com sem_enviar: cria, não manda, e passa pelo caminho de dia e de noite", async () => {
-  await comRelogio(NOITE, async () => {
-    const plano = { ...PLANO_GUARDADO, sem_enviar: true };
-    const f = fluxo({ retorno_previa_retrato: { ok: true, item_id: "i-1", n: 1 }, retorno_previa_aplicar: { previa_id: "pv-1", hash: "h" }, retorno_previa_preparar: PRE_OK });
-    const d = depsFalsos(f);
-    const r = await orcarCaso({ n: 1, _retrato: { ...RETRATO_OK, plano } }, f.c, d.deps);
     assertEquals(d.enviados.length, 0);
-    assertEquals(d.montados.length, 1);
-    assertEquals(r.aviso, "Rascunho ORÇ-00151 criado, nada foi ao cliente.");
+    assertEquals(d.montados.length, 0);
+    assertEquals(r.aviso, "o 1: fora do horário de envio; não mandei o PDF do ORÇ-00151. Mande *retorno* a partir das 8h");
   });
 });
 
-Deno.test("retrato do ditado leva o plano; sem plano, null", async () => {
+Deno.test("o áudio cria o ORÇ quando a pendência nasce: aplicar, preparar, montar, orc_criado, soltar e marcar; nada é enviado", async () => {
+  await comRelogio(NOITE, async () => {   // de noite também: criar não depende da janela de envio
+    const f = fluxo(rotasDoDitado());
+    const d = depsFalsos(f);
+    const r = await criarOrcamentoDoAudio({ n: 1, trocas: [{ linha: 1, preco: 1320 }] }, f.c, d.deps);
+    assertEquals(f.nomes(), [
+      "retorno_destino_do_item", "retorno_orc_do_audio_do_caso", "retorno_previa_ver", "retorno_previa_aplicar",
+      "retorno_previa_preparar", "montar", "retorno_previa_orc_criado", "retorno_previa_soltar", "retorno_orc_do_audio_marcar",
+    ]);
+    assertEquals(f.chamadas.find((x) => x.fn === "retorno_previa_aplicar")?.args.p_item, "i-1");
+    assertEquals(f.chamadas.find((x) => x.fn === "retorno_orc_do_audio_marcar")?.args, { p_previa: "pv-1", p_so: "os-1", p_autor: "dono" });
+    assertEquals(d.enviados.length, 0);
+    assertEquals(d.montados[0].opcoes, { origem: { valor: "retorno_previa", chave8: "12345678" } });
+    assertEquals(r.numero, "ORÇ-00151");
+    assertEquals(r.service_order_id, "os-1");
+    assertEquals(r.impressao, "imp-1");
+    assertEquals(r.ja_existia, false);
+    assertEquals(r.plano?.linhas[0].preco, 1320);
+  });
+});
+
+Deno.test("áudio repetido não cria dois: com o ORÇ do áudio ainda em rascunho no caso, o retrato é ele, sem aplicar nem montar", async () => {
+  const existente = { previa_id: "pv-1", service_order_id: "os-9", numero: "ORÇ-00149", total: 500, impressao: "imp-9",
+    linhas: [{ nome: "Bateria LiFePO4 100Ah", quantidade: 1, preco: 500 }] };
+  const f = fluxo(rotasDoDitado({ retorno_orc_do_audio_do_caso: existente }));
+  const r = await resumoDoAudio(f, { n: 1, trocas: [{ linha: 1, preco: 999 }] });
+  assertEquals(f.nomes().includes("retorno_previa_aplicar"), false);
+  assertEquals(f.nomes().includes("montar"), false);
+  assertEquals(r, [
+    "Já criei o *ORÇ-00149* deste caso com o áudio anterior: não criei outro. Ele está assim:",
+    "Orçamento *ORÇ-00149* (rascunho) para *Ana* · Brisa (WhatsApp ••1234, o contato do caso) · 1 item · R$ 500",
+    "1. Bateria LiFePO4 100Ah · 1 × R$ 500",
+    "Vale até terça (15/12), contado do envio.",
+    "*sim <PIN>* manda o PDF do ORÇ-00149 a Ana",
+    "*não* não manda nada: o ORÇ-00149 fica em rascunho na lista. Para mudar algo, ajuste na tela antes do *sim <PIN>*.",
+  ].join("\n"));
+});
+
+Deno.test("criação que não termina vira recusa de uma linha (sem pendência): já existe, erro do construtor, marca que falha, exceção", async () => {
+  const ja = fluxo(rotasDoDitado());
+  const dja = depsFalsos(ja, { orcamento: { ja_existe: "ORÇ-00140", error: "x" } });
+  const r1 = await comRelogio(MEIO_DIA, () => criarOrcamentoDoAudio({ n: 1 }, ja.c, dja.deps));
+  assertEquals(r1, { recusa: "⚠️ o 1: já existe o ORÇ-00140 de hoje; não criei outro" });
+  assertEquals(ja.nomes().includes("retorno_orc_do_audio_marcar"), false);
+
+  const erro = fluxo(rotasDoDitado());
+  const r2 = await criarOrcamentoDoAudio({ n: 1 }, erro.c, depsFalsos(erro, { orcamento: { error: "x" } }).deps);
+  assertEquals(r2, { recusa: "⚠️ o 1: não consegui criar o orçamento; nada saiu" });
+
+  const marca = fluxo(rotasDoDitado({ retorno_orc_do_audio_marcar: { ok: false, motivo: "sem_proposta" } }));
+  const r3 = await criarOrcamentoDoAudio({ n: 1 }, marca.c, depsFalsos(marca).deps);
+  assertEquals(r3, { recusa: "⚠️ Criei o ORÇ-00151 em rascunho, mas não consegui conferir o que ficou nele: confira na tela. Nada foi ao cliente." });
+
+  const rede = fluxo(rotasDoDitado({ retorno_previa_aplicar: { __erro: "57014" } }));
+  const r4 = await criarOrcamentoDoAudio({ n: 1 }, rede.c, depsFalsos(rede).deps);
+  assertEquals(r4, { recusa: "⚠️ Não consegui terminar o orçamento agora: confira na tela se o rascunho nasceu. Nada foi ao cliente." });
+
+  // provisório e plano recusado: nem aplica
+  const prov = fluxo(rotasDoDitado());
+  assertEquals(await criarOrcamentoDoAudio({ n: 1, novas: [{ nome: "Cabo especial 35 mm" }] }, prov.c, depsFalsos(prov).deps),
+    { recusa: "⚠️ Falta preço em Cabo especial 35 mm: dite o valor." });
+  assertEquals(prov.nomes().includes("retorno_previa_aplicar"), false);
+
+  // o resumo devolve a recusa como está (uma linha: o agente não cria a pendência)
+  for (const r of [r1, r2, r3, r4]) {
+    const texto = await resumirPropostaDoCaso(null, { n: 1 }, "dono", r as Record<string, unknown>);
+    assertEquals(texto, r.recusa);
+    assertEquals(texto.includes("\n"), false);
+  }
+  // sem retrato (o retrato lançou no agente): recusa, nunca pede PIN
+  assertEquals(await resumirPropostaDoCaso(null, { n: 1 }, "dono", null), "⚠️ Não consegui terminar o orçamento agora: confira na tela se o rascunho nasceu. Nada foi ao cliente.");
+});
+
+Deno.test("de noite o ORÇ nasce, mas não há PIN: a recusa de uma linha diz para mandar a partir das 8h", async () => {
+  await comRelogio(NOITE, async () => {
+    const f = fluxo(rotasDoDitado());
+    const retrato = await criarOrcamentoDoAudio({ n: 1 }, f.c, depsFalsos(f).deps);
+    assertEquals(await resumirPropostaDoCaso(f.c.admin, { n: 1 }, "dono", retrato as Record<string, unknown>),
+      "⚠️ Criei o ORÇ-00151 em rascunho, e nada foi ao cliente: fora do horário de envio (8h às 20h). A partir das 8h, mande *retorno*: o *sim <PIN>* do caso manda o PDF.");
+  });
+});
+
+Deno.test("o retrato da pendência do ditado é o ORÇ criado; com recusa, o retrato carrega a frase e o agente não cria pendência", async () => {
   const f = fluxo(rotasDoDitado());
-  const r = await toolsByName.retorno_orcar_caso.retratoDaPendencia!({ n: 1 }, f.c) as Record<string, unknown>;
-  assertEquals(r.abertura_id, "a-1");
-  assertEquals(r.phone, "5547900001234");
-  assertEquals(r.previa_id, "pv-1");
-  assertEquals(r.previa_hash, "h-efetivo");
-  assertEquals((r.plano as PlanoDaProposta).linhas.length, 4);
-  assertEquals(await toolsByName.retorno_orcar_caso.retratoDaPendencia!({ n: 1, trocas: [{ linha: 9 }] }, fluxo(rotasDoDitado()).c), null);
+  const r = await comRelogio(MEIO_DIA, async () => {
+    // a ferramenta real usa dependenciasReais(); aqui o construtor falso entra pela rota do banco falso
+    return await criarOrcamentoDoAudio({ n: 1 }, f.c, depsFalsos(f).deps);
+  });
+  assertEquals(r.service_order_id, "os-1");
+  const recusa = await toolsByName.retorno_orcar_caso.retratoDaPendencia!({ n: 1, trocas: [{ linha: 9 }] }, fluxo(rotasDoDitado()).c);
+  assertEquals(recusa, { recusa: "⚠️ A proposta não tem a linha 9." });
+  assertEquals(resumoQueRecusa("retorno_orcar_caso", await resumirPropostaDoCaso(null, { n: 1 }, "dono", recusa)), { error: "A proposta não tem a linha 9.", nada_registrado: true });
+});
+
+Deno.test("buildPendingSummary passa o retrato ao resumo do ditado (rr-f3-2b)", async () => {
+  await comRelogio(MEIO_DIA, async () => {
+    const texto = await buildPendingSummary(null, "retorno_orcar_caso", { n: 1 }, { userId: "dono", retrato: RETRATO_OK });
+    assertEquals(texto.split("\n")[0], "Orçamento *ORÇ-00151* criado em rascunho para *Ana* · Brisa (WhatsApp ••1234, o contato do caso) · 1 item · R$ 8.040");
+    assertStringIncludes(texto, "*sim <PIN>* manda o PDF do ORÇ-00151 a Ana");
+  });
 });
 
 // ─── Unidade do caso ────────────────────────────────────────────────────────────────────────────────────────────────────

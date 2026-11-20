@@ -9,8 +9,9 @@
 // O ditado por áudio (P9): retorno_ler_caso e retorno_responder_caso. O modelo recebe só o número do caso; o texto do cliente é dado
 // de terceiro, nunca instrução. Sem campo de telefone, de propósito: o destino fica preso na proposta (retrato) e, sem retrato, recusa.
 //
-// Orçamento pelo cartão (F3, P8): o *sim <PIN>* cria e manda o que a proposta trouxe, ou o que o dono ditou. Tudo desligado
-// até o dono mandar ligar (retorno_config.previa_ditado_ligado e previa_modo).
+// Orçamento pelo cartão (F3, P8): o *sim <PIN>* do cartão cria e manda o que a proposta trouxe. O ditado por áudio (rr-f3-2b,
+// 20/11/2026): o áudio já cria o orçamento em rascunho, e o *sim <PIN>* só manda o PDF. Tudo desligado até o dono mandar ligar
+// (retorno_config.previa_ditado_ligado e previa_modo).
 //
 // Reverter: tirar retornoSoPelaPendencia de toolsSoPelaPendencia e retornoTools de allTools.
 
@@ -314,7 +315,7 @@ export const retornoTools: ToolDef[] = [
   },
   {
     name: "retorno_orcar_caso",
-    description: "Monta o orçamento do caso n do cartão do retorno com o que o dono disse: trocar, tirar ou acrescentar itens, preço dito. Quem mostra as linhas e pede o PIN é o sistema. O destino é sempre o contato do caso: não existe campo de cliente nem de telefone.",
+    description: "Monta o orçamento do caso n do cartão do retorno com o que o dono disse: trocar, tirar ou acrescentar itens, preço dito. O sistema já cria o orçamento em rascunho e mostra o número e as linhas; o PIN só manda o PDF. O destino é sempre o contato do caso: não existe campo de cliente nem de telefone.",
     input_schema: {
       type: "object",
       properties: {
@@ -338,12 +339,9 @@ export const retornoTools: ToolDef[] = [
     },
     risk: "high",
     roles: ["admin"],
-    // O plano fica guardado na pendência: se o cartão cair em 24 h, o áudio não se perde.
-    retratoDaPendencia: async (args, ctx) => {
-      const plano = await planoDaProposta(ctx.admin, args, ctx.userId);
-      if ("recusa" in plano) return null;
-      return { abertura_id: plano.abertura_id, phone: plano.phone, previa_id: plano.previa_id, previa_hash: plano.previa_hash, plano };
-    },
+    // rr-f3-2b: quando a pendência nasce, o áudio já vira orçamento em rascunho, e o retrato é o ORÇ criado (número e impressão
+    // digital). O *sim <PIN>* só manda o PDF, e só se o ORÇ ainda for o que o dono viu. Recusa volta em {recusa}, e o resumo a mostra.
+    retratoDaPendencia: async (args, ctx) => await criarOrcamentoDoAudio(args, ctx) as unknown as Record<string, unknown>,
     execute: (args, ctx) => orcarCaso((args ?? {}) as Record<string, unknown>, ctx, dependenciasReais()),
   },
   {
@@ -470,6 +468,15 @@ export interface OpcoesDoOrcamento {
   pedido_id?: string;
   frase_sem_enviar?: string;
   soltar_sem_enviar?: boolean;
+  /** rr-f3-2b: o ORÇ nasceu (ramo orcar, total conferido), antes do sem_enviar e do envio. Quem chama guarda o número. */
+  aoCriar?: (so: OrcamentoCriado) => void;
+}
+
+/** O ORÇ que o ramo orcar acabou de criar. */
+export interface OrcamentoCriado {
+  service_order_id: string;
+  numero: string;
+  total: number;
 }
 
 /** Os nomes da F3: o padrão, sem opções. */
@@ -508,7 +515,9 @@ export async function orcarEEnviar(o: OrcamentoDoCartao, ctx: ToolCtx, deps: Dep
   const fora = aoParceiro ? guardaDeEnvio(pre.legenda.texto, GUARDA_PARCEIRO).bloqueado : foraDoHorario(pre.legenda.texto);
   if (!o.sem_enviar && fora) {
     // sem_enviar não passa pela guarda de janela: nada vai ao cliente
-    avisos.push(`${quem}: fora do horário de envio; não criei nada. Mande *${opcoes?.pedido_id ? "parceiro" : "retorno"}* a partir das 8h`);
+    // rr-f3-2b: no PDF de rascunho o orçamento já existe; a frase diz o que não aconteceu.
+    const naoFez = pre.acao === "pdf" ? `não mandei o PDF${pre.numero ? ` do ${pre.numero}` : ""}` : "não criei nada";
+    avisos.push(`${quem}: fora do horário de envio; ${naoFez}. Mande *${opcoes?.pedido_id ? "parceiro" : "retorno"}* a partir das 8h`);
     await soltarItem();
     return avisos;
   }
@@ -551,6 +560,7 @@ export async function orcarEEnviar(o: OrcamentoDoCartao, ctx: ToolCtx, deps: Dep
       return avisos;
     }
   }
+  if (pre.acao === "orcar") opcoes?.aoCriar?.({ service_order_id: String(so.service_order_id), numero: String(so.orcamento), total: Number(so.total) });
   if (o.sem_enviar) {
     avisos.push(opcoes?.frase_sem_enviar ?? `Rascunho ${so.orcamento} criado, nada foi ao cliente.`);
     if (opcoes?.soltar_sem_enviar !== false) await soltarItem();
@@ -931,67 +941,177 @@ function recusaDosProvisorios(p: PlanoDaProposta): string | null {
   return partes.length ? `⚠️ ${partes.join(" ")}` : null;
 }
 
-/** O texto da pendência, linha a linha e literal: é o único que não passa pelo modelo. */
-export async function resumirPropostaDoCaso(admin: ToolCtx["admin"], args: Record<string, any>, userId: string): Promise<string> {
-  if (!nValido(args.n)) return naoHaCaso(args.n);
+// ─── rr-f3-2b (20/11/2026): o áudio já cria o orçamento, e o PIN serve só para mandar o PDF ──────────────────────────────
+
+/**
+ * O retrato da pendência do ditado: o ORÇ que o áudio criou (ou o que um áudio anterior já tinha criado no caso), com a
+ * impressão digital que o *sim <PIN>* confere. Recusa = {recusa: "⚠️ …"}, numa linha; aí não há pendência.
+ */
+export interface RetratoDoAudio {
+  recusa?: string;
+  ja_existia?: boolean;
+  abertura_id?: string;
+  phone?: string;
+  rotulo?: string;
+  unidade_nome?: string;
+  validade?: string;
+  previa_id?: string | null;
+  service_order_id?: string;
+  numero?: string;
+  total?: number;
+  impressao?: string;
+  /** Só na criação: as linhas do plano, com a origem de cada preço (o resumo mostra). */
+  plano?: PlanoDaProposta;
+  /** Só no ORÇ que já existia: as linhas como estão nele. */
+  linhas?: Array<{ nome: string; quantidade: number; preco: number }>;
+}
+
+const NAO_CONFERIU = "⚠️ Não consegui conferir o caso agora. Nada foi registrado; tente de novo.";
+const NAO_TERMINOU = "⚠️ Não consegui terminar o orçamento agora: confira na tela se o rascunho nasceu. Nada foi ao cliente.";
+
+/**
+ * Chamado quando a pendência do ditado nasce (retratoDaPendencia): grava o plano na proposta (retorno_previa_aplicar) e cria
+ * o ORÇ em rascunho pela criação que já existe (orcarEEnviar com sem_enviar: retorno_previa_preparar e montarOrcamento). Não
+ * manda nada a ninguém. Com um ORÇ do áudio ainda em rascunho no caso, devolve esse (áudio repetido não cria dois).
+ */
+export async function criarOrcamentoDoAudio(
+  args: Record<string, any>,
+  ctx: ToolCtx,
+  deps?: DepsDoCartao,
+): Promise<RetratoDoAudio> {
+  const n = args?.n;
+  if (!nValido(n)) return { recusa: naoHaCaso(n) };
+  let destino: Destino | null;
   try {
-    const { data, error } = await admin.rpc("retorno_destino_do_item", { p_n: args.n, p_autor: userId });
-    if (error) return "⚠️ Não consegui conferir o caso agora. Nada foi registrado; tente de novo.";
-    const destino = (data ?? {}) as Destino;
-    if (destino.ok === false) return `⚠️ ${destino.texto ?? "Esse caso não pode receber agora."}`;
-
-    const plano = await planoDaProposta(admin, args, userId);
-    if ("recusa" in plano) return plano.recusa;
-    const recusa = recusaDosProvisorios(plano);
-    if (recusa) return recusa;
-
-    const titulo = typeof args.titulo === "string" && args.titulo.trim() ? [`Título no PDF: ${args.titulo.trim()}`] : [];
-    return [
-      `Proposta de *${plano.rotulo}* · ${plano.unidade_nome} (WhatsApp ••${plano.phone.slice(-4)}, o contato do caso) · ${itensDe(plano.linhas.length)} · R$ ${brl(plano.total)}`,
-      ...titulo,
-      ...plano.linhas.map((l) => `${l.linha}. ${nomeDaLinhaDoResumo(l)} · ${qtd(l.quantidade)} × R$ ${brl(l.preco as number)} · ${l.rotulo}`),
-      `Vale até ${plano.validade}, contado do envio.`,
-      ...(plano.condicao ? [`Condição: ${plano.condicao}`] : []),
-      plano.sem_enviar
-        ? "*sim <PIN>* cria o orçamento e não manda nada"
-        : `*sim <PIN>* cria o orçamento e manda o PDF a ${plano.rotulo} · ou diga o que mudar`,
-      ...(plano.sem_enviar ? [] : ["*não* cancela o ditado inteiro. Para só criar, diga *cria sem mandar*."]),
-    ].join("\n");
+    destino = await destinoDoCaso(ctx, n);
   } catch {
-    return "⚠️ Não consegui conferir o caso agora. Nada foi registrado; tente de novo.";
+    return { recusa: NAO_CONFERIU };
+  }
+  if (!destino) return { recusa: NAO_CONFERIU };
+  if (destino.ok === false) return { recusa: `⚠️ ${destino.texto ?? "Esse caso não pode receber agora."}` };
+  if (typeof destino.abertura_id !== "string") return { recusa: naoHaCaso(n) };
+
+  try {
+    const existente = await rpc(ctx, "retorno_orc_do_audio_do_caso", { p_abertura: destino.abertura_id, p_autor: ctx.userId });
+    if (existente?.service_order_id) {
+      const ver = await lerProposta(ctx.admin, n, ctx.userId);
+      if (ver.erro) return recusaDoErro(ver.erro, n);
+      if (ver.ditado_ligado !== true) return { recusa: "⚠️ O ditado do orçamento está desligado." };
+      return {
+        ja_existia: true, abertura_id: destino.abertura_id, phone: ver.phone, rotulo: ver.rotulo, unidade_nome: ver.unidade_nome ?? "",
+        validade: ver.validade, previa_id: existente.previa_id ?? null, service_order_id: existente.service_order_id, numero: existente.numero,
+        total: Number(existente.total), impressao: existente.impressao, linhas: Array.isArray(existente.linhas) ? existente.linhas : [],
+      };
+    }
+
+    const plano = await planoDaProposta(ctx.admin, args, ctx.userId);
+    if ("recusa" in plano) return plano;
+    const recusa = recusaDosProvisorios(plano);
+    if (recusa) return { recusa };
+
+    const aplicado = await rpc(ctx, "retorno_previa_aplicar", {
+      p_previa: plano.previa_id ?? null, p_plano: plano, p_autor: ctx.userId, p_item: destino.item_id ?? null,
+    });
+    let criado: OrcamentoCriado | null = null;
+    const avisos = await orcarEEnviarSemLancar(
+      { acao: "orcar", previa_id: aplicado.previa_id, item_id: destino.item_id ?? null, n, sem_enviar: true },
+      ctx,
+      deps ?? dependenciasReais(),
+      { aoCriar: (so) => { criado = so; } },
+    );
+    const feito = criado as OrcamentoCriado | null;
+    if (!feito) return { recusa: `⚠️ ${avisos.join(" ") || "Não consegui criar o orçamento; nada saiu."}` };
+
+    const marca = await rpc(ctx, "retorno_orc_do_audio_marcar", { p_previa: aplicado.previa_id, p_so: feito.service_order_id, p_autor: ctx.userId });
+    if (!marca?.ok || typeof marca.impressao !== "string") {
+      return { recusa: `⚠️ Criei o ${feito.numero} em rascunho, mas não consegui conferir o que ficou nele: confira na tela. Nada foi ao cliente.` };
+    }
+    return {
+      ja_existia: false, abertura_id: plano.abertura_id, phone: plano.phone, rotulo: plano.rotulo, unidade_nome: plano.unidade_nome,
+      validade: plano.validade, previa_id: aplicado.previa_id, service_order_id: feito.service_order_id, numero: String(marca.numero ?? feito.numero),
+      total: Number(marca.total), impressao: marca.impressao, plano,
+    };
+  } catch {
+    return { recusa: NAO_TERMINOU };
   }
 }
 
-/** Depois do "sim <PIN>": confere o que o dono aprovou, guarda as linhas e só então cria e manda. */
-export async function orcarCaso(args: Record<string, unknown>, ctx: ToolCtx, deps: DepsDoCartao): Promise<Record<string, unknown>> {
-  const retrato = lerRetrato(args);
-  const plano = retrato?.plano as PlanoDaProposta | undefined;
-  if (!retrato || !plano || !Array.isArray(plano.linhas) || typeof retrato.abertura_id !== "string" || typeof retrato.phone !== "string") return { error: CARTAO_MUDOU };
+/**
+ * O texto da pendência, linha a linha e literal: é o único que não passa pelo modelo. Com rr-f3-2b ele mostra o ORÇ que o áudio
+ * já criou (o retrato, tirado logo antes); o *sim <PIN>* só manda o PDF. Sem retrato, a criação falhou: recusa.
+ */
+export function resumirPropostaDoCaso(
+  _admin: ToolCtx["admin"],
+  args: Record<string, any>,
+  _userId: string,
+  retrato?: Record<string, unknown> | null,
+): Promise<string> {
+  return Promise.resolve(textoDoResumo(args, retrato as RetratoDoAudio | null | undefined));
+}
 
+function textoDoResumo(args: Record<string, any>, r: RetratoDoAudio | null | undefined): string {
+  if (!nValido(args?.n)) return naoHaCaso(args?.n);
+  if (!r) return NAO_TERMINOU;
+  if (typeof r.recusa === "string") return r.recusa;
+  if (!r.numero || !r.phone || !r.rotulo) return NAO_TERMINOU;
+  const numero = r.numero;
+  // Sem envio agora (o dono pediu, ou fora do horário): sem pendência. O ORÇ fica em rascunho, e o caso volta no cartão.
+  if (args.sem_enviar === true) {
+    return `⚠️ ${r.ja_existia ? "O" : "Criei o"} ${numero} em rascunho, e nada foi ao cliente. Para mandar depois: *retorno* e o *sim <PIN>* do caso.`;
+  }
+  if (foraDoHorario()) {
+    return `⚠️ ${r.ja_existia ? "O" : "Criei o"} ${numero} em rascunho, e nada foi ao cliente: fora do horário de envio (8h às 20h). A partir das 8h, mande *retorno*: o *sim <PIN>* do caso manda o PDF.`;
+  }
+  const quem = `para *${r.rotulo}*${r.unidade_nome ? ` · ${r.unidade_nome}` : ""} (WhatsApp ••${r.phone.slice(-4)}, o contato do caso)`;
+  const rodape = [
+    `*sim <PIN>* manda o PDF do ${numero} a ${r.rotulo}`,
+    `*não* não manda nada: o ${numero} fica em rascunho na lista. Para mudar algo, ajuste na tela antes do *sim <PIN>*.`,
+  ];
+  if (r.ja_existia) {
+    const linhas = r.linhas ?? [];
+    return [
+      `Já criei o *${numero}* deste caso com o áudio anterior: não criei outro. Ele está assim:`,
+      `Orçamento *${numero}* (rascunho) ${quem} · ${itensDe(linhas.length)} · R$ ${brl(Number(r.total))}`,
+      ...linhas.map((l, i) => `${i + 1}. ${l.nome} · ${qtd(Number(l.quantidade))} × R$ ${brl(Number(l.preco))}`),
+      `Vale até ${r.validade}, contado do envio.`,
+      ...rodape,
+    ].join("\n");
+  }
+  const plano = r.plano;
+  if (!plano || !Array.isArray(plano.linhas)) return NAO_TERMINOU;
+  const titulo = typeof args.titulo === "string" && args.titulo.trim() ? [`Título no PDF: ${args.titulo.trim()}`] : [];
+  return [
+    `Orçamento *${numero}* criado em rascunho ${quem} · ${itensDe(plano.linhas.length)} · R$ ${brl(Number(r.total))}`,
+    ...titulo,
+    ...plano.linhas.map((l) => `${l.linha}. ${nomeDaLinhaDoResumo(l)} · ${qtd(l.quantidade)} × R$ ${brl(l.preco as number)} · ${l.rotulo}`),
+    `Vale até ${plano.validade}, contado do envio.`,
+    ...(plano.condicao ? [`Condição: ${plano.condicao}`] : []),
+    ...rodape,
+  ].join("\n");
+}
+
+/** Depois do "sim <PIN>" (rr-f3-2b): confere que o ORÇ ainda é o que o dono viu e só manda o PDF. Nada é criado aqui. */
+export async function orcarCaso(args: Record<string, unknown>, ctx: ToolCtx, deps: DepsDoCartao): Promise<Record<string, unknown>> {
+  const r = lerRetrato(args) as RetratoDoAudio | null;
+  if (!r || typeof r.service_order_id !== "string" || typeof r.impressao !== "string" || typeof r.abertura_id !== "string" || typeof r.phone !== "string") {
+    return { error: CARTAO_MUDOU };
+  }
+  const numero = r.numero ?? "orçamento";
   let vale: Record<string, any>;
   try {
-    vale = await rpc(ctx, "retorno_previa_retrato", {
-      p_abertura: retrato.abertura_id, p_previa: retrato.previa_id ?? null, p_hash: retrato.previa_hash ?? null, p_phone: retrato.phone, p_autor: ctx.userId,
+    vale = await rpc(ctx, "retorno_orc_do_audio_conferir", {
+      p_abertura: r.abertura_id, p_so: r.service_order_id, p_impressao: r.impressao, p_phone: r.phone, p_autor: ctx.userId,
     });
   } catch {
-    return { error: "Não consegui conferir o caso agora. Nada foi criado." };
+    return { error: `Não consegui conferir o ${numero} agora. Nada foi ao cliente.` };
   }
-  if (!vale?.ok) return { error: vale?.motivo === "desligado" ? "O ditado do orçamento está desligado. Nada foi criado." : CARTAO_MUDOU };
-  // Sem recalcular sobre o cartão: o que o dono aprovou é o plano guardado. Cartão caído (item nulo) não recusa.
-  if (plano.provisorios?.length) return { error: `Falta completar ${plano.provisorios.map((x) => x.nome).join(", ")}: nada foi criado.` };
-
-  let aplicado: Record<string, any>;
-  try {
-    aplicado = await rpc(ctx, "retorno_previa_aplicar", { p_previa: retrato.previa_id ?? null, p_plano: plano, p_autor: ctx.userId, p_item: vale.item_id ?? null });
-  } catch {
-    return { error: "Não consegui guardar as linhas agora. Nada foi criado." };
-  }
-
-  if (!plano.sem_enviar && foraDoHorario()) {
-    return { ok: true, aviso: "Guardei as linhas na proposta. Mande *retorno* a partir das 8h e o *sim <PIN>* cria e manda.", so_texto: true };
+  if (!vale?.ok) {
+    if (vale?.motivo === "desligado") return { error: `O ditado do orçamento está desligado. O ${numero} fica em rascunho; nada foi ao cliente.` };
+    if (vale?.motivo === "enviado") return { error: `O ${numero} já tinha sido enviado; não mandei de novo.` };
+    return { error: `O ${numero} mudou desde o resumo, ou o caso fechou: nada foi ao cliente. Mande *retorno* para ver de novo.` };
   }
   const avisos = await orcarEEnviarSemLancar({
-    acao: "orcar", previa_id: aplicado.previa_id, item_id: vale.item_id ?? null, n: vale.n ?? null, sem_enviar: plano.sem_enviar,
+    acao: "pdf", service_order_id: r.service_order_id, numero, previa_id: r.previa_id ?? null, item_id: vale.item_id ?? null, n: vale.n ?? null,
   }, ctx, deps);
   return { ok: true, aviso: avisos.join(" "), so_texto: true };
 }

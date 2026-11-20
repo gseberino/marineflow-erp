@@ -115,6 +115,16 @@ export type RegraDoValidador =
 
 export type ResultadoDoValidador = { ok: true } | { ok: false; regras: RegraDoValidador[] };
 
+/**
+ * rr-f1-11 (20/11/2026): o formulário de cadastro do dono, exato (o atalho de mensagens rápidas dele), que o número novo
+ * recebe depois do recibo. É o T36 de _retorno_texto (migration 20270214100200), e formulario_test.ts confere que os dois
+ * são iguais. Só este texto, exato, passa do limite de linhas abaixo.
+ */
+export const FORMULARIO_DE_CADASTRO =
+  "Dados para preenchimento do Orçamento / Ordem de Serviço:\n\nNome:\nCPF:\nData Nasc.:\nCel/Whats:\nEndereço:\nCEP:\nEmail:\n" +
+  "Local fixo Lancha/Veículo:\nNome (Embarcação):\nFabricante:\nAno:\nModelo:\nTamanho:\nPlaca (Veículo):\n\n" +
+  "É muito importante ter o máximo de informações preenchidas.";
+
 /** Ao cliente: no máximo 400 caracteres e 5 linhas (B.5, R2 P20). */
 export const LIMITE_DE_CARACTERES = 400;
 export const LIMITE_DE_LINHAS = 5;
@@ -550,7 +560,10 @@ function conferir(texto: unknown, ctx: unknown, opcoes: Opcoes): RegraDoValidado
   if (afirmaSemDado(t, c.marcas, !aoParceiro)) regras.push("afirmacao_sem_dado");
   if (ecoaOCliente(t, c.textosDoCliente, c.escritoPeloBanco)) regras.push("eco_do_cliente");
   if (EMOJI.test(bruto)) regras.push("emoji");
-  if (bruto.length > opcoes.limiteCaracteres || bruto.split(QUEBRA_DE_LINHA).length > opcoes.limiteLinhas) {
+  // rr-f1-11: o formulário de cadastro do dono (T36) passa do limite de linhas por natureza. Só o texto EXATO, ao cliente,
+  // escapa da regra de tamanho; todas as outras regras continuam valendo para ele.
+  const formularioDoDono = !aoParceiro && bruto === FORMULARIO_DE_CADASTRO;
+  if (!formularioDoDono && (bruto.length > opcoes.limiteCaracteres || bruto.split(QUEBRA_DE_LINHA).length > opcoes.limiteLinhas)) {
     regras.push("tamanho");
   }
   if (PALAVRAS_PROIBIDAS.some((r) => r.test(t))) regras.push("palavra_proibida");

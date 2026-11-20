@@ -884,7 +884,7 @@ Deno.test("ORÇAMENTO PELO CARTÃO: o prompt ensina as três ferramentas e as re
   for (const regra of [
     "Nunca invente preço, item, título ou cliente",
     "nunca o nome",
-    "Quem pede o PIN e mostra as linhas é o sistema",
+    "O sistema já cria o orçamento em rascunho e mostra o número e as linhas; o PIN só manda o PDF",
     "nunca create_vessel",
     "com client_id, nunca com nome",
   ]) assertEquals(trecho.includes(regra), true, regra);

@@ -515,7 +515,10 @@ export async function buildPendingSummary(
   admin: any,
   toolName: string,
   args: Record<string, unknown>,
-  quem: Partial<Pick<ToolCtx, "userId" | "userRole" | "settings" | "sessaoAmarrada" | "casoAmarrado">> = {},
+  quem: Partial<Pick<ToolCtx, "userId" | "userRole" | "settings" | "sessaoAmarrada" | "casoAmarrado">> & {
+    /** Retorno F3 (rr-f3-2b): o retrato que a pendência vai gravar; o ditado mostra o ORÇ que o áudio já criou. */
+    retrato?: Record<string, unknown> | null;
+  } = {},
 ): Promise<string> {
   // "Sim, é do X" (leva 8, revisão de 23/10/2026): com cliente_confirmado, o cartão mostra cada proposta (título, data,
   // valor) e, nas confirmadas, "cliente: <nome> (<motivo>)" — nunca uuid. Os outros argumentos (vínculo, categoria, OS…)
@@ -712,7 +715,8 @@ export async function buildPendingSummary(
     return await resumirRespostaDoCaso(admin, args, quem.userId ?? "");
   }
   // Retorno F3 (P8): o preço do ditado aparece linha a linha, no texto que não passa pelo modelo.
-  if (toolName === "retorno_orcar_caso") return await resumirPropostaDoCaso(admin, args, quem.userId ?? "");
+  // rr-f3-2b: o áudio já criou o ORÇ no retrato; o resumo mostra o número, e o PIN só manda o PDF.
+  if (toolName === "retorno_orcar_caso") return await resumirPropostaDoCaso(admin, args, quem.userId ?? "", quem.retrato ?? null);
   if (toolName === "retorno_cadastrar_unidade") return await resumirUnidadeDoCaso(admin, args, quem.userId ?? "");
   // Só a sessão amarrada tem o resumo linha a linha; sem a marca, segue o genérico de sempre.
   if (toolName === "create_quote_from_items" && quem.sessaoAmarrada === true) {
@@ -1270,7 +1274,7 @@ export async function executarChamadaDeTool(
       const limpa = !!solicitante || !!toolDef.retratoDaPendencia;
       let resumo = await buildPendingSummary(amb.toolCtx.admin, tc.name, limpa ? entrada : tc.input as Record<string, unknown>, {
         userId: amb.toolCtx.userId, userRole: amb.toolCtx.userRole, settings: amb.toolCtx.settings,
-        sessaoAmarrada: amb.toolCtx.sessaoAmarrada, casoAmarrado: amb.toolCtx.casoAmarrado,
+        sessaoAmarrada: amb.toolCtx.sessaoAmarrada, casoAmarrado: amb.toolCtx.casoAmarrado, retrato,
       });
       // A recusa é decidida pelo resumo DA TOOL, antes da linha "Pedido por" (15/10/2026): com ela, a linha
       // "⚠️ …" ganhava uma segunda linha e virava pendência — o caso das tools com gravarSolicitante.
