@@ -131,6 +131,7 @@ import type { Conjunto } from '@/lib/conjunto';
 import { AgruparDialog } from '@/components/service-order/AgruparDialog';
 import { EnviarConjuntoDialog } from '@/components/service-order/EnviarConjuntoDialog';
 import { FaixaDoConjunto } from '@/components/service-order/FaixaDoConjunto';
+import { FaixaDoComplemento } from '@/components/service-order/FaixaDoComplemento';
 import { Combine, Ungroup } from 'lucide-react';
 
 interface Props {
@@ -2152,6 +2153,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       {!isNew && orderId && conjuntoAtivo && (
         <FaixaDoConjunto conjunto={conjuntoAtivo} documentoId={orderId} podeMexer={cargoAgrupa} />
       )}
+      {/* Agrupar para o cliente F2 (5A): "complementa a OS-X" / "complementada por OS-Y". */}
+      {!isNew && orderId && <FaixaDoComplemento documentoId={orderId} />}
 
       {agruparAberto && fusaoAlvo?.tipo === 'orcamentos' && orderData?.client_id && orderData?.vessel_id && (
         <AgruparOrcamentosDialog

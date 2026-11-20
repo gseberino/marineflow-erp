@@ -26,6 +26,11 @@ export interface DocumentoDoConjunto {
   recebido: number;
   sinal_a_pagar: number;
   em_aberto: number;
+  /** F2 (5A): a OS que este documento complementa (orçamento complementar aprovado junto). */
+  complementa_os_id: string | null;
+  complementa_numero: string | null;
+  /** F2: orçamento pendente e não assinado — dá para aprovar com o conjunto. */
+  aprovavel: boolean;
 }
 
 export interface Conjunto {
@@ -104,6 +109,9 @@ export function normalizarConjunto(bruto: unknown): Conjunto | null {
       recebido: num(d.recebido),
       sinal_a_pagar: num(d.sinal_a_pagar),
       em_aberto: num(d.em_aberto),
+      complementa_os_id: textoOuNulo(d.complementa_os_id),
+      complementa_numero: textoOuNulo(d.complementa_numero),
+      aprovavel: d.aprovavel === true,
     })),
   };
 }

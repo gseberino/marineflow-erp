@@ -1,12 +1,15 @@
 // Faixa no documento que está num conjunto ("Agrupar para o cliente"): cita os outros documentos e oferece enviar ao
 // cliente (um PDF só) e desfazer. Desfazer não pede confirmação: nada se perde — os documentos nunca mudaram.
+// F2: "Aprovar…" quando há orçamento pendente no conjunto (AprovarConjuntoDialog mostra antes o que muda).
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Layers, Loader2, Send, Ungroup } from 'lucide-react';
+import { CheckCheck, Layers, Loader2, Send, Ungroup } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useDesfazerConjunto } from '@/hooks/use-conjunto';
 import { type Conjunto, situacaoDoDocumento } from '@/lib/conjunto';
+import { orcamentosAprovaveis } from '@/lib/conjunto-aprovacao';
+import { AprovarConjuntoDialog } from './AprovarConjuntoDialog';
 import { EnviarConjuntoDialog } from './EnviarConjuntoDialog';
 
 interface Props {
@@ -20,6 +23,8 @@ interface Props {
 export function FaixaDoConjunto({ conjunto, documentoId, podeMexer }: Props) {
   const desfazer = useDesfazerConjunto();
   const [enviarAberto, setEnviarAberto] = useState(false);
+  const [aprovarAberto, setAprovarAberto] = useState(false);
+  const temAprovar = orcamentosAprovaveis(conjunto).length > 0;
   const docs = conjunto.documentos.filter((d) => d.ativo);
 
   async function desfazerAgora() {
@@ -42,6 +47,9 @@ export function FaixaDoConjunto({ conjunto, documentoId, podeMexer }: Props) {
               <li key={d.id} className="break-words">
                 <Link to={`/v2/service-orders/${d.id}`} className="font-medium underline underline-offset-2">{d.numero}</Link>
                 <span className="text-muted-foreground"> · {situacaoDoDocumento(d)}</span>
+                {d.complementa_numero && (
+                  <span className="text-muted-foreground"> · complementa a {d.complementa_numero}</span>
+                )}
               </li>
             ))}
           </ul>
@@ -50,6 +58,11 @@ export function FaixaDoConjunto({ conjunto, documentoId, podeMexer }: Props) {
       </div>
       {podeMexer && (
         <div className="flex flex-wrap gap-2">
+          {temAprovar && (
+            <Button size="sm" variant="outline" onClick={() => setAprovarAberto(true)} className="gap-1.5">
+              <CheckCheck className="h-4 w-4" /> Aprovar…
+            </Button>
+          )}
           <Button size="sm" onClick={() => setEnviarAberto(true)} className="gap-1.5">
             <Send className="h-4 w-4" /> Enviar ao cliente
           </Button>
@@ -57,6 +70,9 @@ export function FaixaDoConjunto({ conjunto, documentoId, podeMexer }: Props) {
             {desfazer.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ungroup className="h-4 w-4" />} Desfazer
           </Button>
         </div>
+      )}
+      {aprovarAberto && (
+        <AprovarConjuntoDialog aberto={aprovarAberto} onFechar={() => setAprovarAberto(false)} conjunto={conjunto} />
       )}
       {enviarAberto && (
         <EnviarConjuntoDialog aberto={enviarAberto} onFechar={() => setEnviarAberto(false)} conjunto={conjunto} />

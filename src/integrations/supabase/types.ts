@@ -10183,6 +10183,7 @@ export type Database = {
           commission_rate: number | null
           commissioned_person: string | null
           commissioned_user_id: string | null
+          complementa_os_id: string | null
           contingency_pct: number | null
           converted_to_os_at: string | null
           created_at: string
@@ -10284,6 +10285,7 @@ export type Database = {
           commission_rate?: number | null
           commissioned_person?: string | null
           commissioned_user_id?: string | null
+          complementa_os_id?: string | null
           contingency_pct?: number | null
           converted_to_os_at?: string | null
           created_at?: string
@@ -10385,6 +10387,7 @@ export type Database = {
           commission_rate?: number | null
           commissioned_person?: string | null
           commissioned_user_id?: string | null
+          complementa_os_id?: string | null
           contingency_pct?: number | null
           converted_to_os_at?: string | null
           created_at?: string
@@ -14403,6 +14406,11 @@ export type Database = {
         Returns: Json
       }
       documentos_para_conjunto: { Args: { p_os: string }; Returns: Json }
+      // F2 (migration 20270129100000_agrupar_para_cliente_aprovar), à mão até o próximo "gen types".
+      aprovar_conjunto: {
+        Args: { p_autor?: string; p_conjunto: string; p_ensaio?: boolean; p_ids?: string[] }
+        Returns: Json
+      }
       // ── Agenda de Produção, Fase 2 (P4): as RPCs que a tela chama (migrations 20261025100100 e 100200). Trecho
       // escrito à mão até o próximo "gen types" depois de aplicar; o retorno é o jsonb pronto do banco.
       agenda_marcar_os: {
