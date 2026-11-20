@@ -15,6 +15,7 @@ import {
   temOOrdinalNoNome,
 } from "./linhas-da-os.ts";
 import {
+  CASOS_DA_PALAVRA_LINHA,
   CASOS_DE_ORDEM,
   CASOS_DO_ACHADOR,
   CASOS_DO_NUMERO_DITO,
@@ -78,6 +79,21 @@ for (const [dito, esperado] of CASOS_DO_ACHADOR) {
     } else {
       assert(!("linha" in r), JSON.stringify(r));
       assertEquals(r.motivo, esperado);
+    }
+  });
+}
+
+for (const [nomes, dito, esperado] of CASOS_DA_PALAVRA_LINHA) {
+  Deno.test(`acharLinha, palavra "linha" (NOVO-via-10): "${dito}" em [${nomes.join(" | ")}] → ${esperado}`, () => {
+    const linhas = nomes.map((nome, i) => ({ id: `p${i + 1}`, numero: i + 1, nome }));
+    const r = acharLinha(linhas, dito);
+    if (typeof esperado === "number") {
+      assert("linha" in r, JSON.stringify(r));
+      assertEquals(r.linha.numero, esperado);
+    } else {
+      assert(!("linha" in r), JSON.stringify(r));
+      assertEquals(r.motivo, esperado);
+      assert(r.erro.includes("Use o número"), r.erro);
     }
   });
 }

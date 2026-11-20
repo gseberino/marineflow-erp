@@ -125,7 +125,8 @@ export const CASOS_DO_ACHADOR: Array<[dito: string, esperado: number | 'fora_da_
   ['o sétimo', 'fora_da_faixa'],
   // "serviço" depois do artigo e o rótulo copiado da pergunta (revisão da F0, achador-4)
   ['o serviço do inversor', 3],
-  ['a linha do LED', 4],
+  // "linha" dito na frente e ausente do nome: pergunta (NOVO-via-10, decidido com a F2 em 20/11/2026); "linha 4" é número
+  ['a linha do LED', 'ambiguo'],
   ['4 · Fita LED externa', 4],
   ['4 - Fita LED externa', 4],
   ['4 – fita led externa', 4],
@@ -133,6 +134,21 @@ export const CASOS_DO_ACHADOR: Array<[dito: string, esperado: number | 'fora_da_
   ['3: Troca do inversor 3000 W', 3],
   // número e nome que não batem: pergunta, nunca escolhe um dos dois
   ['4 · Troca do inversor 3000 W', 'nao_achei'],
+];
+
+/**
+ * NOVO-via-10 (20/11/2026): em serviço náutico "linha" é substantivo (linha d'água, linha de combustível). Dita na
+ * frente e ausente do nome, o achador PERGUNTA em vez de escolher calado; com "linha" no nome, acha.
+ */
+export const CASOS_DA_PALAVRA_LINHA: Array<[nomes: string[], dito: string, esperado: number | 'ambiguo' | 'nao_achei']> = [
+  [["Troca da bomba d'água", 'Revisão do gerador'], "a linha d'água", 'ambiguo'],
+  [["Troca da bomba d'água", 'Revisão do gerador'], "linha d'água", 'ambiguo'],
+  [["Troca da bomba d'água", "Pintura da linha d'água"], "a linha d'água", 2],
+  [['Filtro de combustível', 'Revisão do gerador'], 'a linha de combustível', 'ambiguo'],
+  [['Mangueira da linha de combustível', 'Filtro de combustível'], 'a linha de combustível', 1],
+  [["Troca da bomba d'água", 'Revisão do gerador'], 'linha 2', 2],
+  [["Troca da bomba d'água", 'Revisão do gerador'], 'a segunda linha', 2],
+  [["Troca da bomba d'água", 'Revisão do gerador'], "bomba d'água", 1],
 ];
 
 /** ordinalDito: o texto inteiro é um ordinal por extenso? */

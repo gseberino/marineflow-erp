@@ -4337,7 +4337,14 @@ quatro estão latentes.
   `INSERT … SELECT`, ordenado pela ordem da origem (`created_at, id` da cotação externa; a ordem dos componentes do kit e das
   regras do levantamento). É o precedente do `_agrupar_os_montar`. Na conversão, os serviços primeiro.
 
-### [NOVO-via-10] Na situação e no responsável da via, "a linha d'água" ainda acha calada uma linha sem "linha" no nome
+### [NOVO-via-10] Na situação e no responsável da via, "a linha d'água" ainda acha calada uma linha sem "linha" no nome — RESOLVIDO em 20/11 (F2)
+
+- **Resolvido (20/11, com a F2, ramo `session/via-v2-f2`):** no `acharLinha`, entre as candidatas pelo nome ficam só as que
+  têm "linha" no nome quando "linha" foi dita na frente (`linhaDitaForaDoNome`); se nenhuma tem, devolve `ambiguo` com
+  todas e "Use o número". Efeito colateral desejado: "a linha d'água" com "Bomba" e "Pintura da linha d'água" agora acha a
+  Pintura (antes perguntava). `['a linha do LED', 'ambiguo']` no caso compartilhado; casos novos em
+  `CASOS_DA_PALAVRA_LINHA`. "linha 4" e "a segunda linha" continuam número. A conta SQL da F2 só numera
+  (`_via_linhas_numeradas`): o achador não tem cópia SQL, então nada muda no Postgres.
 
 - **Onde:** `supabase/functions/_shared/linhas-da-os.ts:212` (`acharLinha`, que tira "serviço/item/linha" do começo em
   `palavrasDitas`, `:133`), usado por `acharServico` (`_shared/ai/tools/field-ops.ts:109`, `update_service_order_via`) e

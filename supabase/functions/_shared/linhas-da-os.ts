@@ -245,7 +245,18 @@ export function acharLinha<T extends LinhaNumerada>(linhas: readonly T[], dito: 
     };
   }
 
-  const escolher = (candidatas: T[]): Achado<T> | null => {
+  const escolher = (todas: T[]): Achado<T> | null => {
+    // "a linha d'água", "a linha de combustível" (NOVO-via-10, decidido com a F2 em 20/11/2026): dita na frente, "linha"
+    // pode ser rótulo ("a linha do LED") ou substantivo náutico. Fica quem tem "linha" no nome; se ninguém tem, pergunta
+    // — nunca marca calado a "Troca da bomba d'água" por "a linha d'água".
+    const candidatas = todas.filter((l) => !linhaDitaForaDoNome(l.nome, bruto));
+    if (todas.length && !candidatas.length) {
+      return {
+        motivo: 'ambiguo',
+        opcoes: todas,
+        erro: `"${bruto}" pode ser ${listaDasLinhas(todas)}, mas "linha" não está no nome. Use o número.`,
+      };
+    }
     if (candidatas.length === 1) return { linha: candidatas[0] };
     if (candidatas.length > 1) {
       return {
