@@ -14,14 +14,17 @@
 // gravado e a tela avisa que a mensagem saiu sem registro.
 //
 // "Enviar extrato" (dono, 20/11/2026: "Sim, as mesmas travas"): o mesmo caminho de conferência
-// (conferirEEnviar) com o cliente inteiro — sem contagem de OS, chave do dia com prefixo 'extrato'
-// e sem criar cobrança (a decisão de criar foi só para o Cobrar juntas).
+// (conferirEEnviar) com o cliente inteiro — sem contagem de OS e chave do dia com prefixo 'extrato'.
+// Respostas do dono (20/11/2026): sem nada em aberto, o extrato SAI como comprovante de quitação
+// (travaDoExtrato: só genérico, opt-out, telefone e horário) e não é cobrança; COM saldo, ele "conta
+// como cobrança do dia" — depois do envio confirmado passa pela mesma cobrar_juntas_registrar_envio,
+// com p_os nulo (o cliente inteiro), e entra na regra "1 por dia" (last_auto_sent_at).
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { extractInvokeErrorMessage } from '@/lib/invoke-error';
 import { normalizePhoneE164 } from '@/lib/masks';
 import {
-  chaveDoCobrarJuntas, hojeLocal, horaEmBrasilia, mudancaNasContas, travaDoCobrarJuntas,
+  chaveDoCobrarJuntas, hojeLocal, horaEmBrasilia, mudancaNasContas, travaDoCobrarJuntas, travaDoExtrato,
 } from '../../supabase/functions/_shared/receivables/cobrar-juntas';
 import { desviadoPorTeste } from '../../supabase/functions/_shared/whatsapp/marcar-enviado';
 
@@ -184,19 +187,32 @@ async function conferirEEnviar(e: Conferencia): Promise<{ deduplicado: boolean; 
   const mudou = mudancaNasContas(e.contas, (contasAgora ?? []) as Parameters<typeof mudancaNasContas>[1], e.tipo);
   if (mudou) throw new Error(mudou);
 
-  const [piso, pix, modoTeste] = await Promise.all([lerPiso(), lerPixEsperando(e.cliente.id), lerDesvioDeTeste()]);
+  const totalEmAberto = e.contas.reduce((s, x) => s + x.saldo, 0);
+  // Comprovante de quitação (extrato sem nada em aberto): piso e Pix esperando não se aplicam, e uma
+  // leitura deles que falhe não pode barrar o comprovante.
+  const quitacao = e.tipo === 'extrato' && !(totalEmAberto > 0);
+  const [piso, pix, modoTeste] = await Promise.all([
+    quitacao ? Promise.resolve(0) : lerPiso(),
+    quitacao ? Promise.resolve([] as PixEsperando[]) : lerPixEsperando(e.cliente.id),
+    lerDesvioDeTeste(),
+  ]);
   const telefoneDoCadastro = c.whatsapp || c.phone || '';
-  const trava = travaDoCobrarJuntas({
+  const entrada = {
     clienteNome: c.name ?? e.cliente.name,
     generico: c.generico === true || e.cliente.generico === true,
-    quantidadeOs: e.servicoIds ? e.servicoIds.length : null,
     optOut: c.opt_out_whatsapp,
     piso,
-    totalEmAberto: e.contas.reduce((s, x) => s + x.saldo, 0),
+    totalEmAberto,
     pixEsperando: pix,
     telefone: telefoneDoCadastro,
     horaBrasilia: horaDoCobrarJuntas(),
-  });
+  };
+  const trava = e.tipo === 'extrato'
+    ? travaDoExtrato({
+      ...entrada,
+      lancamentos: ((contasAgora ?? []) as Array<{ status?: string | null }>).filter((x) => x.status !== 'cancelled').length,
+    })
+    : travaDoCobrarJuntas({ ...entrada, quantidadeOs: e.servicoIds ? e.servicoIds.length : null });
   if (trava) throw new Error(trava);
 
   const telefone = normalizePhoneE164(telefoneDoCadastro, '55');
@@ -222,12 +238,17 @@ async function conferirEEnviar(e: Conferencia): Promise<{ deduplicado: boolean; 
  * Depois do envio confirmado: cria a cobrança das contas que não têm e registra o envio em todas
  * (cobrar_juntas_registrar_envio, tudo ou nada). Não lança: a mensagem já saiu.
  */
-async function registrarNoBanco(e: EnvioCobrarJuntas): Promise<{ criadas: number; registradas: number; erro: string | null }> {
+async function registrarNoBanco(
+  e: { cliente: { id: string }; contas: Array<{ id: string }> },
+  servicoIds: string[] | null,
+  nota: string,
+): Promise<{ criadas: number; registradas: number; erro: string | null }> {
   const { data, error } = await supabase.rpc('cobrar_juntas_registrar_envio', {
     p_cliente: e.cliente.id,
     p_contas: e.contas.map((x) => x.id),
-    p_os: e.servicoIds,
-    p_nota: 'Cobrar juntas (várias OS numa mensagem)',
+    // null = o cliente inteiro ("Enviar extrato"): as contas só precisam ser do cliente.
+    p_os: servicoIds,
+    p_nota: nota,
   });
   if (error) return { criadas: 0, registradas: 0, erro: error.message };
   const r = (data ?? {}) as { criadas?: number; registradas?: number };
@@ -247,7 +268,7 @@ export function useEnviarCobrarJuntas() {
       // last_auto_sent_at faria o plano de inadimplência achar que ele já foi cobrado hoje.
       if (envio.modoTeste) return { deduplicado: false, ...vazio, aviso: AVISO_MODO_TESTE, modoTeste: true };
 
-      const r = await registrarNoBanco(e);
+      const r = await registrarNoBanco(e, e.servicoIds, 'Cobrar juntas (várias OS numa mensagem)');
       return {
         deduplicado: false,
         cobrancasRegistradas: r.registradas,
@@ -287,25 +308,56 @@ export interface ResultadoDoExtrato {
   deduplicado: boolean;
   aviso: string | null;
   modoTeste?: boolean;
+  /** Saiu sem nada em aberto: comprovante de quitação (não é cobrança, nada registrado). */
+  quitacao?: boolean;
+  /** Com saldo: cobranças que receberam o registro do envio (a cobrança do dia). */
+  cobrancasRegistradas?: number;
+  /** Com saldo: cobranças criadas junto (contas que não tinham nenhuma). */
+  cobrancasCriadas?: number;
 }
 
 /** Aviso da tela quando o extrato foi desviado pelo modo de teste. */
 export const AVISO_MODO_TESTE_EXTRATO =
   'O modo de teste do WhatsApp está ligado: o extrato foi para o número de teste, não para o cliente.';
 
+/** A nota do contato 'whatsapp_sent' que o extrato com saldo deixa em cada cobrança. */
+export const NOTA_DO_EXTRATO = 'Extrato do cliente com saldo (Enviar extrato)';
+
 /**
  * "Enviar extrato" da ficha do cliente com as travas do Cobrar juntas (dono, 20/11/2026): o mesmo
- * conferirEEnviar, com o cliente inteiro. Não cria nem registra cobrança.
+ * conferirEEnviar, com o cliente inteiro. Sem nada em aberto sai como comprovante de quitação e não
+ * registra nada. Com saldo conta como a cobrança do dia: depois do envio confirmado (não desviado
+ * pelo modo de teste, não "já enviado hoje"), cobrar_juntas_registrar_envio com p_os nulo cria a
+ * cobrança das contas que não têm e registra o envio em todas (last_auto_sent_at de hoje).
  */
 export function useEnviarExtrato() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (e: EnvioDoExtrato): Promise<ResultadoDoExtrato> => {
       const envio = await conferirEEnviar({ ...e, servicoIds: null, tipo: 'extrato' });
+      const quitacao = e.contas.length === 0;
+      const base = { deduplicado: envio.deduplicado, ...(quitacao ? { quitacao: true } : {}) };
       if (envio.modoTeste) {
-        return { deduplicado: envio.deduplicado, aviso: envio.deduplicado ? null : AVISO_MODO_TESTE_EXTRATO, modoTeste: true };
+        return { ...base, aviso: envio.deduplicado ? null : AVISO_MODO_TESTE_EXTRATO, modoTeste: true };
       }
-      return { deduplicado: envio.deduplicado, aviso: null };
+      if (envio.deduplicado || quitacao) return { ...base, aviso: null };
+
+      const r = await registrarNoBanco(e, null, NOTA_DO_EXTRATO);
+      return {
+        ...base,
+        cobrancasRegistradas: r.registradas,
+        cobrancasCriadas: r.criadas,
+        aviso: r.erro
+          ? `O extrato foi enviado, mas não consegui registrar a cobrança do dia (${r.erro}). Nada foi gravado nas cobranças: `
+            + 'confira em Cobranças antes de cobrar este cliente de novo hoje.'
+          : null,
+      };
+    },
+    onSuccess: (r) => {
+      if (r.cobrancasRegistradas || r.cobrancasCriadas) {
+        qc.invalidateQueries({ queryKey: ['collections'] });
+        qc.invalidateQueries({ queryKey: ['receivables'] });
+      }
     },
     onError: () => invalidarDepoisDaRecusa(qc),
   });
