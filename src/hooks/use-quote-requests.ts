@@ -480,16 +480,23 @@ export function useApplyQuotePrice() {
         }
         const { data: svc, error: readErr } = await supabase
           .from('service_order_services')
-          .select('quantity')
+          .select('quantity, discount_amount')
           .eq('id', params.serviceOrderServiceId)
           .single();
         if (readErr) throw readErr;
         const qty = Number((svc as any).quantity) || 0;
+        // NOVO-historico-01: a mesma conta de useUpdateServiceOrderService — preço × qtd − desconto da linha (R$,
+        // fonte da verdade), em centavos. Antes era preço × qtd, e o total da OS saía maior que o PDF.
+        const discountAmount = Number((svc as any).discount_amount) || 0;
+        const line_total = Math.round((qty * params.unitPrice - discountAmount) * 100) / 100;
+        if (line_total < 0) {
+          throw new Error('O desconto desta linha é maior que o novo preço. Ajuste o desconto na OS antes de aplicar.');
+        }
         const { error } = await supabase
           .from('service_order_services')
           .update({
             unit_price_snapshot: params.unitPrice,
-            line_total: params.unitPrice * qty,
+            line_total,
           } as any)
           .eq('id', params.serviceOrderServiceId);
         if (error) throw error;

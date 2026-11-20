@@ -130,6 +130,28 @@ describe('duplicar OS', () => {
     ]);
   });
 
+  // NOVO-historico-05: a cópia levava o total líquido da linha e deixava o desconto dela para trás — a próxima edição
+  // recalculava sem ele e o PDF não mostrava o desconto.
+  it('a cópia leva o desconto de cada linha junto com o total líquido', async () => {
+    fonte.service_order_services = [
+      { id: 's1', created_at: '2026-11-10T11:00:00+00:00', name_snapshot: 'Instalação', quantity: 1, unit_price_snapshot: 800,
+        line_total: 720, discount_pct: 10, discount_amount: 80 },
+    ];
+    fonte.service_order_parts = [
+      { id: 'p1', created_at: '2026-11-10T11:00:00+00:00', product_id: 'pA', quantity: 2, unit_sale_snapshot: 30,
+        line_total_sale: 50, discount_pct: 16.67, discount_amount: 10 },
+      { id: 'p2', created_at: '2026-11-10T11:00:01+00:00', product_id: 'pB', quantity: 1, unit_sale_snapshot: 5, line_total_sale: 5 },
+    ];
+    const { result } = renderHook(() => useDuplicateServiceOrder(), { wrapper });
+    result.current.mutate({ sourceId: 'os1', mode: 'quote' });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const servicos = (gravacoes.service_order_services ?? []).flat() as Array<Record<string, unknown>>;
+    const pecas = (gravacoes.service_order_parts ?? []).flat() as Array<Record<string, unknown>>;
+    expect(servicos[0]).toMatchObject({ line_total: 720, discount_pct: 10, discount_amount: 80 });
+    expect(pecas[0]).toMatchObject({ line_total_sale: 50, discount_pct: 16.67, discount_amount: 10 });
+    expect(pecas[1]).toMatchObject({ line_total_sale: 5, discount_pct: 0, discount_amount: 0 });
+  });
+
   it('só despesa de comprovante: nenhuma despesa é gravada na OS nova', async () => {
     fonte.service_order_expenses = [despesa({ id: 'cmp', billable_to_client: false, origem_codigo: 'CMP-00124' })];
     const { result } = renderHook(() => useDuplicateServiceOrder(), { wrapper });
