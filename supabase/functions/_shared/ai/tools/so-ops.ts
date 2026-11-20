@@ -627,6 +627,9 @@ export const soOpsTools: ToolDef[] = [
           unit_cost_snapshot: p.unit_cost_snapshot,
           unit_sale_snapshot: p.unit_sale_snapshot,
           line_total_cost: p.line_total_cost,
+          // NOVO-historico-05 (mesma classe da tela): o total da linha já é líquido do desconto dela; o desconto vai junto.
+          discount_pct: p.discount_pct ?? 0,
+          discount_amount: p.discount_amount ?? 0,
           line_total_sale: p.line_total_sale,
           currency_snapshot: p.currency_snapshot,
           notes: p.notes,
@@ -647,6 +650,8 @@ export const soOpsTools: ToolDef[] = [
           billing_unit_snapshot: s.billing_unit_snapshot,
           quantity: s.quantity,
           unit_price_snapshot: s.unit_price_snapshot,
+          discount_pct: s.discount_pct ?? 0,
+          discount_amount: s.discount_amount ?? 0,
           line_total: s.line_total,
           notes: s.notes,
         })));

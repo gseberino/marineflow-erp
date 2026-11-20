@@ -4173,36 +4173,69 @@ mudam comportamento fora do escopo; cada um tem a menor mudança indicada.
 - **Onde:** `supabase/functions/_shared/ai/tools/service-orders.ts` (~1151 e ~1163, `edit_service_order_item`) e `src/hooks/use-quote-requests.ts:486`.
 - **Efeito:** total do item = preço × quantidade, sem o `discount_amount` da linha; o total da OS sai maior que o PDF (que imprime desconto por item desde 14/11). O histórico vai registrar esse total inconsistente.
 - **Menor mudança:** usar a mesma conta das telas de item (preço × qtd − desconto) nos dois pontos, com teste.
+- **Status (20/11/2026): CORRIGIDO no ramo `session/historico-correcoes` (commits 08a41313 e d002d352), NÃO publicado.** Não há
+  helper exportado para a conta: as telas repetem `Math.round((qtd × preço − discount_amount) × 100) / 100`
+  (use-service-order-parts/-services, useAdd*); os dois pontos passaram a usar essa mesma expressão. Mesma classe achada e
+  corrigida junto: `apply_quote_price` (o assistente aplicando o preço do fornecedor, `_shared/ai/tools/quotes.ts`), peça e
+  material. Desconto maior que o novo bruto é recusado (não grava total negativo). Testes:
+  `_shared/ai/tools/historico-correcoes_test.ts` (deno) e `src/hooks/historico-correcoes.test.tsx` (vitest).
 
 ### [NOVO-historico-02] `apply_service_order_discount` não confere se a OS pode ser editada
 
 - **Onde:** `supabase/functions/_shared/ai/tools/service-orders.ts` (~1305-1319): `update` direto em `service_orders.discount_amount` sem `assertEditableSo`.
 - **Efeito:** o assistente aplica desconto em OS cancelada ou faturada.
 - **Menor mudança:** chamar `assertEditableSo` antes do update, como as outras tools de item.
+- **Status (20/11/2026): CORRIGIDO no ramo `session/historico-correcoes` (commit 08a41313), NÃO publicado.** Teste:
+  `_shared/ai/tools/historico-correcoes_test.ts` (cancelada e faturada recusadas, nada gravado; aberta grava).
 
 ### [NOVO-historico-03] `service_order_signatures` aceita UPDATE de qualquer usuário logado
 
 - **Onde:** policy `auth_update_signatures` (authenticated, sem condição de cargo).
 - **Efeito:** a prova de assinatura do cliente pode ser alterada pela API por técnico/vendedor. O histórico agora registra a mudança (trg_historico), mas não impede.
 - **Menor mudança:** restringir o UPDATE a admin (ou só ao gatilho/edge), provando com `set local role`.
+- **Status (20/11/2026): CORRIGIDO no ramo `session/historico-correcoes` (commit e311a300, ajustado depois para
+  admin + financeiro; migration `20270211100000_assinaturas_admin_financeiro_altera`), NÃO aplicado.** Decisão do dono:
+  "Admin e financeiro" (mesmo helper `is_admin_or_financial` dos termos e do PIX) e o sistema. Quem grava hoje: a
+  edge `submit-signature` (service_role, não muda); os gatilhos que derrubam a assinatura quando o documento muda —
+  `private.linha_pede_nova_assinatura` (já definer) e `public.detect_so_change_after_signature`, que era INVOKER: só
+  restringir a policy faria a edição de um técnico numa OS assinada deixar a assinatura velha valendo em silêncio (provado:
+  o A7 reprova com só a policy). Por isso o gatilho virou SECURITY DEFINER (ALTER, corpo igual) e anon perdeu
+  INSERT/UPDATE/DELETE na tabela. Teste: `supabase/tests/assinaturas_admin_financeiro_altera.sql` (A1–A10: técnico e
+  vendedor recusados, financeiro e admin aceitos; ensaiado com rollback: 12/12 com a migration, 6 falhas sem ela, 2 falhas
+  — A3 e A10a — com a versão antiga "só admin").
 
 ### [NOVO-historico-04] `app_settings` aceita UPDATE/DELETE de qualquer usuário logado
 
 - **Onde:** policies de `app_settings` (termos, PIX, dados bancários e `cron_worker_secret` na mesma tabela).
 - **Efeito:** qualquer logado troca a chave PIX ou os termos impressos no orçamento. O histórico registra as chaves do documento (lista fechada), não impede.
 - **Menor mudança:** escrita só para admin/financeiro (como `20260909201619_app_settings_escrita_admin_ou_financeiro` previa — conferir se foi revertida).
+- **Status (20/11/2026): já FECHADO em produção** (conferido em `pg_policies`: INSERT/UPDATE/DELETE com
+  `is_admin_or_financial((select auth.uid()))` e `key <> 'cron_worker_secret'`, mais `deny_internal_secrets` RESTRICTIVE).
+  Nada a fazer.
 
 ### [NOVO-historico-05] Duplicar OS não copia o desconto das linhas
 
 - **Onde:** `src/hooks/use-service-orders.ts` (~953-981, `useDuplicateServiceOrder`).
 - **Efeito:** a cópia sai com o total sem desconto por item.
 - **Menor mudança:** copiar `discount_pct`/`discount_amount` das peças e serviços.
+- **Status (20/11/2026): CORRIGIDO no ramo `session/historico-correcoes` (commits d002d352 e 76233487), NÃO publicado.** Na
+  verdade o `line_total` já ia líquido; o desconto ficava para trás (a próxima edição recalculava sem ele e o PDF não o
+  mostrava). Mesma classe corrigida no assistente (`duplicate_service_order`, `_shared/ai/tools/so-ops.ts`). Testes:
+  `use-service-orders.duplicar.test.tsx` e `gravacao-em-sequencia_test.ts`.
 
 ### [NOVO-historico-06] Remover item que falhou volta com id NOVO
 
 - **Onde:** `src/hooks/use-service-orders.ts:609` e `:858` (`const { id: _oldId, ...reinsertData }`).
 - **Efeito:** a linha "desfeita" pela tela perde a identidade: o histórico mostra uma exclusão e uma inclusão de itens diferentes, e o material da agenda (os_material, CASCADE) não volta.
 - **Menor mudança:** reinserir com o mesmo id (a restauração do histórico já faz assim).
+- **Status (20/11/2026): CORRIGIDO no ramo `session/historico-correcoes` (commit d002d352), NÃO publicado.** A linha volta
+  com o mesmo id (peça e serviço). **Limite:** o `os_material` ligado NÃO volta junto — o CASCADE o apagou e a tela não pode
+  regravá-lo (a RLS de `os_material` só deixa admin/financeiro LER; escrever é só do sistema). A sincronização de material
+  (`os_material_sincronizar_carteira`, a cada 15 min, para OS da carteira) recria a linha com o que o sistema sabe (falta /
+  na mão / a caminho); o que o dono tinha informado nela (comprado, previsão — 6 linhas com fonte `dono` em 20/11) se perde.
+  Os vínculos SET NULL (item de OC, item de cotação, comprovante, passos, tarefas) também não voltam. Fechar isso pede a
+  remoção passar por uma função do banco (conferir o total ANTES de apagar), não um desfazer na tela. Teste:
+  `src/hooks/historico-correcoes.test.tsx`.
 
 ## Via do técnico v2 — porte, F0 (16/11/2026) — achados laterais, NÃO corrigidos de passagem
 

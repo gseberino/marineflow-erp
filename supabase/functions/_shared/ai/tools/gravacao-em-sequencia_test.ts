@@ -176,3 +176,21 @@ Deno.test("create_service_order: o insert das peças falhou → nada sai do esto
   assertEquals(db.insercoes.filter(([t]) => t === "inventory_movements").length, 0);
   assertEquals(db.atualizacoes.filter(([t]) => t === "products").length, 0);
 });
+
+// NOVO-historico-05 (mesma classe da tela): a cópia levava o total líquido da linha e deixava o desconto dela para trás.
+Deno.test("duplicar: o desconto de cada linha vai junto com o total líquido", async () => {
+  const origem = origemEmbaralhada();
+  origem.service_order_parts[0] = { ...origem.service_order_parts[0], quantity: 2, line_total_sale: 50, discount_pct: 16.67, discount_amount: 10 };
+  origem.service_order_services[0] = { ...origem.service_order_services[0], line_total: 90, discount_pct: 10, discount_amount: 10 };
+  const db = bancoDaCopia(origem, "2026-11-16T18:00:00Z");
+  const r = await duplicar.execute({ service_order_id: "orc-1" }, ctxCom(db)) as Linha;
+  assert(r.ok, JSON.stringify(r));
+  const [, pecas] = db.insercoes.find(([t]) => t === "service_order_parts")!;
+  const [, servicos] = db.insercoes.find(([t]) => t === "service_order_services")!;
+  const pecaC = pecas.find((p) => p.product_id === "pC")!;
+  assertEquals([pecaC.line_total_sale, pecaC.discount_pct, pecaC.discount_amount], [50, 16.67, 10]);
+  const teste = servicos.find((s) => s.name_snapshot === "Teste final")!;
+  assertEquals([teste.line_total, teste.discount_pct, teste.discount_amount], [90, 10, 10]);
+  // linha sem desconto na origem sai com 0, não com undefined
+  assertEquals(pecas.find((p) => p.product_id === "pA")!.discount_amount, 0);
+});

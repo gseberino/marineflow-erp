@@ -607,9 +607,11 @@ export function useRemoveServiceOrderPart() {
         await recalcTotals(part.service_order_id);
       } catch (e) {
         // Reverte: readiciona a linha removida e desfaz o ajuste de estoque (só no modelo antigo).
+        // NOVO-historico-06: volta com o MESMO id (como documento_restaurar): o histórico mostra a linha que saiu e
+        // voltou, não uma exclusão e uma inclusão de itens diferentes. O material da agenda (os_material, CASCADE) é
+        // refeito pela sincronização seguinte; os vínculos SET NULL (item de OC/cotação) não voltam sozinhos.
         if (fullRow) {
-          const { id: _oldId, ...reinsertData } = fullRow as any;
-          await supabase.from('service_order_parts').insert(reinsertData);
+          await supabase.from('service_order_parts').insert(fullRow as any);
         }
         if (!v2) {
           await supabase.from('products').update({ stock_quantity: stockBeforeReturn }).eq('id', part.product_id);
@@ -860,9 +862,9 @@ export function useRemoveServiceOrderService() {
       try {
         await recalcTotals(service_order_id);
       } catch (e) {
+        // NOVO-historico-06: volta com o MESMO id (ver useRemoveServiceOrderPart).
         if (fullRow) {
-          const { id: _oldId, ...reinsertData } = fullRow as any;
-          await supabase.from('service_order_services').insert(reinsertData);
+          await supabase.from('service_order_services').insert(fullRow as any);
         }
         await recalcTotals(service_order_id).catch(() => {});
         throw e;
@@ -972,6 +974,10 @@ export function useDuplicateServiceOrder() {
           billing_unit_snapshot: s.billing_unit_snapshot,
           quantity: s.quantity,
           unit_price_snapshot: s.unit_price_snapshot,
+          // NOVO-historico-05: o line_total já é líquido do desconto da linha; sem o desconto, a cópia ficava com o
+          // total líquido e o desconto zerado — a próxima edição recalculava sem ele e o PDF não mostrava o desconto.
+          discount_pct: s.discount_pct ?? 0,
+          discount_amount: s.discount_amount ?? 0,
           line_total: s.line_total,
           notes: s.notes,
         }));
@@ -991,6 +997,8 @@ export function useDuplicateServiceOrder() {
           unit_cost_snapshot: p.unit_cost_snapshot,
           unit_sale_snapshot: p.unit_sale_snapshot,
           line_total_cost: p.line_total_cost,
+          discount_pct: p.discount_pct ?? 0,
+          discount_amount: p.discount_amount ?? 0,
           line_total_sale: p.line_total_sale,
           currency_snapshot: p.currency_snapshot,
           notes: p.notes,
