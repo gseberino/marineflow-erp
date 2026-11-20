@@ -193,6 +193,14 @@ export default function ClientDetailV2() {
   const contasParaCobrar = (clientReceivables ?? []).filter((r) => osEntraNoCobrarJuntas(r.os));
   const osParaCobrar = osComSaldo(contasParaCobrar);
   const generico = client.generico === true;
+  const clienteParaCobrar = {
+    id: client.id,
+    name: client.name,
+    generico,
+    opt_out_whatsapp: (client as { opt_out_whatsapp?: boolean | null }).opt_out_whatsapp,
+    whatsapp: (client as { whatsapp?: string | null }).whatsapp,
+    phone: client.phone,
+  };
   const abrirCobrarJuntas = (contaIds: string[]) => {
     const escolhidas = new Set(contaIds);
     const oss = [...new Set(contasParaCobrar
@@ -358,24 +366,17 @@ export default function ClientDetailV2() {
       </PageShell>
 
       <ClientFormDialog open={editOpen} onOpenChange={setEditOpen} client={client} />
+      {/* "Enviar extrato" com as travas do Cobrar juntas (dono, 20/11/2026): o mesmo cliente, as mesmas regras. */}
       <ClientStatementDialog
         open={statementOpen}
         onOpenChange={setStatementOpen}
-        clientName={client.name}
-        clientPhone={(client as any).whatsapp || client.phone}
+        cliente={clienteParaCobrar}
         items={(clientReceivables ?? []) as any}
       />
       <CobrarJuntasDialog
         open={cobrarJuntas !== null}
         onOpenChange={(v) => { if (!v) setCobrarJuntas(null); }}
-        cliente={{
-          id: client.id,
-          name: client.name,
-          generico,
-          opt_out_whatsapp: (client as { opt_out_whatsapp?: boolean | null }).opt_out_whatsapp,
-          whatsapp: (client as { whatsapp?: string | null }).whatsapp,
-          phone: client.phone,
-        }}
+        cliente={clienteParaCobrar}
         contas={contasParaCobrar}
         osIniciais={cobrarJuntas ?? []}
       />

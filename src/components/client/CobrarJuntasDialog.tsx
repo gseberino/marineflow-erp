@@ -4,7 +4,9 @@
 // sua OS (para juntar OS que ainda não começaram, é o Agrupar OS).
 //
 // Recusas aparecem ANTES do botão, com o texto pronto da regra (cadastro genérico, 2 a 10 OS, piso,
-// Pix esperando no Extrato, opt-out, sem telefone, fora do horário de cobrança). Enviar não tem
+// Pix esperando no Extrato, opt-out, sem telefone, fora do horário de cobrança). Conta sem cobrança
+// registrada ganha a cobrança junto com o envio (dono, 20/11/2026): o aviso diz quantas, antes do
+// botão (a criação é do banco, cobrar_juntas_registrar_envio, depois do envio). Enviar não tem
 // confirmação extra: o próprio botão é a confirmação e não há perda (padrão da casa: useConfirmacao
 // só com perda real). O destino é o WhatsApp do cadastro, só exibido (como a tool cobrar_juntas).
 import { useEffect, useMemo, useState } from 'react';
@@ -21,7 +23,8 @@ import {
 } from '@/hooks/use-cobrar-juntas';
 import { buildClientStatement, type StatementItem } from '@/lib/client-statement';
 import {
-  osComSaldo, resumoDoCobrarJuntas, saldoDaConta, SEM_COBRANCA_FORMAL, travaDoCobrarJuntas, type ContaDoCliente,
+  avisoDaCobrancaCriada, contasSemCobranca, osComSaldo, resumoDoCobrarJuntas, saldoDaConta, travaDoCobrarJuntas,
+  type ContaDoCliente,
 } from '../../../supabase/functions/_shared/receivables/cobrar-juntas';
 
 const brl = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
@@ -73,6 +76,7 @@ export function CobrarJuntasDialog({ open, onOpenChange, cliente, contas, osInic
   const selecionadas = oss.filter((o) => escolhidas.has(o.service_order_id));
   const total = Math.round(selecionadas.reduce((s, o) => s + o.saldo, 0) * 100) / 100;
   const contasEscolhidas = selecionadas.flatMap((o) => o.contas.map((c) => ({ id: c.id, saldo: saldoDaConta(c) })));
+  const contasComOs = selecionadas.flatMap((o) => o.contas.map((c) => ({ id: c.id, service_order_id: o.service_order_id })));
   const contaIds = contasEscolhidas.map((c) => c.id);
   const cobrancas = useCobrancasFormais(contaIds, servicoIds, open && !cliente.generico);
 
@@ -95,8 +99,10 @@ export function CobrarJuntasDialog({ open, onOpenChange, cliente, contas, osInic
       telefone: phone,
       horaBrasilia: horaDoCobrarJuntas(),
     });
-  // Sem cobrança formal, o envio não fica registrado: aviso (não trava), antes do botão.
-  const semCobrancaFormal = !trava && cobrancas.data === 0;
+  // Conta sem cobrança registrada: a cobrança é criada junto com o envio (aviso, não trava).
+  const cobrancaCriada = !trava && cobrancas.data
+    ? avisoDaCobrancaCriada(contasSemCobranca(contasComOs, cobrancas.data).length)
+    : null;
   const carregando = !cliente.generico && pix.isLoading;
   const podeEnviar = !trava && !carregando && selecionadas.length > 0 && message.trim().length > 0;
 
@@ -132,7 +138,10 @@ export function CobrarJuntasDialog({ open, onOpenChange, cliente, contas, osInic
             // Modo de teste: foi para o número de teste, não para o cliente — "Cobrança enviada" seria fingir.
             toast.warning(r.aviso);
           } else {
-            toast.success(`Cobrança enviada: ${resumoDoCobrarJuntas(selecionadas)}.`);
+            const criadas = r.cobrancasCriadas
+              ? ` ${r.cobrancasCriadas === 1 ? '1 cobrança criada' : `${r.cobrancasCriadas} cobranças criadas`} em Cobranças.`
+              : '';
+            toast.success(`Cobrança enviada: ${resumoDoCobrarJuntas(selecionadas)}.${criadas}`);
             if (r.aviso) toast.warning(r.aviso);
           }
           onOpenChange(false);
@@ -236,13 +245,13 @@ export function CobrarJuntasDialog({ open, onOpenChange, cliente, contas, osInic
               <span className="min-w-0 break-words">{trava}</span>
             </p>
           )}
-          {semCobrancaFormal && (
+          {cobrancaCriada && (
             <p
-              className="flex gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm"
-              data-testid="cobrar-juntas-sem-cobranca"
+              className="flex gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm"
+              data-testid="cobrar-juntas-cria-cobranca"
             >
-              <Info className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
-              <span className="min-w-0 break-words">{SEM_COBRANCA_FORMAL}</span>
+              <Info className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 break-words">{cobrancaCriada}</span>
             </p>
           )}
         </div>

@@ -11,7 +11,8 @@ const { enviarMock, estado } = vi.hoisted(() => ({
     pix: [] as Array<{ valor: number; data: string | null }>,
     settings: { pix_key: 'hbr@pix' } as Record<string, string>,
     hora: 14,
-    cobrancas: 2 as number | undefined,
+    // as cobranças abertas da conta r45 e da OS-00046 sem conta: nenhuma conta ganha cobrança nova
+    cobrancas: undefined as Array<{ receivable_id: string | null; service_order_id: string | null }> | undefined,
   },
 }));
 
@@ -42,7 +43,7 @@ beforeEach(() => {
   estado.pix = [];
   estado.settings = { pix_key: 'hbr@pix' };
   estado.hora = 14;
-  estado.cobrancas = 2;
+  estado.cobrancas = [{ receivable_id: 'r45', service_order_id: 'os45' }, { receivable_id: null, service_order_id: 'os46' }];
 });
 
 describe('CobrarJuntasDialog', () => {
@@ -104,10 +105,16 @@ describe('CobrarJuntasDialog', () => {
     expect(screen.getByRole('button', { name: /Enviar ao cliente/ })).toBeDisabled();
   });
 
-  it('sem cobrança formal nas contas: avisa antes do botão que o envio não fica registrado (não trava)', () => {
-    estado.cobrancas = 0;
+  it('contas que já têm cobrança: nenhum aviso de criação', () => {
     renderizar(MP, ['os45', 'os46']);
-    expect(screen.getByTestId('cobrar-juntas-sem-cobranca')).toHaveTextContent('o envio não fica registrado');
+    expect(screen.queryByTestId('cobrar-juntas-cria-cobranca')).toBeNull();
+  });
+
+  it('sem cobrança nas contas (a MP): avisa antes do botão que a cobrança é criada junto (não trava)', () => {
+    estado.cobrancas = [];
+    renderizar(MP, ['os45', 'os46']);
+    expect(screen.getByTestId('cobrar-juntas-cria-cobranca')).toHaveTextContent(
+      '2 contas não têm cobrança registrada: elas são criadas junto com o envio (aparecem em Cobranças), e o lembrete não repete hoje.');
     expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.getByRole('button', { name: /Enviar ao cliente/ })).toBeEnabled();
   });
