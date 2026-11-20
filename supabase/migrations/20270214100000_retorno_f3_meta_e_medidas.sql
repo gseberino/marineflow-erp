@@ -151,3 +151,5 @@ comment on view public.retorno_f3_medidas is
 
 revoke all on public.retorno_f3_medidas from public, anon, authenticated;
 grant select on public.retorno_f3_medidas to service_role;
+
+insert into supabase_migrations.schema_migrations (version, name) values ('20270214100000','retorno_f3_meta_e_medidas');

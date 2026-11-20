@@ -59,3 +59,5 @@ end;
 $function$;
 
 comment on function public._agenda_periodo(text, date) is 'Agenda de Produção (Fase 1, P4; mês em 20/11/2026): o período pedido — hoje, amanha, semana (seg–sáb desta), proxima_semana (seg–sáb da que vem), mes (de hoje ao fim do mês), proximo_mes (o mês que vem inteiro) ou o que o dono disse por agenda_data_dita (futuro). Vazio = (null, null). Data incompreensível lança 22007 com a frase ao dono.';
+
+insert into supabase_migrations.schema_migrations (version, name) values ('20270213100000','agenda_periodo_mes');

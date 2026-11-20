@@ -582,3 +582,5 @@ end;
 $$;
 
 revoke all on function public._retorno_item_montar(uuid, smallint, timestamptz) from public, anon, authenticated;
+
+insert into supabase_migrations.schema_migrations (version, name) values ('20270214100100','retorno_f3_audio_cria_orc');

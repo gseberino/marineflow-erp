@@ -1446,3 +1446,5 @@ revoke all on function public._retorno_texto(text, text, jsonb) from public, ano
 revoke all on function public._retorno_triar(uuid, timestamptz) from public, anon, authenticated;
 revoke all on function public.retorno_pegar(timestamptz) from public, anon, authenticated;
 grant execute on function public.retorno_pegar(timestamptz) to service_role;
+
+insert into supabase_migrations.schema_migrations (version, name) values ('20270214100200','retorno_f1_formulario_numero_novo');

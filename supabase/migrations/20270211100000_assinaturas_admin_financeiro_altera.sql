@@ -43,3 +43,5 @@ alter function public.detect_so_change_after_signature() set search_path = publi
 revoke all on function public.detect_so_change_after_signature() from public, anon, authenticated;
 
 revoke insert, update, delete on public.service_order_signatures from anon;
+
+insert into supabase_migrations.schema_migrations (version, name) values ('20270211100000','assinaturas_admin_financeiro_altera');
