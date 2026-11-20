@@ -31,6 +31,26 @@ describe('buildClientStatement', () => {
     });
     expect(soPago).not.toContain('hbr@pix');
   });
+
+  it('tudo quitado: sai como comprovante de quitação (dono, 20/11/2026)', () => {
+    const s = buildClientStatement({
+      clientName: 'Charline Souza', pixKey: 'hbr@pix',
+      items: [ITEMS[0], { description: 'Saldo — OS-00060', status: 'paid', amount: 1998.96, paid_amount: 1998.96, balance_amount: 0 }, ITEMS[3]],
+    });
+    expect(s.startsWith('✅ *Comprovante de quitação — HBR*\nCliente: Charline')).toBe(true);
+    expect(s).not.toContain('Extrato financeiro');
+    expect(s).toMatch(/\*Em aberto: R\$\s0,00 — tudo quitado\* ✅/);
+    expect(s).toMatch(/Pago: R\$\s20\.000,00/);
+    expect(s).not.toContain('hbr@pix');
+    expect(s).toContain('Obrigado!');
+  });
+
+  it('com saldo continua "Extrato financeiro"; sem lançamento nenhum não vira quitação', () => {
+    expect(buildClientStatement({ clientName: 'A', items: ITEMS })).toContain('📋 *Extrato financeiro — HBR*');
+    const vazio = buildClientStatement({ clientName: 'A', items: [ITEMS[3]] });
+    expect(vazio).toContain('Extrato financeiro');
+    expect(vazio).not.toContain('quitação');
+  });
 });
 
 // "Cobrar juntas" (Fase 0, 28/10/2026). Caso medido: MP MOTOR HOMES, OS-00045 (R$ 1.650) + OS-00046
