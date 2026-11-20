@@ -126,8 +126,17 @@ declare
   v_c13 boolean := false;
   -- (pedidos A-1, A-3 e A-5 da F5, 13/11) os blocos "-- PEDIDO A-x (F5): … -- PEDIDO A-x (F5): fim" também saem
   v_ped boolean := false;
+  -- (vence primeiro, 20/11) os blocos "-- VENCE PRIMEIRO: … -- VENCE PRIMEIRO: fim" saem e a linha "--antes:" de dentro volta (a 20270129200000 troca a ordem do 1º laço de _agenda_cliente_fechamento)
+  v_vp boolean := false;
 begin
   foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
+    if not v_bloco and not v_vp and l ~ '^\s*-- VENCE PRIMEIRO:' and l !~ '^\s*-- VENCE PRIMEIRO: fim' then v_vp := true; continue; end if;
+    if v_vp then
+      if l ~ '^\s*-- VENCE PRIMEIRO: fim' then v_vp := false;
+      elsif l ~ '^--antes:' then v_b := v_b || substr(l, 9);
+      end if;
+      continue;
+    end if;
     -- (pedidos A-1, A-3 e A-5 da F5, 13/11) a 20261113300000 recria _agenda_cliente_enfileirar copiando a definição mais nova (20261028100800) e só acrescenta os blocos dela
     if not v_bloco and not v_ped and l ~ '^\s*-- PEDIDO A-[0-9]( e A-[0-9])? \(F5\):' and l !~ '\(F5\): fim\s*$' then v_ped := true; continue; end if;
     if v_ped then
