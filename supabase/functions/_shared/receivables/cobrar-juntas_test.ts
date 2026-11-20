@@ -1,7 +1,7 @@
 import { assert, assertEquals, assertNotEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   avisoDaCobrancaCriada, chaveDoCobrarJuntas, contasSemCobranca, contaVencida, horaEmBrasilia, MAX_COBRAR_JUNTAS, MIN_COBRAR_JUNTAS, mudancaNasContas, osComSaldo,
-  osEntraNoCobrarJuntas, pagoDaConta, saldoDaConta, travaDoCobrarJuntas,
+  osEntraNoCobrarJuntas, pagoDaConta, saldoDaConta, travaDoCobrarJuntas, travaDoExtrato,
 } from "./cobrar-juntas.ts";
 import { checarConformidade } from "../ai/comms/compliance-guard.ts";
 import { MAX_AGRUPAR, MIN_AGRUPAR } from "../ai/tools/agrupar-orcamentos.ts";
@@ -171,4 +171,27 @@ Deno.test("Enviar extrato: chave do dia com prefixo próprio e frase de mudança
   const mudou = mudancaNasContas(antes, [{ id: "r45", status: "partially_paid", amount: 1650, paid_amount: 650, balance_amount: 1000 }], "extrato");
   assert(mudou?.startsWith("O saldo do cliente mudou desde que a tela abriu"), mudou ?? "");
   assert(mudou?.includes("feche e abra o extrato de novo"));
+});
+
+Deno.test("Enviar extrato sem nada em aberto sai como comprovante de quitação (dono, 20/11/2026), com as travas de mensagem", () => {
+  const quitado = { clienteNome: "MP MOTOR HOMES", totalEmAberto: 0, lancamentos: 3, telefone: "47999990000", horaBrasilia: 14 };
+  assertEquals(travaDoExtrato(quitado), null, "tudo quitado: sai");
+  // Piso e Pix esperando não se aplicam (não há o que cobrar).
+  assertEquals(travaDoExtrato({ ...quitado, piso: 5000, pixEsperando: [{ valor: 100 }] }), null);
+  assert(travaDoExtrato({ ...quitado, generico: true })?.includes("é genérico, sem CPF/CNPJ: não recebe extrato"));
+  assert(travaDoExtrato({ ...quitado, optOut: true })?.includes("opt-out"));
+  assertEquals(travaDoExtrato({ ...quitado, telefone: "123" }), "Sem telefone para enviar o extrato.");
+  assert(travaDoExtrato({ ...quitado, horaBrasilia: 7 })?.startsWith("Fora do horário de mensagem ao cliente (7h"));
+  assert(travaDoExtrato({ ...quitado, horaBrasilia: 20 })?.startsWith("Fora do horário"));
+  assertEquals(travaDoExtrato({ ...quitado, horaBrasilia: 19 }), null);
+  assertEquals(travaDoExtrato({ ...quitado, lancamentos: 0 }), "Este cliente não tem lançamentos: não há extrato para enviar.");
+});
+
+Deno.test("Enviar extrato COM saldo: as travas inteiras do Cobrar juntas, sem a contagem de OS", () => {
+  const base = { clienteNome: "MP MOTOR HOMES", totalEmAberto: 1670, lancamentos: 3, telefone: "47999990000", horaBrasilia: 14 };
+  assertEquals(travaDoExtrato(base), null);
+  assert(travaDoExtrato({ ...base, piso: 5000 })?.includes("abaixo do piso"));
+  assert(travaDoExtrato({ ...base, pixEsperando: [{ valor: 1670 }] })?.includes("Pix esperando no Extrato"));
+  assertEquals(travaDoExtrato({ ...base, generico: true }), travaDoCobrarJuntas({ ...base, generico: true }));
+  assertEquals(travaDoExtrato({ ...base, horaBrasilia: 21 }), travaDoCobrarJuntas({ ...base, horaBrasilia: 21 }));
 });
