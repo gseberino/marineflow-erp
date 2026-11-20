@@ -8,7 +8,7 @@ import { assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.
 import {
   dataDoDito, datasDoIntervalo, diaCurto, diariasTools, numeroDito, pagamentoQueSeDivide, paramsDoCadastro, periodoDito, reembolsosDitos,
   resolverDiaria, resolverPagamento, resumirAcerto, resumirCadastro, resumirDiaria, resumirDivisaoDoPagamento, resumirEnvioAoFreelancer,
-  resumirPagamento, textoDaDivisao, resolverLote, resumirLote, textoDaFilaSemIdentidade,
+  resumirPagamento, resumirSaida, saidaDe, textoDaDivisao, resolverLote, resumirLote, textoDaFilaSemIdentidade,
 } from "./diarias.ts";
 import { buildPendingSummary } from "../agent.ts";
 
@@ -23,13 +23,17 @@ type Opcoes = {
   daAgenda?: { data?: unknown; error?: { code?: string; message: string } };
   /** PÓS-MERGE (B): o plano e a diária da agenda DIA A DIA (o lote pergunta um dia de cada vez); vale sobre plano/daAgenda. */
   planoPorDia?: Record<string, unknown[]>; daAgendaPorDia?: Record<string, unknown>;
+  /** 20/11/2026: o último dia do Mickael, que saiu da equipe (vigencia_fim do perfil). */
+  saidaDoMickael?: string;
+  /** 20/11/2026: o resumo com quem saiu (um com saldo, um zerado). */
+  comSaidas?: boolean;
 };
 function admin(opcoes: Opcoes = {}) {
   const tabelas: Record<string, any[]> = {
     work_profiles: [
       { id: "wp-rob", payee_id: "p-rob", valor_diaria: 160, vigencia_inicio: "2026-08-23", vigencia_fim: null, modo_pagamento: "diaria",
         payees: { id: "p-rob", name: "Roberto Daniel Rodrigues Correa", active: true } },
-      { id: "wp-mic", payee_id: "p-mic", valor_diaria: 130, vigencia_inicio: "2026-08-23", vigencia_fim: null, modo_pagamento: "diaria",
+      { id: "wp-mic", payee_id: "p-mic", valor_diaria: 130, vigencia_inicio: "2026-08-23", vigencia_fim: opcoes.saidaDoMickael ?? null, modo_pagamento: "diaria",
         payees: { id: "p-mic", name: "Mickael Fernando Gonzaga", active: true } },
       { id: "wp-fel", payee_id: "p-fel", valor_diaria: 150, vigencia_inicio: "2026-01-01", vigencia_fim: null, modo_pagamento: "diaria",
         payees: { id: "p-fel", name: "Felipe Antunes", active: false } },
@@ -93,12 +97,21 @@ function ctx(opcoes: Opcoes = {}) {
     if (n === "conta_corrente_freelancer") return Promise.resolve({ data: { saldo_final: 290, estado: "deve", dias: 12, trabalhado: 1820, pago: 1530, linhas: [] }, error: null });
     if (n === "registrar_diarias_em_lote") return Promise.resolve({ data: { ok: true, quantos: (a.p_dias as unknown[]).length }, error: null });
     if (n === "apagar_diaria") return Promise.resolve({ data: { ok: true, apagado: {}, message: "Diária de Roberto em qui 24/09 apagada." }, error: null });
-    if (n === "resumo_freelancers") return Promise.resolve({ data: { pessoas: [{ nome: "Roberto", dias: 12, trabalhado: 1980, pago: 1530, saldo_final: 450, estado: "deve" }] }, error: null });
+    if (n === "resumo_freelancers") {
+      return Promise.resolve({ data: { pessoas: [{ nome: "Roberto", dias: 12, trabalhado: 1980, pago: 1530, saldo_final: 450, estado: "deve" },
+        ...(opcoes.comSaidas ? [
+          { nome: "Mickael", dias: 12, trabalhado: 1500, pago: 1880, saldo_final: -380, estado: "adiantado", saiu_em: "2026-10-24", ativo: true },
+          { nome: "João", dias: 3, trabalhado: 450, pago: 450, saldo_final: 0, estado: "quitado", saiu_em: "2026-10-01", ativo: true },
+          { nome: "Felipe", dias: 2, trabalhado: 300, pago: 20, saldo_final: 280, estado: "deve", saiu_em: null, ativo: false },
+        ] : [])] }, error: null });
+    }
     if (n === "cadastrar_freelancer") return Promise.resolve({ data: { ok: true, acao: "criado", message: "João Marcelo cadastrado: diária de R$ 150,00 desde ter 29/09." }, error: null });
     if (n === "anotar_transacao") return Promise.resolve({ data: { ok: true, aplicada: false, message: "Anotado. Quando a transação chegar do banco, ela já entra classificada." }, error: null });
     if (n === "lancar_no_caixa") return Promise.resolve({ data: { ok: true, message: "Lançado: R$ 50,00." }, error: null });
     if (n === "fechar_acerto_diarias") return Promise.resolve({ data: { ok: true, numero: 2, valor_do_acerto: 290, message: "Acerto nº 0002 fechado: … Os dias até 01/10 ficam travados." }, error: null });
     if (n === "reabrir_acerto_diarias") return Promise.resolve({ data: { ok: true, message: "Acerto nº 0001 de Roberto reaberto." }, error: null });
+    if (n === "registrar_saida_da_equipe") return Promise.resolve({ data: { ok: true, acao: "saiu", saldo: -380, message: "Mickael saiu da equipe: último dia sáb 24/10. Saldo hoje: R$ 380,00 adiantado." }, error: null });
+    if (n === "desfazer_saida_da_equipe") return Promise.resolve({ data: { ok: true, acao: "voltou", saldo: -380, message: "Mickael voltou para a equipe." }, error: null });
     return Promise.resolve({ data: null, error: { message: `rpc inesperada ${n}` } });
   };
   return {
@@ -112,8 +125,10 @@ Deno.test("nove ferramentas: as que gravam ou mandam a terceiro pedem confirmaç
   assertEquals(diariasTools.map((t) => t.name).sort(), [
     "cadastrar_freelancer", "consultar_freelancer", "dividir_pagamento_freelancer", "enviar_acerto_ao_freelancer", "enviar_extrato_freelancer",
     "fechar_acerto_freelancer", "reabrir_acerto_freelancer", "registrar_diaria", "registrar_pagamento_freelancer",
-    "registrar_servico_prestador",
+    "registrar_servico_prestador", "saida_da_equipe",
   ]);
+  assertEquals(tool("saida_da_equipe").risk, "medium");
+  assertEquals((tool("saida_da_equipe").input_schema as any).required, ["freelancer"]);
   assertEquals(tool("registrar_servico_prestador").risk, "medium");
   assertEquals((tool("registrar_servico_prestador").input_schema as any).required, ["prestador", "os"]);
   for (const n of ["fechar_acerto_freelancer", "reabrir_acerto_freelancer", "enviar_acerto_ao_freelancer", "dividir_pagamento_freelancer"]) assertEquals(tool(n).risk, "medium");
@@ -1017,4 +1032,63 @@ Deno.test("Pix na fila em outro nome: não afirma que é de outra pessoa; diz o 
   assertStringIncludes(t, "o nome do extrato não identifica a pessoa");
   assertStringIncludes(t, "aprove-a na fila como diária dele: a anotação sai sozinha");
   assertStringIncludes(t, "ponha o CPF dele no cadastro");
+});
+
+// ── Saída da equipe (20/11/2026, decisão do dono) ────────────────────────────────────────────────
+
+Deno.test("saída da equipe: sem o último dia, pergunta (não supõe hoje); com voltou, não precisa", () => {
+  const recusa = tool("saida_da_equipe").preValidar!({ freelancer: "Roberto" }, {} as never) as { error: string };
+  assertStringIncludes(recusa.error, "último dia de trabalho de Roberto");
+  assertEquals(tool("saida_da_equipe").preValidar!({ freelancer: "Roberto", voltou: true }, {} as never), null);
+  assertEquals(tool("saida_da_equipe").preValidar!({ freelancer: "Roberto", ultimo_dia: "24/10" }, {} as never), null);
+});
+
+Deno.test("saída da equipe: grava pela função do banco com o último dia resolvido; voltou desfaz", async () => {
+  const { c, chamadas } = ctx();
+  const r = await tool("saida_da_equipe").execute({ freelancer: "Mickael", ultimo_dia: "2026-10-24" }, c as never) as Record<string, unknown>;
+  assertEquals(chamadas.map((x) => x.n), ["registrar_saida_da_equipe"]);
+  assertEquals(chamadas[0].a, { p_favorecido_id: "p-mic", p_ultimo_dia: "2026-10-24", p_simular: false, p_autor: "u-dono" });
+  assertStringIncludes(String(r.aviso), "R$ 380,00 adiantado");
+
+  const volta = ctx();
+  await tool("saida_da_equipe").execute({ freelancer: "Mickael", voltou: true }, volta.c as never);
+  assertEquals(volta.chamadas[0], { n: "desfazer_saida_da_equipe", a: { p_favorecido_id: "p-mic", p_simular: false, p_autor: "u-dono" } });
+});
+
+Deno.test("saída da equipe: o \"sim\" é a frase do banco simulando (sem autor), e a recusa aparece antes", async () => {
+  const ok = ctx({ simulacao: { data: { acao: "saiu", message: "Mickael sai da equipe: último dia sáb 24/10. Saldo hoje: R$ 380,00 adiantado." } } });
+  const texto = await resumirSaida(ok.c as never, { freelancer: "Mickael", ultimo_dia: "2026-10-24" });
+  assertStringIncludes(texto!, "Saída da equipe: *Mickael Fernando Gonzaga* · último dia sáb 24/10");
+  assertStringIncludes(texto!, "R$ 380,00 adiantado");
+  const simulada = (ok.c.admin as any).simuladas[0];
+  assertEquals([simulada.n, simulada.p_simular, simulada.p_autor, simulada.p_ultimo_dia], ["registrar_saida_da_equipe", true, null, "2026-10-24"]);
+
+  const recusa = ctx({ simulacao: { error: { message: "P0001: Há 1 dia(s) de Mickael lançado(s) depois de sáb 24/10: seg 27/10." } } });
+  const t2 = await resumirSaida(recusa.c as never, { freelancer: "Mickael", ultimo_dia: "2026-10-24" });
+  assertStringIncludes(t2!, "⚠️ Há 1 dia(s) de Mickael");
+  assertStringIncludes(t2!, "o sistema vai recusar");
+});
+
+Deno.test("saída da equipe: quem não está entre os que têm diária (desativado) vira a pergunta de quem é", async () => {
+  const { c } = ctx();
+  // o Alex não está no banco falso como prestador; quem não recebe por diária cai na busca por nome
+  const r = await tool("saida_da_equipe").execute({ freelancer: "Felipe", ultimo_dia: "2026-10-24" }, c as never) as { error?: string };
+  assertStringIncludes(String(r.error), "Não achei");
+});
+
+Deno.test("diária depois da saída: o \"sim\" já avisa que o sistema vai recusar (e o porquê)", async () => {
+  const { c } = ctx({ saidaDoMickael: "2026-10-24" });
+  const texto = await resumirDiaria(c as never, { freelancer: "Mickael", data: "2026-10-27", jornada: "inteiro" });
+  assertStringIncludes(texto!, "saiu da equipe (último dia sáb 24/10)");
+  assertEquals(saidaDe({ perfis: [{ id: "a", valor_diaria: 1, vigencia_inicio: "2026-01-01", vigencia_fim: "2026-03-01" },
+    { id: "b", valor_diaria: 1, vigencia_inicio: "2026-03-02", vigencia_fim: null }] }), null);
+});
+
+Deno.test("consultar todos: quem saiu entra enquanto tem saldo (com o último dia); zerado sai; desativado com saldo aparece", async () => {
+  const { c } = ctx({ comSaidas: true });
+  const r = await tool("consultar_freelancer").execute({}, c as never) as { pessoas: Array<Record<string, unknown>> };
+  assertEquals(r.pessoas.map((p) => p.nome), ["Roberto", "Mickael", "Felipe"]);
+  assertEquals(r.pessoas[1].saiu_da_equipe_ultimo_dia, "2026-10-24");
+  assertEquals(r.pessoas[2].cadastro_desativado, true);
+  assertEquals("saiu_da_equipe_ultimo_dia" in r.pessoas[0], false);
 });

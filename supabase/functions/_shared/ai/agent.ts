@@ -1,6 +1,6 @@
 import { resumirPedido } from "./tools/caixa.ts";
 import {
-  resumirAcerto, resumirCadastro, resumirDiaria, resumirDivisaoDoPagamento, resumirEnvioAoFreelancer, resumirPagamento,
+  resumirAcerto, resumirCadastro, resumirDiaria, resumirDivisaoDoPagamento, resumirEnvioAoFreelancer, resumirPagamento, resumirSaida,
   resumirServico,
 } from "./tools/diarias.ts";
 import { resumirEnvioAoCliente } from "./tools/whatsapp.ts";
@@ -199,6 +199,7 @@ const TOOL_LABELS_PT: Record<string, string> = {
   ajustar_saldo_do_caixa: "Acertar o Caixa pela contagem",
   registrar_diaria: "Registrar diária",
   cadastrar_freelancer: "Cadastrar freelancer",
+  saida_da_equipe: "Saída da equipe (freelancer)",
   registrar_servico_prestador: "Registrar serviço do prestador",
   // A via do técnico pelo WhatsApp (13/11/2026)
   enviar_via_do_tecnico: "Mandar a via do técnico à equipe",
@@ -622,6 +623,14 @@ export async function buildPendingSummary(
   if (toolName === "cadastrar_freelancer") {
     try {
       const r = await resumirCadastro({ admin } as unknown as ToolCtx, args);
+      if (r) return r;
+    } catch { /* cai no resumo genérico */ }
+  }
+  // Saída da equipe (20/11/2026): o "sim" é a frase da função do banco SIMULANDO — o último dia, que depois dele
+  // não entra dia, e o saldo de hoje (a receber ou adiantado), que fica na conta.
+  if (toolName === "saida_da_equipe") {
+    try {
+      const r = await resumirSaida({ admin } as unknown as ToolCtx, args);
       if (r) return r;
     } catch { /* cai no resumo genérico */ }
   }

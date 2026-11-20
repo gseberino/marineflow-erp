@@ -99,6 +99,8 @@ ACRESCENTADAS.push("converter_sem_sinal");
 ACRESCENTADAS.push("listar_os_para_agrupar", "agrupar_os", "desagrupar_os");
 // cobrar juntas (28/10/2026, Fase 0 do Fechar juntas): o saldo de várias OS executadas numa mensagem só.
 ACRESCENTADAS.push("cobrar_juntas");
+// saída da equipe (20/11/2026, decisão do dono): "o Roberto saiu, último dia 24/10" e "o Mickael voltou".
+ACRESCENTADAS.push("saida_da_equipe");
 // 06/10/2026: levantamento e roteiro de execução — escondidos da tela em 05/10 (chave
 // roteiro_execucao_visivel); o prompt deixou de ensinar as duas seções.
 const REMOVIDAS = ["registrar_jornada", "fechar_jornada", "minhas_horas", "apurar_pagamento",

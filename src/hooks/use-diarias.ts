@@ -36,6 +36,15 @@ export interface FreelancerNoResumo {
   n_servicos: number;
   /** Serviços em OS que o cliente ainda não pagou — fora do saldo. */
   aguardando_cliente: number;
+  /**
+   * 20/11/2026: o último dia de quem SAIU da equipe ('AAAA-MM-DD'); null = está na equipe. Depois dele
+   * nenhum dia entra; o saldo fica na conta (seção "Saíram da equipe") até zerar.
+   */
+  saiu_em: string | null;
+  /** Cadastro ativo nos Favorecidos. Desativado só aparece enquanto tem saldo. */
+  ativo: boolean;
+  /** O último dia trabalhado lançado (o "último dia" que a saída propõe). */
+  ultimo_dia_trabalhado: string | null;
 }
 
 export interface ResumoDosFreelancers {
@@ -138,6 +147,7 @@ export function useResumoFreelancers(de: string | null, ate: string | null, atal
           de: p.de ?? null, ate: p.ate ?? null,
           modo: p.modo === 'servico' ? 'servico' : 'diaria', servicos: num(p.servicos), n_servicos: num(p.n_servicos),
           aguardando_cliente: num(p.aguardando_cliente),
+          saiu_em: p.saiu_em ?? null, ativo: p.ativo !== false, ultimo_dia_trabalhado: p.ultimo_dia_trabalhado ?? null,
         })),
         trabalhado: num(r.trabalhado), pago: num(r.pago), reembolsos: num(r.reembolsos), dias: num(r.dias),
         deve: num(r.deve), adiantado: num(r.adiantado),
@@ -405,6 +415,56 @@ export function useCadastrarFreelancer() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (p: PedidoDeCadastro) => chamarCadastro(p, false),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['diarias'] }),
+  });
+}
+
+// ── Saída da equipe (20/11/2026, decisão do dono; migration 20270210100000) ─────────────────────
+// "Saiu da equipe" fecha a diária no último dia: depois dele nenhum dia entra e a agenda deixa de
+// contar com a pessoa. NÃO desativa o favorecido nem pausa regras (o Pix para ele continua abatendo)
+// e não zera o saldo. "Voltou para a equipe" reabre. As mesmas funções do assistente (saida_da_equipe).
+
+/** Está na equipe: cadastro ativo e sem saída registrada. */
+export const estaNaEquipe = (p: Pick<FreelancerNoResumo, 'ativo' | 'saiu_em'>) => p.ativo && !p.saiu_em;
+
+export interface ResultadoDaSaida {
+  acao: 'saiu' | 'mudou_a_data' | 'sem_mudanca' | 'voltou';
+  favorecido: string;
+  ultimo_dia?: string;
+  saldo: number;
+  /** A frase do banco (com o saldo): é o que a tela mostra e o que o assistente manda no "sim". */
+  message: string;
+}
+
+async function chamarSaida(favorecidoId: string, ultimoDia: string, simular: boolean): Promise<ResultadoDaSaida> {
+  const { data, error } = await supabase.rpc('registrar_saida_da_equipe' as never, {
+    p_favorecido_id: favorecidoId, p_ultimo_dia: ultimoDia, p_simular: simular,
+  } as never);
+  if (error) throw error;
+  const r = data as unknown as ResultadoDaSaida;
+  return { ...r, saldo: num(r.saldo) };
+}
+
+/** O que a saída FARIA — nada é gravado. A recusa (dia lançado depois, data no futuro) vem como erro. */
+export const simularSaida = (favorecidoId: string, ultimoDia: string) => chamarSaida(favorecidoId, ultimoDia, true);
+
+export function useRegistrarSaida() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ favorecidoId, ultimoDia }: { favorecidoId: string; ultimoDia: string }) => chamarSaida(favorecidoId, ultimoDia, false),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['diarias'] }),
+  });
+}
+
+export function useDesfazerSaida() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (favorecidoId: string): Promise<ResultadoDaSaida> => {
+      const { data, error } = await supabase.rpc('desfazer_saida_da_equipe' as never, { p_favorecido_id: favorecidoId } as never);
+      if (error) throw error;
+      const r = data as unknown as ResultadoDaSaida;
+      return { ...r, saldo: num(r.saldo) };
+    },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['diarias'] }),
   });
 }

@@ -121,6 +121,15 @@ async function prestadoresPorServico(ctx: ToolCtx): Promise<Freelancer[]> {
   return ((data ?? []) as any[]).map((p) => ({ id: p.id, nome: p.name, perfis: [], modo: "servico" as const }));
 }
 
+/**
+ * 20/11/2026: o último dia de quem SAIU da equipe — a vigência do perfil de diária mais novo (o mesmo
+ * _saida_da_equipe do banco). null = está na equipe (ou não tem diária).
+ */
+export function saidaDe(f: Pick<Freelancer, "perfis">): string | null {
+  const maisNovo = [...f.perfis].sort((a, b) => b.vigencia_inicio.localeCompare(a.vigencia_inicio))[0];
+  return maisNovo?.vigencia_fim ?? null;
+}
+
 async function acharFreelancer(ctx: ToolCtx, dito: unknown): Promise<Freelancer | { error: string }> {
   const comDiaria = (await freelancersComDiaria(ctx)).map((f) => ({ ...f, modo: "diaria" as const }));
   const ids = new Set(comDiaria.map((f) => f.id));
@@ -652,7 +661,7 @@ export async function resumirDiaria(ctx: ToolCtx, args: Record<string, unknown>)
   if (p.os.length > 1) linhas.push("O valor do dia se divide em partes iguais entre as OS.");
   if (p.observacao) linhas.push(`Observação: ${p.observacao}`);
   if (atual) linhas.push(`Hoje está lançado: ${rotuloDaFracao(atual.fracao)} (${brl.format(atual.valorDia)}) — vai ser corrigido, não duplicado.`);
-  else if (!perfil) linhas.push("⚠️ Sem diária cadastrada nessa data: o sistema vai recusar.");
+  else if (!perfil) linhas.push(avisoSemPerfil(p.freelancer, p.data));
   // Agenda de Produção (Fase 3, P4): quando foi a agenda que lançou, o "sim" diz (e a palavra que corrige).
   const daAgenda = await diariaDaAgenda(ctx, p.freelancer.id, p.data);
   if (daAgenda) linhas.push(daAgenda);
@@ -688,7 +697,16 @@ async function resumirIntervalo(ctx: ToolCtx, p: PedidoDeDiaria): Promise<string
   if (!novos.length) linhas.push("Todos os dias do intervalo já estão lançados: nada vai mudar.");
   if (p.observacao) linhas.push(`Observação: ${p.observacao}`);
   if (!perfil) linhas.push("⚠️ Sem diária cadastrada no começo do intervalo: o sistema vai recusar esses dias.");
+  else if (saidaDe(p.freelancer) && ultimo > saidaDe(p.freelancer)!) linhas.push(avisoSemPerfil(p.freelancer, ultimo));
   return linhas.join("\n");
+}
+
+/** O "sim" de um dia que o banco vai recusar: depois da saída da equipe, ou sem diária na data. */
+function avisoSemPerfil(f: Freelancer, data: string): string {
+  const saiu = saidaDe(f);
+  return saiu && data > saiu
+    ? `⚠️ ${f.nome} saiu da equipe (último dia ${diaCurto(saiu)}): depois disso não entra dia — o sistema vai recusar. Se ele voltou, primeiro saida_da_equipe com voltou.`
+    : "⚠️ Sem diária cadastrada nessa data: o sistema vai recusar.";
 }
 
 async function chamar(ctx: ToolCtx, fn: string, params: Record<string, unknown>) {
@@ -824,6 +842,40 @@ export async function resumirCadastro(ctx: ToolCtx, args: Record<string, unknown
     : "Sem CPF: os Pix para ele vão pedir a sua confirmação na fila do extrato.");
   linhas.push("Meio período = metade da diária. Ele passa a aparecer em Financeiro › Diárias.");
   return linhas.join("\n");
+}
+
+// ── Saída da equipe (20/11/2026, decisão do dono) ────────────────────────────────────────────────
+// "o Roberto saiu, último dia 24/10": a função do banco fecha a diária no último dia (depois dele
+// nenhum dia entra e a agenda deixa de contar com ele), sem desativar o cadastro e sem mexer no saldo.
+// "voltou" reabre. A confirmação é a frase da própria função SIMULANDO (p_simular) — com o saldo de
+// hoje dito pelo banco, a receber ou adiantado: a IA não calcula nada.
+
+export type PedidoDeSaida = { freelancer: Freelancer; voltou: true } | { freelancer: Freelancer; voltou: false; ultimoDia: string };
+
+export async function resolverSaida(ctx: ToolCtx, args: Record<string, unknown>): Promise<PedidoDeSaida | { error: string }> {
+  const f = await acharFreelancer(ctx, args.freelancer);
+  if ("error" in f) return f;
+  if (f.modo === "servico") return { error: `${f.nome} recebe por serviço, não por diária: não há saída da equipe para registrar.` };
+  if (args.voltou === true) return { freelancer: f, voltou: true };
+  if (args.ultimo_dia == null || args.ultimo_dia === "") return { error: `Qual foi o último dia de trabalho de ${f.nome}? (não suponha hoje: pergunte)` };
+  const ultimoDia = dataDoDito(args.ultimo_dia);
+  if (!ultimoDia) return { error: `Não entendi o último dia: "${args.ultimo_dia}". Use dd/mm, 'ontem' ou o dia da semana.` };
+  return { freelancer: f, voltou: false, ultimoDia };
+}
+
+const paramsDaSaida = (p: PedidoDeSaida, simular: boolean) => p.voltou
+  ? { fn: "desfazer_saida_da_equipe", params: { p_favorecido_id: p.freelancer.id, p_simular: simular } }
+  : { fn: "registrar_saida_da_equipe", params: { p_favorecido_id: p.freelancer.id, p_ultimo_dia: p.ultimoDia, p_simular: simular } };
+
+/** O texto do "sim": a função do banco simulando (nada gravado). Uma recusa aparece aqui, antes do "sim". */
+export async function resumirSaida(ctx: ToolCtx, args: Record<string, unknown>): Promise<string | null> {
+  const p = await resolverSaida(ctx, args);
+  if ("error" in p) return null;
+  const { fn, params } = paramsDaSaida(p, true);
+  const { data, error } = await ctx.admin.rpc(fn, { ...params, p_autor: null });
+  const titulo = p.voltou ? `Voltou para a equipe: *${p.freelancer.nome}*` : `Saída da equipe: *${p.freelancer.nome}* · último dia ${diaCurto(p.ultimoDia)}`;
+  if (error) return `${titulo}\n⚠️ ${semCodigo(error.message)} — o sistema vai recusar.`;
+  return `${titulo}\n${String((data as Record<string, unknown> | null)?.message ?? "")}`.trim();
 }
 
 /**
@@ -1596,7 +1648,9 @@ export const diariasTools: ToolDef[] = [
       if (!args.freelancer) {
         const r = await chamar(ctx, "resumo_freelancers", periodo) as Record<string, unknown>;
         if (r && "error" in r) return r;
-        const pessoas = ((r?.pessoas ?? []) as any[]).map((x) => ({
+        // 20/11/2026: quem saiu da equipe (ou foi desativado) entra enquanto tem saldo — zerado, sai da lista
+        const vivos = ((r?.pessoas ?? []) as any[]).filter((x) => (!x.saiu_em && x.ativo !== false) || Math.abs(Number(x.saldo_final) || 0) >= 0.005);
+        const pessoas = vivos.map((x) => ({
           nome: x.nome, periodo: periodoResolvido(x), dias: Number(x.dias), trabalhado: Number(x.trabalhado),
           // F2b: as despesas que ele pagou com comprovante (CMP), a favor dele, à parte dos dias
           ...(Number(x.reembolsos) > 0 ? { reembolsos: Number(x.reembolsos) } : {}),
@@ -1605,6 +1659,8 @@ export const diariasTools: ToolDef[] = [
           // 27/10/2026: o Pix que já saiu do banco para ele e espera a fila — já está no "pago"
           ...(Number(x.pago_falta_aprovar) > 0 ? { pago_no_banco_falta_aprovar_na_fila: Number(x.pago_falta_aprovar) } : {}),
           saldo: Number(x.saldo_final), situacao: situacaoDoSaldo(x.estado, x.modo), ultimo_pagamento: x.ultimo_pagamento,
+          ...(x.saiu_em ? { saiu_da_equipe_ultimo_dia: x.saiu_em } : {}),
+          ...(x.ativo === false ? { cadastro_desativado: true } : {}),
           // 12/11/2026: o prestador por serviço (Alex)
           ...(x.modo === "servico"
             ? { recebe_por: "serviço", servicos: Number(x.servicos), aguardando_cliente_pagar: Number(x.aguardando_cliente) }
@@ -1661,6 +1717,8 @@ export const diariasTools: ToolDef[] = [
         ...(Number(c.pago_falta_aprovar) > 0 ? { pago_no_banco_falta_aprovar_na_fila: Number(c.pago_falta_aprovar) } : {}),
         extras_no_periodo: soma("extras"), descontos_no_periodo: soma("descontos"),
         saldo: Number(c.saldo_final), situacao: situacaoDoSaldo(c.estado, c.favorecido?.modo),
+        // 20/11/2026: depois do último dia não entra dia; o saldo continua até zerar
+        ...(saidaDe(f) ? { saiu_da_equipe_ultimo_dia: saidaDe(f) } : {}),
         ...(c.favorecido?.modo === "servico" ? {
           recebe_por: "serviço (não tem diária)",
           servicos_na_conta: Number(c.servicos ?? 0),
@@ -1709,6 +1767,46 @@ export const diariasTools: ToolDef[] = [
       const r = await chamar(ctx, "cadastrar_freelancer", { ...p, p_simular: false }) as Record<string, unknown>;
       if (r && "error" in r) return r;
       return { ...r, aviso: String(r?.message ?? "") };
+    },
+  },
+  {
+    // 20/11/2026 (decisão do dono): "Saiu da equipe" pela conversa. Uso raro: fica fora do PERFIL_ADMIN (teto do perfil
+    // enxuto), ao alcance da ferramenta_extra; no perfil de operação (financeiro), à vista.
+    name: "saida_da_equipe",
+    description:
+      "Registra que um freelancer de diária SAIU da equipe: 'o Roberto saiu, último dia 24/10', 'o Mickael não trabalha mais " +
+      "com a gente'. Depois do último dia nenhum dia entra para ele e a agenda deixa de contar com ele; o saldo — a receber OU " +
+      "adiantado — continua na conta dele até zerar (o Pix para ele continua abatendo; o adiantado fica para descontar se ele " +
+      "voltar). NÃO desativa o cadastro. Precisa do último dia TRABALHADO: se a pessoa não disser, PERGUNTE (não suponha hoje). " +
+      "voltou=true quando ele voltou a trabalhar ('o Mickael voltou'): reabre, e os dias voltam a entrar. Repetir com outra data " +
+      "corrige o último dia. Pede confirmação.",
+    input_schema: {
+      type: "object",
+      properties: {
+        freelancer: { type: "string", description: "Nome como a pessoa falou ('Roberto')." },
+        ultimo_dia: { type: "string", description: "Último dia que ele TRABALHOU: dd/mm, 'ontem' ou dia da semana. Nunca no futuro." },
+        voltou: { type: "boolean", description: "true = ele voltou para a equipe (desfaz a saída). Sem ultimo_dia." },
+      },
+      required: ["freelancer"],
+    },
+    risk: "medium",
+    roles: CARGOS,
+    preValidar(args) {
+      if (args?.voltou === true) return null;
+      if (args?.ultimo_dia == null || args.ultimo_dia === "") {
+        return { error: `Qual foi o último dia de trabalho de ${args?.freelancer ?? "ele"}? Pergunte ao dono — não suponha hoje.` };
+      }
+      return null;
+    },
+    async execute(args, ctx) {
+      const b = semAcesso(ctx);
+      if (b) return b;
+      const p = await resolverSaida(ctx, args);
+      if ("error" in p) return p;
+      const { fn, params } = paramsDaSaida(p, false);
+      const r = await chamar(ctx, fn, params) as Record<string, unknown>;
+      if (r && "error" in r) return r;
+      return { ok: true, acao: r?.acao, saldo: r?.saldo, aviso: String(r?.message ?? "") };
     },
   },
   {

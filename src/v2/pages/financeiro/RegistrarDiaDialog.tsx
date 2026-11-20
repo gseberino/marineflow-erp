@@ -89,13 +89,19 @@ export function RegistrarDiaDialog({ pessoas, favorecidoInicial, dataInicial, ed
   // Antes do início da conta corrente o dia não entra no saldo (foi acertado por fora): aceitar
   // a data faria o dia "sumir" depois de salvo.
   const desde = pessoa?.desde ?? null;
+  // Quem saiu da equipe (20/11/2026): só entra dia até o último dia (o dia esquecido de antes da saída).
+  const saiu = pessoa?.saiu_em ?? null;
+  const limite = saiu && saiu < hoje ? saiu : hoje;
+  const textoDaSaida = saiu ? `${pessoa?.nome} saiu da equipe (último dia ${saiu.split('-').reverse().join('/')}): depois disso não entra dia.` : '';
   const erro = !favorecidoId ? 'Escolha o freelancer.'
     : !data ? 'Informe a data.'
     : data > hoje ? 'A data não pode estar no futuro.'
+    : saiu && data > saiu ? textoDaSaida
     : desde && data < desde ? `A conta corrente começa em ${desde.split('-').reverse().join('/')}.`
     : varios && !ate ? 'Informe até quando.'
     : varios && data > ate ? 'A data inicial é depois da final.'
     : varios && ate > hoje ? 'A data final não pode estar no futuro.'
+    : varios && saiu && ate > saiu ? textoDaSaida
     : varios && datas.length === 0 ? 'Nenhum dia útil no intervalo (marque sábado ou domingo, se for o caso).'
     : varios && datas.length > MAX_DIAS ? `Até ${MAX_DIAS} dias por vez.`
     : varios && !doIntervalo.isLoading && novas.length === 0 ? 'Todos os dias do intervalo já estão lançados.'
@@ -170,19 +176,23 @@ export function RegistrarDiaDialog({ pessoas, favorecidoInicial, dataInicial, ed
             <Select value={favorecidoId} onValueChange={(v) => { setFavorecidoId(v); setDiariaDigitada(null); }} disabled={!!editar}>
               <SelectTrigger id="dia-freelancer"><SelectValue placeholder="Escolha…" /></SelectTrigger>
               <SelectContent>
-                {pessoas.map((p) => <SelectItem key={p.id} value={p.id}>{p.nome}</SelectItem>)}
+                {pessoas.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.nome}{p.saiu_em ? ` (saiu; último dia ${p.saiu_em.split('-').reverse().join('/')})` : ''}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="dia-data">{varios ? 'De' : 'Data'}</Label>
-            <Input id="dia-data" type="date" value={data} min={desde ?? undefined} max={hoje}
+            <Input id="dia-data" type="date" value={data} min={desde ?? undefined} max={limite}
                    onChange={(e) => setData(e.target.value)} disabled={!!editar} />
           </div>
           {varios && (
             <div className="space-y-1.5">
               <Label htmlFor="dia-ate">Até</Label>
-              <Input id="dia-ate" type="date" value={ate} min={data || desde || undefined} max={hoje}
+              <Input id="dia-ate" type="date" value={ate} min={data || desde || undefined} max={limite}
                      onChange={(e) => setAte(e.target.value)} />
             </div>
           )}
