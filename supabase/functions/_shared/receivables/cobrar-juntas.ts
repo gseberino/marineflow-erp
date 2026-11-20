@@ -19,8 +19,11 @@
 // cobrança das contas que não têm nenhuma e registra o envio em todas, tudo ou nada.
 //
 // A mesma conferência vale para o "Enviar extrato" da ficha do cliente (dono, 20/11/2026: "Sim, as
-// mesmas travas"): travaDoCobrarJuntas sem a contagem de OS, o destino do cadastro, a releitura do
-// saldo e a chave do dia (chaveDoCobrarJuntas com tipo 'extrato').
+// mesmas travas"): travaDoExtrato (com saldo = travaDoCobrarJuntas sem a contagem de OS; sem nada em
+// aberto = comprovante de quitação, que sai e não é cobrança), o destino do cadastro, a releitura do
+// saldo e a chave do dia (chaveDoCobrarJuntas com tipo 'extrato'). O extrato COM saldo conta como a
+// cobrança do dia (dono, 20/11/2026): depois do envio passa pela mesma cobrar_juntas_registrar_envio,
+// com p_os nulo (migration 20270212110000).
 
 /**
  * OS que entram no "Cobrar juntas": já começaram (em execução, concluída ou faturada). As que não
@@ -217,6 +220,37 @@ export function travaDoCobrarJuntas(e: EntradaDasTravas): string | null {
   if (e.horaBrasilia != null && (e.horaBrasilia < HORA_INICIO_COBRANCA || e.horaBrasilia >= HORA_FIM_COBRANCA)) {
     return `Fora do horário de cobrança (${e.horaBrasilia}h; janela ${HORA_INICIO_COBRANCA}–${HORA_FIM_COBRANCA}h em Brasília): `
       + `cliente não recebe cobrança à noite nem de madrugada. Envie a partir das ${HORA_INICIO_COBRANCA}h.`;
+  }
+  return null;
+}
+
+export interface EntradaDoExtrato extends Omit<EntradaDasTravas, 'quantidadeOs'> {
+  /** Lançamentos do cliente que não estão cancelados (pagos ou não). 0 = não há extrato para mandar. */
+  lancamentos: number;
+}
+
+/**
+ * "Enviar extrato" da ficha do cliente (dono, 20/11/2026). Com saldo em aberto é cobrança: as travas
+ * inteiras do Cobrar juntas (travaDoCobrarJuntas sem a contagem de OS). Sem nada em aberto ("Deixar
+ * sair como comprovante de quitação"): sai, e NÃO é cobrança — piso e Pix esperando no Extrato não se
+ * aplicam (não há o que cobrar), mas continuam o cadastro genérico, o opt-out, o telefone e o horário
+ * (mensagem a cliente pelo WhatsApp). Cliente sem lançamento nenhum não tem extrato.
+ */
+export function travaDoExtrato(e: EntradaDoExtrato): string | null {
+  const total = centavos(n(e.totalEmAberto));
+  if (total > 0) return travaDoCobrarJuntas({ ...e, quantidadeOs: null });
+  const nome = (e.clienteNome || '').trim() || 'deste cliente';
+  if (e.generico) {
+    return `O cadastro ${nome} é genérico, sem CPF/CNPJ: não recebe extrato. `
+      + 'Passe as OS para o cadastro do cliente de verdade e mande por lá.';
+  }
+  if (!(n(e.lancamentos) > 0)) return 'Este cliente não tem lançamentos: não há extrato para enviar.';
+  if (e.optOut) return 'Este cliente pediu para não receber mensagens no WhatsApp (opt-out). Mande o comprovante por outro canal.';
+  const digitos = (e.telefone || '').replace(/\D/g, '');
+  if (digitos.length < 10) return 'Sem telefone para enviar o extrato.';
+  if (e.horaBrasilia != null && (e.horaBrasilia < HORA_INICIO_COBRANCA || e.horaBrasilia >= HORA_FIM_COBRANCA)) {
+    return `Fora do horário de mensagem ao cliente (${e.horaBrasilia}h; janela ${HORA_INICIO_COBRANCA}–${HORA_FIM_COBRANCA}h em Brasília): `
+      + `envie a partir das ${HORA_INICIO_COBRANCA}h.`;
   }
   return null;
 }
