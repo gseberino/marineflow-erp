@@ -2,6 +2,7 @@
 // de fetch usado em _shared/whatsapp/*_test.ts. Rodar com:
 //   deno test --allow-env supabase/functions/_shared/ai/agent_test.ts
 import { assertEquals, assertExists, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { FakeTime } from "https://deno.land/std@0.224.0/testing/time.ts";
 import { callClaude } from "./anthropic.ts";
 import { buildPendingSummary, interrupcaoDaTool, resumoQueRecusa, runAgentLoop, textoDoSim } from "./agent.ts";
 import { quoteBuilderTools } from "./tools/quote-builder.ts";
@@ -487,13 +488,24 @@ Deno.test("sem amarra, create_quote_from_items roda direto, e a auditoria não g
 });
 
 Deno.test("retorno_orcar_caso vira pendência high com o resumo literal; retorno_cadastrar_unidade pede só sim", async () => {
-  const rotas = { retorno_destino_do_item: { ok: true }, retorno_previa_ver: VER_DO_DITADO };
+  // rr-f3-2b: o retrato é o ORÇ que o áudio criou (aqui, o que um áudio anterior já tinha criado no caso: sem construtor no teste).
+  const rotas = {
+    retorno_destino_do_item: { ok: true, abertura_id: "a-1", item_id: "i-1" }, retorno_previa_ver: VER_DO_DITADO,
+    retorno_orc_do_audio_do_caso: { previa_id: "pv-1", service_order_id: "os-9", numero: "ORÇ-00149", total: 1400, impressao: "imp-9",
+      linhas: [{ nome: "Controlador", quantidade: 1, preco: 1400 }] },
+  };
   const a = adminDoDitado(rotas);
-  await chamarComAdmin(ORCAR_CASO, { n: 1, trocas: [{ linha: 1, preco: 1400 }] }, a.admin);
+  const relogio = new FakeTime("2026-12-09T15:00:00.000Z");   // meio-dia em Brasília: dentro da janela de envio
+  try {
+    await chamarComAdmin(ORCAR_CASO, { n: 1, trocas: [{ linha: 1, preco: 1400 }] }, a.admin);
+  } finally {
+    relogio.restore();
+  }
   assertEquals(a.pendingRows[0].risk_level, "high");
-  assertStringIncludes(a.pendingRows[0].summary, "Proposta de *Ana* · Brisa");
-  assertStringIncludes(a.pendingRows[0].summary, "*sim <PIN>* cria o orçamento e manda o PDF a Ana");
-  assertEquals(a.pendingRows[0].payload._retrato.plano.linhas[0].preco, 1400);
+  assertStringIncludes(a.pendingRows[0].summary, "Já criei o *ORÇ-00149* deste caso");
+  assertStringIncludes(a.pendingRows[0].summary, "*sim <PIN>* manda o PDF do ORÇ-00149 a Ana");
+  assertEquals(a.pendingRows[0].payload._retrato.service_order_id, "os-9");
+  assertEquals(a.pendingRows[0].payload._retrato.impressao, "imp-9");
 
   const u = adminDoDitado({ retorno_previa_ver: { ...VER_DO_DITADO, vessel_id: null, unidade_nome: null } });
   await chamarComAdmin(UNIDADE_DO_CASO, { n: 1, nome: "Brisa", tipo: "lancha" }, u.admin);
