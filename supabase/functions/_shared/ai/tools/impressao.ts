@@ -12,7 +12,7 @@ import { localizarOrdem } from "./documentos-pdf.ts";
 import { acharPessoa } from "./via-do-tecnico.ts";
 import { hojeEmBrasilia, pessoasDaOs } from "../../pdf/via-do-tecnico-dados.ts";
 import { fraseDoResultado, impressoraNoAr, limitarCopias } from "../../impressao/fila.ts";
-import { osDaAgendaDoDia } from "../../impressao/agenda.ts";
+import { diaSeguinte, osDaAgendaDoDia } from "../../impressao/agenda.ts";
 import {
   abrirViaPeloId,
   type Impressao,
@@ -22,7 +22,16 @@ import {
   VIAS_POR_PEDIDO_MAX,
 } from "../../impressao/imprimir.ts";
 
-const ehHoje = (s: string) => /^(as |as vias de )?(hoje|vias? de hoje|do dia)$/i.test(s.normalize("NFD").replace(/[̀-ͯ]/g, "").trim());
+/**
+ * "as vias de hoje" / (20/11/2026, a sugestão das 19:30 da véspera) "as vias de amanhã": o dia da agenda pedido, ou null
+ * para um documento comum.
+ */
+export function diaDasVias(s: string): "hoje" | "amanha" | null {
+  const t = s.normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase();
+  if (/^(as |as vias de )?(hoje|vias? de hoje|do dia)$/.test(t)) return "hoje";
+  if (/^(as |as vias de )?(amanha|vias? de amanha)$/.test(t)) return "amanha";
+  return null;
+}
 
 /** O que a tool devolve ao modelo (e o atalho sem modelo lê `frase`). */
 function resposta(impressoes: Impressao[], extra: Record<string, unknown> = {}): Record<string, unknown> {
@@ -49,7 +58,8 @@ export async function imprimirParaQuemPediu(args: Record<string, unknown>, ctx: 
     pedidoPor: { usuario: ctx.userId || null },
   };
   const documento = String(args.documento ?? "").trim();
-  const tecnico = args.via === "tecnico" || ehHoje(documento);
+  const doDia = diaDasVias(documento);
+  const tecnico = args.via === "tecnico" || doDia !== null;
 
   if (!tecnico) {
     const achado = await localizarOrdem(admin, documento, args.tipo as string | undefined);
@@ -58,25 +68,27 @@ export async function imprimirParaQuemPediu(args: Record<string, unknown>, ctx: 
     return resposta([await imprimirOrdem(admin, settings, achado.ordem, opcoes)]);
   }
 
-  // "as vias de hoje": cada OS da agenda de hoje, a via inteira (sem preço).
-  if (ehHoje(documento)) {
+  // "as vias de hoje" (ou de amanhã): cada OS da agenda do dia, a via inteira (sem preço).
+  if (doDia) {
+    const palavra = doDia === "hoje" ? "hoje" : "amanhã";
     let ids: string[];
     try {
-      ids = await osDaAgendaDoDia(admin, hojeEmBrasilia());
+      const hoje = hojeEmBrasilia();
+      ids = await osDaAgendaDoDia(admin, doDia === "hoje" ? hoje : diaSeguinte(hoje));
     } catch (e) {
       return { error: e instanceof Error ? e.message : String(e) };
     }
-    if (!ids.length) return { ok: false, frase: "Não há OS na agenda de hoje; nada a imprimir.", orientacao: "Diga isso." };
+    if (!ids.length) return { ok: false, frase: `Não há OS na agenda de ${palavra}; nada a imprimir.`, orientacao: "Diga isso." };
     const feitas: Impressao[] = [];
     for (const id of ids.slice(0, VIAS_POR_PEDIDO_MAX)) {
       const aberta = await abrirViaPeloId(admin, id, settings);
       if ("erro" in aberta) {
-        feitas.push({ oque: "uma via de hoje", copias: 1, resultado: { ok: false, motivo: aberta.erro } });
+        feitas.push({ oque: `uma via de ${palavra}`, copias: 1, resultado: { ok: false, motivo: aberta.erro } });
         continue;
       }
       feitas.push(await imprimirVia(admin, settings, aberta, null, [], opcoes));
     }
-    return resposta(feitas, ids.length > VIAS_POR_PEDIDO_MAX ? { aviso: `Imprimi só as ${VIAS_POR_PEDIDO_MAX} primeiras de ${ids.length} OS de hoje.` } : {});
+    return resposta(feitas, ids.length > VIAS_POR_PEDIDO_MAX ? { aviso: `Imprimi só as ${VIAS_POR_PEDIDO_MAX} primeiras de ${ids.length} OS de ${palavra}.` } : {});
   }
 
   const achado = await localizarOrdem(admin, documento, "os");

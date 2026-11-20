@@ -12,6 +12,13 @@ export function hojeNoEscritorio(agora: Date = new Date()): string {
     .format(agora);
 }
 
+/** O dia seguinte no calendário (aaaa-mm-dd → aaaa-mm-dd), sem fuso: conta só a data. */
+export function diaSeguinte(dia: string): string {
+  const d = new Date(`${dia}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
 /** As OS da agenda de um dia, sem repetir. `payeeId` = só as da pessoa. Lança no erro de leitura. */
 export async function osDaAgendaDoDia(admin: Admin, dia: string, payeeId?: string | null): Promise<string[]> {
   let q = admin.from("agenda_alocacoes").select("service_order_id")
