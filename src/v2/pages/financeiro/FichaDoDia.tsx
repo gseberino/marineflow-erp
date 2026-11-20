@@ -3,10 +3,16 @@
 //
 // "Não trabalhou" GRAVA a falta (valor zero) — não apaga o dia (decisão do dono, 28/09/2026).
 // Apagar um lançamento feito por engano é o "Excluir" da lista, com Desfazer.
+//
+// "Trouxe o almoço" (20/11/2026): no dia já lançado, marcar/desmarcar grava na hora; no dia vazio, vai
+// junto quando se marca inteiro ou meio. O valor é o da configuração e o motivo o banco escreve.
+import { useState } from 'react';
 import { toast } from 'sonner';
 import { Pencil, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { useAppSetting } from '@/hooks/use-app-settings';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AcoesDaLinha } from '@/components/AcoesDaLinha';
 import { useI18n } from '@/i18n';
@@ -38,14 +44,31 @@ export function FichaDoDia({ pessoa, data, linhas, onFechar, onEditar, onDetalhe
   const reembolsos = linhas.filter((l) => l.tipo === 'reembolso');
   const acertos = useAcertos(reembolsos.length ? pessoa.id : null);
 
+  const valorDoAlmoco = Number(String(useAppSetting('diarias_valor_almoco')).replace(',', '.')) || 0;
+  const [almocoNoDiaNovo, setAlmocoNoDiaNovo] = useState(false);
+  const comAlmoco = dia ? (dia.almoco ?? 0) > 0 : almocoNoDiaNovo;
+
   async function marcar(jornada: Jornada) {
     if (dia?.jornada === jornada) return;
     try {
-      // Só a jornada: OS, extras e observação que o dia já tinha continuam como estavam.
-      const r = await registrar.mutateAsync({ favorecidoId: pessoa.id, data, jornada });
+      // Só a jornada: OS, extras e observação que o dia já tinha continuam como estavam. No dia vazio, o
+      // almoço marcado vai junto.
+      const r = await registrar.mutateAsync({
+        favorecidoId: pessoa.id, data, jornada, ...(!dia && almocoNoDiaNovo ? { almoco: true } : {}),
+      });
       toast.success(r.message);
     } catch (e) {
       toast.error((e as Error).message || 'Não deu para registrar o dia.');
+    }
+  }
+
+  async function mudarAlmoco(marcado: boolean) {
+    if (!dia) { setAlmocoNoDiaNovo(marcado); return; }
+    try {
+      const r = await registrar.mutateAsync({ favorecidoId: pessoa.id, data, jornada: dia.jornada ?? 'inteiro', almoco: marcado });
+      toast.success(r.message);
+    } catch (e) {
+      toast.error((e as Error).message || 'Não deu para mudar o almoço.');
     }
   }
 
@@ -69,6 +92,13 @@ export function FichaDoDia({ pessoa, data, linhas, onFechar, onEditar, onDetalhe
             </Button>
           ))}
         </div>
+        {dia?.jornada !== 'faltou' && (
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox checked={comAlmoco} disabled={registrar.isPending} aria-label="Trouxe o almoço"
+                      onCheckedChange={(v) => { void mudarAlmoco(v === true); }} />
+            Trouxe o almoço{valorDoAlmoco > 0 ? ` (+${formatCurrency(dia && (dia.almoco ?? 0) > 0 ? dia.almoco! : valorDoAlmoco)})` : ''}
+          </label>
+        )}
 
         <div className="space-y-2">
           <p className="text-sm font-medium">Lançado neste dia</p>

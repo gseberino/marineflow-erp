@@ -121,6 +121,15 @@ async function prestadoresPorServico(ctx: ToolCtx): Promise<Freelancer[]> {
   return ((data ?? []) as any[]).map((p) => ({ id: p.id, nome: p.name, perfis: [], modo: "servico" as const }));
 }
 
+/**
+ * 20/11/2026: o último dia de quem SAIU da equipe — a vigência do perfil de diária mais novo (o mesmo
+ * _saida_da_equipe do banco). null = está na equipe (ou não tem diária).
+ */
+export function saidaDe(f: Pick<Freelancer, "perfis">): string | null {
+  const maisNovo = [...f.perfis].sort((a, b) => b.vigencia_inicio.localeCompare(a.vigencia_inicio))[0];
+  return maisNovo?.vigencia_fim ?? null;
+}
+
 async function acharFreelancer(ctx: ToolCtx, dito: unknown): Promise<Freelancer | { error: string }> {
   const comDiaria = (await freelancersComDiaria(ctx)).map((f) => ({ ...f, modo: "diaria" as const }));
   const ids = new Set(comDiaria.map((f) => f.id));
@@ -155,6 +164,11 @@ export interface PedidoDeDiaria {
   /** Extras e descontos DO DIA (o total, como na tela); nulo = deixa como está (07/10/2026). */
   extras: number | null;
   descontos: number | null;
+  /**
+   * 20/11/2026: "trouxe almoço" — true soma o almoço da configuração (o banco escreve o motivo); false tira; nulo = como
+   * está. Com ele dito, `extras` são os OUTROS extras.
+   */
+  almoco: boolean | null;
   /** O dia já lançado, quando a jornada dita foi "manter". */
   atual?: DiaLancado | null;
   /** O que a agenda tinha para a pessoa no dia (Agenda de Produção, Fase 2; só com a agenda automática ligada). */
@@ -342,17 +356,19 @@ export async function resolverDiaria(
   const descontos = valorDoDito(args.descontos);
   if (extras === undefined) return { error: `Não entendi o valor dos extras: "${args.extras}".` };
   if (descontos === undefined) return { error: `Não entendi o valor dos descontos: "${args.descontos}".` };
+  // "trouxe almoço" (20/11/2026): só o que a pessoa disse; o valor é da configuração, o motivo é do banco.
+  const almoco = args.almoco === true ? true : args.almoco === false ? false : null;
   let atual: DiaLancado | null = null;
   if (jornada === "manter") {
     atual = await diaLancado(ctx, f, data);
     if (!atual) return { error: `Não há dia lançado para ${f.nome} em ${diaCurto(data)}: diga se foi dia inteiro ou meio período.` };
-    if (extras == null && descontos == null && valorDiaria == null && !os.length && !observacao) {
-      return { error: "Diga o que mudar no dia: extras, descontos, OS, observação ou o valor." };
+    if (extras == null && descontos == null && valorDiaria == null && almoco == null && !os.length && !observacao) {
+      return { error: "Diga o que mudar no dia: extras, almoço, descontos, OS, observação ou o valor." };
     }
   }
   const resolvida: Jornada = atual ? (atual.fracao === 1 ? "inteiro" : atual.fracao === 0.5 ? "meio" : "faltou") : jornada;
   return {
-    freelancer: f, data, datas, intervalo, fimDeSemana, jornada: resolvida, os, observacao, valorDiaria, extras, descontos, atual,
+    freelancer: f, data, datas, intervalo, fimDeSemana, jornada: resolvida, os, observacao, valorDiaria, extras, descontos, almoco, atual,
     plano, osDoPlano, ...(perguntaDoPlano ? { perguntaDoPlano } : {}),
   };
 }
@@ -415,7 +431,7 @@ export async function resolverLote(ctx: ToolCtx, args: Record<string, unknown>):
 
 type DiaDoLote = {
   data: string; jornada: Jornada; os_ids: string[] | null; observacao: string | null;
-  extras: number | null; descontos: number | null; valor_diaria: number | null;
+  extras: number | null; descontos: number | null; valor_diaria: number | null; almoco: boolean | null;
 };
 
 /**
@@ -450,7 +466,7 @@ async function diasDoLote(ctx: ToolCtx, l: PedidoDeLote) {
     const os = plano ? plano.os : p.os;
     return {
       item: p, plano, data: d, jornada: p.jornada, os_ids: os.length ? os.map((o) => o.id) : null, observacao: p.observacao,
-      extras: p.extras, descontos: p.descontos, valor_diaria: p.valorDiaria,
+      extras: p.extras, descontos: p.descontos, valor_diaria: p.valorDiaria, almoco: p.almoco,
     };
   });
   return { dias, mantidos, diasMantidos, corrigidos, lancados };
@@ -481,11 +497,45 @@ function linhasPorDia(pares: Array<[string, string]>): string[] {
   return [...grupos].map(([texto, dias]) => `${dias.join(", ")}: ${texto}`);
 }
 
+/**
+ * 20/11/2026: o valor do almoço de quem traz o próprio — a MESMA chave que o banco usa
+ * (app_settings.diarias_valor_almoco). Nulo = não configurada (o banco recusa; o "sim" avisa).
+ */
+async function valorDoAlmoco(ctx: ToolCtx): Promise<number | null> {
+  const { data, error } = await ctx.admin.from("app_settings").select("value").eq("key", "diarias_valor_almoco").maybeSingle();
+  if (error) throw new Error(`Não consegui ler o valor do almoço: ${error.message}`);
+  const n = Number(String((data as { value?: string } | null)?.value ?? "").replace(",", "."));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * Os extras do dia como o banco vai gravar (registrar_diaria): sem almoço dito, o total dito (ou o de
+ * antes); com almoço dito, os OUTROS extras mais o almoço — o já lançado guarda o valor daquele dia.
+ */
+function extrasDoDia(p: Pick<PedidoDeDiaria, "extras" | "almoco">, atual: DiaLancado | null | undefined, almoco: number | null): number {
+  if (p.almoco == null) return p.extras ?? atual?.extras ?? 0;
+  const almocoAntes = atual?.almoco ?? 0;
+  const outros = p.extras ?? ((atual?.extras ?? 0) - almocoAntes);
+  return outros + (!p.almoco ? 0 : almocoAntes > 0 ? almocoAntes : (almoco ?? 0));
+}
+
 /** O que o dia vai valer: a diária dita, a já gravada ou a do cadastro, mais extras, menos descontos. */
-function valorDoDia(p: PedidoDeDiaria, data: string, atual: DiaLancado | undefined): number {
+function valorDoDia(p: PedidoDeDiaria, data: string, atual: DiaLancado | undefined, almoco: number | null): number {
   const perfil = p.freelancer.perfis.find((x) => x.vigencia_inicio <= data && (!x.vigencia_fim || x.vigencia_fim >= data));
   const base = (p.valorDiaria ?? (atual?.valorDiaria || null) ?? perfil?.valor_diaria ?? 0) * (FRACAO[p.jornada] ?? 0);
-  return Math.round((base + (p.extras ?? atual?.extras ?? 0) - (p.descontos ?? atual?.descontos ?? 0)) * 100) / 100;
+  return Math.round((base + extrasDoDia(p, atual, almoco) - (p.descontos ?? atual?.descontos ?? 0)) * 100) / 100;
+}
+
+/** A linha do almoço no "sim": quanto entra, que o motivo vai sozinho — ou que o banco vai recusar. */
+function linhaDoAlmoco(p: Pick<PedidoDeDiaria, "almoco">, atual: DiaLancado | null | undefined, almoco: number | null): string[] {
+  if (p.almoco === true) {
+    const valor = (atual?.almoco ?? 0) > 0 ? atual!.almoco : almoco;
+    return valor == null
+      ? ["⚠️ O valor do almoço não está configurado: o sistema vai recusar o almoço."]
+      : [`Almoço (trouxe o próprio): + ${brl.format(valor)} — o motivo "Alimentação (trouxe o almoço)" vai sozinho.`];
+  }
+  if (p.almoco === false && (atual?.almoco ?? 0) > 0) return [`Tirar o almoço (${brl.format(atual!.almoco)}) do dia.`];
+  return [];
 }
 
 /** A confirmação do lote: um trecho por linha, o total, e o que já estava lançado. */
@@ -493,12 +543,13 @@ export async function resumirLote(ctx: ToolCtx, args: Record<string, unknown>): 
   const l = await resolverLote(ctx, args);
   if ("error" in l) return `Registrar diárias\n⚠️ ${l.error} — nada vai ser gravado assim.`;
   const { dias, mantidos, diasMantidos, corrigidos, lancados } = await diasDoLote(ctx, l);
-  const total = dias.reduce((s, d) => s + valorDoDia(d.item, d.data, lancados.get(d.data)), 0);
+  const almoco = l.itens.some((p) => p.almoco === true) ? await valorDoAlmoco(ctx) : null;
+  const total = dias.reduce((s, d) => s + valorDoDia(d.item, d.data, lancados.get(d.data), almoco), 0);
   const linhas = [`Registrar diárias de *${l.freelancer.nome}*: ${dias.length} dia(s) · ${brl.format(total)}`];
   for (const p of l.itens) {
     const ds = dias.filter((d) => d.item === p);
     if (!ds.length) continue;
-    const valores = ds.map((d) => valorDoDia(p, d.data, lancados.get(d.data)));
+    const valores = ds.map((d) => valorDoDia(p, d.data, lancados.get(d.data), almoco));
     const quando = ds.length > 1
       ? `${diaCurto(ds[0].data)} a ${diaCurto(ds[ds.length - 1].data)} (${ds.length} dias${p.fimDeSemana ? "" : ", só dias úteis"})`
       : diaCurto(ds[0].data);
@@ -511,8 +562,15 @@ export async function resumirLote(ctx: ToolCtx, args: Record<string, unknown>): 
       ? (osDosDias[0] ? ` · ${osDosDias[0]}` : "")
       : ` · pelo plano: ${osDosDiasNoSim(ds)}`;
     linhas.push(`• ${quando} · ${ROTULO[p.jornada]} · ${valor}` +
-      (p.extras ? ` (extras ${brl.format(p.extras)})` : "") + (p.descontos ? ` (descontos ${brl.format(p.descontos)})` : "") +
+      (p.almoco === true ? ` (com almoço${almoco != null ? ` ${brl.format(almoco)}` : ""})` : p.almoco === false ? " (sem almoço)" : "") +
+      (p.extras ? ` (${p.almoco != null ? "outros extras" : "extras"} ${brl.format(p.extras)})` : "") +
+      (p.descontos ? ` (descontos ${brl.format(p.descontos)})` : "") +
       os + (p.observacao ? ` · ${p.observacao}` : ""));
+  }
+  if (l.itens.some((p) => p.almoco === true)) {
+    linhas.push(almoco == null
+      ? "⚠️ O valor do almoço não está configurado: o sistema vai recusar os dias com almoço."
+      : `Almoço: o motivo "Alimentação (trouxe o almoço)" vai sozinho em cada dia.`);
   }
   // PÓS-MERGE (B): o que o "sim" de um dia diz sobre o plano, dia a dia — a OS dita diferente do plano e a pergunta da
   // meia diária com duas OS no plano; o valor que se divide entre as OS.
@@ -581,18 +639,18 @@ function valorDoDito(v: unknown): number | null | undefined {
   return n == null || n < 0 ? undefined : Math.round(n * 100) / 100;
 }
 
-type DiaLancado = { id: string; fracao: number; valorDia: number; valorDiaria: number; extras: number; descontos: number };
+type DiaLancado = { id: string; fracao: number; valorDia: number; valorDiaria: number; extras: number; almoco: number; descontos: number };
 
 /** Os dias já lançados para a pessoa nessas datas (no máximo um por data, pelo índice do banco). */
 async function diasLancados(ctx: ToolCtx, f: Freelancer, datas: string[]): Promise<Map<string, DiaLancado>> {
   const { data: linhas } = await ctx.admin.from("work_shifts")
-    .select("id, data, fracao, valor_diaria, valor_dia, extras, descontos")
+    .select("id, data, fracao, valor_diaria, valor_dia, extras, almoco, descontos")
     .in("work_profile_id", f.perfis.map((p) => p.id))
     .in("data", datas)
     .not("fracao", "is", null);
   return new Map(((linhas ?? []) as any[]).map((d) => [String(d.data), {
     id: d.id as string, fracao: Number(d.fracao), valorDia: Number(d.valor_dia),
-    valorDiaria: Number(d.valor_diaria), extras: Number(d.extras ?? 0), descontos: Number(d.descontos ?? 0),
+    valorDiaria: Number(d.valor_diaria), extras: Number(d.extras ?? 0), almoco: Number(d.almoco ?? 0), descontos: Number(d.descontos ?? 0),
   }]));
 }
 
@@ -617,7 +675,9 @@ function linhasDosExtras(p: PedidoDeDiaria, atual: DiaLancado | null): string[] 
     if (novo == null) return;
     linhas.push(`${rotulo}${p.intervalo ? " (cada dia)" : ""}: ${atual && antes !== novo ? `${brl.format(antes ?? 0)} → ` : ""}*${brl.format(novo)}*`);
   };
-  uma("Extras", p.extras, atual?.extras);
+  // com almoço dito, os extras ditos são os OUTROS (o almoço vai na linha dele)
+  if (p.almoco != null) uma("Outros extras", p.extras, atual ? atual.extras - atual.almoco : undefined);
+  else uma("Extras", p.extras, atual?.extras);
   uma("Descontos", p.descontos, atual?.descontos);
   return linhas;
 }
@@ -637,7 +697,9 @@ export async function resumirDiaria(ctx: ToolCtx, args: Record<string, unknown>)
   }
   const perfil = p.freelancer.perfis.find((x) => x.vigencia_inicio <= p.data && (!x.vigencia_fim || x.vigencia_fim >= p.data));
   // O banco guarda a diária e os extras/descontos do dia já lançado quando não vêm ditos (07/10/2026).
-  const extras = p.extras ?? atual?.extras ?? 0;
+  // 20/11/2026: o almoço dito entra com o valor da configuração (o mesmo que o banco usa).
+  const almoco = p.almoco === true ? await valorDoAlmoco(ctx) : null;
+  const extras = extrasDoDia(p, atual, almoco);
   const descontos = p.descontos ?? atual?.descontos ?? 0;
   const base = (p.jornada === "faltou" ? 0 : (p.valorDiaria ?? (atual?.valorDiaria || null) ?? perfil?.valor_diaria ?? 0) * FRACAO[p.jornada]);
   const valor = Math.round((base + extras - descontos) * 100) / 100;
@@ -648,11 +710,12 @@ export async function resumirDiaria(ctx: ToolCtx, args: Record<string, unknown>)
   if (divergencia) linhas.push(divergencia);
   if (p.perguntaDoPlano) linhas.push(p.perguntaDoPlano);
   linhas.push(...linhaDoValorDito(p, perfil));
+  linhas.push(...linhaDoAlmoco(p, atual, almoco));
   linhas.push(...linhasDosExtras(p, atual));
   if (p.os.length > 1) linhas.push("O valor do dia se divide em partes iguais entre as OS.");
   if (p.observacao) linhas.push(`Observação: ${p.observacao}`);
   if (atual) linhas.push(`Hoje está lançado: ${rotuloDaFracao(atual.fracao)} (${brl.format(atual.valorDia)}) — vai ser corrigido, não duplicado.`);
-  else if (!perfil) linhas.push("⚠️ Sem diária cadastrada nessa data: o sistema vai recusar.");
+  else if (!perfil) linhas.push(avisoSemPerfil(p.freelancer, p.data));
   // Agenda de Produção (Fase 3, P4): quando foi a agenda que lançou, o "sim" diz (e a palavra que corrige).
   const daAgenda = await diariaDaAgenda(ctx, p.freelancer.id, p.data);
   if (daAgenda) linhas.push(daAgenda);
@@ -670,14 +733,16 @@ async function resumirIntervalo(ctx: ToolCtx, p: PedidoDeDiaria): Promise<string
   const primeiro = p.datas[0];
   const ultimo = p.datas[p.datas.length - 1];
   const perfil = p.freelancer.perfis.find((x) => x.vigencia_inicio <= primeiro && (!x.vigencia_fim || x.vigencia_fim >= primeiro));
+  const almoco = p.almoco === true ? await valorDoAlmoco(ctx) : null;
   const valor = (p.jornada === "faltou" ? 0 : (p.valorDiaria ?? perfil?.valor_diaria ?? 0) * FRACAO[p.jornada]) +
-    (p.extras ?? 0) - (p.descontos ?? 0);
+    extrasDoDia(p, null, almoco) - (p.descontos ?? 0);
   const linhas = [
     `Registrar diária: *${p.freelancer.nome}* · *${ROTULO[p.jornada]}* · ${novos.length} dia(s) de ${diaCurto(primeiro)} a ${diaCurto(ultimo)}` +
       (p.fimDeSemana ? "" : " (só dias úteis)") +
       (p.jornada === "faltou" && !p.extras ? " (sem diária)" : ` · ${brl.format(valor)} cada, ${brl.format(valor * novos.length)} no total`) +
       (p.os.length ? ` · ${p.os.map((o) => o.numero).join(", ")}` : ""),
     ...linhaDoValorDito(p, perfil),
+    ...linhaDoAlmoco(p, null, almoco),
     ...linhasDosExtras(p, null),
   ];
   if (novos.length) linhas.push(`Dias: ${novos.map(ddmm).join(", ")}`);
@@ -688,7 +753,16 @@ async function resumirIntervalo(ctx: ToolCtx, p: PedidoDeDiaria): Promise<string
   if (!novos.length) linhas.push("Todos os dias do intervalo já estão lançados: nada vai mudar.");
   if (p.observacao) linhas.push(`Observação: ${p.observacao}`);
   if (!perfil) linhas.push("⚠️ Sem diária cadastrada no começo do intervalo: o sistema vai recusar esses dias.");
+  else if (saidaDe(p.freelancer) && ultimo > saidaDe(p.freelancer)!) linhas.push(avisoSemPerfil(p.freelancer, ultimo));
   return linhas.join("\n");
+}
+
+/** O "sim" de um dia que o banco vai recusar: depois da saída da equipe, ou sem diária na data. */
+function avisoSemPerfil(f: Freelancer, data: string): string {
+  const saiu = saidaDe(f);
+  return saiu && data > saiu
+    ? `⚠️ ${f.nome} saiu da equipe (último dia ${diaCurto(saiu)}): depois disso não entra dia — o sistema vai recusar. Se ele voltou, primeiro saida_da_equipe com voltou.`
+    : "⚠️ Sem diária cadastrada nessa data: o sistema vai recusar.";
 }
 
 async function chamar(ctx: ToolCtx, fn: string, params: Record<string, unknown>) {
@@ -826,6 +900,40 @@ export async function resumirCadastro(ctx: ToolCtx, args: Record<string, unknown
   return linhas.join("\n");
 }
 
+// ── Saída da equipe (20/11/2026, decisão do dono) ────────────────────────────────────────────────
+// "o Roberto saiu, último dia 24/10": a função do banco fecha a diária no último dia (depois dele
+// nenhum dia entra e a agenda deixa de contar com ele), sem desativar o cadastro e sem mexer no saldo.
+// "voltou" reabre. A confirmação é a frase da própria função SIMULANDO (p_simular) — com o saldo de
+// hoje dito pelo banco, a receber ou adiantado: a IA não calcula nada.
+
+export type PedidoDeSaida = { freelancer: Freelancer; voltou: true } | { freelancer: Freelancer; voltou: false; ultimoDia: string };
+
+export async function resolverSaida(ctx: ToolCtx, args: Record<string, unknown>): Promise<PedidoDeSaida | { error: string }> {
+  const f = await acharFreelancer(ctx, args.freelancer);
+  if ("error" in f) return f;
+  if (f.modo === "servico") return { error: `${f.nome} recebe por serviço, não por diária: não há saída da equipe para registrar.` };
+  if (args.voltou === true) return { freelancer: f, voltou: true };
+  if (args.ultimo_dia == null || args.ultimo_dia === "") return { error: `Qual foi o último dia de trabalho de ${f.nome}? (não suponha hoje: pergunte)` };
+  const ultimoDia = dataDoDito(args.ultimo_dia);
+  if (!ultimoDia) return { error: `Não entendi o último dia: "${args.ultimo_dia}". Use dd/mm, 'ontem' ou o dia da semana.` };
+  return { freelancer: f, voltou: false, ultimoDia };
+}
+
+const paramsDaSaida = (p: PedidoDeSaida, simular: boolean) => p.voltou
+  ? { fn: "desfazer_saida_da_equipe", params: { p_favorecido_id: p.freelancer.id, p_simular: simular } }
+  : { fn: "registrar_saida_da_equipe", params: { p_favorecido_id: p.freelancer.id, p_ultimo_dia: p.ultimoDia, p_simular: simular } };
+
+/** O texto do "sim": a função do banco simulando (nada gravado). Uma recusa aparece aqui, antes do "sim". */
+export async function resumirSaida(ctx: ToolCtx, args: Record<string, unknown>): Promise<string | null> {
+  const p = await resolverSaida(ctx, args);
+  if ("error" in p) return null;
+  const { fn, params } = paramsDaSaida(p, true);
+  const { data, error } = await ctx.admin.rpc(fn, { ...params, p_autor: null });
+  const titulo = p.voltou ? `Voltou para a equipe: *${p.freelancer.nome}*` : `Saída da equipe: *${p.freelancer.nome}* · último dia ${diaCurto(p.ultimoDia)}`;
+  if (error) return `${titulo}\n⚠️ ${semCodigo(error.message)} — o sistema vai recusar.`;
+  return `${titulo}\n${String((data as Record<string, unknown> | null)?.message ?? "")}`.trim();
+}
+
 /**
  * Vários dias: registra, um por um, só os que ainda não estão lançados (o banco é idempotente por
  * dia, mas aqui NÃO se corrige dia existente — "faltou desde 19/09" não pode apagar um dia inteiro
@@ -844,7 +952,7 @@ async function registrarIntervalo(ctx: ToolCtx, p: PedidoDeDiaria) {
     const r = await chamar(ctx, "registrar_diaria", {
       p_favorecido_id: p.freelancer.id, p_data: d, p_jornada: p.jornada,
       p_os_ids: p.os.length ? p.os.map((o) => o.id) : null, p_observacao: p.observacao,
-      p_extras: p.extras, p_descontos: p.descontos, p_valor_diaria: p.valorDiaria, p_origem: "agente",
+      p_extras: p.extras, p_descontos: p.descontos, p_valor_diaria: p.valorDiaria, p_origem: "agente", p_almoco: p.almoco,
     }) as Record<string, unknown>;
     if (r && "error" in r) falhas.push(`${ddmm(d)}: ${r.error}`);
     else feitos.push(d);
@@ -1476,9 +1584,12 @@ export const diariasTools: ToolDef[] = [
       "valor nem horário; valor_diaria só quando a pessoa DISSER outro valor para o dia ('na quarta foram 130'). Freelancer que " +
       "ainda não existe: cadastrar_freelancer antes. Não é pagamento (pagamento vem do extrato; em dinheiro é lancar_no_caixa) nem hora de OS " +
       "(log_service_order_hours). Vários dias com a mesma jornada ('a semana toda', 'de segunda até hoje'): data + data_ate; " +
-      "só dias úteis, salvo fim_de_semana; dia já lançado no intervalo fica como está. EXTRAS e DESCONTOS do dia, como na tela: " +
-      "'diária inteira mais 50 de almoço' (extras=50, observacao='almoço'), 'desconta 30 da diária do Mickael de ontem, chegou " +
-      "atrasado' (jornada='manter', descontos=30) — o valor é o TOTAL do dia e substitui o que havia (a confirmação mostra o antes). " +
+      "só dias úteis, salvo fim_de_semana; dia já lançado no intervalo fica como está. ALMOÇO: 'trouxe almoço', 'o Roberto trouxe " +
+      "o almoço ontem' → almoco=true (o sistema soma o valor do almoço da configuração e escreve o motivo; não passe extras para " +
+      "o almoço; no dia já lançado, jornada='manter'); almoco=false tira. EXTRAS e DESCONTOS do dia, como na tela: 'mais 50 de " +
+      "condução' (extras=50, observacao='condução'), 'desconta 30 da diária do Mickael de ontem, chegou atrasado' " +
+      "(jornada='manter', descontos=30) — o valor é o TOTAL do dia e substitui o que havia (com almoco dito, extras são os OUTROS; " +
+      "a confirmação mostra o antes). " +
       "Pede confirmação.",
     input_schema: {
       type: "object",
@@ -1493,13 +1604,13 @@ export const diariasTools: ToolDef[] = [
         },
         dias: {
           type: "array",
-          description: "Vários trechos de uma vez (uma confirmação só): cada um com data (e data_ate num intervalo) e a jornada; extras, descontos, os, observacao e valor_diaria do trecho se a pessoa disser. Com dias, não mande data/jornada fora.",
+          description: "Vários trechos de uma vez (uma confirmação só): cada um com data (e data_ate num intervalo) e a jornada; extras, almoco, descontos, os, observacao e valor_diaria do trecho se a pessoa disser. Com dias, não mande data/jornada fora.",
           items: {
             type: "object",
             properties: {
               data: { type: "string" }, data_ate: { type: "string" }, jornada: { type: "string", enum: ["inteiro", "meio", "manter"] },
               fim_de_semana: { type: "boolean" }, extras: { type: "number" }, descontos: { type: "number" },
-              os: { type: "string" }, observacao: { type: "string" }, valor_diaria: { type: "number" },
+              os: { type: "string" }, observacao: { type: "string" }, valor_diaria: { type: "number" }, almoco: { type: "boolean" },
             },
             required: ["data", "jornada"],
           },
@@ -1507,7 +1618,8 @@ export const diariasTools: ToolDef[] = [
         os: { type: "string", description: "Número da OS em que trabalhou; duas OS separadas por vírgula (o dia se divide igual)." },
         observacao: { type: "string", description: "Serviço feito, obra, embarcação ou veículo — se a pessoa disser." },
         valor_diaria: { type: "number", description: "Só se a pessoa DISSER o valor do dia, diferente do cadastro (em reais). Sem isso vale a diária do cadastro." },
-        extras: { type: "number", description: "Extras do dia em reais (o almoço quando ele traz o próprio, condução, hora a mais) — o total do dia. Só se a pessoa disser." },
+        extras: { type: "number", description: "Extras do dia em reais (condução, hora a mais) — o total do dia; com almoco dito, só os outros. Só se a pessoa disser." },
+        almoco: { type: "boolean", description: "true = ele trouxe o próprio almoço ('trouxe almoço'): o valor vem da configuração e o motivo vai sozinho. false = tirar o almoço do dia. Só se a pessoa disser." },
         descontos: { type: "number", description: "Descontos do dia em reais (atraso, vale) — o total do dia. Só se a pessoa disser." },
       },
       required: ["freelancer"],
@@ -1554,7 +1666,7 @@ export const diariasTools: ToolDef[] = [
         p_jornada: p.jornada,
         p_os_ids: p.os.length ? p.os.map((o) => o.id) : null,
         p_observacao: p.observacao,
-        p_extras: p.extras, p_descontos: p.descontos, p_valor_diaria: p.valorDiaria,
+        p_extras: p.extras, p_descontos: p.descontos, p_valor_diaria: p.valorDiaria, p_almoco: p.almoco,
         p_origem: "agente",
       }) as Record<string, unknown>;
       if (r && "error" in r) return r;
@@ -1596,7 +1708,9 @@ export const diariasTools: ToolDef[] = [
       if (!args.freelancer) {
         const r = await chamar(ctx, "resumo_freelancers", periodo) as Record<string, unknown>;
         if (r && "error" in r) return r;
-        const pessoas = ((r?.pessoas ?? []) as any[]).map((x) => ({
+        // 20/11/2026: quem saiu da equipe (ou foi desativado) entra enquanto tem saldo — zerado, sai da lista
+        const vivos = ((r?.pessoas ?? []) as any[]).filter((x) => (!x.saiu_em && x.ativo !== false) || Math.abs(Number(x.saldo_final) || 0) >= 0.005);
+        const pessoas = vivos.map((x) => ({
           nome: x.nome, periodo: periodoResolvido(x), dias: Number(x.dias), trabalhado: Number(x.trabalhado),
           // F2b: as despesas que ele pagou com comprovante (CMP), a favor dele, à parte dos dias
           ...(Number(x.reembolsos) > 0 ? { reembolsos: Number(x.reembolsos) } : {}),
@@ -1605,6 +1719,8 @@ export const diariasTools: ToolDef[] = [
           // 27/10/2026: o Pix que já saiu do banco para ele e espera a fila — já está no "pago"
           ...(Number(x.pago_falta_aprovar) > 0 ? { pago_no_banco_falta_aprovar_na_fila: Number(x.pago_falta_aprovar) } : {}),
           saldo: Number(x.saldo_final), situacao: situacaoDoSaldo(x.estado, x.modo), ultimo_pagamento: x.ultimo_pagamento,
+          ...(x.saiu_em ? { saiu_da_equipe_ultimo_dia: x.saiu_em } : {}),
+          ...(x.ativo === false ? { cadastro_desativado: true } : {}),
           // 12/11/2026: o prestador por serviço (Alex)
           ...(x.modo === "servico"
             ? { recebe_por: "serviço", servicos: Number(x.servicos), aguardando_cliente_pagar: Number(x.aguardando_cliente) }
@@ -1661,6 +1777,8 @@ export const diariasTools: ToolDef[] = [
         ...(Number(c.pago_falta_aprovar) > 0 ? { pago_no_banco_falta_aprovar_na_fila: Number(c.pago_falta_aprovar) } : {}),
         extras_no_periodo: soma("extras"), descontos_no_periodo: soma("descontos"),
         saldo: Number(c.saldo_final), situacao: situacaoDoSaldo(c.estado, c.favorecido?.modo),
+        // 20/11/2026: depois do último dia não entra dia; o saldo continua até zerar
+        ...(saidaDe(f) ? { saiu_da_equipe_ultimo_dia: saidaDe(f) } : {}),
         ...(c.favorecido?.modo === "servico" ? {
           recebe_por: "serviço (não tem diária)",
           servicos_na_conta: Number(c.servicos ?? 0),
@@ -1709,6 +1827,46 @@ export const diariasTools: ToolDef[] = [
       const r = await chamar(ctx, "cadastrar_freelancer", { ...p, p_simular: false }) as Record<string, unknown>;
       if (r && "error" in r) return r;
       return { ...r, aviso: String(r?.message ?? "") };
+    },
+  },
+  {
+    // 20/11/2026 (decisão do dono): "Saiu da equipe" pela conversa. Uso raro: fica fora do PERFIL_ADMIN (teto do perfil
+    // enxuto), ao alcance da ferramenta_extra; no perfil de operação (financeiro), à vista.
+    name: "saida_da_equipe",
+    description:
+      "Registra que um freelancer de diária SAIU da equipe: 'o Roberto saiu, último dia 24/10', 'o Mickael não trabalha mais " +
+      "com a gente'. Depois do último dia nenhum dia entra para ele e a agenda deixa de contar com ele; o saldo — a receber OU " +
+      "adiantado — continua na conta dele até zerar (o Pix para ele continua abatendo; o adiantado fica para descontar se ele " +
+      "voltar). NÃO desativa o cadastro. Precisa do último dia TRABALHADO: se a pessoa não disser, PERGUNTE (não suponha hoje). " +
+      "voltou=true quando ele voltou a trabalhar ('o Mickael voltou'): reabre, e os dias voltam a entrar. Repetir com outra data " +
+      "corrige o último dia. Pede confirmação.",
+    input_schema: {
+      type: "object",
+      properties: {
+        freelancer: { type: "string", description: "Nome como a pessoa falou ('Roberto')." },
+        ultimo_dia: { type: "string", description: "Último dia que ele TRABALHOU: dd/mm, 'ontem' ou dia da semana. Nunca no futuro." },
+        voltou: { type: "boolean", description: "true = ele voltou para a equipe (desfaz a saída). Sem ultimo_dia." },
+      },
+      required: ["freelancer"],
+    },
+    risk: "medium",
+    roles: CARGOS,
+    preValidar(args) {
+      if (args?.voltou === true) return null;
+      if (args?.ultimo_dia == null || args.ultimo_dia === "") {
+        return { error: `Qual foi o último dia de trabalho de ${args?.freelancer ?? "ele"}? Pergunte ao dono — não suponha hoje.` };
+      }
+      return null;
+    },
+    async execute(args, ctx) {
+      const b = semAcesso(ctx);
+      if (b) return b;
+      const p = await resolverSaida(ctx, args);
+      if ("error" in p) return p;
+      const { fn, params } = paramsDaSaida(p, false);
+      const r = await chamar(ctx, fn, params) as Record<string, unknown>;
+      if (r && "error" in r) return r;
+      return { ok: true, acao: r?.acao, saldo: r?.saldo, aviso: String(r?.message ?? "") };
     },
   },
   {

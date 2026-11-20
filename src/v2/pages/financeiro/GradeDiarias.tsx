@@ -60,8 +60,10 @@ export function GradeDiarias({ pessoas, mes, onMes, onEditar, onNovo }: Props) {
     return m;
   }, [pessoas, contas]);
   const celula = (pessoaId: string, data: string): Celula => celulas.get(`${pessoaId}|${data}`) ?? celulaVazia();
-  // Antes do início da conta corrente e no futuro não se lança: a célula fica apagada.
-  const bloqueada = (p: FreelancerNoResumo, data: string) => data > hoje || (!!p.desde && data < p.desde);
+  // Antes do início da conta corrente, no futuro e depois da saída da equipe (20/11/2026) não se lança:
+  // a célula fica apagada.
+  const bloqueada = (p: FreelancerNoResumo, data: string) =>
+    data > hoje || (!!p.desde && data < p.desde) || (!!p.saiu_em && data > p.saiu_em);
 
   const carregando = contas.some((c) => c.isLoading);
   const erro = contas.find((c) => c.error)?.error as Error | undefined;

@@ -175,6 +175,9 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   // despesas pagas pelo técnico — paridade com o "Dividir" da tela. Como as do acerto, fica fora do
   // PERFIL_ADMIN (teto do perfil enxuto): no admin, pela rede.
   "dividir_pagamento_freelancer",
+  // 20/11/2026 (decisão do dono): "o Roberto saiu, último dia 24/10" — a saída da equipe (e a volta). Uso raro: fora do
+  // PERFIL_ADMIN (teto do perfil enxuto); no admin, pela ferramenta_extra.
+  "saida_da_equipe",
 
   // — Fiscal: espelho e consulta (emitir é risco alto e entra sempre) —
   "preview_fiscal_note",

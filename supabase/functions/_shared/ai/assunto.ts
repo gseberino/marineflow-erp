@@ -43,6 +43,7 @@ export const ASSUNTO_DAS_ACOES: Readonly<Record<string, readonly string[]>> = {
   create_service: ["name"],
   cadastrar_favorecido: ["nome"],
   cadastrar_freelancer: ["nome"],
+  saida_da_equipe: ["freelancer", "voltou"],
   // diárias (27/10/2026): "Roberto de 19 a 24" e "Roberto dia 20" são pedidos diferentes
   registrar_diaria: ["freelancer", "data", "data_ate", "dias"],
   registrar_pagamento_freelancer: ["freelancer", "data"],

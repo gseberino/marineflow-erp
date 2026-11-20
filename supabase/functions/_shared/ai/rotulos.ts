@@ -170,6 +170,8 @@ export const ROTULOS_DOS_CAMPOS: Record<string, string> = {
   adicionar_itens: "Itens a acrescentar",
   agencia: "Agência",
   alias: "Apelido",
+  // trouxe o almoço (20/11/2026): registrar_diaria
+  almoco: "Trouxe o almoço",
   alterar_itens: "Itens a alterar",
   alvo_id: "Conta ou OS",
   anotacao_id: "Anotação",
@@ -382,6 +384,7 @@ export const ROTULOS_DOS_CAMPOS: Record<string, string> = {
   transaction_id: "Linha do extrato",
   trecho: "Trecho",
   trigger_reason: "Motivo",
+  ultimo_dia: "Último dia de trabalho",
   ultimo_servico_em: "Último serviço em",
   unit: "Unidade",
   unit_cost: "Custo unitário",
@@ -395,6 +398,8 @@ export const ROTULOS_DOS_CAMPOS: Record<string, string> = {
   vessel_id: "Embarcação ou veículo",
   // histórico de documentos (16/11/2026): restaurar_documento
   versao: "Versão",
+  // saída da equipe (20/11/2026): saida_da_equipe
+  voltou: "Voltou para a equipe",
   eventos: "Alterações a desfazer",
   voltar_para_em_elaboracao: "Voltar para em elaboração",
   whatsapp: "WhatsApp",

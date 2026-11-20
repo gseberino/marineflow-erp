@@ -20,6 +20,10 @@ vi.mock('@/integrations/supabase/client', () => ({
     rpc: (...a: unknown[]) => rpc(...a),
     // A leitura do cadastro dos freelancers (CPF e PIX) que os documentos fazem, e a dos acertos.
     from: (tabela: string) => ({ select: () => ({
+      // 20/11/2026: o valor do almoço (useAppSettings lê app_settings inteiro)
+      ...(tabela === 'app_settings'
+        ? { then: (ok: (r: unknown) => unknown) => Promise.resolve({ data: [{ key: 'diarias_valor_almoco', value: '20' }], error: null }).then(ok) }
+        : {}),
       in: async () => ({ data: [
         { id: 'r', name: 'Roberto', document: '12345678940', pix_key: null },
         { id: 'm', name: 'Mickael', document: '98765432100', pix_key: null },
@@ -100,8 +104,23 @@ const contaVazia = (id: string, nome: string, desde: string) => ({
   de: null, ate: null, saldo_anterior: 0, dias: 0, trabalhado: 0, pago: 0, saldo_final: 0, estado: 'quitado', linhas: [],
 });
 
+/**
+ * Saída da equipe (20/11/2026): o Mickael saiu (último dia 22/09) com R$ 20 adiantado; o Felipe foi
+ * desativado nos Favorecidos com R$ 280 a receber; o João saiu com a conta zerada.
+ */
+let comSaidas = false;
+const pessoasComSaidas = () => [
+  { ...pessoas[0], ultimo_dia_trabalhado: '2026-09-16', saiu_em: null, ativo: true },
+  { ...pessoas[1], saiu_em: '2026-09-22', ativo: true, ultimo_dia_trabalhado: '2026-09-22' },
+  { id: 'f', nome: 'Felipe', diaria: 150, desde: '2026-08-25', dias: 2, trabalhado: 280, pago: 0, ultimo_pagamento: null,
+    saldo_final: 280, estado: 'deve', saiu_em: null, ativo: false, ultimo_dia_trabalhado: '2026-09-02' },
+  { id: 'j', nome: 'João', diaria: 150, desde: '2026-09-01', dias: 1, trabalhado: 150, pago: 150, ultimo_pagamento: '2026-09-05',
+    saldo_final: 0, estado: 'quitado', saiu_em: '2026-09-04', ativo: true, ultimo_dia_trabalhado: '2026-09-04' },
+];
+
 beforeEach(() => {
   acertosNoBanco = [];
+  comSaidas = false;
   comReembolso = false;
   reembolsoEmAberto = false;
   pagamentoJaDividido = false;
@@ -114,6 +133,9 @@ beforeEach(() => {
         if (args.p_atalho === 'em_aberto') {
           return { data: { pessoas: [{ ...pessoas[0], de: '2026-09-23', ate: null, pago_aguardando_banco: 100, pago_falta_aprovar: 50 }],
             trabalhado: 160, pago: 150, dias: 1, deve: 10, adiantado: 0 }, error: null };
+        }
+        if (comSaidas) {
+          return { data: { pessoas: pessoasComSaidas(), trabalhado: 2990, pago: 2280, dias: 19, deve: 730, adiantado: 20 }, error: null };
         }
         if (comReembolso) {
           return { data: { pessoas: [{ ...pessoas[0], reembolsos: 62, saldo_final: 512 }, pessoas[1]],
@@ -167,6 +189,15 @@ beforeEach(() => {
               pix: { id: 'px', data: '2026-10-05', valor: 80, conta: 'C6' },
               candidatos: [{ id: 'px', data: '2026-10-05', valor: 80, conta: 'C6', aguardando: false, saldo_final: 0, zera: true }] }, error: null }
           : { data: { id: 'ac2', numero: 2, message: 'Recibo nº 0002 fechado.' }, error: null };
+      case 'registrar_saida_da_equipe':
+        if (args.p_ultimo_dia === '2026-09-10') {
+          return { data: null, error: { message: 'Há 1 dia(s) de Roberto lançado(s) depois de qui 10/09: qua 16/09. Apague esses dias antes (se foram por engano) ou diga outro último dia.' } };
+        }
+        return { data: { ok: true, acao: 'saiu', favorecido: 'Roberto', ultimo_dia: args.p_ultimo_dia, saldo: 450,
+          message: `Roberto ${args.p_simular ? 'sai' : 'saiu'} da equipe: último dia qua 16/09. Saldo hoje: R$ 450,00 a receber.` }, error: null };
+      case 'desfazer_saida_da_equipe':
+        return { data: { ok: true, acao: 'voltou', favorecido: 'Mickael', saldo: -20,
+          message: 'Mickael voltou para a equipe (tinha saído com último dia ter 22/09).' }, error: null };
       case 'cadastrar_freelancer':
         if (String(args.p_nome).startsWith('Roberto')) {
           return { data: null, error: { message: 'Roberto já tem diária cadastrada (veja em Financeiro › Diárias).' } };
@@ -242,7 +273,7 @@ describe('DiariasPanel', () => {
     opcoes.action.onClick();
     await waitFor(() => expect(chamadas('registrar_diaria')).toEqual([{
       p_favorecido_id: 'r', p_data: '2026-09-16', p_jornada: 'inteiro', p_os_ids: ['o1'],
-      p_observacao: 'Gerador do Marcelo', p_extras: 20, p_descontos: 0, p_valor_diaria: 160, p_origem: 'painel',
+      p_observacao: 'Gerador do Marcelo', p_extras: 20, p_descontos: 0, p_valor_diaria: 160, p_origem: 'painel', p_almoco: false,
     }]));
   });
 
@@ -266,7 +297,7 @@ describe('DiariasPanel', () => {
     // Só a jornada: OS, extras, descontos, observação e diária ficam como o dia já tinha.
     expect(chamadas('registrar_diaria')[0]).toEqual({
       p_favorecido_id: 'r', p_data: '2026-09-16', p_jornada: 'meio', p_os_ids: null, p_observacao: null,
-      p_extras: null, p_descontos: null, p_valor_diaria: null, p_origem: 'painel',
+      p_extras: null, p_descontos: null, p_valor_diaria: null, p_origem: 'painel', p_almoco: null,
     });
   });
 
@@ -293,9 +324,9 @@ describe('DiariasPanel', () => {
     await user.click(screen.getByRole('button', { name: /Registrar dia/ }));
     const dialogo = await screen.findByRole('dialog');
     expect(within(dialogo).queryByRole('button', { name: 'Não trabalhou' })).not.toBeInTheDocument();
-    expect(within(dialogo).queryByLabelText('Extras (R$)')).not.toBeInTheDocument();
+    expect(within(dialogo).queryByLabelText('Outros extras (R$)')).not.toBeInTheDocument();
     await user.click(within(dialogo).getByRole('button', { name: /Mais detalhes/ }));
-    expect(within(dialogo).getByLabelText('Extras (R$)')).toBeInTheDocument();
+    expect(within(dialogo).getByLabelText('Outros extras (R$)')).toBeInTheDocument();
     expect(within(dialogo).getByLabelText('Em qual OS (opcional)')).toBeInTheDocument();
   });
 
@@ -651,5 +682,132 @@ describe('DiariasPanel', () => {
     expect(await within(dialogo).findByRole('alert')).toHaveTextContent('Roberto já tem diária cadastrada');
     expect(within(dialogo).queryByRole('button', { name: 'Cadastrar' })).not.toBeInTheDocument();
     expect(chamadas('cadastrar_freelancer').every((a) => a.p_simular === true)).toBe(true);
+  });
+});
+
+// Saída da equipe (decisão do dono, 20/11/2026): quem saiu fica com o saldo em "Saíram da equipe" até
+// zerar; desativado com saldo também aparece; a saída e a volta passam pelas funções do banco.
+describe('DiariasPanel — saída da equipe', () => {
+  it('quem saiu (e o desativado com saldo) fica em "Saíram da equipe" com o saldo; zerado vira uma linha', async () => {
+    comSaidas = true;
+    renderizar('resumo');
+    expect(await screen.findByRole('heading', { name: 'Saíram da equipe' })).toBeInTheDocument();
+    expect(screen.getByText('Saiu da equipe · último dia 22/09/2026')).toBeInTheDocument();
+    expect(screen.getByText('Cadastro desativado nos Favorecidos')).toBeInTheDocument();
+    expect(screen.getByText(/conta zerada · último dia 04\/09\/2026/)).toBeInTheDocument();
+    // a dívida de quem saiu continua no topo
+    expect(screen.getByText('A pagar a todos').nextSibling).toHaveTextContent(/730,00/);
+    // quem saiu não tem "Registrar dia" à vista (só o Roberto, que está na equipe)
+    expect(screen.getAllByRole('button', { name: 'Registrar dia' })).toHaveLength(2); // barra + cartão do Roberto
+    expect(screen.getAllByRole('button', { name: 'Pagar' })).toHaveLength(3);
+  });
+
+  it('"Saiu da equipe": propõe o último dia lançado, mostra a frase do banco simulando e só grava no botão', async () => {
+    comSaidas = true;
+    const user = userEvent.setup();
+    renderizar('resumo');
+    await user.click(await screen.findByRole('button', { name: /Mais ações para Roberto/ }));
+    await user.click(await screen.findByRole('menuitem', { name: /Saiu da equipe/ }));
+    const dialogo = await screen.findByRole('dialog');
+    expect(within(dialogo).getByLabelText('Último dia de trabalho')).toHaveValue('2026-09-16');
+    expect(await within(dialogo).findByText(/Roberto sai da equipe: último dia qua 16\/09/)).toBeInTheDocument();
+    expect(chamadas('registrar_saida_da_equipe')).toEqual([{ p_favorecido_id: 'r', p_ultimo_dia: '2026-09-16', p_simular: true }]);
+
+    // a recusa do banco aparece antes do clique e o botão fica preso
+    fireEvent.change(within(dialogo).getByLabelText('Último dia de trabalho'), { target: { value: '2026-09-10' } });
+    expect(await within(dialogo).findByText(/Apague esses dias antes/)).toBeInTheDocument();
+    expect(within(dialogo).getByRole('button', { name: 'Registrar a saída' })).toBeDisabled();
+
+    fireEvent.change(within(dialogo).getByLabelText('Último dia de trabalho'), { target: { value: '2026-09-16' } });
+    await within(dialogo).findByText(/Roberto sai da equipe/);
+    await user.click(within(dialogo).getByRole('button', { name: 'Registrar a saída' }));
+    await waitFor(() => expect(chamadas('registrar_saida_da_equipe').filter((a) => a.p_simular === false))
+      .toEqual([{ p_favorecido_id: 'r', p_ultimo_dia: '2026-09-16', p_simular: false }]));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('"Voltou para a equipe" desfaz a saída direto (reversível, sem confirmação)', async () => {
+    comSaidas = true;
+    const user = userEvent.setup();
+    renderizar('resumo');
+    await user.click(await screen.findByRole('button', { name: /Mais ações para Mickael/ }));
+    await user.click(await screen.findByRole('menuitem', { name: /Voltou para a equipe/ }));
+    await waitFor(() => expect(chamadas('desfazer_saida_da_equipe')).toEqual([{ p_favorecido_id: 'm' }]));
+  });
+
+  it('desativado nos Favorecidos não tem "Voltou para a equipe" (a saída não reativa nada)', async () => {
+    comSaidas = true;
+    const user = userEvent.setup();
+    renderizar('resumo');
+    await user.click(await screen.findByRole('button', { name: /Mais ações para Felipe/ }));
+    expect(await screen.findByRole('menuitem', { name: /Extrato em PDF/ })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /Voltou para a equipe/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /Saiu da equipe/ })).not.toBeInTheDocument();
+  });
+
+  it('grade: depois do último dia a célula de quem saiu fica travada; o desativado sem saída não entra', async () => {
+    comSaidas = true;
+    renderizar('grade');
+    await screen.findByText('Setembro de 2026');
+    expect((await screen.findAllByRole('gridcell', { name: 'Mickael em ter 22/09' }))[0]).not.toBeDisabled();
+    expect(screen.getAllByRole('gridcell', { name: 'Mickael em qua 23/09' })[0]).toBeDisabled();
+    // o desativado sem saída não entra na grade; o João (saiu em 04/09) entra só com os dias até a saída
+    expect(screen.queryAllByRole('gridcell', { name: /^Felipe em/ })).toHaveLength(0);
+    expect(screen.getAllByRole('gridcell', { name: 'João em sáb 05/09' })[0]).toBeDisabled();
+  });
+});
+
+// "Trouxe o almoço" (decisão do dono, 20/11/2026): a caixa à vista ao lançar o dia, com o valor da
+// configuração; o banco soma o almoço e escreve o motivo (a tela manda só p_almoco e os OUTROS extras).
+describe('DiariasPanel — trouxe o almoço', () => {
+  it('registrar dia: a caixa mostra o valor da configuração, soma no total e vai como p_almoco (sem extra inventado)', async () => {
+    const user = userEvent.setup();
+    renderizar('extrato');
+    await screen.findByText('OS-0042');
+    await user.click(screen.getByRole('button', { name: /Registrar dia/ }));
+    const dialogo = await screen.findByRole('dialog');
+    expect(await within(dialogo).findByText(/Trouxe o almoço \(\+R\$\s?20,00\)/)).toBeInTheDocument();
+    await user.click(within(dialogo).getByRole('checkbox', { name: 'Trouxe o almoço' }));
+    expect(within(dialogo).getByText(/Total do dia/)).toHaveTextContent(/180,00/);
+    await user.click(within(dialogo).getByRole('button', { name: 'Registrar' }));
+    await waitFor(() => expect(chamadas('registrar_diaria')).toHaveLength(1));
+    expect(chamadas('registrar_diaria')[0]).toMatchObject({ p_favorecido_id: 'r', p_jornada: 'inteiro', p_extras: 0, p_almoco: true });
+  });
+
+  it('corrigir um dia com almoço: a caixa vem marcada, "Outros extras" sem o almoço e a observação sem o motivo', async () => {
+    const user = userEvent.setup();
+    rpc.mockReset();
+    rpc.mockImplementation(async (nome: string) => {
+      if (nome === 'conta_corrente_freelancer') {
+        return { data: { ...contaDoRoberto, linhas: [{ ...contaDoRoberto.linhas[0], extras: 50, almoco: 20,
+          observacao: 'Alimentação (trouxe o almoço); Gerador do Marcelo', trabalhado: 210 }] }, error: null };
+      }
+      if (nome === 'resumo_freelancers') return { data: { pessoas, trabalhado: 0, pago: 0, dias: 0, deve: 0, adiantado: 0 }, error: null };
+      if (nome === 'registrar_diaria') return { data: { acao: 'atualizado', diaria_id: 'd1', message: 'ok' }, error: null };
+      return { data: null, error: { message: `rpc inesperada: ${nome}` } };
+    });
+    renderizar('extrato');
+    await user.click(await screen.findByRole('button', { name: /Mais ações para dia qua 16\/09/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /Corrigir o dia/ }));
+    const dialogo = await screen.findByRole('dialog');
+    expect(within(dialogo).getByRole('checkbox', { name: 'Trouxe o almoço' })).toBeChecked();
+    expect(within(dialogo).getByLabelText('Outros extras (R$)')).toHaveValue('30,00');
+    expect(within(dialogo).getByLabelText('Observação')).toHaveValue('Gerador do Marcelo');
+    await user.click(within(dialogo).getByRole('checkbox', { name: 'Trouxe o almoço' }));
+    await user.click(within(dialogo).getByRole('button', { name: 'Salvar' }));
+    await waitFor(() => expect(chamadas('registrar_diaria')).toHaveLength(1));
+    expect(chamadas('registrar_diaria')[0]).toMatchObject({ p_extras: 30, p_almoco: false, p_observacao: 'Gerador do Marcelo' });
+  });
+
+  it('grade: na ficha do dia já lançado, marcar o almoço grava na hora só o almoço', async () => {
+    const user = userEvent.setup();
+    renderizar('grade');
+    await user.click((await screen.findAllByRole('gridcell', { name: 'Roberto em qua 16/09' }))[0]);
+    const ficha = await screen.findByRole('dialog');
+    const caixa = within(ficha).getByRole('checkbox', { name: 'Trouxe o almoço' });
+    expect(caixa).not.toBeChecked();
+    await user.click(caixa);
+    await waitFor(() => expect(chamadas('registrar_diaria')).toHaveLength(1));
+    expect(chamadas('registrar_diaria')[0]).toMatchObject({ p_jornada: 'inteiro', p_almoco: true, p_extras: null, p_observacao: null });
   });
 });

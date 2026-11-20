@@ -12936,6 +12936,7 @@ export type Database = {
       }
       work_shifts: {
         Row: {
+          almoco: number
           aprovado_em: string | null
           aprovado_por: string | null
           created_at: string
@@ -12960,6 +12961,7 @@ export type Database = {
           work_profile_id: string
         }
         Insert: {
+          almoco?: number
           aprovado_em?: string | null
           aprovado_por?: string | null
           created_at?: string
@@ -12984,6 +12986,7 @@ export type Database = {
           work_profile_id: string
         }
         Update: {
+          almoco?: number
           aprovado_em?: string | null
           aprovado_por?: string | null
           created_at?: string
@@ -15866,6 +15869,7 @@ export type Database = {
       }
       registrar_diaria: {
         Args: {
+          p_almoco?: boolean
           p_autor?: string
           p_data: string
           p_descontos?: number
