@@ -499,6 +499,11 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const { data: instrucoesSugeridas } = useInstrucoesSugeridas(
     !isNew && orderId && authUser?.role === 'admin' ? orderId : undefined,
   );
+  // Cobrança só nasce na sessão de administrador ou financeiro (dono, 20/11/2026: "Só admin e financeiro";
+  // RLS de collections, migration 20270212120000). A geração AUTOMÁTICA (assinatura chegando com a OS aberta,
+  // salvar como concluída/faturada) não roda na tela do técnico: lá o insert seria recusado e ele veria um
+  // erro de cobrança que não é dele. O escritório gera pelo botão "Gerar Cobranças" ou na própria sessão.
+  const geraCobranca = authUser?.role === 'admin' || authUser?.role === 'financial';
   // A embarcação/veículo da OS como foi LIDA (não a do formulário): técnico escolhe a primeira, mas
   // não troca a que já está gravada (decisão do dono, 22/10/2026). Sem a OS lida: não se sabe.
   const unidadeGravada: string | null | undefined = orderData ? (orderData.vessel_id ?? null) : undefined;
@@ -747,8 +752,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       return;
     }
     prevSignedAt.current = form.signed_at;
-    handleGenerateCollections();
-  }, [form.signed_at, orderId, handleGenerateCollections]);
+    if (geraCobranca) handleGenerateCollections();
+  }, [form.signed_at, orderId, handleGenerateCollections, geraCobranca]);
 
   // A releitura não reescreve o que está sendo digitado: o que a tela recebeu da leitura anterior
   // é a base da mesclagem campo a campo (src/lib/releitura-da-os.ts). Outra OS = sem base.
@@ -1129,7 +1134,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
 
         // M4: gerar cobranças do saldo ao concluir (preset de parcelamento) — SEM auto-envio.
         // Na conclusão o aviso ao cliente é OPT-IN (prompt abaixo), nunca WhatsApp automático.
-        if (form.status === 'completed' && form.payment_condition_preset_id) {
+        if (geraCobranca && form.status === 'completed' && form.payment_condition_preset_id) {
           const { generateCollectionsFromOS } = await import('@/lib/generate-collections');
           generateCollectionsFromOS({
             serviceOrderId: orderId!,
@@ -1156,7 +1161,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         // acontece via o seletor de status. Aqui, no salvar, ele não caberia.)
 
         // Auto-trigger collection generation when status becomes 'invoiced'
-        if (form.status === 'invoiced') {
+        if (geraCobranca && form.status === 'invoiced') {
           const { generateCollectionsFromOS } = await import('@/lib/generate-collections');
           generateCollectionsFromOS({
             serviceOrderId: orderId!,
