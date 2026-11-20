@@ -1,6 +1,8 @@
 // Extrato financeiro do cliente em texto (para enviar por WhatsApp / copiar). Lista os lançamentos
 // (sinal, saldo, faturas) com vencimento e status, e os totais (total / pago / em aberto). Inclui a
 // chave Pix quando há saldo em aberto — mesmo seam do completion (depois vira QR/copia-e-cola).
+// Sem nada em aberto, o extrato do cliente inteiro vira "Comprovante de quitação" (dono, 20/11/2026:
+// "Deixar sair como comprovante de quitação"): o título e a linha do em aberto dizem que está quitado.
 //
 // "Cobrar juntas" (Fase 0, 28/10/2026) é este mesmo extrato filtrado pelas OS escolhidas
 // (`servicoIds`): só as contas abertas delas, cada linha com o número da OS e o SALDO.
@@ -110,17 +112,23 @@ export function buildClientStatement({ clientName, items, pixKey, servicoIds, ho
   const pixLine = open > 0.009 && pixKey && pixKey.trim() ? `\n\n💠 Para pagar por Pix, use a chave: *${pixKey.trim()}*` : '';
 
   const numeros = [...new Set(rows.map((r) => (r.numero_os || '').trim()).filter(Boolean))];
+  // Extrato do cliente inteiro sem nada em aberto: sai como comprovante de quitação (dono, 20/11/2026).
+  const quitado = !filtrarOs && rows.length > 0 && open <= 0.009;
   const cabecalho = filtrarOs
     ? `📋 *Cobrança — HBR*\nCliente: ${nome}${numeros.length ? `\nOS: ${numeros.join(', ')}` : ''}\n\n`
-    : `📋 *Extrato financeiro — HBR*\nCliente: ${nome}\n\n`;
+    : quitado
+      ? `✅ *Comprovante de quitação — HBR*\nCliente: ${nome}\n\n`
+      : `📋 *Extrato financeiro — HBR*\nCliente: ${nome}\n\n`;
 
   return (
     cabecalho +
     (lines.length ? lines.join('\n') : '_Sem lançamentos._') +
     `\n\nTotal: ${brl(total)}\n` +
     `Pago: ${brl(paid)}\n` +
-    `*Em aberto: ${brl(open)}*` +
+    (quitado ? `*Em aberto: ${brl(0)} — tudo quitado* ✅` : `*Em aberto: ${brl(open)}*`) +
     pixLine +
-    `\n\n_Qualquer dúvida sobre os valores, estamos à disposição._`
+    (quitado
+      ? `\n\n_Obrigado! Qualquer dúvida sobre os valores, estamos à disposição._`
+      : `\n\n_Qualquer dúvida sobre os valores, estamos à disposição._`)
   );
 }

@@ -243,11 +243,18 @@ export default function ClientDetail() {
       </Tabs>
 
       <ClientFormDialog open={editOpen} onOpenChange={setEditOpen} client={client} />
+      {/* "Enviar extrato" com as travas do Cobrar juntas (dono, 20/11/2026). */}
       <ClientStatementDialog
         open={statementOpen}
         onOpenChange={setStatementOpen}
-        clientName={client.name}
-        clientPhone={(client as any).whatsapp || client.phone}
+        cliente={{
+          id: client.id,
+          name: client.name,
+          generico: (client as { generico?: boolean | null }).generico === true,
+          opt_out_whatsapp: (client as { opt_out_whatsapp?: boolean | null }).opt_out_whatsapp,
+          whatsapp: (client as { whatsapp?: string | null }).whatsapp,
+          phone: client.phone,
+        }}
         items={clientReceivables ?? []}
       />
     </div>

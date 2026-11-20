@@ -1,7 +1,7 @@
 import { assert, assertEquals, assertNotEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
-  chaveDoCobrarJuntas, contaVencida, horaEmBrasilia, MAX_COBRAR_JUNTAS, MIN_COBRAR_JUNTAS, mudancaNasContas, osComSaldo,
-  osEntraNoCobrarJuntas, pagoDaConta, saldoDaConta, travaDoCobrarJuntas,
+  avisoDaCobrancaCriada, chaveDoCobrarJuntas, contasSemCobranca, contaVencida, horaEmBrasilia, MAX_COBRAR_JUNTAS, MIN_COBRAR_JUNTAS, mudancaNasContas, osComSaldo,
+  osEntraNoCobrarJuntas, pagoDaConta, saldoDaConta, travaDoCobrarJuntas, travaDoExtrato,
 } from "./cobrar-juntas.ts";
 import { checarConformidade } from "../ai/comms/compliance-guard.ts";
 import { MAX_AGRUPAR, MIN_AGRUPAR } from "../ai/tools/agrupar-orcamentos.ts";
@@ -125,4 +125,73 @@ Deno.test("chave de envio desviado pelo modo de teste: só ganha ':teste' (não 
   const real = chaveDoCobrarJuntas("cli", ["r45", "r46"], "2026-10-28", "Olá");
   assertEquals(chaveDoCobrarJuntas("cli", ["r45", "r46"], "2026-10-28", "Olá", false), real);
   assertEquals(chaveDoCobrarJuntas("cli", ["r46", "r45"], "2026-10-28", "Olá", true), `${real}:teste`);
+});
+
+// ── 20/11/2026: cobrança criada junto (decisão A) e "Enviar extrato" com as mesmas travas (decisão B) ──
+
+Deno.test("contasSemCobranca: a mesma regra da função do banco (conta sem cobrança aberta e OS sem cobrança sem conta)", () => {
+  const contas = [
+    { id: "r45", service_order_id: "os45" },
+    { id: "r46", service_order_id: "os46" },
+    { id: "r47", service_order_id: "os47" },
+  ];
+  // r45: cobrança pela conta; os46: a "Total" sem conta; r47: nada → só r47 ganha cobrança.
+  assertEquals(contasSemCobranca(contas, [
+    { receivable_id: "r45", service_order_id: "os45" },
+    { receivable_id: null, service_order_id: "os46" },
+  ]), ["r47"]);
+  // A MP em produção: nenhuma cobrança → as duas.
+  assertEquals(contasSemCobranca(contas.slice(0, 2), []), ["r45", "r46"]);
+});
+
+Deno.test("aviso da cobrança criada: singular, plural e nada quando não cria", () => {
+  assertEquals(avisoDaCobrancaCriada(0), null);
+  assertEquals(avisoDaCobrancaCriada(1),
+    "1 conta não tem cobrança registrada: ela é criada junto com o envio (aparecem em Cobranças), e o lembrete não repete hoje.");
+  assert(avisoDaCobrancaCriada(2)?.startsWith("2 contas não têm cobrança registrada: elas são criadas junto com o envio"));
+});
+
+Deno.test("Enviar extrato usa as mesmas travas: sem contagem de OS, frase do cliente inteiro quando nada está em aberto", () => {
+  const base = { clienteNome: "MP MOTOR HOMES", totalEmAberto: 1670, telefone: "47999990000", horaBrasilia: 14 };
+  assertEquals(travaDoCobrarJuntas(base), null, "uma 'OS' só não trava o extrato (não há escolha de OS)");
+  assertEquals(travaDoCobrarJuntas({ ...base, totalEmAberto: 0 }), "Este cliente não tem saldo em aberto: não há o que cobrar.");
+  assertEquals(travaDoCobrarJuntas({ ...base, totalEmAberto: 0, quantidadeOs: 2 }), "As OS escolhidas não têm saldo em aberto: não há o que cobrar.");
+  assert(travaDoCobrarJuntas({ ...base, generico: true })?.includes("genérico"));
+  assert(travaDoCobrarJuntas({ ...base, pixEsperando: [{ valor: 1670 }] })?.includes("Pix esperando no Extrato"));
+  assert(travaDoCobrarJuntas({ ...base, horaBrasilia: 21 })?.includes("Fora do horário"));
+});
+
+Deno.test("Enviar extrato: chave do dia com prefixo próprio e frase de mudança do cliente inteiro", () => {
+  const cj = chaveDoCobrarJuntas("cli", ["r45"], "2026-10-28", "Olá");
+  const ex = chaveDoCobrarJuntas("cli", ["r45"], "2026-10-28", "Olá", false, "extrato");
+  assert(ex.startsWith("extrato:cli:2026-10-28:"));
+  assertEquals(ex.split(":").at(-1), cj.split(":").at(-1), "só o prefixo muda");
+  assertEquals(chaveDoCobrarJuntas("cli", ["r45"], "2026-10-28", "Olá", true, "extrato"), `${ex}:teste`);
+  const antes = [{ id: "r45", saldo: 1650 }];
+  const mudou = mudancaNasContas(antes, [{ id: "r45", status: "partially_paid", amount: 1650, paid_amount: 650, balance_amount: 1000 }], "extrato");
+  assert(mudou?.startsWith("O saldo do cliente mudou desde que a tela abriu"), mudou ?? "");
+  assert(mudou?.includes("feche e abra o extrato de novo"));
+});
+
+Deno.test("Enviar extrato sem nada em aberto sai como comprovante de quitação (dono, 20/11/2026), com as travas de mensagem", () => {
+  const quitado = { clienteNome: "MP MOTOR HOMES", totalEmAberto: 0, lancamentos: 3, telefone: "47999990000", horaBrasilia: 14 };
+  assertEquals(travaDoExtrato(quitado), null, "tudo quitado: sai");
+  // Piso e Pix esperando não se aplicam (não há o que cobrar).
+  assertEquals(travaDoExtrato({ ...quitado, piso: 5000, pixEsperando: [{ valor: 100 }] }), null);
+  assert(travaDoExtrato({ ...quitado, generico: true })?.includes("é genérico, sem CPF/CNPJ: não recebe extrato"));
+  assert(travaDoExtrato({ ...quitado, optOut: true })?.includes("opt-out"));
+  assertEquals(travaDoExtrato({ ...quitado, telefone: "123" }), "Sem telefone para enviar o extrato.");
+  assert(travaDoExtrato({ ...quitado, horaBrasilia: 7 })?.startsWith("Fora do horário de mensagem ao cliente (7h"));
+  assert(travaDoExtrato({ ...quitado, horaBrasilia: 20 })?.startsWith("Fora do horário"));
+  assertEquals(travaDoExtrato({ ...quitado, horaBrasilia: 19 }), null);
+  assertEquals(travaDoExtrato({ ...quitado, lancamentos: 0 }), "Este cliente não tem lançamentos: não há extrato para enviar.");
+});
+
+Deno.test("Enviar extrato COM saldo: as travas inteiras do Cobrar juntas, sem a contagem de OS", () => {
+  const base = { clienteNome: "MP MOTOR HOMES", totalEmAberto: 1670, lancamentos: 3, telefone: "47999990000", horaBrasilia: 14 };
+  assertEquals(travaDoExtrato(base), null);
+  assert(travaDoExtrato({ ...base, piso: 5000 })?.includes("abaixo do piso"));
+  assert(travaDoExtrato({ ...base, pixEsperando: [{ valor: 1670 }] })?.includes("Pix esperando no Extrato"));
+  assertEquals(travaDoExtrato({ ...base, generico: true }), travaDoCobrarJuntas({ ...base, generico: true }));
+  assertEquals(travaDoExtrato({ ...base, horaBrasilia: 21 }), travaDoCobrarJuntas({ ...base, horaBrasilia: 21 }));
 });

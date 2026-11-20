@@ -45,6 +45,11 @@ vi.mock('@/integrations/supabase/client', () => {
   return {
     supabase: {
       from: (t: string) => consulta(t),
+      // cobrar_juntas_registrar_envio (20/11/2026): cria a cobrança que falta e registra o envio, no banco.
+      rpc: (fn: string, args: unknown) => {
+        banco.chamadas.push({ alvo: `rpc.${fn}`, op: 'rpc', valores: args, filtros: [] });
+        return Promise.resolve(responder(`rpc.${fn}`));
+      },
       functions: {
         invoke: (nome: string, o: { body: Record<string, unknown> }) => {
           banco.invocacoes.push({ nome, body: o.body });
@@ -55,7 +60,9 @@ vi.mock('@/integrations/supabase/client', () => {
   };
 });
 
-import { AVISO_MODO_TESTE, relogioDoCobrarJuntasTela, useEnviarCobrarJuntas } from './use-cobrar-juntas';
+import {
+  AVISO_MODO_TESTE, AVISO_MODO_TESTE_EXTRATO, NOTA_DO_EXTRATO, relogioDoCobrarJuntasTela, useCobrancasFormais, useEnviarCobrarJuntas, useEnviarExtrato,
+} from './use-cobrar-juntas';
 
 const ok = (data: unknown): Resposta => ({ data, error: null });
 
@@ -99,8 +106,12 @@ beforeEach(() => {
     'app_settings.select': ok({ value: '0' }),
     'app_settings.select:modo-teste': ok([{ key: 'wa_test_mode', value: 'false' }]),
     'finance_review_queue.select': ok([]),
-    // 1ª leitura: cobranças das contas; 2ª: cobrança só com a OS.
-    'collections.select': [ok([{ id: 'col45', status: 'pending' }]), ok([{ id: 'colOs46', status: 'sent' }])],
+    // 1ª leitura: cobranças das contas; 2ª: cobrança só com a OS (useCobrancasFormais).
+    'collections.select': [
+      ok([{ id: 'col45', status: 'pending', receivable_id: 'r45', service_order_id: 'os45' }]),
+      ok([{ id: 'colOs46', status: 'sent', receivable_id: null, service_order_id: 'os46' }]),
+    ],
+    'rpc.cobrar_juntas_registrar_envio': ok({ criadas: 0, registradas: 2, cobrancas_criadas: [] }),
   };
   banco.chamadas = [];
   banco.invocacoes = [];
@@ -108,10 +119,10 @@ beforeEach(() => {
 });
 
 describe('useEnviarCobrarJuntas', () => {
-  it('envia com chave de idempotência e registra contato + last_auto_sent_at nas cobranças das contas', async () => {
+  it('envia com chave de idempotência e registra pelo banco (cobrar_juntas_registrar_envio) DEPOIS do envio', async () => {
     const r = await enviar();
     expect(r.isSuccess).toBe(true);
-    expect(r.data).toEqual({ deduplicado: false, cobrancasRegistradas: 2, aviso: null });
+    expect(r.data).toEqual({ deduplicado: false, cobrancasRegistradas: 2, cobrancasCriadas: 0, aviso: null });
     expect(banco.invocacoes).toHaveLength(1);
     const body = banco.invocacoes[0].body;
     expect(body).toMatchObject({ phone: '5547999990000', context: 'billing', kind: 'text' });
@@ -122,18 +133,23 @@ describe('useEnviarCobrarJuntas', () => {
     expect(contas?.filtros).toContainEqual(['eq', 'client_id', 'cli']);
     expect(contas?.filtros).toContainEqual(['in', 'service_order_id', ['os45', 'os46']]);
 
-    const leituras = banco.chamadas.filter((c) => c.alvo === 'collections' && c.op === 'select');
-    expect(leituras[0].filtros).toContainEqual(['in', 'receivable_id', ['r45', 'r46']]);
-    expect(leituras[0].filtros).toContainEqual(['not', 'status', 'in', '(paid,cancelled)']);
-    expect(leituras[1].filtros).toContainEqual(['in', 'service_order_id', ['os45', 'os46']]);
-    expect(leituras[1].filtros).toContainEqual(['is', 'receivable_id', null]);
+    // Registro: uma chamada só à função do banco (tudo ou nada), com o cliente, as contas e as OS — e só
+    // depois do envio. Nada é gravado direto em collections/collection_contacts pela tela.
+    const ordem = banco.chamadas.map((c) => c.alvo);
+    expect(ordem.filter((a) => a.startsWith('rpc.'))).toEqual(['rpc.cobrar_juntas_registrar_envio']);
+    const rpc = banco.chamadas.find((c) => c.alvo === 'rpc.cobrar_juntas_registrar_envio');
+    expect(rpc?.valores).toEqual({
+      p_cliente: 'cli', p_contas: ['r45', 'r46'], p_os: ['os45', 'os46'], p_nota: 'Cobrar juntas (várias OS numa mensagem)',
+    });
+    expect(banco.chamadas.filter((c) => c.alvo === 'collection_contacts' || (c.alvo === 'collections' && c.op !== 'select'))).toEqual([]);
+  });
 
-    const contatos = banco.chamadas.filter((c) => c.alvo === 'collection_contacts' && c.op === 'insert');
-    expect(contatos.map((c) => (c.valores as { collection_id: string }).collection_id)).toEqual(['col45', 'colOs46']);
-    const updates = banco.chamadas.filter((c) => c.alvo === 'collections' && c.op === 'update');
-    expect(updates).toHaveLength(2);
-    expect(updates[0].valores).toMatchObject({ status: 'sent' });
-    expect((updates[0].valores as { last_auto_sent_at: string }).last_auto_sent_at).toBeTruthy();
+  it('a mensagem não saiu (erro do WhatsApp): a função do banco nem é chamada — nenhuma cobrança criada', async () => {
+    banco.envio = { data: { error: 'provedor fora do ar' }, error: null };
+    const r = await enviar();
+    expect(r.isError).toBe(true);
+    expect((r.error as Error).message).toContain('provedor fora do ar');
+    expect(banco.chamadas.filter((c) => c.alvo.startsWith('rpc.'))).toEqual([]);
   });
 
   it('saldo mudou desde que a tela abriu (Pix aplicado em outra aba) → não envia', async () => {
@@ -185,12 +201,11 @@ describe('useEnviarCobrarJuntas', () => {
     expect(banco.invocacoes).toEqual([]);
   });
 
-  it('sem cobrança formal nas contas: envia e avisa que nada ficou registrado', async () => {
-    banco.respostas['collections.select'] = [ok([]), ok([])];
+  it('sem cobrança nas contas (a MP): a função do banco cria as duas e o envio fica registrado, sem aviso', async () => {
+    banco.respostas['rpc.cobrar_juntas_registrar_envio'] = ok({ criadas: 2, registradas: 2, cobrancas_criadas: ['n1', 'n2'] });
     const r = await enviar();
     expect(r.isSuccess).toBe(true);
-    expect(r.data?.cobrancasRegistradas).toBe(0);
-    expect(r.data?.aviso).toContain('o envio não fica registrado');
+    expect(r.data).toEqual({ deduplicado: false, cobrancasRegistradas: 2, cobrancasCriadas: 2, aviso: null });
   });
 
   it('trava relida na hora: cadastro virou genérico no banco → não envia', async () => {
@@ -227,15 +242,16 @@ describe('useEnviarCobrarJuntas', () => {
   it('mesma cobrança já enviada hoje (deduplicated): não registra de novo', async () => {
     banco.envio = { data: { success: true, deduplicated: true }, error: null };
     const r = await enviar();
-    expect(r.data).toEqual({ deduplicado: true, cobrancasRegistradas: 0, aviso: null });
-    expect(banco.chamadas.filter((c) => c.alvo === 'collection_contacts')).toEqual([]);
+    expect(r.data).toEqual({ deduplicado: true, cobrancasRegistradas: 0, cobrancasCriadas: 0, aviso: null });
+    expect(banco.chamadas.filter((c) => c.alvo.startsWith('rpc.'))).toEqual([]);
   });
 
-  it('enviou mas o registro falhou: devolve aviso, não erro', async () => {
-    banco.respostas['collection_contacts.insert'] = { data: null, error: { message: 'mês fechado' } };
+  it('enviou mas a função do banco falhou: devolve aviso (nada gravado), não erro', async () => {
+    banco.respostas['rpc.cobrar_juntas_registrar_envio'] = { data: null, error: { message: 'mês fechado' } };
     const r = await enviar();
     expect(r.isSuccess).toBe(true);
-    expect(r.data?.aviso).toContain('A mensagem foi enviada, mas não consegui registrar o envio nas cobranças (mês fechado)');
+    expect(r.data?.cobrancasCriadas).toBe(0);
+    expect(r.data?.aviso).toContain('A mensagem foi enviada, mas não consegui criar/registrar a cobrança (mês fechado). Nada foi gravado nas cobranças');
   });
 
   // A ficha não relê ao voltar para a aba (refetchOnWindowFocus false): sem invalidar no erro, o
@@ -273,11 +289,10 @@ describe('useEnviarCobrarJuntas', () => {
     ]);
     const r = await enviar();
     expect(r.isSuccess).toBe(true);
-    expect(r.data).toEqual({ deduplicado: false, cobrancasRegistradas: 0, aviso: AVISO_MODO_TESTE, modoTeste: true });
+    expect(r.data).toEqual({ deduplicado: false, cobrancasRegistradas: 0, cobrancasCriadas: 0, aviso: AVISO_MODO_TESTE, modoTeste: true });
     expect(r.data?.aviso).toContain('foi para o número de teste');
     expect(banco.invocacoes[0].body.dedupe_key).toBe(`${chaveReal}:teste`);
-    expect(banco.chamadas.filter((c) => c.alvo === 'collection_contacts')).toEqual([]);
-    expect(banco.chamadas.filter((c) => c.alvo === 'collections' && c.op === 'update')).toEqual([]);
+    expect(banco.chamadas.filter((c) => c.alvo.startsWith('rpc.'))).toEqual([]);
     const leitura = banco.chamadas.find((c) => c.alvo === 'app_settings' && c.filtros.some((f) => f[0] === 'in'));
     expect(leitura?.filtros).toContainEqual(['in', 'key', ['wa_test_mode', 'wa_test_number', 'zapi_test_mode', 'zapi_test_number']]);
   });
@@ -285,7 +300,7 @@ describe('useEnviarCobrarJuntas', () => {
   it('modo de teste ligado SEM número: a edge não desvia — chave e registro de sempre (como a tool)', async () => {
     banco.respostas['app_settings.select:modo-teste'] = ok([{ key: 'wa_test_mode', value: 'true' }, { key: 'wa_test_number', value: '' }]);
     const r = await enviar();
-    expect(r.data).toEqual({ deduplicado: false, cobrancasRegistradas: 2, aviso: null });
+    expect(r.data).toEqual({ deduplicado: false, cobrancasRegistradas: 2, cobrancasCriadas: 0, aviso: null });
     expect(String(banco.invocacoes[0].body.dedupe_key).endsWith(':teste')).toBe(false);
   });
 
@@ -295,5 +310,148 @@ describe('useEnviarCobrarJuntas', () => {
     expect(r.isError).toBe(true);
     expect((r.error as Error).message).toContain('Não consegui ler o modo de teste do WhatsApp: permission denied');
     expect(banco.invocacoes).toEqual([]);
+  });
+});
+
+describe('useCobrancasFormais', () => {
+  it('devolve as cobranças abertas das contas e as da OS sem conta (para saber quais contas ganham cobrança)', async () => {
+    const { result } = renderHook(() => useCobrancasFormais(['r45', 'r46'], ['os45', 'os46']), { wrapper });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.map((c) => c.id).sort()).toEqual(['col45', 'colOs46']);
+    const leituras = banco.chamadas.filter((c) => c.alvo === 'collections' && c.op === 'select');
+    expect(leituras[0].filtros).toContainEqual(['in', 'receivable_id', ['r45', 'r46']]);
+    expect(leituras[0].filtros).toContainEqual(['not', 'status', 'in', '(paid,cancelled)']);
+    expect(leituras[1].filtros).toContainEqual(['in', 'service_order_id', ['os45', 'os46']]);
+    expect(leituras[1].filtros).toContainEqual(['is', 'receivable_id', null]);
+  });
+});
+
+// "Enviar extrato" com as mesmas travas do Cobrar juntas (dono, 20/11/2026).
+describe('useEnviarExtrato', () => {
+  const EXTRATO = {
+    cliente: { id: 'cli', name: 'MP MOTOR HOMES' },
+    mensagem: 'Extrato financeiro — HBR …',
+    contas: [{ id: 'r45', saldo: 1650 }, { id: 'r46', saldo: 20 }],
+  };
+
+  async function enviarExtrato(e = EXTRATO) {
+    const { result } = renderHook(() => useEnviarExtrato(), { wrapper });
+    result.current.mutate(e);
+    await waitFor(() => expect(result.current.isSuccess || result.current.isError).toBe(true));
+    return result.current;
+  }
+
+  it('envia ao cadastro com a chave do dia "extrato:", relê as contas do cliente inteiro e registra como a cobrança do dia DEPOIS do envio', async () => {
+    banco.respostas['rpc.cobrar_juntas_registrar_envio'] = ok({ criadas: 1, registradas: 2, cobrancas_criadas: ['k-nova'] });
+    const r = await enviarExtrato();
+    expect(r.isSuccess).toBe(true);
+    expect(r.data).toEqual({ deduplicado: false, aviso: null, cobrancasRegistradas: 2, cobrancasCriadas: 1 });
+    expect(banco.invocacoes[0].body).toMatchObject({ phone: '5547999990000', context: 'billing', kind: 'text' });
+    expect(String(banco.invocacoes[0].body.dedupe_key)).toMatch(/^extrato:cli:\d{4}-\d{2}-\d{2}:/);
+    const contas = banco.chamadas.find((c) => c.alvo === 'receivables');
+    expect(contas?.filtros).toContainEqual(['eq', 'client_id', 'cli']);
+    expect(contas?.filtros.some((f) => f[0] === 'in')).toBe(false);
+    // Dono (20/11/2026): "conta como cobrança do dia" — a mesma função do Cobrar juntas, com p_os nulo
+    // (o cliente inteiro), chamada só depois do envio.
+    const rpc = banco.chamadas.filter((c) => c.alvo === 'rpc.cobrar_juntas_registrar_envio');
+    expect(rpc).toHaveLength(1);
+    expect(rpc[0].valores).toEqual({ p_cliente: 'cli', p_contas: ['r45', 'r46'], p_os: null, p_nota: NOTA_DO_EXTRATO });
+    expect(banco.chamadas.indexOf(rpc[0])).toBeGreaterThan(banco.chamadas.findIndex((c) => c.alvo === 'receivables'));
+    expect(banco.chamadas.filter((c) => c.alvo === 'collection_contacts' || (c.alvo === 'collections' && c.op !== 'select'))).toEqual([]);
+  });
+
+  it('com saldo: a mensagem não saiu, saiu repetida ou foi para o número de teste → nada registrado', async () => {
+    banco.envio = { data: null, error: { message: 'falhou' } };
+    expect((await enviarExtrato()).isError).toBe(true);
+    banco.envio = { data: { success: true, deduplicated: true }, error: null };
+    expect((await enviarExtrato()).data).toEqual({ deduplicado: true, aviso: null });
+    banco.envio = { data: { success: true }, error: null };
+    banco.respostas['app_settings.select:modo-teste'] = ok([
+      { key: 'wa_test_mode', value: 'true' }, { key: 'wa_test_number', value: '5547900001111' },
+    ]);
+    expect((await enviarExtrato()).data?.modoTeste).toBe(true);
+    expect(banco.chamadas.filter((c) => c.alvo.startsWith('rpc.'))).toEqual([]);
+  });
+
+  it('com saldo: enviou mas o registro falhou → aviso (a mensagem saiu, nada gravado), não erro', async () => {
+    banco.respostas['rpc.cobrar_juntas_registrar_envio'] = { data: null, error: { message: 'Seu cargo não mexe em cobranças.' } };
+    const r = await enviarExtrato();
+    expect(r.isSuccess).toBe(true);
+    expect(r.data?.aviso).toContain('O extrato foi enviado, mas não consegui registrar a cobrança do dia (Seu cargo não mexe em cobranças.)');
+  });
+
+  it('uma conta só também sai (o extrato não tem contagem de OS)', async () => {
+    banco.respostas['receivables.select'] = ok([CONTAS_NO_BANCO[0]]);
+    const r = await enviarExtrato({ ...EXTRATO, contas: [{ id: 'r45', saldo: 1650 }] });
+    expect(r.isSuccess).toBe(true);
+  });
+
+  it('as travas barram: genérico, Pix esperando, opt-out, piso, sem telefone e fora do horário', async () => {
+    banco.respostas['clients.select'] = ok({ name: 'Cliente Final', opt_out_whatsapp: false, generico: true, whatsapp: '47999990000' });
+    expect(((await enviarExtrato()).error as Error).message).toContain('é genérico, sem CPF/CNPJ');
+    banco.respostas['clients.select'] = ok({ name: 'MP', opt_out_whatsapp: false, generico: false, whatsapp: '47999990000' });
+    banco.respostas['finance_review_queue.select'] = ok([{ suggested_amount: 1670, suggested_date: '2026-10-28' }]);
+    expect(((await enviarExtrato()).error as Error).message).toContain('Pix esperando no Extrato');
+    banco.respostas['finance_review_queue.select'] = ok([]);
+    banco.respostas['clients.select'] = ok({ name: 'MP', opt_out_whatsapp: true, generico: false, whatsapp: '47999990000' });
+    expect(((await enviarExtrato()).error as Error).message).toContain('opt-out');
+    banco.respostas['clients.select'] = ok({ name: 'MP', opt_out_whatsapp: false, generico: false, whatsapp: null, phone: null });
+    expect(((await enviarExtrato()).error as Error).message).toContain('Sem telefone');
+    banco.respostas['clients.select'] = ok({ name: 'MP', opt_out_whatsapp: false, generico: false, whatsapp: '47999990000' });
+    banco.respostas['app_settings.select'] = ok({ value: '5000' });
+    expect(((await enviarExtrato()).error as Error).message).toContain('abaixo do piso');
+    banco.respostas['app_settings.select'] = ok({ value: '0' });
+    relogioDoCobrarJuntasTela.agora = () => new Date('2026-10-29T01:00:00Z');
+    expect(((await enviarExtrato()).error as Error).message).toContain('Fora do horário de cobrança (22h');
+    expect(banco.invocacoes).toEqual([]);
+  });
+
+  it('nada em aberto: sai como comprovante de quitação e não registra cobrança (dono, 20/11/2026)', async () => {
+    banco.respostas['receivables.select'] = ok([CONTAS_NO_BANCO[2]]);
+    // Piso alto e Pix esperando não barram a quitação (nem são lidos).
+    banco.respostas['app_settings.select'] = ok({ value: '5000' });
+    banco.respostas['finance_review_queue.select'] = ok([{ suggested_amount: 100, suggested_date: '2026-10-28' }]);
+    const r = await enviarExtrato({ ...EXTRATO, mensagem: 'Comprovante de quitação — HBR …', contas: [] });
+    expect(r.isSuccess).toBe(true);
+    expect(r.data).toEqual({ deduplicado: false, aviso: null, quitacao: true });
+    expect(banco.invocacoes).toHaveLength(1);
+    expect(String(banco.invocacoes[0].body.dedupe_key)).toMatch(/^extrato:cli:/);
+    expect(banco.chamadas.filter((c) => c.alvo.startsWith('rpc.') || c.alvo === 'finance_review_queue')).toEqual([]);
+  });
+
+  it('nada em aberto: genérico, opt-out, sem telefone e fora do horário barram; sem lançamento nenhum também', async () => {
+    banco.respostas['receivables.select'] = ok([CONTAS_NO_BANCO[2]]);
+    const Q = { ...EXTRATO, contas: [] };
+    banco.respostas['clients.select'] = ok({ name: 'Cliente Final', opt_out_whatsapp: false, generico: true, whatsapp: '47999990000' });
+    expect(((await enviarExtrato(Q)).error as Error).message).toContain('não recebe extrato');
+    banco.respostas['clients.select'] = ok({ name: 'MP', opt_out_whatsapp: true, generico: false, whatsapp: '47999990000' });
+    expect(((await enviarExtrato(Q)).error as Error).message).toContain('opt-out');
+    banco.respostas['clients.select'] = ok({ name: 'MP', opt_out_whatsapp: false, generico: false, whatsapp: null, phone: null });
+    expect(((await enviarExtrato(Q)).error as Error).message).toBe('Sem telefone para enviar o extrato.');
+    banco.respostas['clients.select'] = ok({ name: 'MP', opt_out_whatsapp: false, generico: false, whatsapp: '47999990000' });
+    relogioDoCobrarJuntasTela.agora = () => new Date('2026-10-29T01:00:00Z');
+    expect(((await enviarExtrato(Q)).error as Error).message).toContain('Fora do horário');
+    relogioDoCobrarJuntasTela.agora = AS_14H;
+    banco.respostas['receivables.select'] = ok([]);
+    expect(((await enviarExtrato(Q)).error as Error).message).toBe('Este cliente não tem lançamentos: não há extrato para enviar.');
+    expect(banco.invocacoes).toEqual([]);
+  });
+
+  it('saldo mudou desde que a tela abriu: não envia, com a frase do extrato', async () => {
+    banco.respostas['receivables.select'] = ok(CONTAS_NO_BANCO.map((c) => c.id === 'r46' ? { ...c, paid_amount: 40, balance_amount: 10 } : c));
+    const r = await enviarExtrato();
+    expect((r.error as Error).message).toContain('O saldo do cliente mudou desde que a tela abriu');
+    expect((r.error as Error).message).toContain('feche e abra o extrato de novo');
+    expect(banco.invocacoes).toEqual([]);
+  });
+
+  it('modo de teste: chave com ":teste" e aviso de que foi para o número de teste', async () => {
+    banco.respostas['app_settings.select:modo-teste'] = ok([
+      { key: 'wa_test_mode', value: 'true' }, { key: 'wa_test_number', value: '5547900001111' },
+    ]);
+    const r = await enviarExtrato();
+    expect(r.data).toEqual({ deduplicado: false, aviso: AVISO_MODO_TESTE_EXTRATO, modoTeste: true });
+    expect(banco.chamadas.filter((c) => c.alvo.startsWith('rpc.'))).toEqual([]);
+    expect(String(banco.invocacoes[0].body.dedupe_key)).toMatch(/^extrato:cli:.*:teste$/);
   });
 });

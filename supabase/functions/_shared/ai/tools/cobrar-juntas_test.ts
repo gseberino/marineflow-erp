@@ -70,12 +70,37 @@ function cadastros(): Linha[] {
 }
 
 function bancoFalso(tabelas: Record<string, Linha[]>, falhas: string[] = []) {
-  const chamadas = { insert: [] as [string, Linha][], update: [] as [string, Linha, Linha][] };
+  const chamadas = { insert: [] as [string, Linha][], update: [] as [string, Linha, Linha][], rpc: [] as [string, Linha][] };
   // deno-lint-ignore no-explicit-any
   const db: any = {
     chamadas,
     tabelas,
-    rpc: () => Promise.resolve({ data: null, error: null }),
+    // cobrar_juntas_registrar_envio (migration 20270212100000) em memória: cria a cobrança da conta sem nenhuma aberta
+    // (nem da OS sem conta) e registra o envio em todas as abertas. A regra de verdade é provada no SQL
+    // (supabase/tests/fechar_juntas_cobranca_junto.sql); aqui só o que a tool manda e o que ela diz.
+    rpc: (fn: string, args: Linha) => {
+      chamadas.rpc.push([fn, args]);
+      if (fn !== "cobrar_juntas_registrar_envio") return Promise.resolve({ data: null, error: null });
+      if (falhas.includes("rpc")) return Promise.resolve({ data: null, error: { message: "mês fechado" } });
+      const aberta = (k: Linha) => k.status !== "paid" && k.status !== "cancelled";
+      const cols = (tabelas.collections ??= []);
+      let criadas = 0;
+      for (const id of args.p_contas as string[]) {
+        const conta = (tabelas.receivables ?? []).find((r) => r.id === id);
+        if (cols.some((k) => aberta(k) && k.receivable_id === id)) continue;
+        if (cols.some((k) => aberta(k) && !k.receivable_id && k.service_order_id === conta?.service_order_id)) continue;
+        cols.push({ id: `nova-${id}`, status: "pending", receivable_id: id, service_order_id: conta?.service_order_id, last_auto_sent_at: null });
+        criadas++;
+      }
+      const alvo = cols.filter((k) => aberta(k) && ((args.p_contas as string[]).includes(k.receivable_id) ||
+        (!k.receivable_id && (args.p_os as string[]).includes(k.service_order_id))));
+      for (const k of alvo) {
+        chamadas.insert.push(["collection_contacts", { collection_id: k.id, contact_type: "whatsapp_sent", notes: args.p_nota }]);
+        chamadas.update.push(["collections", { status: "sent" }, { id: k.id }]);
+        Object.assign(k, { status: "sent", last_auto_sent_at: "2026-10-28T17:00:00Z" });
+      }
+      return Promise.resolve({ data: { criadas, registradas: alvo.length }, error: null });
+    },
     from(tabela: string) {
       const filtros: Array<(l: Linha) => boolean> = [];
       const erro = falhas.includes(tabela) ? { message: `${tabela} fora do ar` } : null;
@@ -250,7 +275,7 @@ Deno.test("cobrar juntas: a pendência mostra cada OS com o saldo, o total, o n�
   assertStringIncludes(s, "- OS-00046 · Concluída · em aberto *R$ 20,00* (vencido)");
   assertStringIncludes(s, "- OS-00045 · Concluída · em aberto *R$ 1.650,00* (vencido)");
   assertStringIncludes(s, "Total em aberto: *R$ 1.670,00*");
-  assertStringIncludes(s, "Nada muda no financeiro: cada conta continua na sua OS. O envio fica registrado em 2 cobranças.");
+  assertStringIncludes(s, "Nada muda nas contas a receber: cada conta continua na sua OS. O envio fica registrado em 2 cobranças.");
   assertStringIncludes(s, "Mensagem que vai ao cliente:\n📋 *Cobrança — HBR*\nCliente: MP\nOS: OS-00045, OS-00046");
   assertStringIncludes(s, "🔴 Saldo OS-00045 · vence 22/07/2026 · vencido: *R$ 1.650,00*\n🔴 Saldo OS-00046 · vence 22/07/2026 · vencido: *R$ 20,00*");
   assertStringIncludes(s, "Total: R$ 1.670,00\nPago: R$ 0,00\n*Em aberto: R$ 1.670,00*");
@@ -291,6 +316,12 @@ Deno.test("o 'sim': envia a mensagem da confirmação ao cadastro e registra o e
     const ressalva = semNbsp(ressalvaDoResultado(r));
     assertStringIncludes(ressalva, "Cobrança conjunta enviada para MP MOTOR HOMES (+55 (47) 99915-9654): OS-00045, OS-00046 — em aberto R$ 1.670,00.");
     assertStringIncludes(ressalva, "Envio registrado em 2 cobranças.");
+    assertEquals(ressalva.includes("criada"), false, "as duas contas já tinham cobrança: nada criado");
+    // a função do banco recebe o cliente, as contas da mensagem, as OS e quem pediu
+    const [[fn, args]] = db.chamadas.rpc;
+    assertEquals(fn, "cobrar_juntas_registrar_envio");
+    assertEquals([args.p_cliente, [...args.p_contas].sort(), [...args.p_os].sort(), args.p_autor], [MP, ["r45", "r46"], [ID_45, ID_46].sort(), "dono-1"]);
+    assertStringIncludes(semNbsp(args.p_nota), "Cobrança conjunta enviada pelo assistente (WhatsApp): OS-00045, OS-00046");
     // nada mais grava: nenhuma conta mexida
     assertEquals(db.chamadas.update.filter(([t]: [string]) => t !== "collections"), []);
   });
@@ -367,10 +398,62 @@ Deno.test("avisos: OS em andamento entra com aviso; lembrete já mandado hoje av
   assertStringIncludes(s, "Já houve lembrete hoje para OS-00045");
 });
 
-Deno.test("sem cobrança formal nas contas (o caso da MP em produção): a confirmação avisa que o envio não fica registrado", async () => {
+Deno.test("sem cobrança nas contas (o caso da MP em produção): a confirmação diz que a cobrança é criada junto, e o 'sim' cria", async () => {
   const { db, ctx } = ambiente(osDaMP(), { tabelas: { collections: [] } });
   const p = await pedir(ctx, db, { os: ["OS-00045", "OS-00046"] });
-  assertStringIncludes(semNbsp(p.summary), "Nenhuma cobrança formal ligada a estas contas: o envio não fica registrado, e o plano de inadimplência pode sugerir cobrar este cliente de novo hoje.");
+  assertStringIncludes(semNbsp(p.summary),
+    "2 contas não têm cobrança registrada: elas são criadas junto com o envio (aparecem em Cobranças), e o lembrete não repete hoje.");
+  await comEnvio({ messageId: "m1" }, async () => {
+    // deno-lint-ignore no-explicit-any
+    const r = await toolsByName["cobrar_juntas"].execute(p.payload, ctx) as any;
+    assertEquals([r.cobrancas_criadas, r.cobrancas_registradas], [2, 2], JSON.stringify(r));
+    assertStringIncludes(r.message, "2 cobranças criadas (em Cobranças). Envio registrado em 2 cobranças.");
+    assertEquals(db.tabelas.collections.map((k: Linha) => [k.receivable_id, k.status]).sort(), [["r45", "sent"], ["r46", "sent"]]);
+  });
+});
+
+Deno.test("só a conta sem cobrança ganha uma; a OS com cobrança sem conta não ganha outra", async () => {
+  // r45 sem cobrança nenhuma; a OS-00046 tem a "Total" sem conta (col46) — r46 fica sem cobrança própria.
+  const { db, ctx } = ambiente(osDaMP(), {
+    tabelas: { collections: [{ id: "col46", status: "pending", receivable_id: null, service_order_id: ID_46, last_auto_sent_at: null }] },
+  });
+  const p = await pedir(ctx, db, { os: ["OS-00045", "OS-00046"] });
+  assertStringIncludes(semNbsp(p.summary), "1 conta não tem cobrança registrada: ela é criada junto com o envio");
+  await comEnvio({ messageId: "m1" }, async () => {
+    // deno-lint-ignore no-explicit-any
+    const r = await toolsByName["cobrar_juntas"].execute(p.payload, ctx) as any;
+    assertEquals([r.cobrancas_criadas, r.cobrancas_registradas], [1, 2], JSON.stringify(r));
+    assertEquals(db.tabelas.collections.filter((k: Linha) => k.receivable_id === "r46"), []);
+  });
+});
+
+Deno.test("a função do banco falha DEPOIS do envio: a resposta diz que a mensagem saiu e nada foi gravado", async () => {
+  const { db, ctx } = ambiente(osDaMP(), { tabelas: { collections: [] }, falhas: ["rpc"] });
+  const p = await pedir(ctx, db, { os: ["OS-00045", "OS-00046"] });
+  await comEnvio({ messageId: "m1" }, async (enviados) => {
+    // deno-lint-ignore no-explicit-any
+    const r = await toolsByName["cobrar_juntas"].execute(p.payload, ctx) as any;
+    assertEquals(enviados.length, 1);
+    assertEquals([r.ok, r.cobrancas_criadas, r.cobrancas_registradas], [true, 0, 0]);
+    assertStringIncludes(r.message, "A mensagem foi enviada, mas não consegui criar/registrar a cobrança (mês fechado). Nada foi gravado nas cobranças");
+    assertEquals(db.tabelas.collections, []);
+  });
+});
+
+Deno.test("mensagem que não sai: a função do banco nem é chamada (nenhuma cobrança criada)", async () => {
+  const { db, ctx } = ambiente(osDaMP(), { tabelas: { collections: [] } });
+  const p = await pedir(ctx, db, { os: ["OS-00045", "OS-00046"] });
+  const original = globalThis.fetch;
+  globalThis.fetch = (() => Promise.resolve(new Response(JSON.stringify({ error: "provedor fora" }), { status: 502 }))) as typeof fetch;
+  try {
+    // deno-lint-ignore no-explicit-any
+    const r = await toolsByName["cobrar_juntas"].execute(p.payload, ctx) as any;
+    assertStringIncludes(String(r.error), "A mensagem não saiu");
+    assertEquals(db.chamadas.rpc.filter(([fn]: [string]) => fn === "cobrar_juntas_registrar_envio"), []);
+    assertEquals(db.tabelas.collections, []);
+  } finally {
+    globalThis.fetch = original;
+  }
 });
 
 // ── recusas sem pendência ────────────────────────────────────────────────────────────────────

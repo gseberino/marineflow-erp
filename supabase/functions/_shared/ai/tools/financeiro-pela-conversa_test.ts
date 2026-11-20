@@ -432,3 +432,15 @@ Deno.test("as ferramentas novas pedem confirmação, menos a lista; só gestor m
   const tecnico = await tool(cobrancaTools, "criar_cobranca").execute({ os: "112" }, ctx(cobrancas(), "technician"));
   assert(tecnico.error);
 });
+
+// Dono (20/11/2026): "Técnico pode criar cobrança pela tela?" → "Só admin e financeiro" (RLS de collections,
+// migration 20270212120000). O vendedor continua lendo e registrando contato; criar e alterar, não.
+Deno.test("criar e alterar cobrança: só administrador e financeiro (o vendedor ouve o porquê, sem tocar no banco)", async () => {
+  assertEquals(tool(cobrancaTools, "criar_cobranca").roles, ["admin", "financial"]);
+  assertEquals(tool(cobrancaTools, "alterar_cobranca").roles, ["admin", "financial"]);
+  assertEquals(tool(cobrancaTools, "registrar_contato_de_cobranca").roles, ["admin", "financial", "seller"]);
+  const cria = await tool(cobrancaTools, "criar_cobranca").execute({ os: "112" }, ctx(cobrancas(), "seller"));
+  assertStringIncludes(cria.error, "Só administrador ou financeiro cria e altera cobrança.");
+  const altera = await tool(cobrancaTools, "alterar_cobranca").execute({ cliente: "Flávio", situacao: "cancelada", motivo: "x" }, ctx(cobrancas(), "seller"));
+  assertStringIncludes(altera.error, "Só administrador ou financeiro cria e altera cobrança.");
+});

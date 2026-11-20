@@ -9,7 +9,10 @@
 // reparte pelo vencimento). Depois do envio, cada cobrança (collections) das contas escolhidas ganha o contato
 // 'whatsapp_sent' e o last_auto_sent_at — como send_collection_reminder (registrarEnvioDaCobranca) —, que é o
 // que o plano de inadimplência lê para não mandar cobrar de novo no mesmo dia. Conta SEM cobrança formal (a MP em
-// 28/10/2026) não recebe registro nenhum: a confirmação avisa (SEM_COBRANCA_FORMAL).
+// 28/10/2026) ganha a cobrança JUNTO com o envio (dono, 20/11/2026: "Criar a cobrança junto"): a função do banco
+// cobrar_juntas_registrar_envio cria as que faltam e registra o envio em todas, tudo ou nada — a mesma que a tela
+// usa. Só é chamada com o envio confirmado (não no modo de teste nem no "já enviado hoje"): mensagem que não sai
+// não cria cobrança. Se ela falhar depois do envio, nada é gravado e a resposta diz isso.
 //
 // Cobra o TITULAR da conta, como a tela (a ficha lista as contas por receivables.client_id): conta em nome de
 // outro cadastro (o pagador da leva 8) recusa, em vez de mandar a dívida de um ao WhatsApp de outro.
@@ -33,21 +36,21 @@ import { STATUS_QUE_AGRUPAM } from "./agrupar-os.ts";
 import { pixEsperandoNoExtrato } from "./pix-esperando.ts";
 import { telefoneLegivel, telefoneParaEnvio } from "./agendamento.ts";
 import { sendWhatsapp } from "./whatsapp.ts";
-import { registrarEnvioDaCobranca } from "./cobrancas.ts";
 import { guardaDeEnvio } from "../comms/send-guard.ts";
 import { registrarEnvio } from "../comms/send-log.ts";
 import { diaLocal } from "../../whatsapp/idempotencia.ts";
 import { desviadoPorTeste } from "../../whatsapp/marcar-enviado.ts";
 import { ROTULOS_STATUS_OS } from "../../service-order-status.ts";
 import {
+  avisoDaCobrancaCriada,
   chaveDoCobrarJuntas,
   type ContaDoCliente,
+  contasSemCobranca,
   contaVencida,
   MAX_COBRAR_JUNTAS as MAX_AGRUPAR,
   MIN_COBRAR_JUNTAS as MIN_AGRUPAR,
   pagoDaConta,
   saldoDaConta,
-  SEM_COBRANCA_FORMAL,
   STATUS_QUE_COBRAM_JUNTAS,
   travaDoCobrarJuntas,
 } from "../../receivables/cobrar-juntas.ts";
@@ -445,13 +448,14 @@ export async function resumirCobrancaConjunta(admin: any, args: Record<string, u
   const c = await montarCobrancaConjunta(admin, admin, args);
   if (ehErro(c)) return recusa(c.error);
   const nome = String(c.cliente.name ?? "").trim() || "cliente";
+  const semCobranca = contasSemCobranca(c.os.flatMap((o) => o.contas), c.cobrancas).length;
   return [
     `Cobrar juntas *${c.os.length}* OS de *${nome}* numa mensagem só, pelo WhatsApp *${telefoneLegivel(c.telefone)}*:`,
     ...c.os.map((o) => `- ${o.numero} · ${situacaoDaOS(o.status)} · em aberto *${emReais(o.saldo)}*${o.vencido ? " (vencido)" : ""}`),
     `Total em aberto: *${emReais(c.emAberto)}*`,
-    `- Nada muda no financeiro: cada conta continua na sua OS. ${c.cobrancas.length
-      ? `O envio fica registrado em ${plural(c.cobrancas.length, "cobrança", "cobranças")}.`
-      : SEM_COBRANCA_FORMAL}`,
+    `- Nada muda nas contas a receber: cada conta continua na sua OS. ${semCobranca
+      ? avisoDaCobrancaCriada(semCobranca)
+      : `O envio fica registrado em ${plural(c.cobrancas.length, "cobrança", "cobranças")}.`}`,
     ...c.avisos.map((a) => `- ${a}`),
     "Mensagem que vai ao cliente:",
     c.mensagem,
@@ -498,8 +502,8 @@ export const cobrarJuntasTools: ToolDef[] = [
     description:
       "Cobra numa MENSAGEM SÓ, pelo WhatsApp do cadastro do cliente, o saldo em aberto de 2 a 10 OS JÁ EXECUTADAS (em andamento, " +
       "concluídas ou faturadas) do MESMO cliente: o extrato dessas OS, com o número da OS e o saldo de cada conta, o vencido pela " +
-      "data, total, pago e em aberto, e a chave Pix. NÃO junta as OS nem muda conta nenhuma (cada conta continua na sua OS); só " +
-      "registra o envio nas cobranças das contas. Diga as OS pelos números ou passe o cliente (id de search_clients) para cobrar " +
+      "data, total, pago e em aberto, e a chave Pix. NÃO junta as OS nem muda conta nenhuma (cada conta continua na sua OS); " +
+      "registra o envio nas cobranças das contas e cria a cobrança da conta que não tem uma. Diga as OS pelos números ou passe o cliente (id de search_clients) para cobrar " +
       "todas as OS executadas dele com saldo. OS que ainda não começou → agrupar_os (outra coisa: junta numa OS nova). Uma OS só → " +
       "send_collection_reminder. Recusa cadastro genérico (sem CPF/CNPJ), Pix do cliente esperando no Extrato, opt-out e valor " +
       "abaixo do piso. A chamada já pede o 'sim' ao dono mostrando a mensagem exata: não pergunte antes.",
@@ -584,25 +588,30 @@ export const cobrarJuntasTools: ToolDef[] = [
         };
       }
 
-      // Enviado: o contato 'whatsapp_sent' e o last_auto_sent_at em cada cobrança das contas (como o lembrete).
+      // Enviado: a função do banco cria a cobrança das contas sem nenhuma e registra o envio (contato
+      // 'whatsapp_sent' + 'sent' + last_auto_sent_at) em todas — tudo ou nada, a mesma da tela.
       const nota = `Cobrança conjunta enviada pelo assistente (WhatsApp): ${numeros.join(", ")} — em aberto ${emReais(c.emAberto)}`;
-      const falhas: string[] = [];
-      for (const col of c.cobrancas) {
-        const falhou = await registrarEnvioDaCobranca(ctx.admin, col, ctx.userId || null, nota);
-        if (falhou) falhas.push(falhou);
-      }
-      const registro = c.cobrancas.length
-        ? falhas.length
-          ? ` ${falhas[0]}`
-          : ` Envio registrado em ${plural(c.cobrancas.length, "cobrança", "cobranças")}.`
-        : "";
+      const { data: reg, error: regErr } = await ctx.sb.rpc("cobrar_juntas_registrar_envio", {
+        p_cliente: c.cliente.id,
+        p_contas: contas,
+        p_os: c.os.map((o) => o.id),
+        p_nota: nota,
+        p_autor: ctx.userId || null,
+      });
+      const criadas = regErr ? 0 : Number((reg as { criadas?: number } | null)?.criadas) || 0;
+      const registradas = regErr ? 0 : Number((reg as { registradas?: number } | null)?.registradas) || 0;
+      const registro = regErr
+        ? ` A mensagem foi enviada, mas não consegui criar/registrar a cobrança (${regErr.message ?? regErr}). Nada foi gravado nas cobranças: avise o dono para não cobrar de novo hoje.`
+        : `${criadas ? ` ${plural(criadas, "cobrança criada", "cobranças criadas")} (em Cobranças).` : ""}` +
+          `${registradas ? ` Envio registrado em ${plural(registradas, "cobrança", "cobranças")}.` : ""}`;
       const texto = `Cobrança conjunta enviada para ${nome} (${telefoneLegivel(c.telefone)}): ${numeros.join(", ")} — em aberto ${emReais(c.emAberto)}.${registro}`;
       return {
         ok: true,
         cliente: nome,
         os: numeros,
         em_aberto: c.emAberto,
-        cobrancas_registradas: c.cobrancas.length - falhas.length,
+        cobrancas_registradas: registradas,
+        cobrancas_criadas: criadas,
         ...(g.avisos.length ? { avisos_estilo: g.avisos } : {}),
         aviso: texto,
         message: texto,

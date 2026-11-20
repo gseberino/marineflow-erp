@@ -21,10 +21,17 @@ import { alvoDoRetrato, brl, casaNome, ddmm, dataFuturaDita, ehUuid, mesmoValor,
  * fica fora pela regra do dono (09/08/2026: técnico não enxerga financeiro). */
 const CARGOS_DA_COBRANCA: Role[] = ["admin", "financial", "seller"];
 
-function semAcesso(ctx: ToolCtx): { error: string } | null {
+/** Quem CRIA e ALTERA cobrança: só administrador e financeiro (dono, 20/11/2026: "Só admin e financeiro";
+ * a RLS de collections, migration 20270212120000). Sem isto o vendedor ouvia o erro cru da RLS ao criar e,
+ * ao alterar, um "ok" falso (UPDATE barrado pela RLS não dá erro: muda 0 linhas). */
+const CARGOS_QUE_GRAVAM_COBRANCA: Role[] = ["admin", "financial"];
+
+function semAcesso(ctx: ToolCtx, cargos: Role[] = CARGOS_DA_COBRANCA): { error: string } | null {
   const b = blockTechnician(ctx);
   if (b) return b;
-  if (!CARGOS_DA_COBRANCA.includes(ctx.userRole as Role)) return { error: "Cargo não autorizado para cobrança." };
+  if (!cargos.includes(ctx.userRole as Role)) {
+    return { error: cargos === CARGOS_QUE_GRAVAM_COBRANCA ? "Só administrador ou financeiro cria e altera cobrança." : "Cargo não autorizado para cobrança." };
+  }
   return null;
 }
 
@@ -356,13 +363,13 @@ export const cobrancaTools: ToolDef[] = [
       },
     },
     risk: "medium",
-    roles: CARGOS_DA_COBRANCA,
+    roles: CARGOS_QUE_GRAVAM_COBRANCA,
     preValidar(args) {
       if (!args?.os && !(args?.cliente && args?.descricao)) return { error: "Diga a OS da cobrança, ou o cliente e o que está sendo cobrado (avulsa)." };
       return null;
     },
     async execute(args, ctx) {
-      const b = semAcesso(ctx);
+      const b = semAcesso(ctx, CARGOS_QUE_GRAVAM_COBRANCA);
       if (b) return b;
       const r = await resolverNovaCobranca(ctx.sb, args);
       if (ehErro(r)) return r;
@@ -444,7 +451,7 @@ export const cobrancaTools: ToolDef[] = [
       },
     },
     risk: "medium",
-    roles: CARGOS_DA_COBRANCA,
+    roles: CARGOS_QUE_GRAVAM_COBRANCA,
     preValidar(args) {
       if (args?.situacao && !SITUACAO_DITA[String(args.situacao)]) return { error: "Situação: pendente, enviada, visualizada, vencida, em_disputa ou cancelada." };
       if (!args?.situacao && !args?.contato_nome && !args?.telefone && !args?.whatsapp) {
@@ -457,7 +464,7 @@ export const cobrancaTools: ToolDef[] = [
       return ehErro(r) ? null : { cobranca_id: r.cobranca.id };
     },
     async execute(args, ctx) {
-      const b = semAcesso(ctx);
+      const b = semAcesso(ctx, CARGOS_QUE_GRAVAM_COBRANCA);
       if (b) return b;
       const r = await acharCobranca(ctx.sb, args);
       if (ehErro(r)) return r;

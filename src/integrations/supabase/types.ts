@@ -15184,6 +15184,16 @@ export type Database = {
         Returns: Json
       }
       classify_service_text: { Args: { p_texto: string }; Returns: Json }
+      cobrar_juntas_registrar_envio: {
+        Args: {
+          p_autor?: string
+          p_cliente: string
+          p_contas: string[]
+          p_nota?: string
+          p_os: string[] | null
+        }
+        Returns: Json
+      }
       compose_route_for_service: {
         Args: { p_service_id: string }
         Returns: {
