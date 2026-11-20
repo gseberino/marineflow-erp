@@ -206,7 +206,7 @@ begin
     v_res := pg_temp.ok(v_res, 'H11 as funções da paridade e da equipe estão na bancada ("ok" é concordância; o telefone normaliza)',
       public._e_concordancia('OK') and not public._e_concordancia('não vou')
       and public.wa_normalize_phone('(47) 90000-0001') = '5547900000001'
-      and to_regprocedure('public.registrar_diaria(uuid,date,text,uuid[],text,numeric,numeric,numeric,text,uuid)') is not null
+      and to_regprocedure('public.registrar_diaria(uuid,date,text,uuid[],text,numeric,numeric,numeric,text,uuid,boolean)') is not null
       and to_regprocedure('public.registrar_conferencia_do_freelancer(text,text,uuid)') is not null,
       public.wa_normalize_phone('(47) 90000-0001'));
 

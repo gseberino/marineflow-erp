@@ -170,6 +170,8 @@ export const ROTULOS_DOS_CAMPOS: Record<string, string> = {
   adicionar_itens: "Itens a acrescentar",
   agencia: "Agência",
   alias: "Apelido",
+  // trouxe o almoço (20/11/2026): registrar_diaria
+  almoco: "Trouxe o almoço",
   alterar_itens: "Itens a alterar",
   alvo_id: "Conta ou OS",
   anotacao_id: "Anotação",

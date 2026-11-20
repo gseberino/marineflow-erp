@@ -20,6 +20,10 @@ vi.mock('@/integrations/supabase/client', () => ({
     rpc: (...a: unknown[]) => rpc(...a),
     // A leitura do cadastro dos freelancers (CPF e PIX) que os documentos fazem, e a dos acertos.
     from: (tabela: string) => ({ select: () => ({
+      // 20/11/2026: o valor do almoço (useAppSettings lê app_settings inteiro)
+      ...(tabela === 'app_settings'
+        ? { then: (ok: (r: unknown) => unknown) => Promise.resolve({ data: [{ key: 'diarias_valor_almoco', value: '20' }], error: null }).then(ok) }
+        : {}),
       in: async () => ({ data: [
         { id: 'r', name: 'Roberto', document: '12345678940', pix_key: null },
         { id: 'm', name: 'Mickael', document: '98765432100', pix_key: null },
@@ -269,7 +273,7 @@ describe('DiariasPanel', () => {
     opcoes.action.onClick();
     await waitFor(() => expect(chamadas('registrar_diaria')).toEqual([{
       p_favorecido_id: 'r', p_data: '2026-09-16', p_jornada: 'inteiro', p_os_ids: ['o1'],
-      p_observacao: 'Gerador do Marcelo', p_extras: 20, p_descontos: 0, p_valor_diaria: 160, p_origem: 'painel',
+      p_observacao: 'Gerador do Marcelo', p_extras: 20, p_descontos: 0, p_valor_diaria: 160, p_origem: 'painel', p_almoco: false,
     }]));
   });
 
@@ -293,7 +297,7 @@ describe('DiariasPanel', () => {
     // Só a jornada: OS, extras, descontos, observação e diária ficam como o dia já tinha.
     expect(chamadas('registrar_diaria')[0]).toEqual({
       p_favorecido_id: 'r', p_data: '2026-09-16', p_jornada: 'meio', p_os_ids: null, p_observacao: null,
-      p_extras: null, p_descontos: null, p_valor_diaria: null, p_origem: 'painel',
+      p_extras: null, p_descontos: null, p_valor_diaria: null, p_origem: 'painel', p_almoco: null,
     });
   });
 
@@ -320,9 +324,9 @@ describe('DiariasPanel', () => {
     await user.click(screen.getByRole('button', { name: /Registrar dia/ }));
     const dialogo = await screen.findByRole('dialog');
     expect(within(dialogo).queryByRole('button', { name: 'Não trabalhou' })).not.toBeInTheDocument();
-    expect(within(dialogo).queryByLabelText('Extras (R$)')).not.toBeInTheDocument();
+    expect(within(dialogo).queryByLabelText('Outros extras (R$)')).not.toBeInTheDocument();
     await user.click(within(dialogo).getByRole('button', { name: /Mais detalhes/ }));
-    expect(within(dialogo).getByLabelText('Extras (R$)')).toBeInTheDocument();
+    expect(within(dialogo).getByLabelText('Outros extras (R$)')).toBeInTheDocument();
     expect(within(dialogo).getByLabelText('Em qual OS (opcional)')).toBeInTheDocument();
   });
 
@@ -750,5 +754,60 @@ describe('DiariasPanel — saída da equipe', () => {
     // o desativado sem saída não entra na grade; o João (saiu em 04/09) entra só com os dias até a saída
     expect(screen.queryAllByRole('gridcell', { name: /^Felipe em/ })).toHaveLength(0);
     expect(screen.getAllByRole('gridcell', { name: 'João em sáb 05/09' })[0]).toBeDisabled();
+  });
+});
+
+// "Trouxe o almoço" (decisão do dono, 20/11/2026): a caixa à vista ao lançar o dia, com o valor da
+// configuração; o banco soma o almoço e escreve o motivo (a tela manda só p_almoco e os OUTROS extras).
+describe('DiariasPanel — trouxe o almoço', () => {
+  it('registrar dia: a caixa mostra o valor da configuração, soma no total e vai como p_almoco (sem extra inventado)', async () => {
+    const user = userEvent.setup();
+    renderizar('extrato');
+    await screen.findByText('OS-0042');
+    await user.click(screen.getByRole('button', { name: /Registrar dia/ }));
+    const dialogo = await screen.findByRole('dialog');
+    expect(await within(dialogo).findByText(/Trouxe o almoço \(\+R\$\s?20,00\)/)).toBeInTheDocument();
+    await user.click(within(dialogo).getByRole('checkbox', { name: 'Trouxe o almoço' }));
+    expect(within(dialogo).getByText(/Total do dia/)).toHaveTextContent(/180,00/);
+    await user.click(within(dialogo).getByRole('button', { name: 'Registrar' }));
+    await waitFor(() => expect(chamadas('registrar_diaria')).toHaveLength(1));
+    expect(chamadas('registrar_diaria')[0]).toMatchObject({ p_favorecido_id: 'r', p_jornada: 'inteiro', p_extras: 0, p_almoco: true });
+  });
+
+  it('corrigir um dia com almoço: a caixa vem marcada, "Outros extras" sem o almoço e a observação sem o motivo', async () => {
+    const user = userEvent.setup();
+    rpc.mockReset();
+    rpc.mockImplementation(async (nome: string) => {
+      if (nome === 'conta_corrente_freelancer') {
+        return { data: { ...contaDoRoberto, linhas: [{ ...contaDoRoberto.linhas[0], extras: 50, almoco: 20,
+          observacao: 'Alimentação (trouxe o almoço); Gerador do Marcelo', trabalhado: 210 }] }, error: null };
+      }
+      if (nome === 'resumo_freelancers') return { data: { pessoas, trabalhado: 0, pago: 0, dias: 0, deve: 0, adiantado: 0 }, error: null };
+      if (nome === 'registrar_diaria') return { data: { acao: 'atualizado', diaria_id: 'd1', message: 'ok' }, error: null };
+      return { data: null, error: { message: `rpc inesperada: ${nome}` } };
+    });
+    renderizar('extrato');
+    await user.click(await screen.findByRole('button', { name: /Mais ações para dia qua 16\/09/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /Corrigir o dia/ }));
+    const dialogo = await screen.findByRole('dialog');
+    expect(within(dialogo).getByRole('checkbox', { name: 'Trouxe o almoço' })).toBeChecked();
+    expect(within(dialogo).getByLabelText('Outros extras (R$)')).toHaveValue('30,00');
+    expect(within(dialogo).getByLabelText('Observação')).toHaveValue('Gerador do Marcelo');
+    await user.click(within(dialogo).getByRole('checkbox', { name: 'Trouxe o almoço' }));
+    await user.click(within(dialogo).getByRole('button', { name: 'Salvar' }));
+    await waitFor(() => expect(chamadas('registrar_diaria')).toHaveLength(1));
+    expect(chamadas('registrar_diaria')[0]).toMatchObject({ p_extras: 30, p_almoco: false, p_observacao: 'Gerador do Marcelo' });
+  });
+
+  it('grade: na ficha do dia já lançado, marcar o almoço grava na hora só o almoço', async () => {
+    const user = userEvent.setup();
+    renderizar('grade');
+    await user.click((await screen.findAllByRole('gridcell', { name: 'Roberto em qua 16/09' }))[0]);
+    const ficha = await screen.findByRole('dialog');
+    const caixa = within(ficha).getByRole('checkbox', { name: 'Trouxe o almoço' });
+    expect(caixa).not.toBeChecked();
+    await user.click(caixa);
+    await waitFor(() => expect(chamadas('registrar_diaria')).toHaveLength(1));
+    expect(chamadas('registrar_diaria')[0]).toMatchObject({ p_jornada: 'inteiro', p_almoco: true, p_extras: null, p_observacao: null });
   });
 });

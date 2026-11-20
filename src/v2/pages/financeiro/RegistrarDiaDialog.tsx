@@ -4,6 +4,9 @@
 // "Vários dias" (29/09/2026, o "+ dias" do app antigo): De/Até, só dias úteis salvo marcar sábado
 // ou domingo. Dia já lançado no intervalo fica como está — o intervalo só PREENCHE o que falta;
 // corrigir um dia é abri-lo sozinho.
+//
+// "Trouxe o almoço" (20/11/2026, decisão do dono): uma caixa à vista; o valor é o da configuração
+// (diarias_valor_almoco) e o banco escreve o motivo, para o recibo não travar por adicional sem motivo.
 import { useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -19,8 +22,9 @@ import { useI18n } from '@/i18n';
 import { hojeLocal } from '@/lib/dia';
 import { datasDoIntervalo, jornadasParaLancar, valorDoDia, type Jornada } from '@/lib/diarias';
 import { useServiceOrdersVinculaveis } from '@/hooks/use-payees';
+import { useAppSetting } from '@/hooks/use-app-settings';
 import {
-  useContaCorrente, useRegistrarDiaria, useRegistrarVariosDias, type DiaParaEditar, type FreelancerNoResumo,
+  semMotivoDoAlmoco, useContaCorrente, useRegistrarDiaria, useRegistrarVariosDias, type DiaParaEditar, type FreelancerNoResumo,
 } from '@/hooks/use-diarias';
 
 const MAX_DIAS = 31;
@@ -59,9 +63,16 @@ export function RegistrarDiaDialog({ pessoas, favorecidoInicial, dataInicial, ed
   // atrás de "Mais detalhes" (abertos ao editar um dia, que pode já ter algum deles).
   const [detalhes, setDetalhes] = useState(!!editar);
   const [osIds, setOsIds] = useState<string[]>(editar?.os.map((o) => o.id) ?? []);
-  const [extras, setExtras] = useState<number>(editar?.extras ?? 0);
+  // "Trouxe o almoço" (20/11/2026, decisão do dono): a caixa fica à vista; o valor vem da configuração
+  // (o mesmo que o banco usa) e o motivo "Alimentação (trouxe o almoço)" o banco escreve sozinho. Os
+  // extras do formulário são os OUTROS (sem o almoço); a observação aparece sem o motivo do almoço.
+  const almocoDoDia = editar?.almoco ?? 0;
+  const [almoco, setAlmoco] = useState<boolean>(almocoDoDia > 0);
+  const valorDaConfiguracao = Number(String(useAppSetting('diarias_valor_almoco')).replace(',', '.')) || 0;
+  const valorDoAlmoco = almocoDoDia > 0 ? almocoDoDia : valorDaConfiguracao;
+  const [extras, setExtras] = useState<number>(editar ? Math.max(0, editar.extras - almocoDoDia) : 0);
   const [descontos, setDescontos] = useState<number>(editar?.descontos ?? 0);
-  const [observacao, setObservacao] = useState<string>(editar?.observacao ?? '');
+  const [observacao, setObservacao] = useState<string>(almocoDoDia > 0 ? semMotivoDoAlmoco(editar?.observacao) : editar?.observacao ?? '');
   // A diária vem do cadastro (ou da que já está gravada no dia). Só vai para o banco se mudar
   // aqui: sem mudança, o banco usa a do perfil vigente NA DATA, que pode não ser a de hoje.
   const pessoa = pessoas.find((p) => p.id === favorecidoId);
@@ -69,7 +80,8 @@ export function RegistrarDiaDialog({ pessoas, favorecidoInicial, dataInicial, ed
   const [diariaDigitada, setDiariaDigitada] = useState<number | null>(null);
   const diaria = diariaDigitada ?? diariaPadrao;
 
-  const total = valorDoDia(jornada, diaria, extras, descontos);
+  const comAlmoco = almoco && jornada !== 'faltou';
+  const total = valorDoDia(jornada, diaria, extras + (comAlmoco ? valorDoAlmoco : 0), descontos);
   const hoje = hojeLocal();
   const nomesDasOS = useMemo(() => {
     const m = new Map<string, string>();
@@ -114,6 +126,7 @@ export function RegistrarDiaDialog({ pessoas, favorecidoInicial, dataInicial, ed
         pedido: {
           favorecidoId, jornada, osIds, extras, descontos, observacao: observacao.trim(),
           valorDiaria: diariaDigitada != null && diariaDigitada !== diariaPadrao ? diariaDigitada : undefined,
+          almoco: comAlmoco,
         },
         datas: novas,
       });
@@ -139,6 +152,7 @@ export function RegistrarDiaDialog({ pessoas, favorecidoInicial, dataInicial, ed
         favorecidoId, data, jornada, osIds, extras, descontos,
         observacao: observacao.trim(),
         valorDiaria: diariaDigitada != null && diariaDigitada !== diariaPadrao ? diariaDigitada : undefined,
+        almoco: comAlmoco,
       });
       toast.success(r.message);
       onFechar();
@@ -219,6 +233,26 @@ export function RegistrarDiaDialog({ pessoas, favorecidoInicial, dataInicial, ed
             </div>
           </div>
 
+          {jornada !== 'faltou' && (
+            <div className="space-y-1 sm:col-span-2">
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox checked={almoco} onCheckedChange={(v) => setAlmoco(v === true)} aria-label="Trouxe o almoço"
+                          aria-describedby="dia-almoco-ajuda" />
+                Trouxe o almoço{valorDoAlmoco > 0 ? ` (+${formatCurrency(valorDoAlmoco)})` : ''}
+              </label>
+              <p id="dia-almoco-ajuda" className="text-xs text-muted-foreground">
+                O motivo “Alimentação (trouxe o almoço)” vai sozinho — o recibo não trava.
+              </p>
+              {/* dia antigo, lançado antes da caixa, com o almoço digitado como extra: não contar duas vezes */}
+              {comAlmoco && editar && almocoDoDia === 0 && extras > 0 && (
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  Este dia já tinha {formatCurrency(extras)} em extras. Se era o almoço, deixe “Outros extras” em zero — senão o
+                  almoço conta duas vezes.
+                </p>
+              )}
+            </div>
+          )}
+
           {!detalhes ? (
             <div className="sm:col-span-2">
               <Button type="button" variant="link" size="sm" className="h-auto px-0" onClick={() => setDetalhes(true)}>
@@ -260,11 +294,11 @@ export function RegistrarDiaDialog({ pessoas, favorecidoInicial, dataInicial, ed
             <p className="text-xs text-muted-foreground">{editar ? 'A gravada neste dia.' : 'Vem do cadastro; mude só se este dia foi diferente.'}</p>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="dia-extras">Extras (R$)</Label>
+            <Label htmlFor="dia-extras">Outros extras (R$)</Label>
             <MoneyInput id="dia-extras" value={extras} onValueChange={setExtras} />
             <p className="text-xs text-muted-foreground">
-              O almoço (quando ele traz o próprio) e outros acréscimos combinados do dia. Despesa paga por ele com comprovante (CMP) entra
-              como reembolso: não repita aqui.
+              Acréscimos combinados do dia, fora o almoço (a caixa acima). Diga o motivo na observação. Despesa paga por ele com
+              comprovante (CMP) entra como reembolso: não repita aqui.
             </p>
           </div>
           <div className="space-y-1.5">

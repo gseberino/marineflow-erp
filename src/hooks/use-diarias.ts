@@ -73,6 +73,8 @@ export interface LinhaDaContaCorrente {
   fracao: number | null;
   valor_diaria: number | null;
   extras: number | null;
+  /** 20/11/2026: quanto dos extras do dia é o almoço que ele trouxe (0 = sem; só no tipo 'dia'). */
+  almoco?: number;
   descontos: number | null;
   trabalhado: number;
   pago: number;
@@ -184,7 +186,7 @@ export async function lerContaCorrente(
     linhas: (c.linhas ?? []).map((l) => ({
       ...l, trabalhado: num(l.trabalhado), pago: num(l.pago), saldo: num(l.saldo),
       fracao: numOuNulo(l.fracao), valor_diaria: numOuNulo(l.valor_diaria),
-      extras: numOuNulo(l.extras), descontos: numOuNulo(l.descontos), os: l.os ?? [],
+      extras: numOuNulo(l.extras), almoco: num(l.almoco), descontos: numOuNulo(l.descontos), os: l.os ?? [],
       aguardando: l.aguardando === true, criado_em: l.criado_em ?? null,
     })),
   };
@@ -219,7 +221,10 @@ export interface DiaParaEditar {
   data: string;
   jornada: Jornada;
   valorDiaria: number;
+  /** O total dos extras do dia (o almoço já está dentro). */
   extras: number;
+  /** 20/11/2026: quanto dos extras é o almoço que ele trouxe (0 = sem). */
+  almoco: number;
   descontos: number;
   observacao: string | null;
   os: OSDoDia[];
@@ -228,10 +233,15 @@ export interface DiaParaEditar {
 export function diaParaEditar(favorecidoId: string, l: LinhaDaContaCorrente): DiaParaEditar {
   return {
     favorecidoId, data: l.data, jornada: l.jornada ?? 'inteiro',
-    valorDiaria: l.valor_diaria ?? 0, extras: l.extras ?? 0, descontos: l.descontos ?? 0,
+    valorDiaria: l.valor_diaria ?? 0, extras: l.extras ?? 0, almoco: l.almoco ?? 0, descontos: l.descontos ?? 0,
     observacao: l.observacao, os: l.os,
   };
 }
+
+/** O motivo que o banco escreve sozinho quando há almoço (o formulário mostra a observação sem ele). */
+export const MOTIVO_DO_ALMOCO = 'Alimentação (trouxe o almoço)';
+export const semMotivoDoAlmoco = (obs: string | null | undefined) =>
+  (obs ?? '').replace(/^\s*Alimentação \(trouxe o almoço\)\s*;?\s*/, '');
 
 export interface PedidoDeDiaria {
   favorecidoId: string;
@@ -241,10 +251,16 @@ export interface PedidoDeDiaria {
   osIds?: string[];
   /** undefined = não mexe; '' = limpa. */
   observacao?: string;
+  /** Com `almoco` dito, são os OUTROS extras (sem o almoço); sem ele, o total do dia. */
   extras?: number;
   descontos?: number;
   /** undefined = a do cadastro vigente na data (ou a já gravada no dia). */
   valorDiaria?: number;
+  /**
+   * 20/11/2026: "Trouxe o almoço" — true soma o almoço da configuração e o banco escreve o motivo;
+   * false tira; undefined = como está.
+   */
+  almoco?: boolean;
 }
 
 export interface ResultadoDaDiaria {
@@ -265,6 +281,7 @@ function paramsDoPedido(p: PedidoDeDiaria) {
     p_descontos: p.descontos ?? null,
     p_valor_diaria: p.valorDiaria ?? null,
     p_origem: 'painel',
+    p_almoco: p.almoco ?? null,
   };
 }
 
@@ -308,6 +325,8 @@ export interface DiariaApagada {
   jornada: Jornada;
   valor_diaria: number;
   extras: number;
+  /** 20/11/2026: quanto dos extras era o almoço (o Desfazer recoloca a caixa marcada). */
+  almoco?: number;
   descontos: number;
   observacao: string | null;
   os_ids: string[];
@@ -852,10 +871,12 @@ export function pedidoParaDesfazer(a: DiariaApagada): PedidoDeDiaria {
     data: a.data,
     jornada: a.jornada,
     osIds: a.os_ids ?? [],
-    observacao: a.observacao ?? '',
-    extras: Number(a.extras) || 0,
+    // com almoço (20/11/2026): a caixa marcada e os OUTROS extras; o banco escreve o motivo de novo
+    observacao: Number(a.almoco) > 0 ? semMotivoDoAlmoco(a.observacao) : a.observacao ?? '',
+    extras: Math.round(((Number(a.extras) || 0) - (Number(a.almoco) || 0)) * 100) / 100,
     descontos: Number(a.descontos) || 0,
     valorDiaria: Number(a.valor_diaria),
+    almoco: Number(a.almoco) > 0,
   };
 }
 

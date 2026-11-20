@@ -27,6 +27,8 @@ type Opcoes = {
   saidaDoMickael?: string;
   /** 20/11/2026: o resumo com quem saiu (um com saldo, um zerado). */
   comSaidas?: boolean;
+  /** 20/11/2026: sem a chave diarias_valor_almoco. */
+  semValorDoAlmoco?: boolean;
 };
 function admin(opcoes: Opcoes = {}) {
   const tabelas: Record<string, any[]> = {
@@ -48,6 +50,8 @@ function admin(opcoes: Opcoes = {}) {
     ],
     app_users: [{ id: "u-dono", phone_normalized: opcoes.semTelefone ? null : "5547999990000" }],
     ai_operator_pending_actions: opcoes.pendencias ?? [],
+    // 20/11/2026: o valor do almoço (a mesma chave que o banco usa)
+    app_settings: opcoes.semValorDoAlmoco ? [] : [{ key: "diarias_valor_almoco", value: "20" }],
     acertos_diarias: opcoes.semAcerto ? [] : [
       { id: "ac-1", numero: 1, favorecido_id: "p-rob", de: "2026-09-01", ate: "2026-09-15", saldo_anterior: 0, dias: 10,
         trabalhado: 1600, pago_no_periodo: 600, valor_do_acerto: 1000, status: opcoes.acertoReaberto ? "reaberto" : "fechado" },
@@ -590,7 +594,8 @@ Deno.test("F2b consultar: o reembolso é a favor dele (com o código do CMP), n�
   assertStringIncludes(tool("consultar_freelancer").description, "reembolsos = reembolso de despesas pagas pelo técnico");
   // resposta 6 do dono: o extra de almoço é quando ele traz o próprio; a mesma despesa não entra também como extra
   assertStringIncludes(tool("consultar_freelancer").description, "o extra de almoço é quando ele traz o próprio");
-  assertStringIncludes((tool("registrar_diaria").input_schema as any).properties.extras.description, "o almoço quando ele traz o próprio");
+  // 20/11/2026: o almoço de quem traz o próprio virou um campo à parte (almoco), com o motivo escrito pelo banco
+  assertStringIncludes((tool("registrar_diaria").input_schema as any).properties.almoco.description, "ele trouxe o próprio almoço");
 });
 
 Deno.test("F2b acerto: a confirmação diz os reembolsos (antes dos vales) só quando há", async () => {
@@ -1091,4 +1096,39 @@ Deno.test("consultar todos: quem saiu entra enquanto tem saldo (com o último di
   assertEquals(r.pessoas[1].saiu_da_equipe_ultimo_dia, "2026-10-24");
   assertEquals(r.pessoas[2].cadastro_desativado, true);
   assertEquals("saiu_da_equipe_ultimo_dia" in r.pessoas[0], false);
+});
+
+// ── Trouxe o almoço (20/11/2026, decisão do dono) ─────────────────────────────────────────────────
+
+Deno.test("almoço: 'trouxe almoço' vai como p_almoco=true (sem extras inventados); o \"sim\" mostra o valor da configuração", async () => {
+  const { c, chamadas } = ctx();
+  const texto = (await resumirDiaria(c as never, { freelancer: "Roberto", data: "2026-09-24", jornada: "inteiro", almoco: true }))?.replace(/ /g, " ");
+  assertStringIncludes(texto!, "R$ 180,00");
+  assertStringIncludes(texto!, "Almoço (trouxe o próprio): + R$ 20,00");
+  assertStringIncludes(texto!, "Alimentação (trouxe o almoço)");
+  await tool("registrar_diaria").execute({ freelancer: "Roberto", data: "2026-09-24", jornada: "inteiro", almoco: true }, c as never);
+  const r = chamadas.find((x) => x.n === "registrar_diaria")!;
+  assertEquals([r.a.p_almoco, r.a.p_extras, r.a.p_observacao], [true, null, null]);
+});
+
+Deno.test("almoço: no dia já lançado, 'manter' só com o almoço é pedido válido; sem a configuração o \"sim\" avisa", async () => {
+  const { c } = ctx({ diaLancado: true });
+  const p = await resolverDiaria(c as never, { freelancer: "Roberto", data: "2026-09-24", jornada: "manter", almoco: true });
+  assertEquals("error" in p, false);
+  const sem = ctx({ semValorDoAlmoco: true });
+  const texto = (await resumirDiaria(sem.c as never, { freelancer: "Roberto", data: "2026-09-24", jornada: "inteiro", almoco: true }))?.replace(/ /g, " ");
+  assertStringIncludes(texto!, "O valor do almoço não está configurado");
+});
+
+Deno.test("almoço no lote: cada trecho leva almoco ao banco e o \"sim\" diz 'com almoço'", async () => {
+  const { c, chamadas } = ctx();
+  const args = { freelancer: "Roberto", dias: [
+    { data: "2026-09-21", data_ate: "2026-09-22", jornada: "inteiro", almoco: true },
+    { data: "2026-09-23", jornada: "meio" },
+  ] };
+  const texto = (await resumirDiaria(c as never, args))?.replace(/ /g, " ");
+  assertStringIncludes(texto!, "(com almoço R$ 20,00)");
+  await tool("registrar_diaria").execute(args, c as never);
+  const lote = chamadas.find((x) => x.n === "registrar_diarias_em_lote")!;
+  assertEquals((lote.a.p_dias as Array<Record<string, unknown>>).map((d) => d.almoco), [true, true, null]);
 });
