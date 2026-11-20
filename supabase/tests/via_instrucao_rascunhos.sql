@@ -466,7 +466,9 @@ begin
   values (v_os, 'TESTE F2 — instalação do sonar', 'unit', 1, 0, 0, t0 + interval '9 ms') returning id into l_fal;
   r := public.via_instrucao_pedir(v_os, 'tela', array[l_fal]);
   v_job2 := (r ->> 'job_id')::uuid;
-  update public.ai_jobs x set status = 'failed', completed_at = now(), error_code = 'timeout', error = 'teste' where x.id = v_job2;
+  -- (20/11) na mesma transação os dois jobs nascem no mesmo now(): o 2º passa 1 ms à frente para "o mais recente" não cair no desempate por id
+  update public.ai_jobs x set status = 'failed', completed_at = now(), error_code = 'timeout', error = 'teste',
+         created_at = x.created_at + interval '1 ms' where x.id = v_job2;
   r := public.via_instrucao_pendentes(v_os);
   v_res := pg_temp.ok(v_res, 'N15 job que falhou: entregue sem sugestão, a tela mostra a falha, a linha volta a ser elegível',
     (r ->> 'job_novo') is null and v_job2 is not null and v_job2 <> v_job
