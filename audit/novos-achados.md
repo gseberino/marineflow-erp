@@ -4193,14 +4193,16 @@ mudam comportamento fora do escopo; cada um tem a menor mudança indicada.
 - **Onde:** policy `auth_update_signatures` (authenticated, sem condição de cargo).
 - **Efeito:** a prova de assinatura do cliente pode ser alterada pela API por técnico/vendedor. O histórico agora registra a mudança (trg_historico), mas não impede.
 - **Menor mudança:** restringir o UPDATE a admin (ou só ao gatilho/edge), provando com `set local role`.
-- **Status (20/11/2026): CORRIGIDO no ramo `session/historico-correcoes` (commit e311a300, migration
-  `20270211100000_assinaturas_so_admin_altera`), NÃO aplicado.** Decisão do dono: admin e o sistema. Quem grava hoje: a
+- **Status (20/11/2026): CORRIGIDO no ramo `session/historico-correcoes` (commit e311a300, ajustado depois para
+  admin + financeiro; migration `20270211100000_assinaturas_admin_financeiro_altera`), NÃO aplicado.** Decisão do dono:
+  "Admin e financeiro" (mesmo helper `is_admin_or_financial` dos termos e do PIX) e o sistema. Quem grava hoje: a
   edge `submit-signature` (service_role, não muda); os gatilhos que derrubam a assinatura quando o documento muda —
   `private.linha_pede_nova_assinatura` (já definer) e `public.detect_so_change_after_signature`, que era INVOKER: só
   restringir a policy faria a edição de um técnico numa OS assinada deixar a assinatura velha valendo em silêncio (provado:
   o A7 reprova com só a policy). Por isso o gatilho virou SECURITY DEFINER (ALTER, corpo igual) e anon perdeu
-  INSERT/UPDATE/DELETE na tabela. Teste: `supabase/tests/assinaturas_so_admin_altera.sql` (A1–A10; ensaiado com rollback:
-  12/12 com a migration, 7 falhas sem ela).
+  INSERT/UPDATE/DELETE na tabela. Teste: `supabase/tests/assinaturas_admin_financeiro_altera.sql` (A1–A10: técnico e
+  vendedor recusados, financeiro e admin aceitos; ensaiado com rollback: 12/12 com a migration, 6 falhas sem ela, 2 falhas
+  — A3 e A10a — com a versão antiga "só admin").
 
 ### [NOVO-historico-04] `app_settings` aceita UPDATE/DELETE de qualquer usuário logado
 
