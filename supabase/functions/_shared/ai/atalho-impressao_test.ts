@@ -17,6 +17,18 @@ Deno.test("imprimir: as formas comuns", () => {
   assertEquals(lerPedidoDeImpressao("imprime o último orçamento"), { documento: "ultimo", tipo: "orcamento", destino: "impressora" });
 });
 
+Deno.test("imprimir: as vias de amanhã (20/11/2026, a sugestão das 19:30) e o negrito copiado da sugestão", () => {
+  const amanha = { documento: "amanha", via: "tecnico" as const, destino: "impressora" as const };
+  assertEquals(lerPedidoDeImpressao("imprime as vias de amanhã"), amanha);
+  assertEquals(lerPedidoDeImpressao("Imprime as vias de amanha!"), amanha);
+  assertEquals(lerPedidoDeImpressao("*imprime as vias de amanhã*"), amanha);
+  assertEquals(lerPedidoDeImpressao("pode imprimir as vias de amanhã"), amanha);
+  assertEquals(lerPedidoDeImpressao("*imprime as vias de hoje*"), { documento: "hoje", via: "tecnico", destino: "impressora" });
+  for (const t of ["imprime o de amanhã", "imprime as vias de hoje e de amanhã", "imprime o 86 amanhã", "imprime as vias de amanhã do Alex"]) {
+    assertEquals(lerPedidoDeImpressao(t), null, t);
+  }
+});
+
 Deno.test("imprimir: o que vai para o modelo", () => {
   for (const t of [
     "imprime 2 cópias do 86",

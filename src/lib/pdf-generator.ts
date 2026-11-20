@@ -32,6 +32,7 @@ import { documentoMascarado, nomeSemCpf } from '../../supabase/functions/_shared
 export {
   buildPDFFilename,
   DEFAULT_PDF_OPTIONS,
+  descontosDosItens,
   opcoesPadraoDoDocumento,
   PDF_ROOT_CLASS,
   resolvePdfOptions,

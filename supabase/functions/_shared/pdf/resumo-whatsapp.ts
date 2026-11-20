@@ -29,6 +29,7 @@
  */
 import { computeSchedule, type DepositInstallment, type DepositOrderLike } from "../banking/quote-deposit.ts";
 import { nomeDaUnidade } from "../unidade.ts";
+import { linhasDoQuadroDeValores, quadroDeValoresEmTexto, type OrdemDoQuadro } from "./quadro-de-valores.ts";
 
 const brl = (v: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
@@ -46,6 +47,8 @@ export interface OpcoesDeExibicao {
   showPartsPrices?: boolean;
   showTravelCost?: boolean;
   showDiscount?: boolean;
+  showTax?: boolean;
+  showCardFee?: boolean;
   showBankDetails?: boolean;
   showPaymentInstructions?: boolean;
   hideFinancials?: boolean;
@@ -70,7 +73,12 @@ export interface ResumoDeOrcamentoInput {
    */
   ativoTipo?: string | null;
   /** O orçamento, com os totais por categoria (mesma forma que o resto do sistema usa). */
-  orcamento: DepositOrderLike & { grand_total?: number | null };
+  orcamento: DepositOrderLike & OrdemDoQuadro & { grand_total?: number | null };
+  /**
+   * Soma dos descontos dados item a item (descontosDosItens(pdfData).total). Com ela o desconto do
+   * quadro sai "Desconto adicional", como no PDF. Ausente = 0.
+   */
+  descontoDosItens?: number | null;
   /** As parcelas da condição de pagamento escolhida. */
   parcelas?: DepositInstallment[] | null;
   /** Rótulo da condição, como aparece na tela ("50% mão de obra + 100% materiais"). */
@@ -123,7 +131,7 @@ function quandoVence(row: { dueBasis: 'delivery' | 'days'; days: number }): stri
 export function buildQuoteWhatsAppSummary(input: ResumoDeOrcamentoInput): string {
   const {
     numero, clienteNome, ativoNome, ativoTipo, orcamento, parcelas, condicaoLabel,
-    validadeDias, validadeAte, empresa = {}, opcoes = {},
+    validadeDias, validadeAte, empresa = {}, opcoes = {}, descontoDosItens,
   } = input;
 
   const mostrar = {
@@ -131,6 +139,8 @@ export function buildQuoteWhatsAppSummary(input: ResumoDeOrcamentoInput): string
     pecas: opcoes.showPartsPrices !== false,
     deslocamento: opcoes.showTravelCost !== false,
     desconto: opcoes.showDiscount !== false,
+    impostos: opcoes.showTax !== false,
+    taxaCartao: opcoes.showCardFee !== false,
     banco: opcoes.showBankDetails !== false,
     comoPagar: opcoes.showPaymentInstructions !== false,
   };
@@ -158,21 +168,29 @@ export function buildQuoteWhatsAppSummary(input: ResumoDeOrcamentoInput): string
   const travel = orcamento.is_travel_billable !== false ? Number(orcamento.travel_cost_total || 0) : 0;
   const subcontrato = Number(orcamento.subcontract_cost_total || 0);
   const desconto = Number(orcamento.discount_amount || 0);
+  const taxaCartao = Number(orcamento.card_fee_amount || 0);
 
   // O total é o do orçamento quando existe: é o número que o cliente já viu no PDF, e
   // divergir dele por centavo de arredondamento destruiria a confiança na mensagem.
   const totalCalculado = labor + parts + operacional + travel + subcontrato - desconto
-    + Number(orcamento.tax_amount || 0);
+    + Number(orcamento.tax_amount || 0) + taxaCartao;
   const total = Number(orcamento.grand_total ?? totalCalculado);
 
   linhas.push('');
   linhas.push('*Valores*');
-  if (mostrar.servicos && labor > 0) linhas.push(`• Serviços: ${brl(labor)}`);
-  if (mostrar.pecas && parts > 0) linhas.push(`• Materiais e peças: ${brl(parts)}`);
-  if (mostrar.deslocamento && travel > 0) linhas.push(`• Deslocamento: ${brl(travel)}`);
-  if (subcontrato > 0) linhas.push(`• Serviços de terceiros: ${brl(subcontrato)}`);
-  if (operacional > 0) linhas.push(`• Custos operacionais: ${brl(operacional)}`);
-  if (mostrar.desconto && desconto > 0) linhas.push(`• Desconto: −${brl(desconto)}`);
+  // O MESMO quadro do PDF (quadro-de-valores.ts; "mesma regra do PDF", dono, 20/11/2026):
+  // deslocamento, impostos e taxa de cartão ocultos viram "Outros encargos"; o desconto geral
+  // oculto vira "Ajustes" — as linhas sempre somam o total. Serviços e peças com o preço
+  // escondido continuam fora da mensagem (regra 2 acima).
+  linhas.push(...quadroDeValoresEmTexto(linhasDoQuadroDeValores(orcamento, {
+    servicos: mostrar.servicos && labor > 0,
+    pecas: mostrar.pecas && parts > 0,
+    deslocamento: mostrar.deslocamento,
+    impostos: mostrar.impostos,
+    taxaCartao: mostrar.taxaCartao,
+    desconto: mostrar.desconto,
+    descontoDosItens: Number(descontoDosItens) || 0,
+  })));
   linhas.push(`*Total: ${brl(total)}*`);
 
   // ── Sinal e saldo ────────────────────────────────────────────────────────

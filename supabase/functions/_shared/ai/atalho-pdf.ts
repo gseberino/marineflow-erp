@@ -76,20 +76,25 @@ export function lerPedidoDePdf(texto: string): PedidoDePdf | null {
 // leitor estrito: palavra fora do vocabulário (cópias, colorido, um nome) = null, e o modelo decide.
 
 const VERBOS_DE_IMPRIMIR = new Set(["imprime", "imprima", "imprimir", "imprimi", "impressao", "imprimam"]);
-const VOCABULARIO_DE_IMPRESSAO = new Set([...VOCABULARIO, "as", "os", "vias", "via", "tecnico", "do", "das", "dos", "hoje", "pode", "ai", "la"]);
+const VOCABULARIO_DE_IMPRESSAO = new Set([...VOCABULARIO, "as", "os", "vias", "via", "tecnico", "do", "das", "dos", "hoje", "amanha", "pode", "ai", "la"]);
 
 /** O pedido de impressão, se a mensagem for SÓ isso; null para qualquer outra coisa. */
 export function lerPedidoDeImpressao(texto: string): PedidoDePdf | null {
-  const t = normalizar(texto);
+  // (20/11/2026) o negrito do WhatsApp (*imprime as vias de amanhã*, copiado da sugestão) não muda o pedido
+  const t = normalizar(String(texto ?? "").replace(/[*_~]/g, " "));
   if (!t || t.length > 80) return null;
   const palavras = t.split(/\s+/);
   if (!palavras.some((p) => VERBOS_DE_IMPRIMIR.has(p))) return null;
   const viaDoTecnico = palavras.includes("via") || palavras.includes("vias") || palavras.includes("tecnico");
-  if (palavras.includes("hoje")) {
-    // "imprime as vias de hoje" (só com via/vias: "imprime o de hoje" é ambíguo)
+  // "imprime as vias de hoje" e (20/11/2026, a sugestão das 19:30) "imprime as vias de amanhã". Só com via/vias: "imprime o
+  // de hoje" é ambíguo. Hoje E amanhã na mesma frase vão ao modelo.
+  const hoje = palavras.includes("hoje");
+  const amanha = palavras.includes("amanha");
+  if (hoje || amanha) {
+    if (hoje && amanha) return null;
     if (!palavras.includes("vias") && !palavras.includes("via")) return null;
     if (palavras.some((p) => !VERBOS_DE_IMPRIMIR.has(p) && !VOCABULARIO_DE_IMPRESSAO.has(p))) return null;
-    return { documento: "hoje", via: "tecnico", destino: "impressora" };
+    return { documento: hoje ? "hoje" : "amanha", via: "tecnico", destino: "impressora" };
   }
   let documento: string | null = null;
   let tipo: PedidoDePdf["tipo"];

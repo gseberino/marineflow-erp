@@ -1668,3 +1668,27 @@ Deno.test("Consertos da revisão da 7g (2) — webhook inteiro: com o CMP no con
   // o controle: em pelo menos uma forma o destino de antes não é o assistente (o teste distingue ser ou não palavra)
   assert(diferentes > 0);
 });
+
+// (20/11/2026, decisão do dono: "Sim, criar") o atalho do mês. Antes, "agenda do mês" ia ao modelo, que passava "este mês" ao
+// banco e voltava "Não entendi a data"; o banco agora entende (supabase/tests/agenda_periodo_mes.sql) e a palavra curta vai direto.
+const doMes: ComandoDaAgenda = { comando: "ver", periodo: "mes", foco: "tudo", pessoa: null };
+const doMesQueVem: ComandoDaAgenda = { comando: "ver", periodo: "proximo_mes", foco: "tudo", pessoa: null };
+
+Deno.test("agenda do mês: as frases do mês e do mês que vem (com acento, maiúscula, negrito, ponto e o 🎤)", () => {
+  const casos: Array<[string, ComandoDaAgenda]> = [
+    ["agenda do mês", doMes], ["Agenda do mês?", doMes], ["*agenda do mes*", doMes], ["🎤 Agenda do mês.", doMes],
+    ["agenda deste mês", doMes], ["agenda desse mês", doMes], ["agenda este mês", doMes], ["agenda esse mes", doMes], ["Agenda mês", doMes],
+    ["agenda mês que vem", doMesQueVem], ["Agenda do mês que vem?", doMesQueVem], ["agenda próximo mês", doMesQueVem],
+    ["agenda do próximo mês", doMesQueVem],
+  ];
+  for (const [t, esperado] of casos) assertEquals(lerComandoDaAgenda(t), esperado, t);
+  // a semana continua a semana
+  assertEquals(lerComandoDaAgenda("agenda da semana"), semana);
+});
+
+Deno.test("agenda do mês: 'este mês' sozinho e o mês com mais palavras continuam conversa (vão ao modelo)", () => {
+  for (const t of ["este mês", "esse mes", "do mês", "mês que vem", "quanto gastei este mês", "agenda do mês do Roberto", "agenda do mês de dezembro",
+    "comissão do mês que vem"]) {
+    assertEquals(lerComandoDaAgenda(t), null, t);
+  }
+});

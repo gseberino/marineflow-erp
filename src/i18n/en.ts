@@ -879,7 +879,7 @@ export const en: DeepPartialStrings<TranslationKeys> = {
     optionsScopeHint: 'Applies to this document only. The company default is set in Settings › Documents.',
     valuesGroup: 'Amounts',
     contentGroup: 'Content',
-    valuesHint: 'Unchecking removes the line from the page; the amount still counts in the total.',
+    valuesHint: 'The total does not change. Unchecked Travel, Taxes and Card fee are grouped in one "Other charges" line; with Discounts unchecked, items show the discounted price and the overall discount goes in an "Adjustments" line.',
     showServicePrices: 'Service amounts (unit and total)',
     showPartsPrices: 'Parts amounts (unit and total)',
     showTravelCost: 'Travel',

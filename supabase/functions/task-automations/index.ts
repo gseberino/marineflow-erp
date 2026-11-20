@@ -89,6 +89,7 @@ import { habilidadeDaAgenda } from "./agenda-habilidade.ts";
 import { localDaAgenda } from "./agenda-local.ts";
 import { tarefasDaAgenda } from "./agenda-tarefas.ts";
 import { viaDaAgenda } from "./via-da-agenda.ts";
+import { sugerirImpressaoDaVespera } from "./sugestao-impressao.ts";
 import { expandOccurrences } from "../_shared/recurrence.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { logEdgeError } from "../_shared/log-error.ts";
@@ -650,6 +651,17 @@ servirComCors(async (req) => {
       agendaVia = { erro: String((e as any)?.message ?? e) };
     }
 
+    // (20/11/2026) A sugestão de imprimir as vias de amanhã, no tique da ficha das 19:30 (sugestao-impressao.ts: só sugere, nada
+    // imprime; só das 19:30 às 20:00 de Brasília, com OS amanhã e a impressora no ar; uma por véspera). Nunca lança; o try de fora é
+    // a segunda trava, para nada daqui parar as regras.
+    let impressaoVespera: unknown = null;
+    try {
+      impressaoVespera = await sugerirImpressaoDaVespera(db, new Date());
+    } catch (e) {
+      console.error("impressao:vespera:", e);
+      impressaoVespera = { erro: String((e as any)?.message ?? e) };
+    }
+
     const rules = await runRules(db, settings);
     const r10 = await runTechnicianReminders(db, settings);
     const reminders = await processReminders(db);
@@ -660,6 +672,7 @@ servirComCors(async (req) => {
       agenda_tarefas: agendaTarefas, agenda_equipe_semana: agendaEquipeSemana,
       agenda_aprender: agendaAprender, agenda_habilidade: agendaHabilidade, agenda_local: agendaLocal, agenda_vigia: agendaVigia, agenda_aviso: agendaAviso, agenda_cliente_vigia: agendaClienteVigia,
       agenda_explicar: agendaExplicar, agenda_comunicar: agendaComunicar, agenda_via: agendaVia,
+      impressao_vespera: impressaoVespera,
       rules, r10, reminders, recurrence,
     };
     // Regra que falhou também é motivo para auditar: sem isto, um tick em que TODAS as
