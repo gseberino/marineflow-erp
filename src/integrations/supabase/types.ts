@@ -11895,6 +11895,66 @@ export type Database = {
           },
         ]
       }
+      via_instrucao_rascunhos: {
+        Row: {
+          base: string
+          criado_em: string
+          decidido_em: string | null
+          decidido_por: string | null
+          decidido_via: string | null
+          estado: string
+          fonte_linha_id: string | null
+          fonte_rotulo: string | null
+          id: string
+          job_id: string | null
+          linha_id: string
+          motivo_fim: string | null
+          origem: string
+          pedido_por: string | null
+          pedido_via: string
+          service_order_id: string
+          texto: string | null
+        }
+        Insert: {
+          base: string
+          criado_em?: string
+          decidido_em?: string | null
+          decidido_por?: string | null
+          decidido_via?: string | null
+          estado?: string
+          fonte_linha_id?: string | null
+          fonte_rotulo?: string | null
+          id?: string
+          job_id?: string | null
+          linha_id: string
+          motivo_fim?: string | null
+          origem: string
+          pedido_por?: string | null
+          pedido_via: string
+          service_order_id: string
+          texto?: string | null
+        }
+        Update: {
+          base?: string
+          criado_em?: string
+          decidido_em?: string | null
+          decidido_por?: string | null
+          decidido_via?: string | null
+          estado?: string
+          fonte_linha_id?: string | null
+          fonte_rotulo?: string | null
+          id?: string
+          job_id?: string | null
+          linha_id?: string
+          motivo_fim?: string | null
+          origem?: string
+          pedido_por?: string | null
+          pedido_via?: string
+          service_order_id?: string
+          texto?: string | null
+        }
+        Relationships: []
+      }
       via_tecnico_envios: {
         Row: {
           app_user_id: string | null
@@ -16072,6 +16132,29 @@ export type Database = {
           p_source_message_id?: string
         }
         Returns: number
+      }
+      via_instrucao_decidir: {
+        Args: {
+          p_autor?: string
+          p_itens: Json
+          p_service_order_id?: string
+          p_via: string
+        }
+        Returns: Json
+      }
+      via_instrucao_pedir: {
+        Args: {
+          p_autor?: string
+          p_linhas?: string[]
+          p_refazer?: boolean
+          p_service_order_id: string
+          p_via?: string
+        }
+        Returns: Json
+      }
+      via_instrucao_pendentes: {
+        Args: { p_autor?: string; p_service_order_id?: string }
+        Returns: Json
       }
       wa_extract_body_text: { Args: { p: Json }; Returns: string }
       wa_extract_message_type: { Args: { p: Json }; Returns: string }

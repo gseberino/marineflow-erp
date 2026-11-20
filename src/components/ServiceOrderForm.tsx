@@ -16,6 +16,8 @@ import { useServices } from '@/hooks/use-services';
 import { useCardFees } from '@/hooks/use-card-fees';
 import { useAppSettings } from '@/hooks/use-app-settings';
 import { useViaDoTecnico, viaHeaderFromOrder } from '@/hooks/use-via-do-tecnico';
+import { useInstrucoesSugeridas } from '@/hooks/use-instrucoes-sugeridas';
+import { faltaDeInstrucaoNaVia } from '@/lib/instrucoes-sugeridas';
 import { isoParaInputLocal, inputLocalParaIso } from '@/lib/datetime-local';
 import { AvisoAntesDaVia } from '@/components/service-order/aviso-antes-da-via';
 import { ViaEntryDialog } from '@/components/service-orders/ViaEntryDialog';
@@ -492,6 +494,11 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   // Assistente "Faturar OS" (NFS-e + NF-e): abre ao concluir, ANTES do aviso de saldo —
   // documento fiscal primeiro, cobrança depois. Só admin (a emissão é admin-only).
   const authUser = useOptionalAuth()?.user ?? null;
+  // Instrução sugerida pelo assistente esperando aprovação (via v2, F2): entra no aviso antes de imprimir a via. A mesma
+  // consulta (e o mesmo cache) da seção de serviços; só o admin.
+  const { data: instrucoesSugeridas } = useInstrucoesSugeridas(
+    !isNew && orderId && authUser?.role === 'admin' ? orderId : undefined,
+  );
   // A embarcação/veículo da OS como foi LIDA (não a do formulário): técnico escolhe a primeira, mas
   // não troca a que já está gravada (decisão do dono, 22/10/2026). Sem a OS lida: não se sabe.
   const unidadeGravada: string | null | undefined = orderData ? (orderData.vessel_id ?? null) : undefined;
@@ -2421,8 +2428,11 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                       // Só com serviços, material e cabeçalho carregados: imprimir antes saía com a folha pela metade.
                       disabled={viaDoTecnico.carregando}
                       onClick={() => {
-                        // O que vai faltar no papel aparece antes; o escritório decide.
-                        if (viaDoTecnico.faltas.length) setFaltasDaVia(viaDoTecnico.faltas);
+                        // O que vai faltar no papel aparece antes; o escritório decide. Sugestão esperando
+                        // aprovação também: só o aprovado sai no papel (via v2, F2).
+                        const semAprovar = faltaDeInstrucaoNaVia(instrucoesSugeridas?.pendentes.length ?? 0);
+                        const faltas = semAprovar ? [...viaDoTecnico.faltas, semAprovar] : viaDoTecnico.faltas;
+                        if (faltas.length) setFaltasDaVia(faltas);
                         else imprimirVia();
                       }}
                       className="gap-2"

@@ -1,7 +1,7 @@
 /* Seção E — Serviços de Mão de Obra da OS, extraída 1:1 do ServiceOrderForm (Fase 3, passo 5). */
-import { useMemo, type Dispatch, type SetStateAction } from 'react';
+import { useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { Loader2, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ServiceTimer } from '@/components/ServiceTimer';
 import { useServiceOrderSteps } from '@/hooks/use-service-steps';
@@ -12,6 +12,13 @@ import { useI18n } from '@/i18n';
 import { ServiceCardFormComponent, QuickDiscountPopover, BILLING_UNIT_LABELS } from './form-parts';
 import { AcoesDaLinha } from '@/components/AcoesDaLinha';
 import { useConfirmacao } from '@/components/Confirmacao';
+import { useOptionalAuth } from '@/hooks/use-auth';
+import {
+  useCancelarPedidoDeInstrucoes, useDecidirInstrucoes, useInstrucoesSugeridas, usePedirInstrucoes,
+} from '@/hooks/use-instrucoes-sugeridas';
+import { estadoDoPedido } from '@/lib/instrucoes-sugeridas';
+import { motivoDaFalha } from '@/lib/orcamento-tecnico-ia';
+import { numerarLinhas } from '../../../supabase/functions/_shared/linhas-da-os';
 
 interface ServicesSectionProps {
   isNew: boolean;
@@ -71,19 +78,100 @@ export function ServicesSection(props: ServicesSectionProps) {
   // Excluir serviço ia num clique, sem confirmar (inventário de 03/10/2026): agora no menu, confirmado.
   const { pedir: pedirConfirmacao, dialogo } = useConfirmacao();
 
+  // O número do serviço no papel (Q1 do dono, 17/11: mostrar). A lista já vem na ordem canônica (created_at, id), e a
+  // cobrança conta no número (regra 4A). É o mesmo número do cartão da via e do "serviço N" no WhatsApp.
+  const numeroPorLinha = useMemo(
+    () => new Map(numerarLinhas((soServices || []) as Array<{ id: string }>).map((l) => [l.id, l.numero])),
+    [soServices],
+  );
+
+  // Instrução sugerida pelo assistente (via v2, F2, canal A). Só o admin pede e aprova; OS nova não tem linha gravada.
+  const admin = useOptionalAuth()?.user?.role === 'admin';
+  const osDasSugestoes = !isNew && orderId && admin ? orderId : undefined;
+  const { data: sugeridas } = useInstrucoesSugeridas(osDasSugestoes);
+  const pedirInstrucoes = usePedirInstrucoes(osDasSugestoes);
+  const decidirInstrucoes = useDecidirInstrucoes(osDasSugestoes);
+  const cancelarPedido = useCancelarPedidoDeInstrucoes(osDasSugestoes);
+  // As edições dos cartões (id da sugestão → texto): o "Aprovar todas" leva o que está escrito em cada um.
+  const [edicoes, setEdicoes] = useState<Record<string, string>>({});
+  const pendentes = useMemo(() => sugeridas?.pendentes ?? [], [sugeridas]);
+  const sugestaoPorLinha = useMemo(() => new Map(pendentes.map((p) => [p.linha_id, p])), [pendentes]);
+  const estadoDoAssistente = sugeridas ? estadoDoPedido(sugeridas) : 'livre';
+  const assistenteTrabalhando = estadoDoAssistente === 'na_fila' || estadoDoAssistente === 'rascunhando';
+  const ocupada = decidirInstrucoes.isPending;
+  const textoDoCartao = (id: string, sugerido: string) => edicoes[id] ?? sugerido;
+  const aprovarTodas = () => decidirInstrucoes.mutate(
+    pendentes.map((p) => ({ id: p.id, acao: 'aprovar' as const, texto: textoDoCartao(p.id, p.texto) })),
+    { onSuccess: () => setEdicoes({}) },
+  );
+
   return (
     <>
       {dialogo}
       {/* E - Labor Services — always visible (with always-on entry row) */}
       <section className="rounded-xl border bg-card shadow-sm overflow-hidden">
         <div className="p-5 border-b">
-          <h2 className="font-semibold text-sm">{t.services.laborSection}</h2>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="font-semibold text-sm">{t.services.laborSection}</h2>
+            {osDasSugestoes && sugeridas?.em_uso && assistenteTrabalhando && (
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <span>
+                  {estadoDoAssistente === 'rascunhando'
+                    ? (sugeridas.job?.linhas === 1 ? 'Rascunhando 1 instrução…' : `Rascunhando ${sugeridas.job?.linhas ?? ''} instruções…`)
+                    : 'Na fila: o assistente continua quando o computador do escritório voltar.'}
+                </span>
+                {sugeridas.job && (
+                  <button
+                    type="button"
+                    className="underline underline-offset-2 hover:text-foreground"
+                    onClick={() => cancelarPedido.mutate(sugeridas.job!.id)}
+                    disabled={cancelarPedido.isPending}
+                  >
+                    Cancelar
+                  </button>
+                )}
+              </div>
+            )}
+            {osDasSugestoes && sugeridas?.em_uso && !assistenteTrabalhando && sugeridas.elegiveis > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs"
+                onClick={() => pedirInstrucoes.mutate()}
+                disabled={pedirInstrucoes.isPending}
+                title="O assistente sugere a instrução ao técnico de cada serviço sem instrução. Só as que você aprovar saem na via."
+              >
+                <Sparkles className="h-3.5 w-3.5 mr-1" />
+                {estadoDoAssistente === 'falhou' ? 'Tentar de novo' : 'Rascunhar instruções'} ({sugeridas.elegiveis})
+              </Button>
+            )}
+          </div>
+          {osDasSugestoes && estadoDoAssistente === 'falhou' && sugeridas?.job && (
+            <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
+              O pedido de instruções não terminou. {motivoDaFalha({ error_code: sugeridas.job.error_code, error: sugeridas.job.error })}
+            </p>
+          )}
           {isNew && (
             <p className="text-xs text-muted-foreground mt-1">
               Itens adicionados aqui serão salvos quando você criar a OS.
             </p>
           )}
         </div>
+
+        {osDasSugestoes && pendentes.length > 0 && (
+          <div className="px-5 py-2.5 border-b bg-sky-50/60 dark:bg-sky-950/30 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <span>
+              {pendentes.length === 1
+                ? '1 instrução sugerida pelo assistente espera sua aprovação.'
+                : `${pendentes.length} instruções sugeridas pelo assistente esperam sua aprovação.`}
+              {' '}Só as aprovadas saem na via do técnico.
+            </span>
+            <Button size="sm" className="h-7 text-xs" onClick={aprovarTodas} disabled={ocupada}>
+              Aprovar todas
+            </Button>
+          </div>
+        )}
 
         {/* List of services as collapsible cards + add button */}
         {(() => {
@@ -97,6 +185,8 @@ export function ServicesSection(props: ServicesSectionProps) {
 
           const renderCollapsedRow = (opts: {
             keyId: string;
+            /** O número do serviço no papel (só linha gravada). */
+            numero?: number;
             name: string;
             description?: string;
             unit: string;
@@ -128,7 +218,12 @@ export function ServicesSection(props: ServicesSectionProps) {
             <div className="flex items-center gap-3 px-4 py-3">
               <div className="flex-1 min-w-0">
                 <div className="font-medium truncate">
-                  {opts.name}
+                  {opts.numero != null && (
+                    <span className="mr-1.5 text-muted-foreground tabular-nums" title="Número do serviço na via do técnico">
+                      {opts.numero} ·
+                    </span>
+                  )}
+                  <span>{opts.name}</span>
                   {opts.isDraft && (
                     <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
                       rascunho
@@ -238,8 +333,10 @@ export function ServicesSection(props: ServicesSectionProps) {
                     </div>
                   );
                 }
+                const sugestao = sugestaoPorLinha.get(s.id);
                 return renderCollapsedRow({
                   keyId: s.id,
+                  numero: numeroPorLinha.get(s.id),
                   name: s.name_snapshot,
                   description: s.description_snapshot,
                   unit: s.billing_unit_snapshot,
@@ -273,7 +370,18 @@ export function ServicesSection(props: ServicesSectionProps) {
                         <LineSystemPicker linha={pendentePorLinha.get(s.id)!} />
                       )}
                       {/* Como a linha sai na via do técnico (fase 2, 01/10/2026). */}
-                      <LineViaTecnico line={s} orderId={orderId} />
+                      <LineViaTecnico
+                        line={s}
+                        orderId={orderId}
+                        sugestao={sugestao ? {
+                          sugestao,
+                          texto: textoDoCartao(sugestao.id, sugestao.texto),
+                          onEditar: (texto) => setEdicoes((prev) => ({ ...prev, [sugestao.id]: texto })),
+                          onAprovar: (texto) => decidirInstrucoes.mutate([{ id: sugestao.id, acao: 'aprovar', texto }]),
+                          onDescartar: () => decidirInstrucoes.mutate([{ id: sugestao.id, acao: 'descartar' }]),
+                          ocupada,
+                        } : undefined}
+                      />
                     </>
                   ) : undefined,
                 });
