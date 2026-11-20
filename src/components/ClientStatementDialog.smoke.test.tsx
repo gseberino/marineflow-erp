@@ -13,12 +13,14 @@ const { enviarMock, estado } = vi.hoisted(() => ({
     pix: [] as Array<{ valor: number; data: string | null }>,
     settings: { pix_key: 'hbr@pix' } as Record<string, string>,
     hora: 14,
+    cobrancas: [] as Array<{ id: string; status: string; receivable_id: string | null; service_order_id: string | null }>,
   },
 }));
 
 vi.mock('@/hooks/use-cobrar-juntas', () => ({
   usePixEsperandoDoCliente: () => ({ data: estado.pix, isLoading: false, error: null }),
   useEnviarExtrato: () => ({ mutate: enviarMock, isPending: false }),
+  useCobrancasFormais: () => ({ data: estado.cobrancas, isLoading: false, error: null }),
   horaDoCobrarJuntas: () => estado.hora,
 }));
 vi.mock('@/hooks/use-app-settings', () => ({
@@ -41,6 +43,7 @@ beforeEach(() => {
   estado.pix = [];
   estado.settings = { pix_key: 'hbr@pix' };
   estado.hora = 14;
+  estado.cobrancas = [];
 });
 
 describe('ClientStatementDialog (Enviar extrato)', () => {
@@ -97,10 +100,44 @@ describe('ClientStatementDialog (Enviar extrato)', () => {
     expect(screen.getByRole('button', { name: /Enviar ao cliente/ })).toBeDisabled();
   });
 
-  it('tudo pago: não há o que cobrar (trava)', () => {
+  it('tudo pago: sai como comprovante de quitação, sem contas, e avisa que não é cobrança (dono, 20/11/2026)', async () => {
+    const user = userEvent.setup();
+    estado.pix = [{ valor: 100, data: '2026-10-27' }]; // Pix esperando não barra a quitação
+    estado.settings = { pix_key: 'hbr@pix', collection_min_amount: '5000' }; // nem o piso
     renderizar(MP, [CONTAS[0]]);
-    expect(screen.getByRole('alert')).toHaveTextContent('Este cliente não tem saldo em aberto: não há o que cobrar.');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('heading', { name: /Comprovante de quitação/ })).toBeInTheDocument();
+    const msg = screen.getByLabelText('Extrato') as HTMLTextAreaElement;
+    expect(msg.value).toContain('Comprovante de quitação — HBR');
+    expect(msg.value).toContain('tudo quitado');
+    expect(screen.getByTestId('enviar-extrato-efeito')).toHaveTextContent('não conta como cobrança');
+    await user.click(screen.getByRole('button', { name: /Enviar ao cliente/ }));
+    expect(enviarMock.mock.calls[0][0].contas).toEqual([]);
+  });
+
+  it('tudo pago: genérico, opt-out, sem telefone e fora do horário continuam barrando', () => {
+    let r = renderizar({ ...MP, name: 'Cliente Final', generico: true }, [CONTAS[0]]);
+    expect(screen.getByRole('alert')).toHaveTextContent('não recebe extrato');
+    r.unmount();
+    r = renderizar({ ...MP, opt_out_whatsapp: true }, [CONTAS[0]]);
+    expect(screen.getByRole('alert')).toHaveTextContent('opt-out');
+    r.unmount();
+    r = renderizar({ ...MP, whatsapp: null, phone: null }, [CONTAS[0]]);
+    expect(screen.getByRole('alert')).toHaveTextContent('Sem telefone para enviar o extrato');
+    r.unmount();
+    estado.hora = 21;
+    renderizar(MP, [CONTAS[0]]);
+    expect(screen.getByRole('alert')).toHaveTextContent('Fora do horário');
     expect(screen.getByRole('button', { name: /Enviar ao cliente/ })).toBeDisabled();
+  });
+
+  it('com saldo: avisa que conta como a cobrança do dia e quantas contas ganham cobrança', () => {
+    // A OS-00045 tem cobrança aberta pela conta; a OS-00046 não tem nenhuma: 1 conta ganha cobrança.
+    estado.cobrancas = [{ id: 'k45', status: 'pending', receivable_id: 'r45', service_order_id: 'os45' }];
+    renderizar();
+    const efeito = screen.getByTestId('enviar-extrato-efeito');
+    expect(efeito).toHaveTextContent('conta como a cobrança de hoje deste cliente');
+    expect(efeito).toHaveTextContent('1 conta não tem cobrança registrada: ela é criada junto com o envio');
   });
 
   it('uma conta só com saldo NÃO trava (o extrato não tem contagem de OS)', () => {
