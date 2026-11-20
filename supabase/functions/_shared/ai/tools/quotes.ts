@@ -565,7 +565,7 @@ export const quoteTools: ToolDef[] = [
       if (item.service_order_part_id) {
         const { data: part } = await sb
           .from("service_order_parts")
-          .select("id, quantity, unit_cost_snapshot, unit_sale_snapshot")
+          .select("id, quantity, unit_cost_snapshot, unit_sale_snapshot, discount_amount")
           .eq("id", item.service_order_part_id)
           .maybeSingle();
         if (!part) return { error: "A linha de peça do orçamento não existe mais." };
@@ -574,8 +574,11 @@ export const quoteTools: ToolDef[] = [
 
         const upd: Record<string, unknown> = { unit_cost_snapshot: preco, line_total_cost: preco * qty };
         if (precoVenda != null) {
+          // NOVO-historico-01 (mesma classe): a venda sai líquida do desconto da linha, a conta das telas de item.
+          const totalVenda = Math.round((qty * precoVenda - (Number(part.discount_amount) || 0)) * 100) / 100;
+          if (totalVenda < 0) return { error: "O desconto dessa linha é maior que o novo preço de venda. Ajuste o desconto na tela da OS antes." };
           upd.unit_sale_snapshot = precoVenda;
-          upd.line_total_sale = precoVenda * qty;
+          upd.line_total_sale = totalVenda;
         }
         const { error } = await sb.from("service_order_parts").update(upd).eq("id", part.id);
         if (error) throw error;
@@ -591,15 +594,18 @@ export const quoteTools: ToolDef[] = [
         }
         const { data: svc } = await sb
           .from("service_order_services")
-          .select("id, quantity, unit_price_snapshot")
+          .select("id, quantity, unit_price_snapshot, discount_amount")
           .eq("id", item.service_order_service_id)
           .maybeSingle();
         if (!svc) return { error: "A linha de material/serviço do orçamento não existe mais." };
         const qty = Number(svc.quantity) || 1;
         antes = { preco_venda: Number(svc.unit_price_snapshot) || 0 };
+        // NOVO-historico-01 (mesma classe): o total da linha sai líquido do desconto dela, a conta das telas de item.
+        const totalLinha = Math.round((qty * precoVenda - (Number(svc.discount_amount) || 0)) * 100) / 100;
+        if (totalLinha < 0) return { error: "O desconto dessa linha é maior que o novo preço de venda. Ajuste o desconto na tela da OS antes." };
         const { error } = await sb
           .from("service_order_services")
-          .update({ unit_price_snapshot: precoVenda, line_total: precoVenda * qty })
+          .update({ unit_price_snapshot: precoVenda, line_total: totalLinha })
           .eq("id", svc.id);
         if (error) throw error;
         depois = { preco_venda: precoVenda, custo_cotado: preco };

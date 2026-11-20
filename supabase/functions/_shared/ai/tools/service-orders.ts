@@ -89,6 +89,8 @@ type SoItem = {
   quantity: number;
   unit_price: number;
   total: number;
+  /** Desconto da linha em R$ (fonte da verdade; discount_pct pode estar velho). O total da linha já vem líquido dele. */
+  discount_amount: number;
   /** Só para peças (produtos) — necessário para mover estoque no editar/remover. */
   product_id?: string | null;
   unit_cost?: number;
@@ -138,13 +140,13 @@ export function avisoDeItemFisico(nome: string): string | null {
 async function loadSoItems(sb: any, soId: string): Promise<SoItem[]> {
   const { data: parts, error: erroPecas } = await sb
     .from("service_order_parts")
-    .select("id, product_id, quantity, unit_sale_snapshot, unit_cost_snapshot, line_total_sale, products(name)")
+    .select("id, product_id, quantity, unit_sale_snapshot, unit_cost_snapshot, line_total_sale, discount_amount, products(name)")
     .eq("service_order_id", soId)
     .order("created_at", { ascending: true }).order("id", { ascending: true });
   if (erroPecas) throw new Error(`Não consegui ler as peças do orçamento/OS: ${erroPecas.message}`);
   const { data: services, error: erroServicos } = await sb
     .from("service_order_services")
-    .select("id, name_snapshot, quantity, unit_price_snapshot, line_total")
+    .select("id, name_snapshot, quantity, unit_price_snapshot, line_total, discount_amount")
     .eq("service_order_id", soId)
     .order("created_at", { ascending: true }).order("id", { ascending: true });
   if (erroServicos) throw new Error(`Não consegui ler os serviços do orçamento/OS: ${erroServicos.message}`);
@@ -155,6 +157,7 @@ async function loadSoItems(sb: any, soId: string): Promise<SoItem[]> {
     quantity: Number(p.quantity) || 0,
     unit_price: Number(p.unit_sale_snapshot) || 0,
     total: Number(p.line_total_sale) || 0,
+    discount_amount: Number(p.discount_amount) || 0,
     product_id: p.product_id ?? null,
     unit_cost: Number(p.unit_cost_snapshot) || 0,
   }));
@@ -165,6 +168,7 @@ async function loadSoItems(sb: any, soId: string): Promise<SoItem[]> {
     quantity: Number(s.quantity) || 0,
     unit_price: Number(s.unit_price_snapshot) || 0,
     total: Number(s.line_total) || 0,
+    discount_amount: Number(s.discount_amount) || 0,
     product_id: null,
     unit_cost: 0,
     numero: i + 1,
@@ -1251,7 +1255,7 @@ export const serviceOrderTools: ToolDef[] = [
   {
     name: "edit_service_order_item",
     description:
-      "Edita a quantidade e/ou o preço unitário de um item (produto OU serviço/material) de um orçamento/OS. Identifique por item_id (de get_service_order) ou por descrição (ambígua → retorna needs_choice, pergunte qual; só um número → needs_choice, nunca altera direto). Recalcula total e margem. Rejeita quantidade <= 0 (para zerar, remova o item) e preço negativo. Desconto NÃO é por item: use apply_service_order_discount, que desconta no total da OS. Não funciona em OS cancelada ou faturada.",
+      "Edita a quantidade e/ou o preço unitário de um item (produto OU serviço/material) de um orçamento/OS. Identifique por item_id (de get_service_order) ou por descrição (ambígua → retorna needs_choice, pergunte qual; só um número → needs_choice, nunca altera direto). Recalcula total e margem. Rejeita quantidade <= 0 (para zerar, remova o item) e preço negativo. O desconto que a linha já tem (R$) é mantido e sai do total do item; esta tool não muda desconto — para desconto no total da OS use apply_service_order_discount. Não funciona em OS cancelada ou faturada.",
     input_schema: {
       type: "object",
       properties: {
@@ -1300,6 +1304,16 @@ export const serviceOrderTools: ToolDef[] = [
       const antes = { quantidade: item.quantity, preco_unitario: item.unit_price, total: item.total, descricao: item.label };
       const newQty = args.quantity != null ? Number(args.quantity) : item.quantity;
       const newPrice = args.unit_price != null ? Number(args.unit_price) : item.unit_price;
+      // NOVO-historico-01: a MESMA conta das telas de item (use-service-order-parts/-services): preço × qtd − desconto
+      // da linha em R$, arredondado a centavos. Antes era preço × qtd, e o total da OS saía maior que o PDF.
+      const desconto = item.discount_amount;
+      const novoTotal = Math.round((newQty * newPrice - desconto) * 100) / 100;
+      if (novoTotal < 0) {
+        return {
+          error: `A linha "${item.label}" tem desconto de R$ ${desconto.toFixed(2)}, maior que o novo valor bruto ` +
+            `(R$ ${(newQty * newPrice).toFixed(2)}). Ajuste o desconto na tela da OS antes de baixar preço ou quantidade.`,
+        };
+      }
 
       // Renomear só faz sentido na linha de texto livre. Em PEÇA o nome é do produto no
       // catálogo — mexer ali mudaria o nome em toda OS que usa o produto, então recusamos
@@ -1322,7 +1336,7 @@ export const serviceOrderTools: ToolDef[] = [
         const unitCost = Number(item.unit_cost) || 0;
         const { error } = await sb
           .from("service_order_parts")
-          .update({ quantity: newQty, unit_sale_snapshot: newPrice, line_total_sale: newPrice * newQty, line_total_cost: unitCost * newQty })
+          .update({ quantity: newQty, unit_sale_snapshot: newPrice, line_total_sale: novoTotal, line_total_cost: unitCost * newQty })
           .eq("id", item.id);
         if (error) throw error;
         // Ajuste de estoque pelo delta de quantidade (old - new): +new baixa, -new devolve.
@@ -1334,7 +1348,7 @@ export const serviceOrderTools: ToolDef[] = [
           .update({
             quantity: newQty,
             unit_price_snapshot: newPrice,
-            line_total: newPrice * newQty,
+            line_total: novoTotal,
             ...(novoNome ? { name_snapshot: novoNome } : {}),
           })
           .eq("id", item.id);
@@ -1349,7 +1363,8 @@ export const serviceOrderTools: ToolDef[] = [
         depois: {
           quantidade: newQty,
           preco_unitario: newPrice,
-          total: Math.round(newPrice * newQty * 100) / 100,
+          total: novoTotal,
+          ...(desconto ? { desconto_da_linha: desconto } : {}),
           descricao: novoNome || item.label,
         },
         ...totais,
@@ -1485,6 +1500,9 @@ export const serviceOrderTools: ToolDef[] = [
     },
     risk: "low",
     async execute(args, { sb }) {
+      // NOVO-historico-02: como as tools de item, não mexe em OS cancelada (total congelado) nem faturada.
+      const guard = await assertEditableSo(sb, args.id);
+      if (guard) return guard;
       const { data, error } = await sb.from("service_orders").update({ discount_amount: args.discount_amount }).eq("id", args.id).select().single();
       if (error) throw error;
       await recalcSoTotals(sb, args.service_order_id || args.id);
