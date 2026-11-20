@@ -61,7 +61,7 @@ vi.mock('@/integrations/supabase/client', () => {
 });
 
 import {
-  AVISO_MODO_TESTE, AVISO_MODO_TESTE_EXTRATO, relogioDoCobrarJuntasTela, useCobrancasFormais, useEnviarCobrarJuntas, useEnviarExtrato,
+  AVISO_MODO_TESTE, AVISO_MODO_TESTE_EXTRATO, NOTA_DO_EXTRATO, relogioDoCobrarJuntasTela, useCobrancasFormais, useEnviarCobrarJuntas, useEnviarExtrato,
 } from './use-cobrar-juntas';
 
 const ok = (data: unknown): Resposta => ({ data, error: null });
@@ -341,16 +341,43 @@ describe('useEnviarExtrato', () => {
     return result.current;
   }
 
-  it('envia ao cadastro com a chave do dia "extrato:", relê as contas do cliente inteiro e não cria cobrança', async () => {
+  it('envia ao cadastro com a chave do dia "extrato:", relê as contas do cliente inteiro e registra como a cobrança do dia DEPOIS do envio', async () => {
+    banco.respostas['rpc.cobrar_juntas_registrar_envio'] = ok({ criadas: 1, registradas: 2, cobrancas_criadas: ['k-nova'] });
     const r = await enviarExtrato();
     expect(r.isSuccess).toBe(true);
-    expect(r.data).toEqual({ deduplicado: false, aviso: null });
+    expect(r.data).toEqual({ deduplicado: false, aviso: null, cobrancasRegistradas: 2, cobrancasCriadas: 1 });
     expect(banco.invocacoes[0].body).toMatchObject({ phone: '5547999990000', context: 'billing', kind: 'text' });
     expect(String(banco.invocacoes[0].body.dedupe_key)).toMatch(/^extrato:cli:\d{4}-\d{2}-\d{2}:/);
     const contas = banco.chamadas.find((c) => c.alvo === 'receivables');
     expect(contas?.filtros).toContainEqual(['eq', 'client_id', 'cli']);
     expect(contas?.filtros.some((f) => f[0] === 'in')).toBe(false);
-    expect(banco.chamadas.filter((c) => c.alvo.startsWith('rpc.') || c.alvo === 'collection_contacts')).toEqual([]);
+    // Dono (20/11/2026): "conta como cobrança do dia" — a mesma função do Cobrar juntas, com p_os nulo
+    // (o cliente inteiro), chamada só depois do envio.
+    const rpc = banco.chamadas.filter((c) => c.alvo === 'rpc.cobrar_juntas_registrar_envio');
+    expect(rpc).toHaveLength(1);
+    expect(rpc[0].valores).toEqual({ p_cliente: 'cli', p_contas: ['r45', 'r46'], p_os: null, p_nota: NOTA_DO_EXTRATO });
+    expect(banco.chamadas.indexOf(rpc[0])).toBeGreaterThan(banco.chamadas.findIndex((c) => c.alvo === 'receivables'));
+    expect(banco.chamadas.filter((c) => c.alvo === 'collection_contacts' || (c.alvo === 'collections' && c.op !== 'select'))).toEqual([]);
+  });
+
+  it('com saldo: a mensagem não saiu, saiu repetida ou foi para o número de teste → nada registrado', async () => {
+    banco.envio = { data: null, error: { message: 'falhou' } };
+    expect((await enviarExtrato()).isError).toBe(true);
+    banco.envio = { data: { success: true, deduplicated: true }, error: null };
+    expect((await enviarExtrato()).data).toEqual({ deduplicado: true, aviso: null });
+    banco.envio = { data: { success: true }, error: null };
+    banco.respostas['app_settings.select:modo-teste'] = ok([
+      { key: 'wa_test_mode', value: 'true' }, { key: 'wa_test_number', value: '5547900001111' },
+    ]);
+    expect((await enviarExtrato()).data?.modoTeste).toBe(true);
+    expect(banco.chamadas.filter((c) => c.alvo.startsWith('rpc.'))).toEqual([]);
+  });
+
+  it('com saldo: enviou mas o registro falhou → aviso (a mensagem saiu, nada gravado), não erro', async () => {
+    banco.respostas['rpc.cobrar_juntas_registrar_envio'] = { data: null, error: { message: 'Seu cargo não mexe em cobranças.' } };
+    const r = await enviarExtrato();
+    expect(r.isSuccess).toBe(true);
+    expect(r.data?.aviso).toContain('O extrato foi enviado, mas não consegui registrar a cobrança do dia (Seu cargo não mexe em cobranças.)');
   });
 
   it('uma conta só também sai (o extrato não tem contagem de OS)', async () => {
@@ -379,10 +406,34 @@ describe('useEnviarExtrato', () => {
     expect(banco.invocacoes).toEqual([]);
   });
 
-  it('nada em aberto: não envia ("não há o que cobrar")', async () => {
+  it('nada em aberto: sai como comprovante de quitação e não registra cobrança (dono, 20/11/2026)', async () => {
     banco.respostas['receivables.select'] = ok([CONTAS_NO_BANCO[2]]);
-    const r = await enviarExtrato({ ...EXTRATO, contas: [] });
-    expect((r.error as Error).message).toBe('Este cliente não tem saldo em aberto: não há o que cobrar.');
+    // Piso alto e Pix esperando não barram a quitação (nem são lidos).
+    banco.respostas['app_settings.select'] = ok({ value: '5000' });
+    banco.respostas['finance_review_queue.select'] = ok([{ suggested_amount: 100, suggested_date: '2026-10-28' }]);
+    const r = await enviarExtrato({ ...EXTRATO, mensagem: 'Comprovante de quitação — HBR …', contas: [] });
+    expect(r.isSuccess).toBe(true);
+    expect(r.data).toEqual({ deduplicado: false, aviso: null, quitacao: true });
+    expect(banco.invocacoes).toHaveLength(1);
+    expect(String(banco.invocacoes[0].body.dedupe_key)).toMatch(/^extrato:cli:/);
+    expect(banco.chamadas.filter((c) => c.alvo.startsWith('rpc.') || c.alvo === 'finance_review_queue')).toEqual([]);
+  });
+
+  it('nada em aberto: genérico, opt-out, sem telefone e fora do horário barram; sem lançamento nenhum também', async () => {
+    banco.respostas['receivables.select'] = ok([CONTAS_NO_BANCO[2]]);
+    const Q = { ...EXTRATO, contas: [] };
+    banco.respostas['clients.select'] = ok({ name: 'Cliente Final', opt_out_whatsapp: false, generico: true, whatsapp: '47999990000' });
+    expect(((await enviarExtrato(Q)).error as Error).message).toContain('não recebe extrato');
+    banco.respostas['clients.select'] = ok({ name: 'MP', opt_out_whatsapp: true, generico: false, whatsapp: '47999990000' });
+    expect(((await enviarExtrato(Q)).error as Error).message).toContain('opt-out');
+    banco.respostas['clients.select'] = ok({ name: 'MP', opt_out_whatsapp: false, generico: false, whatsapp: null, phone: null });
+    expect(((await enviarExtrato(Q)).error as Error).message).toBe('Sem telefone para enviar o extrato.');
+    banco.respostas['clients.select'] = ok({ name: 'MP', opt_out_whatsapp: false, generico: false, whatsapp: '47999990000' });
+    relogioDoCobrarJuntasTela.agora = () => new Date('2026-10-29T01:00:00Z');
+    expect(((await enviarExtrato(Q)).error as Error).message).toContain('Fora do horário');
+    relogioDoCobrarJuntasTela.agora = AS_14H;
+    banco.respostas['receivables.select'] = ok([]);
+    expect(((await enviarExtrato(Q)).error as Error).message).toBe('Este cliente não tem lançamentos: não há extrato para enviar.');
     expect(banco.invocacoes).toEqual([]);
   });
 
@@ -400,6 +451,7 @@ describe('useEnviarExtrato', () => {
     ]);
     const r = await enviarExtrato();
     expect(r.data).toEqual({ deduplicado: false, aviso: AVISO_MODO_TESTE_EXTRATO, modoTeste: true });
+    expect(banco.chamadas.filter((c) => c.alvo.startsWith('rpc.'))).toEqual([]);
     expect(String(banco.invocacoes[0].body.dedupe_key)).toMatch(/^extrato:cli:.*:teste$/);
   });
 });
