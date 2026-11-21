@@ -27,6 +27,8 @@ import {
   chaveDoCobrarJuntas, hojeLocal, horaEmBrasilia, mudancaNasContas, travaDoCobrarJuntas, travaDoExtrato,
 } from '../../supabase/functions/_shared/receivables/cobrar-juntas';
 import { desviadoPorTeste } from '../../supabase/functions/_shared/whatsapp/marcar-enviado';
+import { criarFaturaParaCobrar } from '@/hooks/use-faturas';
+import { colocarNumeroDaFatura } from '@/lib/fatura';
 
 /** O relógio da tela (horário de cobrança) — os testes trocam, como relogioDoCobrarJuntas da tool. */
 export const relogioDoCobrarJuntasTela = { agora: () => new Date() };
@@ -96,6 +98,13 @@ export interface EnvioCobrarJuntas {
   contas: Array<{ id: string; saldo: number }>;
   /** As OS escolhidas (cobrança sem conta, só com a OS, também é registrada). */
   servicoIds: string[];
+  /**
+   * Fechar juntas F1 (20/11/2026): as OS escolhidas estão todas executadas, então as contas viram a fatura
+   * FAT-N. Depois das travas e ANTES do WhatsApp, fatura_criar cria a fatura (ou acha a que já existe com
+   * essas contas) e o número entra no lugar de NUMERO_DA_FATURA_NOVA na mensagem. Se o banco recusar,
+   * nada sai. Se o WhatsApp falhar depois, a fatura fica (aparece na ficha; o próximo envio usa a mesma).
+   */
+  comFatura?: boolean;
 }
 
 export interface ResultadoCobrarJuntas {
@@ -106,6 +115,8 @@ export interface ResultadoCobrarJuntas {
   aviso: string | null;
   /** O modo de teste desviou o envio para o número de teste: o cliente NÃO recebeu. */
   modoTeste?: boolean;
+  /** A fatura das contas (FAT-N), quando o envio foi com fatura. */
+  fatura?: string | null;
 }
 
 /** Aviso da tela quando o envio foi desviado pelo modo de teste. */
@@ -157,6 +168,11 @@ interface Conferencia {
   /** As OS escolhidas (Cobrar juntas); null = o cliente inteiro ("Enviar extrato"). */
   servicoIds: string[] | null;
   tipo: 'cobrar-juntas' | 'extrato';
+  /**
+   * Roda depois de todas as travas e antes do WhatsApp, e devolve a mensagem final (a fatura do
+   * Cobrar juntas põe o número FAT-N nela). Se lançar, nada sai.
+   */
+  antesDoEnvio?: (mensagem: string, contexto: { modoTeste: boolean }) => Promise<string>;
 }
 
 /**
@@ -215,16 +231,19 @@ async function conferirEEnviar(e: Conferencia): Promise<{ deduplicado: boolean; 
     : travaDoCobrarJuntas({ ...entrada, quantidadeOs: e.servicoIds ? e.servicoIds.length : null });
   if (trava) throw new Error(trava);
 
+  // Fatura (Fechar juntas F1): depois das travas e antes do WhatsApp. Se lançar, nada sai.
+  const mensagem = e.antesDoEnvio ? await e.antesDoEnvio(e.mensagem, { modoTeste }) : e.mensagem;
+
   const telefone = normalizePhoneE164(telefoneDoCadastro, '55');
   const { data, error } = await supabase.functions.invoke('whatsapp-send', {
     body: {
       phone: telefone,
-      message: e.mensagem,
+      message: mensagem,
       context: 'billing',
       kind: 'text',
       // Desviado pelo modo de teste, a chave ganha ":teste" (a mesma da tool): o teste não
       // reserva a chave do cliente para o dia.
-      dedupe_key: chaveDoCobrarJuntas(e.cliente.id, e.contas.map((x) => x.id), hojeLocal(), e.mensagem, modoTeste, e.tipo),
+      dedupe_key: chaveDoCobrarJuntas(e.cliente.id, e.contas.map((x) => x.id), hojeLocal(), mensagem, modoTeste, e.tipo),
     },
   });
   if (error) throw new Error(await extractInvokeErrorMessage(error));
@@ -259,8 +278,21 @@ export function useEnviarCobrarJuntas() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (e: EnvioCobrarJuntas): Promise<ResultadoCobrarJuntas> => {
-      const envio = await conferirEEnviar({ ...e, tipo: 'cobrar-juntas' });
-      const vazio = { cobrancasRegistradas: 0, cobrancasCriadas: 0 };
+      const doEnvio: { fatura: string | null } = { fatura: null };
+      const envio = await conferirEEnviar({
+        ...e,
+        tipo: 'cobrar-juntas',
+        antesDoEnvio: e.comFatura
+          ? async (mensagem, { modoTeste }) => {
+            // Modo de teste: nada se cria (como as cobranças); o número de teste vê o provisório.
+            if (modoTeste) return colocarNumeroDaFatura(mensagem, 'FAT-(teste)');
+            const f = await criarFaturaParaCobrar(e.cliente.id, e.contas.map((x) => x.id));
+            doEnvio.fatura = f.numero;
+            return colocarNumeroDaFatura(mensagem, f.numero);
+          }
+          : undefined,
+      });
+      const vazio = { cobrancasRegistradas: 0, cobrancasCriadas: 0, ...(doEnvio.fatura ? { fatura: doEnvio.fatura } : {}) };
       if (envio.deduplicado) {
         return { deduplicado: true, ...vazio, aviso: null, ...(envio.modoTeste ? { modoTeste: true } : {}) };
       }
@@ -273,6 +305,7 @@ export function useEnviarCobrarJuntas() {
         deduplicado: false,
         cobrancasRegistradas: r.registradas,
         cobrancasCriadas: r.criadas,
+        ...(doEnvio.fatura ? { fatura: doEnvio.fatura } : {}),
         aviso: r.erro
           ? `A mensagem foi enviada, mas não consegui criar/registrar a cobrança (${r.erro}). Nada foi gravado nas cobranças: `
             + 'confira em Cobranças antes de cobrar este cliente de novo hoje.'
@@ -282,6 +315,7 @@ export function useEnviarCobrarJuntas() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['collections'] });
       qc.invalidateQueries({ queryKey: ['receivables'] });
+      qc.invalidateQueries({ queryKey: ['faturas'] });
     },
     // Recusa ou falha: o dado que a tela mostrou pode estar velho (o caso do "saldo mudou desde que
     // a tela abriu"). Sem invalidar, a ficha (sem refetch ao voltar para a aba) reabria o Cobrar
@@ -295,6 +329,8 @@ function invalidarDepoisDaRecusa(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ['collections'] });
   qc.invalidateQueries({ queryKey: ['finance-review', 'pix-esperando'] });
   qc.invalidateQueries({ queryKey: ['app-settings'] });
+  // A fatura pode ter nascido antes de o WhatsApp falhar: a ficha mostra.
+  qc.invalidateQueries({ queryKey: ['faturas'] });
 }
 
 export interface EnvioDoExtrato {

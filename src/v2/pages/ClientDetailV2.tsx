@@ -15,6 +15,9 @@ import { ClientFormDialog } from '@/components/ClientFormDialog';
 // faltava a casa na V2.
 import { ClientStatementDialog } from '@/components/ClientStatementDialog';
 import { CobrarJuntasDialog } from '@/components/client/CobrarJuntasDialog';
+import { FaturasDoCliente } from '@/components/client/FaturasDoCliente';
+import { useFaturasDoCliente } from '@/hooks/use-faturas';
+import { osEntraNaFatura } from '@/lib/fatura';
 import { RecordHistory } from '@/components/RecordHistory';
 import { PagadoresDoCliente } from '@/components/PagadoresDoCliente';
 import { EntityTasksPanel } from '@/components/agenda/EntityTasksPanel';
@@ -49,6 +52,8 @@ type RecRow = {
   numero_os?: string | null;
   /** Situação da OS da conta: só OS que já começou entra no "Cobrar juntas". */
   os?: { status?: string | null; merged_into_id?: string | null } | null;
+  /** A fatura FAT-N da conta (Fechar juntas F1), se estiver numa. */
+  invoice_id?: string | null;
 };
 
 export default function ClientDetailV2() {
@@ -61,6 +66,8 @@ export default function ClientDetailV2() {
   const [statementOpen, setStatementOpen] = useState(false);
   /** Cobrar juntas: aberto com estas OS marcadas (vazio = todas as que têm saldo). */
   const [cobrarJuntas, setCobrarJuntas] = useState<string[] | null>(null);
+  // As faturas do cliente (Fechar juntas F1): o Cobrar juntas cita a que já existe. Só admin/financeiro leem.
+  const { data: faturas } = useFaturasDoCliente(id);
 
   const { data: orders } = useQuery({
     queryKey: ['service-orders', 'client', id],
@@ -192,6 +199,10 @@ export default function ClientDetailV2() {
   // Só contas de OS que já começaram (as que não começaram se juntam pelo Agrupar OS).
   const contasParaCobrar = (clientReceivables ?? []).filter((r) => osEntraNoCobrarJuntas(r.os));
   const osParaCobrar = osComSaldo(contasParaCobrar);
+  // As OS executadas (concluídas ou faturadas): só elas viram fatura no Cobrar juntas.
+  const osQueFaturam = [...new Set(contasParaCobrar
+    .filter((r) => r.service_order_id && osEntraNaFatura(r.os, r.numero_os))
+    .map((r) => r.service_order_id as string))];
   const generico = client.generico === true;
   const clienteParaCobrar = {
     id: client.id,
@@ -302,6 +313,8 @@ export default function ClientDetailV2() {
           </TabsContent>
 
           <TabsContent value="financial" className="mt-4 space-y-2">
+            {/* Faturas FAT-N (Fechar juntas F1): somem sozinhas quando não há nenhuma. */}
+            <FaturasDoCliente clienteId={id} />
             <DataTable<RecRow>
               rows={clientReceivables ?? []}
               rowKey={(r) => r.id}
@@ -379,6 +392,8 @@ export default function ClientDetailV2() {
         cliente={clienteParaCobrar}
         contas={contasParaCobrar}
         osIniciais={cobrarJuntas ?? []}
+        osQueFaturam={osQueFaturam}
+        faturas={faturas}
       />
     </V2Shell>
   );

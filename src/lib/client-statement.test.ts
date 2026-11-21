@@ -113,3 +113,18 @@ describe('buildClientStatement — números certos', () => {
     expect(s).toBe(P.esperado);
   });
 });
+
+// Fatura FAT-N (Fechar juntas F1, 20/11/2026): a única mudança na mensagem é a linha da fatura.
+describe('buildClientStatement — Cobrar juntas com fatura', () => {
+  it('cita o número numa linha logo abaixo das OS; o resto fica igual', () => {
+    const sem = buildClientStatement({ clientName: 'MP', items: MP, servicoIds: ['os45', 'os46'], pixKey: 'hbr@pix', hoje: '2026-10-28' });
+    const com = buildClientStatement({ clientName: 'MP', items: MP, servicoIds: ['os45', 'os46'], pixKey: 'hbr@pix', hoje: '2026-10-28', fatura: 'FAT-00001' });
+    expect(com).toContain('OS: OS-00045, OS-00046\nFatura: FAT-00001\n\n');
+    expect(com.replace('\nFatura: FAT-00001', '')).toBe(sem);
+  });
+
+  it('o extrato do cliente inteiro não ganha a linha', () => {
+    const s = buildClientStatement({ clientName: 'MP', items: MP, pixKey: 'hbr@pix', fatura: 'FAT-00001' });
+    expect(s).not.toContain('Fatura:');
+  });
+});

@@ -3400,6 +3400,7 @@ export type Database = {
           description: string | null
           due_date: string
           id: string
+          invoice_id: string | null
           last_auto_sent_at: string | null
           message_template: string | null
           notes: string | null
@@ -3428,6 +3429,7 @@ export type Database = {
           description?: string | null
           due_date: string
           id?: string
+          invoice_id?: string | null
           last_auto_sent_at?: string | null
           message_template?: string | null
           notes?: string | null
@@ -3456,6 +3458,7 @@ export type Database = {
           description?: string | null
           due_date?: string
           id?: string
+          invoice_id?: string | null
           last_auto_sent_at?: string | null
           message_template?: string | null
           notes?: string | null
@@ -3474,6 +3477,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "collections_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "collections_client_id_fkey"
             columns: ["client_id"]
@@ -5691,8 +5701,11 @@ export type Database = {
       }
       invoices: {
         Row: {
+          cancel_reason: string | null
+          cancelled_at: string | null
           client_id: string
           created_at: string
+          created_by: string | null
           currency: string | null
           discount_amount: number | null
           due_date: string
@@ -5708,8 +5721,11 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          cancel_reason?: string | null
+          cancelled_at?: string | null
           client_id: string
           created_at?: string
+          created_by?: string | null
           currency?: string | null
           discount_amount?: number | null
           due_date: string
@@ -5725,8 +5741,11 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          cancel_reason?: string | null
+          cancelled_at?: string | null
           client_id?: string
           created_at?: string
+          created_by?: string | null
           currency?: string | null
           discount_amount?: number | null
           due_date?: string
@@ -13436,6 +13455,25 @@ export type Database = {
           },
         ]
       }
+      faturas_resumo: {
+        Row: {
+          cancelled_at: string | null
+          client_id: string | null
+          contas: number | null
+          created_at: string | null
+          emitida_em: string | null
+          id: string | null
+          notes: string | null
+          numero: string | null
+          os: string[] | null
+          recebido: number | null
+          saldo: number | null
+          status: string | null
+          total: number | null
+          vencimento: string | null
+        }
+        Relationships: []
+      }
       faturas_do_cartao: {
         Row: {
           bill_id: string | null
@@ -15489,6 +15527,29 @@ export type Database = {
           tipo_fora: string
           valor: number
         }[]
+      }
+      fatura_criar: {
+        Args: { p_autor?: string; p_cliente: string; p_contas: string[] }
+        Returns: Json
+      }
+      fatura_desfazer: {
+        Args: { p_autor?: string; p_fatura: string; p_motivo?: string }
+        Returns: Json
+      }
+      fatura_desfazer_recebimento: {
+        Args: { p_autor?: string; p_motivo?: string; p_pagamento: string }
+        Returns: Json
+      }
+      fatura_receber: {
+        Args: {
+          p_autor?: string
+          p_data?: string
+          p_fatura: string
+          p_motivo?: string
+          p_transacao?: string
+          p_valor?: number
+        }
+        Returns: Json
       }
       fechar_acerto_diarias: {
         Args: {

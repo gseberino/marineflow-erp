@@ -24,6 +24,15 @@ vi.mock('@/hooks/use-lancamentos', async (importOriginal) => ({
   usePagamentosSemPixDoCliente: () => ({ data: dados.pagamentos }),
   useAplicarEntradaEmContas: () => ({ mutate: aplicarMock, isPending: false }),
 }));
+// Fatura FAT-N (Fechar juntas F1, 20/11/2026): sem fatura por padrão; o caso da fatura liga a lista.
+const fat = vi.hoisted(() => ({
+  faturas: [] as Array<Record<string, unknown>>,
+  receberMock: vi.fn(),
+}));
+vi.mock('@/hooks/use-faturas', () => ({
+  useFaturasDoCliente: () => ({ data: fat.faturas }),
+  useReceberFatura: () => ({ mutate: fat.receberMock, isPending: false }),
+}));
 vi.mock('@/hooks/use-payees', () => ({
   useClientesParaReceita: () => ({ data: [{ id: 'cli', name: 'Cliente Final' }] }),
 }));
@@ -47,6 +56,8 @@ beforeEach(() => {
     { id: 'r77', descricao: 'Sinal — ORÇ-00077', documento: 'ORÇ-00077', vencimento: '2026-08-12', valor: 2520, pago: 0, saldo: 2520 },
   ];
   dados.pagamentos = [];
+  fat.faturas = [];
+  fat.receberMock.mockReset();
 });
 
 describe('EstePixPagaDialog', () => {
@@ -141,5 +152,45 @@ describe('EstePixPagaDialog', () => {
       { receivable_id: 'r77', valor: 2520, quitar: false },
       { pagamento_id: 'pg9' },
     ]);
+  });
+});
+
+describe('EstePixPagaDialog — fatura FAT-N', () => {
+  const FATURA = {
+    id: 'f1', numero: 'FAT-00001', clientId: 'cli', status: 'open', vencimento: '2026-07-22',
+    total: 4795, recebido: 0, saldo: 4795, contas: 2, os: ['OS-00045', 'OS-00046'], criadaEm: '2026-11-20T12:00:00Z',
+  };
+
+  it('"Esta entrada paga a fatura": R$ 5 a mais viram receita; confirma e chama fatura_receber com a entrada', async () => {
+    const user = userEvent.setup();
+    fat.faturas = [FATURA];
+    renderizar();
+    await user.click(screen.getByRole('checkbox', { name: 'Esta entrada paga a fatura FAT-00001' }));
+    expect(screen.getByTestId('resumo-da-fatura')).toHaveTextContent(/5,00 a mais viram receita da última conta/);
+    await user.click(screen.getByRole('button', { name: 'Aplicar' }));
+    expect(screen.getByText(/Vai aplicar esta entrada na fatura FAT-00001/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Confirmar' }));
+    expect(fat.receberMock).toHaveBeenCalledTimes(1);
+    expect(fat.receberMock.mock.calls[0][0]).toEqual({ faturaId: 'f1', transacaoId: 'btL' });
+    expect(aplicarMock).not.toHaveBeenCalled();
+  });
+
+  it('entrada R$ 50 acima do saldo da fatura: não deixa aplicar (é decisão do dono)', async () => {
+    const user = userEvent.setup();
+    fat.faturas = [{ ...FATURA, saldo: 4750 }];
+    renderizar();
+    await user.click(screen.getByRole('checkbox', { name: 'Esta entrada paga a fatura FAT-00001' }));
+    expect(screen.getByTestId('resumo-da-fatura')).toHaveTextContent('decisão do dono');
+    expect(screen.getByRole('button', { name: 'Aplicar' })).toBeDisabled();
+  });
+
+  it('marcar uma conta solta a fatura (uma coisa ou outra)', async () => {
+    const user = userEvent.setup();
+    fat.faturas = [FATURA];
+    renderizar();
+    await user.click(screen.getByRole('checkbox', { name: 'Esta entrada paga a fatura FAT-00001' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Este Pix paga Sinal — ORÇ-00074' }));
+    expect(screen.getByRole('checkbox', { name: 'Esta entrada paga a fatura FAT-00001' })).not.toBeChecked();
+    expect(screen.queryByTestId('resumo-da-fatura')).toBeNull();
   });
 });

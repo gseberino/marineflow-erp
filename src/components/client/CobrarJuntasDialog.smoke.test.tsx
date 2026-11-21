@@ -143,3 +143,47 @@ describe('CobrarJuntasDialog', () => {
     expect(screen.getByRole('button', { name: /Enviar ao cliente/ })).toBeDisabled();
   });
 });
+
+// Fatura FAT-N (Fechar juntas F1, 20/11/2026): OS todas executadas → as contas viram a fatura no envio.
+describe('CobrarJuntasDialog com fatura', () => {
+  const FATURA = {
+    id: 'f1', numero: 'FAT-00007', clientId: 'cli', status: 'open' as const, vencimento: '2026-07-22',
+    total: 1670, recebido: 0, saldo: 1670, contas: 2, os: ['OS-00045', 'OS-00046'], criadaEm: '2026-11-20T12:00:00Z',
+  };
+  const renderizarComFatura = (contas: typeof CONTAS, osQueFaturam: string[], faturas = [FATURA]) =>
+    render(<CobrarJuntasDialog open onOpenChange={() => {}} cliente={MP} contas={contas} osIniciais={['os45', 'os46']}
+      osQueFaturam={osQueFaturam} faturas={faturas} />);
+
+  it('sem fatura ainda: avisa que vira fatura, põe o número provisório e envia pedindo a fatura', async () => {
+    const user = userEvent.setup();
+    renderizarComFatura(CONTAS, ['os45', 'os46', 'os99'], []);
+    expect(screen.getByTestId('cobrar-juntas-fatura')).toHaveTextContent('Ao enviar, estas contas viram uma fatura');
+    const msg = screen.getByLabelText('Mensagem') as HTMLTextAreaElement;
+    expect(msg.value).toContain('OS: OS-00045, OS-00046\nFatura: FAT-(número ao enviar)');
+    await user.click(screen.getByRole('button', { name: /Enviar ao cliente/ }));
+    expect(enviarMock.mock.calls[0][0]).toMatchObject({ comFatura: true });
+  });
+
+  it('as contas já são uma fatura aberta: a mensagem cita o número dela', () => {
+    const contas = CONTAS.map((c) => (c.id === 'r45' || c.id === 'r46' ? { ...c, invoice_id: 'f1' } : c));
+    renderizarComFatura(contas, ['os45', 'os46']);
+    expect((screen.getByLabelText('Mensagem') as HTMLTextAreaElement).value).toContain('Fatura: FAT-00007');
+    expect(screen.getByTestId('cobrar-juntas-fatura')).toHaveTextContent('Estas contas são a fatura FAT-00007.');
+  });
+
+  it('uma OS ainda em execução: sai como antes, sem fatura', async () => {
+    const user = userEvent.setup();
+    renderizarComFatura(CONTAS, ['os45'], []);
+    expect(screen.getByTestId('cobrar-juntas-fatura')).toHaveTextContent('Sem fatura: OS-00046 ainda não terminou');
+    expect((screen.getByLabelText('Mensagem') as HTMLTextAreaElement).value).not.toContain('Fatura:');
+    await user.click(screen.getByRole('button', { name: /Enviar ao cliente/ }));
+    expect(enviarMock.mock.calls[0][0]).not.toHaveProperty('comFatura');
+  });
+
+  it('parte das contas noutra fatura: trava antes do botão', () => {
+    const contas = CONTAS.map((c) => (c.id === 'r45' ? { ...c, invoice_id: 'f1' } : c));
+    renderizarComFatura(contas, ['os45', 'os46']);
+    expect(screen.getByRole('alert')).toHaveTextContent('Parte destas contas já está na fatura FAT-00007');
+    expect(screen.getByRole('button', { name: /Enviar ao cliente/ })).toBeDisabled();
+  });
+});

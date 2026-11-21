@@ -63,6 +63,11 @@ export interface ClientStatementInput {
   servicoIds?: string[];
   /** Hoje (YYYY-MM-DD), para "vencido". Padrão: a data local. */
   hoje?: string;
+  /**
+   * "Cobrar juntas" com fatura (Fechar juntas F1, 20/11/2026): o número FAT-N, numa linha logo abaixo
+   * das OS. É a única diferença na mensagem; sem fatura (e no extrato) nada muda.
+   */
+  fatura?: string | null;
 }
 
 /** A situação calculada: paga, vencida pela data, parcial ou a vencer. */
@@ -81,7 +86,7 @@ function rotuloDa(r: StatementItem): string {
 const cent = (v: number) => Math.round(v * 100) / 100;
 
 /** Monta o extrato do cliente em texto. Ignora lançamentos cancelados. */
-export function buildClientStatement({ clientName, items, pixKey, servicoIds, hoje = hojeLocal() }: ClientStatementInput): string {
+export function buildClientStatement({ clientName, items, pixKey, servicoIds, hoje = hojeLocal(), fatura }: ClientStatementInput): string {
   const nome = (clientName || '').trim().split(/\s+/)[0] || 'Cliente';
   const filtrarOs = Array.isArray(servicoIds);
   const escolhidas = new Set(servicoIds ?? []);
@@ -115,7 +120,7 @@ export function buildClientStatement({ clientName, items, pixKey, servicoIds, ho
   // Extrato do cliente inteiro sem nada em aberto: sai como comprovante de quitação (dono, 20/11/2026).
   const quitado = !filtrarOs && rows.length > 0 && open <= 0.009;
   const cabecalho = filtrarOs
-    ? `📋 *Cobrança — HBR*\nCliente: ${nome}${numeros.length ? `\nOS: ${numeros.join(', ')}` : ''}\n\n`
+    ? `📋 *Cobrança — HBR*\nCliente: ${nome}${numeros.length ? `\nOS: ${numeros.join(', ')}` : ''}${fatura ? `\nFatura: ${fatura}` : ''}\n\n`
     : quitado
       ? `✅ *Comprovante de quitação — HBR*\nCliente: ${nome}\n\n`
       : `📋 *Extrato financeiro — HBR*\nCliente: ${nome}\n\n`;

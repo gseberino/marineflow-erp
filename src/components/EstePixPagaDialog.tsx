@@ -11,6 +11,11 @@
  *
  * F4 (03/10/2026): pode abrir já preenchido com o que a linha "parece pagar" (contas e pagamentos à
  * mão do cliente identificado cuja soma bate). Só preenche: quem aplica é a pessoa, no "Aplicar".
+ *
+ * Fatura FAT-N (Fechar juntas F1, 20/11/2026): se o cliente tem fatura aberta, aparece "Esta entrada paga
+ * a fatura FAT-N" — a entrada vai para a fatura pela função fatura_receber, que aplica pelo MESMO
+ * aplicar_entrada_em_contas, da conta que vence primeiro para a última (até R$ 10 a mais vira receita).
+ * As contas que estão em fatura saem da lista de contas: elas só recebem pela fatura (trava do banco).
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -28,6 +33,8 @@ import {
 import {
   analisarItem, distribuirPeloVencimento, montarAplicacoes, resumir, type ItemDaAplicacao,
 } from '@/lib/este-pix-paga';
+import { useFaturasDoCliente, useReceberFatura } from '@/hooks/use-faturas';
+import { previaDoRecebimento } from '@/lib/fatura';
 import { ListChecks } from 'lucide-react';
 import type { ParecePagar } from '../../supabase/functions/_shared/banking/parece-pagar';
 
@@ -51,6 +58,10 @@ export function EstePixPagaDialog({
   const { data: contas = [], isLoading: lendoContas } = useContasEmAbertoDoCliente(aberto ? clienteId : null);
   const { data: pagamentos = [] } = usePagamentosSemPixDoCliente(aberto ? clienteId : null);
   const aplicar = useAplicarEntradaEmContas();
+  const { data: faturas = [] } = useFaturasDoCliente(aberto ? clienteId : null);
+  const faturasAbertas = faturas.filter((f) => f.status === 'open' && f.saldo > 0);
+  const receberFatura = useReceberFatura();
+  const [faturaId, setFaturaId] = useState<string | null>(null);
 
   const [escolhas, setEscolhas] = useState<Record<string, Escolha>>({});
   const [ligados, setLigados] = useState<Set<string>>(new Set());
@@ -72,6 +83,7 @@ export function EstePixPagaDialog({
     setLigados(new Set(sug ? sug.itens.filter((i) => i.tipo === 'pagamento').map((i) => i.id) : []));
     setPreenchido(!!sug);
     setConfirmando(false);
+    setFaturaId(null);
   }, [aberto, entradaId, clienteInicial]);
 
   const restante = entrada ? Math.round((entrada.valor - entrada.aplicado) * 100) / 100 : 0;
@@ -84,6 +96,16 @@ export function EstePixPagaDialog({
   );
   const valoresLigados = pagamentos.filter((p) => ligados.has(p.id)).map((p) => p.valor);
   const resumo = resumir(restante, itens, valoresLigados, formatCurrency);
+  const fatura = faturasAbertas.find((f) => f.id === faturaId) ?? null;
+  const previaDaFatura = fatura ? previaDoRecebimento(restante, fatura.saldo, 'pix', formatCurrency) : null;
+  const podeAplicar = fatura ? !!previaDaFatura?.pode : resumo.podeAplicar;
+  const gravando = aplicar.isPending || receberFatura.isPending;
+
+  const escolherFatura = (id: string, marcado: boolean) => {
+    setConfirmando(false);
+    setFaturaId(marcado ? id : null);
+    if (marcado) { setEscolhas({}); setLigados(new Set()); }
+  };
 
   const mudarCliente = (id: string) => {
     setPreenchido(false);
@@ -91,10 +113,12 @@ export function EstePixPagaDialog({
     setEscolhas({});
     setLigados(new Set());
     setConfirmando(false);
+    setFaturaId(null);
   };
 
   const marcar = (contaId: string, saldo: number, marcado: boolean) => {
     setConfirmando(false);
+    setFaturaId(null);
     setEscolhas((atual) => {
       const novo = { ...atual };
       if (!marcado) { delete novo[contaId]; return novo; }
@@ -115,6 +139,13 @@ export function EstePixPagaDialog({
 
   const confirmar = () => {
     if (!entradaId) return;
+    if (fatura) {
+      receberFatura.mutate(
+        { faturaId: fatura.id, transacaoId: entradaId },
+        { onSuccess: () => { onConcluido?.(); onFechar(); } },
+      );
+      return;
+    }
     aplicar.mutate(
       { bankTransactionId: entradaId, aplicacoes: montarAplicacoes(itens, [...ligados]) },
       { onSuccess: () => { onConcluido?.(); onFechar(); } },
@@ -160,6 +191,33 @@ export function EstePixPagaDialog({
                 Quem fez o Pix pode ter outro nome (um parente, a empresa dele): escolha o cliente das contas.
               </p>
             </div>
+
+            {clienteId && faturasAbertas.length > 0 && (
+              <div className="space-y-2" data-testid="faturas-do-pix">
+                <p className="text-sm font-medium">Faturas em aberto</p>
+                <ul className="space-y-2">
+                  {faturasAbertas.map((f) => (
+                    <li key={f.id} className={cn('rounded-md border p-2', faturaId === f.id && 'border-primary/40 bg-primary/5')}>
+                      <div className="flex items-start gap-2">
+                        <Checkbox
+                          id={`fatura-${f.id}`}
+                          checked={faturaId === f.id}
+                          onCheckedChange={(v) => escolherFatura(f.id, v === true)}
+                          className="mt-0.5 shrink-0"
+                          aria-label={`Esta entrada paga a fatura ${f.numero}`}
+                        />
+                        <label htmlFor={`fatura-${f.id}`} className="min-w-0 flex-1 cursor-pointer text-sm">
+                          <span className="block font-medium">Esta entrada paga a fatura {f.numero}</span>
+                          <span className="block break-words text-xs text-muted-foreground">
+                            {f.os.join(', ')} · falta {formatCurrency(f.saldo)}
+                          </span>
+                        </label>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {clienteId && (
               <div className="space-y-2">
@@ -257,7 +315,19 @@ export function EstePixPagaDialog({
               </div>
             )}
 
-            {entrada && clienteId && (
+            {entrada && clienteId && fatura && previaDaFatura && (
+              <div
+                className={cn('rounded-md border p-2 text-sm', previaDaFatura.pode ? 'bg-muted/30' : 'border-amber-500/40 bg-amber-500/5')}
+                data-testid="resumo-da-fatura"
+              >
+                <p className="font-medium">
+                  {formatCurrency(restante)} a aplicar na fatura {fatura.numero} · falta nela {formatCurrency(fatura.saldo)}
+                </p>
+                <p className="text-xs">{previaDaFatura.mensagem}</p>
+              </div>
+            )}
+
+            {entrada && clienteId && !fatura && (
               <div
                 className={cn('rounded-md border p-2 text-sm', resumo.podeAplicar ? 'bg-muted/30' : 'border-amber-500/40 bg-amber-500/5')}
                 data-testid="resumo-da-aplicacao"
@@ -269,7 +339,14 @@ export function EstePixPagaDialog({
               </div>
             )}
 
-            {confirmando && (
+            {confirmando && fatura && (
+              <div className="rounded-md border bg-background p-2 text-xs">
+                Vai aplicar esta entrada na fatura {fatura.numero}, da conta que vence primeiro para a última, com a data
+                desta entrada. Fica na trilha, e cada recebimento pode ser desfeito na ficha do cliente.
+              </div>
+            )}
+
+            {confirmando && !fatura && (
               <div className="rounded-md border bg-background p-2 text-xs">
                 Vai registrar {itens.length} pagamento(s) com a data desta entrada
                 {ligados.size > 0 && <> e ligar {ligados.size} pagamento(s) já lançado(s) a ela</>}. Fica na trilha, e cada aplicação
@@ -280,15 +357,15 @@ export function EstePixPagaDialog({
         )}
 
         <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={confirmando ? () => setConfirmando(false) : onFechar} disabled={aplicar.isPending}>
+          <Button variant="outline" onClick={confirmando ? () => setConfirmando(false) : onFechar} disabled={gravando}>
             {confirmando ? 'Voltar' : 'Cancelar'}
           </Button>
           {confirmando ? (
-            <Button onClick={confirmar} disabled={aplicar.isPending}>
-              {aplicar.isPending ? 'Gravando…' : 'Confirmar'}
+            <Button onClick={confirmar} disabled={gravando}>
+              {gravando ? 'Gravando…' : 'Confirmar'}
             </Button>
           ) : (
-            <Button onClick={() => setConfirmando(true)} disabled={!resumo.podeAplicar || !entrada || restante <= 0}>
+            <Button onClick={() => setConfirmando(true)} disabled={!podeAplicar || !entrada || restante <= 0}>
               Aplicar
             </Button>
           )}

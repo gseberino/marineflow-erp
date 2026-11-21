@@ -295,7 +295,11 @@ export function usePixDaConta(contaId: string | null | undefined, linhaDona: str
   });
 }
 
-/** Contas a receber em aberto de um cliente, da que vence primeiro para a última. */
+/**
+ * Contas a receber em aberto de um cliente, da que vence primeiro para a última. As que estão numa
+ * fatura FAT-N ficam de fora (Fechar juntas F1): só recebem pela fatura — o "Este Pix paga" mostra a
+ * fatura como uma opção à parte.
+ */
 export function useContasEmAbertoDoCliente(clienteId: string | null | undefined) {
   return useQuery({
     queryKey: ['contas-em-aberto-do-cliente', clienteId],
@@ -305,6 +309,7 @@ export function useContasEmAbertoDoCliente(clienteId: string | null | undefined)
         .select('id, description, due_date, amount, paid_amount, service_orders!receivables_service_order_id_fkey(service_order_number)')
         .eq('client_id', clienteId!)
         .in('status', ['pending', 'overdue', 'partially_paid'])
+        .is('invoice_id', null)
         .order('due_date', { ascending: true });
       if (error) throw error;
       return ((data ?? []) as unknown as Array<{
@@ -336,6 +341,7 @@ export function usePagamentosSemPixDoCliente(clienteId: string | null | undefine
         .select('id, amount, payment_date, receivable_id, receivables!inner(description, client_id, status, service_orders!receivables_service_order_id_fkey(service_order_number))')
         .eq('receivables.client_id', clienteId!)
         .neq('receivables.status', 'cancelled')
+        .is('receivables.invoice_id', null) // conta de fatura: a trava do banco recusaria ligar
         .eq('status', 'confirmed')
         .is('bank_transaction_id', null)
         .neq('payment_method', 'cash')

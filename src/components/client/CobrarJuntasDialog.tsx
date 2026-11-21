@@ -9,6 +9,11 @@
 // botão (a criação é do banco, cobrar_juntas_registrar_envio, depois do envio). Enviar não tem
 // confirmação extra: o próprio botão é a confirmação e não há perda (padrão da casa: useConfirmacao
 // só com perda real). O destino é o WhatsApp do cadastro, só exibido (como a tool cobrar_juntas).
+//
+// Fatura FAT-N (Fechar juntas F1, 20/11/2026): com as OS escolhidas todas executadas (osQueFaturam),
+// as contas viram a fatura no envio e a mensagem ganha uma linha "Fatura: FAT-N" (até lá, o número
+// provisório). Se já são uma fatura aberta, a mensagem cita a que existe. Alguma OS ainda em execução:
+// sai como antes, sem fatura (aviso). Parte das contas noutra fatura: trava antes do botão.
 import { useEffect, useMemo, useState } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -22,6 +27,8 @@ import {
   horaDoCobrarJuntas, useCobrancasFormais, useEnviarCobrarJuntas, usePixEsperandoDoCliente,
 } from '@/hooks/use-cobrar-juntas';
 import { buildClientStatement, type StatementItem } from '@/lib/client-statement';
+import { NUMERO_DA_FATURA_NOVA } from '@/lib/fatura';
+import type { FaturaResumo } from '@/hooks/use-faturas';
 import {
   avisoDaCobrancaCriada, contasSemCobranca, osComSaldo, resumoDoCobrarJuntas, saldoDaConta, travaDoCobrarJuntas,
   type ContaDoCliente,
@@ -44,12 +51,61 @@ interface Props {
   onOpenChange: (v: boolean) => void;
   cliente: ClienteParaCobrar;
   /** As contas do cliente (com service_order_id e numero_os). As sem saldo ficam de fora sozinhas. */
-  contas: Array<ContaDoCliente & StatementItem>;
+  contas: Array<ContaDoCliente & StatementItem & { invoice_id?: string | null }>;
   /** OS já marcadas ao abrir (ex.: as escolhidas na tabela). Vazio = todas as que têm saldo. */
   osIniciais?: string[];
+  /** As OS (ids) já executadas, que entram em fatura. Ausente = sem fatura (como na Fase 0). */
+  osQueFaturam?: string[];
+  /** As faturas do cliente (para citar a que já existe). */
+  faturas?: FaturaResumo[];
 }
 
-export function CobrarJuntasDialog({ open, onOpenChange, cliente, contas, osIniciais }: Props) {
+interface FaturaDaEscolha {
+  /** O número na mensagem (o provisório, se a fatura nasce no envio); null = sem linha de fatura. */
+  numero: string | null;
+  /** Vai criar/usar a fatura no envio. */
+  comFatura: boolean;
+  aviso: string | null;
+  trava: string | null;
+}
+
+const SEM_FATURA: FaturaDaEscolha = { numero: null, comFatura: false, aviso: null, trava: null };
+
+/** O que acontece com a fatura nesta escolha de OS (o banco confere de novo no envio). */
+function faturaDaEscolha(
+  selecionadas: Array<{ service_order_id: string; numero_os?: string | null }>,
+  contaIds: string[],
+  faturaDaConta: (id: string) => string | null,
+  osQueFaturam: string[] | undefined,
+  faturas: FaturaResumo[] | undefined,
+): FaturaDaEscolha {
+  if (!osQueFaturam || selecionadas.length < 2 || contaIds.length === 0) return SEM_FATURA;
+  const emExecucao = selecionadas.filter((o) => !osQueFaturam.includes(o.service_order_id));
+  if (emExecucao.length) {
+    return {
+      ...SEM_FATURA,
+      aviso: `Sem fatura: ${emExecucao.map((o) => o.numero_os || 'uma OS').join(', ')} ainda não terminou. A cobrança sai como antes.`,
+    };
+  }
+  const dasContas = [...new Set(contaIds.map(faturaDaConta))];
+  if (dasContas.length === 1 && dasContas[0] === null) {
+    return {
+      numero: NUMERO_DA_FATURA_NOVA, comFatura: true, trava: null,
+      aviso: 'Ao enviar, estas contas viram uma fatura (FAT-N) e o número entra na mensagem. Cada conta continua na sua OS.',
+    };
+  }
+  const existente = dasContas.length === 1 ? (faturas ?? []).find((f) => f.id === dasContas[0] && f.status === 'open') : undefined;
+  if (existente) {
+    return { numero: existente.numero, comFatura: true, trava: null, aviso: `Estas contas são a fatura ${existente.numero}.` };
+  }
+  const numeros = dasContas.filter(Boolean).map((id) => (faturas ?? []).find((f) => f.id === id)?.numero ?? 'outra fatura');
+  return {
+    ...SEM_FATURA,
+    trava: `Parte destas contas já está na fatura ${numeros.join(', ')} junto com outras. Escolha as OS da fatura inteira ou desfaça a fatura na ficha.`,
+  };
+}
+
+export function CobrarJuntasDialog({ open, onOpenChange, cliente, contas, osIniciais, osQueFaturam, faturas }: Props) {
   const oss = useMemo(() => osComSaldo(contas), [contas]);
   const [escolhidas, setEscolhidas] = useState<Set<string>>(new Set());
   const [message, setMessage] = useState('');
@@ -79,14 +135,17 @@ export function CobrarJuntasDialog({ open, onOpenChange, cliente, contas, osInic
   const contasComOs = selecionadas.flatMap((o) => o.contas.map((c) => ({ id: c.id, service_order_id: o.service_order_id })));
   const contaIds = contasEscolhidas.map((c) => c.id);
   const cobrancas = useCobrancasFormais(contaIds, servicoIds, open && !cliente.generico);
+  const faturaDaContaPorId = useMemo(() => new Map(contas.map((c) => [c.id, c.invoice_id ?? null])), [contas]);
+  const fatura = faturaDaEscolha(selecionadas, contaIds, (id) => faturaDaContaPorId.get(id) ?? null, osQueFaturam, faturas);
+  const numeroDaFatura = fatura.numero;
 
   // A mensagem acompanha a escolha das OS (a edição à mão vale até mudar a escolha).
   useEffect(() => {
     if (!open) return;
-    setMessage(buildClientStatement({ clientName: cliente.name, items: contas, pixKey, servicoIds }));
-  }, [open, cliente.name, contas, pixKey, servicoIds]);
+    setMessage(buildClientStatement({ clientName: cliente.name, items: contas, pixKey, servicoIds, fatura: numeroDaFatura }));
+  }, [open, cliente.name, contas, pixKey, servicoIds, numeroDaFatura]);
 
-  const trava = pix.error
+  const trava = fatura.trava ?? (pix.error
     ? (pix.error as Error).message
     : travaDoCobrarJuntas({
       clienteNome: cliente.name,
@@ -98,7 +157,7 @@ export function CobrarJuntasDialog({ open, onOpenChange, cliente, contas, osInic
       pixEsperando: pix.data ?? [],
       telefone: phone,
       horaBrasilia: horaDoCobrarJuntas(),
-    });
+    }));
   // Conta sem cobrança registrada: a cobrança é criada junto com o envio (aviso, não trava).
   const cobrancaCriada = !trava && cobrancas.data
     ? avisoDaCobrancaCriada(contasSemCobranca(contasComOs, cobrancas.data).length)
@@ -127,7 +186,7 @@ export function CobrarJuntasDialog({ open, onOpenChange, cliente, contas, osInic
   const handleSend = () => {
     if (!podeEnviar) return;
     enviar.mutate(
-      { cliente, mensagem: message, contas: contasEscolhidas, servicoIds },
+      { cliente, mensagem: message, contas: contasEscolhidas, servicoIds, ...(fatura.comFatura ? { comFatura: true } : {}) },
       {
         onSuccess: (r) => {
           if (r.deduplicado) {
@@ -141,7 +200,7 @@ export function CobrarJuntasDialog({ open, onOpenChange, cliente, contas, osInic
             const criadas = r.cobrancasCriadas
               ? ` ${r.cobrancasCriadas === 1 ? '1 cobrança criada' : `${r.cobrancasCriadas} cobranças criadas`} em Cobranças.`
               : '';
-            toast.success(`Cobrança enviada: ${resumoDoCobrarJuntas(selecionadas)}.${criadas}`);
+            toast.success(`Cobrança enviada: ${resumoDoCobrarJuntas(selecionadas)}.${r.fatura ? ` Fatura ${r.fatura}.` : ''}${criadas}`);
             if (r.aviso) toast.warning(r.aviso);
           }
           onOpenChange(false);
@@ -243,6 +302,12 @@ export function CobrarJuntasDialog({ open, onOpenChange, cliente, contas, osInic
             <p role="alert" className="flex gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
               <span className="min-w-0 break-words">{trava}</span>
+            </p>
+          )}
+          {!trava && fatura.aviso && (
+            <p className="flex gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm" data-testid="cobrar-juntas-fatura">
+              <Layers className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 break-words">{fatura.aviso}</span>
             </p>
           )}
           {cobrancaCriada && (

@@ -63,6 +63,7 @@ vi.mock('@/integrations/supabase/client', () => {
 import {
   AVISO_MODO_TESTE, AVISO_MODO_TESTE_EXTRATO, NOTA_DO_EXTRATO, relogioDoCobrarJuntasTela, useCobrancasFormais, useEnviarCobrarJuntas, useEnviarExtrato,
 } from './use-cobrar-juntas';
+import { NUMERO_DA_FATURA_NOVA } from '@/lib/fatura';
 
 const ok = (data: unknown): Resposta => ({ data, error: null });
 
@@ -453,5 +454,55 @@ describe('useEnviarExtrato', () => {
     expect(r.data).toEqual({ deduplicado: false, aviso: AVISO_MODO_TESTE_EXTRATO, modoTeste: true });
     expect(banco.chamadas.filter((c) => c.alvo.startsWith('rpc.'))).toEqual([]);
     expect(String(banco.invocacoes[0].body.dedupe_key)).toMatch(/^extrato:cli:.*:teste$/);
+  });
+});
+
+// Fatura FAT-N (Fechar juntas F1, 20/11/2026): com as OS todas executadas a tela pede comFatura — a fatura
+// nasce depois das travas e antes do WhatsApp, e o número entra no lugar do provisório.
+describe('useEnviarCobrarJuntas com fatura', () => {
+  const COM_FATURA = { ...ENVIO, mensagem: `Cobrança — HBR\nFatura: ${NUMERO_DA_FATURA_NOVA}\n…`, comFatura: true };
+
+  it('cria a fatura antes do envio, cita o número na mensagem e registra depois', async () => {
+    banco.respostas['rpc.fatura_criar'] = ok({ ok: true, criada: true, fatura_id: 'fat1', numero: 'FAT-00001' });
+    const r = await enviar(COM_FATURA);
+    expect(r.isSuccess).toBe(true);
+    expect(r.data).toMatchObject({ deduplicado: false, fatura: 'FAT-00001', cobrancasRegistradas: 2 });
+    const rpcs = banco.chamadas.filter((c) => c.alvo.startsWith('rpc.')).map((c) => c.alvo);
+    expect(rpcs).toEqual(['rpc.fatura_criar', 'rpc.cobrar_juntas_registrar_envio']);
+    expect(banco.chamadas.find((c) => c.alvo === 'rpc.fatura_criar')?.valores).toEqual({ p_cliente: 'cli', p_contas: ['r45', 'r46'] });
+    expect(banco.invocacoes).toHaveLength(1);
+    expect(String(banco.invocacoes[0].body.message)).toContain('Fatura: FAT-00001');
+    expect(String(banco.invocacoes[0].body.message)).not.toContain(NUMERO_DA_FATURA_NOVA);
+  });
+
+  it('o banco recusa a fatura (conta já noutra fatura): nada sai nem é registrado', async () => {
+    banco.respostas['rpc.fatura_criar'] = { data: null, error: { message: 'Estas contas já estão numa fatura: Saldo (FAT-00002).' } };
+    const r = await enviar(COM_FATURA);
+    expect(r.isError).toBe(true);
+    expect((r.error as Error).message).toContain('já estão numa fatura');
+    expect(banco.invocacoes).toHaveLength(0);
+    expect(banco.chamadas.some((c) => c.alvo === 'rpc.cobrar_juntas_registrar_envio')).toBe(false);
+  });
+
+  it('travas antes da fatura: fora do horário, nem a fatura nasce', async () => {
+    relogioDoCobrarJuntasTela.agora = () => new Date('2026-10-29T01:00:00Z'); // 22h em Brasília
+    const r = await enviar(COM_FATURA);
+    expect(r.isError).toBe(true);
+    expect(banco.chamadas.some((c) => c.alvo === 'rpc.fatura_criar')).toBe(false);
+    expect(banco.invocacoes).toHaveLength(0);
+  });
+
+  it('modo de teste: a fatura não nasce e o número de teste vê o provisório de teste', async () => {
+    banco.respostas['app_settings.select:modo-teste'] = ok([{ key: 'wa_test_mode', value: 'true' }, { key: 'wa_test_number', value: '5547900000000' }]);
+    const r = await enviar(COM_FATURA);
+    expect(r.isSuccess).toBe(true);
+    expect(banco.chamadas.some((c) => c.alvo === 'rpc.fatura_criar')).toBe(false);
+    expect(String(banco.invocacoes[0].body.message)).toContain('Fatura: FAT-(teste)');
+    expect(r.data).not.toHaveProperty('fatura');
+  });
+
+  it('sem comFatura: nada muda (nenhuma chamada a fatura_criar)', async () => {
+    await enviar();
+    expect(banco.chamadas.some((c) => c.alvo === 'rpc.fatura_criar')).toBe(false);
   });
 });
