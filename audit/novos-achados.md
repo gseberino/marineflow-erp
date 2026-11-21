@@ -4444,3 +4444,13 @@ quatro estão latentes.
   já recebeu, pode mandar de novo (com SIM). Baixo: exige SIM ou timeout; hoje 0 envios da agenda e 0 do assistente.
 - **Menor mudança:** `liberarEnvio` apagar só a reserva sem `concluido_em`; no cartão do SIM, mostrar "já recebeu em dd/mm"
   (`ultimaViaEntregue`).
+
+### [NOVO-fatura-01] 8 testes SQL de supabase/tests já falham na produção de hoje (com e sem a migration da fatura)
+
+- **Onde:** rodados em 20/11/2026 em begin…rollback, cada um com e SEM `20270220100000_fechar_juntas_fatura` — as mesmas falhas nos
+  dois: `agenda_fase1_prontidao` (P1, P3, P4), `agenda_fase3_pos_deploy` (S6), `agenda_fase7g_como_pensei` (C6b: o administrador de
+  teste com login recebe 42501), `agenda_fase7g_ok_do_dono` (hashes de funções `_agenda_*` mudaram; K4k), `agrupar_orcamentos` (A1
+  "auditoria"), `agrupar_orcamentos_assistente` (2 de auditoria), `agrupar_os` (A1 recusado por "agenda automática ligada" → E1/E2
+  em cascata), `comprovantes_gravacao` (AN e XF: fixtures sem `product_id` / `client_id`).
+- **Efeito:** teste velho acusando falha que não é da frente em curso (feedback_testes_sql_envelhecem). Nenhum é da fatura.
+- **Menor mudança:** em tarefa própria, conferir amostra/fixture de cada um antes de mexer em regra.
