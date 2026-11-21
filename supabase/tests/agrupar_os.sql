@@ -560,7 +560,7 @@ begin
   v := pg_temp._dupla();
   select client_id into v_cli from public.service_orders where id = v[2];
   insert into public.invoices (invoice_number, service_order_id, client_id, issue_date, due_date, status)
-  values ('FAT-TESTE-' || upper(pg_temp._letras(8)), v[2], v_cli, current_date, current_date + 10, 'draft');
+  values ('FAT-TESTE-' || upper(pg_temp._letras(8)), v[2], v_cli, current_date, current_date + 10, 'open');
   perform pg_temp._bloqueio('B04 fatura ("fatura")', v, null, pg_temp._id('admin'), null, 'fatura');
 
   v := pg_temp._dupla();
