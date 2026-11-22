@@ -523,7 +523,10 @@ $c4$;
 do $c6$
 declare
   v_res     jsonb := '[]'::jsonb;
-  c_admin   constant uuid := 'aa000000-0000-4000-8000-000000000001';
+  -- 21/11/2026: o admin aa…01 é o da fixture da bancada; em produção ele não existe em app_users (is_admin_or_financial falso → o
+  -- 42501 do C6b era do teste, não da porta). Sem ele, o 1º administrador ativo (o molde de agenda_fase1_leituras.sql).
+  c_admin   constant uuid := coalesce((select u.id from public.app_users u where u.id = 'aa000000-0000-4000-8000-000000000001' and u.role = 'admin'),
+                                      (select u.id from public.app_users u where u.role = 'admin' and u.active order by u.created_at, u.id limit 1));
   c_tecnico constant uuid := 'aa000000-0000-4000-8000-000000000002';
   c_cp      constant text := $s$select (public.agenda_como_pensei(null, date '2026-10-29', now()) ->> 'modo')$s$;
   c_pq      text;
