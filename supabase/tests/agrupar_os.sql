@@ -277,9 +277,14 @@ begin
   --    envio do link pendente, tarefa manual e tarefa automática; ASSINADA (depois das linhas)
   v_a := pg_temp._os_vazia(v_cli, v_ves, 'scheduled', now() - interval '2 hours');
   -- (sem chegada no barco: desde 20261028190000 a chegada registrada é execução e recusa — B24/B25)
+  -- 21/11/2026: com a agenda automática ligada (modo_proposta = 'ligado' desde 14/11), trg_so_datas_pela_agenda
+  -- (20261025100100_agenda_fase2_porta) recusa mudar a data da OS fora da porta da agenda. A data de A é a do cenário:
+  -- entra pela porta (agenda.porta, como a agenda grava), só neste update; a regra não muda.
+  perform set_config('agenda.porta', 'on', true);
   update public.service_orders set scheduled_start_at = v_agenda, scheduled_end_at = v_agenda + interval '2 hours',
          problem_description = 'Revisar o quadro elétrico', commission_rate = 3
    where id = v_a;
+  perform set_config('agenda.porta', '', true);
   v_sa := pg_temp._servico(v_a, 'A1 Revisão do quadro', 2, 150, now() - interval '2 hours');
   insert into public.service_order_steps (service_order_id, service_order_service_id, seq, title, status)
   values (v_a, v_sa, 1, 'Passo A1', 'pending'), (v_a, v_sa, 2, 'Passo A2', 'pending');
