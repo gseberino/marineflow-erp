@@ -902,8 +902,13 @@ select 'P1 uma prontidão por item da carteira, todas ok, estado conhecido',
        count(*) = (select count(*) from public.os_carteira(date '2026-10-23'))
        and coalesce(bool_and((p ->> 'ok')::boolean and p ->> 'estado' in ('congelada', 'concluida', 'fora_da_carteira',
              'em_execucao', 'parada', 'marcada', 'sem_sinal', 'aguardando_cliente', 'esperando_voce',
-             'aguardando_material', 'pronta')), true),
-       count(*)::text
+             'aguardando_material', 'pronta',
+             -- 21/11/2026: 'fixada' e 'programada' são os estados do plano da Fase 2 (20261025100200_agenda_fase2_motor,
+             -- os_prontidao §3); com a agenda automática ligada (14/11) a carteira de produção passou a ter OS programadas.
+             'fixada', 'programada')), true),
+       count(*)::text || coalesce(' fora da lista: ' || string_agg(distinct p ->> 'estado', ', ') filter (where p ->> 'estado' not in
+             ('congelada', 'concluida', 'fora_da_carteira', 'em_execucao', 'parada', 'marcada', 'sem_sinal', 'aguardando_cliente',
+              'esperando_voce', 'aguardando_material', 'pronta', 'fixada', 'programada')), '')
   from public.os_prontidao_carteira(date '2026-10-23') p;
 
 insert into _resultado
@@ -918,15 +923,28 @@ select 'P2 duração: sem base, ou otimista <= realista, em meios-dias, pessoas 
 
 insert into _resultado
 select 'P3 o comprometível é diárias × carga_max (um número só)',
-       abs((c ->> 'comprometivel')::numeric - (c ->> 'diarias_semana')::numeric * (select carga_max from public.agenda_config)) < 0.01,
-       (c - 'pessoas')::text
-  from public.agenda_capacidade_semanal(date '2026-10-23') c;
+       -- 21/11/2026: desde a 7b (20261101100100_agenda_fase7b_disponibilidade, R4.5/AG7-02), com modo_dias fora de 'desligado'
+       -- e a linha do dono, as diárias do dono já vêm × dono_carga_max e o comprometível dele é esse mesmo número (não × carga_max
+       -- de novo): comprometível = (diárias − as do dono) × carga_max + as do dono. Fora disso, a régua de antes. to_jsonb para a
+       -- bancada com corte antes da 7b (sem a coluna modo_dias).
+       abs((c ->> 'comprometivel')::numeric
+           - case when coalesce((select to_jsonb(a) ->> 'modo_dias' from public.agenda_config a), 'desligado') <> 'desligado'
+                       and (c ->> 'conta_dono')::boolean
+                  then ((c ->> 'diarias_semana')::numeric - v.dono) * (select carga_max from public.agenda_config) + v.dono
+                  else (c ->> 'diarias_semana')::numeric * (select carga_max from public.agenda_config) end) < 0.01,
+       (c - 'pessoas')::text || ' dono=' || v.dono::text
+  from public.agenda_capacidade_semanal(date '2026-10-23') c,
+       lateral (select coalesce(sum((e ->> 'diarias_semana')::numeric) filter (where (e ->> 'eh_dono')::boolean), 0) as dono
+                  from jsonb_array_elements(c -> 'pessoas') e) v;
 
 insert into _resultado
 select 'P4 restrições: todo tipo e "quem" conhecidos; a que trava vem antes da que só informa',
        coalesce(bool_and(e ->> 'tipo' in ('parada', 'atrasado', 'sem_previsao', 'comprado_sem_previsao', 'compre_ate',
                                           'peca_embutida', 'material_nao_conferido', 'orcamento', 'escopo', 'sinal',
-                                          'cliente', 'duracao', 'bem', 'nao_antes')
+                                          'cliente', 'duracao', 'bem', 'nao_antes',
+                                          -- 21/11/2026: 'compra_sem_prazo' já vinha da 20261024160400; 'sem_peca_suposta' (não
+                                          -- trava) e 'situacao' são da 7a (20261031100200_agenda_fase7a_prontidao).
+                                          'compra_sem_prazo', 'sem_peca_suposta', 'situacao')
                          and e ->> 'quem' in ('dono', 'cliente', 'fornecedor', 'terceiro', 'sistema')), true)
        and not exists (
          select 1 from public.os_prontidao_carteira(date '2026-10-23') p2,
