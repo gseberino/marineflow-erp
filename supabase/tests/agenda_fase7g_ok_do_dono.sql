@@ -139,7 +139,9 @@ begin
      and exists (select 1 from aclexplode(p.proacl) a where a.grantee = 0);
   v_res := pg_temp.ok(v_res, 'K0a2 nenhuma das 4 com execute para PUBLIC', v_dif is null, v_dif);
   -- as 11 recriadas: tiradas as marcas do P5b, o corpo da origem (o md5 do R9.1 nas 7 da tabela; o da 7g, fixado pelo montador, nas 4 do P5, P6 e P7)
-  select string_agg(format('%s: %s', t.n, md5(pg_temp.sem_p5b(p.prosrc))), '; ' order by t.n) into v_dif
+  -- 21/11/2026: em produção as 11 estão com fim de linha CRLF (a 20261112100700 foi aplicada de uma cópia Windows): prosrc tem 1 \r por \n e o md5 cru
+  -- não casava em nenhuma. Tirado o \r, as 11 dão o md5 da origem (nenhuma migration depois da 20261112100700 recria alguma delas): os hashes ficam.
+  select string_agg(format('%s: %s', t.n, md5(pg_temp.sem_p5b(replace(p.prosrc, E'\r', '')))), '; ' order by t.n) into v_dif
     from (values ('_agenda_classe_da_os', '06aa24fb0049f269d39787434c3aceeb'), ('_agenda_condicao_da_reserva', '63b22e85a316102edad939f2e57ae53c'),
                  ('_agenda_padrao_da_pergunta', '4c2024d1cb4ed7f252e09adaa7351615'), ('_agenda_modo_da_pergunta', '40a78627108f025a6caaa035df768927'),
                  ('agenda_decidir', '108125fc0e603c9f9077d019f6767809'), ('agenda_desfazer', '7a138b9382d5fc4289de0b770a70fa55'),
@@ -147,10 +149,10 @@ begin
                  ('agenda_explicar_rodar', '49c8737529162699e8c26e9b7aa1e769'), ('_agenda_saude_explicar', '1be352347492cf36427707bd3ca87606'),
                  ('agenda_tela_semana', '1491d1fc43940ccf0d0a6dd8cbdf3a9a')) t(n, h)
     join pg_proc p on p.proname = t.n and p.pronamespace = 'public'::regnamespace
-   where md5(pg_temp.sem_p5b(p.prosrc)) <> t.h or p.prosrc not like '%-- FASE 7g: (7g P5b%';
+   where md5(pg_temp.sem_p5b(replace(p.prosrc, E'\r', ''))) <> t.h or p.prosrc not like '%-- FASE 7g: (7g P5b%';
   v_res := pg_temp.ok(v_res, 'K0b as 11 recriadas têm o bloco do P5b e, sem ele, são a origem byte a byte (md5 do corpo)', v_dif is null, v_dif);
   v_res := pg_temp.ok(v_res, 'K0b2 o tirador morde: o corpo vivo, com o bloco, não é a origem',
-    (select md5(p.prosrc) from pg_proc p where p.proname = 'agenda_decidir' and p.pronamespace = 'public'::regnamespace) <> '108125fc0e603c9f9077d019f6767809', null);
+    (select md5(replace(p.prosrc, E'\r', '')) from pg_proc p where p.proname = 'agenda_decidir' and p.pronamespace = 'public'::regnamespace) <> '108125fc0e603c9f9077d019f6767809', null);
   -- as listas, a crítica e as colunas
   v_res := pg_temp.ok(v_res, 'K0c as 3 listas: ok_marcacao nas perguntas, ok_do_dono na condição, nivel nas ações',
     (select pg_get_constraintdef(c.oid) from pg_constraint c where c.conname = 'agenda_perguntas_tipo_check') like '%''ok_marcacao''%'
@@ -277,6 +279,9 @@ begin
   v_c := public._agenda_condicao_da_reserva(v_os, 'duracao', date '2026-11-16', v_pr, date '2026-10-29');
   v_res := pg_temp.ok(v_res, 'K4j as outras condições, as de antes (duracao)', v_c ->> 'condicao' like 'se você confirmar os dias até %', v_c::text);
   -- o padrão da 7f para ok_marcacao (ponto 1, R8.5-2)
+  -- 21/11/2026: o dado 20261112100990_agenda_fase7g_modos já pôs ok_marcacao em veto_tipos na produção; o K4k é o caso "fora de veto_tipos", então
+  -- tira aqui (o bloco é desfeito no fim) e o K4l põe de volta.
+  update public.agenda_config set veto_tipos = array_remove(veto_tipos, 'ok_marcacao') where id;
   v_res := pg_temp.igual(v_res, 'K4k o padrão de ok_marcacao: recomendação, opção; fora de veto_tipos, espera tipo',
     public._agenda_padrao_da_pergunta('ok_marcacao', true, v_os, '[{"n": 1}, {"n": 2}]'::jsonb, 1::smallint)::text,
     '{"chave": "recomendacao", "efeito": "opcao", "espera": "tipo"}');
