@@ -5,7 +5,8 @@
 // clique, filtros, agrupamento, CSV e as ações de linha (Pagar à vista, o resto no menu).
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Ban, Download, DollarSign, Paperclip, Pencil, Plus, Undo2 } from 'lucide-react';
+import { Ban, Copy, Download, DollarSign, Paperclip, Pencil, Plus, Undo2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { useI18n } from '@/i18n';
 import { usePayables } from '@/hooks/use-financial';
 import { exportToCSV } from '@/lib/export';
@@ -40,6 +41,8 @@ type PayableRow = {
   linked_service_order_id?: string | null;
   issue_date?: string | null;
   bank_transaction_id?: string | null;
+  /** Linha digitável do boleto desta conta (lida do e-mail), para pagar no aplicativo do banco. */
+  boleto_linha?: string | null;
   supplier_id?: string | null;
   payee_id?: string | null;
   cost_center_id?: string | null;
@@ -81,9 +84,25 @@ const originView = (origin: string | null | undefined): { label: string; tone: S
   switch (origin) {
     case 'service_order_expense': return { label: 'Despesa de OS', tone: 'info' };
     case 'bank_reconciliation': return { label: 'Conciliação', tone: 'info' };
+    // O boleto que chegou por e-mail e virou conta sozinho (21/11/2026).
+    case 'boleto': return { label: 'Boleto do e-mail', tone: 'info' };
     default: return { label: 'Manual', tone: 'neutral' };
   }
 };
+
+/**
+ * A linha digitável vai para a área de transferência: é só colar no aplicativo do banco. O sistema não paga nada —
+ * quando o pagamento aparecer no extrato, a conta é baixada por lá.
+ */
+export async function copiarLinhaDoBoleto(linha: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(linha);
+    toast.success('Linha do boleto copiada — cole no aplicativo do banco.');
+  } catch {
+    // Sem permissão de área de transferência (navegador antigo, aba sem foco): mostra para copiar à mão.
+    toast.message('Copie a linha do boleto:', { description: linha, duration: 20000 });
+  }
+}
 
 type GroupBy = 'none' | 'category' | 'supplier' | 'month';
 
@@ -141,7 +160,12 @@ export function ContasAPagarLista({ onNovaConta }: {
     const viva = p.status !== 'cancelled';
     const emAberto = viva && p.status !== 'paid';
     return {
-      rapidas: emAberto ? [{ texto: 'Pagar', icone: DollarSign, titulo: 'Registrar pagamento', onClick: () => setPaymentTarget(p) }] : [],
+      rapidas: emAberto ? [
+        ...(p.boleto_linha
+          ? [{ texto: 'Copiar boleto', icone: Copy, titulo: 'Copiar a linha digitável para pagar no aplicativo do banco', onClick: () => { void copiarLinhaDoBoleto(p.boleto_linha!); } }]
+          : []),
+        { texto: 'Pagar', icone: DollarSign, titulo: 'Registrar pagamento', onClick: () => setPaymentTarget(p) },
+      ] : [],
       menu: [
         ...(viva ? [{ texto: 'Corrigir', icone: Pencil, titulo: 'Fornecedor, categoria, OS, datas, valor', onClick: () => setEditingPayable(p) }] : []),
         ...(viva && p.bank_transaction_id
@@ -420,6 +444,11 @@ export function ContasAPagarLista({ onNovaConta }: {
                 {deOndeSaiu(p) && <p className="text-xs text-muted-foreground">Saiu de: {deOndeSaiu(p)}</p>}
                 {p.status !== 'cancelled' && (
                   <div className="mt-3 flex items-center gap-2">
+                    {p.status !== 'paid' && p.boleto_linha && (
+                      <Button variant="outline" className="min-h-11 gap-1.5" onClick={() => { void copiarLinhaDoBoleto(p.boleto_linha!); }}>
+                        <Copy className="h-4 w-4" /> Copiar boleto
+                      </Button>
+                    )}
                     {p.status !== 'paid' && (
                       <Button className="min-h-11 flex-1" onClick={() => setPaymentTarget(p)}>{t.financial.registerPayment}</Button>
                     )}

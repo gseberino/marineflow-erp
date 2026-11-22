@@ -33,6 +33,19 @@ describe('paraDespesa', () => {
     expect(d.semNome).toBe(true);
     expect(d.quemClassificou).toBe('voce');
   });
+
+  it('conta criada do boleto do e-mail (21/11/2026): não é "lançado à mão", e o nome é o do remetente', () => {
+    const d = paraDespesa({ ...base, origin: 'boleto', status: 'pending', expense_category: null, supplier_name: 'Boletos COMPASS', description: 'Boleto — Boleto Bancário' }, grupos);
+    expect(d.quemClassificou).toBe('boleto');
+    expect(d.quem).toBe('Boletos COMPASS');
+    expect(d.deOnde).toBe('—');
+    expect(d.categoria).toBe('Sem categoria');
+  });
+
+  it('boleto pago: quem aprovou a linha do banco no Extrato continua valendo sobre a origem', () => {
+    const d = paraDespesa({ ...base, origin: 'boleto', finance_review_queue: [{ automatica: null, status: 'approved' }] }, grupos);
+    expect(d.quemClassificou).toBe('voce');
+  });
 });
 
 describe('sem quem recebeu', () => {

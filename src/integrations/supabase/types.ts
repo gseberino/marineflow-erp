@@ -6888,12 +6888,14 @@ export type Database = {
           balance_amount: number | null
           bank_transaction_id: string | null
           beneficiario_id: string | null
+          boleto_linha: string | null
           cost_center_id: string | null
           created_at: string
           currency: string | null
           description: string
           divisao_id: string | null
           due_date: string
+          email_message_id: string | null
           expense_category: string | null
           fiscal_note_id: string | null
           id: string
@@ -6915,12 +6917,14 @@ export type Database = {
           balance_amount?: number | null
           bank_transaction_id?: string | null
           beneficiario_id?: string | null
+          boleto_linha?: string | null
           cost_center_id?: string | null
           created_at?: string
           currency?: string | null
           description: string
           divisao_id?: string | null
           due_date: string
+          email_message_id?: string | null
           expense_category?: string | null
           fiscal_note_id?: string | null
           id?: string
@@ -6942,12 +6946,14 @@ export type Database = {
           balance_amount?: number | null
           bank_transaction_id?: string | null
           beneficiario_id?: string | null
+          boleto_linha?: string | null
           cost_center_id?: string | null
           created_at?: string
           currency?: string | null
           description?: string
           divisao_id?: string | null
           due_date?: string
+          email_message_id?: string | null
           expense_category?: string | null
           fiscal_note_id?: string | null
           id?: string
@@ -7026,6 +7032,13 @@ export type Database = {
             columns: ["divisao_id"]
             isOneToOne: false
             referencedRelation: "payables"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payables_email_message_id_fkey"
+            columns: ["email_message_id"]
+            isOneToOne: false
+            referencedRelation: "email_messages"
             referencedColumns: ["id"]
           },
           {

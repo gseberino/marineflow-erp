@@ -10,13 +10,14 @@ import { lerEmPaginas } from '@/lib/ler-em-paginas';
 import { historicoSemIdentidade } from '../../supabase/functions/_shared/banking/proposals';
 import { origemDoDinheiro } from '@/lib/origem-do-dinheiro';
 
-export type QuemClassificou = 'regra' | 'confianca' | 'voce' | 'nota' | 'caixa' | 'mao';
+export type QuemClassificou = 'regra' | 'confianca' | 'voce' | 'nota' | 'boleto' | 'caixa' | 'mao';
 
 export const ROTULO_QUEM_CLASSIFICOU: Record<QuemClassificou, string> = {
   regra: 'sozinho, pela sua regra',
   confianca: 'sozinho, por confiança alta',
   voce: 'você, no Extrato',
   nota: 'nota fiscal (XML)',
+  boleto: 'boleto do e-mail',
   caixa: 'lançado no Caixa',
   mao: 'lançado à mão',
 };
@@ -65,6 +66,7 @@ export function paraDespesa(l: Linha, grupoDe: Map<string, string>): Despesa {
     : fila?.automatica === 'confianca' ? 'confianca'
     : fila ? 'voce'
     : l.origin === 'fiscal_note' ? 'nota'
+    : l.origin === 'boleto' ? 'boleto'
     : conta?.provider === 'caixa' ? 'caixa'
     : 'mao';
   // O banco e o final do cartão: quem confere vai direto ao aplicativo certo (28/09/2026).

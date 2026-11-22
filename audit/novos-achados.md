@@ -4492,3 +4492,21 @@ quatro estão latentes.
   `criado_em = 2026-12-01 10:00/11:00/12:00 -03` que o caso precisa MAIS NOVAS que as gravadas com `now()`; a partir de
   01/12/2026 10:00 elas ficam mais velhas e a prova passa sem provar (o P3 já quebra hoje em produção pelo NOVO-testes-02).
   Conserto quando for mexer: `now() + interval '…'` no lugar da data fixa.
+
+### [NOVO-o-que-vence-01] Contas a pagar mostra "Manual" na conta que nasceu da nota fiscal
+
+- **Onde:** `src/v2/pages/financeiro/ContasAPagarLista.tsx`, `originView`: só conhece `service_order_expense` e
+  `bank_reconciliation`; `fiscal_note`, `purchase_order`, `commission` e `folha` caem em "Manual". Visto em 21/11/2026 ao
+  acrescentar a origem `boleto` (essa ganhou rótulo próprio).
+- **Efeito:** a parcela criada pela importação do XML aparece como lançada à mão — o dono não vê de onde a conta veio. Só rótulo.
+- **Menor mudança:** um `case` por origem com o nome que a tela Despesas já usa ("nota fiscal (XML)").
+
+### [NOVO-o-que-vence-02] Parcela da nota paga por boleto continua "em aberto" (a baixa espera uma resposta que não vem)
+
+- **Onde:** medido em 21/11/2026: NF-e 132181 (TSD), parcelas de R$ 785,07 (20/10) e R$ 784,82 (17/11): o extrato tem a saída
+  "Pagamento Boleto BCO BRAD" no dia e no valor exatos, e as contas seguem `pending`. A linha do extrato ganha o vínculo sugerido
+  e fica na fila até alguém responder "é este" (`exigeDecisao`, decisão do dono de 26/09: ligar dinheiro a conta sempre pergunta);
+  a fila não recebe decisão manual desde 29/09 (284 pendentes).
+- **Efeito:** Contas a pagar mostra como vencido o que já foi pago; o que a empresa deve fica maior do que é.
+- **Menor mudança:** é a fatia 2 desta frente ("baixa pelo boleto") — depende de o dono liberar a exceção à regra de 26/09 para o
+  caso do boleto (linha conhecida, pagamento por boleto, valor igual no centavo, uma conta só). Não corrigido aqui.

@@ -26,6 +26,9 @@
 // pelo modo_material) DEPOIS de gravar dados_extraidos — e também no ?reextrair=1. Nunca derruba a leitura (remessas.ts:
 // o erro vai para app_error_logs, action agenda:remessas). `?remessas=1` relê o XML das NF-e dos últimos remessa_dias que
 // ainda não viraram remessa (as extraídas antes de 25/10 não têm os itens nem a saída), até 15 por chamada.
+//
+// O que vence, fatia 1 (21/11/2026): o boleto lido vira CONTA A PAGAR (contas.ts → contas_a_pagar_do_email), depois de
+// gravar dados_extraidos e também no ?reextrair=1. Decisão do dono: criar sozinho; nada é pago. Nunca derruba a leitura.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
@@ -40,6 +43,7 @@ import { displaySender, normalizeAddress } from "../_shared/email/normalize.ts";
 import { extrairDados, fornecedorPelaNota } from "../_shared/email/dados.ts";
 import type { InboundEmail } from "../_shared/email/types.ts";
 import { registrarRemessas, relerRemessas, temNotaParaEmpresa } from "./remessas.ts";
+import { registrarContas, temBoleto } from "./contas.ts";
 import { avisoDoEmail } from "../_shared/uma-voz/fontes.ts";
 import { textoDoGolpe } from "../_shared/uma-voz/acorde.ts";
 import {
@@ -216,6 +220,8 @@ async function reextrair(admin: Db, cnpjEmpresa: string | null): Promise<Record<
     await admin.from("email_messages").update({ dados_extraidos: gravar, ...ligar }).eq("id", m.id);
     // Fase 4 (P3): a remessa da NF-e, depois de gravar (nunca lança).
     if (temNotaParaEmpresa(dados)) await registrarRemessas(admin, m.id);
+    // O que vence (21/11/2026): o boleto vira conta a pagar, depois de gravar (nunca lança).
+    if (temBoleto(dados)) await registrarContas(admin, m.id);
     lidos++;
     if (dados) comDados++;
   }
@@ -337,6 +343,9 @@ servirComCors(async (req) => {
             await admin.from("email_messages").update({ dados_extraidos: { ...dados, nfes }, ...ligar }).eq("id", id);
             // Fase 4 (P3): a NF-e para a HBR vira remessa no nível da nota, DEPOIS de gravar (nunca lança: a leitura segue).
             if (temNotaParaEmpresa(dados)) await registrarRemessas(admin, id);
+            // O que vence (21/11/2026): o boleto vira conta a pagar (contas_a_pagar_do_email decide: liga à conta que já
+            // existe, não recria a cancelada, não cria o que parece pago). Nunca lança: a leitura segue.
+            if (temBoleto(dados)) await registrarContas(admin, id);
           }
         } catch (e) {
           console.warn("[email-imap] extração de NF-e/boleto falhou:", (e as Error)?.message ?? e);
