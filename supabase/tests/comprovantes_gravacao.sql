@@ -731,6 +731,7 @@ declare
   v_vs numeric := pg_temp._val();
   v_desp uuid;
   v_peca uuid;
+  v_prod uuid;
   d0 record;
   d1 record;
   v_op0 numeric; v_gt0 numeric; v_op1 numeric; v_gt1 numeric; v_op2 numeric;
@@ -749,7 +750,14 @@ begin
   select id into v_desp from public.service_order_expenses where service_order_id = v_os;
   select billable_to_client, amount, category, description into d0 from public.service_order_expenses where id = v_desp;
   -- a peça lançada na OS (2 × o custo)
-  insert into public.service_order_parts (service_order_id, quantity, unit_cost_snapshot) values (v_os, 2, v_vp / 2)
+  -- 21/11/2026: product_id, unit_sale_snapshot e os line_total_* de service_order_parts são NOT NULL desde o esquema inicial
+  -- (20260407192937; "item físico é sempre Produto"): a fixture sem eles nunca gravava em produção. A peça agora tem um
+  -- produto de teste e o custo = a venda (2 × v_vp/2).
+  insert into public.products (name, cost_price, sale_price)
+  values ('Peça teste comprovantes ' || pg_temp._letras(6), v_vp / 2, v_vp / 2) returning id into v_prod;
+  insert into public.service_order_parts (service_order_id, product_id, quantity, unit_cost_snapshot, unit_sale_snapshot,
+                                          line_total_cost, line_total_sale)
+  values (v_os, v_prod, 2, v_vp / 2, v_vp / 2, v_vp, v_vp)
   returning id into v_peca;
   -- duas despesas iguais lançadas na OS (ambíguo)
   insert into public.service_order_expenses (service_order_id, category, description, amount, expense_date, paid_by, billable_to_client)
@@ -981,7 +989,11 @@ begin
                                                  'tipo_na_os', 'despesa', 'categoria', 'Alimentação de campo'));
   r := pg_temp._gravar(v_cmp2);
   update public.service_orders set invoicing_status = 'invoiced' where id = v_os2;
-  insert into public.receivables (service_order_id, amount, paid_amount, status) values (v_os2, v_val, v_val, 'paid');
+  -- 21/11/2026: client_id, description, issue_date e due_date de receivables são NOT NULL desde o esquema inicial
+  -- (20260407192937): a fixture sem eles nunca gravava em produção. O recebível leva o cliente da OS.
+  insert into public.receivables (client_id, service_order_id, description, issue_date, due_date, amount, paid_amount, status)
+  values ((select client_id from public.service_orders where id = v_os2), v_os2, 'Teste XF: pago', pg_temp._hoje(), pg_temp._hoje(),
+          v_val, v_val, 'paid');
   select grand_total, operational_cost_total into v_antes2 from public.service_orders where id = v_os2;
   v_canc2 := public.comprovante_cancelar(v_cmp2, 'quero desfazer', pg_temp._dono());
   select grand_total, operational_cost_total into v_depois2 from public.service_orders where id = v_os2;
