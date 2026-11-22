@@ -197,8 +197,12 @@ begin
   v_c := pg_temp._orc(v_cli, v_ves, now() - interval '2 hours', 'draft', 'rejected');
   v_d := pg_temp._orc(v_cli, v_ves, now() - interval '1 hour');
   -- a tela grava a reprovação assim (action 'update', new_value só com a situação nova)
+  -- 21/11/2026: desde o histórico de documentos (20270121100000_historico_de_documentos_captura, no ar 16/11) o gatilho
+  -- trg_audit_log_carimbar põe clock_timestamp() no changed_at da linha que não vem do banco (ninguém forja a hora): o
+  -- v_quando que vale é o carimbado, lido pelo returning.
   insert into public.audit_log (table_name, record_id, action, changed_by, previous_value, new_value, changed_at)
-  values ('service_orders', v_b, 'update', 'Teste listar agrupar', null, jsonb_build_object('quote_status', 'rejected'), v_quando);
+  values ('service_orders', v_b, 'update', 'Teste listar agrupar', null, jsonb_build_object('quote_status', 'rejected'), v_quando)
+  returning changed_at into v_quando;
 
   r := public.orcamentos_para_agrupar(v_ves, v_cli, pg_temp._id('admin'));
   ia := pg_temp._item(r, v_a);
@@ -596,7 +600,9 @@ begin
                 'o histórico guarda Reprovado (e Em elaboração para o outro)'),
     pg_temp._se((select count(*) from public.audit_log a
                   where a.table_name = 'service_orders' and a.record_id = v_b and a.action = 'update'
-                    and a.previous_value ->> 'quote_status' = 'rejected' and a.new_value ->> 'quote_status' = 'draft') = 1,
+                    and a.previous_value ->> 'quote_status' = 'rejected' and a.new_value ->> 'quote_status' = 'draft'
+                    -- 21/11/2026: sem a linha do gatilho do histórico (pelo_banco, 20270121100000); conta a que a RPC escreve
+                    and not a.pelo_banco) = 1,
                 'auditoria rejected -> draft'));
 
   -- desagrupar devolve o reaberto como Reprovado
