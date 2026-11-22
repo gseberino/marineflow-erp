@@ -353,8 +353,11 @@ begin
     pg_temp._se((select count(*) from public.audit_log l
                   where l.table_name = 'service_orders' and l.action = 'cancel'
                     and l.triggered_by_id = v_novo and l.record_id in (v_a, v_b)) = 2
+                -- 21/11/2026: desde o histórico de documentos (20270121100000_historico_de_documentos_captura, no ar 16/11) o gatilho
+                -- do banco também grava 'update' (pelo_banco = true) a cada mudança da OS; o registro do agrupar é o que a RPC escreve.
                 and (select count(*) from public.audit_log l
-                      where l.table_name = 'service_orders' and l.action = 'update' and l.record_id = v_novo) = 1,
+                      where l.table_name = 'service_orders' and l.action = 'update' and l.record_id = v_novo
+                        and not l.pelo_banco) = 1,
                 'auditoria'),
     pg_temp._se((select w.status from public.whatsapp_scheduled_sends w where w.id = v_envio) = 'cancelled'
                 and (r ->> 'envios_cancelados')::int = 1, 'envio agendado'));
