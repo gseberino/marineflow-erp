@@ -4454,3 +4454,41 @@ quatro estão latentes.
   em cascata), `comprovantes_gravacao` (AN e XF: fixtures sem `product_id` / `client_id`).
 - **Efeito:** teste velho acusando falha que não é da frente em curso (feedback_testes_sql_envelhecem). Nenhum é da fatura.
 - **Menor mudança:** em tarefa própria, conferir amostra/fixture de cada um antes de mexer em regra.
+- **Situação 21/11/2026 (ramo `session/testes-envelhecidos`):** 7 dos 8 eram o TESTE envelhecido e foram consertados só no teste
+  (produção, depois: `agenda_fase1_prontidao` 19/19, `agenda_fase7g_como_pensei` 25/25, `agenda_fase7g_ok_do_dono` 36/36,
+  `agrupar_orcamentos` 41/41, `agrupar_orcamentos_assistente` 9/9, `agrupar_os` 48/48, `comprovantes_gravacao` 26/26). O 8º,
+  `agenda_fase3_pos_deploy` S6, não é teste velho: é a saúde da agenda acusando um caso real (NOVO-testes-01). Os K0b do
+  `ok_do_dono` não eram hash mudado: as 11 funções estão em produção com fim de linha CRLF e, sem o `\r`, são a origem byte a byte.
+
+### [NOVO-testes-01] agenda_saude().ok falso em produção: aprovada_sem_data = 1 (OS-00136 em execução, o único dia já passou)
+
+- **Onde:** `agenda_saude` → `gestor.aprovada_sem_data` (bloco da 7a, `20261031100600_agenda_fase7a_rodada.sql:2766`, recriado nas
+  leituras seguintes). Conta a OS da carteira aprovada há mais de `aprovada_sem_data_min` (30) sem alocação publicada/fixada de hoje
+  em diante, sem pergunta aberta e sem o motor ter dito por que fica de fora — com `_agenda_gestor_modo('encaixe') = 'ligado'`.
+- **Prova (21/11, só leitura):** o único zero diferente de 0 em toda a `agenda_saude()` é `gestor.aprovada_sem_data = 1`
+  (critica, invariantes, equipe, diárias, conclusão, comissão, material, cliente, aprendizado, equipe_dias, local, comunicacao,
+  margem e explicar: todos zero / `zeros_ok` true). A OS é a OS-00136: `in_progress`, aprovada 17/11 14:04, 1 alocação (qui 19/11
+  tarde, publicada, `resultado` nulo), `os_prontidao` = `em_execucao` com `plano.dias = 1`, `meios_cumpridos = 1`,
+  `meios_vigentes = 0`, `proximo_dia` nulo; perguntas: 2 resolvidas e 2 `cliente_aprovar` vencidas, nenhuma aberta; nenhuma
+  proposta a pôs em `fora`. Derruba `agenda_fase3_pos_deploy` S6 (139/140) e `agenda_fase7g_pos_deploy` Z2 (173/174).
+- **Efeito:** a OS teve dia e o dia foi feito; o que falta é concluir a OS ou marcar o resto — e ninguém pergunta. A saúde fica
+  vermelha (e os pós-deploy também) até alguém mexer na OS; o nome "aprovada sem data" não descreve o caso.
+- **Menor mudança (escolha do dono, não feita aqui):** (a) a vigia perguntar "a OS-00136 terminou ou falta dia?" para a OS em
+  execução com o plano cumprido e sem dia futuro (o caso vira pergunta aberta e sai do zero); ou (b) o zero não contar a OS com
+  alocação cumprida e `status = 'in_progress'` (vira outro contador, só informativo). O teste não muda em nenhum dos dois.
+
+### [NOVO-testes-02] Vizinhos da 7g que também já falham na produção (fora dos 8; não mexidos)
+
+- **Onde:** rodados em 21/11 como controle: `agenda_fase7g_base` 68/73 (B1c, B1f, B2b, B3c, B8a: conferem o estado logo depois da
+  migration — tabelas vazias, os 4 modos desligados, `marcacoes_desde` nula — que o dado `20261112100990` e os *ligar* do dono já
+  mudaram) e `agenda_fase7g_porque` 48/57 (M1c-c, P1, P1c, P3, P5 "o bloco quebrou", P8m, P8n, P8r3, P8t: as suposições hoje
+  trazem `bem_disponivel` antes das esperadas). Os outros vizinhos passam 100%.
+- **Efeito:** o mesmo do NOVO-fatura-01: falha velha que esconde falha nova.
+- **Menor mudança:** em tarefa própria, como a deste ramo: separar o que é "estado do dia do deploy" (só vale na bancada) do que vale
+  sempre, e conferir de que migration veio `bem_disponivel` antes de mexer no P8.
+- **Datas fixas até 31/12/2026 (varredura de 21/11, sem consertar):** nenhuma comparação direta de data fixa de 21/11 a 31/12 com o
+  relógio (`now()`, `current_date`, `_hoje_brt()`, `pg_temp._hoje()`) nos asserts; os cenários da 7e/7f/retorno passam o "hoje" e o
+  "agora" explícitos. Único caso que muda com o calendário: `agenda_fase7g_porque` P3f/P3g (linhas 412, 424 e 426), alocações com
+  `criado_em = 2026-12-01 10:00/11:00/12:00 -03` que o caso precisa MAIS NOVAS que as gravadas com `now()`; a partir de
+  01/12/2026 10:00 elas ficam mais velhas e a prova passa sem provar (o P3 já quebra hoje em produção pelo NOVO-testes-02).
+  Conserto quando for mexer: `now() + interval '…'` no lugar da data fixa.
