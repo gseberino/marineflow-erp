@@ -1154,6 +1154,9 @@ insert into _definer_da_agenda values ('agenda_fechamento_guardar');
 -- Opção A (19/11/2026), 20270128100000: a leitura das aprovações ao cliente para o resumo da manhã (só lê; só o service_role, o ai-daily-briefing).
 -- agenda_aprovacao_na_manha.sql P0 prova a porta
 insert into _definer_da_agenda values ('agenda_aprovacoes_da_manha');
+-- "Terminou ou falta dia?" (23/11/2026), 20270223100000: a palavra *falta dia* (o administrador por _autor_da_agenda, como agenda_concluir_dito; escreve o
+-- resultado do dia pela agenda_registrar_dia e responde a pergunta). As 3 internas novas são invoker e sem grant. agenda_terminou_falta_dia.sql P0 prova as portas
+insert into _definer_da_agenda values ('agenda_falta_dia_dito');
   -- FASE 7f: fim
   -- FASE 7e: (7e P1, 20261111100000) nenhuma definer nova: o modo, a credibilidade, o z e a temporada são invoker, e o gatilho _agenda_medidas_compra_so_muda só mexe na própria linha. agenda_fase7e_base.sql prova as portas.
   -- FASE 7e: fim
