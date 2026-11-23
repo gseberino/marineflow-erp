@@ -1692,3 +1692,64 @@ Deno.test("agenda do mês: 'este mês' sozinho e o mês com mais palavras contin
     assertEquals(lerComandoDaAgenda(t), null, t);
   }
 });
+
+// ─── "Terminou ou falta dia?" (23/11/2026, NOVO-testes-01): *falta dia [<alvo>]* ──────────────────────────────────────────────────────
+// A resposta à pergunta da manhã "A OS-00136 (Jorge) terminou ou falta dia? Responda *concluiu OS-00136* ou *falta dia OS-00136*.".
+// "Terminou" é o *concluiu <alvo>* que já existe (TABELA_FASE3).
+const faltaDia = (alvo: string | null): ComandoDaAgenda => ({ comando: "falta_dia", alvo });
+
+const TABELA_FALTA_DIA: Array<[string, ComandoDaAgenda]> = [
+  ["falta dia", faltaDia(null)],
+  ["Falta dia.", faltaDia(null)],
+  ["*falta dia*", faltaDia(null)],
+  ["falta dia OS-00136", faltaDia("os-00136")],
+  ["*falta dia OS-00136*", faltaDia("os-00136")],
+  ["Falta dia o Jorge", faltaDia("jorge")],
+  ["falta dia Jorge!", faltaDia("jorge")],
+  ["🎤 Falta dia OS-00136.", faltaDia("os-00136")],
+  ["falta dia 136", faltaDia("136")],
+];
+
+Deno.test("terminou ou falta dia — lerComandoDaAgenda: *falta dia* (com ou sem alvo); a resposta 'terminou' é o *concluiu <alvo>*", () => {
+  for (const [texto, esperado] of TABELA_FALTA_DIA) assertEquals(lerComandoDaAgenda(texto), esperado, texto);
+  // as duas palavras que a pergunta da manhã ensina, escritas como ela escreve
+  assertEquals(lerComandoDaAgenda("*concluiu OS-00136*"), concluir("os-00136"));
+  assertEquals(lerComandoDaAgenda("*falta dia OS-00136*"), faltaDia("os-00136"));
+});
+
+// Conversa: o alvo de outra ferramenta, conectivo, letra do secretário, um dígito só, palavra a mais, a pergunta.
+const CONVERSA_FALTA_DIA = [
+  "falta dia de chuva", "falta dia pra entregar", "falta dia para o Jorge terminar", "falta dia b", "falta dia 3", "falta dia?", "Falta dia?",
+  "falta dia OS-00136?", "faltou dia", "falta um dia", "falta dia no Jorge e no Lenine", "ainda falta dia", "falta dia o pagamento",
+  "falta dia " + "x".repeat(45), "falta dias", "falta",
+];
+
+Deno.test("terminou ou falta dia — conversa (conectivo, letra, um dígito, palavra a mais, pergunta) não é comando", () => {
+  for (const t of CONVERSA_FALTA_DIA) assertEquals(lerComandoDaAgenda(t), null, t);
+});
+
+Deno.test("terminou ou falta dia — *falta dia* não é do secretário, da confirmação, do menu, do PDF, dos comprovantes nem resposta curta", () => {
+  const base = TABELA_FALTA_DIA.map(([t]) => t);
+  for (const t of [...base, ...base.map((x) => `*${x}*`), ...base.map((x) => `${x}.`)]) {
+    assertEquals(lerComandoDoSecretario(t), null, `secretário: ${t}`);
+    assertEquals(parseConfirmationReply(t), null, `confirmação: ${t}`);
+    assertEquals(parseOptionReply(t, 9), null, `opção: ${t}`);
+    assertEquals(lerPedidoDePdf(t), null, `pdf: ${t}`);
+    assertEquals(lerComando(t), null, `comprovantes: ${t}`);
+    const n = normalizarResposta(t.replace(/[*_~]/g, ""));
+    assertEquals(lerSimNao(n), null, `sim/não: ${t}`);
+    assertEquals(lerNumero(n, 99), null, `número: ${t}`);
+    assertEquals(pareceRespostaCurta(t), false, `resposta curta: ${t}`);
+    assertEquals(travaDaConfirmacao(estadoComCmpNoConfirmar(), t, { pending_confirm_action_id: "pend-1" }).travar, false, `trava do CMP: ${t}`);
+  }
+});
+
+Deno.test("terminou ou falta dia — webhook: com a agenda em sombra ou ligada, *falta dia OS-00136* e *falta dia* vão ao assistente", async () => {
+  for (const modo of ["sombra", "ligado"]) {
+    for (const t of ["falta dia OS-00136", "falta dia"]) {
+      const { d, c } = depsDoWebhook(modo, undefined, "sombra");
+      assertEquals(await rotearTextoDoDono(TEXTO(t), d), "assistente", `${modo}: ${t}`);
+      assertEquals(c.chamar.length, 0, t);
+    }
+  }
+});
