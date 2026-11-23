@@ -26,6 +26,7 @@ import {
   RPC_DIARIA_DITA,
   RPC_DUPLA_DITA,
   RPC_ENTREGAR_DITO,
+  RPC_FALTA_DIA_DITO,
   RPC_GESTOR_DITO,
   RPC_GRAVAR,
   RPC_VETO_DITO,
@@ -38,6 +39,8 @@ import {
   TEXTO_SEM_DIARIA,
   TEXTO_SEM_DUPLA,
   TEXTO_SEM_ENTREGAR,
+  TEXTO_SEM_FALTA_DIA,
+  TEXTO_FALTA_DIA_NAO_LIGADO,
   TEXTO_SEM_GESTOR,
   TEXTO_SEM_GRAVAR,
   TEXTO_SO_ADMIN,
@@ -1004,4 +1007,63 @@ Deno.test("Consertos da revisão da 7g (2) — modosDa7gNoBanco: um SELECT só d
   const a = adminDoModo({ data: { modo_explicar: "ligado", modo_placar: "ligado" } });
   await modosDa7gNoBanco(a);
   assertEquals(a.lidas, ["agenda_config"]);
+});
+
+// ─── "Terminou ou falta dia?" (23/11/2026, NOVO-testes-01): *falta dia [<alvo>]* ──────────────────────────────────────────────────────
+
+Deno.test("terminou ou falta dia — chamadaDoComando: *falta dia* vai a agenda_falta_dia_dito com o alvo como o dono disse e o canal", () => {
+  assertEquals(chamadaDoComando({ comando: "falta_dia", alvo: "os-00136" }, AUTOR, "2026-11-24", "painel"), {
+    rpc: RPC_FALTA_DIA_DITO, params: { p_autor: AUTOR, p_alvo: "os-00136", p_canal: "painel", p_hoje: "2026-11-24" },
+  });
+  assertEquals(chamadaDoComando({ comando: "falta_dia", alvo: null }, AUTOR), {
+    rpc: RPC_FALTA_DIA_DITO, params: { p_autor: AUTOR, p_alvo: null, p_canal: "whatsapp" },
+  });
+});
+
+Deno.test("terminou ou falta dia — executar: o texto do banco volta; nao_achei com alvo segue ao modelo; sem alvo e o resto ficam", async () => {
+  const anotado = "Anotado, qui 19/11: Jorge (OS-00136) andou em parte (estimativa). Replanejei: Jorge (OS-00136) ter 24/11 à tarde. " +
+    "Se faltar mais de meio dia, diga quantos (ex.: \"Jorge precisa de mais 2 dias\").";
+  const c1 = cliente({ [RPC_FALTA_DIA_DITO]: { data: { ok: true, mudou: true, status: "ok", texto: anotado } } });
+  assertEquals(await executarComandoDaAgenda(c1, { comando: "falta_dia", alvo: "os-00136" }, { autor: AUTOR }), { ok: true, texto: anotado });
+  const naoAchei = { ok: false, mudou: false, status: "nao_achei", texto: "Não encontrei \"Chuva\" entre os serviços da carteira." };
+  const c2 = cliente({ [RPC_FALTA_DIA_DITO]: { data: naoAchei } });
+  assertEquals((await executarComandoDaAgenda(c2, { comando: "falta_dia", alvo: "chuva" }, { autor: AUTOR })).seguirAoModelo, true);
+  for (const status of ["ambiguo", "ja_concluida", "fora_de_andamento", "tem_dia", "sem_dia", "recusada", "em_teste"]) {
+    const c = cliente({ [RPC_FALTA_DIA_DITO]: { data: { ok: false, mudou: false, status, texto: `texto ${status}` } } });
+    const r = await executarComandoDaAgenda(c, { comando: "falta_dia", alvo: "jorge" }, { autor: AUTOR });
+    assertEquals([r.texto, r.seguirAoModelo], [`texto ${status}`, undefined], status);
+  }
+  // sem alvo, "nenhuma" pergunta aberta é a resposta (a palavra sozinha é só da agenda)
+  const c3 = cliente({ [RPC_FALTA_DIA_DITO]: { data: { ok: false, mudou: false, status: "nenhuma", texto: "Não tenho pergunta aberta." } } });
+  assertEquals((await executarComandoDaAgenda(c3, { comando: "falta_dia", alvo: null }, { autor: AUTOR })).seguirAoModelo, undefined);
+});
+
+Deno.test("terminou ou falta dia — executar nunca lança: erro = a frase e o log; antes da migration, 'ainda não está ligado' sem log", async () => {
+  const cmd = lerComandoDaAgenda("falta dia OS-00136")!;
+  const c = cliente({ [RPC_FALTA_DIA_DITO]: { error: { message: "rede", code: "XX000" } } });
+  const r = await executarComandoDaAgenda(c, cmd, { autor: AUTOR });
+  assertEquals([r.ok, r.texto], [false, TEXTO_SEM_FALTA_DIA]);
+  assertEquals(c.logs().length, 1);
+  for (const code of ["PGRST202", "42883"]) {
+    const sem = cliente({ [RPC_FALTA_DIA_DITO]: { error: { code, message: "function public.agenda_falta_dia_dito does not exist" } } });
+    const log = cliente();
+    assertEquals(await executarComandoDaAgenda(sem, cmd, { autor: AUTOR, log }), { ok: true, texto: TEXTO_FALTA_DIA_NAO_LIGADO }, code);
+    assertEquals(log.logs().length, 0, code);
+  }
+  assert(!/erro|error|rpc|ferramenta|migration/i.test(TEXTO_FALTA_DIA_NAO_LIGADO + TEXTO_SEM_FALTA_DIA));
+});
+
+Deno.test("terminou ou falta dia — camada: *falta dia OS-00136* só com a agenda automática fora de 'desligado'; com \"?\" vai ao modelo", async () => {
+  const deps = (proposta: "desligado" | "sombra", data: unknown): DependenciasDaCamada => ({
+    ehDoDono: () => true,
+    modo: () => Promise.resolve("ligado"),
+    modosDaFase2: () => Promise.resolve({ proposta, vigia: "desligado" }),
+    executar: (cmd) => executarComandoDaAgenda(cliente({ [RPC_FALTA_DIA_DITO]: { data } }), cmd, { autor: AUTOR }),
+  });
+  const ok = { ok: true, mudou: true, status: "ok", texto: "Anotado, qui 19/11: Jorge (OS-00136) andou em parte (estimativa)." };
+  assertEquals((await camadaDaAgenda("falta dia OS-00136", deps("sombra", ok)))?.texto, ok.texto);
+  assertEquals((await camadaDaAgenda("*falta dia*", deps("sombra", ok)))?.comando, { comando: "falta_dia", alvo: null });
+  assertEquals(await camadaDaAgenda("falta dia OS-00136", deps("desligado", ok)), null);
+  assertEquals(await camadaDaAgenda("falta dia OS-00136?", deps("sombra", ok)), null);
+  assertEquals(await camadaDaAgenda("falta dia chuva", deps("sombra", { ok: false, status: "nao_achei", texto: "Não encontrei." })), null);
 });
