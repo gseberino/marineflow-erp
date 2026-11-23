@@ -41,8 +41,19 @@ create function pg_temp.em(p_quando text) returns timestamptz language sql immut
   select (p_quando::timestamp) at time zone 'America/Sao_Paulo'
 $f$;
 -- O corpo (prosrc, sem CR) de uma função pela assinatura.
+-- (23/11/2026, 20270223100000) Sem os blocos "-- TERMINOU: … -- TERMINOU: fim" (devolvidas as linhas "--antes:"): o "terminou ou falta dia?" acrescentou
+-- 3 deles a agenda_aprovacoes_da_manha, e o corpo desta Opção A continua o mesmo; o resto é provado em agenda_terminou_falta_dia.sql.
 create function pg_temp.src(p_assinatura text) returns text language sql stable as $f$
-  select replace(p.prosrc, chr(13), '') from pg_proc p where p.oid = to_regprocedure(p_assinatura)
+  select array_to_string(array(
+           select case when dentro > 0 and l ~ '^--antes:' then substr(l, 9) else l end
+             from (select l, o, sum(case when l ~ '^\s*-- TERMINOU:' and l !~ '^\s*-- TERMINOU: fim' then 1
+                                         when l ~ '^\s*-- TERMINOU: fim' then -1 else 0 end)
+                                over (order by o rows between unbounded preceding and current row) as dentro,
+                          l ~ '^\s*-- TERMINOU: fim' as fecha
+                     from unnest(string_to_array(replace(p.prosrc, chr(13), ''), E'\n')) with ordinality u(l, o)) x
+            where (dentro = 0 and not fecha) or (dentro > 0 and l ~ '^--antes:')
+            order by o), E'\n')
+    from pg_proc p where p.oid = to_regprocedure(p_assinatura)
 $f$;
 -- Tira os blocos "-- OPÇÃO A: … -- OPÇÃO A: fim", devolvendo as linhas "--antes:" de dentro deles (a convenção da FICHA PAGA): o corpo de antes.
 create function pg_temp.sem_opcao_a(p text) returns text language sql immutable as $oa$
