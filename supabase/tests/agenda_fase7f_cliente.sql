@@ -60,6 +60,19 @@ begin
 end $f$;
 -- O texto sem os blocos e as marcas DESTE pacote ("-- FASE 7f: (7f P6 … -- FASE 7f: fim" e "-- (7f P6 … -- (7f: fim)"). Os blocos da 7f de antes (o P7 em
 -- agenda_saude) ficam: a origem os tem.
+-- (23/11/2026, 20270223100000) o "terminou ou falta dia?" recria agenda_saude (e outras 2) com blocos "-- TERMINOU: … -- TERMINOU: fim" que trocam
+-- linhas (as de antes em "--antes:"): sem eles, devolvidas as linhas de antes, o corpo é o de antes dela
+create function pg_temp.sem_terminou(p text) returns text language sql immutable as $st$
+  select array_to_string(array(
+           select case when dentro > 0 and l ~ '^--antes:' then substr(l, 9) else l end
+             from (select l, o, sum(case when l ~ '^\s*-- TERMINOU:' and l !~ '^\s*-- TERMINOU: fim' then 1
+                                         when l ~ '^\s*-- TERMINOU: fim' then -1 else 0 end)
+                                over (order by o rows between unbounded preceding and current row) as dentro,
+                          l ~ '^\s*-- TERMINOU: fim' as fecha
+                     from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
+            where (dentro = 0 and not fecha) or (dentro > 0 and l ~ '^--antes:')
+            order by o), E'\n')
+$st$;
 create function pg_temp.sem_p6(p text) returns text language plpgsql immutable as $f$
 declare
   v_fora   text[] := '{}';
@@ -964,7 +977,7 @@ begin
     select count(*) into v_n from regexp_matches(replace(pg_temp.corpo(v_mig, x.nome), E'\r\n', E'\n'), '-- (FASE 7f: \(7f P6|\(7f P6)', 'g');
     r := pg_temp.ok(r, format('C8a %s: a viva é a desta migration; sem os %s blocos do P6, é o corpo da origem (agenda_teste.%s), byte a byte', x.nome, x.blocos, x.fonte),
       coalesce(current_setting('agenda_teste.' || x.fonte, true), '') <> ''
-      and pg_temp.sem_p9(replace((select p.prosrc from pg_proc p where p.oid = x.sig::regprocedure), E'\r\n', E'\n')) = pg_temp.corpo(v_mig, x.nome)
+      and pg_temp.sem_p9(pg_temp.sem_terminou(replace((select p.prosrc from pg_proc p where p.oid = x.sig::regprocedure), E'\r\n', E'\n'))) = pg_temp.corpo(v_mig, x.nome)
       and v_n = x.blocos
       and pg_temp.sem_p6(pg_temp.corpo(v_mig, x.nome)) = replace(pg_temp.corpo(current_setting('agenda_teste.' || x.fonte, true), x.nome), E'\r\n', E'\n')
       and pg_temp.corpo(current_setting('agenda_teste.' || x.fonte, true), x.nome) <> '',
