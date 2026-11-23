@@ -223,6 +223,16 @@ export const FORA_DA_BANCADA = new Set([
   '20270214100000_retorno_f3_meta_e_medidas.sql',
   '20270214100100_retorno_f3_audio_cria_orc.sql',
   '20270214100200_retorno_f1_formulario_numero_novo.sql',
+  // Via do técnico v2, F2 (de OUTRA sessão; na main desde 20/11): só funções private._via_* e _linha_instrucao_*, o CHECK de ai_suggestion_reviews e um
+  // gatilho em service_order_services; usa public.ai_jobs, que a bancada não modela ("relation public.ai_jobs does not exist", 23/11). Não recria função da
+  // agenda (procurado em 23/11: nenhuma public.agenda_*, _agenda_*, os_* ou _os_*).
+  '20270131100000_via_instrucao_rascunhos.sql',
+  // Assinaturas (NOVO-historico-03, de OUTRA sessão; na main desde 20/11): a policy de service_order_signatures e um ALTER em
+  // detect_so_change_after_signature, que a bancada não modela ("function ... does not exist", 23/11). Não toca em função da agenda.
+  '20270211100000_assinaturas_admin_financeiro_altera.sql',
+  // Cobranças só admin/financeiro (de OUTRA sessão; na main desde 21/11): só as policies de collections, com is_external_seller, que a bancada não
+  // modela ("function ... does not exist", 23/11). Não toca em função da agenda.
+  '20270212120000_cobrancas_so_admin_financeiro.sql',
 ]);
 
 /**
@@ -247,6 +257,9 @@ export const VIEWS_RECRIADAS_DEPOIS = {
  */
 export const FUNCOES_COM_DEFAULT_DEPOIS = {
   '20261026100500_agenda_fase3_acompanhamento.sql': ['public.agenda_carona(uuid, text[], text, date, timestamptz)'],
+  // (23/11/2026) O almoço do freelancer (20270210110000, de OUTRA sessão; na main desde 20/11) troca a assinatura de registrar_diaria com DROP + CREATE sem
+  // "or replace": na 2ª rodada o CREATE esbarrava na de 11 argumentos da 1ª ("already exists with same argument types"). O mesmo remédio: ela sai antes.
+  '20270210110000_freelancer_almoco.sql': ['public.registrar_diaria(uuid, date, text, uuid[], text, numeric, numeric, numeric, text, uuid, boolean)'],
 };
 
 /**
