@@ -40,6 +40,14 @@
 //   "concluiu o pagamento" vai ao modelo) ou o número, nunca uma letra ("concluiu b" não é palavra). "entregue" e
 //   "entreguei" sozinhos não são palavra (precisa do alvo). Também só com a agenda automática fora de 'desligado'.
 //
+// "Terminou ou falta dia?" (23/11/2026, NOVO-testes-01, opção A do dono) — a resposta à pergunta da manhã "A OS-00136 (Jorge) terminou ou
+// falta dia?" (executa direto: agenda_falta_dia_dito). "Terminou" é o *concluiu <alvo>* de cima, que já existe.
+//   falta dia · falta dia <alvo>                          → o último dia da OS andou em parte (estimativa) e o motor encaixa o que falta;
+//                                                           a pergunta fecha (sem alvo: a única "terminou?" aberta)
+//   O alvo segue a régua do *desfaz* (o nome do cliente até 3 palavras, sem conectivo nem palavra de outra ferramenta, ou o número; nunca uma
+//   letra): "falta dia de chuva", "falta dia pra entregar" e "falta dia b" vão ao modelo; o nome que não acha OS (nao_achei) também. Age:
+//   dita com "?" vai ao modelo ("falta dia?"). Como o *concluiu*, só com a agenda automática fora de 'desligado'.
+//
 // Fase 3 (P4, 24/10/2026; spec-fase3.md §11) — a diária que a agenda lançou ou perguntou (agenda_diaria_dita):
 //   diaria <nome> inteira|meia|nao [quando] · diaria <nome> dia inteiro [quando] · diaria do/da <nome> …
 //   → responde a pergunta da diária aberta, ou corrige (meia/inteira) / apaga (não) a que a agenda lançou; sem nada da
@@ -211,6 +219,8 @@ export type ComandoDaAgenda =
   | { comando: "concluir"; alvo: string | null }
   /** (Fase 3) agenda_entregar_dito: o alvo como o dono disse */
   | { comando: "entregar"; alvo: string }
+  /** (23/11/2026) agenda_falta_dia_dito: o alvo como o dono disse (null = a única pergunta "terminou ou falta dia?" aberta) */
+  | { comando: "falta_dia"; alvo: string | null }
   /** (Fase 3, P4) agenda_diaria_dita: a pessoa como o dono disse, a jornada e o dia (null = o da pergunta ou hoje) */
   | { comando: "diaria"; nome: string; jornada: JornadaDita; quando: string | null }
   /** (Fase 5, P5) agenda_cliente_decidir_dito: manda ou segura a mensagem ao cliente (alvo null = todas as que esperam) */
@@ -479,6 +489,14 @@ function lerPalavraComplemento(t: string): ComandoDaAgenda | null {
     const nome = alvoDito(m[1].trim());
     return nome === undefined ? null : { comando: "entregar", alvo: nome };
   }
+  // (23/11/2026) *falta dia [<alvo>]*: a resposta à pergunta "terminou ou falta dia?" (sem alvo: a única aberta; o alvo pela régua do *desfaz*)
+  m = /^falta dia(?: (.+))?$/.exec(t);
+  if (m) {
+    const alvo = (m[1] ?? "").trim();
+    if (!alvo) return { comando: "falta_dia", alvo: null };
+    const nome = alvoDito(alvo);
+    return nome === undefined ? null : { comando: "falta_dia", alvo: nome };
+  }
   // Fase 3 (P6): *comissão <mês>* ("comissão outubro", "comissão de setembro", "comissão do mês passado")
   m = /^comissao (?:de |do |em )?(janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro|mes passado)$/.exec(t);
   if (m) return { comando: "ver", periodo: null, foco: "comissao", pessoa: null, mes: m[1] };
@@ -563,6 +581,8 @@ export function ehPalavraDaDiaria(cmd: ComandoDaAgenda): boolean {
 export function ehPalavraDaFase2(cmd: ComandoDaAgenda): boolean {
   if (cmd.comando === "dia" || cmd.comando === "choveu" || cmd.comando === "desfazer") return true;
   if (cmd.comando === "concluir" || cmd.comando === "entregar") return true;
+  // (23/11/2026) *falta dia*: como o *concluiu* (a pergunta e o replanejar são da agenda automática)
+  if (cmd.comando === "falta_dia") return true;
   // (Fase 7a, P7) a palavra do gestor e a da dupla: como o *desfaz*, só com a agenda automática fora de 'desligado'
   if (cmd.comando === "gestor" || cmd.comando === "dupla") return true;
   // (Fase 7f, P7) *agenda espera <nome>*: também (as perguntas que ela alcança são as da agenda automática)
@@ -584,6 +604,8 @@ const PALAVRAS_QUE_AGEM: ReadonlySet<ComandoDaAgenda["comando"]> = new Set([
   "gestor", "dupla",
   // (Fase 7f, P7) "agenda espera Nelson?" é pergunta, não ordem
   "veto",
+  // (23/11/2026) "falta dia?" é pergunta, não ordem
+  "falta_dia",
 ]);
 
 /** O texto termina em pergunta? O "?" final que o normalizarComando tira (também com negrito, espaço ou aspas depois). */
