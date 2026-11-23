@@ -28,6 +28,11 @@
 // condição na mesma transação, e o texto do banco ("Concluí o Lenine (OS-00074) hoje … *desfaz OS-00074* volta como
 // estava."). O alvo que o banco não acha (nao_achei: "concluiu a instalação") segue ao modelo, como o *desfaz <nome>*.
 //
+// "Terminou ou falta dia?" (23/11/2026, NOVO-testes-01): *falta dia [<alvo>]* executa direto (agenda_falta_dia_dito: o último dia da OS
+// andou em parte pela estimativa, o motor encaixa o que falta e a pergunta da manhã fecha). Como o *concluiu*: o alvo que o banco não acha
+// (nao_achei) segue ao modelo; só com a agenda automática fora de 'desligado'. Antes da migration 20270223100000 a função não existe
+// (PGRST202/42883): a resposta é que ainda não está ligado, sem registro de erro.
+//
 // Fase 3 (P4, 24/10/2026): *diária <nome> inteira|meia|não [quando]* executa direto (agenda_diaria_dita): responde a
 // pergunta da diária aberta ou corrige/apaga a que a agenda lançou. Só com agenda_config.modo_diaria fora de 'desligado'
 // (modoDaDiariaNoBanco, lido num SELECT à parte: a coluna é da Fase 3 e a falta dela não pode calar as palavras da Fase 2).
@@ -91,6 +96,8 @@ export const RPC_DESFAZER_DITO = "agenda_desfazer_dito";
 /** Fase 3: as palavras de concluir e de entregar. */
 export const RPC_CONCLUIR_DITO = "agenda_concluir_dito";
 export const RPC_ENTREGAR_DITO = "agenda_entregar_dito";
+/** (23/11/2026) *falta dia [<alvo>]*: a resposta à pergunta "terminou ou falta dia?". */
+export const RPC_FALTA_DIA_DITO = "agenda_falta_dia_dito";
 /** Fase 3 (P4): a palavra da diária. */
 export const RPC_DIARIA_DITA = "agenda_diaria_dita";
 /** Fase 5 (P5): *manda cliente* / *segura cliente*. */
@@ -290,6 +297,10 @@ export function chamadaDoComando(
   if (cmd.comando === "entregar") {
     return { rpc: RPC_ENTREGAR_DITO, params: comHoje({ p_autor: autor, p_alvo: cmd.alvo, p_canal: canal }) };
   }
+  // (23/11/2026) *falta dia [<alvo>]*: como o *concluiu* (o banco resolve a OS; sem alvo, a única pergunta aberta)
+  if (cmd.comando === "falta_dia") {
+    return { rpc: RPC_FALTA_DIA_DITO, params: comHoje({ p_autor: autor, p_alvo: cmd.alvo, p_canal: canal }) };
+  }
   // Fase 3 (P4): a pessoa, a jornada e o dia como o dono disse (o banco resolve a pessoa e o dia)
   if (cmd.comando === "diaria") {
     return {
@@ -343,6 +354,11 @@ export const TEXTO_SEM_DUPLA = "Não consegui anotar a dupla agora: nada mudou. 
 export const TEXTO_SEM_VETO = "Não consegui deixar a pergunta esperando você agora: nada mudou. Mande de novo em alguns minutos.";
 /** Fase 7f (P7): antes da migration 20261109100600, a função não existe. */
 export const TEXTO_VETO_NAO_LIGADO = "O *agenda espera* ainda não está ligado: por enquanto, responda a pergunta.";
+/** (23/11/2026) quando o banco falha no *falta dia* (dizer de novo não anota em dobro: o banco diz que já estava anotado). */
+export const TEXTO_SEM_FALTA_DIA = "Não consegui anotar que falta dia agora: nada mudou. Mande *falta dia* de novo em alguns minutos.";
+/** (23/11/2026) antes da migration 20270223100000, a função não existe. */
+export const TEXTO_FALTA_DIA_NAO_LIGADO =
+  "O *falta dia* ainda não está ligado: por enquanto, diga quantos dias faltam (ex.: \"Jorge precisa de mais 2 dias\").";
 
 function textoDoErro(cmd: ComandoDaAgenda, e: unknown): string {
   if ((e as { code?: unknown })?.code === "42501") return TEXTO_SO_ADMIN;
@@ -370,6 +386,8 @@ function textoDoErro(cmd: ComandoDaAgenda, e: unknown): string {
       return TEXTO_SEM_DUPLA;
     case "veto":
       return TEXTO_SEM_VETO;
+    case "falta_dia":
+      return TEXTO_SEM_FALTA_DIA;
     default:
       return TEXTO_SEM_AGENDA;
   }
@@ -402,6 +420,8 @@ function rpcDoComando(cmd: ComandoDaAgenda): string {
       return RPC_DUPLA_DITA;
     case "veto":
       return RPC_VETO_DITO;
+    case "falta_dia":
+      return RPC_FALTA_DIA_DITO;
     default:
       return RPC_AGENDA_VER;
   }
@@ -420,6 +440,8 @@ function seguirAoModelo(cmd: ComandoDaAgenda, data: unknown): boolean {
   if ((cmd.comando === "concluir" || cmd.comando === "entregar") && cmd.alvo !== null) {
     return !!r && r.ok !== true && String(r.status) === "nao_achei";
   }
+  // (23/11/2026) *falta dia <alvo>* que não acha OS nenhuma: não é da agenda (como o *concluiu <alvo>*). Sem alvo, a frase do banco vale.
+  if (cmd.comando === "falta_dia" && cmd.alvo !== null) return !!r && r.ok !== true && String(r.status) === "nao_achei";
   // (Fase 3, P4) *diária <nome> …* sem pergunta nem diária da agenda (ou a pessoa que não é da equipe): o registrar_diaria
   // de sempre, pelo modelo. Ambíguo, a opção que não existe e o acerto fechado ficam: são a resposta do banco.
   if (cmd.comando === "diaria") return !!r && r.ok !== true && String(r.status) === "nao_achei";
@@ -471,6 +493,8 @@ export async function executarComandoDaAgenda(
   } catch (e) {
     // (Fase 7f, P7) a palavra nova antes da migration dela: não é erro, é o estado de antes (sem registro)
     if (cmd.comando === "veto" && ehPortaAusente(e)) return { ok: true, texto: TEXTO_VETO_NAO_LIGADO };
+    // (23/11/2026) *falta dia* antes da migration 20270223100000: o estado de antes, sem registro
+    if (cmd.comando === "falta_dia" && ehPortaAusente(e)) return { ok: true, texto: TEXTO_FALTA_DIA_NAO_LIGADO };
     const err = e as { message?: unknown; code?: unknown };
     await logEdgeError(ctx.log ?? cliente, {
       context: "agenda",
