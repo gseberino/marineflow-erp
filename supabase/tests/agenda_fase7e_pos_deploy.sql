@@ -158,6 +158,19 @@ select format('F1 %s (%s): existe, 1 por nome, %s, %s, search_path=public, execu
 -- (7g, o rebase sobre a 7e publicada) o corpo sem os blocos e as marcas da 7g ("-- FASE 7g: …" até "-- FASE 7g: fim"; "-- (7g …" até "-- (7g: fim)"), linha a linha: a 7g recria
 -- agenda_propor (20261112100100) só acrescentando blocos, e o resto do corpo é o da 7e, byte a byte. Sem marca da 7g (antes dela), o corpo como está. Molde: o pg_temp.sem_7e de
 -- agenda_fase7f_pos_deploy_final.sql.
+-- (23/11/2026, 20270223100000) o "terminou ou falta dia?" recria agenda_saude (e outras 2) com blocos "-- TERMINOU: … -- TERMINOU: fim" que trocam
+-- linhas (as de antes em "--antes:"): sem eles, devolvidas as linhas de antes, o corpo é o de antes dela
+create function pg_temp.sem_terminou(p text) returns text language sql immutable as $st$
+  select array_to_string(array(
+           select case when dentro > 0 and l ~ '^--antes:' then substr(l, 9) else l end
+             from (select l, o, sum(case when l ~ '^\s*-- TERMINOU:' and l !~ '^\s*-- TERMINOU: fim' then 1
+                                         when l ~ '^\s*-- TERMINOU: fim' then -1 else 0 end)
+                                over (order by o rows between unbounded preceding and current row) as dentro,
+                          l ~ '^\s*-- TERMINOU: fim' as fecha
+                     from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
+            where (dentro = 0 and not fecha) or (dentro > 0 and l ~ '^--antes:')
+            order by o), E'\n')
+$st$;
 create function pg_temp.sem_7g(p text) returns text language plpgsql immutable as $f$
 declare
   l      text;
@@ -175,9 +188,9 @@ begin
   return array_to_string(fora, E'\n');
 end $f$;
 insert into _resultado
-select format('F2 %s: o corpo é o da 7e (md5, sem as marcas da 7g)', r.f), p.oid is not null and md5(pg_temp.sem_7g(replace(p.prosrc, chr(13), ''))) = r.m,
-       case when p.oid is null then 'NÃO EXISTE' when md5(pg_temp.sem_7g(replace(p.prosrc, chr(13), ''))) <> r.m
-            then 'md5 ' || md5(pg_temp.sem_7g(replace(p.prosrc, chr(13), ''))) || ' ≠ ' || r.m end
+select format('F2 %s: o corpo é o da 7e (md5, sem as marcas da 7g)', r.f), p.oid is not null and md5(pg_temp.sem_7g(pg_temp.sem_terminou(replace(p.prosrc, chr(13), '')))) = r.m,
+       case when p.oid is null then 'NÃO EXISTE' when md5(pg_temp.sem_7g(pg_temp.sem_terminou(replace(p.prosrc, chr(13), '')))) <> r.m
+            then 'md5 ' || md5(pg_temp.sem_7g(pg_temp.sem_terminou(replace(p.prosrc, chr(13), '')))) || ' ≠ ' || r.m end
   from _pe_f r
   left join pg_proc p on p.oid = to_regprocedure('public.' || r.f);
 
