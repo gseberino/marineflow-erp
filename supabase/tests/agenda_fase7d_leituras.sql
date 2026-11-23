@@ -69,6 +69,19 @@ create function pg_temp.sem_7f(p text) returns text language sql immutable as $f
             where dentro = 0 and not fecha order by o), E'\n')
 $f$;
 -- FASE 7f: fim
+-- (23/11/2026, 20270223100000) o "terminou ou falta dia?" recria agenda_saude com 1 bloco "-- TERMINOU: … -- TERMINOU: fim" que TROCA uma linha (a de antes
+-- em "--antes:"): sem ele, devolvida a linha de antes, a viva continua sendo a desta migration
+create function pg_temp.sem_terminou(p text) returns text language sql immutable as $f$
+  select array_to_string(array(
+           select case when dentro > 0 and l ~ '^--antes:' then substr(l, 9) else l end
+             from (select l, o, sum(case when l ~ '^\s*-- TERMINOU:' and l !~ '^\s*-- TERMINOU: fim' then 1
+                                         when l ~ '^\s*-- TERMINOU: fim' then -1 else 0 end)
+                                over (order by o rows between unbounded preceding and current row) as dentro,
+                          l ~ '^\s*-- TERMINOU: fim' as fecha
+                     from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
+            where (dentro = 0 and not fecha) or (dentro > 0 and l ~ '^--antes:')
+            order by o), E'\n')
+$f$;
 create function pg_temp.sem_7d(p text) returns text language sql immutable as $f$
   select array_to_string(array(
            select l from (select l, o, sum(case when (l ~ '^\s*-- FASE 7[defg]:' and l !~ '^\s*-- FASE 7[defg]: fim')
@@ -874,7 +887,7 @@ Beto (OS-J12): Marina Itajaí (pela OS). Combinar: o acesso de Rafael para seg 2
   select string_agg(p.proname, ', ') into v_t
     from pg_proc p
    where p.pronamespace = 'public'::regnamespace and p.proname in ('agenda_ver', 'os_plano_da_os', 'agenda_saude', 'agenda_equipe_ficha', '_agenda_cliente_da_os', '_agenda_local_da_os')
-     and pg_temp.sem_7f(p.prosrc) is distinct from pg_temp.corpo(v_mig, p.proname);
+     and pg_temp.sem_7f(pg_temp.sem_terminou(p.prosrc)) is distinct from pg_temp.corpo(v_mig, p.proname);
   v_res := pg_temp.ok(v_res, 'V6c no banco está a desta migration', v_t is null, v_t);
   v_t := regexp_replace(pg_temp.sem_7d(pg_temp.corpo(v_mig, '_agenda_local_da_os')), '\s+', ' ', 'g');
   v_res := pg_temp.ok(v_res, 'V6d _agenda_local_da_os: tirado o bloco, o select da Fase 3 (só o espaço mudou)', replace(v_t, 'coalesce( ', 'coalesce(') = regexp_replace(pg_temp.corpo(current_setting('agenda_teste.mig_equipe_fase3'), '_agenda_local_da_os'), '\s+', ' ', 'g'), v_t);
