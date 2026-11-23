@@ -194,13 +194,27 @@ select format('F1 %s (%s): existe, 1 por nome, %s, %s, search_path=public, execu
                         has_function_privilege('authenticated', p.oid, 'execute'), has_function_privilege('service_role', p.oid, 'execute')) end
   from _pg_f r
   left join pg_proc p on p.oid = to_regprocedure('public.' || r.f);
+-- (23/11/2026, 20270223100000) O "terminou ou falta dia?" recria agenda_saude com 1 bloco "-- TERMINOU: … -- TERMINOU: fim" (a linha de antes em "--antes:"): o F2 e o
+-- F3 comparam o corpo sem esses blocos (devolvidas as linhas "--antes:"), que é o da ponta da 7g; sem blocos, o corpo como está. O resto é provado em
+-- agenda_terminou_falta_dia.sql (P0c).
+create function pg_temp.sem_terminou(p text) returns text language sql immutable as $st$
+  select array_to_string(array(
+           select case when dentro > 0 and l ~ '^--antes:' then substr(l, 9) else l end
+             from (select l, o, sum(case when l ~ '^\s*-- TERMINOU:' and l !~ '^\s*-- TERMINOU: fim' then 1
+                                         when l ~ '^\s*-- TERMINOU: fim' then -1 else 0 end)
+                                over (order by o rows between unbounded preceding and current row) as dentro,
+                          l ~ '^\s*-- TERMINOU: fim' as fecha
+                     from unnest(string_to_array(p, E'\n')) with ordinality u(l, o)) x
+            where (dentro = 0 and not fecha) or (dentro > 0 and l ~ '^--antes:')
+            order by o), E'\n')
+$st$;
 -- (consertos de 13/11) com a 20261113200000 registrada, _agenda_porque_da_os pode ser a do conserto do NOVO-agenda-296 (1 linha trocada: quem_texto na reserva;
 -- md5 do corpo dela, sem CR, 8cbcbd13…) ou, depois da volta dos consertos (que deixa o registro como rastro), a da ponta final da 7g; sem ela, só a da 7g, como
 -- antes. Que o corpo vivo é o do conserto quem prende é o F2 de agenda_consertos_1311_pos_deploy.sql
 insert into _resultado
 select format('F2 %s: o corpo é o da ponta final da 7g (md5 sem CR)', r.f),
-       p.oid is not null and md5(replace(p.prosrc, chr(13), '')) in (r.m, coalesce(c13.m, r.m)),
-       case when p.oid is null then 'NÃO EXISTE' when md5(replace(p.prosrc, chr(13), '')) not in (r.m, coalesce(c13.m, r.m)) then 'md5 ' || md5(replace(p.prosrc, chr(13), '')) || ' ≠ ' || coalesce(c13.m || ' ou ', '') || r.m end
+       p.oid is not null and md5(pg_temp.sem_terminou(replace(p.prosrc, chr(13), ''))) in (r.m, coalesce(c13.m, r.m)),
+       case when p.oid is null then 'NÃO EXISTE' when md5(pg_temp.sem_terminou(replace(p.prosrc, chr(13), ''))) not in (r.m, coalesce(c13.m, r.m)) then 'md5 ' || md5(pg_temp.sem_terminou(replace(p.prosrc, chr(13), ''))) || ' ≠ ' || coalesce(c13.m || ' ou ', '') || r.m end
   from _pg_f r
   left join lateral (select '8cbcbd131425b64976d96b4e65dd6cb4'::text as m
                       where r.f like '\_agenda\_porque\_da\_os(%'
@@ -225,9 +239,9 @@ begin
   return array_to_string(fora, E'\n');
 end $f$;
 insert into _resultado
-select format('F3 %s (recriada): sem as marcas da 7g, o corpo de antes dela (md5)', r.f), p.oid is not null and md5(pg_temp.sem_7g(replace(p.prosrc, chr(13), ''))) = r.m_antes,
-       case when p.oid is null then 'NÃO EXISTE' when md5(pg_temp.sem_7g(replace(p.prosrc, chr(13), ''))) <> r.m_antes
-            then 'md5 ' || md5(pg_temp.sem_7g(replace(p.prosrc, chr(13), ''))) || ' ≠ ' || r.m_antes end
+select format('F3 %s (recriada): sem as marcas da 7g, o corpo de antes dela (md5)', r.f), p.oid is not null and md5(pg_temp.sem_7g(pg_temp.sem_terminou(replace(p.prosrc, chr(13), '')))) = r.m_antes,
+       case when p.oid is null then 'NÃO EXISTE' when md5(pg_temp.sem_7g(pg_temp.sem_terminou(replace(p.prosrc, chr(13), '')))) <> r.m_antes
+            then 'md5 ' || md5(pg_temp.sem_7g(pg_temp.sem_terminou(replace(p.prosrc, chr(13), '')))) || ' ≠ ' || r.m_antes end
   from _pg_f r
   left join pg_proc p on p.oid = to_regprocedure('public.' || r.f)
  where r.tipo = 'recriada';
