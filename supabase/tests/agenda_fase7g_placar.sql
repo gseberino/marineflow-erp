@@ -76,6 +76,19 @@ begin
   v := substr(v, position(E'\nas $function$' in v) + length(E'\nas $function$'));
   return left(v, position('$function$' in v) - 1);
 end $f$;
+-- (23/11/2026, 20270223100000) o "terminou ou falta dia?" recria agenda_saude (e outras 2) com blocos "-- TERMINOU: … -- TERMINOU: fim" que trocam
+-- linhas (as de antes em "--antes:"): sem eles, devolvidas as linhas de antes, o corpo é o de antes dela
+create function pg_temp.sem_terminou(p text) returns text language sql immutable as $st$
+  select array_to_string(array(
+           select case when dentro > 0 and l ~ '^--antes:' then substr(l, 9) else l end
+             from (select l, o, sum(case when l ~ '^\s*-- TERMINOU:' and l !~ '^\s*-- TERMINOU: fim' then 1
+                                         when l ~ '^\s*-- TERMINOU: fim' then -1 else 0 end)
+                                over (order by o rows between unbounded preceding and current row) as dentro,
+                          l ~ '^\s*-- TERMINOU: fim' as fecha
+                     from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
+            where (dentro = 0 and not fecha) or (dentro > 0 and l ~ '^--antes:')
+            order by o), E'\n')
+$st$;
 create function pg_temp.sem7g(p text) returns text language plpgsql immutable as $f$
 declare
   l      text;
@@ -306,7 +319,7 @@ begin
         char_length(pg_temp.corpo(current_setting('agenda_teste.' || x.mig), x.nome)) > 100
         and pg_temp.sem7g(pg_temp.corpo(v_mig, x.nome)) = replace(pg_temp.corpo(current_setting('agenda_teste.' || x.mig), x.nome), E'\r\n', E'\n'), null);
       v_res := pg_temp.ok(v_res, format('Q0e %s: a viva é a desta migration, com %s marca(s) da 7g', x.nome, x.marcas),
-        (select replace(p.prosrc, E'\r\n', E'\n') from pg_proc p where p.oid = x.assin::regprocedure) = pg_temp.corpo(v_mig, x.nome)
+        (select pg_temp.sem_terminou(replace(p.prosrc, E'\r\n', E'\n')) from pg_proc p where p.oid = x.assin::regprocedure) = pg_temp.corpo(v_mig, x.nome)
         and (select count(*) from regexp_matches(pg_temp.corpo(v_mig, x.nome), '-- (FASE 7g: fim|\(7g: fim\))', 'g')) = x.marcas, null);
     end loop;
     -- em agenda_saude, a marca da 7g vem depois do último "(7e: fim)" e antes de return v_gr (R9.5-17)
