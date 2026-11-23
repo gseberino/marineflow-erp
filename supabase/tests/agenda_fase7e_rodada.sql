@@ -54,6 +54,19 @@ begin
 end $f$;
 -- (7g P6) o corpo vivo sem os blocos e as marcas da 7g ("-- FASE 7g:" … "-- FASE 7g: fim" e "-- (7g …" … "-- (7g: fim)"), linha a linha: a 7g recria agenda_saude
 -- (20261112100500) com a chave explicar numa marca, e o resto do corpo é o desta migration. Sem marca da 7g, o corpo como está.
+-- (23/11/2026, 20270223100000) o "terminou ou falta dia?" recria agenda_saude (e outras 2) com blocos "-- TERMINOU: … -- TERMINOU: fim" que trocam
+-- linhas (as de antes em "--antes:"): sem eles, devolvidas as linhas de antes, o corpo é o de antes dela
+create function pg_temp.sem_terminou(p text) returns text language sql immutable as $st$
+  select array_to_string(array(
+           select case when dentro > 0 and l ~ '^--antes:' then substr(l, 9) else l end
+             from (select l, o, sum(case when l ~ '^\s*-- TERMINOU:' and l !~ '^\s*-- TERMINOU: fim' then 1
+                                         when l ~ '^\s*-- TERMINOU: fim' then -1 else 0 end)
+                                over (order by o rows between unbounded preceding and current row) as dentro,
+                          l ~ '^\s*-- TERMINOU: fim' as fecha
+                     from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
+            where (dentro = 0 and not fecha) or (dentro > 0 and l ~ '^--antes:')
+            order by o), E'\n')
+$st$;
 create function pg_temp.sem_7g(p_t text) returns text language plpgsql immutable as $f$
 declare
   l text;
@@ -137,7 +150,7 @@ begin
       ('_agenda_desfazer_aprendizado', 'public._agenda_desfazer_aprendizado(uuid, uuid, text, date, timestamptz)', 'mig_correcao_calculo_fase6')) x(nome, sig, origem)
   loop
     v_res := pg_temp.ok(v_res, format('R0d %s: a viva é a desta migration; sem os blocos do P7, é a da origem (agenda_teste.%s), byte a byte; e tem bloco', f.nome, f.origem),
-      (select pg_temp.sem_7g(p.prosrc) from pg_proc p where p.oid = f.sig::regprocedure) = pg_temp.corpo(v_mig, f.nome)
+      (select pg_temp.sem_7g(pg_temp.sem_terminou(p.prosrc)) from pg_proc p where p.oid = f.sig::regprocedure) = pg_temp.corpo(v_mig, f.nome)
       and pg_temp.sem_p7(pg_temp.corpo(v_mig, f.nome)) = pg_temp.corpo(current_setting('agenda_teste.' || f.origem), f.nome)
       and pg_temp.corpo(v_mig, f.nome) ~ '-- (FASE 7e: \(7e P7|\(7e P7)',
       format('%s × %s letras', length(pg_temp.sem_p7(pg_temp.corpo(v_mig, f.nome))), length(pg_temp.corpo(current_setting('agenda_teste.' || f.origem), f.nome))));
