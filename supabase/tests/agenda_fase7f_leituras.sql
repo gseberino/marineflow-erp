@@ -91,6 +91,19 @@ begin
   return array_to_string(fora, E'\n');
 end $f$;
 -- (7f P6) as marcas do P6, que recria agenda_saude depois desta migration ("-- (7f P6 … -- (7f: fim)"): o corpo vivo sem elas é o desta (com e sem o P6 no banco)
+-- (23/11/2026, 20270223100000) o "terminou ou falta dia?" recria agenda_saude (e outras 2) com blocos "-- TERMINOU: … -- TERMINOU: fim" que trocam
+-- linhas (as de antes em "--antes:"): sem eles, devolvidas as linhas de antes, o corpo é o de antes dela
+create function pg_temp.sem_terminou(p text) returns text language sql immutable as $st$
+  select array_to_string(array(
+           select case when dentro > 0 and l ~ '^--antes:' then substr(l, 9) else l end
+             from (select l, o, sum(case when l ~ '^\s*-- TERMINOU:' and l !~ '^\s*-- TERMINOU: fim' then 1
+                                         when l ~ '^\s*-- TERMINOU: fim' then -1 else 0 end)
+                                over (order by o rows between unbounded preceding and current row) as dentro,
+                          l ~ '^\s*-- TERMINOU: fim' as fecha
+                     from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
+            where (dentro = 0 and not fecha) or (dentro > 0 and l ~ '^--antes:')
+            order by o), E'\n')
+$st$;
 create function pg_temp.sem_p6(p text) returns text language plpgsql immutable as $f$
 declare
   l      text;
@@ -227,7 +240,7 @@ begin
     r := pg_temp.ok(r, 'V0f _agenda_ver_decisoes: o corpo vivo é o desta migration; sem os blocos "-- FASE 7f:", é o de 20261107100860 (a mais nova antes), byte a byte',
       v = pg_temp.corpo(v_mig, '_agenda_ver_decisoes') and pg_temp.sem_7f(v) = pg_temp.corpo(current_setting('agenda_teste.mig_correcao3_fase7d'), '_agenda_ver_decisoes'),
       format('vivo %s; sem blocos %s; origem %s', length(v), length(pg_temp.sem_7f(v)), length(pg_temp.corpo(current_setting('agenda_teste.mig_correcao3_fase7d'), '_agenda_ver_decisoes'))));
-    select replace(p.prosrc, E'\r\n', E'\n') into v from pg_proc p where p.oid = 'public.agenda_saude(date, timestamptz)'::regprocedure;
+    select pg_temp.sem_terminou(replace(p.prosrc, E'\r\n', E'\n')) into v from pg_proc p where p.oid = 'public.agenda_saude(date, timestamptz)'::regprocedure;
     r := pg_temp.ok(r, 'V0g agenda_saude: o corpo vivo (sem as marcas do P6, que a recria depois) é o desta migration; sem as marcas "-- (7f", é o de 20261107100700 (a 7e não existe), byte a byte',
       pg_temp.sem_p6(v) = pg_temp.corpo(v_mig, 'agenda_saude') and pg_temp.sem_7f(v) = pg_temp.corpo(current_setting('agenda_teste.mig_leituras_fase7d'), 'agenda_saude'),
       format('vivo %s; sem blocos %s; origem %s', length(v), length(pg_temp.sem_7f(v)), length(pg_temp.corpo(current_setting('agenda_teste.mig_leituras_fase7d'), 'agenda_saude'))));
