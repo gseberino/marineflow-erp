@@ -68,6 +68,19 @@ create function pg_temp.sem_7b(p text) returns text language sql immutable as $f
                             from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
             where dentro = 0 and not fecha order by o), E'\n')
 $f$;
+-- (23/11/2026, 20270223100000) o "terminou ou falta dia?" recria agenda_saude com 1 bloco "-- TERMINOU: … -- TERMINOU: fim" no aprovada_sem_data (a
+-- linha de antes em "--antes:"): sem ele, devolvida a linha de antes, o corpo é o que a 7b deixou
+create function pg_temp.sem_terminou(p text) returns text language sql immutable as $f$
+  select array_to_string(array(
+           select case when dentro > 0 and l ~ '^--antes:' then substr(l, 9) else l end
+             from (select l, o, sum(case when l ~ '^\s*-- TERMINOU:' and l !~ '^\s*-- TERMINOU: fim' then 1
+                                         when l ~ '^\s*-- TERMINOU: fim' then -1 else 0 end)
+                                over (order by o rows between unbounded preceding and current row) as dentro,
+                          l ~ '^\s*-- TERMINOU: fim' as fecha
+                     from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
+            where (dentro = 0 and not fecha) or (dentro > 0 and l ~ '^--antes:')
+            order by o), E'\n')
+$f$;
 -- (7d P8) a função passou a viver na 7d: antes de comparar com a etapa dela, tiram-se os blocos "-- FASE 7d:" e as marcas "-- (7d … -- (7d: fim)"
 create function pg_temp.sem_7d(p text) returns text language sql immutable as $f$
   select array_to_string(array(
@@ -432,8 +445,12 @@ begin
   v_len := pg_temp.os('OS-00074');
   -- L2a desligado: a saúde de antes (a definição de 20261031100600 rodada como pg_temp), byte a byte, mais a chave equipe_dias com os
   -- zeros 0 e o ok de antes
-  execute replace(pg_temp.inteira(current_setting('agenda_teste.mig_rodada_fase7a'), 'agenda_saude'),
-                  'create or replace function public.agenda_saude(', 'create function pg_temp.saude_de_antes(');
+  -- (23/11/2026, 20270223100000) com a mesma troca do bloco TERMINOU (aprovada_sem_data vê a pergunta aberta também por os_ids): a saúde de antes
+  -- da 7b com o que mudou depois dela, para comparar só o que a 7b acrescenta
+  execute replace(replace(pg_temp.inteira(current_setting('agenda_teste.mig_rodada_fase7a'), 'agenda_saude'),
+                          'create or replace function public.agenda_saude(', 'create function pg_temp.saude_de_antes('),
+                  'and not exists (select 1 from public.agenda_perguntas q where q.estado = ''aberta'' and q.service_order_id = k.service_order_id)',
+                  'and not exists (select 1 from public.agenda_perguntas q where q.estado = ''aberta'' and (q.service_order_id = k.service_order_id or k.service_order_id = any (q.os_ids)))');
   begin
     perform pg_temp.gestor('ligado');
     perform pg_temp.modos7b('desligado');
@@ -622,10 +639,10 @@ begin
       continue;
     end if;
     v_res := pg_temp.ok(v_res, format('L5 a cópia de %s só acrescenta %s bloco(s) da 7b (o resto é o corpo da origem, byte a byte)', r.nome, r.blocos),
-      (select pg_temp.sem_7b(pg_temp.sem_7d(p.prosrc)) = pg_temp.corpo(v_src, r.nome)
+      (select pg_temp.sem_7b(pg_temp.sem_7d(pg_temp.sem_terminou(p.prosrc))) = pg_temp.corpo(v_src, r.nome)
               and (select count(*) from regexp_matches(p.prosrc, '-- FASE 7b( \(P5\))?: fim', 'g')) = r.blocos
          from pg_proc p where p.oid = r.sig::regprocedure),
-      (select format('%s × %s linhas; %s blocos', cardinality(string_to_array(pg_temp.sem_7b(pg_temp.sem_7d(p.prosrc)), E'\n')),
+      (select format('%s × %s linhas; %s blocos', cardinality(string_to_array(pg_temp.sem_7b(pg_temp.sem_7d(pg_temp.sem_terminou(p.prosrc))), E'\n')),
                      cardinality(string_to_array(pg_temp.corpo(v_src, r.nome), E'\n')),
                      (select count(*) from regexp_matches(p.prosrc, '-- FASE 7b( \(P5\))?: fim', 'g')))
          from pg_proc p where p.oid = r.sig::regprocedure));
