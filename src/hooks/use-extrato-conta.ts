@@ -55,10 +55,28 @@ export interface LancadoSozinho {
   suggested_date: string | null;
   decided_at: string | null;
   decision_note: string | null;
-  automatica: 'regra' | 'confianca';
+  /** 'boleto' (22/11/2026): não é lançamento novo — a conta de um boleto conhecido foi baixada pelo pagamento no banco. */
+  automatica: 'regra' | 'confianca' | 'boleto';
   created_payable_id: string | null;
   created_receivable_id: string | null;
+  bank_transaction_id?: string | null;
+  /** Baixa pelo boleto: a conta (que já existia) casada com a linha do banco — é ela que se desfaz. */
+  conta_baixada_id?: string | null;
   bank_transactions?: { bank_connection_id: string | null } | null;
+}
+
+/**
+ * A baixa pelo boleto não cria conta: a que foi baixada é a que está casada com a linha do banco. A baixa já desfeita
+ * (por aqui, em Contas a pagar ou pelo assistente) não tem mais conta casada e sai da lista.
+ */
+export function comContaBaixada(
+  linhas: LancadoSozinho[],
+  casadas: Array<{ id: string; bank_transaction_id: string | null }>,
+): LancadoSozinho[] {
+  const contaDaLinha = new Map(casadas.filter((c) => c.bank_transaction_id).map((c) => [String(c.bank_transaction_id), c.id]));
+  return linhas
+    .filter((l) => l.automatica !== 'boleto' || contaDaLinha.has(String(l.bank_transaction_id)))
+    .map((l) => (l.automatica === 'boleto' ? { ...l, conta_baixada_id: contaDaLinha.get(String(l.bank_transaction_id)) ?? null } : l));
 }
 
 /** O que foi lançado sem clique nos últimos 30 dias — para conferir e desfazer. */
@@ -70,7 +88,7 @@ export function useLancadosSozinhos() {
       const { data, error } = await supabase
         .from('finance_review_queue')
         .select(`id, title, suggested_amount, suggested_category, suggested_date, decided_at, decision_note,
-                 automatica, created_payable_id, created_receivable_id,
+                 automatica, created_payable_id, created_receivable_id, bank_transaction_id,
                  bank_transactions!finance_review_queue_bank_transaction_id_fkey (bank_connection_id)`)
         .not('automatica', 'is', null)
         .eq('status', 'approved')
@@ -78,7 +96,13 @@ export function useLancadosSozinhos() {
         .order('decided_at', { ascending: false })
         .limit(200);
       if (error) throw error;
-      return (data ?? []) as unknown as LancadoSozinho[];
+      const linhas = (data ?? []) as unknown as LancadoSozinho[];
+      const doBoleto = linhas.filter((l) => l.automatica === 'boleto' && l.bank_transaction_id).map((l) => String(l.bank_transaction_id));
+      if (doBoleto.length === 0) return linhas;
+      const { data: casadas, error: erroCasadas } = await supabase
+        .from('payables').select('id, bank_transaction_id').in('bank_transaction_id', doBoleto);
+      if (erroCasadas) throw erroCasadas;
+      return comContaBaixada(linhas, (casadas ?? []) as Array<{ id: string; bank_transaction_id: string | null }>);
     },
     staleTime: 30_000,
   });

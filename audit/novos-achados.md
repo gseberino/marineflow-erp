@@ -4510,3 +4510,8 @@ quatro estão latentes.
 - **Efeito:** Contas a pagar mostra como vencido o que já foi pago; o que a empresa deve fica maior do que é.
 - **Menor mudança:** é a fatia 2 desta frente ("baixa pelo boleto") — depende de o dono liberar a exceção à regra de 26/09 para o
   caso do boleto (linha conhecida, pagamento por boleto, valor igual no centavo, uma conta só). Não corrigido aqui.
+- **Situação 22/11/2026 (ramo `session/o-que-vence`, fatia 2):** o dono liberou a exceção ("A: baixar sozinho só no caso seguro").
+  `baixar_pelo_boleto` (migration `20270222100000`) baixa a conta quando a saída é por boleto, o valor é igual no centavo, o banco
+  da linha digitável é o banco da saída e a conta é uma só (entre parcelas iguais do mesmo fornecedor, a de vencimento mais
+  próximo); a proposta fica `approved` com `automatica = 'boleto'` e se desfaz por `desfazer_aprovacao`. Simulado no dado real:
+  baixa as duas parcelas acima e deixa a de 01/12 em aberto. Todo o resto continua sendo pergunta.

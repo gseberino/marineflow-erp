@@ -65,7 +65,9 @@ function LancadosSozinhos({ contaId }: { contaId: string | null }) {
               que fica fora do resultado (fatura, empréstimo, retirada), fornecedor reconhecido só pelo nome
               cortado pelo banco, linha com OS, OC ou vínculo sugerido (é pergunta sua) e o que veio de regra
               marcada "só sugerir". Tudo aparece aqui, com Desfazer. As regras marcadas "Lançar sozinha" valem
-              mesmo com este interruptor desligado — menos nos casos acima.
+              mesmo com este interruptor desligado — menos nos casos acima. À parte disso, a conta que tem boleto
+              conhecido é baixada quando o banco mostra o pagamento desse boleto (mesmo valor, mesmo banco, uma
+              conta só): também aparece aqui, e Desfazer devolve a conta para "em aberto".
             </Ajuda>
             {confirmando ? (
               <>
@@ -95,10 +97,23 @@ function LancadosSozinhos({ contaId }: { contaId: string | null }) {
                   <span className="min-w-0 flex-1">
                     <span className="block truncate font-medium">{l.title}</span>
                     <span className="block truncate text-xs text-muted-foreground">
-                      {l.suggested_date ? formatDate(l.suggested_date) : ''} · {l.suggested_category ?? '—'} · {l.decision_note ?? (l.automatica === 'regra' ? 'pela sua regra' : 'confiança alta')}
+                      {l.automatica === 'boleto'
+                        ? <>{l.suggested_date ? formatDate(l.suggested_date) : ''} · {l.decision_note ?? 'Baixada sozinha pelo boleto'}</>
+                        : <>{l.suggested_date ? formatDate(l.suggested_date) : ''} · {l.suggested_category ?? '—'} · {l.decision_note ?? (l.automatica === 'regra' ? 'pela sua regra' : 'confiança alta')}</>}
                     </span>
                   </span>
                   <span className="shrink-0 font-semibold tabular-nums">{formatCurrency(Number(l.suggested_amount ?? 0))}</span>
+                  {l.automatica === 'boleto' && l.conta_baixada_id && (
+                    <Button size="sm" variant="ghost" className="h-7 shrink-0 gap-1 text-xs" disabled={desfazer.isPending}
+                      title="Desfaz a baixa: a conta volta a ficar em aberto e a linha do banco volta para a fila, para você decidir"
+                      onClick={() => desfazer.mutate({
+                        tipo: 'payable',
+                        id: l.conta_baixada_id!,
+                        motivo: 'Baixada pelo boleto — desfeita para revisão',
+                      })}>
+                      <Undo2 className="h-3.5 w-3.5" /> Desfazer
+                    </Button>
+                  )}
                   {(l.created_payable_id || l.created_receivable_id) && (
                     <Button size="sm" variant="ghost" className="h-7 shrink-0 gap-1 text-xs" disabled={desfazer.isPending}
                       title="Cancela o lançamento e devolve a linha para a fila, para decidir à mão"

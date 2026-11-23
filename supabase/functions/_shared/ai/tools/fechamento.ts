@@ -185,8 +185,9 @@ export const fechamentoTools: ToolDef[] = [
   {
     name: "listar_lancados_sozinhos",
     description:
-      "O que o sistema lançou sem clique nos últimos dias (por regra sua ou por confiança alta), com o id do lançamento para " +
-      "desfazer (desfazer_aprovacao_de_lancamento). Diz também se o lançar sozinho está ligado. Só leitura.",
+      "O que o sistema lançou sem clique nos últimos dias (por regra sua ou por confiança alta) e as contas que ele baixou " +
+      "sozinho pelo boleto (por = 'baixa pelo boleto': a conta já existia e o banco mostrou o pagamento), com o id do lançamento " +
+      "para desfazer (desfazer_aprovacao_de_lancamento). Diz também se o lançar sozinho está ligado. Só leitura.",
     input_schema: { type: "object", properties: { dias: { type: "number", description: "Padrão 7." } } },
     risk: "low",
     roles: CARGOS_FINANCEIRO,
@@ -196,7 +197,7 @@ export const fechamentoTools: ToolDef[] = [
       const desde = new Date(Date.now() - Math.min(90, Number(args.dias ?? 7)) * 86_400_000).toISOString();
       const [{ data, error }, { data: cfg, error: erroCfg }] = await Promise.all([
         ctx.admin.from("finance_review_queue")
-          .select("title, suggested_amount, suggested_category, suggested_date, automatica, created_payable_id")
+          .select("title, suggested_amount, suggested_category, suggested_date, automatica, created_payable_id, bank_transaction_id")
           .not("automatica", "is", null).eq("status", "approved").gte("decided_at", desde)
           .order("decided_at", { ascending: false }).limit(50),
         ctx.admin.from("app_settings").select("value").eq("key", "finance_auto_approve").maybeSingle(),
@@ -204,10 +205,23 @@ export const fechamentoTools: ToolDef[] = [
       // Erro engolido diria "nada lançado sozinho" e "desligado" — as duas coisas como fato.
       if (error) throw new Error(`Não consegui ler o que foi lançado sozinho: ${error.message}`);
       if (erroCfg) throw new Error(`Não consegui ler se o lançar sozinho está ligado: ${erroCfg.message}`);
-      const lista = ((data ?? []) as any[]).map((l) => ({
-        o_que: mascararCpfNoTexto(l.title ?? null), valor: Number(l.suggested_amount), categoria: l.suggested_category, data: l.suggested_date,
-        por: l.automatica === "regra" ? "regra sua" : "confiança alta", payable_id: l.created_payable_id,
-      }));
+      // Baixa pelo boleto (22/11/2026): a conta não nasceu da proposta — é a que está casada com a linha do banco.
+      // Baixa desfeita por outro caminho não tem mais conta casada: sai da lista.
+      const doBoleto = ((data ?? []) as any[]).filter((l) => l.automatica === "boleto" && l.bank_transaction_id);
+      const contaDaLinha = new Map<string, string>();
+      if (doBoleto.length > 0) {
+        const { data: casadas, error: erroCasadas } = await ctx.admin.from("payables")
+          .select("id, bank_transaction_id").in("bank_transaction_id", doBoleto.map((l) => l.bank_transaction_id));
+        if (erroCasadas) throw new Error(`Não consegui ler as contas baixadas pelo boleto: ${erroCasadas.message}`);
+        for (const c of (casadas ?? []) as any[]) contaDaLinha.set(String(c.bank_transaction_id), String(c.id));
+      }
+      const lista = ((data ?? []) as any[])
+        .filter((l) => l.automatica !== "boleto" || contaDaLinha.has(String(l.bank_transaction_id)))
+        .map((l) => ({
+          o_que: mascararCpfNoTexto(l.title ?? null), valor: Number(l.suggested_amount), categoria: l.suggested_category, data: l.suggested_date,
+          por: l.automatica === "regra" ? "regra sua" : l.automatica === "boleto" ? "baixa pelo boleto" : "confiança alta",
+          payable_id: l.automatica === "boleto" ? contaDaLinha.get(String(l.bank_transaction_id)) ?? null : l.created_payable_id,
+        }));
       return {
         ligado: String((cfg as any)?.value ?? "off") === "on",
         total: lista.length, valor_total: lista.reduce((s, l) => s + l.valor, 0), lancados: lista,

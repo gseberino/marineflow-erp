@@ -46,6 +46,7 @@ import {
 } from "../_shared/banking/entrada-sem-cliente.ts";
 import { lerRespostaDaReceita } from "../_shared/banking/cnae.ts";
 import { PISO_DA_CONFIANCA, selecionarParaLancarSozinho, type LinhaCandidata } from "./lancar-sozinho.ts";
+import { baixarPeloBoleto, mensagemDaBaixa } from "./baixa-boleto.ts";
 import {
   aprovarOsDaVarredura, type AprovarUma, foraDasReservadas, linhasDeComprovante, mensagemDosComprovantes, reavaliarComprovantes,
   recusaDaLinhaDoCmp, reservadasDaRodada, responderApproveCmp,
@@ -747,6 +748,13 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     }
   }
 
+  // Baixa pelo boleto (dono, 22/11/2026 — exceção estrita à regra de 26/09): a saída por boleto que paga uma conta de
+  // boleto conhecido (mesmo valor, mesmo banco, uma conta só) baixa essa conta. Vem ANTES do "lançar sozinho", para a
+  // saída não virar despesa nova ao lado da conta que ela paga; as reservadas e as anotadas da rodada ficam de fora.
+  // A proposta baixada deixa de estar pendente, então o aprovar abaixo não a enxerga. Erro = como antes.
+  const baixa = await baixarPeloBoleto(admin, [...reservadas, ...anotadasAgora]);
+  const baixadasDaRodada = baixa.transacoes.filter((t) => idsPorTransacao.has(t)).length;
+
   // Aplica de imediato o que as regras autônomas resolveram. Cada lançamento fica ligado à
   // regra que o criou, então desligar a regra e desfazer o que ela fez são a mesma consulta.
   let lancadasSozinhas = 0;
@@ -815,7 +823,8 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
   }
 
   const partes = [
-    criadas > 0 ? `${criadas - lancadasSozinhas} proposta(s) para revisar` : "Nada novo para propor",
+    criadas > 0 ? `${Math.max(0, criadas - lancadasSozinhas - baixadasDaRodada)} proposta(s) para revisar` : "Nada novo para propor",
+    mensagemDaBaixa(baixa.baixadas),
     completadas > 0 ? `${completadas} já na fila ganharam identificação` : "",
     anotadas > 0 ? `${anotadas} classificada(s) pelas suas anotações` : "",
     mensagemDosComprovantes(cmp.ligados, aprovadasDoSim),
@@ -831,6 +840,7 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     ok: true,
     criadas,
     lancadas_por_regra: lancadasSozinhas,
+    baixadas_pelo_boleto: baixa.baixadas,
     transferencias_internas: pares.length,
     parcelas_de_compra_ja_lancada: parcelasDeCompraJaLancada,
     elegiveis_lote: linhas.filter((l) => Number(l.suggested_amount) < limiteLote).length,

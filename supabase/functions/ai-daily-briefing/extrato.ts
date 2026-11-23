@@ -61,6 +61,11 @@ export function linhasDoExtratoNoResumo(
     const soma = lancados.reduce((s, l) => s + Math.abs(Number(l.suggested_amount ?? 0)), 0);
     linhas.push(`🤖 Lançados sozinhos nas últimas 24h: *${lancados.length}* (${moeda(soma)})`);
     for (const l of lancados.slice(0, MOSTRAR)) {
+      // Baixa pelo boleto (22/11/2026): não é despesa nova — a conta já existia e o banco mostrou o pagamento.
+      if (l.automatica === "boleto") {
+        linhas.push(`   • ${moeda(Math.abs(Number(l.suggested_amount ?? 0)))} — ${nomeCurto(l.title)} → conta baixada (boleto pago no banco)`);
+        continue;
+      }
       const por = l.automatica === "regra" ? "sua regra" : "confiança alta";
       linhas.push(`   • ${moeda(Math.abs(Number(l.suggested_amount ?? 0)))} — ${nomeCurto(l.title)} → ${l.suggested_category ?? "sem categoria"} (${por})`);
     }

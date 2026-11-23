@@ -24,6 +24,16 @@ Deno.test("lançados sozinhos: total, os 3 primeiros, o resto e como desfazer", 
   assertEquals(r.acoes.length, 1);
 });
 
+Deno.test("baixa pelo boleto (22/11/2026): aparece como conta baixada, não como despesa por confiança", () => {
+  const r = linhasDoExtratoNoResumo([{
+    title: "Despesa: TSD LOGISTICA", suggested_amount: 785.07, suggested_category: "Mercadorias", automatica: "boleto",
+  }], [], moeda);
+  assertStringIncludes(r.linhas[1], "R$ 785,07");
+  assertStringIncludes(r.linhas[1], "conta baixada (boleto pago no banco)");
+  assert(!r.linhas[1].includes("confiança alta"));
+  assert(!r.linhas[1].includes("Mercadorias"), "a categoria sugerida da proposta não é a da conta");
+});
+
 Deno.test("débito sem loja: pergunta com data e valor, o mais recente de exemplo", () => {
   const r = linhasDoExtratoNoResumo([], [
     { suggested_amount: 45, suggested_date: "2026-09-20" },

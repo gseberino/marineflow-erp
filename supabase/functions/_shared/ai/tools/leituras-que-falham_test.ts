@@ -141,6 +141,33 @@ Deno.test("listar_lancados_sozinhos: fila ilegível não vira 'nada lançado'", 
   );
 });
 
+Deno.test("listar_lancados_sozinhos: baixa pelo boleto (22/11/2026) vem com a conta casada para desfazer; a desfeita some", async () => {
+  const fila = [
+    { title: "Despesa: TSD", suggested_amount: 785.07, suggested_category: "Mercadorias", suggested_date: "2026-10-20", automatica: "boleto", created_payable_id: null, bank_transaction_id: "t1" },
+    { title: "Despesa: OUTRA", suggested_amount: 10, suggested_category: "Mercadorias", suggested_date: "2026-10-21", automatica: "boleto", created_payable_id: null, bank_transaction_id: "t-desfeita" },
+    { title: "Despesa: POSTO", suggested_amount: 50, suggested_category: "Combustível", suggested_date: "2026-10-22", automatica: "confianca", created_payable_id: "p9", bank_transaction_id: "t3" },
+  ];
+  const db = bancoFalso({ finance_review_queue: fila, app_settings: [{ value: "on" }], payables: [{ id: "conta-1", bank_transaction_id: "t1" }] });
+  const r = await ferramenta(fechamentoTools, "listar_lancados_sozinhos").execute({}, contexto(db));
+  assertEquals(r.lancados.map((l: { por: string; payable_id: string }) => [l.por, l.payable_id]), [["baixa pelo boleto", "conta-1"], ["confiança alta", "p9"]]);
+  assertEquals(r.total, 2);
+  // a leitura das contas casadas pede só as linhas das baixas
+  const pedido = db.pedidos.find((p) => p.tabela === "payables")!;
+  assertEquals(pedido.chamadas.find((c) => c[0] === "in"), ["in", "bank_transaction_id", ["t1", "t-desfeita"]]);
+});
+
+Deno.test("listar_lancados_sozinhos: contas da baixa ilegíveis não viram 'nada baixado'", async () => {
+  const db = bancoFalso({
+    finance_review_queue: [{ title: "Despesa: TSD", suggested_amount: 1, automatica: "boleto", created_payable_id: null, bank_transaction_id: "t1" }],
+    app_settings: [],
+  }, ["payables"]);
+  await assertRejects(
+    () => ferramenta(fechamentoTools, "listar_lancados_sozinhos").execute({}, contexto(db)),
+    Error,
+    "baixadas pelo boleto",
+  );
+});
+
 Deno.test("get_delinquency_plan: cliente com Pix esperando no Extrato sai da cobrança, com o porquê", async () => {
   const vencido = { id: "r", amount: 500, balance_amount: 500, due_date: "2026-01-10", client_id: "c", clients: { name: "Cliente" } };
   const db = bancoFalso({
