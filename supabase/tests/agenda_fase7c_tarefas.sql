@@ -42,13 +42,15 @@ begin;
 -- de OS paga), com a linha de antes devolvida onde o bloco a trocou ("--antes:" na coluna 0, dentro dele), é a de antes; as
 -- conferências de cópia abaixo a leem assim. (F2b, 18/11/2026, 20270126100000: e os blocos "-- FICHA PAGA B: … -- FICHA PAGA B: fim",
 -- do mesmo jeito; um bloco B pode estar dentro de um da F2: a conta é por nível. F2c, 20270127100000: e os "-- FICHA PAGA C:".)
+-- ("Terminou ou falta dia?", 23/11/2026, 20270223100000: e os "-- TERMINOU: … -- TERMINOU: fim", pela mesma convenção; _agenda_rotina_conclusao
+-- ganhou 2 deles.)
 create function pg_temp.sem_ficha_paga(p text) returns text language sql immutable as $fp$
   select array_to_string(array(
            select case when dentro > 0 and l ~ '^--antes:' then substr(l, 9) else l end
-             from (select l, o, sum(case when l ~ '^\s*-- FICHA PAGA( [BC])?:' and l !~ '^\s*-- FICHA PAGA( [BC])?: fim' then 1
-                                         when l ~ '^\s*-- FICHA PAGA( [BC])?: fim' then -1 else 0 end)
+             from (select l, o, sum(case when l ~ '^\s*-- (FICHA PAGA( [BC])?|TERMINOU):' and l !~ '^\s*-- (FICHA PAGA( [BC])?|TERMINOU): fim' then 1
+                                         when l ~ '^\s*-- (FICHA PAGA( [BC])?|TERMINOU): fim' then -1 else 0 end)
                                 over (order by o rows between unbounded preceding and current row) as dentro,
-                          l ~ '^\s*-- FICHA PAGA( [BC])?: fim' as fecha
+                          l ~ '^\s*-- (FICHA PAGA( [BC])?|TERMINOU): fim' as fecha
                      from unnest(string_to_array(p, E'\n')) with ordinality u(l, o)) x
             where (dentro = 0 and not fecha) or (dentro > 0 and l ~ '^--antes:')
             order by o), E'\n')
