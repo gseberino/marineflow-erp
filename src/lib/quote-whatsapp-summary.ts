@@ -21,6 +21,8 @@
  *  2. O que o gestor escolheu ESCONDER do cliente continua escondido. As opções de
  *     documento (`pdf_options_quote`) valem aqui igual: se os preços de peça não aparecem
  *     no PDF, não podem vazar pela mensagem.
+ *     Preço de serviço/peça escondido = some o preço de cada ITEM (a mensagem nunca lista itens);
+ *     o subtotal da categoria aparece, igual ao PDF (dono, 23/11/2026).
  */
 import { computeSchedule, type DepositInstallment, type DepositOrderLike } from './quote-deposit';
 import { nomeDaUnidade } from './unidade';
@@ -137,8 +139,6 @@ export function buildQuoteWhatsAppSummary(input: ResumoDeOrcamentoInput): string
   } = input;
 
   const mostrar = {
-    servicos: opcoes.showServicePrices !== false,
-    pecas: opcoes.showPartsPrices !== false,
     deslocamento: opcoes.showTravelCost !== false,
     desconto: opcoes.showDiscount !== false,
     impostos: opcoes.showTax !== false,
@@ -184,10 +184,12 @@ export function buildQuoteWhatsAppSummary(input: ResumoDeOrcamentoInput): string
   // O MESMO quadro do PDF (quadro-de-valores.ts; "mesma regra do PDF", dono, 20/11/2026):
   // deslocamento, impostos e taxa de cartão ocultos viram "Outros encargos"; o desconto geral
   // oculto vira "Ajustes" — as linhas sempre somam o total. Serviços e peças com o preço
-  // escondido continuam fora da mensagem (regra 2 acima).
+  // escondido saem só com o SUBTOTAL ("Peças e materiais: R$ X"), como no PDF, que esconde o preço
+  // de cada item e mantém o subtotal (dono, 23/11/2026: "siga pelo recomendado"). Antes a linha
+  // sumia e a conta não fechava. O preço de cada item nunca vai na mensagem.
   linhas.push(...quadroDeValoresEmTexto(linhasDoQuadroDeValores(orcamento, {
-    servicos: mostrar.servicos && labor > 0,
-    pecas: mostrar.pecas && parts > 0,
+    servicos: labor > 0,
+    pecas: parts > 0,
     deslocamento: mostrar.deslocamento,
     impostos: mostrar.impostos,
     taxaCartao: mostrar.taxaCartao,
@@ -222,8 +224,8 @@ export function buildQuoteWhatsAppSummary(input: ResumoDeOrcamentoInput): string
             }
           : null,
         {
-          servicos: labor > 0 && mostrar.servicos,
-          pecas: parts > 0 && mostrar.pecas,
+          servicos: labor > 0,
+          pecas: parts > 0,
           despesas: operacional + travel + subcontrato > 0,
         },
       );

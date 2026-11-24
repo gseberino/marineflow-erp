@@ -62,6 +62,7 @@ const variantes: Array<[string, ResumoDeOrcamentoInput]> = [
   ['desconto geral oculto', { ...completo, opcoes: { showDiscount: false } }],
   ['tudo oculto', { ...completo, opcoes: { showTravelCost: false, showTax: false, showCardFee: false, showDiscount: false } }],
   ['com desconto nos itens', { ...completo, descontoDosItens: 40 }],
+  ['preço de peças e serviços escondido', { ...completo, opcoes: { showPartsPrices: false, showServicePrices: false } }],
 ];
 casos.push(...variantes.map(([, c]) => c));
 

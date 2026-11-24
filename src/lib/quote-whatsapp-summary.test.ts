@@ -108,10 +108,16 @@ describe('resumo do orçamento para WhatsApp', () => {
   });
 
   it('o que o gestor esconde do PDF não vaza pela mensagem', () => {
+    // Preço de peça escondido = some o preço de cada item; o SUBTOTAL fica, como no PDF
+    // (dono, 23/11/2026). Antes a linha sumia e Serviços R$ 750 + nada ≠ Total R$ 2.446,45.
     const semPecas = buildQuoteWhatsAppSummary({ ...ROBSON, opcoes: { showPartsPrices: false } });
-    expect(texto(semPecas)).not.toContain('1.696,45');
-    // Mas o total e o sinal continuam — são o objeto da conversa.
+    expect(texto(semPecas)).toContain('• Peças e materiais: R$ 1.696,45');
+    expect(texto(semPecas)).toContain('• Serviços: R$ 750,00');
     expect(texto(semPecas)).toContain('Total: R$ 2.446,45');
+    const semServicos = buildQuoteWhatsAppSummary({ ...ROBSON, opcoes: { showServicePrices: false } });
+    expect(texto(semServicos)).toContain('• Serviços: R$ 750,00');
+    // O texto é o mesmo com ou sem o preço por item: a mensagem nunca lista itens.
+    expect(semPecas).toBe(buildQuoteWhatsAppSummary(ROBSON));
 
     const semBanco = buildQuoteWhatsAppSummary({ ...ROBSON, opcoes: { showBankDetails: false } });
     expect(texto(semBanco)).not.toContain('25625409-5');
