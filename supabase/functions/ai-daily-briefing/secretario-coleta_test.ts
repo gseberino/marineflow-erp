@@ -313,6 +313,74 @@ Deno.test("linha Hoje: agenda de Brasília (sem a tarefa da automação nem a de
   assertEquals([deHoje.falhasDeEnvio, deHoje.errosDaNoite], [1, 1]);
 });
 
+// ─── (24/11/2026) Pacote 1, V2: a rotina de IA que falhou calada entra na linha "Hoje" ─────────────
+// O que se protege: a soma por rotina vem das linhas rotina-ia:% vistas desde as 07:30 de ontem (Brasília), só erro
+// aberto; essas linhas saem da conta dos "erros registrados" (não contam duas vezes) sem tirar dela o erro comum, nem
+// o erro sem contexto; sem falha, o campo nem existe (a linha "Hoje" de antes); leitura que falha não inventa nada.
+Deno.test("V2: as rotinas de IA que falharam desde 07:30 de ontem vêm somadas por rotina e saem dos 'erros registrados'", async () => {
+  const t = banco();
+  const linha = (id: string, context: string | null, occurrences: number, last_seen_at: string, resolved_at: string | null = null) =>
+    ({ id, source: "edge", level: "error", resolved_at, context, occurrences, last_seen_at });
+  t.app_error_logs.push(
+    // hoje às 04:00 de Brasília: entra na frase da IA e fica FORA dos "erros registrados"
+    linha("ia-hoje", "rotina-ia:triagem_email@2026-10-15", 3, "2026-10-15T07:00:00Z"),
+    // ontem à tarde (depois das 07:30 de ontem): entra na frase
+    linha("ia-ontem", "rotina-ia:triagem_email@2026-10-14", 9, "2026-10-14T18:00:00Z"),
+    linha("ia-fornecedor", "rotina-ia:casar_fornecedor@2026-10-14", 1, "2026-10-14T19:00:00Z"),
+    // ontem às 06:00 de Brasília (a manhã de ontem já disse): não entra
+    linha("ia-velha", "rotina-ia:triagem_email@2026-10-14", 5, "2026-10-14T09:00:00Z"),
+    // marcada como resolvida: não entra
+    linha("ia-resolvida", "rotina-ia:triagem_email@2026-10-15", 7, "2026-10-15T07:30:00Z", "2026-10-15T08:00:00Z"),
+    // rotina que este código não conhece: a frase não sabe dizer, então continua nos "erros registrados" (não some)
+    linha("ia-outra", "rotina-ia:nao_existe@2026-10-15", 4, "2026-10-15T06:00:00Z"),
+    // erro comum da noite, com e sem contexto: continuam nos "erros registrados"
+    linha("e-imap", "email-imap", 2, "2026-10-15T04:00:00Z"),
+    linha("e-sem-contexto", null, 1, "2026-10-15T04:30:00Z"),
+  );
+  const selects: string[] = [];
+  const { deHoje } = await rodar(t, [], selects);
+  assertEquals(deHoje.rotinasSemIA, [
+    { rotulo: "triagem de e-mail", vezes: 12 },
+    { rotulo: "leitura do prazo do fornecedor", vezes: 1 },
+  ]);
+  // e1 (do banco de sempre) + e-imap + e-sem-contexto + ia-outra; a linha da triagem desta noite (ia-hoje) não conta aqui
+  assertEquals(deHoje.errosDaNoite, 4);
+  assertEquals(deHoje.falhasDeEnvio, 1);
+  assert(selects.includes("app_error_logs: context, occurrences"), "a soma lê o contexto e as ocorrências");
+  // o filtro dos "erros registrados" não ganhou not.like (tiraria da conta o erro sem contexto)
+  const fonte = await Deno.readTextFile(new URL("./secretario-coleta.ts", import.meta.url));
+  assert(!/\.not\(\s*"context"/.test(fonte), "sem not.like no contexto");
+});
+
+Deno.test("V2: sem falha de rotina o campo nem existe; a leitura que falha não inventa falha nem zera calada", async () => {
+  const semFalha = await rodar();
+  assertEquals("rotinasSemIA" in semFalha.deHoje, false);
+  assertEquals(semFalha.deHoje.errosDaNoite, 1);
+  const semLeitura = await rodar(banco(), ["app_error_logs"]);
+  assertEquals("rotinasSemIA" in semLeitura.deHoje, false);
+  assertEquals([semLeitura.deHoje.falhasDeEnvio, semLeitura.deHoje.errosDaNoite], [0, 0]);
+
+  // só a SOMA por rotina falha (as contagens leem): a frase não sai, e a falha da triagem continua nos "erros
+  // registrados" em vez de sumir dos dois lugares
+  const t = banco();
+  t.app_error_logs.push({ id: "ia-hoje", source: "edge", level: "error", resolved_at: null, context: "rotina-ia:triagem_email@2026-10-15", occurrences: 3, last_seen_at: "2026-10-15T07:00:00Z" });
+  const inteiro = falsoAdmin(t);
+  const quebrado = falsoAdmin(t, ["app_error_logs"]);
+  const admin = {
+    from(tabela: string) {
+      const q = inteiro.from(tabela);
+      if (tabela !== "app_error_logs") return q;
+      return { ...q, select: (c?: string, o?: { head?: boolean }) => (c === "context, occurrences" ? quebrado.from(tabela).select(c, o) : q.select(c, o)) };
+    },
+  };
+  const { deHoje } = await coletar(admin, {
+    agora: AGORA, hoje: HOJE, dono: DONO, modo: "novo",
+    doResumo: { esperando: ESPERANDO, recebidas: RECEBIDAS, cfg: { quote_validity_days: "3" } },
+  });
+  assertEquals("rotinasSemIA" in deHoje, false);
+  assertEquals(deHoje.errosDaNoite, 2, "e1 + a falha da triagem, que a frase não vai dizer");
+});
+
 // ─── (23/10/2026) Agenda de Produção, Fase 0: D11a e D4 no "Hoje" ──────────────────────────────────
 Deno.test("D11a: a OS esperando o cliente entra nas ativas (STATUS_OS_ATIVAS) e vira 'esperando o cliente desde' na lista", async () => {
   const t = banco();

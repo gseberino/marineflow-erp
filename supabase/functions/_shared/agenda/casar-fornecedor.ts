@@ -25,6 +25,12 @@ export interface EscolhaDaCompra {
   n: number | null;
   /** 0 a 1, como o modelo disse (0 quando não escolheu). */
   confianca: number;
+  /**
+   * (V2, 24/11/2026) A chamada do modelo falhou (fora do ar, sem saldo). Continua "ninguém escolhido"; quem tem banco
+   * registra (acompanhar-conversas → registrarFalhaDeRotina). `erro` é só o erro técnico, nunca a frase do fornecedor.
+   */
+  falhou?: true;
+  erro?: string;
 }
 
 export interface DepsDoCasamento {
@@ -93,7 +99,7 @@ const NINGUEM: EscolhaDaCompra = { n: null, confianca: 0 };
 
 /**
  * Qual das compras candidatas a frase do fornecedor fala. Nunca lança: falha do modelo, resposta sem a ferramenta,
- * opção fora da lista ou candidatas vazias = { n: null, confianca: 0 }.
+ * opção fora da lista ou candidatas vazias = { n: null, confianca: 0 } (a falha do modelo vem marcada com `falhou`).
  */
 export async function escolherCompra(
   trecho: string,
@@ -122,7 +128,7 @@ export async function escolherCompra(
     if (typeof opcao !== "number" || !Number.isInteger(opcao)) return { n: null, confianca };
     if (!lista.some((c) => c.n === opcao)) return NINGUEM;
     return { n: opcao, confianca };
-  } catch {
-    return NINGUEM;
+  } catch (e) {
+    return { ...NINGUEM, falhou: true, erro: String(e).slice(0, 300) };
   }
 }

@@ -3,10 +3,17 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   contextoDaHora,
+  contextoDaRotina,
   contextosDaUltimaHora,
+  falhasDeRotinaDesde,
   falhasNaUltimaHora,
+  PADRAO_DO_CONTEXTO_DE_ROTINA,
+  registrarFalhaDeRotina,
   registrarFalhaDoAssistente,
+  ROTULO_DA_ROTINA,
+  rotinaDoContexto,
   somaDeFalhas,
+  somaPorRotina,
 } from "./falhas-do-assistente.ts";
 
 const AGORA = new Date("2026-11-05T16:20:00.000Z");
@@ -53,7 +60,8 @@ Deno.test("somaDeFalhas: soma as ocorrências e aceita vazio", () => {
 function bancoDoLog(resposta: { data?: unknown; error?: unknown } | "lanca") {
   const filtros: Record<string, unknown> = {};
   const consulta = {
-    select: () => consulta,
+    select: (c?: string) => { filtros.select = c; return consulta; },
+    like: (c: string, v: unknown) => { filtros[`like:${c}`] = v; return consulta; },
     in: (c: string, v: unknown) => { filtros[`in:${c}`] = v; return consulta; },
     eq: (c: string, v: unknown) => { filtros[`eq:${c}`] = v; return consulta; },
     is: (c: string, v: unknown) => { filtros[`is:${c}`] = v; return consulta; },
@@ -82,4 +90,97 @@ Deno.test("falhasNaUltimaHora: sem linha nenhuma é zero", async () => {
 Deno.test("falhasNaUltimaHora: leitura que falha é null, nunca zero", async () => {
   assertEquals(await falhasNaUltimaHora(bancoDoLog({ data: null, error: { message: "x" } }).admin, AGORA), null);
   assertEquals(await falhasNaUltimaHora(bancoDoLog("lanca").admin, AGORA), null);
+});
+
+// ─── Rotina de IA que falha calada (pacote 1, V2, 24/11/2026) ─────────────────────────────────────────
+// O que se protege: uma linha por rotina e por DIA DE BRASÍLIA (o que torna `occurrences` a contagem do
+// dia), o registro que nunca derruba quem chamou, e a leitura que falha não vira "nenhuma falha".
+
+Deno.test("contextoDaRotina: uma linha por rotina e dia, no dia de Brasília", () => {
+  // 23h30 de 24/11 em Brasília (já 25/11 em UTC): ainda é o dia 24
+  assertEquals(contextoDaRotina("triagem_email", new Date("2026-11-25T02:30:00.000Z")), "rotina-ia:triagem_email@2026-11-24");
+  // 00h30 UTC de 25/11 = 21h30 de 24/11 em Brasília
+  assertEquals(contextoDaRotina("triagem_email", new Date("2026-11-25T00:30:00.000Z")), "rotina-ia:triagem_email@2026-11-24");
+  // a virada é à meia-noite de Brasília (03:00 UTC)
+  assertEquals(contextoDaRotina("triagem_email", new Date("2026-11-25T03:00:00.000Z")), "rotina-ia:triagem_email@2026-11-25");
+  assertEquals(contextoDaRotina("casar_fornecedor", new Date("2026-11-24T15:00:00.000Z")), "rotina-ia:casar_fornecedor@2026-11-24");
+});
+
+Deno.test("registrarFalhaDeRotina: grava o contexto do dia, a rotina como ação e o erro técnico", async () => {
+  const chamadas: Array<{ fn: string; args: Record<string, unknown> }> = [];
+  const admin = {
+    rpc: (fn: string, args: Record<string, unknown>) => {
+      chamadas.push({ fn, args });
+      return Promise.resolve({ error: null });
+    },
+  };
+  const agora = new Date("2026-11-24T13:00:00.000Z");
+  await registrarFalhaDeRotina(admin, { rotina: "triagem_email", mensagem: "ClaudeApiError: OpenRouter 402 (créditos insuficientes na conta)", agora });
+  assertEquals(chamadas.length, 1);
+  assertEquals(chamadas[0].fn, "log_app_error");
+  assertEquals(chamadas[0].args.p_source, "edge");
+  assertEquals(chamadas[0].args.p_context, "rotina-ia:triagem_email@2026-11-24");
+  assertEquals(chamadas[0].args.p_action, "triagem_email");
+  assertEquals(chamadas[0].args.p_level, "error");
+  assertEquals(chamadas[0].args.p_message, "ClaudeApiError: OpenRouter 402 (créditos insuficientes na conta)");
+  // a falha sem texto ainda conta (logEdgeError descartaria a mensagem vazia)
+  await registrarFalhaDeRotina(admin, { rotina: "casar_fornecedor", mensagem: "  ", agora });
+  assertEquals(chamadas.length, 2);
+  assertEquals(chamadas[1].args.p_context, "rotina-ia:casar_fornecedor@2026-11-24");
+  assertEquals(chamadas[1].args.p_message, "falha sem mensagem de erro");
+});
+
+Deno.test("registrarFalhaDeRotina: o banco fora do ar não derruba a rotina", async () => {
+  const admin = { rpc: () => Promise.reject(new Error("sem banco")) };
+  await registrarFalhaDeRotina(admin, { rotina: "triagem_email", mensagem: "x" });
+});
+
+Deno.test("rotinaDoContexto: só as rotinas conhecidas, no formato do registro", () => {
+  assertEquals(rotinaDoContexto("rotina-ia:triagem_email@2026-11-24"), "triagem_email");
+  assertEquals(rotinaDoContexto("rotina-ia:followup@2026-11-24"), "followup");
+  for (const fora of ["rotina-ia:outra_coisa@2026-11-24", "rotina-ia:triagem_email", "ai-agent@2026-11-05T16", "rotina-ia:constructor@2026-11-24", "", null, undefined]) {
+    assertEquals(rotinaDoContexto(fora), null, String(fora));
+  }
+  // o padrão do LIKE casa o que o registro grava
+  assertEquals(PADRAO_DO_CONTEXTO_DE_ROTINA, "rotina-ia:%");
+  assertEquals(contextoDaRotina("triagem_email", AGORA).startsWith(PADRAO_DO_CONTEXTO_DE_ROTINA.slice(0, -1)), true);
+  // toda rotina tem o nome que o dono lê
+  assertEquals(ROTULO_DA_ROTINA.triagem_email, "triagem de e-mail");
+  assertEquals(ROTULO_DA_ROTINA.casar_fornecedor, "leitura do prazo do fornecedor");
+});
+
+Deno.test("somaPorRotina: soma os dias e os textos de erro da mesma rotina; contexto desconhecido não entra", () => {
+  assertEquals(somaPorRotina([
+    { context: "rotina-ia:casar_fornecedor@2026-11-24", occurrences: 1 },
+    { context: "rotina-ia:triagem_email@2026-11-23", occurrences: 8 },
+    { context: "rotina-ia:triagem_email@2026-11-24", occurrences: 3 },
+    { context: "rotina-ia:triagem_email@2026-11-24", occurrences: 1 }, // outro texto de erro no mesmo dia
+    { context: "rotina-ia:nao_existe@2026-11-24", occurrences: 50 },
+    { context: "email-imap", occurrences: 4 },
+    { context: null, occurrences: 2 },
+    { context: "rotina-ia:followup@2026-11-24", occurrences: null },
+  ]), [{ rotina: "triagem_email", vezes: 12 }, { rotina: "casar_fornecedor", vezes: 1 }]);
+  assertEquals(somaPorRotina([]), []);
+  assertEquals(somaPorRotina(null), []);
+});
+
+Deno.test("falhasDeRotinaDesde: lê só o erro aberto das rotinas, visto desde a hora pedida", async () => {
+  const desde = new Date("2026-11-23T10:30:00.000Z"); // 07:30 de 23/11 em Brasília
+  const { admin, filtros } = bancoDoLog({
+    data: [{ context: "rotina-ia:triagem_email@2026-11-23", occurrences: 9 }, { context: "rotina-ia:triagem_email@2026-11-24", occurrences: 3 }],
+    error: null,
+  });
+  assertEquals(await falhasDeRotinaDesde(admin, desde), [{ rotina: "triagem_email", vezes: 12 }]);
+  assertEquals(filtros.select, "context, occurrences");
+  assertEquals(filtros["like:context"], "rotina-ia:%");
+  assertEquals(filtros["eq:level"], "error");
+  assertEquals(filtros["is:resolved_at"], null);
+  assertEquals(filtros["gte:last_seen_at"], "2026-11-23T10:30:00.000Z");
+  assertEquals(await falhasDeRotinaDesde(bancoDoLog({ data: [], error: null }).admin, desde), []);
+});
+
+Deno.test("falhasDeRotinaDesde: leitura que falha é null, nunca 'nenhuma falha'", async () => {
+  const desde = new Date("2026-11-23T10:30:00.000Z");
+  assertEquals(await falhasDeRotinaDesde(bancoDoLog({ data: null, error: { message: "x" } }).admin, desde), null);
+  assertEquals(await falhasDeRotinaDesde(bancoDoLog("lanca").admin, desde), null);
 });

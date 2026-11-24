@@ -11,7 +11,7 @@
 // classificação carrega um TRECHO LITERAL do e-mail, e se esse trecho não existir no texto
 // real a classificação é rebaixada — nunca aceita.
 
-import { callClaude, type ClaudeToolSchema } from "../ai/anthropic.ts";
+import { callClaude, type CallClaudeParams, type CallClaudeResult, type ClaudeToolSchema } from "../ai/anthropic.ts";
 import { MODEL_LITE } from "../ai/models.ts";
 import { preClassify, isNoReplySender, readableBody, displaySender } from "./normalize.ts";
 import type { InboundEmail } from "./types.ts";
@@ -52,6 +52,16 @@ export interface Triage {
   rebaixada: boolean;
   /** Quando o resultado saiu sem gastar LLM. */
   deterministica: boolean;
+  /**
+   * (V2, 24/11/2026) O erro técnico quando a chamada do modelo falhou. Quem tem banco registra
+   * (email-imap → registrarFalhaDeRotina): este arquivo não grava nada. Nunca leva texto do e-mail.
+   */
+  falha?: string;
+}
+
+/** O que o teste troca: o modelo. */
+export interface DepsDaTriagem {
+  chamar?: (p: CallClaudeParams) => Promise<CallClaudeResult>;
 }
 
 const MAX_BODY_CHARS = 4000;
@@ -200,17 +210,18 @@ export function formatEmailForTriage(email: InboundEmail): string {
 /**
  * Classifica um e-mail. Tenta o caminho determinístico primeiro (custo zero) e só chama o
  * modelo quando o cabeçalho não resolve. Falha do modelo NÃO some com o e-mail: cai em
- * `notify`, que é o estado seguro.
+ * `notify`, que é o estado seguro, e sai com `falha` preenchida para quem chama registrar.
  */
-export async function triageEmail(email: InboundEmail, now: Date = new Date()): Promise<Triage> {
+export async function triageEmail(email: InboundEmail, now: Date = new Date(), deps: DepsDaTriagem = {}): Promise<Triage> {
   const rapido = triageDeterministica(email);
   if (rapido) return rapido;
 
   const textoReal = formatEmailForTriage(email);
   const hojeBRT = new Date(now.getTime() - 3 * 3600000).toISOString().slice(0, 10);
+  const chamar = deps.chamar ?? callClaude;
 
   try {
-    const result = await callClaude({
+    const result = await chamar({
       model: MODEL_LITE,
       system: [{ type: "text", text: buildTriagePrompt(hojeBRT) }],
       messages: [{ role: "user", content: [{ type: "text", text: textoReal }] }],
@@ -235,6 +246,8 @@ export async function triageEmail(email: InboundEmail, now: Date = new Date()): 
       classe: FALLBACK_CLASS, confianca: 0, evidencia: "",
       motivo: `falha na triagem: ${String(e).slice(0, 120)}`,
       alertaFraude: false, rebaixada: true, deterministica: false,
+      // (V2) a falha deixa de ser calada: quem chamou registra
+      falha: String(e).slice(0, 300),
     };
   }
 }

@@ -1,7 +1,7 @@
 // E-mail urgente avisado UMA vez (15/10/2026). O mesmo golpe ("CONTRATO 20037247643 - Advocacia
 // Antonio Samuel da Silveira", do mesmo remetente) chegou em 13/10 e 14/10 e foi avisado na hora
 // duas vezes. Pelo texto da fonte (importar index.ts subiria o servidor da função).
-import { assert, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 
 const fonte = await Deno.readTextFile(new URL("./index.ts", import.meta.url));
 
@@ -83,6 +83,24 @@ Deno.test("Fase 4: a remessa vem depois do update de dados_extraidos, na leitura
   const g2 = fn.indexOf('await admin.from("email_messages").update({ dados_extraidos: gravar, ...ligar }).eq("id", m.id);');
   const r2 = fn.indexOf("if (temNotaParaEmpresa(dados)) await registrarRemessas(admin, m.id);");
   assert(g2 > 0 && r2 > g2, `reextrair: ${g2} ${r2}`);
+});
+
+// Pacote 1, V2 (24/11/2026). De 12 a 24/11 a triagem falhou em 95 e-mails sem deixar uma linha em app_error_logs. O que
+// se protege: o registro vem logo depois da triagem, só quando ela falhou (t.falha), antes de gravar a classe; e o e-mail
+// é gravado do mesmo jeito (a falha não pula a gravação nem esconde o e-mail).
+Deno.test("V2: a triagem que falhou é registrada logo depois de triageEmail, só com t.falha, e o e-mail é gravado igual", () => {
+  const ini = fonte.indexOf("// Triagem só do que é recente");
+  assert(ini > 0);
+  const bloco = fonte.slice(ini, fonte.indexOf("cursor = uid;", ini));
+  const triagem = bloco.indexOf("await triageEmail(email");
+  const registro = bloco.indexOf('if (t.falha) await registrarFalhaDeRotina(admin, { rotina: "triagem_email", mensagem: t.falha });');
+  const grava = bloco.indexOf("triage_class: t.classe");
+  assert(triagem > 0 && registro > triagem && grava > registro, `ordem: ${triagem} ${registro} ${grava}`);
+  assertEquals(bloco.split("registrarFalhaDeRotina(").length, 2, "um registro só, o da triagem");
+  assertStringIncludes(fonte, 'import { registrarFalhaDeRotina } from "../_shared/ai/falhas-do-assistente.ts";');
+  // o registro leva só o erro técnico: nem assunto, nem corpo, nem remetente
+  const linha = bloco.slice(registro, bloco.indexOf("\n", registro));
+  for (const proibido of ["email.subject", "email.text", "email.from", "body"]) assert(!linha.includes(proibido), proibido);
 });
 
 Deno.test("Fase 4: ?remessas=1 chama a releitura e responde 500 só com erro de leitura (o modo desligado é pulado)", () => {

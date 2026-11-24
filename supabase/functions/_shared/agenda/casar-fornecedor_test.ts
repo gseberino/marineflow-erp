@@ -56,6 +56,28 @@ Deno.test("escolherCompra: fora da lista, sem a ferramenta, opção nula ou o mo
   assertEquals(await escolherCompra("O painel já foi coletado", DUAS, { chamar: m2.chamar }), { n: 2, confianca: 1 });
 });
 
+// (pacote 1, V2, 24/11/2026) A falha do modelo era calada: voltava "ninguém", igual a "não deu para saber". Agora vem
+// marcada, com o erro técnico, para o acompanhar-conversas registrar. Só a falha da CHAMADA marca: resposta fora da lista,
+// sem a ferramenta ou nula é o modelo respondendo, não a rotina falhando.
+Deno.test("escolherCompra: o modelo fora do ar continua 'ninguém', agora marcado com falhou e o erro técnico", async () => {
+  const fora = await escolherCompra("Já foi coletado", DUAS, { chamar: modelo(new Error("OpenRouter 402 (créditos insuficientes na conta)")).chamar });
+  assertEquals(fora, { n: null, confianca: 0, falhou: true, erro: "Error: OpenRouter 402 (créditos insuficientes na conta)" });
+  const longo = await escolherCompra("Já foi coletado", DUAS, { chamar: modelo(new Error("x".repeat(900))).chamar });
+  assertEquals([longo.falhou, longo.erro?.length], [true, 300]);
+  // o erro é o da chamada: a frase do fornecedor não vai junto
+  assert(!String(fora.erro).includes("coletado"));
+  for (const r of [
+    escolheu({ opcao: 7, confianca: 0.95 }),
+    escolheu({ opcao: null, confianca: 0.2 }),
+    { content: [{ type: "text", text: "É o compressor do Flávio." }] } as Partial<CallClaudeResult>,
+  ]) {
+    const escolha = await escolherCompra("Já foi coletado", DUAS, { chamar: modelo(r).chamar });
+    assertEquals([escolha.falhou, escolha.erro], [undefined, undefined]);
+  }
+  // nada a escolher nem chama o modelo: não é falha
+  assertEquals((await escolherCompra("Já foi coletado", [], { chamar: modelo(new Error("x")).chamar })).falhou, undefined);
+});
+
 Deno.test("escolherCompra: nada a escolher não chama o modelo", async () => {
   const m = modelo(escolheu({ opcao: 1, confianca: 1 }));
   assertEquals(await escolherCompra("Já foi coletado", [], { chamar: m.chamar }), { n: null, confianca: 0 });
