@@ -17,6 +17,8 @@ export interface PluggyAccount {
   name: string;
   number?: string;
   balance: number;
+  /** Só em conta de crédito: vencimento, mínimo e limite. O que vem preenchido depende do banco. */
+  creditData?: Record<string, unknown> | null;
 }
 
 export interface PluggyTransaction {
@@ -136,8 +138,8 @@ export async function pluggyAuth(clientId: string, clientSecret: string): Promis
   return apiKey;
 }
 
-async function pluggyGet(apiKey: string, path: string): Promise<any> {
-  const res = await fetch(`${PLUGGY_API}${path}`, { headers: { "X-API-KEY": apiKey } });
+async function pluggyGet(apiKey: string, path: string, signal?: AbortSignal): Promise<any> {
+  const res = await fetch(`${PLUGGY_API}${path}`, { headers: { "X-API-KEY": apiKey }, ...(signal ? { signal } : {}) });
   if (!res.ok) {
     throw new Error(`Pluggy ${path} respondeu ${res.status}: ${(await res.text()).slice(0, 200)}`);
   }
@@ -196,6 +198,43 @@ export async function criarWebhook(apiKey: string, event: string, url: string): 
 export async function fetchAccounts(apiKey: string, itemId: string): Promise<PluggyAccount[]> {
   const data = await pluggyGet(apiKey, `/accounts?itemId=${encodeURIComponent(itemId)}`);
   return (data?.results ?? []) as PluggyAccount[];
+}
+
+/** Prazo da leitura INTEIRA das faturas de uma conta (todas as páginas), em milissegundos. */
+export const PRAZO_DAS_FATURAS_MS = 10_000;
+
+/**
+ * As faturas que o banco emitiu para uma conta de crédito (vencimento, total, mínimo, pagamentos, encargos).
+ *
+ * `/bills` pagina por número de página (`page`, `totalPages`), diferente das transações. O tamanho padrão da página
+ * (500) cobre anos de fatura; o teto de páginas é só trava contra resposta que nunca diz que acabou. Devolve o objeto
+ * cru: quem lê é `_shared/banking/cartao.ts`.
+ *
+ * Tem PRAZO, e é um só para a leitura inteira (não por página): esta chamada roda no meio da sincronização do extrato,
+ * e as outras chamadas ao provedor não têm limite de tempo. Sem prazo, uma lista de faturas que não responde seguraria
+ * o extrato das contas e das conexões seguintes. O estouro vira erro, que quem chama registra e segue.
+ *
+ * Resposta sem a lista (`results`) é erro, não "nenhuma fatura": "o banco não tem fatura" e "a resposta veio em outro
+ * formato" levam a conclusões opostas sobre o que este banco entrega.
+ */
+export async function fetchBills(
+  apiKey: string,
+  accountId: string,
+  maxPages = 5,
+  prazoMs = PRAZO_DAS_FATURAS_MS,
+): Promise<unknown[]> {
+  const todas: unknown[] = [];
+  const prazo = AbortSignal.timeout(prazoMs);
+  for (let pagina = 1; pagina <= maxPages; pagina++) {
+    const params = new URLSearchParams({ accountId, page: String(pagina) });
+    const data = await pluggyGet(apiKey, `/bills?${params.toString()}`, prazo);
+    if (!Array.isArray(data?.results)) throw new Error("Pluggy /bills respondeu sem a lista de faturas (results)");
+    const lote = data.results as unknown[];
+    todas.push(...lote);
+    const totalDePaginas = Number(data?.totalPages);
+    if (lote.length === 0 || !Number.isFinite(totalDePaginas) || pagina >= totalDePaginas) break;
+  }
+  return todas;
 }
 
 /**

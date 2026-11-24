@@ -14,9 +14,10 @@
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
-  pluggyAuth, fetchItem, fetchAccounts, fetchTransactions, listItems, listarWebhooks, criarWebhook,
+  pluggyAuth, fetchItem, fetchAccounts, fetchTransactions, fetchBills, listItems, listarWebhooks, criarWebhook,
   mapTransaction, accountSourceType, motivoDeCreditoEmCartao,
 } from "../_shared/banking/pluggy.ts";
+import { guardarCartao } from "../_shared/banking/cartao.ts";
 import {
   JANELA_INICIAL_DIAS, inicioDaBusca, mudancasDoProvedor, transacaoMaisRecente, type EstadoDaLinha,
 } from "../_shared/banking/janela-de-busca.ts";
@@ -710,6 +711,12 @@ async function sincronizarConexao(
       }
 
       if (origem === "bank") await conferirSaldoAcumulado(admin, conexao, conta);
+      // (24/11/2026) Cartão: guarda o que o banco diz da conta de crédito (saldo, vencimento, mínimo, limite) e as
+      // faturas emitidas. Depois do extrato; nunca lança e a leitura das faturas tem prazo (10 s): se ela falhar ou
+      // demorar, as compras já estão gravadas e a sincronização segue.
+      if (origem === "credit_card") {
+        await guardarCartao(admin, conexao.id, conta, (contaId) => fetchBills(apiKey, contaId), (item as any)?.lastUpdatedAt);
+      }
     }
 
     const base = importadas > 0
