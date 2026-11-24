@@ -4535,3 +4535,28 @@ quatro estão latentes.
   da linha digitável é o banco da saída e a conta é uma só (entre parcelas iguais do mesmo fornecedor, a de vencimento mais
   próximo); a proposta fica `approved` com `automatica = 'boleto'` e se desfaz por `desfazer_aprovacao`. Simulado no dado real:
   baixa as duas parcelas acima e deixa a de 01/12 em aberto. Todo o resto continua sendo pergunta.
+
+### [NOVO-p1-c3-01] Status agendado: horário sem fuso é gravado como UTC (sairia 3 horas antes do que foi dito)
+
+- **Onde:** `supabase/functions/_shared/ai/tools/status-tools.ts`, `schedule_status_post`: `scheduled_at: args.scheduled_at ??
+  new Date().toISOString()` vai cru para `whatsapp_status_scheduled.scheduled_at` (timestamptz). As outras ferramentas com
+  horário passam por `comFusoDeBrasilia` / `horariosDeBrasilia` (`_shared/ai/fuso.ts`); esta não. Visto em 24/11/2026 ao seguir
+  os campos de data do cartão de confirmação (ramo `session/assistente-p1`, pacote 1 do assistente, item C3-b).
+- **Efeito:** "2026-11-25T09:00" sem fuso o Postgres lê como UTC, e o status sairia às 06:00 de Brasília. Entre 00:00 e 02:59 o
+  cartão (que desde o C3-b lê hora sem fuso como de Brasília) mostra o dia dito, e o banco grava a véspera. Latente: a tabela
+  tem 0 linhas, a ferramenta nunca foi usada.
+- **Menor mudança:** `comFusoDeBrasilia(args.scheduled_at)` na ferramenta, com teste. Não corrigido aqui.
+
+### [NOVO-p1-s2-01] Depois do S2, pagamento a freelancer e caixa ainda podem ser liberados para rodar sem o "sim"
+
+- **Onde:** `supabase/functions/_shared/ai/autonomy-policy.ts`, `NEVER_AUTONOMOUS`. Medido em 24/11/2026 sobre `allTools` (312
+  ferramentas), já com os 8 nomes do S2 (ramo `session/assistente-p1`): 54 ações de risco acima de baixo continuam fora da lista.
+  No perfil de hoje (`ai_tool_profile = admin_enxuto`) 16 ficam à vista, e só essas a autonomia alcança; entre elas mexem em
+  dinheiro `registrar_pagamento_freelancer`, `lancar_no_caixa` e `casar_lancamento_com_extrato` (que registra o pagamento da
+  conta em aberto). Fora do perfil (alcançáveis só se o perfil mudar) há quatro de risco alto: `enviar_resposta_email` (e-mail a
+  quem é de fora), `schedule_status_post` (status público), `fechar_mes` e `adjust_inventory`.
+- **Efeito:** `isAutonomyGranted` não olha o nível do risco: com a chave `ai_autonomy_<nome> = 'auto'` a ação roda sem o "sim" e
+  sem o PIN. E a recusa nova de `set_tool_autonomy` diz que o que "mexe em dinheiro" ou "fala com quem é de fora" nunca é
+  liberável, o que não vale para essas. Latente: 0 chaves `ai_autonomy_*` no banco.
+- **Menor mudança:** decisão do dono, nome a nome. O S2 fechou 8 e deixou de fora, de propósito, as ações internas e com
+  desfazer (a porta do "se eu não responder, faça" do pacote seguinte). Não corrigido aqui.
