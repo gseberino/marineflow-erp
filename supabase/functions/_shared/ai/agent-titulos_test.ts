@@ -57,6 +57,41 @@ Deno.test("aprovação em lote: o cartão real de 28/10 (create_service) sai em 
   assertEquals(formatFieldValue("percentual_comissao", 10), "10%");
 });
 
+// C3-b (24/11/2026): a data do cartão saía por `new Date(v).toLocaleDateString("pt-BR")`, sem fuso. A função roda em
+// UTC, onde 22:00 de Brasília já é o dia seguinte. Os casos abaixo valem em qualquer fuso do servidor (UTC na
+// função, Brasília no PC): nenhum depende do relógio nem do fuso da máquina.
+Deno.test("C3-b: horário no cartão sai com o dia de Brasília, não o do servidor", () => {
+  assertEquals(formatFieldValue("scheduled_at", "2026-11-24T22:00:00-03:00"), "24/11/2026");
+  // o mesmo instante escrito em UTC (é assim que o banco devolve)
+  assertEquals(formatFieldValue("scheduled_at", "2026-11-25T01:00:00Z"), "24/11/2026");
+  assertEquals(formatFieldValue("scheduled_at", "2026-11-25T01:00:00.000+00:00"), "24/11/2026");
+  // hora sem fuso é de Brasília (a mesma leitura de comFusoDeBrasilia): 01:00 de 25/11 é 25/11
+  assertEquals(formatFieldValue("scheduled_at", "2026-11-25T01:00"), "25/11/2026");
+  assertEquals(formatFieldValue("scheduled_at", "2026-11-24T22:00:00"), "24/11/2026");
+  assertEquals(formatFieldValue("scheduled_at", "2026-11-25"), "25/11/2026");
+});
+
+Deno.test("C3-b: vencimento, emissão e pagamento saem com o dia escrito, que é o que o banco guarda", () => {
+  assertEquals(formatFieldValue("due_date", "2026-11-25"), "25/11/2026");
+  assertEquals(formatFieldValue("payment_date", "2026-12-01"), "01/12/2026");
+  assertEquals(formatFieldValue("issue_date", " 2026-01-31 "), "31/01/2026");
+  // veio com hora: a coluna é de data e ignora hora e fuso; converter mostraria a véspera
+  assertEquals(formatFieldValue("due_date", "2026-11-25T00:00:00"), "25/11/2026");
+  assertEquals(formatFieldValue("payment_date", "2026-11-25T00:00:00.000Z"), "25/11/2026");
+  assertEquals(formatFieldValue("issue_date", "2026-11-24T22:00:00-03:00"), "24/11/2026");
+});
+
+Deno.test("C3-b: o que não é data ISO aparece como foi escrito; campo que não é de data não vira data", () => {
+  // o new Date lia "dia 10" como 01/10/2001 e "10/12" como 12/10/2001
+  assertEquals(formatFieldValue("due_date", "dia 10"), "dia 10");
+  assertEquals(formatFieldValue("due_date", "10/12"), "10/12");
+  assertEquals(formatFieldValue("scheduled_at", "amanhã cedo"), "amanhã cedo");
+  assertEquals(formatFieldValue("scheduled_at", "2026-11-25T25:99"), "2026-11-25T25:99");
+  assertEquals(formatFieldValue("due_date", ""), "");
+  assertEquals(formatFieldValue("due_date", null), "—");
+  assertEquals(formatFieldValue("description", "2026-11-25"), "2026-11-25");
+});
+
 Deno.test("os títulos que saíram em inglês em produção", () => {
   assertEquals(tituloDaAcao("duplicate_service_order"), "Duplicar orçamento/OS");
   assertEquals(tituloDaAcao("create_purchase_order"), "Criar ordem de compra");

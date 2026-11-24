@@ -53,6 +53,7 @@ import {
 } from "./rotulos.ts";
 import { resumirServicoNovo } from "./tools/products.ts";
 import { resolverCobrancasDoLote } from "./tools/flow-macros.ts";
+import { comFusoDeBrasilia, FUSO_DE_BRASILIA } from "./fuso.ts";
 
 export interface Proposal {
   pending_action_id: string;
@@ -358,7 +359,29 @@ const FIELD_LABELS_PT: Record<string, string> = {
 for (const [campo, rotulo] of Object.entries(ROTULOS_DOS_CAMPOS)) FIELD_LABELS_PT[campo] ??= rotulo;
 
 const DATE_FIELDS = new Set(["payment_date", "scheduled_at", "issue_date", "due_date"]);
+/** Dos campos de data, os que guardam um INSTANTE (timestamptz). Os outros são colunas de data: guardam só o dia. */
+const CAMPOS_DE_INSTANTE = new Set(["scheduled_at"]);
 const fmtBRL = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+
+/**
+ * A data que o dono confere no cartão, "dd/mm/aaaa" (C3-b, 24/11/2026). Saía por `new Date(v).toLocaleDateString("pt-BR")`,
+ * sem fuso, e a função roda em UTC: um agendamento para 22:00 de Brasília aparecia com o dia seguinte.
+ *
+ *  · data pura ("2026-11-25")           → o dia escrito, pelo próprio texto (sem new Date);
+ *  · coluna de data que veio com hora   → o dia escrito: o banco guarda o dia e ignora hora e fuso (register_payment
+ *                                         faz split("T")[0]). Converter para Brasília mostraria a véspera de
+ *                                         "2026-11-25T00:00:00Z", que é gravado como 25/11;
+ *  · instante (scheduled_at) com hora   → o dia em Brasília; hora sem fuso é de Brasília (a leitura de comFusoDeBrasilia);
+ *  · o que não é data ISO ("dia 10")    → null: o cartão mostra como foi escrito. (O new Date lia "dia 10" como 01/10/2001.)
+ */
+function diaNoCartao(key: string, v: string): string | null {
+  const s = v.trim();
+  const escrito = /^(\d{4})-(\d{2})-(\d{2})(?:$|[T ])/.exec(s);
+  if (!escrito) return null;
+  if (s.length === 10 || !CAMPOS_DE_INSTANTE.has(key)) return `${escrito[3]}/${escrito[2]}/${escrito[1]}`;
+  const d = new Date(String(comFusoDeBrasilia(s)));
+  return isNaN(d.getTime()) ? null : d.toLocaleDateString("pt-BR", { timeZone: FUSO_DE_BRASILIA });
+}
 
 /** O rótulo do campo no resumo genérico (o mesmo que o teste agent-titulos_test.ts cobra). */
 export function rotuloDoCampo(key: string): string {
@@ -379,8 +402,8 @@ export function formatFieldValue(key: string, v: unknown): string {
   const doValor = typeof v === "string" ? ROTULOS_DOS_VALORES[key]?.[v] : undefined;
   if (doValor) return doValor;
   if (DATE_FIELDS.has(key) && typeof v === "string") {
-    const d = new Date(v);
-    if (!isNaN(d.getTime())) return d.toLocaleDateString("pt-BR");
+    const dia = diaNoCartao(key, v);
+    if (dia) return dia;
   }
   return typeof v === "object" ? JSON.stringify(v) : String(v);
 }
