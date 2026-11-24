@@ -11,8 +11,14 @@
 // As linhas NÃO levam letra nem número: as letras são dos itens da manhã (*A feito*) e "1" é um "sim". O dono responde
 // pelo nome ("paguei a Unifique") e o assistente usa as ferramentas de sempre, com a confirmação de sempre. Nada aqui
 // paga nem baixa conta.
+//
+// Fatura do cartão (24/11/2026, "siga em frente" do dono): entra no bloco da semana e na resposta do assistente como
+// seção à parte — é aviso de saída de caixa (_shared/pagamentos/cartoes.ts), não conta a pagar. O vencimento é o do
+// calendário do banco; o valor é estimado pelo extrato e o texto diz sempre "cerca de"; o fechamento da fatura aberta é
+// projetado e sai como "por volta de".
 import { brl, ddmm, diasEntre, umaLinha } from "../secretario/base.ts";
 import { diasUteisDaSemana, ehDiaUtilDaTarde } from "../secretario/turno.ts";
+import { type CartaoNaFila, lerCartoes } from "./cartoes.ts";
 
 export const RPC_DOS_PAGAMENTOS = "pagamentos_da_semana";
 export const CHAVE_DOS_PAGAMENTOS = "pagamentos_semana_modo";
@@ -58,7 +64,18 @@ export interface PagamentosDaSemana {
   vencido: { n: number; total: number };
   /** o que a empresa deve aos sócios (pago do bolso) — fora da fila */
   reembolsos: { n: number; total: number };
+  /** as faturas de cartão em aberto, pelo extrato (em ordem de vencimento). Ausente = não lido. */
+  cartoes?: CartaoNaFila[];
+  /** o que o extrato do cartão não explica */
+  avisosDoCartao?: string[];
+  /** pagamentos que já saíram da conta e o cartão ainda não mostrou (já descontados das faturas) */
+  cartaoEmTransito?: number;
+  /** a leitura dos cartões falhou: quem responde ao dono tem de dizer que ficou de fora */
+  cartoesErro?: string;
 }
+
+/** Quantas faturas de cartão o bloco mostra (2 cartões × fechada e aberta). */
+export const MAX_DE_CARTOES = 4;
 
 const numero = (v: unknown): number => {
   const n = Number(v);
@@ -135,21 +152,81 @@ function primeiroNome(c: ContaDaSemana): string {
 }
 
 /**
- * O bloco da semana (1º dia útil): a fila na ordem de pagar, a soma contra o saldo, o que a empresa deve ao sócio e, uma
- * vez por fornecedor, a pergunta do grupo. Sem conta na fila = null (a manhã sai como antes).
+ * Uma fatura de cartão em uma linha. O vencimento é o do calendário do banco ("vencimento 25/11": em fim de semana ou
+ * feriado o banco passa para o dia útil seguinte); o fechamento da aberta é projetado ("por volta de"); o valor é
+ * estimado e leva sempre "cerca de" — menos o total que o próprio banco informou.
+ */
+export function linhaDoCartao(f: CartaoNaFila): string {
+  const nome = `Cartão ${umaLinha(f.cartao, 20)}`;
+  if (f.situacao === "aberta") {
+    return `${nome} — cerca de ${brl(f.valor)} até agora (fecha por volta de ${ddmm(f.fechamento)}, vencimento ${ddmm(f.vencimento)})`;
+  }
+  const fatura = f.origem === "banco" ? `fatura de ${brl(f.total)}` : `fatura de cerca de ${brl(f.total)}`;
+  const data = `vencimento ${ddmm(f.vencimento)}`;
+  if (f.valor < 1) {
+    if (f.total < 1) return `${nome} — ${data}: pelo extrato não há nada em aberto`;
+    return `${nome} — ${fatura} (${data}): coberta pelos ${brl(f.pago)} pagos desde o fechamento`;
+  }
+  const atraso = f.vencida ? "; o extrato não mostra pagamento que cubra" : "";
+  if (f.pago < 1) return `${nome} — ${fatura} (${data}${atraso})`;
+  return `${nome} — faltam cerca de ${brl(f.valor)} da ${fatura} (${data}${atraso})`;
+}
+
+/** O que das faturas de cartão cai até o fim da janela (ou já passou do vencimento aproximado). */
+export function cartaoNaJanela(p: PagamentosDaSemana): number {
+  return centavos((p.cartoes ?? []).filter((f) => f.vencimento <= p.ate).reduce((s, f) => s + f.valor, 0));
+}
+
+/** A seção do cartão no bloco da semana. Sem fatura e sem aviso = nenhuma linha. */
+function linhasDosCartoes(p: PagamentosDaSemana): string[] {
+  const cartoes = p.cartoes ?? [];
+  const avisos = p.avisosDoCartao ?? [];
+  if (!cartoes.length && !avisos.length) return [];
+  const linhas: string[] = [];
+  if (cartoes.length) {
+    linhas.push("Cartão (vencimento do banco; valor estimado pelo extrato):");
+    for (const f of cartoes.slice(0, MAX_DE_CARTOES)) linhas.push(`• ${linhaDoCartao(f).replace(/^Cartão /, "")}`);
+    const resto = cartoes.slice(MAX_DE_CARTOES);
+    if (resto.length) linhas.push(`• e mais ${resto.length} (cerca de ${brl(centavos(resto.reduce((s, f) => s + f.valor, 0)))})`);
+    if ((p.cartaoEmTransito ?? 0) > 0) {
+      linhas.push(`Contei como pagos ${brl(p.cartaoEmTransito!)} que parecem ter saído da conta para o cartão; ele ainda não mostra.`);
+    }
+  }
+  for (const a of avisos.slice(0, 2)) linhas.push(umaLinha(a, 160));
+  return linhas;
+}
+
+/**
+ * O bloco da semana (1º dia útil): a fila na ordem de pagar, as faturas de cartão, a soma contra o saldo, o que a empresa
+ * deve ao sócio e, uma vez por fornecedor, a pergunta do grupo. Sem conta e sem cartão = null (a manhã sai como antes);
+ * sem cartão lido, o texto é o de antes, byte a byte.
  */
 export function blocoDaSemana(p: PagamentosDaSemana): string | null {
-  if (!p.contas.length) return null;
+  const doCartao = linhasDosCartoes(p);
+  if (!p.contas.length && !doCartao.length) return null;
   const saldo = textoDoSaldo(p);
-  const linhas: string[] = [`*Pagamentos da semana*${saldo ? ` — ${saldo}` : ""}`, "Na ordem em que eu pagaria:"];
-  const mostradas = p.contas.slice(0, MAX_DE_LINHAS);
-  for (const c of mostradas) linhas.push(`• ${umaLinha(c.nome, 28)} — ${brl(c.valor)} (${quando(c, p.hoje)})`);
-  const resto = p.contas.slice(MAX_DE_LINHAS);
-  if (resto.length) linhas.push(`• e mais ${resto.length} (${brl(centavos(resto.reduce((s, c) => s + c.valor, 0)))})`);
-  if (p.saldoNoBanco === null) linhas.push(`Soma ${brl(p.soma)}.`);
-  else {
-    const falta = centavos(p.soma - p.saldoNoBanco);
-    linhas.push(falta > 0 ? `Soma ${brl(p.soma)}: faltam ${brl(falta)} no banco.` : `Soma ${brl(p.soma)}: o saldo cobre.`);
+  const linhas: string[] = [`*Pagamentos da semana*${saldo ? ` — ${saldo}` : ""}`];
+  if (p.contas.length) {
+    linhas.push("Na ordem em que eu pagaria:");
+    const mostradas = p.contas.slice(0, MAX_DE_LINHAS);
+    for (const c of mostradas) linhas.push(`• ${umaLinha(c.nome, 28)} — ${brl(c.valor)} (${quando(c, p.hoje)})`);
+    const resto = p.contas.slice(MAX_DE_LINHAS);
+    if (resto.length) linhas.push(`• e mais ${resto.length} (${brl(centavos(resto.reduce((s, c) => s + c.valor, 0)))})`);
+  }
+  linhas.push(...doCartao);
+  // a soma leva o cartão só quando a fatura vence na semana (ou já venceu): a de depois aparece, mas não entra na conta.
+  // Com cartão dentro, a soma inteira é aproximada e o texto diz isso.
+  const doCartaoNaSemana = cartaoNaJanela(p);
+  const soma = centavos(p.soma + doCartaoNaSemana);
+  if (p.contas.length || doCartaoNaSemana > 0) {
+    const comCartao = doCartaoNaSemana > 0;
+    const rotulo = comCartao ? `Soma cerca de ${brl(soma)} (com cerca de ${brl(doCartaoNaSemana)} de cartão)` : `Soma ${brl(soma)}`;
+    if (p.saldoNoBanco === null) linhas.push(`${rotulo}.`);
+    else {
+      const falta = centavos(soma - p.saldoNoBanco);
+      if (comCartao) linhas.push(falta > 0 ? `${rotulo}: faltam cerca de ${brl(falta)} no banco.` : `${rotulo}: o saldo deve cobrir.`);
+      else linhas.push(falta > 0 ? `${rotulo}: faltam ${brl(falta)} no banco.` : `${rotulo}: o saldo cobre.`);
+    }
   }
   if (p.reembolsos.n > 0) {
     linhas.push(`Fora da fila: a empresa te deve ${brl(p.reembolsos.total)} (${p.reembolsos.n === 1 ? "1 reembolso" : `${p.reembolsos.n} reembolsos`}).`);
@@ -159,10 +236,30 @@ export function blocoDaSemana(p: PagamentosDaSemana): string | null {
     const nomes = semGrupo.slice(0, 3).join(", ") + (semGrupo.length > 3 ? ` e mais ${semGrupo.length - 3}` : "");
     linhas.push(`Ainda não sei a prioridade de ${nomes}: é imposto ou pessoa, serviço que corta, ou fornecedor comum?`);
   }
-  const exemplo = primeiroNome(p.contas[0]);
-  const comBoleto = p.contas.find((c) => c.boletoLinha);
-  linhas.push(`Pagou alguma? Me diga qual (*paguei ${exemplo}*).${comBoleto ? ` Para o código do boleto: *boleto ${primeiroNome(comBoleto)}*.` : ""}`);
+  if (p.contas.length) {
+    const exemplo = primeiroNome(p.contas[0]);
+    const comBoleto = p.contas.find((c) => c.boletoLinha);
+    linhas.push(`Pagou alguma? Me diga qual (*paguei ${exemplo}*).${comBoleto ? ` Para o código do boleto: *boleto ${primeiroNome(comBoleto)}*.` : ""}`);
+  }
   return linhas.join("\n");
+}
+
+// deno-lint-ignore no-explicit-any
+type Leitor = any;
+
+/**
+ * Junta as faturas de cartão à fila. Nunca lança: erro de leitura fica em `cartoesErro` (o assistente diz que o cartão
+ * ficou de fora; a manhã sai sem a seção). A fila das contas a pagar não muda em nenhum caso.
+ */
+export async function comCartoes(admin: Leitor, p: PagamentosDaSemana): Promise<PagamentosDaSemana> {
+  try {
+    const c = await lerCartoes(admin, p.hoje);
+    return { ...p, cartoes: c.faturas, avisosDoCartao: c.avisos, cartaoEmTransito: c.emTransito };
+  } catch (e) {
+    const motivo = String((e as { message?: unknown })?.message ?? e).slice(0, 160) || "erro";
+    console.warn(JSON.stringify({ fn: "pagamentos", cartoes: "leitura_falhou", motivo }));
+    return { ...p, cartoesErro: motivo };
+  }
 }
 
 /** A linha dos outros dias úteis: só o que já venceu, com o primeiro da fila. Sem vencida = null. */
@@ -209,7 +306,8 @@ export async function filaDePagamentos(admin: Admin, ate: string): Promise<Pagam
     throw new Error(`Não consegui ler a ordem de pagamento: ${(error as { message?: string })?.message ?? codigo}`);
   }
   if (data === null || data === undefined) return null;
-  return pagamentosDaResposta(data);
+  // a fatura do cartão vem junto (nunca lança: erro de leitura fica em cartoesErro, e a fila das contas segue igual)
+  return await comCartoes(admin, pagamentosDaResposta(data));
 }
 
 /**
@@ -238,7 +336,10 @@ export async function lerPagamentosDaManha(admin: Admin, hoje: string): Promise<
     if (String(chave?.value ?? "").trim().replace(/^"(.*)"$/, "$1").toLowerCase() === "desligado") return null;
     const { data, error } = await admin.rpc(RPC_DOS_PAGAMENTOS, { p_hoje: hoje });
     if (error) throw error;
-    return pagamentosDaResposta(data);
+    const p = pagamentosDaResposta(data);
+    // o cartão só aparece no bloco da semana (1º dia útil): nos outros dias a linha das vencidas não o usa, e não se lê
+    // o extrato à toa. Falha na leitura = a manhã sai sem a seção do cartão (comCartoes nunca lança).
+    return diasUteisDaSemana(hoje)[0] === hoje ? await comCartoes(admin, p) : p;
   } catch (e) {
     const codigo = String((e as { code?: unknown })?.code ?? (e as Error)?.name ?? "erro");
     // a função ainda não existe (edge publicada antes da migration): silêncio

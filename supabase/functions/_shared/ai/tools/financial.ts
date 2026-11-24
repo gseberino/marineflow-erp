@@ -12,7 +12,7 @@ import {
 // LGPD (leva 8): a conta que veio do Extrato nasce com o nome do banco ("12345678901-MARIA…"), e a observação do
 // pagamento conciliado leva o histórico da linha — o CPF de terceiro sai mascarado ao modelo.
 import { nomeSemCpf as mascararCpfNoTexto } from "../../banking/contraparte.ts";
-import { filaDePagamentos, NOME_DO_GRUPO } from "../../pagamentos/semana.ts";
+import { cartaoNaJanela, filaDePagamentos, linhaDoCartao, NOME_DO_GRUPO } from "../../pagamentos/semana.ts";
 
 /** O recorte de dias do fechamento, em datas de Brasília ('AAAA-MM-DD'). */
 export function periodoDoFechamento(periodo: string, hoje: string): { de: string; ate: string } {
@@ -289,7 +289,8 @@ export const financialTools: ToolDef[] = [
       "pessoas e impostos, serviço que corta, fornecedor com boleto, o resto; dentro do grupo, o que vence antes), com o saldo no " +
       "banco, a soma e quanto falta. Use para 'pagamentos da semana', 'o que eu pago primeiro?', 'o que vence?'. Mostre na ordem " +
       "recebida, sem reordenar. O campo boleto é o código para copiar ('manda o boleto da X' → responda com ele sozinho numa linha). " +
-      "Só leitura: nada é pago por aqui.",
+      "Para admin e financeiro traz também as FATURAS DE CARTÃO (campo cartoes): a data é do banco e o valor é estimado pelo extrato " +
+      "('cerca de'); não são contas a pagar e não se registra pagamento nelas. Só leitura: nada é pago por aqui.",
     input_schema: {
       type: "object",
       properties: { days_ahead: { type: "number", description: "Inclui contas que vencem até N dias à frente, além das já vencidas. Padrão: 7." } },
@@ -333,6 +334,10 @@ export const financialTools: ToolDef[] = [
           };
         });
       const falta = fila.saldoNoBanco === null ? null : Math.max(0, Math.round((fila.soma - fila.saldoNoBanco) * 100) / 100);
+      // (24/11/2026) fatura do cartão: aviso de saída de caixa pelo extrato (não é conta a pagar; nada a baixar)
+      const veCartao = ctx.userRole === "admin" || ctx.userRole === "financial";
+      const doCartao = cartaoNaJanela(fila);
+      const somaComCartao = Math.round((fila.soma + doCartao) * 100) / 100;
       return {
         results,
         ordem: "já na ordem de pagar (grupo de prioridade, depois vencimento); não reordene",
@@ -341,6 +346,37 @@ export const financialTools: ToolDef[] = [
         soma_da_fila: fila.soma,
         falta_no_banco: falta,
         reembolsos_a_socio: fila.reembolsos,
+        // o extrato do banco é de admin e financeiro (como as outras ferramentas de extrato): os outros cargos não veem o cartão
+        ...(!veCartao ? {} : {
+          ...(fila.cartoes?.length
+            ? {
+              cartoes: fila.cartoes.map((f) => ({
+                descricao: linhaDoCartao(f),
+                cartao: f.cartao,
+                fatura: f.situacao,
+                falta_cerca_de: f.valor,
+                soma_cerca_de: f.total,
+                pago: f.pago,
+                fecha: f.fechamento,
+                vencimento: f.vencimento,
+                ...(f.origem === "banco" ? { total_informado_pelo_banco: true } : {}),
+                ...(f.vencida ? { parece_sem_pagamento: true } : {}),
+              })),
+              cartoes_como_ler:
+                "O VENCIMENTO é do calendário do banco (em fim de semana ou feriado passa para o dia útil seguinte); o fechamento da " +
+                "fatura aberta é 'por volta de'. O VALOR é estimativa pelo extrato do cartão: diga sempre 'cerca de', nunca valor exato; " +
+                "a soma e a falta com cartão também são aproximadas. Use a descrição pronta de cada fatura. Não é conta a pagar: o " +
+                "pagamento da fatura entra sozinho pelo extrato do banco, não registre pagamento. Só as faturas que vencem até a " +
+                "data-limite entram na soma com cartão. Se vier o campo do valor pago que o extrato ainda não mostra, diga que esse " +
+                "valor saiu da conta, parece pagamento de fatura e já foi descontado, mas o cartão ainda não confirma.",
+              soma_com_cartao_cerca_de: somaComCartao,
+              falta_com_cartao_cerca_de: fila.saldoNoBanco === null ? null : Math.max(0, Math.round((somaComCartao - fila.saldoNoBanco) * 100) / 100),
+            }
+            : {}),
+          ...((fila.cartaoEmTransito ?? 0) > 0 ? { cartao_pago_que_o_extrato_ainda_nao_mostra: fila.cartaoEmTransito } : {}),
+          ...(fila.avisosDoCartao?.length ? { cartoes_avisos: fila.avisosDoCartao } : {}),
+          ...(fila.cartoesErro ? { cartoes_erro: "Não consegui ler as faturas dos cartões agora: elas ficaram de fora desta lista. Diga isso ao dono." } : {}),
+        }),
       };
     },
   },

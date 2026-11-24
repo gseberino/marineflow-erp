@@ -8,8 +8,10 @@ import { montarAging, type ContaEmAberto } from '@/lib/aging';
 import { rotuloDoMes, hojeEmBrasilia, somarDias, type FluxoDeCaixa } from '@/lib/fluxo-de-caixa';
 import { carregarFluxoDeCaixa, chaveDoFluxo } from '@/hooks/use-fluxo-de-caixa';
 import {
-  categoriaNaPrevisao, faturasDoCartao, gastosQueSeRepetem, gastosQueSeRepetemPorDia, mesesDeReferencia,
-  type ContaEmAberto as ContaDaPrevisao, type DespesaLancada, type FaturaPrevista, type GastoQueSeRepete, type LinhaDoCartao,
+  cartaoDoPagamento, categoriaNaPrevisao, comPagamentosEmTransito, faturasDoCartao, gastosQueSeRepetem, gastosQueSeRepetemPorDia,
+  mesesDeReferencia, somaEmTransito,
+  type ContaEmAberto as ContaDaPrevisao, type DebitoDaConta, type DespesaLancada, type FaturaPrevista, type GastoQueSeRepete,
+  type LinhaDoCartao, type PagamentoPelaConta,
 } from '@/lib/previsao-de-caixa';
 
 export function useReceivables() {
@@ -308,13 +310,25 @@ async function lerExtrasDaPrevisao(hoje: string): Promise<{
   /** O que já foi pago no mês de hoje, por categoria (fora do cartão): não entra de novo. */
   const pagoNoMes = new Map<string, number>();
   try {
-    const [linhas, conexoes] = await Promise.all([
+    const [linhas, conexoes, debitos] = await Promise.all([
       lerEmPaginas((i, f) => supabase.from('bank_transactions')
         .select('id, bank_connection_id, transaction_date, amount, transaction_type, description, bill_id, dismissed_kind, import_batch_id')
         .eq('source_type', 'credit_card')
         .gte('transaction_date', somarDias(hoje, -200))
         .order('transaction_date').order('id').range(i, f)),
       supabase.from('bank_connections').select('id, label'),
+      // (24/11/2026) O pagamento de ontem sai da conta e o cartão só mostra no dia seguinte: sem ler a conta, a fatura
+      // paga na véspera aparecia como vencida. A fila de pagamentos do WhatsApp lê do mesmo jeito (mesma regra).
+      lerEmPaginas((i, f) => supabase.from('bank_transactions')
+        .select('id, bank_connection_id, transaction_date, amount, description, counterparty_name, dismissed_kind')
+        .eq('source_type', 'bank').eq('transaction_type', 'debit')
+        .gte('transaction_date', somarDias(hoje, -5))
+        .order('transaction_date').order('id').range(i, f))
+        // Falha só nesta leitura não tira a fatura da previsão: ela sai como saía antes, com o aviso.
+        .catch(() => {
+          avisos.push('Não consegui ler os pagamentos recentes da conta: fatura paga ontem pode aparecer como vencida.');
+          return [] as unknown[];
+        }),
     ]);
     if (conexoes.error) throw conexoes.error;
     const rotulo = new Map((conexoes.data ?? []).map((c: { id: string; label: string | null }) => [c.id, c.label ?? 'Cartão']));
@@ -324,8 +338,20 @@ async function lerExtrasDaPrevisao(hoje: string): Promise<{
       const conta = l.bank_connection_id ?? 'sem conta';
       porConta.set(conta, [...(porConta.get(conta) ?? []), l]);
     }
-    for (const [conta, doCartao] of porConta) {
+    const cartoes = [...porConta.keys()].map((conexao) => ({ conexao, rotulo: rotulo.get(conexao) ?? '' }));
+    const pelaConta = new Map<string, PagamentoPelaConta[]>();
+    for (const d of debitos as Array<DebitoDaConta & { dismissed_kind: string | null }>) {
+      if (d.dismissed_kind === 'duplicata') continue;
+      const conexao = cartaoDoPagamento(d, cartoes);
+      if (conexao) pelaConta.set(conexao, [...(pelaConta.get(conexao) ?? []), { transaction_date: d.transaction_date, amount: d.amount }]);
+    }
+    for (const [conta, linhasDaConta] of porConta) {
       const nome = rotulo.get(conta) ?? 'Cartão';
+      const doCartao = comPagamentosEmTransito(linhasDaConta, pelaConta.get(conta) ?? [], hoje);
+      const emTransito = somaEmTransito(doCartao);
+      if (emTransito > 0) {
+        avisos.push(`${nome}: contei como pagos ${reais(emTransito)} que parecem ter saído da conta para o cartão; ele ainda não mostra.`);
+      }
       const r = faturasDoCartao(nome, doCartao, hoje);
       faturas.push(...r.faturas);
       // Cartão em uso cujo ciclo não dá para saber: o banco parou de identificar a fatura das
