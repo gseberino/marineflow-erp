@@ -128,7 +128,7 @@ describe('CobrarJuntasDialog', () => {
   it('Pix esperando no Extrato, opt-out e piso travam com o texto do lembrete de cobrança', () => {
     estado.pix = [{ valor: 1670, data: '2026-10-27' }];
     const { unmount } = renderizar(MP, ['os45', 'os46']);
-    expect(screen.getByRole('alert')).toHaveTextContent('Pix esperando no Extrato');
+    expect(screen.getByRole('alert')).toHaveTextContent('entrada esperando no Extrato');
     expect(screen.getByRole('button', { name: /Enviar ao cliente/ })).toBeDisabled();
     unmount();
 

@@ -211,7 +211,7 @@ export function travaDoCobrarJuntas(e: EntradaDasTravas): string | null {
   const pix = e.pixEsperando ?? [];
   if (pix.length) {
     const lista = pix.map((p) => `${brlDoLembrete(n(p.valor))}${p.data ? ` de ${p.data}` : ''}`).join(', ');
-    return `Este cliente tem Pix esperando no Extrato (${lista}): pode ser este pagamento. `
+    return `Este cliente tem entrada esperando no Extrato (${lista}): pode ser este pagamento. `
       + 'Confira no Extrato (Este Pix paga…) antes de cobrar; se for outra coisa, decida a linha lá e cobre depois.';
   }
   if (e.optOut) return 'Este cliente pediu para não receber mensagens no WhatsApp (opt-out). Cobre por outro canal.';

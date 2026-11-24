@@ -127,6 +127,8 @@ export interface CobrancaCrua {
   barco: string | null;
   /** vessels.asset_type da unidade da OS ("Motorhome", "Lancha"); null/ausente = sem tipo */
   tipo_unidade?: string | null;
+  /** (24/11/2026) entradas no Extrato esperando baixa que podem ser este pagamento (soma, a data mais recente e quantas) */
+  esperando?: { valor: number; data: string | null; n?: number } | null;
 }
 
 export interface ConversaCrua {
@@ -310,7 +312,20 @@ export function candidatoDeCobranca(c: CobrancaCrua, hoje: string): Candidato {
     : dias >= REGRAS.cobrancaAntigaDias ? "cobranca_antiga" : "cobranca_fora_do_marco";
   const fase = grande ? "grande" : noMarco ? (dias <= 3 ? "m1" : "m7") : "lista";
   const quem = umaLinha(c.cliente || "Sem cliente", 30);
-  const porqueNaoSobe = tipo === "cobranca_antiga"
+  // (24/11/2026) Entrada no Extrato esperando baixa que pode ser este pagamento: a conta NÃO sobe como "venceu e não
+  // entrou" nem pede para ligar — fica na lista, dizendo por quê. Quando o dono der baixa, a conta some; quando ele
+  // dispensar a entrada, a conta grande volta a subir toda manhã e a de R$ 1 mil a R$ 5 mil volta a seguir a regra dos
+  // marcos (só sobe do 1º ao 3º e do 7º ao 9º dia: se a entrada sair depois disso, ela fica na lista como qualquer
+  // outra fora do marco). A regra de quais entradas contam: _shared/receivables/dinheiro-esperando.ts.
+  const esperando = c.esperando && c.esperando.valor > 0 ? c.esperando : null;
+  // Várias entradas do cliente não viram "uma entrada de R$ soma": diz quantas são (a MP tinha R$ 20.000,00 e R$ 783,00).
+  const varias = (esperando?.n ?? 1) > 1;
+  const noExtrato = !esperando ? ""
+    : varias ? `há ${esperando.n} entradas no Extrato (${brl(esperando.valor)} ao todo) esperando baixa`
+    : `há ${brl(esperando.valor)} no Extrato${esperando.data ? ` (de ${ddmm(esperando.data)})` : ""} esperando baixa`;
+  const porqueNaoSobe = esperando
+    ? `Ficou na lista: ${noExtrato} — ${varias ? "alguma pode ser" : "pode ser"} este pagamento. Confira no Extrato antes de cobrar.`
+    : tipo === "cobranca_antiga"
     ? `Ficou na lista: vencida há ${dias} dias (30 ou mais vão para a revisão do mês).`
     : tipo === "cobranca_fora_do_marco"
     ? (c.saldo < REGRAS.cobrancaMarco
@@ -327,23 +342,33 @@ export function candidatoDeCobranca(c: CobrancaCrua, hoje: string): Candidato {
     referencia: `recv:${c.id}`,
     assunto: assuntoDe(c.client_id, c.cliente, `recv:${c.id}`),
     nome: quem,
-    fato: `${c.saldo.toFixed(2)}|${c.vencimento}|${fase}`,
+    fato: `${c.saldo.toFixed(2)}|${c.vencimento}|${esperando ? "esperando" : fase}`,
     valor: c.saldo,
     desde: c.vencimento,
     perdeHoje: false,
-    elegivel: grande || noMarco,
+    elegivel: !esperando && (grande || noMarco),
+    // todoDia NÃO muda com a entrada esperando: com ele, o "feito" do dono deixa a conta na lista (com o porquê) em vez
+    // de tirá-la de tudo — a resposta do "feito" promete que cobrança grande volta, e ela tem de continuar à vista.
     todoDia: grande,
     porqueNaoSobe,
-    titulo: `*${quem}*${onde(c.barco, c.os_numero)}: ${brl(c.saldo)} ${venceuEm(c.vencimento, hoje)} e não entrou.`,
-    curto: `${quem}${onde(c.os_numero)}: ${brl(c.saldo)}, venceu ${ddmm(c.vencimento)} (${diasTexto(dias)})`,
+    titulo: esperando
+      ? `*${quem}*${onde(c.barco, c.os_numero)}: ${brl(c.saldo)} ${venceuEm(c.vencimento, hoje)}; ${noExtrato}.`
+      : `*${quem}*${onde(c.barco, c.os_numero)}: ${brl(c.saldo)} ${venceuEm(c.vencimento, hoje)} e não entrou.`,
+    curto: `${quem}${onde(c.os_numero)}: ${brl(c.saldo)}, venceu ${ddmm(c.vencimento)} (${diasTexto(dias)})${esperando ? `; ${noExtrato}` : ""}`,
     rotulo: `${umaLinha(quem, 24)} (${brl(c.saldo)}, venceu ${ddmm(c.vencimento)})`,
-    recomendacao: dias <= 3 ? "Recomendo um lembrete educado hoje." : "Recomendo ligar hoje.",
-    faco: "te mostro o lembrete pronto",
+    recomendacao: esperando ? "Recomendo conferir no Extrato antes de cobrar."
+      : dias <= 3 ? "Recomendo um lembrete educado hoje." : "Recomendo ligar hoje.",
+    // com entrada esperando, a letra NÃO prepara lembrete: mostra a entrada (o detalhe dizia "confira antes de cobrar" e,
+    // na linha seguinte, oferecia o lembrete pronto)
+    faco: esperando ? "te mostro a entrada do Extrato" : "te mostro o lembrete pronto",
     alternativa: "até segunda",
     comandoAlternativo: "espera",
     motivo,
-    pedido: `Prepare um lembrete de pagamento para o cliente ${umaLinha(c.cliente || "do recebível", 60)} sobre "${umaLinha(c.descricao || "o serviço", 80)}"` +
-      ` (saldo de ${brl(c.saldo)}, venceu em ${dataBR(c.vencimento)}). Mostre o texto pronto e peça o meu sim antes de enviar.`,
+    pedido: esperando
+      ? `O cliente ${umaLinha(c.cliente || "do recebível", 60)} tem ${brl(c.saldo)} vencido em ${dataBR(c.vencimento)} ("${umaLinha(c.descricao || "o serviço", 80)}") e ${noExtrato}` +
+        `: pode ser este pagamento. Me mostre essa entrada do Extrato e a conta. NÃO prepare lembrete nem cobrança antes de eu decidir a entrada.`
+      : `Prepare um lembrete de pagamento para o cliente ${umaLinha(c.cliente || "do recebível", 60)} sobre "${umaLinha(c.descricao || "o serviço", 80)}"` +
+        ` (saldo de ${brl(c.saldo)}, venceu em ${dataBR(c.vencimento)}). Mostre o texto pronto e peça o meu sim antes de enviar.`,
     fatos: ([
       ["Cliente", c.cliente ? umaLinha(c.cliente, 60) : null],
       fatoDaUnidade(c.barco, c.tipo_unidade),
@@ -351,6 +376,8 @@ export function candidatoDeCobranca(c: CobrancaCrua, hoje: string): Candidato {
       ["Cobrança", c.descricao ? umaLinha(c.descricao, 80) : null],
       ["Saldo", brl(c.saldo)],
       ["Venceu em", `${dataBR(c.vencimento)} (${diasTexto(dias)})`],
+      ["No Extrato", esperando ? (varias ? `${esperando.n} entradas, ${brl(esperando.valor)} ao todo, esperando baixa`
+        : `${brl(esperando.valor)}${esperando.data ? ` de ${ddmm(esperando.data)}` : ""} esperando baixa`) : null],
     ] as Array<[string, string | null]>).filter((f): f is [string, string] => !!f[1]),
     unidade: unidadeEmUmaLinha(c.barco, c.tipo_unidade),
   };

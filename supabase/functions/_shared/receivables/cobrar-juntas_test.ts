@@ -52,7 +52,7 @@ Deno.test("travas: genérico, nada em aberto, piso, Pix esperando, opt-out, tele
   // Piso compara o TOTAL das OS juntas, não cada conta.
   assertEquals(travaDoCobrarJuntas({ ...base, piso: 50 }), null);
   const pix = travaDoCobrarJuntas({ ...base, optOut: true, pixEsperando: [{ valor: 1670, data: "2026-10-27" }] });
-  assert(pix?.includes("Pix esperando no Extrato (R$ 1670.00 de 2026-10-27)"));
+  assert(pix?.includes("entrada esperando no Extrato (R$ 1670.00 de 2026-10-27)"));
   assert(travaDoCobrarJuntas({ ...base, optOut: true })?.includes("opt-out"));
   assert(travaDoCobrarJuntas({ ...base, telefone: "123" })?.includes("Sem telefone"));
 });
@@ -157,7 +157,7 @@ Deno.test("Enviar extrato usa as mesmas travas: sem contagem de OS, frase do cli
   assertEquals(travaDoCobrarJuntas({ ...base, totalEmAberto: 0 }), "Este cliente não tem saldo em aberto: não há o que cobrar.");
   assertEquals(travaDoCobrarJuntas({ ...base, totalEmAberto: 0, quantidadeOs: 2 }), "As OS escolhidas não têm saldo em aberto: não há o que cobrar.");
   assert(travaDoCobrarJuntas({ ...base, generico: true })?.includes("genérico"));
-  assert(travaDoCobrarJuntas({ ...base, pixEsperando: [{ valor: 1670 }] })?.includes("Pix esperando no Extrato"));
+  assert(travaDoCobrarJuntas({ ...base, pixEsperando: [{ valor: 1670 }] })?.includes("entrada esperando no Extrato"));
   assert(travaDoCobrarJuntas({ ...base, horaBrasilia: 21 })?.includes("Fora do horário"));
 });
 
@@ -191,7 +191,7 @@ Deno.test("Enviar extrato COM saldo: as travas inteiras do Cobrar juntas, sem a 
   const base = { clienteNome: "MP MOTOR HOMES", totalEmAberto: 1670, lancamentos: 3, telefone: "47999990000", horaBrasilia: 14 };
   assertEquals(travaDoExtrato(base), null);
   assert(travaDoExtrato({ ...base, piso: 5000 })?.includes("abaixo do piso"));
-  assert(travaDoExtrato({ ...base, pixEsperando: [{ valor: 1670 }] })?.includes("Pix esperando no Extrato"));
+  assert(travaDoExtrato({ ...base, pixEsperando: [{ valor: 1670 }] })?.includes("entrada esperando no Extrato"));
   assertEquals(travaDoExtrato({ ...base, generico: true }), travaDoCobrarJuntas({ ...base, generico: true }));
   assertEquals(travaDoExtrato({ ...base, horaBrasilia: 21 }), travaDoCobrarJuntas({ ...base, horaBrasilia: 21 }));
 });

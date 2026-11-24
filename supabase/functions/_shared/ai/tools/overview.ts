@@ -106,7 +106,7 @@ export const overviewTools: ToolDef[] = [
           total_em_atraso: r2(casos.reduce((a, c) => a + c.saldo, 0)),
           topo: casos.slice(0, 5),
           ...(talvez.length
-            ? { talvez_ja_pagos: { quantidade: talvez.length, valor: r2(talvez.reduce((a, c) => a + c.saldo, 0)), nota: "Estes clientes têm Pix esperando no Extrato: confira antes de cobrar." } }
+            ? { talvez_ja_pagos: { quantidade: talvez.length, valor: r2(talvez.reduce((a, c) => a + c.saldo, 0)), nota: "Estes clientes têm entrada esperando no Extrato: confira antes de cobrar." } }
             : {}),
         };
       } catch (e) { cobrancas = { erro: (e as Error).message }; }

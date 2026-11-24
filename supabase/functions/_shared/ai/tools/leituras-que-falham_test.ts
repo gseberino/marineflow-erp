@@ -168,7 +168,7 @@ Deno.test("listar_lancados_sozinhos: contas da baixa ilegíveis não viram 'nada
   );
 });
 
-Deno.test("get_delinquency_plan: cliente com Pix esperando no Extrato sai da cobrança, com o porquê", async () => {
+Deno.test("get_delinquency_plan: cliente com entrada esperando no Extrato sai da cobrança, com o porquê", async () => {
   const vencido = { id: "r", amount: 500, balance_amount: 500, due_date: "2026-01-10", client_id: "c", clients: { name: "Cliente" } };
   const db = bancoFalso({
     receivables: [vencido], collections: [], app_settings: [],
@@ -193,7 +193,7 @@ Deno.test("send_collection_reminder: com Pix do cliente esperando no Extrato, n�
   globalThis.fetch = (() => { enviou = true; return Promise.resolve(new Response("{}")); }) as typeof fetch;
   try {
     const r = await ferramenta(whatsappTools, "send_collection_reminder").execute({ collection_id: "col" }, contexto(db));
-    assertEquals(/Pix esperando no Extrato/.test(r.error), true);
+    assertEquals(/entrada esperando no Extrato/.test(r.error), true);
     assertEquals(enviou, false);
   } finally {
     globalThis.fetch = original;

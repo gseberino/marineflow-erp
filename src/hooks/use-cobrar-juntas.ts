@@ -26,6 +26,7 @@ import { normalizePhoneE164 } from '@/lib/masks';
 import {
   chaveDoCobrarJuntas, hojeLocal, horaEmBrasilia, mudancaNasContas, travaDoCobrarJuntas, travaDoExtrato,
 } from '../../supabase/functions/_shared/receivables/cobrar-juntas';
+import { lerDinheiroEsperando } from '../../supabase/functions/_shared/receivables/dinheiro-esperando';
 import { desviadoPorTeste } from '../../supabase/functions/_shared/whatsapp/marcar-enviado';
 import { criarFaturaParaCobrar } from '@/hooks/use-faturas';
 import { colocarNumeroDaFatura } from '@/lib/fatura';
@@ -41,22 +42,14 @@ export function horaDoCobrarJuntas(): number {
 export interface PixEsperando { valor: number; data: string | null }
 
 /**
- * Pix do cliente parado no Extrato esperando decisão (mesma leitura de pix-esperando.ts do
- * assistente). Leitura que falha LANÇA: "nenhum Pix esperando" por erro mandaria cobrar quem pagou.
+ * Pix do cliente parado no Extrato esperando decisão — a MESMA leitura do assistente (pix-esperando.ts), pela mesma
+ * função (24/11/2026): contam as entradas que a fila identificou como dele e as que o vínculo sugerido aponta para
+ * uma conta aberta dele (os boletos da Apolo estavam na fila sem cliente e passavam pela trava). Leitura que falha
+ * LANÇA: "nenhum Pix esperando" por erro mandaria cobrar quem pagou.
  */
 async function lerPixEsperando(clientId: string): Promise<PixEsperando[]> {
-  const { data, error } = await supabase
-    .from('finance_review_queue')
-    .select('suggested_amount, suggested_date')
-    .eq('status', 'pending')
-    .eq('kind', 'create_receivable')
-    .eq('suggested_client_id', clientId)
-    .range(0, 999);
-  if (error) throw new Error(`Não consegui ler os Pix que esperam no Extrato: ${error.message}`);
-  return ((data ?? []) as Array<{ suggested_amount: number | null; suggested_date: string | null }>).map((l) => ({
-    valor: Math.abs(Number(l.suggested_amount ?? 0)),
-    data: l.suggested_date,
-  }));
+  const todas = await lerDinheiroEsperando(supabase);
+  return todas.filter((e) => e.clienteId === clientId).map((e) => ({ valor: e.valor, data: e.data }));
 }
 
 async function lerPiso(): Promise<number> {

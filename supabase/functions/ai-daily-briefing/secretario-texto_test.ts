@@ -107,3 +107,35 @@ Deno.test("escritório: só o que tem; tudo zerado = em dia", () => {
   ]);
   assertEquals(textoDoEscritorio({ propostas: null, alertas: 0, regras: null, debitosSemLoja: 0, entradas: null }, "07:30"), "Escritório em dia (contado às 07:30).");
 });
+
+// (24/11/2026) entrada no Extrato esperando baixa: a linha "Na rua" diz quanto do vencido pode já estar pago.
+Deno.test("'Na rua' com entradas esperando baixa: diz quanto do vencido pode já estar pago; sem elas, a linha de sempre", () => {
+  const coleta = coleta1510();
+  coleta.orcamentos = [];
+  coleta.conversas = [];
+  coleta.oss = [];
+  coleta.cobrancas = [
+    { id: "g-deve", client_id: "c-deve", cliente: "Quem Deve", descricao: null, vencimento: "2026-10-13", saldo: 16890, os_numero: null, barco: null },
+    { id: "g-pagou", client_id: "c-pagou", cliente: "Quem Pagou", descricao: null, vencimento: "2026-10-08", saldo: 5238.02, os_numero: null, barco: null,
+      esperando: { valor: 5238.02, data: "2026-10-08" } },
+  ];
+  const selecao = selecionar(candidatosDoDia(coleta, AGORA_1510, HOJE_1510), [], HOJE_1510);
+  const manha = (naRua: { total: number; n: number; esperando?: { total: number; n: number } }) =>
+    textoDaManha({ hoje: HOJE_1510, tipoDoDia: "util", feriado: null, selecao, naRua, deHoje: VAZIO });
+
+  const t = manha({ total: 22128.02, n: 2, esperando: { total: 5238.02, n: 1 } });
+  assertStringIncludes(t, "Na rua: R$ 22.128,02 vencidos (2). Desses, até R$ 5.238,02 podem já estar pagos: 1 conta tem entrada no Extrato esperando baixa.");
+  // quem deve sobe com letra; quem tem entrada esperando não sobe nem é mandado ligar
+  assertStringIncludes(t, "*A.* *Quem Deve*: R$ 16.890,00");
+  assert(!t.includes("*Quem Pagou*"), "a conta com entrada esperando não ganha letra");
+  assertEquals(selecao.manha.length, 1);
+
+  assertStringIncludes(manha({ total: 5238.02, n: 1, esperando: { total: 5238.02, n: 1 } }),
+    "Na rua: R$ 5.238,02 vencidos (1). Desses, até R$ 5.238,02 podem já estar pagos: 1 conta tem entrada no Extrato esperando baixa.");
+  // o total é o que as entradas cobrem, não o saldo das contas (um Pix de R$ 5.000,00 para duas contas de R$ 8.574,60)
+  assertStringIncludes(manha({ total: 8574.6, n: 2, esperando: { total: 5000, n: 2 } }),
+    "Na rua: R$ 8.574,60 vencidos (2). Desses, até R$ 5.000,00 podem já estar pagos: 2 contas têm entrada no Extrato esperando baixa.");
+  // sem entradas esperando (campo ausente ou zerado): a linha de antes
+  assertStringIncludes(manha({ total: 22128.02, n: 2 }), "Na rua: R$ 22.128,02 vencidos (2).\n");
+  assertStringIncludes(manha({ total: 22128.02, n: 2, esperando: { total: 0, n: 0 } }), "Na rua: R$ 22.128,02 vencidos (2).\n");
+});

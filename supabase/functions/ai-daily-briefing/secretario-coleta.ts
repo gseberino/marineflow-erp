@@ -22,6 +22,7 @@ import { ddmm, somarDias, umaLinha } from "../_shared/secretario/base.ts";
 import { STATUS_OS_ATIVAS } from "../_shared/service-order-status.ts";
 import { contatoEncerrou, conversaEncerradaPeloContato, ULTIMAS_RECEBIDAS } from "../_shared/whatsapp/contato-encerrou.ts";
 import { type ModosDaAgenda, modosDaAgendaNoBanco } from "../_shared/agenda/executar.ts";
+import { type EntradaEsperando, esperandoDaConta, lerDinheiroEsperando } from "../_shared/receivables/dinheiro-esperando.ts";
 import type { ColetaDoSecretario, ConversaCrua, OrcamentoCru, OsCrua, PlanoDaOsCrua } from "./secretario-candidatos.ts";
 import { adiadoPor, type PassagemDoHistorico } from "./secretario-selecao.ts";
 import { CORTE_DA_AGENDA_DE_HOJE, type DadosDeHoje, type NaRua } from "./secretario-texto.ts";
@@ -202,10 +203,28 @@ export async function coletar(admin: Admin, p: {
     .select("id, client_id, description, due_date, amount, balance_amount, clients(name, display_name), service_orders!receivables_service_order_id_fkey(service_order_number, vessels(name, asset_type))")
     .in("status", ["pending", "partially_paid"]).eq("is_deposit", false).lt("due_date", hoje)
     .order("due_date", { ascending: true }).limit(500), "cobranças") as Array<Record<string, unknown>>;
+  // (24/11/2026) Dinheiro que já entrou no banco e espera baixa no Extrato: a conta com entrada esperando não sobe como
+  // "venceu e não entrou" (a manhã recomendou "ligar hoje" para a Apolo 50 vezes com o boleto no banco desde o
+  // vencimento). Leitura que falha aqui não derruba a manhã: sai o texto de antes, e o erro vai para o log.
+  let esperandoNoExtrato: EntradaEsperando[] = [];
+  try {
+    esperandoNoExtrato = await lerDinheiroEsperando(admin);
+  } catch (e) {
+    console.error("[secretário] dinheiro esperando no Extrato:", (e as Error)?.message ?? e);
+  }
   const cobrancas = cobrancasLidas.map((r) => {
     // deno-lint-ignore no-explicit-any
     const so = (Array.isArray(r.service_orders) ? r.service_orders[0] : r.service_orders) as any;
+    const esperando = esperandoDaConta(esperandoNoExtrato, { id: String(r.id), client_id: (r.client_id as string | null) ?? null });
     return {
+      // só entra o campo quando há entrada esperando: sem ela, a linha é a de sempre
+      ...(esperando.length === 0 ? {} : {
+        esperando: {
+          valor: Math.round(esperando.reduce((s, e) => s + e.valor, 0) * 100) / 100,
+          data: esperando.map((e) => e.data).filter((d): d is string => !!d).sort().at(-1) ?? null,
+          n: esperando.length,
+        },
+      }),
       id: String(r.id),
       client_id: (r.client_id as string | null) ?? null,
       cliente: nomeDe(r.clients),
@@ -217,7 +236,24 @@ export async function coletar(admin: Admin, p: {
       tipo_unidade: tipoDe(so?.vessels),
     };
   }).filter((c) => c.saldo > 0);
-  const naRua: NaRua = { total: cobrancas.reduce((s, c) => s + c.saldo, 0), n: cobrancas.length };
+  const comEntrada = cobrancas.filter((c) => "esperando" in c && c.esperando);
+  // Quanto do vencido PODE já estar pago: por cliente, o menor entre o que ele deve nas contas marcadas e o que as
+  // entradas dele somam, contando cada entrada uma vez (a mesma entrada do cliente vale para cada conta dele: somar o
+  // saldo das contas dizia que R$ 8.574,60 do César podiam estar pagos com um Pix de R$ 5.000,00 esperando).
+  const porCliente = new Map<string, { saldo: number; entradas: Set<EntradaEsperando> }>();
+  for (const c of comEntrada) {
+    const chave = c.client_id ?? c.id;
+    const g = porCliente.get(chave) ?? { saldo: 0, entradas: new Set<EntradaEsperando>() };
+    g.saldo += c.saldo;
+    for (const e of esperandoDaConta(esperandoNoExtrato, { id: c.id, client_id: c.client_id })) g.entradas.add(e);
+    porCliente.set(chave, g);
+  }
+  const podeEstarPago = Math.round([...porCliente.values()]
+    .reduce((s, g) => s + Math.min(g.saldo, [...g.entradas].reduce((t, e) => t + e.valor, 0)), 0) * 100) / 100;
+  const naRua: NaRua = {
+    total: cobrancas.reduce((s, c) => s + c.saldo, 0), n: cobrancas.length,
+    ...(comEntrada.length === 0 ? {} : { esperando: { total: podeEstarPago, n: comEntrada.length } }),
+  };
 
   // ── orçamentos enviados/aguardando (index.ts:655-661) e rascunhos (novo: o "montado e não enviado") ──
   const orcs = ou(await admin.from("service_orders")

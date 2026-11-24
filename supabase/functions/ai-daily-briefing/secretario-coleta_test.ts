@@ -81,6 +81,7 @@ function falsoAdmin(
         not: (c: string, op: string, v: unknown) => ((linhas = linhas.filter((l) => !(op === "is" && (valor(l, c) ?? null) === v))), q),
         order: () => q,
         limit: () => q,
+        range: () => q,
         maybeSingle: () =>
           Promise.resolve(falhar.includes(tabela) ? { data: null, error: { code: "XX000" } } : { data: linhas[0] ?? null, error: null }),
         then: (ok: (r: unknown) => unknown, erro?: (e: unknown) => unknown) =>
@@ -468,4 +469,64 @@ Deno.test("Fase 2: o estado das OS que falha = a regra de antes (sem plano em ne
   const lido = await rodar({ ...banco(), ...LIGADO }, [], [], { agenda_linhas_do_dia: { data: [] }, agenda_estado_das_os: { error: { code: "XX000" } } });
   assert(lido.coleta.oss.every((o) => o.plano === undefined), "nenhuma OS com plano");
   assertEquals(lido.modos, { proposta: "ligado", vigia: "ligado" });
+});
+
+// (24/11/2026) entrada no Extrato esperando baixa: a coleta marca a conta que tem dinheiro esperando e o "Na rua" soma essas.
+Deno.test("cobrança com entrada esperando no Extrato: a coleta marca a conta (pela conta apontada ou pelo cliente) e o 'Na rua' soma", async () => {
+  const fila = (extra: Linha): Linha => ({ status: "pending", kind: "create_receivable", suggested_client_id: null, suggested_amount: 0, suggested_date: null, title: "Receita", vinculo_sugerido: null, ...extra });
+  const tabelas = {
+    ...banco(),
+    finance_review_queue: [
+      // boleto sem cliente, com o vínculo apontando a conta aberta (o caso da Apolo)
+      fila({ suggested_amount: 16890, suggested_date: "2026-10-13", vinculo_sugerido: { principal: { tipo: "receivable", lancamentoId: "r-marcelo", nivel: "weak" } } }),
+      // já decidida: não conta
+      fila({ status: "approved", suggested_client_id: "c-x", suggested_amount: 16890 }),
+      // saída: não conta
+      fila({ kind: "create_payable", suggested_client_id: "c-x", suggested_amount: 16890 }),
+    ],
+  };
+  const { coleta, naRua } = await rodar(tabelas);
+  assertEquals(coleta.cobrancas.map((c) => [c.id, c.esperando ?? null]), [
+    ["r-marcelo", { valor: 16890, data: "2026-10-13", n: 1 }],
+    ["r-38", null],
+  ]);
+  assertEquals(naRua, { total: 33780, n: 2, esperando: { total: 16890, n: 1 } });
+});
+
+Deno.test("a leitura das entradas do Extrato falha: a manhã sai como antes (sem marca, sem derrubar a coleta)", async () => {
+  const { coleta, naRua } = await rodar(banco(), ["finance_review_queue"]);
+  assertEquals(coleta.cobrancas.map((c) => c.id), ["r-marcelo", "r-38"]);
+  assert(coleta.cobrancas.every((c) => !("esperando" in c)), "nenhuma conta marcada");
+  assertEquals(naRua, { total: 33780, n: 2 });
+});
+
+Deno.test("'Na rua': o que PODE estar pago é o que as entradas cobrem — a mesma entrada do cliente não conta duas vezes", async () => {
+  const conta = (id: string, cliente: string, saldo: number): Linha => ({
+    id, client_id: cliente, description: "Serviço", due_date: "2026-10-12", amount: saldo, balance_amount: saldo, status: "pending", is_deposit: false,
+    service_order_id: null, clients: { name: cliente },
+  });
+  const fila = (extra: Linha): Linha => ({ status: "pending", kind: "create_receivable", suggested_client_id: null, suggested_amount: 0, suggested_date: "2026-10-13", title: "Receita", vinculo_sugerido: null, ...extra });
+  const { coleta, naRua } = await rodar({
+    ...banco(),
+    receivables: [
+      // um Pix de R$ 5.000,00 do cliente, duas contas dele (R$ 8.574,60): as duas ficam marcadas, mas só R$ 5.000,00 podem estar pagos
+      conta("r-c1", "c-cesar", 396), conta("r-c2", "c-cesar", 8178.6),
+      // entrada maior que a conta: conta no máximo o saldo
+      conta("r-n", "c-nelson", 2110.06),
+      // duas entradas do mesmo cliente para uma conta pequena
+      conta("r-mp", "c-mp", 20),
+      // quem não tem nada esperando
+      conta("r-deve", "c-deve", 1000),
+    ],
+    finance_review_queue: [
+      fila({ suggested_client_id: "c-cesar", suggested_amount: 5000 }),
+      fila({ suggested_amount: 2800, vinculo_sugerido: { principal: { tipo: "receivable", lancamentoId: "r-n" } } }),
+      fila({ suggested_client_id: "c-mp", suggested_amount: 20000 }), fila({ suggested_client_id: "c-mp", suggested_amount: 783 }),
+    ],
+  });
+  assertEquals(coleta.cobrancas.map((c) => [c.id, c.esperando?.valor ?? null, c.esperando?.n ?? null]), [
+    ["r-c1", 5000, 1], ["r-c2", 5000, 1], ["r-n", 2800, 1], ["r-mp", 20783, 2], ["r-deve", null, null],
+  ]);
+  // 5.000 (César) + 2.110,06 (Nelson, no máximo o saldo) + 20 (MP, no máximo o saldo)
+  assertEquals(naRua, { total: 11704.66, n: 5, esperando: { total: 7130.06, n: 4 } });
 });

@@ -218,10 +218,34 @@ describe('useEnviarCobrarJuntas', () => {
   });
 
   it('Pix chegou depois de abrir a tela → não envia', async () => {
-    banco.respostas['finance_review_queue.select'] = ok([{ suggested_amount: 1670, suggested_date: '2026-10-28' }]);
+    banco.respostas['finance_review_queue.select'] = ok([{ suggested_client_id: 'cli', suggested_amount: 1670, suggested_date: '2026-10-28' }]);
     const r = await enviar();
-    expect((r.error as Error).message).toContain('Pix esperando no Extrato');
+    expect((r.error as Error).message).toContain('entrada esperando no Extrato');
     expect(banco.invocacoes).toEqual([]);
+  });
+
+  // 24/11/2026: os boletos da Apolo estavam na fila SEM cliente, só com o vínculo sugerido apontando a conta aberta, e
+  // passavam pela trava. A tela usa a mesma regra do assistente (_shared/receivables/dinheiro-esperando.ts).
+  it('entrada sem cliente na fila, com o vínculo apontando uma conta aberta dele → não envia', async () => {
+    banco.respostas['receivables.select'] = ok(CONTAS_NO_BANCO.map((c) => ({ ...c, client_id: 'cli' })));
+    banco.respostas['finance_review_queue.select'] = ok([{
+      suggested_client_id: null, suggested_amount: 1650, suggested_date: '2026-10-28',
+      vinculo_sugerido: { principal: { tipo: 'receivable', lancamentoId: 'r45', nivel: 'weak' } },
+    }]);
+    const r = await enviar();
+    expect((r.error as Error).message).toContain('entrada esperando no Extrato');
+    expect(banco.invocacoes).toEqual([]);
+  });
+
+  it('entrada de OUTRO cliente (ou sem cliente e sem conta dele apontada) não segura a cobrança deste', async () => {
+    banco.respostas['finance_review_queue.select'] = ok([
+      { suggested_client_id: 'outro', suggested_amount: 1670, suggested_date: '2026-10-28' },
+      { suggested_client_id: null, suggested_amount: 500, suggested_date: '2026-10-28', vinculo_sugerido: null },
+      { suggested_client_id: null, suggested_amount: 500, suggested_date: '2026-10-28', vinculo_sugerido: { principal: { tipo: 'existing_payment', lancamentoId: 'r45' } } },
+    ]);
+    const r = await enviar();
+    expect(r.isSuccess).toBe(true);
+    expect(banco.invocacoes).toHaveLength(1);
   });
 
   it('leitura do Extrato que falha não vira "nenhum Pix": não envia', async () => {
@@ -391,8 +415,8 @@ describe('useEnviarExtrato', () => {
     banco.respostas['clients.select'] = ok({ name: 'Cliente Final', opt_out_whatsapp: false, generico: true, whatsapp: '47999990000' });
     expect(((await enviarExtrato()).error as Error).message).toContain('é genérico, sem CPF/CNPJ');
     banco.respostas['clients.select'] = ok({ name: 'MP', opt_out_whatsapp: false, generico: false, whatsapp: '47999990000' });
-    banco.respostas['finance_review_queue.select'] = ok([{ suggested_amount: 1670, suggested_date: '2026-10-28' }]);
-    expect(((await enviarExtrato()).error as Error).message).toContain('Pix esperando no Extrato');
+    banco.respostas['finance_review_queue.select'] = ok([{ suggested_client_id: 'cli', suggested_amount: 1670, suggested_date: '2026-10-28' }]);
+    expect(((await enviarExtrato()).error as Error).message).toContain('entrada esperando no Extrato');
     banco.respostas['finance_review_queue.select'] = ok([]);
     banco.respostas['clients.select'] = ok({ name: 'MP', opt_out_whatsapp: true, generico: false, whatsapp: '47999990000' });
     expect(((await enviarExtrato()).error as Error).message).toContain('opt-out');
@@ -411,7 +435,7 @@ describe('useEnviarExtrato', () => {
     banco.respostas['receivables.select'] = ok([CONTAS_NO_BANCO[2]]);
     // Piso alto e Pix esperando não barram a quitação (nem são lidos).
     banco.respostas['app_settings.select'] = ok({ value: '5000' });
-    banco.respostas['finance_review_queue.select'] = ok([{ suggested_amount: 100, suggested_date: '2026-10-28' }]);
+    banco.respostas['finance_review_queue.select'] = ok([{ suggested_client_id: 'cli', suggested_amount: 100, suggested_date: '2026-10-28' }]);
     const r = await enviarExtrato({ ...EXTRATO, mensagem: 'Comprovante de quitação — HBR …', contas: [] });
     expect(r.isSuccess).toBe(true);
     expect(r.data).toEqual({ deduplicado: false, aviso: null, quitacao: true });

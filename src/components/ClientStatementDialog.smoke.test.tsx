@@ -74,7 +74,7 @@ describe('ClientStatementDialog (Enviar extrato)', () => {
   it('Pix esperando no Extrato, opt-out, piso, sem telefone e fora do horário travam com o mesmo texto do Cobrar juntas', () => {
     estado.pix = [{ valor: 1670, data: '2026-10-27' }];
     let r = renderizar();
-    expect(screen.getByRole('alert')).toHaveTextContent('Pix esperando no Extrato');
+    expect(screen.getByRole('alert')).toHaveTextContent('entrada esperando no Extrato');
     expect(screen.getByRole('button', { name: /Enviar ao cliente/ })).toBeDisabled();
     r.unmount();
     estado.pix = [];

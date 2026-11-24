@@ -36,6 +36,11 @@ export interface DadosDeHoje {
 export interface NaRua {
   total: number;
   n: number;
+  /**
+   * (24/11/2026) das vencidas, as que têm entrada no Extrato esperando baixa. `n` = quantas contas; `total` = quanto
+   * delas PODE já estar pago (o que as entradas cobrem, por cliente, sem contar a mesma entrada duas vezes).
+   */
+  esperando?: { total: number; n: number };
 }
 
 function plural(n: number, um: string, varios: string): string {
@@ -127,7 +132,12 @@ function linhaNaRua(naRua: NaRua, sel: Selecao): string | null {
   const extra = !nomeada ? ""
     : fora.length === 1 ? `; mais uma grande: ${nomeada}`
     : `; mais ${fora.length} grandes, a maior com ${nomeada}`;
-  return `Na rua: ${brl(naRua.total)} vencidos (${naRua.n})${extra}.`;
+  // (24/11/2026) o que tem entrada esperando baixa no Extrato pode já estar pago: a manhã diz, em vez de mandar cobrar
+  // `e.total` é o que as entradas podem quitar (nunca mais que o saldo das contas marcadas), não o saldo delas.
+  const e = naRua.esperando;
+  const esperando = !e || e.n <= 0 ? ""
+    : ` Desses, até ${brl(e.total)} podem já estar pagos: ${e.n === 1 ? "1 conta tem" : `${e.n} contas têm`} entrada no Extrato esperando baixa.`;
+  return `Na rua: ${brl(naRua.total)} vencidos (${naRua.n})${extra}.${esperando}`;
 }
 
 /** "Logo abaixo ficaram X e Y, mais N assuntos. *lista*" (null quando nada ficou guardado). */

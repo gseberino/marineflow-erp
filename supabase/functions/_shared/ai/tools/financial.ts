@@ -871,7 +871,7 @@ export const financialTools: ToolDef[] = [
           pix_esperando_no_extrato: esperando.get(String(c.client_id)) ?? [],
         })),
         nota: `Não cobre quem já foi cobrado hoje nem valores abaixo de R$ ${piso} (só listados). `
-          + "Quem está em talvez_ja_pago tem Pix esperando no Extrato: confira se é o pagamento (Extrato › Este Pix paga…) antes de cobrar. "
+          + "Quem está em talvez_ja_pago tem entrada esperando no Extrato: confira se é o pagamento (Extrato › Este Pix paga…) antes de cobrar. "
           + "Enviar cobrança é ação sensível — o sistema pede sua confirmação.",
       };
     },

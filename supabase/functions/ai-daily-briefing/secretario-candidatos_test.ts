@@ -454,3 +454,55 @@ Deno.test("Fase 2: com a proposta fora de 'ligado' (compraPeloPlano false) a tar
   const comPlanoSemR16Desligada = candidatoDeOs(os({ plano: plano({ compraPeloPlano: false, paradaPeloPlano: false }) }), HOJE)!;
   assertEquals(comPlanoSemR16Desligada, antes);
 });
+
+// (24/11/2026) entrada no Extrato esperando baixa: a conta com dinheiro esperando não sobe como "venceu e não entrou" nem pede para ligar.
+Deno.test("cobrança com entrada no Extrato esperando baixa: fica na lista, diz por quê e não recomenda ligar", () => {
+  const sem = candidatoDeCobranca(cob({ saldo: 5238.02, vencimento: "2026-10-08" }), HOJE);
+  assertEquals([sem.tipo, sem.elegivel, sem.todoDia, sem.recomendacao], ["cobranca_grande", true, true, "Recomendo ligar hoje."]);
+
+  const com = candidatoDeCobranca(cob({ saldo: 5238.02, vencimento: "2026-10-08", esperando: { valor: 5238.02, data: "2026-10-08" } }), HOJE);
+  // todoDia fica: com ele, o "feito" do dono deixa a conta na lista em vez de tirá-la de tudo
+  assertEquals([com.tipo, com.elegivel, com.todoDia], ["cobranca_grande", false, true]);
+  assertEquals(com.porqueNaoSobe, "Ficou na lista: há R$ 5.238,02 no Extrato (de 08/10) esperando baixa — pode ser este pagamento. Confira no Extrato antes de cobrar.");
+  assertEquals(com.titulo.includes("não entrou"), false);
+  assertStringIncludes(com.titulo, "; há R$ 5.238,02 no Extrato (de 08/10) esperando baixa.");
+  assertStringIncludes(com.curto, "; há R$ 5.238,02 no Extrato (de 08/10) esperando baixa");
+  assertEquals(com.recomendacao, "Recomendo conferir no Extrato antes de cobrar.");
+  // a letra não prepara lembrete: mostra a entrada, e o pedido ao assistente diz para NÃO cobrar
+  assertEquals([sem.faco, com.faco], ["te mostro o lembrete pronto", "te mostro a entrada do Extrato"]);
+  assertStringIncludes(com.pedido!, "há R$ 5.238,02 no Extrato (de 08/10) esperando baixa: pode ser este pagamento.");
+  assertStringIncludes(com.pedido!, "NÃO prepare lembrete nem cobrança antes de eu decidir a entrada.");
+  assertEquals(com.pedido!.includes("Prepare um lembrete"), false);
+  assertEquals(com.fatos!.find((f) => f[0] === "No Extrato"), ["No Extrato", "R$ 5.238,02 de 08/10 esperando baixa"]);
+  assertEquals(sem.fatos!.some((f) => f[0] === "No Extrato"), false);
+  // várias entradas do cliente não viram "uma entrada de R$ soma"
+  const varias = candidatoDeCobranca(cob({ saldo: 20, vencimento: "2026-07-22", esperando: { valor: 20783, data: "2026-10-27", n: 2 } }), HOJE);
+  assertEquals(varias.porqueNaoSobe, "Ficou na lista: há 2 entradas no Extrato (R$ 20.783,00 ao todo) esperando baixa — alguma pode ser este pagamento. Confira no Extrato antes de cobrar.");
+  assertEquals(varias.fatos!.find((f) => f[0] === "No Extrato"), ["No Extrato", "2 entradas, R$ 20.783,00 ao todo, esperando baixa"]);
+  assertEquals(com.fato, "5238.02|2026-10-08|esperando");
+  // a referência e o assunto não mudam: é a mesma conta
+  assertEquals([com.referencia, com.assunto], [sem.referencia, sem.assunto]);
+
+  // no marco (1º ao 3º dia) também não sobe; sem data, a frase sai sem ela
+  const marco = candidatoDeCobranca(cob({ saldo: 1710, vencimento: "2026-10-13", esperando: { valor: 2800, data: null } }), HOJE);
+  assertEquals([marco.tipo, marco.elegivel], ["cobranca_marco", false]);
+  assertEquals(marco.porqueNaoSobe, "Ficou na lista: há R$ 2.800,00 no Extrato esperando baixa — pode ser este pagamento. Confira no Extrato antes de cobrar.");
+
+  // sem entrada (nulo, ausente ou valor zero) a cobrança é a de sempre, byte a byte
+  assertEquals(candidatoDeCobranca(cob({ esperando: null }), HOJE), candidatoDeCobranca(cob({}), HOJE));
+  assertEquals(candidatoDeCobranca(cob({ esperando: { valor: 0, data: "2026-10-08" } }), HOJE).elegivel, true);
+});
+
+Deno.test("na seleção do dia, a cobrança grande com entrada esperando vai para a lista e não ocupa letra", () => {
+  const coleta = coleta1510();
+  coleta.orcamentos = [];
+  coleta.conversas = [];
+  coleta.oss = [];
+  coleta.cobrancas = [
+    { id: "g-deve", client_id: "c-deve", cliente: "Quem Deve", descricao: null, vencimento: "2026-10-13", saldo: 16890, os_numero: null, barco: null },
+    { id: "g-pagou", client_id: "c-pagou", cliente: "Quem Pagou", descricao: null, vencimento: "2026-10-08", saldo: 5238.02, os_numero: null, barco: null,
+      esperando: { valor: 5238.02, data: "2026-10-08" } },
+  ];
+  const candidatos = candidatosDoDia(coleta, AGORA_1510, HOJE);
+  assertEquals(candidatos.filter((c) => c.familia === "cobranca").map((c) => [c.nome, c.elegivel]), [["Quem Deve", true], ["Quem Pagou", false]]);
+});

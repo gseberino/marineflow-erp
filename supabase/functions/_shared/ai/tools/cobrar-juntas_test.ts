@@ -511,11 +511,11 @@ Deno.test("recusas claras sem pendência: genérico, conta no genérico, não co
   }
 });
 
-Deno.test("as travas do lembrete: Pix esperando no Extrato, opt-out, abaixo do piso e sem telefone recusam sem pendência", async () => {
+Deno.test("as travas do lembrete: entrada esperando no Extrato, opt-out, abaixo do piso e sem telefone recusam sem pendência", async () => {
   const casos: Array<{ tabelas: Record<string, Linha[]>; trecho: string }> = [
     {
       tabelas: { finance_review_queue: [{ suggested_client_id: MP, suggested_amount: 1670, suggested_date: "2026-10-27", title: "Receita: MP", status: "pending", kind: "create_receivable" }] },
-      trecho: "Este cliente tem Pix esperando no Extrato (R$ 1670.00 de 2026-10-27): pode ser este pagamento.",
+      trecho: "Este cliente tem entrada esperando no Extrato (R$ 1670.00 de 2026-10-27): pode ser este pagamento.",
     },
     { tabelas: { clients: cadastros().map((c) => c.id === MP ? { ...c, opt_out_whatsapp: true } : c) }, trecho: "opt-out" },
     {

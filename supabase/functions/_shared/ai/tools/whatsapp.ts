@@ -1171,7 +1171,7 @@ export const whatsappTools: ToolDef[] = [
         if (pix.length) {
           const lista = pix.map((p) => `R$ ${p.valor.toFixed(2)}${p.data ? ` de ${p.data}` : ""}`).join(", ");
           return {
-            error: `Este cliente tem Pix esperando no Extrato (${lista}): pode ser este pagamento. `
+            error: `Este cliente tem entrada esperando no Extrato (${lista}): pode ser este pagamento. `
               + "Confira no Extrato (Este Pix paga…) antes de cobrar; se for outra coisa, decida a linha lá e cobre depois.",
           };
         }
