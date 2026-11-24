@@ -4560,3 +4560,49 @@ quatro estão latentes.
   liberável, o que não vale para essas. Latente: 0 chaves `ai_autonomy_*` no banco.
 - **Menor mudança:** decisão do dono, nome a nome. O S2 fechou 8 e deixou de fora, de propósito, as ações internas e com
   desfazer (a porta do "se eu não responder, faça" do pacote seguinte). Não corrigido aqui.
+
+### [NOVO-p1-s3-01] update_client: número só com espaços APAGA o telefone ou o WhatsApp; vazio e nulo são descartados
+
+- **Onde:** `supabase/functions/_shared/ai/tools/clients.ts`, `pedidoDeAtualizacao` (a leitura do pedido que o `execute` usa:
+  descarta `undefined`, `null` e `""`) e `normalizarCampos` → `formatarTelefone` (`_shared/ai/busca-cadastro.ts`), que devolve
+  `null` para texto só com espaços. Visto em 24/11/2026 ao construir o S3 do pacote 1 (ramo `session/assistente-p1`); conferido
+  rodando o `execute` com banco falso.
+- **Efeito:** `phone: "   "` passa pelo filtro, vira `null` e o update grava: o número é apagado. `phone: ""` ou `null` não apaga
+  (o campo é descartado e o resto do pedido é gravado). Duas respostas para o mesmo pedido, e a que apaga não avisa. Depois do
+  S3 esse caminho não roda mais direto: qualquer presença de telefone ou WhatsApp no pedido pede o "sim", e o resumo recusa o
+  pedido de apagar ("pelo assistente dá para trocar o número, mas não apagar"). Sobra só com a chave `ai_autonomy_update_client
+  = 'auto'` gravada (0 chaves). Medido em 90 dias: 6 chamadas de `update_client`, 3 mexiam em contato, 0 com número vazio ou nulo.
+- **Menor mudança:** decisão do dono: o assistente apaga contato de cliente (com "sim" e cartão "antigo → —") ou não. Se não,
+  tratar o texto só com espaços como vazio na leitura do pedido. Não corrigido aqui.
+
+### [NOVO-p1-s3-02] apply_quote_price: margem que não é número apaga o preço de venda da linha e responde "ok"
+
+- **Onde:** `supabase/functions/_shared/ai/tools/quotes.ts`, `apply_quote_price`, `execute`: `Number(args.markup_percent)` dá
+  `NaN`, `NaN < 0` é falso, e o preço de venda calculado (`NaN`) vai para `unit_sale_snapshot` e `line_total_sale` (no JSON vira
+  `null`). Conferido em 24/11/2026 rodando o `execute` com banco falso: a resposta foi `ok: true`.
+- **Efeito:** latente (0 chamadas em 90 dias). Depois do S3 a ferramenta pede o "sim" e o resumo recusa antes ("Não entendi a
+  margem"), então o `execute` só receberia esse valor com a chave `ai_autonomy_apply_quote_price = 'auto'` gravada (0 chaves).
+- **Menor mudança:** a mesma conferência do resumo (`Number.isFinite`) no `execute`, com teste. Não corrigido aqui.
+
+### [NOVO-p1-s3-03] Depois do S3, preço cotado e contato do cliente pedem o "sim", mas ainda podem ser liberados para rodar sozinhos
+
+- **Onde:** `supabase/functions/_shared/ai/autonomy-policy.ts`, `NEVER_AUTONOMOUS`. Complementa o NOVO-p1-s2-01:
+  `apply_quote_price` (agora risco médio) e `update_client` (risco por argumento) estão no `PERFIL_ADMIN` e fora da lista.
+- **Efeito:** com `ai_autonomy_<nome> = 'auto'`, a troca de telefone, WhatsApp ou da marca de não receber mensagens e a
+  mudança de custo e preço de venda rodam sem o "sim" que o S3 criou (`isAutonomyGranted` não olha o nível do risco).
+  `remember_note` e `review_entity_note` (S4) também estão fora da lista, mas ficam fora do perfil, e pela rede de segurança a
+  autonomia não vale: só as alcançaria com a ferramenta à vista. Latente: 0 chaves `ai_autonomy_*` no banco, e gravar uma
+  chave exige `set_tool_autonomy`, que pede "sim" com PIN.
+- **Menor mudança:** decisão do dono, junto com a do NOVO-p1-s2-01. A crítica de risco do pacote 1 já pede, no S6, que subida
+  de risco com motivo não seja anulada por autonomia. Não corrigido aqui.
+
+### [NOVO-p1-s4-01] Aprovar observação da memória: o cartão mostra o código da nota, não o texto
+
+- **Onde:** `supabase/functions/_shared/ai/agent.ts`, `buildPendingSummary`: `review_entity_note` cai no resumo genérico, e
+  `resolveIdLabel` não conhece `note_id`. O cartão sai "- Nota: <uuid>" e "- Decisão: aprovar". Visto em 24/11/2026 ao
+  construir o S4 do pacote 1.
+- **Efeito:** o dono dá o "sim" sem ver o título nem o texto da observação que passa a entrar no contexto do assistente. Já era
+  assim quando a ferramenta chegava pela rede de segurança; com o S4, aprovar pede o "sim" também à vista, pelo mesmo cartão.
+  Latente: 0 notas no banco e 0 chamadas em 90 dias.
+- **Menor mudança:** resumo próprio que lê o título, o texto e de quem é a nota (cliente, embarcação ou fornecedor), com recusa
+  quando a nota não existe ou já foi decidida. Não está na especificação do S4; não construído aqui.
