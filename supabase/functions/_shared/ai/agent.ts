@@ -1202,6 +1202,20 @@ export interface ResultadoDaTool {
   ferramenta?: string;
 }
 
+// ─── Pacote 1, S1 (24/11/2026): o risco visto pelo servidor (ToolDef.riscoNoServidor) ───────────────────────────────
+const NIVEL_DO_RISCO: Record<string, number> = { low: 0, medium: 1, high: 2 };
+
+/** O motivo quando o gancho do risco lança ou responde torto: na dúvida, risco alto. */
+export const FALHA_AO_CONFERIR_O_RISCO = "não consegui conferir quem recebe";
+
+/**
+ * A última linha do cartão de risco alto que tem motivo dado pelo servidor. O resumo é o mesmo no WhatsApp e no chat do
+ * app (lá a aprovação é por botão, sem PIN): por isso a frase diz onde o PIN é pedido.
+ */
+export function linhaDoPin(motivos: string[]): string {
+  return `🔒 No WhatsApp, pede PIN: ${motivos.join("; ")}.`;
+}
+
 /**
  * Executa UMA chamada de ferramenta com todas as travas: perfil e rede de segurança, validação
  * de argumentos, risco e autonomia, pré-validação, pendência para aprovação e auditoria.
@@ -1257,7 +1271,24 @@ export async function executarChamadaDeTool(
   let createdPendingProposal: Proposal | undefined;
   let executou = false;
 
-  const riscoDaTool = toolDef ? (toolDef.computeRisk ? toolDef.computeRisk(tc.input) : toolDef.risk) : "low";
+  let riscoDaTool = toolDef ? (toolDef.computeRisk ? toolDef.computeRisk(tc.input) : toolDef.risk) : "low";
+  // Pacote 1, S1 (24/11/2026): o risco que só o servidor sabe (ToolDef.riscoNoServidor): quem recebe de fato e o que o
+  // texto diz, lidos do banco pela própria ferramenta, e não o argumento que o modelo escolheu. Só SOBE o risco; o gancho
+  // que lança ou responde torto vale risco alto. Os motivos vão para o cartão (linhaDoPin), para risk_reason e travam a
+  // autonomia. Não roda quando o pedido já vai ser recusado pelo número da OS ou pelos argumentos.
+  const motivosDoRisco: string[] = [];
+  if (toolDef?.riscoNoServidor && !recusaDoNumero && argumentosInvalidos.length === 0) {
+    try {
+      const visto = await toolDef.riscoNoServidor((tc.input ?? {}) as Record<string, unknown>, amb.toolCtx);
+      const nivel = NIVEL_DO_RISCO[visto?.risco];
+      if (nivel === undefined) throw new Error("risco que não existe");
+      if (nivel > NIVEL_DO_RISCO[riscoDaTool]) riscoDaTool = visto.risco;
+      if (typeof visto.motivo === "string" && visto.motivo.trim()) motivosDoRisco.push(visto.motivo.trim());
+    } catch {
+      riscoDaTool = "high";
+      motivosDoRisco.push(FALHA_AO_CONFERIR_O_RISCO);
+    }
+  }
   // Pela rede, só roda direto o que o computeRisk CALCULA como low e rodaDiretoPelaRede aceita:
   // declarada low E leitura ou escrita de sugestão/análise (ESCRITAS_VERIFICADAS_DA_REDE).
   // Escrita low fora dessa lista, ou declarada acima de low e rebaixada pelo computeRisk, pede
@@ -1270,8 +1301,9 @@ export async function executarChamadaDeTool(
   // nunca entram aqui — ver NEVER_AUTONOMOUS. Pela rede também não: a autonomia foi dada
   // pensando no modelo que VÊ a ferramenta, não no que a chama de memória do prompt. Os
   // argumentos vão junto porque há trava por argumento: o envio do PDF ao cliente nunca roda
-  // sozinho (NEVER_AUTONOMOUS_WHEN).
-  const autonomo = toolDef && !foraDoPerfil
+  // sozinho (NEVER_AUTONOMOUS_WHEN). Pacote 1, S1: com motivo de risco dado pelo servidor também não
+  // (isAutonomyGranted não olha o nível: uma chave 'auto' pularia o PIN que o motivo acabou de pedir).
+  const autonomo = toolDef && !foraDoPerfil && motivosDoRisco.length === 0
     ? isAutonomyGranted(tc.name, effectiveRisk, amb.toolCtx.settings, tc.input as Record<string, unknown>)
     : false;
 
@@ -1331,6 +1363,10 @@ export async function executarChamadaDeTool(
       if (solicitante) {
         resumo += `\nPedido por: *${solicitante.nome || "—"}* (${ROTULO_DO_CARGO[solicitante.cargo] ?? solicitante.cargo})`;
       }
+      // Pacote 1, S1: o porquê do PIN, na última linha do cartão (o mesmo resumo aparece no chat do app, onde a
+      // aprovação é por botão: por isso "No WhatsApp"). Só quando o risco final é alto e o servidor deu o motivo.
+      const motivoDoRisco = motivosDoRisco.join("; ");
+      if (effectiveRisk === "high" && motivoDoRisco) resumo += `\n${linhaDoPin(motivosDoRisco)}`;
       const payloadDaPendencia = limpa
         ? {
           ...entrada,
@@ -1349,6 +1385,9 @@ export async function executarChamadaDeTool(
             requested_by_user_id: amb.toolCtx.userId,
             action_name: tc.name,
             risk_level: effectiveRisk,
+            // Pacote 1, S1: o motivo que o servidor deu para o risco, para medir depois. Sem motivo, a coluna fica como
+            // sempre ficou (nula): a linha gravada das outras ferramentas não muda.
+            ...(motivoDoRisco ? { risk_reason: motivoDoRisco } : {}),
             title: humanizeToolNamePt(tc.name),
             summary: resumo,
             payload: payloadDaPendencia,
