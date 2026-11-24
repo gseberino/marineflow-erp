@@ -10,7 +10,7 @@
 // entrar classificado no favorecido desativado. As regras do extrato que apontam para ele — pelo
 // CPF/CNPJ dele, ou pelo nome COMPLETO dele no extrato — são pausadas junto, com uma marca na nota;
 // reativar o favorecido reativa as que foram pausadas por isso. A confirmação lista quais.
-import { lerRetrato, type ToolCtx, type ToolDef } from "./registry.ts";
+import { lerRetrato, type RiskLevel, type ToolCtx, type ToolDef } from "./registry.ts";
 import { categoriaValida, dataDita, ehErro, escolherPorNome, normal } from "./caixa.ts";
 import { mensagemDoBanco } from "./lancamentos.ts";
 import {
@@ -146,13 +146,48 @@ export async function mudancasDoFavorecido(ctx: ToolCtx, f: FavorecidoLido, args
   return { patch, linhas, ativar };
 }
 
+// ── Troca de Pix, conta ou documento pede PIN (pacote 1, S3, 24/11/2026) ────────────────────────
+//
+// alterar_favorecido pedia só o "sim" para trocar a chave Pix e a conta: é para onde vai o dinheiro de quem a oficina
+// paga. O risco DECLARADO continua medium (o perfil 'operacao' e financeiro-pela-conversa_test.ts dependem dele); o
+// computeRisk sobe para high quando o pedido traz chave Pix, conta ou CPF/CNPJ.
+
+/** Os argumentos que mudam para onde vai o dinheiro (Pix e conta) ou de quem é o cadastro (CPF/CNPJ). */
+const ARGUMENTOS_QUE_PEDEM_PIN = ["chave_pix", "tipo_chave_pix", "banco", "agencia", "conta", "tipo_conta", "documento"] as const;
+
+/** As colunas de `payees` que dizem para onde vai o dinheiro: mudou uma, o cartão avisa logo abaixo do título. */
+const COLUNAS_DO_DESTINO_DO_DINHEIRO = ["pix_key", "pix_key_type", "bank_name", "bank_branch", "bank_account", "account_type"];
+
+/**
+ * A primeira linha do cartão quando muda Pix ou conta. "No WhatsApp": o mesmo resumo aparece no cartão do chat do app,
+ * onde a aprovação é por botão, com login e sem PIN (crítica de viabilidade do pacote 1, sobre a linha do S1).
+ */
+export const AVISO_DO_DESTINO_DO_DINHEIRO = "🔒 Muda para onde vai o dinheiro (Pix ou conta): no WhatsApp, pede PIN.";
+
+/**
+ * O risco de alterar_favorecido. TOTAL: executarChamadaDeTool (agent.ts) chama computeRisk fora de try, e uma exceção
+ * aqui derrubaria o turno. O que não é objeto, ou qualquer surpresa, devolve o risco mais alto do caso (high). Vazio e
+ * nulo não contam: mudancasDoFavorecido só muda o campo que vem com texto (a ferramenta não apaga campo).
+ */
+export function riscoDeAlterarFavorecido(args: unknown): RiskLevel {
+  try {
+    if (args === null || typeof args !== "object" || Array.isArray(args)) return "high";
+    const a = args as Record<string, unknown>;
+    return ARGUMENTOS_QUE_PEDEM_PIN.some((k) => a[k] != null && String(a[k]).trim() !== "") ? "high" : "medium";
+  } catch {
+    return "high";
+  }
+}
+
 export async function resumirFavorecido(ctx: ToolCtx, args: Record<string, unknown>): Promise<string | null> {
   const r = await acharFavorecido(ctx.admin, args);
   if (ehErro(r)) return `⚠️ ${r.error}`;
   const f = r.favorecido;
   const m = await mudancasDoFavorecido(ctx, f, args);
   if (ehErro(m)) return `⚠️ ${m.error}`;
-  const linhas = [`Alterar o favorecido *${f.name}*${f.active ? "" : " (inativo)"}:`, ...m.linhas.map((l) => `- ${l}`)];
+  const linhas = [`Alterar o favorecido *${f.name}*${f.active ? "" : " (inativo)"}:`];
+  if (COLUNAS_DO_DESTINO_DO_DINHEIRO.some((c) => c in m.patch)) linhas.push(AVISO_DO_DESTINO_DO_DINHEIRO);
+  linhas.push(...m.linhas.map((l) => `- ${l}`));
   if (m.ativar !== null) {
     const regras = await regrasDaMudanca(ctx.admin, f, m.ativar);
     if (ehErro(regras)) linhas.push(`- ⚠️ ${regras.error}`);
@@ -195,6 +230,8 @@ export const favorecidoTools: ToolDef[] = [
       },
     },
     risk: "medium",
+    // S3 (24/11/2026): trocar chave Pix, conta ou CPF/CNPJ pede PIN; o resto segue com o "sim".
+    computeRisk: riscoDeAlterarFavorecido,
     roles: CARGOS_DO_FINANCEIRO,
     preValidar(args) {
       if (!args?.favorecido && !args?.favorecido_id) return { error: "Qual favorecido? Diga o nome." };

@@ -52,6 +52,9 @@ import {
   CAMPOS_EM_PORCENTO, CAMPOS_EM_REAIS, ROTULOS_DOS_CAMPOS, ROTULOS_DOS_VALORES, TITULOS_DA_REDE_DO_ADMIN, TITULOS_DAS_ACOES_DIRETAS,
 } from "./rotulos.ts";
 import { resumirServicoNovo } from "./tools/products.ts";
+// pacote 1, S3 (24/11/2026): o cartão do preço cotado (custo e venda, antes e depois) e o da troca de contato do cliente.
+import { resumirAplicacaoDoPreco } from "./tools/quotes.ts";
+import { FALHA_AO_CONFERIR_O_CLIENTE, resumirTrocaDeContato } from "./tools/clients.ts";
 import { resolverCobrancasDoLote } from "./tools/flow-macros.ts";
 import { comFusoDeBrasilia, FUSO_DE_BRASILIA } from "./fuso.ts";
 
@@ -523,6 +526,10 @@ RESUMO_QUE_RESOLVE.add("definir_responsavel_do_servico");
 // Histórico de documentos (16/11/2026): a simulação da restauração falhou (documento fechado, mudou, versão que não existe,
 // total abaixo do pago) ou nada mudaria — o resumo diz por quê numa linha "⚠️": é recusa, não pendência.
 RESUMO_QUE_RESOLVE.add("restaurar_documento");
+// Pacote 1, S3 (24/11/2026): resposta de cotação sem preço, item sem linha no orçamento, OS fechada, cliente que não
+// existe, telefone que veio vazio ou leitura que falha — o resumo diz por quê numa linha "⚠️": é recusa, não pendência.
+RESUMO_QUE_RESOLVE.add("apply_quote_price");
+RESUMO_QUE_RESOLVE.add("update_client");
 
 export function resumoQueRecusa(toolName: string, resumo: string): { error: string; nada_registrado: true } | null {
   const t = resumo.trim();
@@ -579,6 +586,20 @@ export async function buildPendingSummary(
       const motivo = String((e as { message?: string })?.message ?? e).replace(/\s*\n+\s*/g, " ");
       return `⚠️ Não consegui conferir o catálogo de serviços agora (${motivo}). Nada foi registrado; tente de novo.`;
     }
+  }
+  // Preço cotado (pacote 1, S3, 24/11/2026): o "sim" é sobre o fornecedor, o item, o orçamento e o custo e a venda de
+  // antes e de depois. O que a execução recusaria e a leitura que falha viram uma linha "⚠️" (o resumo nunca lança).
+  if (toolName === "apply_quote_price") return await resumirAplicacaoDoPreco(admin, args);
+  // Contato do cliente (pacote 1, S3, 24/11/2026): telefone, WhatsApp e a marca de não receber mensagens, com o antes
+  // e o depois. null = o pedido não mexe em contato (chegou aqui por outro motivo): o resumo genérico de sempre.
+  if (toolName === "update_client") {
+    let r: string | null;
+    try {
+      r = await resumirTrocaDeContato(admin, args, { cargo: quem.userRole, rotulo: rotuloDoCampo });
+    } catch {
+      r = FALHA_AO_CONFERIR_O_CLIENTE;
+    }
+    if (r !== null) return r;
   }
   // Resposta a e-mail (08/10/2026): o "sim" é sobre o texto EXATO que vai sair, de qual caixa e
   // para quem — lido do rascunho guardado, não do que o modelo diz.

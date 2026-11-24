@@ -1,4 +1,4 @@
-import type { ToolDef } from "./registry.ts";
+import type { RiskLevel, ToolDef } from "./registry.ts";
 import {
   buscarCadastro,
   digitosDoDocumento,
@@ -85,6 +85,130 @@ function mesmoValorGravado(campo: string, pedido: unknown, gravado: unknown): bo
 /** "o nome", "o nome e o CPF/CNPJ", "o nome, o CPF/CNPJ e o tipo (…)". */
 function emLista(itens: string[]): string {
   return itens.length <= 1 ? (itens[0] ?? "") : `${itens.slice(0, -1).join(", ")} e ${itens[itens.length - 1]}`;
+}
+
+/**
+ * O pedido de update_client como a execução o lê: sem o que veio vazio ou nulo, e no formato que a tela grava. O cartão
+ * do "sim" (resumirTrocaDeContato) usa a mesma leitura: o que ele mostra é o que vai ser gravado.
+ */
+function pedidoDeAtualizacao(
+  args: unknown,
+): { client_id: unknown; motivo: unknown; patch: Record<string, unknown> } | { error: string } {
+  const { client_id, motivo, ...campos } = (args ?? {}) as Record<string, unknown>;
+  const patch = Object.fromEntries(Object.entries(campos).filter(([, v]) => v !== undefined && v !== null && v !== ""));
+  if (Object.keys(patch).length === 0) return { error: "Nada para atualizar — informe ao menos um campo." };
+  const recusa = normalizarCampos(patch);
+  if (recusa) return recusa;
+  return { client_id, motivo, patch };
+}
+
+/** Do que só o escritório muda, o que este pedido mudaria de fato: o que veio IGUAL ao gravado não é troca. */
+function mudariaSoDoEscritorio(
+  patch: Record<string, unknown>,
+  antes: Record<string, unknown>,
+): (keyof typeof SO_DO_ESCRITORIO)[] {
+  return (Object.keys(SO_DO_ESCRITORIO) as (keyof typeof SO_DO_ESCRITORIO)[])
+    .filter((c) => c in patch && !mesmoValorGravado(c, patch[c], antes[c]));
+}
+
+/** A recusa ao técnico que tenta mudar nome, CPF/CNPJ ou tipo: a mesma frase na execução e antes do cartão do "sim". */
+function recusaAoTecnico(mudaria: (keyof typeof SO_DO_ESCRITORIO)[]): string {
+  return `Só o escritório muda ${emLista(mudaria.map((c) => SO_DO_ESCRITORIO[c]))} de um cliente — peça ao escritório.`;
+}
+
+// ── Troca de contato pede o "sim" (pacote 1, S3, 24/11/2026) ───────────────────────────────────
+//
+// update_client rodava direto (risco low) e trocava telefone, WhatsApp e a marca de "não receber mensagens" sem o dono
+// ver — e é para esse número que vão orçamento, cobrança e PDF. Tocou num dos três, o risco sobe para medium e o cartão
+// mostra o antes e o depois. O resto do cadastro (e-mail, endereço, documento) segue como era.
+
+/** Os argumentos que dizem para onde vão as mensagens do cliente. */
+const CAMPOS_DE_CONTATO = ["phone", "whatsapp", "opt_out_whatsapp"] as const;
+
+/**
+ * O risco de update_client. TOTAL: executarChamadaDeTool (agent.ts) chama computeRisk fora de try, e uma exceção aqui
+ * derrubaria o turno inteiro — por isso nada de `"phone" in args` (lança com args indefinido). O que não é objeto, ou
+ * qualquer surpresa, devolve o risco mais alto do caso. Vazio e nulo CONTAM: apagar o contato também é troca; só
+ * `undefined` é "não veio".
+ */
+export function riscoDeAtualizarCliente(args: unknown): RiskLevel {
+  try {
+    if (args === null || typeof args !== "object" || Array.isArray(args)) return "medium";
+    const a = args as Record<string, unknown>;
+    return CAMPOS_DE_CONTATO.some((c) => a[c] !== undefined) ? "medium" : "low";
+  } catch {
+    return "medium";
+  }
+}
+
+/** Leitura do cliente que falha: o cartão não nasce (sem o antes, o "sim" seria às cegas). */
+export const FALHA_AO_CONFERIR_O_CLIENTE = "⚠️ Não consegui conferir o cliente agora. Nada foi alterado; tente de novo.";
+
+/**
+ * O cartão do "sim" da troca de contato: o WhatsApp, o telefone e a marca de não receber mensagens, com o antes (lido
+ * agora do cadastro) e o depois (o que a execução vai gravar, já no formato da tela).
+ *
+ * null = o pedido não mexe em contato: quem chamou usa o resumo genérico de sempre.
+ * Linha "⚠️" = recusa, e a pendência não nasce (RESUMO_QUE_RESOLVE em agent.ts): leitura que falha, cliente que não
+ * existe, o que a execução recusaria de qualquer jeito (técnico mudando nome, CPF/CNPJ ou tipo) e o pedido de APAGAR o
+ * telefone ou o WhatsApp (vazio, nulo ou só espaço). Apagar não é coisa do assistente: a execução descarta o que vem
+ * vazio ou nulo, então um cartão "→ —" pediria um "sim" sobre algo que não acontece. O risco continua medium nesses
+ * casos (riscoDeAtualizarCliente): o pedido nunca roda direto.
+ *
+ * `rotulo` vem de quem chama (rotuloDoCampo, agent.ts): os nomes dos outros campos são os mesmos do cartão genérico.
+ */
+export async function resumirTrocaDeContato(
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  args: unknown,
+  opts: { cargo?: string; rotulo?: (campo: string) => string } = {},
+): Promise<string | null> {
+  if (riscoDeAtualizarCliente(args) === "low") return null;
+  if (args === null || typeof args !== "object" || Array.isArray(args)) return "⚠️ Nada para atualizar — informe ao menos um campo.";
+  const dito = args as Record<string, unknown>;
+  const emBranco = (v: unknown) => v === null || (typeof v === "string" && v.trim() === "");
+  if (emBranco(dito.phone) || emBranco(dito.whatsapp)) {
+    return "⚠️ Telefone ou WhatsApp vazio: pelo assistente dá para trocar o número do cliente, mas não apagar (isso é na tela do cliente). Nada foi alterado.";
+  }
+  const pedido = pedidoDeAtualizacao(dito);
+  if ("error" in pedido) return `⚠️ ${String(pedido.error).replace(/\s*\n+\s*/g, " ")}`;
+  const { client_id, patch } = pedido;
+  const tocados = CAMPOS_DE_CONTATO.filter((c) => c in patch);
+  if (tocados.length === 0) return null;
+  if ("opt_out_whatsapp" in patch && typeof patch.opt_out_whatsapp !== "boolean") {
+    return "⚠️ Não entendi se o cliente quer ou não receber mensagens no WhatsApp: diga sim ou não. Nada foi alterado.";
+  }
+
+  if (typeof client_id !== "string" || !client_id.trim()) return "⚠️ Cliente não encontrado.";
+  let antes: Record<string, unknown> | null;
+  try {
+    const { data, error } = await admin
+      .from("clients").select("id, name, cpf_cnpj, type, phone, whatsapp, opt_out_whatsapp").eq("id", client_id).maybeSingle();
+    if (error) return FALHA_AO_CONFERIR_O_CLIENTE;
+    antes = data;
+  } catch {
+    return FALHA_AO_CONFERIR_O_CLIENTE;
+  }
+  if (!antes) return "⚠️ Cliente não encontrado.";
+
+  // O técnico: o mesmo corte da execução. O que ela recusaria é recusa já aqui; o que veio igual ao gravado sai.
+  if (opts.cargo === "technician") {
+    const mudaria = mudariaSoDoEscritorio(patch, antes);
+    if (mudaria.length) return `⚠️ ${recusaAoTecnico(mudaria)}`;
+    for (const c of Object.keys(SO_DO_ESCRITORIO)) delete patch[c];
+  }
+
+  const texto = (v: unknown) => (v === null || v === undefined || v === "" ? "—" : String(v));
+  const simOuNao = (v: unknown) => (v === true ? "sim" : "não");
+  const linhas = [`Trocar o contato do cliente *${texto(antes.name)}*:`];
+  if ("whatsapp" in patch) linhas.push(`- WhatsApp: ${texto(antes.whatsapp)} → *${texto(patch.whatsapp)}*`);
+  if ("phone" in patch) linhas.push(`- Telefone: ${texto(antes.phone)} → *${texto(patch.phone)}*`);
+  if ("opt_out_whatsapp" in patch) {
+    linhas.push(`- Não receber mensagens no WhatsApp: ${simOuNao(antes.opt_out_whatsapp)} → *${simOuNao(patch.opt_out_whatsapp)}*`);
+  }
+  const outros = Object.keys(patch).filter((c) => !(CAMPOS_DE_CONTATO as readonly string[]).includes(c));
+  if (outros.length) linhas.push(`- Também muda: ${outros.map((c) => (opts.rotulo ? opts.rotulo(c) : c)).join(", ")}`);
+  return linhas.join("\n");
 }
 
 const COLUNAS_DUPLICADO = "id, name, cpf_cnpj, phone, whatsapp, city, active";
@@ -246,12 +370,12 @@ export const clientTools: ToolDef[] = [
       required: ["client_id"],
     },
     risk: "low",
+    // S3 (24/11/2026): telefone, WhatsApp ou a marca de não receber mensagens pedem o "sim" (inclusive apagar).
+    computeRisk: riscoDeAtualizarCliente,
     async execute(args, { sb, userRole }) {
-      const { client_id, motivo, ...campos } = args as Record<string, unknown>;
-      const patch = Object.fromEntries(Object.entries(campos).filter(([, v]) => v !== undefined && v !== null && v !== ""));
-      if (Object.keys(patch).length === 0) return { error: "Nada para atualizar — informe ao menos um campo." };
-      const recusa = normalizarCampos(patch);
-      if (recusa) return recusa;
+      const pedido = pedidoDeAtualizacao(args);
+      if ("error" in pedido) return pedido;
+      const { client_id, motivo, patch } = pedido;
 
       const { data: antes, error: lerErr } = await sb
         .from("clients").select("id, name, cpf_cnpj, type, active, notes").eq("id", client_id).maybeSingle();
@@ -264,10 +388,10 @@ export const clientTools: ToolDef[] = [
       // telefone; sai do patch para não regravar (o CPF sem máscara viraria "outro" valor).
       if (userRole === "technician") {
         const protegidos = Object.keys(SO_DO_ESCRITORIO) as (keyof typeof SO_DO_ESCRITORIO)[];
-        const mudaria = protegidos.filter((c) => c in patch && !mesmoValorGravado(c, patch[c], antes[c]));
+        const mudaria = mudariaSoDoEscritorio(patch, antes);
         if (mudaria.length) {
           return {
-            error: `Só o escritório muda ${emLista(mudaria.map((c) => SO_DO_ESCRITORIO[c]))} de um cliente — peça ao escritório.`,
+            error: recusaAoTecnico(mudaria),
             nada_gravado: true,
             tecnico_pode_mudar: "telefone, WhatsApp, e-mail e endereço (mande de novo só com esses campos)",
           };
