@@ -4643,3 +4643,62 @@ quatro estão latentes.
   nenhuma decisão mudou. No aviso da legenda do PDF e do link, o link da OS já é tirado antes de conferir.
 - **Menor mudança:** lista de data própria do texto livre (sem "ter", e número/número só com cara de data), com teste. Fere a
   instrução do pacote de não criar outra lista: decisão de quem especifica. Não corrigido aqui.
+
+### [NOVO-p1-v2-01] Domingo e feriado: a falha de rotina de IA do sábado pode não aparecer em manhã nenhuma
+
+- **Onde:** `supabase/functions/ai-daily-briefing/secretario-texto.ts`, `textoDaManha`: em domingo e feriado a manhã é uma
+  linha só, sem a linha "Hoje". `secretario-coleta.ts` lê as falhas de rotina "desde as 07:30 de ontem" (V2 do pacote 1) e os
+  erros da noite "desde as 20:00 de ontem". Visto em 24/11/2026 ao construir o V2 (ramo `session/assistente-p1`).
+- **Efeito:** a rotina que falha no sábado depois das 07:30 e não falha no domingo não é dita no domingo (não há linha "Hoje")
+  nem na segunda (que lê desde as 07:30 de domingo). O mesmo já valia para "Esta noite: N erros registrados". A falha que
+  continua (provedor sem saldo) aparece na segunda de qualquer jeito; a que se perde é a isolada. O registro em
+  `app_error_logs` (`rotina-ia:<rotina>@<dia>`) fica.
+- **Menor mudança:** a leitura partir da última manhã que teve linha "Hoje" (o último dia útil), e a frase dizer desde quando.
+  Não está na especificação do V2; não construído aqui.
+
+### [NOVO-p1-f1-01] O golpe que a caixa de e-mail recebe é cobrança judicial falsa, e a regra fixa do F1 não a cobre
+
+- **Onde:** dados de produção (`email_messages`), medidos em 24/11/2026 só por contagem, com a expressão dentro do SQL. A regra
+  fixa do F1 (`supabase/functions/_shared/email/triage.ts`, `golpeDeTrocaDeConta`) procura o pedido de troca de conta, de chave
+  Pix ou de boleto, como especificado.
+- **Efeito:** dos 17 e-mails que o modelo tinha marcado como golpe antes de 12/11, a regra pega 0. O vocabulário deles é outro:
+  13 falam em "contrato", 11 em termo judicial (processo, advocacia, protesto), 10 em dívida; nenhum em Pix nem em conta. Dos 96
+  e-mails sem triagem de 12/11 a 24/11, 4 têm contrato + termo judicial + dívida. Enquanto a triagem por modelo não volta, esse
+  golpe continua sem alerta.
+- **Menor mudança:** decisão do dono. Uma segunda regra fixa (contrato + termo judicial + dívida) pegaria 10 dos 17 marcados,
+  mas também 7 dos 102 e-mails que o modelo leu e NÃO marcou: cerca de 4 alarmes falsos em cada 10, e com a voz única cada
+  alarme gasta o "um aviso por remetente, para sempre". A alternativa é esperar a triagem voltar (V3). Não construído aqui.
+
+### [NOVO-p1-f1-02] Remetente "no-reply" sem anexo nunca tem o conteúdo lido, com o modelo de pé ou não
+
+- **Onde:** `supabase/functions/_shared/email/triage.ts`, `triageDeterministica`: o remetente que não aceita resposta, sem
+  anexo, e a resposta automática saem `notify` pelo atalho do cabeçalho, antes do modelo e antes da regra fixa do F1 (que só
+  roda no catch da chamada do modelo).
+- **Efeito:** um pedido de troca de conta mandado de "no-reply@…" ou "notificacoes@…" nunca vira alerta de golpe. Já era assim
+  antes do F1. Dos 598 e-mails triados, 149 saíram pelo atalho do remetente e 3 pelo da resposta automática. A crítica de
+  viabilidade citou a regra fixa "e em triageDeterministica"; o desenho mínimo do F1 ficou só no catch.
+- **Menor mudança:** passar a regra fixa também nos dois atalhos que dão `notify` (não no de lista, que dá `ignore`: as 2
+  ocorrências reais da regra em e-mail de lista são de divulgação). Medido: nos 152 e-mails desses dois atalhos a regra pega 0
+  hoje. Não construído aqui.
+
+### [NOVO-p1-f1-03] O corpo que vem só em HTML é guardado com as entidades de acento ("altera&ccedil;&atilde;o")
+
+- **Onde:** `supabase/functions/_shared/email/normalize.ts`, `htmlToText`: só resolve `&nbsp;`, `&amp;`, `&lt;`, `&gt;`,
+  `&quot;` e `&#39;`. Medido em 24/11/2026 (contagem): dos 1.920 e-mails guardados, 153 têm entidade de acento nomeada em
+  `body_text`, 139 têm entidade numérica e 4, em hexadecimal.
+- **Efeito:** é esse texto que o modelo da triagem lê, que fica guardado em `body_text` e que `normalizeTriage` usa para
+  conferir a evidência literal: se o modelo copiar a palavra já com o acento, a evidência não bate e a classificação é
+  rebaixada para `notify` (9 rebaixadas por "evidência não encontrada" na história, 1 delas em e-mail com entidade). A regra
+  fixa do F1 resolve as entidades só para si (`semEntidades`), sem mexer no que é guardado.
+- **Menor mudança:** resolver as entidades em `htmlToText`, com teste (vale para os e-mails novos; os guardados ficam como
+  estão). Mexe no que o modelo lê e no que é guardado: fora do F1. Não corrigido aqui.
+
+### [NOVO-p1-f1-04] Um e-mail de outubro fala em mudança de dados bancários e nunca passou por triagem
+
+- **Onde:** dados de produção (`email_messages`), contagem de 24/11/2026 com a regra do F1 dentro do SQL: nos 1.920 e-mails
+  guardados a regra pega 3, todos pela expressão "mudança de dados bancários ou de pagamento". Dois são de lista de divulgação
+  (o cabeçalho os descartou). O terceiro chegou em outubro, de remetente sem cadastro de cliente nem de fornecedor, e entrou
+  pelo histórico (mais de 48 horas quando foi lido): nunca foi classificado nem avisado. O texto não foi lido aqui.
+- **Efeito:** pode ser aviso legítimo ou tentativa de golpe; ninguém olhou. A regra do F1 só vale para e-mail novo (48 horas),
+  então ele não vira aviso sozinho.
+- **Menor mudança:** o dono olhar esse e-mail na caixa. Nada em código.
