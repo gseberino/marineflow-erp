@@ -54,6 +54,109 @@ async function loadItemsFromServiceOrder(sb: any, soId: string) {
   return out;
 }
 
+// ── Aplicar o preço cotado pede o "sim" (pacote 1, S3, 24/11/2026) ─────────────────────────────
+//
+// apply_quote_price rodava direto (risco low) e mudava o custo — e, com markup_percent, o preço de VENDA — de um item
+// do orçamento, sem o dono ver. Passa a medium, e o cartão mostra o custo e a venda de antes e de depois.
+
+/** O preço de venda que a margem dá: custo × (1 + margem%), em centavos. A execução e o cartão do "sim" usam a mesma conta. */
+export function precoDeVendaComMargem(custo: number, margemPct: number): number {
+  return Math.round(custo * (1 + margemPct / 100) * 100) / 100;
+}
+
+/** Leitura que falha: o cartão não nasce (sem o antes, o "sim" seria às cegas). */
+export const FALHA_AO_CONFERIR_A_COTACAO = "⚠️ Não consegui conferir a cotação agora. Nada foi alterado; tente de novo.";
+
+const reais = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+
+/**
+ * O cartão do "sim" de apply_quote_price: de qual fornecedor, em qual item de qual orçamento, e o custo e a venda de
+ * antes e de depois. Lê o mesmo que a execução, na mesma ordem, e recusa pelos mesmos motivos — numa linha "⚠️", que
+ * vira recusa em vez de pendência (RESUMO_QUE_RESOLVE em agent.ts): o dono não aprova o que a execução recusaria.
+ * Leitura que falha (erro do banco ou exceção) também é recusa. Nunca lança.
+ */
+export async function resumirAplicacaoDoPreco(
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  args: Record<string, unknown> | null | undefined,
+): Promise<string> {
+  try {
+    // Erro do banco lança e cai na recusa do catch: leitura que falhou nunca vira "não encontrado". Tabela e colunas
+    // ficam escritas em cada consulta (e não num leitor genérico) para a varredura de colunas do Vitest as conferir.
+    const lida = async (consulta: PromiseLike<{ data: unknown; error: unknown }>): Promise<Record<string, unknown> | null> => {
+      const { data, error } = await consulta;
+      if (error) throw error;
+      return (data ?? null) as Record<string, unknown> | null;
+    };
+
+    const respostaId = typeof args?.response_id === "string" ? args.response_id.trim() : "";
+    const resp = respostaId
+      ? await lida(admin.from("quote_responses")
+        .select("id, quote_request_id, supplier_id, quote_request_item_id, unit_price").eq("id", respostaId).maybeSingle())
+      : null;
+    if (!resp) return "⚠️ Resposta de cotação não encontrada.";
+    const preco = resp.unit_price == null ? NaN : Number(resp.unit_price);
+    if (!Number.isFinite(preco)) return "⚠️ Essa resposta de cotação não tem preço registrado.";
+
+    const item = await lida(admin.from("quote_request_items")
+      .select("id, description, service_order_part_id, service_order_service_id").eq("id", resp.quote_request_item_id).maybeSingle());
+    if (!item) return "⚠️ Item da cotação não encontrado.";
+    if (!item.service_order_part_id && !item.service_order_service_id) {
+      return "⚠️ Esse item da cotação não está amarrado a nenhuma linha de orçamento — não há onde aplicar o preço.";
+    }
+    // Numa linha só: a recusa "⚠️" só vale como recusa sem quebra de linha (resumoQueRecusa, agent.ts).
+    const nomeDoItem = String(item.description ?? "").replace(/\s+/g, " ").trim() || "item";
+
+    const req = await lida(admin.from("quote_requests").select("id, code, service_order_id").eq("id", resp.quote_request_id).maybeSingle());
+    if (!req?.service_order_id) return "⚠️ Essa cotação não tem orçamento de origem.";
+    const so = await lida(admin.from("service_orders").select("id, service_order_number, status").eq("id", req.service_order_id).maybeSingle());
+    if (!so) return "⚠️ Orçamento/OS de origem não encontrado.";
+    if (so.status === "cancelled") return "⚠️ OS cancelada não pode ser alterada.";
+    if (so.status === "invoiced") return "⚠️ OS já faturada não pode ter valores alterados.";
+
+    const margem = args?.markup_percent != null ? Number(args.markup_percent) : null;
+    if (margem != null && !Number.isFinite(margem)) return "⚠️ Não entendi a margem (markup_percent): diga um número, por exemplo 40.";
+    if (margem != null && margem < 0) return "⚠️ markup_percent não pode ser negativo.";
+    const venda = margem != null ? precoDeVendaComMargem(preco, margem) : null;
+    // A mesma conta da execução: o total da linha sai líquido do desconto dela, e total negativo é recusa.
+    const totalNegativo = (linha: Record<string, unknown>, precoDeVenda: number) =>
+      Math.round(((Number(linha.quantity) || 1) * precoDeVenda - (Number(linha.discount_amount) || 0)) * 100) / 100 < 0;
+    const descontoMaior = "⚠️ O desconto dessa linha é maior que o novo preço de venda. Ajuste o desconto na tela da OS antes.";
+
+    const linhas: string[] = [];
+    if (item.service_order_part_id) {
+      const part = await lida(admin.from("service_order_parts")
+        .select("id, quantity, unit_cost_snapshot, unit_sale_snapshot, discount_amount").eq("id", item.service_order_part_id).maybeSingle());
+      if (!part) return "⚠️ A linha de peça do orçamento não existe mais.";
+      if (venda != null && totalNegativo(part, venda)) return descontoMaior;
+      linhas.push(`- Custo: ${reais.format(Number(part.unit_cost_snapshot) || 0)} → *${reais.format(preco)}*`);
+      linhas.push(venda != null
+        ? `- Venda: ${reais.format(Number(part.unit_sale_snapshot) || 0)} → *${reais.format(venda)}*`
+        : "- Venda: não muda");
+    } else {
+      // Material/serviço de texto livre: a linha não guarda custo; sem margem a execução não altera nada e pede a margem.
+      if (venda == null) {
+        return `⚠️ "${nomeDoItem}" é material/serviço (texto livre) e o sistema não guarda custo nessa linha. ` +
+          `Custo cotado: ${reais.format(preco)}. Diga a margem (markup_percent) para eu aplicar o preço de venda.`;
+      }
+      const svc = await lida(admin.from("service_order_services")
+        .select("id, quantity, unit_price_snapshot, discount_amount").eq("id", item.service_order_service_id).maybeSingle());
+      if (!svc) return "⚠️ A linha de material/serviço do orçamento não existe mais.";
+      if (totalNegativo(svc, venda)) return descontoMaior;
+      linhas.push(`- Custo: esta linha não guarda custo (cotado: ${reais.format(preco)})`);
+      linhas.push(`- Venda: ${reais.format(Number(svc.unit_price_snapshot) || 0)} → *${reais.format(venda)}*`);
+    }
+
+    // O nome como a comparação da cotação o mostra (suppliers.name).
+    const sup = await lida(admin.from("suppliers").select("id, name").eq("id", resp.supplier_id).maybeSingle());
+    const fornecedor = String(sup?.name || "fornecedor sem cadastro");
+    const documento = String(so.service_order_number || req.code || "orçamento");
+    return [`Aplicar o preço de *${fornecedor}* em *${nomeDoItem}* (${documento}):`, ...linhas].join("\n");
+  } catch {
+    return FALHA_AO_CONFERIR_A_COTACAO;
+  }
+}
+
 export const quoteTools: ToolDef[] = [
   {
     name: "create_quote_request",
@@ -520,7 +623,8 @@ export const quoteTools: ToolDef[] = [
       },
       required: ["response_id"],
     },
-    risk: "low",
+    // S3 (24/11/2026): muda custo e preço de venda do orçamento; pede o "sim" (cartão em resumirAplicacaoDoPreco).
+    risk: "medium",
     roles: NON_TECHNICIAN_ROLES,
     async execute(args, ctx) {
       const blocked = blockTechnician(ctx);
@@ -557,7 +661,7 @@ export const quoteTools: ToolDef[] = [
 
       const markup = args.markup_percent != null ? Number(args.markup_percent) : null;
       if (markup != null && markup < 0) return { error: "markup_percent não pode ser negativo." };
-      const precoVenda = markup != null ? Math.round(preco * (1 + markup / 100) * 100) / 100 : null;
+      const precoVenda = markup != null ? precoDeVendaComMargem(preco, markup) : null;
 
       let antes: Record<string, unknown> = {};
       let depois: Record<string, unknown> = {};

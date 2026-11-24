@@ -140,6 +140,16 @@ export const TITULOS_DAS_ACOES_DIRETAS: Record<string, string> = {
 export const ROTULOS_DOS_CAMPOS: Record<string, string> = {
   // Retorno F5 (P11.3): o motivo do orçamento perdido (update_quote_status)
   motivo_perda: "Motivo da perda",
+  // Pacote 1, S3 (24/11/2026): update_client e apply_quote_price passaram a poder virar cartão
+  type: "Tipo",
+  display_name: "Nome usado",
+  communication_tone: "Tom da comunicação",
+  opt_out_whatsapp: "Não receber mensagens no WhatsApp",
+  cpf_cnpj: "CPF/CNPJ",
+  state_registration: "Inscrição estadual",
+  ie_indicator: "Indicador de IE",
+  response_id: "Resposta da cotação",
+  markup_percent: "Margem sobre o custo (%)",
   // A via do técnico (13/11/2026)
   para: "Para quem",
   linhas: "Serviços e responsáveis",
