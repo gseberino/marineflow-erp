@@ -56,6 +56,12 @@ export function blockTechnician(ctx: ToolCtx): { error: string } | null {
   return null;
 }
 
+/** O que ToolDef.riscoNoServidor devolve: o risco visto pelo servidor e o motivo para o dono (null = nada a dizer). */
+export interface RiscoNoServidor {
+  risco: RiskLevel;
+  motivo: string | null;
+}
+
 export interface ToolDef {
   name: string;
   description: string;
@@ -73,6 +79,19 @@ export interface ToolDef {
    * filtrar a lista de tools por cargo.
    */
   computeRisk?: (args: any) => RiskLevel;
+  /**
+   * Pacote 1, S1 (24/11/2026): o risco que só o SERVIDOR sabe, lido do banco na hora em que a pendência nasce: quem
+   * recebe de fato (o número resolvido contra os cadastros) e o que o texto diz. Não depende do argumento que o modelo
+   * escolheu, que é o que `computeRisk` olha.
+   *
+   * Só SOBE o risco de `computeRisk`/`risk`; devolver um risco menor não rebaixa nada. `motivo` é o porquê em português,
+   * para o dono: vai para o cartão (a linha "🔒 No WhatsApp, pede PIN: …", quando o risco final é alto) e para
+   * `risk_reason` da pendência; null = nada a dizer. Com motivo, a ação nunca roda sozinha, mesmo com autonomia gravada.
+   *
+   * Pode lançar: o executor trata exceção (e resposta torta) como risco ALTO, com o motivo "não consegui conferir quem
+   * recebe". Só leitura: nunca grava nem envia.
+   */
+  riscoNoServidor?: (args: Record<string, unknown>, ctx: ToolCtx) => Promise<RiscoNoServidor>;
   /** undefined = todos os cargos autenticados podem chamar (comportamento atual, via RLS). */
   roles?: Role[];
   /**
