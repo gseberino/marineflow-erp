@@ -59,9 +59,11 @@ export interface Triage {
   falha?: string;
 }
 
-/** O que o teste troca: o modelo. */
+/** O que quem chama decide: o modelo (o teste troca) e a regra fixa do golpe (app_settings desliga). */
 export interface DepsDaTriagem {
   chamar?: (p: CallClaudeParams) => Promise<CallClaudeResult>;
+  /** (F1) false = sem a regra fixa do golpe quando o modelo falha. Ausente = ligada. */
+  regraDoGolpe?: boolean;
 }
 
 const MAX_BODY_CHARS = 4000;
@@ -143,6 +145,127 @@ export function triageDeterministica(email: InboundEmail): Triage | null {
   return null;
 }
 
+// ═══ GOLPE DE TROCA DE CONTA OU DE PIX POR REGRA FIXA (pacote 1, F1, 24/11/2026) ═══
+//
+// O alerta de golpe só saía de e-mail que o MODELO classificou como urgente. Em 12/11 o provedor do modelo ficou
+// sem saldo: toda triagem passou a cair no catch (notify) e o alerta parou. Esta regra é a rede para essa hora, e SÓ
+// para ela: quando a chamada do modelo falha, o assunto e o corpo passam por expressões fixas que procuram o pedido
+// de troca de dados de pagamento (o item 4 do prompt da triagem). Casou: o e-mail sai `urgent` com `alertaFraude` e
+// segue o MESMO caminho de aviso do urgente (email-imap: teto do dia, "não repetir" e o portão da voz única).
+// Não casou: `notify`, como antes. Nada vai ao remetente nem a terceiros.
+//
+// Com o modelo de pé esta regra não roda: quem decide é ele, que lê contexto e erra menos.
+//
+// As expressões valem em dois lugares: aqui (RegExp do JavaScript) e na medição no banco (regex do Postgres, só
+// contagem, com `\b` trocado por `\y`). Por isso ficam no que os dois motores leem igual: grupos sem captura,
+// alternativas, `\s`, classes negadas, repetição com teto e o "não seguido de" `(?!…)`. O texto chega sem acento,
+// minúsculo e com os espaços colapsados (comparavel), então "alteração", "ALTERACAO" e "alteracao" são a mesma coisa.
+//
+// Medido no banco em 24/11/2026 (só contagem): nos 1.920 e-mails guardados, as oito regras pegam 3 (2 de lista de
+// divulgação, que o cabeçalho descarta antes, e 1 do histórico que nunca passou por triagem); dos 96 sem triagem desde
+// 12/11, nenhum. O golpe que o modelo vinha marcando nesta caixa é outro (cobrança judicial falsa: 0 dos 17 marcados
+// casam aqui) e esta regra não o cobre: ela é só a do pedido de troca de dados de pagamento.
+
+/** A chave de app_settings que desliga a regra. Ausente = ligada (não há migration: a chave só nasce para desligar). */
+export const CHAVE_DA_REGRA_DO_GOLPE = "email_golpe_regra_fixa";
+
+/** Ausente, vazia ou qualquer outro valor = ligada. Só um "desligado" explícito desliga a rede. */
+export function regraDoGolpeLigada(valor: unknown): boolean {
+  const v = comparavel(String(valor ?? ""));
+  return !["desligado", "desligada", "off", "false", "0", "nao"].includes(v);
+}
+
+// Os dados de pagamento ditos por extenso (dizem sozinhos do que se trata)…
+const DADO_FORTE = "(?:dados\\s+(?:bancarios|de\\s+pagamentos?|para\\s+(?:o\\s+)?(?:pagamentos?|depositos?|transferencias?))" +
+  "|contas?\\s+(?:bancarias?|correntes?|para\\s+(?:o\\s+)?(?:pagamentos?|depositos?|transferencias?|recebimentos?))" +
+  "|domicilio\\s+bancario|chaves?\\s+(?:d[oe]\\s+)?pix)";
+// …e os dois nomes curtos, que aparecem em todo e-mail de cobrança: só valem com a mudança colada neles.
+const DADO_FRACO = "(?:pix|boletos?)";
+const MUDAR = "(?:alter(?:ar|acao|acoes|amos|ou|aram|ando)|mud(?:ar|anca|ancas|amos|ou|aram|ando)" +
+  "|troc(?:ar|a|amos|ou|aram|ando)|atualiz(?:ar|acao|acoes|amos|ou|aram|ando)" +
+  "|substitu(?:ir|icao|imos|iu|iram|indo)|modific(?:ar|acao|amos|ou|aram))";
+// o pedido dirigido a quem lê ("atualizem nossos dados bancários"): só vale com o dado por extenso
+const MUDEM = "(?:alter(?:e|em)|mud(?:e|em)|troqu(?:e|em)|atualiz(?:e|em)|substitu(?:a|am)|modifiqu(?:e|em))";
+const MUDADO = "(?:alterad[oa]s?|atualizad[oa]s?|substituid[oa]s?|trocad[oa]s?|modificad[oa]s?|mudad[oa]s?|mudou|mudaram)";
+const ARTIGOS = "(?:\\s+(?:de|do|da|dos|das|o|a|os|as|no|na|nosso|nossa|nossos|nossas|meu|minha|seu|sua))";
+const PAGAR = "(?:pagamentos?|pagar|pague|paguem|depositos?|deposit(?:ar|e|em)|transferencias?|transferir|transfira|transfiram)";
+const NAO_USAR = "(?:desconsider(?:ar|e|em|ando)|nao\\s+(?:utiliz(?:ar|e|em)|us(?:ar|e|em)|deposit(?:ar|e|em)|pag(?:ar|ue|uem)|efetu(?:ar|e|em)|transferir|transfir(?:a|am)))";
+
+export interface RegraDoGolpe {
+  nome: string;
+  /** Como o dono lê o motivo: "…o e-mail fala em <rotulo>." */
+  rotulo: string;
+  /** A expressão, como texto (a medição no banco usa a mesma, com \b → \y). */
+  fonte: string;
+}
+
+export const REGRAS_DO_GOLPE: ReadonlyArray<RegraDoGolpe> = [
+  // "informamos a alteração dos nossos dados bancários", "mudança de conta bancária", "atualizem a chave Pix"
+  { nome: "mudanca_de_dados", rotulo: "mudança de dados bancários ou de pagamento", fonte: `\\b(?:${MUDAR}|${MUDEM})\\b[^.!?]{0,30}\\b${DADO_FORTE}\\b` },
+  // "alteração do Pix", "troca do nosso boleto", "substituir o boleto"
+  { nome: "mudanca_de_pix_ou_boleto", rotulo: "mudança de Pix ou de boleto", fonte: `\\b${MUDAR}${ARTIGOS}{0,3}\\s+${DADO_FRACO}\\b` },
+  // "mudamos de banco", "troca de conta", "mudança de banco" (mas não "mudança de banco de dados")
+  { nome: "mudar_de_banco", rotulo: "troca de banco ou de conta", fonte: `\\b(?:mud(?:ar|anca|amos|ou|aram|ando)|troc(?:ar|a|amos|ou|aram|ando))\\s+de\\s+(?:banco|conta)\\b(?!\\s+de\\s+dados)` },
+  // "chave Pix alterada", "os dados bancários foram atualizados", "boleto atualizado", "o Pix mudou"
+  { nome: "dado_alterado", rotulo: "conta, chave Pix ou boleto alterado", fonte: `\\b(?:${DADO_FORTE}|${DADO_FRACO})\\b[^.!?,;:()]{0,20}\\b${MUDADO}\\b` },
+  // "a chave Pix agora é o CNPJ", "nossa conta bancária passa a ser…"
+  { nome: "dado_passa_a_ser", rotulo: "conta ou chave Pix que passa a ser outra", fonte: `\\b${DADO_FORTE}\\b[^.!?,;:()]{0,20}\\b(?:pass(?:a|ou|am|aram)\\s+a\\s+ser|agora\\s+e)\\b` },
+  // "nova chave Pix", "novos dados bancários", "nova conta bancária", "novo boleto", "chave Pix nova", "nossa nova conta"
+  { nome: "dado_novo", rotulo: "conta, chave Pix ou boleto novo", fonte: `\\b(?:nov[oa]s?\\s+(?:numero\\s+d[ae]\\s+)?(?:${DADO_FORTE}|${DADO_FRACO})|${DADO_FORTE}\\s+nov[oa]s?|(?:noss[oa]|meu|minha)\\s+nov[oa]\\s+(?:conta|banco))\\b` },
+  // "os pagamentos devem ser feitos na nova conta", "favor depositar em outra conta"
+  { nome: "pagar_em_outra_conta", rotulo: "pagamento em outra conta", fonte: `\\b${PAGAR}\\b[^.!?]{0,50}\\b(?:nov[oa]|(?:em|na|para|para\\s+a)\\s+outra|noutra)\\s+conta\\b` },
+  // "favor desconsiderar o boleto anterior", "não utilizem mais a conta antiga"
+  { nome: "dado_antigo", rotulo: "pedido para não usar a conta, a chave Pix ou o boleto anterior", fonte: `\\b${NAO_USAR}\\b[^.!?]{0,40}\\b(?:contas?|dados|chaves?|pix|boletos?)\\s+(?:(?:bancari[oa]s?|corrente|pix)\\s+)?(?:antig[oa]s?|anterior(?:es)?)\\b` },
+];
+
+const REGRAS_COMPILADAS = REGRAS_DO_GOLPE.map((r) => ({ ...r, re: new RegExp(r.fonte) }));
+
+/**
+ * O corpo que veio só em HTML guarda as letras acentuadas como entidade ("altera&ccedil;&atilde;o", "banc&#225;rios"):
+ * em 24/11/2026, 153 dos 1.920 e-mails guardados tinham entidade de acento e 139, entidade numérica. O modelo lê isso
+ * sem esforço; a expressão fixa, não. Aqui a entidade vira a letra (o acento cai depois, em comparavel).
+ */
+function semEntidades(s: string): string {
+  const letra = (codigo: number) => (codigo >= 32 && codigo <= 0x10ffff ? String.fromCodePoint(codigo) : " ");
+  return s
+    .replace(/&([a-zA-Z])(?:acute|grave|circ|tilde|uml|cedil);/g, "$1")
+    .replace(/&#(\d{2,7});/g, (_, n) => letra(Number(n)))
+    .replace(/&#[xX]([0-9a-fA-F]{2,6});/g, (_, h) => letra(parseInt(h, 16)))
+    .replace(/&nbsp;/gi, " ");
+}
+
+/** O texto em que a regra procura: o assunto e o mesmo corpo que o modelo veria, já normalizados. */
+export function textoParaARegraDoGolpe(email: Pick<InboundEmail, "subject" | "text" | "html">): string {
+  return comparavel(semEntidades(`${email.subject ?? ""} . ${readableBody(email).slice(0, MAX_BODY_CHARS)}`));
+}
+
+export interface AchadoDoGolpe {
+  regra: string;
+  rotulo: string;
+  /** O trecho que casou (normalizado: sem acento e minúsculo), para a evidência. */
+  trecho: string;
+}
+
+/**
+ * O e-mail fala em troca de conta, de chave Pix ou de boleto? Regra fixa, sem modelo. null = não casou (ou a leitura
+ * do texto falhou: a rede nunca derruba a triagem).
+ */
+export function golpeDeTrocaDeConta(email: Pick<InboundEmail, "subject" | "text" | "html">): AchadoDoGolpe | null {
+  try {
+    const texto = textoParaARegraDoGolpe(email);
+    for (const r of REGRAS_COMPILADAS) {
+      const m = r.re.exec(texto);
+      if (m) return { regra: r.nome, rotulo: r.rotulo, trecho: m[0].slice(0, 120) };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** O começo do motivo de quem foi pego pela regra (é o que as contagens procuram em triage_reason). */
+export const MOTIVO_DA_REGRA_DO_GOLPE = "A triagem por IA falhou; pela regra fixa, o e-mail fala em";
+
 const TRIAGE_TOOL: ClaudeToolSchema = {
   name: "classificar_email",
   description: "Registra a classificação do e-mail lido. Chame exatamente uma vez.",
@@ -211,6 +334,8 @@ export function formatEmailForTriage(email: InboundEmail): string {
  * Classifica um e-mail. Tenta o caminho determinístico primeiro (custo zero) e só chama o
  * modelo quando o cabeçalho não resolve. Falha do modelo NÃO some com o e-mail: cai em
  * `notify`, que é o estado seguro, e sai com `falha` preenchida para quem chama registrar.
+ * (F1) Na falha, o e-mail que fala em troca de conta, de chave Pix ou de boleto sai `urgent`
+ * com o alerta de fraude, pela regra fixa (golpeDeTrocaDeConta).
  */
 export async function triageEmail(email: InboundEmail, now: Date = new Date(), deps: DepsDaTriagem = {}): Promise<Triage> {
   const rapido = triageDeterministica(email);
@@ -241,13 +366,25 @@ export async function triageEmail(email: InboundEmail, now: Date = new Date(), d
     }
     return normalizeTriage(call.input as unknown as RawTriage, textoReal);
   } catch (e) {
+    // (V2) a falha deixa de ser calada: quem chamou registra — casando a regra do golpe ou não
+    const falha = String(e).slice(0, 300);
+    // (F1) a rede para esta hora: o golpe de troca de conta ou de Pix por regra fixa. Sai urgente com o alerta de
+    // fraude e segue o caminho de aviso que o urgente já tem; quem desliga é app_settings (CHAVE_DA_REGRA_DO_GOLPE).
+    const golpe = deps.regraDoGolpe === false ? null : golpeDeTrocaDeConta(email);
+    if (golpe) {
+      return {
+        classe: "urgent", confianca: 1, evidencia: golpe.trecho,
+        motivo: `${MOTIVO_DA_REGRA_DO_GOLPE} ${golpe.rotulo}.`,
+        alertaFraude: true, rebaixada: false, deterministica: true,
+        falha,
+      };
+    }
     // Indisponibilidade do modelo não pode esconder e-mail.
     return {
       classe: FALLBACK_CLASS, confianca: 0, evidencia: "",
       motivo: `falha na triagem: ${String(e).slice(0, 120)}`,
       alertaFraude: false, rebaixada: true, deterministica: false,
-      // (V2) a falha deixa de ser calada: quem chamou registra
-      falha: String(e).slice(0, 300),
+      falha,
     };
   }
 }
