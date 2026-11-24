@@ -8,10 +8,9 @@ import { montarAging, type ContaEmAberto } from '@/lib/aging';
 import { rotuloDoMes, hojeEmBrasilia, somarDias, type FluxoDeCaixa } from '@/lib/fluxo-de-caixa';
 import { carregarFluxoDeCaixa, chaveDoFluxo } from '@/hooks/use-fluxo-de-caixa';
 import {
-  cartaoDoPagamento, categoriaNaPrevisao, comPagamentosEmTransito, faturasDoCartao, gastosQueSeRepetem, gastosQueSeRepetemPorDia,
-  mesesDeReferencia, somaEmTransito,
-  type ContaEmAberto as ContaDaPrevisao, type DebitoDaConta, type DespesaLancada, type FaturaPrevista, type GastoQueSeRepete,
-  type LinhaDoCartao, type PagamentoPelaConta,
+  cartoesDoExtrato, categoriaNaPrevisao, gastosQueSeRepetem, gastosQueSeRepetemPorDia, mesesDeReferencia,
+  type CartaoNaFila, type ContaEmAberto as ContaDaPrevisao, type DebitoLido, type DespesaLancada, type FaturaLida,
+  type GastoQueSeRepete, type LinhaLida,
 } from '@/lib/previsao-de-caixa';
 
 export function useReceivables() {
@@ -287,7 +286,8 @@ export interface ForecastWeek {
 
 /** O que a previsão soma além das contas lançadas, para a tela dizer de onde vem cada número. */
 export interface ExtrasDaPrevisao {
-  faturas: Array<FaturaPrevista & { naPrevisao: boolean }>;
+  /** Pelo calendário do banco, com o valor estimado pelo extrato — a mesma conta da fila de pagamentos do WhatsApp. */
+  faturas: Array<CartaoNaFila & { naPrevisao: boolean }>;
   recorrentes: GastoQueSeRepete[];
   /** O que não deu para ler — a previsão segue sem aquela parte e diz qual. */
   avisos: string[];
@@ -296,23 +296,24 @@ export interface ExtrasDaPrevisao {
 /**
  * A fatura de cada cartão e os gastos que se repetem (regras em src/lib/previsao-de-caixa.ts).
  * Erro de leitura aqui não derruba a previsão: ela segue só com as contas e diz o que ficou fora.
+ * A fatura (24/11/2026) sai da mesma função da fila de pagamentos do WhatsApp: vencimento do banco, valor estimado.
  */
 const reais = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-const diaEMes = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
 
 async function lerExtrasDaPrevisao(hoje: string): Promise<{
   extras: ExtrasDaPrevisao; linhasDoCartao: Set<string>; pagoNoMes: Map<string, number>;
 }> {
   const avisos: string[] = [];
-  let faturas: FaturaPrevista[] = [];
+  let faturas: CartaoNaFila[] = [];
   let recorrentes: GastoQueSeRepete[] = [];
   const linhasDoCartao = new Set<string>();
   /** O que já foi pago no mês de hoje, por categoria (fora do cartão): não entra de novo. */
   const pagoNoMes = new Map<string, number>();
+  let erroDoCalendario: unknown = null;
   try {
-    const [linhas, conexoes, debitos] = await Promise.all([
+    const [linhas, conexoes, debitos, doBanco] = await Promise.all([
       lerEmPaginas((i, f) => supabase.from('bank_transactions')
-        .select('id, bank_connection_id, transaction_date, amount, transaction_type, description, bill_id, dismissed_kind, import_batch_id')
+        .select('id, bank_connection_id, transaction_date, amount, transaction_type, description, bill_id, dismissed_kind, import_batch_id, tx_status')
         .eq('source_type', 'credit_card')
         .gte('transaction_date', somarDias(hoje, -200))
         .order('transaction_date').order('id').range(i, f)),
@@ -329,42 +330,26 @@ async function lerExtrasDaPrevisao(hoje: string): Promise<{
           avisos.push('Não consegui ler os pagamentos recentes da conta: fatura paga ontem pode aparecer como vencida.');
           return [] as unknown[];
         }),
+      // (24/11/2026) O calendário de cada cartão como o BANCO informa (fechamento, vencimento e total das faturas que
+      // ele emitiu). Só administrador e financeiro leem, e só estas cinco colunas (migration 20270227100000). Se esta
+      // leitura falhar, a fatura fica fora da previsão com o aviso — data deduzida errava o C6 em um mês.
+      lerEmPaginas((i, f) => supabase.from('cartao_faturas_do_banco')
+        .select('bill_id, bank_connection_id, fechamento, vencimento, total')
+        .order('bill_id').range(i, f))
+        // Falha só aqui tira a fatura da previsão (com o aviso), mas não derruba o conjunto: as linhas do cartão já
+        // lidas continuam valendo lá embaixo — sem elas a despesa paga no cartão entraria como gasto que se repete.
+        .catch((e: unknown) => { erroDoCalendario = e ?? new Error('erro'); return [] as unknown[]; }),
     ]);
+    for (const l of linhas as Array<{ id: string }>) linhasDoCartao.add(l.id);
     if (conexoes.error) throw conexoes.error;
-    const rotulo = new Map((conexoes.data ?? []).map((c: { id: string; label: string | null }) => [c.id, c.label ?? 'Cartão']));
-    const porConta = new Map<string, LinhaDoCartao[]>();
-    for (const l of linhas as Array<LinhaDoCartao & { id: string; bank_connection_id: string | null }>) {
-      linhasDoCartao.add(l.id);
-      const conta = l.bank_connection_id ?? 'sem conta';
-      porConta.set(conta, [...(porConta.get(conta) ?? []), l]);
-    }
-    const cartoes = [...porConta.keys()].map((conexao) => ({ conexao, rotulo: rotulo.get(conexao) ?? '' }));
-    const pelaConta = new Map<string, PagamentoPelaConta[]>();
-    for (const d of debitos as Array<DebitoDaConta & { dismissed_kind: string | null }>) {
-      if (d.dismissed_kind === 'duplicata') continue;
-      const conexao = cartaoDoPagamento(d, cartoes);
-      if (conexao) pelaConta.set(conexao, [...(pelaConta.get(conexao) ?? []), { transaction_date: d.transaction_date, amount: d.amount }]);
-    }
-    for (const [conta, linhasDaConta] of porConta) {
-      const nome = rotulo.get(conta) ?? 'Cartão';
-      const doCartao = comPagamentosEmTransito(linhasDaConta, pelaConta.get(conta) ?? [], hoje);
-      const emTransito = somaEmTransito(doCartao);
-      if (emTransito > 0) {
-        avisos.push(`${nome}: contei como pagos ${reais(emTransito)} que parecem ter saído da conta para o cartão; ele ainda não mostra.`);
-      }
-      const r = faturasDoCartao(nome, doCartao, hoje);
-      faturas.push(...r.faturas);
-      // Cartão em uso cujo ciclo não dá para saber: o banco parou de identificar a fatura das
-      // compras (C6 desde julho, Nubank desde agosto/2026). Sem este aviso, ele sumia da previsão.
-      if (!r.ciclo && doCartao.some((l) => l.transaction_date >= somarDias(hoje, -60))) {
-        avisos.push(`${nome}: não consegui saber em que dia a fatura fecha (o banco não identifica a fatura das compras `
-          + 'recentes) — a fatura deste cartão ficou fora da previsão.');
-      }
-      if (r.pagoAlemDoExtrato > 0) {
-        avisos.push(`${nome}: a fatura que fechou em ${diaEMes(r.fechada.fechamento)} foi paga em ${reais(r.fechada.pago)}, `
-          + `mas o extrato do cartão mostra só ${reais(r.fechada.compras)} de compras nela. Faltam compras no extrato do `
-          + 'cartão — a próxima fatura pode ser maior do que a prevista.');
-      }
+    if (erroDoCalendario) throw erroDoCalendario;
+    const rotulos = new Map((conexoes.data ?? []).map((c: { id: string; label: string | null }) => [c.id, c.label ?? '']));
+    // A mesma função da fila de pagamentos do WhatsApp: tela e mensagem dizem o mesmo número.
+    const r = cartoesDoExtrato(linhas as LinhaLida[], debitos as DebitoLido[], rotulos, doBanco as FaturaLida[], hoje);
+    faturas = r.faturas;
+    for (const aviso of r.avisos) avisos.push(aviso.replace(/ficou de fora\.$/, 'a fatura dele ficou fora da previsão.'));
+    if (r.emTransito > 0) {
+      avisos.push(`Cartão: contei como pagos ${reais(r.emTransito)} que parecem ter saído da conta para o cartão; ele ainda não mostra.`);
     }
   } catch (e) {
     avisos.push(`Não consegui ler os cartões (${(e as Error)?.message ?? 'erro'}): a fatura ficou fora da previsão.`);
@@ -423,7 +408,7 @@ async function lerExtrasDaPrevisao(hoje: string): Promise<{
  * pressionam o caixa de verdade.
  *
  * Desde 27/09/2026 as saídas somam também a fatura de cada cartão (o que já está no cartão, no
- * dia provável de pagamento) e os gastos que se repetem todo mês, pela média — quase todo gasto
+ * vencimento que o banco informa — até 24/11/2026 era o dia provável de pagamento, deduzido) e os gastos que se repetem todo mês, pela média — quase todo gasto
  * da HBR é lançado depois que sai, e só com as contas lançadas a previsão dizia que sobrava
  * dinheiro. As regras estão em src/lib/previsao-de-caixa.ts; o que entrou vem em `extras`.
  */

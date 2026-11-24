@@ -40,6 +40,31 @@ export function CashForecastPanel({ saldoInicial = null }: { saldoInicial?: numb
   const extras = forecast.extras ?? { faturas: [], recorrentes: [], avisos: [] };
   const faturasNaPrevisao = extras.faturas.filter((f) => f.naPrevisao);
   const dataCurta = (d: string) => d.slice(8, 10) + '/' + d.slice(5, 7);
+  // (24/11/2026) A mesma leitura da fila de pagamentos do WhatsApp (linhaDoCartao, no servidor): o vencimento é o que o
+  // banco informa e o valor é estimado pelo extrato — por isso "cerca de", menos no total que o próprio banco informou.
+  const oQueDizAFatura = (f: (typeof faturasNaPrevisao)[number]): { valor: string; detalhe: string } => {
+    const vence = `vencimento ${dataCurta(f.vencimento)}`;
+    if (f.situacao === 'aberta') {
+      return {
+        valor: `cerca de ${formatCurrency(f.valor)}`,
+        detalhe: `o que já está no cartão até hoje (fecha por volta de ${dataCurta(f.fechamento)}, ${vence})`,
+      };
+    }
+    const total = f.origem === 'banco' ? formatCurrency(f.total) : `cerca de ${formatCurrency(f.total)}`;
+    // O fechamento da fatura que o banco ainda não publicou é projetado (ele só publica no dia do vencimento).
+    const fechou = `${f.origem === 'banco' ? 'fechada em' : 'fechada por volta de'} ${dataCurta(f.fechamento)}, ${vence}`;
+    if (f.valor < 1) {
+      return f.total < 1
+        ? { valor: formatCurrency(0), detalhe: `fatura ${fechou}: pelo extrato não há nada em aberto` }
+        : { valor: formatCurrency(0), detalhe: `fatura de ${total} ${fechou}: coberta pelos ${formatCurrency(f.pago)} pagos desde o fechamento` };
+    }
+    const atraso = f.vencida ? '; o extrato não mostra pagamento que cubra — confira' : '';
+    if (f.pago < 1) return { valor: total, detalhe: `fatura ${fechou}${atraso}` };
+    return {
+      valor: `cerca de ${formatCurrency(f.valor)}`,
+      detalhe: `o que falta da fatura de ${total} ${fechou}, depois dos ${formatCurrency(f.pago)} pagos desde o fechamento${atraso}`,
+    };
+  };
   const saldoPeriodo = totalEntradas - totalSaidas;
   const comSaldo = saldoInicial != null;
   const semanas: Semana[] = weeks.map((w) => ({
@@ -168,23 +193,19 @@ export function CashForecastPanel({ saldoInicial = null }: { saldoInicial?: numb
           <p className="font-medium">Além das contas lançadas, a previsão soma:</p>
           {faturasNaPrevisao.length > 0 && (
             <ul className="space-y-1">
-              {faturasNaPrevisao.map((f, i) => (
-                <li key={`${i}-${f.conta}-${f.situacao}`} className="min-w-0">
-                  <span className="font-medium">Fatura {f.conta}</span>{' '}
-                  <span className="tabular-nums">{formatCurrency(f.valor)}</span>
-                  <span className="text-muted-foreground">
-                    {' — '}
-                    {f.situacao === 'fechada'
-                      ? `fatura fechada em ${dataCurta(f.fechamento)}, ${f.compras} lançamento(s), menos o que já foi pago`
-                      : `${f.compras} lançamento(s) do ciclo aberto até hoje (fecha em ${dataCurta(f.fechamento)})`}
-                    {f.vencida
-                      ? (f.pago > 0
-                        ? `; venceu por volta de ${dataCurta(f.vencimento)} e o pago (${formatCurrency(f.pago)}) não cobre as compras — confira`
-                        : `; venceu por volta de ${dataCurta(f.vencimento)} e não aparece pagamento — confira`)
-                      : `; vence por volta de ${dataCurta(f.vencimento)}`}
-                  </span>
-                </li>
-              ))}
+              {faturasNaPrevisao.map((f, i) => {
+                const diz = oQueDizAFatura(f);
+                return (
+                  <li key={`${i}-${f.cartao}-${f.situacao}`} className="min-w-0">
+                    <span className="font-medium">Fatura {f.cartao}</span>{' '}
+                    <span className="tabular-nums">{diz.valor}</span>
+                    <span className="text-muted-foreground">{' — '}{diz.detalhe}</span>
+                  </li>
+                );
+              })}
+              <li className="min-w-0 text-xs text-muted-foreground">
+                Cartão: o vencimento é o que o banco informa; o valor é estimado pelo extrato.
+              </li>
             </ul>
           )}
           {extras.recorrentes.length > 0 && (

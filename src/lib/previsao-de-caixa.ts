@@ -51,6 +51,13 @@ export type {
   CartaoConhecido, CartaoPeloBanco, CicloDoCartao, DebitoDaConta, FaturaInformada, FaturaPeloBanco, FaturaPrevista, FaturasDoCartao,
   LinhaDoCartao, PagamentoPelaConta,
 } from '../../supabase/functions/_shared/banking/fatura-do-cartao';
+// (24/11/2026) A previsão de caixa da tela passou a usar a MESMA função da fila de pagamentos do WhatsApp
+// (cartoesDoExtrato): o dia em que cada cartão fecha e vence é o que o BANCO informa (cartao_faturas_do_banco), e o
+// valor parte da última fatura que ele informou. A regra descrita lá em cima (ciclo deduzido do histórico,
+// faturasDoCartao) errava o C6 em um mês — deduzia "vence dia 21" e o banco diz dia 25 — e não é mais usada pela tela;
+// continua exportada e testada.
+export { cartoesDoExtrato } from '../../supabase/functions/_shared/pagamentos/cartoes';
+export type { CartaoNaFila, DebitoLido, FaturaLida, LinhaLida } from '../../supabase/functions/_shared/pagamentos/cartoes';
 
 // ── Gastos que se repetem ────────────────────────────────────────────────────────────────
 

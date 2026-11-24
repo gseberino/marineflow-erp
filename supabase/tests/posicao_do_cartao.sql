@@ -1,5 +1,6 @@
--- Prova: as duas tabelas do retrato do cartão existem, só o servidor lê e grava, e regravar uma fatura não perde a data
--- em que ela apareceu (migration 20270225100000_posicao_do_cartao).
+-- Prova: as duas tabelas do retrato do cartão existem, só o servidor grava (das faturas, administrador e financeiro leem
+-- cinco colunas desde 20270227100000), e regravar uma fatura não perde a data em que ela apareceu (migration
+-- 20270225100000_posicao_do_cartao).
 --
 -- ═══ COMO RODAR ═══
 --
@@ -17,20 +18,30 @@ create temp table _ctx on commit drop as
          'teste-' || substr(md5(random()::text), 1, 10) as sufixo;
 
 -- C1. As tabelas existem, com RLS ligada e sem policy (fechadas a tudo que não é o servidor) ------------------------
+-- Desde 20270227100000 as faturas têm UMA policy, só de leitura (administrador e financeiro leem cinco colunas para a
+-- previsão de caixa da tela; a prova dela é tela_le_calendario_do_cartao.sql). Qualquer outra policy reprova aqui.
 insert into _resultado
-select 'C1 tabelas com RLS ligada e sem policy',
+select 'C1 tabelas com RLS ligada e sem policy (fora a de leitura das faturas pela tela)',
        (select count(*) = 2 from pg_class c join pg_namespace n on n.oid = c.relnamespace
          where n.nspname = 'public' and c.relname in ('cartao_posicoes', 'cartao_faturas_do_banco') and c.relkind = 'r' and c.relrowsecurity)
-   and (select count(*) = 0 from pg_policies where schemaname = 'public' and tablename in ('cartao_posicoes', 'cartao_faturas_do_banco')),
+   and (select count(*) = 0 from pg_policies where schemaname = 'public' and tablename in ('cartao_posicoes', 'cartao_faturas_do_banco')
+           and not (tablename = 'cartao_faturas_do_banco' and cmd = 'SELECT' and roles = '{authenticated}'::name[])),
        (select string_agg(c.relname || ':' || c.relrowsecurity, ', ') from pg_class c join pg_namespace n on n.oid = c.relnamespace
          where n.nspname = 'public' and c.relname in ('cartao_posicoes', 'cartao_faturas_do_banco'));
 
--- C2. anon e authenticated não têm NENHUM privilégio; service_role lê e grava --------------------------------------
+-- C2. anon e authenticated não têm NENHUM privilégio, de tabela nem de coluna; service_role lê e grava ---------------
+-- Única exceção (20270227100000): authenticated lê cinco colunas das faturas, para a previsão de caixa da tela.
 insert into _resultado
-select 'C2 ' || t || ': anon e authenticated sem privilégio, service_role com',
+select 'C2 ' || t || ': anon e authenticated sem privilégio (fora a leitura de cinco colunas das faturas), service_role com',
        not exists (
          select 1 from unnest(array['anon', 'authenticated']) papel, unnest(array['select', 'insert', 'update', 'delete', 'truncate', 'references', 'trigger']) priv
           where has_table_privilege(papel, 'public.' || t, priv))
+   and not exists (
+         select 1 from pg_attribute a, unnest(array['anon', 'authenticated']) papel, unnest(array['select', 'insert', 'update', 'references']) priv
+          where a.attrelid = ('public.' || t)::regclass and a.attnum > 0 and not a.attisdropped
+            and has_column_privilege(papel, 'public.' || t, a.attname, priv)
+            and not (t = 'cartao_faturas_do_banco' and papel = 'authenticated' and priv = 'select'
+                     and a.attname in ('bill_id', 'bank_connection_id', 'fechamento', 'vencimento', 'total')))
    and has_table_privilege('service_role', 'public.' || t, 'select')
    and has_table_privilege('service_role', 'public.' || t, 'insert')
    and has_table_privilege('service_role', 'public.' || t, 'update'),

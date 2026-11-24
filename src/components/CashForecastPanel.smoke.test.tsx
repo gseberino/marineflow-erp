@@ -20,8 +20,12 @@ const { forecast, duplicadas, estado } = vi.hoisted(() => ({
     semanasNegativas: 1,
     extras: {
       faturas: [
-        { conta: 'Nubank PJ HBR', valor: 554.27, vencimento: '2026-07-16', fechamento: '2026-07-02', situacao: 'fechada', vencida: true, compras: 8, naPrevisao: true },
-        { conta: 'C6 - Conta PJ HBR', valor: 245.73, vencimento: '2026-08-27', fechamento: '2026-08-17', situacao: 'aberta', vencida: false, compras: 3, naPrevisao: true },
+        // 24/11/2026: as faturas vêm da mesma conta da fila do WhatsApp (calendário do banco, valor estimado).
+        { cartao: 'Nubank', valor: 554.27, total: 554.27, pago: 0, vencimento: '2026-07-16', fechamento: '2026-07-02', situacao: 'fechada', vencida: true, origem: 'banco', naPrevisao: true },
+        { cartao: 'C6', valor: 245.73, total: 245.73, pago: 0, vencimento: '2026-08-27', fechamento: '2026-08-17', situacao: 'aberta', vencida: false, origem: 'extrato', naPrevisao: true },
+        { cartao: 'Itaú', valor: 0, total: 456.73, pago: 2450.61, vencimento: '2026-07-25', fechamento: '2026-07-19', situacao: 'fechada', vencida: false, origem: 'extrato', naPrevisao: true },
+        { cartao: 'Inter', valor: 300, total: 1000, pago: 700, vencimento: '2026-08-05', fechamento: '2026-07-28', situacao: 'fechada', vencida: false, origem: 'extrato', naPrevisao: true },
+        { cartao: 'Fora', valor: 99, total: 99, pago: 0, vencimento: '2026-12-05', fechamento: '2026-11-28', situacao: 'aberta', vencida: false, origem: 'extrato', naPrevisao: false },
       ],
       recorrentes: [{ categoria: 'Contabilidade e assessoria', mediaMensal: 915.35, meses: 3 }],
       avisos: [],
@@ -118,10 +122,27 @@ describe('CashForecastPanel', () => {
   it('diz o que soma além das contas: a fatura de cada cartão e os gastos que se repetem', async () => {
     renderPainel(5000);
     expect(await screen.findByText(/Além das contas lançadas, a previsão soma/)).toBeInTheDocument();
-    expect(screen.getByText('Fatura Nubank PJ HBR')).toBeInTheDocument();
-    expect(screen.getByText(/venceu por volta de 16\/07 e não aparece pagamento — confira/)).toBeInTheDocument();
-    // "lançamento(s)": no ciclo entram compras, parcelas, tarifas e juros.
-    expect(screen.getByText(/3 lançamento\(s\) do ciclo aberto até hoje \(fecha em 17\/08\)/)).toBeInTheDocument();
+    expect(screen.getByText('Fatura Nubank')).toBeInTheDocument();
     expect(screen.getByText(/Contabilidade e assessoria R\$ 915,35\/mês/)).toBeInTheDocument();
+  });
+
+  // 24/11/2026: a tela diz a fatura como a fila de pagamentos do WhatsApp — vencimento do banco, valor "cerca de".
+  it('fatura do cartão: vencimento do banco, valor estimado, e cada situação com a sua frase', async () => {
+    renderPainel(5000);
+    await screen.findByText(/Além das contas lançadas, a previsão soma/);
+    const linha = (nome: string) => screen.getByText(`Fatura ${nome}`).closest('li')!.textContent!.replace(/\s/g, ' ');
+    // fechada, total informado pelo banco, sem pagamento e vencida: valor exato (sem "cerca de") e o pedido de conferir
+    expect(linha('Nubank')).toBe('Fatura Nubank R$ 554,27 — fatura fechada em 02/07, vencimento 16/07; o extrato não mostra pagamento que cubra — confira');
+    // aberta: sempre estimada, com o fechamento "por volta de"
+    expect(linha('C6')).toBe('Fatura C6 cerca de R$ 245,73 — o que já está no cartão até hoje (fecha por volta de 17/08, vencimento 27/08)');
+    // fechada e coberta: zero a pagar, e diz com quanto foi coberta
+    expect(linha('Itaú')).toBe('Fatura Itaú R$ 0,00 — fatura de cerca de R$ 456,73 fechada por volta de 19/07, vencimento 25/07: coberta pelos R$ 2.450,61 pagos desde o fechamento');
+    // paga em parte: o que falta
+    expect(linha('Inter')).toBe('Fatura Inter cerca de R$ 300,00 — o que falta da fatura de cerca de R$ 1.000,00 fechada por volta de 28/07, vencimento 05/08, depois dos R$ 700,00 pagos desde o fechamento');
+    // a que não entrou na previsão (vence depois da janela, ou já lançada como conta) não aparece
+    expect(screen.queryByText('Fatura Fora')).not.toBeInTheDocument();
+    expect(screen.getByText(/o vencimento é o que o banco informa; o valor é estimado pelo extrato/)).toBeInTheDocument();
+    // a regra antiga (data deduzida) dizia "por volta de" no vencimento: não diz mais
+    expect(screen.queryByText(/vence por volta de|venceu por volta de/)).not.toBeInTheDocument();
   });
 });

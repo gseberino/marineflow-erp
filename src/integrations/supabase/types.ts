@@ -3185,6 +3185,59 @@ export type Database = {
         }
         Relationships: []
       }
+      cartao_faturas_do_banco: {
+        Row: {
+          bank_connection_id: string
+          bill_id: string
+          dados: Json | null
+          encargos: number | null
+          fechamento: string | null
+          lido_em: string
+          minimo: number | null
+          pago: number | null
+          provider_account_id: string
+          total: number | null
+          vencimento: string | null
+          visto_em: string
+        }
+        Insert: {
+          bank_connection_id: string
+          bill_id: string
+          dados?: Json | null
+          encargos?: number | null
+          fechamento?: string | null
+          lido_em?: string
+          minimo?: number | null
+          pago?: number | null
+          provider_account_id: string
+          total?: number | null
+          vencimento?: string | null
+          visto_em?: string
+        }
+        Update: {
+          bank_connection_id?: string
+          bill_id?: string
+          dados?: Json | null
+          encargos?: number | null
+          fechamento?: string | null
+          lido_em?: string
+          minimo?: number | null
+          pago?: number | null
+          provider_account_id?: string
+          total?: number | null
+          vencimento?: string | null
+          visto_em?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cartao_faturas_do_banco_bank_connection_id_fkey"
+            columns: ["bank_connection_id"]
+            isOneToOne: false
+            referencedRelation: "bank_connections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       client_whatsapp_settings: {
         Row: {
           client_id: string
