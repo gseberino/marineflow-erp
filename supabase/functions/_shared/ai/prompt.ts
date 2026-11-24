@@ -2,6 +2,7 @@ import type { ClaudeTextBlock } from "./anthropic.ts";
 import { exemplaresParaPrompt } from "./comms/exemplars.ts";
 import { statusOsParaPrompt } from "../service-order-status.ts";
 import { conversaDosComprovantesLigada } from "../comprovantes/modo.ts";
+import { agoraEmBrasilia } from "./fuso.ts";
 
 export interface PromptRuntimeCtx {
   userName: string;
@@ -13,6 +14,8 @@ export interface PromptRuntimeCtx {
   memoryNotes?: string[];
   /** Fase 4: WhatsApp tem formatação diferente do painel. Padrão: "panel". */
   channel?: "panel" | "whatsapp";
+  /** O instante do turno. Só para teste: nenhum chamador passa, e vale o relógio. */
+  agora?: Date;
 }
 
 // MF-AUD-007: esta linha ensinava ao modelo quatro status que o banco REJEITA
@@ -675,12 +678,12 @@ PROATIVIDADE:
 }
 
 function buildVolatileBlock(ctx: PromptRuntimeCtx, settings: Record<string, string>): string {
-  const now = new Date();
-  const dateStr = now.toLocaleDateString("pt-BR", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
-  const timeStr = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+  // C3 (24/11/2026): a data saía sem fuso (só a hora tinha) e o ISO em UTC, com "Z". A função roda em UTC: das 21:00
+  // à meia-noite de Brasília o modelo lia o dia seguinte e o dia da semana seguinte (58 de 471 turnos em 90 dias).
+  const { porExtenso, hora, isoComFuso } = agoraEmBrasilia(ctx.agora ?? new Date());
 
   let block = `════ CONTEXTO ATUAL ════
-- Hoje é ${dateStr}, ${timeStr} (horário de Brasília). Data/hora ISO: ${now.toISOString()}
+- Hoje é ${porExtenso}, ${hora} (horário de Brasília). Data/hora ISO: ${isoComFuso}
 - Usuário logado: ${ctx.userName} | Cargo: ${ctx.userRole.toUpperCase()}
 - Rota atual: ${ctx.route || "desconhecida"}
 - Entidade em contexto: ${ctx.entityType || "nenhuma"} ${ctx.entityId ? `(id: ${ctx.entityId})` : ""}

@@ -43,3 +43,30 @@ export function horariosDeBrasilia<T extends Record<string, unknown>>(args: T): 
   }
   return saida as T;
 }
+
+/** O fuso de Brasília para o Intl (toLocaleDateString / toLocaleTimeString). */
+export const FUSO_DE_BRASILIA = "America/Sao_Paulo";
+
+/**
+ * O relógio de Brasília para o texto que o modelo lê (C3, 24/11/2026).
+ *
+ * A função roda em UTC. Sem o fuso, entre 21:00 e meia-noite de Brasília o "Hoje é" do prompt já dizia o dia
+ * seguinte (e o dia da semana seguinte: sábado à noite virava "domingo"), e o ISO saía em UTC, com "Z".
+ *
+ *  · porExtenso  → "terça-feira, 24 de novembro de 2026"
+ *  · hora        → "21:30"
+ *  · isoComFuso  → "2026-11-24T21:30:00-03:00"
+ *  · dia         → "2026-11-24"
+ *
+ * O ISO e o dia usam -03:00 fixo, a mesma premissa de comFusoDeBrasilia (Brasília não tem horário de verão).
+ * Data inválida não lança (toISOString lançaria e derrubaria o turno): vale o relógio.
+ */
+export function agoraEmBrasilia(agora: Date = new Date()): { porExtenso: string; hora: string; isoComFuso: string; dia: string } {
+  const instante = isNaN(agora.getTime()) ? new Date() : agora;
+  const porExtenso = instante.toLocaleDateString("pt-BR", {
+    weekday: "long", year: "numeric", month: "long", day: "numeric", timeZone: FUSO_DE_BRASILIA,
+  });
+  const hora = instante.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: FUSO_DE_BRASILIA });
+  const local = new Date(instante.getTime() - 3 * 3_600_000).toISOString();
+  return { porExtenso, hora, isoComFuso: `${local.slice(0, 19)}-03:00`, dia: local.slice(0, 10) };
+}
