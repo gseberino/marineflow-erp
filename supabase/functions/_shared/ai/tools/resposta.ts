@@ -5,7 +5,7 @@
 // (get_whatsapp_conversation) e o envio também (send_whatsapp_message, sempre com confirmação). O que
 // faltava era a confirmação mostrar A QUE a resposta responde: a última mensagem da pessoa — o dono
 // confere de relance que a sugestão casa com a pergunta, no número certo, antes do "sim".
-import { destinoDoAgendamento, telefoneLegivel, telefoneParaEnvio } from "./agendamento.ts";
+import { destinoDoAgendamento, recusaDoDestino, telefoneLegivel, telefoneParaEnvio } from "./agendamento.ts";
 import { chavesForaDoAssistente, foraDoAssistente } from "../parceiro-fora-da-ia.ts";
 
 const BRASILIA_MS = 3 * 60 * 60 * 1000;
@@ -45,6 +45,10 @@ export async function ultimaMensagemRecebida(admin: any, telefone: string): Prom
 /** Resumo da confirmação de send_whatsapp_message. */
 // deno-lint-ignore no-explicit-any
 export async function resumirMensagem(admin: any, args: Record<string, unknown>): Promise<string> {
+  // Pacote 1, S1 (24/11/2026): com client_id, o destino que não fecha (to_phone de outro número junto, cliente sem
+  // número) é recusa numa linha "⚠️", não cartão: o dono nunca aprova um número e a mensagem vai a outro.
+  const recusa = await recusaDoDestino(admin, { client_id: args?.client_id, telefone: args?.to_phone }, "to_phone");
+  if (recusa) return recusa;
   const destino = await destinoDoAgendamento(admin, { client_id: args?.client_id, phone: args?.to_phone });
   const quem = destino.origem === "cliente"
     ? `*${destino.nome || "cliente"}* (cliente do cadastro)`

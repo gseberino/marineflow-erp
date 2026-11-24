@@ -353,6 +353,28 @@ export function afirmaAprovacao(texto: string): boolean {
   return AFIRMA_APROVACAO.test(preparar(String(texto ?? ""), true));
 }
 
+/**
+ * Pacote 1 do assistente (S1, 24/11/2026): o texto cita valor, data/hora ou promessa? As MESMAS listas de validarSaida
+ * (DINHEIRO e "valor" com número; DATAS, "março" e HORAS; PROMESSA), sem contexto: nada é "permitido", então "hoje",
+ * "amanhã" e "sexta" contam. Serve ao PIN da mensagem de texto livre do assistente (_shared/ai/envio-livre.ts), que não
+ * pode usar validarSaida: ela reprova tamanho, emoji e eco, regras do texto fixo do retorno. Não muda lista nem regra
+ * nenhuma daqui, e continua sem import. Nunca lança: exceção = tudo verdadeiro (na dúvida, cita).
+ */
+export function citaValorDataOuPromessa(texto: string): { valor: boolean; data: boolean; promessa: boolean } {
+  try {
+    const bruto = typeof texto === "string" ? texto : String(texto ?? "");
+    const t = preparar(bruto, true);
+    const tComAcento = preparar(bruto, false);
+    return {
+      valor: temValorAoParceiro(t),
+      data: algumForaDe(t, DATAS, []) || algumForaDe(tComAcento, DATAS_COM_ACENTO, []) || algumForaDe(t, HORAS, []),
+      promessa: PROMESSA.test(t),
+    };
+  } catch {
+    return { valor: true, data: true, promessa: true };
+  }
+}
+
 const EMOJI = /[\p{Extended_Pictographic}\p{Regional_Indicator}\p{Emoji_Modifier}\u{FE0F}\u{20E3}]/u;
 
 const QUEBRA_DE_LINHA = /\r\n|\r|\n|\u000b|\u000c|\u0085|\u2028|\u2029/;

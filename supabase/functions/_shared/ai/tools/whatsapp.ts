@@ -25,11 +25,15 @@ import {
   cadastrarContatoDoAgendamento,
   destinoDoAgendamento,
   horarioDoAgendamento,
+  type NumeroDoEnvio,
+  numeroDoEnvio,
   quandoPorExtenso,
   telefoneLegivel,
-  telefoneParaEnvio,
   validarAgendamento,
 } from "./agendamento.ts";
+// Pacote 1, S1 (24/11/2026): o PIN da mensagem de texto livre por quem recebe de fato e pelo que o texto diz, e o aviso
+// do cartão quando a frase do PDF ou do link, escrita pelo assistente, cita valor ou data.
+import { avisoDaFraseDoAssistente, riscoDaMensagemLivre } from "../envio-livre.ts";
 import { validarMensagem } from "./resposta.ts";
 import { agrupadoEm, ehOsAgrupada } from "./service-orders.ts";
 // Frente financeiro (07/10/2026): o lembrete enviado entra no histórico da cobrança, como na tela.
@@ -729,6 +733,10 @@ export async function resumirEnvioAoCliente(
       linhas.push("(a mensagem não traz o link: ele vai no fim dela)");
     }
   }
+  // Pacote 1, S1 (24/11/2026): a frase que o assistente escreveu (custom_message) cita valor, data ou promessa? Só um
+  // aviso de onde olhar: o PIN deste envio já existe e não muda. Sem frase, o cartão fica byte a byte como era.
+  const avisoDaFrase = avisoDaFraseDoAssistente(mensagem);
+  if (avisoDaFrase) linhas.push(avisoDaFrase);
   if (so.status === "cancelled") linhas.push(frasesDaOrdemCancelada(so).aviso);
   // (F5) no pdf_e_link, a linha da validade logo depois da abertura (a mesma regra do dd/mm da frase)
   if (formato === "pdf_e_link" && v?.linha && v.data && !mensagem.includes(ddmmDoDia(v.data))) linhas.push(`Na legenda: "${v.linha}"`);
@@ -962,6 +970,9 @@ export const whatsappTools: ToolDef[] = [
     risk: "high",
     roles: NON_TECHNICIAN_ROLES,
     computeRisk: (args) => (args?.client_id ? "high" : "medium"),
+    // Pacote 1, S1 (24/11/2026): o PIN é decidido no servidor, por quem recebe de fato (o número conferido contra os
+    // cadastros) e pelo que o texto diz, e não pelo argumento que o modelo escolheu. Só sobe o risco de cima.
+    riscoNoServidor: (args, ctx) => riscoDaMensagemLivre(args, ctx, "to_phone"),
     // Mensagem vazia ou número inválido: recusado antes de pedir a confirmação (06/10/2026).
     preValidar: (args) => validarMensagem(args),
     async execute(args, ctx) {
@@ -970,12 +981,16 @@ export const whatsappTools: ToolDef[] = [
       const invalida = validarMensagem(args);
       if (invalida) return invalida;
       const { sb, jwt } = ctx;
-      let phone: string | null = args.to_phone ? telefoneParaEnvio(args.to_phone) : null;
-      if (!phone && args.client_id) {
-        const { data: c } = await sb.from("clients").select("whatsapp, phone").eq("id", args.client_id).maybeSingle();
-        phone = c?.whatsapp || c?.phone;
+      // Pacote 1, S1: o número é o MESMO que o cartão mostrou (numeroDoEnvio). Com client_id vale o do cadastro, e só
+      // ele; client_id com to_phone de outro número é recusado (antes ia ao to_phone, com o cartão mostrando o cadastro).
+      let destino: NumeroDoEnvio;
+      try {
+        destino = await numeroDoEnvio(sb, { client_id: args.client_id, telefone: args.to_phone }, "to_phone");
+      } catch {
+        return { error: "Não consegui conferir o cadastro do cliente agora. Nada foi enviado; tente de novo.", nada_enviado: true };
       }
-      if (!phone) return { error: "Telefone não fornecido nem encontrado para o cliente." };
+      if (!destino.ok) return { error: destino.erro, nada_enviado: true };
+      const phone = destino.telefone;
       // Idempotência: mesmo texto, mesmo número, mesmo dia = um envio (protege contra o
       // laço do agente repetir a tool após um timeout).
       const chave = chaveDeEnvio("agente-msg", String(phone).replace(/\D/g, ""), diaLocal(), hashCurto(String(args.message)));
@@ -1519,6 +1534,9 @@ export const whatsappTools: ToolDef[] = [
     risk: "high",
     roles: NON_TECHNICIAN_ROLES,
     computeRisk: (args) => (args?.client_id || args?.service_order_id ? "high" : "medium"),
+    // Pacote 1, S1 (24/11/2026): como em send_whatsapp_message, o PIN é decidido no servidor, por quem recebe de fato e
+    // pelo que o texto diz. Só sobe o risco de cima (service_order_id continua pedindo PIN).
+    riscoNoServidor: (args, ctx) => riscoDaMensagemLivre(args, ctx, "phone"),
     // Número, horário e mensagem conferidos ANTES da pendência (05/10/2026): o dono não aprova um
     // agendamento que vai falhar, nem um "08:00" que sairia às 05:00.
     preValidar: (args) => validarAgendamento(args),
@@ -1528,14 +1546,18 @@ export const whatsappTools: ToolDef[] = [
       const invalido = validarAgendamento(args);
       if (invalido) return invalido;
       const { sb, admin, userId } = ctx;
-      let phone = telefoneParaEnvio(args.phone);
-      const clientId = args.client_id || null;
-
-      if (clientId) {
-        const { data: c } = await sb.from("clients").select("whatsapp, phone").eq("id", clientId).maybeSingle();
-        phone = telefoneParaEnvio(c?.whatsapp || c?.phone) ?? phone;
+      // Pacote 1, S1: o número é o MESMO que o cartão mostrou (numeroDoEnvio). Com client_id vale o do cadastro, e só
+      // ele: cliente sem número não cai mais, calado, no phone dos argumentos (o cartão dizia "será recusado"), e
+      // client_id com phone de outro número é recusado.
+      let destino: NumeroDoEnvio;
+      try {
+        destino = await numeroDoEnvio(sb, { client_id: args.client_id, telefone: args.phone }, "phone");
+      } catch {
+        return { error: "Não consegui conferir o cadastro do cliente agora. Nada foi agendado; tente de novo." };
       }
-      if (!phone) return { error: "Telefone não informado ou inválido. Forneça o WhatsApp com DDD, ou o cliente do cadastro." };
+      if (!destino.ok) return { error: destino.erro };
+      const phone = destino.telefone;
+      const clientId = args.client_id || null;
 
       let soId: string | null = null;
       if (args.service_order_id) {

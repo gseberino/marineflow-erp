@@ -532,6 +532,11 @@ RESUMO_QUE_RESOLVE.add("restaurar_documento");
 // existe, telefone que veio vazio ou leitura que falha — o resumo diz por quê numa linha "⚠️": é recusa, não pendência.
 RESUMO_QUE_RESOLVE.add("apply_quote_price");
 RESUMO_QUE_RESOLVE.add("update_client");
+// Pacote 1, S1 (24/11/2026): mensagem livre e agendamento com client_id cujo destino não fecha (veio também um número
+// e ele é outro, cliente sem número no cadastro, cliente que não existe, cadastro que não deu para ler) — o resumo diz por
+// quê numa linha "⚠️": é recusa, não pendência. O dono nunca aprova um número e a mensagem vai a outro.
+RESUMO_QUE_RESOLVE.add("send_whatsapp_message");
+RESUMO_QUE_RESOLVE.add("schedule_whatsapp_message");
 
 export function resumoQueRecusa(toolName: string, resumo: string): { error: string; nada_registrado: true } | null {
   const t = resumo.trim();

@@ -758,6 +758,58 @@ Deno.test("mensagem acima do limite: recusada antes da pendência e no execute; 
   assertEquals(tool.preValidar!({ service_order_id: ORC.id, formato: "link", custom_message: enorme }, amb.ctx() as any), null);
 });
 
+// ─── Pacote 1, S1 (24/11/2026): a frase escrita pelo assistente que cita valor, data ou promessa ───
+// O PIN deste envio já existe e não muda; o cartão só passa a dizer onde olhar.
+const AVISO_DA_FRASE = (cita: string) => `⚠️ A frase da legenda foi escrita pelo assistente e cita ${cita}. Confira antes do PIN.`;
+
+Deno.test("S1 legenda: a frase do assistente que cita valor, data ou promessa ganha o aviso, logo depois dela", async () => {
+  const amb = montarAmbiente();
+  const comValor = await resumirEnvioAoCliente(amb.admin, { service_order_id: ORC.id, formato: "pdf", custom_message: "Segue o orçamento, ficou em R$ 18.450,50." }, ONZE_DA_MANHA);
+  const linhas = comValor!.split("\n");
+  const i = linhas.indexOf('Legenda: "Segue o orçamento, ficou em R$ 18.450,50."');
+  assert(i >= 0, comValor!);
+  assertEquals(linhas[i + 1], AVISO_DA_FRASE("valor"));
+  // Em todo formato que leva a frase, e juntando o que ela cita.
+  for (const formato of ["pdf", "pdf_e_link", "link", "resumo"]) {
+    const r = await resumirEnvioAoCliente(amb.admin, { service_order_id: ORC.id, formato, custom_message: "Fica pronto na sexta, sinal de R$ 500." }, ONZE_DA_MANHA);
+    assertStringIncludes(r!, AVISO_DA_FRASE("valor, data e promessa"), formato);
+  }
+  const comData = await resumirEnvioAoCliente(amb.admin, { service_order_id: ORC.id, custom_message: "Consigo começar amanhã." }, ONZE_DA_MANHA);
+  assertStringIncludes(comData!, AVISO_DA_FRASE("data"));
+});
+
+Deno.test("S1 legenda: sem frase do assistente, ou com frase que não cita nada, o cartão fica como era", async () => {
+  const amb = montarAmbiente();
+  // Sem custom_message: o cartão de sempre, linha a linha (o Intl separa "R$" do número com espaço fixo, U+00A0).
+  const semFrase = await resumirEnvioAoCliente(amb.admin, { service_order_id: ORC.id, formato: "pdf" }, ONZE_DA_MANHA);
+  assertEquals(semFrase!.replace(/ /g, " ").split("\n"), [
+    "Cliente: *Cliente Exemplo Silva*",
+    "WhatsApp: ••••0000 (do cadastro)",
+    "Orçamento: *ORÇ-00086* — Total *R$ 18.450,50*",
+    "Formato: *só o PDF*, sem link (o arquivo com preço e PIX vai na conversa)",
+    'Legenda: "Segue o ORÇ-00086, conforme solicitado. Qualquer dúvida, estamos à disposição."',
+  ]);
+  for (const args of [{}, { formato: "pdf_e_link" }, { formato: "link" }, { formato: "resumo" }, { sem_legenda: true }, { custom_message: "" }, { custom_message: "   " }]) {
+    const r = await resumirEnvioAoCliente(amb.admin, { service_order_id: ORC.id, ...args }, ONZE_DA_MANHA);
+    assert(!r!.includes("A frase da legenda"), JSON.stringify(args));
+  }
+  // Frase do assistente que não cita valor, data nem promessa: sem aviso.
+  for (const neutra of ["Segue o orçamento.", "Bom dia! Conforme conversamos:", "Oi! Segue o orçamento que combinamos."]) {
+    const r = await resumirEnvioAoCliente(amb.admin, { service_order_id: ORC.id, formato: "pdf_e_link", custom_message: neutra }, ONZE_DA_MANHA);
+    assert(!r!.includes("A frase da legenda"), neutra);
+  }
+  // O link da OS dentro da frase não é data (o código do compartilhamento tem números com traço).
+  const comLink = `Oi! Veja aqui: https://erp.example/view/${ORC.share_token} — qualquer dúvida me chama.`;
+  const r = await resumirEnvioAoCliente(amb.admin, { service_order_id: ORC.id, formato: "link", custom_message: comLink }, ONZE_DA_MANHA);
+  assert(!r!.includes("A frase da legenda"), r!);
+});
+
+Deno.test("S1 legenda: o aviso não muda o risco do envio (o PDF e o link já pedem PIN sempre)", () => {
+  assertEquals(tool.risk, "high");
+  assertEquals(tool.computeRisk, undefined);
+  assertEquals(tool.riscoNoServidor, undefined, "não há o que subir: a conferência no servidor é só da mensagem livre");
+});
+
 Deno.test("formato 'link' com mensagem sem o link: o link vai no fim, e o resumo diz isso", async () => {
   const amb = montarAmbiente();
   const args = { service_order_id: ORC.id, formato: "link", custom_message: "Oi! Segue o orçamento que combinamos." };
