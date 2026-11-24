@@ -83,7 +83,7 @@ export const autonomyTools: ToolDef[] = [
         // modo travado — sem isto, o agente diria que a ação está liberada por inteiro.
         liberaveis_so_em_parte: EXPLICACAO_DA_TRAVA_POR_ARGUMENTO,
         explicacao:
-          "Ações de baixo risco (buscas, montar orçamento, cadastros) sempre executam direto. As sensíveis pedem confirmação até serem liberadas uma a uma. As da lista 'nunca_liberaveis' envolvem dinheiro ou são destrutivas e exigem confirmação para sempre — por decisão de projeto, não dá para liberar.",
+          "Ações de baixo risco (buscas, montar orçamento, cadastros) sempre executam direto. As sensíveis pedem confirmação até serem liberadas uma a uma. As da lista 'nunca_liberaveis' mexem em dinheiro, em nota fiscal, falam com quem é de fora ou não se desfazem e exigem confirmação para sempre — por decisão de projeto, não dá para liberar.",
       };
     },
   },
@@ -109,8 +109,9 @@ export const autonomyTools: ToolDef[] = [
       if (modo !== "auto" && modo !== "confirm") return { error: "mode deve ser 'auto' ou 'confirm'." };
 
       if (NEVER_AUTONOMOUS.has(nome) && modo === "auto") {
+        // S2 (24/11/2026): a lista ganhou nota fiscal, conciliação, pedido de cotação e mensagem livre; a recusa diz o critério inteiro.
         return {
-          error: `"${nome}" mexe em dinheiro ou é destrutiva — não pode ser liberada para agir sozinha. Essa trava é permanente, por segurança.`,
+          error: `"${nome}" fica sempre com a sua confirmação: mexe em dinheiro, em nota fiscal, fala com quem é de fora ou não se desfaz. Essa trava é permanente, por segurança.`,
         };
       }
 

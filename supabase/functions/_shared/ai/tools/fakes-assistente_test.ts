@@ -255,6 +255,46 @@ Deno.test("fakes 5f. tools/index.ts registra o catálogo real (set_tool_autonomy
   assertEquals(r.ok, true, JSON.stringify(r));
 });
 
+// Pacote 1 do assistente, S2 (24/11/2026): oito ações deixaram de ser liberáveis (autonomy-policy.ts). A porta de
+// entrada recusa ANTES de gravar e diz o critério inteiro: a recusa antiga falava só de "dinheiro ou destrutiva".
+const OS_OITO_DE_24_11 = [
+  "emit_fiscal_note", "emit_fiscal_service_note", "conciliar_transacao", "cancelar_lancamento",
+  "send_supplier_quote_request", "alterar_favorecido", "send_whatsapp_message", "set_tool_autonomy",
+];
+
+Deno.test("fakes 5g. set_tool_autonomy recusa liberar o que nunca roda sozinho, com o motivo, e nada é gravado", async () => {
+  const { allTools } = await import("./index.ts");
+  registrarCatalogoDaAutonomia(allTools);
+  for (const nome of OS_OITO_DE_24_11) {
+    const b = bancoFalso({ app_settings: [] });
+    // deno-lint-ignore no-explicit-any
+    const r = await setAuto.execute({ action_name: nome, mode: "auto" }, ctxDe(b.db)) as any;
+    assertEquals(
+      r.error,
+      `"${nome}" fica sempre com a sua confirmação: mexe em dinheiro, em nota fiscal, fala com quem é de fora ou não se desfaz. Essa trava é permanente, por segurança.`,
+    );
+    assertEquals(r.ok, undefined);
+    assertEquals(b.gravacoes, [], `${nome}: a chave não pode ser gravada`);
+  }
+});
+
+Deno.test("fakes 5h. chave 'auto' de ação que entrou no teto: aparece como sem efeito e pode ser revogada", async () => {
+  const { allTools } = await import("./index.ts");
+  registrarCatalogoDaAutonomia(allTools);
+  const b = bancoFalso({ app_settings: [{ key: "ai_autonomy_send_supplier_quote_request", value: "auto" }] });
+  // deno-lint-ignore no-explicit-any
+  const lista = await getAuto.execute({}, ctxDe(b.db)) as any;
+  assertEquals(lista.agindo_sozinho, []);
+  assertEquals(lista.liberadas_sem_efeito, ["send_supplier_quote_request"]);
+  assertStringIncludes(lista.explicacao, "mexem em dinheiro, em nota fiscal, falam com quem é de fora ou não se desfazem");
+  for (const nome of OS_OITO_DE_24_11) assert(lista.nunca_liberaveis.includes(nome), `${nome} fora de nunca_liberaveis`);
+
+  // deno-lint-ignore no-explicit-any
+  const r = await setAuto.execute({ action_name: "send_supplier_quote_request", mode: "confirm" }, ctxDe(b.db)) as any;
+  assertEquals(r.ok, true, JSON.stringify(r));
+  assertEquals(b.tabelas.app_settings[0].value, "confirm");
+});
+
 // ─── 6. send_bulk_collection_reminders ──────────────────────────────────────────────────────
 
 const COBRANCAS = () => [
