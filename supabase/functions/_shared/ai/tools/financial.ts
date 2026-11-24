@@ -12,6 +12,7 @@ import {
 // LGPD (leva 8): a conta que veio do Extrato nasce com o nome do banco ("12345678901-MARIA…"), e a observação do
 // pagamento conciliado leva o histórico da linha — o CPF de terceiro sai mascarado ao modelo.
 import { nomeSemCpf as mascararCpfNoTexto } from "../../banking/contraparte.ts";
+import { filaDePagamentos, NOME_DO_GRUPO } from "../../pagamentos/semana.ts";
 
 /** O recorte de dias do fechamento, em datas de Brasília ('AAAA-MM-DD'). */
 export function periodoDoFechamento(periodo: string, hoje: string): { de: string; ate: string } {
@@ -283,7 +284,12 @@ export const financialTools: ToolDef[] = [
   },
   {
     name: "list_payables_due",
-    description: "Lista contas a pagar vencidas ou próximas do vencimento.",
+    description:
+      "Lista as contas a pagar vencidas ou que vencem em até N dias, JÁ NA ORDEM DE PAGAR (prioridade pela consequência do atraso: " +
+      "pessoas e impostos, serviço que corta, fornecedor com boleto, o resto; dentro do grupo, o que vence antes), com o saldo no " +
+      "banco, a soma e quanto falta. Use para 'pagamentos da semana', 'o que eu pago primeiro?', 'o que vence?'. Mostre na ordem " +
+      "recebida, sem reordenar. O campo boleto é o código para copiar ('manda o boleto da X' → responda com ele sozinho numa linha). " +
+      "Só leitura: nada é pago por aqui.",
     input_schema: {
       type: "object",
       properties: { days_ahead: { type: "number", description: "Inclui contas que vencem até N dias à frente, além das já vencidas. Padrão: 7." } },
@@ -295,20 +301,74 @@ export const financialTools: ToolDef[] = [
       if (blocked) return blocked;
       const { admin } = ctx;
       const daysAhead = Number(args.days_ahead) || 7;
-      const limitDate = new Date(Date.now() + daysAhead * 86400000).toISOString().slice(0, 10);
+      // o dia de Brasília (UTC−3), não o do servidor: às 22h de lá o UTC já virou o dia
+      const limitDate = new Date(Date.now() - 3 * 3_600_000 + daysAhead * 86_400_000).toISOString().slice(0, 10);
       const { data, error } = await admin
         .from("payables")
-        .select("id, description, amount, balance_amount, due_date, status, supplier_name, expense_category")
+        .select("id, description, amount, balance_amount, due_date, status, supplier_name, expense_category, notes")
         .not("status", "in", "(paid,cancelled)")
         .lte("due_date", limitDate)
         .order("due_date", { ascending: true })
         .limit(50);
       if (error) throw error;
+      const linhas = ((data ?? []) as any[]).map(({ notes, ...p }) => ({
+        ...p, description: mascararCpfNoTexto(p.description ?? null), supplier_name: mascararCpfNoTexto(p.supplier_name ?? null),
+        _reembolso: String(notes ?? "").startsWith("Reembolso ao sócio"),
+      }));
+      // (24/11/2026, pagamentos da semana) a MESMA ordem da mensagem da manhã; sem a função publicada, a lista de antes
+      const fila = await filaDePagamentos(admin, limitDate);
+      if (!fila) return { results: linhas.map(({ _reembolso, ...p }) => p) };
+      const posicao = new Map(fila.contas.map((c, i) => [c.id, i]));
+      const daFila = new Map(fila.contas.map((c) => [c.id, c]));
+      const results = linhas
+        .sort((a, b) => (posicao.get(a.id) ?? 9999) - (posicao.get(b.id) ?? 9999))
+        .map(({ _reembolso, ...p }) => {
+          const c = daFila.get(p.id);
+          if (!c) return { ...p, prioridade: _reembolso ? "fora da fila: a empresa deve ao sócio (pago do bolso)" : "fora da fila" };
+          return {
+            ...p,
+            prioridade: `${c.grupo} — ${NOME_DO_GRUPO[c.grupo]}${c.aDefinir ? " (palpite: o dono ainda não disse o grupo deste fornecedor)" : ""}`,
+            vencida: c.vencida,
+            ...(c.boletoLinha ? { boleto: c.boletoLinha } : {}),
+          };
+        });
+      const falta = fila.saldoNoBanco === null ? null : Math.max(0, Math.round((fila.soma - fila.saldoNoBanco) * 100) / 100);
       return {
-        results: ((data ?? []) as any[]).map((p) => ({
-          ...p, description: mascararCpfNoTexto(p.description ?? null), supplier_name: mascararCpfNoTexto(p.supplier_name ?? null),
-        })),
+        results,
+        ordem: "já na ordem de pagar (grupo de prioridade, depois vencimento); não reordene",
+        saldo_no_banco: fila.saldoNoBanco,
+        saldo_informado_em: fila.saldoEm,
+        soma_da_fila: fila.soma,
+        falta_no_banco: falta,
+        reembolsos_a_socio: fila.reembolsos,
       };
+    },
+  },
+  {
+    name: "definir_prioridade_de_pagamento",
+    description:
+      "Grava em que grupo de prioridade de pagamento um FORNECEDOR entra — vale para as contas dele de agora e as próximas, e muda a " +
+      "ordem da lista de pagamentos. Use quando o dono disser 'a Unifique é internet', 'esse é imposto', 'esse pode ficar por último'. " +
+      "grupo: 1 = pessoas e impostos; 2 = serviço que corta (internet, luz, aluguel); 3 = fornecedor com boleto; 4 = o resto. " +
+      "Não paga nem altera a conta.",
+    input_schema: {
+      type: "object",
+      properties: {
+        payable_id: { type: "string", description: "UUID de UMA conta a pagar desse fornecedor (de list_payables_due)." },
+        grupo: { type: "number", enum: [1, 2, 3, 4], description: "1 pessoas e impostos · 2 serviço que corta · 3 fornecedor com boleto · 4 o resto." },
+      },
+      required: ["payable_id", "grupo"],
+    },
+    risk: "medium",
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { data, error } = await ctx.admin.rpc("definir_prioridade_de_pagamento", {
+        p_conta: String(args.payable_id), p_grupo: Number(args.grupo), p_autor: ctx.userId || null,
+      });
+      if (error) return { error: mensagemDoBanco(error) };
+      return data;
     },
   },
   {

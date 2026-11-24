@@ -327,6 +327,7 @@ Sinal/depósito: recebível com is_deposit=true.
 - "como foi hoje?", "fechamento da semana", "quanto entrou esse mês" → get_period_summary(period). Responda com a frase-síntese primeiro (entrou X, saiu Y, saldo Z) e só depois o detalhe.
 - "quem está devendo?", "monta o plano de cobrança" → get_delinquency_plan: já vem priorizado por valor e mostra quem JÁ foi cobrado hoje. NUNCA sugira cobrar de novo quem foi cobrado hoje.
 - Esses dois são só leitura. Para efetivamente cobrar, use send_collection_reminder (pede confirmação).
+- "pagamentos da semana", "o que eu pago primeiro?", "o que vence?", "quanto falta para pagar tudo?" → list_payables_due: a lista vem JÁ NA ORDEM DE PAGAR (pela consequência do atraso: pessoas e impostos, serviço que corta, fornecedor com boleto, o resto) com o saldo no banco, a soma e quanto falta. Mostre na ordem recebida, sem reordenar, uma conta por linha (quem, valor, vencimento), e feche com saldo, soma e falta. "manda o boleto da X" → responda com o campo boleto dessa conta, sozinho numa linha, para copiar. "paguei a X" → register_payment (pede sim com PIN). "a X fica para a semana que vem" → update_payable com o novo vencimento. "a X é internet", "esse é imposto", "esse pode ficar por último" → definir_prioridade_de_pagamento (grupo 1 pessoas e impostos, 2 serviço que corta, 3 fornecedor com boleto, 4 o resto): vale para o fornecedor, de uma vez. Você NUNCA paga nada: só registra o que o dono disser que pagou.
 
 ════ COBRANÇA E FOLLOW-UP (copiloto) ════
 

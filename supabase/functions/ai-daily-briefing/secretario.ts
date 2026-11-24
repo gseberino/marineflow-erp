@@ -22,6 +22,7 @@ import { type DadosDeHoje, type DadosDoEscritorio, linhaDoItem, type NaRua, text
 import { type ExtraDaManha, lerExtra, lerRetorno, linhasDaManha, type RetornoDaManha } from "./retorno.ts";
 import { impressoraNoAr } from "../_shared/impressao/fila.ts";
 import { osDaAgendaDoDia } from "../_shared/impressao/agenda.ts";
+import { comPagamentos, lerPagamentosDaManha, type PagamentosDaSemana, pagamentosDaManha } from "../_shared/pagamentos/semana.ts";
 
 // deno-lint-ignore no-explicit-any
 type Admin = any;
@@ -269,6 +270,12 @@ export function montarDosDados(p: {
    * depois do texto da manhã e antes da sugestão de imprimir, só em dia útil. Ausente ou null = o texto de antes, byte a byte.
    */
   aprovacoes?: AprovacoesDaManha | null;
+  /**
+   * (24/11/2026, pagamentos da semana) A fila do que pagar (lerPagamentosDaManha): no 1º dia útil da semana o bloco
+   * inteiro, nos outros dias úteis a linha das vencidas. Entra depois das aprovações e antes da sugestão de imprimir.
+   * Ausente, null ou sem conta = o texto de antes, byte a byte.
+   */
+  pagamentos?: PagamentosDaSemana | null;
 }): ManhaNova {
   const tipo = tipoDoDia(p.hoje);
   const opcoes = p.opcoes ?? OPCOES_PADRAO;
@@ -286,9 +293,9 @@ export function montarDosDados(p: {
   // (P14) "Clientes esperando" e "Para conferir": os sem prazo que já têm letra na manhã não repetem
   const retorno = p.retorno ? linhasDaManha(p.retorno, fonesDaManha(selecao), p.agora, p.retornoExtra ?? null) : null;
   const aprovacoes = tipo === "util" && p.aprovacoes?.texto ? p.aprovacoes : null;
-  const texto = comSugestaoDeImpressao(comAprovacoesAoCliente(textoDaManha({
+  const texto = comSugestaoDeImpressao(comPagamentos(comAprovacoesAoCliente(textoDaManha({
     hoje: p.hoje, tipoDoDia: tipo, feriado: feriadoDoDia(p.hoje), selecao, naRua: p.naRua, deHoje: p.deHoje, guardado: plano, retorno,
-  }), tipo, aprovacoes), tipo, p.viasParaImprimir ?? 0);
+  }), tipo, aprovacoes), pagamentosDaManha(p.pagamentos, p.hoje)), tipo, p.viasParaImprimir ?? 0);
   return {
     texto,
     tipoDoDia: tipo,
@@ -368,9 +375,12 @@ export async function montarManhaNova(admin: Admin, p: {
   const viasParaImprimir = tipoDoDia(p.hoje) === "util" ? await viasParaImprimirHoje(admin, p.hoje) : 0;
   // (19/11/2026, agenda, Opção A) as mensagens ao cliente esperando o *manda cliente*; lerAprovacoesDaManha nunca lança (erro = sem o bloco)
   const aprovacoes = tipoDoDia(p.hoje) === "util" ? await lerAprovacoesDaManha(admin, p.hoje, p.agora) : null;
+  // (24/11/2026) a fila do que pagar; lerPagamentosDaManha nunca lança (erro ou chave desligada = null = sem o bloco)
+  const pagamentos = tipoDoDia(p.hoje) === "util" ? await lerPagamentosDaManha(admin, p.hoje) : null;
   return montarDosDados({
     hoje: p.hoje, agora: p.agora, ...lido, escritorio: p.escritorio,
     opcoes: { semanaVoltaComFatoNovo: portao.regras.semana_volta_com_fato_novo }, guardado, retorno, retornoExtra, viasParaImprimir, aprovacoes,
+    pagamentos,
   });
 }
 

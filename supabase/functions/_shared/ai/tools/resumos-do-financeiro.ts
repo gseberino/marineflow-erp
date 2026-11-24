@@ -7,6 +7,7 @@ import { resumirEstorno } from "./estorno.ts";
 import { resumirCobranca } from "./cobrancas.ts";
 import { resumirFavorecido } from "./favorecidos.ts";
 import { resumirCadastroDoExtrato, resumirGuardarPagador } from "./finance-rules.ts";
+import { resumirPrioridade } from "../../pagamentos/semana.ts";
 
 export const TITULOS_DO_FINANCEIRO: Record<string, string> = {
   alterar_anotacao_do_extrato: "Cancelar ou corrigir anotação de Pix",
@@ -20,6 +21,8 @@ export const TITULOS_DO_FINANCEIRO: Record<string, string> = {
   // mesmo de antes, em agent.ts).
   guardar_pagador_do_cliente: "Guardar quem paga pelo cliente",
   cadastrar_contraparte_do_extrato: "Cadastrar a partir do extrato",
+  // Pagamentos da semana (24/11/2026): o grupo de prioridade de um fornecedor, com o nome dele e o grupo por extenso.
+  definir_prioridade_de_pagamento: "Definir prioridade de pagamento do fornecedor",
 };
 
 /**
@@ -45,5 +48,6 @@ export async function resumirDoFinanceiro(
   if (nome === "alterar_favorecido") return await resumirFavorecido(ctx, args);
   if (nome === "guardar_pagador_do_cliente") return await resumirGuardarPagador(admin, args, quem);
   if (nome === "cadastrar_contraparte_do_extrato") return await resumirCadastroDoExtrato(admin, args);
+  if (nome === "definir_prioridade_de_pagamento") return await resumirPrioridade(admin, args);
   return null;
 }

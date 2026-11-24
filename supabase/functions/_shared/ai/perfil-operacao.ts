@@ -326,6 +326,10 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
  * para PERFIL_OPERACAO.
  */
 export const SO_PELA_REDE: ReadonlySet<string> = new Set([
+  // — Pagamentos da semana (24/11/2026): o dono diz UMA vez em que grupo de prioridade um fornecedor entra ("a Unifique é
+  //   internet"). Uso raro por natureza (uma vez por fornecedor) e o perfil do admin está no teto: fica na rede e pede o
+  //   "sim" (escrita). O prompt a ensina (FECHAMENTO E INADIMPLÊNCIA) e list_payables_due devolve a fila já na ordem. —
+  "definir_prioridade_de_pagamento",
   // — Dropbox (08/10/2026): arquivos e pasta do barco, e mandar um PDF de lá para quem pede.
   //   As duas consultas só leem o índice (arquivos_dropbox/pastas_dropbox); o envio vai só para
   //   o próprio WhatsApp de quem pede (ver ESCRITAS_VERIFICADAS_DA_REDE). Lista enxuta cheia (113). —
