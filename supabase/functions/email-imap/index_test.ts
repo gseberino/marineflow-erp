@@ -103,6 +103,41 @@ Deno.test("V2: a triagem que falhou é registrada logo depois de triageEmail, s�
   for (const proibido of ["email.subject", "email.text", "email.from", "body"]) assert(!linha.includes(proibido), proibido);
 });
 
+// Pacote 1, F1 (24/11/2026). O alerta de golpe parou em 12/11 porque só saía de e-mail classificado pelo modelo, e o
+// provedor ficou sem saldo. O que se protege: a regra fixa (triage.ts) entra pela MESMA triagem e pelo MESMO aviso do
+// urgente (teto do dia, "não repetir", portão), sem caminho próprio; a chave de app_settings é lida como as outras do
+// arquivo e só desliga (ausente = ligada); o diagnóstico não lê a chave; e o aviso só vai aos admins, nunca ao remetente.
+Deno.test("F1: a regra fixa do golpe entra pela triagem e usa o aviso do urgente; a chave só desliga; nada vai ao remetente", () => {
+  assertStringIncludes(fonte, 'import { CHAVE_DA_REGRA_DO_GOLPE, regraDoGolpeLigada, triageEmail, type Triage } from "../_shared/email/triage.ts";');
+  // a chave, lida como o arquivo já lê app_settings (select value / eq key / maybeSingle), fora do diagnóstico
+  const leitura = fonte.indexOf("const { data: cfgGolpe } = diagnostico");
+  assert(leitura > 0, "a leitura da chave");
+  const trecho = fonte.slice(leitura, fonte.indexOf("const resultados", leitura));
+  assertStringIncludes(trecho, "? { data: null }");
+  assertStringIncludes(trecho, ': await admin.from("app_settings").select("value").eq("key", CHAVE_DA_REGRA_DO_GOLPE).maybeSingle();');
+  assertStringIncludes(trecho, "const regraDoGolpe = regraDoGolpeLigada(cfgGolpe?.value);");
+  // lida uma vez por rodada (antes do laço das caixas), não a cada e-mail
+  assert(leitura < fonte.indexOf("for (const conta of (contas ?? [])"), "a chave é lida antes das caixas");
+  // vai para a triagem; o remetente silenciado continua sem triagem nenhuma
+  const ini = fonte.indexOf("// Triagem só do que é recente");
+  const bloco = fonte.slice(ini, fonte.indexOf("cursor = uid;", ini));
+  assertStringIncludes(bloco, ": await triageEmail(email, new Date(), { regraDoGolpe });");
+  assert(bloco.indexOf('regra === "ignore_always"') < bloco.indexOf("await triageEmail(email"), "silenciado decide antes");
+  // um aviso só, o do urgente, com as mesmas travas: nenhum atalho pela regra
+  assertEquals(fonte.split("await avisarUrgente(").length, 2, "um ponto de aviso só");
+  const aviso = bloco.slice(bloco.indexOf('if (recente && t.classe === "urgent" && jaAvisados < MAX_URGENTES_PADRAO) {'));
+  assert(aviso.length > 0 && aviso.indexOf("await jaAvisadoAntes(") < aviso.indexOf("await avisarUrgente("), "teto e 'não repetir' antes do aviso");
+  assertStringIncludes(aviso, "await avisarUrgente(admin, conta.address, remetente, email.subject, t.motivo, t.alertaFraude,");
+  for (const atalho of ["deterministica", "golpe_pela_regra"]) assert(!aviso.includes(atalho), `o aviso não olha ${atalho}`);
+  // quem recebe: só os admins com o canal ligado (app_users); o endereço do remetente só serve de chave no portão
+  const f = fonte.indexOf("async function avisarUrgente(");
+  const fn = fonte.slice(f, fonte.indexOf("\n}\n", f));
+  assertStringIncludes(fn, 'await admin.from("app_users").select("phone_normalized")');
+  assertStringIncludes(fn, "const telefones = ((quem ?? []) as { phone_normalized: string }[]).map((u) => u.phone_normalized);");
+  assertEquals(fn.split('admin.from("whatsapp_send_queue")').length, 2, "uma escrita na fila, para os telefones lidos");
+  for (const saida of ["email_outbox", "sendEmail", "smtp", "responder"]) assert(!fn.toLowerCase().includes(saida.toLowerCase()), `sem ${saida}`);
+});
+
 Deno.test("Fase 4: ?remessas=1 chama a releitura e responde 500 só com erro de leitura (o modo desligado é pulado)", () => {
   assertStringIncludes(fonte, 'if (new URL(req.url).searchParams.get("remessas") === "1") {');
   assertStringIncludes(fonte, "return jr({ ok: true, ...(await relerRemessas(admin, cnpjEmpresa)), ms: Date.now() - inicio });");
