@@ -117,13 +117,22 @@ $f$;
 -- Depois, o cenário B da 7a: os 5 modos do gestor ligados, sem o freio, com as regras todas (pg_temp.modos('ligado') de agenda_fase7a_compras.sql), e a presença
 -- do dono de produção no Lenine e no Vanderlei. Sem isso, em 29/10 o motor não marca nenhum dos dois (o Lenine espera "tem peça a comprar?", o Vanderlei, o
 -- material), e não haveria porquê a gravar.
+-- (23/11/2026, NOVO-testes-02) O replay está carregado? Antes, a porta do P1, P3, P5, P7, M1c e do cenário B era "a OS-00074 existe": na produção ela existe
+-- (é o Lenine de verdade), então esses blocos rodavam sobre a carteira real de hoje com as datas de 29/10. Desde 11/11 a OS-00074 e a OS-00069 estão concluídas e o
+-- motor não marca nenhuma das duas: o P1 quebrava em "fixar precisa da OS e do dia", o P3 e o P5 em "query returned no rows", o M1c-c em "0 registro(s)". A porta
+-- agora é a das outras provas do replay (agenda_fase7a_*.sql): a fixture agenda_teste.replay2910, que só a bancada passa. Fora dela, PULADO, como o cabeçalho diz.
+-- O P4 fica com a porta dele: ele monta as ações na 1ª OS sem planejamento (a OS-00074 é só o valor inicial de v_len) e roda também na produção.
+create function pg_temp.com_replay() returns boolean language sql stable as $f$
+  select coalesce(current_setting('agenda_teste.replay2910', true), '') <> '' and pg_temp.os('OS-00074') is not null
+$f$;
+
 do $f$
 begin
   if coalesce(current_setting('agenda_teste.replay2910', true), '') <> '' and pg_temp.os('OS-97006') is null then
     execute current_setting('agenda_teste.replay2910');
     execute current_setting('agenda_teste.fase7a');
   end if;
-  if pg_temp.os('OS-00074') is not null then
+  if pg_temp.com_replay() then
     update public.agenda_config
        set modo_marcar_sozinho = 'ligado', modo_encaixe_aprovacao = 'ligado', modo_revisao_diaria = 'ligado', modo_compre_ate = 'ligado',
            modo_vaga_fechamento = 'ligado', gestor_so_propor = false, gestor_so_propor_em = null, marcar_sozinho_desde = timestamptz '2026-10-29 16:46-03',
@@ -187,7 +196,7 @@ declare
   v_f    jsonb;
   v_it   jsonb;
 begin
-  if pg_temp.os('OS-00074') is null then
+  if not pg_temp.com_replay() then
     perform pg_temp.gravar(pg_temp.ok('[]', 'P1 a proposta gravada', true, 'PULADO: sem o replay de 29/10 (rode pela bancada)'));
     return;
   end if;
@@ -357,8 +366,9 @@ declare
   v_pid  uuid;
   r      public.agenda_alocacoes;
   v      text;
+  v_novo timestamptz;   -- a hora mais nova já gravada na OS: as "mais novas" do P3f e do P3g vêm depois dela
 begin
-  if v_len is null then
+  if not pg_temp.com_replay() then
     perform pg_temp.gravar(pg_temp.ok('[]', 'P3 o gatilho das alocações', true, 'PULADO: sem o replay de 29/10 (rode pela bancada)'));
     return;
   end if;
@@ -407,9 +417,12 @@ begin
   v_res := pg_temp.ok(v_res, 'P3e (c) a abertura na proposta do gestor: [] e sem degrau', r.suposicoes = '[]'::jsonb and r.degrau is null, format('%s | %s', r.suposicoes, r.degrau));
   -- nunca da própria proposta: a 2ª alocação de turno da mesma proposta não copia da 1ª (que é mais nova), copia a de antes
   -- (a hora: a da bancada é anterior à do cenário de 29/10; a irmã fica de fato a mais nova da OS, e some no fim do caso)
+  -- (23/11/2026, NOVO-testes-02) As 3 "mais novas" (a irmã, a abertura e a reserva) eram de 01/12/2026 10h, 11h e 12h, datas fixas: com o relógio depois de 01/12 10h
+  -- (BANCADA_RELOGIO=real) a irmã deixaria de ser a mais nova e o P3f passaria sem provar. Agora 1 h, 2 h e 3 h depois da mais nova já gravada na OS (ou de now()).
+  v_novo := greatest(now(), (select max(a.criado_em) from public.agenda_alocacoes a where a.service_order_id = v_len));
   begin
     insert into public.agenda_alocacoes (service_order_id, payee_id, dia, turno, presenca, tipo, estado, origem, proposta_id, cancelada_em, criado_em, suposicoes)
-    values (v_len, v_pes, date '2031-01-11', 'manha', 'turno', 'execucao', 'cancelada', 'motor', v_pid, now(), timestamptz '2026-12-01 10:00-03',
+    values (v_len, v_pes, date '2031-01-11', 'manha', 'turno', 'execucao', 'cancelada', 'motor', v_pid, now(), v_novo + interval '1 hour',
             '[{"codigo": "sem_peca", "detalhe": {}}]');
     insert into public.agenda_alocacoes (service_order_id, payee_id, dia, turno, presenca, tipo, estado, origem, proposta_id, cancelada_em)
     values (v_len, v_pes, date '2031-01-12', 'manha', 'turno', 'execucao', 'cancelada', 'motor', v_pid, now())
@@ -421,9 +434,9 @@ begin
   end;
   -- mais novas que não contam: a abertura do dono (não é meio-dia de turno) e uma reserva (a reserva copia de reserva; o compromisso, de compromisso)
   insert into public.agenda_alocacoes (service_order_id, payee_id, dia, turno, presenca, tipo, estado, origem, cancelada_em, criado_em, suposicoes)
-  values (v_len, v_dono, date '2031-01-05', 'manha', 'abertura', 'execucao', 'cancelada', 'motor', now(), timestamptz '2026-12-01 11:00-03', '[]');
+  values (v_len, v_dono, date '2031-01-05', 'manha', 'abertura', 'execucao', 'cancelada', 'motor', now(), v_novo + interval '2 hours', '[]');
   insert into public.agenda_alocacoes (service_order_id, payee_id, dia, turno, presenca, tipo, estado, origem, reserva_de, cancelada_em, criado_em, suposicoes)
-  values (v_len, v_pes, date '2031-01-05', 'tarde', 'turno', 'reserva', 'cancelada', 'motor', 'teto', now(), timestamptz '2026-12-01 12:00-03', '[]');
+  values (v_len, v_pes, date '2031-01-05', 'tarde', 'turno', 'reserva', 'cancelada', 'motor', 'teto', now(), v_novo + interval '3 hours', '[]');
   -- o corte (reestimar): sem degrau na proposta, sem degrau; as suposições copiadas
   v_pid := pg_temp.prop_gestor(v_len, jsonb_build_object('tipo', 'reestimar'));
   insert into public.agenda_alocacoes (service_order_id, payee_id, dia, turno, presenca, tipo, estado, origem, proposta_id, cancelada_em)
@@ -636,7 +649,7 @@ declare
   v     text;
   c     text;
 begin
-  if pg_temp.os('OS-00074') is null then
+  if not pg_temp.com_replay() then
     perform pg_temp.gravar(pg_temp.ok('[]', 'P5 a vigente', true, 'PULADO: sem o replay de 29/10 (rode pela bancada)'));
     return;
   end if;
@@ -764,7 +777,7 @@ declare
   v_p   jsonb;
   x     uuid;
 begin
-  if pg_temp.os('OS-00074') is null then
+  if not pg_temp.com_replay() then
     perform pg_temp.gravar(pg_temp.ok('[]', 'P7 o foco locais', true, 'PULADO: sem o replay de 29/10 (rode pela bancada)'));
     return;
   end if;
@@ -809,12 +822,22 @@ declare
   v_sl   constant uuid := '00000000-0000-4000-8000-0000000000c9';   -- P8n2: alguém sem nenhuma linha de disponibilidade (fonte nenhum)
   v_k    bigint;
   v_cham text;
+  v_mar  uuid;   -- P8r3: a marina de teste que não virou local
 begin
   begin
+  -- (23/11/2026, NOVO-testes-02) Os casos partem dos 4 modos do local desligados, como na bancada (o P8r liga um por vez, sem o freio). Na produção estão ligados desde
+  -- 14/11, e o local_suposto da OS de base entraria em todo caso, de P8a a P8n.
+  update public.agenda_config set modo_local_calendario = 'desligado', modo_patio = 'desligado', modo_viagem = 'desligado', modo_mesmo_local = 'desligado' where id;
   -- uma OS sem linha em os_planejamento (o caso comum), a 1ª pelo número: a base dos casos montados
+  -- (23/11/2026, NOVO-testes-02) ... que não seja barco, de preferência com bem cadastrado e sem marina na OS: a OS que os casos supõem. O barco num dia de temporada
+  -- ganha bem_disponivel em todo caso com bloco (o P8q prova isso na OS de barco dele). Na produção a 1ª pelo número era o ORÇ-00004, barco com o local pela OS: o P8m, o
+  -- P8n e o P8t mostravam bem_disponivel. O bem sem marina é para o P8t: o local_suposto dele vem do P8r3, que roda nesta mesma OS (a marina do bem vira local e a OS vai
+  -- para uma marina que não é local: fonte bem, suposição). Antes isso era coincidência (na bancada a 1ª pelo número já era assim, o ORÇ-00083, e continua a escolhida;
+  -- na produção de hoje é o ORÇ-00036).
   select so.id into strict v_os from public.service_orders so
    where not exists (select 1 from public.os_planejamento pl where pl.service_order_id = so.id) and so.merged_into_id is null
-   order by so.service_order_number, so.id limit 1;
+     and public._agenda_classe_de_campo(so.id) ->> 'bem' is distinct from 'barco'
+   order by (so.vessel_id is not null and so.marina_id is null) desc, so.service_order_number, so.id limit 1;
   select array_agg(x.id order by x.name, x.id) into v_p
     from (select p.id, p.name from public.payees p where p.active and p.kind <> 'socio' and p.id is distinct from v_dono order by p.name, p.id limit 4) x;
   a1 := jsonb_build_array(jsonb_build_object('payee_id', v_p[1], 'nome', 'Alfa', 'dia', c_d, 'turno', 'manha', 'presenca', 'turno'));
@@ -897,9 +920,11 @@ begin
   v_res := pg_temp.ok(v_res, 'P8l uma_pessoa não entra com 2 num meio-dia, com a equipe dita ou com a dupla dita (mesmo "sem dupla")', v = 'false false false', v);
 
   -- dono_abre_fecha: a abertura ou o fechamento no bloco e a presença do dono pela regra (abre e fecha)
+  -- (23/11/2026, NOVO-testes-02) ... numa OS que não é barco (o bem_disponivel do barco em temporada entraria junto; na produção a 1ª era um barco)
   select so.id into v_os2 from public.service_orders so
    where public.os_presenca_do_dono(so.id) ->> 'presenca' = 'abre_e_fecha' and coalesce(public.os_presenca_do_dono(so.id) ->> 'fonte', 'regra') = 'regra'
      and not exists (select 1 from public.os_planejamento pl where pl.service_order_id = so.id)
+     and public._agenda_classe_de_campo(so.id) ->> 'bem' is distinct from 'barco'
    order by so.service_order_number, so.id limit 1;
   if v_os2 is null then
     v_res := pg_temp.ok(v_res, 'P8m dono_abre_fecha', false, 'sem OS com a presença do dono pela regra do abre e fecha');
@@ -1089,9 +1114,10 @@ begin
     v_res := pg_temp.ok(v_res, 'P8r2 o local dito pelo dono', false, 'sem a OS do P8r');
   end if;
   -- o local do cadastro do barco: a marina do barco que é local, com a OS sem marina, não é suposição (fonte bem); a OS com outra marina que não virou local, é
+  -- (23/11/2026, NOVO-testes-02) a OS de base primeiro, se ela couber (o P8t lê o local_suposto que este caso deixa nela); senão a 1ª pelo número, como antes
   select so.id into v_os2 from public.service_orders so
    where so.vessel_id is not null and so.marina_id is null
-   order by so.service_order_number, so.id limit 1;
+   order by (so.id = v_os) desc, so.service_order_number, so.id limit 1;
   if v_os2 is null or (select count(*) from public.marinas) < 2 then
     v_res := pg_temp.ok(v_res, 'P8r3 o local do cadastro do barco', false, 'sem OS com barco e sem marina, ou menos de 2 marinas');
   else
@@ -1105,7 +1131,10 @@ begin
     s := public._agenda_suposicoes_da_os(v_os2, jsonb_build_object('meios', jsonb_build_object('equipe_dita', true)), '[]'::jsonb, c_d);
     v := coalesce(public._agenda_local_resolvido(v_os2, c_d) ->> 'fonte', '?') || ':' || coalesce(public._agenda_local_resolvido(v_os2, c_d) ->> 'suposicao', '?')
          || ' ' || (s @> '[{"codigo": "local_suposto"}]')::text;
-    update public.service_orders set marina_id = (select m.id from public.marinas m order by m.id offset 1 limit 1) where id = v_os2;
+    -- (23/11/2026, NOVO-testes-02) A marina que não virou local era a 2ª pelo id; na produção a semente da 7d fez local de 8 das 9 marinas, a 2ª entre elas, e a OS
+    -- caía na fonte os (sem suposição: "os:false sem"). Agora uma marina de teste, na transação, sem local: a mesma em qualquer carteira.
+    insert into public.marinas (name) values ('Marina de teste P8r3 (sem local)') returning id into v_mar;
+    update public.service_orders set marina_id = v_mar where id = v_os2;
     s := public._agenda_suposicoes_da_os(v_os2, jsonb_build_object('meios', jsonb_build_object('equipe_dita', true)), '[]'::jsonb, c_d);
     v := v || ' / ' || coalesce(public._agenda_local_resolvido(v_os2, c_d) ->> 'fonte', '?') || ':' || coalesce(public._agenda_local_resolvido(v_os2, c_d) ->> 'suposicao', '?')
          || ' ' || coalesce((select e -> 'detalhe' ->> 'fonte' || ',' || coalesce(e -> 'detalhe' ->> 'bem', '-') from jsonb_array_elements(s) e where e ->> 'codigo' = 'local_suposto'), 'sem');
@@ -1124,7 +1153,7 @@ begin
     v_res := pg_temp.ok(v_res, 'P8m2 a presença do dono pela regra do "sempre": dono_abre_fecha não entra', not s @> '[{"codigo": "dono_abre_fecha"}]', s::text);
   end if;
 
-  -- a ordem do §3.1-3 com vários juntos (9 dos 12: o local da OS de base é suposto pela cidade, com o calendário ligado acima), e a saída passa no CHECK da alocação
+  -- a ordem do §3.1-3 com vários juntos (9 dos 12: o local da OS de base é suposto pelo bem, que o P8r3 deixou nela, com o calendário ligado acima), e a saída passa no CHECK da alocação
   s := public._agenda_suposicoes_da_os(v_os, jsonb_build_object(
          'pront', jsonb_build_object('restricoes', jsonb_build_array(jsonb_build_object('tipo', 'sem_peca_suposta'), jsonb_build_object('tipo', 'sinal')),
                                      'material', jsonb_build_object('itens', jsonb_build_array(
@@ -1154,7 +1183,7 @@ declare
   v     text;
   v_sim text;
 begin
-  if pg_temp.os('OS-00074') is null then
+  if not pg_temp.com_replay() then
     perform pg_temp.gravar(pg_temp.ok('[]', 'M1c', true, 'PULADO: sem o replay de 29/10 (rode pela bancada)'));
     return;
   end if;
