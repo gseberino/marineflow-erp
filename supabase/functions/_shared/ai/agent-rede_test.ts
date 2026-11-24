@@ -228,14 +228,26 @@ Deno.test("rede: review_entity_note (portão humano da memória) vira pendência
   assertEquals(pendingRows[0].payload, { note_id: "n1", decision: "approve" });
   assertEquals(marcasDaRede(auditRows), [{ tool: REVISAR, desfecho: "pendencia" }]);
 
-  // Controle: À VISTA (nome no pedido do dono), a tool segue o risco que declara (low) e roda —
-  // a confirmação é da rede, não uma mudança na tool.
+  // Controle: À VISTA (nome no pedido do dono). Até 24/11/2026 a tool rodava aqui (risco low declarado) e a confirmação
+  // era só da rede. Pacote 1, S4: APROVAR pede o "sim" pela própria tool (computeRisk) — à vista também vira pendência,
+  // e sem a marca da rede (não veio de fora do perfil).
   execucoes = [];
   const aVista = montar({ tools: [comExecuteFalso(REVISAR)], pedido: `aprova a nota n1 (${REVISAR})` });
-  const s = mockFetchSequence([chamaTool(REVISAR, { note_id: "n1", decision: "approve" }), respondeTexto("aprovada")]);
-  await withFetch(s.fetchStub, () => runAgentLoop(aVista.params));
+  const s = mockFetchSequence([chamaTool(REVISAR, { note_id: "n1", decision: "approve" })]);
+  const rVista = await withFetch(s.fetchStub, () => runAgentLoop(aVista.params));
+  assertEquals(toolsEnviadas(s.calls).includes(REVISAR), true, "premissa: com o nome no pedido, a tool está à vista");
+  assertEquals(execucoes, []);
+  assertEquals(rVista.proposal?.risk_level, "medium");
+  assertEquals(aVista.pendingRows.map((p) => p.action_name), [REVISAR]);
+  assertEquals(marcasDaRede(aVista.auditRows), []);
+
+  // REJEITAR, à vista, segue o risco que a tool declara (low) e roda direto: descartar uma sugestão não põe nada no contexto.
+  execucoes = [];
+  const rejeita = montar({ tools: [comExecuteFalso(REVISAR)], pedido: `rejeita a nota n1 (${REVISAR})` });
+  const s2 = mockFetchSequence([chamaTool(REVISAR, { note_id: "n1", decision: "reject" }), respondeTexto("rejeitada")]);
+  await withFetch(s2.fetchStub, () => runAgentLoop(rejeita.params));
   assertEquals(execucoes, [REVISAR]);
-  assertEquals(aVista.pendingRows.length, 0);
+  assertEquals(rejeita.pendingRows.length, 0);
 });
 
 Deno.test("rede: o modelo cria a nota e tenta aprová-la no mesmo turno — a nota nasce candidata, a aprovação para no dono", async () => {

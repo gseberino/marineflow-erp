@@ -1,4 +1,4 @@
-import { NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
+import { NON_TECHNICIAN_ROLES, type RiskLevel, type ToolDef } from "./registry.ts";
 
 // Memória por entidade (Fase 3 · Etapa 3) — ver plans/marineflow-contexto-unificado-escopo.md
 //
@@ -10,6 +10,25 @@ import { NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
 // Aprovar é do dono — o agente não promove a própria memória.
 
 import { ESCOPOS_DE_ENTIDADE as ESCOPOS, colunaDaEntidade } from "../memory-scope.ts";
+
+/**
+ * O risco de review_entity_note (pacote 1, S4, 24/11/2026): APROVAR faz a nota entrar no contexto do assistente e pede o
+ * "sim" mesmo com a ferramenta à vista (antes, só pela rede de segurança); REJEITAR só descarta e segue direto.
+ *
+ * TOTAL: executarChamadaDeTool (agent.ts) chama computeRisk fora de try, e uma exceção aqui derrubaria o turno. Só o
+ * "reject" exato é low; qualquer outra coisa — "approve", decisão torta, argumento que não é objeto — devolve o risco
+ * mais alto do caso. O risco DECLARADO continua low (premissa de agent-rede_test.ts e de perfil-operacao_test.ts).
+ */
+export function riscoDeRevisarNota(args: unknown): RiskLevel {
+  try {
+    if (args === null || typeof args !== "object" || Array.isArray(args)) return "medium";
+    return (args as Record<string, unknown>).decision === "reject" ? "low" : "medium";
+  } catch {
+    return "medium";
+  }
+}
+
+const DECISAO_INVALIDA = "decision deve ser approve ou reject.";
 
 export const entityMemoryTools: ToolDef[] = [
   {
@@ -121,10 +140,17 @@ export const entityMemoryTools: ToolDef[] = [
       required: ["note_id", "decision"],
     },
     risk: "low",
+    // S4 (24/11/2026): aprovar pede o "sim"; rejeitar segue direto.
+    computeRisk: riscoDeRevisarNota,
     roles: NON_TECHNICIAN_ROLES,
+    // Decisão que a execução recusaria não vira cartão: recusa antes de a pendência nascer.
+    preValidar(args) {
+      const decisao = String(args?.decision);
+      return decisao === "approve" || decisao === "reject" ? null : { error: DECISAO_INVALIDA };
+    },
     async execute(args, { sb, userId }) {
       const decisao = String(args.decision);
-      if (decisao !== "approve" && decisao !== "reject") return { error: "decision deve ser approve ou reject." };
+      if (decisao !== "approve" && decisao !== "reject") return { error: DECISAO_INVALIDA };
 
       const { data: nota } = await sb
         .from("ai_operator_memory_notes")

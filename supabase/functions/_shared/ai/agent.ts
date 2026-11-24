@@ -55,6 +55,8 @@ import { resumirServicoNovo } from "./tools/products.ts";
 // pacote 1, S3 (24/11/2026): o cartão do preço cotado (custo e venda, antes e depois) e o da troca de contato do cliente.
 import { resumirAplicacaoDoPreco } from "./tools/quotes.ts";
 import { FALHA_AO_CONFERIR_O_CLIENTE, resumirTrocaDeContato } from "./tools/clients.ts";
+// pacote 1, S4 (24/11/2026): o cartão da nota global mostra o texto inteiro da regra.
+import { resumirNotaGlobal } from "./tools/memory.ts";
 import { resolverCobrancasDoLote } from "./tools/flow-macros.ts";
 import { comFusoDeBrasilia, FUSO_DE_BRASILIA } from "./fuso.ts";
 
@@ -601,6 +603,9 @@ export async function buildPendingSummary(
     }
     if (r !== null) return r;
   }
+  // Nota global da memória (pacote 1, S4, 24/11/2026): a regra entra no texto de todo turno, então o "sim" é sobre o
+  // texto INTEIRO dela, sem corte, e o assunto.
+  if (toolName === "remember_note") return resumirNotaGlobal(args);
   // Resposta a e-mail (08/10/2026): o "sim" é sobre o texto EXATO que vai sair, de qual caixa e
   // para quem — lido do rascunho guardado, não do que o modelo diz.
   if (toolName === "enviar_resposta_email") {
