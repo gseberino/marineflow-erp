@@ -3,10 +3,32 @@ import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.
 // Adaptado ao schema real de ai_operator_memory_notes (scope é vessel/client/global,
 // não user/global como o plano original supunha — ver migration
 // 20260703140000_ai_operator_tables.sql). Grava sempre scope='global' por enquanto
-// (não há conceito de nota por-usuário no schema existente). verification_status vai
-// direto para 'verified': um humano pediu explicitamente "lembre disso" na conversa,
-// então já houve aprovação humana implícita — não faz sentido deixar como 'candidate'
-// esperando uma revisão que não existe ainda (isso é trabalho de UI de fase futura).
+// (não há conceito de nota por-usuário no schema existente).
+//
+// Pacote 1, S4 (24/11/2026): a nota global entra no texto de sistema de TODO turno (ai-agent/index.ts lê as 10
+// 'verified' mais recentes), então ela não pode nascer sem o dono ver o texto. remember_note pede o "sim" (risco
+// medium) e o cartão mostra o texto inteiro. A nota continua nascendo 'verified' — o "sim" É a aprovação — e passa a
+// gravar quem aprovou e quando (verified_by, verified_at), como review_entity_note. Antes ia direto para 'verified' com
+// risco low, por "aprovação implícita" de quem disse "lembre disso"; mas quem escreve o texto é o modelo.
+
+/** A nota como a execução a grava: o texto sem espaço nas pontas e o assunto ("geral" quando não vem). O cartão usa a mesma leitura. */
+function notaDita(args: unknown): { body: string; topic: string } {
+  try {
+    const a = (args ?? {}) as Record<string, unknown>;
+    return { body: String(a.content || "").trim(), topic: String(a.category || "geral").trim() || "geral" };
+  } catch {
+    return { body: "", topic: "geral" }; // argumento que nem vira texto: nota vazia, que é recusa
+  }
+}
+
+const NOTA_VAZIA = "A nota veio vazia: diga o que é para lembrar.";
+
+/** O cartão do "sim" de remember_note: o texto INTEIRO da regra (sem corte) e o assunto. Só argumentos; nunca lança. */
+export function resumirNotaGlobal(args: unknown): string {
+  const { body, topic } = notaDita(args);
+  return ["Guardar como regra que vale em TODA conversa:", `"${body}"`, `Assunto: ${topic}`].join("\n");
+}
+
 export const memoryTools: ToolDef[] = [
   {
     name: "remember_note",
@@ -20,10 +42,14 @@ export const memoryTools: ToolDef[] = [
       },
       required: ["content", "category"],
     },
-    risk: "low",
+    // S4 (24/11/2026): regra que vale em toda conversa só nasce com o "sim" do dono, que vê o texto inteiro.
+    risk: "medium",
+    preValidar(args) {
+      return notaDita(args).body ? null : { error: NOTA_VAZIA };
+    },
     async execute(args, { admin, userId }) {
-      const body = String(args.content || "").trim();
-      const topic = String(args.category || "geral").trim();
+      const { body, topic } = notaDita(args);
+      if (!body) return { error: NOTA_VAZIA };
       const title = body.length > 60 ? `${body.slice(0, 57)}...` : body;
       const { data, error } = await admin
         .from("ai_operator_memory_notes")
@@ -33,7 +59,10 @@ export const memoryTools: ToolDef[] = [
           title,
           body,
           source: "ai",
+          // Quem executa é quem deu o "sim": a nota nasce verificada por ele, agora.
           verification_status: "verified",
+          verified_by: userId ?? null,
+          verified_at: new Date().toISOString(),
           created_by: userId,
         })
         .select("id")
