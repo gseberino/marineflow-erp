@@ -117,12 +117,22 @@ create function pg_temp.acao(p_cols text, p_vals text) returns text language sql
                 coalesce(', ' || p_cols, ''), coalesce(', ' || p_vals, ''))
 $f$;
 
+-- (23/11/2026, NOVO-testes-02) O dado 20261112100990 já rodou? Na bancada nunca (FORA_DA_BANCADA); na produção, desde 13/11 04:55 UTC (schema_migrations). O B8a, o B1c,
+-- o B1f e o B2b nasceram para o dia do deploy, ANTES do dado; depois dele (e do que o dono ligou em 14/11) o estado do dia do deploy não existe mais. Sem o dado, os 4
+-- provam o mesmo de antes; com o dado, cada um prova o invariante que continua valendo, ou sai PULADO (o B8a: "nasce vazia" só se prova antes de usar).
+create function pg_temp.dado_7g_aplicado() returns boolean language sql stable as $f$
+  select exists (select 1 from supabase_migrations.schema_migrations where version = '20261112100990')
+$f$;
+
 -- ── B8a antes de tudo: o que a migration deixa (as tabelas vazias, os modos desligados; o B3 e o B5 escrevem depois, na transação) ──
+-- Depois do dado, PULADO: as 3 tabelas guardam o que a sombra e o ligado mediram, e os modos são os que o dono escolheu. A bancada (sem o dado) prova toda vez.
 insert into _resultado
 select 'B8a as 3 tabelas nascem vazias e os 4 interruptores desligados, marcacoes_desde nula: a migration não grava dado',
+       case when pg_temp.dado_7g_aplicado() then true else
        (select count(*) from public.agenda_marcacoes) = 0 and (select count(*) from public.agenda_tipos_os) = 0 and (select count(*) from public.agenda_placar_semanas) = 0
        and (select c.modo_porque = 'desligado' and c.modo_explicar = 'desligado' and c.modo_placar = 'desligado' and c.modo_rebaixar = 'desligado' and c.marcacoes_desde is null
-              from public.agenda_config c where c.id), null;
+              from public.agenda_config c where c.id) end,
+       case when pg_temp.dado_7g_aplicado() then 'PULADO: o dado 20261112100990 já rodou (o estado de nascença só existe antes dele; rode pela bancada)' end;
 
 -- ── B1. agenda_config: colunas, DEFAULTs e CHECKs ────────────────────────────────────────────────────
 with cfg as (select to_jsonb(c) as j from public.agenda_config c where c.id),
@@ -140,9 +150,11 @@ insert into _resultado
 select 'B1b origens_do_dono nasce {dono,assistente,tela} (§4.1)', c.origens_do_dono = '{dono,assistente,tela}'::text[], c.origens_do_dono::text
   from public.agenda_config c where c.id;
 -- R9.4-2: nula e sem DEFAULT. Com um DEFAULT (now()), a linha nasceria com a hora da migration e a medida começaria antes do dado; a medida sem o "desde" olharia para trás.
+-- (23/11/2026, NOVO-testes-02) A forma vale sempre; a linha, nula até o dado 20261112100990 e, depois dele, a hora que ele gravou (não nula, no passado).
 insert into _resultado
-select 'B1c marcacoes_desde: nula na linha, nulável e sem DEFAULT (quem grava é o dado 20261112100990; R9.4-2)',
-       c.marcacoes_desde is null and not a.attnotnull and not a.atthasdef and format_type(a.atttypid, a.atttypmod) = 'timestamp with time zone',
+select 'B1c marcacoes_desde: nulável e sem DEFAULT; na linha, nula até o dado 20261112100990 e a hora dele depois (quem grava é o dado; R9.4-2)',
+       case when pg_temp.dado_7g_aplicado() then c.marcacoes_desde is not null and c.marcacoes_desde <= now() else c.marcacoes_desde is null end
+       and not a.attnotnull and not a.atthasdef and format_type(a.atttypid, a.atttypmod) = 'timestamp with time zone',
        format('linha=%s notnull=%s default=%s tipo=%s', c.marcacoes_desde, a.attnotnull, a.atthasdef, format_type(a.atttypid, a.atttypmod))
   from public.agenda_config c, pg_attribute a
  where c.id and a.attrelid = 'public.agenda_config'::regclass and a.attname = 'marcacoes_desde';
@@ -150,10 +162,12 @@ insert into _resultado
 select 'B1d explicar_tempo_max nasce 15 s (R9.5-8)', c.explicar_tempo_max = interval '15 seconds', c.explicar_tempo_max::text
   from public.agenda_config c where c.id;
 
+-- (23/11/2026, NOVO-testes-02) O DEFAULT sombra vale sempre; a linha, desligado até o dado 20261112100990 e, depois dele, um dos 3 valores (o dono ligou os 4 em 14/11).
 with m(coluna) as (values ('modo_porque'), ('modo_explicar'), ('modo_placar'), ('modo_rebaixar'))
 insert into _resultado
-select 'B1f os 4 interruptores: a linha desligado, o DEFAULT da coluna sombra (quem põe em sombra é o dado 20261112100990)',
-       count(*) = 4 and bool_and(to_jsonb(c) ->> m.coluna = 'desligado')
+select 'B1f os 4 interruptores: o DEFAULT da coluna sombra; a linha desligado até o dado 20261112100990 (quem põe em sombra), depois desligado, sombra ou ligado',
+       count(*) = 4
+       and bool_and(case when pg_temp.dado_7g_aplicado() then to_jsonb(c) ->> m.coluna in ('desligado', 'sombra', 'ligado') else to_jsonb(c) ->> m.coluna = 'desligado' end)
        and bool_and(pg_get_expr(d.adbin, d.adrelid) = '''sombra''::text'),
        string_agg(m.coluna || '=' || (to_jsonb(c) ->> m.coluna) || '/' || pg_get_expr(d.adbin, d.adrelid), ', ')
   from m
@@ -306,11 +320,19 @@ select 'B2a as 4 colunas novas: nuláveis e SEM DEFAULT (suposicoes nula = de an
        string_agg(format('%s.%s notnull=%s default=%s tipo=%s', col.tabela, col.coluna, a.attnotnull, a.atthasdef, format_type(a.atttypid, a.atttypmod)), '; ')
          filter (where a.attnotnull or a.atthasdef or format_type(a.atttypid, a.atttypmod) <> col.tipo)
   from col join pg_attribute a on a.attrelid = ('public.' || col.tabela)::regclass and a.attname = col.coluna and not a.attisdropped;
+-- (23/11/2026, NOVO-testes-02) Sem o dado 20261112100990, todas as linhas (como antes). Com o dado, as de ANTES dele (criadas antes de marcacoes_desde, a hora do dado):
+-- a migration e o modo desligado não escreveram nada nelas, e nada voltou para escrever nelas depois; as de depois têm o porquê que o motor grava (o B2d prova o CHECK).
 insert into _resultado
-select 'B2b nada é escrito: todas as alocações e ações que existem seguem com as 4 colunas nulas',
-       (select count(*) from public.agenda_alocacoes where suposicoes is not null or degrau is not null) = 0
-       and (select count(*) from public.agenda_acoes where zona is not null or degrau is not null) = 0,
-       format('%s alocações, %s ações', (select count(*) from public.agenda_alocacoes), (select count(*) from public.agenda_acoes));
+select 'B2b nada é escrito: as alocações e ações de antes do dado 20261112100990 (todas, sem o dado) seguem com as 4 colunas nulas',
+       (select count(*) from public.agenda_alocacoes a, public.agenda_config c
+         where c.id and a.criado_em < coalesce(c.marcacoes_desde, 'infinity') and (a.suposicoes is not null or a.degrau is not null)) = 0
+       and (select count(*) from public.agenda_acoes x, public.agenda_config c
+             where c.id and x.criada_em < coalesce(c.marcacoes_desde, 'infinity') and (x.zona is not null or x.degrau is not null)) = 0,
+       format('%s de %s alocações, %s de %s ações de antes do dado',
+              (select count(*) from public.agenda_alocacoes a, public.agenda_config c where c.id and a.criado_em < coalesce(c.marcacoes_desde, 'infinity')),
+              (select count(*) from public.agenda_alocacoes),
+              (select count(*) from public.agenda_acoes x, public.agenda_config c where c.id and x.criada_em < coalesce(c.marcacoes_desde, 'infinity')),
+              (select count(*) from public.agenda_acoes));
 insert into _resultado
 select 'B2c os 4 CHECKs pelo nome; o das suposições chama _agenda_suposicoes_validas',
        (select count(*) from pg_constraint where conrelid = 'public.agenda_alocacoes'::regclass and conname in ('alocacao_suposicoes_validas', 'alocacao_degrau_check')) = 2
@@ -375,6 +397,7 @@ declare
   v_tec  uuid := pg_temp.tec();
   v_dif  text;
   v      text;
+  v_tot  text;   -- quantas linhas a tabela tem de verdade (lidas pelo dono da tabela, sem a RLS)
   t      text;
   c_tabelas constant text[] := array['agenda_marcacoes', 'agenda_tipos_os', 'agenda_placar_semanas'];
   c_funcoes constant text[] := array['public._agenda_suposicoes_validas(jsonb)', 'public._agenda_quem_marcou(text, text)', 'public._agenda_degrau(jsonb, jsonb, date, date, date)',
@@ -411,12 +434,15 @@ begin
     if v <> '0' then v_dif := coalesce(v_dif || ' | ', '') || t || ' técnico=' || v; end if;
     v := pg_temp.como(v_tec, 'authenticated', format('delete from public.%I returning 1', t));
     if v not like 'erro 42501%' then v_dif := coalesce(v_dif || ' | ', '') || t || ' técnico apaga=' || coalesce(v, 'nulo'); end if;
+    -- (23/11/2026, NOVO-testes-02) o administrador lê TODAS as linhas: as que a sombra e o ligado gravaram desde 13/11 e a da transação. Antes, "= 1" (a tabela
+    -- vazia do dia do deploy mais a da transação): na produção de hoje dava admin=6, 4 e 2, a leitura certa. Na bancada (tabelas vazias) continua 1.
+    execute format('select count(*)::text from public.%I', t) into v_tot;
     v := pg_temp.como(v_adm, 'authenticated', format('select count(*)::text from public.%I', t));
-    if v <> '1' then v_dif := coalesce(v_dif || ' | ', '') || t || ' admin=' || v; end if;
+    if v is distinct from v_tot or v_tot::int < 1 then v_dif := coalesce(v_dif || ' | ', '') || t || ' admin=' || coalesce(v, 'nulo') || ' de ' || v_tot; end if;
     v := pg_temp.como(v_adm, 'authenticated', format('update public.%I set versao = versao returning 1', t));
     if t <> 'agenda_tipos_os' and v not like 'erro 42501%' then v_dif := coalesce(v_dif || ' | ', '') || t || ' admin grava=' || coalesce(v, 'nulo'); end if;
   end loop;
-  v_res := pg_temp.ok(v_res, 'B3c as leituras por papel: anon 42501, técnico lê vazio e não apaga, administrador lê a linha e não grava', v_dif is null, v_dif);
+  v_res := pg_temp.ok(v_res, 'B3c as leituras por papel: anon 42501, técnico lê vazio e não apaga, administrador lê todas as linhas e não grava', v_dif is null, v_dif);
   select string_agg(p, ', ') into v_dif from unnest(c_funcoes) p
    where has_function_privilege('anon', p, 'execute')
       or exists (select 1 from pg_proc x, aclexplode(x.proacl) a where x.oid = p::regprocedure and a.grantee = 0 and a.privilege_type = 'EXECUTE');
