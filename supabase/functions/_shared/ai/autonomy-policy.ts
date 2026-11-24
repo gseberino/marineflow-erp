@@ -13,8 +13,9 @@ import type { RiskLevel } from "./tools/registry.ts";
 
 /**
  * TETO RÍGIDO — estas ações NUNCA rodam sozinhas, mesmo que a chave seja gravada no banco.
- * Critério: mexe em dinheiro ou é destrutivo/difícil de desfazer. Autonomia se conquista
- * nas ações reversíveis; aqui a confirmação humana é permanente por decisão de projeto.
+ * Critério: mexe em dinheiro ou em nota fiscal, fala com quem é de fora ou é destrutivo/difícil
+ * de desfazer. Autonomia se conquista nas ações internas e reversíveis; aqui a confirmação
+ * humana é permanente por decisão de projeto.
  */
 export const NEVER_AUTONOMOUS = new Set<string>([
   "retorno_responder_caso",
@@ -38,11 +39,11 @@ export const NEVER_AUTONOMOUS = new Set<string>([
   // para garantir que esteja tudo correto" — nome, número e dia conferidos antes de valer.
   "schedule_whatsapp_message",
   // Confiança Graduada (comms, Fase 3): cobrança individual NUNCA vira autônoma (dinheiro +
-  // sensível). RFQ a fornecedor e follow-up de OS (send_supplier_quote_request /
-  // send_service_order_link) NÃO estão aqui de propósito — o dono PODE liberá-los via
-  // set_tool_autonomy quando a qualidade provar (são de baixo risco). Desde 26/09/2026 o
-  // send_service_order_link só é liberável no formato 'link': o PDF fica em
-  // NEVER_AUTONOMOUS_WHEN, logo abaixo.
+  // sensível). Das mensagens a quem é de fora, só o follow-up de OS (send_service_order_link)
+  // NÃO está aqui, de propósito — o dono PODE liberá-lo via set_tool_autonomy, e desde
+  // 26/09/2026 só no formato 'link': o PDF fica em NEVER_AUTONOMOUS_WHEN, logo abaixo.
+  // O pedido de cotação a fornecedor (send_supplier_quote_request) era liberável até
+  // 24/11/2026; por decisão do dono entrou na lista (está no fim, com os outros do mesmo dia).
   "send_collection_reminder",
   // "Deixar a IA acompanhar" (Fase 1, copiloto por 30 dias — decisão do dono de 30/08/2026):
   // é a IA falando com TERCEIRO em nome da empresa. Autonomia por tipo só na Fase 3, e aí
@@ -85,6 +86,30 @@ export const NEVER_AUTONOMOUS = new Set<string>([
   // histórico de documentos (16/11/2026): restaurar muda itens, valores e total do orçamento/OS (e as parcelas a receber), e
   // a autonomia pularia o resumo — onde a simulação mostra o que muda, o que não se desfaz e a nova assinatura. Sempre com o "sim".
   "restaurar_documento",
+
+  // ─── Pacote 1 do assistente, S2 (24/11/2026) ───────────────────────────────────────────────────────────────────────
+  // Oito ações que ainda eram liberáveis e deixam de ser. isAutonomyGranted não olha o nível do risco: com a chave
+  // 'auto' gravada, até ação de risco alto rodava sem o "sim" e sem o PIN. Não havia nenhuma chave ai_autonomy_*
+  // gravada (conferido em 24/11/2026), então nada muda no dia a dia: a mudança só fecha a porta.
+  //
+  // Nota fiscal (24/11/2026): NF-e e NFS-e emitidas vão à SEFAZ e à prefeitura e não se desfazem. Sempre com o "sim".
+  "emit_fiscal_note",
+  "emit_fiscal_service_note",
+  // Dinheiro (24/11/2026): conciliar dá baixa na conta com a linha do extrato (e, no sinal, aprova o orçamento e abre
+  // a OS); cancelar lançamento tira a receita ou a despesa do resultado. Sempre com o "sim".
+  "conciliar_transacao",
+  "cancelar_lancamento",
+  // Pedido de cotação a fornecedor (decisão do dono de 24/11/2026): é a empresa falando com quem é de fora. Era
+  // liberável pela Confiança Graduada; não é mais.
+  "send_supplier_quote_request",
+  // Favorecido (24/11/2026): a troca de chave Pix ou de conta muda para onde vai o dinheiro. Sempre com o "sim".
+  "alterar_favorecido",
+  // Mensagem livre a terceiro (24/11/2026): o dono confere para quem vai, o número e o texto. Com a chave 'auto', o
+  // envio pularia o "sim" e o PIN de quando a mensagem vai a cliente.
+  "send_whatsapp_message",
+  // Defesa (24/11/2026): liberar autonomia é, ela própria, ação forte ("sim" e PIN). Com a chave 'auto' nela, o
+  // assistente liberaria as outras sem o dono ver. Hoje já fica fora do WhatsApp e do perfil enxuto; aqui é o teto.
+  "set_tool_autonomy",
 ]);
 
 /**
