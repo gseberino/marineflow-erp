@@ -4606,3 +4606,40 @@ quatro estão latentes.
   Latente: 0 notas no banco e 0 chamadas em 90 dias.
 - **Menor mudança:** resumo próprio que lê o título, o texto e de quem é a nota (cliente, embarcação ou fornecedor), com recusa
   quando a nota não existe ou já foi decidida. Não está na especificação do S4; não construído aqui.
+
+### [NOVO-p1-s1-01] Mensagem livre pelo cadastro do cliente: o número pode mudar entre o cartão e o "sim"
+
+- **Onde:** `supabase/functions/_shared/ai/tools/whatsapp.ts`, `send_whatsapp_message` e `schedule_whatsapp_message`, `execute`:
+  com `client_id`, o número é lido do cadastro na hora do envio (`numeroDoEnvio`, em `tools/agendamento.ts`). A pendência vale
+  24 horas. Visto em 24/11/2026 ao construir o S1 do pacote 1.
+- **Efeito:** o dono aprova o cartão que mostra o número A; se o telefone do cliente for trocado no cadastro antes do "sim", a
+  mensagem vai ao número B. Já era assim antes do S1 (que só garante que o cartão e o envio usam a mesma regra). O envio de PDF e
+  de link já tem essa defesa: guarda o retrato do pedido (`retratoDaPendencia`) e recusa quando o número mudou
+  (`oQueMudouDesdeOPedido`). Latente: precisa de uma edição do cadastro dentro das 24 horas do cartão.
+- **Menor mudança:** `retratoDaPendencia` nas duas ferramentas, com o número conferido, e recusa no `execute` quando o de agora
+  for outro ("desde o pedido, o número mudou; peça de novo"). Não está na especificação do S1; não construído aqui.
+
+### [NOVO-p1-s1-02] Cadastro: 333 dos 383 números de fornecedor também estão no cadastro de clientes
+
+- **Onde:** dados de produção (`suppliers.phone` contra `clients.whatsapp` e `clients.phone`, pelos 8 últimos dígitos). Medido em
+  24/11/2026, só contagem.
+- **Efeito:** pela regra do S1 ("número em mais de um cadastro vale o mais protegido"), mensagem de texto livre a esses 333
+  números pede PIN sempre, mesmo com texto neutro. "Fornecedor, só o sim" vale hoje para 50 números: 26 de fornecedor ativo e
+  24 de fornecedor inativo. Dos 52 números de fornecedor ativo, 26 também são de cliente; dos 331 de fornecedor inativo, 307.
+  Parece carga dos mesmos contatos nas duas tabelas (hipótese, não conferida). Na equipe, 1 dos 5 números com cadastro ativo
+  também é de cliente e de fornecedor.
+- **Menor mudança:** decisão do dono: limpar o cadastro (tirar de clientes quem é só fornecedor) ou aceitar o PIN nesses
+  números. Nada em código. O S1 conta fornecedor inativo como fornecedor (a especificação não filtra); filtrar só mexeria nos
+  24 números inativos que não são de cliente.
+
+### [NOVO-p1-s1-03] No texto livre, a régua de data do validador do retorno acusa o verbo "ter", fração e código de peça
+
+- **Onde:** `supabase/functions/_shared/retorno/validador.ts`, `DATAS`: as abreviações de dia ("seg", "ter", "qua"…), qualquer
+  número/número e qualquer número-número. Está certo para o texto fixo do retorno. O S1 reaproveita a lista, como mandado, na
+  mensagem de texto livre (`_shared/ai/envio-livre.ts`, `conteudoQuePedePin`), e ali "ter" (o verbo), "mangueira 3/4", "filtro
+  35-866340", telefone com traço e link com código contam como data.
+- **Efeito:** PIN a mais em mensagem a fornecedor ou equipe, com o motivo "o texto cita data" sem data no texto. Erra para o lado
+  seguro. Medido nas 42 propostas de 90 dias: 3 só acusavam por esses pontos, as 3 a número de cliente (PIN de qualquer jeito);
+  nenhuma decisão mudou. No aviso da legenda do PDF e do link, o link da OS já é tirado antes de conferir.
+- **Menor mudança:** lista de data própria do texto livre (sem "ter", e número/número só com cara de data), com teste. Fere a
+  instrução do pacote de não criar outra lista: decisão de quem especifica. Não corrigido aqui.
