@@ -4492,6 +4492,26 @@ quatro estão latentes.
   `criado_em = 2026-12-01 10:00/11:00/12:00 -03` que o caso precisa MAIS NOVAS que as gravadas com `now()`; a partir de
   01/12/2026 10:00 elas ficam mais velhas e a prova passa sem provar (o P3 já quebra hoje em produção pelo NOVO-testes-02).
   Conserto quando for mexer: `now() + interval '…'` no lugar da data fixa.
+- **Situação (23/11/2026, ramo `session/testes-envelhecidos-2`): CONSERTADO NO TESTE, nenhum defeito do sistema.** Na produção:
+  `agenda_fase7g_base` 68/73 → 73/73 e `agenda_fase7g_porque` 48/57 → 54/54 (o porque perde 3 linhas porque o P1, o P3, o P5,
+  o P7 e o M1c passam a sair numa linha PULADO cada, como o cabeçalho sempre disse).
+  - **base, teste do dia do deploy:** B1c, B1f, B2b e B8a conferiam o estado de antes do dado `20261112100990` (aplicado em 13/11
+    04:55 UTC; os 4 modos ligados pelo dono em 14/11). Agora a porta é o próprio dado em `schema_migrations`: sem ele (a bancada)
+    provam o mesmo de antes; com ele, B1c = forma + hora gravada, B1f = DEFAULT sombra + um dos 3 valores, B2b = as linhas criadas
+    antes de `marcacoes_desde` seguem nulas (102 de 124 alocações e 45 de 96 ações, todas nulas), B8a = PULADO. B3c: o
+    administrador lia "1" (tabela vazia + a da transação); agora lê o total que o dono da tabela vê (6, 4 e 2 hoje).
+  - **porque, porta errada:** P1, P3, P5, P7, M1c e o cenário B tinham a porta "a OS-00074 existe", e ela existe na produção (o Lenine
+    de verdade): rodavam sobre a carteira real com as datas de 29/10. A OS-00074 e a OS-00069 estão `completed` desde 11/11, o motor não
+    marca nenhuma, e daí "fixar precisa da OS e do dia", "query returned no rows" e "0 registro(s)". Porta nova: a fixture
+    `agenda_teste.replay2910` (a das provas `agenda_fase7a_*`). O P4 fica com a porta dele (monta na 1ª OS sem planejamento).
+  - **porque, amostra de outro tipo (P8m/P8n/P8r3/P8t):** `bem_disponivel` veio da própria 7g (`_agenda_suposicoes_da_os` só nasce na
+    `20261112100100`; nenhuma migration depois a recria; o P8q prova o caso) e entra, certo, para barco em mês de temporada. A OS de base (a 1ª sem planejamento) era na
+    produção o ORÇ-00004, barco com o local pela OS; o P8 supunha OS sem barco (na bancada, o ORÇ-00083, motorhome). Agora a OS de
+    base e a do P8m não são barco; a de base prefere bem cadastrado sem marina na OS e o P8r3 roda nela primeiro (o `local_suposto`
+    que o P8t espera é o que o P8r3 deixa nela, fonte bem: antes era coincidência de amostra); os 4 modos do local partem desligados
+    (como na bancada; o P8r liga um por vez); e o P8r3 usa uma marina de teste sem local (a 2ª pelo id virou local na semente da 7d:
+    8 de 9 marinas são local, e a OS caía na fonte `os`). A bancada escolhe as mesmas OS de antes (ORÇ-00083); a produção, o ORÇ-00036.
+  - **P3f/P3g:** as 3 horas fixas de 01/12/2026 viraram 1 h, 2 h e 3 h depois da mais nova já gravada na OS (ou de `now()`).
 
 ### [NOVO-o-que-vence-01] Contas a pagar mostra "Manual" na conta que nasceu da nota fiscal
 
