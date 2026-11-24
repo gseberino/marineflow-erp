@@ -85,6 +85,51 @@ Deno.test("linha Hoje: agenda com hora, promessa, a receber e a pagar de hoje e 
   assertStringIncludes(linhaDeHoje({ ...VAZIO, agenda: [{ hora: "09:00", titulo: "x" }, { hora: "10:00", titulo: "y" }] }, true), "2 compromissos na agenda.");
 });
 
+// (pacote 1, V2, 24/11/2026) A rotina de IA que falhou calada (a triagem de e-mail ficou 12 dias assim) vira UMA frase no
+// fim da linha "Hoje", na mensagem que o dono já recebe. O que se protege: o texto exato, a versão curta sem a contagem, e
+// que sem falha (campo ausente, vazio ou zerado) a linha é a de antes, byte a byte.
+Deno.test("linha Hoje: a rotina de IA que falhou desde ontem entra como uma frase no fim; sem falha, a linha de antes", () => {
+  const umaRotina = { ...VAZIO, rotinasSemIA: [{ rotulo: "triagem de e-mail", vezes: 12 }] };
+  assertEquals(linhaDeHoje(umaRotina), "Hoje: nada na agenda. IA que falhou desde ontem: triagem de e-mail (12 vezes).");
+  assertEquals(linhaDeHoje(umaRotina, true), "Hoje: nada na agenda. IA falhou desde ontem: triagem de e-mail.");
+  const duas = { ...VAZIO, rotinasSemIA: [{ rotulo: "triagem de e-mail", vezes: 12 }, { rotulo: "leitura do prazo do fornecedor", vezes: 1 }] };
+  assertEquals(linhaDeHoje(duas),
+    "Hoje: nada na agenda. IA que falhou desde ontem: triagem de e-mail (12 vezes) e leitura do prazo do fornecedor (1 vez).");
+  assertEquals(linhaDeHoje(duas, true), "Hoje: nada na agenda. IA falhou desde ontem: triagem de e-mail e leitura do prazo do fornecedor.");
+  const tres = { ...VAZIO, rotinasSemIA: [...duas.rotinasSemIA, { rotulo: "detector da agenda", vezes: 2 }] };
+  assertEquals(linhaDeHoje(tres),
+    "Hoje: nada na agenda. IA que falhou desde ontem: triagem de e-mail (12 vezes), leitura do prazo do fornecedor (1 vez) e detector da agenda (2 vezes).");
+  // vem depois do "Esta noite", que continua igual
+  assertEquals(linhaDeHoje({ ...umaRotina, falhasDeEnvio: 2, errosDaNoite: 1 }),
+    "Hoje: nada na agenda. Esta noite: 2 mensagens do sistema não saíram e 1 erro registrado. IA que falhou desde ontem: triagem de e-mail (12 vezes).");
+  // sem falha: nada muda
+  for (const semFalha of [VAZIO, { ...VAZIO, rotinasSemIA: [] }, { ...VAZIO, rotinasSemIA: [{ rotulo: "triagem de e-mail", vezes: 0 }] }]) {
+    assertEquals(linhaDeHoje(semFalha), "Hoje: nada na agenda.");
+    assertEquals(linhaDeHoje(semFalha, true), "Hoje: nada na agenda.");
+  }
+});
+
+Deno.test("manhã: a frase da IA que falhou sai na mesma mensagem, dentro da meta; em domingo e feriado a linha é a de sempre", () => {
+  const selecao = selecionar(candidatosDoDia(coleta1510(), AGORA_1510, HOJE_1510), [], HOJE_1510);
+  const deHoje = { ...deHoje1510(), rotinasSemIA: [{ rotulo: "triagem de e-mail", vezes: 12 }] };
+  const base = { hoje: HOJE_1510, tipoDoDia: "util" as const, feriado: null, selecao, naRua: { total: 21026, n: 5 } };
+  const sem = textoDaManha({ ...base, deHoje: deHoje1510() });
+  const com = textoDaManha({ ...base, deHoje });
+  assert(com.length <= META_DE_CARACTERES, `${com.length} caracteres`);
+  // uma mensagem só, com as mesmas linhas: muda só a linha "Hoje", que ganha a frase no fim
+  const [linhasSem, linhasCom] = [sem.split("\n"), com.split("\n")];
+  assertEquals(linhasCom.length, linhasSem.length);
+  const hoje = linhasCom.find((l) => l.startsWith("Hoje: "))!;
+  assert(/IA (que )?falhou desde ontem: triagem de e-mail( \(12 vezes\))?\.$/.test(hoje), hoje);
+  assertEquals(linhasCom.filter((l) => l.includes("desde ontem: triagem")).length, 1);
+  // os itens da manhã (as letras) não mudam
+  assertEquals(linhasCom.filter((l) => /^\*[A-C]\.\*/.test(l)), linhasSem.filter((l) => /^\*[A-C]\.\*/.test(l)));
+  assertEquals(
+    textoDaManha({ ...base, hoje: "2026-10-18", tipoDoDia: "domingo", deHoje }),
+    "Bom dia! Domingo: nada precisa de você hoje. *lista* se quiser ver.",
+  );
+});
+
 Deno.test("logo abaixo: sem guardados não há linha; sem nomes, só a contagem", () => {
   assertEquals(linhaDeLogoAbaixo(selecionar([], [], HOJE_1510)), null);
   const selecao = selecionar(candidatosDoDia(coleta1510(), AGORA_1510, HOJE_1510), [], HOJE_1510);

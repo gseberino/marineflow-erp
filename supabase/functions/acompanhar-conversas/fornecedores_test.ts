@@ -172,6 +172,43 @@ Deno.test("C1 (R5): a leitura do teto que falha = nenhum modelo nesta rodada, co
   assert(String(d.logs[0].message).includes("teto do modelo"), String(d.logs[0].message));
 });
 
+// (pacote 1, V2, 24/11/2026) O modelo que falha na escolha da compra era calado. O que se protege: a falha vai a
+// app_error_logs com o contexto da rotina e do dia de Brasília (rotina-ia:casar_fornecedor@<dia>), que é o que a manhã lê;
+// a mensagem segue como antes (nenhum, a pergunta ao dono lista as compras); e o modelo que só não escolheu não registra.
+Deno.test("V2: o modelo que falha na escolha deixa registro de rotina e a mensagem segue como 'nenhum'", async () => {
+  const db = banco([msg("w1", "O painel foi postado hoje", [COMPRESSOR, PAINEL])]);
+  const d = deps();
+  const r = await vigiarPrazosDosFornecedores(db, AGORA, {
+    ...d,
+    escolher: () => Promise.resolve({ n: null, confianca: 0, falhou: true as const, erro: "ClaudeApiError: OpenRouter 402 (créditos insuficientes na conta)" }),
+  });
+  assertEquals(r, { lidas: 1, sinais: 1, modelo: 1 });
+  const registros = db.chamadas.filter((c) => c.fn === "log_app_error").map((c) => c.args);
+  assertEquals(registros.length, 1);
+  // 21:00 UTC de 13/10 = 18:00 de Brasília: o dia do contexto é o de Brasília
+  assertEquals([registros[0].p_context, registros[0].p_action, registros[0].p_level], ["rotina-ia:casar_fornecedor@2026-10-13", "casar_fornecedor", "error"]);
+  assertEquals(registros[0].p_message, "ClaudeApiError: OpenRouter 402 (créditos insuficientes na conta)");
+  assert(!JSON.stringify(registros[0]).includes("painel"), "a frase do fornecedor não vai ao registro");
+  // o registro vem antes de gravar o sinal, e o sinal sai como antes
+  const ordem = db.chamadas.map((c) => c.fn).filter((f) => f === "log_app_error" || f === "material_sinal_registrar");
+  assertEquals(ordem, ["log_app_error", "material_sinal_registrar"]);
+  const sinal = db.chamadas.find((c) => c.fn === "material_sinal_registrar")!.args;
+  assertEquals([sinal.p_casou_por, sinal.p_os_material, sinal.p_confianca], ["nenhum", null, 0]);
+  assertEquals(d.logs.length, 0, "não é erro do passo: só o registro da rotina");
+
+  // sem o texto do erro, o registro sai com a frase padrão
+  const dbSemTexto = banco([msg("w1", "O painel foi postado hoje", [COMPRESSOR, PAINEL])]);
+  await vigiarPrazosDosFornecedores(dbSemTexto, AGORA, { ...deps(), escolher: () => Promise.resolve({ n: null, confianca: 0, falhou: true as const }) });
+  assertEquals(dbSemTexto.chamadas.find((c) => c.fn === "log_app_error")!.args.p_message, "o modelo não respondeu");
+
+  // o modelo que respondeu (escolheu ou não) não é falha de rotina
+  for (const escolha of [{ n: 2, confianca: 0.8 }, { n: null, confianca: 0.3 }]) {
+    const db2 = banco([msg("w1", "O painel foi postado hoje", [COMPRESSOR, PAINEL])]);
+    await vigiarPrazosDosFornecedores(db2, AGORA, { ...deps(), escolher: () => Promise.resolve(escolha) });
+    assert(!db2.chamadas.some((c) => c.fn === "log_app_error"), JSON.stringify(escolha));
+  }
+});
+
 Deno.test("nunca lança: a leitura que falha, a mensagem que falha sozinha, a função ausente", async () => {
   const d = deps();
   const r = await vigiarPrazosDosFornecedores(banco({ error: { code: "XX000", message: "caiu" } }), AGORA, d);

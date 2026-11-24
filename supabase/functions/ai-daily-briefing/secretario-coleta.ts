@@ -23,6 +23,7 @@ import { STATUS_OS_ATIVAS } from "../_shared/service-order-status.ts";
 import { contatoEncerrou, conversaEncerradaPeloContato, ULTIMAS_RECEBIDAS } from "../_shared/whatsapp/contato-encerrou.ts";
 import { type ModosDaAgenda, modosDaAgendaNoBanco } from "../_shared/agenda/executar.ts";
 import { type EntradaEsperando, esperandoDaConta, lerDinheiroEsperando } from "../_shared/receivables/dinheiro-esperando.ts";
+import { falhasDeRotinaDesde, PADRAO_DO_CONTEXTO_DE_ROTINA, ROTULO_DA_ROTINA, rotinaDoContexto } from "../_shared/ai/falhas-do-assistente.ts";
 import type { ColetaDoSecretario, ConversaCrua, OrcamentoCru, OsCrua, PlanoDaOsCrua } from "./secretario-candidatos.ts";
 import { adiadoPor, type PassagemDoHistorico } from "./secretario-selecao.ts";
 import { CORTE_DA_AGENDA_DE_HOJE, type DadosDeHoje, type NaRua } from "./secretario-texto.ts";
@@ -196,6 +197,8 @@ export async function coletar(admin: Admin, p: {
   const amanha = somarDias(hoje, 1);
   const { de: inicioDoDia, ate: fimDoDia } = limitesDoDiaBR(hoje);
   const desdeAs20 = new Date(new Date(inicioDoDia).getTime() - 4 * 3_600_000).toISOString();
+  // (pacote 1, V2) 07:30 de ontem em Brasília, a hora da manhã anterior: o que falhou depois dela ainda não foi dito
+  const desdeAManhaDeOntem = new Date(new Date(inicioDoDia).getTime() - 16.5 * 3_600_000);
   const seteDias = new Date(agora.getTime() - 7 * 86_400_000).toISOString();
 
   // ── cobranças vencidas (as de index.ts:109-116, com cliente, OS e barco) ──
@@ -566,15 +569,31 @@ export async function coletar(admin: Admin, p: {
     falhou("vencimentos", e);
   }
   try {
-    const [fila, erros] = await Promise.all([
+    const [fila, erros, errosDeRotina, rotinas] = await Promise.all([
       admin.from("whatsapp_send_queue").select("id", { count: "exact", head: true }).eq("status", "failed").gte("updated_at", desdeAs20),
       admin.from("app_error_logs").select("id", { count: "exact", head: true })
         .eq("source", "edge").eq("level", "error").is("resolved_at", null).gte("last_seen_at", desdeAs20),
+      // (pacote 1, V2, 24/11/2026) as falhas das rotinas de IA ganham frase própria ("IA que falhou desde ontem") e saem
+      // da conta dos "erros registrados", para não contar duas vezes. Lê à parte e subtrai, em vez de um not.like no
+      // filtro de cima: NOT LIKE de contexto nulo dá nulo no Postgres e tiraria da conta o erro sem contexto.
+      admin.from("app_error_logs").select("context")
+        .eq("source", "edge").eq("level", "error").is("resolved_at", null).gte("last_seen_at", desdeAs20)
+        .like("context", PADRAO_DO_CONTEXTO_DE_ROTINA),
+      falhasDeRotinaDesde(admin, desdeAManhaDeOntem),
     ]);
     if (fila.error) throw fila.error;
     if (erros.error) throw erros.error;
+    if (errosDeRotina.error) throw errosDeRotina.error;
+    // só sai dos "erros registrados" o que a frase da IA vai dizer: a rotina que este código não conhece e a soma que
+    // não foi lida (null) continuam contando lá (contar em dobro é melhor que esconder)
+    const ditosNaFrase = rotinas === null
+      ? 0
+      : ((errosDeRotina.data ?? []) as Array<{ context?: string | null }>).filter((l) => rotinaDoContexto(l.context)).length;
     deHoje.falhasDeEnvio = fila.count ?? 0;
-    deHoje.errosDaNoite = erros.count ?? 0;
+    deHoje.errosDaNoite = Math.max(0, (erros.count ?? 0) - ditosNaFrase);
+    // leitura que falhou (null) não é "nenhuma falha": a frase não sai e o aviso vai ao log
+    if (rotinas === null) falhou("rotinas_de_ia", new Error("leitura das falhas de rotina"));
+    else if (rotinas.length) deHoje.rotinasSemIA = rotinas.map((r) => ({ rotulo: ROTULO_DA_ROTINA[r.rotina], vezes: r.vezes }));
   } catch (e) {
     falhou("falhas_da_noite", e);
   }

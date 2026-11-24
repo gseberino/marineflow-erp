@@ -7,7 +7,7 @@
 //   *A.* <quem (barco, OS)>: <o que é e por que hoje>. <recomendação> *A* = <faço> · *A espera* = <alternativa>
 //   …
 //
-//   Hoje: <agenda> <promessa> <vence hoje/amanhã> <falha da noite>
+//   Hoje: <agenda> <promessa> <vence hoje/amanhã> <falha da noite> <rotina de IA que falhou desde ontem>
 //   Logo abaixo ficaram <1–2 que quase entraram>, mais N assuntos. *lista*
 //
 // Domingo e feriado: uma linha. Meta: até ~1.000 caracteres — acima disso, primeiro o "Hoje" encurta
@@ -29,8 +29,13 @@ export interface DadosDeHoje {
   vencimentos: Array<{ lado: "receber" | "pagar"; quando: "hoje" | "amanha"; valor: number; nome: string }>;
   /** envios do sistema que falharam desde 20:00 de ontem */
   falhasDeEnvio: number;
-  /** erros do servidor vistos desde 20:00 de ontem e ainda abertos */
+  /** erros do servidor vistos desde 20:00 de ontem e ainda abertos (sem as falhas das rotinas de IA, que têm frase própria) */
   errosDaNoite: number;
+  /**
+   * (pacote 1, V2, 24/11/2026) Rotinas automáticas de IA que falharam desde a manhã de ontem (a triagem de e-mail, a
+   * leitura do prazo do fornecedor), com quantas vezes. Ausente ou vazio = a linha "Hoje" de antes, byte a byte.
+   */
+  rotinasSemIA?: Array<{ rotulo: string; vezes: number }>;
 }
 
 export interface NaRua {
@@ -105,6 +110,13 @@ export function linhaDeHoje(d: DadosDeHoje, curta = false): string {
   if (d.falhasDeEnvio > 0) noite.push(`${plural(d.falhasDeEnvio, "mensagem do sistema não saiu", "mensagens do sistema não saíram")}`);
   if (d.errosDaNoite > 0) noite.push(`${plural(d.errosDaNoite, "erro registrado", "erros registrados")}`);
   if (noite.length) partes.push(`Esta noite: ${noite.join(" e ")}.`);
+  // (pacote 1, V2) a rotina de IA que falhou calada: uma frase aqui, sem mensagem nova. `curta` = sem a contagem.
+  const semIA = (d.rotinasSemIA ?? []).filter((r) => r.vezes > 0);
+  if (semIA.length) {
+    const nomes = semIA.map((r) => curta ? r.rotulo : `${r.rotulo} (${plural(r.vezes, "vez", "vezes")})`);
+    const lista = nomes.length > 1 ? `${nomes.slice(0, -1).join(", ")} e ${nomes[nomes.length - 1]}` : nomes[0];
+    partes.push(`${curta ? "IA falhou" : "IA que falhou"} desde ontem: ${lista}.`);
+  }
   return `Hoje: ${partes.join(" ")}`;
 }
 

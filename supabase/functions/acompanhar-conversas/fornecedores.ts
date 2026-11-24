@@ -23,6 +23,7 @@
 // resumo da rodada. A RPC que ainda não existe (migration 20261027100400 não aplicada) é silêncio: { pulado }.
 import { diaBR } from "../_shared/agenda-dia.ts";
 import { type CompraCandidata, type EscolhaDaCompra, escolherCompra } from "../_shared/agenda/casar-fornecedor.ts";
+import { registrarFalhaDeRotina } from "../_shared/ai/falhas-do-assistente.ts";
 import { detectarPrazoDeFornecedor } from "../_shared/ai/promessa.ts";
 import { logEdgeError } from "../_shared/log-error.ts";
 
@@ -132,6 +133,11 @@ export async function vigiarPrazosDosFornecedores(
           if (resultado.modelo < teto) {
             resultado.modelo++;
             const r = await escolher(p.trecho, compras.map((c) => ({ n: c.n, rotulo: c.rotulo })));
+            // (V2, 24/11/2026) o modelo que falhou deixa registro (a manhã conta por rotina); a mensagem segue sem
+            // ele (nenhum), como antes. Nunca lança.
+            if (r.falhou) {
+              await registrarFalhaDeRotina(admin, { rotina: "casar_fornecedor", mensagem: r.erro || "o modelo não respondeu", agora });
+            }
             confianca = r.confianca;
             escolhida = r.n === null ? undefined : compras.find((c) => c.n === r.n);
             casouPor = escolhida ? "modelo" : "nenhum";

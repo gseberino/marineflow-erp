@@ -29,6 +29,10 @@
 //
 // O que vence, fatia 1 (21/11/2026): o boleto lido vira CONTA A PAGAR (contas.ts → contas_a_pagar_do_email), depois de
 // gravar dados_extraidos e também no ?reextrair=1. Decisão do dono: criar sozinho; nada é pago. Nunca derruba a leitura.
+//
+// Pacote 1, V2 (24/11/2026): a triagem que falha (o modelo fora do ar ou sem saldo) deixa de ser calada. O e-mail continua
+// saindo como `notify` (esconder é pior) e a falha vai a app_error_logs (rotina-ia:triagem_email@<dia>), que a manhã das
+// 07:30 lê na linha "Hoje". Só o erro técnico é gravado, nunca o texto do e-mail.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
@@ -50,6 +54,7 @@ import {
   enfileirarAcorde, falaPeloPortao, lerDonoDaVoz, lerPortao, perguntarAoPortao, PORTAO_DESLIGADO, type PortaoDaRodada, registrarParaTodos,
 } from "../_shared/uma-voz/registrar.ts";
 import type { Dono } from "../_shared/whatsapp/dono.ts";
+import { registrarFalhaDeRotina } from "../_shared/ai/falhas-do-assistente.ts";
 import { extractText, getDocumentProxy } from "npm:unpdf@0.12.1";
 
 const corsHeaders = {
@@ -358,6 +363,8 @@ servirComCors(async (req) => {
           let t: Triage = regra === "ignore_always"
             ? { classe: "ignore", confianca: 1, evidencia: "", motivo: "remetente silenciado", alertaFraude: false, rebaixada: false, deterministica: true }
             : await triageEmail(email);
+          // (V2, 24/11/2026) a triagem que falhou deixa registro, e a manhã conta por rotina. Nunca lança.
+          if (t.falha) await registrarFalhaDeRotina(admin, { rotina: "triagem_email", mensagem: t.falha });
           if (regra === "always_notify" && t.classe === "ignore") t = { ...t, classe: "notify", motivo: "remetente marcado para sempre avisar" };
           await admin.from("email_messages").update({
             triage_class: t.classe, triage_confidence: t.confianca, triage_evidence: t.evidencia || null,

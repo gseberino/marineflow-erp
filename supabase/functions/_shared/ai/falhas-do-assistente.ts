@@ -15,6 +15,7 @@
 //
 // A conta olha a hora corrente e a anterior: a janela real fica entre 1 e 2 horas, conforme o minuto
 // e quando a última falha caiu. Basta para o aviso, que é de "continua falhando", não de auditoria.
+import { diaBR } from "../agenda-dia.ts";
 import { logEdgeError } from "../log-error.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -71,6 +72,103 @@ export async function falhasNaUltimaHora(admin: Db, agora: Date): Promise<number
       .gte("last_seen_at", new Date(agora.getTime() - UMA_HORA_MS).toISOString());
     if (error) return null;
     return somaDeFalhas(data as Array<{ occurrences?: number | null }> | null);
+  } catch {
+    return null;
+  }
+}
+
+// ═══ ROTINA DE IA QUE FALHA CALADA (pacote 1, V2, 24/11/2026) ═══
+//
+// De 12 a 24/11 a triagem de e-mail falhou em 95 e-mails (o provedor ficou sem saldo) e app_error_logs
+// não ganhou nenhuma linha: o catch só escrevia o motivo no próprio e-mail. Rotina automática que chama
+// o modelo e falha passa a registrar aqui, e a manhã das 07:30 lê a soma por rotina (secretario-coleta.ts,
+// frase "IA que falhou desde ontem" da linha "Hoje"). Sem mensagem nova, sem tabela e sem migration.
+//
+// O mesmo truque do contexto, agora por DIA de Brasília: "rotina-ia:triagem_email@2026-11-24" abre uma
+// linha por rotina e dia, e o `occurrences` dela é a contagem do dia. Se o texto do erro mudar em
+// palavras, o dia ganha mais de uma linha; a soma por rotina continua certa.
+//
+// Só o erro técnico vai para o registro (já mascarado por logEdgeError): nunca texto de e-mail nem de
+// mensagem. Função sob pedido (botão, ferramenta do assistente) não registra aqui: o erro já aparece
+// para quem pediu.
+
+export type RotinaDeIA = "triagem_email" | "casar_fornecedor" | "detector_agenda" | "followup";
+
+/** Como a rotina é dita ao dono na manhã. */
+export const ROTULO_DA_ROTINA: Readonly<Record<RotinaDeIA, string>> = {
+  triagem_email: "triagem de e-mail",
+  casar_fornecedor: "leitura do prazo do fornecedor",
+  detector_agenda: "detector da agenda",
+  followup: "acompanhamento automático",
+};
+
+const PREFIXO_DA_ROTINA = "rotina-ia:";
+
+/** O LIKE que acha (e tira da conta dos "erros registrados") as linhas das rotinas de IA. */
+export const PADRAO_DO_CONTEXTO_DE_ROTINA = `${PREFIXO_DA_ROTINA}%`;
+
+/** "rotina-ia:triagem_email@2026-11-24" (dia de Brasília): uma linha por rotina e dia em app_error_logs. */
+export function contextoDaRotina(rotina: RotinaDeIA, agora: Date): string {
+  return `${PREFIXO_DA_ROTINA}${rotina}@${diaBR(agora)}`;
+}
+
+/** A rotina de um contexto lido, ou null (contexto de outra coisa ou rotina que este código não conhece). */
+export function rotinaDoContexto(contexto: unknown): RotinaDeIA | null {
+  const m = /^rotina-ia:([a-z_]+)@\d{4}-\d{2}-\d{2}$/.exec(String(contexto ?? ""));
+  return m && Object.hasOwn(ROTULO_DA_ROTINA, m[1]) ? m[1] as RotinaDeIA : null;
+}
+
+/**
+ * Uma rotina automática de IA que falhou. Nunca lança (logEdgeError não lança); o chamador dá `await`
+ * para o log sair antes de a função terminar.
+ */
+export async function registrarFalhaDeRotina(
+  admin: Db,
+  p: { rotina: RotinaDeIA; mensagem: string; erro?: unknown; agora?: Date },
+): Promise<void> {
+  await logEdgeError(admin, {
+    context: contextoDaRotina(p.rotina, p.agora ?? new Date()),
+    action: p.rotina,
+    // logEdgeError descarta mensagem vazia: a falha sem texto ainda conta
+    message: String(p.mensagem ?? "").trim() || "falha sem mensagem de erro",
+    error: p.erro,
+  });
+}
+
+/** Soma as ocorrências por rotina, na ordem de ROTULO_DA_ROTINA (puro). Contexto desconhecido não entra. */
+export function somaPorRotina(
+  linhas: Array<{ context?: string | null; occurrences?: number | null }> | null | undefined,
+): Array<{ rotina: RotinaDeIA; vezes: number }> {
+  const soma = new Map<RotinaDeIA, number>();
+  for (const l of linhas ?? []) {
+    const rotina = rotinaDoContexto(l?.context);
+    if (!rotina) continue;
+    soma.set(rotina, (soma.get(rotina) ?? 0) + (Number(l.occurrences) || 0));
+  }
+  return (Object.keys(ROTULO_DA_ROTINA) as RotinaDeIA[])
+    .filter((r) => (soma.get(r) ?? 0) > 0)
+    .map((r) => ({ rotina: r, vezes: soma.get(r)! }));
+}
+
+/**
+ * As falhas por rotina nas linhas vistas desde `desde` (erro aberto), ou null quando a leitura falhou.
+ * null não é "nenhuma": quem lê não conclui nada. A linha do dia entra inteira quando a última falha
+ * dela caiu depois de `desde`.
+ */
+export async function falhasDeRotinaDesde(
+  admin: Db,
+  desde: Date,
+): Promise<Array<{ rotina: RotinaDeIA; vezes: number }> | null> {
+  try {
+    const { data, error } = await admin
+      .from("app_error_logs")
+      .select("context, occurrences")
+      .like("context", PADRAO_DO_CONTEXTO_DE_ROTINA)
+      .eq("level", "error")
+      .is("resolved_at", null)
+      .gte("last_seen_at", desde.toISOString());
+    if (error) return null;
+    return somaPorRotina(data as Array<{ context?: string | null; occurrences?: number | null }> | null);
   } catch {
     return null;
   }
