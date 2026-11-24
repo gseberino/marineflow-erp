@@ -62,6 +62,97 @@ export function telefoneLegivel(digitos: string): string {
   return `+${digitos}`;
 }
 
+// ─── Pacote 1, S1 (24/11/2026): o número que VAI receber, por uma regra só ──────────────────────────────────────────
+// Antes, com client_id E número nos argumentos, send_whatsapp_message mandava ao número dito e o cartão mostrava o do
+// cadastro: o dono aprovaria (com PIN) um número e a mensagem iria a outro. E o agendamento, sem número no cadastro, caía
+// calado no número dito, com o cartão dizendo "será recusado". Agora o cartão, o risco e o envio perguntam aqui:
+//   · só o número: vale o número (normalizado);
+//   · só client_id: vale o número do cadastro; cliente sem número ou que não existe = recusa clara;
+//   · os dois: só passa se forem o MESMO número; diferentes = recusa que ensina (nunca escolher um dos dois calado).
+
+/** O campo do número em cada ferramenta: to_phone (send_whatsapp_message) ou phone (schedule_whatsapp_message). */
+export type CampoDoNumero = "to_phone" | "phone";
+
+export type NumeroDoEnvio =
+  | { ok: true; telefone: string; cliente: { id: string; nome: string | null } | null }
+  | { ok: false; erro: string };
+
+/**
+ * O destino de uma mensagem de texto livre. `db` é quem lê o cadastro (o service-role no cartão e no risco; o cliente
+ * do usuário no envio). Leitura que falha LANÇA: quem chama decide o lado seguro. `erro` é uma linha só, escrita para o
+ * modelo corrigir o pedido.
+ */
+export async function numeroDoEnvio(
+  // deno-lint-ignore no-explicit-any
+  db: any,
+  alvo: { client_id?: unknown; telefone?: unknown } | null | undefined,
+  campo: CampoDoNumero,
+): Promise<NumeroDoEnvio> {
+  const nada = campo === "phone" ? "Nada foi agendado." : "Nada foi enviado.";
+  const dito = String(alvo?.telefone ?? "").trim();
+  // "Tem client_id" pela mesma conta do risco pelos argumentos, da validação e do cartão (`args?.client_id` verdadeiro):
+  // os quatro têm de concordar, senão o cartão mostraria um destino e o envio usaria outro.
+  if (!alvo?.client_id) {
+    const telefone = telefoneParaEnvio(dito);
+    if (telefone) return { ok: true, telefone, cliente: null };
+    return { ok: false, erro: `Número "${dito}" inválido. ${nada} Peça o WhatsApp com DDD (ex.: 47 99915-9654).` };
+  }
+  const clientId = String(alvo.client_id).trim();
+  const naoAchado: NumeroDoEnvio = {
+    ok: false,
+    erro: `Não achei cliente com o client_id "${clientId}" no cadastro. ${nada} Confira o id do cliente, ou mande só o ${campo} com o número.`,
+  };
+  if (!clientId) return naoAchado;
+  const { data: c, error } = await db.from("clients").select("id, name, display_name, whatsapp, phone").eq("id", clientId).maybeSingle();
+  if (error) {
+    // 22P02 = o texto não é um uuid: não é falha do banco, é um id que não existe.
+    if ((error as { code?: string }).code === "22P02") return naoAchado;
+    throw new Error(`leitura do cliente falhou: ${(error as { message?: string }).message ?? "erro desconhecido"}`);
+  }
+  if (!c) return naoAchado;
+  const nome = String(c.display_name || c.name || "").trim() || null;
+  const doCadastro = telefoneParaEnvio(c.whatsapp || c.phone);
+  if (!doCadastro) {
+    return {
+      ok: false,
+      erro: `O cliente ${nome ?? "(sem nome)"} não tem WhatsApp nem telefone válido no cadastro. ${nada} ` +
+        `Peça o número ao usuário e mande só o ${campo} (sem client_id), ou corrija o cadastro antes.`,
+    };
+  }
+  if (dito && telefoneParaEnvio(dito) !== doCadastro) {
+    return {
+      ok: false,
+      erro: `Vieram client_id e ${campo}, e eles apontam números diferentes: o cadastro de ${nome ?? "(sem nome)"} tem ` +
+        `${telefoneLegivel(doCadastro)} e o ${campo} é "${dito}". ${nada} Mande só o client_id para usar o número do cadastro, ` +
+        `ou só o ${campo} para mandar a outro número.`,
+    };
+  }
+  return { ok: true, telefone: doCadastro, cliente: { id: String(c.id ?? clientId), nome } };
+}
+
+/** A frase da recusa quando nem dá para ler o cadastro do cliente: sem o número conferido, não há cartão. */
+export const FALHA_AO_CONFERIR_O_DESTINO = "⚠️ Não consegui conferir o cadastro do cliente agora. Nada foi enviado nem agendado; tente de novo.";
+
+/**
+ * Para o cartão (resumirMensagem e resumirAgendamento): com client_id, o destino que não fecha vira uma linha "⚠️ …",
+ * que o executor devolve ao modelo como recusa (RESUMO_QUE_RESOLVE em agent.ts), sem pendência. Sem client_id devolve
+ * null: o número dito já foi conferido antes do cartão (preValidar) e o resumo segue como sempre. Nunca lança.
+ */
+export async function recusaDoDestino(
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  alvo: { client_id?: unknown; telefone?: unknown } | null | undefined,
+  campo: CampoDoNumero,
+): Promise<string | null> {
+  if (!alvo?.client_id) return null;
+  try {
+    const destino = await numeroDoEnvio(admin, alvo, campo);
+    return destino.ok ? null : `⚠️ ${destino.erro}`;
+  } catch {
+    return FALHA_AO_CONFERIR_O_DESTINO;
+  }
+}
+
 type Destino = { nome: string | null; origem: "cliente" | "conversa" | "novo"; telefone: string | null };
 
 /**
@@ -112,6 +203,9 @@ export async function destinoDoAgendamento(admin: any, args: Record<string, unkn
 /** O resumo da confirmação: para quem, o número inteiro, quando por extenso e a mensagem inteira. */
 // deno-lint-ignore no-explicit-any
 export async function resumirAgendamento(admin: any, args: Record<string, unknown>, agora: Date = new Date()): Promise<string> {
+  // Pacote 1, S1: com client_id, o destino que não fecha (outro número junto, cliente sem número) é recusa, não cartão.
+  const recusa = await recusaDoDestino(admin, { client_id: args?.client_id, telefone: args?.phone }, "phone");
+  if (recusa) return recusa;
   const destino = await destinoDoAgendamento(admin, args);
   const hora = horarioDoAgendamento(args?.scheduled_at, agora);
   const quem = destino.origem === "cliente"
