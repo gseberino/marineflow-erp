@@ -241,7 +241,9 @@ Deno.test("S1 mensagem livre: número que é de cliente e de fornecedor vale o m
 });
 
 Deno.test("S1 mensagem livre: leitura do cadastro que falha não vira 'só o sim': PIN, dizendo que não deu para conferir", async () => {
-  for (const tabela of ["suppliers", "payees", "app_users", "parceiro_numeros"]) {
+  // As cinco leituras de quemRecebe. `clients` entrou no laço no acabamento da leva A (24/11/2026): é a que diz que o
+  // número é de cliente, e sem ela conferida o fornecedor do cadastro não pode valer "só o sim".
+  for (const tabela of ["clients", "suppliers", "payees", "app_users", "parceiro_numeros"]) {
     const b = banco(undefined, { [`select:${tabela}`]: "banco fora" });
     await executarChamadaDeTool({ name: "send_whatsapp_message", input: { to_phone: FORNECEDOR, message: NEUTRO } }, aVista(enviar, b.db));
     assertEquals(pendencias(b)[0].risk_level, "high", tabela);
