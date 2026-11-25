@@ -16,6 +16,7 @@
 
 import { ddmm, umaLinha } from "../secretario/base.ts";
 import { diaBR, horaBR } from "../pdf/datas.ts";
+import { fraseDaCausaDaQueda } from "../ai/max/queda-do-assistente.ts";
 import type { ModoDoPortao, RegrasDaVozUnica } from "./portao.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -95,6 +96,16 @@ export function linhaDoGuardado(a: AvisoGuardado, hoje: string): string {
     case "conexao": {
       const q = trechoDaQueda(d, hoje);
       return q ? `o WhatsApp ficou fora ${q}` : "o WhatsApp ficou fora do ar";
+    }
+    case "assistente": {
+      // (pacote 1, V1) a queda ou a volta do assistente; a frase da causa é a mesma do turno do dono (causa-da-falha.ts)
+      if (d.momento === "voltou") {
+        const q = quando(d.ate, hoje);
+        return q ? `o assistente voltou ${q}` : "o assistente voltou";
+      }
+      const q = quando(d.desde, hoje);
+      const desde = q ? ` desde ${q.replace(/^às /, "as ").replace(/^em /, "")}` : "";
+      return `o assistente ficou fora${desde} (${fraseDaCausaDaQueda(d.causa)})`;
     }
     case "email": {
       const quem = a.assunto.replace(/^(golpe|email):/, "");
@@ -362,6 +373,20 @@ export async function quaisSeResolveram(admin: Db, avisos: AvisoGuardado[]): Pro
     }
   } catch (e) {
     console.warn("[uma-voz] conferência do guardado (notas) falhou:", (e as Error)?.message ?? e);
+  }
+  // (pacote 1, V1) a queda do assistente que já fechou: o aviso da QUEDA deixou de ser verdade. O aviso da VOLTA não
+  // se resolve assim (é ele que conta que voltou).
+  try {
+    const quedas = avisos.filter((a) => a.fonte === "assistente" && typeof a.dados?.queda_id === "string" && a.dados?.momento !== "voltou");
+    if (quedas.length) {
+      const { data, error } = await admin.from("assistente_quedas").select("id, ate")
+        .in("id", quedas.map((a) => a.dados!.queda_id as string));
+      if (error) throw error;
+      const fechadas = new Set(((data ?? []) as Array<{ id: string; ate: string | null }>).filter((q) => q.ate).map((q) => String(q.id)));
+      for (const a of quedas) if (fechadas.has(String(a.dados!.queda_id))) resolvidos.add(a.id);
+    }
+  } catch (e) {
+    console.warn("[uma-voz] conferência do guardado (quedas do assistente) falhou:", (e as Error)?.message ?? e);
   }
   return resolvidos;
 }

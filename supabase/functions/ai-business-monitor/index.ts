@@ -38,6 +38,7 @@ import {
   telefonesSemResumo, tentativasAteAs20h, TEXTO_MANHA_QUEBROU, TEXTO_RESUMO_NAO_CHEGOU, textoDoAssistenteFalhando,
 } from "./horario.ts";
 import { falhasNaUltimaHora, LIMITE_DE_FALHAS_NA_HORA } from "../_shared/ai/falhas-do-assistente.ts";
+import { lerModoDoVigia } from "../_shared/ai/max/queda-do-assistente.ts";
 import type { AvisoDaFonte } from "../_shared/uma-voz/portao.ts";
 import { avisoDaNfe, avisoDoAssistenteFalhando, avisoDoCertificado, avisoDoConsentimento, avisoDoVigia, avisoResumoNaoChegou } from "../_shared/uma-voz/fontes.ts";
 import { textoDaNfe, textoDoCertificado } from "../_shared/uma-voz/acorde.ts";
@@ -337,9 +338,13 @@ servirComCors(async (req) => {
     // (7) O assistente que continua falhando (Retorno F0a-2, 05/11/2026): as falhas do ai-agent iam só para o console e,
     // com a reserva sem crédito desde 28/10, ninguém soube. Vai ao dono, um aviso por dia, pelo portão. Leitura que
     // falhou (null) não conclui nada, e a chave do dia só se gasta com o limite atingido. Falha aqui não derruba os outros sinais.
+    // (pacote 1, V1, 25/11/2026) Com app_settings.vigia_assistente = 'ligado', quem avisa da queda do assistente é o vigia
+    // da conexão (whatsapp-conexao, a cada 5 min, com a causa): este bloco não roda, para o mesmo fato não ter dois
+    // avisos. Chave ausente, ilegível, 'desligado' ou 'sombra' = roda como sempre (lerModoDoVigia nunca lança).
     let assistenteFalhando: { falhas: number; acordes: number; guardados: number } | null = null;
     try {
-      const falhas = await falhasNaUltimaHora(admin, now);
+      const vigiaDeQuedaLigado = (await lerModoDoVigia(admin)) === "ligado";
+      const falhas = vigiaDeQuedaLigado ? null : await falhasNaUltimaHora(admin, now);
       if (dono && falhas !== null && falhas >= LIMITE_DE_FALHAS_NA_HORA && await claim(`assistente_falhando:${todayISO}`, { falhas })) {
         const texto = textoDoAssistenteFalhando(falhas);
         const aviso = avisoDoAssistenteFalhando(todayISO, texto, falhas);

@@ -172,6 +172,66 @@ Deno.test("D8 no banco: contato respondido depois da mensagem = resolvido; nota 
   assertEquals(erro.size, 0);
 });
 
+// Pacote 1, V1 (25/11/2026): a queda e a volta do assistente no guardado. O que se protege: a linha diz desde quando e a
+// causa com a MESMA frase do turno do dono (causa-da-falha.ts); a queda que já fechou some (deixou de ser verdade); o
+// aviso da volta NÃO some (é ele que conta que voltou); tabela que não existe ou leitura que falha = nada se resolve.
+Deno.test("linha da queda e da volta do assistente: desde quando, a causa com a frase do turno, e a hora da volta", () => {
+  const queda = (dados: Record<string, unknown>) => aviso({ fonte: "assistente", assunto: "assistente", destino: "acorde", texto: "*Seu assistente está fora do ar…*", dados });
+  assertEquals(linhaDoGuardado(queda({ queda_id: "q1", momento: "caiu", desde: "2026-10-15T20:27:00Z", causa: "programa_parado" }), HOJE),
+    "o assistente ficou fora desde as 17:27 (o PC da oficina está sem sinal)");
+  assertEquals(linhaDoGuardado(queda({ queda_id: "q1", momento: "caiu", desde: "2026-10-14T23:10:00Z", causa: "login" }), HOJE),
+    "o assistente ficou fora desde ontem às 20:10 (o login do Claude caiu)");
+  assertEquals(linhaDoGuardado(queda({ queda_id: "q1", momento: "caiu", desde: "2026-10-10T19:04:00Z", causa: "limite" }), HOJE),
+    "o assistente ficou fora desde 10/10 (acabou o limite da assinatura)");
+  // causa que este código não conhece, ou sem horário: a frase do erro comum, sem inventar a hora
+  assertEquals(linhaDoGuardado(queda({ queda_id: "q1", momento: "caiu", causa: "causa_nova" }), HOJE), "o assistente ficou fora (deu um erro no assistente do PC)");
+  assertEquals(linhaDoGuardado(queda({ queda_id: "q1", momento: "voltou", desde: "2026-10-15T12:32:00Z", ate: "2026-10-15T13:37:00Z", causa: "login" }), HOJE),
+    "o assistente voltou às 10:37");
+  assertEquals(linhaDoGuardado(queda({ queda_id: "q1", momento: "voltou", ate: "2026-10-15T01:18:00Z" }), HOJE), "o assistente voltou ontem às 22:18");
+  assertEquals(linhaDoGuardado(queda({ queda_id: "q1", momento: "voltou" }), HOJE), "o assistente voltou");
+  // não é "sistema": não vira "a manhã não chegou" nem se junta à linha das quedas do WhatsApp
+  const p = planoDoGuardado({
+    avisos: [queda({ queda_id: "q1", momento: "caiu", desde: "2026-10-15T20:27:00Z", causa: "sem_rede" }), aviso({ fonte: "vigia_negocio", assunto: "sistema", dia: "2026-10-14" })],
+    mensagem: "manha", hoje: HOJE, resolvidosAgora: new Set(), regras: REGRAS_PADRAO,
+  });
+  assertEquals(p.linhas, ["o assistente ficou fora desde as 17:27 (o PC da oficina está sem sinal)", "a manhã de 14/10 não chegou (WhatsApp fora do ar)"]);
+});
+
+Deno.test("D8 no banco: a queda do assistente que já fechou some; a aberta fica; o aviso da volta nunca some; erro = nenhum", async () => {
+  const fechada = aviso({ fonte: "assistente", assunto: "assistente", dados: { queda_id: "q-fechada", momento: "caiu" } });
+  const aberta = aviso({ fonte: "assistente", assunto: "assistente", dados: { queda_id: "q-aberta", momento: "caiu" } });
+  const volta = aviso({ fonte: "assistente", assunto: "assistente", dados: { queda_id: "q-fechada", momento: "voltou", ate: "2026-10-15T13:37:00Z" } });
+  // o aviso antigo do "assistente falhando" (fonte vigia_negocio) não tem queda: fica de fora
+  const antigo = aviso({ fonte: "vigia_negocio", assunto: "assistente", dados: { falhas: 3 } });
+  // deno-lint-ignore no-explicit-any
+  const pedidos: any[] = [];
+  const db = (resposta: { data?: unknown; error?: unknown } | "lanca") => ({
+    from(t: string) {
+      const q = {
+        select(c: string) { pedidos.push([t, c]); return q; },
+        in(c: string, v: string[]) {
+          pedidos.push([c, [...v].sort()]);
+          if (resposta === "lanca") return Promise.reject(new Error("rede fora"));
+          return Promise.resolve({ data: resposta.data ?? null, error: resposta.error ?? null });
+        },
+      };
+      return q;
+    },
+  });
+  const linhas = [{ id: "q-fechada", ate: "2026-10-15T13:37:00Z" }, { id: "q-aberta", ate: null }];
+  const r = await quaisSeResolveram(db({ data: linhas }), [fechada, aberta, volta, antigo]);
+  assertEquals([...r], [fechada.id]);
+  assertEquals(pedidos, [["assistente_quedas", "id, ate"], ["id", ["q-aberta", "q-fechada"]]], "só as quedas, só o id e o fim");
+  // a tabela ainda não existe, o banco recusa ou a rede cai: nada se resolve (a linha aparece; melhor a mais que calar)
+  for (const falha of [{ error: { code: "42P01", message: "relation does not exist" } }, { error: { message: "permission denied" } }, "lanca"] as const) {
+    assertEquals((await quaisSeResolveram(db(falha), [fechada, aberta])).size, 0);
+  }
+  // sem aviso de queda, a tabela nem é lida
+  pedidos.length = 0;
+  await quaisSeResolveram(db({ data: linhas }), [volta, antigo]);
+  assertEquals(pedidos, []);
+});
+
 Deno.test("marcar: resolver e incluir; sem fila não manda fila_id (a sombra); erro não lança", async () => {
   const { admin, rpcs } = banco();
   const r = await marcarNaMensagem(admin, { phone: "5547900000009", modo: "sombra", mostrados: ["a", "b"], resolvidos: ["c"] });

@@ -5,7 +5,7 @@
 // leva a referência do freio (acomp:<id>:<última recebida>).
 import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
-  avisoDaAgenda, avisoDaNfe, avisoDaVoltaDoWhatsApp, avisoDoAcompanhamento, avisoDoAssistenteFalhando, avisoDoCertificado, avisoDoConsentimento, avisoDoEmail, avisoDoLeadDoSite,
+  avisoDaAgenda, avisoDaNfe, avisoDaQuedaDoAssistente, avisoDaVoltaDoWhatsApp, avisoDoAcompanhamento, avisoDoAssistenteFalhando, avisoDoCertificado, avisoDoConsentimento, avisoDoEmail, avisoDoLeadDoSite,
   avisoDosLembretesDeRevisao, avisoDosSaldos, avisoDoVigia, avisoResumoNaoChegou, DESTINO_DO_VIGIA, pedeHojeOuUrgente,
   referenciaDoAcompanhamento,
 } from "./fontes.ts";
@@ -45,6 +45,31 @@ Deno.test("consentimento do banco: ≤ 7 dias na linha Hoje (todo dia); 8–30 n
 Deno.test("assistente falhando: acorde, um por dia, fora do assunto sistema", () => {
   const a = avisoDoAssistenteFalhando(DIA, "t", 4);
   assertEquals([a.fonte, a.chave, a.assunto, a.destino, a.dados], ["vigia_negocio", `assistente_falhando:${DIA}`, "assistente", "acorde", { falhas: 4 }]);
+});
+
+// Pacote 1, V1 (25/11/2026): a queda e a volta do assistente. O que se protege: uma chave por queda e por momento (a mesma
+// queda não acorda duas vezes); assunto próprio (com "sistema" o guardado diria "a manhã não chegou"); só a volta é fato
+// novo (pode acordar no mesmo dia da queda); a fonte passa no CHECK de avisos_do_dono; os dados levam o que o guardado
+// precisa para escrever a linha e para saber que a queda fechou.
+Deno.test("queda do assistente: chave por queda e momento, assunto próprio, fato novo só na volta", () => {
+  const q = { id: "11111111-2222-3333-4444-555555555555", desde: "2026-11-24T12:35:00.000Z", causa: "login" };
+  const caiu = avisoDaQuedaDoAssistente(q, "caiu", "texto da queda");
+  assertEquals([caiu.fonte, caiu.chave, caiu.assunto, caiu.destino, caiu.referencia, caiu.texto],
+    ["assistente", `assistente:caiu:${q.id}`, "assistente", "acorde", `queda:${q.id}`, "texto da queda"]);
+  assertEquals(caiu.dados, { queda_id: q.id, momento: "caiu", desde: q.desde, causa: "login" });
+  assert(!("novo_fato" in caiu), "a queda não é fato novo");
+  const voltou = avisoDaQuedaDoAssistente({ ...q, ate: "2026-11-24T13:37:00.000Z" }, "voltou", "texto da volta");
+  assertEquals([voltou.chave, voltou.assunto, voltou.destino, voltou.novo_fato], [`assistente:voltou:${q.id}`, "assistente", "acorde", true]);
+  assertEquals(voltou.dados, { queda_id: q.id, momento: "voltou", desde: q.desde, causa: "login", ate: "2026-11-24T13:37:00.000Z" });
+  assert(caiu.chave !== voltou.chave, "a volta não é 'repetido' da queda");
+  // o CHECK de avisos_do_dono.fonte (migration 20261016101000)
+  assert(/^[a-z][a-z_]{2,39}$/.test(caiu.fonte));
+  // nunca o destino "deixar" (é do alarme pedido pelo próprio dono e fura a janela do portão)
+  assert(caiu.destino !== "deixar" && voltou.destino !== "deixar");
+  // o pedido ao portão leva o fato novo só na volta
+  assertEquals([pedidoAoPortao("5547900000001", "ligado", caiu).novo_fato, pedidoAoPortao("5547900000001", "ligado", voltou).novo_fato], [false, true]);
+  // o aviso antigo do assistente falhando tem outra fonte e outra chave: os dois não se confundem
+  assert(avisoDoAssistenteFalhando(DIA, "t", 3).chave !== caiu.chave && avisoDoAssistenteFalhando(DIA, "t", 3).fonte !== caiu.fonte);
 });
 
 Deno.test("sistema: a manhã que não chegou e a volta longa do WhatsApp são o MESMO assunto (um acorde por dia)", () => {

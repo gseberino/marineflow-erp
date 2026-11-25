@@ -6,8 +6,8 @@
 // parado em PENDING) conta como queda, sem alarmar pelo SERVER_ACK que a API não mostra.
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
-  confirmaTravada, decidirVigia, lerEstado, lerRespostaDoConnect, lerSaidas, motivoDaQueda, numeroParaPareamento,
-  type SaidaRecente, suspeitaDeTravada, textoDoAviso, type RegistroDoVigia,
+  causaDoWhatsApp, causaQueOAvisoDiz, confirmaTravada, decidirVigia, lerEstado, lerRespostaDoConnect, lerSaidas, motivoDaQueda,
+  numeroParaPareamento, type SaidaRecente, suspeitaDeTravada, textoDoAviso, type RegistroDoVigia,
 } from "./conexao.ts";
 
 Deno.test("lerEstado: formato do connectionState e valores desconhecidos", () => {
@@ -235,4 +235,51 @@ Deno.test("textoDoAviso: travado diz que aparece conectado e qual envio parou", 
     t.body,
     "Aparece conectado, mas as mensagens não estão saindo (a mensagem enviada às 15:25 não foi confirmada pelo WhatsApp). Toque para desconectar e ler o QR de novo.",
   );
+});
+
+// Pacote 1, V1 (25/11/2026): a causa da queda do WhatsApp. O que se protege: sem causa (o vigia do assistente desligado,
+// em sombra, ou a leitura dos programas do PC que falhou) o texto do aviso é EXATAMENTE o de sempre; com causa, só o
+// corpo do "fora do ar" muda.
+Deno.test("causaDoWhatsApp: PC com sinal = Docker ou túnel; sem sinal = PC fora; sem leitura = desconhecida", () => {
+  assertEquals(causaDoWhatsApp("inacessivel", { pcComSinal: true }), "docker_ou_tunel");
+  assertEquals(causaDoWhatsApp("inacessivel", { pcComSinal: false }), "pc_fora");
+  assertEquals(causaDoWhatsApp("inacessivel", null), "desconhecida");
+  assertEquals([causaDoWhatsApp("close", null), causaDoWhatsApp("connecting", { pcComSinal: true }), causaDoWhatsApp("travado", null)],
+    ["desconectado", "desconectado", "travado"]);
+  assertEquals(causaDoWhatsApp("open", { pcComSinal: true }), "desconhecida");
+  // só as duas causas do "fora do ar" mudam o texto do aviso
+  assertEquals(["pc_fora", "docker_ou_tunel", "desconectado", "travado", "desconhecida", null].map((c) => causaQueOAvisoDiz(c as never)),
+    ["pc_fora", "docker_ou_tunel", null, null, null, null]);
+});
+
+Deno.test("textoDoAviso: sem causa o 'fora do ar' é o texto de sempre; com causa diz se foi o PC ou o Docker/túnel", () => {
+  const fora: RegistroDoVigia = { estado: "inacessivel", desde: "2026-11-24T16:00:00Z", avisado_em: null };
+  const deSempre = {
+    title: "WhatsApp fora do ar",
+    body: "Desde 13:00 o ERP não alcança o servidor do WhatsApp no PC (PC, Docker ou túnel desligado). Religar no PC.",
+  };
+  assertEquals(textoDoAviso("caiu", fora), deSempre);
+  assertEquals(textoDoAviso("caiu", fora, null), deSempre);
+  assertEquals(textoDoAviso("caiu", fora, null, null), deSempre);
+  assertEquals(textoDoAviso("caiu", fora, null, null, true), deSempre, "sem causa, o resto não muda nada");
+  assertEquals(textoDoAviso("caiu", fora, null, "pc_fora"), {
+    title: "WhatsApp fora do ar",
+    body: "Desde 13:00 o ERP não alcança o PC da oficina: ele está desligado ou sem internet (o programa do assistente também parou de responder). Ligar o PC.",
+  });
+  assertEquals(textoDoAviso("caiu", fora, null, "docker_ou_tunel"), {
+    title: "WhatsApp fora do ar",
+    body: "Desde 13:00 o PC da oficina está ligado, mas o servidor do WhatsApp não responde: o Docker ou o túnel parou. O religador do PC tenta de hora em hora; se não voltar, reinicie o PC.",
+  });
+  // só diz que o chat do app funciona quando o programa do assistente está no ar e atendendo
+  assertEquals(textoDoAviso("caiu", fora, null, "docker_ou_tunel", true).body,
+    "Desde 13:00 o PC da oficina está ligado, mas o servidor do WhatsApp não responde: o Docker ou o túnel parou. O religador do PC tenta de hora em hora; se não voltar, reinicie o PC. O chat do app segue funcionando.");
+});
+
+Deno.test("textoDoAviso: a causa não mexe na volta, no desconectado nem no travado", () => {
+  const voltou = textoDoAviso("voltou", { estado: "open", desde: "2026-11-24T16:00:00Z", avisado_em: null });
+  assertEquals(textoDoAviso("voltou", { estado: "open", desde: "2026-11-24T16:00:00Z", avisado_em: null }, null, "pc_fora", true), voltou);
+  for (const estado of ["close", "connecting", "travado"] as const) {
+    const registro: RegistroDoVigia = { estado, desde: "2026-11-24T16:00:00Z", avisado_em: null };
+    assertEquals(textoDoAviso("caiu", registro, "motivo", "docker_ou_tunel", true), textoDoAviso("caiu", registro, "motivo"), estado);
+  }
 });

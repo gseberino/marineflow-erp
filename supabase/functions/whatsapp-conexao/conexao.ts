@@ -5,6 +5,8 @@
 // conectado. Reconectar exigia o Claude gerar o QR no PC. Agora o ERP mostra o estado, gera o
 // QR (ou o código de 8 dígitos para conectar só com o celular) e avisa no sino quando cai.
 
+import type { CausaDoWhatsApp } from "../_shared/ai/max/queda-do-assistente.ts";
+
 // "travado" não vem da Evolution: é o vigia que conclui (ver suspeitaDeTravada).
 export type EstadoConexao = "open" | "connecting" | "close" | "inacessivel" | "travado";
 
@@ -196,10 +198,34 @@ export function hhmm(quando: string | number): string {
   });
 }
 
+/**
+ * (pacote 1, V1) A causa da queda do WhatsApp para o histórico (assistente_quedas), a partir do estado da conexão e do
+ * que os programas do PC dizem ao banco. Servidor inalcançável: com algum programa do PC dando sinal, o PC está ligado e
+ * quem parou foi o Docker ou o túnel; sem nenhum, o PC está desligado ou sem internet. `pc` nulo = a leitura dos
+ * programas falhou: "desconhecida" (não se conclui nada).
+ */
+export function causaDoWhatsApp(estado: EstadoConexao, pc: { pcComSinal: boolean } | null): CausaDoWhatsApp {
+  if (estado === "travado") return "travado";
+  if (estado === "close" || estado === "connecting") return "desconectado";
+  if (estado === "inacessivel" && pc) return pc.pcComSinal ? "docker_ou_tunel" : "pc_fora";
+  return "desconhecida";
+}
+
+/** As duas causas que mudam o texto do aviso de "fora do ar"; qualquer outra (ou nula) deixa o texto de sempre. */
+export function causaQueOAvisoDiz(causa: CausaDoWhatsApp | null): "pc_fora" | "docker_ou_tunel" | null {
+  return causa === "pc_fora" || causa === "docker_ou_tunel" ? causa : null;
+}
+
+/**
+ * `causa` e `assistenteNoAr` (pacote 1, V1, só com vigia_assistente = 'ligado') mudam só o corpo do "fora do ar":
+ * dizem se o PC está desligado ou se foi o Docker/túnel. Sem `causa`, o texto é o de sempre.
+ */
 export function textoDoAviso(
   aviso: Exclude<Aviso, null>,
   registro: RegistroDoVigia,
   motivo: string | null = null,
+  causa: "pc_fora" | "docker_ou_tunel" | null = null,
+  assistenteNoAr = false,
 ): { title: string; body: string } {
   if (aviso === "voltou") {
     return {
@@ -212,6 +238,19 @@ export function textoDoAviso(
     return {
       title: "WhatsApp travado",
       body: `Aparece conectado, mas as mensagens não estão saindo${motivo ? ` (${motivo})` : ""}. Toque para desconectar e ler o QR de novo.`,
+    };
+  }
+  if (registro.estado === "inacessivel" && causa === "pc_fora") {
+    return {
+      title: "WhatsApp fora do ar",
+      body: `Desde ${desde} o ERP não alcança o PC da oficina: ele está desligado ou sem internet (o programa do assistente também parou de responder). Ligar o PC.`,
+    };
+  }
+  if (registro.estado === "inacessivel" && causa === "docker_ou_tunel") {
+    return {
+      title: "WhatsApp fora do ar",
+      body: `Desde ${desde} o PC da oficina está ligado, mas o servidor do WhatsApp não responde: o Docker ou o túnel parou. ` +
+        `O religador do PC tenta de hora em hora; se não voltar, reinicie o PC.${assistenteNoAr ? " O chat do app segue funcionando." : ""}`,
     };
   }
   if (registro.estado === "inacessivel") {

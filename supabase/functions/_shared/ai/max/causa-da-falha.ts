@@ -216,15 +216,18 @@ function emBrasilia(iso: unknown, agora: Date): { hora: string; dia: string; hoj
   };
 }
 
-/** "Libera às 18:30." / "Libera qui 26/11 às 02:00." / "Ainda não sei quando libera." (horário ausente ou já passado). */
-function fraseDeQuandoLibera(iso: unknown, agora: Date): string {
+/**
+ * "Libera às 18:30." / "Libera qui 26/11 às 02:00." / "Ainda não sei quando libera." (horário ausente ou já passado).
+ * EXPORTADA para o vigia de queda (V1): o horário de liberação do limite é dito do mesmo jeito no turno e no aviso.
+ */
+export function fraseDeQuandoLibera(iso: unknown, agora: Date): string {
   const q = emBrasilia(iso, agora);
   if (!q || (instante(iso) ?? 0) <= agora.getTime()) return "Ainda não sei quando libera.";
   return q.hoje ? `Libera às ${q.hora}.` : `Libera ${q.dia} às ${q.hora}.`;
 }
 
-/** " desde as 17:27" / " desde seg 23/11 às 17:27" / "" (sem horário). */
-function trechoDeDesdeQuando(iso: unknown, agora: Date): string {
+/** " desde as 17:27" / " desde seg 23/11 às 17:27" / "" (sem horário). EXPORTADA para o vigia de queda (V1). */
+export function trechoDeDesdeQuando(iso: unknown, agora: Date): string {
   const q = emBrasilia(iso, agora);
   if (!q) return "";
   return q.hoje ? ` desde as ${q.hora}` : ` desde ${q.dia} às ${q.hora}`;
