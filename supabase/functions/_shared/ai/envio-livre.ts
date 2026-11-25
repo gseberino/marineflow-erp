@@ -3,7 +3,8 @@
 // ═══ POR QUE EXISTE ═══
 //
 // Regra do dono (24/11/2026): a mensagem de texto livre pede PIN quando vai a CLIENTE ou quando o texto cita VALOR, DATA
-// ou PROMESSA; para fornecedor e equipe basta o "sim" (se o texto a eles citar valor, data ou promessa, pede PIN).
+// ou PROMESSA; para fornecedor e equipe basta o "sim". Desde 25/11/2026 (cartão IA-19, abaixo), a eles o PIN é só quando
+// o texto fala de dinheiro.
 // Destinatário sem cadastro conta como cliente.
 //
 // (25/11/2026, cartão IA-19) Para fornecedor, equipe e o próprio dono o PIN passou a ser só pelo DINHEIRO. A escolha do
