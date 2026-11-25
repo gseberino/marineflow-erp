@@ -259,7 +259,8 @@ Deno.test("S1 mensagem livre: número de cliente por to_phone pede PIN (antes er
 });
 
 Deno.test("S1 mensagem livre: número que é de cliente e de fornecedor vale o mais protegido; com client_id o cartão mostra o número do cadastro", async () => {
-  const doisCadastros = banco((t) => { t.suppliers[0].phone = "47 99915-9654"; });
+  // Cliente de verdade (tem orçamento) que também é fornecedor: os dois cadastros contam (cartão IA-20, mais abaixo).
+  const doisCadastros = banco((t) => { t.suppliers[0].phone = "47 99915-9654"; t.service_orders = [{ id: "os-1", client_id: "c1", status: "orcamento" }]; });
   await executarChamadaDeTool({ name: "send_whatsapp_message", input: { to_phone: CLIENTE, message: NEUTRO } }, aVista(enviar, doisCadastros.db));
   assertEquals(pendencias(doisCadastros)[0].risk_level, "high");
   assertEquals(ultimaLinha(pendencias(doisCadastros)[0].summary), "🔒 No WhatsApp, pede PIN: o número é de cliente e de fornecedor (vale o mais protegido).");
@@ -271,6 +272,75 @@ Deno.test("S1 mensagem livre: número que é de cliente e de fornecedor vale o m
   assertStringIncludes(p.summary, "WhatsApp: +55 (47) 99915-9654");
   assertEquals(ultimaLinha(p.summary), "🔒 No WhatsApp, pede PIN: vai a cliente; o texto cita valor.");
   assertEquals(p.risk_reason, "vai a cliente; o texto cita valor");
+});
+
+// ─── IA-20 (25/11/2026): fornecedor ativo que também está no cadastro de clientes ───────────────
+// A escolha do dono: "Contar como fornecedor quando o cadastro de cliente desse número nunca teve orçamento nem OS. Os 26
+// passam a sair só com o 'sim'; se um deles virar cliente de verdade, volta a pedir PIN sozinho". Pelas ferramentas de
+// verdade e pelo executor: o cartão sem a linha do PIN, e a linha de volta no primeiro orçamento.
+
+const LINHA_DOS_DOIS_CADASTROS = "🔒 No WhatsApp, pede PIN: o número é de cliente e de fornecedor (vale o mais protegido).";
+/** O fornecedor s1 (ativo e antigo) com o número do cliente c1. */
+const fornecedorQueTambemECliente = (mais: (t: Record<string, Linha[]>) => void = () => {}) =>
+  banco((t) => { t.suppliers[0].phone = "47 99915-9654"; mais(t); });
+
+Deno.test("IA-20 mensagem livre: fornecedor ativo que também está em clientes, sem orçamento nem OS, sai só com o sim; com orçamento volta o PIN", async () => {
+  const b = fornecedorQueTambemECliente();
+  const r = await executarChamadaDeTool({ name: "send_whatsapp_message", input: { to_phone: CLIENTE, message: NEUTRO } }, aVista(enviar, b.db));
+  assertEquals(r.proposal?.risk_level, "medium");
+  assertEquals(pendencias(b)[0].risk_level, "medium", "é o risk_level gravado que decide se o sim pede PIN");
+  assert(!("risk_reason" in pendencias(b)[0]));
+  assertEquals(String(pendencias(b)[0].summary).includes("🔒"), false);
+  // O agendamento usa a mesma conferência.
+  await executarChamadaDeTool({ name: "schedule_whatsapp_message", input: { phone: "47 99915-9654", scheduled_at: QUANDO, message: NEUTRO } }, aVista(agendar, b.db));
+  assertEquals(pendencias(b)[1].risk_level, "medium");
+  // Vale a regra do fornecedor (cartão IA-19): com dinheiro no texto, PIN pelo valor.
+  await executarChamadaDeTool({ name: "send_whatsapp_message", input: { to_phone: CLIENTE, message: "Fecha por R$ 4.200?" } }, aVista(enviar, b.db));
+  assertEquals([pendencias(b)[2].risk_level, pendencias(b)[2].risk_reason], ["high", "o texto cita valor"]);
+
+  // "Se um deles virar cliente de verdade, volta a pedir PIN sozinho": o primeiro orçamento, de qualquer status.
+  b.tabelas.service_orders.push({ id: "os-1", client_id: "c1", status: "cancelada" });
+  await executarChamadaDeTool({ name: "send_whatsapp_message", input: { to_phone: CLIENTE, message: NEUTRO } }, aVista(enviar, b.db));
+  assertEquals(pendencias(b)[3].risk_level, "high");
+  assertEquals(pendencias(b)[3].risk_reason, "o número é de cliente e de fornecedor (vale o mais protegido)");
+  assertEquals(ultimaLinha(pendencias(b)[3].summary), LINHA_DOS_DOIS_CADASTROS);
+});
+
+Deno.test("IA-20 mensagem livre: fornecedor inativo, fornecedor mexido há pouco, client_id e leitura que falha continuam pedindo PIN", async () => {
+  // Fornecedor INATIVO que também é cliente: nada muda (em 25/11/2026 eram 307 números).
+  const inativo = fornecedorQueTambemECliente((t) => { t.suppliers[0].active = false; });
+  await executarChamadaDeTool({ name: "send_whatsapp_message", input: { to_phone: CLIENTE, message: NEUTRO } }, aVista(enviar, inativo.db));
+  assertEquals(ultimaLinha(pendencias(inativo)[0].summary), LINHA_DOS_DOIS_CADASTROS);
+
+  // Fornecedor ativo alterado há 1 hora: o cadastro recente não conta, e o número é só de cliente.
+  const mexido = fornecedorQueTambemECliente((t) => { t.suppliers[0].updated_at = horasAtras(1); });
+  await executarChamadaDeTool({ name: "send_whatsapp_message", input: { to_phone: CLIENTE, message: NEUTRO } }, aVista(enviar, mexido.db));
+  assertEquals([pendencias(mexido)[0].risk_level, pendencias(mexido)[0].risk_reason], ["high", "vai a cliente"]);
+
+  // O caminho inteiro num turno só: o assistente põe o número do cliente num fornecedor (roda direto, sem cartão) e manda.
+  const noTurno = comRelogioDoBanco(banco());
+  const amb = turno(noTurno.db);
+  const troca = await executarChamadaDeTool({ name: "update_supplier", input: { supplier_id: "s1", phone: "47 99915-9654" } }, amb);
+  assertEquals(troca.executou, true);
+  await executarChamadaDeTool({ name: "send_whatsapp_message", input: { to_phone: CLIENTE, message: NEUTRO } }, amb);
+  assertEquals([pendencias(noTurno)[0].risk_level, pendencias(noTurno)[0].risk_reason], ["high", "vai a cliente"]);
+
+  // Endereçado por client_id: é a cliente que o dono está escrevendo.
+  const porId = fornecedorQueTambemECliente();
+  await executarChamadaDeTool({ name: "send_whatsapp_message", input: { client_id: "c1", message: NEUTRO } }, aVista(enviar, porId.db));
+  assertEquals(pendencias(porId)[0].risk_level, "high");
+  assertEquals(ultimaLinha(pendencias(porId)[0].summary), LINHA_DOS_DOIS_CADASTROS);
+
+  // A leitura dos orçamentos falhou: não dá para afirmar que não é cliente de verdade.
+  const fora = banco((t) => { t.suppliers[0].phone = "47 99915-9654"; }, { "select:service_orders": "banco fora" });
+  await executarChamadaDeTool({ name: "send_whatsapp_message", input: { to_phone: CLIENTE, message: NEUTRO } }, aVista(enviar, fora.db));
+  assertEquals(pendencias(fora)[0].risk_level, "high");
+  assertEquals(pendencias(fora)[0].risk_reason, "não consegui conferir quem recebe");
+  assertEquals(ultimaLinha(pendencias(fora)[0].summary), "🔒 No WhatsApp, pede PIN: não consegui conferir quem recebe.");
+  // E essa leitura não entra no caso comum: com ela fora do ar, o fornecedor que não é cliente segue só com o sim.
+  const soFornecedor = banco(undefined, { "select:service_orders": "banco fora" });
+  await executarChamadaDeTool({ name: "send_whatsapp_message", input: { to_phone: FORNECEDOR, message: NEUTRO } }, aVista(enviar, soFornecedor.db));
+  assertEquals(pendencias(soFornecedor)[0].risk_level, "medium");
 });
 
 Deno.test("S1 mensagem livre: leitura do cadastro que falha não vira 'só o sim': PIN, dizendo que não deu para conferir", async () => {

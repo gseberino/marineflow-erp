@@ -7,7 +7,9 @@
 //   · tudo o que não dá para conferir cai no PIN: leitura que falha, lista grande demais, número em dois cadastros,
 //     equipe que saiu (inativa), número inválido;
 //   · a regra pura (destino × conteúdo) com o texto exato que o dono lê no cartão;
-//   · o conteúdo: as listas do validador do retorno, mais valor por extenso e data relativa.
+//   · o conteúdo: as listas do validador do retorno, mais valor por extenso e data relativa;
+//   · (cartão IA-20, 25/11/2026) fornecedor ativo e antigo cujo número também está no cadastro de clientes, sem
+//     orçamento nem OS, conta só como fornecedor.
 // Banco falso em memória (com o filtro ilike de verdade); dados inventados.
 // Rodar com:
 //   deno test --allow-all --no-check --node-modules-dir=none supabase/functions/_shared/ai/envio-livre_test.ts
@@ -29,25 +31,31 @@ function ilike(valor: unknown, padrao: string): boolean {
 }
 
 /**
- * Banco falso que FILTRA como o PostgREST: `.or("a.ilike.P,b.ilike.P")`, `.ilike(col, P)`, `.eq`, `.limit`. Guarda os
- * filtros pedidos, para o teste conferir que a consulta não depende do formato digitado. `falhas[tabela]` = erro.
+ * Banco falso que FILTRA como o PostgREST: `.or("a.ilike.P,b.ilike.P")`, `.ilike(col, P)`, `.eq`, `.in`, `.limit`, e
+ * devolve só as colunas do `.select()`. Guarda os filtros pedidos, para o teste conferir que a consulta não depende do
+ * formato digitado, e os limites pedidos. `falhas[tabela]` = erro.
  */
 function banco(tabelas: Record<string, Linha[]>, falhas: Record<string, string> = {}) {
   const consultas: Array<{ tabela: string; filtro: string }> = [];
+  const limites: Array<{ tabela: string; limite: number }> = [];
   const db = {
     from(tabela: string) {
       const filtros: Array<(l: Linha) => boolean> = [];
       let limite: number | null = null;
       let unico = false;
+      let colunas: string[] | null = null;
       const executar = () => {
         if (falhas[tabela]) return { data: null, error: { message: falhas[tabela] } };
         let linhas = (tabelas[tabela] ?? []).filter((l) => filtros.every((f) => f(l)));
         if (limite !== null) linhas = linhas.slice(0, limite);
+        // Só as colunas pedidas voltam, como no PostgREST: coluna esquecida no .select() chega vazia à regra.
+        const pedidas = colunas;
+        if (pedidas) linhas = linhas.map((l) => Object.fromEntries(pedidas.filter((c) => c in l).map((c) => [c, l[c]])));
         return unico ? { data: linhas[0] ?? null, error: null } : { data: linhas, error: null };
       };
       // deno-lint-ignore no-explicit-any
       const q: any = {
-        select: () => q,
+        select: (lista?: string) => { colunas = lista && lista.trim() !== "*" ? lista.split(",").map((c) => c.trim()) : null; return q; },
         eq: (c: string, v: unknown) => { consultas.push({ tabela, filtro: `${c}=${v}` }); filtros.push((l) => l[c] === v); return q; },
         ilike: (c: string, p: string) => { consultas.push({ tabela, filtro: `${c}.ilike.${p}` }); filtros.push((l) => ilike(l[c], p)); return q; },
         or: (expr: string) => {
@@ -56,14 +64,15 @@ function banco(tabelas: Record<string, Linha[]>, falhas: Record<string, string> 
           filtros.push((l) => partes.some(({ c, p }) => ilike(l[c], p)));
           return q;
         },
-        limit: (n: number) => { limite = n; return q; },
+        in: (c: string, vs: unknown[]) => { consultas.push({ tabela, filtro: `${c} in ${vs.join("|")}` }); filtros.push((l) => vs.includes(l[c])); return q; },
+        limit: (n: number) => { limite = n; limites.push({ tabela, limite: n }); return q; },
         maybeSingle: () => { unico = true; return Promise.resolve(executar()); },
         then: (ok: (v: unknown) => unknown, nao?: (e: unknown) => unknown) => Promise.resolve(executar()).then(ok, nao),
       };
       return q;
     },
   };
-  return { db, consultas };
+  return { db, consultas, limites };
 }
 
 const DONO = "dono-1";
@@ -76,9 +85,15 @@ const NUMERO = "5547999159654"; // como o WhatsApp manda: DDI + DDD + nono dígi
 const ANTIGO = { created_at: "2026-03-02T12:00:00.123456+00:00", updated_at: "2026-05-20T09:30:00.654321+00:00" };
 const antigos = (linhas: Linha[] = []) => linhas.map((l) => ({ ...ANTIGO, ...l }));
 
-/** Os cadastros de cada caso; vazio = ninguém tem o número. */
-function cadastros(t: Partial<Record<"clients" | "suppliers" | "payees" | "app_users" | "parceiro_numeros", Linha[]>> = {}) {
-  return { clients: [], app_users: [], parceiro_numeros: [], ...t, suppliers: antigos(t.suppliers), payees: antigos(t.payees) } as Record<string, Linha[]>;
+/**
+ * Os cadastros de cada caso; vazio = ninguém tem o número. O fornecedor nasce ATIVO, como a coluna suppliers.active em
+ * produção (cartão IA-20), a não ser que a linha diga outra coisa. `service_orders` = os orçamentos e as OS.
+ */
+function cadastros(t: Partial<Record<"clients" | "suppliers" | "payees" | "app_users" | "parceiro_numeros" | "service_orders", Linha[]>> = {}) {
+  return {
+    clients: [], app_users: [], parceiro_numeros: [], service_orders: [], ...t,
+    suppliers: antigos(t.suppliers).map((l) => ({ active: true, ...l })), payees: antigos(t.payees),
+  } as Record<string, Linha[]>;
 }
 
 // ─── quemRecebe ─────────────────────────────────────────────────────────────────────────────────
@@ -140,6 +155,8 @@ Deno.test("S1 quem recebe: número em mais de um cadastro devolve todos, do mais
     payees: [{ id: "p1", phone: "47999159654", active: true, app_user_id: null }],
     app_users: [{ id: DONO, phone: null, phone_normalized: "5547999159654", active: true }],
     parceiro_numeros: [{ id: "n1", chave: "99159654" }],
+    // Cliente de verdade (tem orçamento): sem isto o fornecedor ativo o tiraria da lista (cartão IA-20, mais abaixo).
+    service_orders: [{ id: "os-1", client_id: "c1", status: "orcamento" }],
   });
   assertEquals((await quemRecebe(banco(tudo).db, NUMERO, { userId: DONO })).destinos, ["cliente", "parceiro", "fornecedor", "equipe", "o_proprio"]);
   // Técnico que também é favorecido: um destino só (equipe), não dois.
@@ -562,4 +579,182 @@ Deno.test("S1 gancho: client_id com outro número junto, ou cliente sem número,
   // Os dois apontando o MESMO número: é o cliente.
   assertEquals(await riscoDaMensagemLivre({ client_id: "c1", to_phone: "5547999159654", message: NEUTRO }, ctx(banco(tabelas).db), "to_phone"),
     { risco: "high", motivo: "vai a cliente" });
+});
+
+// ─── IA-20 (25/11/2026): fornecedor ativo que também está no cadastro de clientes ───────────────
+// A escolha do dono no cartão: "Contar como fornecedor quando o cadastro de cliente desse número nunca teve orçamento nem
+// OS. Os 26 passam a sair só com o 'sim'; se um deles virar cliente de verdade, volta a pedir PIN sozinho".
+// Medido em produção em 25/11/2026 (só contagem): 26 números de fornecedor ativo também são de cliente, nenhum deles com
+// orçamento ou OS; com fornecedor inativo são 307, 5 deles com orçamento ou OS (para esses nada muda).
+// O que se fixa: as três condições juntas (fornecedor ativo e antigo; nenhum cadastro de cliente do número com linha em
+// service_orders; envio sem client_id), a leitura nova só nesse caso, e o lado seguro quando ela falha.
+
+const C1 = { id: "c1", whatsapp: "(47) 99915-9654", phone: null };
+const S1 = { id: "s1", phone: "47 99915-9654", active: true };
+const SO_FORNECEDOR = { telefone: NUMERO, destinos: ["fornecedor"] };
+const CLIENTE_E_FORNECEDOR = { telefone: NUMERO, destinos: ["cliente", "fornecedor"] };
+const PIN_DOS_DOIS_CADASTROS = { risco: "high", motivo: "o número é de cliente e de fornecedor (vale o mais protegido)" };
+const leuOsOrcamentos = (b: { consultas: Array<{ tabela: string; filtro: string }> }) => b.consultas.filter((c) => c.tabela === "service_orders");
+const noGancho = (tabelas: Record<string, Linha[]>, message = NEUTRO, falhas: Record<string, string> = {}) =>
+  riscoDaMensagemLivre({ to_phone: NUMERO, message }, ctx(banco(tabelas, falhas).db), "to_phone");
+
+Deno.test("IA-20 quem recebe: fornecedor ativo e antigo + cliente sem orçamento nem OS conta só como fornecedor", async () => {
+  const b = banco(cadastros({ clients: [C1], suppliers: [S1] }));
+  assertEquals(await quemRecebe(b.db, NUMERO, { userId: DONO }, AGORA), SO_FORNECEDOR);
+  // A pergunta ao banco: os orçamentos e as OS do cliente casado, sem filtro de status, e uma linha basta.
+  assertEquals(leuOsOrcamentos(b), [{ tabela: "service_orders", filtro: "client_id in c1" }]);
+  assertEquals(b.limites.filter((l) => l.tabela === "service_orders"), [{ tabela: "service_orders", limite: 1 }]);
+
+  const variantes: Array<[string, Record<string, Linha[]>]> = [
+    ["o número no telefone do cliente, sem o nono dígito", cadastros({ clients: [{ id: "c1", whatsapp: null, phone: "47 9915-9654" }], suppliers: [S1] })],
+    ["cliente inativo", cadastros({ clients: [{ ...C1, active: false }], suppliers: [S1] })],
+    ["o orçamento que existe é de OUTRO cliente", cadastros({ clients: [C1], suppliers: [S1], service_orders: [{ id: "os-9", client_id: "c9", status: "orcamento" }] })],
+    ["dois fornecedores com o número, um inativo e um ativo", cadastros({ clients: [C1], suppliers: [{ id: "s0", phone: "(47) 99915-9654", active: false }, S1] })],
+    ["o fornecedor ativo fez 24 horas agora", cadastros({ clients: [C1], suppliers: [{ ...S1, ...datas(ha(24)) }] })],
+  ];
+  for (const [nome, tabelas] of variantes) {
+    assertEquals(await quemRecebe(banco(tabelas).db, NUMERO, { userId: DONO }, AGORA), SO_FORNECEDOR, nome);
+  }
+
+  // Daí em diante vale a regra do fornecedor (cartão IA-19): só o "sim", e PIN quando o texto fala de dinheiro.
+  const t = cadastros({ clients: [C1], suppliers: [S1] });
+  assertEquals(await noGancho(t), SO_O_SIM);
+  assertEquals(await noGancho(t, "Amanhã começamos às 8h na marina."), SO_O_SIM);
+  assertEquals(await noGancho(t, "Fecha por R$ 4.200?"), PIN_PELO_VALOR);
+  assertEquals(await riscoDaMensagemLivre({ phone: "47 9915-9654", message: NEUTRO }, ctx(banco(t).db), "phone"), SO_O_SIM, "no agendamento também");
+});
+
+Deno.test("IA-20 quem recebe: com uma linha em service_orders, de qualquer status, o número continua de cliente e de fornecedor (PIN)", async () => {
+  for (const status of ["orcamento", "rascunho", "cancelada", "concluida", null]) {
+    const t = cadastros({ clients: [C1], suppliers: [S1], service_orders: [{ id: "os-1", client_id: "c1", status }] });
+    assertEquals(await quemRecebe(banco(t).db, NUMERO, { userId: DONO }, AGORA), CLIENTE_E_FORNECEDOR, String(status));
+    assertEquals(await noGancho(t), PIN_DOS_DOIS_CADASTROS, String(status));
+  }
+  // "Volta a pedir PIN sozinho": o mesmo cadastro, antes e depois do primeiro orçamento.
+  const t = cadastros({ clients: [C1], suppliers: [S1] });
+  assertEquals(await noGancho(t), SO_O_SIM);
+  t.service_orders.push({ id: "os-1", client_id: "c1", status: "orcamento" });
+  assertEquals(await noGancho(t), PIN_DOS_DOIS_CADASTROS);
+  // Cliente com muitas OS: uma linha basta, e a leitura não esbarra no limite de conferência das outras listas.
+  const muitas = Array.from({ length: LIMITE_POR_CADASTRO + 10 }, (_, i) => ({ id: `os-${i}`, client_id: "c1", status: "concluida" }));
+  assertEquals(await quemRecebe(banco(cadastros({ clients: [C1], suppliers: [S1], service_orders: muitas })).db, NUMERO, { userId: DONO }, AGORA), CLIENTE_E_FORNECEDOR);
+});
+
+Deno.test("IA-20 quem recebe: dois cadastros de cliente com o número e um deles com orçamento ou OS: é cliente", async () => {
+  const C2 = { id: "c2", whatsapp: null, phone: "(47) 9915-9654" };
+  for (const dono of ["c1", "c2"]) {
+    const b = banco(cadastros({ clients: [C1, C2], suppliers: [S1], service_orders: [{ id: "os-1", client_id: dono, status: "concluida" }] }));
+    assertEquals(await quemRecebe(b.db, NUMERO, { userId: DONO }, AGORA), CLIENTE_E_FORNECEDOR, `o orçamento é do ${dono}`);
+    assertEquals(leuOsOrcamentos(b), [{ tabela: "service_orders", filtro: "client_id in c1|c2" }], "pergunta pelos dois cadastros");
+  }
+  // Nenhum dos dois com orçamento nem OS: só fornecedor.
+  assertEquals(await quemRecebe(banco(cadastros({ clients: [C1, C2], suppliers: [S1] })).db, NUMERO, { userId: DONO }, AGORA), SO_FORNECEDOR);
+  // Cliente de número PARECIDO (o filtro do banco traz, a conferência linha a linha recusa): a OS dele não é deste número.
+  const parecido = { id: "c3", whatsapp: "47 99159-6541", phone: null };
+  const b = banco(cadastros({ clients: [C1, parecido], suppliers: [S1], service_orders: [{ id: "os-3", client_id: "c3", status: "concluida" }] }));
+  assertEquals(await quemRecebe(b.db, NUMERO, { userId: DONO }, AGORA), SO_FORNECEDOR);
+  assertEquals(leuOsOrcamentos(b), [{ tabela: "service_orders", filtro: "client_id in c1" }]);
+});
+
+Deno.test("IA-20 quem recebe: fornecedor INATIVO que também é cliente continua valendo os dois, sem ler os orçamentos", async () => {
+  // Só `true` é ativo: falso, vazio ou valor torto não solta o PIN.
+  for (const active of [false, null, undefined, "true", 1]) {
+    const t = cadastros({ clients: [C1], suppliers: [{ ...S1, active }] });
+    const b = banco(t);
+    assertEquals(await quemRecebe(b.db, NUMERO, { userId: DONO }, AGORA), CLIENTE_E_FORNECEDOR, String(active));
+    assertEquals(leuOsOrcamentos(b), [], String(active));
+    assertEquals(await noGancho(t), PIN_DOS_DOIS_CADASTROS, String(active));
+  }
+});
+
+Deno.test("IA-20 quem recebe: fornecedor ativo criado ou alterado há menos de 24 horas não tira o cliente", async () => {
+  const recentes: Array<[string, Linha]> = [
+    ["criado há 1 hora", datas(ha(1))],
+    ["antigo, alterado há 1 minuto", datas(ANTIGO.created_at, ha(0, 1))],
+    ["criado há 23 h 59", datas(ha(23, 59))],
+    ["sem as datas", datas(undefined)],
+  ];
+  for (const [nome, d] of recentes) {
+    const b = banco(cadastros({ clients: [C1], suppliers: [{ ...S1, ...d }] }));
+    assertEquals(await quemRecebe(b.db, NUMERO, { userId: DONO }, AGORA), { telefone: NUMERO, destinos: ["cliente"], cadastroRecente: true }, nome);
+    assertEquals(leuOsOrcamentos(b), [], nome);
+  }
+  // Pelo gancho, com o relógio de verdade: cadastrar o número de um cliente sem orçamento como fornecedor não solta o PIN.
+  const feitoAgora = cadastros({ clients: [C1], suppliers: [{ ...S1, ...datas(new Date().toISOString()) }] });
+  assertEquals(await noGancho(feitoAgora), { risco: "high", motivo: "vai a cliente" });
+  // Um fornecedor ativo recente e outro antigo inativo: nenhum dos dois vale a condição; o inativo segue contando.
+  const misturado = cadastros({ clients: [C1], suppliers: [{ ...S1, ...datas(ha(1)) }, { id: "s0", phone: "(47) 99915-9654", active: false }] });
+  assertEquals(await quemRecebe(banco(misturado).db, NUMERO, { userId: DONO }, AGORA), { ...CLIENTE_E_FORNECEDOR, cadastroRecente: true });
+});
+
+Deno.test("IA-20 quem recebe: com client_id o envio continua sendo a cliente, sem ler os orçamentos", async () => {
+  const t = cadastros({ clients: [{ ...C1, name: "Cliente Inventado" }], suppliers: [S1] });
+  const b = banco(t);
+  assertEquals(await quemRecebe(b.db, NUMERO, { userId: DONO, clienteId: "c1" }, AGORA), CLIENTE_E_FORNECEDOR);
+  assertEquals(leuOsOrcamentos(b), []);
+  // Pelo gancho: o MESMO número, por client_id pede PIN; só pelo número, vale o fornecedor.
+  assertEquals(await riscoDaMensagemLivre({ client_id: "c1", message: NEUTRO }, ctx(banco(t).db), "to_phone"), PIN_DOS_DOIS_CADASTROS);
+  assertEquals(await riscoDaMensagemLivre({ client_id: "c1", to_phone: NUMERO, message: NEUTRO }, ctx(banco(t).db), "to_phone"), PIN_DOS_DOIS_CADASTROS);
+  assertEquals(await riscoDaMensagemLivre({ to_phone: NUMERO, message: NEUTRO }, ctx(banco(t).db), "to_phone"), SO_O_SIM);
+  // client_id vazio não é client_id (a mesma conta de numeroDoEnvio).
+  for (const vazio of ["", null, undefined]) {
+    assertEquals(await quemRecebe(banco(t).db, NUMERO, { userId: DONO, clienteId: vazio }, AGORA), SO_FORNECEDOR, String(vazio));
+  }
+});
+
+Deno.test("IA-20 quem recebe: leitura dos orçamentos que falha LANÇA, e o gancho pede PIN dizendo que não conseguiu conferir", async () => {
+  const t = cadastros({ clients: [C1], suppliers: [S1] });
+  await assertRejects(() => quemRecebe(banco(t, { service_orders: "banco fora" }).db, NUMERO, { userId: DONO }, AGORA), Error, "leitura de orçamentos e ordens de serviço falhou");
+  assertEquals(await noGancho(t, NEUTRO, { service_orders: "banco fora" }), { risco: "high", motivo: FALHA_AO_CONFERIR_QUEM_RECEBE });
+  assertEquals(FALHA_AO_CONFERIR_QUEM_RECEBE, "não consegui conferir quem recebe");
+  // Resposta que não é lista (banco torto só nessa tabela).
+  const inteiro = banco(t).db;
+  // deno-lint-ignore no-explicit-any
+  const semLista: any = { select: () => semLista, in: () => semLista, eq: () => semLista, limit: () => Promise.resolve({ data: null, error: null }) };
+  const torto = { from: (tabela: string) => (tabela === "service_orders" ? semLista : inteiro.from(tabela)) };
+  await assertRejects(() => quemRecebe(torto, NUMERO, { userId: DONO }, AGORA), Error, "leitura de orçamentos e ordens de serviço sem resposta");
+  assertEquals(await riscoDaMensagemLivre({ to_phone: NUMERO, message: NEUTRO }, ctx(torto), "to_phone"), { risco: "high", motivo: FALHA_AO_CONFERIR_QUEM_RECEBE });
+  // Cadastro de cliente sem id legível: não dá para perguntar pelos orçamentos dele. Continua cliente, sem leitura.
+  for (const id of [undefined, null, "", "   ", 7]) {
+    const b = banco(cadastros({ clients: [{ ...C1, id }], suppliers: [S1] }));
+    assertEquals(await quemRecebe(b.db, NUMERO, { userId: DONO }, AGORA), CLIENTE_E_FORNECEDOR, String(id));
+    assertEquals(leuOsOrcamentos(b), [], String(id));
+  }
+  // Um cadastro com id e outro sem: também não dá para afirmar que nenhum tem orçamento.
+  const umSemId = banco(cadastros({ clients: [C1, { id: null, whatsapp: "47 99915-9654", phone: null }], suppliers: [S1] }));
+  assertEquals(await quemRecebe(umSemId.db, NUMERO, { userId: DONO }, AGORA), CLIENTE_E_FORNECEDOR);
+});
+
+Deno.test("IA-20 quem recebe: número só de cliente, sem orçamento nem OS, continua cliente; o caso comum não ganha leitura", async () => {
+  const comuns: Array<[string, Record<string, Linha[]>, Destino[]]> = [
+    ["só cliente, sem orçamento nem OS", cadastros({ clients: [C1] }), ["cliente"]],
+    ["só cliente, com OS", cadastros({ clients: [C1], service_orders: [{ id: "os-1", client_id: "c1", status: "concluida" }] }), ["cliente"]],
+    ["só fornecedor ativo", cadastros({ suppliers: [S1] }), ["fornecedor"]],
+    ["só fornecedor inativo", cadastros({ suppliers: [{ ...S1, active: false }] }), ["fornecedor"]],
+    ["ninguém", cadastros(), ["sem_cadastro"]],
+    ["cliente sem orçamento que também é da equipe", cadastros({ clients: [C1], app_users: [{ id: "tec-1", phone: null, phone_normalized: "5547999159654", active: true }] }), ["cliente", "equipe"]],
+    ["cliente sem orçamento que também é parceiro", cadastros({ clients: [C1], parceiro_numeros: [{ id: "n1", chave: "99159654" }] }), ["cliente", "parceiro"]],
+  ];
+  for (const [nome, tabelas, esperado] of comuns) {
+    const b = banco(tabelas);
+    assertEquals(await quemRecebe(b.db, NUMERO, { userId: DONO }, AGORA), { telefone: NUMERO, destinos: esperado }, nome);
+    assertEquals(leuOsOrcamentos(b), [], nome);
+  }
+  assertEquals(await noGancho(cadastros({ clients: [C1] })), { risco: "high", motivo: "vai a cliente" });
+});
+
+Deno.test("IA-20 quem recebe: as outras regras seguem valendo sobre o que sobra (parceiro, equipe, o próprio)", async () => {
+  const base = { clients: [C1], suppliers: [S1] };
+  // Também parceiro: sobra parceiro e fornecedor, que é mais de um cadastro.
+  const parceiro = cadastros({ ...base, parceiro_numeros: [{ id: "n1", chave: "99159654" }] });
+  assertEquals((await quemRecebe(banco(parceiro).db, NUMERO, { userId: DONO }, AGORA)).destinos, ["parceiro", "fornecedor"]);
+  assertEquals(await noGancho(parceiro), { risco: "high", motivo: "o número é de parceiro e de fornecedor (vale o mais protegido)" });
+  // Também da equipe (em 24/11/2026, 1 dos 5 números da equipe era de cliente e de fornecedor): continua PIN.
+  const equipe = cadastros({ ...base, payees: [{ id: "p1", phone: "47999159654", active: true, app_user_id: null }] });
+  assertEquals((await quemRecebe(banco(equipe).db, NUMERO, { userId: DONO }, AGORA)).destinos, ["fornecedor", "equipe"]);
+  assertEquals(await noGancho(equipe), { risco: "high", motivo: "o número é de fornecedor e da equipe (vale o mais protegido)" });
+  // Também do próprio dono.
+  const proprio = cadastros({ ...base, app_users: [{ id: DONO, phone: null, phone_normalized: "5547999159654", active: true }] });
+  assertEquals((await quemRecebe(banco(proprio).db, NUMERO, { userId: DONO }, AGORA)).destinos, ["fornecedor", "o_proprio"]);
+  assertEquals(await noGancho(proprio), { risco: "high", motivo: "o número é de fornecedor e seu (vale o mais protegido)" });
 });

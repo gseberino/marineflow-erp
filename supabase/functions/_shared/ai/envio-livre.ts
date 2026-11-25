@@ -12,6 +12,16 @@
 // número sem cadastro e número em mais de um tipo de cadastro nada mudou: PIN sempre, e o motivo segue dizendo valor,
 // data e promessa. Ver CONTEUDO_PARA_FORNECEDOR_E_EQUIPE.
 //
+// (25/11/2026, cartão IA-20) O número que está no cadastro de clientes E no de fornecedores deixa de contar como cliente
+// quando o fornecedor é ativo e antigo (mais de 24 horas) e NENHUM cadastro de cliente desse número tem orçamento nem OS
+// (linha em service_orders, de qualquer status). A escolha do dono: "Contar como fornecedor quando o cadastro de cliente
+// desse número nunca teve orçamento nem OS. Os 26 passam a sair só com o 'sim'; se um deles virar cliente de verdade,
+// volta a pedir PIN sozinho". Com client_id o envio continua sendo a cliente. Medido em produção em 25/11/2026 (só
+// contagem): 26 números são de fornecedor ativo e de cliente ao mesmo tempo, e nenhum dos 26 tem orçamento, OS, conta a
+// receber nem embarcação. Só com fornecedor inativo são 307 números, 5 deles com orçamento ou OS: para esses nada muda
+// (fornecedor inativo que também é cliente segue valendo os dois, PIN). Nenhum fornecedor tinha sido criado ou alterado
+// nas 24 horas anteriores. Ver quemRecebe e algumTemOrcamentoOuOs.
+//
 // Até aqui o PIN era decidido pelo ARGUMENTO que o modelo escolhia: com client_id, PIN; com to_phone, só "sim". E a
 // descrição da ferramenta manda usar to_phone para responder uma conversa. Em 90 dias, 19 de 23 mensagens propostas com
 // to_phone iam a número do cadastro de clientes, e 8 saíram sem PIN (spec-seguranca.md do pacote 1). Aqui o risco é
@@ -112,11 +122,25 @@ async function lerLista(consulta: PromiseLike<{ data: unknown; error: unknown }>
 const texto = (v: unknown): string | null => (typeof v === "string" ? v : null);
 
 /**
+ * (25/11/2026, cartão IA-20) Algum destes cadastros de cliente tem orçamento ou ordem de serviço? Os dois ficam em
+ * service_orders, pela coluna client_id; qualquer linha, de qualquer status (rascunho, cancelada, concluída), conta como
+ * histórico. Basta saber se existe uma (limit 1). Cadastro sem id legível não dá para conferir: conta como tendo
+ * histórico (lado seguro). Leitura que falha LANÇA, como as outras.
+ */
+// deno-lint-ignore no-explicit-any
+async function algumTemOrcamentoOuOs(admin: any, clientes: Linha[]): Promise<boolean> {
+  const ids = clientes.map((c) => (texto(c.id) ?? "").trim());
+  if (ids.some((id) => id === "")) return true;
+  const linhas = await lerLista(admin.from("service_orders").select("id").in("client_id", ids).limit(1), "orçamentos e ordens de serviço");
+  return linhas.length > 0;
+}
+
+/**
  * Em que cadastros o número aparece, pelos 8 últimos dígitos (ai/phone.ts, a régua da casa). `clienteId` = o envio veio
  * com client_id e o número é o do cadastro dele: é cliente, e as outras tabelas ainda são lidas (o número pode ser
  * também de fornecedor ou da equipe).
  *
- *  · clients (whatsapp ou phone), ativo ou não            → "cliente"
+ *  · clients (whatsapp ou phone), ativo ou não            → "cliente" (menos no caso do cartão IA-20, mais abaixo)
  *  · parceiro_numeros (qualquer situação)                 → "parceiro"
  *  · suppliers (phone), ativo ou não                      → "fornecedor"
  *  · app_users ATIVO: o de quem pede → "o_proprio"; outro → "equipe". Inativo não conta (quem saiu é de fora)
@@ -125,6 +149,16 @@ const texto = (v: unknown): string | null => (typeof v === "string" ? v : null);
  *
  * O cadastro de fornecedor ou de favorecido criado ou alterado há menos de 24 horas NÃO conta (CADASTRO_RECENTE_MS):
  * a linha é pulada e `cadastroRecente` sai true. Os outros cadastros do mesmo número contam como sempre.
+ *
+ * (25/11/2026, cartão IA-20) Número de cliente que também é de fornecedor: sai "cliente" e fica só "fornecedor" quando
+ * as três condições valem juntas:
+ *   1. algum cadastro de fornecedor com o número está ATIVO (suppliers.active = true) e não é recente (a regra das 24
+ *      horas de cima). Fornecedor inativo que também é cliente segue contando os dois (PIN);
+ *   2. NENHUM dos cadastros de cliente com o número tem orçamento nem OS (algumTemOrcamentoOuOs);
+ *   3. o envio NÃO veio endereçado por client_id (com client_id é a cliente que o dono está escrevendo).
+ * O número volta a contar como cliente sozinho, no primeiro orçamento. service_orders só é lida quando 1 e 3 já valem e
+ * há cliente casado: o caso comum (só cliente, só fornecedor, ninguém) não ganha leitura. As outras regras seguem
+ * valendo sobre o que sobrar (se o número também é de parceiro ou da equipe, continua em mais de um cadastro: PIN).
  *
  * Leitura que falha LANÇA; quem chama trata como risco alto. `admin` é o service-role: o risco não pode depender do
  * que a RLS de quem pede deixa ver. `agora` só existe para o teste escolher a hora.
@@ -142,7 +176,7 @@ export async function quemRecebe(
   const L = LIMITE_POR_CADASTRO;
   const [clientes, fornecedores, favorecidos, usuarios, parceiros] = await Promise.all([
     lerLista(admin.from("clients").select("id, whatsapp, phone").or(`whatsapp.ilike.${padrao},phone.ilike.${padrao}`).limit(L), "clientes"),
-    lerLista(admin.from("suppliers").select("id, phone, created_at, updated_at").ilike("phone", padrao).limit(L), "fornecedores"),
+    lerLista(admin.from("suppliers").select("id, phone, active, created_at, updated_at").ilike("phone", padrao).limit(L), "fornecedores"),
     lerLista(admin.from("payees").select("id, phone, active, app_user_id, created_at, updated_at").ilike("phone", padrao).limit(L), "favorecidos"),
     lerLista(
       admin.from("app_users").select("id, phone, phone_normalized, active").or(`phone_normalized.ilike.${padrao},phone.ilike.${padrao}`).limit(L),
@@ -153,15 +187,20 @@ export async function quemRecebe(
 
   const achados = new Set<Destino>();
   if (quem.clienteId) achados.add("cliente");
-  if (clientes.some((c) => mesmoTelefone(texto(c.whatsapp), telefone) || mesmoTelefone(texto(c.phone), telefone))) achados.add("cliente");
+  const clientesDoNumero = clientes.filter((c) => mesmoTelefone(texto(c.whatsapp), telefone) || mesmoTelefone(texto(c.phone), telefone));
+  if (clientesDoNumero.length > 0) achados.add("cliente");
   if (parceiros.some((n) => n.chave === chave)) achados.add("parceiro");
   // Fornecedor e favorecido são os cadastros em que o assistente escreve: o criado ou alterado há menos de 24 horas é pulado.
   const agoraMs = agora.getTime();
   let recente = false;
+  let fornecedorAtivoEAntigo = false;
   for (const s of fornecedores) {
     if (!mesmoTelefone(texto(s.phone), telefone)) continue;
     if (cadastroRecente(s, agoraMs)) recente = true;
-    else achados.add("fornecedor");
+    else {
+      achados.add("fornecedor");
+      if (s.active === true) fornecedorAtivoEAntigo = true;
+    }
   }
   for (const u of usuarios) {
     if (u.active !== true) continue;
@@ -172,6 +211,11 @@ export async function quemRecebe(
     if (f.active !== true || !mesmoTelefone(texto(f.phone), telefone)) continue;
     if (cadastroRecente(f, agoraMs)) recente = true;
     else achados.add(f.app_user_id && f.app_user_id === quem.userId ? "o_proprio" : "equipe");
+  }
+  // (IA-20) Fornecedor ativo e antigo cujo número também está no cadastro de clientes, sem orçamento nem OS e sem
+  // client_id no envio: conta só como fornecedor. A leitura de service_orders fica por último na condição, de propósito.
+  if (fornecedorAtivoEAntigo && !quem.clienteId && clientesDoNumero.length > 0 && !(await algumTemOrcamentoOuOs(admin, clientesDoNumero))) {
+    achados.delete("cliente");
   }
   const destinos = ORDEM_DOS_DESTINOS.filter((d) => achados.has(d));
   return { telefone, destinos: destinos.length > 0 ? destinos : ["sem_cadastro"], ...(recente ? { cadastroRecente: true } : {}) };
