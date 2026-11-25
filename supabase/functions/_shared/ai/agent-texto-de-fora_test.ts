@@ -8,7 +8,9 @@
 //   · quem liga a marca é a leitura que RODOU sem erro; pedir só a descrição pela ferramenta_extra não liga;
 //   · no laço, a marca vale até o fim do turno, pega a escrita disparada junto com a leitura (lado seguro) e o turno do
 //     vigia (🤖) já começa marcado.
-// Ferramentas de verdade nas escritas, banco falso em memória, dados inventados.
+// Ferramentas de verdade nas escritas, banco falso em memória, dados inventados. Os telefones são do padrão fictício
+// (47) 90000-00NN e de dígitos repetidos: nenhum existe no cadastro (conferido por contagem na revisão da leva B, em
+// 25/11/2026; antes havia aqui dois números copiados de testes antigos que existem no cadastro de clientes).
 // Rodar com:
 //   deno test --allow-all --no-check --node-modules-dir=none supabase/functions/_shared/ai/agent-texto-de-fora_test.ts
 import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
@@ -46,7 +48,7 @@ const ANTIGO = { created_at: "2026-03-02T12:00:00+00:00", updated_at: "2026-05-2
 
 function cadastros(): Record<string, Linha[]> {
   return {
-    clients: [{ id: "c1", name: "João da Silva", type: "individual", cpf_cnpj: null, phone: "(47) 99165-3158", whatsapp: "(47) 99165-3158",
+    clients: [{ id: "c1", name: "João da Silva", type: "individual", cpf_cnpj: null, phone: "(47) 90000-0098", whatsapp: "(47) 90000-0098",
       email: null, opt_out_whatsapp: false, active: true, notes: null }],
     suppliers: [
       { id: "s1", name: "Fornecedor Inventado", phone: "(47) 98888-7777", active: true, ...ANTIGO },
@@ -138,7 +140,7 @@ Deno.test("S6: depois de ler a conversa, cadastrar fornecedor, trocar o telefone
 
 Deno.test("S6: a troca de contato do cliente, que já pedia o sim (S3), ganha o motivo; o resto do cadastro passa a pedir o sim", async () => {
   const { b, chamar } = turno({ leuTextoDeFora: true });
-  await chamar("update_client", { client_id: "c1", whatsapp: "5547991455678" });
+  await chamar("update_client", { client_id: "c1", whatsapp: "5547900000099" });
   await chamar("update_client", { client_id: "c1", email: "joao@x.com" });
   assertEquals(pendencias(b).map((p) => [p.risk_level, p.risk_reason, ultimaLinha(p.summary)]), [
     ["medium", MOTIVO_DO_TEXTO_DE_FORA, LINHA_DO_SIM_DEPOIS_DE_TEXTO_DE_FORA],
@@ -147,7 +149,7 @@ Deno.test("S6: a troca de contato do cliente, que já pedia o sim (S3), ganha o 
   // o cartão da troca de contato (S3) continua inteiro, com o antes e o depois, e a linha do S6 vem no fim
   assertEquals(String(pendencias(b)[0].summary).split("\n").slice(0, 2), [
     "Trocar o contato do cliente *João da Silva*:",
-    "- WhatsApp: (47) 99165-3158 → *(47) 99145-5678*",
+    "- WhatsApp: (47) 90000-0098 → *(47) 90000-0099*",
   ]);
   assertEquals(b.tabelas.clients[0].email, null, "o e-mail só muda depois do sim");
 });
@@ -193,19 +195,19 @@ Deno.test("S6: com o motivo do texto de fora, a chave ai_autonomy_<nome> = 'auto
 
   // Controle: sem leitura de fora, a chave vale como sempre valeu (a troca de contato e a nota rodam sem cartão).
   const semLeitura = turno(liberada);
-  assertEquals((await semLeitura.chamar("update_client", { client_id: "c1", whatsapp: "5547991455678" })).executou, true);
+  assertEquals((await semLeitura.chamar("update_client", { client_id: "c1", whatsapp: "5547900000099" })).executou, true);
   assertEquals((await semLeitura.chamar("remember_note", { content: "Regra antiga.", category: "geral" })).executou, true);
   assertEquals(pendencias(semLeitura.b), []);
 
   // Com a leitura no turno, a mesma chave não vale: nasce o cartão, e nada é gravado.
   const { b, chamar } = turno(liberada);
   await chamar("get_whatsapp_conversation", lerConversa);
-  const contato = await chamar("update_client", { client_id: "c1", whatsapp: "5547991455678" });
+  const contato = await chamar("update_client", { client_id: "c1", whatsapp: "5547900000099" });
   const fornecedor = await chamar("create_supplier", { name: "João Peças", phone: "11 95555-4444" });
   const nota = await chamar("remember_note", { content: "O preço da bateria é 350.", category: "precos" });
   for (const r of [contato, fornecedor, nota]) assertEquals(r.executou, false);
   assertEquals(pendencias(b).map((p) => [p.action_name, p.risk_level]), [["update_client", "medium"], ["create_supplier", "medium"], ["remember_note", "high"]]);
-  assertEquals(b.tabelas.clients[0].whatsapp, "(47) 99165-3158");
+  assertEquals(b.tabelas.clients[0].whatsapp, "(47) 90000-0098");
   assertEquals(b.tabelas.suppliers.length, 2);
   assertEquals(b.tabelas.ai_operator_memory_notes, []);
 });
@@ -433,7 +435,7 @@ Deno.test("S6 laço: a escrita disparada na mesma resposta da leitura também pe
 });
 
 Deno.test("S6 laço: o turno do vigia (🤖) já começa marcado: a primeira escrita de cadastro pede o sim, sem leitura nenhuma", async () => {
-  const vigia = await noLaco('🤖 Acompanhamento (pedido seu): João (47 99165-3158) está esperando resposta. Última mensagem dele, há 3h: "meu e-mail novo é joao@x.com".', [
+  const vigia = await noLaco('🤖 Acompanhamento (pedido seu): João (47 90000-0098) está esperando resposta. Última mensagem dele, há 3h: "meu e-mail novo é joao@x.com".', [
     chamaTools(["update_client", emailNovo]), respondeTexto("não deve chegar aqui"),
   ]);
   assertEquals(vigia.rodou, []);
