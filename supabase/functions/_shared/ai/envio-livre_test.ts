@@ -1,7 +1,8 @@
 // Pacote 1 do assistente, S1 (24/11/2026): mensagem de texto livre pede PIN por QUEM RECEBE e pelo QUE O TEXTO DIZ.
 //
 // Regra do dono: PIN quando vai a cliente ou quando o texto cita valor, data ou promessa; para fornecedor e equipe só o
-// "sim" (com valor, data ou promessa no texto, PIN); destinatário sem cadastro conta como cliente. O que se fixa aqui:
+// "sim"; destinatário sem cadastro conta como cliente. Desde 25/11/2026 (cartão IA-19), a fornecedor, equipe e ao próprio
+// dono o PIN é só quando o texto fala de dinheiro: data, hora, prazo e promessa saem com o "sim". O que se fixa aqui:
 //   · quemRecebe: o número conferido contra os cadastros, em qualquer formato digitado, pelos 8 últimos dígitos;
 //   · tudo o que não dá para conferir cai no PIN: leitura que falha, lista grande demais, número em dois cadastros,
 //     equipe que saiu (inativa), número inválido;
@@ -12,7 +13,7 @@
 //   deno test --allow-all --no-check --node-modules-dir=none supabase/functions/_shared/ai/envio-livre_test.ts
 import { assert, assertEquals, assertRejects } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
-  avisoDaFraseDoAssistente, CADASTRO_FEITO_HA_POUCO, CADASTRO_RECENTE_MS, conteudoQuePedePin, CONTEUDO_VALE_PARA_FORNECEDOR_E_EQUIPE, type Destino,
+  avisoDaFraseDoAssistente, CADASTRO_FEITO_HA_POUCO, CADASTRO_RECENTE_MS, conteudoQuePedePin, CONTEUDO_PARA_FORNECEDOR_E_EQUIPE, type Destino,
   FALHA_AO_CONFERIR_QUEM_RECEBE, LIMITE_POR_CADASTRO, NUMERO_QUE_NAO_FECHA, oQueCita, padraoDoNumero, quemRecebe, riscoDaMensagemLivre,
   riscoDoEnvioLivrePorDestino,
 } from "./envio-livre.ts";
@@ -236,8 +237,8 @@ Deno.test("Revisão S1 regra: número só em cadastro feito há pouco pede PIN e
   const comValor = { valor: true, data: false, promessa: false };
   assertEquals(riscoDoEnvioLivrePorDestino(recente("sem_cadastro"), nada), { risco: "high", motivo: CADASTRO_FEITO_HA_POUCO });
   assertEquals(riscoDoEnvioLivrePorDestino(recente("sem_cadastro"), comValor), { risco: "high", motivo: `${CADASTRO_FEITO_HA_POUCO}; o texto cita valor` });
-  // Nem na outra leitura da regra (fornecedor e equipe sempre só o sim) o cadastro feito há pouco vale o sim.
-  assertEquals(riscoDoEnvioLivrePorDestino(recente("sem_cadastro"), nada, false).risco, "high");
+  // Nem na leitura mais solta da regra (fornecedor e equipe sempre só o sim) o cadastro feito há pouco vale o sim.
+  assertEquals(riscoDoEnvioLivrePorDestino(recente("sem_cadastro"), nada, "nada").risco, "high");
   // Sobrou outro cadastro: a regra é a dele.
   assertEquals(riscoDoEnvioLivrePorDestino(recente("cliente"), nada), { risco: "high", motivo: "vai a cliente" });
   assertEquals(riscoDoEnvioLivrePorDestino(recente("fornecedor"), nada), { risco: "medium", motivo: null });
@@ -252,8 +253,8 @@ const NADA = { valor: false, data: false, promessa: false };
 const COM_VALOR = { valor: true, data: false, promessa: false };
 const q = (...destinos: Destino[]) => ({ telefone: NUMERO, destinos });
 
-Deno.test("S1 regra: cliente, parceiro e sem cadastro pedem PIN com ou sem conteúdo; fornecedor, equipe e o próprio, só com conteúdo", () => {
-  assertEquals(CONTEUDO_VALE_PARA_FORNECEDOR_E_EQUIPE, true, "a leitura confirmada pelo dono em 24/11/2026");
+Deno.test("S1 regra: cliente, parceiro e sem cadastro pedem PIN com ou sem conteúdo; fornecedor, equipe e o próprio, só com dinheiro", () => {
+  assertEquals(CONTEUDO_PARA_FORNECEDOR_E_EQUIPE, "dinheiro", "a leitura escolhida pelo dono em 25/11/2026 (cartão IA-19)");
   const tabela: Array<[Destino, typeof NADA, "high" | "medium", string | null]> = [
     ["cliente", NADA, "high", "vai a cliente"],
     ["cliente", COM_VALOR, "high", "vai a cliente; o texto cita valor"],
@@ -273,13 +274,61 @@ Deno.test("S1 regra: cliente, parceiro e sem cadastro pedem PIN com ou sem conte
   }
 });
 
-Deno.test("S1 regra: o motivo junta só o que o texto cita", () => {
-  const cita = (valor: boolean, data: boolean, promessa: boolean) => riscoDoEnvioLivrePorDestino(q("fornecedor"), { valor, data, promessa }).motivo;
-  assertEquals(cita(true, true, false), "o texto cita valor e data");
-  assertEquals(cita(false, true, false), "o texto cita data");
-  assertEquals(cita(false, false, true), "o texto cita promessa");
-  assertEquals(cita(true, true, true), "o texto cita valor, data e promessa");
+Deno.test("S1 regra: o motivo junta só o que o texto cita (cliente, parceiro, sem cadastro e mais de um cadastro)", () => {
+  const cita = (valor: boolean, data: boolean, promessa: boolean) => riscoDoEnvioLivrePorDestino(q("cliente"), { valor, data, promessa }).motivo;
+  assertEquals(cita(true, true, false), "vai a cliente; o texto cita valor e data");
+  assertEquals(cita(false, true, false), "vai a cliente; o texto cita data");
+  assertEquals(cita(false, false, true), "vai a cliente; o texto cita promessa");
+  assertEquals(cita(true, true, true), "vai a cliente; o texto cita valor, data e promessa");
   assertEquals(oQueCita(NADA), null);
+  // Parceiro, número sem cadastro e número em mais de um cadastro: igual, depois do motivo do destino.
+  const tudo = { valor: true, data: true, promessa: true };
+  assertEquals(riscoDoEnvioLivrePorDestino(q("parceiro"), tudo).motivo, "o número é de parceiro; o texto cita valor, data e promessa");
+  assertEquals(riscoDoEnvioLivrePorDestino(q("sem_cadastro"), { valor: false, data: true, promessa: true }).motivo,
+    "o número não tem cadastro (vale como cliente); o texto cita data e promessa");
+  assertEquals(riscoDoEnvioLivrePorDestino(q("fornecedor", "equipe"), { valor: false, data: true, promessa: false }).motivo,
+    "o número é de fornecedor e da equipe (vale o mais protegido); o texto cita data");
+});
+
+// ─── IA-19 (25/11/2026): a fornecedor, equipe e ao próprio dono, PIN só pelo dinheiro ────────────
+// A escolha do dono no cartão: "PIN só quando o texto fala de dinheiro (valor, Pix, pagamento). Data, horário e prazo
+// saem só com o 'sim'. Exemplo: o aviso do horário ao Alex sai com 'sim'; 'fecha por R$ 4.200' ao fornecedor pede PIN".
+
+const SO_O_SIM = { risco: "medium", motivo: null };
+const PIN_PELO_VALOR = { risco: "high", motivo: "o texto cita valor" };
+const DE_UM_SO: Destino[] = ["fornecedor", "equipe", "o_proprio"];
+
+Deno.test("IA-19 regra: a fornecedor, equipe e ao próprio dono, data, hora, prazo e promessa sozinhos saem só com o sim", () => {
+  const semDinheiro = [
+    { valor: false, data: true, promessa: false },
+    { valor: false, data: false, promessa: true },
+    { valor: false, data: true, promessa: true },
+  ];
+  for (const destino of DE_UM_SO) {
+    for (const conteudo of semDinheiro) {
+      assertEquals(riscoDoEnvioLivrePorDestino(q(destino), conteudo), SO_O_SIM, `${destino} ${JSON.stringify(conteudo)}`);
+    }
+  }
+  // Os outros destinos não mudaram: a mesma data pede PIN, com o motivo de antes.
+  const comData = { valor: false, data: true, promessa: false };
+  assertEquals(riscoDoEnvioLivrePorDestino(q("cliente"), comData), { risco: "high", motivo: "vai a cliente; o texto cita data" });
+  assertEquals(riscoDoEnvioLivrePorDestino(q("parceiro"), comData), { risco: "high", motivo: "o número é de parceiro; o texto cita data" });
+  assertEquals(riscoDoEnvioLivrePorDestino(q("sem_cadastro"), comData),
+    { risco: "high", motivo: "o número não tem cadastro (vale como cliente); o texto cita data" });
+});
+
+Deno.test("IA-19 regra: com dinheiro no texto pede PIN, e o motivo diz só o que disparou (valor), sem data nem promessa", () => {
+  const comDinheiro = [
+    { valor: true, data: false, promessa: false },
+    { valor: true, data: true, promessa: false },
+    { valor: true, data: false, promessa: true },
+    { valor: true, data: true, promessa: true },
+  ];
+  for (const destino of DE_UM_SO) {
+    for (const conteudo of comDinheiro) {
+      assertEquals(riscoDoEnvioLivrePorDestino(q(destino), conteudo), PIN_PELO_VALOR, `${destino} ${JSON.stringify(conteudo)}`);
+    }
+  }
 });
 
 Deno.test("S1 regra: número em mais de um cadastro pede PIN, mesmo sem cliente entre eles", () => {
@@ -301,11 +350,29 @@ Deno.test("S1 regra: sem número conferido ou sem destino nenhum = PIN", () => {
   assertEquals(riscoDoEnvioLivrePorDestino({ telefone: NUMERO, destinos: [] }, NADA).risco, "high");
 });
 
-Deno.test("S1 regra: a outra leitura (fornecedor e equipe sempre só o sim) é uma constante; o lado do cliente não muda", () => {
-  assertEquals(riscoDoEnvioLivrePorDestino(q("fornecedor"), COM_VALOR, false), { risco: "medium", motivo: null });
-  assertEquals(riscoDoEnvioLivrePorDestino(q("equipe"), COM_VALOR, false), { risco: "medium", motivo: null });
-  assertEquals(riscoDoEnvioLivrePorDestino(q("cliente"), NADA, false).risco, "high");
-  assertEquals(riscoDoEnvioLivrePorDestino(q("sem_cadastro"), NADA, false).risco, "high");
+Deno.test("S1 regra: as outras duas leituras (tudo, a de 24/11; nada) são uma palavra da constante; o lado do cliente não muda", () => {
+  const comData = { valor: false, data: true, promessa: false };
+  const comTudo = { valor: true, data: true, promessa: true };
+  // "tudo": a regra de 24/11/2026, com o motivo de então.
+  assertEquals(riscoDoEnvioLivrePorDestino(q("fornecedor"), comData, "tudo"), { risco: "high", motivo: "o texto cita data" });
+  assertEquals(riscoDoEnvioLivrePorDestino(q("equipe"), { valor: false, data: false, promessa: true }, "tudo"), { risco: "high", motivo: "o texto cita promessa" });
+  assertEquals(riscoDoEnvioLivrePorDestino(q("o_proprio"), comTudo, "tudo"), { risco: "high", motivo: "o texto cita valor, data e promessa" });
+  assertEquals(riscoDoEnvioLivrePorDestino(q("fornecedor"), NADA, "tudo"), SO_O_SIM);
+  // "nada": fornecedor e equipe sempre só o sim.
+  assertEquals(riscoDoEnvioLivrePorDestino(q("fornecedor"), COM_VALOR, "nada"), SO_O_SIM);
+  assertEquals(riscoDoEnvioLivrePorDestino(q("equipe"), comTudo, "nada"), SO_O_SIM);
+  // "dinheiro" dito por extenso é o mesmo que não dizer nada (é o padrão).
+  assertEquals(riscoDoEnvioLivrePorDestino(q("fornecedor"), comTudo, "dinheiro"), riscoDoEnvioLivrePorDestino(q("fornecedor"), comTudo));
+  // Leitura que não existe vale a mais protegida ("tudo"), nunca só o sim.
+  // deno-lint-ignore no-explicit-any
+  assertEquals(riscoDoEnvioLivrePorDestino(q("fornecedor"), comData, "qualquer" as any), { risco: "high", motivo: "o texto cita data" });
+  // Em nenhuma das três o lado do cliente muda.
+  for (const leitura of ["dinheiro", "tudo", "nada"] as const) {
+    assertEquals(riscoDoEnvioLivrePorDestino(q("cliente"), NADA, leitura), { risco: "high", motivo: "vai a cliente" }, leitura);
+    assertEquals(riscoDoEnvioLivrePorDestino(q("cliente"), comData, leitura), { risco: "high", motivo: "vai a cliente; o texto cita data" }, leitura);
+    assertEquals(riscoDoEnvioLivrePorDestino(q("sem_cadastro"), NADA, leitura).risco, "high", leitura);
+    assertEquals(riscoDoEnvioLivrePorDestino(q("fornecedor", "equipe"), NADA, leitura).risco, "high", leitura);
+  }
 });
 
 // ─── O conteúdo ─────────────────────────────────────────────────────────────────────────────────
@@ -319,6 +386,23 @@ Deno.test("S1 conteúdo: valor em número, abreviado, por extenso e depois de ve
   for (const t of comValor) assertEquals(conteudoQuePedePin(t).valor, true, t);
   const semValor = ["Bom dia, tudo bem? Pode me mandar a foto da peça?", "O barco é o de 32 pés", "chegaram os 2 filtros", "milímetros de folga", "5 kg de cabo"];
   for (const t of semValor) assertEquals(conteudoQuePedePin(t).valor, false, t);
+});
+
+Deno.test("IA-19 conteúdo: pagamento falado sem número conta como valor (pagar, transferir, depositar)", () => {
+  const comPagamento = [
+    "já paguei", "Já pagamos, pode conferir.", "vou pagar", "o cliente pagou", "está pago", "a conta está paga", "estou pagando agora",
+    "pagaremos na entrega", "pode pagar por mim?", "PAGO!", "transferência feita", "Transferencia feita", "vou transferir agora", "já transferi",
+    "transfiro assim que chegar", "depósito feito", "depositei", "vou depositar", "faz o pix", "fecha por R$ 4.200",
+  ];
+  for (const t of comPagamento) assertEquals(conteudoQuePedePin(t).valor, true, t);
+  // O pedido comum a fornecedor não fala de dinheiro, e palavra parecida não é pagamento.
+  const semPagamento = [
+    "Me manda o orçamento?", "Tem em estoque?", "Chega quando?", "Pode me passar a cotação das baterias?", "Confirma a entrega?", "Me manda a nota",
+    "Pode apagar a luz do galpão", "Veja a página 2 do catálogo", "O pagode é sábado", "Tem como transportar a lancha?", "Recebi o comprovante, obrigado",
+  ];
+  for (const t of semPagamento) assertEquals(conteudoQuePedePin(t).valor, false, t);
+  // Lado seguro conhecido: "depósito" de guardar peça também acusa.
+  assertEquals(conteudoQuePedePin("Tem no depósito?").valor, true);
 });
 
 Deno.test("S1 conteúdo: data marcada e data relativa contam", () => {
@@ -379,8 +463,9 @@ Deno.test("S1 gancho: decide pelo número que vai receber, não pelo argumento q
 
   const fornecedor = cadastros({ suppliers: [{ id: "s1", phone: "(47) 99915-9654" }] });
   assertEquals(await riscoDaMensagemLivre({ to_phone: NUMERO, message: NEUTRO }, ctx(banco(fornecedor).db), "to_phone"), { risco: "medium", motivo: null });
+  // (IA-19) A fornecedor o motivo diz só o valor, mesmo com data no texto.
   assertEquals(await riscoDaMensagemLivre({ to_phone: NUMERO, message: "Pode entregar o cabo amanhã? Pago R$ 350 no Pix." }, ctx(banco(fornecedor).db), "to_phone"),
-    { risco: "high", motivo: "o texto cita valor e data" });
+    { risco: "high", motivo: "o texto cita valor" });
   assertEquals(await riscoDaMensagemLivre({ to_phone: NUMERO, message: NEUTRO }, ctx(banco(cadastros()).db), "to_phone"),
     { risco: "high", motivo: "o número não tem cadastro (vale como cliente)" });
   // (Revisão) O mesmo fornecedor, cadastrado ou alterado agora: não vale o sim, e o motivo diz por quê.
@@ -388,6 +473,58 @@ Deno.test("S1 gancho: decide pelo número que vai receber, não pelo argumento q
   assertEquals(await riscoDaMensagemLivre({ to_phone: NUMERO, message: NEUTRO }, ctx(banco(feitoAgora).db), "to_phone"), { risco: "high", motivo: CADASTRO_FEITO_HA_POUCO });
   assertEquals(await riscoDaMensagemLivre({ phone: NUMERO, message: "Fechado por R$ 350." }, ctx(banco(feitoAgora).db), "phone"),
     { risco: "high", motivo: `${CADASTRO_FEITO_HA_POUCO}; o texto cita valor` });
+});
+
+Deno.test("IA-19 gancho: horário, data, prazo e promessa a fornecedor e à equipe saem só com o sim; dinheiro pede PIN e o motivo diz só valor", async () => {
+  const fornecedor = cadastros({ suppliers: [{ id: "s1", phone: "(47) 99915-9654" }] });
+  const usuario = cadastros({ app_users: [{ id: "tec-1", phone: null, phone_normalized: "5547999159654", active: true }] });
+  const favorecido = cadastros({ payees: [{ id: "p1", phone: "47999159654", active: true, app_user_id: null }] });
+  const cliente = cadastros({ clients: [{ id: "c1", whatsapp: "(47) 99915-9654", phone: null }] });
+  const risco = (tabelas: Record<string, Linha[]>, message: string) => riscoDaMensagemLivre({ to_phone: NUMERO, message }, ctx(banco(tabelas).db), "to_phone");
+
+  // O aviso do horário ao técnico, o pedido de entrega ao fornecedor: nada de dinheiro, só o "sim".
+  const semDinheiro = [
+    "Alex, amanhã começamos às 8h na marina.",
+    "Pode entregar na sexta?",
+    "Preciso das baterias em 5 dias úteis.",
+    "Pode deixar que eu te aviso quando o barco subir.",
+    "Te mando a lista de material hoje à tarde.",
+  ];
+  for (const message of semDinheiro) {
+    const c = conteudoQuePedePin(message);
+    assert(c.data || c.promessa, `o texto tem de citar data ou promessa, senão o caso não prova nada: ${message}`);
+    assertEquals(c.valor, false, message);
+    for (const [nome, tabelas] of [["fornecedor", fornecedor], ["usuário da equipe", usuario], ["favorecido da equipe", favorecido]] as const) {
+      assertEquals(await risco(tabelas, message), SO_O_SIM, `${nome}: ${message}`);
+    }
+    // A cliente a mesma mensagem continua pedindo PIN, com o motivo de antes.
+    const aCliente = await risco(cliente, message);
+    assertEquals(aCliente.risco, "high", message);
+    assertEquals(aCliente.motivo, `vai a cliente; o texto cita ${oQueCita(c)}`, message);
+  }
+  assertEquals(await risco(cliente, "A descida do barco é na sexta às 10h."), { risco: "high", motivo: "vai a cliente; o texto cita data" });
+  assertEquals(await risco(fornecedor, "A descida do barco é na sexta às 10h."), SO_O_SIM);
+
+  // Dinheiro: valor escrito, Pix e pagamento falado. O motivo diz só o valor, mesmo com data ou promessa junto.
+  const comDinheiro = [
+    "Fecha por R$ 4.200?",
+    "Já paguei, pode liberar.",
+    "Faz o pix que eu confirmo.",
+    "Transferência feita.",
+    "Já paguei hoje cedo, te mando o comprovante.",
+    "Deposito amanhã às 9h, pode deixar.",
+  ];
+  for (const message of comDinheiro) {
+    for (const [nome, tabelas] of [["fornecedor", fornecedor], ["usuário da equipe", usuario], ["favorecido da equipe", favorecido]] as const) {
+      assertEquals(await risco(tabelas, message), PIN_PELO_VALOR, `${nome}: ${message}`);
+    }
+  }
+  assertEquals(await risco(cliente, "Já paguei hoje cedo, te mando o comprovante."), { risco: "high", motivo: "vai a cliente; o texto cita valor, data e promessa" });
+
+  // O pedido comum a fornecedor segue só com o "sim".
+  for (const message of ["Me manda o orçamento?", "Tem em estoque?", "Chega quando?"]) {
+    assertEquals(await risco(fornecedor, message), SO_O_SIM, message);
+  }
 });
 
 Deno.test("S1 gancho: nunca lança e nunca devolve menos que o sim; o que não confere vale PIN", async () => {

@@ -6,6 +6,12 @@
 // ou PROMESSA; para fornecedor e equipe basta o "sim" (se o texto a eles citar valor, data ou promessa, pede PIN).
 // Destinatário sem cadastro conta como cliente.
 //
+// (25/11/2026, cartão IA-19) Para fornecedor, equipe e o próprio dono o PIN passou a ser só pelo DINHEIRO. A escolha do
+// dono: "PIN só quando o texto fala de dinheiro (valor, Pix, pagamento). Data, horário e prazo saem só com o 'sim'."
+// O aviso do horário ao técnico sai com o "sim"; "fecha por R$ 4.200" ao fornecedor pede PIN. Para cliente, parceiro,
+// número sem cadastro e número em mais de um tipo de cadastro nada mudou: PIN sempre, e o motivo segue dizendo valor,
+// data e promessa. Ver CONTEUDO_PARA_FORNECEDOR_E_EQUIPE.
+//
 // Até aqui o PIN era decidido pelo ARGUMENTO que o modelo escolhia: com client_id, PIN; com to_phone, só "sim". E a
 // descrição da ferramenta manda usar to_phone para responder uma conversa. Em 90 dias, 19 de 23 mensagens propostas com
 // to_phone iam a número do cadastro de clientes, e 8 saíram sem PIN (spec-seguranca.md do pacote 1). Aqui o risco é
@@ -212,6 +218,24 @@ const VALOR_NO_TEXTO_LIVRE: RegExp[] = [
   ),
 ];
 
+// (25/11/2026, cartão IA-19) Pagamento falado sem número. Para fornecedor e equipe o PIN passou a ser só pelo dinheiro,
+// e "já paguei", "vou transferir agora" e "depósito feito" não trazem moeda nem número para as listas de cima acharem.
+// As três famílias inteiras (pagar, transferir, depositar), palavra inteira e sem acento: "apagar" e "página" não casam.
+// Ficam de fora, de propósito, as palavras do pedido comum a fornecedor (orçamento, cotação, estoque, entrega, nota,
+// comprovante): "me manda o orçamento", "tem em estoque?" e "chega quando?" saem só com o "sim".
+// Lado seguro conhecido: "deposito" também é o depósito de guardar peça ("tem no depósito?"), e acusa.
+const PAGAMENTO_FALADO: RegExp[] = [
+  new RegExp(
+    ANTES + "(?:pagar|pago|paga|pagos|pagas|paguei|pagou|pagamos|pagam|pagaram|pagando|pague|paguem|pagarei|pagara|pagaremos|pagarao)" + DEPOIS,
+    "u",
+  ),
+  new RegExp(
+    ANTES + "(?:transferir|transferi|transfiro|transfere|transferiu|transferimos|transferindo|transferid[oa]s?|transferencias?)" + DEPOIS,
+    "u",
+  ),
+  new RegExp(ANTES + "(?:depositar|depositei|deposita|depositou|depositamos|depositando|depositad[oa]s?|depositos?)" + DEPOIS, "u"),
+];
+
 const DATA_NO_TEXTO_LIVRE: RegExp[] = [
   // relativas que a lista do validador não tem
   new RegExp(
@@ -232,8 +256,9 @@ const DATA_NO_TEXTO_LIVRE: RegExp[] = [
 /**
  * O texto cita valor, data/hora ou promessa? Erra para o lado de ACHAR (um PIN a mais custa pouco; um valor ou uma
  * promessa que sai sem o dono ver custa caro).
- *   valor    = a lista do validador do retorno (R$, %, 350,00, reais, pix, preço, boleto, sinal, "valor de 3"…) ou valor
- *              abreviado, por extenso ou depois de verbo de preço;
+ *   valor    = a lista do validador do retorno (R$, %, 350,00, reais, pix, preço, boleto, sinal, "valor de 3"…), valor
+ *              abreviado, por extenso ou depois de verbo de preço, ou pagamento falado sem número ("já paguei",
+ *              "transferência feita", "vou depositar"). É o "fala de dinheiro" da regra de fornecedor e equipe;
  *   data     = a lista do validador (dd/mm, dia da semana, hoje/amanhã/ontem, mês, 19h, 21:40, 30 min) ou data relativa;
  *   promessa = a lista do validador ("garanto", "pode deixar", "fica pronto") ou a promessa do dono de ai/promessa.ts
  *              ("te mando", "vou enviar", "amanhã mando", "deixa comigo").
@@ -245,7 +270,7 @@ export function conteudoQuePedePin(textoDaMensagem: unknown): ConteudoDoTexto {
     const doValidador = citaValorDataOuPromessa(bruto);
     const t = semAcento(bruto);
     return {
-      valor: doValidador.valor || VALOR_NO_TEXTO_LIVRE.some((r) => r.test(t)),
+      valor: doValidador.valor || VALOR_NO_TEXTO_LIVRE.some((r) => r.test(t)) || PAGAMENTO_FALADO.some((r) => r.test(t)),
       data: doValidador.data || DATA_NO_TEXTO_LIVRE.some((r) => r.test(t)),
       promessa: doValidador.promessa || detectarPromessa(bruto, new Date()) !== null,
     };
@@ -286,10 +311,16 @@ export function avisoDaFraseDoAssistente(frase: unknown): string | null {
 // ─── A regra ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * As duas leituras da regra do dono. true (a que vale, confirmada em 24/11/2026): o conteúdo vale para todos, e a
- * mensagem a fornecedor ou equipe que cita valor, data ou promessa pede PIN. false: fornecedor e equipe sempre só "sim".
+ * O que, no texto, faz a mensagem a fornecedor, equipe ou ao próprio dono pedir PIN. As três leituras da regra do dono:
+ *   "dinheiro" (a que vale, cartão IA-19 de 25/11/2026): só quando o texto fala de dinheiro (o campo `valor`); data,
+ *              hora, prazo e promessa, sozinhos, saem só com o "sim";
+ *   "tudo"     (a de 24/11/2026): valor, data ou promessa pedem PIN;
+ *   "nada"     : fornecedor e equipe sempre só o "sim".
+ * Voltar atrás é trocar a palavra da constante (uma linha). Para cliente, parceiro, número sem cadastro e número em mais
+ * de um tipo de cadastro a leitura não muda nada: PIN sempre.
  */
-export const CONTEUDO_VALE_PARA_FORNECEDOR_E_EQUIPE = true;
+export type ConteudoParaFornecedorEEquipe = "dinheiro" | "tudo" | "nada";
+export const CONTEUDO_PARA_FORNECEDOR_E_EQUIPE: ConteudoParaFornecedorEEquipe = "dinheiro";
 
 const ROTULO_DO_DESTINO: Record<Destino, string> = {
   cliente: "de cliente",
@@ -308,18 +339,22 @@ export const CADASTRO_FEITO_HA_POUCO = "o cadastro deste número foi criado ou a
 
 /**
  * A regra pura (sem banco): risco e motivo pelo destino e pelo conteúdo. O motivo é o que o dono lê depois de
- * "🔒 No WhatsApp, pede PIN: ". null = só o "sim" (fornecedor, equipe ou o próprio dono, com texto que não cita nada).
+ * "🔒 No WhatsApp, pede PIN: ". null = só o "sim" (fornecedor, equipe ou o próprio dono, com texto que não fala de
+ * dinheiro).
  *
- *  · sem número conferido                          → PIN
- *  · número em mais de um tipo de cadastro         → PIN ("vale o mais protegido"), mesmo sem cliente entre eles
- *  · cliente, parceiro ou sem cadastro             → PIN (sem cadastro por ter só cadastro feito há pouco: diz isso)
- *  · fornecedor, equipe ou o próprio, com conteúdo → PIN (com conteudoParaTodos, a leitura que vale)
- *  · fornecedor, equipe ou o próprio, sem conteúdo → só "sim"
+ *  · sem número conferido                            → PIN
+ *  · número em mais de um tipo de cadastro           → PIN ("vale o mais protegido"), mesmo sem cliente entre eles
+ *  · cliente, parceiro ou sem cadastro               → PIN (sem cadastro por ter só cadastro feito há pouco: diz isso)
+ *  · fornecedor, equipe ou o próprio, com dinheiro   → PIN, e o motivo diz só o que disparou: "o texto cita valor"
+ *  · fornecedor, equipe ou o próprio, sem dinheiro   → só "sim", mesmo com data, hora, prazo ou promessa no texto
+ *
+ * Nas quatro primeiras linhas o motivo junta tudo o que o texto cita (valor, data e promessa), como sempre. `leitura`
+ * só existe para o teste e para voltar atrás (CONTEUDO_PARA_FORNECEDOR_E_EQUIPE); leitura que não existe vale "tudo".
  */
 export function riscoDoEnvioLivrePorDestino(
   q: QuemRecebe,
   c: ConteudoDoTexto,
-  conteudoParaTodos: boolean = CONTEUDO_VALE_PARA_FORNECEDOR_E_EQUIPE,
+  leitura: ConteudoParaFornecedorEEquipe = CONTEUDO_PARA_FORNECEDOR_E_EQUIPE,
 ): { risco: "high" | "medium"; motivo: string | null } {
   const cita = oQueCita(c);
   const doTexto = cita ? `o texto cita ${cita}` : null;
@@ -331,8 +366,10 @@ export function riscoDoEnvioLivrePorDestino(
   else if (destinos[0] === "parceiro") doDestino = "o número é de parceiro";
   else if (destinos[0] === "sem_cadastro") doDestino = q.cadastroRecente === true ? CADASTRO_FEITO_HA_POUCO : "o número não tem cadastro (vale como cliente)";
   if (doDestino) return { risco: "high", motivo: doTexto ? `${doDestino}; ${doTexto}` : doDestino };
-  if (conteudoParaTodos && doTexto) return { risco: "high", motivo: doTexto };
-  return { risco: "medium", motivo: null };
+  // Daqui para baixo o destino é um só: fornecedor, equipe ou o próprio dono. Quem decide é o texto, pela leitura que vale.
+  if (leitura === "nada") return { risco: "medium", motivo: null };
+  if (leitura === "dinheiro") return c.valor ? { risco: "high", motivo: "o texto cita valor" } : { risco: "medium", motivo: null };
+  return doTexto ? { risco: "high", motivo: doTexto } : { risco: "medium", motivo: null };
 }
 
 /**

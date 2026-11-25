@@ -4,7 +4,8 @@
 // Como era: PIN só com client_id; com to_phone (que a própria descrição manda usar para responder conversa), só "sim",
 // mesmo indo a cliente. E com client_id E to_phone o envio ia ao to_phone, com o cartão mostrando o número do cadastro.
 // O que se fixa aqui, pelas ferramentas de verdade e pelo executor do agente, com banco falso e dados inventados:
-//   · fornecedor com texto neutro: só o "sim"; com valor, data ou promessa: PIN;
+//   · fornecedor com texto neutro: só o "sim"; com dinheiro no texto: PIN (cartão IA-19, 25/11/2026: data, hora, prazo e
+//     promessa, sozinhos, saem com o "sim");
 //   · número de cliente por to_phone/phone, número sem cadastro, leitura que falha: PIN, com o motivo no cartão;
 //   · client_id com outro número junto, cliente sem número ou que não existe: recusa que ensina, sem cartão;
 //   · o envio usa o mesmo número do cartão; o que não fecha não sai.
@@ -173,7 +174,7 @@ Deno.test("S1 mensagem livre: as duas ferramentas conferem o risco no servidor; 
   assert(NEVER_AUTONOMOUS.has("send_whatsapp_message") && NEVER_AUTONOMOUS.has("schedule_whatsapp_message"));
 });
 
-Deno.test("S1 mensagem livre: a fornecedor, texto neutro pede só o sim; com valor, data ou promessa pede PIN", async () => {
+Deno.test("S1 mensagem livre: a fornecedor, texto neutro pede só o sim; com dinheiro no texto pede PIN (IA-19)", async () => {
   const b = banco();
   const r = await executarChamadaDeTool({ name: "send_whatsapp_message", input: { to_phone: "47 98888-7777", message: NEUTRO } }, aVista(enviar, b.db));
   assertEquals(r.proposal?.risk_level, "medium");
@@ -183,18 +184,50 @@ Deno.test("S1 mensagem livre: a fornecedor, texto neutro pede só o sim; com val
   assertEquals(String(p.summary).includes("🔒"), false);
   assertStringIncludes(p.summary, "WhatsApp: +55 (47) 98888-7777");
 
-  const casos: Array<[string, string]> = [
-    ["Pode entregar o cabo amanhã? Pago R$ 350 no Pix.", "o texto cita valor e data"],
-    ["Fechado por dois mil, pode separar.", "o texto cita valor"],
-    ["Passo aí na sexta para pegar.", "o texto cita data"],
-    ["Pode deixar que te mando o comprovante.", "o texto cita promessa"],
+  // Dinheiro: valor escrito, por extenso, Pix e pagamento falado. O motivo diz só o valor, mesmo com data no texto.
+  const comDinheiro = [
+    "Pode entregar o cabo amanhã? Pago R$ 350 no Pix.",
+    "Fechado por dois mil, pode separar.",
+    "Fecha por R$ 4.200?",
+    "Já paguei, pode liberar.",
+    "Transferência feita na sexta.",
   ];
-  for (const [mensagem, motivo] of casos) {
+  for (const mensagem of comDinheiro) {
     const bb = banco();
     const rr = await executarChamadaDeTool({ name: "send_whatsapp_message", input: { to_phone: FORNECEDOR, message: mensagem } }, aVista(enviar, bb.db));
     assertEquals(rr.proposal?.risk_level, "high", mensagem);
-    assertEquals(pendencias(bb)[0].risk_reason, motivo, mensagem);
-    assertEquals(ultimaLinha(pendencias(bb)[0].summary), `🔒 No WhatsApp, pede PIN: ${motivo}.`, mensagem);
+    assertEquals(pendencias(bb)[0].risk_level, "high", mensagem);
+    assertEquals(pendencias(bb)[0].risk_reason, "o texto cita valor", mensagem);
+    assertEquals(ultimaLinha(pendencias(bb)[0].summary), "🔒 No WhatsApp, pede PIN: o texto cita valor.", mensagem);
+  }
+});
+
+Deno.test("IA-19 mensagem livre: data, hora, prazo e promessa a fornecedor e à equipe saem só com o sim, sem a linha do PIN", async () => {
+  // Até 24/11/2026 as duas primeiras pediam PIN ("o texto cita data", "o texto cita promessa").
+  const semDinheiro = [
+    "Passo aí na sexta para pegar.",
+    "Pode deixar que te mando o comprovante.",
+    "Amanhã começamos às 8h na marina.",
+    "Preciso das baterias em 5 dias úteis.",
+  ];
+  for (const mensagem of semDinheiro) {
+    for (const numero of [FORNECEDOR, TECNICO]) {
+      const b = banco();
+      const r = await executarChamadaDeTool({ name: "send_whatsapp_message", input: { to_phone: numero, message: mensagem } }, aVista(enviar, b.db));
+      assertEquals(r.proposal?.risk_level, "medium", `${numero}: ${mensagem}`);
+      assertEquals(pendencias(b)[0].risk_level, "medium", `${numero}: ${mensagem}`);
+      assert(!("risk_reason" in pendencias(b)[0]), `${numero}: ${mensagem}`);
+      assertEquals(String(pendencias(b)[0].summary).includes("🔒"), false, `${numero}: ${mensagem}`);
+    }
+    // O agendamento usa a mesma regra.
+    const ag = banco();
+    await executarChamadaDeTool({ name: "schedule_whatsapp_message", input: { phone: FORNECEDOR, scheduled_at: QUANDO, message: mensagem } }, aVista(agendar, ag.db));
+    assertEquals(pendencias(ag)[0].risk_level, "medium", `agendamento: ${mensagem}`);
+    // A cliente a mesma mensagem continua pedindo PIN, e o motivo segue dizendo a data ou a promessa.
+    const cl = banco();
+    await executarChamadaDeTool({ name: "send_whatsapp_message", input: { to_phone: CLIENTE, message: mensagem } }, aVista(enviar, cl.db));
+    assertEquals(pendencias(cl)[0].risk_level, "high", `cliente: ${mensagem}`);
+    assert(/^vai a cliente; o texto cita (data|promessa|data e promessa)$/.test(String(pendencias(cl)[0].risk_reason)), `cliente: ${mensagem} → ${pendencias(cl)[0].risk_reason}`);
   }
 });
 
