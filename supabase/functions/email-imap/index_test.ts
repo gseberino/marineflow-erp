@@ -108,7 +108,7 @@ Deno.test("V2: a triagem que falhou é registrada logo depois de triageEmail, s�
 // urgente (teto do dia, "não repetir", portão), sem caminho próprio; e o aviso só vai aos admins, nunca ao remetente.
 // (Revisão, 24/11/2026) Sem interruptor: a especificação não pede chave nova, e a rodada não lê app_settings por ela.
 Deno.test("F1: a regra fixa do golpe entra pela triagem e usa o aviso do urgente; sem chave para desligar; nada vai ao remetente", () => {
-  assertStringIncludes(fonte, 'import { triageEmail, type Triage } from "../_shared/email/triage.ts";');
+  assertStringIncludes(fonte, 'import { MARCA_DA_REGRA_FIXA, triageEmail, type Triage } from "../_shared/email/triage.ts";');
   // nenhuma chave nova: a única leitura de app_settings do arquivo é a do CNPJ, que já existia
   for (const sumiu of ["CHAVE_DA_REGRA_DO_GOLPE", "regraDoGolpeLigada", "cfgGolpe", "regraDoGolpe"]) assert(!fonte.includes(sumiu), sumiu);
   assertEquals(fonte.split('admin.from("app_settings")').length, 2, "uma leitura de app_settings, a do CNPJ");
@@ -120,8 +120,12 @@ Deno.test("F1: a regra fixa do golpe entra pela triagem e usa o aviso do urgente
   assert(bloco.indexOf('regra === "ignore_always"') < bloco.indexOf("await triageEmail(email"), "silenciado decide antes");
   // um aviso só, o do urgente, com as mesmas travas: nenhum atalho pela regra
   assertEquals(fonte.split("await avisarUrgente(").length, 2, "um ponto de aviso só");
-  const aviso = bloco.slice(bloco.indexOf('if (recente && t.classe === "urgent" && jaAvisados < MAX_URGENTES_PADRAO) {'));
-  assert(aviso.length > 0 && aviso.indexOf("await jaAvisadoAntes(") < aviso.indexOf("await avisarUrgente("), "teto e 'não repetir' antes do aviso");
+  const inicioDoAviso = bloco.indexOf('if (recente && t.classe === "urgent") {');
+  assert(inicioDoAviso > 0, "o bloco do aviso de urgente");
+  const aviso = bloco.slice(inicioDoAviso);
+  const teto = aviso.indexOf("if (!cabeMaisUmAviso(");
+  assert(teto > 0 && teto < aviso.indexOf("await jaAvisadoAntes(") && aviso.indexOf("await jaAvisadoAntes(") < aviso.indexOf("await avisarUrgente("),
+    "teto, depois 'não repetir', depois o aviso");
   assertStringIncludes(aviso, "await avisarUrgente(admin, conta.address, remetente, email.subject, t.motivo, t.alertaFraude,");
   for (const atalho of ["deterministica", "golpe_pela_regra"]) assert(!aviso.includes(atalho), `o aviso não olha ${atalho}`);
   // quem recebe: só os admins com o canal ligado (app_users); o endereço do remetente só serve de chave no portão
@@ -131,6 +135,43 @@ Deno.test("F1: a regra fixa do golpe entra pela triagem e usa o aviso do urgente
   assertStringIncludes(fn, "const telefones = ((quem ?? []) as { phone_normalized: string }[]).map((u) => u.phone_normalized);");
   assertEquals(fn.split('admin.from("whatsapp_send_queue")').length, 2, "uma escrita na fila, para os telefones lidos");
   for (const saida of ["email_outbox", "sendEmail", "smtp", "responder"]) assert(!fn.toLowerCase().includes(saida.toLowerCase()), `sem ${saida}`);
+});
+
+// Revisão do pacote 1 (24/11/2026). Três segundas vias de boleto de manhã gastavam os 3 avisos do dia, e o pedido real de
+// troca de conta da tarde ficava urgente no banco, sem aviso e sem contador. O que se protege:
+//   · só a regra FORTE (conta, chave Pix) conta como golpe pela regra; a de boleto fica notify e é só contada;
+//   · o alerta da regra forte tem a própria cota do dia (cabeMaisUmAviso, digest_test.ts), lida só quando a regra casa;
+//   · o que o teto segura fica contado em urgentes_barrados (não avisa, não marca alerted_at);
+//   · a cota conta os alertas de hoje com a marca da regra e o alerta de fraude (sem vírgula no filtro).
+Deno.test("Revisão F1: a regra forte tem cota própria, a de boleto não avisa, e o que o teto segura é contado", () => {
+  assertStringIncludes(fonte, 'import { cabeMaisUmAviso } from "../_shared/email/digest.ts";');
+  assert(!fonte.includes("MAX_URGENTES_PADRAO"), "o teto mora em cabeMaisUmAviso");
+  const ini = fonte.indexOf("// Triagem só do que é recente");
+  const bloco = fonte.slice(ini, fonte.indexOf("cursor = uid;", ini));
+  // forte × boleto, decidido pelo que a triagem devolveu (nunca pelo texto do e-mail aqui)
+  assertStringIncludes(bloco, "const daRegraDoGolpe = t.golpePelaRegra?.forte === true;");
+  assertStringIncludes(bloco, "if (daRegraDoGolpe) r.golpe_pela_regra = Number(r.golpe_pela_regra ?? 0) + 1;");
+  assertStringIncludes(bloco, "else if (t.golpePelaRegra) r.boleto_pela_regra = Number(r.boleto_pela_regra ?? 0) + 1;");
+  // o aviso só nasce de urgente: a regra de boleto (notify) não chega ao bloco do aviso
+  const aviso = bloco.slice(bloco.indexOf('if (recente && t.classe === "urgent") {'));
+  assertStringIncludes(aviso, "if (daRegraDoGolpe) golpesDaRegraHoje ??= await golpesDaRegraAvisadosHoje(admin);");
+  assertStringIncludes(aviso, "if (!cabeMaisUmAviso({ daRegraDoGolpe, avisados: jaAvisados, golpesDaRegra: golpesDaRegraHoje ?? 0 })) {");
+  // barrado: só conta. O aviso, o alerted_at e as duas contas ficam no outro ramo.
+  const barrado = aviso.indexOf("r.urgentes_barrados = Number(r.urgentes_barrados ?? 0) + 1;");
+  const senao = aviso.indexOf("} else {", barrado);
+  assert(barrado > 0 && senao > barrado, "o ramo do barrado vem antes do aviso");
+  const ramoDoBarrado = aviso.slice(aviso.indexOf("if (!cabeMaisUmAviso("), senao);
+  for (const proibido of ["avisarUrgente", "alerted_at", "jaAvisados++"]) assert(!ramoDoBarrado.includes(proibido), `barrado não faz ${proibido}`);
+  const ramoDoAviso = aviso.slice(senao);
+  assert(ramoDoAviso.indexOf("jaAvisados++;") > ramoDoAviso.indexOf("await avisarUrgente("), "conta depois de avisar");
+  assertStringIncludes(ramoDoAviso, "if (daRegraDoGolpe) golpesDaRegraHoje = (golpesDaRegraHoje ?? 0) + 1;");
+  // a cota nasce vazia e só é lida quando a regra casa (nenhuma leitura a mais por rodada)
+  assertStringIncludes(fonte, "let golpesDaRegraHoje: number | null = null;");
+  assertEquals(fonte.split("await golpesDaRegraAvisadosHoje(admin)").length, 2, "uma leitura só, dentro do bloco do aviso");
+  // a conta de hoje: avisados (alerted_at) de hoje, com alerta de fraude e a marca da regra no motivo
+  const f = fonte.indexOf("async function golpesDaRegraAvisadosHoje(");
+  const fn = fonte.slice(f, fonte.indexOf("return count ?? 0;", f));
+  assertStringIncludes(fn, '.gte("alerted_at", inicioDeHojeEmBrasilia()).eq("triage_fraud_alert", true).like("triage_reason", `%${MARCA_DA_REGRA_FIXA}%`);');
 });
 
 Deno.test("Fase 4: ?remessas=1 chama a releitura e responde 500 só com erro de leitura (o modo desligado é pulado)", () => {

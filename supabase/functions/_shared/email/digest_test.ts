@@ -1,6 +1,6 @@
 import { assertEquals, assert } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
-  chaveDoAviso, montarSecaoEmail, selecionarUrgentes, taxaDeRuido, MAX_URGENTES_PADRAO,
+  cabeMaisUmAviso, chaveDoAviso, montarSecaoEmail, selecionarUrgentes, taxaDeRuido, MAX_URGENTES_PADRAO,
   type EmailDigestItem,
 } from "./digest.ts";
 import type { TriageClass } from "./triage.ts";
@@ -114,6 +114,31 @@ Deno.test("montarSecaoEmail: só urgente já avisado e ruído não vira 'tudo ru
 Deno.test("selecionarUrgentes: ignora o já avisado; o teto padrão não muda", () => {
   assertEquals(selecionarUrgentes([item("urgent", { jaAvisado: true }), item("urgent", { remetente: "B" })]).map((i) => i.remetente), ["B"]);
   assertEquals(MAX_URGENTES_PADRAO, 3);
+});
+
+// Revisão do pacote 1 (24/11/2026): o teto do aviso na hora (email-imap). Três urgentes de manhã calavam o pedido de troca
+// de conta da tarde. O que se protege: o aviso comum respeita o teto do dia; o alerta de golpe da regra fixa forte tem a
+// própria cota (não é barrado pelos comuns) e também tem teto (quem dispara a regra é texto de fora).
+Deno.test("cabeMaisUmAviso: o aviso comum respeita o teto do dia; o alerta de golpe da regra fixa tem cota própria, com teto", () => {
+  const comum = (avisados: number, golpesDaRegra = 0) => cabeMaisUmAviso({ daRegraDoGolpe: false, avisados, golpesDaRegra });
+  const golpe = (avisados: number, golpesDaRegra: number) => cabeMaisUmAviso({ daRegraDoGolpe: true, avisados, golpesDaRegra });
+  // comum: 3 por dia, contando TODO aviso de hoje (os de golpe pela regra também gastam a atenção do dono)
+  assertEquals([comum(0), comum(2), comum(3), comum(7)], [true, true, false, false]);
+  assertEquals(comum(3, 0), false);
+  assertEquals(comum(2, 2), true, "a conta do comum é a dos avisos de hoje, não a da cota da regra");
+  // golpe pela regra fixa: os 3 avisos do dia já gastos não o barram…
+  assertEquals([golpe(3, 0), golpe(5, 2), golpe(99, 0)], [true, true, true]);
+  // …e ele tem o próprio teto, do mesmo tamanho
+  assertEquals([golpe(3, 3), golpe(0, 3), golpe(6, 4)], [false, false, false]);
+  // o pior dia: 3 comuns e 3 de golpe pela regra, nunca mais que isso
+  let avisados = 0, golpes = 0, saiu = 0;
+  for (let i = 0; i < 10; i++) if (comum(avisados, golpes)) { avisados++; saiu++; }
+  for (let i = 0; i < 10; i++) if (golpe(avisados, golpes)) { avisados++; golpes++; saiu++; }
+  for (let i = 0; i < 10; i++) if (comum(avisados, golpes)) { avisados++; saiu++; }
+  assertEquals([saiu, golpes], [6, 3]);
+  // teto pedido por quem chama; teto negativo vale zero
+  assertEquals([cabeMaisUmAviso({ daRegraDoGolpe: false, avisados: 0, golpesDaRegra: 0 }, 0), cabeMaisUmAviso({ daRegraDoGolpe: true, avisados: 0, golpesDaRegra: 1 }, 2)], [false, true]);
+  assertEquals(cabeMaisUmAviso({ daRegraDoGolpe: true, avisados: 0, golpesDaRegra: 0 }, -1), false);
 });
 
 Deno.test("chaveDoAviso: mesmo remetente e assunto, sem 're:'/'fwd:', caixa e espaços", () => {

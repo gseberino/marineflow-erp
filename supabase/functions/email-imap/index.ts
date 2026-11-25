@@ -39,6 +39,12 @@
 // e no corpo o pedido de troca de conta, de chave Pix ou de boleto; casou, o e-mail sai urgente com o alerta de fraude
 // e segue o MESMO aviso ao dono (teto do dia, "não repetir", portão da voz única). Nada vai ao remetente. Não há
 // chave de app_settings para desligar (a especificação não pede; revisão de 24/11/2026): voltar atrás = reverter o commit.
+//
+// Revisão do pacote 1 (24/11/2026): (1) só a regra FORTE (conta, chave Pix, dados bancários) sai urgente; a regra só
+// de boleto ("segue boleto atualizado": a segunda via de todo dia) fica notify, com o motivo, e não gasta aviso;
+// (2) o alerta da regra forte tem a própria cota do dia (digest.ts, cabeMaisUmAviso): os 3 avisos comuns não o barram,
+// e ele também tem teto; (3) o urgente que o teto segura fica contado (urgentes_barrados) em vez de calado; (4) a
+// regra roda também no e-mail de remetente que não aceita resposta e na resposta automática (triage.ts).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
@@ -47,8 +53,8 @@ import { ClienteImap, dataImap, internalDateParaIso } from "../_shared/email/ima
 import { mimeParaInbound } from "../_shared/email/mime.ts";
 import { applySenderRules, persistInboundEmail, storagePathFor } from "../_shared/email/store.ts";
 import { matchSender, type MatchCandidate } from "../_shared/email/sender-match.ts";
-import { triageEmail, type Triage } from "../_shared/email/triage.ts";
-import { MAX_URGENTES_PADRAO } from "../_shared/email/digest.ts";
+import { MARCA_DA_REGRA_FIXA, triageEmail, type Triage } from "../_shared/email/triage.ts";
+import { cabeMaisUmAviso } from "../_shared/email/digest.ts";
 import { displaySender, normalizeAddress } from "../_shared/email/normalize.ts";
 import { extrairDados, fornecedorPelaNota } from "../_shared/email/dados.ts";
 import type { InboundEmail } from "../_shared/email/types.ts";
@@ -125,12 +131,28 @@ function ligacaoPelaNota(dados: Parameters<typeof fornecedorPelaNota>[0], porCnp
   return id ? { supplier_id: id, match_confidence: 1, match_reason: "nfe_cnpj" } : {};
 }
 
-/** Urgentes já avisados hoje (Brasília), para o teto. */
-async function avisadosHoje(admin: Db): Promise<number> {
+/** O começo de hoje em Brasília (o corte do teto do dia). */
+function inicioDeHojeEmBrasilia(): string {
   const inicio = new Date(Date.now() - 3 * 3600_000);
   inicio.setUTCHours(0, 0, 0, 0);
-  const desde = new Date(inicio.getTime() + 3 * 3600_000).toISOString();
-  const { count } = await admin.from("email_messages").select("id", { count: "exact", head: true }).gte("alerted_at", desde);
+  return new Date(inicio.getTime() + 3 * 3600_000).toISOString();
+}
+
+/** Urgentes já avisados hoje (Brasília), para o teto. */
+async function avisadosHoje(admin: Db): Promise<number> {
+  const { count } = await admin.from("email_messages").select("id", { count: "exact", head: true }).gte("alerted_at", inicioDeHojeEmBrasilia());
+  return count ?? 0;
+}
+
+/**
+ * (Revisão do pacote 1, 24/11/2026) Dos avisados hoje, os alertas de golpe que vieram da regra fixa forte (triage.ts:
+ * o motivo traz a marca da regra e o alerta de fraude está ligado). É a cota própria deles (digest.ts, cabeMaisUmAviso).
+ * Lido só quando a regra casa, não a cada rodada. Erro na leitura = 0, como em avisadosHoje: um alerta a mais é melhor
+ * que um golpe calado (e a rodada segue contando o que ela mesma avisou).
+ */
+async function golpesDaRegraAvisadosHoje(admin: Db): Promise<number> {
+  const { count } = await admin.from("email_messages").select("id", { count: "exact", head: true })
+    .gte("alerted_at", inicioDeHojeEmBrasilia()).eq("triage_fraud_alert", true).like("triage_reason", `%${MARCA_DA_REGRA_FIXA}%`);
   return count ?? 0;
 }
 
@@ -278,6 +300,8 @@ servirComCors(async (req) => {
   let cands: MatchCandidate[] | null = null;
   let porCnpj: Map<string, string> | null = null;
   let jaAvisados = diagnostico ? 0 : await avisadosHoje(admin);
+  // (Revisão, 24/11/2026) a cota própria do alerta de golpe da regra fixa: só é lida quando a regra casa
+  let golpesDaRegraHoje: number | null = null;
   const portao = diagnostico ? PORTAO_DESLIGADO : await lerPortao(admin);
   // (20/10/2026, P4.5) o dono só é lido com a voz ligada de verdade (sombra/desligada: nada a mais)
   const dono = portao.modo === "ligado" ? await lerDonoDaVoz(admin) : null;
@@ -371,8 +395,11 @@ servirComCors(async (req) => {
             : await triageEmail(email);
           // (V2, 24/11/2026) a triagem que falhou deixa registro, e a manhã conta por rotina. Nunca lança.
           if (t.falha) await registrarFalhaDeRotina(admin, { rotina: "triagem_email", mensagem: t.falha });
-          // (F1) pego pela regra fixa do golpe: sai urgente abaixo, pelo mesmo caminho de aviso de sempre
-          if (t.falha && t.alertaFraude) r.golpe_pela_regra = Number(r.golpe_pela_regra ?? 0) + 1;
+          // (F1) pego pela regra fixa do golpe. Regra forte (conta, chave Pix): sai urgente abaixo, pelo mesmo caminho de
+          // aviso de sempre. Regra só de boleto (revisão, 24/11/2026): fica notify, com o motivo; só é contada.
+          const daRegraDoGolpe = t.golpePelaRegra?.forte === true;
+          if (daRegraDoGolpe) r.golpe_pela_regra = Number(r.golpe_pela_regra ?? 0) + 1;
+          else if (t.golpePelaRegra) r.boleto_pela_regra = Number(r.boleto_pela_regra ?? 0) + 1;
           if (regra === "always_notify" && t.classe === "ignore") t = { ...t, classe: "notify", motivo: "remetente marcado para sempre avisar" };
           await admin.from("email_messages").update({
             triage_class: t.classe, triage_confidence: t.confianca, triage_evidence: t.evidencia || null,
@@ -380,18 +407,27 @@ servirComCors(async (req) => {
             muted: regra === "ignore_always",
           }).eq("id", id);
           r.triados = Number(r.triados) + 1;
-          if (recente && t.classe === "urgent" && jaAvisados < MAX_URGENTES_PADRAO) {
-            // Mesmo remetente e assunto já avisado: a triagem fica gravada, o aviso não se repete.
-            const repetido = await jaAvisadoAntes(admin, email.from.address, email.subject);
-            if (!repetido) {
-              const remetente = match?.name ?? displaySender(email.from);
-              await avisarUrgente(admin, conta.address, remetente, email.subject, t.motivo, t.alertaFraude,
-                { emailId: id, endereco: normalizeAddress(email.from.address), portao, dono });
-              await admin.from("email_messages").update({ alerted_at: new Date().toISOString() }).eq("id", id);
-              jaAvisados++;
-              r.avisados = Number(r.avisados) + 1;
+          if (recente && t.classe === "urgent") {
+            // O teto do dia. (Revisão, 24/11/2026) O alerta de golpe da regra fixa forte tem a própria cota: os avisos
+            // comuns do dia não o barram, e ele também não fica sem teto (digest.ts, cabeMaisUmAviso). O que o teto
+            // segura deixa de ser calado: fica contado, e o e-mail segue urgente no banco (entra no resumo da manhã).
+            if (daRegraDoGolpe) golpesDaRegraHoje ??= await golpesDaRegraAvisadosHoje(admin);
+            if (!cabeMaisUmAviso({ daRegraDoGolpe, avisados: jaAvisados, golpesDaRegra: golpesDaRegraHoje ?? 0 })) {
+              r.urgentes_barrados = Number(r.urgentes_barrados ?? 0) + 1;
             } else {
-              r.urgentes_ja_avisados = Number(r.urgentes_ja_avisados ?? 0) + 1;
+              // Mesmo remetente e assunto já avisado: a triagem fica gravada, o aviso não se repete.
+              const repetido = await jaAvisadoAntes(admin, email.from.address, email.subject);
+              if (!repetido) {
+                const remetente = match?.name ?? displaySender(email.from);
+                await avisarUrgente(admin, conta.address, remetente, email.subject, t.motivo, t.alertaFraude,
+                  { emailId: id, endereco: normalizeAddress(email.from.address), portao, dono });
+                await admin.from("email_messages").update({ alerted_at: new Date().toISOString() }).eq("id", id);
+                jaAvisados++;
+                if (daRegraDoGolpe) golpesDaRegraHoje = (golpesDaRegraHoje ?? 0) + 1;
+                r.avisados = Number(r.avisados) + 1;
+              } else {
+                r.urgentes_ja_avisados = Number(r.urgentes_ja_avisados ?? 0) + 1;
+              }
             }
           }
         }

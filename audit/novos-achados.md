@@ -4680,6 +4680,9 @@ quatro estão latentes.
 - **Menor mudança:** passar a regra fixa também nos dois atalhos que dão `notify` (não no de lista, que dá `ignore`: as 2
   ocorrências reais da regra em e-mail de lista são de divulgação). Medido: nos 152 e-mails desses dois atalhos a regra pega 0
   hoje. Não construído aqui.
+- **Situação (revisão do pacote 1, 24/11/2026):** construído. A revisão cobrou o que a crítica de viabilidade pedia, e a regra
+  fixa passou a rodar nos dois atalhos que dão `notify` (commit "Revisão: alerta de golpe por regra fixa…"). O modelo continua
+  sem ler esses e-mails; quem lê é só a regra. Medido de novo com as 16 regras: 0 nos 152.
 
 ### [NOVO-p1-f1-03] O corpo que vem só em HTML é guardado com as entidades de acento ("altera&ccedil;&atilde;o")
 
@@ -4726,3 +4729,17 @@ quatro estão latentes.
 - **Menor mudança:** decisão do dono (está no "Fora do pacote 1" da especificação de segurança): `create_supplier`,
   `update_supplier` e `link_contact_to_entity` pedirem o "sim" quando gravam telefone, dentro ou fora do turno que leu texto de
   fora. Não construído aqui.
+
+### [NOVO-p1-f1-05] Com a IA fora, e-mail que só fala de boleto novo ou trocado não dá alerta de golpe (decisão a confirmar)
+
+- **Onde:** `supabase/functions/_shared/email/triage.ts`, `REGRAS_DO_GOLPE`, as quatro regras com `forte: false`
+  (`troca_de_boleto`, `boleto_alterado`, `boleto_novo`, `boleto_antigo`). Mudado na revisão do pacote 1 (24/11/2026).
+- **Efeito:** a primeira versão do F1 tratava "segue boleto atualizado", "segue novo boleto", "substituição de boleto" e
+  "favor desconsiderar o boleto anterior" como possível golpe. A revisão apontou que isso é a segunda via de todo dia e que
+  cada uma gastava um dos 3 avisos urgentes. Agora esses e-mails ficam `notify`, sem alerta, com o motivo dito ("…pela regra
+  fixa, o e-mail fala em boleto novo."). O outro lado: o golpe do boleto trocado ("desconsidere o boleto anterior, pague este")
+  também deixa de avisar na hora enquanto a triagem por IA estiver fora. Medido em 24/11/2026 (só contagem): nos 1.921 e-mails
+  guardados, as quatro regras de boleto pegam 0 (119 e-mails citam boleto; nenhum com essas frases). Ou seja: até hoje nem o
+  alarme falso nem o golpe apareceram nesta caixa.
+- **Menor mudança:** decisão do dono. Para voltar a alertar só o pedido de não usar o boleto anterior, basta `forte: true` na
+  regra `boleto_antigo` (uma palavra, com o teste). Não mudado aqui.
