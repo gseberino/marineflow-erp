@@ -184,3 +184,48 @@ Deno.test("'Na rua' com entradas esperando baixa: diz quanto do vencido pode já
   assertStringIncludes(manha({ total: 22128.02, n: 2 }), "Na rua: R$ 22.128,02 vencidos (2).\n");
   assertStringIncludes(manha({ total: 22128.02, n: 2, esperando: { total: 0, n: 0 } }), "Na rua: R$ 22.128,02 vencidos (2).\n");
 });
+
+// (Conferência da leva A do pacote 1, 24/11/2026) O rebase juntou na mesma mensagem duas frases novas, cada uma com o
+// teste dela e nenhum com as duas: a da cobrança ("Desses, até … podem já estar pagos", na linha "Na rua") e a da leva A
+// ("IA que falhou desde ontem", no fim da linha "Hoje"). O que se protege: as duas saem juntas, cada uma na linha dela e
+// uma vez só; e, num dia cheio, a soma das duas não tira item da manhã nem some com uma delas: o que encurta é o "Hoje"
+// (a frase da IA fica sem a contagem) e o "logo abaixo". Em 24/11/2026, com os 3 itens longos de 15/10, as duas frases
+// juntas dão 1.056 caracteres: passa da meta de 1.000, que é alvo e não corte (ninguém trunca o texto depois).
+Deno.test("manhã com entrada esperando baixa E rotina de IA que falhou: as duas frases saem juntas, e a soma não tira item nem frase", () => {
+  const naRua = { total: 8574.6, n: 2, esperando: { total: 5000, n: 2 } };
+  const rotinasSemIA = [{ rotulo: "triagem de e-mail", vezes: 12 }, { rotulo: "leitura do prazo do fornecedor", vezes: 1 }];
+  const fraseDaRua = " Desses, até R$ 5.000,00 podem já estar pagos: 2 contas têm entrada no Extrato esperando baixa.";
+  const fraseDaIA = " IA que falhou desde ontem: triagem de e-mail (12 vezes) e leitura do prazo do fornecedor (1 vez).";
+
+  // dia leve: cabe na meta, e as duas saem por extenso
+  const leve = textoDaManha({
+    hoje: HOJE_1510, tipoDoDia: "util", feriado: null, selecao: selecionar([], [], HOJE_1510), naRua, deHoje: { ...VAZIO, rotinasSemIA },
+  });
+  assertEquals(leve, [
+    "Bom dia! Quinta, 15/10. Nada precisa de você hoje.",
+    `Na rua: R$ 8.574,60 vencidos (2).${fraseDaRua}`,
+    "",
+    `Hoje: nada na agenda.${fraseDaIA}`,
+  ].join("\n"));
+
+  // dia cheio (os 3 itens de 15/10): as mesmas linhas da manhã sem as duas frases, com as duas frases a mais
+  const selecao = selecionar(candidatosDoDia(coleta1510(), AGORA_1510, HOJE_1510), [], HOJE_1510);
+  const base = { hoje: HOJE_1510, tipoDoDia: "util" as const, feriado: null, selecao };
+  const sem = textoDaManha({ ...base, naRua: { total: 8574.6, n: 2 }, deHoje: deHoje1510() });
+  const com = textoDaManha({ ...base, naRua, deHoje: { ...deHoje1510(), rotinasSemIA } });
+  const [linhasSem, linhasCom] = [sem.split("\n"), com.split("\n")];
+  assertEquals(linhasCom.length, linhasSem.length);
+  assertEquals(linhasCom[1], `Na rua: R$ 8.574,60 vencidos (2).${fraseDaRua}`);
+  assertEquals(linhasCom.filter((l) => l.includes("podem já estar pagos")).length, 1);
+  const hoje = linhasCom.filter((l) => l.startsWith("Hoje: "));
+  assertEquals(hoje.length, 1);
+  // por extenso quando cabe; sem a contagem quando o "Hoje" encurta. Nos dois casos, no fim da linha e com as duas rotinas
+  assert(/ IA (que )?falhou desde ontem: triagem de e-mail( \(12 vezes\))? e leitura do prazo do fornecedor( \(1 vez\))?\.$/.test(hoje[0]), hoje[0]);
+  assertEquals(linhasCom.filter((l) => l.includes("desde ontem: triagem")).length, 1);
+  // os itens da manhã (as letras) são os mesmos, na mesma ordem
+  const itens = (linhas: string[]) => linhas.filter((l) => /^\*[A-C]\.\*/.test(l));
+  assertEquals(itens(linhasCom), itens(linhasSem));
+  assertEquals(itens(linhasCom).length, 3);
+  // e a mensagem cresce, no máximo, o tamanho das duas frases (o resto só encurta)
+  assert(com.length <= sem.length + fraseDaRua.length + fraseDaIA.length, `${com.length} caracteres (sem as frases: ${sem.length})`);
+});
