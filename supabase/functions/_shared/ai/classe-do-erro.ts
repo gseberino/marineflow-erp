@@ -85,6 +85,14 @@ function classeDoStatus(status: number): string {
 }
 
 /**
+ * A classe da falta de saldo no provedor: "HTTP 402 (sem crédito)". Tem nome próprio porque a manhã das 07:30 a deixa
+ * de fora da frase "IA que falhou desde ontem" (falhas-do-assistente.ts, somaPorRotina): a falta de crédito é conhecida,
+ * e o dono decidiu em 24/11/2026 não ser lembrado dela. Sai de classeDoStatus, para ser sempre a mesma frase que
+ * classeDoErro devolve para o 402.
+ */
+export const SEM_CREDITO_NO_PROVEDOR = classeDoStatus(402);
+
+/**
  * A classe do erro: uma frase fixa, nunca a mensagem. Aceita qualquer coisa que tenha sido lançada (erro, texto,
  * objeto, nada) e nunca lança: o que não der para classificar é "erro não classificado".
  */

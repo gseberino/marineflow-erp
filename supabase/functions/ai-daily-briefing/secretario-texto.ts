@@ -34,6 +34,8 @@ export interface DadosDeHoje {
   /**
    * (pacote 1, V2, 24/11/2026) Rotinas automáticas de IA que falharam desde a manhã de ontem (a triagem de e-mail, a
    * leitura do prazo do fornecedor), com quantas vezes. Ausente ou vazio = a linha "Hoje" de antes, byte a byte.
+   * (fecho da leva A, 24/11/2026) Não traz a falha por falta de crédito no provedor: é conhecida, e o dono decidiu em
+   * 24/11/2026 não ser lembrado dela (falhas-do-assistente.ts, somaPorRotina).
    */
   rotinasSemIA?: Array<{ rotulo: string; vezes: number }>;
 }

@@ -17,7 +17,7 @@
 // e quando a última falha caiu. Basta para o aviso, que é de "continua falhando", não de auditoria.
 import { diaBR } from "../agenda-dia.ts";
 import { logEdgeError } from "../log-error.ts";
-import { soAClasseDoErro } from "./classe-do-erro.ts";
+import { SEM_CREDITO_NO_PROVEDOR, soAClasseDoErro } from "./classe-do-erro.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -141,14 +141,38 @@ export async function registrarFalhaDeRotina(
   });
 }
 
-/** Soma as ocorrências por rotina, na ordem de ROTULO_DA_ROTINA (puro). Contexto desconhecido não entra. */
+// ═══ A FALTA DE CRÉDITO NÃO ENTRA NA FRASE DA MANHÃ (fecho da leva A do pacote 1, 24/11/2026) ═══
+//
+// Decisão do dono de 24/11/2026: a falta de crédito no provedor é conhecida; ele não vai pôr crédito agora e não quer
+// ser lembrado disso. A triagem de e-mail falha hoje justamente por isso (classe "HTTP 402 (sem crédito)"), e a frase
+// "IA que falhou desde ontem: triagem de e-mail (N vezes)" sairia toda manhã. Por isso a linha do log cuja classe é a
+// falta de crédito não entra na soma que a manhã lê: nem na frase, nem na contagem dela.
+//   · O registro não muda: a falha continua sendo gravada (registrarFalhaDeRotina), para diagnóstico.
+//   · A linha continua FORA da conta dos "erros registrados" (secretario-coleta.ts), para não inflar essa conta.
+//   · Falha de OUTRA classe na mesma rotina continua sendo dita, só com as vezes dela.
+// Dá para separar pela mensagem porque log_app_error abre uma linha por contexto e por texto do erro (sem os números),
+// e nenhuma outra classe tem o nome "sem crédito": o `occurrences` dessa linha só conta falta de crédito.
+
+type LinhaDeRotina = { context?: string | null; occurrences?: number | null; message?: string | null };
+
+/** A linha do log é de falta de crédito no provedor? (`message` guarda a classe do erro) */
+export function ehFaltaDeCredito(linha: { message?: string | null } | null | undefined): boolean {
+  return linha?.message === SEM_CREDITO_NO_PROVEDOR;
+}
+
+/**
+ * Soma as ocorrências por rotina, na ordem de ROTULO_DA_ROTINA (puro). Contexto desconhecido não entra, e a linha de
+ * falta de crédito também não (decisão do dono de 24/11/2026, acima): a rotina que só falhou por falta de crédito some
+ * da lista, e a que falhou também por outro motivo sai só com as vezes desse outro motivo.
+ */
 export function somaPorRotina(
-  linhas: Array<{ context?: string | null; occurrences?: number | null }> | null | undefined,
+  linhas: Array<LinhaDeRotina> | null | undefined,
 ): Array<{ rotina: RotinaDeIA; vezes: number }> {
   const soma = new Map<RotinaDeIA, number>();
   for (const l of linhas ?? []) {
     const rotina = rotinaDoContexto(l?.context);
     if (!rotina) continue;
+    if (ehFaltaDeCredito(l)) continue;
     soma.set(rotina, (soma.get(rotina) ?? 0) + (Number(l.occurrences) || 0));
   }
   return (Object.keys(ROTULO_DA_ROTINA) as RotinaDeIA[])
@@ -159,7 +183,8 @@ export function somaPorRotina(
 /**
  * As falhas por rotina nas linhas vistas desde `desde` (erro aberto), ou null quando a leitura falhou.
  * null não é "nenhuma": quem lê não conclui nada. A linha do dia entra inteira quando a última falha
- * dela caiu depois de `desde`.
+ * dela caiu depois de `desde`. É o que a manhã diz: a falta de crédito no provedor fica de fora
+ * (somaPorRotina), e por isso a leitura traz também a mensagem, que guarda a classe do erro.
  */
 export async function falhasDeRotinaDesde(
   admin: Db,
@@ -168,13 +193,13 @@ export async function falhasDeRotinaDesde(
   try {
     const { data, error } = await admin
       .from("app_error_logs")
-      .select("context, occurrences")
+      .select("context, occurrences, message")
       .like("context", PADRAO_DO_CONTEXTO_DE_ROTINA)
       .eq("level", "error")
       .is("resolved_at", null)
       .gte("last_seen_at", desde.toISOString());
     if (error) return null;
-    return somaPorRotina(data as Array<{ context?: string | null; occurrences?: number | null }> | null);
+    return somaPorRotina(data as Array<LinhaDeRotina> | null);
   } catch {
     return null;
   }
