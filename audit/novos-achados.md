@@ -4574,7 +4574,7 @@ quatro estão latentes.
   = 'auto'` gravada (0 chaves). Medido em 90 dias: 6 chamadas de `update_client`, 3 mexiam em contato, 0 com número vazio ou nulo.
 - **Menor mudança:** decisão do dono: o assistente apaga contato de cliente (com "sim" e cartão "antigo → —") ou não. Se não,
   tratar o texto só com espaços como vazio na leitura do pedido. Não corrigido aqui.
-- **Situação (acabamento da leva A, 24/11/2026, commit `168fa4c2`):** consertada a parte que apagava calado. O número só com
+- **Situação (acabamento da leva A, 24/11/2026, commit `a3293123`):** consertada a parte que apagava calado. O número só com
   espaços passou a valer como vazio na leitura do pedido (`pedidoDeAtualizacao`), que é a mesma do cartão, do risco e da
   execução: junto de outro campo é descartado e o resto é gravado; sozinho, é o pedido de apagar, recusado no cartão e também
   na execução (`RECUSA_DE_APAGAR_CONTATO`). Não há mais caminho em que `update_client` apague telefone ou WhatsApp, com ou sem
@@ -4835,7 +4835,7 @@ quatro estão latentes.
   de `String(e).slice(0, 120)`. Ele vai para `email_messages.triage_reason` (`email-imap/index.ts`) e sai no campo `motivo`
   do que o assistente lê ao listar e-mails (`_shared/ai/tools/email.ts`). Existe desde o núcleo do e-mail (commit
   `d677e1c1`), antes do pacote 1. Visto em 24/11/2026 no acabamento da leva A, ao tirar o texto cru do erro do registro em
-  `app_error_logs` (commit `2df7f661`), que não mexeu no motivo.
+  `app_error_logs` (commit `475b8226`), que não mexeu no motivo.
 - **Efeito:** o erro do provedor carrega o corpo da resposta, que pode devolver um trecho do e-mail (recusa de moderação,
   pedido recusado). Em `triage_reason` isso não sai da linha do próprio e-mail; o ponto é outro: o assistente lê o motivo
   como texto do sistema, fora das marcas de "dado de terceiro" que cercam o corpo do e-mail. Até 120 caracteres escritos por
@@ -4848,7 +4848,7 @@ quatro estão latentes.
   muda; muda o resto do texto que o dono lê no motivo ("…HTTP 402 (sem crédito)" no lugar de "…ClaudeApiError: OpenRouter 402
   (créditos insuficientes na conta)…"). Uma linha, mais os testes que fixam o motivo. Não corrigido aqui: a tarefa era o que
   vai para o log.
-- **Situação (fecho da leva A, 24/11/2026, commit `013e95d0`):** consertado o motivo. O `catch` de `triageEmail` passou a
+- **Situação (fecho da leva A, 24/11/2026, commit `cbb511de`):** consertado o motivo. O `catch` de `triageEmail` passou a
   gravar "falha na triagem: " seguido da classe do erro (`classeDoErro`, a mesma frase que vai para `app_error_logs`), e não
   mais o texto dele. O começo "falha na triagem" não mudou. Teste em `_shared/email/triage_test.ts`: erro que traz remetente,
   assunto e corpo do e-mail não deixa nada disso no motivo. Vale para os e-mails triados depois da publicação de
