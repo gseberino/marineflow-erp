@@ -3,7 +3,7 @@
 import { assert, assertEquals, assertRejects } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { candidatosDoDia } from "./secretario-candidatos.ts";
 import { coletar } from "./secretario-coleta.ts";
-import { CORTE_DA_AGENDA_DE_HOJE } from "./secretario-texto.ts";
+import { CORTE_DA_AGENDA_DE_HOJE, linhaDeHoje } from "./secretario-texto.ts";
 
 type Linha = Record<string, unknown>;
 const AGORA = new Date("2026-10-15T10:30:00Z"); // 07:30 de Brasília
@@ -346,7 +346,7 @@ Deno.test("V2: as rotinas de IA que falharam desde 07:30 de ontem vêm somadas p
   // e1 (do banco de sempre) + e-imap + e-sem-contexto + ia-outra; a linha da triagem desta noite (ia-hoje) não conta aqui
   assertEquals(deHoje.errosDaNoite, 4);
   assertEquals(deHoje.falhasDeEnvio, 1);
-  assert(selects.includes("app_error_logs: context, occurrences"), "a soma lê o contexto e as ocorrências");
+  assert(selects.includes("app_error_logs: context, occurrences, message"), "a soma lê o contexto, as ocorrências e a classe do erro");
   // o filtro dos "erros registrados" não ganhou not.like (tiraria da conta o erro sem contexto)
   const fonte = await Deno.readTextFile(new URL("./secretario-coleta.ts", import.meta.url));
   assert(!/\.not\(\s*"context"/.test(fonte), "sem not.like no contexto");
@@ -364,21 +364,96 @@ Deno.test("V2: sem falha de rotina o campo nem existe; a leitura que falha não 
   // registrados" em vez de sumir dos dois lugares
   const t = banco();
   t.app_error_logs.push({ id: "ia-hoje", source: "edge", level: "error", resolved_at: null, context: "rotina-ia:triagem_email@2026-10-15", occurrences: 3, last_seen_at: "2026-10-15T07:00:00Z" });
-  const inteiro = falsoAdmin(t);
-  const quebrado = falsoAdmin(t, ["app_error_logs"]);
-  const admin = {
-    from(tabela: string) {
-      const q = inteiro.from(tabela);
-      if (tabela !== "app_error_logs") return q;
-      return { ...q, select: (c?: string, o?: { head?: boolean }) => (c === "context, occurrences" ? quebrado.from(tabela).select(c, o) : q.select(c, o)) };
-    },
-  };
-  const { deHoje } = await coletar(admin, {
+  const { deHoje } = await coletar(semASomaPorRotina(t), {
     agora: AGORA, hoje: HOJE, dono: DONO, modo: "novo",
     doResumo: { esperando: ESPERANDO, recebidas: RECEBIDAS, cfg: { quote_validity_days: "3" } },
   });
   assertEquals("rotinasSemIA" in deHoje, false);
   assertEquals(deHoje.errosDaNoite, 2, "e1 + a falha da triagem, que a frase não vai dizer");
+});
+
+/** O banco em que só a SOMA por rotina falha (a leitura de falhasDeRotinaDesde); as contagens leem. */
+function semASomaPorRotina(t: Record<string, Linha[]>) {
+  const inteiro = falsoAdmin(t);
+  const quebrado = falsoAdmin(t, ["app_error_logs"]);
+  return {
+    from(tabela: string) {
+      const q = inteiro.from(tabela);
+      if (tabela !== "app_error_logs") return q;
+      return { ...q, select: (c?: string, o?: { head?: boolean }) => (c === "context, occurrences, message" ? quebrado.from(tabela).select(c, o) : q.select(c, o)) };
+    },
+  };
+}
+
+// ─── (24/11/2026) Fecho da leva A: a frase da manhã não lembra a falta de crédito ──────────────────
+// Decisão do dono de 24/11/2026: a falta de crédito no provedor é conhecida; ele não vai pôr crédito agora e não quer
+// ser lembrado disso. A triagem de e-mail falha hoje por isso (classe "HTTP 402 (sem crédito)"), e a frase "IA que falhou
+// desde ontem: triagem de e-mail (N vezes)" sairia toda manhã. O que se protege: a falha de rotina por falta de crédito
+// não entra na frase nem na contagem dela; continua fora dos "erros registrados" (a conta não muda); e a falha de outra
+// classe na mesma rotina continua sendo dita, só com as vezes dela.
+const FALTA_DE_CREDITO = "HTTP 402 (sem crédito)";
+const linhaDoLog = (id: string, context: string, occurrences: number, last_seen_at: string, message: string) =>
+  ({ id, source: "edge", level: "error", resolved_at: null, context, occurrences, last_seen_at, message });
+
+/** A triagem falhando como em novembro: 22 vezes ontem à tarde e 8 nesta madrugada, todas com a mesma classe. */
+function triagemFalhando(classe: string): Record<string, Linha[]> {
+  const t = banco();
+  t.app_error_logs.push(
+    linhaDoLog("ia-ontem", "rotina-ia:triagem_email@2026-10-14", 22, "2026-10-14T18:00:00Z", classe),
+    linhaDoLog("ia-hoje", "rotina-ia:triagem_email@2026-10-15", 8, "2026-10-15T07:00:00Z", classe),
+  );
+  return t;
+}
+
+Deno.test("falta de crédito: só ela na janela = a manhã sai sem a frase da IA, e os 'erros registrados' não mudam", async () => {
+  const { deHoje } = await rodar(triagemFalhando(FALTA_DE_CREDITO));
+  assertEquals("rotinasSemIA" in deHoje, false);
+  const linha = linhaDeHoje(deHoje);
+  for (const trecho of ["IA que falhou", "IA falhou", "triagem", "crédito", "402"]) assert(!linha.includes(trecho), `"${trecho}" saiu na manhã: ${linha}`);
+  for (const trecho of ["IA falhou", "triagem"]) assert(!linhaDeHoje(deHoje, true).includes(trecho), `"${trecho}" saiu na linha curta`);
+  // a conta dos "erros registrados" é a de sempre: só o e1 do banco. A linha desta madrugada não entra nela.
+  assertEquals([deHoje.falhasDeEnvio, deHoje.errosDaNoite], [1, 1]);
+  assert(linha.endsWith("Esta noite: 1 mensagem do sistema não saiu e 1 erro registrado."), linha);
+  // a mesma manhã sem falha nenhuma de rotina: a linha "Hoje" é idêntica, letra por letra
+  assertEquals(linha, linhaDeHoje((await rodar()).deHoje));
+
+  // as mesmas falhas com outra classe: a frase sai, com as 30 vezes, e a conta dos "erros registrados" é a mesma
+  const outra = (await rodar(triagemFalhando("tempo esgotado"))).deHoje;
+  assertEquals(outra.rotinasSemIA, [{ rotulo: "triagem de e-mail", vezes: 30 }]);
+  assertEquals([outra.falhasDeEnvio, outra.errosDaNoite], [1, 1]);
+  assert(linhaDeHoje(outra).endsWith("1 erro registrado. IA que falhou desde ontem: triagem de e-mail (30 vezes)."), linhaDeHoje(outra));
+});
+
+Deno.test("falta de crédito e outra classe na mesma rotina: a frase sai só com as vezes da outra", async () => {
+  const t = triagemFalhando(FALTA_DE_CREDITO);
+  t.app_error_logs.push(
+    // a triagem também ficou sem resposta 2 vezes nesta madrugada e 1 vez ontem à tarde: isso o dono precisa saber
+    linhaDoLog("ia-tempo", "rotina-ia:triagem_email@2026-10-15", 2, "2026-10-15T06:00:00Z", "tempo esgotado"),
+    linhaDoLog("ia-fora", "rotina-ia:triagem_email@2026-10-14", 1, "2026-10-14T19:00:00Z", "HTTP 503 (provedor fora do ar)"),
+    // outra rotina, só com falta de crédito: não é dita
+    linhaDoLog("ia-fornecedor", "rotina-ia:casar_fornecedor@2026-10-15", 4, "2026-10-15T05:00:00Z", FALTA_DE_CREDITO),
+  );
+  const { deHoje } = await rodar(t);
+  assertEquals(deHoje.rotinasSemIA, [{ rotulo: "triagem de e-mail", vezes: 3 }]);
+  // e1; as linhas das rotinas desta madrugada (com crédito ou sem) não entram nos "erros registrados"
+  assertEquals([deHoje.falhasDeEnvio, deHoje.errosDaNoite], [1, 1]);
+  const linha = linhaDeHoje(deHoje);
+  assert(linha.endsWith("Esta noite: 1 mensagem do sistema não saiu e 1 erro registrado. IA que falhou desde ontem: triagem de e-mail (3 vezes)."), linha);
+  assert(!linha.includes("fornecedor") && !linha.includes("crédito"), linha);
+});
+
+Deno.test("falta de crédito: nem com a soma por rotina sem ler ela vira 'erro registrado'; a falha de outra classe continua contando lá", async () => {
+  const lida = (t: Record<string, Linha[]>) => coletar(semASomaPorRotina(t), {
+    agora: AGORA, hoje: HOJE, dono: DONO, modo: "novo",
+    doResumo: { esperando: ESPERANDO, recebidas: RECEBIDAS, cfg: { quote_validity_days: "3" } },
+  });
+  const semCredito = (await lida(triagemFalhando(FALTA_DE_CREDITO))).deHoje;
+  assertEquals("rotinasSemIA" in semCredito, false);
+  assertEquals(semCredito.errosDaNoite, 1, "só o e1: a falta de crédito é conhecida e não é dita de outro jeito");
+  // a de outra classe a frase não vai dizer (a soma não leu): continua nos "erros registrados", como antes
+  const semTempo = (await lida(triagemFalhando("tempo esgotado"))).deHoje;
+  assertEquals("rotinasSemIA" in semTempo, false);
+  assertEquals(semTempo.errosDaNoite, 2, "e1 + a linha desta madrugada");
 });
 
 // ─── (23/10/2026) Agenda de Produção, Fase 0: D11a e D4 no "Hoje" ──────────────────────────────────

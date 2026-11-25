@@ -11,6 +11,7 @@ import {
   ehClasseDeErro,
   ERRO_NAO_CLASSIFICADO,
   FALHA_SEM_ERRO,
+  SEM_CREDITO_NO_PROVEDOR,
   soAClasseDoErro,
 } from "./classe-do-erro.ts";
 
@@ -127,6 +128,28 @@ Deno.test("ehClasseDeErro: só a frase exata passa; texto cru de erro, ou classe
     null, undefined, 402, {}, ["tempo esgotado"],
   ]) {
     assertEquals(ehClasseDeErro(fora), false, String(fora));
+  }
+});
+
+// (Fecho da leva A, 24/11/2026) A manhã deixa a falta de crédito fora da frase "IA que falhou desde ontem" (decisão do
+// dono de 24/11/2026) e a reconhece por esta frase. O que se protege: ela é a mesma que o 402 grava, e nenhum outro
+// status divide a linha do log com ela. log_app_error agrupa pelo texto em minúsculas e sem os números: se outro
+// status ganhasse o nome "sem crédito", as falhas dele cairiam na linha do 402 e sumiriam da manhã junto.
+Deno.test("SEM_CREDITO_NO_PROVEDOR: é a classe do 402, e nenhum outro status cai na mesma linha do log", () => {
+  assertEquals(SEM_CREDITO_NO_PROVEDOR, "HTTP 402 (sem crédito)");
+  assertEquals(classeDoErro(new ClaudeApiError(402, `OpenRouter 402 (créditos insuficientes na conta): ${corpoDaRecusa(402)}`)), SEM_CREDITO_NO_PROVEDOR);
+  assertEquals(ehClasseDeErro(SEM_CREDITO_NO_PROVEDOR), true);
+  assertEquals(soAClasseDoErro(SEM_CREDITO_NO_PROVEDOR), SEM_CREDITO_NO_PROVEDOR);
+  // como a impressão digital de log_app_error lê o texto (migration 20260722180000)
+  const semOsNumeros = (texto: string) => texto.toLowerCase().replace(/\d+/g, "#");
+  const naMesmaLinha: number[] = [];
+  for (let status = 100; status <= 599; status++) {
+    if (semOsNumeros(classeDoErro(new ClaudeApiError(status, "x"))) === semOsNumeros(SEM_CREDITO_NO_PROVEDOR)) naMesmaLinha.push(status);
+  }
+  assertEquals(naMesmaLinha, [402]);
+  // as frases que não são de status também não
+  for (const outra of [ERRO_NAO_CLASSIFICADO, FALHA_SEM_ERRO, "tempo esgotado", "resposta inválida", "falha de rede", "chave do provedor não configurada", "erro do tipo Error"]) {
+    assert(semOsNumeros(outra) !== semOsNumeros(SEM_CREDITO_NO_PROVEDOR), outra);
   }
 });
 

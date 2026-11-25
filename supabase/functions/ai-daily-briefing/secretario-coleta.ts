@@ -23,7 +23,7 @@ import { STATUS_OS_ATIVAS } from "../_shared/service-order-status.ts";
 import { contatoEncerrou, conversaEncerradaPeloContato, ULTIMAS_RECEBIDAS } from "../_shared/whatsapp/contato-encerrou.ts";
 import { type ModosDaAgenda, modosDaAgendaNoBanco } from "../_shared/agenda/executar.ts";
 import { type EntradaEsperando, esperandoDaConta, lerDinheiroEsperando } from "../_shared/receivables/dinheiro-esperando.ts";
-import { falhasDeRotinaDesde, PADRAO_DO_CONTEXTO_DE_ROTINA, ROTULO_DA_ROTINA, rotinaDoContexto } from "../_shared/ai/falhas-do-assistente.ts";
+import { ehFaltaDeCredito, falhasDeRotinaDesde, PADRAO_DO_CONTEXTO_DE_ROTINA, ROTULO_DA_ROTINA, rotinaDoContexto } from "../_shared/ai/falhas-do-assistente.ts";
 import type { ColetaDoSecretario, ConversaCrua, OrcamentoCru, OsCrua, PlanoDaOsCrua } from "./secretario-candidatos.ts";
 import { adiadoPor, type PassagemDoHistorico } from "./secretario-selecao.ts";
 import { CORTE_DA_AGENDA_DE_HOJE, type DadosDeHoje, type NaRua } from "./secretario-texto.ts";
@@ -576,7 +576,7 @@ export async function coletar(admin: Admin, p: {
       // (pacote 1, V2, 24/11/2026) as falhas das rotinas de IA ganham frase própria ("IA que falhou desde ontem") e saem
       // da conta dos "erros registrados", para não contar duas vezes. Lê à parte e subtrai, em vez de um not.like no
       // filtro de cima: NOT LIKE de contexto nulo dá nulo no Postgres e tiraria da conta o erro sem contexto.
-      admin.from("app_error_logs").select("context")
+      admin.from("app_error_logs").select("context, message")
         .eq("source", "edge").eq("level", "error").is("resolved_at", null).gte("last_seen_at", desdeAs20)
         .like("context", PADRAO_DO_CONTEXTO_DE_ROTINA),
       falhasDeRotinaDesde(admin, desdeAManhaDeOntem),
@@ -585,12 +585,14 @@ export async function coletar(admin: Admin, p: {
     if (erros.error) throw erros.error;
     if (errosDeRotina.error) throw errosDeRotina.error;
     // só sai dos "erros registrados" o que a frase da IA vai dizer: a rotina que este código não conhece e a soma que
-    // não foi lida (null) continuam contando lá (contar em dobro é melhor que esconder)
-    const ditosNaFrase = rotinas === null
-      ? 0
-      : ((errosDeRotina.data ?? []) as Array<{ context?: string | null }>).filter((l) => rotinaDoContexto(l.context)).length;
+    // não foi lida (null) continuam contando lá (contar em dobro é melhor que esconder).
+    // (fecho da leva A, 24/11/2026) A falta de crédito no provedor é a exceção: a frase não a diz (decisão do dono de
+    // 24/11/2026: é conhecida, e ele não quer ser lembrado dela; falhas-do-assistente.ts, somaPorRotina) e ela também
+    // não entra aqui, nem quando a soma não foi lida. Contada aqui, viraria o mesmo lembrete com outro nome, toda manhã.
+    const foraDaConta = ((errosDeRotina.data ?? []) as Array<{ context?: string | null; message?: string | null }>)
+      .filter((l) => rotinaDoContexto(l.context) && (rotinas !== null || ehFaltaDeCredito(l))).length;
     deHoje.falhasDeEnvio = fila.count ?? 0;
-    deHoje.errosDaNoite = Math.max(0, (erros.count ?? 0) - ditosNaFrase);
+    deHoje.errosDaNoite = Math.max(0, (erros.count ?? 0) - foraDaConta);
     // leitura que falhou (null) não é "nenhuma falha": a frase não sai e o aviso vai ao log
     if (rotinas === null) falhou("rotinas_de_ia", new Error("leitura das falhas de rotina"));
     else if (rotinas.length) deHoje.rotinasSemIA = rotinas.map((r) => ({ rotulo: ROTULO_DA_ROTINA[r.rotina], vezes: r.vezes }));

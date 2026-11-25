@@ -2,11 +2,12 @@
 // log (o que torna `occurrences` uma contagem), a virada da hora, e a leitura que falha não vira "zero".
 import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { ClaudeApiError } from "./anthropic.ts";
-import { classeDoErro } from "./classe-do-erro.ts";
+import { classeDoErro, SEM_CREDITO_NO_PROVEDOR } from "./classe-do-erro.ts";
 import {
   contextoDaHora,
   contextoDaRotina,
   contextosDaUltimaHora,
+  ehFaltaDeCredito,
   falhasDeRotinaDesde,
   falhasNaUltimaHora,
   PADRAO_DO_CONTEXTO_DE_ROTINA,
@@ -209,7 +210,8 @@ Deno.test("falhasDeRotinaDesde: lê só o erro aberto das rotinas, visto desde a
     error: null,
   });
   assertEquals(await falhasDeRotinaDesde(admin, desde), [{ rotina: "triagem_email", vezes: 12 }]);
-  assertEquals(filtros.select, "context, occurrences");
+  // a mensagem vem junto: é ela que guarda a classe do erro (a falta de crédito fica fora da soma)
+  assertEquals(filtros.select, "context, occurrences, message");
   assertEquals(filtros["like:context"], "rotina-ia:%");
   assertEquals(filtros["eq:level"], "error");
   assertEquals(filtros["is:resolved_at"], null);
@@ -221,4 +223,101 @@ Deno.test("falhasDeRotinaDesde: leitura que falha é null, nunca 'nenhuma falha'
   const desde = new Date("2026-11-23T10:30:00.000Z");
   assertEquals(await falhasDeRotinaDesde(bancoDoLog({ data: null, error: { message: "x" } }).admin, desde), null);
   assertEquals(await falhasDeRotinaDesde(bancoDoLog("lanca").admin, desde), null);
+});
+
+// ─── A falta de crédito não entra na frase da manhã (fecho da leva A do pacote 1, 24/11/2026) ─────────
+// Decisão do dono de 24/11/2026: a falta de crédito no provedor é conhecida e ele não quer ser lembrado dela. A triagem
+// de e-mail falha hoje por isso, e a frase "IA que falhou desde ontem: triagem de e-mail (N vezes)" sairia toda manhã.
+// O que se protege: a linha de falta de crédito não entra na soma que a manhã lê (nem a rotina, nem as vezes); a falha
+// de outra classe na mesma rotina continua entrando, só com as vezes dela; e o registro continua sendo gravado.
+
+const FALTA_DE_CREDITO = "HTTP 402 (sem crédito)";
+
+Deno.test("somaPorRotina: a rotina que só falhou por falta de crédito some da lista", () => {
+  assertEquals(SEM_CREDITO_NO_PROVEDOR, FALTA_DE_CREDITO);
+  assertEquals(somaPorRotina([
+    { context: "rotina-ia:triagem_email@2026-11-23", occurrences: 22, message: FALTA_DE_CREDITO },
+    { context: "rotina-ia:triagem_email@2026-11-24", occurrences: 8, message: FALTA_DE_CREDITO },
+  ]), []);
+  // de todas as rotinas
+  assertEquals(somaPorRotina([
+    { context: "rotina-ia:triagem_email@2026-11-24", occurrences: 8, message: FALTA_DE_CREDITO },
+    { context: "rotina-ia:casar_fornecedor@2026-11-24", occurrences: 1, message: FALTA_DE_CREDITO },
+  ]), []);
+  assertEquals(ehFaltaDeCredito({ message: FALTA_DE_CREDITO }), true);
+});
+
+Deno.test("somaPorRotina: falta de crédito e outra classe na mesma rotina: a soma traz só as vezes da outra", () => {
+  assertEquals(somaPorRotina([
+    { context: "rotina-ia:triagem_email@2026-11-23", occurrences: 22, message: FALTA_DE_CREDITO },
+    { context: "rotina-ia:triagem_email@2026-11-24", occurrences: 8, message: FALTA_DE_CREDITO },
+    { context: "rotina-ia:triagem_email@2026-11-24", occurrences: 2, message: "tempo esgotado" },
+    { context: "rotina-ia:triagem_email@2026-11-23", occurrences: 1, message: "HTTP 503 (provedor fora do ar)" },
+    // outra rotina, só com falta de crédito: não entra
+    { context: "rotina-ia:casar_fornecedor@2026-11-24", occurrences: 4, message: FALTA_DE_CREDITO },
+  ]), [{ rotina: "triagem_email", vezes: 3 }]);
+  // uma rotina com falta de crédito, outra com outro motivo: só a segunda é dita
+  assertEquals(somaPorRotina([
+    { context: "rotina-ia:triagem_email@2026-11-24", occurrences: 8, message: FALTA_DE_CREDITO },
+    { context: "rotina-ia:casar_fornecedor@2026-11-24", occurrences: 1, message: "resposta inválida" },
+  ]), [{ rotina: "casar_fornecedor", vezes: 1 }]);
+});
+
+Deno.test("somaPorRotina: só a classe exata da falta de crédito fica de fora; as outras e a linha sem mensagem contam", () => {
+  const contam: Array<string | null | undefined> = [
+    "HTTP 401 (credencial recusada)", "HTTP 403 (recusado pelo provedor)", "HTTP 429 (limite de chamadas)", "HTTP 500 (erro no provedor)",
+    "tempo esgotado", "resposta inválida", "falha de rede", "chave do provedor não configurada", "erro do tipo Error",
+    "erro não classificado", "falha sem mensagem de erro",
+    // parecido não é igual: na dúvida, a falha é dita
+    "HTTP 402", "http 402 (sem crédito)", "HTTP 402 (sem crédito) ", "HTTP 402 (sem crédito) e mais", "sem crédito",
+    // linha sem a mensagem lida
+    null, undefined, "",
+  ];
+  for (const message of contam) {
+    assertEquals(somaPorRotina([{ context: "rotina-ia:triagem_email@2026-11-24", occurrences: 5, message }]), [{ rotina: "triagem_email", vezes: 5 }], String(message));
+    assertEquals(ehFaltaDeCredito({ message }), false, String(message));
+  }
+  assertEquals(somaPorRotina([{ context: "rotina-ia:triagem_email@2026-11-24", occurrences: 5 }]), [{ rotina: "triagem_email", vezes: 5 }]);
+  for (const semLinha of [null, undefined, {}]) assertEquals(ehFaltaDeCredito(semLinha), false);
+});
+
+Deno.test("falta de crédito: o registro continua sendo gravado (diagnóstico), e é essa mesma linha que a soma da manhã deixa de fora", async () => {
+  const chamadas: Array<{ fn: string; args: Record<string, unknown> }> = [];
+  const admin = { rpc: (fn: string, args: Record<string, unknown>) => { chamadas.push({ fn, args }); return Promise.resolve({ error: null }); } };
+  const agora = new Date("2026-11-24T13:00:00.000Z");
+  const semSaldo = classeDoErro(new ClaudeApiError(402, "OpenRouter 402 (créditos insuficientes na conta): {}"));
+  const semTempo = classeDoErro(new DOMException("Signal timed out.", "TimeoutError"));
+  await registrarFalhaDeRotina(admin, { rotina: "triagem_email", mensagem: semSaldo, agora });
+  await registrarFalhaDeRotina(admin, { rotina: "triagem_email", mensagem: semTempo, agora });
+  // as duas falhas foram para o log, cada uma com a classe dela
+  assertEquals(chamadas.map((c) => [c.fn, c.args.p_context, c.args.p_message, c.args.p_level]), [
+    ["log_app_error", "rotina-ia:triagem_email@2026-11-24", FALTA_DE_CREDITO, "error"],
+    ["log_app_error", "rotina-ia:triagem_email@2026-11-24", "tempo esgotado", "error"],
+  ]);
+  // o que foi gravado, lido de volta como a manhã lê: só a falha que não é de crédito
+  const linhas = chamadas.map((c) => ({ context: c.args.p_context as string, message: c.args.p_message as string, occurrences: 1 }));
+  assertEquals(somaPorRotina(linhas), [{ rotina: "triagem_email", vezes: 1 }]);
+  assertEquals(somaPorRotina(linhas.slice(0, 1)), []);
+});
+
+Deno.test("falhasDeRotinaDesde: só falta de crédito na janela = lista vazia (não null: a leitura deu certo)", async () => {
+  const desde = new Date("2026-11-23T10:30:00.000Z");
+  const soCredito = bancoDoLog({
+    data: [
+      { context: "rotina-ia:triagem_email@2026-11-23", occurrences: 22, message: FALTA_DE_CREDITO },
+      { context: "rotina-ia:triagem_email@2026-11-24", occurrences: 8, message: FALTA_DE_CREDITO },
+    ],
+    error: null,
+  });
+  assertEquals(await falhasDeRotinaDesde(soCredito.admin, desde), []);
+  const misturado = bancoDoLog({
+    data: [
+      { context: "rotina-ia:triagem_email@2026-11-24", occurrences: 8, message: FALTA_DE_CREDITO },
+      { context: "rotina-ia:triagem_email@2026-11-24", occurrences: 2, message: "tempo esgotado" },
+    ],
+    error: null,
+  });
+  assertEquals(await falhasDeRotinaDesde(misturado.admin, desde), [{ rotina: "triagem_email", vezes: 2 }]);
+  // a leitura não filtra a classe no banco: traz a linha e decide aqui (o que fica de fora é uma regra deste arquivo)
+  assertEquals(Object.keys(misturado.filtros).sort(), ["eq:level", "gte:last_seen_at", "is:resolved_at", "like:context", "select"]);
 });
