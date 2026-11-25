@@ -87,16 +87,44 @@ function emLista(itens: string[]): string {
   return itens.length <= 1 ? (itens[0] ?? "") : `${itens.slice(0, -1).join(", ")} e ${itens[itens.length - 1]}`;
 }
 
+/** O telefone e o WhatsApp do cliente: pelo assistente dá para trocar, não apagar. */
+const NUMEROS_DE_CONTATO = ["phone", "whatsapp"] as const;
+
+/** Número que veio vazio, nulo ou só com espaços: não é troca. (`undefined` é "não veio".) */
+function numeroEmBranco(v: unknown): boolean {
+  return v === null || (typeof v === "string" && v.trim() === "");
+}
+
+/** O que sobra do pedido para gravar: sem o que veio vazio ou nulo e sem o número de contato em branco. */
+function camposParaGravar(campos: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(campos).filter(([c, v]) =>
+    v !== undefined && v !== null && v !== "" && !((NUMEROS_DE_CONTATO as readonly string[]).includes(c) && numeroEmBranco(v))
+  ));
+}
+
+/** O pedido que só apaga o telefone ou o WhatsApp (nada mais para gravar): recusa dita, no cartão e na execução. */
+export const RECUSA_DE_APAGAR_CONTATO =
+  "Telefone ou WhatsApp vazio: pelo assistente dá para trocar o número do cliente, mas não apagar (isso é na tela do cliente). Nada foi alterado.";
+
 /**
  * O pedido de update_client como a execução o lê: sem o que veio vazio ou nulo, e no formato que a tela grava. O cartão
- * do "sim" (resumirTrocaDeContato) usa a mesma leitura: o que ele mostra é o que vai ser gravado.
+ * do "sim" (resumirTrocaDeContato) e o risco (riscoDeAtualizarCliente) usam a mesma leitura: o que o cartão mostra é o
+ * que vai ser gravado.
+ *
+ * Telefone ou WhatsApp em branco (vazio, nulo ou SÓ ESPAÇOS) é descartado e o resto do pedido segue: o modelo costuma
+ * mandar "" nos campos que não quer mudar. Só espaços entra na conta desde 24/11/2026 (acabamento da leva A,
+ * NOVO-p1-s3-01): antes passava pelo filtro, formatarTelefone devolvia null e o número era APAGADO sem aviso. Quando o
+ * número em branco é tudo o que o pedido traz, é um pedido de apagar: recusa dita (RECUSA_DE_APAGAR_CONTATO).
  */
 function pedidoDeAtualizacao(
   args: unknown,
 ): { client_id: unknown; motivo: unknown; patch: Record<string, unknown> } | { error: string } {
   const { client_id, motivo, ...campos } = (args ?? {}) as Record<string, unknown>;
-  const patch = Object.fromEntries(Object.entries(campos).filter(([, v]) => v !== undefined && v !== null && v !== ""));
-  if (Object.keys(patch).length === 0) return { error: "Nada para atualizar — informe ao menos um campo." };
+  const patch = camposParaGravar(campos);
+  if (Object.keys(patch).length === 0) {
+    const pediuApagar = NUMEROS_DE_CONTATO.some((c) => numeroEmBranco(campos[c]));
+    return { error: pediuApagar ? RECUSA_DE_APAGAR_CONTATO : "Nada para atualizar — informe ao menos um campo." };
+  }
   const recusa = normalizarCampos(patch);
   if (recusa) return recusa;
   return { client_id, motivo, patch };
@@ -128,14 +156,26 @@ const CAMPOS_DE_CONTATO = ["phone", "whatsapp", "opt_out_whatsapp"] as const;
 /**
  * O risco de update_client. TOTAL: executarChamadaDeTool (agent.ts) chama computeRisk fora de try, e uma exceção aqui
  * derrubaria o turno inteiro — por isso nada de `"phone" in args` (lança com args indefinido). O que não é objeto, ou
- * qualquer surpresa, devolve o risco mais alto do caso. Vazio e nulo CONTAM: apagar o contato também é troca; só
- * `undefined` é "não veio".
+ * qualquer surpresa, devolve o risco mais alto do caso.
+ *
+ * Vale pelo que SOBRA do pedido, na mesma leitura da execução (camposParaGravar); só `undefined` é "não veio":
+ *   · a marca de não receber mensagens, com qualquer valor (nulo e torto inclusive)  → medium;
+ *   · telefone ou WhatsApp com número                                                → medium;
+ *   · telefone ou WhatsApp em branco e NADA mais para gravar (o pedido de apagar)    → medium: não roda direto, e o
+ *     cartão recusa (RECUSA_DE_APAGAR_CONTATO);
+ *   · telefone ou WhatsApp em branco JUNTO de outro campo (acabamento da leva A, 24/11/2026): o número em branco é
+ *     descartado, como a execução sempre fez, e vale o risco do que sobra (o e-mail sozinho roda direto). Na primeira
+ *     versão do S3 o vazio contava e recusava o pedido inteiro, e o e-mail que vinha junto deixava de ser gravado.
  */
 export function riscoDeAtualizarCliente(args: unknown): RiskLevel {
   try {
     if (args === null || typeof args !== "object" || Array.isArray(args)) return "medium";
-    const a = args as Record<string, unknown>;
-    return CAMPOS_DE_CONTATO.some((c) => a[c] !== undefined) ? "medium" : "low";
+    const { client_id: _cliente, motivo: _motivo, ...campos } = args as Record<string, unknown>;
+    if (campos.opt_out_whatsapp !== undefined) return "medium";
+    const numeros = NUMEROS_DE_CONTATO.filter((c) => campos[c] !== undefined);
+    if (numeros.length === 0) return "low";
+    if (numeros.some((c) => !numeroEmBranco(campos[c]))) return "medium";
+    return Object.keys(camposParaGravar(campos)).length === 0 ? "medium" : "low";
   } catch {
     return "medium";
   }
@@ -150,10 +190,14 @@ export const FALHA_AO_CONFERIR_O_CLIENTE = "⚠️ Não consegui conferir o clie
  *
  * null = o pedido não mexe em contato: quem chamou usa o resumo genérico de sempre.
  * Linha "⚠️" = recusa, e a pendência não nasce (RESUMO_QUE_RESOLVE em agent.ts): leitura que falha, cliente que não
- * existe, o que a execução recusaria de qualquer jeito (técnico mudando nome, CPF/CNPJ ou tipo) e o pedido de APAGAR o
- * telefone ou o WhatsApp (vazio, nulo ou só espaço). Apagar não é coisa do assistente: a execução descarta o que vem
- * vazio ou nulo, então um cartão "→ —" pediria um "sim" sobre algo que não acontece. O risco continua medium nesses
- * casos (riscoDeAtualizarCliente): o pedido nunca roda direto.
+ * existe, o que a execução recusaria de qualquer jeito (técnico mudando nome, CPF/CNPJ ou tipo) e o pedido que SÓ apaga
+ * o telefone ou o WhatsApp (vazio, nulo ou só espaço, sem mais nada para gravar). Apagar não é coisa do assistente: a
+ * execução descarta o número em branco, então um cartão "→ —" pediria um "sim" sobre algo que não acontece. O risco
+ * continua medium nesse caso (riscoDeAtualizarCliente): o pedido nunca roda direto.
+ *
+ * (Acabamento da leva A, 24/11/2026) O número em branco que vem JUNTO de outra coisa não recusa mais o pedido inteiro:
+ * é descartado (pedidoDeAtualizacao) e o cartão mostra o que sobra. Com outro número ou a marca, é o cartão de sempre,
+ * sem a linha do número em branco; só com campos que não são de contato, o risco é low e este resumo nem é chamado.
  *
  * `rotulo` vem de quem chama (rotuloDoCampo, agent.ts): os nomes dos outros campos são os mesmos do cartão genérico.
  */
@@ -165,12 +209,8 @@ export async function resumirTrocaDeContato(
 ): Promise<string | null> {
   if (riscoDeAtualizarCliente(args) === "low") return null;
   if (args === null || typeof args !== "object" || Array.isArray(args)) return "⚠️ Nada para atualizar — informe ao menos um campo.";
-  const dito = args as Record<string, unknown>;
-  const emBranco = (v: unknown) => v === null || (typeof v === "string" && v.trim() === "");
-  if (emBranco(dito.phone) || emBranco(dito.whatsapp)) {
-    return "⚠️ Telefone ou WhatsApp vazio: pelo assistente dá para trocar o número do cliente, mas não apagar (isso é na tela do cliente). Nada foi alterado.";
-  }
-  const pedido = pedidoDeAtualizacao(dito);
+  // O pedido que só apaga o número sai daqui como erro (RECUSA_DE_APAGAR_CONTATO), e a linha "⚠️" abaixo o recusa.
+  const pedido = pedidoDeAtualizacao(args);
   if ("error" in pedido) return `⚠️ ${String(pedido.error).replace(/\s*\n+\s*/g, " ")}`;
   const { client_id, patch } = pedido;
   const tocados = CAMPOS_DE_CONTATO.filter((c) => c in patch);
@@ -370,7 +410,8 @@ export const clientTools: ToolDef[] = [
       required: ["client_id"],
     },
     risk: "low",
-    // S3 (24/11/2026): telefone, WhatsApp ou a marca de não receber mensagens pedem o "sim" (inclusive apagar).
+    // S3 (24/11/2026): telefone, WhatsApp ou a marca de não receber mensagens pedem o "sim". O pedido que só apaga o
+    // número também não roda direto (o cartão recusa); o número em branco junto de outro campo é descartado.
     computeRisk: riscoDeAtualizarCliente,
     async execute(args, { sb, userRole }) {
       const pedido = pedidoDeAtualizacao(args);
