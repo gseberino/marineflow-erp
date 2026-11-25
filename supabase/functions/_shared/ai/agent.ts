@@ -57,6 +57,9 @@ import { resumirAplicacaoDoPreco } from "./tools/quotes.ts";
 import { FALHA_AO_CONFERIR_O_CLIENTE, resumirTrocaDeContato } from "./tools/clients.ts";
 // pacote 1, S4 (24/11/2026): o cartão da nota global mostra o texto inteiro da regra.
 import { resumirNotaGlobal } from "./tools/memory.ts";
+// pacote 1, S6 (24/11/2026): o turno que leu texto de fora (conversa, e-mail, fornecedor) e depois grava cadastro, contato,
+// preço ou memória.
+import { leuTextoDeFora, LEITURAS_DE_TEXTO_DE_FORA, LINHA_DO_SIM_DEPOIS_DE_TEXTO_DE_FORA, riscoDepoisDeTextoDeFora } from "./texto-de-fora.ts";
 import { resolverCobrancasDoLote } from "./tools/flow-macros.ts";
 import { comFusoDeBrasilia, FUSO_DE_BRASILIA } from "./fuso.ts";
 
@@ -1300,7 +1303,13 @@ export async function executarChamadaDeTool(
   // confirmação. Só sobe o risco, nunca rebaixa.
   const riscoSemAmarra = foraDoPerfil && riscoDaTool === "low" && !rodaDiretoPelaRede(foraDoPerfil) ? "medium" : riscoDaTool;
   // Retorno F2 (P9): depois de o modelo ler um caso do cartão, o envio livre pede PIN e mostra o número.
-  const effectiveRisk = riscoDoEnvioLivre(tc.name, riscoSemAmarra, amb.toolCtx.sessaoAmarrada, tc.input as Record<string, unknown>);
+  const riscoDoEnvio = riscoDoEnvioLivre(tc.name, riscoSemAmarra, amb.toolCtx.sessaoAmarrada, tc.input as Record<string, unknown>);
+  // Pacote 1, S6 (24/11/2026): depois de o turno ler texto de fora (conversa, e-mail, mensagem de fornecedor), escrita em
+  // cadastro, contato e preço pede o "sim" e escrita na memória pede PIN (texto-de-fora.ts). Só SOBE o risco; sem a marca
+  // do turno, nada muda. O motivo entra na mesma lista do S1: vai para o cartão, para risk_reason e trava a autonomia.
+  const depoisDeTextoDeFora = riscoDepoisDeTextoDeFora(tc.name, riscoDoEnvio, amb.toolCtx.leuTextoDeFora === true);
+  const effectiveRisk = depoisDeTextoDeFora.risco;
+  if (depoisDeTextoDeFora.motivo) motivosDoRisco.push(depoisDeTextoDeFora.motivo);
 
   // Autonomia concedida pelo dono para ESTA ação (Onda 2). Ações de dinheiro/destrutivas
   // nunca entram aqui — ver NEVER_AUTONOMOUS. Pela rede também não: a autonomia foi dada
@@ -1308,6 +1317,7 @@ export async function executarChamadaDeTool(
   // argumentos vão junto porque há trava por argumento: o envio do PDF ao cliente nunca roda
   // sozinho (NEVER_AUTONOMOUS_WHEN). Pacote 1, S1: com motivo de risco dado pelo servidor também não
   // (isAutonomyGranted não olha o nível: uma chave 'auto' pularia o PIN que o motivo acabou de pedir).
+  // S6: o motivo do texto de fora vale igual (uma chave 'auto' pularia o "sim" que a leitura acabou de pedir).
   const autonomo = toolDef && !foraDoPerfil && motivosDoRisco.length === 0
     ? isAutonomyGranted(tc.name, effectiveRisk, amb.toolCtx.settings, tc.input as Record<string, unknown>)
     : false;
@@ -1372,6 +1382,9 @@ export async function executarChamadaDeTool(
       // aprovação é por botão: por isso "No WhatsApp"). Só quando o risco final é alto e o servidor deu o motivo.
       const motivoDoRisco = motivosDoRisco.join("; ");
       if (effectiveRisk === "high" && motivoDoRisco) resumo += `\n${linhaDoPin(motivosDoRisco)}`;
+      // Pacote 1, S6: no risco médio (cadastro, contato, preço) a última linha diz por que este cartão pede o "sim". No
+      // risco alto o motivo do texto de fora já está na linha do PIN, acima, junto dos outros.
+      if (effectiveRisk === "medium" && depoisDeTextoDeFora.motivo) resumo += `\n${LINHA_DO_SIM_DEPOIS_DE_TEXTO_DE_FORA}`;
       const payloadDaPendencia = limpa
         ? {
           ...entrada,
@@ -1418,6 +1431,10 @@ export async function executarChamadaDeTool(
     } catch (e: any) {
       toolResult = { error: e?.message || "Falha na execução da tool" };
     }
+    // Pacote 1, S6: a leitura que rodou sem erro trouxe texto de terceiro para o turno. A marca fica no contexto, que no
+    // laço do OpenRouter é o mesmo até o fim do turno (no Claude Max cada chamada tem contexto novo, e o erp-mcp refaz a
+    // marca pela lista de ferramentas do job). Não vai para a sessão: vale para este turno.
+    if (LEITURAS_DE_TEXTO_DE_FORA.has(tc.name) && !temErro(toolResult)) amb.toolCtx.leuTextoDeFora = true;
     await writeAudit(amb, {
       eventType: `tool:${tc.name}`,
       risk: toolDef.risk,
@@ -1527,6 +1544,9 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
   let pausadoPorTempo = false;
   // aprovação em lote (29/10/2026): o turno ganha um id, que vai a cada linha de auditoria dele.
   const turno = { id: crypto.randomUUID(), inicio: new Date(inicioDoTurno).toISOString() };
+  // Pacote 1, S6: o pedido do vigia ("🤖 …", acompanhar-conversas) já traz mensagem de terceiro citada. O turno começa
+  // marcado, como no Claude Max (erp-mcp, pelo texto do job). A marca só liga; nunca desliga a que já veio no contexto.
+  if (leuTextoDeFora(null, textoDoUltimoPedido(params.messages))) params.toolCtx.leuTextoDeFora = true;
 
   for (let iter = 0; iter < maxIterations; iter++) {
     if (Date.now() - inicioDoTurno > orcamentoMs) {

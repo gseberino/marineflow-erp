@@ -41,6 +41,14 @@ export interface ToolCtx {
    * baixar; no WhatsApp ele vai como arquivo na conversa. Ausente = WhatsApp (o comportamento antigo).
    */
   canal?: "panel" | "whatsapp";
+  /**
+   * Pacote 1, S6 (24/11/2026): neste TURNO o modelo leu texto escrito por terceiro (conversa do WhatsApp, e-mail,
+   * mensagem ou mídia de fornecedor). Daí em diante, no mesmo turno, escrita em cadastro, contato e preço pede o "sim"
+   * e escrita na memória pede PIN (ai/texto-de-fora.ts). Nunca vem do modelo: quem marca é o executor (agent.ts, depois
+   * de uma leitura que rodou) e, no Claude Max, o erp-mcp, pela lista de ferramentas do job. Vale para o turno; não é
+   * gravada na sessão.
+   */
+  leuTextoDeFora?: boolean;
 }
 
 /** Cargos que podem ver/chamar tools financeiras/compras/preço (todos menos technician —
