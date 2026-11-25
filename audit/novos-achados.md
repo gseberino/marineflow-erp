@@ -4924,3 +4924,47 @@ quatro estão latentes.
   com esse código; conferido por contagem em 24/11/2026).
 - **Menor mudança:** no programa do PC, publicar no estado uma classe fixa do detalhe (por exemplo `faturamento` ou
   `ferramentas`), nunca o texto. É mudança no repositório do programa, fora do pacote 1. Não corrigido aqui.
+
+### [NOVO-p1-s5-01] A lista de quem usa a assinatura Claude (`ai_max_assinantes`) pode ser gravada pelo cargo financeiro
+
+- **Onde:** policies de escrita de `app_settings` (`app_settings_auth_insert`, `_update` e `_delete`:
+  `is_admin_or_financial(auth.uid())` e `key <> 'cron_worker_secret'`, em `supabase/schemas/producao/08-politicas-rls.sql`)
+  e o gatilho `_app_settings_chaves_do_dono` (última versão em `20261016130000_papelada_lote.sql`), cuja lista de chaves
+  que só o administrador muda não tem nenhuma `ai_*`. Visto em 24/11/2026 ao construir o S5 do pacote 1, que cria a chave.
+- **Efeito:** com o S5, quem pode usar a assinatura passa a ser decidido por uma chave que um usuário de cargo financeiro
+  consegue gravar. Ele pode pôr o próprio id na lista (o servidor passaria a mandá-lo pelo Claude, e a trava que sobra é a
+  lista do programa do PC, que o servidor não lê) ou esvaziar a lista (o dono sai da assinatura: com a reserva ligada vai
+  pelo OpenRouter; desligada, lê a frase do titular). As chaves vizinhas já eram assim antes do S5: `ai_provedor_whatsapp`,
+  `ai_provedor_painel`, `ai_whatsapp_max_reserva` e `ai_autonomy_*`. Latente: 0 usuários ativos além do dono (contagem de
+  24/11/2026). Leitura: qualquer usuário logado lê a chave (um id interno, não é segredo); quem não está logado não lê
+  (`anon_public_settings_whitelist`), e o teste `supabase/tests/assinatura_max_por_pessoa.sql` confere isso (A6).
+- **Menor mudança:** incluir `ai_max_assinantes` na lista de `_app_settings_chaves_do_dono` (e decidir as vizinhas), em
+  migration própria, com a guarda do md5 do corpo de produção que as anteriores usam. Decisão do dono. Não corrigido aqui:
+  a especificação do S5 pede só a chave, e recriar o gatilho é outra migration.
+
+### [NOVO-p1-s5-02] A tela e o documento do assistente ainda dizem que a assinatura é "do administrador"
+
+- **Onde:** `src/pages/settings/AssistenteIATab.tsx` (o aviso "A assinatura Claude Max é pessoal: só você (administrador)
+  é atendido por ela. Os demais usuários seguem no OpenRouter mesmo com a chave ligada.", e o comentário do cabeçalho) e
+  `docs/ai-operator-setup.md` ("Desde 03/10 o **admin** (só o dono…) pode ir pela assinatura Claude Max", e a lista de
+  chaves, sem `ai_max_assinantes`). Visto em 24/11/2026 ao construir o S5.
+- **Efeito:** depois do S5 quem decide é a pessoa da lista, não o cargo; e depois do C2 e do S5, com a reserva desligada,
+  os demais usuários não "seguem no OpenRouter": leem que o assistente atende só o titular. Para o dono a frase da tela
+  continua verdadeira hoje (ele é o único administrador ativo e o único da lista). A lista não aparece em tela nenhuma:
+  mudar o assinante é pelo banco.
+- **Menor mudança:** ajustar as duas frases e citar a chave no documento. Mostrar ou editar a lista na tela é decisão do
+  dono. Não corrigido aqui: o S5 não toca em `src/` nem em `docs/`.
+
+### [NOVO-p1-s5-03] ai-agent: a leitura das configurações que falha vira "tudo no padrão", sem erro
+
+- **Onde:** `supabase/functions/ai-agent/index.ts`, as três leituras
+  `const { data: settingsRows } = await admin.from("app_settings").select("key, value");` (turno do WhatsApp, entrega do
+  Claude e chat do app): o `error` não é lido, e a leitura que falha deixa `settings` vazio. Visto em 24/11/2026 ao
+  construir o S5. No `erp-mcp` a mesma leitura passou a recusar o pedido quando falha (S5: sem a lista não há como saber
+  quem é o assinante); o resto do `ai-agent` ficou como estava.
+- **Efeito:** com `settings` vazio, o turno do dono vai pelo OpenRouter (a chave do provedor não foi lida), a reserva conta
+  como ligada, o perfil de ferramentas e todos os modos atrás de chave valem o padrão do código, e nada avisa. Para o S5
+  o lado é o seguro (sem a chave do provedor ninguém vai pela assinatura). Não medido: precisa de uma falha de leitura do
+  banco no instante do turno.
+- **Menor mudança:** ler o `error` nas três leituras e fechar o turno com o aviso de erro do sistema, registrando a falha.
+  Tarefa própria (mexe no começo de todo turno). Não corrigido aqui.
