@@ -13,7 +13,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
 import { useBankConnections } from '@/hooks/use-bank-connections';
-import { useLancadosSozinhos } from '@/hooks/use-extrato-conta';
+import { useLancadosSozinhos, type LancadoSozinho } from '@/hooks/use-extrato-conta';
 import { useAppSetting, useUpdateAppSetting } from '@/hooks/use-app-settings';
 import { useDesfazerAprovacao } from '@/hooks/use-lancamentos';
 import { FinanceReviewInbox, type SementeDeRegra } from '@/components/FinanceReviewInbox';
@@ -27,10 +27,18 @@ import { Ajuda } from '@/components/Ajuda';
 
 export type VisaoDoExtrato = 'revisar' | 'saldo' | 'fora';
 
+/** Recebimento baixado pelo boleto (24/11/2026): a conta casada com a linha do banco é a RECEBER — entrada, não saída. */
+const ehRecebimentoBaixado = (l: LancadoSozinho) => l.automatica === 'boleto' && l.conta_baixada_tipo === 'receivable';
+
 /** O que o sistema lançou sem clique, com o interruptor e o desfazer. */
 function LancadosSozinhos({ contaId }: { contaId: string | null }) {
   const { formatCurrency, formatDate } = useI18n();
-  const { data = [] } = useLancadosSozinhos();
+  // 24/11/2026 (revisão): `data = []` fazia a leitura que falhou (ou que ainda não voltou) virar "0" e "Nada foi
+  // lançado sem clique" — justamente no bloco que mostra o que foi feito sem clique. Sem dado nenhum, o bloco diz que
+  // não leu. A condição é "não há dado", não "deu erro": numa releitura que falha depois de uma boa, a lista boa
+  // continua em mãos, com os Desfazer certos, e não pode ser trocada por um aviso.
+  const { data, isError } = useLancadosSozinhos();
+  const semLeitura = data === undefined;
   const ligado = useAppSetting('finance_auto_approve', 'off') === 'on';
   const salvar = useUpdateAppSetting();
   const desfazer = useDesfazerAprovacao();
@@ -38,10 +46,15 @@ function LancadosSozinhos({ contaId }: { contaId: string | null }) {
   // Desligar pede confirmação: um clique distraído mudava o comportamento do dia seguinte.
   const [confirmando, setConfirmando] = useState(false);
   const lista = useMemo(
-    () => data.filter((l) => !contaId || l.bank_transactions?.bank_connection_id === contaId),
+    () => (data ?? []).filter((l) => !contaId || l.bank_transactions?.bank_connection_id === contaId),
     [data, contaId],
   );
-  const total = lista.reduce((s, l) => s + Number(l.suggested_amount ?? 0), 0);
+  // 24/11/2026: o recebimento baixado pelo boleto é ENTRADA. O total do cabeçalho sempre foi "quanto saiu sem clique";
+  // somar o crédito nele inflava o número. A entrada ganha contagem e valor à parte.
+  const recebimentos = lista.filter(ehRecebimentoBaixado);
+  const saidas = lista.filter((l) => !ehRecebimentoBaixado(l));
+  const total = saidas.reduce((s, l) => s + Number(l.suggested_amount ?? 0), 0);
+  const totalRecebido = recebimentos.reduce((s, l) => s + Number(l.suggested_amount ?? 0), 0);
 
   return (
     <Card className="p-3">
@@ -51,8 +64,10 @@ function LancadosSozinhos({ contaId }: { contaId: string | null }) {
             <button type="button" className="flex min-w-0 items-center gap-2 text-left text-sm">
               <Bot className="h-4 w-4 shrink-0 text-primary" />
               <span className="min-w-0">
-                <b>Lançados sozinhos</b> nos últimos 30 dias: {lista.length}
-                {lista.length > 0 && ` · ${formatCurrency(total)}`}
+                {/* Sem leitura a lista está vazia, então os totais abaixo já não aparecem: só a contagem troca de texto. */}
+                <b>Lançados sozinhos</b> nos últimos 30 dias: {semLeitura ? (isError ? 'não consegui ler — recarregue a página' : 'lendo…') : saidas.length}
+                {saidas.length > 0 && ` · ${formatCurrency(total)}`}
+                {recebimentos.length > 0 && ` · ${recebimentos.length} ${recebimentos.length === 1 ? 'recebimento baixado' : 'recebimentos baixados'} ${formatCurrency(totalRecebido)}`}
               </span>
               <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${aberto ? 'rotate-180' : ''}`} />
             </button>
@@ -67,7 +82,10 @@ function LancadosSozinhos({ contaId }: { contaId: string | null }) {
               marcada "só sugerir". Tudo aparece aqui, com Desfazer. As regras marcadas "Lançar sozinha" valem
               mesmo com este interruptor desligado — menos nos casos acima. À parte disso, a conta que tem boleto
               conhecido é baixada quando o banco mostra o pagamento desse boleto (mesmo valor, mesmo banco, uma
-              conta só): também aparece aqui, e Desfazer devolve a conta para "em aberto".
+              conta só): também aparece aqui, e Desfazer devolve a conta para "em aberto". O mesmo vale para o
+              que você tem a receber: a conta a receber de NF-e com boleto é baixada quando o banco mostra o
+              crédito do boleto no dia do vencimento, no mesmo valor. Aparece aqui como recebimento baixado,
+              contado à parte das saídas, e Desfazer devolve a conta para "em aberto".
             </Ajuda>
             {confirmando ? (
               <>
@@ -88,28 +106,47 @@ function LancadosSozinhos({ contaId }: { contaId: string | null }) {
           </span>
         </div>
         <CollapsibleContent className="mt-2">
-          {lista.length === 0 ? (
+          {semLeitura ? (
+            <p className="text-sm text-muted-foreground">
+              {isError
+                ? 'Não consegui ler os lançados sozinhos — recarregue a página. O que foi lançado ou baixado sem clique continua valendo.'
+                : 'Lendo…'}
+            </p>
+          ) : lista.length === 0 ? (
             <p className="text-sm text-muted-foreground">Nada foi lançado sem clique neste período.</p>
           ) : (
             <ul className="max-h-80 divide-y overflow-y-auto rounded-md border text-sm">
-              {lista.map((l) => (
+              {lista.map((l) => {
+                // 24/11/2026: a entrada não pode se confundir com as saídas da lista — a nota diz "Recebimento baixado…"
+                // (inteira na dica, porque a linha corta) e o valor vai com "+" e na cor de entrada do Extrato com saldo.
+                // 24/11/2026 (revisão): no celular a data na frente da nota comia a linha inteira e o cliente não
+                // aparecia (a 360 px, "13/11/2026 · …"), e o título do recebimento é só "Receita: CREDITO DE BOLETO" —
+                // o dono apertaria Desfazer sem ver de quem é a conta. Só no recebimento, a segunda linha pode ocupar
+                // até DUAS linhas (a data continua: é ela que separa duas parcelas do mesmo cliente). Sem limite não
+                // serve: um item tomava a lista inteira. A conta a pagar e os lançados continuam numa linha só.
+                const recebimento = ehRecebimentoBaixado(l);
+                return (
                 <li key={l.id} className="flex min-w-0 items-center gap-2 p-2">
                   <span className="min-w-0 flex-1">
                     <span className="block truncate font-medium">{l.title}</span>
-                    <span className="block truncate text-xs text-muted-foreground">
+                    <span className={`${recebimento ? 'line-clamp-2 break-words' : 'block truncate'} text-xs text-muted-foreground`}
+                      title={recebimento ? (l.decision_note ?? undefined) : undefined}>
                       {l.automatica === 'boleto'
-                        ? <>{l.suggested_date ? formatDate(l.suggested_date) : ''} · {l.decision_note ?? 'Baixada sozinha pelo boleto'}</>
+                        ? <>{l.suggested_date ? formatDate(l.suggested_date) : ''} · {l.decision_note ?? (recebimento ? 'Recebimento baixado sozinho pelo boleto' : 'Baixada sozinha pelo boleto')}</>
                         : <>{l.suggested_date ? formatDate(l.suggested_date) : ''} · {l.suggested_category ?? '—'} · {l.decision_note ?? (l.automatica === 'regra' ? 'pela sua regra' : 'confiança alta')}</>}
                     </span>
                   </span>
-                  <span className="shrink-0 font-semibold tabular-nums">{formatCurrency(Number(l.suggested_amount ?? 0))}</span>
+                  <span className={`shrink-0 font-semibold tabular-nums${recebimento ? ' text-success' : ''}`}>
+                    {recebimento && '+'}{formatCurrency(Number(l.suggested_amount ?? 0))}
+                  </span>
                   {l.automatica === 'boleto' && l.conta_baixada_id && (
                     <Button size="sm" variant="ghost" className="h-7 shrink-0 gap-1 text-xs" disabled={desfazer.isPending}
                       title="Desfaz a baixa: a conta volta a ficar em aberto e a linha do banco volta para a fila, para você decidir"
                       onClick={() => desfazer.mutate({
-                        tipo: 'payable',
+                        // O lado da conta casada (24/11/2026): 'payable' fixo fazia o banco não achar a conta a receber.
+                        tipo: l.conta_baixada_tipo ?? 'payable',
                         id: l.conta_baixada_id!,
-                        motivo: 'Baixada pelo boleto — desfeita para revisão',
+                        motivo: recebimento ? 'Recebimento baixado pelo boleto — desfeito para revisão' : 'Baixada pelo boleto — desfeita para revisão',
                       })}>
                       <Undo2 className="h-3.5 w-3.5" /> Desfazer
                     </Button>
@@ -126,7 +163,8 @@ function LancadosSozinhos({ contaId }: { contaId: string | null }) {
                     </Button>
                   )}
                 </li>
-              ))}
+                );
+              })}
             </ul>
           )}
         </CollapsibleContent>

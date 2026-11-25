@@ -128,6 +128,22 @@ export async function acharPagamento(
 
 /** Veio do extrato: o caminho certo, em vez do estorno. */
 function orientacaoDoExtrato(p: PagamentoLido): string {
+  // Recebimento baixado pelo boleto (24/11/2026): o pagamento que a baixa cria vem de um crédito de boleto (forma
+  // 'bank_transfer'), não de um Pix. A ferramenta é a mesma — ela desfaz a aplicação de qualquer entrada do banco —,
+  // mas a frase dizia ao dono que o boleto dele era "um Pix". O caso do Pix fica como estava.
+  // "A conta volta a dever" só vale para o pagamento que a CONCILIAÇÃO criou (24/11/2026): a função do banco
+  // (desfazer_aplicacao) separa pelo começo da observação — "Concilia…" é o que a conciliação criou (o da baixa pelo
+  // boleto é assim) e esse é estornado; o resto foi lançado à mão e só ligado à entrada: continua valendo, a conta
+  // segue paga e só a entrada se solta. Os boletos antigos, casados à mão, são deste segundo tipo, e a frase prometia
+  // a eles o que o banco não faz. O teste é o mesmo do banco (ilike 'concilia%'), sem aparar espaço.
+  if (p.receivable_id && p.payment_method && p.payment_method !== "pix") {
+    const inicio = `Esse pagamento (${rotuloDoPagamento(p)}) veio de uma entrada do extrato do banco: não se estorna. ` +
+      `Use desfazer_aplicacao_de_pix com payment_id ${p.id} (ela vale para qualquer entrada do banco, não só Pix) — `;
+    return /^concilia/i.test(p.notes ?? "")
+      ? `${inicio}a conta volta a dever e a entrada volta para a fila do Extrato.`
+      : `${inicio}esse pagamento foi lançado à mão e só ligado à entrada: ele continua valendo (a conta segue paga) e só ` +
+        `deixa de vir dessa entrada, que volta para a fila do Extrato. Para estornar o pagamento em si, peça o estorno de novo depois disso.`;
+  }
   return p.receivable_id
     ? `Esse pagamento (${rotuloDoPagamento(p)}) veio de um Pix do extrato: não se estorna. Use desfazer_aplicacao_de_pix com payment_id ${p.id} — a conta volta a dever e o Pix volta para a fila do Extrato.`
     : `Esse pagamento (${rotuloDoPagamento(p)}) veio do extrato do banco: não se estorna. Use desfazer_aprovacao_de_lancamento com payable_id ${p.payable_id} — o lançamento volta para a fila do Extrato.`;
@@ -152,10 +168,15 @@ export async function resumirEstorno(ctx: ToolCtx, args: Record<string, unknown>
 export const estornoTools: ToolDef[] = [
   {
     name: "estornar_pagamento",
+    // A frase da baixa que o SISTEMA fez (24/11/2026): esta é a única ferramenta à vista do dono com "desfaz a baixa" na
+    // descrição, e a manhã manda dizer "desfaz a baixa de <cliente>" — sem a ressalva, o pedido vinha para cá (motivo e
+    // sim com PIN) para só então ouvir que não se estorna. O caminho está na linha do prompt; aqui só a placa de saída.
     description:
       "ESTORNA um pagamento (baixa) registrado errado — o 'Cancelar (estornar)' da tela de pagamentos: o pagamento fica cancelado com o " +
       "motivo e a conta volta a dever. 'estorna o pagamento de 800 que lancei na OS-00095, foi duplicado' (os + valor), 'desfaz a baixa " +
-      "da conta de luz, ainda não paguei' (ache a conta com buscar_lancamentos e passe payable_id). Mais de um pagamento → o sistema " +
+      "da conta de luz, ainda não paguei' (ache a conta com buscar_lancamentos e passe payable_id). Baixa que o SISTEMA fez sozinho pelo " +
+      "boleto ('desfaz a baixa de <cliente>', vinda do resumo da manhã) não é aqui: listar_lancados_sozinhos e " +
+      "desfazer_aprovacao_de_lancamento. Mais de um pagamento → o sistema " +
       "devolve as opções e você pergunta. Pagamento que veio do EXTRATO (Pix aplicado, linha conciliada) não se estorna: a resposta diz " +
       "o caminho (desfazer_aplicacao_de_pix ou desfazer_aprovacao_de_lancamento). Mês fechado recusa. Motivo obrigatório. Pede confirmação.",
     input_schema: {

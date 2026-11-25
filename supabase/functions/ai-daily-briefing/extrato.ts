@@ -14,6 +14,49 @@ export interface LancadoSozinho {
   suggested_amount: number | string | null;
   suggested_category: string | null;
   automatica: string | null;
+  /**
+   * (24/11/2026) O recebimento baixado pelo boleto é automatica = 'boleto' com kind = 'create_receivable': o título da
+   * fila é só "Receita: CREDITO DE BOLETO" (sem cliente), então quem pagou vem da conta casada com a linha do banco.
+   * Os três são opcionais: linha sem `kind` é tratada como sempre foi.
+   */
+  kind?: string | null;
+  bank_transaction_id?: string | null;
+  /** o cliente da conta baixada (já curto); ausente = a linha sai com "cliente" */
+  quem?: string | null;
+}
+
+/** A conta a receber casada com a linha do banco e o cliente dela. */
+export interface RecebimentoCasado {
+  bank_transaction_id: string | null;
+  quem: string | null;
+}
+
+/** A conta a receber que o sistema baixou sozinho pelo boleto (não é despesa nem entra na soma do que foi lançado). */
+export function ehRecebimentoPeloBoleto(l: LancadoSozinho): boolean {
+  return l.automatica === "boleto" && l.kind === "create_receivable";
+}
+
+/**
+ * (24/11/2026) Põe o nome de quem pagou em cada recebimento baixado pelo boleto e tira o que foi desfeito: a proposta
+ * fica approved/boleto para sempre, e a baixa desfeita se reconhece por não haver mais conta a receber casada com a
+ * linha do banco. `casadas` null = a leitura das contas falhou: segue como veio, sem o nome (melhor dizer que houve a
+ * baixa do que escondê-la). As outras linhas (despesa, conta a pagar baixada) não mudam.
+ * (24/11/2026, revisão) `casadas` traz só a conta da baixa que continua de pé (contasDaBaixaDePe, secretario-boleto.ts):
+ * a conta que o dono casou à mão com a mesma linha depois de desfazer não entra, e o recebimento sai da lista como a
+ * baixa desfeita — antes saía "recebimento baixado" com o cliente da conta nova.
+ */
+export function comQuemPagouOBoleto(lancados: LancadoSozinho[], casadas: RecebimentoCasado[] | null): LancadoSozinho[] {
+  if (!casadas) return lancados;
+  const quemDaLinha = new Map<string, string | null>();
+  for (const c of casadas) if (c.bank_transaction_id) quemDaLinha.set(String(c.bank_transaction_id), c.quem);
+  const saida: LancadoSozinho[] = [];
+  for (const l of lancados) {
+    if (!ehRecebimentoPeloBoleto(l)) { saida.push(l); continue; }
+    const linha = String(l.bank_transaction_id ?? "");
+    if (!quemDaLinha.has(linha)) continue;
+    saida.push({ ...l, quem: quemDaLinha.get(linha) ?? null });
+  }
+  return saida;
 }
 
 /** Anotação do dono que a varredura não pôde aplicar (ambígua, disputada…): ele precisa saber. */
@@ -58,9 +101,28 @@ export function linhasDoExtratoNoResumo(
   const acoes: string[] = [];
 
   if (lancados.length > 0) {
-    const soma = lancados.reduce((s, l) => s + Math.abs(Number(l.suggested_amount ?? 0)), 0);
-    linhas.push(`🤖 Lançados sozinhos nas últimas 24h: *${lancados.length}* (${moeda(soma)})`);
+    // (24/11/2026) O recebimento baixado pelo boleto fica fora da soma: ela é do que o sistema lançou, e o dinheiro de um
+    // cliente somado em valor absoluto com as despesas daria um total que não significa nada. Sem recebimento, o
+    // cabeçalho é o de sempre, byte a byte.
+    const recebidos = lancados.filter(ehRecebimentoPeloBoleto).length;
+    const soma = lancados.reduce((s, l) => (ehRecebimentoPeloBoleto(l) ? s : s + Math.abs(Number(l.suggested_amount ?? 0))), 0);
+    const total = recebidos === 0 ? moeda(soma)
+      : recebidos === lancados.length ? (recebidos === 1 ? "recebimento baixado pelo boleto" : "recebimentos baixados pelo boleto")
+      : `${moeda(soma)}, sem contar ${recebidos === 1 ? "o recebimento baixado" : `os ${recebidos} recebimentos baixados`}`;
+    linhas.push(`🤖 Lançados sozinhos nas últimas 24h: *${lancados.length}* (${total})`);
     for (const l of lancados.slice(0, MOSTRAR)) {
+      // Recebimento baixado pelo boleto (24/11/2026): a conta a receber já existia e o banco mostrou o crédito do boleto
+      // no dia do vencimento. A palavra é outra ("recebimento baixado") para o dono não ler como conta a pagar.
+      // (24/11/2026, revisão) A própria linha ensina como desfazer, com a frase da manhã nova: o item só tem o nome do
+      // cliente, e "desfazer Apolo" (o rodapé "Responda *desfazer* e diga qual") é a palavra *desfaz <cliente>* da
+      // agenda, lida antes do assistente — desfaria a mudança DELA numa OS do cliente e a baixa continuaria. "desfaz a
+      // baixa de …" não é comando da agenda. Sem o nome não há o que digitar: o dono diz o valor.
+      if (ehRecebimentoPeloBoleto(l)) {
+        const nome = String(l.quem ?? "").replace(/\s+/g, " ").trim().slice(0, 40);
+        const comoDesfazer = nome ? `Não era? Diga *desfaz a baixa de ${nome}*.` : "Não era? Diga *desfaz a baixa* e o valor.";
+        linhas.push(`   • ${moeda(Math.abs(Number(l.suggested_amount ?? 0)))} — ${nome || "cliente"} → recebimento baixado (o cliente pagou o boleto). ${comoDesfazer}`);
+        continue;
+      }
       // Baixa pelo boleto (22/11/2026): não é despesa nova — a conta já existia e o banco mostrou o pagamento.
       if (l.automatica === "boleto") {
         linhas.push(`   • ${moeda(Math.abs(Number(l.suggested_amount ?? 0)))} — ${nomeCurto(l.title)} → conta baixada (boleto pago no banco)`);
@@ -70,7 +132,10 @@ export function linhasDoExtratoNoResumo(
       linhas.push(`   • ${moeda(Math.abs(Number(l.suggested_amount ?? 0)))} — ${nomeCurto(l.title)} → ${l.suggested_category ?? "sem categoria"} (${por})`);
     }
     if (lancados.length > MOSTRAR) linhas.push(`   …e mais ${lancados.length - MOSTRAR} (Extrato → Lançados sozinhos)`);
-    linhas.push("   Algo errado? Responda *desfazer* e diga qual — volta para a fila.");
+    // (24/11/2026, revisão) O rodapé é do que foi LANÇADO (despesa, conta a pagar baixada): bloco só de recebimentos
+    // não o leva — cada um já diz como desfazer, e "volta para a fila" não descreve o desfazer de uma conta a receber.
+    // Sem recebimento a condição é sempre verdadeira: o bloco de sempre sai byte a byte.
+    if (recebidos < lancados.length) linhas.push("   Algo errado? Responda *desfazer* e diga qual — volta para a fila.");
     acoes.push("   • *O que foi lançado sozinho?*");
   }
 

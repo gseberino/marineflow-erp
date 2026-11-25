@@ -187,7 +187,11 @@ export const fechamentoTools: ToolDef[] = [
     description:
       "O que o sistema lançou sem clique nos últimos dias (por regra sua ou por confiança alta) e as contas que ele baixou " +
       "sozinho pelo boleto (por = 'baixa pelo boleto': a conta já existia e o banco mostrou o pagamento), com o id do lançamento " +
-      "para desfazer (desfazer_aprovacao_de_lancamento). Diz também se o lançar sozinho está ligado. Só leitura.",
+      "para desfazer (desfazer_aprovacao_de_lancamento). Traz também o recebimento baixado pelo boleto (por = 'recebimento pelo " +
+      "boleto': conta a receber de NF-e com boleto, e o banco mostrou o crédito do boleto de mesmo valor no dia do vencimento): vem " +
+      "com receivable_id e se desfaz com desfazer_aprovacao_de_lancamento passando receivable_id — a conta volta a ficar em aberto " +
+      "e a linha do banco volta para a fila ('desfaz a baixa da Apolo': ache o id aqui). valor_total soma só as saídas; os " +
+      "recebimentos somam à parte (valor_recebido_pelo_boleto). Diz também se o lançar sozinho está ligado. Só leitura.",
     input_schema: { type: "object", properties: { dias: { type: "number", description: "Padrão 7." } } },
     risk: "low",
     roles: CARGOS_FINANCEIRO,
@@ -197,7 +201,7 @@ export const fechamentoTools: ToolDef[] = [
       const desde = new Date(Date.now() - Math.min(90, Number(args.dias ?? 7)) * 86_400_000).toISOString();
       const [{ data, error }, { data: cfg, error: erroCfg }] = await Promise.all([
         ctx.admin.from("finance_review_queue")
-          .select("title, suggested_amount, suggested_category, suggested_date, automatica, created_payable_id, bank_transaction_id")
+          .select("title, suggested_amount, suggested_category, suggested_date, automatica, created_payable_id, bank_transaction_id, kind")
           .not("automatica", "is", null).eq("status", "approved").gte("decided_at", desde)
           .order("decided_at", { ascending: false }).limit(50),
         ctx.admin.from("app_settings").select("value").eq("key", "finance_auto_approve").maybeSingle(),
@@ -208,23 +212,94 @@ export const fechamentoTools: ToolDef[] = [
       // Baixa pelo boleto (22/11/2026): a conta não nasceu da proposta — é a que está casada com a linha do banco.
       // Baixa desfeita por outro caminho não tem mais conta casada: sai da lista.
       const doBoleto = ((data ?? []) as any[]).filter((l) => l.automatica === "boleto" && l.bank_transaction_id);
+      // Recebimento baixado pelo boleto (24/11/2026): a mesma marca 'boleto', mas a proposta é de entrada (kind
+      // 'create_receivable') e a conta casada com a linha do banco está em receivables. Procurada só em payables, a
+      // baixa pareceria desfeita e sumiria daqui — sem id para desfazer. Linha sem kind (dado antigo) é conta a pagar.
+      const ehRecebimento = (l: any) => l.automatica === "boleto" && l.kind === "create_receivable";
+      const dePagar = doBoleto.filter((l) => !ehRecebimento(l));
+      const deReceber = doBoleto.filter(ehRecebimento);
       const contaDaLinha = new Map<string, string>();
-      if (doBoleto.length > 0) {
+      if (dePagar.length > 0) {
         const { data: casadas, error: erroCasadas } = await ctx.admin.from("payables")
-          .select("id, bank_transaction_id").in("bank_transaction_id", doBoleto.map((l) => l.bank_transaction_id));
+          .select("id, bank_transaction_id").in("bank_transaction_id", dePagar.map((l) => l.bank_transaction_id));
         if (erroCasadas) throw new Error(`Não consegui ler as contas baixadas pelo boleto: ${erroCasadas.message}`);
         for (const c of (casadas ?? []) as any[]) contaDaLinha.set(String(c.bank_transaction_id), String(c.id));
       }
+      // O título da proposta é só "Receita: CREDITO DE BOLETO": quem pagou e qual parcela vêm da conta. A categoria
+      // também (24/11/2026): a da proposta ("Outras receitas") é a da receita nova que NÃO foi criada — a baixa casou a
+      // linha com a conta da nota. Dita ao dono, viraria "a venda entrou como Outras receitas", que ninguém gravou.
+      const casadoComALinha = new Map<string, { id: string; o_que: string; categoria: string | null }>();
+      if (deReceber.length > 0) {
+        const { data: recebidas, error: erroRecebidas } = await ctx.admin.from("receivables")
+          .select("id, bank_transaction_id, description, category, clients!receivables_client_id_fkey(name)")
+          .in("bank_transaction_id", deReceber.map((l) => l.bank_transaction_id));
+        if (erroRecebidas) throw new Error(`Não consegui ler os recebimentos baixados pelo boleto: ${erroRecebidas.message}`);
+        for (const c of (recebidas ?? []) as any[]) {
+          const cliente = (Array.isArray(c.clients) ? c.clients[0]?.name : c.clients?.name) ?? null;
+          casadoComALinha.set(String(c.bank_transaction_id), {
+            id: String(c.id),
+            o_que: `Recebimento: ${[cliente, c.description].filter(Boolean).join(" — ") || "conta a receber"}`,
+            categoria: c.category ?? null,
+          });
+        }
+      }
+      // A marca que revive (24/11/2026): o desfazer não toca na fila — a proposta fica approved + 'boleto' para sempre.
+      // Se o dono desfaz a baixa e depois casa À MÃO a mesma linha do banco (com a mesma conta ou com outra), "existe
+      // conta casada com a linha" volta a ser verdade e isto diria "baixei sozinho" o que ele decidiu. A baixa só vale
+      // se o registro da linha tiver EXATAMENTE UMA entrada, e ela for a da baixa: acao 'conciliou', detalhe começando
+      // por "Baixa automática pelo boleto" e a mesma conta. É exato porque a função do banco nunca baixa linha que já
+      // tenha qualquer registro: o que vier depois (desfazer, casar de novo, corrigir) é mão do dono. Só no lado de
+      // RECEBER — a conta a pagar continua como estava. Erro engolido aqui diria "nada baixado" como fato.
+      const recebidoDaLinha = new Map<string, { id: string; o_que: string; categoria: string | null }>();
+      if (casadoComALinha.size > 0) {
+        const { data: registros, error: erroRegistros } = await ctx.admin.from("reconciliation_log")
+          .select("bank_transaction_id, receivable_id, acao, detalhe")
+          .in("bank_transaction_id", [...casadoComALinha.keys()]);
+        if (erroRegistros) {
+          throw new Error(`Não consegui conferir se os recebimentos baixados pelo boleto continuam valendo: ${erroRegistros.message}`);
+        }
+        const registrosDaLinha = new Map<string, any[]>();
+        for (const g of (registros ?? []) as any[]) {
+          // a faxina da própria varredura (proposta repetida fechada) não é mão de ninguém: não conta
+          if (g.acao === "tirou_da_fila_ja_lancada") continue;
+          const linha = String(g.bank_transaction_id);
+          registrosDaLinha.set(linha, [...(registrosDaLinha.get(linha) ?? []), g]);
+        }
+        // (as vivas entram num mapa novo, em vez de tirar as outras do primeiro: esta ferramenta roda direto pela rede
+        // do admin, e a guarda de perfil-operacao_test.ts lê este corpo atrás de qualquer chamada de apagar)
+        for (const [linha, casado] of casadoComALinha) {
+          const daLinha = registrosDaLinha.get(linha) ?? [];
+          const baixaViva = daLinha.length === 1 && daLinha[0].acao === "conciliou"
+            && String(daLinha[0].detalhe ?? "").startsWith("Baixa automática pelo boleto")
+            && String(daLinha[0].receivable_id ?? "") === casado.id;
+          if (baixaViva) recebidoDaLinha.set(linha, casado);
+        }
+      }
       const lista = ((data ?? []) as any[])
-        .filter((l) => l.automatica !== "boleto" || contaDaLinha.has(String(l.bank_transaction_id)))
-        .map((l) => ({
-          o_que: mascararCpfNoTexto(l.title ?? null), valor: Number(l.suggested_amount), categoria: l.suggested_category, data: l.suggested_date,
-          por: l.automatica === "regra" ? "regra sua" : l.automatica === "boleto" ? "baixa pelo boleto" : "confiança alta",
-          payable_id: l.automatica === "boleto" ? contaDaLinha.get(String(l.bank_transaction_id)) ?? null : l.created_payable_id,
-        }));
+        .filter((l) => l.automatica !== "boleto"
+          || (ehRecebimento(l) ? recebidoDaLinha.has(String(l.bank_transaction_id)) : contaDaLinha.has(String(l.bank_transaction_id))))
+        .map((l) => {
+          const recebido = ehRecebimento(l) ? recebidoDaLinha.get(String(l.bank_transaction_id)) : undefined;
+          if (recebido) {
+            return {
+              o_que: mascararCpfNoTexto(recebido.o_que), valor: Number(l.suggested_amount), categoria: recebido.categoria, data: l.suggested_date,
+              por: "recebimento pelo boleto", payable_id: null, receivable_id: recebido.id,
+            };
+          }
+          return {
+            o_que: mascararCpfNoTexto(l.title ?? null), valor: Number(l.suggested_amount), categoria: l.suggested_category, data: l.suggested_date,
+            por: l.automatica === "regra" ? "regra sua" : l.automatica === "boleto" ? "baixa pelo boleto" : "confiança alta",
+            payable_id: l.automatica === "boleto" ? contaDaLinha.get(String(l.bank_transaction_id)) ?? null : l.created_payable_id,
+          };
+        });
+      // valor_total é "quanto saiu sem clique": entrada de cliente somada ali deixaria o número sem sentido (24/11/2026).
+      const recebidos = lista.filter((l) => l.por === "recebimento pelo boleto");
       return {
         ligado: String((cfg as any)?.value ?? "off") === "on",
-        total: lista.length, valor_total: lista.reduce((s, l) => s + l.valor, 0), lancados: lista,
+        total: lista.length, valor_total: lista.filter((l) => l.por !== "recebimento pelo boleto").reduce((s, l) => s + l.valor, 0), lancados: lista,
+        ...(recebidos.length > 0
+          ? { recebimentos_pelo_boleto: recebidos.length, valor_recebido_pelo_boleto: Math.round(recebidos.reduce((s, l) => s + l.valor, 0) * 100) / 100 }
+          : {}),
       };
     },
   },

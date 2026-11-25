@@ -20,6 +20,11 @@
 // avulsa para cada entrada contaria o mesmo faturamento duas vezes assim que a OS fosse
 // faturada, e ninguém perceberia. Entrada, portanto, entra na fila apenas quando é a
 // perna de uma transferência entre contas próprias (que não é receita de ninguém).
+//
+// A EXCEÇÃO DO LADO DO CLIENTE (dono, 24/11/2026): o motivo acima é contra CRIAR receita sozinho, e continua valendo —
+// entrada nenhuma vira receita nova sem a pessoa. O que passou a ser feito sem pergunta é só BAIXAR a conta a receber
+// de NF-e (duplicata/boleto) que já existe, quando o banco mostra o 'CREDITO DE BOLETO' de mesmo valor no dia do
+// vencimento: nada é criado, então nada é contado duas vezes. Quem decide é o banco (baixa-boleto.ts).
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
@@ -46,7 +51,7 @@ import {
 } from "../_shared/banking/entrada-sem-cliente.ts";
 import { lerRespostaDaReceita } from "../_shared/banking/cnae.ts";
 import { PISO_DA_CONFIANCA, selecionarParaLancarSozinho, type LinhaCandidata } from "./lancar-sozinho.ts";
-import { baixarPeloBoleto, mensagemDaBaixa } from "./baixa-boleto.ts";
+import { baixarPeloBoleto, baixarRecebidoPeloBoleto, mensagemDaBaixa, mensagemDoRecebimento } from "./baixa-boleto.ts";
 import {
   aprovarOsDaVarredura, type AprovarUma, foraDasReservadas, linhasDeComprovante, mensagemDosComprovantes, reavaliarComprovantes,
   recusaDaLinhaDoCmp, reservadasDaRodada, responderApproveCmp,
@@ -754,6 +759,13 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
   // A proposta baixada deixa de estar pendente, então o aprovar abaixo não a enxerga. Erro = como antes.
   const baixa = await baixarPeloBoleto(admin, [...reservadas, ...anotadasAgora]);
   const baixadasDaRodada = baixa.transacoes.filter((t) => idsPorTransacao.has(t)).length;
+  // O lado do cliente (dono, 24/11/2026 — a segunda exceção estrita à regra de 26/09): o 'CREDITO DE BOLETO' de mesmo
+  // valor, no dia do vencimento, baixa a conta a receber de NF-e que já existe (uma candidata só; o resto continua
+  // pergunta). Mesmas reservadas e anotadas de fora, e também ANTES do "lançar sozinho": hoje nenhuma entrada é lançada
+  // sozinha, mas a ordem é a única proteção se um dia existir regra de entrada com autonomia. Roda nos mesmos caminhos
+  // da baixa acima (cron, botão da tela, mutirão do histórico), porque é o mesmo ponto da varredura. Erro = como antes.
+  const recebido = await baixarRecebidoPeloBoleto(admin, [...reservadas, ...anotadasAgora]);
+  const recebidosDaRodada = recebido.transacoes.filter((t) => idsPorTransacao.has(t)).length;
 
   // Aplica de imediato o que as regras autônomas resolveram. Cada lançamento fica ligado à
   // regra que o criou, então desligar a regra e desfazer o que ela fez são a mesma consulta.
@@ -774,6 +786,9 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
    * categoria de verdade (não "Outras despesas"), sem alerta do vigilante sobre a transação
    * e sem "pode já estar lançado". Fica marcada como automática, aparece em "Lançados
    * sozinhos" e se desfaz como qualquer aprovação.
+   *
+   * 24/11/2026: "só saída" continua valendo aqui. O recebimento baixado pelo boleto (acima) não passa por este
+   * caminho — ele baixa uma conta a receber que já existe, não cria receita.
    */
   const cfgAuto = await admin.from("app_settings").select("key, value")
     .in("key", ["finance_auto_approve", "finance_auto_approve_min_confidence"]);
@@ -823,8 +838,10 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
   }
 
   const partes = [
-    criadas > 0 ? `${Math.max(0, criadas - lancadasSozinhas - baixadasDaRodada)} proposta(s) para revisar` : "Nada novo para propor",
+    // 24/11/2026: o recebimento baixado nesta rodada também deixou de ser pergunta — sem descontar, a contagem mentiria.
+    criadas > 0 ? `${Math.max(0, criadas - lancadasSozinhas - baixadasDaRodada - recebidosDaRodada)} proposta(s) para revisar` : "Nada novo para propor",
     mensagemDaBaixa(baixa.baixadas),
+    mensagemDoRecebimento(recebido.baixadas),
     completadas > 0 ? `${completadas} já na fila ganharam identificação` : "",
     anotadas > 0 ? `${anotadas} classificada(s) pelas suas anotações` : "",
     mensagemDosComprovantes(cmp.ligados, aprovadasDoSim),
@@ -841,6 +858,8 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     criadas,
     lancadas_por_regra: lancadasSozinhas,
     baixadas_pelo_boleto: baixa.baixadas,
+    // 24/11/2026: contador à parte do lado do cliente, para o diagnóstico não somar conta a pagar com recebimento.
+    recebimentos_baixados_pelo_boleto: recebido.baixadas,
     transferencias_internas: pares.length,
     parcelas_de_compra_ja_lancada: parcelasDeCompraJaLancada,
     elegiveis_lote: linhas.filter((l) => Number(l.suggested_amount) < limiteLote).length,
@@ -1944,6 +1963,8 @@ async function aprovar(
       } else {
         vinculo = vinculoAutomatico(sugerido);
         // Decisão do dono (26/09/2026): vínculo sugerido é PERGUNTA, nunca aplicado sozinho.
+        // (As duas exceções — conta baixada pelo boleto, 22/11/2026, e recebimento baixado pelo boleto, 24/11/2026 —
+        // não passam por aqui: são decididas no banco, na varredura, antes de a proposta chegar a esta aprovação.)
         if (!vinculo && exigeDecisao(sugerido)) {
           const o = sugerido!.principal;
           throw new Error(podeJaEstarLancado(sugerido)

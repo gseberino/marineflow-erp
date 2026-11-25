@@ -235,6 +235,61 @@ Deno.test("pagamento que veio do extrato não se estorna: diz o caminho", async 
   assertEquals(db2.rpcs, []);
 });
 
+// Recebimento baixado pelo boleto (24/11/2026): o pagamento que a baixa cria é 'bank_transfer' e vem de um crédito de
+// boleto. O caminho continua o mesmo (a função do banco desfaz a aplicação de qualquer entrada), mas a frase não pode
+// dizer ao dono que o boleto era "um Pix".
+Deno.test("pagamento que veio de um boleto do extrato: mesmo caminho, sem chamar de Pix; o do Pix fica como estava", async () => {
+  const db = pagamentos({ doExtrato: true });
+  // o pagamento como a baixa o grava (conciliar_lancamento): transferência, com a nota da conciliação
+  await db.from("payments").update({ payment_method: "bank_transfer", notes: "Conciliado com o extrato de 01/10/2026" }).eq("id", "pg1");
+  const r = await tool(estornoTools, "estornar_pagamento").execute({ os: "OS-00095", valor: 800, data: "01/10/2026", motivo: "não era" }, ctx(db));
+  assertStringIncludes(r.error, "veio de uma entrada do extrato do banco: não se estorna");
+  assertStringIncludes(r.error, "desfazer_aplicacao_de_pix com payment_id pg1");
+  assertEquals(/veio de um Pix|o Pix volta/.test(r.error), false, r.error);
+  assertEquals(r.nada_mudou, true);
+  assertEquals(db.rpcs, []);
+  // o resumo do pedido (antes do sim) diz a mesma coisa
+  const resumo = sem(await resumirEstorno(ctx(db) as never, { os: "OS-00095", valor: 800, data: "01/10/2026", motivo: "não era" }));
+  assertStringIncludes(resumo, "veio de uma entrada do extrato do banco");
+  // Pix: a frase de sempre, letra por letra
+  const pix = await tool(estornoTools, "estornar_pagamento").execute({ os: "OS-00095", valor: 800, data: "01/10/2026", motivo: "duplicado" }, ctx(pagamentos({ doExtrato: true })));
+  assertStringIncludes(pix.error, "veio de um Pix do extrato: não se estorna. Use desfazer_aplicacao_de_pix com payment_id pg1 — a conta volta a dever e o Pix volta para a fila do Extrato.");
+  // … e o que a conciliação criou (o da baixa pelo boleto) volta a dever: a promessa vale, letra por letra
+  assertStringIncludes(r.error, "(ela vale para qualquer entrada do banco, não só Pix) — a conta volta a dever e a entrada volta para a fila do Extrato.");
+});
+
+// A promessa "a conta volta a dever" só vale para o pagamento que a conciliação criou (24/11/2026). No banco,
+// desfazer_aplicacao separa pelo começo da observação: "Concilia…" é estornado; o resto foi lançado à mão e só ligado
+// à entrada — continua valendo, a conta segue paga e só a entrada volta para a fila. Em produção há 4 assim, 3 deles
+// boletos antigos da Apolo casados à mão (um de R$ 5.237,99, o mesmo valor de uma parcela que a regra vai baixar): a
+// frase prometia ao dono uma conta em aberto e ele ficava com a conta paga e um crédito solto na fila.
+Deno.test("boleto do extrato lançado à mão (observação sem 'Concilia…'): a frase não promete que a conta volta a dever", async () => {
+  const pedido = { os: "OS-00095", valor: 800, data: "01/10/2026", motivo: "não era" };
+  for (const notes of [null, "", "Boleto pago no banco", " Conciliado com espaço na frente (o banco não apara)"]) {
+    const db = pagamentos({ doExtrato: true });
+    await db.from("payments").update({ payment_method: "bank_transfer", notes }).eq("id", "pg1");
+    const r = await tool(estornoTools, "estornar_pagamento").execute(pedido, ctx(db));
+    assertStringIncludes(r.error, "veio de uma entrada do extrato do banco: não se estorna");
+    assertStringIncludes(r.error, "desfazer_aplicacao_de_pix com payment_id pg1 (ela vale para qualquer entrada do banco, não só Pix)");
+    assertStringIncludes(r.error, "continua valendo (a conta segue paga) e só deixa de vir dessa entrada, que volta para a fila do Extrato");
+    assertStringIncludes(r.error, "Para estornar o pagamento em si, peça o estorno de novo depois disso.");
+    assertEquals(/volta a dever|veio de um Pix|o Pix volta/.test(r.error), false, r.error);
+    assertEquals(r.nada_mudou, true);
+    assertEquals(db.rpcs, []);
+    // o resumo do pedido (antes do sim) diz a mesma coisa
+    const resumo = sem(await resumirEstorno(ctx(db) as never, pedido));
+    assertStringIncludes(resumo, "continua valendo (a conta segue paga)");
+    assertEquals(resumo.includes("volta a dever"), false, resumo);
+  }
+  // o mesmo teste do banco (ilike 'concilia%'): maiúscula ou minúscula, "Conciliação…" também
+  for (const notes of ["conciliado com o extrato de 01/10/2026", "Conciliação automática"]) {
+    const db = pagamentos({ doExtrato: true });
+    await db.from("payments").update({ payment_method: "bank_transfer", notes }).eq("id", "pg1");
+    const r = await tool(estornoTools, "estornar_pagamento").execute(pedido, ctx(db));
+    assertStringIncludes(r.error, "— a conta volta a dever e a entrada volta para a fila do Extrato.");
+  }
+});
+
 Deno.test("estorno: leitura que falha diz que falhou", async () => {
   const r = await tool(estornoTools, "estornar_pagamento").execute({ valor: 800, motivo: "duplicado" }, ctx(pagamentos({ falha: ["payments"] })));
   assertStringIncludes(r.error, "consulta falhou");

@@ -13,6 +13,8 @@
 //
 // Decisões de 26/09/2026: só com confiança 90+ (app_settings); nada com nome cortado pelo banco;
 // nada com OS, OC ou vínculo sugerido — "o sistema deve sempre questionar".
+// As duas exceções que o dono abriu depois (22/11/2026: conta a pagar com boleto; 24/11/2026: conta a receber de NF-e com
+// o crédito do boleto) NÃO passam por aqui: são baixas de conta que já existe, decididas no banco (baixa-boleto.ts).
 import { exigeDecisao, podeJaEstarLancado, type VinculoSugerido } from "../_shared/banking/vinculo.ts";
 import { precisaDeDestino } from "../_shared/banking/destino.ts";
 

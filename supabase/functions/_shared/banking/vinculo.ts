@@ -188,6 +188,14 @@ export function sugerirVinculo(
  * questionar". Antes, vínculo "certo" ou com 70+ pontos era usado sozinho na aprovação; agora
  * toda sugestão vira pergunta. A função continua existindo para a tela e o servidor lerem a
  * mesma política.
+ *
+ * As duas exceções estritas que o dono abriu NÃO passam por aqui (24/11/2026: escrito para ninguém
+ * procurar a exceção nesta função, nem mudar o null dela): a conta a PAGAR com boleto conhecido,
+ * baixada quando o banco mostra a saída (22/11/2026), e a conta a RECEBER de NF-e com
+ * duplicata/boleto, baixada quando o banco mostra o 'CREDITO DE BOLETO' de mesmo valor no dia do
+ * vencimento (24/11/2026). As duas são decididas no banco (baixar_pelo_boleto e
+ * baixar_recebido_pelo_boleto), chamadas pela varredura em finance-review/baixa-boleto.ts. Aqui
+ * continua null: todo o resto é pergunta.
  */
 export function vinculoAutomatico(_v: VinculoSugerido | null | undefined): OpcaoDeVinculo | null {
   return null;

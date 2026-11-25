@@ -9,6 +9,7 @@ import {
 } from '../../supabase/functions/_shared/banking/parece-pagar';
 import { toast } from 'sonner';
 import { useAppSetting } from '@/hooks/use-app-settings';
+import { recarregarFinanceiro } from '@/hooks/use-lancamentos';
 import { clienteDoParecePagar } from '@/lib/extrato-vinculo';
 
 /**
@@ -371,8 +372,11 @@ export function useGerarPropostas() {
     },
     onSuccess: (r) => {
       toast.success(r.message);
-      qc.invalidateQueries({ queryKey: ['finance-review-queue'] });
-      qc.invalidateQueries({ queryKey: ['finance-review-count'] });
+      // 24/11/2026: o aviso da varredura manda ver em "Lançados sozinhos" (lançada sozinha, conta baixada pelo boleto
+      // e, agora, recebimento baixado pelo boleto), mas só a fila recarregava — o cartão logo acima do botão ficava com
+      // a contagem antiga, sem o item e sem o Desfazer. A varredura também baixa conta, cria lançamento e casa linha
+      // do banco, então recarrega tudo que mostra isso (a fila e a contagem dela estão na mesma lista).
+      recarregarFinanceiro(qc);
     },
     onError: (e: Error) => {
       toast.dismiss('mutirao-historico');
