@@ -4867,3 +4867,60 @@ quatro estão latentes.
   repositório, um `git add` descuidado leva o lixo junto, e toda conferência de "árvore limpa" precisa desfazer à mão.
 - **Menor mudança:** `*.tsbuildinfo` no `.gitignore`, em tarefa própria. O `deno.lock` (que é versionado) e o fim de linha
   do snapshot pedem olhar à parte. Não corrigido aqui.
+
+### [NOVO-p1-c2-01] Chat do app: a resposta que chega tarde e falha ainda mostra o código cru do erro
+
+- **Onde:** `supabase/functions/ai-agent/index.ts`, `handleEntregaDoPainel`: quando a tela desistiu de esperar (passou de
+  ~110 s), o pedido falha depois e não deixou nada gravado, a conversa recebe "⚠️ Não consegui terminar este pedido pelo
+  Claude Max (`timeout`). Peça de novo.", com `job.error_code ?? job.status` entre parênteses. Visto em 24/11/2026 ao
+  construir o C2 do pacote 1, que trocou o código cru pela causa em frase nos outros avisos (turno do WhatsApp e os três
+  ramos de `turnoDoPainelPeloMax`); este ponto não está na lista da especificação.
+- **Efeito:** é o único aviso de falha do Claude da assinatura que ainda mostra "timeout", "deadline_exceeded" ou
+  "auth_failed" ao dono, e o único que não diz a causa. Só aparece no chat do app, e só em pedido que passou de 110 s e
+  falhou depois. Não medido.
+- **Menor mudança:** `textoDaFalhaParaODono(await lerCausaDaFalha(admin, { job }))`, de `_shared/ai/max/causa-da-falha.ts`,
+  no lugar da frase com o código; a leitura do job em `handleEntregaDoMax` já traz `error` e `timeout_seconds`. Uma linha,
+  mais o teste. Não corrigido aqui: fora da lista do C2.
+
+### [NOVO-p1-c2-02] Chat do app com a reserva desligada: o pedido que o Claude não atende depois de entrar na fila não conta como falha
+
+- **Onde:** `supabase/functions/ai-agent/index.ts`, `turnoDoPainelPeloMax`, ramo `d.tipo === "reserva"` com
+  `!reservaLigada(p.settings)`: grava o aviso na conversa e devolve à tela, sem `registrarFalhaDoAssistente`. O mesmo em
+  `handleEntregaDoPainel` (a resposta tardia que falha). Já era assim antes do C2. Os outros caminhos de turno sem
+  resposta registram (`turno_whatsapp`, `turno_painel`, `max_sem_reserva`, `handler` e, desde o C2,
+  `max_fora_sem_reserva`); no C2 os dois ramos novos do painel (Claude indisponível antes do pedido e falha ao pôr na fila)
+  registram como `turno_painel`, porque já contavam assim quando caíam no OpenRouter sem saldo.
+- **Efeito:** com a reserva desligada, a falha do chat do app em que o pedido chegou à fila (ninguém pegou em 20 s, login,
+  limite, tempo máximo) não entra na conta de falhas por hora que o vigia lê (`falhasNaUltimaHora`). Hoje não acontece: a
+  chave está ligada. Passa a valer quando o dono desligar a reserva. O dono vê o aviso na tela; o que falta é só a conta.
+- **Menor mudança:** `registrarFalhaDoAssistente(p.admin, { onde: "turno_painel", … })` nesses dois pontos, com o código da
+  causa na mensagem. Decidir junto com o V1, que filtra por `action`. Não corrigido aqui.
+
+### [NOVO-p1-c2-03] WhatsApp com a reserva desligada: a lista de opções já foi consumida quando o Claude falha depois de entrar na fila
+
+- **Onde:** `supabase/functions/ai-agent/index.ts`. Em `handleWhatsAppTurn`, a resposta "2" a uma lista de opções vira o
+  texto da opção e `metadata.pending_options` é zerado em memória; em `turnoDoModeloNoWhatsApp`, ao pôr o pedido na fila
+  do Claude, esse `metadata` é gravado na sessão. Se o pedido falha depois e a reserva está desligada,
+  `handleEntregaDoMax` avisa e pede para mandar de novo, e a lista não volta. Já era assim antes do C2 (o ramo do aviso
+  existe desde 03/10); com a reserva ligada não aparece, porque a reserva refaz o turno com o texto já resolvido.
+- **Efeito:** o dono lê "mande a mensagem de novo", manda "2" outra vez, e o "2" segue ao modelo como texto solto, sem ser
+  a opção 2. O pedido original (com o texto da opção) e o aviso estão na conversa, então o modelo costuma entender; não
+  medido. Nos dois ramos novos do C2 (Claude indisponível antes do pedido, falha ao pôr na fila) isso não acontece: o
+  estado da sessão não é gravado, e o "2" mandado de novo volta a ser a opção.
+- **Menor mudança:** gravar na sessão, ao pôr o pedido na fila, o que o turno consumiu (a lista), e devolvê-lo no ramo do
+  aviso de `handleEntregaDoMax`; ou só gravar o `metadata` consumido na entrega que deu certo. Mexe no estado da sessão
+  entre o pedido e a entrega: tarefa própria, junto com o C1 (um turno por vez). Não corrigido aqui.
+
+### [NOVO-p1-c2-04] A pausa do Claude por "serviço indisponível" não diz se foi faturamento ou ferramentas
+
+- **Onde:** o programa do assistente no PC publica em `ai_gateway_workers.estado` só `available`, `until` e `reason` do
+  Claude (conferido em 24/11/2026 no estado de produção e no código do programa, só leitura). O motivo
+  `provider_unavailable` cobre dois casos: a assinatura recusada por faturamento (pausa de 30 minutos) e o servidor de
+  ferramentas do sistema que não conectou (pausa de 1 minuto). O detalhe só existe no erro do pedido que falhou.
+- **Efeito:** quando não há pedido (o Claude já estava em pausa), `causaDaFalha` (`_shared/ai/max/causa-da-falha.ts`) diz
+  a frase das ferramentas ("…não conseguiu se ligar às ferramentas do sistema. Tente de novo em 1 minuto."), como a
+  especificação do C2 mandou. Se a pausa for a de faturamento, a frase erra a causa e o "1 minuto" por até 30 minutos. O
+  primeiro pedido, o que causou a pausa, sai com a frase certa (lê o erro dele). Nunca aconteceu em 120 dias (0 pedidos
+  com esse código; conferido por contagem em 24/11/2026).
+- **Menor mudança:** no programa do PC, publicar no estado uma classe fixa do detalhe (por exemplo `faturamento` ou
+  `ferramentas`), nunca o texto. É mudança no repositório do programa, fora do pacote 1. Não corrigido aqui.
