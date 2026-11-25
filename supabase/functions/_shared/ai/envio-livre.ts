@@ -270,6 +270,9 @@ export function oQueCita(c: ConteudoDoTexto): string | null {
  * O aviso do cartão do PDF e do link da OS (send_service_order_link) quando a frase escrita pelo assistente
  * (custom_message) cita valor, data ou promessa. Só diz onde olhar: o PIN desse envio já existe e não muda.
  * null = sem frase ou frase que não cita nada (o cartão fica como sempre foi).
+ *
+ * "Confira antes de aprovar" (acabamento da leva A, 24/11/2026; era "antes do PIN"): o mesmo cartão aparece no chat do
+ * app, onde a aprovação é por botão, sem PIN.
  */
 export function avisoDaFraseDoAssistente(frase: unknown): string | null {
   // O link que a frase já traz (o da OS, com o código do compartilhamento) não é valor nem data: sai antes de conferir,
@@ -277,7 +280,7 @@ export function avisoDaFraseDoAssistente(frase: unknown): string | null {
   const t = typeof frase === "string" ? frase.replace(/(?:https?:\/\/|www\.)\S+/gi, " ").trim() : "";
   if (!t) return null;
   const cita = oQueCita(conteudoQuePedePin(t));
-  return cita ? `⚠️ A frase da legenda foi escrita pelo assistente e cita ${cita}. Confira antes do PIN.` : null;
+  return cita ? `⚠️ A frase da legenda foi escrita pelo assistente e cita ${cita}. Confira antes de aprovar.` : null;
 }
 
 // ─── A regra ────────────────────────────────────────────────────────────────────────────────────────────────────────
