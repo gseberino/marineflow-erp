@@ -419,6 +419,8 @@ const horasAtras = (h: number) => new Date(Date.now() - h * 3600_000).toISOStrin
 /**
  * O que o banco de verdade faz e o falso não: created_at e updated_at = now() no insert (o padrão das colunas) e
  * updated_at = now() em todo update (gatilhos set_updated_at_suppliers e payees_updated_at, conferidos em produção).
+ * O padrão vale só para a coluna que o insert não manda, como no banco. suppliers.active nasce true (DEFAULT true na
+ * migration 20260407211146).
  */
 // deno-lint-ignore no-explicit-any
 function comRelogioDoBanco<B extends { db: { from: (tabela: string) => any } }>(b: B): B {
@@ -428,7 +430,7 @@ function comRelogioDoBanco<B extends { db: { from: (tabela: string) => any } }>(
     const q = from(tabela);
     if (tabela !== "suppliers" && tabela !== "payees") return q;
     const { insert, update } = q;
-    const carimbo = (l: Linha) => ({ created_at: agora(), updated_at: agora(), ...l });
+    const carimbo = (l: Linha) => ({ created_at: agora(), updated_at: agora(), ...(tabela === "suppliers" ? { active: true } : {}), ...l });
     q.insert = (v: Linha | Linha[]) => insert(Array.isArray(v) ? v.map(carimbo) : carimbo(v));
     q.update = (v: Linha) => update({ ...v, updated_at: agora() });
     return q;
@@ -471,6 +473,47 @@ Deno.test("Revisão S1: cadastrar o número como fornecedor na hora não troca o
   await executarChamadaDeTool({ name: "send_whatsapp_message", input: { to_phone: FORNECEDOR, message: NEUTRO } }, amb);
   assertEquals(pendencias(b)[3].risk_level, "medium");
   assert(!("risk_reason" in pendencias(b)[3]));
+});
+
+// (Revisão do IA-20, 25/11/2026) O executor só descarta campo fora do schema na ferramenta que chega pela rede, e
+// create_supplier gravava os argumentos crus: com created_at e updated_at antigos nos argumentos o fornecedor nascia
+// "antigo" e pulava as 24 horas. Com o IA-20, o cliente sem orçamento nem OS (um interessado) passava a sair só com o
+// "sim" no mesmo turno; o número sem cadastro, também. O que se fixa: as datas são sempre as do banco.
+Deno.test("Revisão do IA-20: create_supplier com datas antigas nos argumentos não pula as 24 horas (interessado e número sem cadastro)", async () => {
+  const datasVelhas = { created_at: "2025-01-01T00:00:00Z", updated_at: "2025-01-01T00:00:00Z" };
+  const PROMESSA = "Amanhã às 9h passo aí, pode deixar.";
+  const b = comRelogioDoBanco(banco());
+  const amb = turno(b.db);
+  const cadastro = await executarChamadaDeTool(
+    { name: "create_supplier", input: { name: "Interessado", phone: "47 99915-9654", ...datasVelhas } },
+    amb,
+  );
+  assertEquals(cadastro.executou, true);
+  const novo = b.tabelas.suppliers.at(-1)!;
+  assert(Date.now() - Date.parse(String(novo.created_at)) < 60_000, "created_at é a do banco, não a do argumento");
+  assert(Date.now() - Date.parse(String(novo.updated_at)) < 60_000, "updated_at é a do banco, não a do argumento");
+  assertEquals((cadastro.toolResult as { campos_ignorados?: string[] }).campos_ignorados, ["created_at", "updated_at"]);
+
+  // O cliente sem orçamento (c1) continua cliente: PIN, como antes do cadastro.
+  await executarChamadaDeTool({ name: "send_whatsapp_message", input: { to_phone: CLIENTE, message: PROMESSA } }, amb);
+  assertEquals([pendencias(b)[0].risk_level, pendencias(b)[0].risk_reason], ["high", "vai a cliente; o texto cita data e promessa"]);
+
+  // O número sem cadastro também: vale o cadastro feito há pouco.
+  await executarChamadaDeTool({ name: "create_supplier", input: { name: "João", phone: "11 95555-4444", ...datasVelhas } }, amb);
+  await executarChamadaDeTool({ name: "send_whatsapp_message", input: { to_phone: DESCONHECIDO, message: NEUTRO } }, amb);
+  assertEquals([pendencias(b)[1].risk_level, pendencias(b)[1].risk_reason], ["high", MOTIVO_DO_RECENTE]);
+
+  // O cadastro comum segue gravando todos os campos do schema, sem aviso de campo ignorado.
+  const loja = await executarChamadaDeTool(
+    { name: "create_supplier", input: { name: "Loja", contact_name: "Ana", phone: "11 3333-2222", email: "a@loja.test", city: "Itajaí", state: "SC" } },
+    amb,
+  );
+  const comum = b.tabelas.suppliers.at(-1)!;
+  assertEquals(
+    [comum.name, comum.contact_name, comum.phone, comum.email, comum.city, comum.state],
+    ["Loja", "Ana", "11 3333-2222", "a@loja.test", "Itajaí", "SC"],
+  );
+  assert(!("campos_ignorados" in (loja.toolResult as object)));
 });
 
 Deno.test("Revisão S1: trocar o telefone de um fornecedor, ou ligar o número a um fornecedor sem telefone, também não troca o PIN pelo sim", async () => {
