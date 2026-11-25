@@ -28,12 +28,22 @@
 // Sempre com o "sim" do dono, por texto: a confirmação mostra cada OS com o saldo, o total, o número inteiro e a
 // mensagem EXATA que vai ao cliente. Impedimento vira uma linha "⚠️ …" (recusa, sem pendência). O "sim" foi
 // sobre o retrato (cliente, telefone, contas e saldos): mudou até o "sim", não envia.
+//
+// O CLIENTE INTEIRO (25/11/2026, etapa 3 do controle financeiro — "cobrar o cliente pelo assistente com as travas da
+// ficha"). Medido no dado real: de 10 clientes com conta em aberto, 5 não tinham caminho direto por aqui — conta sem
+// OS (as parcelas de NF-e da Apolo), uma OS só sem cobrança criada (Sergio, Lírio, Carlson) e OS que não chegou a
+// "Em andamento" (César). Chamada só com o cliente (sem as OS), a tool cobra TUDO que ele tem em aberto: uma conta ou
+// várias, de OS em qualquer situação ou sem OS — o que a ficha faz no "Enviar extrato" com saldo (dono, 20/11/2026),
+// pela MESMA função do banco, com p_os nulo. As travas, o cartão com a mensagem exata, o retrato e o registro são os
+// mesmos; a mensagem é a de cobrança (só o que está em aberto), não o extrato com o que já foi pago. Conta de OS
+// cancelada ou agrupada em outra fica de fora, com aviso. Com as OS ditas, nada muda (2 a 10, já executadas).
 import { cargosQueContam, lerRetrato, type Role, type ToolCtx, type ToolDef } from "./registry.ts";
 import { localizarOrdem } from "./documentos-pdf.ts";
 import { pareceNumeroDeOS } from "./os-referencia.ts";
 import { emReais, referenciasDosOrcamentos } from "./agrupar-orcamentos.ts";
 import { STATUS_QUE_AGRUPAM } from "./agrupar-os.ts";
 import { pixEsperandoNoExtrato } from "./pix-esperando.ts";
+import { AVISO_DE_FIXO, pareceTelefoneFixo } from "./lembrete-de-cobranca.ts";
 import { telefoneLegivel, telefoneParaEnvio } from "./agendamento.ts";
 import { sendWhatsapp } from "./whatsapp.ts";
 import { guardaDeEnvio } from "../comms/send-guard.ts";
@@ -66,6 +76,9 @@ export const relogioDoCobrarJuntas = { agora: () => new Date() };
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SEM_CARGO = "Só administrador ou financeiro cobra várias OS juntas.";
 const SEM_RETRATO = "Nada foi enviado: não consegui conferir as contas quando o pedido foi feito. Peça de novo que eu confiro.";
+/** O que fazer quando, das OS ditas, só uma tem saldo: o cliente inteiro (tudo em aberto) ou o lembrete da cobrança dela. */
+const UMA_OS_SO =
+  "peça a cobrança pelo cliente (só o cliente_id, sem as OS: entra tudo que ele tem em aberto) ou mande o lembrete da cobrança dela (send_collection_reminder).";
 const NAO_COMECOU =
   "Cobrar juntas é para OS já executadas (em andamento, concluídas ou faturadas); para juntar OS que ainda não começaram numa OS só, use agrupar_os.";
 
@@ -108,10 +121,13 @@ export function validarPedidoDeCobrarJuntas(args: Record<string, unknown> | unde
   const refs = referenciasDosOrcamentos(args?.os);
   const cliente = String(args?.cliente_id ?? "").trim();
   if (cliente && !UUID_RE.test(cliente)) return { error: "Passe o id do cliente (ache com search_clients) ou diga as OS pelos números." };
-  if (!refs.length && !cliente) return { error: "Diga as OS a cobrar juntas (números, ex.: OS-00045 e OS-00046) ou o cliente (id de search_clients)." };
+  if (!refs.length && !cliente) return { error: "Diga as OS a cobrar juntas (números, ex.: OS-00045 e OS-00046) ou o cliente (cliente_id, de search_clients)." };
   if (refs.length) {
     if (refs.length < MIN_AGRUPAR) {
-      return { error: "Cobrar juntas é para 2 OS ou mais. Para uma OS só, cobre pela cobrança dela (send_collection_reminder)." };
+      return {
+        error: "Pelas OS, cobrar juntas é para 2 ou mais. Para cobrar tudo que o cliente tem em aberto (uma conta ou várias), " +
+          "passe só o cliente (cliente_id, de search_clients), sem as OS; para o lembrete de uma cobrança, send_collection_reminder.",
+      };
     }
     if (refs.length > MAX_AGRUPAR) return { error: "Cobre no máximo 10 OS de uma vez." };
     const torto = refs.find((r) => !referenciaValida(r));
@@ -162,7 +178,10 @@ interface CobrancaLida {
   last_auto_sent_at: string | null;
 }
 
-/** Uma OS da cobrança conjunta: a linha, as contas com saldo (por vencimento) e o saldo. */
+/**
+ * Uma OS da cobrança conjunta: a linha, as contas com saldo (por vencimento) e o saldo. No modo "cliente inteiro", as
+ * contas SEM OS (parcela de nota, avulsa) vêm num grupo só, com id e numero vazios.
+ */
 export interface OSDaCobranca {
   id: string;
   numero: string;
@@ -172,8 +191,13 @@ export interface OSDaCobranca {
   vencido: boolean;
 }
 
+/** Contas demais numa mensagem só: acima disso, cobre pelas OS (o cliente inteiro não escolhe). */
+export const MAX_CONTAS_DO_CLIENTE = 30;
+
 /** A cobrança conjunta resolvida: o que a confirmação mostra, o retrato guarda e o envio manda. */
 export interface CobrancaConjunta {
+  /** "os" = as OS ditas (2 a 10, já executadas); "cliente" = tudo que o cliente tem em aberto (25/11/2026). */
+  modo: "os" | "cliente";
   cliente: ClienteLido;
   os: OSDaCobranca[];
   /** Total = Pago + Em aberto das contas escolhidas (a mensagem prova a conta). */
@@ -249,7 +273,10 @@ async function cobrancasDasContas(db: any, contas: ContaLida[], osIds: string[])
   const COLUNAS = "id, status, receivable_id, service_order_id, last_auto_sent_at";
   const idsDasContas = contas.map((c) => c.id);
   const pelaConta = await ler<CobrancaLida[]>(db.from("collections").select(COLUNAS).in("receivable_id", idsDasContas), "as cobranças das contas");
-  const pelaOS = await ler<CobrancaLida[]>(db.from("collections").select(COLUNAS).in("service_order_id", osIds), "as cobranças das OS");
+  // Cliente só com conta sem OS (a Apolo): não há OS para procurar.
+  const pelaOS = osIds.length
+    ? await ler<CobrancaLida[]>(db.from("collections").select(COLUNAS).in("service_order_id", osIds), "as cobranças das OS")
+    : [];
   const todas = new Map<string, CobrancaLida>();
   for (const c of [...(pelaConta ?? []), ...(pelaOS ?? [])]) {
     const daConta = !!c.receivable_id && idsDasContas.includes(c.receivable_id);
@@ -290,8 +317,11 @@ export function mensagemDaCobrancaConjunta(p: {
   const pago = contas.reduce((t, c) => t + centavos(pagoDaConta(c)), 0);
   const emAberto = contas.reduce((t, c) => t + centavos(saldoDaConta(c)), 0);
   const pix = String(p.pixKey ?? "").trim();
+  // O cliente inteiro pode ter conta sem OS: a linha "OS:" só lista os números que existem (e some sem nenhum),
+  // como o extrato da tela (buildClientStatement). Com as OS ditas, o texto é o de sempre.
+  const numeros = p.os.map((o) => o.numero).filter(Boolean);
   return (
-    `📋 *Cobrança — HBR*\nCliente: ${nome}\nOS: ${p.os.map((o) => o.numero).join(", ")}\n\n` +
+    `📋 *Cobrança — HBR*\nCliente: ${nome}${numeros.length ? `\nOS: ${numeros.join(", ")}` : ""}\n\n` +
     `${linhas.join("\n")}\n\n` +
     `Total: ${emReais(reais(total))}\n` +
     `Pago: ${emReais(reais(pago))}\n` +
@@ -313,24 +343,36 @@ export async function montarCobrancaConjunta(db: any, admin: any, args: Record<s
   const refs = referenciasDosOrcamentos(args?.os);
   const clienteDito = String(args?.cliente_id ?? "").trim() || null;
 
-  // 1) As OS.
-  let linhas: OSLida[];
-  if (refs.length) {
-    const ditas = await osDitas(db, refs);
-    if (ehErro(ditas)) return ditas;
-    const problemas = ditas.map(problemaDaOS).filter((p): p is string => !!p);
-    if (problemas.length) return { error: `${problemas.join(" ")} Explique ao dono e proponha cobrar juntas sem ela.` };
-    const clientes = new Set(ditas.map((o) => o.client_id ?? ""));
-    if (clientes.size > 1) return { error: "As OS são de clientes diferentes: cobrar juntas só junta OS do MESMO cliente." };
-    if (clienteDito && ditas[0].client_id !== clienteDito) return { error: "As OS ditas não são desse cliente: confira o cliente e os números." };
-    // Na ordem do número (como a tela, osComSaldo), não na ordem em que o dono falou.
-    linhas = [...ditas].sort((a, b) => a.service_order_number.localeCompare(b.service_order_number));
-  } else {
-    linhas = ((await ler<OSLida[]>(
-      db.from("service_orders").select(COLUNAS_DA_OS).eq("client_id", clienteDito).in("status", [...STATUS_QUE_COBRAM_JUNTAS]),
-      "as OS do cliente",
-    )) ?? []).filter((o) => !o.merged_into_id).sort((a, b) => a.service_order_number.localeCompare(b.service_order_number));
+  // Só o cliente, sem as OS: tudo que ele tem em aberto (25/11/2026).
+  if (!refs.length) {
+    if (!clienteDito) return { error: "Diga as OS a cobrar juntas (números) ou o cliente (id de search_clients)." };
+    return await montarCobrancaDoCliente(db, admin, clienteDito, hoje);
   }
+
+  // 1) As OS.
+  const ditas = await osDitas(db, refs);
+  if (ehErro(ditas)) return ditas;
+  const problemas = ditas.map(problemaDaOS).filter((p): p is string => !!p);
+  if (problemas.length) {
+    // Revisão de 25/11/2026: a OS que não começou (ou que está aguardando com a chegada registrada) mandava só agrupar ou
+    // mudar a situação. Desde a fatia 2 há o caminho pelo cliente, que cobra sem mexer na OS — dito UMA vez, no fim.
+    // Conferência de 25/11/2026: só quando a OS que não começou TEM conta em aberto — a maioria (agendada) ainda não tem, e
+    // mandar ao caminho pelo cliente aí era só trocar uma recusa por outra.
+    const naoComecaram = ditas.filter((o) => STATUS_QUE_AGRUPAM.includes(o.status)).map((o) => o.id);
+    const comConta = naoComecaram.length
+      ? ((await ler<ContaLida[]>(db.from("receivables").select(COLUNAS_DA_CONTA).in("service_order_id", naoComecaram), "as contas das OS")) ?? [])
+        .some((c) => saldoDaConta(c) > 0)
+      : false;
+    const peloCliente = comConta
+      ? " Para cobrar sem mexer na OS, peça pelo cliente (só o cliente_id, sem as OS): entra TUDO que ele tem em aberto, e a conta dessa OS entra com aviso."
+      : "";
+    return { error: `${problemas.join(" ")} Explique ao dono e proponha cobrar juntas sem ela.${peloCliente}` };
+  }
+  const clientes = new Set(ditas.map((o) => o.client_id ?? ""));
+  if (clientes.size > 1) return { error: "As OS são de clientes diferentes: cobrar juntas só junta OS do MESMO cliente." };
+  if (clienteDito && ditas[0].client_id !== clienteDito) return { error: "As OS ditas não são desse cliente: confira o cliente e os números." };
+  // Na ordem do número (como a tela, osComSaldo), não na ordem em que o dono falou.
+  const linhas: OSLida[] = [...ditas].sort((a, b) => a.service_order_number.localeCompare(b.service_order_number));
   const clienteId = linhas[0]?.client_id ?? clienteDito;
   if (!clienteId) return { error: "As OS não têm cliente no cadastro: não há para quem cobrar." };
 
@@ -358,23 +400,22 @@ export async function montarCobrancaConjunta(db: any, admin: any, args: Record<s
   });
   const semSaldo = os.filter((o) => o.saldo <= 0);
   const entram = os.filter((o) => o.saldo > 0);
-  if (refs.length && semSaldo.length) {
+  if (semSaldo.length) {
     const quais = semSaldo.map((o) => o.numero).join(", ");
     const resto = entram.length >= MIN_AGRUPAR
       ? `Sem ${semSaldo.length === 1 ? "ela" : "elas"}, dá para cobrar juntas ${entram.map((o) => o.numero).join(", ")}.`
       : entram.length === 1
-      ? `Sobra só ${entram[0].numero}: cobre pela cobrança dela (send_collection_reminder).`
+      ? `Sobra só ${entram[0].numero}: ${UMA_OS_SO}`
       : "Não há o que cobrar.";
     return { error: `${quais} não ${semSaldo.length === 1 ? "tem" : "têm"} saldo em aberto. ${resto}` };
   }
   if (entram.length < MIN_AGRUPAR) {
     return {
       error: entram.length === 1
-        ? `${nomeDoCliente} tem saldo em aberto só na ${entram[0].numero}: cobre pela cobrança dela (send_collection_reminder).`
+        ? `${nomeDoCliente} tem saldo em aberto só na ${entram[0].numero}: ${UMA_OS_SO}`
         : `${nomeDoCliente} não tem OS executada com saldo em aberto.`,
     };
   }
-  if (entram.length > MAX_AGRUPAR) return { error: `${nomeDoCliente} tem ${entram.length} OS com saldo: diga até 10 para cobrar juntas.` };
   const contas = entram.flatMap((o) => o.contas);
 
   // 4) Conta em nome de outro cadastro: genérico recusa com a frase do genérico; outro cliente de verdade (o
@@ -405,6 +446,22 @@ export async function montarCobrancaConjunta(db: any, admin: any, args: Record<s
     }
   }
 
+  return await conferirEMontar(db, admin, { modo: "os", cliente, os: entram, avisos, hoje });
+}
+
+/** As travas, as cobranças que ganham o registro, os avisos e a mensagem — o fim comum dos dois modos. */
+// deno-lint-ignore no-explicit-any
+async function conferirEMontar(db: any, admin: any, p: {
+  modo: CobrancaConjunta["modo"];
+  cliente: ClienteLido;
+  os: OSDaCobranca[];
+  avisos: string[];
+  hoje: string;
+}): Promise<CobrancaConjunta | { error: string }> {
+  const { cliente, os: entram, avisos, hoje } = p;
+  const nomeDoCliente = String(cliente.name ?? "").trim() || "sem nome";
+  const contas = entram.flatMap((o) => o.contas);
+
   // 5) As travas do lembrete (piso, Pix esperando, opt-out, telefone) sobre o TOTAL em aberto.
   const cfg = await configuracoes(admin);
   const emAberto = reais(contas.reduce((t, c) => t + centavos(saldoDaConta(c)), 0));
@@ -417,26 +474,100 @@ export async function montarCobrancaConjunta(db: any, admin: any, args: Record<s
     optOut: !!cliente.opt_out_whatsapp,
     piso: Number(cfg.collection_min_amount) || 0,
     totalEmAberto: emAberto,
-    pixEsperando: pix.map((p) => ({ valor: p.valor, data: p.data })),
+    pixEsperando: pix.map((x) => ({ valor: x.valor, data: x.data })),
     telefone,
   });
   if (trava) return { error: trava };
   if (!telefone) return { error: "Sem telefone válido no cadastro do cliente para enviar a cobrança." };
 
   // 6) As cobranças que ganham o registro do envio, e os avisos do que o dono precisa saber.
-  const cobrancas = await cobrancasDasContas(db, contas, entram.map((o) => o.id));
+  const cobrancas = await cobrancasDasContas(db, contas, entram.map((o) => o.id).filter(Boolean));
   const emAndamento = entram.filter((o) => o.status === "in_progress");
   if (emAndamento.length) {
     avisos.push(`${emAndamento.map((o) => o.numero).join(", ")} ainda ${emAndamento.length === 1 ? "está" : "estão"} em andamento: entra na cobrança, mas a nota só depois de concluída.`);
   }
   const cobradasHoje = cobrancas.filter((c) => c.last_auto_sent_at && diaLocal(new Date(c.last_auto_sent_at)) === hoje);
   if (cobradasHoje.length) {
-    const quais = [...new Set(cobradasHoje.map((c) => entram.find((o) => o.id === c.service_order_id || o.contas.some((x) => x.id === c.receivable_id))?.numero).filter(Boolean))];
+    const quais = [...new Set(cobradasHoje.map((c) => entram.find((o) => (!!o.id && o.id === c.service_order_id) || o.contas.some((x) => x.id === c.receivable_id))?.numero).filter(Boolean))];
     avisos.push(`Já houve lembrete hoje${quais.length ? ` para ${quais.join(", ")}` : ""}: o cliente vai receber outra mensagem no mesmo dia.`);
   }
 
   const mensagem = mensagemDaCobrancaConjunta({ cliente, os: entram, pixKey: cfg.pix_key, hoje });
-  return { cliente, os: entram, total: reais(centavos(pago) + centavos(emAberto)), pago, emAberto, telefone, cobrancas, avisos, mensagem };
+  return {
+    modo: p.modo, cliente, os: entram, total: reais(centavos(pago) + centavos(emAberto)), pago, emAberto, telefone, cobrancas, avisos, mensagem,
+  };
+}
+
+/** O rótulo de uma conta sem OS no cartão do dono: a descrição dela (a parcela da nota, a avulsa). */
+const rotuloDaConta = (c: ContaLida) => String(c.description ?? "").trim() || "Lançamento";
+
+/**
+ * O cliente inteiro (25/11/2026): TODAS as contas com saldo em nome dele (o titular, como a ficha), de OS em qualquer
+ * situação ou sem OS. Fica de fora, com aviso, a conta cuja OS foi cancelada ou agrupada em outra — a OS não vale mais
+ * e a conta aberta ali é sobra a conferir, não dívida a cobrar. Recusa de negócio = { error }; leitura que falha LANÇA.
+ */
+// deno-lint-ignore no-explicit-any
+async function montarCobrancaDoCliente(db: any, admin: any, clienteId: string, hoje: string): Promise<CobrancaConjunta | { error: string }> {
+  const cliente = await ler<ClienteLido | null>(db.from("clients").select(COLUNAS_DO_CLIENTE).eq("id", clienteId).maybeSingle(), "o cadastro do cliente");
+  if (!cliente) return { error: "Não achei esse cliente no cadastro: ache o id com search_clients." };
+  const nome = String(cliente.name ?? "").trim() || "sem nome";
+  // Genérico recusa antes de qualquer conta: o "Cliente Final" nunca entra (decisão do dono de 28/10/2026).
+  if (cliente.generico) return { error: travaDoCobrarJuntas({ clienteNome: nome, generico: true, totalEmAberto: 0 })! };
+
+  const lidas = (await ler<ContaLida[]>(db.from("receivables").select(COLUNAS_DA_CONTA).eq("client_id", cliente.id), "as contas a receber do cliente")) ?? [];
+  const abertas = lidas.filter((c) => saldoDaConta(c) > 0)
+    .sort((a, b) => String(a.due_date ?? "").localeCompare(String(b.due_date ?? "")) || a.id.localeCompare(b.id));
+  if (!abertas.length) return { error: `${nome} não tem conta em aberto: não há o que cobrar.` };
+
+  const idsDasOS = [...new Set(abertas.map((c) => c.service_order_id).filter((x): x is string => !!x))];
+  const ordens = idsDasOS.length
+    ? (await ler<OSLida[]>(db.from("service_orders").select(COLUNAS_DA_OS).in("id", idsDasOS), "as OS das contas")) ?? []
+    : [];
+
+  const grupos = new Map<string, OSDaCobranca>();
+  const fora: string[] = [];
+  for (const c of abertas) {
+    const o = c.service_order_id ? ordens.find((x) => x.id === c.service_order_id) : null;
+    if (c.service_order_id && !o) {
+      return { error: `Não achei a OS de uma conta em aberto de ${nome} (${rotuloDaConta(c)}): confira em Contas a Receber antes de cobrar.` };
+    }
+    if (o && (o.status === "cancelled" || o.merged_into_id)) {
+      fora.push(`${rotuloDaConta(c)}, ${emReais(saldoDaConta(c))} (${o.service_order_number}, ${o.merged_into_id ? "agrupada em outra OS" : "cancelada"})`);
+      continue;
+    }
+    const chave = o?.id ?? "";
+    const g = grupos.get(chave) ?? { id: chave, numero: o?.service_order_number ?? "", status: o?.status ?? "", contas: [], saldo: 0, vencido: false };
+    g.contas.push(c);
+    g.saldo = reais(centavos(g.saldo) + centavos(saldoDaConta(c)));
+    g.vencido = g.vencido || contaVencida(c, hoje);
+    grupos.set(chave, g);
+  }
+  const avisoDeFora = fora.length
+    ? `Ficou de fora: ${fora.join("; ")} — a OS não vale mais e a conta segue aberta. Confira em Contas a Receber.`
+    : null;
+  // As contas sem OS primeiro, depois na ordem do número — a ordem do extrato da tela (buildClientStatement).
+  const entram = [...grupos.values()].sort((a, b) => a.numero.localeCompare(b.numero));
+  const contas = entram.flatMap((o) => o.contas);
+  if (!contas.length) return { error: `${nome} não tem o que cobrar. ${avisoDeFora}` };
+  if (contas.length > MAX_CONTAS_DO_CLIENTE) {
+    return { error: `${nome} tem ${contas.length} contas em aberto: é conta demais para uma mensagem só. Cobre pelas OS (diga os números, até 10).` };
+  }
+
+  const avisos: string[] = [];
+  if (avisoDeFora) avisos.push(avisoDeFora);
+  // OS que não chegou a "Em andamento" (agendada, aguardando o cliente, orçamento com sinal a cobrar…): a conta entra
+  // porque é dívida aberta do cliente; o dono fica sabendo de qual OS é.
+  const naoExecutadas = entram.filter((o) => !!o.id && !STATUS_QUE_COBRAM_JUNTAS.includes(o.status));
+  if (naoExecutadas.length) {
+    const uma = naoExecutadas.length === 1;
+    avisos.push(`${naoExecutadas.map((o) => `${o.numero} (${situacaoDaOS(o.status)})`).join(", ")} ainda não ${uma ? "foi executada" : "foram executadas"}: `
+      + `${uma ? "a conta entra" : "as contas entram"} mesmo assim, porque ${uma ? "está" : "estão"} em aberto.`);
+  }
+  const vencidas = contas.filter((c) => contaVencida(c, hoje));
+  if (!vencidas.length) {
+    avisos.push(`Nenhuma conta está vencida (a primeira vence em ${dataDaConta(contas.map((c) => String(c.due_date ?? "")).filter(Boolean).sort()[0]) || "data não informada"}): é cobrança antes do vencimento.`);
+  }
+  return await conferirEMontar(db, admin, { modo: "cliente", cliente, os: entram, avisos, hoje });
 }
 
 /** "⚠️ …" numa linha só: o executor devolve como recusa, sem pendência (RESUMO_QUE_RESOLVE em agent.ts). */
@@ -448,21 +579,48 @@ export async function resumirCobrancaConjunta(admin: any, args: Record<string, u
   const c = await montarCobrancaConjunta(admin, admin, args);
   if (ehErro(c)) return recusa(c.error);
   const nome = String(c.cliente.name ?? "").trim() || "cliente";
-  const semCobranca = contasSemCobranca(c.os.flatMap((o) => o.contas), c.cobrancas).length;
+  const contas = c.os.flatMap((o) => o.contas);
+  const semCobranca = contasSemCobranca(contas, c.cobrancas).length;
+  const registro = semCobranca
+    ? avisoDaCobrancaCriada(semCobranca)
+    : `O envio fica registrado em ${plural(c.cobrancas.length, "cobrança", "cobranças")}.`;
+  const cliente = c.modo === "cliente";
+  // O cliente inteiro: cada OS com o saldo e cada conta sem OS com a descrição e o vencimento; o total diz quanto
+  // dele já venceu (o cartão é do dono: a mensagem ao cliente vem inteira logo abaixo).
+  const hoje = diaLocal(relogioDoCobrarJuntas.agora());
+  const vencido = reais(contas.filter((x) => contaVencida(x, hoje)).reduce((t, x) => t + centavos(saldoDaConta(x)), 0));
+  const linhas = c.os.flatMap((o) => o.id
+    ? [`- ${o.numero} · ${situacaoDaOS(o.status)} · em aberto *${emReais(o.saldo)}*${o.vencido ? " (vencido)" : ""}`]
+    : o.contas.map((x) => `- Sem OS · ${rotuloDaConta(x)} · vence ${dataDaConta(x.due_date) || "—"} · em aberto *${emReais(saldoDaConta(x))}*${contaVencida(x, hoje) ? " (vencido)" : ""}`));
   return [
-    `Cobrar juntas *${c.os.length}* OS de *${nome}* numa mensagem só, pelo WhatsApp *${telefoneLegivel(c.telefone)}*:`,
-    ...c.os.map((o) => `- ${o.numero} · ${situacaoDaOS(o.status)} · em aberto *${emReais(o.saldo)}*${o.vencido ? " (vencido)" : ""}`),
-    `Total em aberto: *${emReais(c.emAberto)}*`,
-    `- Nada muda nas contas a receber: cada conta continua na sua OS. ${semCobranca
-      ? avisoDaCobrancaCriada(semCobranca)
-      : `O envio fica registrado em ${plural(c.cobrancas.length, "cobrança", "cobranças")}.`}`,
+    cliente
+      ? `Cobrar *${nome}* por tudo que ele tem em aberto (${plural(contas.length, "conta", "contas")}), numa mensagem só, pelo WhatsApp *${telefoneLegivel(c.telefone)}*:`
+      : `Cobrar juntas *${c.os.length}* OS de *${nome}* numa mensagem só, pelo WhatsApp *${telefoneLegivel(c.telefone)}*:`,
+    ...linhas,
+    `Total em aberto: *${emReais(c.emAberto)}*${cliente && centavos(vencido) !== centavos(c.emAberto) ? ` (vencido: ${emReais(vencido)})` : ""}`,
+    `- Nada muda nas contas a receber${cliente ? "." : ": cada conta continua na sua OS."} ${registro}`,
     ...c.avisos.map((a) => `- ${a}`),
+    ...(pareceTelefoneFixo(c.telefone) ? [`- ${AVISO_DE_FIXO}`] : []),
     "Mensagem que vai ao cliente:",
     c.mensagem,
   ].join("\n");
 }
 
-/** O retrato que o "sim" aprova: o cliente, o telefone, as contas com o saldo de cada uma e o total. */
+/** O que foi cobrado, numa frase curta (a nota do contato, a resposta ao dono): as OS, ou "tudo em aberto". */
+function oQueFoiCobrado(c: CobrancaConjunta): string {
+  const numeros = c.os.map((o) => o.numero).filter(Boolean);
+  if (c.modo !== "cliente") return numeros.join(", ");
+  const contas = c.os.reduce((t, o) => t + o.contas.length, 0);
+  const semOS = c.os.filter((o) => !o.id).reduce((t, o) => t + o.contas.length, 0);
+  const partes = [...numeros, ...(semOS ? [`${semOS} sem OS`] : [])];
+  return `tudo em aberto (${plural(contas, "conta", "contas")}: ${partes.join(", ")})`;
+}
+
+/**
+ * O retrato que o "sim" aprova: o cliente, o telefone, as contas com o saldo de cada uma, o total e o TEXTO (revisão de
+ * 25/11/2026: o cartão das 20h30 com a conta "a vencer" e o "sim" às 8h do dia seguinte mandavam "vencido" — outro texto
+ * do que o dono aprovou; o mesmo com a chave Pix, a descrição ou o nome trocados no meio).
+ */
 // deno-lint-ignore no-explicit-any
 export async function retratoDaCobrancaConjunta(admin: any, args: Record<string, unknown>): Promise<Record<string, unknown> | null> {
   try {
@@ -480,6 +638,7 @@ function retratoDe(c: CobrancaConjunta): Record<string, unknown> {
     telefone: c.telefone,
     contas: c.os.flatMap((o) => o.contas).map((x) => ({ id: x.id, saldo: saldoDaConta(x) })).sort((a, b) => a.id.localeCompare(b.id)),
     total: c.emAberto,
+    texto: c.mensagem,
   };
 }
 
@@ -490,9 +649,13 @@ export function oQueMudouNaCobrancaConjunta(retrato: Record<string, unknown>, ag
   if (retrato.telefone !== novo.telefone) return "o telefone do cadastro do cliente mudou";
   const antes = Array.isArray(retrato.contas) ? retrato.contas as Array<{ id?: unknown; saldo?: unknown }> : [];
   const depois = novo.contas as Array<{ id: string; saldo: number }>;
-  if (antes.map((x) => String(x.id)).sort().join("|") !== depois.map((x) => x.id).join("|")) return "as contas em aberto das OS não são mais as mesmas";
+  if (antes.map((x) => String(x.id)).sort().join("|") !== depois.map((x) => x.id).join("|")) {
+    return agora.modo === "cliente" ? "as contas em aberto do cliente não são mais as mesmas" : "as contas em aberto das OS não são mais as mesmas";
+  }
   const mexida = depois.find((x) => centavos(antes.find((a) => String(a.id) === x.id)?.saldo) !== centavos(x.saldo));
   if (mexida) return `o saldo em aberto mudou (era ${emReais(retrato.total)}, agora ${emReais(novo.total)})`;
+  // retrato de antes de 25/11/2026 não tem o texto: segue como antes
+  if (typeof retrato.texto === "string" && retrato.texto !== novo.texto) return "o texto da mensagem mudou (o dia virou, ou a chave Pix, a descrição ou o nome mudaram)";
   return null;
 }
 
@@ -500,13 +663,15 @@ export const cobrarJuntasTools: ToolDef[] = [
   {
     name: "cobrar_juntas",
     description:
-      "Cobra numa MENSAGEM SÓ, pelo WhatsApp do cadastro do cliente, o saldo em aberto de 2 a 10 OS JÁ EXECUTADAS (em andamento, " +
-      "concluídas ou faturadas) do MESMO cliente: o extrato dessas OS, com o número da OS e o saldo de cada conta, o vencido pela " +
-      "data, total, pago e em aberto, e a chave Pix. NÃO junta as OS nem muda conta nenhuma (cada conta continua na sua OS); " +
-      "registra o envio nas cobranças das contas e cria a cobrança da conta que não tem uma. Diga as OS pelos números ou passe o cliente (id de search_clients) para cobrar " +
-      "todas as OS executadas dele com saldo. OS que ainda não começou → agrupar_os (outra coisa: junta numa OS nova). Uma OS só → " +
-      "send_collection_reminder. Recusa cadastro genérico (sem CPF/CNPJ), Pix do cliente esperando no Extrato, opt-out e valor " +
-      "abaixo do piso. A chamada já pede o 'sim' ao dono mostrando a mensagem exata: não pergunte antes.",
+      "Cobra o cliente numa MENSAGEM SÓ, pelo WhatsApp do cadastro dele: cada conta em aberto com o saldo e o vencimento, o " +
+      "vencido pela data, total, pago e em aberto, e a chave Pix. DOIS JEITOS. (1) Pelo CLIENTE — só cliente_id (de " +
+      "search_clients), sem as OS: TUDO que ele tem em aberto, uma conta ou várias, de OS em qualquer situação ou sem OS " +
+      "(parcela de nota); é o caminho de 'cobra o Fulano'. (2) Pelas OS — os números de 2 a 10 OS JÁ EXECUTADAS (em andamento, " +
+      "concluídas ou faturadas) do MESMO cliente: só o saldo delas. NÃO junta as OS nem muda conta nenhuma; registra o envio nas " +
+      "cobranças das contas e cria a cobrança da conta que não tem uma. Juntar OS que ainda não começaram numa OS nova é outra " +
+      "coisa → agrupar_os. Lembrete curto de UMA cobrança → send_collection_reminder. Recusa cadastro genérico (sem CPF/CNPJ), " +
+      "entrada do cliente esperando no Extrato, opt-out e valor abaixo do piso. A chamada já pede o 'sim' ao dono mostrando a " +
+      "mensagem exata: não pergunte antes.",
     input_schema: {
       type: "object",
       properties: {
@@ -515,7 +680,7 @@ export const cobrarJuntasTools: ToolDef[] = [
           items: { type: "string" },
           description: "As OS a cobrar juntas: números (OS-00045 ou só 45) ou ids, 2 a 10.",
         },
-        cliente_id: { type: "string", description: "Id (UUID) do cliente — sem os números, entram todas as OS executadas dele com saldo." },
+        cliente_id: { type: "string", description: "Id (UUID) do cliente — sem os números das OS, entra TUDO que ele tem em aberto (com ou sem OS)." },
       },
     },
     // Mensagem a CLIENTE com valores, que não se desfaz — como send_collection_reminder.
@@ -543,7 +708,11 @@ export const cobrarJuntasTools: ToolDef[] = [
       if (mudou) return { error: `Nada foi enviado: ${mudou} depois do pedido. Peça de novo que eu confiro e mostro a mensagem atualizada.` };
 
       const agora = relogioDoCobrarJuntas.agora();
-      const numeros = c.os.map((o) => o.numero);
+      const numeros = c.os.map((o) => o.numero).filter(Boolean);
+      // As OS ditas: "OS-00045, OS-00046"; o cliente inteiro: "tudo em aberto (3 contas: OS-00045, 2 sem OS)".
+      const oQue = oQueFoiCobrado(c);
+      const doCliente = c.modo === "cliente";
+      const rotulo = doCliente ? "cobrança" : "cobrança conjunta";
       // Portão de comunicação: horário (bloqueia) e estilo (avisa) — como o lembrete individual.
       const g = guardaDeEnvio(c.mensagem, {
         tipo: "cobranca", audiencia: "cliente", canal: "whatsapp", destinatarioIdentificado: true, texto: c.mensagem,
@@ -574,7 +743,7 @@ export const cobrarJuntasTools: ToolDef[] = [
         };
       }
       if (modoTeste) {
-        const texto = `O modo de teste do WhatsApp está ligado: a cobrança conjunta (${numeros.join(", ")} — em aberto ${emReais(c.emAberto)}) foi para o número de TESTE, NÃO para ${nome}. Nada foi registrado nas cobranças. Diga isso.`;
+        const texto = `O modo de teste do WhatsApp está ligado: a ${rotulo} (${oQue} — em aberto ${emReais(c.emAberto)}) foi para o número de TESTE, NÃO para ${nome}. Nada foi registrado nas cobranças. Diga isso.`;
         return {
           ok: true,
           cliente: nome,
@@ -590,11 +759,12 @@ export const cobrarJuntasTools: ToolDef[] = [
 
       // Enviado: a função do banco cria a cobrança das contas sem nenhuma e registra o envio (contato
       // 'whatsapp_sent' + 'sent' + last_auto_sent_at) em todas — tudo ou nada, a mesma da tela.
-      const nota = `Cobrança conjunta enviada pelo assistente (WhatsApp): ${numeros.join(", ")} — em aberto ${emReais(c.emAberto)}`;
+      const nota = `${doCliente ? "Cobrança do cliente" : "Cobrança conjunta"} enviada pelo assistente (WhatsApp): ${oQue} — em aberto ${emReais(c.emAberto)}`;
       const { data: reg, error: regErr } = await ctx.sb.rpc("cobrar_juntas_registrar_envio", {
         p_cliente: c.cliente.id,
         p_contas: contas,
-        p_os: c.os.map((o) => o.id),
+        // null = o cliente inteiro (o que a tela manda no "Enviar extrato" com saldo): as contas só precisam ser dele.
+        p_os: doCliente ? null : c.os.map((o) => o.id),
         p_nota: nota,
         p_autor: ctx.userId || null,
       });
@@ -604,7 +774,7 @@ export const cobrarJuntasTools: ToolDef[] = [
         ? ` A mensagem foi enviada, mas não consegui criar/registrar a cobrança (${regErr.message ?? regErr}). Nada foi gravado nas cobranças: avise o dono para não cobrar de novo hoje.`
         : `${criadas ? ` ${plural(criadas, "cobrança criada", "cobranças criadas")} (em Cobranças).` : ""}` +
           `${registradas ? ` Envio registrado em ${plural(registradas, "cobrança", "cobranças")}.` : ""}`;
-      const texto = `Cobrança conjunta enviada para ${nome} (${telefoneLegivel(c.telefone)}): ${numeros.join(", ")} — em aberto ${emReais(c.emAberto)}.${registro}`;
+      const texto = `${doCliente ? "Cobrança" : "Cobrança conjunta"} enviada para ${nome} (${telefoneLegivel(c.telefone)}): ${oQue} — em aberto ${emReais(c.emAberto)}.${registro}`;
       return {
         ok: true,
         cliente: nome,

@@ -376,9 +376,14 @@ Deno.test("get_delinquency_plan: cliente com entrada esperando no Extrato sai da
   await assertRejects(() => ferramenta(financialTools, "get_delinquency_plan").execute({}, contexto(falha)), Error, "Pix que esperam no Extrato");
 });
 
+// 25/11/2026: o lembrete só roda pelo "sim" de uma pendência, que leva o retrato do que o cartão mostrou (_retrato); sem
+// ele o execute recusa antes de ler. Estes três testes passam o retrato para chegar na trava que cada um prova — a
+// entrada que chegou no Extrato DEPOIS do pedido ainda segura o envio. O id da cobrança é uuid, como no banco.
+const COBRANCA = "33333333-3333-4333-8333-333333333001";
+
 Deno.test("send_collection_reminder: com Pix do cliente esperando no Extrato, não cobra", async () => {
   const db = bancoFalso({
-    collections: [{ id: "col", amount: 500, due_date: "2026-09-10", contact_whatsapp: "5547999990000", client_id: "c" }],
+    collections: [{ id: COBRANCA, amount: 500, due_date: "2026-09-10", contact_whatsapp: "5547999990000", client_id: "c" }],
     app_settings: [],
     finance_review_queue: [{ suggested_client_id: "c", suggested_amount: 500, suggested_date: "2026-10-02", title: "Receita: CLIENTE" }],
   });
@@ -386,8 +391,16 @@ Deno.test("send_collection_reminder: com Pix do cliente esperando no Extrato, n�
   let enviou = false;
   globalThis.fetch = (() => { enviou = true; return Promise.resolve(new Response("{}")); }) as typeof fetch;
   try {
-    const r = await ferramenta(whatsappTools, "send_collection_reminder").execute({ collection_id: "col" }, contexto(db));
+    const tool = ferramenta(whatsappTools, "send_collection_reminder");
+    // Pedido novo com a entrada já esperando: nem retrato há (o cartão vira a recusa, sem pendência).
+    assertEquals(await tool.retratoDaPendencia({ collection_id: COBRANCA }, contexto(db)), null);
+    const r = await tool.execute({ collection_id: COBRANCA, _retrato: { cobranca: COBRANCA } }, contexto(db));
     assertEquals(/entrada esperando no Extrato/.test(r.error), true);
+    assertEquals(r.nada_enviado, true);
+    assertEquals(enviou, false);
+    // E sem retrato nenhum (chamada direta, pendência antiga) também não sai nada.
+    const semRetrato = await tool.execute({ collection_id: COBRANCA }, contexto(db));
+    assertEquals(/não consegui conferir a cobrança quando o pedido foi feito/.test(semRetrato.error), true);
     assertEquals(enviou, false);
   } finally {
     globalThis.fetch = original;
@@ -397,7 +410,7 @@ Deno.test("send_collection_reminder: com Pix do cliente esperando no Extrato, n�
 // Retorno F0a-2 (05/11/2026): o telefone do cadastro genérico é de um terceiro. Cobrar lá expõe a dívida a quem não deve.
 Deno.test("send_collection_reminder: 'Cliente Final' sem contato próprio não recebe a cobrança", async () => {
   const db = bancoFalso({
-    collections: [{ id: "col", amount: 500, due_date: "2026-09-10", client_id: "c" }],
+    collections: [{ id: COBRANCA, amount: 500, due_date: "2026-09-10", client_id: "c" }],
     clients: [{ id: "c", name: "Cliente Final", whatsapp: "5547999990000", phone: null, opt_out_whatsapp: false, generico: true }],
     app_settings: [], finance_review_queue: [],
   });
@@ -405,7 +418,7 @@ Deno.test("send_collection_reminder: 'Cliente Final' sem contato próprio não r
   let enviou = false;
   globalThis.fetch = (() => { enviou = true; return Promise.resolve(new Response("{}")); }) as typeof fetch;
   try {
-    const r = await ferramenta(whatsappTools, "send_collection_reminder").execute({ collection_id: "col" }, contexto(db));
+    const r = await ferramenta(whatsappTools, "send_collection_reminder").execute({ collection_id: COBRANCA, _retrato: { cobranca: COBRANCA } }, contexto(db));
     assertEquals(/Cliente Final/.test(r.error), true);
     assertEquals(r.nada_enviado, true);
     assertEquals(enviou, false);
@@ -416,7 +429,7 @@ Deno.test("send_collection_reminder: 'Cliente Final' sem contato próprio não r
 
 Deno.test("send_collection_reminder: a cobrança com contato próprio não é barrada pelo cadastro genérico", async () => {
   const db = bancoFalso({
-    collections: [{ id: "col", amount: 500, due_date: "2026-09-10", contact_whatsapp: "5547988887777", client_id: "c" }],
+    collections: [{ id: COBRANCA, amount: 500, due_date: "2026-09-10", contact_whatsapp: "5547988887777", client_id: "c" }],
     clients: [{ id: "c", name: "Cliente Final", whatsapp: "5547999990000", phone: null, opt_out_whatsapp: false, generico: true }],
     app_settings: [], finance_review_queue: [],
   });
@@ -429,8 +442,12 @@ Deno.test("send_collection_reminder: a cobrança com contato próprio não é ba
   // 11h em Brasília: fora da janela a guarda barra o envio, e o teste só passaria em horário comercial.
   const relogio = new FakeTime(new Date("2026-11-05T14:00:00.000Z"));
   try {
+    const tool = ferramenta(whatsappTools, "send_collection_reminder");
+    // O retrato como a pendência grava: tirado do banco quando o pedido nasce (o destino já é o contato da cobrança).
+    const retrato = await tool.retratoDaPendencia({ collection_id: COBRANCA }, contexto(db));
+    assertEquals([retrato?.cobranca, retrato?.telefone, retrato?.valor, retrato?.vencimento], [COBRANCA, "5547988887777", 500, "2026-09-10"]);
     // O banco falso não grava o histórico da cobrança, que vem depois do envio: aqui importa só para onde saiu.
-    await ferramenta(whatsappTools, "send_collection_reminder").execute({ collection_id: "col" }, contexto(db)).catch(() => null);
+    await tool.execute({ collection_id: COBRANCA, _retrato: retrato }, contexto(db)).catch(() => null);
     assertEquals(destino, "5547988887777");
   } finally {
     relogio.restore();

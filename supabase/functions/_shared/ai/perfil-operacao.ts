@@ -64,7 +64,8 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   "listar_os_para_agrupar",
   "agrupar_os",
   "desagrupar_os",
-  // 28/10/2026 (Fase 0 do Fechar juntas): cobrar numa mensagem só o saldo de várias OS executadas do mesmo cliente. É de
+  // 28/10/2026 (Fase 0 do Fechar juntas): cobrar numa mensagem só o saldo de várias OS executadas do mesmo cliente — e, desde
+  // 25/11/2026, tudo que o cliente tem em aberto (só com o cliente, sem as OS). É de
   // risco alto (entraria de todo jeito no turno); fica aqui para o perfil dizer o que ensina. FORA de PERFIL_ADMIN (teto):
   // o admin alcança pela ferramenta_extra e vira pendência, como seria à vista.
   "cobrar_juntas",

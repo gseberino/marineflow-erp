@@ -46,6 +46,15 @@ Deno.test("cobrança empática a cliente passa", () => {
 Deno.test("jargão técnico (100/50) para cliente é sinalizado", () => {
   const r = revisarMensagem("Segue o MPPT 100/50 do seu sistema.", cli);
   assertEquals(r.problemas.some((p) => p.codigo === "jargao_tecnico"), true);
+  // data não é jargão (25/11/2026): o vencimento da cobrança; o código 12/24 continua pego
+  const datas = revisarMensagem("Olá João, você possui um valor com vencimento em 22/07/2026. Pago em 5/11.", cli);
+  assertEquals(datas.problemas.some((p) => p.codigo === "jargao_tecnico"), false, JSON.stringify(datas));
+  assertEquals(revisarMensagem("O conversor 12/24 chegou.", cli).problemas.some((p) => p.codigo === "jargao_tecnico"), true);
+  // código Victron com cara de data continua pego; data depois de "dia/em" não
+  for (const codigo of ["Segue o Orion 24/12 do seu barco.", "Segue o Orion 12/12-30.", "O 12/10 chegou."]) {
+    assertEquals(revisarMensagem(codigo, cli).problemas.some((p) => p.codigo === "jargao_tecnico"), true, codigo);
+  }
+  assertEquals(revisarMensagem("O pagamento venceu dia 03/07.", cli).problemas.some((p) => p.codigo === "jargao_tecnico"), false);
 });
 
 Deno.test("teto de tamanho é respeitado (fornecedor curto)", () => {

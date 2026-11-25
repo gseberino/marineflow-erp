@@ -776,7 +776,7 @@ export const financialTools: ToolDef[] = [
   {
     name: "get_delinquency_plan",
     description:
-      "Plano de ação da INADIMPLÊNCIA: recebíveis vencidos priorizados por impacto (maior valor primeiro), com dias de atraso e QUANDO o cliente foi cobrado pela última vez — para não cobrar a mesma pessoa duas vezes. Só leitura: não envia cobrança (isso é send_collection_reminder, que pede confirmação).",
+      "Plano de ação da INADIMPLÊNCIA: recebíveis vencidos priorizados por impacto (maior valor primeiro), com dias de atraso e QUANDO o cliente foi cobrado pela última vez — para não cobrar a mesma pessoa duas vezes. Só leitura: não envia cobrança. Para cobrar um cliente do plano → cobrar_juntas só com cliente_id = o client_id do caso (tudo que ele tem em aberto numa mensagem; pede confirmação). Lembrete curto de uma cobrança → send_collection_reminder.",
     input_schema: {
       type: "object",
       properties: {
