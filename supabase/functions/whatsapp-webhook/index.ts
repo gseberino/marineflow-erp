@@ -35,6 +35,9 @@ import { respostaDoCliente } from "../_shared/agenda/resposta-do-cliente.ts";
 import { ehPedidoDeParar } from "../_shared/whatsapp/parar.ts";
 import { abrirNoRetorno, consumidaPelosLeitores, identificarCliente, noFundo } from "./retorno.ts";
 import { lerNoParceiro } from "./parceiro.ts";
+// C4 (pacote 1, 25/11/2026): o rastro por mensagem. Aqui, só o que o ai-agent não tem como registrar: a mensagem que a
+// conversa dos comprovantes tratou sem ir ao assistente e o despacho que falhou. Rótulos e ids, nunca o texto.
+import { registrarRota } from "../_shared/ai/rota-da-mensagem.ts";
 
 // Manejo automático da resposta (Camada de Inteligência de Comunicação, módulo G):
 // fecha o loop no ai_comms_log (marca respondido + intenção) e HONRA OPT-OUT sozinho.
@@ -419,9 +422,16 @@ export async function handler(req: Request): Promise<Response> {
                 citado: event.quotedId ?? null,
               }),
             });
-            if (!res.ok) console.error("[whatsapp-webhook] ai-agent respondeu", res.status, await res.text().catch(() => ""));
+            if (!res.ok) {
+              console.error("[whatsapp-webhook] ai-agent respondeu", res.status, await res.text().catch(() => ""));
+              // C4: o assistente não tratou a mensagem (a função caiu, passou do tempo ou nem subiu) e, por isso, não
+              // deixou a rota dela. Fica registrado aqui, com o status. Já estamos no fundo: a Evolution não espera.
+              await registrarRota(admin, { sessionId: null, mensagemId: msg?.id ?? null, canal: "whatsapp", camada: "despacho_falhou", detalhe: `http_${res.status}` });
+            }
           } catch (e) {
             console.error("[whatsapp-webhook] falha ao disparar ai-agent:", e);
+            // C4: nem resposta houve (rede, tempo). registrarRota nunca lança.
+            await registrarRota(admin, { sessionId: null, mensagemId: msg?.id ?? null, canal: "whatsapp", camada: "despacho_falhou", detalhe: "sem_resposta" });
           }
         };
         // Comprovantes (F1, 11/10/2026): foto/PDF do dono pode ir também (ou só) ao fluxo de
@@ -442,8 +452,9 @@ export async function handler(req: Request): Promise<Response> {
             };
             const url = Deno.env.get("SUPABASE_URL") ?? "";
             const chave = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+            let destinoDoTexto: string | null = null;
             try {
-              await rotearTextoDoDono(
+              destinoDoTexto = await rotearTextoDoDono(
                 { msgId: msg.id, phone, tipo: event.messageType, texto: body, citado: event.quotedId ?? null },
                 {
                   estado: (citado) => lerEstadoDoTelefone(admin, phone, citado),
@@ -471,6 +482,12 @@ export async function handler(req: Request): Promise<Response> {
               console.error("[whatsapp-webhook] roteamento do texto do dono falhou:", (e as Error)?.name ?? "erro");
               if (!despachouTexto) await dispatchToAgent();
             }
+            // C4: a conversa dos comprovantes ficou com a mensagem (resposta ao CMP, comando, dica, desempate…) e nada foi
+            // ao assistente, que é quem registra a rota das outras. Fora do try de propósito: a gravação nunca pode cair
+            // no despacho de reserva acima. O detalhe é o destino que o roteador devolveu, um rótulo.
+            if (destinoDoTexto && destinoDoTexto !== "assistente" && !despachouTexto) {
+              await registrarRota(admin, { sessionId: null, mensagemId: msg.id, canal: "whatsapp", camada: "comprovantes", detalhe: destinoDoTexto });
+            }
             return;
           }
           let despachou = false;
@@ -478,8 +495,9 @@ export async function handler(req: Request): Promise<Response> {
             despachou = true;
             await dispatchToAgent();
           };
+          let rotaDaMidia: string | null = null;
           try {
-            await rotearMidiaDoDono(
+            rotaDaMidia = await rotearMidiaDoDono(
               {
                 msgId: msg?.id ?? null,
                 appUserId: aiUser.id,
@@ -505,6 +523,10 @@ export async function handler(req: Request): Promise<Response> {
           } catch (e) {
             console.error("[whatsapp-webhook] roteamento do comprovante falhou:", (e as Error)?.name ?? "erro");
             if (!despachou) await dispatchToAgent();
+          }
+          // C4: a foto ou o PDF ficou só com o fluxo de comprovantes (nada foi ao assistente)
+          if (rotaDaMidia && !despachou) {
+            await registrarRota(admin, { sessionId: null, mensagemId: msg?.id ?? null, canal: "whatsapp", camada: "comprovantes", detalhe: "midia" });
           }
         };
         const waitUntil = (globalThis as any).EdgeRuntime?.waitUntil;

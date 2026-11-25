@@ -4,6 +4,7 @@
 // PDF e do modelo; só com o formato novo; só do dono; a resposta sem modelo volta antes do turno do modelo.
 import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { camadaDaAgenda, executarComandoDaAgenda, modoDaLeituraNoBanco, modosDaAgendaNoBanco } from "../_shared/agenda/executar.ts";
+import { rotaDaResposta } from "../_shared/ai/rota-da-mensagem.ts";
 
 const fonte = await Deno.readTextFile(new URL("./index.ts", import.meta.url));
 const inicio = fonte.indexOf("async function handleWhatsAppTurn(");
@@ -608,4 +609,183 @@ Deno.test("Retorno F3: depois do sim do ditado, comAProximaPendencia devolve o p
   const proxima = fonte.slice(fonte.indexOf("async function comAProximaPendencia("));
   assertStringIncludes(proxima, "proximaPendenciaGuardada(admin, metadataLimpa)");
   assertStringIncludes(proxima, "pending_confirm_action_id: guardada.pendencia.id");
+});
+
+// ─── Pacote 1, C4 (25/11/2026): o rastro por mensagem recebida ────────────────────────────────────────────────────────
+// O que se protege: handleWhatsAppTurn virou o envoltório e as camadas foram para tratarMensagemDoWhatsApp SEM mudar de
+// ordem; o corte é fixo (o "um turno por vez", C1, vai pedir a vez no envoltório, antes das camadas); toda saída do
+// envoltório deixa a rota, num ponto só, fora do caminho da resposta; o que vai para a rota são rótulos e ids, nunca o
+// texto, o telefone ou o PIN; e toda saída do tratador devolve uma chave que a rota sabe ler. O que é gravado, e que a
+// gravação nunca lança, é provado em _shared/ai/rota-da-mensagem_test.ts.
+const inicioDoTratador = fonte.indexOf("async function tratarMensagemDoWhatsApp(");
+const envoltorio = fonte.slice(inicio, inicioDoTratador);
+const tratador = fonte.slice(inicioDoTratador, fim);
+
+Deno.test("C4: o corte do envoltório — fora do tratador ficam o segredo, o corpo, o limite, o usuário, a sessão e as configurações", () => {
+  assert(inicio > 0 && inicioDoTratador > inicio && inicioDoTratador < fim, "o tratador fica entre handleWhatsAppTurn e o turno do modelo");
+  // fora, e nesta ordem
+  const fora = [
+    'Deno.env.get("AI_INTERNAL_SECRET")',
+    "await req.json()",
+    "await checkWhatsAppRateLimit(admin, phoneNormalized)",
+    '.from("app_users")',
+    "await resolveOrCreateWhatsAppSession(admin, phoneNormalized, appUserId)",
+    'await admin.from("app_settings").select("key, value")',
+    "await tratarMensagemDoWhatsApp({",
+  ];
+  let anterior = 0;
+  for (const marca of fora) {
+    const p = envoltorio.indexOf(marca);
+    assert(p > anterior, `no envoltório, na ordem: ${marca}`);
+    anterior = p;
+    assert(!tratador.includes(marca), `fora do tratador: ${marca}`);
+  }
+  // o tratador recebe pronto o que o envoltório resolveu e não lê o pedido
+  assert(!/\breq\b|\bbody\./.test(tratador), "o tratador não lê o pedido HTTP");
+  assertStringIncludes(tratador, "const { admin, text, phoneNormalized, appUser, sessionId, metadata, settings, toolCtx, messageId, citado } = entrada;");
+  // dentro, de depsDoRetorno em diante: é a primeira coisa que o tratador faz, antes de qualquer espera
+  const primeira = tratador.indexOf("const depsRetorno = depsDoRetorno(admin, { appUser, phone: phoneNormalized, sessionId, toolCtx, texto: text, settings });");
+  assert(primeira > 0, "o tratador começa por depsDoRetorno");
+  assert(!tratador.slice(0, primeira).includes("await "), "nada espera antes de depsDoRetorno");
+  assert(!envoltorio.includes("depsDoRetorno("), "depsDoRetorno é do tratador");
+});
+
+Deno.test("C4: as camadas ficaram na mesma ordem (retorno, travas, confirmação, PIN solto, opções, secretário, agenda, PDF, modelo)", () => {
+  const ordem = [
+    "await camadaDoOrcamento(text,",
+    "await camadaDoParceiro(text,",
+    "await camadaDoRetorno(text,",
+    "await textoDaTravaDoComprovante(admin,",
+    "await textoDaTravaDaAgenda(admin,",
+    "const confirmation = parseConfirmationReply(text",
+    "if (await pinNoTexto(text, appUser.ai_whatsapp_pin_hash)) {",
+    "parseOptionReply(text, pendingOptions.length)",
+    "lerComandoDoSecretario(text)",
+    "await camadaDaAgenda(text, {",
+    "lerPedidoDePdf(effectiveText)",
+    "return await turnoDoModeloNoWhatsApp({",
+  ];
+  let anterior = 0;
+  for (const marca of ordem) {
+    const p = tratador.indexOf(marca);
+    assert(p > anterior, `no tratador, na ordem: ${marca}`);
+    anterior = p;
+    assert(!envoltorio.includes(marca), `nenhuma camada ficou no envoltório: ${marca}`);
+    assertEquals(turno.split(marca).length - 1, 1, `uma vez só: ${marca}`);
+  }
+});
+
+Deno.test("C4: toda saída do envoltório deixa a rota, num ponto só, sem esperar a gravação", () => {
+  const marca = envoltorio.indexOf("o rastro da mensagem ----");
+  assert(marca > 0, "falta o bloco do rastro");
+  // antes do bloco só saem o segredo errado e o pedido malformado: não são mensagem de ninguém
+  const antes = envoltorio.slice(0, marca);
+  assertEquals((antes.match(/return jr\(/g) ?? []).length, 2);
+  assertStringIncludes(antes, 'return jr({ error: "Não autorizado" }, 401);');
+  assertStringIncludes(antes, "}, 400);");
+  // do bloco em diante, nenhuma saída escapa: ou é o `return res` de dentro do comRota, ou passa por ele
+  const depois = envoltorio.slice(marca);
+  const saidas = [...depois.matchAll(/\breturn ([^\r\n]*)/g)].map((m) => m[1]);
+  assertEquals(saidas.length, 4);
+  assertEquals(saidas[0], "res;");
+  assertEquals(saidas[1], 'comRota(jr({ ok: true, skipped: "rate_limited" }));');
+  assertEquals(saidas[2], 'comRota(jr({ error: "Usuário não autorizado para o canal WhatsApp" }, 403));');
+  assertEquals(saidas[3], "comRota(await tratarMensagemDoWhatsApp({");
+  // o turno que lança também deixa a rota (erro), e o erro sobe como sempre
+  assert(/\} catch \(e\) \{\r?\n\s+comRota\(null\);[^\r\n]*\r?\n\s+throw e;\r?\n\s+\}/.test(depois), "exceção: rota e relança");
+  // um ponto só grava, e ninguém espera por ele (a gravação segue no fundo, dentro de rastrearResposta)
+  assertEquals((turno.match(/rastrearResposta\(/g) ?? []).length, 1);
+  assert(!/await\s+(comRota|rastrearResposta)\(/.test(fonte), "a rota não fica no caminho da resposta");
+  // a sessão entra na rota assim que existe
+  assert(/const sessionId = await resolveOrCreateWhatsAppSession\([^\r\n]*\r?\n\s+sessaoDaRota = sessionId;/.test(depois));
+});
+
+Deno.test("C4: a rota leva ids, tempo e status — nunca o texto, o telefone, o corpo do pedido ou o usuário", () => {
+  const ini = envoltorio.indexOf("rastrearResposta(admin, res, {");
+  const chamada = envoltorio.slice(ini, envoltorio.indexOf("return res;", ini));
+  assert(ini > 0 && chamada.length > 0, "falta a chamada");
+  for (const campo of ["sessionId: sessaoDaRota,", "mensagemId: messageId,", "ms: Date.now() - inicioDoTurno,", 'status: res ? Number(res.headers.get("X-Actual-Status")) || res.status : undefined,']) {
+    assertStringIncludes(chamada, campo);
+  }
+  assert(!/\b(text|phoneNormalized|body|citado|appUserId|appUser|metadata|settings)\b/.test(chamada), "só ids, tempo e status");
+  // o tratador não sabe do rastro: quem grava é o envoltório, lendo o que sai dele
+  for (const proibido of ["registrarRota", "rastrearResposta", "comRota", "noFundoDaRota", "ai_operator_audit"]) {
+    assert(!tratador.includes(proibido), `o tratador não usa ${proibido}`);
+  }
+  // fora do envoltório, toda gravação de rota vai para o fundo (nunca com await)
+  assertEquals((fonte.match(/registrarRota\(admin, /g) ?? []).length, (fonte.match(/noFundoDaRota\(registrarRota\(admin, /g) ?? []).length);
+  assert(!/await\s+registrarRota\(/.test(fonte), "nenhuma rota é esperada");
+});
+
+Deno.test("C4: as quatro saídas da confirmação e a do PIN solto têm chave própria, e a rota fica fora do bloco do PIN", () => {
+  // cada saída diz qual foi, logo depois do envio dela
+  for (const [envia, chave] of [
+    ["queueWhatsAppReply(admin, phoneNormalized, naoExecutei)", 'return jr({ ok: true, confirmacao: "recusar_ajuste" });'],
+    ["queueWhatsAppReply(admin, phoneNormalized, reapresentada)", 'return jr({ ok: true, confirmacao: "reapresentada" });'],
+    ["await enviarComRegistro(", 'return jr({ ok: true, confirmacao: "resolvida" });'],
+    ["queueWhatsAppReply(admin, phoneNormalized, nadaEsperando)", 'return jr({ ok: true, confirmacao: "nada_esperando" });'],
+  ]) {
+    const e = confirmacao.indexOf(envia);
+    const c = confirmacao.indexOf(chave);
+    assert(e > 0 && c > e, `${chave}: depois do envio`);
+    assertEquals(confirmacao.split(chave).length - 1, 1, chave);
+    assert(!confirmacao.slice(e, c).includes("return "), `${chave}: é a saída daquele envio`);
+  }
+  assertEquals((confirmacao.match(/return jr\(/g) ?? []).length, 5, "as quatro da confirmação e a do PIN solto");
+  // o PIN solto: a chave é um rótulo fixo, e o bloco continua sem gravar nada (o teste da guarda do PIN segue valendo)
+  const guarda = tratador.indexOf("if (await pinNoTexto(text, appUser.ai_whatsapp_pin_hash)) {");
+  const blocoDoPin = tratador.slice(guarda, tratador.indexOf("let effectiveText = text;"));
+  assert(guarda > 0 && blocoDoPin.length > 0, "falta a guarda do PIN");
+  assertStringIncludes(blocoDoPin, "return jr({ ok: true, pin_na_frase: true });");
+  assertEquals((blocoDoPin.match(/return /g) ?? []).length, 1);
+  for (const proibido of ["registrarRota", "rastrearResposta", "comRota", "ai_operator_audit", "gravarDecisaoNaConversa", "ai_operator_messages", "pin_attempts"]) {
+    assert(!blocoDoPin.includes(proibido), `o bloco do PIN não usa ${proibido}`);
+  }
+  // nenhuma saída muda sobrou no tratador
+  assert(!tratador.includes("return jr({ ok: true });"), "saída sem chave cairia na rota desconhecida");
+});
+
+Deno.test("C4: toda saída do turno do WhatsApp devolve uma chave que a rota sabe ler (nenhuma cai em 'desconhecida')", () => {
+  const amostra: Record<string, unknown> = {
+    skipped: "rate_limited", travado: "agenda", pin_na_frase: true, entregue: "aviso",
+    session_id: "aaaaaaaa-0000-4000-8000-000000000001", claude_max: "cccccccc-0000-4000-8000-000000000003",
+  };
+  // as saídas do envoltório e do tratador, e as do turno do modelo (que o tratador devolve como vieram)
+  const saidas = [...(turno + modeloWa + fonte.slice(fonte.indexOf("async function avisarQueOMaxNaoAtende("), fonte.indexOf("async function turnoDoModeloNoWhatsApp(")))
+    .matchAll(/jr\(\{ ok: true, (\w+): /g)].map((m) => m[1]);
+  const chaves = [...new Set(saidas)].sort();
+  assertEquals(chaves, ["agenda", "atalho", "confirmacao", "entregue", "orcamento", "parceiro", "pin_na_frase", "retorno", "secretario", "session_id", "skipped", "travado"]);
+  for (const chave of chaves) {
+    const { camada } = rotaDaResposta({ ok: true, [chave]: amostra[chave] ?? "rotulo" }, 200);
+    assert(camada !== "desconhecida" && camada !== "erro", `a rota não conhece a saída '${chave}'`);
+  }
+  // e o que o tratador põe nessas chaves é o comando da camada (um rótulo), nunca o texto que o dono mandou
+  for (const m of tratador.matchAll(/return jr\(\{ ok: true, \w+: ([^}]*)\}\);/g)) {
+    assert(!/\b(text|effectiveText|texto|phoneNormalized|pin)\b/.test(m[1]), `saída que levaria texto: ${m[0]}`);
+  }
+});
+
+Deno.test("C4: a entrega do Claude Max deixa a rota depois de cada envio, ligada pelo pedido e sem texto", () => {
+  const rotas = [...entregaDoMax.matchAll(/noFundoDaRota\(registrarRota\(admin, \{[\s\S]*?\}\)\);/g)];
+  assertEquals(rotas.length, 3, "resposta do Max, aviso da causa e turno refeito");
+  for (const r of rotas) {
+    assertStringIncludes(r[0], 'camada: "entrega"');
+    assertStringIncludes(r[0], "mensagemId: null");
+    assert(/\bsessionId\b/.test(r[0]) && /\bjobId\b/.test(r[0]), "sessão e pedido");
+    assert(!/\b(texto|text|phoneNormalized|replyText|resposta|respostaDoMax|avisoDaCausa|effectiveText)\b/.test(r[0]), `a rota não leva texto nem telefone: ${r[0]}`);
+  }
+  // 1) a resposta (ou o cartão, a lista, o fluxo, o turno que parou no meio): depois do envio com registro
+  const envio = entregaDoMax.indexOf("await enviarComRegistro(");
+  assert(envio > 0 && rotas[0].index! > envio && rotas[0].index! < entregaDoMax.indexOf('return jr({ ok: true, entregue: "claude_max" });'), "depois do envio, antes de voltar");
+  assertStringIncludes(rotas[0][0], "detalhe: detalheDaEntrega({ interrompido: Boolean(parouNoMeio), codigo: job.error_code ?? job.status, interrupcao }),");
+  // 2) o aviso da causa: depois de mandar
+  const aviso = entregaDoMax.indexOf("await queueWhatsAppReply(admin, phoneNormalized, avisoDaCausa);");
+  assert(aviso > 0 && rotas[1].index! > aviso && rotas[1].index! < entregaDoMax.indexOf('return jr({ ok: true, entregue: "aviso", causa: causa.codigo });'), "depois do aviso, antes de voltar");
+  assertStringIncludes(rotas[1][0], 'detalhe: detalheComCodigo("aviso", causa.codigo),');
+  // 3) o turno refeito: depois de ele terminar
+  const refeito = entregaDoMax.indexOf("const daReserva = await turnoDoModeloNoWhatsApp({");
+  assert(refeito > 0 && rotas[2].index! > refeito && rotas[2].index! < entregaDoMax.indexOf("return daReserva;"), "depois do turno refeito, antes de voltar");
+  assertStringIncludes(rotas[2][0], 'detalhe: "reserva"');
+  // a chave `turno` não entra na rota: trabalhoNaAuditoria lê essa chave para saber o que um pedido gravou
+  assert(!/registrarRota\(admin, \{[^}]*\bturno\b/.test(fonte), "a rota não usa a chave turno");
 });

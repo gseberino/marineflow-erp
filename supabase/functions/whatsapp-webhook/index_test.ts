@@ -8,7 +8,7 @@
 // Os casos de recusa não tocam o banco de propósito: a verificação acontece
 // antes de qualquer I/O, então o handler pode ser exercitado sem Supabase.
 
-import { assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 
 const SEGREDO = "segredo-de-teste-nao-real";
 const URL_FN = "https://exemplo.supabase.co/functions/v1/whatsapp-webhook";
@@ -128,6 +128,12 @@ function bancoEFuncoesFalsos(op: {
   equipe?: unknown;
   /** Fase 5 (P4): a resposta do agenda_resposta_do_cliente ("erro" = a RPC responde erro). */
   cliente?: unknown;
+  /** C4: o status com que o ai-agent responde (sem isto, 200); "cai" = a chamada nem tem resposta. */
+  agente?: number | "cai";
+  /** C4: a gravação da rota em ai_operator_audit responde erro. */
+  rotaFalha?: boolean;
+  /** C4: o dono tem telefone no cadastro (o fluxo de comprovantes só assume a mídia dele). */
+  donoComTelefone?: boolean;
 } = {}) {
   const chamadas: Array<{ metodo: string; caminho: string; corpo?: unknown }> = [];
   const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { "content-type": "application/json" } });
@@ -141,7 +147,13 @@ function bancoEFuncoesFalsos(op: {
     } catch { /* não é JSON */ }
     chamadas.push({ metodo: req.method, caminho: u.pathname, corpo });
     if (u.pathname === "/rest/v1/whatsapp_messages" && req.method === "GET") return json([]); // dedup: nova
-    if (u.pathname === "/rest/v1/app_users") return json(op.semLogin ? [] : [{ id: ADMIN_ID, role: op.role ?? "admin" }]);
+    if (u.pathname === "/rest/v1/app_users") {
+      return json(op.semLogin ? [] : [{ id: ADMIN_ID, role: op.role ?? "admin", ...(op.donoComTelefone ? { phone_normalized: "5547999990000" } : {}) }]);
+    }
+    // C4: a rota da mensagem (um insert em ai_operator_audit)
+    if (u.pathname === "/rest/v1/ai_operator_audit" && req.method === "POST") {
+      return op.rotaFalha ? json({ code: "23514", message: "falhou" }, 400) : new Response(null, { status: 201 });
+    }
     if (op.semLogin && u.pathname === "/rest/v1/clients") return json([]);
     if (op.semLogin && u.pathname === "/rest/v1/whatsapp_leads") return json(req.method === "GET" ? [{ id: "lead-1" }] : []);
     if (u.pathname === "/rest/v1/rpc/agenda_resposta_da_equipe") {
@@ -167,7 +179,8 @@ function bancoEFuncoesFalsos(op: {
     if (u.pathname === "/functions/v1/whatsapp-send") return json({ success: true, messageId: "WA-OUT" });
     if (u.pathname === "/functions/v1/ai-agent") {
       await op.segurarAgente;
-      return json({ ok: true });
+      if (op.agente === "cai") throw new TypeError("rede fora");
+      return op.agente && op.agente !== 200 ? json({ error: "internal error" }, op.agente) : json({ ok: true });
     }
     return json({ inesperado: u.pathname }, 500);
   };
@@ -320,6 +333,118 @@ Deno.test("F2: texto livre com pergunta de CMP aberta → pergunta_interromper e
   assertEquals(falso.conta("/functions/v1/comprovantes-whatsapp"), 0);
   const ordem = falso.chamadas.map((c) => c.caminho).filter((c) => c === "/rest/v1/rpc/pergunta_interromper" || c === "/functions/v1/ai-agent");
   assertEquals(ordem, ["/rest/v1/rpc/pergunta_interromper", "/functions/v1/ai-agent"]);
+});
+
+// ─── Pacote 1, C4 (25/11/2026): o rastro por mensagem, do lado do webhook ─────────────────────────────────────────────
+// O que se protege: a mensagem que a conversa dos comprovantes trata sem ir ao assistente, e o despacho que falha,
+// deixam UMA linha "rota:…" em ai_operator_audit (antes não deixavam pegada nenhuma); a mensagem que foi ao assistente
+// não ganha linha aqui (quem registra é o ai-agent); a linha só leva rótulos e o id da mensagem, nunca o texto nem o
+// telefone; e a gravação que falha não muda o caminho da mensagem.
+const ROTA = "/rest/v1/ai_operator_audit";
+const TELEFONE_DO_DONO = "5547999990000";
+const PERGUNTA_DO_DONO = "quanto ficou a OS 123?";
+
+Deno.test("C4: resposta que a conversa dos comprovantes tratou grava rota:comprovantes com o destino, e não vai ao ai-agent", async () => {
+  const falso = bancoEFuncoesFalsos({ rotear: ROTEAR_COM_PERGUNTA });
+  await comHandlerFalso(falso, payloadDoDono({ conversation: "1" }, "WAID-C4-1"), async (res, fundo) => {
+    assertEquals((await res.json()).routed, "ai_operator");
+    assertEquals(fundo.length, 1, "a rota é gravada dentro do despacho de fundo: a resposta à Evolution não espera");
+  });
+  assertEquals(falso.conta("/functions/v1/ai-agent"), 0);
+  assertEquals(falso.corpos(ROTA), [{
+    session_id: null, actor_kind: "channel", event_category: "channel", event_type: "rota:comprovantes",
+    payload: { mensagem_id: MSG_GRAVADA, canal: "whatsapp", detalhe: "comprovante", job_id: null, ms: null },
+  }]);
+  // a rota vem depois de o responder tratar a mensagem
+  const ordem = falso.chamadas.map((c) => c.caminho).filter((c) => c === "/functions/v1/comprovantes-whatsapp" || c === ROTA);
+  assertEquals(ordem, ["/functions/v1/comprovantes-whatsapp", ROTA]);
+});
+
+Deno.test("C4: mensagem que foi ao assistente não ganha rota no webhook (admin, quem não é admin e conversa desligada)", async () => {
+  const casos: Array<[Parameters<typeof bancoEFuncoesFalsos>[0], Record<string, unknown>]> = [
+    [{ rotear: ROTEAR_COM_PERGUNTA }, { conversation: PERGUNTA_DO_DONO }],
+    [{ rotear: { conversa: false, dono: true } }, { conversation: "1" }],
+    [{ role: "technician" }, { conversation: "1" }],
+    [{ modo: "off" }, { imageMessage: { mimetype: "image/jpeg" } }],
+  ];
+  for (const [op, mensagem] of casos) {
+    const falso = bancoEFuncoesFalsos(op);
+    await comHandlerFalso(falso, payloadDoDono(mensagem, "WAID-C4-2"), async () => {});
+    assertEquals(falso.conta("/functions/v1/ai-agent", "POST"), 1, JSON.stringify(op));
+    assertEquals(falso.conta(ROTA), 0, `quem registra é o ai-agent: ${JSON.stringify(op)}`);
+  }
+});
+
+Deno.test("C4: ai-agent que responde 500 (ou nem responde) grava rota:despacho_falhou, sem o texto e sem o telefone", async () => {
+  for (const [agente, detalhe] of [[500, "http_500"], [546, "http_546"], ["cai", "sem_resposta"]] as const) {
+    const falso = bancoEFuncoesFalsos({ rotear: { conversa: false, dono: true }, agente });
+    await comHandlerFalso(falso, payloadDoDono({ conversation: PERGUNTA_DO_DONO }, "WAID-C4-3"), async (res) => {
+      assertEquals(res.status, 200, "a Evolution recebe 200 do mesmo jeito");
+    });
+    assertEquals(falso.conta("/functions/v1/ai-agent", "POST"), 1, "uma tentativa só: o despacho não é refeito");
+    assertEquals(falso.corpos(ROTA), [{
+      session_id: null, actor_kind: "channel", event_category: "channel", event_type: "rota:despacho_falhou",
+      payload: { mensagem_id: MSG_GRAVADA, canal: "whatsapp", detalhe, job_id: null, ms: null },
+    }], String(agente));
+    const gravado = JSON.stringify(falso.corpos(ROTA));
+    assertEquals(gravado.includes(PERGUNTA_DO_DONO) || gravado.includes("OS 123") || gravado.includes(TELEFONE_DO_DONO), false, gravado);
+  }
+  // quem não é admin também deixa o rastro do despacho que falhou (a mensagem dele sumiria do mesmo jeito)
+  const tecnico = bancoEFuncoesFalsos({ role: "technician", agente: 500 });
+  await comHandlerFalso(tecnico, payloadDoDono({ conversation: "1" }, "WAID-C4-4"), async () => {});
+  assertEquals(tecnico.corpos(ROTA).map((c) => c.event_type), ["rota:despacho_falhou"]);
+});
+
+Deno.test("C4: foto que ficou só com o fluxo de comprovantes grava rota:comprovantes com o detalhe 'midia'", async () => {
+  const falso = bancoEFuncoesFalsos({ modo: "dono", donoComTelefone: true, comprovantes: { status: 200, corpo: { aceito: true } } });
+  await comHandlerFalso(falso, payloadDoDono({ imageMessage: { mimetype: "image/jpeg" } }, "WAID-C4-5"), async () => {});
+  assertEquals(falso.conta("/functions/v1/comprovantes-whatsapp", "POST"), 1);
+  assertEquals(falso.conta("/functions/v1/ai-agent"), 0, "o fluxo assumiu a foto");
+  assertEquals(falso.corpos(ROTA), [{
+    session_id: null, actor_kind: "channel", event_category: "channel", event_type: "rota:comprovantes",
+    payload: { mensagem_id: MSG_GRAVADA, canal: "whatsapp", detalhe: "midia", job_id: null, ms: null },
+  }]);
+  // o fluxo recusou a foto: ela vai ao assistente como sempre, e a rota é dele
+  const recusada = bancoEFuncoesFalsos({ modo: "dono", donoComTelefone: true, comprovantes: { status: 422, corpo: { aceito: false } } });
+  await comHandlerFalso(recusada, payloadDoDono({ imageMessage: { mimetype: "image/jpeg" } }, "WAID-C4-6"), async () => {});
+  assertEquals(recusada.conta("/functions/v1/ai-agent", "POST"), 1);
+  assertEquals(recusada.conta(ROTA), 0);
+});
+
+Deno.test("C4: a gravação da rota que falha não muda o caminho — o '1' do comprovante não cai no ai-agent, e o despacho não se repete", async () => {
+  const comprovante = bancoEFuncoesFalsos({ rotear: ROTEAR_COM_PERGUNTA, rotaFalha: true });
+  await comHandlerFalso(comprovante, payloadDoDono({ conversation: "1" }, "WAID-C4-7"), async (res) => {
+    assertEquals(res.status, 200);
+  });
+  assertEquals(comprovante.conta(ROTA), 1, "tentou gravar");
+  assertEquals(comprovante.conta("/functions/v1/ai-agent"), 0, "a falha da rota nunca manda a resposta do comprovante ao assistente");
+  assertEquals(comprovante.conta("/functions/v1/comprovantes-whatsapp", "POST"), 1);
+  assertEquals(comprovante.conta("/functions/v1/whatsapp-send"), 0, "nem avisa o dono de falha: a resposta dele foi tratada");
+
+  const despacho = bancoEFuncoesFalsos({ rotear: { conversa: false, dono: true }, agente: 500, rotaFalha: true });
+  await comHandlerFalso(despacho, payloadDoDono({ conversation: PERGUNTA_DO_DONO }, "WAID-C4-8"), async () => {});
+  assertEquals(despacho.conta(ROTA), 1);
+  assertEquals(despacho.conta("/functions/v1/ai-agent", "POST"), 1, "uma tentativa só");
+});
+
+Deno.test("C4: no código, a rota do webhook fica fora do try do roteador e só leva o id da mensagem e rótulos", async () => {
+  const fonte = (await Deno.readTextFile(new URL("./index.ts", import.meta.url))).replace(/\r\n/g, "\n");
+  const rotas = [...fonte.matchAll(/await registrarRota\(admin, \{[\s\S]*?\}\);/g)].map((m) => m[0]);
+  assertEquals(rotas.length, 4, "despacho que respondeu erro, despacho sem resposta, texto dos comprovantes e mídia dos comprovantes");
+  for (const r of rotas) {
+    assertStringIncludes(r, "sessionId: null");
+    assert(/mensagemId: msg(\?)?\.id( \?\? null)?,/.test(r), r);
+    assert(!/\b(body|phone|texto|text|dispatchText|textoPronto|caption|pushName)\b/.test(r), `a rota não leva texto nem telefone: ${r}`);
+  }
+  // texto: a gravação vem DEPOIS do catch do roteador (dentro do try, uma falha dela cairia no despacho de reserva)
+  const roteador = fonte.indexOf("destinoDoTexto = await rotearTextoDoDono(");
+  const reserva = fonte.indexOf("if (!despachouTexto) await dispatchToAgent();", roteador);
+  const rota = fonte.indexOf('if (destinoDoTexto && destinoDoTexto !== "assistente" && !despachouTexto) {', roteador);
+  assert(roteador > 0 && reserva > roteador && rota > reserva, "roteador → catch com o despacho de reserva → rota");
+  // mídia: idem, e só quando o roteador terminou sem despachar
+  const midia = fonte.indexOf("rotaDaMidia = await rotearMidiaDoDono(");
+  const reservaDaMidia = fonte.indexOf("if (!despachou) await dispatchToAgent();", midia);
+  assert(midia > 0 && reservaDaMidia > midia && fonte.indexOf("if (rotaDaMidia && !despachou) {", midia) > reservaDaMidia);
 });
 
 // Lead do site (15/10/2026): a lista de destinatários tinha perdido a barra invertida (`/[,s]+/` cortava na

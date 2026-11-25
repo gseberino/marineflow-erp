@@ -43,6 +43,8 @@ import {
   rotuloDaCausaNoLog,
   textoDaFalhaParaODono,
 } from "../_shared/ai/max/causa-da-falha.ts";
+// C4 (pacote 1, 25/11/2026): o rastro por mensagem. Uma linha "rota:<camada>" em ai_operator_audit, sem o texto.
+import { detalheComCodigo, detalheDaEntrega, noFundoDaRota, rastrearResposta, registrarRota } from "../_shared/ai/rota-da-mensagem.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { filtrarTools } from "../_shared/ai/intent-router.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
@@ -654,33 +656,87 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
   const messageId = typeof body.message_id === "string" && body.message_id ? body.message_id : null;
   const citado = typeof body.citado === "string" && body.citado ? body.citado : null;
 
-  // Rate limit — custo $0, nem chega a resolver sessão/usuário.
-  const withinLimit = await checkWhatsAppRateLimit(admin, phoneNormalized);
-  if (!withinLimit) return jr({ ok: true, skipped: "rate_limited" });
+  // ---- C4 (pacote 1, 25/11/2026): o rastro da mensagem ----
+  // Toda mensagem que chega até aqui deixa UMA linha em ai_operator_audit dizendo em que camada parou ("rota:<camada>"),
+  // sem o texto, o telefone nem o PIN (_shared/ai/rota-da-mensagem.ts). Daqui para baixo toda saída passa por comRota,
+  // que lê a rota da própria resposta e grava no fundo: a resposta não espera a gravação, e a gravação que falha só vai
+  // ao console. O corte é fixo, porque o "um turno por vez" (C1, adiado) vai pedir a vez aqui, antes das camadas: ficam
+  // NESTA função o segredo, o corpo do pedido, o limite por minuto, o usuário, a sessão e as configurações; as camadas,
+  // da do retorno rápido em diante, são de tratarMensagemDoWhatsApp, que não sabe do rastro.
+  const inicioDoTurno = Date.now();
+  let sessaoDaRota: string | null = null;
+  const comRota = <R extends Response | null>(res: R): R => {
+    rastrearResposta(admin, res, {
+      sessionId: sessaoDaRota,
+      mensagemId: messageId,
+      ms: Date.now() - inicioDoTurno,
+      // o jr responde sempre HTTP 200: o status de verdade vai no cabeçalho
+      status: res ? Number(res.headers.get("X-Actual-Status")) || res.status : undefined,
+    });
+    return res;
+  };
+  try {
+    // Rate limit — custo $0, nem chega a resolver sessão/usuário.
+    const withinLimit = await checkWhatsAppRateLimit(admin, phoneNormalized);
+    if (!withinLimit) return comRota(jr({ ok: true, skipped: "rate_limited" }));
 
-  const { data: appUser } = await admin
-    .from("app_users")
-    .select("id, role, full_name, ai_whatsapp_pin_hash")
-    .eq("id", appUserId)
-    .eq("ai_whatsapp_enabled", true)
-    .eq("active", true)
-    .maybeSingle();
-  if (!appUser) return jr({ error: "Usuário não autorizado para o canal WhatsApp" }, 403);
+    const { data: appUser } = await admin
+      .from("app_users")
+      .select("id, role, full_name, ai_whatsapp_pin_hash")
+      .eq("id", appUserId)
+      .eq("ai_whatsapp_enabled", true)
+      .eq("active", true)
+      .maybeSingle();
+    if (!appUser) return comRota(jr({ error: "Usuário não autorizado para o canal WhatsApp" }, 403));
 
-  const sessionId = await resolveOrCreateWhatsAppSession(admin, phoneNormalized, appUserId);
-  const { data: sessionRow } = await admin.from("ai_operator_sessions").select("metadata, client_id, vessel_id").eq("id", sessionId).maybeSingle();
-  const metadata: Record<string, any> = (sessionRow?.metadata as any) || {};
+    const sessionId = await resolveOrCreateWhatsAppSession(admin, phoneNormalized, appUserId);
+    sessaoDaRota = sessionId;
+    const { data: sessionRow } = await admin.from("ai_operator_sessions").select("metadata, client_id, vessel_id").eq("id", sessionId).maybeSingle();
+    const metadata: Record<string, any> = (sessionRow?.metadata as any) || {};
 
-  const { data: settingsRows } = await admin.from("app_settings").select("key, value");
-  const settings: Record<string, string> = {};
-  (settingsRows || []).forEach((r: any) => {
-    if (r.key) settings[r.key] = String(r.value ?? "");
-  });
+    const { data: settingsRows } = await admin.from("app_settings").select("key, value");
+    const settings: Record<string, string> = {};
+    (settingsRows || []).forEach((r: any) => {
+      if (r.key) settings[r.key] = String(r.value ?? "");
+    });
 
-  // Sem JWT de usuário neste canal — sb e admin são o mesmo client service-role, que leva quem pediu ao histórico
-  // de documentos (o gatilho do banco não tem auth.uid() aqui).
-  const adminDoTurno = clienteServicoComAtor(SUPABASE_URL, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, appUserId, "assistente_whatsapp");
-  const toolCtx = { sb: adminDoTurno, admin: adminDoTurno, userId: appUserId, userRole: (appUser.role as Role) || "unknown", jwt: "", appOrigin: settings.app_public_url || "", settings, sessaoId: sessionId, sessaoAmarrada: metadata.retorno_amarrada === true, casoAmarrado: casoAmarradoDaSessao(sessionRow) };
+    // Sem JWT de usuário neste canal — sb e admin são o mesmo client service-role, que leva quem pediu ao histórico
+    // de documentos (o gatilho do banco não tem auth.uid() aqui).
+    const adminDoTurno = clienteServicoComAtor(SUPABASE_URL, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, appUserId, "assistente_whatsapp");
+    const toolCtx = { sb: adminDoTurno, admin: adminDoTurno, userId: appUserId, userRole: (appUser.role as Role) || "unknown", jwt: "", appOrigin: settings.app_public_url || "", settings, sessaoId: sessionId, sessaoAmarrada: metadata.retorno_amarrada === true, casoAmarrado: casoAmarradoDaSessao(sessionRow) };
+
+    return comRota(await tratarMensagemDoWhatsApp({
+      admin, text, phoneNormalized, appUser, sessionId, metadata, settings, toolCtx, messageId, citado,
+    }));
+  } catch (e) {
+    comRota(null); // o turno lançou: a rota fica "erro" e o erro sobe como sempre
+    throw e;
+  }
+}
+
+/**
+ * As camadas de uma mensagem do WhatsApp, na ordem de sempre: os comandos do retorno rápido (orçamento, parceiro e
+ * retorno), as travas, a confirmação de pendência, o PIN solto na frase, a lista de opções, o secretário, a agenda, o
+ * atalho do PDF e, por fim, o modelo.
+ *
+ * C4 (pacote 1, 25/11/2026): saiu de handleWhatsAppTurn sem mudar de comportamento. Recebe pronto o que o envoltório
+ * resolveu (usuário, sessão, configurações) e não grava o rastro: quem grava é o envoltório, lendo o que sai daqui. Por
+ * isso toda saída devolve uma chave que diz a camada (orcamento, retorno, travado, confirmacao, pin_na_frase,
+ * secretario, agenda, atalho…); saída nova sem chave própria cai na rota "desconhecida".
+ */
+async function tratarMensagemDoWhatsApp(entrada: {
+  admin: any;
+  text: string;
+  phoneNormalized: string;
+  appUser: any;
+  sessionId: string;
+  metadata: Record<string, any>;
+  settings: Record<string, string>;
+  toolCtx: any;
+  messageId: string | null;
+  citado: string | null;
+}): Promise<Response> {
+  const { admin, text, phoneNormalized, appUser, sessionId, metadata, settings, toolCtx, messageId, citado } = entrada;
 
   // ---- Camada determinística (custo $0): o vocabulário do retorno rápido (F2) ----
   // ANTES da trava e da confirmação: "não 2" rejeitaria o cartão inteiro, e "1 A sim <PIN>" levaria o PIN ao modelo.
@@ -763,7 +819,7 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
       // Na conversa (29/10/2026), com o PIN mascarado: o ajuste que vier depois tem a que se referir.
       await gravarDecisaoNaConversa(admin, { sessionId, resposta: text, texto: naoExecutei });
       await queueWhatsAppReply(admin, phoneNormalized, naoExecutei);
-      return jr({ ok: true });
+      return jr({ ok: true, confirmacao: "recusar_ajuste" });
     } else if (destinoDoSim === "resolver" && confirmation) {
       // Pendência que veio da conversa anterior (resolveOrCreateWhatsAppSession): aprovar sem
       // PIN a mostra de novo em vez de executar — o "ok" pode ser resposta a outra coisa.
@@ -780,7 +836,7 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
           const reapresentada = textoDaPendenciaReapresentada(herdada);
           await gravarDecisaoNaConversa(admin, { sessionId, resposta: text, texto: reapresentada });
           await queueWhatsAppReply(admin, phoneNormalized, reapresentada);
-          return jr({ ok: true });
+          return jr({ ok: true, confirmacao: "reapresentada" });
         }
       }
       const resolved = await resolveWhatsAppConfirmation(admin, metadata, appUser, toolCtx, confirmation);
@@ -794,7 +850,7 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
         admin, phoneNormalized, resolved.message,
         registroDoTurno(metadata, resolved.metadata, sessionId, resolved.titulo), { ligada: conversaLigada },
       );
-      return jr({ ok: true });
+      return jr({ ok: true, confirmacao: "resolvida" });
     }
     // Não pareceu confirmação (ou "sim" com número que não é o PIN e texto junto) — segue pro LLM
     // (usuário pode ter mudado de assunto, ou está conversando sobre o pedido).
@@ -807,7 +863,7 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
       "Não há nenhuma ação esperando a sua confirmação agora — nada foi executado. Por segurança, o seu PIN não foi repassado ao assistente.";
     await gravarDecisaoNaConversa(admin, { sessionId, resposta: text, texto: nadaEsperando });
     await queueWhatsAppReply(admin, phoneNormalized, nadaEsperando);
-    return jr({ ok: true });
+    return jr({ ok: true, confirmacao: "nada_esperando" });
   }
 
   // ---- Última barreira antes do modelo (Retorno, 05/11/2026): PIN solto na frase ("2 B <PIN>", "manda <PIN>") ----
@@ -815,7 +871,7 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
   if (await pinNoTexto(text, appUser.ai_whatsapp_pin_hash)) {
     await admin.from("ai_operator_sessions").update({ last_activity_at: new Date().toISOString() }).eq("id", sessionId);
     await queueWhatsAppReply(admin, phoneNormalized, PIN_NA_MENSAGEM);
-    return jr({ ok: true });
+    return jr({ ok: true, pin_na_frase: true });
   }
 
   // ---- Camada determinística (custo $0): número de uma lista de opções pendente ----
@@ -1257,6 +1313,12 @@ async function handleEntregaDoMax(body: Record<string, any>): Promise<Response> 
       registroDoTurno(metadata, novo, sessionId, interrupcao.proposal?.title ?? interrupcao.options?.question ?? null),
       { ligada: conversaDosComprovantesLigada(settings) },
     );
+    // C4: o rastro da entrega, depois do envio e no fundo. Liga-se à mensagem pelo job: a rota "modelo_max" da chegada
+    // guarda o mesmo job_id. O detalhe é rótulo (resposta, cartao, lista, fluxo ou interrompido:<código>).
+    noFundoDaRota(registrarRota(admin, {
+      sessionId, mensagemId: null, canal: "whatsapp", camada: "entrega", jobId,
+      detalhe: detalheDaEntrega({ interrompido: Boolean(parouNoMeio), codigo: job.error_code ?? job.status, interrupcao }),
+    }));
     return jr({ ok: true, entregue: "claude_max" });
   }
 
@@ -1270,16 +1332,23 @@ async function handleEntregaDoMax(body: Record<string, any>): Promise<Response> 
     // O aviso entra na conversa antes de sair: o turno seguinte sabe que este falhou (até 24/11 ele não entrava).
     if (texto) await gravarTurnoDoMax(admin, sessionId, texto, avisoDaCausa, job, "whatsapp");
     await queueWhatsAppReply(admin, phoneNormalized, avisoDaCausa);
+    // C4: a entrega foi o aviso da causa (aviso:<código da causa>)
+    noFundoDaRota(registrarRota(admin, {
+      sessionId, mensagemId: null, canal: "whatsapp", camada: "entrega", jobId, detalhe: detalheComCodigo("aviso", causa.codigo),
+    }));
     return jr({ ok: true, entregue: "aviso", causa: causa.codigo });
   }
   // Só aviso: a reserva ainda pode responder. Se ela falhar também, o turno abaixo registra a falha.
   await logEdgeError(admin, { context: "ai-agent", action: "max_falhou", level: "warn", message: `Turno do Claude Max falhou (${job.error_code ?? job.status}); refazendo pelo OpenRouter` });
   const adminDoTurno = clienteServicoComAtor(SUPABASE_URL, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, appUser.id, "assistente_whatsapp");
   const toolCtx = { sb: adminDoTurno, admin: adminDoTurno, userId: appUser.id, userRole: (appUser.role as Role) || "unknown", jwt: "", appOrigin: settings.app_public_url || "", settings, sessaoId: sessionId, sessaoAmarrada: metadata.retorno_amarrada === true, casoAmarrado: casoAmarradoDaSessao(sessionRow) };
-  return await turnoDoModeloNoWhatsApp({
+  const daReserva = await turnoDoModeloNoWhatsApp({
     admin, sessionId, phoneNormalized, appUser, settings, toolCtx, metadata, effectiveText: texto, permitirMax: false,
     causaDoMax: causa,
   });
+  // C4: quem respondeu a este pedido foi o turno refeito
+  noFundoDaRota(registrarRota(admin, { sessionId, mensagemId: null, canal: "whatsapp", camada: "entrega", jobId, detalhe: "reserva" }));
+  return daReserva;
 }
 
 
