@@ -45,7 +45,7 @@ begin;
 -- do mesmo jeito; um bloco B pode estar dentro de um da F2: a conta é por nível. F2c, 20270127100000: e os "-- FICHA PAGA C:".)
 -- ("Terminou ou falta dia?", 23/11/2026, 20270223100000: e os "-- TERMINOU: … -- TERMINOU: fim", pela mesma convenção; _agenda_rotina_conclusao
 -- ganhou 2 deles.) (Pacote 1 do assistente, A3, 24/11/2026, 20270301120200: e os "-- P1 AGENDA: … -- P1 AGENDA: fim"; _agenda_rotina_conclusao
--- ganhou 2 deles, só acréscimos.)
+-- ganhou 3 deles, só acréscimos.)
 create function pg_temp.sem_ficha_paga(p text) returns text language sql immutable as $fp$
   select array_to_string(array(
            select case when dentro > 0 and l ~ '^--antes:' then substr(l, 9) else l end

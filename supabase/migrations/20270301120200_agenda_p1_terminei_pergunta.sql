@@ -6,12 +6,14 @@
 -- dia concluía a OS sem ninguém dizer que terminou. Concluir faz o saldo "na entrega" vencer e prepara o aviso de "pronto" ao cliente.
 --
 -- O que muda: só _agenda_rotina_conclusao, recriada do corpo em vigor (20270223100000, igual ao de produção guardado em 24/11/2026 17:46: md5 de
--- pg_get_functiondef a9bfdfa9…) mais 2 blocos "-- P1 AGENDA: … -- P1 AGENDA: fim" (a variável v_num e o ramo novo). Tirados os blocos, o corpo é o
--- de antes, byte a byte.
+-- pg_get_functiondef a9bfdfa9…) mais 3 blocos "-- P1 AGENDA: … -- P1 AGENDA: fim" (a variável v_num, a mensagem já perguntada que não é relida
+-- e o ramo novo). Tirados os blocos, o corpo é o de antes, byte a byte.
 --   · agenda_config.equipe_terminei_conclui = false (o padrão; 20270301120000) e modo_proposta ligado: nada conclui pela palavra do técnico. Nasce a
 --     pergunta tipo concluir, chave terminou:<os> (a de _agenda_terminou_rodar), em ligado, com o técnico em payee_id e dia = hoje; uma por dia:
 --       "terminei": O Alex disse em qua 02/12 que terminou a OS-00131 (Fernando). Responda *concluiu OS-00131* para fechar, ou *falta dia OS-00131* se ainda tem serviço.
 --       "ok" puro:  O Alex respondeu *ok* ao "como foi hoje?" no último dia da OS-00131 (Fernando). Responda *concluiu OS-00131* para fechar, ou *falta dia OS-00131* se ainda tem serviço.
+--   · A mensagem que já virou essa pergunta não é relida no resto do dia (nem com a chave virada para true no meio do dia: a OS não conclui
+--     pela mensagem já perguntada; nem depois do *falta dia* do dono: o "dia sobrando" não nasce dela).
 --   · equipe_terminei_conclui = true: o de antes (conclui pela porta, via equipe).
 --   · Não mudam: modo_proposta em sombra (só a ação "Em teste: concluiria…"), a etapa pendente dita (7c P8), o dia sobrando no plano e a porta que
 --     recusa (as três perguntas concluir:<os>:<dia> de antes).
@@ -74,6 +76,14 @@ begin
                    where a.payee_id = m.payee_id and a.dia = p_hoje and a.estado in ('publicada', 'fixada') and a.tipo <> 'reserva');
     continue when cardinality(v_os) <> 1;
     v_x := v_os[1];
+    -- P1 AGENDA: (A3, 25/11/2026, revisão) a mensagem que já virou a pergunta terminou:<os> de hoje deste técnico (o ramo novo, abaixo) não é
+    -- relida: ela fica sem acao_id e o laço a pegaria em todo tique do dia. Sem isto, depois do *falta dia* do dono no mesmo dia (o motor
+    -- encaixa dia novo) o tique seguinte abria a pergunta do "dia sobrando", que contradiz o dono, não vence e segura a pergunta geral; e
+    -- virar a chave para true no mesmo dia concluía a OS da pergunta já feita ao dono. A pergunta geral (sem payee_id) não conta aqui.
+    continue when exists (select 1 from public.agenda_perguntas q
+                           where q.chave = 'terminou:' || v_x and q.payee_id = m.payee_id
+                             and q.criada_em >= (p_hoje::timestamp at time zone 'America/Sao_Paulo'));
+    -- P1 AGENDA: fim
     select so.status into v_st from public.service_orders so where so.id = v_x;
     continue when v_st not in ('open', 'approved', 'scheduled', 'in_progress', 'awaiting_parts', 'awaiting_client');
     v_nome := (select public._agenda_nome_curto(p.name) from public.payees p where p.id = m.payee_id);

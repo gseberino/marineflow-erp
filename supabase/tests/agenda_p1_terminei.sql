@@ -5,17 +5,18 @@
 --
 --   P0  a forma (vale em produção, nada grava): as 4 chaves de agenda_config (tipo, DEFAULT, NOT NULL, CHECK e comentário; cada CHECK recusa o seu
 --       caso, P0g) e _agenda_cfg() com elas;
---       a porta de _agenda_rotina_conclusao (a de antes: invoker, ninguém de fora executa); nenhum UPDATE/DELETE sem WHERE; tirados os 2 blocos
+--       a porta de _agenda_rotina_conclusao (a de antes: invoker, ninguém de fora executa); nenhum UPDATE/DELETE sem WHERE; tirados os 3 blocos
 --       "-- P1 AGENDA:", o corpo é o de produção de 24/11 (md5 sem CR ae91e221…); tirados também os "-- TERMINOU:", o de 23/11 (ff5397d8…)
 --   Sobre a fixture-fase3 (o Roberto no Vanderlei, OS-00069, de ter 03 a qui 05/11 o dia todo; o Gustavo, o dono, abre na terça de manhã e fecha na
 --   quinta à tarde: a presença "abre e fecha", o padrão da casa):
 --   T1  chave false, só o técnico no último dia, "ok, terminei" às 17:15: nada conclui, a OS fica em andamento e nasce 1 pergunta concluir
 --       terminou:<os> com o texto exato ("disse em qui 05/11 que terminou")
 --   T2  o "ok" puro: o mesmo, e o texto diz "respondeu *ok*" (correção da crítica de risco)
---   T3  o tique seguinte não abre outra; depois de *falta dia* no mesmo dia nenhuma terminou:<os> nasce de novo (LIMITE: o *falta dia* do mesmo
---       dia marca o dia ANTERIOR, NOVO-agenda-p1-01, e o tique seguinte abre a pergunta do "dia sobrando", também NOVO-agenda-p1-01)
+--   T3  o tique seguinte não abre outra; depois de *falta dia* no mesmo dia nenhuma terminou:<os> nasce de novo e, com o dia novo no plano, a
+--       mensagem já perguntada não abre a pergunta do "dia sobrando" (T3d, revisão de 25/11) (LIMITE que fica: o *falta dia* do mesmo dia marca
+--       o dia ANTERIOR, NOVO-agenda-p1-01)
 --   T4  a manhã seguinte traz a linha; *concluiu* conclui pela porta e a pergunta fecha no tique seguinte; *falta dia* a fecha e devolve a OS ao motor
---   T5  chave true: o de antes (conclui pela porta, via equipe)
+--   T5  chave true: o de antes (conclui pela porta, via equipe); T5b a chave virada para true DEPOIS da pergunta feita não conclui a OS dela
 --   T6  chave false com o motor em teste (sombra): o de antes (só a ação "Em teste: concluiria…")
 --   S   A SOBREVIVÊNCIA AO PASSO INTEIRO (agenda_rotina_rodar; no fim do passo conclusao roda _agenda_terminou_rodar, que fecha a pergunta concluir
 --       terminou:% cuja OS tenha meio-dia de hoje em diante sem resultado ou não esteja em andamento; correção da crítica de viabilidade):
@@ -145,11 +146,11 @@ begin
     not exists (select 1 from pg_temp.sem_where(coalesce(pg_temp.src(c_f), ''))),
     (select string_agg(x, ' | ') from pg_temp.sem_where(coalesce(pg_temp.src(c_f), '')) x));
   v_txt := coalesce(pg_temp.src(c_f), '');
-  v_res := pg_temp.ok(v_res, 'P0e sem os 2 blocos "-- P1 AGENDA:" o corpo é o de produção de 24/11/2026 (md5 sem CR ae91e221…); sem eles e sem os "-- TERMINOU:", o de 23/11 (ff5397d8…)',
+  v_res := pg_temp.ok(v_res, 'P0e sem os 3 blocos "-- P1 AGENDA:" o corpo é o de produção de 24/11/2026 (md5 sem CR ae91e221…); sem eles e sem os "-- TERMINOU:", o de 23/11 (ff5397d8…)',
     md5(pg_temp.sem_blocos(v_txt, 'P1 AGENDA')) = 'ae91e2216c9eede4ce794e7a9ba86b2f'
     and md5(pg_temp.sem_blocos(v_txt, 'P1 AGENDA|TERMINOU')) = 'ff5397d86f0ae999dda0b3f74a730170'
     and md5(v_txt) <> 'ae91e2216c9eede4ce794e7a9ba86b2f'
-    and (select count(*) from regexp_matches(v_txt, '-- P1 AGENDA: fim', 'g')) = 2,
+    and (select count(*) from regexp_matches(v_txt, '-- P1 AGENDA: fim', 'g')) = 3,
     format('%s / %s / %s blocos', md5(pg_temp.sem_blocos(v_txt, 'P1 AGENDA')), md5(pg_temp.sem_blocos(v_txt, 'P1 AGENDA|TERMINOU')),
            (select count(*) from regexp_matches(v_txt, '-- P1 AGENDA: fim', 'g'))));
   v_res := pg_temp.ok(v_res, 'P0f o ramo novo só vale com a chave em false e o motor ligado, e nada nele chama a porta (os_registrar_marco fica fora dos blocos)',
@@ -282,13 +283,21 @@ begin
         and (select count(*) from public.agenda_perguntas x where x.chave = c_chave) = 1
         and (select so.status from public.service_orders so where so.id = c_vand) = 'in_progress',
         (r1 ->> 'texto') || ' | ' || pg_temp.pergs(c_vand));
-      v_res := pg_temp.ok(v_res, 'T3c LIMITES do *falta dia* no MESMO dia: ele marca como parcial o dia ANTERIOR (qua 04/11; NOVO-agenda-p1-01) e, com o dia novo no plano, o tique seguinte abre a pergunta do "dia sobrando" (concluir:<os>:<dia>; também NOVO-agenda-p1-01)',
-        (r1 ->> 'dia')::date = d04 and (r2 #>> '{contagens,conclusao,perguntas}')::int = 1
-        and exists (select 1 from public.agenda_perguntas x
-                     where x.chave = format('concluir:%s:%s', c_vand, d05) and x.estado = 'aberta'
-                       and x.texto like 'O Roberto disse que terminou o Vanderlei (OS-00069), mas o plano tinha mais 1 dia (%). *concluiu Vanderlei* fecha a OS.'),
-        format('dia marcado %s | %s | %s', r1 ->> 'dia', pg_temp.pergs(c_vand),
-               (select x.texto from public.agenda_perguntas x where x.chave = format('concluir:%s:%s', c_vand, d05))));
+      v_res := pg_temp.ok(v_res, 'T3c LIMITE do *falta dia* no MESMO dia: ele marca como parcial o dia ANTERIOR (qua 04/11; NOVO-agenda-p1-01)',
+        (r1 ->> 'dia')::date = d04, format('dia marcado %s', r1 ->> 'dia'));
+      v_txt := (select string_agg(a.dia::text, ', ' order by a.dia) from (select distinct a.dia from public.agenda_alocacoes a
+                 where a.service_order_id = c_vand and a.dia > d05 and a.estado in ('publicada', 'fixada') and a.tipo <> 'reserva') a);
+      r := pg_temp.rodar(d05, '19:45');
+      v_res := pg_temp.ok(v_res, 'T3d com o dia novo no plano, os tiques seguintes (18:15 e 19:45) não releem a mensagem já perguntada: nenhuma pergunta do "dia sobrando" (concluir:<os>:<dia>), nenhuma outra, a OS em andamento e a mensagem sem ação',
+        v_txt is not null
+        and (r2 #>> '{contagens,conclusao,perguntas}')::int = 0 and (r #>> '{contagens,conclusao,perguntas}')::int = 0
+        and (r2 #>> '{contagens,conclusao,concluidas}')::int = 0 and (r #>> '{contagens,conclusao,concluidas}')::int = 0
+        and not exists (select 1 from public.agenda_perguntas x where x.chave like 'concluir:' || c_vand || ':%')
+        and pg_temp.pergs(c_vand) = 'terminou:<os>|respondida|-'
+        and (select so.status from public.service_orders so where so.id = c_vand) = 'in_progress'
+        and (select m.acao_id is null from public.agenda_equipe_mensagens m where m.payee_id = c_roberto and m.tipo = 'como_foi' and m.dia = d05),
+        format('dias novos %s | %s / %s | %s', coalesce(v_txt, '(nenhum)'), r2 #> '{contagens,conclusao}', r #> '{contagens,conclusao}',
+               pg_temp.pergs(c_vand)));
       raise exception 'desfaz' using errcode = 'P0097';
     exception when sqlstate 'P0097' then null;
     end;
@@ -378,6 +387,28 @@ begin
       and (r #>> '{contagens,conclusao,concluidas}')::int = 1 and (r #>> '{contagens,conclusao,perguntas}')::int = 0
       and (select m.acao_id is not null from public.agenda_equipe_mensagens m where m.payee_id = c_roberto and m.tipo = 'como_foi' and m.dia = d05)
       and not exists (select 1 from public.agenda_perguntas x where x.chave like 'terminou:%' and x.service_order_id = c_vand),
+      (r #> '{contagens,conclusao}')::text || ' | ' || (select so.status from public.service_orders so where so.id = c_vand) || ' | ' || pg_temp.pergs(c_vand));
+    raise exception 'desfaz' using errcode = 'P0098';
+  exception when sqlstate 'P0098' then null;
+  end;
+
+  -- ── T5b. A chave virada para true DEPOIS da pergunta feita (só o técnico no último dia): a mensagem já perguntada não é relida ──
+  begin
+    update public.agenda_alocacoes set estado = 'cancelada', cancelada_motivo = 'dono'
+     where service_order_id = c_vand and dia = d05 and payee_id = c_gustavo and estado in ('publicada', 'fixada');
+    perform pg_temp.rodar(d05, '17:00');
+    perform pg_temp.resp('ok', d05, '17:15');
+    r1 := pg_temp.rodar(d05, '17:30');
+    update public.agenda_config set equipe_terminei_conclui = true where id;
+    r := pg_temp.rodar(d05, '17:45');
+    select * into q from public.agenda_perguntas x where x.chave = c_chave;
+    v_res := pg_temp.ok(v_res, 'T5b a chave virada para true às 17:40, depois da pergunta das 17:30: o tique das 17:45 NÃO conclui a OS pela mensagem já perguntada, e a pergunta segue aberta para o dono',
+      (r1 #>> '{contagens,conclusao,perguntas}')::int = 1
+      and (r #>> '{contagens,conclusao,concluidas}')::int = 0 and (r #>> '{contagens,conclusao,perguntas}')::int = 0
+      and (select so.status from public.service_orders so where so.id = c_vand) = 'in_progress'
+      and not exists (select 1 from public.agenda_acoes a where a.tipo = 'concluir' and a.service_order_id = c_vand)
+      and q.estado = 'aberta' and q.texto = c_ok
+      and (select m.acao_id is null from public.agenda_equipe_mensagens m where m.payee_id = c_roberto and m.tipo = 'como_foi' and m.dia = d05),
       (r #> '{contagens,conclusao}')::text || ' | ' || (select so.status from public.service_orders so where so.id = c_vand) || ' | ' || pg_temp.pergs(c_vand));
     raise exception 'desfaz' using errcode = 'P0098';
   exception when sqlstate 'P0098' then null;
