@@ -47,14 +47,15 @@ $f$;
 create function pg_temp.src(p_assinatura text) returns text language sql stable as $f$
   select replace(p.prosrc, chr(13), '') from pg_proc p where p.oid = to_regprocedure(p_assinatura)
 $f$;
--- Tira os blocos "-- TERMINOU: … -- TERMINOU: fim", devolvendo as linhas "--antes:" de dentro deles: o corpo de antes.
+-- Tira os blocos "-- TERMINOU: … -- TERMINOU: fim", devolvendo as linhas "--antes:" de dentro deles: o corpo de antes. (Pacote 1 do
+-- assistente, A3, 20270301120200: e os "-- P1 AGENDA: … -- P1 AGENDA: fim", pela mesma convenção; _agenda_rotina_conclusao ganhou 2 deles.)
 create function pg_temp.sem_terminou(p text) returns text language sql immutable as $st$
   select array_to_string(array(
            select case when dentro > 0 and l ~ '^--antes:' then substr(l, 9) else l end
-             from (select l, o, sum(case when l ~ '^\s*-- TERMINOU:' and l !~ '^\s*-- TERMINOU: fim' then 1
-                                         when l ~ '^\s*-- TERMINOU: fim' then -1 else 0 end)
+             from (select l, o, sum(case when l ~ '^\s*-- (TERMINOU|P1 AGENDA):' and l !~ '^\s*-- (TERMINOU|P1 AGENDA): fim' then 1
+                                         when l ~ '^\s*-- (TERMINOU|P1 AGENDA): fim' then -1 else 0 end)
                                 over (order by o rows between unbounded preceding and current row) as dentro,
-                          l ~ '^\s*-- TERMINOU: fim' as fecha
+                          l ~ '^\s*-- (TERMINOU|P1 AGENDA): fim' as fecha
                      from unnest(string_to_array(replace(p, chr(13), ''), E'\n')) with ordinality u(l, o)) x
             where (dentro = 0 and not fecha) or (dentro > 0 and l ~ '^--antes:')
             order by o), E'\n')
