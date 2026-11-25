@@ -4867,3 +4867,53 @@ quatro estão latentes.
   repositório, um `git add` descuidado leva o lixo junto, e toda conferência de "árvore limpa" precisa desfazer à mão.
 - **Menor mudança:** `*.tsbuildinfo` no `.gitignore`, em tarefa própria. O `deno.lock` (que é versionado) e o fim de linha
   do snapshot pedem olhar à parte. Não corrigido aqui.
+
+### [NOVO-agenda-p1-01] *falta dia <alvo>* dito no mesmo dia do "terminei" marca como parcial o dia do plano anterior a hoje
+
+- **Onde:** `agenda_falta_dia_dito` (migration `20270223100000`): o dia marcado é `max(a.dia)` com `a.dia < p_hoje`, e só
+  depois de olhar se a OS tem dia sem resultado de hoje em diante. Especificação do pacote 1 (agenda), A3 (c), "Limite
+  conhecido"; seção 11.
+- **Efeito:** com o A3, o "terminei" (ou o "ok") do técnico no último dia vira a pergunta "terminou ou falta dia?" ao dono no
+  mesmo dia. Se o dono responder *falta dia* ainda nesse dia, o dia marcado "em parte (estimativa)" é o dia do plano
+  **anterior** a hoje (ou a resposta é "não tem dia passado no plano", se hoje era o único). Provado na bancada
+  (`supabase/tests/agenda_p1_terminei.sql`, T3b e T3c, fixture-fase3): *falta dia Vanderlei* às 18:00 de qui 05/11 marca
+  qua 04/11. E, como a mensagem do técnico continua com `terminou` e o motor encaixou um dia novo, o tique seguinte do mesmo
+  dia abre a pergunta do "dia sobrando" (`concluir:<os>:<dia>`: "O Roberto disse que terminou o Vanderlei (OS-00069), mas o
+  plano tinha mais 1 dia (seg 09/11). *concluiu Vanderlei* fecha a OS."), uma pergunta a mais logo depois da resposta do
+  dono. Na manhã seguinte (o caminho desenhado) as duas coisas não acontecem (T4c).
+- **Menor mudança:** em `agenda_falta_dia_dito`, quando a OS tem meio-dia de hoje já com resultado, marcar hoje; e, em
+  `_agenda_rotina_conclusao`, não reabrir a mensagem cuja pergunta `terminou:<os>` de hoje já foi respondida. Duas funções
+  fora do A3. Não corrigido aqui.
+
+### [NOVO-agenda-p1-02] Perguntas críticas não chegam ao dono: o bloco das 17:30 mostra 1 ou 2 perguntas com 7 a 13 abertas
+
+- **Onde:** o bloco das 17:30 (`agenda_bloco_do_fechamento` e a ordem de `agenda_perguntas_em_ordem`), com
+  `agenda_config.bloco_max_chars` e `bloco_decisoes_max`. Especificação do pacote 1 (agenda), seção 11.
+- **Efeito (números da especificação, lidos no banco em 24/11/2026 por ela; não reconferidos nesta sessão, que não acessa o
+  banco):** a pergunta `atraso_longo` da OS-00131 (criada 24/11 09:00) teve 0 mostras; de 16 a 24/11 o bloco mostrou 1 a 2
+  perguntas por noite com 7 a 13 abertas. A causa (o corte por `bloco_max_chars` antes de `bloco_decisoes_max`) é hipótese
+  da especificação. O A5 do pacote 1 (as sobras do fechamento na manhã seguinte) mexe em parte disso.
+- **Menor mudança:** medir o tamanho do bloco de cada noite contra `bloco_max_chars` antes de mexer; se a causa se
+  confirmar, a pergunta crítica entra primeiro e o resto vai "e mais N". Não corrigido aqui.
+
+### [NOVO-agenda-p1-03] O "ok" ao "como foi hoje?" no último dia vale "terminou" e conclui a OS em nome da equipe
+
+- **Onde:** `agenda_resposta_da_equipe` (o "ok" puro grava `terminou = coalesce(leitura.terminou, true)`) e
+  `_agenda_rotina_conclusao` (no último dia do plano, com `modo_proposta` ligado, `os_registrar_marco(…, 'conclusao',
+  'equipe', …)`). Especificação do pacote 1 (agenda), A3 e seção 11.
+- **Efeito:** um "ok" do técnico ao "como foi hoje?" no último dia do plano concluía a OS sem ninguém dizer que terminou: o
+  saldo "na entrega" passa a vencer e o aviso de "pronto" ao cliente fica preparado. O "terminei" dito também concluía.
+- **Situação (25/11/2026, ramo `session/assistente-agenda`, NÃO publicado):** coberto pelo A3 (migrations `20270301120000`
+  e `20270301120200`, commits `b1adfa51` e `a7a909ae`): com `agenda_config.equipe_terminei_conclui = false` (o padrão) nada conclui pela palavra do técnico;
+  nasce a pergunta concluir `terminou:<os>` ao dono, com o texto do "ok" ("O Alex respondeu *ok* ao "como foi hoje?" no
+  último dia da OS-00131 (Fernando). …") ou do "terminei" ("O Alex disse em qua 02/12 que terminou a OS-00131 (Fernando).
+  …"). **Cobertura parcial da pergunta (a OS nunca conclui):** no fim do mesmo passo, `_agenda_terminou_rodar` fecha toda
+  pergunta `terminou:%` cuja OS tenha meio-dia de hoje em diante sem resultado, ou que não esteja em andamento. A pergunta
+  do técnico só sobrevive quando nenhum meio-dia de hoje da OS ficou sem resultado (só o técnico na OS respondendo às 17h, ou
+  o *dia feito* do dono antes). No padrão da casa (o meio-dia do dono à tarde sem resultado) e na resposta às 12h ela é
+  fechada no mesmo passo e, no dia seguinte, nasce a pergunta geral "A OS-X terminou ou falta dia?" na manhã das 07:30; no
+  "terminei" seco (sem turno, a OS ainda agendada) ela é fechada e nada nasce no dia seguinte. A chave
+  `terminou:<os>:equipe` não escapa (o filtro é `like 'terminou:%'`) e *falta dia* não a fecharia (fecha a chave exata).
+  Consertar pede mexer em `_agenda_terminou_rodar` (e, para o "terminei" seco, em `_agenda_terminou_candidatas`,
+  `_agenda_terminou_da_manha` e `agenda_falta_dia_dito`, que exigem a OS em andamento): decisão de desenho, fora do lote.
+  Provas: `supabase/tests/agenda_p1_terminei.sql`, S1 a S6.
