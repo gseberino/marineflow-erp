@@ -4,6 +4,8 @@
 // PDF e do modelo; só com o formato novo; só do dono; a resposta sem modelo volta antes do turno do modelo.
 import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { camadaDaAgenda, executarComandoDaAgenda, modoDaLeituraNoBanco, modosDaAgendaNoBanco } from "../_shared/agenda/executar.ts";
+import { assistenteCalou } from "../_shared/ai/acompanhar.ts";
+import { FALHAS_QUE_O_DONO_LEU } from "../_shared/ai/max/queda-do-assistente.ts";
 import { rotaDaResposta } from "../_shared/ai/rota-da-mensagem.ts";
 
 const fonte = await Deno.readTextFile(new URL("./index.ts", import.meta.url));
@@ -472,6 +474,51 @@ Deno.test("revisão B (WhatsApp): com a reserva ligada, Max fora ou falha ao enf
   assertStringIncludes(modeloWa, "onde: ondeDoTurnoSemResposta(turno.causaDoMax), mensagem: `Turno do WhatsApp sem resposta: ${result.error}`");
   // o nome antigo não é mais escrito à mão em lugar nenhum do ai-agent
   assert(!fonte.includes('onde: "turno_whatsapp"'), "o registro do turno sai só por ondeDoTurnoSemResposta");
+});
+
+// Revisão da leva B (25/11/2026). O turno que o vigia das conversas abre como o dono (lembrete de promessa, lembrete com
+// hora, acompanhamento) não é pedido dele. Com o Claude fora e a reserva desligada, o dono recebia "⚠️ Não consegui
+// responder… Confira o PC e mande de novo." sem ter mandado nada, e o vigia encerrava o lembrete (a resposta é 200).
+// O que se protege: nesse turno nada sai e nada entra na conversa; fica o registro, com um nome que o vigia de queda
+// não lê como "o dono já soube"; e a resposta leva `calado: true`, que o vigia das conversas lê para tentar de novo.
+Deno.test("revisão B (WhatsApp): no turno aberto pelo vigia, o Claude fora sem reserva não manda nada ao dono — registra e devolve calado", () => {
+  const aviso = fonte.slice(fonte.indexOf("async function avisarQueOMaxNaoAtende("), fonte.indexOf("async function turnoDoModeloNoWhatsApp("));
+  const guarda = aviso.indexOf("if (turno.doVigia) {");
+  const montaOAviso = aviso.indexOf("const aviso = textoDaFalhaParaODono(causa);");
+  assert(guarda > 0 && guarda < montaOAviso, "o ramo do vigia vem antes de montar o aviso do dono");
+  const ramo = aviso.slice(guarda, montaOAviso);
+  for (const proibido of ["queueWhatsAppReply", "gravarTurnoDoMax", "textoDaFalhaParaODono", "ai_operator_messages", "ai_operator_sessions", "runAgentLoop"]) {
+    assert(!ramo.includes(proibido), `o turno do vigia que não foi atendido não usa ${proibido}`);
+  }
+  // fica o registro (conta na soma por hora), só com o código da causa
+  assertStringIncludes(ramo, 'await registrarFalhaDoAssistente(admin, { onde: "max_fora_turno_do_vigia", mensagem: `Claude Max fora e sem reserva, no turno aberto pelo vigia das conversas (nada enviado): ${rotuloDaCausaNoLog(causa)}`, erro });');
+  // o dono não leu nada: o vigia de queda (V1) não pode contar este registro como "o dono já soube"
+  assert(!(FALHAS_QUE_O_DONO_LEU as readonly string[]).includes("max_fora_turno_do_vigia"), "o registro do turno calado fica fora da lista do V1");
+  // a resposta: a mesma chave de sempre (a rota sabe ler) e a marca que o vigia das conversas lê
+  assertStringIncludes(ramo, 'return jr({ ok: true, entregue: "aviso", causa: causa.codigo, calado: true });');
+  assertEquals((ramo.match(/return /g) ?? []).length, 1, "uma saída só");
+  const resposta = { ok: true, entregue: "aviso", causa: "pc_fora", calado: true };
+  assertEquals(assistenteCalou(resposta), true);
+  assertEquals(rotaDaResposta(resposta, 200), { camada: "aviso_falha", detalhe: "pc_fora", jobId: null });
+  // o aviso ao dono (o turno que ELE abriu) não leva a marca: o caminho de sempre não mudou
+  assertEquals((aviso.match(/calado: true/g) ?? []).length, 1);
+  assertEquals(assistenteCalou({ ok: true, entregue: "aviso", causa: "pc_fora" }), false);
+});
+
+Deno.test("revisão B (WhatsApp): quem diz que o turno é do vigia é o pedido (origem + 🤖), lido no envoltório e levado até o turno do modelo", () => {
+  // o envoltório lê a origem do corpo, com o texto como chegou, e passa adiante já resolvido
+  assertStringIncludes(envoltorio, "const doVigia = turnoAbertoPeloVigia(body.origem, text);");
+  assertStringIncludes(envoltorio, "admin, text, phoneNormalized, appUser, sessionId, metadata, settings, toolCtx, messageId, citado, doVigia,");
+  assertStringIncludes(fonte, 'import { turnoAbertoPeloVigia } from "../_shared/ai/acompanhar.ts";');
+  // o tratador só repassa (não lê o pedido HTTP nem decide)
+  assertStringIncludes(tratador, "doVigia: entrada.doVigia,");
+  assertEquals((fonte.match(/turnoAbertoPeloVigia\(/g) ?? []).length, 1, "decidido num ponto só");
+  // só o aviso do Claude fora sem reserva olha a marca: nenhuma camada, nenhum outro aviso e nenhum caminho do modelo muda
+  const usos = fonte.split("\n").map((l) => l.trim()).filter((l) => /\.doVigia\b/.test(l) && !l.startsWith("*") && !l.startsWith("//"));
+  assertEquals(usos, ["doVigia: entrada.doVigia,", "if (turno.doVigia) {"], "o repasse e o aviso, e mais ninguém");
+  // a reserva que refaz o turno depois de o pedido falhar não marca vigia (segue como sempre)
+  const refaz = entregaDoMax.slice(entregaDoMax.indexOf("const daReserva = await turnoDoModeloNoWhatsApp({"), entregaDoMax.indexOf("return daReserva;"));
+  assert(refaz.length > 0 && !refaz.includes("doVigia"), "o turno refeito pela reserva não leva a marca do vigia");
 });
 
 Deno.test("C2 (painel): depois de escolhido o Max, nenhum 'return null' sem conferir a reserva", () => {

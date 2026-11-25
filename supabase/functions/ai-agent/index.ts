@@ -44,6 +44,9 @@ import {
   rotuloDaCausaNoLog,
   textoDaFalhaParaODono,
 } from "../_shared/ai/max/causa-da-falha.ts";
+// Revisão da leva B (25/11/2026): o pedido que o vigia das conversas abre como o dono (🤖), para não responder a ele
+// "mande de novo" quando o Claude não atende.
+import { turnoAbertoPeloVigia } from "../_shared/ai/acompanhar.ts";
 // C4 (pacote 1, 25/11/2026): o rastro por mensagem. Uma linha "rota:<camada>" em ai_operator_audit, sem o texto.
 import { detalheComCodigo, detalheDaEntrega, noFundoDaRota, rastrearResposta, registrarRota } from "../_shared/ai/rota-da-mensagem.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
@@ -656,6 +659,9 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
   // dono citou (quotedId). Opcionais: quem chama sem eles (acompanhar-conversas) segue como antes.
   const messageId = typeof body.message_id === "string" && body.message_id ? body.message_id : null;
   const citado = typeof body.citado === "string" && body.citado ? body.citado : null;
+  // Revisão da leva B (25/11/2026): o vigia das conversas diz que o turno é dele (`origem`) e o texto traz a marca 🤖.
+  // Pelo texto como CHEGOU. Só muda o que acontece quando o Claude não atende e a reserva está desligada.
+  const doVigia = turnoAbertoPeloVigia(body.origem, text);
 
   // ---- C4 (pacote 1, 25/11/2026): o rastro da mensagem ----
   // Toda mensagem que chega até aqui deixa UMA linha em ai_operator_audit dizendo em que camada parou ("rota:<camada>"),
@@ -707,7 +713,7 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
     const toolCtx = { sb: adminDoTurno, admin: adminDoTurno, userId: appUserId, userRole: (appUser.role as Role) || "unknown", jwt: "", appOrigin: settings.app_public_url || "", settings, sessaoId: sessionId, sessaoAmarrada: metadata.retorno_amarrada === true, casoAmarrado: casoAmarradoDaSessao(sessionRow) };
 
     return comRota(await tratarMensagemDoWhatsApp({
-      admin, text, phoneNormalized, appUser, sessionId, metadata, settings, toolCtx, messageId, citado,
+      admin, text, phoneNormalized, appUser, sessionId, metadata, settings, toolCtx, messageId, citado, doVigia,
     }));
   } catch (e) {
     comRota(null); // o turno lançou: a rota fica "erro" e o erro sobe como sempre
@@ -736,6 +742,8 @@ async function tratarMensagemDoWhatsApp(entrada: {
   toolCtx: any;
   messageId: string | null;
   citado: string | null;
+  /** Revisão da leva B: o turno foi aberto pelo vigia das conversas, e não pelo dono (só chega até o turno do modelo). */
+  doVigia: boolean;
 }): Promise<Response> {
   const { admin, text, phoneNormalized, appUser, sessionId, metadata, settings, toolCtx, messageId, citado } = entrada;
 
@@ -1015,6 +1023,7 @@ async function tratarMensagemDoWhatsApp(entrada: {
 
   return await turnoDoModeloNoWhatsApp({
     admin, sessionId, phoneNormalized, appUser, settings, toolCtx, metadata, effectiveText, permitirMax: true,
+    doVigia: entrada.doVigia,
   });
 }
 
@@ -1035,6 +1044,11 @@ interface TurnoDoModelo {
    * (o Claude já estava fora, ou o pedido não entrou na fila). Sem ela, o turno nem passou pelo Claude.
    */
   causaDoMax?: CausaDaFalha;
+  /**
+   * Revisão da leva B: o turno foi aberto pelo vigia das conversas (ele diz a origem e o texto traz a marca 🤖), e não
+   * pelo dono. Se o Claude não puder atender e a reserva estiver desligada, nada é dito a ele (avisarQueOMaxNaoAtende).
+   */
+  doVigia?: boolean;
 }
 
 /**
@@ -1064,9 +1078,19 @@ async function fraseParaQuemNaoEOTitular(admin: any, canal: "whatsapp" | "panel"
  * O turno fecha aqui, sem o laço do OpenRouter: conta para o vigia (o registro max_fora_sem_reserva diz que o dono já
  * soube), a causa entra na conversa (o turno seguinte sabe que este falhou) e vai ao dono. O estado das camadas acima
  * (lista de opções, pendência) não é gravado: o turno não aconteceu, e o dono manda de novo.
+ *
+ * Revisão da leva B (25/11/2026): o turno aberto pelo vigia das conversas (`turno.doVigia`: o lembrete de promessa, o
+ * lembrete com hora, o acompanhamento) não é pedido do dono. "Confira o PC e mande de novo" não teria a que se referir,
+ * e o vigia, lendo a resposta como "aviso dado", encerrava o lembrete. Nesse turno nada sai e nada entra na conversa:
+ * fica o registro (com um nome que o vigia de queda NÃO lê como "o dono já soube", porque ele não leu nada) e a
+ * resposta leva `calado: true`, que faz o vigia das conversas tentar de novo na rodada seguinte.
  */
 async function avisarQueOMaxNaoAtende(turno: TurnoDoModelo, causa: CausaDaFalha, erro?: unknown): Promise<Response> {
   const { admin, sessionId, phoneNormalized, effectiveText } = turno;
+  if (turno.doVigia) {
+    await registrarFalhaDoAssistente(admin, { onde: "max_fora_turno_do_vigia", mensagem: `Claude Max fora e sem reserva, no turno aberto pelo vigia das conversas (nada enviado): ${rotuloDaCausaNoLog(causa)}`, erro });
+    return jr({ ok: true, entregue: "aviso", causa: causa.codigo, calado: true });
+  }
   const aviso = textoDaFalhaParaODono(causa);
   await registrarFalhaDoAssistente(admin, { onde: "max_fora_sem_reserva", mensagem: `Claude Max fora e sem reserva: ${rotuloDaCausaNoLog(causa)}`, erro });
   await gravarTurnoDoMax(admin, sessionId, effectiveText, aviso, {}, "whatsapp");

@@ -4,8 +4,8 @@
 // texto pede ao assistente para ler, sugerir e chamar send_whatsapp_message.
 import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
-  type Acompanhamento, aplicarFreio, AVISOS_POR_MENSAGEM, decidir, horaDeAvisar, janelaDoEncerramento, MOTIVO_FREIO, podeAvisarNoModo,
-  tempoEsperando, textoDoAviso,
+  type Acompanhamento, aplicarFreio, assistenteCalou, AVISOS_POR_MENSAGEM, decidir, horaDeAvisar, janelaDoEncerramento, MOTIVO_FREIO,
+  ORIGEM_DO_VIGIA, podeAvisarNoModo, tempoEsperando, textoDoAviso, turnoAbertoPeloVigia,
 } from "./acompanhar.ts";
 import { conversaEncerradaPeloContato, MOTIVO_CONTATO_ENCERROU } from "../whatsapp/contato-encerrou.ts";
 
@@ -149,4 +149,45 @@ Deno.test("freio no caso Miguel: com a desistência do passo 0 encerrando antes,
   const recebidas = ["André você demora muito pra responder e por isso acabei fechando com outra empresa. Obrigado"];
   const d = decidir(base, { ...esperando(5), encerrouPeloContato: conversaEncerradaPeloContato(recebidas) }, AGORA);
   assertEquals(aplicarFreio(d, base, 0), { acao: "encerrar", motivo: MOTIVO_CONTATO_ENCERROU });
+});
+
+// ─── Revisão da leva B do pacote 1 (25/11/2026): o assistente que não pode atender o pedido do vigia ─────────────────
+// O que se protege: o ai-agent só trata como "turno do vigia" o pedido que diz a origem E traz a marca 🤖 (a mensagem do
+// dono nunca é calada por engano); e o vigia só deixa de contar o aviso como dado com o `calado: true` exato.
+
+Deno.test("turno do vigia: precisa da origem que só o vigia manda E da marca 🤖 no começo do texto", () => {
+  assertEquals(ORIGEM_DO_VIGIA, "acompanhar-conversas");
+  // os três pedidos de verdade do vigia
+  for (const modo of ["acompanhar", "lembrar_em", "promessa"] as const) {
+    const pedido = textoDoAviso({ ...base, modo, lembrar_em: horasAtras(1), promessa: "te mando amanhã" }, esperando(3), AGORA, "(47) 99999-0000");
+    assertEquals(turnoAbertoPeloVigia(ORIGEM_DO_VIGIA, pedido), true, modo);
+    // o mesmo texto sem a origem (o webhook e o fluxo dos comprovantes não mandam origem) é mensagem do dono
+    assertEquals(turnoAbertoPeloVigia(undefined, pedido), false, modo);
+    assertEquals(turnoAbertoPeloVigia(null, pedido), false, modo);
+  }
+  assertEquals(turnoAbertoPeloVigia(ORIGEM_DO_VIGIA, "  \n🤖 Lembrete que você pediu: responder João."), true, "espaço antes não esconde a marca");
+  // o dono que começa a própria mensagem com 🤖 continua sendo o dono
+  assertEquals(turnoAbertoPeloVigia("", "🤖 me lembra do João"), false);
+  assertEquals(turnoAbertoPeloVigia("whatsapp-webhook", "🤖 me lembra do João"), false);
+  assertEquals(turnoAbertoPeloVigia(true, "🤖 me lembra do João"), false, "só o nome exato vale");
+  // a origem sem a marca não basta (quem chama com a origem por engano não cala a mensagem de ninguém)
+  assertEquals(turnoAbertoPeloVigia(ORIGEM_DO_VIGIA, "como estão as coisas?"), false);
+  assertEquals(turnoAbertoPeloVigia(ORIGEM_DO_VIGIA, "responde o João 🤖"), false, "só no começo");
+  assertEquals(turnoAbertoPeloVigia(ORIGEM_DO_VIGIA, undefined), false);
+  assertEquals(turnoAbertoPeloVigia(ORIGEM_DO_VIGIA, 42), false);
+});
+
+Deno.test("assistente calou: só o `calado: true` exato faz o vigia tentar de novo; o resto conta como aviso dado", () => {
+  // o que o ai-agent devolve quando o Claude está fora, a reserva está desligada e o turno é do vigia
+  assertEquals(assistenteCalou({ ok: true, entregue: "aviso", causa: "pc_fora", calado: true }), true);
+  // o aviso que SAIU (um ai-agent sem esta mudança, ou a frase para quem não é o titular): algo foi dito, conta como dado
+  assertEquals(assistenteCalou({ ok: true, entregue: "aviso", causa: "pc_fora" }), false);
+  assertEquals(assistenteCalou({ ok: true, entregue: "aviso", causa: "nao_assinante" }), false);
+  // o turno que respondeu, pelo Claude ou pela reserva
+  assertEquals(assistenteCalou({ ok: true, session_id: "s1", claude_max: "j1" }), false);
+  assertEquals(assistenteCalou({ ok: true, session_id: "s1" }), false);
+  // corpo ilegível ou torto: nunca reabre por engano (reabrir sem o assistente ter calado repetiria o aviso ao dono)
+  for (const corpo of [null, undefined, "", "calado", 1, [], [{ calado: true }], { calado: "true" }, { calado: 1 }, { calado: false }]) {
+    assertEquals(assistenteCalou(corpo), false, JSON.stringify(corpo));
+  }
 });

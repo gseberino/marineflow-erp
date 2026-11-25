@@ -387,8 +387,9 @@ Deno.test("ligado: o turno que falhou SEM a causa na resposta (turno_whatsapp) n
   assertEquals([b.sinos().length, b.perguntas().length, b.fila().length], [1, 1, 1]);
   assertEquals([b.quedas[0].dono_soube, b.quedas[0].avisado_por], ["aviso", "whatsapp"]);
   assertEquals(b.fila()[0].valores.message, TEXTO_DO_LOGIN);
-  // o painel e o tratador continuam de fora, como antes
-  for (const action of ["turno_painel", "handler", "max_falhou", "enfileirar_max", "nao_assinante"]) {
+  // o painel e o tratador continuam de fora, como antes; e o turno aberto pelo vigia das conversas que o Claude não
+  // atendeu (max_fora_turno_do_vigia) também: nesse turno nada foi dito ao dono
+  for (const action of ["turno_painel", "handler", "max_falhou", "enfileirar_max", "nao_assinante", "max_fora_turno_do_vigia"]) {
     const x = banco({ quedas: [queda()], registros: [{ action, last_seen_at: iso(2) }] });
     assertEquals((await vigiarOAssistente(x.db, { modo: "ligado", pc: NO_AR, whatsappAberto: true, agora: min(15) })).avisou, "whatsapp", action);
   }
