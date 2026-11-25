@@ -4882,8 +4882,12 @@ quatro estão latentes.
   plano tinha mais 1 dia (seg 09/11). *concluiu Vanderlei* fecha a OS."), uma pergunta a mais logo depois da resposta do
   dono. Na manhã seguinte (o caminho desenhado) as duas coisas não acontecem (T4c).
 - **Menor mudança:** em `agenda_falta_dia_dito`, quando a OS tem meio-dia de hoje já com resultado, marcar hoje; e, em
-  `_agenda_rotina_conclusao`, não reabrir a mensagem cuja pergunta `terminou:<os>` de hoje já foi respondida. Duas funções
-  fora do A3. Não corrigido aqui.
+  `_agenda_rotina_conclusao`, não reabrir a mensagem cuja pergunta `terminou:<os>` de hoje já foi respondida.
+- **Situação (25/11/2026, revisão do lote 1, NÃO publicado):** a segunda parte (a pergunta do "dia sobrando") está
+  **corrigida** no commit `9f75afba`: `_agenda_rotina_conclusao` não relê, no resto do dia, a mensagem que já virou a pergunta
+  `terminou:<os>` deste técnico (T3d). Ela, além de contradizer o dono, nascia sem `expira_em` e, aberta, impedia
+  `_agenda_terminou_candidatas` de abrir a pergunta geral depois do dia novo. A primeira parte (o dia marcado é o anterior,
+  T3c) continua em `agenda_falta_dia_dito`, fora do A3: não corrigida.
 
 ### [NOVO-agenda-p1-02] Perguntas críticas não chegam ao dono: o bloco das 17:30 mostra 1 ou 2 perguntas com 7 a 13 abertas
 
@@ -4911,9 +4915,48 @@ quatro estão latentes.
   pergunta `terminou:%` cuja OS tenha meio-dia de hoje em diante sem resultado, ou que não esteja em andamento. A pergunta
   do técnico só sobrevive quando nenhum meio-dia de hoje da OS ficou sem resultado (só o técnico na OS respondendo às 17h, ou
   o *dia feito* do dono antes). No padrão da casa (o meio-dia do dono à tarde sem resultado) e na resposta às 12h ela é
-  fechada no mesmo passo e, no dia seguinte, nasce a pergunta geral "A OS-X terminou ou falta dia?" na manhã das 07:30; no
-  "terminei" seco (sem turno, a OS ainda agendada) ela é fechada e nada nasce no dia seguinte. A chave
+  fechada no mesmo passo, sem ser mostrada, e o "uma por dia" impede recriá-la no mesmo dia. Quando o resto do dia ganha
+  resultado (o *dia feito* do dono, ou a tarde "cumprido via sistema" no tique das 17:30), nasce a pergunta geral "A OS-X
+  terminou ou falta dia?", sem o que o técnico disse, e a manhã das 07:30 a mostra. No "terminei" seco (sem turno, a OS
+  ainda agendada) ela é fechada e nenhuma pergunta "terminou ou falta dia?" nasce depois; só fica a pergunta crítica da
+  diária ("O Roberto respondeu "terminei" ao "como foi hoje?" … e eu não entendi se foi o dia todo."). A chave
   `terminou:<os>:equipe` não escapa (o filtro é `like 'terminou:%'`) e *falta dia* não a fecharia (fecha a chave exata).
-  Consertar pede mexer em `_agenda_terminou_rodar` (e, para o "terminei" seco, em `_agenda_terminou_candidatas`,
-  `_agenda_terminou_da_manha` e `agenda_falta_dia_dito`, que exigem a OS em andamento): decisão de desenho, fora do lote.
   Provas: `supabase/tests/agenda_p1_terminei.sql`, S1 a S6.
+- **Decisão de desenho pendente (revisão de 25/11/2026; achado médio, ABERTO, não mexido por regra do lote):** duas saídas.
+  (1) Em `_agenda_terminou_rodar`, não fechar por "a OS voltou a ter dia no plano" a pergunta com `payee_id` (a do técnico)
+  enquanto os únicos meios-dias sem resultado forem os do dia dela (`a.dia > q.dia` para ela) e, para o "terminei" seco,
+  aceitar a OS `scheduled` ali, em `_agenda_terminou_candidatas`, `_agenda_terminou_da_manha` e `agenda_falta_dia_dito`
+  (quatro funções fora do A3). (2) Menor, só em `_agenda_rotina_conclusao`: criar a pergunta do técnico só quando ela
+  sobreviveria (as mesmas condições de `_agenda_terminou_rodar`: a OS em andamento e nenhum meio-dia publicado ou fixado de
+  hoje em diante sem resultado) e, sem isso, não gastar o "uma por dia", para um tique seguinte do mesmo dia criá-la quando o
+  dia tiver resultado (antes da geral, porque o laço roda antes de `_agenda_terminou_rodar`). A (2) cobre o padrão da casa e
+  a resposta das 12h, mas não o "terminei" seco, e copia as condições de outra função. Quando entrar, S3 a S5 passam a exigir
+  a pergunta aberta.
+- **Corrigido no mesmo lote (commit `9f75afba`):** virar `equipe_terminei_conclui` para true no meio do dia concluía, no tique
+  seguinte, a OS cuja pergunta já tinha sido feita ao dono (a mensagem ficava sem `acao_id` e era relida). Agora a mensagem já
+  perguntada não é relida (T5b).
+
+### [NOVO-agenda-p1-04] `agenda_config` não está em `src/integrations/supabase/types.ts`: a especificação pedia só as 4 colunas novas
+
+- **Onde:** `src/integrations/supabase/types.ts` (nenhuma ocorrência de `agenda_config`; estão `agenda_detector_exclusions`,
+  `agenda_suggestions` e `agenda_tasks`). Especificação do pacote 1 (agenda), seções 7, 8 e 9.
+- **Efeito:** a especificação manda acrescentar as 4 colunas de `20270301120000` em `agenda_config` (Row, Insert e Update),
+  mas a tabela não está declarada ali: as leituras de `src` usam cliente sem tipo (`type Cliente = any` em
+  `use-agenda-producao.ts`). Acrescentar só as 4 colunas seria inventar a tabela pela metade, e a varredura dos `.select()`
+  (`src/test/postgrest-select-columns.test.ts`), que só confere tabelas presentes em `types.ts`, passaria a conferir as
+  colunas que já são lidas de `agenda_config` (hipótese: não provada rodando). Nenhum código de `src` lê as colunas novas. O lote 1 deixou `types.ts` como estava; vitest e `tsc -b` passam assim.
+- **Menor mudança:** nenhuma neste lote. Quando `types.ts` for regenerado do banco, `agenda_config` entra inteira, com as 4.
+
+### [NOVO-agenda-p1-05] O texto da pergunta do A3 nem sempre diz o que o técnico disse, e o nome do cliente sai de outra fonte
+
+- **Onde:** `_agenda_rotina_conclusao`, o ramo `-- P1 AGENDA:` (migration `20270301120200`).
+- **Efeito (lido no código do leitor e da resposta; sem teste próprio):** (a) o texto "respondeu *ok*" vale para toda leitura
+  de tipo `ok`, que inclui "beleza", "tudo certo", "foi tudo como o previsto" (`_agenda_ler_resposta_da_equipe`): o dono lê
+  *ok*, não a palavra. (b) Com `modo_tarefas` ligado e `tarefas_resposta_vale_dia`, o "fiz tudo" das etapas grava
+  `terminou = true` com tipo `nao_entendi`/`turnos` (`agenda_resposta_da_equipe`, bloco 7c), e o texto vira "disse em <dia>
+  que terminou a OS", mais do que ele disse (ele falou das etapas do dia). (c) O nome do cliente vem de `clients.name`; a
+  pergunta geral e a manhã com mais de uma OS usam `display_name` primeiro, então o mesmo cliente pode aparecer com nomes
+  diferentes. Sem cliente na OS, sai "OS-00131 (OS-00131)".
+- **Menor mudança:** citar o trecho da resposta (`left(m.resposta_texto, 60)`) no lugar de *ok* e de "disse que terminou", e
+  usar o nome curto de `_agenda_terminou_candidatas` (`display_name` primeiro). Mexe no texto que o dono lê: pede o OK dele.
+  Não corrigido aqui.
