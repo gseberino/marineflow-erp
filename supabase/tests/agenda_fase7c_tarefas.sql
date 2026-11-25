@@ -21,7 +21,8 @@
 --       nunca, a palavra sem OK, falou de falta sem dizer qual, o Mateus responde a dele, o texto que não confere
 --   T11 a conferência: dia feito, dia parcial, sem registro (segue o plano, R5.2-3), o desfaz, a equipe e o dono por cima, o roteiro
 --   T12 as exceções: a 2ª pendência (uma ação por sequência), não cabe até o prazo (aberta e "coube"), sem quem faça, em teste
---   T13 a conclusão pela palavra do técnico: a pendente dita segura; sem ela conclui; o parâmetro; só sem registro conclui
+--   T13 a conclusão pela palavra do técnico: a pendente dita segura; sem ela conclui; o parâmetro; só sem registro conclui (os "conclui"
+--       com agenda_config.equipe_terminei_conclui = true, do pacote 1, A3; T13e: no padrão, false, vira a pergunta "terminou ou falta dia?")
 --   T14 as leituras: a linha "Etapas" da OS e o dia da pessoa (ligado e sombra; desligado = antes); até 400
 --   T15 o rascunho etapa: as 3 formas, as guardas, o número que não vale (R5.10-10), o *grava* (o falta grava pendente via dono)
 --   T16 as medidas
@@ -43,14 +44,15 @@ begin;
 -- conferências de cópia abaixo a leem assim. (F2b, 18/11/2026, 20270126100000: e os blocos "-- FICHA PAGA B: … -- FICHA PAGA B: fim",
 -- do mesmo jeito; um bloco B pode estar dentro de um da F2: a conta é por nível. F2c, 20270127100000: e os "-- FICHA PAGA C:".)
 -- ("Terminou ou falta dia?", 23/11/2026, 20270223100000: e os "-- TERMINOU: … -- TERMINOU: fim", pela mesma convenção; _agenda_rotina_conclusao
--- ganhou 2 deles.)
+-- ganhou 2 deles.) (Pacote 1 do assistente, A3, 24/11/2026, 20270301120200: e os "-- P1 AGENDA: … -- P1 AGENDA: fim"; _agenda_rotina_conclusao
+-- ganhou 2 deles, só acréscimos.)
 create function pg_temp.sem_ficha_paga(p text) returns text language sql immutable as $fp$
   select array_to_string(array(
            select case when dentro > 0 and l ~ '^--antes:' then substr(l, 9) else l end
-             from (select l, o, sum(case when l ~ '^\s*-- (FICHA PAGA( [BC])?|TERMINOU):' and l !~ '^\s*-- (FICHA PAGA( [BC])?|TERMINOU): fim' then 1
-                                         when l ~ '^\s*-- (FICHA PAGA( [BC])?|TERMINOU): fim' then -1 else 0 end)
+             from (select l, o, sum(case when l ~ '^\s*-- (FICHA PAGA( [BC])?|TERMINOU|P1 AGENDA):' and l !~ '^\s*-- (FICHA PAGA( [BC])?|TERMINOU|P1 AGENDA): fim' then 1
+                                         when l ~ '^\s*-- (FICHA PAGA( [BC])?|TERMINOU|P1 AGENDA): fim' then -1 else 0 end)
                                 over (order by o rows between unbounded preceding and current row) as dentro,
-                          l ~ '^\s*-- (FICHA PAGA( [BC])?|TERMINOU): fim' as fecha
+                          l ~ '^\s*-- (FICHA PAGA( [BC])?|TERMINOU|P1 AGENDA): fim' as fecha
                      from unnest(string_to_array(p, E'\n')) with ordinality u(l, o)) x
             where (dentro = 0 and not fecha) or (dentro > 0 and l ~ '^--antes:')
             order by o), E'\n')
@@ -1343,7 +1345,11 @@ do $t13$
 declare
   v_res jsonb := '[]'::jsonb;
   r jsonb;
-  t1 text; t2 text; t3 text; t4 text;
+  t1 text; t2 text; t3 text; t4 text; t5 text;
+  -- P1 AGENDA (A3, 20270301120200): o "conclui como antes" de T13b–T13d pede agenda_config.equipe_terminei_conclui = true (ela nasce
+  -- false: a pergunta "terminou ou falta dia?" ao dono, T13e). Sem a coluna (a bancada cortada antes do pacote 1), o de antes é o único.
+  v_chave boolean := exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                                                          and a.attname = 'equipe_terminei_conclui' and not a.attisdropped);
 begin
   if not pg_temp.carregada() then
     insert into _resultado values ('T13 a conclusão', true, 'PULADO: sem a fixture do P8 (rode pela bancada)');
@@ -1362,6 +1368,7 @@ begin
   begin
     -- o dono disse que a passagem já está feita: sem pendente dita, conclui como antes
     perform pg_temp.semana('qui_como_foi');
+    if v_chave then execute 'update public.agenda_config set equipe_terminei_conclui = true where id'; end if;
     perform public._agenda_tarefas_registrar(array(select d.id from public.os_tarefas_dia d join public.os_tarefas t on t.id = d.tarefa_id
                                                      where d.service_order_id = pg_temp.os('OS-97192') and d.termina and t.texto like 'Passagem%'),
                                             'feita', 'dono', 'no Lenine os cabos já estão passados', null, pg_temp.em(date '2026-11-05', '12:00'));
@@ -1375,6 +1382,7 @@ begin
     -- tarefas_concluir_sem_pendente = false: conclui como antes, mesmo com a pendente dita
     perform pg_temp.semana('qui_como_foi');
     update public.agenda_config set tarefas_concluir_sem_pendente = false where id;
+    if v_chave then execute 'update public.agenda_config set equipe_terminei_conclui = true where id'; end if;
     r := public.agenda_resposta_da_equipe('5547900000031', 'terminei', 'WA-T13', pg_temp.em(date '2026-11-05', '17:40'));
     r := public._agenda_rotina_conclusao(date '2026-11-05', pg_temp.em(date '2026-11-05', '18:00'));
     t3 := (select so.status || ' ' || (so.check_out_at is not null) from public.service_orders so where so.id = pg_temp.os('OS-97192'));
@@ -1384,6 +1392,7 @@ begin
   begin
     -- só sem registro (ninguém disse que falta): conclui, e a medida conta a conclusão sem confirmação (R5.2-3)
     perform pg_temp.semana('qua');
+    if v_chave then execute 'update public.agenda_config set equipe_terminei_conclui = true where id'; end if;
     perform pg_temp.tique(date '2026-11-05', '07:10');
     perform public._agenda_rotina_como_foi(date '2026-11-05', pg_temp.em(date '2026-11-05', '17:00'));
     r := public.agenda_resposta_da_equipe('5547900000031', 'terminei', 'WA-T13', pg_temp.em(date '2026-11-05', '17:40'));
@@ -1394,12 +1403,34 @@ begin
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
+  if v_chave then
+    begin
+      -- P1 AGENDA (A3): o caso do T13b com a chave no padrão (false): sem a pendente dita, o "terminei" do último dia não conclui; vira a
+      -- pergunta concluir terminou:<os> ao dono (o bloco 7c, antes, não pergunta: nada pendente)
+      perform pg_temp.semana('qui_como_foi');
+      perform public._agenda_tarefas_registrar(array(select d.id from public.os_tarefas_dia d join public.os_tarefas t on t.id = d.tarefa_id
+                                                       where d.service_order_id = pg_temp.os('OS-97192') and d.termina and t.texto like 'Passagem%'),
+                                              'feita', 'dono', 'no Lenine os cabos já estão passados', null, pg_temp.em(date '2026-11-05', '12:00'));
+      r := public.agenda_resposta_da_equipe('5547900000031', 'terminei', 'WA-T13', pg_temp.em(date '2026-11-05', '17:40'));
+      r := public._agenda_rotina_conclusao(date '2026-11-05', pg_temp.em(date '2026-11-05', '18:00'));
+      t5 := (select so.status || ' ' || (so.check_out_at is null) from public.service_orders so where so.id = pg_temp.os('OS-97192'))
+            || ' ' || (r ->> 'concluidas') || ' ' || (r ->> 'perguntas') || ' | '
+            || coalesce((select string_agg(left(q.chave, 9) || ' ' || q.texto, ' ; ') from public.agenda_perguntas q
+                          where q.tipo = 'concluir' and q.service_order_id = pg_temp.os('OS-97192') and q.criada_em = pg_temp.em(date '2026-11-05', '18:00')), 'sem pergunta');
+      raise exception 'desfaz' using errcode = 'P0099';
+    exception when sqlstate 'P0099' then null;
+    end;
+  end if;
   v_res := pg_temp.ok(v_res, 'T13a "terminei" no último dia com a etapa pendente dita: a OS não conclui; a pergunta concluir lista só a pendente dita (§16.6.6)',
     t1 = 'in_progress true | O Alex disse que terminou o Lenine, mas não concluí: ainda falta "Passagem e crimpagem de cabos de bateria". *concluiu Lenine* fecha a OS mesmo assim.', t1);
   v_res := pg_temp.ok(v_res, 'T13b sem a pendente dita (o dono disse que está feita), conclui como antes', t2 = 'completed true', t2);
   v_res := pg_temp.ok(v_res, 'T13c com tarefas_concluir_sem_pendente = false, conclui como antes', t3 = 'completed true', t3);
   v_res := pg_temp.ok(v_res, 'T13d só sem registro (ninguém disse que falta): conclui, e a medida conta concluidas_sem_confirmacao',
     t4 = 'completed true 1 0', t4);
+  if v_chave then
+    v_res := pg_temp.ok(v_res, 'T13e (pacote 1, A3) o caso do T13b com equipe_terminei_conclui no padrão (false): não conclui; vira a pergunta "terminou ou falta dia?" ao dono (terminou:<os>)',
+      t5 like 'in_progress true 0 1 | terminou: O Alex disse em qui 05/11 que terminou a OS-% (Lenine). Responda *concluiu OS-%* para fechar, ou *falta dia OS-%* se ainda tem serviço.', t5);
+  end if;
   perform pg_temp.gravar(v_res);
 end
 $t13$;

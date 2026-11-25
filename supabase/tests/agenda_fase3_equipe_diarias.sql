@@ -17,7 +17,10 @@
 --      igual byte a byte; meio dia em duas OS; acerto fechado; sombra; a decisão; *diária Roberto meia*/*não*; desfazer
 --   D  a repescagem (a diária lançada 4 dias depois preenche o resultado)
 --   E  a conclusão pelo técnico ("terminei" no último dia conclui; fora dele pergunta; proposta em sombra só registra) e a
---      OS concluída antes do fim do plano (a vigia seguinte tira os meios-dias futuros dela)
+--      OS concluída antes do fim do plano (a vigia seguinte tira os meios-dias futuros dela). Pacote 1 do assistente, A3
+--      (20270301120000/20270301120200): o "conclui" do E1 vale com agenda_config.equipe_terminei_conclui = true, que o E1 grava;
+--      o E1b prova o padrão (false): nada conclui e vira a pergunta "terminou ou falta dia?" ao dono. Cortada antes do pacote 1
+--      (--ate), a coluna não existe, o E1 roda como antes e o E1b não sai.
 --   F  a intervenção do dono ("eu fui no Lenine" sem estar no plano)
 --   G  a saúde (os zeros na fixture; a diária forçada sem confirmação e a fila forçada fora da janela aparecem)
 --   H  o acorde avisa quem já recebeu a ficha
@@ -1098,6 +1101,12 @@ begin
   -- ── E. A conclusão pelo técnico ────────────────────────────────────────────────────────────────────────
   begin
     perform pg_temp.modos('ligado', 'ligado');
+    -- P1 AGENDA (A3): o caminho de antes pede a chave em true (ela nasce false). Sem a coluna (a bancada cortada antes do pacote 1),
+    -- o de antes é o único caminho.
+    if exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                                             and a.attname = 'equipe_terminei_conclui' and not a.attisdropped) then
+      execute 'update public.agenda_config set equipe_terminei_conclui = true where id';
+    end if;
     perform pg_temp.rodar(d05, '17:00');
     r := pg_temp.resp('ok, terminei', d05, '17:15');
     r := pg_temp.rodar(d05, '17:30');
@@ -1109,6 +1118,30 @@ begin
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
+  -- P1 AGENDA (A3): o padrão (equipe_terminei_conclui = false), só com a coluna. O mesmo "ok, terminei" no último dia não conclui
+  -- nada: vira a pergunta concluir de chave terminou:<os> ao dono. Se ela sobrevive ao passo (o meio-dia do dono à tarde fica sem
+  -- resultado nesta fixture) é prova de supabase/tests/agenda_p1_terminei.sql, não daqui.
+  if exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                                           and a.attname = 'equipe_terminei_conclui' and not a.attisdropped) then
+    begin
+      perform pg_temp.modos('ligado', 'ligado');
+      perform pg_temp.rodar(d05, '17:00');
+      r := pg_temp.resp('ok, terminei', d05, '17:15');
+      r := pg_temp.rodar(d05, '17:30');
+      v_res := pg_temp.ok(v_res, 'E1b com a chave no padrão (false), o mesmo "ok, terminei" no último dia não conclui: nenhuma ação concluir e a pergunta "terminou ou falta dia?" ao dono',
+        (select not c.equipe_terminei_conclui from public.agenda_config c)
+        and (select so.status from public.service_orders so where so.id = c_vand) = 'in_progress'
+        and not exists (select 1 from public.agenda_acoes a where a.tipo = 'concluir' and a.service_order_id = c_vand)
+        and (r #>> '{contagens,conclusao,concluidas}')::int = 0 and (r #>> '{contagens,conclusao,perguntas}')::int = 1
+        and exists (select 1 from public.agenda_perguntas q
+                     where q.tipo = 'concluir' and q.chave = 'terminou:' || c_vand and q.payee_id = c_roberto and q.modo = 'ligado'
+                       and q.texto = 'O Roberto disse em qui 05/11 que terminou a OS-00069 (Vanderlei). Responda *concluiu OS-00069* para fechar, ou *falta dia OS-00069* se ainda tem serviço.'),
+        r::text || ' | ' || coalesce((select string_agg(q.chave || ' ' || q.estado || ': ' || q.texto, ' | ') from public.agenda_perguntas q
+                                       where q.tipo = 'concluir' and q.service_order_id = c_vand), '(nenhuma pergunta)'));
+      raise exception 'desfaz' using errcode = 'P0099';
+    exception when sqlstate 'P0099' then null;
+    end;
+  end if;
   begin
     perform pg_temp.modos('ligado', 'ligado');
     perform pg_temp.rodar(d04, '17:00');
