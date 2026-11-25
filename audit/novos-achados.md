@@ -4643,6 +4643,16 @@ quatro estão latentes.
   mesmo nome e 5 com orçamento ou OS. Aqui a conta é por cadastro de fornecedor (26 + 322 = 348); a de cima é por número (333).
   Reforça a hipótese de carga dos mesmos contatos nas duas tabelas: 316 dos 348 têm o mesmo nome nos dois cadastros, e só 5
   têm orçamento ou OS como cliente. Decisão do dono pendente (cartão IA-20).
+- **Situação (25/11/2026, commit `2e332613`):** decidido e construído no ramo `session/assistente-leva-a`; não publicado até
+  este registro. O dono respondeu o cartão IA-20: "Contar como fornecedor quando o cadastro de cliente desse número nunca teve
+  orçamento nem OS. Os 26 passam a sair só com o 'sim'; se um deles virar cliente de verdade, volta a pedir PIN sozinho". Em
+  `quemRecebe` (`supabase/functions/_shared/ai/envio-livre.ts`) o número deixa de contar como cliente quando as três condições
+  valem juntas: há cadastro de fornecedor ativo e antigo (mais de 24 horas) com ele; nenhum cadastro de cliente do número tem
+  linha em `service_orders` (orçamento ou OS, de qualquer status); e o envio não veio por `client_id`. Aí vale a regra do
+  fornecedor (só o "sim"; PIN quando o texto fala de dinheiro, NOVO-p1-s1-05). Medida de 25/11/2026 (só contagem): 26 números
+  são de fornecedor ativo e de cliente ao mesmo tempo, e nenhum dos 26 tem orçamento, OS, conta a receber nem embarcação.
+  **Continuam pedindo PIN** os 307 números só de fornecedor inativo (NOVO-p1-s1-08) e o número que também é de parceiro ou da
+  equipe. O que a regra nova abre está no NOVO-p1-s1-09.
 
 ### [NOVO-p1-s1-03] No texto livre, a régua de data do validador do retorno acusa o verbo "ter", fração e código de peça
 
@@ -4791,6 +4801,14 @@ quatro estão latentes.
   4 da conferência da leva A). Se ficar a leitura estrita, completar as listas ("fechado por", "combinado em", "vou
   transferir", "vou pagar", "confirmo o pedido", "confirmo a compra") e medir nas propostas de 90 dias antes de publicar. Não
   corrigido aqui.
+- **Situação (25/11/2026, commit `f9da297a`):** decidido, e consertado em parte, no ramo `session/assistente-leva-a`; não
+  publicado até este registro. O dono respondeu o cartão IA-19: "PIN só quando o texto fala de dinheiro (valor, Pix,
+  pagamento). Data, horário e prazo saem só com o 'sim'. Exemplo: o aviso do horário ao Alex sai com 'sim'; 'fecha por R$
+  4.200' ao fornecedor pede PIN". A fornecedor, equipe e ao próprio dono o PIN passou a depender só do valor
+  (`CONTEUDO_PARA_FORNECEDOR_E_EQUIPE = "dinheiro"`), com o motivo "o texto cita valor", e o valor ganhou o pagamento falado
+  sem número (`PAGAMENTO_FALADO`: famílias de pagar, transferir e depositar). "Vou transferir agora" passou a pedir PIN.
+  **Continuam saindo só com o "sim"** "Fechado por 350 cada" e "Confirmo o pedido das 10 baterias" (conferido em 25/11/2026
+  rodando a função: as duas voltam sem valor): ver NOVO-p1-s1-10. As listas não foram medidas nas propostas de 90 dias.
 
 ### [NOVO-p1-s1-06] O texto livre tem listas próprias de valor e de data, além das do validador do retorno
 
@@ -4804,6 +4822,9 @@ quatro estão latentes.
   própria do texto livre. Frase nova de valor ou de data passa a ter dois lugares possíveis.
 - **Menor mudança:** decisão de quem especifica: assumir a lista própria do texto livre (e resolver nela o NOVO-p1-s1-03 e o
   NOVO-p1-s1-05) ou levar essas expressões para o validador. Não mudado aqui.
+- **Situação (25/11/2026, commit `f9da297a`):** as listas próprias cresceram. Entrou `PAGAMENTO_FALADO` (3 expressões: as
+  famílias de pagar, transferir e depositar), ao lado de `VALOR_NO_TEXTO_LIVRE`, a pedido do cartão IA-19 (NOVO-p1-s1-05). O
+  validador do retorno não mudou. A decisão sobre onde essas listas devem morar continua aberta.
 
 ### [NOVO-p1-s1-07] A tabela parceiro_numeros não está no types.ts: a varredura dos .select() não confere a leitura nova
 
@@ -4867,3 +4888,56 @@ quatro estão latentes.
   repositório, um `git add` descuidado leva o lixo junto, e toda conferência de "árvore limpa" precisa desfazer à mão.
 - **Menor mudança:** `*.tsbuildinfo` no `.gitignore`, em tarefa própria. O `deno.lock` (que é versionado) e o fim de linha
   do snapshot pedem olhar à parte. Não corrigido aqui.
+
+### [NOVO-p1-s1-08] Fornecedor inativo que também está no cadastro de clientes continua pedindo PIN (307 números)
+
+- **Onde:** `supabase/functions/_shared/ai/envio-livre.ts`, `quemRecebe`, a condição 1 da regra do cartão IA-20 (commit
+  `2e332613`): só o cadastro de fornecedor com `active = true` tira o "cliente" do número. Registrado em 25/11/2026 ao
+  construir a regra (ramo `session/assistente-leva-a`).
+- **Efeito:** gravidade baixa. A mensagem de texto livre a esses números segue pedindo PIN com qualquer texto, com o motivo "o
+  número é de cliente e de fornecedor (vale o mais protegido)". Medida de 25/11/2026 (só contagem): 307 números são de
+  fornecedor inativo e de cliente ao mesmo tempo, 5 deles com orçamento ou OS. Erra para o lado seguro (um PIN a mais), e é o
+  que a escolha do dono cobre: o cartão IA-20 fala dos 26 de fornecedor ativo. `active` nulo também conta como inativo aqui
+  (a coluna aceita nulo no `types.ts`; não medi quantos fornecedores estão assim), enquanto as leituras da agenda usam
+  `coalesce(s.active, true)`.
+- **Menor mudança:** decisão do dono: limpar o cadastro (tirar de clientes quem é só fornecedor) ou estender a regra ao
+  fornecedor inativo cujo cliente não tem orçamento nem OS (tirar a condição `active`, uma linha, mais os testes). Não mudado
+  aqui.
+
+### [NOVO-p1-s1-09] Depois do IA-20, pôr o número de um interessado num cadastro de fornecedor troca o PIN pelo "sim" passadas 24 horas
+
+- **Onde:** `supabase/functions/_shared/ai/envio-livre.ts`, `quemRecebe` (regra do cartão IA-20, commit `2e332613`), somada ao
+  NOVO-p1-s1-04: `create_supplier`, `update_supplier` e `link_contact_to_entity` gravam telefone em fornecedor sem o "sim".
+  Registrado em 25/11/2026 (ramo `session/assistente-leva-a`).
+- **Efeito:** gravidade baixa. Até o IA-20, número que estava no cadastro de clientes pedia PIN sempre, estivesse ou não em
+  fornecedores. Agora o cliente que ainda não tem orçamento nem OS (um interessado recém-cadastrado) e cujo número for gravado
+  num fornecedor ativo passa a valer "fornecedor": nas primeiras 24 horas nada muda (`CADASTRO_RECENTE_MS`: "vai a cliente",
+  PIN; há teste do caminho inteiro num turno só); depois delas, a mensagem de texto livre pelo número (`to_phone`) sai só com
+  o "sim", enquanto o texto não falar de dinheiro. O histórico que conta é só `service_orders`: conversa no WhatsApp,
+  embarcação, conta a receber e agenda não fazem o número voltar a ser cliente. O que segura: o "sim" continua obrigatório
+  (`send_whatsapp_message` e `schedule_whatsapp_message` estão em `NEVER_AUTONOMOUS`); com `client_id` o envio continua
+  pedindo PIN; e o primeiro orçamento devolve o PIN sozinho. Latente: pede uma escrita no cadastro de fornecedores, 24 horas
+  e um cliente sem orçamento. Na medida de 25/11/2026 nenhum fornecedor tinha sido criado ou alterado nas 24 horas
+  anteriores, e nenhum dos 26 números de fornecedor ativo que também são de cliente tinha conta a receber nem embarcação.
+  Não conferi o valor com que `active` nasce no fornecedor criado pelo assistente (o esquema de `create_supplier` não tem a
+  coluna, vale o padrão do banco): se nascer nulo, esse cadastro não vale a condição.
+- **Menor mudança:** a do NOVO-p1-s1-04 (as três escritas pedirem o "sim" quando gravam telefone) fecha a porta. Sem ela:
+  exigir também que o cadastro de cliente seja antigo (`clients.created_at` e `updated_at` existem no `types.ts`), ou contar
+  mais sinais de cliente (embarcação, conta a receber). Decisão do dono. Não construído aqui.
+
+### [NOVO-p1-s1-10] Mensagem livre a fornecedor ou equipe: valor em número solto e compra confirmada seguem só com o "sim", e a data deixou de cobrir
+
+- **Onde:** `supabase/functions/_shared/ai/envio-livre.ts`, `conteudoQuePedePin` (o campo `valor`) e
+  `riscoDoEnvioLivrePorDestino` com a leitura "dinheiro" do cartão IA-19 (commit `f9da297a`). É o que sobrou do NOVO-p1-s1-05.
+  Conferido em 25/11/2026 rodando a função.
+- **Efeito:** gravidade baixa. Voltam sem valor, e por isso saem só com o "sim" a fornecedor, equipe e ao próprio dono:
+  "Fechado por 350 cada", "fecha por 4.200" (sem "R$"), "Combinado em 350", "o cabo é 350" (número sem moeda e sem verbo de
+  preço da lista), "Confirmo o pedido das 10 baterias" e "Pode faturar as 10 baterias." (compra confirmada sem valor). Com a
+  regra de 24/11 a data ou a promessa do mesmo texto ainda pedia PIN; pela escolha do IA-19 não pede mais: "Fechado por 350
+  cada, entrego na sexta" hoje sai só com o "sim". O cartão do "sim" mostra o texto inteiro; o que falta é o PIN. Para o outro
+  lado (um PIN a mais): "Tem no depósito?" e "Segue a transferência de titularidade do barco." acusam valor. E as palavras de
+  pagamento passaram a contar como valor também no motivo dos outros destinos e no aviso da frase do PDF e do link ("…cita
+  valor. Confira antes de aprovar."). Nada disso foi medido nas propostas reais de 90 dias.
+- **Menor mudança:** decisão do dono sobre o que é "falar de dinheiro": completar os verbos de preço ("fecha por", "fechado
+  por", "combinado em" seguidos de número; cuidado com "fechado por 3 dias") e decidir se compra confirmada ("confirmo o
+  pedido", "pode faturar") pede PIN. Medir nas propostas de 90 dias antes de publicar. Não corrigido aqui.
