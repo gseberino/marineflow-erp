@@ -237,6 +237,13 @@ function semAcento(s: string): string {
   return s.normalize("NFKC").toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
 }
 
+/**
+ * O número inteiro (o grupo dentro do lookahead não volta atrás: "30 dias" não vira "3" + "0 dias"), desde que não seja
+ * prazo, hora, data ou quantidade.
+ */
+const NUMERO_QUE_E_PRECO = "(?=(\\d[\\d.,]*))\\1(?!\\s*(?:[/:]|(?:dias?|semanas?|mes|meses|anos?|horas?|hs?|min|minutos?|unidades?|un" +
+  "|pecas?|itens?|caixas?|metros?|m|kg|litros?|l|pes|vezes|x)" + DEPOIS + "))";
+
 // O que a lista do validador não tem, porque foi escrita para o texto FIXO do retorno. No texto livre o valor também vem
 // abreviado ou por extenso, sem moeda ("uns 2 mil", "trezentos", "sai 350"), e a data vem relativa ("semana que vem",
 // "dia 12", "em 5 dias"). São complementos pequenos: a régua continua sendo a do validador.
@@ -260,6 +267,16 @@ const VALOR_NO_TEXTO_LIVRE: RegExp[] = [
       "|faco\\s+por|fazemos\\s+por|fecho\\s+por|fechamos\\s+por)\\s+(?:uns\\s+|umas\\s+|por\\s+|a\\s+)?\\d",
     "u",
   ),
+  // (Revisão do IA-19, 25/11/2026) Preço fechado em número sem moeda: "fecha por 4.200", "fechado em 3800", "faz por
+  // 3800?", "acertamos 4200", "Combinado em 350". Para fornecedor e equipe o valor é o único gatilho do PIN, e o próprio
+  // exemplo do dono sem o "R$" passava só com o "sim". O número que é prazo, hora, data ou quantidade não conta
+  // ("fechado por 3 dias", "fecha em 30/11", "combinado 10h", "combinamos 10 peças").
+  new RegExp(
+    ANTES + "(?:fecha|fechad[oa]|fechou|fechar|fechamos|fecho|faz|fazer|faria|fazemos|faco|acertamos|acertad[oa]|acertei|acertou" +
+      "|combinad[oa]|combinamos|combinei|combinou)\\s+(?:por|em)\\s+" + NUMERO_QUE_E_PRECO,
+    "u",
+  ),
+  new RegExp(ANTES + "(?:acertamos|acertad[oa]|acertei|acertou|combinad[oa]|combinamos|combinei|combinou)\\s+(?:de\\s+)?" + NUMERO_QUE_E_PRECO, "u"),
 ];
 
 // (25/11/2026, cartão IA-19) Pagamento falado sem número. Para fornecedor e equipe o PIN passou a ser só pelo dinheiro,

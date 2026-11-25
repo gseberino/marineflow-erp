@@ -422,6 +422,25 @@ Deno.test("IA-19 conteúdo: pagamento falado sem número conta como valor (pagar
   assertEquals(conteudoQuePedePin("Tem no depósito?").valor, true);
 });
 
+// Revisão do IA-19 (25/11/2026): o exemplo do dono sem o "R$" ("fecha por 4.200") saía só com o "sim" a fornecedor.
+Deno.test("Revisão do IA-19 conteúdo: preço fechado em número sem moeda conta como valor; prazo, hora, data e quantidade não", () => {
+  const comPreco = [
+    "fecha por 4.200", "Fecha em 4200?", "Fechado por 350 cada", "fechado em 3800", "faz por 3800?", "fazer por 1.500,", "acertamos 4200",
+    "Combinado em 350", "combinado de 350", "combinamos 1200 com a nota",
+  ];
+  for (const t of comPreco) assertEquals(conteudoQuePedePin(t).valor, true, t);
+  const semPreco = [
+    "fechado por 3 dias", "fecha em 2 semanas", "fecha em 30/11", "fecha em 18:30", "combinado 10h", "combinado às 10h", "combinamos 10 peças",
+    "faz 3 dias que pedi", "fazer 3 furos", "fechou 3 pedidos", "fecha em 10 minutos", "faz em 2 dias?", "Me manda o orçamento?", "Chega quando?",
+  ];
+  for (const t of semPreco) assertEquals(conteudoQuePedePin(t).valor, false, t);
+  // Pela regra: a fornecedor, o PIN vem e o motivo diz só o valor, mesmo com data junto.
+  const fornecedor = { telefone: "5547988887777", destinos: ["fornecedor" as Destino] };
+  assertEquals(riscoDoEnvioLivrePorDestino(fornecedor, conteudoQuePedePin("fecha por 4.200")), { risco: "high", motivo: "o texto cita valor" });
+  assertEquals(riscoDoEnvioLivrePorDestino(fornecedor, conteudoQuePedePin("Fechado por 350 cada, entrega amanhã")), { risco: "high", motivo: "o texto cita valor" });
+  assertEquals(riscoDoEnvioLivrePorDestino(fornecedor, conteudoQuePedePin("Fechado por 3 dias, reabre segunda")), { risco: "medium", motivo: null });
+});
+
 Deno.test("S1 conteúdo: data marcada e data relativa contam", () => {
   const comData = [
     "amanhã às 10h", "dia 12/12", "fica pronto sexta", "passo aí hoje", "na semana que vem", "próxima semana eu vejo", "até o dia 5",
