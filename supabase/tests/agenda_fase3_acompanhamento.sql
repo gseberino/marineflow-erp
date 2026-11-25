@@ -12,7 +12,8 @@
 --   D  a linha dia: o Roberto confirmou e a diária lançada, o João a confirmar; o Roberto sem resposta ainda; sem nada da
 --      equipe (byte a byte o da Fase 2); o último dia da OS; só o Roberto, tudo confirmado; a sombra da diária no detalhe
 --   X  a linha diaria (crítica): as opções, a recomendação e as palavras; 80 com 2 dias úteis; em sombra
---   C  a linha conclusao: o que o gestor concluiu pela palavra do técnico, com o *desfaz* pelo número; contada não volta
+--   C  a linha conclusao: o que o gestor concluiu pela palavra do técnico, com o *desfaz* pelo número; contada não volta (com
+--      agenda_config.equipe_terminei_conclui = true, o caminho de antes: a chave do pacote 1, A3, nasce false)
 --   F  a comissão no 1º dia útil do mês (e não nos outros); a sombra da vigia; a ordem pela perda
 --   V  a agenda_ver: os focos ppc, diarias, marcos, comissao e equipe; o mês dito; foco inválido; livre em ligado e sombra
 --   L  agenda_livre_de_verdade: nenhuma tabela da agenda muda (contagem e md5), determinística, < 2 s, projeção fora de
@@ -383,6 +384,13 @@ begin
   -- ── C. A linha conclusao ──────────────────────────────────────────────────────────────────────────────
   begin
     perform pg_temp.modos('ligado', 'ligado');
+    -- P1 AGENDA (A3, 20270301120200): a conclusão pela palavra do técnico pede agenda_config.equipe_terminei_conclui = true (ela nasce
+    -- false: vira a pergunta "terminou ou falta dia?" ao dono, provada em agenda_p1_terminei.sql). Sem a coluna (a bancada cortada antes do
+    -- pacote 1), o de antes é o único caminho.
+    if exists (select 1 from pg_attribute a where a.attrelid = 'public.agenda_config'::regclass
+                                             and a.attname = 'equipe_terminei_conclui' and not a.attisdropped) then
+      execute 'update public.agenda_config set equipe_terminei_conclui = true where id';
+    end if;
     perform pg_temp.rodar(d05, '17:00');
     perform pg_temp.resp('ok, terminei', d05, '17:12');
     perform pg_temp.rodar(d05, '17:15');
