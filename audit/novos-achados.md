@@ -4602,6 +4602,8 @@ quatro estão latentes.
   chave exige `set_tool_autonomy`, que pede "sim" com PIN.
 - **Menor mudança:** decisão do dono, junto com a do NOVO-p1-s2-01. A crítica de risco do pacote 1 já pede, no S6, que subida
   de risco com motivo não seja anulada por autonomia. Não corrigido aqui.
+  (S6, 25/11/2026: no turno que leu texto de fora, as duas levam o motivo e a chave 'auto' não vale. Fora desse turno
+  continua como está descrito acima.)
 
 ### [NOVO-p1-s4-01] Aprovar observação da memória: o cartão mostra o código da nota, não o texto
 
@@ -4736,17 +4738,27 @@ quatro estão latentes.
   escolhendo o risco por uma escrita calada; um turno que leu texto de fora (conversa, e-mail) pode ser levado a isso.
   **Fechado na leitura** (commit "Revisão: mensagem livre…", `envio-livre.ts`, `CADASTRO_RECENTE_MS`): cadastro de fornecedor ou de
   favorecido criado ou alterado há menos de 24 horas não conta, e o cartão diz "o cadastro deste número foi criado ou alterado
-  há menos de 24 horas (vale como cliente)". **Continua aberto:** a escrita em si segue sem o "sim". Passadas 24 horas, o número
-  que o assistente cadastrou sozinho vale "fornecedor, só o sim". O S6 (subir essas escritas depois de ler texto de fora) não
-  está neste ramo.
+  há menos de 24 horas (vale como cliente)".
+  **Fechado dentro do turno que leu texto de fora** (S6, 25/11/2026, commit "Assistente: depois de ler conversa, e-mail ou
+  mensagem de fornecedor…", `_shared/ai/texto-de-fora.ts`): no turno em que o assistente leu conversa, e-mail ou mensagem de
+  fornecedor, as três escritas pedem o "sim", com a linha "Este turno leu texto de fora (conversa, e-mail ou mensagem de
+  fornecedor): por isso pede *sim*." no cartão, e com esse motivo a chave de autonomia não vale. Entram junto as outras que
+  gravam telefone: `link_contact_identity`, `link_whatsapp_lead_to_client`, `create_client`, `update_client`, contato de
+  embarcação, marina, favorecido, freelancer, cobrança e missão de acompanhamento. O teste varre o catálogo: ferramenta nova
+  que grave e aceite telefone nos argumentos tem de entrar na lista ou numa exceção com motivo.
+  **Continua aberto:** (1) fora desse turno a escrita segue sem o "sim": o pedido ditado ("cadastra o fornecedor X, telefone Y")
+  roda direto, e o texto lido num turno ANTERIOR não marca o seguinte; passadas 24 horas, o número que o assistente cadastrou
+  sozinho vale "fornecedor, só o sim"; (2) no Claude Max, a escrita disparada em paralelo com a leitura pode passar sem a marca
+  (a lista do job só ganha o nome depois de a ferramenta rodar); (3) a marca depende da lista de ferramentas do job
+  (NOVO-p1-s6-01) e das portas de texto de terceiro que o S6 conhece (NOVO-p1-s6-02).
 - **Custo do conserto, medido em 24/11/2026 (só contagem):** quem acabou de ser cadastrado ou corrigido pede PIN por um dia. Dos
   534 fornecedores, 0 tinham sido criados ou alterados nas 24 horas anteriores e 0 nos 7 dias anteriores; 198 nos 30 dias
   anteriores (uma alteração em lote no cadastro faz todos os números tocados pedirem PIN por 24 horas). Dos 9 favorecidos, 0 nas
   24 horas e 1 nos 7 dias. Nenhuma linha sem data de criação ou de alteração; os gatilhos `set_updated_at_suppliers` e
   `payees_updated_at` existem em produção.
 - **Menor mudança:** decisão do dono (está no "Fora do pacote 1" da especificação de segurança): `create_supplier`,
-  `update_supplier` e `link_contact_to_entity` pedirem o "sim" quando gravam telefone, dentro ou fora do turno que leu texto de
-  fora. Não construído aqui.
+  `update_supplier` e `link_contact_to_entity` pedirem o "sim" quando gravam telefone também FORA do turno que leu texto de
+  fora (dentro dele, o S6 já pede). Não construído.
 
 ### [NOVO-p1-f1-05] Com a IA fora, e-mail que só fala de boleto novo ou trocado não dá alerta de golpe (decisão a confirmar)
 
@@ -4968,3 +4980,47 @@ quatro estão latentes.
   banco no instante do turno.
 - **Menor mudança:** ler o `error` nas três leituras e fechar o turno com o aviso de erro do sistema, registrando a falha.
   Tarefa própria (mexe no começo de todo turno). Não corrigido aqui.
+
+### [NOVO-p1-s6-01] No Claude Max, o S6 decide por uma lista que nasceu como diagnóstico e pode ficar incompleta calada
+
+- **Onde:** `supabase/migrations/20261003235000_assistente_max_painel.sql`, `ai_job_registrar_ferramenta` (o nome da
+  ferramenta só entra em `ai_jobs.metadata.ferramentas_usadas` enquanto o metadata couber em 18.000 bytes: "a lista de
+  ferramentas é diagnóstico") e `supabase/functions/erp-mcp/index.ts`, `chamar` (o erro dessa RPC só vai para o log). Visto em
+  25/11/2026 ao construir o S6 do pacote 1.
+- **Efeito:** no Max cada chamada tem contexto novo, e o S6 sabe que o turno leu texto de fora por essa lista. Dois jeitos
+  de uma leitura não aparecer nela: (a) o metadata no teto: **tratado no S6** (`texto-de-fora.ts`, acima de 17.000 bytes o
+  turno vale como "leu"; em 90 dias o maior metadata teve 2.396 bytes, e o teto só é alcançado com mais de 500 chamadas num
+  turno); (b) a RPC falhar depois de a leitura rodar: a leitura não fica registrada, e as escritas seguintes do turno não
+  sobem. Latente: precisa de uma falha do banco entre a leitura e o registro. A chamada seguinte relê o job e, se essa
+  leitura falhar também, o turno vale como "leu".
+- **Menor mudança:** a RPC devolver se o nome entrou na lista, e o `erp-mcp` tratar "não entrou" depois de uma leitura como
+  turno marcado (ou tentar de novo). Pede migration, que a especificação do S6 não tem. Não corrigido aqui.
+
+### [NOVO-p1-s6-02] Texto de terceiro chega ao assistente por portas que o S6 não marca
+
+- **Onde:** ferramentas fora de `LEITURAS_DE_TEXTO_DE_FORA` (`supabase/functions/_shared/ai/texto-de-fora.ts`), vistas em
+  25/11/2026 ao varrer o catálogo: `list_external_quotes` (devolve o começo do "problema" escrito por quem pediu o orçamento
+  de fora); as leituras do extrato (`listar_transacoes_pendentes` e as vizinhas devolvem a descrição e o nome de quem pagou,
+  escritos pelo pagador ou pelo banco); o nome do contato sem cadastro, que vem do WhatsApp e aparece em várias leituras
+  (`get_situation_overview`, por exemplo). Não conferidas aqui, mas da mesma família: as leituras de nota fiscal de
+  fornecedor e de arquivos do Dropbox. E o que a especificação já aponta como limite: o texto lido num turno anterior.
+- **Efeito:** o turno que só passou por essas portas e depois grava cadastro, contato, preço ou memória não pede o "sim" do
+  S6. O S6 cobre o que a especificação definiu (conversa, e-mail, mensagem de fornecedor) e as leituras que devolvem a frase
+  original dessas fontes por RPC, view ou coluna. Não medido por porta; `list_external_quotes` teve 0 chamadas em 90 dias.
+- **Menor mudança:** decisão de quem especifica: quais dessas portas contam como "texto de fora". O extrato é usado em muitos
+  turnos; incluí-lo faria quase toda escrita de cadastro depois de olhar o extrato pedir o "sim". Não mudado aqui.
+
+### [NOVO-p1-s6-03] Depois de ler texto de fora, ainda rodam direto: produto novo, serviço novo e as escritas do orçamento
+
+- **Onde:** fora de `SOBEM_PARA_SIM` (`texto-de-fora.ts`). À vista do admin e de risco baixo: `create_product`,
+  `edit_service_order_item`, `set_service_order_charges`, `apply_service_order_discount`, além das quatro que a especificação
+  manda não subir (`add_service_order_item`, `create_quote_from_items`, `record_quote_response`, `create_service_order`).
+  Pela ferramenta_extra (já pedem o "sim" pela regra da rede, sem o motivo do S6): `create_service`,
+  `create_composed_product`, `convert_external_quote_to_so` (cria cliente e unidade com os dados do pedido de fora),
+  `cadastrar_favorecido` e `cadastrar_contraparte_do_extrato`. Visto em 25/11/2026.
+- **Efeito:** no turno que leu conversa, e-mail ou mensagem de fornecedor, o preço de uma linha do orçamento, o desconto, a
+  taxa e um produto novo com preço entram sem cartão. É o "lê a conversa e monta o orçamento", que a especificação preserva
+  de propósito (o orçamento só vai ao cliente com PIN). `create_product` teve 35 chamadas em 12 turnos em 90 dias: subir
+  quebraria esse uso. Entrou na lista, além do que a especificação citava, só `update_service` (o preço do serviço do
+  catálogo, o par de `update_product`; 0 chamadas em 90 dias).
+- **Menor mudança:** é o assunto do pacote de orçamento (regra de texto de fora para o orçamento). Não mudado aqui.
