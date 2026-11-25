@@ -4848,6 +4848,13 @@ quatro estão latentes.
   muda; muda o resto do texto que o dono lê no motivo ("…HTTP 402 (sem crédito)" no lugar de "…ClaudeApiError: OpenRouter 402
   (créditos insuficientes na conta)…"). Uma linha, mais os testes que fixam o motivo. Não corrigido aqui: a tarefa era o que
   vai para o log.
+- **Situação (fecho da leva A, 24/11/2026, commit `013e95d0`):** consertado o motivo. O `catch` de `triageEmail` passou a
+  gravar "falha na triagem: " seguido da classe do erro (`classeDoErro`, a mesma frase que vai para `app_error_logs`), e não
+  mais o texto dele. O começo "falha na triagem" não mudou. Teste em `_shared/email/triage_test.ts`: erro que traz remetente,
+  assunto e corpo do e-mail não deixa nada disso no motivo. Vale para os e-mails triados depois da publicação de
+  `email-imap`; os motivos já gravados ficam como estão. **Continuam abertos** os dois vizinhos: o corpo da resposta no
+  console de `anthropic.ts` nos erros 400 e 401, e a mensagem crua do erro do turno em `registrarFalhaDoAssistente`
+  (`ai-agent`).
 
 ### [NOVO-p1-conf-01] Rodar as suítes suja a árvore: os .tsbuildinfo estão fora do .gitignore
 
