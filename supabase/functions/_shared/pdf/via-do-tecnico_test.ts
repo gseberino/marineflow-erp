@@ -160,9 +160,10 @@ const partes = (s: string) => lerImpressao(s)!;
 Deno.test("impressão: formato v<versão>.d<versão do dado>.<dado>.<papel>; o formato antigo (hash do HTML) lê como null", () => {
   const imp = impressaoDaVia(dados(), { pessoa: ALEX });
   assert(new RegExp(`^v${VERSAO_DA_VIA}\\.d${VERSAO_DO_DADO}\\.[0-9a-z]+\\.[0-9a-z]+$`).test(imp), imp);
-  // 3 = a via aprovada (porte da via v2, F1). O dado não mudou de lista: VERSAO_DO_DADO continua 1.
-  assertEquals(VERSAO_DA_VIA, 3);
-  assertEquals(partes(imp).versao, 3);
+  // 3 = a via aprovada (porte da via v2, F1); 4 = a mesma via com a identidade da marca (25/11/2026, só o desenho). O dado
+  // não mudou de lista: VERSAO_DO_DADO continua 1.
+  assertEquals(VERSAO_DA_VIA, 4);
+  assertEquals(partes(imp).versao, 4);
   assertEquals(partes(imp).versaoDoDado, 1);
   assertEquals(lerImpressao("772aau"), null);
   assertEquals(lerImpressao(null), null);
@@ -385,9 +386,11 @@ Deno.test("TRAVA DE VERSÃO: o papel e o dado de 5 fixtures sintéticas (mudou? 
     // F1 (via aprovada): o PAPEL mudou e a versão subiu para 3; o DADO é o mesmo da F0 (a lista não mudou). Revisão da
     // F1 (papel-1, nota dos materiais presa aos itens; papel-4, texto sem espaço quebra): só o CSS mudou, ainda na v3 —
     // nenhuma v3 foi entregue. As 4 últimas (trava A e B) entraram na revisão da F0 (impressao-3).
+    // v4 (25/11/2026, a identidade da marca): só o PAPEL mudou (fontes embutidas, cores, cabeçalho); o DADO das 7 é o
+    // mesmo da v3, letra por letra — via já entregue com a OS igual é pulada, não reenviada.
     [
-      "v3.d1.1uhyv2v.16qx61a", "v3.d1.1ll802l.c5wkea", "v3.d1.fuf6ax.1tnim3l",
-      "v3.d1.1ogh0h6.lixmvc", "v3.d1.ccvoev.7ie2v6", "v3.d1.1w0aua7.e28zvz", "v3.d1.1g533zq.abpdaq",
+      "v4.d1.1uhyv2v.gcp9re", "v4.d1.1ll802l.tn0nq6", "v4.d1.fuf6ax.p1h58d",
+      "v4.d1.1ogh0h6.i10nms", "v4.d1.ccvoev.1j6sr7i", "v4.d1.1w0aua7.1ttyeuj", "v4.d1.1g533zq.t8n8by",
     ],
     "a regra do papel (ou a lista do dado) mudou: suba a versão e atualize o valor",
   );
@@ -573,7 +576,9 @@ Deno.test("veículo numa linha própria, fora do rosto; número da OS grande", (
   assertStringIncludes(html, '<div class="unidade"><span class="lab">Motorhome</span><div class="uval">Itapoã</div></div>');
   const rosto = html.slice(html.indexOf('<div class="rosto">'), html.indexOf("Serviços desta OS"));
   assert(!rosto.includes('<span class="lab">Motorhome</span>'));
-  assertStringIncludes(html, ".doctype .num { font-size: 28pt;");
+  // 28 pt (rodada 2, f: legível a 2 m com a ficha pendurada), agora na caixa marinho da marca (25/11/2026).
+  assert(/\.num \{[^}]*font-size: 28pt;/.test(html), "o número da OS em 28 pt");
+  assertStringIncludes(html, '<div class="num">OS-00119</div>');
 });
 
 Deno.test("instrução do serviço: o rótulo na mesma linha; duas linhas viram uma, juntas por espaço", () => {
@@ -625,7 +630,10 @@ Deno.test("fechamento num bloco só, com a faixa da foto no fim; a seta entre as
   assertStringIncludes(fechamento, '<div class="fotofim"><b>No fim:</b> fotografe todas as folhas preenchidas e mande no WhatsApp do escritório, com as fotos do serviço pronto.</div>');
   assertStringIncludes(html, "<b>26/11/2026, 08:00</b> até 27/11/2026, 17:00");
   assert(!html.includes("→"));
-  assertStringIncludes(html, 'font-family: "Open Sans", Arial, Helvetica, sans-serif');
+  // A letra da marca vai embutida (o servidor só tem a Open Sans), e a Open Sans continua logo depois na pilha: é ela que
+  // desenha o que o subconjunto latino da marca não tiver — por isso o teste de glifos abaixo segue contra a Open Sans.
+  assertStringIncludes(html, 'font-family: "Hanken Grotesk", "Open Sans", Arial, sans-serif');
+  assertEquals((html.match(/src: url\(data:font\/woff2;base64,/g) ?? []).length, 2, "Archivo e Hanken Grotesk embutidas");
 });
 
 /** O texto que vai ao papel: o corpo sem marcação (o SVG do ⚠ é desenho) e as strings de `content:` do CSS (rodapé). */

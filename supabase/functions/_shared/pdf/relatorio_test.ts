@@ -33,6 +33,13 @@ Deno.test("relatório: tabela vazia diz 'Nada no período' em vez de sumir", () 
   assertStringIncludes(html, "Nada no período.");
 });
 
+Deno.test("relatório com a marca: logo de app_settings escapado; sem logo, sem <img>; fontes embutidas", () => {
+  const com = montarRelatorioHtml({ ...base, logoUrl: 'https://x/logo.png?a=1&b="2"' });
+  assertStringIncludes(com, '<img class="logo" src="https://x/logo.png?a=1&amp;b=&quot;2&quot;" alt="">');
+  assert(!montarRelatorioHtml(base).includes("<img"));
+  assertEquals((com.match(/src: url\(data:font\/woff2;base64,/g) ?? []).length, 2);
+});
+
 Deno.test("nomeDoRelatorio: sem acento nem espaço, com .pdf", () => {
   assertEquals(nomeDoRelatorio(["Despesas", "2026-09-01", "2026-09-30", "Combustível"]), "despesas-2026-09-01-2026-09-30-combustivel.pdf");
   assertEquals(nomeDoRelatorio([]), "relatorio.pdf");

@@ -432,7 +432,8 @@ export const relatorioTools: ToolDef[] = [
         : { error: "Diga o tipo: despesas, receitas ou extrato." };
       if ("error" in montado) return montado;
 
-      const html = montarRelatorioHtml(montado.relatorio);
+      // O logo da marca no cabeçalho (25/11/2026): o mesmo de app_settings que o orçamento e a via usam.
+      const html = montarRelatorioHtml({ ...montado.relatorio, logoUrl: ctx.settings.company_logo_url || null });
       const nomeDoArquivo = nomeDoRelatorio(montado.partesDoNome.filter(Boolean));
       const emitirToken = async () => {
         const { data: token, error: tErr } = await ctx.admin.rpc("emitir_token_de_pdf", { p_finalidade: `relatorio:${args.relatorio}` });
