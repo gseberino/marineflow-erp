@@ -12,8 +12,9 @@
 //   deno test --allow-all --no-check --node-modules-dir=none supabase/functions/_shared/ai/envio-livre_test.ts
 import { assert, assertEquals, assertRejects } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
-  avisoDaFraseDoAssistente, conteudoQuePedePin, CONTEUDO_VALE_PARA_FORNECEDOR_E_EQUIPE, type Destino, FALHA_AO_CONFERIR_QUEM_RECEBE,
-  LIMITE_POR_CADASTRO, NUMERO_QUE_NAO_FECHA, oQueCita, padraoDoNumero, quemRecebe, riscoDaMensagemLivre, riscoDoEnvioLivrePorDestino,
+  avisoDaFraseDoAssistente, CADASTRO_FEITO_HA_POUCO, CADASTRO_RECENTE_MS, conteudoQuePedePin, CONTEUDO_VALE_PARA_FORNECEDOR_E_EQUIPE, type Destino,
+  FALHA_AO_CONFERIR_QUEM_RECEBE, LIMITE_POR_CADASTRO, NUMERO_QUE_NAO_FECHA, oQueCita, padraoDoNumero, quemRecebe, riscoDaMensagemLivre,
+  riscoDoEnvioLivrePorDestino,
 } from "./envio-livre.ts";
 import { FALHA_AO_CONFERIR_O_RISCO } from "./agent.ts";
 
@@ -67,9 +68,16 @@ function banco(tabelas: Record<string, Linha[]>, falhas: Record<string, string> 
 const DONO = "dono-1";
 const NUMERO = "5547999159654"; // como o WhatsApp manda: DDI + DDD + nono dígito
 
+/**
+ * As datas de um cadastro antigo, como o banco as devolve. Fornecedor e favorecido só contam com mais de 24 horas
+ * (revisão do pacote 1): os dos casos abaixo nascem antigos, a não ser que a linha diga as próprias datas.
+ */
+const ANTIGO = { created_at: "2026-03-02T12:00:00.123456+00:00", updated_at: "2026-05-20T09:30:00.654321+00:00" };
+const antigos = (linhas: Linha[] = []) => linhas.map((l) => ({ ...ANTIGO, ...l }));
+
 /** Os cadastros de cada caso; vazio = ninguém tem o número. */
 function cadastros(t: Partial<Record<"clients" | "suppliers" | "payees" | "app_users" | "parceiro_numeros", Linha[]>> = {}) {
-  return { clients: [], suppliers: [], payees: [], app_users: [], parceiro_numeros: [], ...t } as Record<string, Linha[]>;
+  return { clients: [], app_users: [], parceiro_numeros: [], ...t, suppliers: antigos(t.suppliers), payees: antigos(t.payees) } as Record<string, Linha[]>;
 }
 
 // ─── quemRecebe ─────────────────────────────────────────────────────────────────────────────────
@@ -159,6 +167,83 @@ Deno.test("S1 quem recebe: sem número não há destino; leitura que falha e lis
   // Resposta que não é lista (banco torto) também.
   const torto = { from: () => { const q: any = { select: () => q, or: () => q, ilike: () => q, eq: () => q, limit: () => Promise.resolve({ data: null, error: null }) }; return q; } };
   await assertRejects(() => quemRecebe(torto, NUMERO, { userId: DONO }), Error, "sem resposta");
+});
+
+// ─── Revisão do pacote 1 (24/11/2026): cadastro feito há pouco não conta ────────────────────────
+// A revisão provou que cadastrar o número como fornecedor (create_supplier, update_supplier: risco baixo, sem cartão)
+// trocava o PIN pelo "sim" na mensagem seguinte. O que se fixa: fornecedor e favorecido criados ou alterados há menos
+// de 24 horas são pulados; o que não dá para datar também; os outros cadastros do número contam como sempre.
+
+const AGORA = new Date("2026-11-24T18:00:00Z");
+const ha = (horas: number, minutos = 0) => new Date(AGORA.getTime() - horas * 3600_000 - minutos * 60_000).toISOString();
+const datas = (criado: unknown, alterado: unknown = criado) => ({ created_at: criado, updated_at: alterado });
+const RECENTE = { telefone: NUMERO, destinos: ["sem_cadastro"], cadastroRecente: true };
+
+Deno.test("Revisão S1 quem recebe: fornecedor ou favorecido criado ou alterado há menos de 24 horas não conta", async () => {
+  assertEquals(CADASTRO_RECENTE_MS, 24 * 3600_000, "a validade do cartão de confirmação");
+  const fornecedor = (d: Linha) => cadastros({ suppliers: [{ id: "s1", phone: "(47) 99915-9654", ...d }] });
+  const favorecido = (d: Linha, dono: string | null = null) => cadastros({ payees: [{ id: "p1", phone: "47999159654", active: true, app_user_id: dono, ...d }] });
+  const casos: Array<[string, Record<string, Linha[]>, unknown]> = [
+    ["fornecedor criado agora", fornecedor(datas(ha(0))), RECENTE],
+    ["fornecedor criado há 23 h 59", fornecedor(datas(ha(23, 59))), RECENTE],
+    ["fornecedor antigo, alterado há 1 minuto (telefone trocado)", fornecedor(datas(ANTIGO.created_at, ha(0, 1))), RECENTE],
+    ["fornecedor criado há 24 h em ponto", fornecedor(datas(ha(24))), { telefone: NUMERO, destinos: ["fornecedor"] }],
+    ["fornecedor criado e alterado há 25 h", fornecedor(datas(ha(30), ha(25))), { telefone: NUMERO, destinos: ["fornecedor"] }],
+    ["as datas como o banco devolve (microssegundos e fuso)", fornecedor(datas("2026-11-23T17:59:59.999999+00:00")), { telefone: NUMERO, destinos: ["fornecedor"] }],
+    ["a mesma hora noutro fuso", fornecedor(datas("2026-11-24T14:30:00-03:00")), RECENTE],
+    ["favorecido criado há 2 h", favorecido(datas(ha(2))), RECENTE],
+    ["favorecido antigo alterado há 2 h", favorecido(datas(ANTIGO.created_at, ha(2))), RECENTE],
+    ["favorecido de quem pede, feito há 2 h (não vira 'o próprio')", favorecido(datas(ha(2)), DONO), RECENTE],
+    ["favorecido alterado há 25 h", favorecido(datas(ANTIGO.created_at, ha(25))), { telefone: NUMERO, destinos: ["equipe"] }],
+    // Sem data, data ilegível, data que não é texto ou data no futuro: não dá para afirmar que é antigo.
+    ["fornecedor sem as datas", fornecedor(datas(undefined)), RECENTE],
+    ["fornecedor sem a data da alteração", fornecedor(datas(ANTIGO.created_at, null)), RECENTE],
+    ["fornecedor com data ilegível", fornecedor(datas("ontem")), RECENTE],
+    ["fornecedor com data que não é texto", fornecedor(datas(1700000000000)), RECENTE],
+    ["fornecedor com data no futuro", fornecedor(datas(ANTIGO.created_at, "2027-01-01T00:00:00Z")), RECENTE],
+    // Favorecido inativo já não contava: continua "sem cadastro", sem falar em cadastro recente.
+    ["favorecido inativo e recente", cadastros({ payees: [{ id: "p1", phone: "47999159654", active: false, app_user_id: null, ...datas(ha(1)) }] }),
+      { telefone: NUMERO, destinos: ["sem_cadastro"] }],
+    // Número parecido num cadastro recente não é este número.
+    ["outro número num cadastro recente", cadastros({ suppliers: [{ id: "s1", phone: "(47) 99915-9655", ...datas(ha(1)) }] }), { telefone: NUMERO, destinos: ["sem_cadastro"] }],
+  ];
+  for (const [nome, tabelas, esperado] of casos) {
+    assertEquals(await quemRecebe(banco(tabelas).db, NUMERO, { userId: DONO }, AGORA), esperado, nome);
+  }
+});
+
+Deno.test("Revisão S1 quem recebe: o cadastro recente é só pulado; os outros cadastros do número contam como sempre", async () => {
+  const novo = { id: "s9", phone: "47 99915-9654", ...datas(ha(1)) };
+  // Também é cliente: é cliente (o lado protegido conta sempre).
+  const comCliente = cadastros({ clients: [{ id: "c1", whatsapp: "(47) 99915-9654", phone: null }], suppliers: [novo] });
+  assertEquals(await quemRecebe(banco(comCliente).db, NUMERO, { userId: DONO }, AGORA), { telefone: NUMERO, destinos: ["cliente"], cadastroRecente: true });
+  // Já era de um fornecedor antigo: o cadastro novo com o mesmo número não tira o "sim" do antigo.
+  const comAntigo = cadastros({ suppliers: [{ id: "s1", phone: "(47) 99915-9654" }, novo] });
+  assertEquals(await quemRecebe(banco(comAntigo).db, NUMERO, { userId: DONO }, AGORA), { telefone: NUMERO, destinos: ["fornecedor"], cadastroRecente: true });
+  // Usuário do sistema não entra na regra (o assistente não escreve em app_users): equipe, com ou sem data.
+  const usuario = cadastros({ app_users: [{ id: "tec-1", phone: null, phone_normalized: "5547999159654", active: true, ...datas(ha(1)) }], suppliers: [novo] });
+  assertEquals(await quemRecebe(banco(usuario).db, NUMERO, { userId: DONO }, AGORA), { telefone: NUMERO, destinos: ["equipe"], cadastroRecente: true });
+  // Sem a hora do teste vale o relógio: o cadastro de março é antigo, o de agora é recente.
+  assertEquals((await quemRecebe(banco(cadastros({ suppliers: [{ id: "s1", phone: "(47) 99915-9654" }] })).db, NUMERO, { userId: DONO })).destinos, ["fornecedor"]);
+  const deAgora = cadastros({ suppliers: [{ id: "s1", phone: "(47) 99915-9654", ...datas(new Date().toISOString()) }] });
+  assertEquals(await quemRecebe(banco(deAgora).db, NUMERO, { userId: DONO }), RECENTE);
+});
+
+Deno.test("Revisão S1 regra: número só em cadastro feito há pouco pede PIN e o cartão diz por quê; com outro cadastro, vale o outro", () => {
+  assertEquals(CADASTRO_FEITO_HA_POUCO, "o cadastro deste número foi criado ou alterado há menos de 24 horas (vale como cliente)");
+  const recente = (...destinos: Destino[]) => ({ telefone: NUMERO, destinos, cadastroRecente: true });
+  const nada = { valor: false, data: false, promessa: false };
+  const comValor = { valor: true, data: false, promessa: false };
+  assertEquals(riscoDoEnvioLivrePorDestino(recente("sem_cadastro"), nada), { risco: "high", motivo: CADASTRO_FEITO_HA_POUCO });
+  assertEquals(riscoDoEnvioLivrePorDestino(recente("sem_cadastro"), comValor), { risco: "high", motivo: `${CADASTRO_FEITO_HA_POUCO}; o texto cita valor` });
+  // Nem na outra leitura da regra (fornecedor e equipe sempre só o sim) o cadastro feito há pouco vale o sim.
+  assertEquals(riscoDoEnvioLivrePorDestino(recente("sem_cadastro"), nada, false).risco, "high");
+  // Sobrou outro cadastro: a regra é a dele.
+  assertEquals(riscoDoEnvioLivrePorDestino(recente("cliente"), nada), { risco: "high", motivo: "vai a cliente" });
+  assertEquals(riscoDoEnvioLivrePorDestino(recente("fornecedor"), nada), { risco: "medium", motivo: null });
+  assertEquals(riscoDoEnvioLivrePorDestino(recente("cliente", "fornecedor"), nada).motivo, "o número é de cliente e de fornecedor (vale o mais protegido)");
+  // Sem a marca, "sem cadastro" segue com a frase de sempre.
+  assertEquals(riscoDoEnvioLivrePorDestino({ telefone: NUMERO, destinos: ["sem_cadastro"] }, nada).motivo, "o número não tem cadastro (vale como cliente)");
 });
 
 // ─── A regra pura: destino × conteúdo ───────────────────────────────────────────────────────────
@@ -296,6 +381,11 @@ Deno.test("S1 gancho: decide pelo número que vai receber, não pelo argumento q
     { risco: "high", motivo: "o texto cita valor e data" });
   assertEquals(await riscoDaMensagemLivre({ to_phone: NUMERO, message: NEUTRO }, ctx(banco(cadastros()).db), "to_phone"),
     { risco: "high", motivo: "o número não tem cadastro (vale como cliente)" });
+  // (Revisão) O mesmo fornecedor, cadastrado ou alterado agora: não vale o sim, e o motivo diz por quê.
+  const feitoAgora = cadastros({ suppliers: [{ id: "s1", phone: "(47) 99915-9654", created_at: new Date().toISOString(), updated_at: new Date().toISOString() }] });
+  assertEquals(await riscoDaMensagemLivre({ to_phone: NUMERO, message: NEUTRO }, ctx(banco(feitoAgora).db), "to_phone"), { risco: "high", motivo: CADASTRO_FEITO_HA_POUCO });
+  assertEquals(await riscoDaMensagemLivre({ phone: NUMERO, message: "Fechado por R$ 350." }, ctx(banco(feitoAgora).db), "phone"),
+    { risco: "high", motivo: `${CADASTRO_FEITO_HA_POUCO}; o texto cita valor` });
 });
 
 Deno.test("S1 gancho: nunca lança e nunca devolve menos que o sim; o que não confere vale PIN", async () => {

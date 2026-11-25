@@ -14,6 +14,9 @@ import { assert, assertEquals, assertRejects, assertStringIncludes } from "https
 import { bancoFalso, ctxDe, type Linha } from "./banco-falso-fakes_test.ts";
 import { FALHA_AO_CONFERIR_O_DESTINO, numeroDoEnvio, recusaDoDestino } from "./agendamento.ts";
 import { whatsappTools } from "./whatsapp.ts";
+import { purchasingTools } from "./purchasing.ts";
+import { registryCrudTools } from "./registry-crud.ts";
+import { contactTools } from "./contacts.ts";
 import { executarChamadaDeTool, resumoQueRecusa } from "../agent.ts";
 import { autonomyKey, NEVER_AUTONOMOUS } from "../autonomy-policy.ts";
 import type { ToolDef } from "./registry.ts";
@@ -27,6 +30,8 @@ const TECNICO = "5547977776666";
 const DESCONHECIDO = "5511955554444";
 const NEUTRO = "Bom dia! Pode me mandar a foto da peça?";
 const QUANDO = "2030-10-08T09:00";
+/** Cadastro antigo (como o banco devolve as datas): só o de mais de 24 horas vale "fornecedor" ou "equipe". */
+const ANTIGO = { created_at: "2026-03-02T12:00:00.123456+00:00", updated_at: "2026-05-20T09:30:00.654321+00:00" };
 
 function cadastros(muda: (t: Record<string, Linha[]>) => void = () => {}) {
   const tabelas: Record<string, Linha[]> = {
@@ -34,8 +39,8 @@ function cadastros(muda: (t: Record<string, Linha[]>) => void = () => {}) {
       { id: "c1", name: "Cliente Inventado", display_name: null, whatsapp: "(47) 99915-9654", phone: "4733331234" },
       { id: "c2", name: "Sem Numero", display_name: null, whatsapp: null, phone: null },
     ],
-    suppliers: [{ id: "s1", name: "Fornecedor Inventado", phone: "(47) 98888-7777", active: true }],
-    payees: [{ id: "p1", name: "Técnico Inventado", phone: "47 97777-6666", active: true, app_user_id: null }],
+    suppliers: [{ id: "s1", name: "Fornecedor Inventado", phone: "(47) 98888-7777", active: true, ...ANTIGO }],
+    payees: [{ id: "p1", name: "Técnico Inventado", phone: "47 97777-6666", active: true, app_user_id: null, ...ANTIGO }],
     app_users: [{ id: "dono-1", full_name: "Dono Inventado", phone: null, phone_normalized: "5547966665555", active: true }],
     parceiro_numeros: [],
     whatsapp_leads: [],
@@ -291,6 +296,132 @@ Deno.test("S1 mensagem livre: a liberação de autonomia não pula o sim nem o P
   await executarChamadaDeTool({ name: "send_whatsapp_message", input: { to_phone: FORNECEDOR, message: NEUTRO } }, aVista(enviar, amarrada.db, { sessaoAmarrada: true }));
   assertEquals(pendencias(amarrada)[0].risk_level, "high");
   assertEquals(String(pendencias(amarrada)[0].summary).includes("🔒"), false);
+});
+
+// ─── Revisão do pacote 1 (24/11/2026): cadastro feito na hora não troca o PIN pelo sim ──────────
+// O que a revisão provou: número sem cadastro pedia PIN; depois de create_supplier com o mesmo número (risco baixo, roda
+// direto, sem cartão), a MESMA mensagem nascia só com o "sim". Igual com update_supplier e com link_contact_to_entity
+// num fornecedor sem telefone. Era de novo o modelo escolhendo o risco, agora por uma escrita calada, num turno só.
+// O que se fixa: cadastro de fornecedor ou de favorecido criado ou alterado há menos de 24 horas não conta como
+// fornecedor nem como equipe; o número segue valendo como cliente (PIN), com o motivo dito no cartão.
+
+const criarFornecedor = purchasingTools.find((t) => t.name === "create_supplier")!;
+const corrigirFornecedor = registryCrudTools.find((t) => t.name === "update_supplier")!;
+const ligarContato = contactTools.find((t) => t.name === "link_contact_to_entity")!;
+const MOTIVO_DO_RECENTE = "o cadastro deste número foi criado ou alterado há menos de 24 horas (vale como cliente)";
+const horasAtras = (h: number) => new Date(Date.now() - h * 3600_000).toISOString();
+
+/**
+ * O que o banco de verdade faz e o falso não: created_at e updated_at = now() no insert (o padrão das colunas) e
+ * updated_at = now() em todo update (gatilhos set_updated_at_suppliers e payees_updated_at, conferidos em produção).
+ */
+// deno-lint-ignore no-explicit-any
+function comRelogioDoBanco<B extends { db: { from: (tabela: string) => any } }>(b: B): B {
+  const from = b.db.from;
+  const agora = () => new Date().toISOString();
+  b.db.from = (tabela: string) => {
+    const q = from(tabela);
+    if (tabela !== "suppliers" && tabela !== "payees") return q;
+    const { insert, update } = q;
+    const carimbo = (l: Linha) => ({ created_at: agora(), updated_at: agora(), ...l });
+    q.insert = (v: Linha | Linha[]) => insert(Array.isArray(v) ? v.map(carimbo) : carimbo(v));
+    q.update = (v: Linha) => update({ ...v, updated_at: agora() });
+    return q;
+  };
+  return b;
+}
+
+/** O turno com a mensagem livre, o agendamento e as três escritas de cadastro à vista (como no perfil do admin). */
+function turno(db: unknown) {
+  const tools = [enviar, agendar, criarFornecedor, corrigirFornecedor, ligarContato];
+  return { ...aVista(enviar, db), toolsByName: Object.fromEntries(tools.map((t) => [t.name, t])) };
+}
+
+Deno.test("Revisão S1: cadastrar o número como fornecedor na hora não troca o PIN pelo sim (mensagem e agendamento)", async () => {
+  const b = comRelogioDoBanco(banco());
+  const amb = turno(b.db);
+  // Antes do cadastro: número sem cadastro, PIN.
+  await executarChamadaDeTool({ name: "send_whatsapp_message", input: { to_phone: DESCONHECIDO, message: NEUTRO } }, amb);
+  assertEquals(pendencias(b)[0].risk_reason, "o número não tem cadastro (vale como cliente)");
+
+  // O cadastro roda direto, sem cartão (pedir o "sim" nessa escrita é decisão do dono: NOVO-p1-s1-04).
+  const cadastro = await executarChamadaDeTool({ name: "create_supplier", input: { name: "João", phone: "11 95555-4444" } }, amb);
+  assertEquals(cadastro.executou, true);
+  assertEquals(pendencias(b).length, 1, "o cadastro não pede nada");
+  assertEquals(b.tabelas.suppliers.length, 2);
+
+  // A MESMA mensagem, no mesmo turno: continua PIN, e o cartão diz por quê.
+  const r = await executarChamadaDeTool({ name: "send_whatsapp_message", input: { to_phone: DESCONHECIDO, message: NEUTRO } }, amb);
+  assertEquals(r.proposal?.risk_level, "high");
+  const p = pendencias(b)[1];
+  assertEquals(p.risk_level, "high", "é o risk_level gravado que cobra o PIN no sim");
+  assertEquals(p.risk_reason, MOTIVO_DO_RECENTE);
+  assertEquals(ultimaLinha(p.summary), `🔒 No WhatsApp, pede PIN: ${MOTIVO_DO_RECENTE}.`);
+
+  // O agendamento usa a mesma conferência.
+  await executarChamadaDeTool({ name: "schedule_whatsapp_message", input: { phone: "11 95555-4444", scheduled_at: QUANDO, message: NEUTRO } }, amb);
+  assertEquals([pendencias(b)[2].risk_level, pendencias(b)[2].risk_reason], ["high", MOTIVO_DO_RECENTE]);
+
+  // O fornecedor antigo (mais de 24 horas, sem mexer) segue só com o "sim".
+  await executarChamadaDeTool({ name: "send_whatsapp_message", input: { to_phone: FORNECEDOR, message: NEUTRO } }, amb);
+  assertEquals(pendencias(b)[3].risk_level, "medium");
+  assert(!("risk_reason" in pendencias(b)[3]));
+});
+
+Deno.test("Revisão S1: trocar o telefone de um fornecedor, ou ligar o número a um fornecedor sem telefone, também não troca o PIN pelo sim", async () => {
+  // update_supplier: o número novo entra num cadastro antigo.
+  const b = comRelogioDoBanco(banco());
+  const amb = turno(b.db);
+  const troca = await executarChamadaDeTool({ name: "update_supplier", input: { supplier_id: "s1", phone: "11 95555-4444" } }, amb);
+  assertEquals(troca.executou, true);
+  assertEquals(pendencias(b), [], "a troca roda direto, sem cartão");
+  await executarChamadaDeTool({ name: "send_whatsapp_message", input: { to_phone: DESCONHECIDO, message: NEUTRO } }, amb);
+  assertEquals([pendencias(b)[0].risk_level, pendencias(b)[0].risk_reason], ["high", MOTIVO_DO_RECENTE]);
+  assertEquals(ultimaLinha(pendencias(b)[0].summary), `🔒 No WhatsApp, pede PIN: ${MOTIVO_DO_RECENTE}.`);
+  // O número antigo saiu do cadastro: é número sem cadastro.
+  await executarChamadaDeTool({ name: "send_whatsapp_message", input: { to_phone: FORNECEDOR, message: NEUTRO } }, amb);
+  assertEquals(pendencias(b)[1].risk_reason, "o número não tem cadastro (vale como cliente)");
+
+  // link_contact_to_entity: grava o número no fornecedor que não tinha telefone (risco baixo, roda direto).
+  const semFone = comRelogioDoBanco(banco((t) => { t.suppliers.push({ id: "s2", name: "Fornecedor Sem Fone", phone: null, active: true, ...ANTIGO }); }));
+  const amb2 = turno(semFone.db);
+  const liga = await executarChamadaDeTool({ name: "link_contact_to_entity", input: { phone: DESCONHECIDO, supplier_id: "s2" } }, amb2);
+  assertEquals(liga.executou, true);
+  assertEquals((liga.toolResult as { numero_no_cadastro: string }).numero_no_cadastro, "gravado (phone)");
+  assertEquals(pendencias(semFone), []);
+  await executarChamadaDeTool({ name: "send_whatsapp_message", input: { to_phone: DESCONHECIDO, message: NEUTRO } }, amb2);
+  assertEquals([pendencias(semFone)[0].risk_level, pendencias(semFone)[0].risk_reason], ["high", MOTIVO_DO_RECENTE]);
+
+  // Lado seguro conhecido: mexer em QUALQUER campo do fornecedor faz o número dele pedir PIN por 24 horas.
+  const outroCampo = comRelogioDoBanco(banco());
+  const amb3 = turno(outroCampo.db);
+  await executarChamadaDeTool({ name: "update_supplier", input: { supplier_id: "s1", notes: "entrega às terças" } }, amb3);
+  await executarChamadaDeTool({ name: "send_whatsapp_message", input: { to_phone: FORNECEDOR, message: NEUTRO } }, amb3);
+  assertEquals([pendencias(outroCampo)[0].risk_level, pendencias(outroCampo)[0].risk_reason], ["high", MOTIVO_DO_RECENTE]);
+});
+
+Deno.test("Revisão S1: o cadastro volta a valer só o sim depois de 24 horas; vale para fornecedor e para favorecido", async () => {
+  const casos: Array<[string, (t: Record<string, Linha[]>) => void, string, "high" | "medium"]> = [
+    ["fornecedor criado há 23 h", (t) => { Object.assign(t.suppliers[0], { created_at: horasAtras(23), updated_at: horasAtras(23) }); }, FORNECEDOR, "high"],
+    ["fornecedor criado há 25 h", (t) => { Object.assign(t.suppliers[0], { created_at: horasAtras(25), updated_at: horasAtras(25) }); }, FORNECEDOR, "medium"],
+    ["fornecedor antigo alterado há 1 h", (t) => { t.suppliers[0].updated_at = horasAtras(1); }, FORNECEDOR, "high"],
+    ["favorecido criado há 2 h", (t) => { Object.assign(t.payees[0], { created_at: horasAtras(2), updated_at: horasAtras(2) }); }, TECNICO, "high"],
+    ["favorecido antigo alterado há 2 h", (t) => { t.payees[0].updated_at = horasAtras(2); }, TECNICO, "high"],
+    ["favorecido alterado há 25 h", (t) => { t.payees[0].updated_at = horasAtras(25); }, TECNICO, "medium"],
+    // Sem as datas não dá para afirmar que o cadastro é antigo: PIN.
+    ["fornecedor sem as datas", (t) => { t.suppliers[0] = { id: "s1", name: "Fornecedor Inventado", phone: "(47) 98888-7777", active: true }; }, FORNECEDOR, "high"],
+  ];
+  for (const [nome, muda, numero, risco] of casos) {
+    const b = banco(muda);
+    await executarChamadaDeTool({ name: "send_whatsapp_message", input: { to_phone: numero, message: NEUTRO } }, aVista(enviar, b.db));
+    assertEquals(pendencias(b)[0].risk_level, risco, nome);
+    if (risco === "high") assertEquals(pendencias(b)[0].risk_reason, MOTIVO_DO_RECENTE, nome);
+    else assert(!("risk_reason" in pendencias(b)[0]), nome);
+  }
+  // Número que também é de cliente: vale "vai a cliente", como sempre (o cadastro novo não muda o motivo).
+  const cliente = banco((t) => { t.suppliers.push({ id: "s9", name: "Novo", phone: "47 99915-9654", created_at: horasAtras(1), updated_at: horasAtras(1) }); });
+  await executarChamadaDeTool({ name: "send_whatsapp_message", input: { to_phone: CLIENTE, message: NEUTRO } }, aVista(enviar, cliente.db));
+  assertEquals(pendencias(cliente)[0].risk_reason, "vai a cliente");
 });
 
 // ─── send_whatsapp_message: o envio depois do sim ───────────────────────────────────────────────

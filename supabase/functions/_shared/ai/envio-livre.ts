@@ -17,6 +17,11 @@
 // Tudo o que não der para conferir cai no lado seguro (PIN): leitura do banco que falha, lista grande demais para
 // conferir, número inválido ou de grupo, número que está em mais de um tipo de cadastro, cadastro inativo de equipe.
 //
+// (Revisão do pacote 1, 24/11/2026) Cadastro de fornecedor ou de favorecido criado ou alterado há menos de 24 horas
+// também não conta: o número segue valendo como cliente. Sem isso o modelo voltava a escolher o risco: cadastrar o
+// número como fornecedor (create_supplier, update_supplier e link_contact_to_entity rodam direto, sem cartão) trocava
+// o PIN pelo "sim" na mensagem seguinte do mesmo turno. Ver CADASTRO_RECENTE_MS.
+//
 // Reverter: tirar `riscoNoServidor` das duas ferramentas (uma linha cada); este arquivo fica inerte.
 import { chaveTelefone, mesmoTelefone } from "./phone.ts";
 import { detectarPromessa } from "./promessa.ts";
@@ -34,6 +39,38 @@ export type Destino = "cliente" | "parceiro" | "sem_cadastro" | "fornecedor" | "
 export interface QuemRecebe {
   telefone: string | null;
   destinos: Destino[];
+  /**
+   * true = o número está num cadastro de fornecedor ou de favorecido criado ou alterado há menos de 24 horas, que por
+   * isso NÃO entrou em `destinos` (CADASTRO_RECENTE_MS). Só muda o motivo dito no cartão quando não sobra outro cadastro.
+   */
+  cadastroRecente?: boolean;
+}
+
+/**
+ * (Revisão do pacote 1, 24/11/2026) Por quanto tempo o cadastro de fornecedor ou de favorecido criado ou alterado NÃO
+ * conta como "fornecedor" nem como "equipe": 24 horas, a validade do cartão de confirmação.
+ *
+ * Por quê: "fornecedor e equipe, só o sim" é o lado menos protegido da regra, e quem escreve nesses cadastros é o
+ * próprio assistente, sem cartão (create_supplier, update_supplier, link_contact_to_entity) ou com um "sim" (favorecido).
+ * Contando o cadastro feito na hora, o número sem cadastro (PIN) virava "fornecedor" (só o "sim") numa escrita calada.
+ * Quem lê é o banco: created_at tem padrão now() e updated_at é regravado em todo update pelos gatilhos
+ * set_updated_at_suppliers e payees_updated_at (conferidos em produção em 24/11/2026; nenhuma linha sem as datas).
+ * Custo: quem acabou de ser cadastrado ou corrigido pede PIN por um dia (em 24/11/2026, 0 dos 534 fornecedores e 0 dos
+ * 9 favorecidos tinham sido mexidos nas 24 horas anteriores).
+ */
+export const CADASTRO_RECENTE_MS = 24 * 3600_000;
+
+/**
+ * O cadastro foi criado ou alterado há menos de 24 horas? Sem data, com data ilegível ou com data no futuro não dá
+ * para afirmar que é antigo: conta como recente (lado seguro).
+ */
+function cadastroRecente(linha: Record<string, unknown>, agora: number): boolean {
+  for (const campo of ["created_at", "updated_at"]) {
+    const valor = linha[campo];
+    const quando = typeof valor === "string" ? Date.parse(valor) : NaN;
+    if (!Number.isFinite(quando) || agora - quando < CADASTRO_RECENTE_MS) return true;
+  }
+  return false;
 }
 
 /** A ordem em que os destinos aparecem (do mais protegido para o menos). */
@@ -80,14 +117,18 @@ const texto = (v: unknown): string | null => (typeof v === "string" ? v : null);
  *  · payees ATIVO (prestador, comissionado, sócio)        → "equipe" ("o_proprio" se for o favorecido de quem pede)
  *  · em nenhum                                            → "sem_cadastro"
  *
+ * O cadastro de fornecedor ou de favorecido criado ou alterado há menos de 24 horas NÃO conta (CADASTRO_RECENTE_MS):
+ * a linha é pulada e `cadastroRecente` sai true. Os outros cadastros do mesmo número contam como sempre.
+ *
  * Leitura que falha LANÇA; quem chama trata como risco alto. `admin` é o service-role: o risco não pode depender do
- * que a RLS de quem pede deixa ver.
+ * que a RLS de quem pede deixa ver. `agora` só existe para o teste escolher a hora.
  */
 export async function quemRecebe(
   // deno-lint-ignore no-explicit-any
   admin: any,
   telefone: string | null | undefined,
   quem: { userId: string; clienteId?: string | null },
+  agora: Date = new Date(),
 ): Promise<QuemRecebe> {
   const chave = chaveTelefone(telefone);
   if (!telefone || !chave) return { telefone: null, destinos: [] };
@@ -95,8 +136,8 @@ export async function quemRecebe(
   const L = LIMITE_POR_CADASTRO;
   const [clientes, fornecedores, favorecidos, usuarios, parceiros] = await Promise.all([
     lerLista(admin.from("clients").select("id, whatsapp, phone").or(`whatsapp.ilike.${padrao},phone.ilike.${padrao}`).limit(L), "clientes"),
-    lerLista(admin.from("suppliers").select("id, phone").ilike("phone", padrao).limit(L), "fornecedores"),
-    lerLista(admin.from("payees").select("id, phone, active, app_user_id").ilike("phone", padrao).limit(L), "favorecidos"),
+    lerLista(admin.from("suppliers").select("id, phone, created_at, updated_at").ilike("phone", padrao).limit(L), "fornecedores"),
+    lerLista(admin.from("payees").select("id, phone, active, app_user_id, created_at, updated_at").ilike("phone", padrao).limit(L), "favorecidos"),
     lerLista(
       admin.from("app_users").select("id, phone, phone_normalized, active").or(`phone_normalized.ilike.${padrao},phone.ilike.${padrao}`).limit(L),
       "usuários",
@@ -108,7 +149,14 @@ export async function quemRecebe(
   if (quem.clienteId) achados.add("cliente");
   if (clientes.some((c) => mesmoTelefone(texto(c.whatsapp), telefone) || mesmoTelefone(texto(c.phone), telefone))) achados.add("cliente");
   if (parceiros.some((n) => n.chave === chave)) achados.add("parceiro");
-  if (fornecedores.some((s) => mesmoTelefone(texto(s.phone), telefone))) achados.add("fornecedor");
+  // Fornecedor e favorecido são os cadastros em que o assistente escreve: o criado ou alterado há menos de 24 horas é pulado.
+  const agoraMs = agora.getTime();
+  let recente = false;
+  for (const s of fornecedores) {
+    if (!mesmoTelefone(texto(s.phone), telefone)) continue;
+    if (cadastroRecente(s, agoraMs)) recente = true;
+    else achados.add("fornecedor");
+  }
   for (const u of usuarios) {
     if (u.active !== true) continue;
     if (!mesmoTelefone(texto(u.phone_normalized), telefone) && !mesmoTelefone(texto(u.phone), telefone)) continue;
@@ -116,10 +164,11 @@ export async function quemRecebe(
   }
   for (const f of favorecidos) {
     if (f.active !== true || !mesmoTelefone(texto(f.phone), telefone)) continue;
-    achados.add(f.app_user_id && f.app_user_id === quem.userId ? "o_proprio" : "equipe");
+    if (cadastroRecente(f, agoraMs)) recente = true;
+    else achados.add(f.app_user_id && f.app_user_id === quem.userId ? "o_proprio" : "equipe");
   }
   const destinos = ORDEM_DOS_DESTINOS.filter((d) => achados.has(d));
-  return { telefone, destinos: destinos.length > 0 ? destinos : ["sem_cadastro"] };
+  return { telefone, destinos: destinos.length > 0 ? destinos : ["sem_cadastro"], ...(recente ? { cadastroRecente: true } : {}) };
 }
 
 // ─── O que o texto diz ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -251,6 +300,8 @@ const ROTULO_DO_DESTINO: Record<Destino, string> = {
 /** Frases do cartão quando não dá para saber quem recebe. */
 export const FALHA_AO_CONFERIR_QUEM_RECEBE = "não consegui conferir quem recebe";
 export const NUMERO_QUE_NAO_FECHA = "não consegui identificar o número de quem recebe (vale como cliente)";
+/** O número só aparece em cadastro de fornecedor ou de favorecido criado ou alterado há menos de 24 horas. */
+export const CADASTRO_FEITO_HA_POUCO = "o cadastro deste número foi criado ou alterado há menos de 24 horas (vale como cliente)";
 
 /**
  * A regra pura (sem banco): risco e motivo pelo destino e pelo conteúdo. O motivo é o que o dono lê depois de
@@ -258,7 +309,7 @@ export const NUMERO_QUE_NAO_FECHA = "não consegui identificar o número de quem
  *
  *  · sem número conferido                          → PIN
  *  · número em mais de um tipo de cadastro         → PIN ("vale o mais protegido"), mesmo sem cliente entre eles
- *  · cliente, parceiro ou sem cadastro             → PIN
+ *  · cliente, parceiro ou sem cadastro             → PIN (sem cadastro por ter só cadastro feito há pouco: diz isso)
  *  · fornecedor, equipe ou o próprio, com conteúdo → PIN (com conteudoParaTodos, a leitura que vale)
  *  · fornecedor, equipe ou o próprio, sem conteúdo → só "sim"
  */
@@ -275,7 +326,7 @@ export function riscoDoEnvioLivrePorDestino(
   else if (destinos.length > 1) doDestino = `o número é ${juntar(destinos.map((d) => ROTULO_DO_DESTINO[d]))} (vale o mais protegido)`;
   else if (destinos[0] === "cliente") doDestino = "vai a cliente";
   else if (destinos[0] === "parceiro") doDestino = "o número é de parceiro";
-  else if (destinos[0] === "sem_cadastro") doDestino = "o número não tem cadastro (vale como cliente)";
+  else if (destinos[0] === "sem_cadastro") doDestino = q.cadastroRecente === true ? CADASTRO_FEITO_HA_POUCO : "o número não tem cadastro (vale como cliente)";
   if (doDestino) return { risco: "high", motivo: doTexto ? `${doDestino}; ${doTexto}` : doDestino };
   if (conteudoParaTodos && doTexto) return { risco: "high", motivo: doTexto };
   return { risco: "medium", motivo: null };

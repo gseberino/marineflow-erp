@@ -4702,3 +4702,27 @@ quatro estão latentes.
 - **Efeito:** pode ser aviso legítimo ou tentativa de golpe; ninguém olhou. A regra do F1 só vale para e-mail novo (48 horas),
   então ele não vira aviso sozinho.
 - **Menor mudança:** o dono olhar esse e-mail na caixa. Nada em código.
+
+### [NOVO-p1-s1-04] Cadastrar fornecedor, ou gravar telefone em fornecedor, roda sem o "sim" (a raiz do desvio do PIN achado na revisão do S1)
+
+- **Onde:** `supabase/functions/_shared/ai/tools/purchasing.ts` (`create_supplier`), `tools/registry-crud.ts` (`update_supplier`) e
+  `tools/contacts.ts` (`link_contact_to_entity`, que grava o número no fornecedor que ainda não tem telefone). As três declaram
+  risco baixo, estão à vista no perfil do admin (`perfil-operacao.ts`) e rodam direto, sem cartão. Visto na revisão do pacote 1
+  (24/11/2026, ramo `session/assistente-p1`).
+- **Efeito:** o S1 decide o PIN da mensagem de texto livre pelo cadastro em que o número está, e "fornecedor" é o lado do "só o
+  sim". A revisão provou, com as ferramentas do ramo: mensagem neutra a número sem cadastro pedia PIN; depois de `create_supplier`
+  com o mesmo número (ou de `update_supplier` com `phone`), a mesma mensagem nascia só com o "sim", no mesmo turno. Era o modelo
+  escolhendo o risco por uma escrita calada; um turno que leu texto de fora (conversa, e-mail) pode ser levado a isso.
+  **Fechado na leitura** (commit "Revisão: mensagem livre…", `envio-livre.ts`, `CADASTRO_RECENTE_MS`): cadastro de fornecedor ou de
+  favorecido criado ou alterado há menos de 24 horas não conta, e o cartão diz "o cadastro deste número foi criado ou alterado
+  há menos de 24 horas (vale como cliente)". **Continua aberto:** a escrita em si segue sem o "sim". Passadas 24 horas, o número
+  que o assistente cadastrou sozinho vale "fornecedor, só o sim". O S6 (subir essas escritas depois de ler texto de fora) não
+  está neste ramo.
+- **Custo do conserto, medido em 24/11/2026 (só contagem):** quem acabou de ser cadastrado ou corrigido pede PIN por um dia. Dos
+  534 fornecedores, 0 tinham sido criados ou alterados nas 24 horas anteriores e 0 nos 7 dias anteriores; 198 nos 30 dias
+  anteriores (uma alteração em lote no cadastro faz todos os números tocados pedirem PIN por 24 horas). Dos 9 favorecidos, 0 nas
+  24 horas e 1 nos 7 dias. Nenhuma linha sem data de criação ou de alteração; os gatilhos `set_updated_at_suppliers` e
+  `payees_updated_at` existem em produção.
+- **Menor mudança:** decisão do dono (está no "Fora do pacote 1" da especificação de segurança): `create_supplier`,
+  `update_supplier` e `link_contact_to_entity` pedirem o "sim" quando gravam telefone, dentro ou fora do turno que leu texto de
+  fora. Não construído aqui.
