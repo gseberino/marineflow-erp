@@ -3,7 +3,8 @@
 -- conclui a OS em nome da equipe; vira a pergunta "terminou ou falta dia?" ao dono (concluir, chave terminou:<os>), uma por dia. Com true, o de antes.
 -- bancada: depende de 20270301120200
 --
---   P0  a forma (vale em produção, nada grava): as 4 chaves de agenda_config (tipo, DEFAULT, NOT NULL, CHECK e comentário) e _agenda_cfg() com elas;
+--   P0  a forma (vale em produção, nada grava): as 4 chaves de agenda_config (tipo, DEFAULT, NOT NULL, CHECK e comentário; cada CHECK recusa o seu
+--       caso, P0g) e _agenda_cfg() com elas;
 --       a porta de _agenda_rotina_conclusao (a de antes: invoker, ninguém de fora executa); nenhum UPDATE/DELETE sem WHERE; tirados os 2 blocos
 --       "-- P1 AGENDA:", o corpo é o de produção de 24/11 (md5 sem CR ae91e221…); tirados também os "-- TERMINOU:", o de 23/11 (ff5397d8…)
 --   Sobre a fixture-fase3 (o Roberto no Vanderlei, OS-00069, de ter 03 a qui 05/11 o dia todo; o Gustavo, o dono, abre na terça de manhã e fecha na
@@ -156,6 +157,35 @@ begin
     and (select count(*) from regexp_matches(v_txt, 'os_registrar_marco', 'g'))
         = (select count(*) from regexp_matches(pg_temp.sem_blocos(v_txt, 'P1 AGENDA'), 'os_registrar_marco', 'g')),
     null);
+  -- P0g: cada CHECK novo recusa o seu caso, pelo nome (o B de agenda_fase1_base.sql deixa estes 3 para cá). Cada UPDATE é recusado dentro
+  -- de um bloco próprio: nada grava.
+  v_txt := null;
+  for r in select * from (values
+      ('equipe_silencio_acao',  '''apagar''', 'agenda_config_equipe_silencio_acao_check'),
+      ('sinal_cobrar_max_dias', '0',          'agenda_config_sinal_cobrar_max_dias_check'),
+      ('sinal_cobrar_max_dias', '121',        'agenda_config_sinal_cobrar_max_dias_check'),
+      ('manha_sobras_max',      '-1',         'agenda_config_manha_sobras_max_check'),
+      ('manha_sobras_max',      '4',          'agenda_config_manha_sobras_max_check')
+    ) x(coluna, valor, regra)
+  loop
+    declare
+      v_est text;
+      v_reg text;
+    begin
+      execute format('update public.agenda_config set %I = %s where id', r.coluna, r.valor);
+      v_txt := concat_ws('; ', v_txt, format('%s = %s passou', r.coluna, r.valor));
+      raise exception 'desfaz' using errcode = 'P0095';
+    exception
+      when sqlstate 'P0095' then null;
+      when check_violation then
+        get stacked diagnostics v_est = returned_sqlstate, v_reg = constraint_name;
+        if v_reg is distinct from r.regra then
+          v_txt := concat_ws('; ', v_txt, format('%s = %s recusado por %s', r.coluna, r.valor, v_reg));
+        end if;
+    end;
+  end loop;
+  v_res := pg_temp.ok(v_res, 'P0g os 3 CHECKs novos recusam, pelo nome: equipe_silencio_acao ''apagar'', sinal_cobrar_max_dias 0 e 121, manha_sobras_max -1 e 4',
+    v_txt is null, v_txt);
   perform pg_temp.gravar(v_res);
 end
 $p0$;

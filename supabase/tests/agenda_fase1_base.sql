@@ -569,8 +569,13 @@ begin
                            'rebaixar_trava_dias', 'explicar_hora', 'placar_janela', 'placar_semanas_hist', 'placar_min_linhas', 'explicar_tempo_max']) n)))
      -- FASE 7g: fim
      -- FASE 7g: (7g P5b, 20261112100700) os 2 de os_planejamento (o ok do dono) têm o caso deles em agenda_fase7g_ok_do_dono.sql (K0f e K0g, pelo nome).
-     and not (c.conname = any (array['os_planejamento_ok_coerente', 'os_planejamento_ok_do_dono_via_check']));
+     and not (c.conname = any (array['os_planejamento_ok_coerente', 'os_planejamento_ok_do_dono_via_check']))
      -- FASE 7g: fim
+     -- P1 AGENDA: (pacote 1 do assistente, 20270301120000) os 3 CHECKs das chaves novas de agenda_config têm o caso deles em
+     -- agenda_p1_terminei.sql (P0g, pelo nome).
+     and not (c.conname = any (array['agenda_config_equipe_silencio_acao_check', 'agenda_config_sinal_cobrar_max_dias_check',
+                                     'agenda_config_manha_sobras_max_check']));
+     -- P1 AGENDA: fim
   insert into _resultado values ('B todo CHECK das 6 tabelas tem um caso que ele recusa', v_sem_caso is null, v_sem_caso);
 end
 $b$;
