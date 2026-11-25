@@ -1,9 +1,27 @@
-import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
+import { blockTechnician, lerRetrato, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
 import { ESQUEMA_DA_FORMA, formaDePagamento, validarForma } from "./forma-de-pagamento.ts";
 import { horariosDeBrasilia } from "../fuso.ts";
 import { sendWhatsapp } from "./whatsapp.ts";
 import { descreverSaldo, parcelasDoSaldo } from "./saldo-do-sinal.ts";
 import { registrarEnvioDaCobranca, SITUACOES_ABERTAS } from "./cobrancas.ts";
+// O lote de lembretes (25/11/2026): cada item passa pela conferência do lembrete individual (valor e vencimento da conta,
+// travas, retrato) e pelo mesmo portão e a mesma chave do dia.
+import {
+  aprovadoNoLote,
+  CARGOS_DO_LEMBRETE,
+  conferirLoteDeLembretes,
+  LOTE_GRANDE,
+  MAX_DO_LOTE,
+  oQueMudouNoLembrete,
+  relogioDoLembrete,
+  retratoDoLote,
+  SEM_RETRATO_DO_LOTE,
+} from "./lembrete-de-cobranca.ts";
+import { guardaDeEnvio } from "../comms/send-guard.ts";
+import { registrarEnvio } from "../comms/send-log.ts";
+import { chaveDeEnvio, diaLocal } from "../../whatsapp/idempotencia.ts";
+import { desviadoPorTeste } from "../../whatsapp/marcar-enviado.ts";
+import { horaEmBrasilia } from "../../receivables/cobrar-juntas.ts";
 import { vincularTecnico } from "./service-orders.ts";
 import { statusAoAgendar } from "../../service-order-status.ts";
 import { diaBR } from "../../agenda-dia.ts";
@@ -13,9 +31,6 @@ import { favorecidoDoLogin, modoDaPropostaNoBanco } from "../../agenda-modo.ts";
 // Cada uma colapsa um procedimento de vários passos numa única tool de risco alto:
 // é interceptada por runAgentLoop → UMA confirmação (+ PIN) → executa tudo server-side.
 // A confirmação mostra a lista/resumo real via buildPendingSummary (ver agent.ts).
-
-const fmtBRL = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
-const hojeISODate = () => new Date().toISOString().slice(0, 10);
 
 const CAMPOS_DA_COBRANCA = "id, amount, due_date, contact_whatsapp, phone, contact_name, client_id, last_auto_sent_at, status, receivable_id";
 
@@ -74,7 +89,7 @@ export const flowMacroTools: ToolDef[] = [
   {
     name: "send_bulk_collection_reminders",
     description:
-      "Envia lembrete de cobrança por WhatsApp para VÁRIOS clientes de uma vez (ex.: 'cobra todos os vencidos', 'manda a cobrança da lista'). Levante a lista ANTES (get_delinquency_plan / list_pending_collections) e passe os ids escolhidos em collection_ids — vale o id de list_pending_collections ou o receivable_id de get_delinquency_plan (o sistema acha a cobrança aberta da conta) — a confirmação vai mostrar quem, quanto e o atraso, e você aprova o lote de uma vez. Quem já foi cobrado hoje é PULADO automaticamente. Envio externo: pede confirmação. Report-only: se um envio falhar, os outros seguem.",
+      "Envia lembrete de cobrança por WhatsApp para VÁRIOS clientes de uma vez (ex.: 'cobra todos os vencidos', 'manda a cobrança da lista'). Levante a lista ANTES (get_delinquency_plan / list_pending_collections) e passe os ids escolhidos em collection_ids — vale o id de list_pending_collections ou o receivable_id de get_delinquency_plan (o sistema acha a cobrança aberta da conta) — a confirmação mostra quem recebe, por qual número, o valor e o vencimento da CONTA A RECEBER de cada um e o que fica de fora (e por quê); você aprova o lote de uma vez. Ficam de fora, sozinhos: quem já foi cobrado hoje, cobrança ou conta paga, entrada do cliente esperando no Extrato, opt-out, piso, cadastro genérico — e a segunda cobrança do mesmo cliente (uma mensagem por cliente; para juntar tudo de um cliente, cobrar_juntas com cliente_id). Envio externo: pede confirmação. Report-only: se um envio falhar, os outros seguem.",
     input_schema: {
       type: "object",
       properties: {
@@ -85,61 +100,88 @@ export const flowMacroTools: ToolDef[] = [
         },
         custom_message: {
           type: "string",
-          description: "Opcional: mensagem única para todos. Se omitido, cada cliente recebe o texto padrão com o próprio valor e vencimento.",
+          description: "Opcional: mensagem única, IGUAL para todos (não cite valor nem data). Se omitido, cada cliente recebe o texto padrão com o próprio valor e vencimento, lidos da conta.",
         },
       },
       required: ["collection_ids"],
     },
     risk: "high",
-    roles: NON_TECHNICIAN_ROLES,
+    // Só admin e financeiro (25/11/2026), como o lembrete individual e o cobrar_juntas: lista literal — o import de
+    // lembrete-de-cobranca.ts é circular e a constante importada ainda não existe quando esta lista é montada.
+    roles: ["admin", "financial"],
+    // O retrato do que o cartão mostrou: cada lembrete que VAI (cobrança, telefone, valor, vencimento e texto).
+    retratoDaPendencia: async (args, ctx) => {
+      try {
+        const ids: string[] = Array.isArray(args?.collection_ids) ? (args.collection_ids as string[]).filter(Boolean) : [];
+        if (!ids.length || ids.length > MAX_DO_LOTE) return null;
+        const itens = await conferirLoteDeLembretes(ctx.admin, ctx.admin, await resolverCobrancasDoLote(ctx.admin, ids), args?.custom_message, { modoTeste: desviadoPorTeste(ctx.settings) });
+        return itens.some((i) => i.lembrete) ? retratoDoLote(itens) : null;
+      } catch {
+        return null;
+      }
+    },
     async execute(args, ctx) {
       const blocked = blockTechnician(ctx);
       if (blocked) return blocked;
+      if (!CARGOS_DO_LEMBRETE.includes(ctx.userRole as (typeof CARGOS_DO_LEMBRETE)[number])) {
+        return { error: "Só administrador ou financeiro envia lembretes de cobrança.", nada_enviado: true };
+      }
       const { sb, admin, jwt } = ctx;
       const ids: string[] = Array.isArray(args.collection_ids) ? (args.collection_ids as string[]).filter(Boolean) : [];
       if (ids.length === 0) return { error: "Nenhuma cobrança informada." };
+      if (ids.length > MAX_DO_LOTE) return { error: LOTE_GRANDE, nada_enviado: true };
+      // O "sim" foi sobre o cartão: só vai quem estava nele, com o mesmo valor, vencimento, número e texto.
+      const retrato = lerRetrato(args);
+      if (!retrato || !Array.isArray(retrato.itens)) return { error: SEM_RETRATO_DO_LOTE, nada_enviado: true };
 
-      const hoje = hojeISODate();
       const enviados: Array<Record<string, unknown>> = [];
       const pulados: Array<Record<string, unknown>> = [];
       const falhas: Array<Record<string, unknown>> = [];
 
-      const lote = await resolverCobrancasDoLote(sb, ids);
-      for (const item of lote) {
-        if (item.repetida) { pulados.push({ id: item.pedido, motivo: item.motivo }); continue; }
-        const col = item.cobranca;
-        if (!col) { falhas.push({ id: item.pedido, motivo: item.motivo }); continue; }
-        // Paga ou cancelada não se cobra (07/10/2026).
-        if (col.status === "paid" || col.status === "cancelled") {
-          pulados.push({ cliente: col.contact_name || null, motivo: col.status === "paid" ? "cobrança paga" : "cobrança cancelada" });
+      const modoTeste = desviadoPorTeste(ctx.settings);
+      const avisosDeEstilo = new Set<string>();
+      let itens;
+      try {
+        itens = await conferirLoteDeLembretes(sb, admin, await resolverCobrancasDoLote(sb, ids), args.custom_message, { modoTeste });
+      } catch (e) {
+        return { error: `Nada foi enviado: não consegui conferir o lote agora (${String((e as Error)?.message ?? e)}). Peça de novo.`, nada_enviado: true };
+      }
+      for (const item of itens) {
+        const l = item.lembrete;
+        if (!l) { pulados.push({ cliente: item.cliente, motivo: item.foraPorque }); continue; }
+        const aprovado = aprovadoNoLote(retrato, l.cobranca.id);
+        if (!aprovado) { pulados.push({ cliente: item.cliente, motivo: "não estava entre os que iam quando o dono disse sim" }); continue; }
+        const mudou = oQueMudouNoLembrete(aprovado, l);
+        if (mudou) { pulados.push({ cliente: item.cliente, motivo: `${mudou} depois do pedido` }); continue; }
+        const col = l.cobranca;
+        const agora = relogioDoLembrete.agora();
+        // Portão: horário (bloqueia) e estilo (avisa), como o lembrete individual.
+        const g = guardaDeEnvio(l.mensagem, {
+          tipo: "cobranca", audiencia: "cliente", canal: "whatsapp", destinatarioIdentificado: !!col.client_id, texto: l.mensagem,
+          horaBrasilia: horaEmBrasilia(agora),
+        });
+        if (g.bloqueado) {
+          await registrarEnvio(admin, { tipo: "cobranca", audiencia: "cliente", entityKind: "client", entityId: col.client_id, phone: l.telefone, preview: l.mensagem, status: "blocked", blockCode: g.codigoBloqueio });
+          falhas.push({ cliente: item.cliente, motivo: g.motivo });
           continue;
         }
-
-        // Não recobrar quem já foi cobrado hoje (mesma regra do get_delinquency_plan).
-        if (col.last_auto_sent_at && String(col.last_auto_sent_at).slice(0, 10) === hoje) {
-          pulados.push({ cliente: col.contact_name || null, motivo: "já cobrado hoje" });
+        g.avisos.forEach((a) => avisosDeEstilo.add(a));
+        // A MESMA chave do lembrete individual: a mesma cobrança não sai duas vezes no dia por um e pelo outro.
+        const chave = chaveDeEnvio("cobranca", col.id, diaLocal(agora), modoTeste ? "teste" : null);
+        const r = await sendWhatsapp(l.telefone, l.mensagem, jwt, chave, ctx.userId);
+        if (!(r as { ok?: boolean }).ok) {
+          await registrarEnvio(admin, { tipo: "cobranca", audiencia: "cliente", entityKind: "client", entityId: col.client_id, phone: l.telefone, preview: l.mensagem, status: "failed" });
+          falhas.push({ cliente: item.cliente, motivo: (r as { error?: string }).error || "falha no envio" });
           continue;
         }
-
-        let phone = col.contact_whatsapp || col.phone;
-        if (!phone && col.client_id) {
-          const { data: c } = await sb.from("clients").select("whatsapp, phone").eq("id", col.client_id).maybeSingle();
-          phone = c?.whatsapp || c?.phone;
+        if ((r as { deduplicated?: boolean }).deduplicated) {
+          pulados.push({ cliente: item.cliente, motivo: modoTeste ? "este lembrete já tinha saído hoje para o número de TESTE; não reenviei" : "o lembrete desta cobrança já tinha saído hoje" });
+          continue;
         }
-        if (!phone) { falhas.push({ cliente: col.contact_name || null, motivo: "sem telefone" }); continue; }
-
-        const valor = fmtBRL.format(Number(col.amount) || 0);
-        const msg = args.custom_message ||
-          `Olá${col.contact_name ? ` ${col.contact_name}` : ""}, lembrete amigável: consta um valor de ${valor} com vencimento em ${col.due_date}. Qualquer dúvida, estamos à disposição.`;
-
-        const r = await sendWhatsapp(phone, msg, jwt);
-        if ((r as { ok?: boolean }).ok) {
-          // O contato 'whatsapp_sent' e a situação 'enviada', como a tela (07/10/2026).
-          const aviso = await registrarEnvioDaCobranca(admin, col, ctx.userId, "Lembrete enviado pelo assistente (lote, WhatsApp)");
-          enviados.push({ cliente: col.contact_name || null, valor: Number(col.amount) || 0, ...(aviso ? { aviso } : {}) });
-        } else {
-          falhas.push({ cliente: col.contact_name || null, motivo: (r as { error?: string }).error || "falha no envio" });
-        }
+        await registrarEnvio(admin, { tipo: "cobranca", audiencia: "cliente", entityKind: "client", entityId: col.client_id, phone: l.telefone, preview: l.mensagem, status: "sent" });
+        // Modo de teste: foi para o número de teste — nada se registra na cobrança.
+        const aviso = modoTeste ? null : await registrarEnvioDaCobranca(admin, col, ctx.userId, "Lembrete enviado pelo assistente (lote, WhatsApp)");
+        enviados.push({ cliente: item.cliente, valor: l.valor, ...(aviso ? { aviso } : {}) });
       }
 
       if (enviados.length === 0) {
@@ -153,6 +195,7 @@ export const flowMacroTools: ToolDef[] = [
           pulados: pulados.length,
           falhas: falhas.length,
           detalhe: { pulados, falhas },
+          ...(modoTeste ? { aviso: "O modo de teste do WhatsApp está ligado: nada foi para os clientes (nem para o número de teste nesta vez). Diga isso." } : {}),
         };
       }
       return {
@@ -162,7 +205,9 @@ export const flowMacroTools: ToolDef[] = [
         pulados: pulados.length,
         falhas: falhas.length,
         detalhe: { enviados, pulados, falhas },
-        ...(pulados.length ? { nota: "Alguns foram pulados (já cobrados hoje, pagos, cancelados ou repetidos): veja detalhe.pulados." } : {}),
+        ...(avisosDeEstilo.size ? { avisos_estilo: [...avisosDeEstilo] } : {}),
+        ...(modoTeste ? { aviso: "O modo de teste do WhatsApp está ligado: os lembretes foram para o número de TESTE, NÃO para os clientes. Nada foi registrado nas cobranças. Diga isso." } : {}),
+        ...(pulados.length ? { nota: "Alguns ficaram de fora (já cobrados hoje, pagos, repetidos, entrada esperando, mudaram depois do pedido…): veja detalhe.pulados." } : {}),
         ...(falhas.length ? { atencao: `${falhas.length} lembrete(s) NÃO saíram: diga quais (detalhe.falhas).` } : {}),
       };
     },

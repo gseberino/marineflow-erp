@@ -77,6 +77,7 @@ function bancoFalso(tabelas: Record<string, Linha[]>, falhas: string[] = []) {
         neq: (c: string, v: unknown) => (filtros.push((l) => l[c] !== v), q),
         in: (c: string, vs: unknown[]) => (filtros.push((l) => vs.includes(l[c])), q),
         is: (c: string, v: unknown) => (filtros.push((l) => (l[c] ?? null) === v), q),
+        gte: (c: string, v: unknown) => (filtros.push((l) => l[c] != null && String(l[c]) >= String(v)), q),
         maybeSingle: () => Promise.resolve({ data: erro ? null : linhas()[0] ?? null, error: erro }),
         single: () => Promise.resolve({ data: erro ? null : linhas()[0] ?? null, error: erro }),
         // deno-lint-ignore no-explicit-any
@@ -696,10 +697,9 @@ Deno.test("saudação de contato PRÓPRIO com rótulo ('Marta Souza - financeiro
   assertEquals(textoDoCartao(s).includes("Souza") || textoDoCartao(s).includes("financeiro"), false, s);
 });
 
-Deno.test("cobrança sem cliente (client_id nulo) com contato próprio: saudação pelo primeiro nome do contato", async () => {
+Deno.test("cobrança sem cliente do cadastro (client_id nulo): recusa — o portão nunca deixaria a cobrança sair a número não identificado", async () => {
   const { db, ctx } = ambiente({ collections: [cobranca({ client_id: null, contact_whatsapp: "47 98888-7777", contact_name: "Marta Souza" })] });
-  const s = semNbsp((await pedir(ctx, db)).summary);
-  assertStringIncludes(s, "Olá Marta, lembrete amigável");
+  assertStringIncludes(await recusado(ctx, db), "Esta cobrança não está ligada a um cliente do cadastro");
 });
 
 Deno.test("o lembrete DESTA cobrança já saiu hoje por aqui (chave do dia concluída): recusa, não promete outra mensagem", async () => {
@@ -739,4 +739,247 @@ Deno.test("a frase do dono: data que não é o vencimento, valor em 'R$1650.00' 
   const semConta = ambiente({ collections: [cobranca({ receivable_id: null })], receivables: [] });
   const s3 = semNbsp((await pedir(semConta.ctx, semConta.db, { collection_id: COL, custom_message: "João, são R$ 900,00." })).summary);
   assertStringIncludes(s3, "- Atenção: a frase cita R$ 900,00; o valor da cobrança é R$ 2.000,00. Confira antes de aprovar.");
+});
+
+// ── o LOTE (send_bulk_collection_reminders), 25/11/2026 ──────────────────────────────────────
+
+const MARIA = "7a1b2c3d-3333-4222-8333-444455556666";
+const COL_M = "33333333-3333-4333-8333-333333333002";
+const CONTA_M = "44444444-4444-4444-8444-444444444002";
+const COL_J2 = "33333333-3333-4333-8333-333333333003";
+const CONTA_J2 = "44444444-4444-4444-8444-444444444003";
+
+/** João (a cobrança de sempre) + Maria (R$ 800 guardados; a conta deve R$ 640, vence 10/11) + uma 2ª cobrança do João. */
+function ambienteDoLote(tabelas: Record<string, Linha[]> = {}) {
+  return ambiente({
+    collections: [
+      cobranca(),
+      cobranca({ id: COL_M, client_id: MARIA, receivable_id: CONTA_M, amount: 800, due_date: "2026-11-01", description: "Saldo OS-00090" }),
+      cobranca({ id: COL_J2, receivable_id: CONTA_J2, amount: 430, due_date: "2026-11-16", description: "Saldo OS-00104" }),
+    ],
+    receivables: [
+      conta(),
+      { id: CONTA_M, client_id: MARIA, amount: 800, paid_amount: 160, balance_amount: 640, status: "partially_paid", due_date: "2026-11-10" },
+      { id: CONTA_J2, client_id: JOAO, amount: 430, paid_amount: 0, balance_amount: 430, status: "pending", due_date: "2026-11-16" },
+    ],
+    clients: [...cadastros(), { id: MARIA, name: "Maria Souza", display_name: null, whatsapp: "(47) 98888-1111", phone: null, opt_out_whatsapp: false, generico: false }],
+    ...tabelas,
+  });
+}
+// deno-lint-ignore no-explicit-any
+async function pedirLote(ctx: any, db: any, input: Record<string, unknown>): Promise<Linha> {
+  const r = await executarChamadaDeTool({ name: "send_bulk_collection_reminders", input }, amb(ctx));
+  // deno-lint-ignore no-explicit-any
+  assertEquals((r.toolResult as any).pending, true, JSON.stringify(r.toolResult));
+  return pendencias(db).at(-1);
+}
+const lote = toolsByName["send_bulk_collection_reminders"];
+
+Deno.test("lote: o cartão mostra cada cliente com o número, o valor e o vencimento da CONTA, o total, o que fica de fora e a mensagem", async () => {
+  const { db, ctx } = ambienteDoLote();
+  const p = await pedirLote(ctx, db, { collection_ids: [COL, COL_M, COL_J2] });
+  const s = semNbsp(p.summary);
+  assertEquals(UUID_NO_TEXTO.test(s), false, s);
+  assertStringIncludes(s, "Enviar lembrete de cobrança pelo WhatsApp a *2* cliente(s) — o valor e o vencimento são os da conta a receber de cada um:");
+  assertStringIncludes(s, "- João Pereira · +55 (47) 99999-0001: *R$ 1.650,00*, vencimento 22/07/2026 (vencido há 126 dias)");
+  assertStringIncludes(s, "- Maria Souza · +55 (47) 98888-1111: *R$ 640,00*, vencimento 10/11/2026 (vencido há 15 dias)");
+  assertStringIncludes(s, "Total: *R$ 2.290,00*");
+  // a 2ª cobrança do João: uma mensagem por cliente
+  assertStringIncludes(s, "Ficam de fora (não recebem):\n- João Pereira: outra cobrança do mesmo cliente já está neste lote");
+  assertStringIncludes(s, "Mensagem (a de João Pereira; os outros com o nome, o valor e o vencimento de cada um):\n" + TEXTO_PADRAO);
+  assertEquals(p.payload._retrato.itens.map((i: Linha) => [i.cobranca, i.valor, i.vencimento]), [[COL, 1650, "2026-07-22"], [COL_M, 640, "2026-11-10"]]);
+});
+
+Deno.test("lote: ficam de fora quem já foi cobrado hoje e a entrada esperando no Extrato — com o motivo; nenhum sairia = recusa", async () => {
+  const { db, ctx } = ambienteDoLote({
+    finance_review_queue: [{ suggested_client_id: MARIA, suggested_amount: 640, suggested_date: "2026-11-24", title: "Receita: MARIA", status: "pending", kind: "create_receivable" }],
+  });
+  db.tabelas.collections[2].last_auto_sent_at = "2026-11-25T12:00:00Z"; // a outra cobrança do João saiu hoje
+  const s = semNbsp(await buildPendingSummary(ctx.admin, "send_bulk_collection_reminders", { collection_ids: [COL, COL_M] }, { userId: "dono-1" }));
+  assertStringIncludes(s, "⚠️ Nenhum lembrete sairia:");
+  assertStringIncludes(s, "João Pereira (já cobrado hoje)");
+  assertStringIncludes(s, "Este cliente tem entrada esperando no Extrato");
+  assert(resumoQueRecusa("send_bulk_collection_reminders", s));
+});
+
+Deno.test("lote: o 'sim' envia só aos do cartão, com o texto e a chave do dia do lembrete individual, e registra cada um", async () => {
+  const { db, ctx } = ambienteDoLote();
+  const p = await pedirLote(ctx, db, { collection_ids: [COL, COL_M, COL_J2] });
+  await comEnvio({ messageId: "m1" }, async (enviados) => {
+    // deno-lint-ignore no-explicit-any
+    const r = await lote.execute(p.payload, ctx) as any;
+    assertEquals([r.ok, r.enviados, r.pulados, r.falhas], [true, 2, 1, 0], JSON.stringify(r));
+    assertEquals(enviados.map((e) => [e.phone, e.dedupe_key]), [[NUMERO, `cobranca:${COL}:2026-11-25`], ["5547988881111", `cobranca:${COL_M}:2026-11-25`]]);
+    assertEquals(semNbsp(enviados[0].message), TEXTO_PADRAO);
+    assertStringIncludes(semNbsp(enviados[1].message), "Olá Maria, lembrete amigável: você possui um valor de R$ 640,00 com vencimento em 10/11/2026.");
+    assertEquals(inseridos(db, "collection_contacts").map((c: Linha) => c.collection_id).sort(), [COL, COL_M].sort());
+    assertEquals(inseridos(db, "ai_comms_log").map((l: Linha) => l.status), ["sent", "sent"]);
+  });
+});
+
+Deno.test("lote: mudou depois do pedido → aquele fica de fora; quem estava de fora no cartão não entra no 'sim'", async () => {
+  const { db, ctx } = ambienteDoLote();
+  const p = await pedirLote(ctx, db, { collection_ids: [COL, COL_M] });
+  // a Maria pagou mais um pedaço entre o cartão e o "sim"
+  Object.assign(db.tabelas.receivables[1], { paid_amount: 400, balance_amount: 400 });
+  await comEnvio({ messageId: "m1" }, async (enviados) => {
+    // deno-lint-ignore no-explicit-any
+    const r = await lote.execute(p.payload, ctx) as any;
+    assertEquals(enviados.map((e) => e.phone), [NUMERO]);
+    assertStringIncludes(semNbsp(JSON.stringify(r.detalhe.pulados)), "o valor mudou (era R$ 640,00, agora R$ 400,00) depois do pedido");
+  });
+  // a 2ª cobrança do João estava de fora no cartão; no "sim", mesmo sem a 1ª, ela não vai (o dono não a aprovou)
+  const outro = ambienteDoLote();
+  const p2 = await pedirLote(outro.ctx, outro.db, { collection_ids: [COL, COL_J2] });
+  assertEquals(p2.payload._retrato.itens.map((i: Linha) => i.cobranca), [COL]);
+  outro.db.tabelas.collections[0].status = "paid";
+  await comEnvio({ messageId: "m1" }, async (enviados) => {
+    // deno-lint-ignore no-explicit-any
+    const r = await lote.execute(p2.payload, outro.ctx) as any;
+    assertEquals(enviados, []);
+    assertEquals(r.ok, false);
+    assertStringIncludes(JSON.stringify(r.detalhe.pulados), "não estava entre os que iam quando o dono disse sim");
+  });
+});
+
+Deno.test("lote: fora do horário o portão barra cada envio; no modo de teste nada se registra e a resposta diz", async () => {
+  {
+    const { db, ctx } = ambienteDoLote();
+    const p = await pedirLote(ctx, db, { collection_ids: [COL, COL_M] });
+    const antes = relogioDoLembrete.agora;
+    relogioDoLembrete.agora = () => new Date("2026-11-26T01:00:00Z");
+    try {
+      await comEnvio({ messageId: "m1" }, async (enviados) => {
+        // deno-lint-ignore no-explicit-any
+        const r = await lote.execute(p.payload, ctx) as any;
+        assertEquals(enviados, []);
+        assertEquals(r.ok, false);
+        assertStringIncludes(r.error, "fora do horário");
+      });
+    } finally {
+      relogioDoLembrete.agora = antes;
+    }
+  }
+  {
+    const { db, ctx } = ambienteDoLote();
+    const p = await pedirLote(ctx, db, { collection_ids: [COL, COL_M] });
+    await comEnvio({ messageId: "m1" }, async (enviados) => {
+      // deno-lint-ignore no-explicit-any
+      const r = await lote.execute(p.payload, { ...ctx, settings: { wa_test_mode: "true", wa_test_number: "5547900000000" } }) as any;
+      assertEquals(enviados.map((e) => e.dedupe_key), [`cobranca:${COL}:2026-11-25:teste`, `cobranca:${COL_M}:2026-11-25:teste`]);
+      assertEquals(inseridos(db, "collection_contacts"), []);
+      assertStringIncludes(r.aviso, "número de TESTE");
+    });
+  }
+});
+
+Deno.test("lote: a frase do dono vai igual a todos — citar valor ganha a linha de atenção", async () => {
+  const { db, ctx } = ambienteDoLote();
+  const p = await pedirLote(ctx, db, { collection_ids: [COL, COL_M], custom_message: "Olá! Consta em aberto R$ 1.650,00. Qualquer dúvida, chame." });
+  const s = semNbsp(p.summary);
+  assertStringIncludes(s, "- Atenção: a frase cita valor e vai IGUAL a todos — confira se serve para cada um.");
+  assertStringIncludes(s, "Mensagem que vai a todos:\nOlá! Consta em aberto R$ 1.650,00.");
+});
+
+// ── revisão do lote (25/11/2026) ─────────────────────────────────────────────────────────────
+
+Deno.test("lote: ficam de fora, com o motivo, sem telefone, opt-out e cobrança sem cliente do cadastro", async () => {
+  const { db, ctx } = ambienteDoLote({
+    clients: [
+      { ...cadastros()[0], whatsapp: null },
+      cadastros()[1],
+      { id: MARIA, name: "Maria Souza", display_name: null, whatsapp: "(47) 98888-1111", phone: null, opt_out_whatsapp: true, generico: false },
+    ],
+  });
+  db.tabelas.collections[2].client_id = null; // a 2ª do João perdeu o cliente
+  db.tabelas.collections[2].contact_name = "Contato avulso";
+  const s = semNbsp(await buildPendingSummary(ctx.admin, "send_bulk_collection_reminders", { collection_ids: [COL, COL_M, COL_J2] }, { userId: "dono-1" }));
+  assertStringIncludes(s, "⚠️ Nenhum lembrete sairia:");
+  assertStringIncludes(s, "João Pereira (Sem telefone para enviar o lembrete.)");
+  assertStringIncludes(s, "Maria Souza (Este cliente pediu para não receber mensagens no WhatsApp (opt-out)");
+  assertStringIncludes(s, "Contato avulso (Esta cobrança não está ligada a um cliente do cadastro");
+});
+
+Deno.test("lote: leitura que falha vira '⚠️' no cartão; retrato que falhou também", async () => {
+  for (const tabela of ["collections", "receivables", "app_settings", "finance_review_queue", "clients"]) {
+    const { ctx } = ambienteDoLote();
+    const falho = bancoFalso(ctx.admin.tabelas, [tabela]);
+    const s = await buildPendingSummary(falho, "send_bulk_collection_reminders", { collection_ids: [COL, COL_M] }, { userId: "dono-1" });
+    assertStringIncludes(s, "⚠️ Não consegui conferir o lote agora", tabela);
+    assert(resumoQueRecusa("send_bulk_collection_reminders", s), tabela);
+  }
+  const { ctx } = ambienteDoLote();
+  const semRetrato = await buildPendingSummary(ctx.admin, "send_bulk_collection_reminders", { collection_ids: [COL, COL_M] }, { userId: "dono-1", retrato: null });
+  assertEquals(semRetrato, "⚠️ Não consegui conferir o lote agora. Nada foi enviado; tente de novo.");
+});
+
+Deno.test("lote: a lista mudou entre o retrato e o cartão (entrada no Extrato chegou no meio) → o cartão recusa", async () => {
+  const { db, ctx } = ambienteDoLote();
+  const retrato = await toolsByName["send_bulk_collection_reminders"].retratoDaPendencia!({ collection_ids: [COL, COL_M] }, ctx);
+  assertEquals((retrato!.itens as Linha[]).length, 2);
+  db.tabelas.finance_review_queue.push({ suggested_client_id: MARIA, suggested_amount: 640, suggested_date: "2026-11-25", title: "Receita: MARIA", status: "pending", kind: "create_receivable" });
+  const s = await buildPendingSummary(ctx.admin, "send_bulk_collection_reminders", { collection_ids: [COL, COL_M] }, { userId: "dono-1", retrato });
+  assertStringIncludes(s, "⚠️ A lista mudou enquanto eu conferia");
+  // sem mudança, o cartão normal
+  const igual = ambienteDoLote();
+  const r2 = await toolsByName["send_bulk_collection_reminders"].retratoDaPendencia!({ collection_ids: [COL, COL_M] }, igual.ctx);
+  assertStringIncludes(await buildPendingSummary(igual.ctx.admin, "send_bulk_collection_reminders", { collection_ids: [COL, COL_M] }, { userId: "dono-1", retrato: r2 }), "a *2* cliente(s)");
+});
+
+Deno.test("lote: 'já cobrado hoje' pelo dia de Brasília — 01h UTC do dia 25 ainda é dia 24 e não conta", async () => {
+  const { db, ctx } = ambienteDoLote();
+  db.tabelas.collections[2].last_auto_sent_at = "2026-11-25T01:00:00Z"; // 24/11 às 22h em Brasília
+  const s = semNbsp(await buildPendingSummary(ctx.admin, "send_bulk_collection_reminders", { collection_ids: [COL, COL_M] }, { userId: "dono-1" }));
+  assertStringIncludes(s, "a *2* cliente(s)");
+  assertEquals(s.includes("já cobrado hoje"), false, s);
+});
+
+Deno.test("lote: dois clientes com o MESMO número — uma mensagem por número", async () => {
+  const { db, ctx } = ambienteDoLote();
+  db.tabelas.clients.find((c: Linha) => c.id === MARIA).whatsapp = "(47) 99999-0001";
+  const s = semNbsp(await buildPendingSummary(ctx.admin, "send_bulk_collection_reminders", { collection_ids: [COL, COL_M] }, { userId: "dono-1" }));
+  assertStringIncludes(s, "a *1* cliente(s)");
+  assertStringIncludes(s, "- Maria Souza: o mesmo número já recebe outra cobrança neste lote");
+});
+
+Deno.test("lote: no máximo 20 por vez — o cartão e o envio recusam o maior", async () => {
+  const { ctx } = ambienteDoLote();
+  const ids = Array.from({ length: 21 }, (_, i) => `33333333-3333-4333-8333-3333333331${String(i).padStart(2, "0")}`);
+  const s = await buildPendingSummary(ctx.admin, "send_bulk_collection_reminders", { collection_ids: ids }, { userId: "dono-1" });
+  assertStringIncludes(s, "⚠️ Cobre no máximo 20 de uma vez");
+  // deno-lint-ignore no-explicit-any
+  const r = await lote.execute({ collection_ids: ids, _retrato: { itens: [] } }, ctx) as any;
+  assertEquals(r.nada_enviado, true);
+});
+
+Deno.test("lote: a frase única cita o nome de um cliente ou uma data — atenção no cartão", async () => {
+  const { db, ctx } = ambienteDoLote();
+  const p = await pedirLote(ctx, db, { collection_ids: [COL, COL_M], custom_message: "Olá João, o pagamento venceu em 22/07. Abraço!" });
+  const s = semNbsp(p.summary);
+  assertStringIncludes(s, "- Atenção: a frase cita \"João\" e vai IGUAL a todos");
+  assertStringIncludes(s, "- Atenção: a frase cita data e vai IGUAL a todos");
+});
+
+Deno.test("lote: modo de teste com o 'sim' repetido — diz que não reenviou para o número de teste; os avisos de estilo voltam", async () => {
+  {
+    const { db, ctx } = ambienteDoLote();
+    const p = await pedirLote(ctx, db, { collection_ids: [COL, COL_M] });
+    await comEnvio({ deduplicated: true }, async () => {
+      // deno-lint-ignore no-explicit-any
+      const r = await lote.execute(p.payload, { ...ctx, settings: { wa_test_mode: "true", wa_test_number: "5547900000000" } }) as any;
+      assertEquals(r.ok, false);
+      assertStringIncludes(JSON.stringify(r.detalhe.pulados), "número de TESTE; não reenviei");
+      assertStringIncludes(r.aviso, "modo de teste");
+    });
+  }
+  {
+    const { db, ctx } = ambienteDoLote();
+    const p = await pedirLote(ctx, db, { collection_ids: [COL, COL_M], custom_message: "Bom dia! Regularize o quanto antes para evitar transtornos." });
+    await comEnvio({ messageId: "m1" }, async () => {
+      // deno-lint-ignore no-explicit-any
+      const r = await lote.execute(p.payload, ctx) as any;
+      assertEquals(r.ok, true, JSON.stringify(r));
+      assert(Array.isArray(r.avisos_estilo) && r.avisos_estilo.some((a: string) => a.startsWith("ameaca")), JSON.stringify(r.avisos_estilo));
+    });
+  }
 });

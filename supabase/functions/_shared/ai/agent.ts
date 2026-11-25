@@ -23,7 +23,15 @@ import { resumirAgrupamentoDeOS, resumirDesagrupamentoDeOS } from "./tools/agrup
 // sem OS) com o saldo e a mensagem exata; trava vira recusa.
 import { resumirCobrancaConjunta } from "./tools/cobrar-juntas.ts";
 // lembrete individual de cobrança (25/11/2026): o resumo mostra o número, o valor conferido na conta e a mensagem exata; trava vira recusa.
-import { resumirLembreteDeCobranca } from "./tools/lembrete-de-cobranca.ts";
+import {
+  cartaoBateComORetrato,
+  cartaoDoLote,
+  conferirLoteDeLembretes,
+  LOTE_GRANDE,
+  MAX_DO_LOTE,
+  resumirLembreteDeCobranca,
+} from "./tools/lembrete-de-cobranca.ts";
+import { desviadoPorTeste } from "../whatsapp/marcar-enviado.ts";
 // histórico de documentos (16/11/2026): o cartão do "sim" é a simulação da restauração (o que muda, total, assinatura).
 import { resumirRestauracao } from "./tools/historico-documento.ts";
 import {
@@ -520,6 +528,8 @@ RESUMO_QUE_RESOLVE.add("cobrar_juntas");
 // lembrete individual de cobrança (25/11/2026): cobrança ou conta paga/cancelada, piso, entrada esperando no Extrato, opt-out,
 // cadastro genérico sem contato próprio, sem telefone — o resumo diz por quê numa linha "⚠️": é recusa, não pendência.
 RESUMO_QUE_RESOLVE.add("send_collection_reminder");
+// lote de lembretes (25/11/2026): nenhum sairia, leitura que falha — o resumo diz por quê numa linha "⚠️": recusa, não pendência.
+RESUMO_QUE_RESOLVE.add("send_bulk_collection_reminders");
 // "Sim, é do X" (leva 8, revisão de 23/10/2026): entrada confirmada sem cliente sugerido, cliente fora do cadastro ou
 // leitura que falha — o resumo diz por quê numa linha "⚠️": é recusa, não pendência.
 RESUMO_QUE_RESOLVE.add("aprovar_propostas_de_lancamento");
@@ -858,24 +868,25 @@ export async function buildPendingSummary(
   }
   // Macros de fluxo: a confirmação PRECISA mostrar o que vai acontecer de verdade (a lista
   // do lote, os passos da aprovação) — os args crus não bastam. Resolve o conteúdo real.
+  // Lote de lembretes (25/11/2026): o cartão é a conferência do envio — cada cliente com o número, o valor e o vencimento
+  // da CONTA, o que fica de fora e por quê, e a mensagem. Nenhum sairia, leitura que falha ou retrato que falhou: "⚠️".
   if (toolName === "send_bulk_collection_reminders") {
-    const ids: string[] = Array.isArray(args?.collection_ids) ? (args.collection_ids as string[]) : [];
-    if (ids.length === 0) return "Nenhuma cobrança selecionada.";
-    let rows: any[] = [];
+    const ids: string[] = Array.isArray(args?.collection_ids) ? (args.collection_ids as string[]).filter(Boolean) : [];
+    if (ids.length === 0) return "⚠️ Nenhuma cobrança selecionada: levante a lista (list_pending_collections ou get_delinquency_plan) e passe os ids.";
+    if (ids.length > MAX_DO_LOTE) return `⚠️ ${LOTE_GRANDE}`;
     try {
-      // O mesmo resolvedor do envio (id da cobrança OU receivable_id de get_delinquency_plan): o resumo mostra o lote
-      // que vai sair de verdade.
-      rows = (await resolverCobrancasDoLote(admin, ids)).flatMap((i) => (i.cobranca ? [i.cobranca] : []));
-    } catch { /* best-effort */ }
-    if (rows.length === 0) return `Enviar cobrança para ${ids.length} cliente(s) selecionado(s).`;
-    const hoje = Date.now();
-    const linhas = rows.map((r) => {
-      const dias = r.due_date ? Math.floor((hoje - new Date(`${r.due_date}T00:00:00`).getTime()) / 86400000) : 0;
-      const atraso = dias > 0 ? ` · ${dias}d de atraso` : "";
-      return `- ${r.contact_name || "cliente"}: ${fmtBRL.format(Number(r.amount) || 0)}${atraso}`;
-    });
-    const total = rows.reduce((a, r) => a + (Number(r.amount) || 0), 0);
-    return `Enviar cobrança por WhatsApp para *${rows.length}* cliente(s):\n${linhas.join("\n")}\nTotal: *${fmtBRL.format(total)}*`;
+      const modoTeste = desviadoPorTeste((quem.settings ?? {}) as Record<string, string>);
+      const itens = await conferirLoteDeLembretes(admin, admin, await resolverCobrancasDoLote(admin, ids), args?.custom_message, { modoTeste });
+      const r = cartaoDoLote(itens, args?.custom_message);
+      if (r.trim().startsWith("⚠️")) return r;
+      if (quem.retrato === null) return "⚠️ Não consegui conferir o lote agora. Nada foi enviado; tente de novo.";
+      // o retrato saiu de outra conferência, segundos antes: a lista tem de ser a mesma que o cartão mostra
+      if (quem.retrato && !cartaoBateComORetrato(itens, quem.retrato)) return "⚠️ A lista mudou enquanto eu conferia (um pagamento ou uma cobrança mexeu agora). Nada foi enviado; peça de novo.";
+      return r;
+    } catch (e) {
+      const motivo = String((e as { message?: string })?.message ?? e).replace(/\s*\n+\s*/g, " ");
+      return `⚠️ Não consegui conferir o lote agora (${motivo}). Nada foi enviado; tente de novo.`;
+    }
   }
   if (toolName === "approve_quote_full") {
     const osLabel = args?.service_order_id ? await resolveIdLabel(admin, "service_order_id", String(args.service_order_id)) : "orçamento";

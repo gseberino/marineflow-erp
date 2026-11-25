@@ -49,43 +49,31 @@ const ctx = (client: unknown, userRole = "admin") =>
 const bulk = flowMacroTools.find((t) => t.name === "send_bulk_collection_reminders")!;
 const approve = flowMacroTools.find((t) => t.name === "approve_quote_full")!;
 
-const hojeISO = new Date().toISOString();
-
 // ───────── send_bulk_collection_reminders ─────────
 
-Deno.test("batch: envia para quem não foi cobrado hoje", async () => {
+// 25/11/2026: o lote passou pela conferência do lembrete individual (valor e vencimento da conta, travas, retrato). O
+// envio, o "já cobrado hoje", o sem telefone e o cartão são testados em lembrete-de-cobranca_test.ts, com o banco falso
+// que respeita os filtros (este mock ignora filtros). Aqui fica a porta: sem o retrato do cartão, nada sai.
+Deno.test("batch: sem o retrato do cartão (execução direta, pendência antiga) nada sai", async () => {
+  let enviou = false;
   const origFetch = globalThis.fetch;
-  globalThis.fetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({ messageId: "m1" }) } as any);
+  globalThis.fetch = () => { enviou = true; return Promise.resolve({ ok: true, json: () => Promise.resolve({ messageId: "m1" }) } as any); };
   try {
     const client = fakeClient({
       collections: [{ id: "c1", amount: 500, due_date: "2020-01-01", contact_whatsapp: "5547999", contact_name: "Ana", last_auto_sent_at: null }],
     });
     const out: any = await bulk.execute({ collection_ids: ["c1"] }, ctx(client));
-    assertEquals(out.enviados, 1);
-    assertEquals(out.falhas, 0);
-    assertEquals(out.pulados, 0);
+    assertEquals(out.nada_enviado, true);
+    assertEquals(enviou, false);
   } finally {
     globalThis.fetch = origFetch;
   }
 });
 
-Deno.test("batch: pula quem já foi cobrado hoje (sem enviar)", async () => {
-  const client = fakeClient({
-    collections: [{ id: "c1", amount: 500, due_date: "2020-01-01", contact_whatsapp: "5547999", contact_name: "Ana", last_auto_sent_at: hojeISO }],
-  });
-  const out: any = await bulk.execute({ collection_ids: ["c1"] }, ctx(client));
-  assertEquals(out.pulados, 1);
-  assertEquals(out.enviados, 0);
-});
-
-Deno.test("batch: sem telefone vira falha (não derruba o lote)", async () => {
-  const client = fakeClient({
-    collections: [{ id: "c1", amount: 500, due_date: "2020-01-01", contact_whatsapp: null, phone: null, contact_name: "Ana", client_id: "x", last_auto_sent_at: null }],
-    clients: [{ whatsapp: null, phone: null }],
-  });
-  const out: any = await bulk.execute({ collection_ids: ["c1"] }, ctx(client));
-  assertEquals(out.falhas, 1);
-  assertEquals(out.enviados, 0);
+Deno.test("batch: vendedor não manda lote de cobrança (só admin e financeiro)", async () => {
+  assertEquals([...(bulk.roles ?? [])].sort(), ["admin", "financial"]);
+  const out: any = await bulk.execute({ collection_ids: ["c1"], _retrato: { itens: [] } }, ctx(fakeClient({}), "seller"));
+  assertEquals(out.error, "Só administrador ou financeiro envia lembretes de cobrança.");
 });
 
 Deno.test("batch: técnico é bloqueado", async () => {
