@@ -34,6 +34,14 @@ import {
   TIPO_DO_JOB,
   TIPO_DO_PAINEL,
 } from "../_shared/ai/max/claude-max.ts";
+// C2 (pacote 1, 24/11/2026): a causa da falha do Claude da assinatura, dita ao dono, e a reserva desligada de verdade.
+import {
+  avisoDeQueOClaudeNaoRespondeu,
+  type CausaDaFalha,
+  lerCausaDaFalha,
+  rotuloDaCausaNoLog,
+  textoDaFalhaParaODono,
+} from "../_shared/ai/max/causa-da-falha.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { filtrarTools } from "../_shared/ai/intent-router.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
@@ -963,13 +971,32 @@ interface TurnoDoModelo {
   effectiveText: string;
   /** false na reserva: o Max já falhou neste turno, vai direto pelo OpenRouter. */
   permitirMax: boolean;
+  /** C2: por que o Max falhou neste turno (só na reserva). Se a reserva também falhar, o dono lê a causa no topo. */
+  causaDoMax?: CausaDaFalha;
+}
+
+/**
+ * C2 (pacote 1, 24/11/2026): o Claude da assinatura não pode atender ANTES de existir pedido (o PC sem sinal, o Claude em
+ * pausa por login ou limite, ou o pedido não entrou na fila) e a reserva está desligada (ai_whatsapp_max_reserva = 'off').
+ * O turno fecha aqui, sem o laço do OpenRouter: conta para o vigia (o registro max_fora_sem_reserva diz que o dono já
+ * soube), a causa entra na conversa (o turno seguinte sabe que este falhou) e vai ao dono. O estado das camadas acima
+ * (lista de opções, pendência) não é gravado: o turno não aconteceu, e o dono manda de novo.
+ */
+async function avisarQueOMaxNaoAtende(turno: TurnoDoModelo, causa: CausaDaFalha, erro?: unknown): Promise<Response> {
+  const { admin, sessionId, phoneNormalized, effectiveText } = turno;
+  const aviso = textoDaFalhaParaODono(causa);
+  await registrarFalhaDoAssistente(admin, { onde: "max_fora_sem_reserva", mensagem: `Claude Max fora e sem reserva: ${rotuloDaCausaNoLog(causa)}`, erro });
+  await gravarTurnoDoMax(admin, sessionId, effectiveText, aviso, {}, "whatsapp");
+  await queueWhatsAppReply(admin, phoneNormalized, aviso);
+  return jr({ ok: true, entregue: "aviso", causa: causa.codigo });
 }
 
 /**
  * O turno do modelo no WhatsApp. Com app_settings.ai_provedor_whatsapp = 'claude_max' (só para o
  * admin — termos da assinatura) e o gateway no ar, o turno vira job para o Claude Max e a resposta
  * sai por handleEntregaDoMax. Em qualquer outro caso — ou se o Max falhar depois — roda o loop do
- * OpenRouter aqui, como sempre rodou.
+ * OpenRouter aqui, como sempre rodou; menos com a reserva desligada (C2): aí o Max que não atende
+ * vira aviso com a causa (avisarQueOMaxNaoAtende) e nada chega ao OpenRouter.
  */
 async function turnoDoModeloNoWhatsApp(turno: TurnoDoModelo): Promise<Response> {
   const { admin, sessionId, phoneNormalized, appUser, settings, toolCtx, metadata, effectiveText } = turno;
@@ -1043,11 +1070,21 @@ async function turnoDoModeloNoWhatsApp(turno: TurnoDoModelo): Promise<Response> 
           .eq("id", sessionId);
         return jr({ ok: true, session_id: sessionId, claude_max: jobId });
       } catch (e) {
+        // C2: reserva desligada = o turno fecha aqui, com a causa dita. Nada vai ao OpenRouter.
+        if (!reservaLigada(settings)) {
+          console.error("[ai-agent][whatsapp] não consegui enfileirar no Claude Max e a reserva está desligada; avisando o dono:", e);
+          return await avisarQueOMaxNaoAtende(turno, await lerCausaDaFalha(admin, { motivo: "enfileirar" }), e);
+        }
         console.error("[ai-agent][whatsapp] não consegui enfileirar no Claude Max; turno pelo OpenRouter:", e);
         // Só aviso: a reserva ainda pode responder. Não conta para o aviso do vigia.
         await logEdgeError(admin, { context: "ai-agent", action: "enfileirar_max", level: "warn", message: "Não enfileirou no Claude Max; turno pelo OpenRouter", error: e });
       }
     } else {
+      // C2: reserva desligada = o turno fecha aqui, com a causa lida do estado do PC. Nada vai ao OpenRouter.
+      if (!reservaLigada(settings)) {
+        console.log("[ai-agent][whatsapp] Claude Max fora do ar e a reserva está desligada; avisando o dono");
+        return await avisarQueOMaxNaoAtende(turno, await lerCausaDaFalha(admin));
+      }
       console.log("[ai-agent][whatsapp] Claude Max fora do ar (gateway sem sinal ou em pausa); turno pelo OpenRouter");
     }
   }
@@ -1083,6 +1120,8 @@ async function turnoDoModeloNoWhatsApp(turno: TurnoDoModelo): Promise<Response> 
     {
       error: result.error, options: result.options, proposal: result.proposal as Proposal | undefined, fluxo: result.fluxo,
       texto: result.message.content, conferido,
+      // C2: o Max falhou, a reserva tentou e também falhou. O dono lê por que o Claude não respondeu, no topo.
+      aviso: result.error && turno.causaDoMax ? avisoDeQueOClaudeNaoRespondeu(turno.causaDoMax) : undefined,
     },
     metadata,
     await pendenciaQueSegueEsperando(admin, metadata),
@@ -1104,7 +1143,8 @@ async function turnoDoModeloNoWhatsApp(turno: TurnoDoModelo): Promise<Response> 
  * Entrega de um turno do Claude Max (chamada pelo gatilho de ai_jobs via pg_net, x-cron-secret).
  * Concluído: grava o turno, aplica pendência/opções e responde no WhatsApp. Falhou (PC desligado,
  * limite da assinatura, erro): refaz o turno pelo OpenRouter (ai_whatsapp_max_reserva != 'off')
- * ou avisa. Idempotente: ai_job_marcar_entregue só deixa passar uma vez.
+ * ou avisa, com a causa dita e o aviso gravado na conversa (C2). Idempotente: ai_job_marcar_entregue
+ * só deixa passar uma vez.
  */
 async function handleEntregaDoMax(body: Record<string, any>): Promise<Response> {
   const jobId = String(body.job_id || "");
@@ -1113,7 +1153,7 @@ async function handleEntregaDoMax(body: Record<string, any>): Promise<Response> 
   });
   const { data: job } = await admin
     .from("ai_jobs")
-    .select("id, status, requested_by, input, metadata, response, error, error_code, model_used, usage")
+    .select("id, status, requested_by, input, metadata, response, error, error_code, model_used, usage, timeout_seconds")
     .eq("id", jobId)
     .maybeSingle();
   const meta = (job?.metadata ?? {}) as Record<string, any>;
@@ -1188,14 +1228,16 @@ async function handleEntregaDoMax(body: Record<string, any>): Promise<Response> 
   }
 
   console.warn(`[ai-agent][max] turno ${jobId} não veio do Max (${job.error_code ?? job.status}); ${reservaLigada(settings) ? "refazendo pelo OpenRouter" : "avisando o usuário"}`);
+  // C2 (pacote 1, 24/11/2026): a causa em frase (login, limite, PC sem sinal, prazo…), no lugar do código cru. O erro do
+  // job só escolhe a frase; o estado do PC é lido aqui, uma vez, e serve aos dois caminhos abaixo.
+  const causa = await lerCausaDaFalha(admin, { job });
   if (!reservaLigada(settings) || !texto) {
     await registrarFalhaDoAssistente(admin, { onde: "max_sem_reserva", mensagem: `Turno do Claude Max sem resposta e sem reserva: ${job.error_code ?? job.status}` });
-    await queueWhatsAppReply(
-      admin,
-      phoneNormalized,
-      `⚠️ Não consegui responder pelo Claude agora (${job.error_code ?? "falha"}). Tente de novo em instantes.`,
-    );
-    return jr({ ok: true, entregue: "aviso" });
+    const avisoDaCausa = textoDaFalhaParaODono(causa);
+    // O aviso entra na conversa antes de sair: o turno seguinte sabe que este falhou (até 24/11 ele não entrava).
+    if (texto) await gravarTurnoDoMax(admin, sessionId, texto, avisoDaCausa, job, "whatsapp");
+    await queueWhatsAppReply(admin, phoneNormalized, avisoDaCausa);
+    return jr({ ok: true, entregue: "aviso", causa: causa.codigo });
   }
   // Só aviso: a reserva ainda pode responder. Se ela falhar também, o turno abaixo registra a falha.
   await logEdgeError(admin, { context: "ai-agent", action: "max_falhou", level: "warn", message: `Turno do Claude Max falhou (${job.error_code ?? job.status}); refazendo pelo OpenRouter` });
@@ -1203,6 +1245,7 @@ async function handleEntregaDoMax(body: Record<string, any>): Promise<Response> 
   const toolCtx = { sb: adminDoTurno, admin: adminDoTurno, userId: appUser.id, userRole: (appUser.role as Role) || "unknown", jwt: "", appOrigin: settings.app_public_url || "", settings, sessaoId: sessionId, sessaoAmarrada: metadata.retorno_amarrada === true, casoAmarrado: casoAmarradoDaSessao(sessionRow) };
   return await turnoDoModeloNoWhatsApp({
     admin, sessionId, phoneNormalized, appUser, settings, toolCtx, metadata, effectiveText: texto, permitirMax: false,
+    causaDoMax: causa,
   });
 }
 
@@ -1266,12 +1309,32 @@ async function handleEntregaDoPainel(admin: any, job: Record<string, any>): Prom
 
 const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+type TurnoDoPainel = Parameters<typeof turnoDoPainelPeloMax>[0];
+
+/** C2 (pacote 1, 24/11/2026): a tela recebe a causa em frase e o aviso entra na conversa. Nada vai ao OpenRouter. */
+async function avisarNoPainelQueOMaxNaoAtende(p: TurnoDoPainel, causa: CausaDaFalha, job: Record<string, any> = {}): Promise<Response> {
+  const aviso = textoDaFalhaParaODono(causa);
+  await gravarTurnoDoMax(p.admin, p.loopParams.sessionId, p.texto, aviso, job, "web");
+  return jr({ message: { role: "assistant", content: aviso }, tool_events: [], session_id: p.loopParams.sessionId });
+}
+
+/**
+ * C2: o Max não pôde atender ANTES de existir pedido e a reserva está desligada. Até 24/11 este turno seguia pelo
+ * OpenRouter e, falhando lá, contava como turno_painel; continua contando igual, agora com a causa no registro.
+ */
+async function semOMaxESemReservaNoPainel(p: TurnoDoPainel, causa: CausaDaFalha, erro?: unknown): Promise<Response> {
+  await registrarFalhaDoAssistente(p.admin, { onde: "turno_painel", mensagem: `Turno do painel sem resposta: Claude Max fora e sem reserva: ${rotuloDaCausaNoLog(causa)}`, erro });
+  return await avisarNoPainelQueOMaxNaoAtende(p, causa);
+}
+
 /**
  * Chat do painel pelo Claude Max (03/10/2026): com ai_provedor_painel = 'claude_max' (só o admin) e
  * o gateway no ar, enfileira e ESPERA o job aqui — a tela recebe a mesma resposta de sempre (texto,
  * card de confirmação ou opções). null = siga pelo OpenRouter nesta mesma requisição (gateway não
  * pegou em 20 s, falhou, ou o Max está desligado). Passou de ~110 s: marca o job "painel_tarde",
  * devolve "ainda trabalhando" e o gatilho de entrega grava a resposta na conversa quando ficar pronta.
+ * C2 (24/11/2026): com a reserva desligada (ai_whatsapp_max_reserva = 'off', que vale para os dois
+ * canais), o Max que não atende nunca devolve null: a tela recebe a causa dita.
  */
 async function turnoDoPainelPeloMax(p: {
   admin: any;
@@ -1283,6 +1346,11 @@ async function turnoDoPainelPeloMax(p: {
 }): Promise<Response | null> {
   if (provedorDoTurno(p.settings, p.userRole, "panel") !== "claude_max") return null;
   if (!(await maxDisponivel(p.admin))) {
+    // C2: reserva desligada = a tela recebe a causa lida do estado do PC. Nada vai ao OpenRouter.
+    if (!reservaLigada(p.settings)) {
+      console.log("[ai-agent][painel] Claude Max fora do ar e a reserva está desligada; avisando na tela");
+      return await semOMaxESemReservaNoPainel(p, await lerCausaDaFalha(p.admin));
+    }
     console.log("[ai-agent][painel] Claude Max fora do ar; turno pelo OpenRouter");
     return null;
   }
@@ -1301,6 +1369,11 @@ async function turnoDoPainelPeloMax(p: {
       canal: "panel",
     });
   } catch (e) {
+    // C2: reserva desligada = a tela recebe a causa. Nada vai ao OpenRouter.
+    if (!reservaLigada(p.settings)) {
+      console.error("[ai-agent][painel] não consegui enfileirar no Claude Max e a reserva está desligada; avisando na tela:", e);
+      return await semOMaxESemReservaNoPainel(p, await lerCausaDaFalha(p.admin, { motivo: "enfileirar" }), e);
+    }
     console.error("[ai-agent][painel] não consegui enfileirar no Claude Max; turno pelo OpenRouter:", e);
     return null;
   }
@@ -1309,7 +1382,7 @@ async function turnoDoPainelPeloMax(p: {
     await dormir(1000);
     const { data: job } = await p.admin
       .from("ai_jobs")
-      .select("id, status, started_at, error_code, response, metadata, model_used, usage")
+      .select("id, status, started_at, error_code, error, timeout_seconds, response, metadata, model_used, usage")
       .eq("id", jobId)
       .maybeSingle();
     const d = desfechoDoPainel(job, Date.now() - inicio);
@@ -1341,9 +1414,11 @@ async function turnoDoPainelPeloMax(p: {
       }
       await p.admin.rpc("ai_job_marcar_entregue", { p_job_id: jobId });
       if (!reservaLigada(p.settings)) {
-        const aviso = `⚠️ O Claude Max não respondeu (${d.motivo}) e a reserva pelo OpenRouter está desligada. Peça de novo em instantes.`;
-        await gravarTurnoDoMax(p.admin, p.loopParams.sessionId, p.texto, aviso, job ?? {}, "web");
-        return jr({ message: { role: "assistant", content: aviso }, tool_events: [], session_id: p.loopParams.sessionId });
+        // C2: a causa em frase, no lugar do motivo cru. O pedido que ninguém pegou em 20 s (cancelado logo acima) é
+        // prazo vencido na fila: o estado do PC diz se foi o PC sem sinal, o Claude em pausa ou o PC ocupado.
+        const jobDaCausa = job?.status === "pending" ? { ...job, error_code: "deadline_exceeded" } : job;
+        console.warn(`[ai-agent][painel] turno ${jobId} sem resposta do Max (${d.motivo}) e a reserva está desligada; avisando na tela`);
+        return await avisarNoPainelQueOMaxNaoAtende(p, await lerCausaDaFalha(p.admin, { job: jobDaCausa }), job ?? {});
       }
       console.warn(`[ai-agent][painel] turno ${jobId} vai pelo OpenRouter: ${d.motivo}`);
       return null;

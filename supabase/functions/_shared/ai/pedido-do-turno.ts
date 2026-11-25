@@ -6,6 +6,7 @@
 // feito. Tudo aqui é texto montado do banco ou do resultado das ferramentas, e o que vai para a conversa é TEXTO —
 // nunca um tool_result solto, que a API recusa (400) sem o tool_use dele.
 import { tituloDaAcao, type ToolEvent } from "./agent.ts";
+import { causaDaFalha } from "./max/causa-da-falha.ts";
 import { ehLeituraPeloNome } from "./perfil-operacao.ts";
 import { ERRO_DO_SISTEMA_PARA_O_DONO, erroParaODono } from "./whatsapp-resposta.ts";
 
@@ -297,7 +298,12 @@ export async function trabalhoNaAuditoria(admin: any, sessionId: string, turnoId
   }
 }
 
-/** O aviso de quando o Claude Max caiu depois de já ter feito algo (a reserva não refaz, para não repetir). */
+/**
+ * O aviso de quando o Claude Max caiu depois de já ter feito algo (a reserva não refaz, para não repetir). Entre
+ * parênteses vai a causa em meia frase ("passou do tempo máximo"), não o código cru ("timeout"): a mesma frase curta
+ * de causa-da-falha.ts (C2, 24/11/2026), que é a fonte única do que o dono lê sobre a queda do assistente.
+ */
 export function avisoDoTurnoInterrompido(codigo: string | null | undefined): string {
-  return `⚠️ O assistente parou no meio desta resposta (${codigo || "falha do Claude Max"}). O que ele já tinha feito ficou registrado e não foi repetido — confira antes de pedir de novo o que faltou.`;
+  const causa = causaDaFalha({ job: { error_code: codigo }, estado: null, agora: new Date() });
+  return `⚠️ O assistente parou no meio desta resposta (${causa.curta}). O que ele já tinha feito ficou registrado e não foi repetido — confira antes de pedir de novo o que faltou.`;
 }

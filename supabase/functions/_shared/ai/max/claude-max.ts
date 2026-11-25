@@ -45,7 +45,11 @@ export function modeloDoMax(settings: Record<string, string>, canal: CanalDoAgen
   return v === "haiku" || v === "opus" ? v : "sonnet";
 }
 
-/** Se o Max falhar (PC desligado, limite, erro), o turno é refeito pelo OpenRouter? Padrão: sim. */
+/**
+ * Se o Max falhar (PC desligado, limite, erro), o turno é refeito pelo OpenRouter? Padrão: sim.
+ * Desligada (C2, 24/11/2026): nos dois canais, o Max que não atende — antes ou depois de existir pedido — vira aviso com
+ * a causa dita (causa-da-falha.ts) e nada chega ao OpenRouter. Quem liga ou desliga é o dono, pela tela.
+ */
 export function reservaLigada(settings: Record<string, string>): boolean {
   return (settings[CHAVE_DA_RESERVA] || "").trim().toLowerCase() !== "off";
 }

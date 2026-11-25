@@ -349,18 +349,146 @@ Deno.test("lote F1: no painel, a frase do assistente acima do cartão (OpenRoute
 // Retorno F0a-2 (05/11/2026): as falhas do assistente ficavam só no console (0 linhas de ai-agent em app_error_logs em 05/11).
 // O que se protege: todo turno que termina sem resposta conta para o aviso do vigia; o Max que falha com a reserva ligada é
 // só aviso, porque a reserva ainda pode responder; o log nunca troca o 500 do handler por outro erro.
-Deno.test("F0a-2: turno sem resposta entra na conta, nos quatro caminhos", () => {
+Deno.test("F0a-2: turno sem resposta entra na conta, nos quatro caminhos (e no do Max fora sem reserva, C2)", () => {
   assertStringIncludes(fonte, 'registrarFalhaDoAssistente(admin, { onde: "turno_whatsapp"');
   assertStringIncludes(fonte, 'registrarFalhaDoAssistente(admin, { onde: "turno_painel"');
   assertStringIncludes(fonte, 'registrarFalhaDoAssistente(admin, { onde: "max_sem_reserva"');
   assertStringIncludes(fonte, 'registrarFalhaDoAssistente(admin, { onde: "handler"');
+  // C2 (24/11/2026): o registro que diz ao vigia de queda (V1) que o dono já soube pelo WhatsApp. O vigia filtra por este
+  // nome exato (ele vira a coluna action do log): não renomear sem mexer no vigia.
+  assertStringIncludes(fonte, 'registrarFalhaDoAssistente(admin, { onde: "max_fora_sem_reserva"');
 });
 
 Deno.test("F0a-2: o Max que falha com a reserva ligada é só aviso e não conta", () => {
   const ini = fonte.indexOf('onde: "max_sem_reserva"');
   const trecho = fonte.slice(ini, fonte.indexOf("turnoDoModeloNoWhatsApp({", ini));
   assertStringIncludes(trecho, 'action: "max_falhou", level: "warn"');
-  assert(trecho.indexOf('return jr({ ok: true, entregue: "aviso" })') < trecho.indexOf('action: "max_falhou"'), "o aviso é do caminho que segue pela reserva");
+  // C2: o retorno do aviso ganhou a causa. A saída do aviso tem de existir (indexOf -1 passaria na comparação) e vir antes
+  // do log da reserva.
+  const saidaDoAviso = trecho.indexOf('return jr({ ok: true, entregue: "aviso", causa: causa.codigo });');
+  assert(saidaDoAviso > 0, "a saída do aviso sumiu");
+  assert(saidaDoAviso < trecho.indexOf('action: "max_falhou"'), "o aviso é do caminho que segue pela reserva");
+  assertEquals((trecho.match(/return jr\(/g) ?? []).length, 1, "uma saída só antes da reserva: a do aviso");
+});
+
+// ─── Pacote 1, C2 (24/11/2026): a causa dita e a reserva desligada de verdade ─────────────────────────────────────────
+// O que se protege: com app_settings.ai_whatsapp_max_reserva = 'off', nenhum caminho em que o Claude da assinatura não
+// atende chega ao laço do OpenRouter, nos dois canais; o aviso leva a causa em frase (causa-da-falha.ts), nunca o código
+// cru, e entra na conversa antes de sair; com a chave ligada, o caminho é o de sempre.
+const entregaDoMax = fonte.slice(fonte.indexOf("async function handleEntregaDoMax("), fonte.indexOf("async function gravarTurnoDoMax("));
+
+Deno.test("C2 (WhatsApp): Max indisponível ou falha ao enfileirar, com a reserva desligada, fecha com o aviso antes do laço do OpenRouter", () => {
+  const ramoDoMax = modeloWa.slice(modeloWa.indexOf("// ---- Claude Max (assinatura do dono"), modeloWa.indexOf("// ---- OpenRouter (loop aqui na edge) ----"));
+  assert(ramoDoMax.length > 0 && modeloWa.indexOf("// ---- OpenRouter (loop aqui na edge) ----") < modeloWa.indexOf("const result = await runAgentLoop(loopParams);"), "o ramo do Max vem antes do laço");
+  assert(!ramoDoMax.includes("runAgentLoop("), "o laço não roda dentro do ramo do Max");
+  // falha ao enfileirar: a guarda é a PRIMEIRA coisa do catch, antes do log que diz "turno pelo OpenRouter"
+  const pegou = ramoDoMax.indexOf("} catch (e) {");
+  const fora = ramoDoMax.indexOf("} else {", pegou);
+  assert(pegou > 0 && fora > pegou, "os dois ramos existem");
+  const ramoDeEnfileirar = ramoDoMax.slice(pegou, fora);
+  const guardaDeEnfileirar = ramoDeEnfileirar.indexOf("if (!reservaLigada(settings)) {");
+  assert(guardaDeEnfileirar > 0 && guardaDeEnfileirar < ramoDeEnfileirar.indexOf('action: "enfileirar_max"'), "enfileirar: a guarda vem antes de seguir pela reserva");
+  assertStringIncludes(ramoDeEnfileirar, 'return await avisarQueOMaxNaoAtende(turno, await lerCausaDaFalha(admin, { motivo: "enfileirar" }), e);');
+  // Max indisponível
+  const ramoDeFora = ramoDoMax.slice(fora);
+  const guardaDeFora = ramoDeFora.indexOf("if (!reservaLigada(settings)) {");
+  assert(guardaDeFora > 0 && guardaDeFora < ramoDeFora.indexOf("turno pelo OpenRouter"), "Max fora: a guarda vem antes de seguir pela reserva");
+  assertStringIncludes(ramoDeFora, "return await avisarQueOMaxNaoAtende(turno, await lerCausaDaFalha(admin));");
+  // duas guardas, duas saídas: nenhuma terceira porta para o laço com a reserva desligada
+  assertEquals((ramoDoMax.match(/if \(!reservaLigada\(settings\)\) \{/g) ?? []).length, 2);
+  assertEquals((ramoDoMax.match(/return await avisarQueOMaxNaoAtende\(/g) ?? []).length, 2);
+  // o turno que foi para a fila do Max continua saindo como sempre
+  assertStringIncludes(ramoDoMax, "return jr({ ok: true, session_id: sessionId, claude_max: jobId });");
+});
+
+Deno.test("C2 (WhatsApp): o aviso do Max fora conta para o vigia, entra na conversa e só então sai; não roda o modelo nem mexe na sessão", () => {
+  const aviso = fonte.slice(fonte.indexOf("async function avisarQueOMaxNaoAtende("), fonte.indexOf("async function turnoDoModeloNoWhatsApp("));
+  assert(aviso.length > 0, "falta a função do aviso");
+  const registra = aviso.indexOf('await registrarFalhaDoAssistente(admin, { onde: "max_fora_sem_reserva"');
+  const grava = aviso.indexOf('await gravarTurnoDoMax(admin, sessionId, effectiveText, aviso, {}, "whatsapp");');
+  const envia = aviso.indexOf("await queueWhatsAppReply(admin, phoneNormalized, aviso);");
+  assert(registra > 0 && registra < grava && grava < envia, "registra, grava na conversa e só então envia");
+  assertStringIncludes(aviso, "const aviso = textoDaFalhaParaODono(causa);");
+  assertStringIncludes(aviso, 'return jr({ ok: true, entregue: "aviso", causa: causa.codigo });');
+  assert(!aviso.includes("runAgentLoop") && !aviso.includes("enfileirarTurnoNoMax"), "sem modelo");
+  // o turno não aconteceu: o estado das camadas (lista de opções, pendência) fica como estava
+  assert(!aviso.includes("ai_operator_sessions"), "não grava a sessão");
+  // o registro do log leva o código da causa, nunca o texto do erro do PC
+  assertStringIncludes(aviso, "mensagem: `Claude Max fora e sem reserva: ${rotuloDaCausaNoLog(causa)}`");
+});
+
+Deno.test("C2 (WhatsApp): o job que falhou sem reserva sai com a causa em frase e entra na conversa antes do envio", () => {
+  const ini = entregaDoMax.indexOf("if (!reservaLigada(settings) || !texto) {");
+  const ramo = entregaDoMax.slice(ini, entregaDoMax.indexOf('action: "max_falhou"'));
+  assert(ini > 0, "falta o ramo do aviso");
+  // a causa é lida uma vez, antes do ramo, com o job (o erro dele só escolhe a frase)
+  const leCausa = entregaDoMax.indexOf("const causa = await lerCausaDaFalha(admin, { job });");
+  assert(leCausa > 0 && leCausa < ini, "lê a causa antes de decidir");
+  assertStringIncludes(entregaDoMax, "error, error_code, model_used, usage, timeout_seconds");
+  const grava = ramo.indexOf('await gravarTurnoDoMax(admin, sessionId, texto, avisoDaCausa, job, "whatsapp");');
+  const envia = ramo.indexOf("await queueWhatsAppReply(admin, phoneNormalized, avisoDaCausa);");
+  assert(grava > 0 && envia > grava, "grava na conversa antes de enviar");
+  assertStringIncludes(ramo, "const avisoDaCausa = textoDaFalhaParaODono(causa);");
+  // sem texto do pedido não há turno a gravar (uma linha de usuário vazia quebraria a conversa)
+  assertStringIncludes(ramo, "if (texto) await gravarTurnoDoMax(");
+  // o código cru não vai mais ao dono
+  assert(!entregaDoMax.includes("Não consegui responder pelo Claude agora"), "o aviso com o código cru saiu");
+  assert(!/queueWhatsAppReply\([^;]*error_code/.test(entregaDoMax), "nenhum envio leva o código do job");
+});
+
+Deno.test("C2 (WhatsApp): com a reserva ligada, a causa segue com o turno e só aparece se a reserva também falhar", () => {
+  assert(/effectiveText: texto, permitirMax: false,\r?\n\s+causaDoMax: causa,/.test(entregaDoMax), "a reserva recebe a causa do Max");
+  assertStringIncludes(modeloWa, "aviso: result.error && turno.causaDoMax ? avisoDeQueOClaudeNaoRespondeu(turno.causaDoMax) : undefined,");
+  // só neste ponto: o turno normal (sem causa do Max) não ganha aviso nenhum
+  assertEquals((fonte.match(/avisoDeQueOClaudeNaoRespondeu\(/g) ?? []).length, 1);
+});
+
+Deno.test("C2 (painel): depois de escolhido o Max, nenhum 'return null' sem conferir a reserva", () => {
+  const corpo = painelMax;
+  const partes = corpo.split("return null");
+  // quatro saídas para o OpenRouter: (1) o provedor do turno não é o Max; (2) Max fora; (3) falha ao enfileirar; (4) o job falhou
+  assertEquals(partes.length - 1, 4);
+  assert(partes[0].trimEnd().endsWith('if (provedorDoTurno(p.settings, p.userRole, "panel") !== "claude_max")'), "a primeira saída é a de quem não vai pelo Max");
+  assert(!partes[0].includes("reservaLigada"), "quem não vai pelo Max não depende da reserva");
+  const esperado: Array<[string, string]> = [
+    ["Max fora", "return await semOMaxESemReservaNoPainel(p, await lerCausaDaFalha(p.admin));"],
+    ["falha ao enfileirar", 'return await semOMaxESemReservaNoPainel(p, await lerCausaDaFalha(p.admin, { motivo: "enfileirar" }), e);'],
+    ["job que falhou", "return await avisarNoPainelQueOMaxNaoAtende(p, await lerCausaDaFalha(p.admin, { job: jobDaCausa }), job ?? {});"],
+  ];
+  esperado.forEach(([nome, saida], i) => {
+    const trecho = partes[i + 1];
+    const guarda = trecho.lastIndexOf("if (!reservaLigada(p.settings)) {");
+    assert(guarda > 0, `${nome}: falta a guarda da reserva antes do 'return null'`);
+    // entre a guarda e o 'return null' está a saída com a causa: com a reserva desligada o 'return null' não é alcançado
+    assertStringIncludes(trecho.slice(guarda), saida, nome);
+  });
+});
+
+Deno.test("C2 (painel): o aviso leva a causa em frase, entra na conversa e conta como turno do painel sem resposta", () => {
+  const helpers = fonte.slice(fonte.indexOf("async function avisarNoPainelQueOMaxNaoAtende("), fonte.indexOf("async function turnoDoPainelPeloMax("));
+  assertStringIncludes(helpers, "const aviso = textoDaFalhaParaODono(causa);");
+  const grava = helpers.indexOf('await gravarTurnoDoMax(p.admin, p.loopParams.sessionId, p.texto, aviso, job, "web");');
+  assert(grava > 0 && grava < helpers.indexOf('return jr({ message: { role: "assistant", content: aviso }, tool_events: [], session_id: p.loopParams.sessionId });'), "grava antes de devolver");
+  // o Max fora antes do job já contava (como falha do OpenRouter); continua contando, e fora da lista que o vigia lê como "o dono soube pelo WhatsApp"
+  assertStringIncludes(helpers, 'await registrarFalhaDoAssistente(p.admin, { onde: "turno_painel", mensagem: `Turno do painel sem resposta: Claude Max fora e sem reserva: ${rotuloDaCausaNoLog(causa)}`, erro });');
+  assert(!helpers.includes("max_fora_sem_reserva"), "o registro do WhatsApp não é usado no painel");
+  assert(!helpers.includes("runAgentLoop"), "sem modelo");
+  // o motivo cru e a frase da reserva saíram da tela
+  assert(!painelMax.includes("a reserva pelo OpenRouter está desligada"), "a frase que falava da reserva saiu");
+  assert(!/content: `[^`]*\$\{d\.motivo\}/.test(painelMax), "o motivo cru não vai mais para a tela");
+  // o pedido que ninguém pegou (cancelado pela edge) é prazo vencido na fila; e a leitura traz o que a causa precisa
+  assertStringIncludes(painelMax, 'const jobDaCausa = job?.status === "pending" ? { ...job, error_code: "deadline_exceeded" } : job;');
+  assertStringIncludes(painelMax, '.select("id, status, started_at, error_code, error, timeout_seconds, response, metadata, model_used, usage")');
+});
+
+Deno.test("C2: nenhum aviso ao dono fala da reserva nem do saldo dela, e a chave da reserva não é escrita por aqui", () => {
+  // decisão do dono de 24/11/2026: ele não vai pôr crédito na reserva e não quer ser lembrado disso
+  const doMax = fonte.slice(fonte.indexOf("async function avisarQueOMaxNaoAtende("), fonte.indexOf("// ---------------- HANDLER ----------------"));
+  const avisos = [...doMax.matchAll(/`[^`]*`|"[^"\r\n]*"/g)].map((m) => m[0]).filter((t) => /^.(⚠️|⏳)/.test(t));
+  assert(avisos.some((t) => t.includes("Ainda estou trabalhando nisso")), "a varredura acha os avisos escritos aqui");
+  for (const t of avisos) assert(!/cr[eé]dito|recarg|saldo|reserva|openrouter/i.test(t), t);
+  // quem liga ou desliga a reserva é o dono, pela tela: o ai-agent só lê a chave (reservaLigada)
+  assert(!doMax.includes('from("app_settings").update') && !doMax.includes('from("app_settings").upsert') && !doMax.includes("CHAVE_DA_RESERVA"), "o ai-agent não grava a chave da reserva");
 });
 
 Deno.test("F0a-2: o log do handler vem antes do 500 e não pode lançar", () => {
