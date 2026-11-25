@@ -17,7 +17,7 @@ import type { Role } from "../_shared/ai/tools/index.ts";
 import { casoAmarradoDaSessao } from "../_shared/ai/tools/registry.ts";
 import { ferramentasDoJob } from "../_shared/ai/max/ferramentas-do-job.ts";
 import { responderMcp, type ServidorDoTurno } from "../_shared/ai/max/mcp.ts";
-import { sha256Hex, TIPOS_DO_AGENTE } from "../_shared/ai/max/claude-max.ts";
+import { assinanteDoMax, sha256Hex, TIPOS_DO_AGENTE } from "../_shared/ai/max/claude-max.ts";
 import { timingSafeEqual } from "../_shared/cron-auth.ts";
 import { servirComCors } from "../_shared/cors.ts";
 
@@ -65,17 +65,29 @@ export async function handler(req: Request): Promise<Response> {
   // WhatsApp exige o canal habilitado para o usuário; o painel só exige o usuário ativo.
   if (!usuario?.active || (canal === "whatsapp" && !usuario.ai_whatsapp_enabled)) return naoAutorizado();
 
-  const { data: linhas } = await admin.from("app_settings").select("key, value");
+  const { data: linhas, error: erroDasSettings } = await admin.from("app_settings").select("key, value");
   const settings: Record<string, string> = {};
   (linhas ?? []).forEach((r: any) => {
     if (r.key) settings[r.key] = String(r.value ?? "");
   });
 
+  // S5 (pacote 1, 24/11/2026): estas ferramentas só rodam para a assinatura Claude, que é de uma pessoa. Quem pediu o job
+  // tem de estar em app_settings.ai_max_assinantes (pessoa, não cargo); sem a chave, vale a regra antiga (cargo admin).
+  // É a mesma conferência do ai-agent ao enfileirar, repetida aqui porque o job pode ter nascido de outro lugar e a
+  // lista pode ter mudado no meio do turno. Fica depois da leitura das settings, que é de onde a lista sai.
+  // Leitura que falhou não é "chave ausente": sem a lista não há como saber quem é o assinante, e valer o cargo aqui
+  // seria abrir a porta calado. Recusa, e o turno falha como qualquer outro em que o banco não respondeu.
+  if (erroDasSettings) {
+    console.error(`[erp-mcp] não consegui ler app_settings no job ${jobId}; sem a lista de assinantes, recusando:`, erroDasSettings.message);
+    return naoAutorizado();
+  }
+  if (!assinanteDoMax(settings, usuario.id, String(usuario.role ?? ""))) return naoAutorizado();
+
   const cargo = (usuario.role as Role) || ("unknown" as Role);
   const { toolsByName, alcancaveisPelaRede } = ferramentasDoJob(cargo, input.ferramentas?.visiveis, input.ferramentas?.rede, canal);
   const sessionId = String(input.sessao ?? meta.session_id ?? "");
-  // Mesmo contexto do canal WhatsApp em ai-agent: sem JWT de usuário, client service-role (no painel
-  // só o admin chega aqui pelo Max — ver provedorDoTurno).
+  // Mesmo contexto do canal WhatsApp em ai-agent: sem JWT de usuário, client service-role (nos dois
+  // canais só o assinante chega aqui pelo Max — ver assinanteDoMax, acima, e provedorDoTurno).
   // Retorno F2 (P9): a marca de quem leu um caso do cartão vale para o turno do Max também.
   const { data: sessao } = sessionId
     ? await admin.from("ai_operator_sessions").select("metadata, client_id, vessel_id").eq("id", sessionId).maybeSingle()

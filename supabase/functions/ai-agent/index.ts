@@ -29,6 +29,7 @@ import {
   enfileirarTurnoNoMax,
   maxDisponivel,
   modeloDoMax,
+  naoAssinanteSemReserva,
   provedorDoTurno,
   reservaLigada,
   TIPO_DO_JOB,
@@ -976,6 +977,27 @@ interface TurnoDoModelo {
 }
 
 /**
+ * S5 (pacote 1, 24/11/2026): a frase para quem não é o titular da assinatura Claude, nos dois canais. Quem chama já
+ * conferiu naoAssinanteSemReserva: o canal está no Claude, quem fala não é assinante e a reserva está desligada, então não
+ * há quem responda. Sem isto a pessoa cairia no laço do OpenRouter com a reserva desligada.
+ *
+ * Não é queda do Claude: não conta para o vigia (nada de registrarFalhaDoAssistente) nem usa o registro que diz ao vigia
+ * de queda que o dono já soube. Fica um aviso consultável em app_error_logs, com o id de quem pediu nos detalhes: é por
+ * ali que se descobre um id errado na lista que tenha deixado o próprio dono de fora. A conversa não ganha linha: o turno
+ * não aconteceu, e o modelo não deve ler esta recusa como fala dele quando a pessoa voltar a ser atendida.
+ */
+async function fraseParaQuemNaoEOTitular(admin: any, canal: "whatsapp" | "panel", userId: string): Promise<string> {
+  const causa = await lerCausaDaFalha(admin, { motivo: "nao_assinante" });
+  console.log(`[ai-agent][${canal}] quem pediu não é o titular da assinatura Claude e a reserva está desligada; avisando`);
+  await logEdgeError(admin, {
+    context: "ai-agent", action: "nao_assinante", level: "warn",
+    message: "Turno recusado: quem pediu não é o titular da assinatura Claude e a reserva está desligada",
+    details: { canal, user_id: userId },
+  });
+  return textoDaFalhaParaODono(causa);
+}
+
+/**
  * C2 (pacote 1, 24/11/2026): o Claude da assinatura não pode atender ANTES de existir pedido (o PC sem sinal, o Claude em
  * pausa por login ou limite, ou o pedido não entrou na fila) e a reserva está desligada (ai_whatsapp_max_reserva = 'off').
  * O turno fecha aqui, sem o laço do OpenRouter: conta para o vigia (o registro max_fora_sem_reserva diz que o dono já
@@ -993,13 +1015,24 @@ async function avisarQueOMaxNaoAtende(turno: TurnoDoModelo, causa: CausaDaFalha,
 
 /**
  * O turno do modelo no WhatsApp. Com app_settings.ai_provedor_whatsapp = 'claude_max' (só para o
- * admin — termos da assinatura) e o gateway no ar, o turno vira job para o Claude Max e a resposta
+ * assinante — termos da assinatura) e o gateway no ar, o turno vira job para o Claude Max e a resposta
  * sai por handleEntregaDoMax. Em qualquer outro caso — ou se o Max falhar depois — roda o loop do
  * OpenRouter aqui, como sempre rodou; menos com a reserva desligada (C2): aí o Max que não atende
  * vira aviso com a causa (avisarQueOMaxNaoAtende) e nada chega ao OpenRouter.
+ * S5 (24/11/2026): o assinante é a pessoa de ai_max_assinantes, não o cargo; quem não é, com a reserva
+ * desligada, lê a frase do titular e também não chega ao OpenRouter.
  */
 async function turnoDoModeloNoWhatsApp(turno: TurnoDoModelo): Promise<Response> {
   const { admin, sessionId, phoneNormalized, appUser, settings, toolCtx, metadata, effectiveText } = turno;
+
+  // ---- S5: quem não é o titular da assinatura ----
+  // O canal está no Claude, quem fala não é assinante e a reserva está desligada: o turno fecha aqui, antes de ler a
+  // conversa, com a frase do titular. Nada chega ao laço do OpenRouter. Com a reserva ligada, a pessoa segue por ele,
+  // como sempre (provedorDoTurno, abaixo).
+  if (naoAssinanteSemReserva(settings, appUser.role, "whatsapp", appUser.id)) {
+    await queueWhatsAppReply(admin, phoneNormalized, await fraseParaQuemNaoEOTitular(admin, "whatsapp", appUser.id));
+    return jr({ ok: true, entregue: "aviso", causa: "nao_assinante" });
+  }
 
   // ---- Turno normal do LLM ----
   // Janela pelas mensagens MAIS RECENTES (ver history-window.ts). Antes era ascending+limit, que
@@ -1051,7 +1084,7 @@ async function turnoDoModeloNoWhatsApp(turno: TurnoDoModelo): Promise<Response> 
   };
 
   // ---- Claude Max (assinatura do dono, pelo HBR AI Gateway) ----
-  if (turno.permitirMax && provedorDoTurno(settings, appUser.role) === "claude_max") {
+  if (turno.permitirMax && provedorDoTurno(settings, appUser.role, "whatsapp", appUser.id) === "claude_max") {
     if (await maxDisponivel(admin)) {
       try {
         const jobId = await enfileirarTurnoNoMax(admin, {
@@ -1328,13 +1361,15 @@ async function semOMaxESemReservaNoPainel(p: TurnoDoPainel, causa: CausaDaFalha,
 }
 
 /**
- * Chat do painel pelo Claude Max (03/10/2026): com ai_provedor_painel = 'claude_max' (só o admin) e
+ * Chat do painel pelo Claude Max (03/10/2026): com ai_provedor_painel = 'claude_max' (só o assinante) e
  * o gateway no ar, enfileira e ESPERA o job aqui — a tela recebe a mesma resposta de sempre (texto,
  * card de confirmação ou opções). null = siga pelo OpenRouter nesta mesma requisição (gateway não
  * pegou em 20 s, falhou, ou o Max está desligado). Passou de ~110 s: marca o job "painel_tarde",
  * devolve "ainda trabalhando" e o gatilho de entrega grava a resposta na conversa quando ficar pronta.
  * C2 (24/11/2026): com a reserva desligada (ai_whatsapp_max_reserva = 'off', que vale para os dois
  * canais), o Max que não atende nunca devolve null: a tela recebe a causa dita.
+ * S5 (24/11/2026): o assinante é a pessoa de ai_max_assinantes, não o cargo; quem não é, com a reserva
+ * desligada, recebe a frase do titular em vez de null.
  */
 async function turnoDoPainelPeloMax(p: {
   admin: any;
@@ -1344,7 +1379,12 @@ async function turnoDoPainelPeloMax(p: {
   loopParams: Parameters<typeof runAgentLoop>[0];
   texto: string;
 }): Promise<Response | null> {
-  if (provedorDoTurno(p.settings, p.userRole, "panel") !== "claude_max") return null;
+  // S5: quem não é o titular da assinatura e está sem reserva lê a frase do titular na tela. Nada vai ao OpenRouter.
+  if (naoAssinanteSemReserva(p.settings, p.userRole, "panel", p.userId)) {
+    const aviso = await fraseParaQuemNaoEOTitular(p.admin, "panel", p.userId);
+    return jr({ message: { role: "assistant", content: aviso }, tool_events: [], session_id: p.loopParams.sessionId });
+  }
+  if (provedorDoTurno(p.settings, p.userRole, "panel", p.userId) !== "claude_max") return null;
   if (!(await maxDisponivel(p.admin))) {
     // C2: reserva desligada = a tela recebe a causa lida do estado do PC. Nada vai ao OpenRouter.
     if (!reservaLigada(p.settings)) {
@@ -1817,7 +1857,7 @@ servirComCors(async (req) => {
       effort: "medium" as const, // painel: trabalho complexo de ERP, tolera mais latência
     };
 
-    // Claude Max (ai_provedor_painel, só admin): espera aqui; se não der, segue pelo OpenRouter com o
+    // Claude Max (ai_provedor_painel, só o assinante): espera aqui; se não der, segue pelo OpenRouter com o
     // tempo que sobrou da janela da edge.
     const inicioDoTurno = Date.now();
     const peloMax = await turnoDoPainelPeloMax({ admin, userId, userRole, settings, loopParams, texto: ultimoTextoUsuario });

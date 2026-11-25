@@ -10,8 +10,11 @@
 // ai-agent (type 'entregar_turno_max'), que responde no WhatsApp ou, se o Max falhou, refaz o
 // turno pelo OpenRouter (reserva legítima; nunca para contornar limite: o limite pausa o Max).
 //
-// Termos da Anthropic: a assinatura é para uso individual do assinante. Só o admin (o dono) vai
-// pelo Max; qualquer outro usuário do WhatsApp segue no OpenRouter. O gateway confere de novo.
+// Termos da Anthropic: a assinatura é para uso individual do assinante. Só o ASSINANTE vai pelo Max:
+// a pessoa listada em app_settings.ai_max_assinantes, e não o cargo (S5 do pacote 1, 24/11/2026; até
+// então era "qualquer admin"). Qualquer outro usuário segue no OpenRouter ou, com a reserva desligada,
+// lê que o assistente atende só o titular (naoAssinanteSemReserva). O gateway confere de novo, pela
+// lista dele (requested_by), que este código não lê.
 import type { ClaudeMessage, ClaudeTextBlock } from "../anthropic.ts";
 import type { FerramentasDoTurno } from "../agent.ts";
 
@@ -32,12 +35,97 @@ export type ProvedorDoAgente = "claude_max" | "openrouter";
 export type NivelDoModelo = "haiku" | "sonnet" | "opus";
 export type CanalDoAgente = "whatsapp" | "panel";
 
-/** Quem atende o turno. Max só se a chave do canal pedir E o usuário for o admin. */
-export function provedorDoTurno(settings: Record<string, string>, cargo: string, canal: CanalDoAgente = "whatsapp"): ProvedorDoAgente {
+// ═══ QUEM É O ASSINANTE (S5 do pacote 1, 24/11/2026) ═══
+//
+// A assinatura é de UMA pessoa. Até aqui a edge mandava pelo Max qualquer administrador: um administrador inativo que
+// fosse reativado entraria na fila do Max, e a única trava seria a lista do gateway, no PC. Agora a edge confere a pessoa,
+// pelo mesmo critério do gateway (o app_users.id que vai em ai_jobs.requested_by).
+//
+//   · chave AUSENTE          → regra antiga (cargo admin), com aviso no log. É o que deixa o deploy sair antes da
+//                              migration 20270301130000_assinatura_max_por_pessoa, que grava a chave.
+//   · chave presente         → só quem está na lista, seja qual for o cargo.
+//   · chave presente e vazia → ninguém.
+//
+// Nenhum id mora no código: a lista é do banco. Apagar a chave volta à regra do cargo (o gateway continua barrando).
+
+/** Quem pode usar a assinatura Claude: lista de app_users.id separados por vírgula. */
+export const CHAVE_DOS_ASSINANTES = "ai_max_assinantes";
+
+const FORMA_DE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * A lista como está na chave: ids em minúscula, sem repetição. null = a chave NÃO EXISTE (regra antiga); lista vazia = a
+ * chave existe e não libera ninguém. Tolera espaço, maiúscula, quebra de linha e ponto e vírgula; o que não tem forma de
+ * id é descartado, porque não pode ser pessoa nenhuma.
+ */
+function listaDosAssinantes(settings: Record<string, string>): string[] | null {
+  if (!Object.hasOwn(settings, CHAVE_DOS_ASSINANTES)) return null;
+  const ids = String(settings[CHAVE_DOS_ASSINANTES] ?? "").toLowerCase().split(/[\s,;]+/).filter((t) => FORMA_DE_ID.test(t));
+  return [...new Set(ids)];
+}
+
+/** O aviso da chave ausente sai uma vez por instância da função, não a cada chamada de ferramenta. */
+let avisouQueFaltaAChave = false;
+
+/**
+ * A pessoa pode usar a assinatura? Pessoa, não cargo (ver o quadro acima). `cargo` só decide enquanto a chave não existe.
+ * Com a chave presente e sem id de pessoa, ninguém passa.
+ */
+export function assinanteDoMax(settings: Record<string, string>, userId: string, cargo: string): boolean {
+  const lista = listaDosAssinantes(settings);
+  if (lista === null) {
+    if (!avisouQueFaltaAChave) {
+      avisouQueFaltaAChave = true;
+      console.warn(
+        `[claude-max] app_settings.${CHAVE_DOS_ASSINANTES} não existe: a assinatura segue pela regra antiga (cargo admin). ` +
+          "Falta aplicar a migration 20270301130000_assinatura_max_por_pessoa.",
+      );
+    }
+    return cargo === "admin";
+  }
+  const id = String(userId ?? "").trim().toLowerCase();
+  return id !== "" && lista.includes(id);
+}
+
+/**
+ * O id do assinante, quando a lista tem exatamente UM; senão null (chave ausente, lista vazia ou com dois ou mais).
+ *
+ * Para os pedidos automáticos, em que não há pessoa falando: eles rodam em nome do assinante e usam este id como
+ * requested_by, que é o que o gateway confere. null = não há em nome de quem pedir, e quem chama NÃO enfileira. Com a
+ * chave ausente também é null: a regra antiga é por cargo, e do cargo não sai um id.
+ */
+export function idDoAssinante(settings: Record<string, string>): string | null {
+  const lista = listaDosAssinantes(settings);
+  return lista?.length === 1 ? lista[0] : null;
+}
+
+/** A chave do canal pede o Claude da assinatura? */
+function canalPedeOMax(settings: Record<string, string>, canal: CanalDoAgente): boolean {
   const chave = canal === "panel" ? CHAVE_DO_PROVEDOR_PAINEL : CHAVE_DO_PROVEDOR;
-  const pedido = (settings[chave] || "").trim().toLowerCase();
-  if (pedido !== "claude_max") return "openrouter";
-  return cargo === "admin" ? "claude_max" : "openrouter";
+  return (settings[chave] || "").trim().toLowerCase() === "claude_max";
+}
+
+/** Quem atende o turno. Max só se a chave do canal pedir E a pessoa for assinante (assinanteDoMax). */
+export function provedorDoTurno(
+  settings: Record<string, string>,
+  cargo: string,
+  canal: CanalDoAgente = "whatsapp",
+  userId = "",
+): ProvedorDoAgente {
+  if (!canalPedeOMax(settings, canal)) return "openrouter";
+  return assinanteDoMax(settings, userId, cargo) ? "claude_max" : "openrouter";
+}
+
+/**
+ * O canal está no Claude da assinatura, quem fala NÃO é assinante e a reserva está desligada: não há quem responda a
+ * essa pessoa. Sem isto ela cairia no laço do OpenRouter com a reserva desligada, porque o desvio do C2 só vale dentro do
+ * ramo do Max, e ela nunca entra nele. Quem chama fecha o turno com a frase do código nao_assinante (causa-da-falha.ts).
+ *
+ * false com a reserva ligada (a pessoa segue pelo OpenRouter, como sempre) e false quando o canal não está no Claude
+ * (aí todos vão pelo OpenRouter por escolha do dono, e a chave da reserva não diz nada).
+ */
+export function naoAssinanteSemReserva(settings: Record<string, string>, cargo: string, canal: CanalDoAgente, userId: string): boolean {
+  return canalPedeOMax(settings, canal) && !reservaLigada(settings) && !assinanteDoMax(settings, userId, cargo);
 }
 
 export function modeloDoMax(settings: Record<string, string>, canal: CanalDoAgente = "whatsapp"): NivelDoModelo {

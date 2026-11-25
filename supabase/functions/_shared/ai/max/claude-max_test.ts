@@ -1,9 +1,13 @@
 import { assert, assertEquals, assertMatch, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   ADENDO_DO_MAX,
+  assinanteDoMax,
+  CHAVE_DOS_ASSINANTES,
   desfechoDoPainel,
+  idDoAssinante,
   linhaDoJob,
   modeloDoMax,
+  naoAssinanteSemReserva,
   novoTokenDoMcp,
   provedorDoTurno,
   reservaLigada,
@@ -160,4 +164,140 @@ Deno.test("desfecho do painel: pronto, reserva, tarde ou esperar", () => {
   // Pego pelo gateway: espera até o teto, mesmo passando do prazo de pegar.
   assertEquals(desfechoDoPainel({ status: "processing", started_at: "x" }, 60_000, lim), { tipo: "esperar" });
   assertEquals(desfechoDoPainel({ status: "processing", started_at: "x" }, 111_000, lim), { tipo: "tarde" });
+});
+
+// ─── Pacote 1, S5 (24/11/2026): a assinatura Claude é da PESSOA do assinante, e não do cargo ─────────────────────────
+// O que se protege: com a chave ai_max_assinantes, só quem está na lista vai pelo Max, seja qual for o cargo (um
+// administrador reativado não entra sozinho); a chave vazia não libera ninguém; sem a chave vale a regra antiga, para o
+// deploy poder sair antes da migration; e quem não é assinante, com a reserva desligada, não tem para onde ir.
+// Os ids são fictícios: nenhum id de pessoa mora no código nem nos testes.
+const DONO = "11111111-1111-4111-8111-111111111111";
+const OUTRO_ADMIN = "22222222-2222-4222-8222-222222222222";
+const TECNICO = "33333333-3333-4333-8333-333333333333";
+const noMax = (lista: string) => ({ ai_provedor_whatsapp: "claude_max", ai_provedor_painel: "claude_max", [CHAVE_DOS_ASSINANTES]: lista });
+
+Deno.test("S5: com a chave, vale a pessoa: o admin fora da lista vai pelo OpenRouter e quem está na lista vai pelo Max", () => {
+  assertEquals(CHAVE_DOS_ASSINANTES, "ai_max_assinantes");
+  const s = noMax(DONO);
+  assertEquals(provedorDoTurno(s, "admin", "whatsapp", DONO), "claude_max");
+  assertEquals(provedorDoTurno(s, "admin", "panel", DONO), "claude_max");
+  // o administrador que não é o assinante (o inativo que foi reativado) não entra pelo cargo
+  assertEquals(provedorDoTurno(s, "admin", "whatsapp", OUTRO_ADMIN), "openrouter");
+  assertEquals(provedorDoTurno(s, "admin", "panel", OUTRO_ADMIN), "openrouter");
+  assertEquals(assinanteDoMax(s, OUTRO_ADMIN, "admin"), false);
+  // pessoa, não cargo: quem está na lista passa com qualquer cargo
+  assertEquals(assinanteDoMax(noMax(`${DONO},${TECNICO}`), TECNICO, "technician"), true);
+  assertEquals(provedorDoTurno(noMax(`${DONO},${TECNICO}`), "technician", "whatsapp", TECNICO), "claude_max");
+  // a lista não liga o Max sozinha: a chave do canal continua mandando
+  assertEquals(provedorDoTurno({ [CHAVE_DOS_ASSINANTES]: DONO }, "admin", "whatsapp", DONO), "openrouter");
+  assertEquals(provedorDoTurno({ ai_provedor_whatsapp: "claude_max", [CHAVE_DOS_ASSINANTES]: DONO }, "admin", "panel", DONO), "openrouter");
+});
+
+Deno.test("S5: chave presente e vazia = ninguém; sem id de pessoa, ninguém", () => {
+  for (const vazia of ["", "   ", ",", " , ;\n"]) {
+    assertEquals(assinanteDoMax(noMax(vazia), DONO, "admin"), false, JSON.stringify(vazia));
+    assertEquals(provedorDoTurno(noMax(vazia), "admin", "whatsapp", DONO), "openrouter", JSON.stringify(vazia));
+  }
+  // quem chama sem o id (o jeito antigo de chamar) não passa quando a chave existe
+  assertEquals(provedorDoTurno(noMax(DONO), "admin"), "openrouter");
+  assertEquals(provedorDoTurno(noMax(DONO), "admin", "panel"), "openrouter");
+  assertEquals(assinanteDoMax(noMax(DONO), "", "admin"), false);
+  assertEquals(assinanteDoMax(noMax(DONO), "   ", "admin"), false);
+  // o que não tem forma de id não é pessoa: não casa com id vazio nem com texto solto
+  assertEquals(assinanteDoMax(noMax("admin"), "admin", "admin"), false);
+  assertEquals(assinanteDoMax(noMax("*"), DONO, "admin"), false);
+  assertEquals(assinanteDoMax(noMax(DONO.slice(0, 8)), DONO, "admin"), false);
+});
+
+Deno.test("S5: espaço, maiúscula, quebra de linha e ponto e vírgula na lista são tolerados", () => {
+  assertEquals(assinanteDoMax(noMax(`  ${DONO.toUpperCase()}  `), DONO, "admin"), true);
+  assertEquals(assinanteDoMax(noMax(DONO), ` ${DONO.toUpperCase()} `, "admin"), true);
+  assertEquals(assinanteDoMax(noMax(`${OUTRO_ADMIN} ,\n ${DONO}`), DONO, "admin"), true);
+  assertEquals(assinanteDoMax(noMax(`${OUTRO_ADMIN};${DONO}`), DONO, "admin"), true);
+  assertEquals(assinanteDoMax(noMax(`lixo, ${DONO}`), DONO, "admin"), true);
+  assertEquals(assinanteDoMax(noMax(`lixo, ${DONO}`), TECNICO, "admin"), false);
+});
+
+Deno.test("S5: sem a chave vale a regra antiga (cargo admin), com aviso no log uma vez só", async () => {
+  // instância nova do módulo: o aviso sai uma vez por instância, e os testes de cima já o gastaram na instância comum
+  const novo = await import(new URL("./claude-max.ts?s5-aviso-da-chave", import.meta.url).href) as typeof import("./claude-max.ts");
+  const avisos: string[] = [];
+  const original = console.warn;
+  console.warn = (...a: unknown[]) => { avisos.push(a.map(String).join(" ")); };
+  try {
+    const s = { ai_provedor_whatsapp: "claude_max" };
+    assertEquals(novo.assinanteDoMax(s, DONO, "admin"), true);
+    assertEquals(novo.assinanteDoMax(s, OUTRO_ADMIN, "admin"), true, "regra antiga: qualquer admin");
+    assertEquals(novo.assinanteDoMax(s, "", "admin"), true, "regra antiga: não olha a pessoa");
+    assertEquals(novo.assinanteDoMax(s, TECNICO, "technician"), false);
+    assertEquals(novo.provedorDoTurno(s, "admin", "whatsapp", DONO), "claude_max");
+    assertEquals(novo.provedorDoTurno(s, "financial", "whatsapp", TECNICO), "openrouter");
+    assertEquals(avisos.length, 1, "um aviso por instância, não um por chamada");
+    assertStringIncludes(avisos[0], "ai_max_assinantes não existe");
+    assertStringIncludes(avisos[0], "regra antiga (cargo admin)");
+    assertStringIncludes(avisos[0], "20270301130000_assinatura_max_por_pessoa");
+    // com a chave presente não há aviso (nem quando ela está vazia)
+    assertEquals(novo.assinanteDoMax({ ...s, ai_max_assinantes: "" }, DONO, "admin"), false);
+    assertEquals(avisos.length, 1);
+  } finally {
+    console.warn = original;
+  }
+  // quando o canal não pede o Max, ninguém consulta a lista: nem aviso há
+  const semPedido = await import(new URL("./claude-max.ts?s5-sem-pedido", import.meta.url).href) as typeof import("./claude-max.ts");
+  const outros: string[] = [];
+  console.warn = (...a: unknown[]) => { outros.push(a.map(String).join(" ")); };
+  try {
+    assertEquals(semPedido.provedorDoTurno({}, "admin", "whatsapp", DONO), "openrouter");
+    assertEquals(semPedido.naoAssinanteSemReserva({ ai_whatsapp_max_reserva: "off" }, "technician", "whatsapp", TECNICO), false);
+    assertEquals(outros.length, 0);
+  } finally {
+    console.warn = original;
+  }
+});
+
+Deno.test("S5: idDoAssinante devolve o id só quando a lista tem exatamente um", () => {
+  assertEquals(idDoAssinante({ [CHAVE_DOS_ASSINANTES]: DONO }), DONO);
+  assertEquals(idDoAssinante({ [CHAVE_DOS_ASSINANTES]: `  ${DONO.toUpperCase()} ,` }), DONO, "normalizado: minúscula e sem espaço");
+  assertEquals(idDoAssinante({ [CHAVE_DOS_ASSINANTES]: `${DONO}, ${DONO.toUpperCase()}` }), DONO, "o mesmo id repetido é um só");
+  // sem assinante definido não há em nome de quem pedir: o pedido automático não entra na fila
+  assertEquals(idDoAssinante({}), null, "chave ausente: do cargo não sai um id");
+  assertEquals(idDoAssinante({ [CHAVE_DOS_ASSINANTES]: "" }), null);
+  assertEquals(idDoAssinante({ [CHAVE_DOS_ASSINANTES]: "lixo" }), null);
+  assertEquals(idDoAssinante({ [CHAVE_DOS_ASSINANTES]: `${DONO},${OUTRO_ADMIN}` }), null, "dois assinantes: não se escolhe um");
+  // o que não tem forma de id não é pessoa e não conta
+  assertEquals(idDoAssinante({ [CHAVE_DOS_ASSINANTES]: `lixo, ${DONO}` }), DONO);
+});
+
+Deno.test("S5: quem não é assinante, com a reserva desligada, não tem para onde ir (nos dois canais)", () => {
+  const semReserva = { ...noMax(DONO), ai_whatsapp_max_reserva: "off" };
+  assertEquals(naoAssinanteSemReserva(semReserva, "admin", "whatsapp", OUTRO_ADMIN), true);
+  assertEquals(naoAssinanteSemReserva(semReserva, "technician", "whatsapp", TECNICO), true);
+  assertEquals(naoAssinanteSemReserva(semReserva, "financial", "panel", TECNICO), true);
+  assertEquals(naoAssinanteSemReserva(semReserva, "admin", "whatsapp", ""), true, "sem id não é assinante");
+  // o assinante nunca é barrado aqui: se o Max dele falhar, quem fala é a causa do C2
+  assertEquals(naoAssinanteSemReserva(semReserva, "admin", "whatsapp", DONO), false);
+  assertEquals(naoAssinanteSemReserva(semReserva, "admin", "panel", DONO), false);
+  // com a reserva ligada fica como sempre: a pessoa segue pelo OpenRouter
+  assertEquals(naoAssinanteSemReserva(noMax(DONO), "technician", "whatsapp", TECNICO), false);
+  assertEquals(naoAssinanteSemReserva({ ...noMax(DONO), ai_whatsapp_max_reserva: "on" }, "admin", "panel", OUTRO_ADMIN), false);
+  // o canal fora do Claude: todos vão pelo OpenRouter por escolha do dono, e a chave da reserva não diz nada
+  const waForaDoMax = { ai_provedor_painel: "claude_max", ai_whatsapp_max_reserva: "off", [CHAVE_DOS_ASSINANTES]: DONO };
+  assertEquals(naoAssinanteSemReserva(waForaDoMax, "technician", "whatsapp", TECNICO), false);
+  assertEquals(naoAssinanteSemReserva(waForaDoMax, "technician", "panel", TECNICO), true, "cada canal pela chave dele");
+  // lista vazia e sem reserva: nem o dono passa (a chave vazia é "ninguém")
+  assertEquals(naoAssinanteSemReserva({ ...noMax(""), ai_whatsapp_max_reserva: "off" }, "admin", "whatsapp", DONO), true);
+});
+
+Deno.test("S5: sem a chave e sem reserva, a regra antiga decide quem fica de fora (o cargo)", async () => {
+  const novo = await import(new URL("./claude-max.ts?s5-regra-antiga-sem-reserva", import.meta.url).href) as typeof import("./claude-max.ts");
+  const original = console.warn;
+  console.warn = () => {};
+  try {
+    const s = { ai_provedor_whatsapp: "claude_max", ai_whatsapp_max_reserva: "off" };
+    assertEquals(novo.naoAssinanteSemReserva(s, "admin", "whatsapp", DONO), false);
+    assertEquals(novo.naoAssinanteSemReserva(s, "technician", "whatsapp", TECNICO), true);
+    assertEquals(novo.idDoAssinante(s), null);
+  } finally {
+    console.warn = original;
+  }
 });
