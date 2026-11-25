@@ -19,8 +19,11 @@ import { resumirLembreteDeRevisao, TITULOS_DOS_PLANOS } from "./tools/planos-man
 import { resumirAgrupamento, resumirDesagrupamento } from "./tools/agrupar-orcamentos.ts";
 // agrupar OS (28/10/2026): o mesmo para ordens de serviço — o impedimento (já começou, nota, outro cliente) vira recusa.
 import { resumirAgrupamentoDeOS, resumirDesagrupamentoDeOS } from "./tools/agrupar-os.ts";
-// cobrar juntas (28/10/2026, Fase 0 do Fechar juntas): o resumo mostra cada OS com o saldo e a mensagem exata; trava vira recusa.
+// cobrar juntas (28/10/2026, Fase 0 do Fechar juntas; 25/11/2026: também o cliente inteiro): o resumo mostra cada OS (ou conta
+// sem OS) com o saldo e a mensagem exata; trava vira recusa.
 import { resumirCobrancaConjunta } from "./tools/cobrar-juntas.ts";
+// lembrete individual de cobrança (25/11/2026): o resumo mostra o número, o valor conferido na conta e a mensagem exata; trava vira recusa.
+import { resumirLembreteDeCobranca } from "./tools/lembrete-de-cobranca.ts";
 // histórico de documentos (16/11/2026): o cartão do "sim" é a simulação da restauração (o que muda, total, assinatura).
 import { resumirRestauracao } from "./tools/historico-documento.ts";
 import {
@@ -285,7 +288,8 @@ const TOOL_LABELS_PT: Record<string, string> = {
   desagrupar_os: "Desagrupar OS",
   listar_os_para_agrupar: "Listar OS para agrupar",
   // cobrar juntas (28/10/2026): o saldo de várias OS executadas do mesmo cliente numa mensagem só.
-  cobrar_juntas: "Cobrar OS juntas (WhatsApp)",
+  // 25/11/2026: a mesma tool cobra o cliente inteiro (uma conta só, conta sem OS) — "OS juntas" deixava o cartão errado.
+  cobrar_juntas: "Cobrar o cliente (WhatsApp)",
   // histórico de documentos (16/11/2026): paridade com a linha do tempo da tela (consultar roda direto; restaurar pede o "sim").
   consultar_historico_documento: "Ver o histórico do documento",
   restaurar_documento: "Restaurar orçamento/OS (desfazer ou voltar versão)",
@@ -510,6 +514,9 @@ RESUMO_QUE_RESOLVE.add("desagrupar_os");
 // cobrar juntas (28/10/2026): cadastro genérico, OS que não começou, outro cliente, sem saldo, Pix esperando no Extrato,
 // opt-out, piso — o resumo diz por quê numa linha "⚠️": é recusa, não pendência.
 RESUMO_QUE_RESOLVE.add("cobrar_juntas");
+// lembrete individual de cobrança (25/11/2026): cobrança ou conta paga/cancelada, piso, entrada esperando no Extrato, opt-out,
+// cadastro genérico sem contato próprio, sem telefone — o resumo diz por quê numa linha "⚠️": é recusa, não pendência.
+RESUMO_QUE_RESOLVE.add("send_collection_reminder");
 // "Sim, é do X" (leva 8, revisão de 23/10/2026): entrada confirmada sem cliente sugerido, cliente fora do cadastro ou
 // leitura que falha — o resumo diz por quê numa linha "⚠️": é recusa, não pendência.
 RESUMO_QUE_RESOLVE.add("aprovar_propostas_de_lancamento");
@@ -810,10 +817,30 @@ export async function buildPendingSummary(
   // ao cliente. Trava (genérico, Pix esperando, opt-out, piso…) vira uma linha "⚠️"; leitura que falha também.
   if (toolName === "cobrar_juntas") {
     try {
-      return await resumirCobrancaConjunta(admin, args);
+      const r = await resumirCobrancaConjunta(admin, args);
+      // Revisão de 25/11/2026: o retrato falhou (leitura que caiu entre as duas conferências) e o cartão saiu certo — sem
+      // retrato o "sim" nunca envia, então nem pede o "sim". `=== null`: quem chama sem a pendência não passa retrato.
+      if (quem.retrato === null && !r.trim().startsWith("⚠️")) return "⚠️ Não consegui conferir as contas agora. Nada foi registrado; tente de novo.";
+      return r;
     } catch (e) {
       const motivo = String((e as { message?: string })?.message ?? e).replace(/\s*\n+\s*/g, " ");
-      return `⚠️ Não consegui conferir as contas das OS agora (${motivo}). Nada foi registrado; tente de novo.`;
+      // com as OS ditas, "das OS"; só com o cliente (25/11/2026), "do cliente" — pode nem haver OS
+      const deQuem = Array.isArray(args?.os) ? args.os.length > 0 : !!String(args?.os ?? "").trim();
+      return `⚠️ Não consegui conferir as contas ${deQuem ? "das OS" : "do cliente"} agora (${motivo}). Nada foi registrado; tente de novo.`;
+    }
+  }
+  // Lembrete individual de cobrança (25/11/2026): o "sim" é sobre quem recebe, o número inteiro, o valor e o vencimento
+  // conferidos na CONTA a receber (a cobrança guarda o valor antigo) e a MENSAGEM EXATA que vai ao cliente. Trava (paga,
+  // piso, entrada esperando no Extrato, opt-out, cadastro genérico, sem telefone) vira uma linha "⚠️"; leitura que falha também.
+  if (toolName === "send_collection_reminder") {
+    try {
+      const r = await resumirLembreteDeCobranca(admin, args);
+      // sem retrato o "sim" nunca envia (ver o cobrar_juntas acima): recusa em vez de pedir o "sim"
+      if (quem.retrato === null && !r.trim().startsWith("⚠️")) return "⚠️ Não consegui conferir a cobrança agora. Nada foi enviado; tente de novo.";
+      return r;
+    } catch (e) {
+      const motivo = String((e as { message?: string })?.message ?? e).replace(/\s*\n+\s*/g, " ");
+      return `⚠️ Não consegui conferir a cobrança agora (${motivo}). Nada foi enviado; tente de novo.`;
     }
   }
   // Restaurar orçamento/OS (16/11/2026): o "sim" é sobre a SIMULAÇÃO do banco — o que muda, o total antes e depois, o que

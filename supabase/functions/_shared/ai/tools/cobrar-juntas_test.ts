@@ -88,12 +88,15 @@ function bancoFalso(tabelas: Record<string, Linha[]>, falhas: string[] = []) {
       for (const id of args.p_contas as string[]) {
         const conta = (tabelas.receivables ?? []).find((r) => r.id === id);
         if (cols.some((k) => aberta(k) && k.receivable_id === id)) continue;
-        if (cols.some((k) => aberta(k) && !k.receivable_id && k.service_order_id === conta?.service_order_id)) continue;
+        if (conta?.service_order_id && cols.some((k) => aberta(k) && !k.receivable_id && k.service_order_id === conta.service_order_id)) continue;
         cols.push({ id: `nova-${id}`, status: "pending", receivable_id: id, service_order_id: conta?.service_order_id, last_auto_sent_at: null });
         criadas++;
       }
+      // p_os nulo = o cliente inteiro: as cobranças "da OS sem conta" que recebem o registro são as das OS das contas
+      const osDoEnvio = (args.p_os as string[] | null) ?? (args.p_contas as string[])
+        .map((id) => (tabelas.receivables ?? []).find((r) => r.id === id)?.service_order_id).filter(Boolean);
       const alvo = cols.filter((k) => aberta(k) && ((args.p_contas as string[]).includes(k.receivable_id) ||
-        (!k.receivable_id && (args.p_os as string[]).includes(k.service_order_id))));
+        (!k.receivable_id && osDoEnvio.includes(k.service_order_id))));
       for (const k of alvo) {
         chamadas.insert.push(["collection_contacts", { collection_id: k.id, contact_type: "whatsapp_sent", notes: args.p_nota }]);
         chamadas.update.push(["collections", { status: "sent" }, { id: k.id }]);
@@ -211,6 +214,8 @@ async function recusado(ctx: any, db: any, input: Record<string, unknown>): Prom
 
 Deno.test("preValidar (sem banco): 2 a 10 OS ou o cliente, só número/id, sem repetida, só admin e financeiro", () => {
   const admin = { userRole: "admin" } as const;
+  // uma OS só: o caminho é o cliente inteiro (ou o lembrete da cobrança dela)
+  assertStringIncludes(validarPedidoDeCobrarJuntas({ os: ["OS-00045"] }, admin)!.error, "passe só o cliente (cliente_id, de search_clients), sem as OS");
   assertStringIncludes(validarPedidoDeCobrarJuntas({ os: ["OS-00045"] }, admin)!.error, "send_collection_reminder");
   assertStringIncludes(validarPedidoDeCobrarJuntas({ os: Array.from({ length: 11 }, (_, i) => `OS-${i + 1}`) }, admin)!.error, "no máximo 10");
   assertStringIncludes(validarPedidoDeCobrarJuntas({ os: ["OS-00045", "45"] }, admin)!.error, "duas vezes");
@@ -267,7 +272,7 @@ Deno.test("paridade com a tela: o mesmo caso fixo dá a MESMA mensagem do Cobrar
 Deno.test("cobrar juntas: a pendência mostra cada OS com o saldo, o total, o número inteiro e a mensagem exata — sem uuid", async () => {
   const { db, ctx } = ambiente();
   const p = await pedir(ctx, db, { os: ["OS-00046", "OS-00045"] });
-  assertEquals(p.title, "Cobrar OS juntas (WhatsApp)");
+  assertEquals(p.title, "Cobrar o cliente (WhatsApp)");
   assertEquals(p.action_name, "cobrar_juntas");
   const s = semNbsp(p.summary);
   assertEquals(UUID_NO_TEXTO.test(s), false, s);
@@ -373,16 +378,205 @@ Deno.test("o 'sim' no modo de teste: a chave ganha ':teste', nada se registra na
   });
 });
 
-Deno.test("pelo cliente: entram as OS executadas com saldo (a agendada e a sem saldo ficam de fora)", async () => {
+// ── o cliente inteiro (25/11/2026): "cobra o Fulano" ─────────────────────────────────────────
+
+const APOLO = "8b2c3d4e-4444-4222-8333-444455556666";
+const cadastroDaApolo = (): Linha => ({ id: APOLO, name: "APOLO INDUSTRIA E COMERCIO", display_name: null, whatsapp: "(47) 98888-1234", phone: null, opt_out_whatsapp: false, generico: false });
+/** As duas parcelas de nota da Apolo (sem OS), como em produção em 24/11/2026 — aqui com o relógio do arquivo (28/10). */
+function parcelasDaApolo(): Linha[] {
+  return [
+    { id: "p2", service_order_id: null, client_id: APOLO, description: "NF-e 2/25 (parcela 2/3)", amount: 5237.99, paid_amount: 0, balance_amount: 5237.99, status: "pending", due_date: "2026-10-16", is_deposit: false },
+    { id: "p3", service_order_id: null, client_id: APOLO, description: "NF-e 2/25 (parcela 3/3)", amount: 5238.02, paid_amount: 0, balance_amount: 5238.02, status: "pending", due_date: "2026-11-13", is_deposit: false },
+    { id: "p1", service_order_id: null, client_id: APOLO, description: "NF-e 2/25 (parcela 1/3)", amount: 5237.99, paid_amount: 5237.99, balance_amount: 0, status: "paid", due_date: "2026-09-16", is_deposit: false },
+  ];
+}
+const ambienteDaApolo = (extra: Extra = {}) => ambiente([], {
+  ...extra,
+  tabelas: { receivables: parcelasDaApolo(), clients: [...cadastros(), cadastroDaApolo()], collections: [], ...(extra.tabelas ?? {}) },
+});
+
+Deno.test("pelo cliente, só conta SEM OS (as parcelas de nota): o cartão lista cada conta, a mensagem sai sem a linha 'OS:' e o 'sim' registra com p_os nulo", async () => {
+  const { db, ctx } = ambienteDaApolo();
+  const p = await pedir(ctx, db, { cliente_id: APOLO });
+  const s = semNbsp(p.summary);
+  assertEquals(UUID_NO_TEXTO.test(s), false, s);
+  assertStringIncludes(s, "Cobrar *APOLO INDUSTRIA E COMERCIO* por tudo que ele tem em aberto (2 contas), numa mensagem só, pelo WhatsApp *+55 (47) 98888-1234*:");
+  assertStringIncludes(s, "- Sem OS · NF-e 2/25 (parcela 2/3) · vence 16/10/2026 · em aberto *R$ 5.237,99* (vencido)");
+  assertStringIncludes(s, "- Sem OS · NF-e 2/25 (parcela 3/3) · vence 13/11/2026 · em aberto *R$ 5.238,02*\n");
+  // parte vencida, parte a vencer: o total diz quanto já venceu
+  assertStringIncludes(s, "Total em aberto: *R$ 10.476,01* (vencido: R$ 5.237,99)");
+  assertStringIncludes(s, "- Nada muda nas contas a receber. 2 contas não têm cobrança registrada: elas são criadas junto com o envio");
+  assertStringIncludes(s, "Mensagem que vai ao cliente:\n📋 *Cobrança — HBR*\nCliente: APOLO\n\n🔴 NF-e 2/25 (parcela 2/3) · vence 16/10/2026 · vencido: *R$ 5.237,99*\n🟡 NF-e 2/25 (parcela 3/3) · vence 13/11/2026 · a vencer: *R$ 5.238,02*");
+  assertStringIncludes(s, "Total: R$ 10.476,01\nPago: R$ 0,00\n*Em aberto: R$ 10.476,01*");
+  assertEquals(s.includes("OS:"), false, "sem OS, a linha 'OS:' não aparece");
+  assertEquals(s.includes("parcela 1/3"), false, "a parcela paga não entra: é cobrança, não extrato");
+  assertEquals(p.payload._retrato.contas, [{ id: "p2", saldo: 5237.99 }, { id: "p3", saldo: 5238.02 }]);
+
+  const mensagemAprovada = String(p.summary).split("Mensagem que vai ao cliente:\n")[1].split("\nPedido por")[0];
+  await comEnvio({ messageId: "m1" }, async (enviados) => {
+    // deno-lint-ignore no-explicit-any
+    const r = await toolsByName["cobrar_juntas"].execute(p.payload, ctx) as any;
+    assertEquals(r.ok, true, JSON.stringify(r));
+    assertEquals(enviados[0].phone, "5547988881234");
+    assertEquals(enviados[0].message, mensagemAprovada.trim());
+    const [[fn, args]] = db.chamadas.rpc;
+    assertEquals(fn, "cobrar_juntas_registrar_envio");
+    assertEquals([args.p_cliente, [...args.p_contas].sort(), args.p_os, args.p_autor], [APOLO, ["p2", "p3"], null, "dono-1"]);
+    assertStringIncludes(semNbsp(args.p_nota), "Cobrança do cliente enviada pelo assistente (WhatsApp): tudo em aberto (2 contas: 2 sem OS) — em aberto R$ 10.476,01");
+    assertEquals([r.cobrancas_criadas, r.cobrancas_registradas], [2, 2], JSON.stringify(r));
+    assertStringIncludes(semNbsp(ressalvaDoResultado(r)), "Cobrança enviada para APOLO INDUSTRIA E COMERCIO (+55 (47) 98888-1234): tudo em aberto (2 contas: 2 sem OS) — em aberto R$ 10.476,01. 2 cobranças criadas (em Cobranças).");
+  });
+});
+
+Deno.test("pelo cliente, UMA OS só e sem cobrança criada (o caso do Sergio): pelas OS recusa; pelo cliente cobra", async () => {
+  const so45 = { tabelas: { receivables: contasDaMP().filter((c) => c.service_order_id === ID_45), collections: [] } };
+  {
+    const { db, ctx } = ambiente([ordem(ID_45, "OS-00045")], so45);
+    const e = await recusado(ctx, db, { os: ["OS-00045"] });
+    assertStringIncludes(e, "passe só o cliente (cliente_id, de search_clients), sem as OS");
+  }
+  const { db, ctx } = ambiente([ordem(ID_45, "OS-00045")], so45);
+  const p = await pedir(ctx, db, { cliente_id: MP });
+  const s = semNbsp(p.summary);
+  assertStringIncludes(s, "Cobrar *MP MOTOR HOMES* por tudo que ele tem em aberto (1 conta), numa mensagem só");
+  assertStringIncludes(s, "- OS-00045 · Concluída · em aberto *R$ 1.650,00* (vencido)");
+  assertStringIncludes(s, "Total em aberto: *R$ 1.650,00*\n");
+  assertStringIncludes(s, "1 conta não tem cobrança registrada: ela é criada junto com o envio");
+  assertStringIncludes(s, "📋 *Cobrança — HBR*\nCliente: MP\nOS: OS-00045\n\n🔴 Saldo OS-00045 · vence 22/07/2026 · vencido: *R$ 1.650,00*");
+  assertEquals(s.includes("Sinal OS-00045"), false, "o sinal pago não entra");
+  await comEnvio({ messageId: "m1" }, async () => {
+    // deno-lint-ignore no-explicit-any
+    const r = await toolsByName["cobrar_juntas"].execute(p.payload, ctx) as any;
+    assertEquals([r.ok, r.cobrancas_criadas, r.cobrancas_registradas], [true, 1, 1], JSON.stringify(r));
+    assertEquals(db.chamadas.rpc[0][1].p_os, null);
+    assertStringIncludes(semNbsp(r.message), "tudo em aberto (1 conta: OS-00045) — em aberto R$ 1.650,00");
+  });
+});
+
+Deno.test("pelo cliente: entra TUDO em aberto — a conta da OS que não começou (com aviso) e a conta sem OS; a OS sem saldo fica de fora", async () => {
   const linhas = [...osDaMP(), ordem(ID_50, "OS-00050", { status: "scheduled" }), ordem("22222222-2222-4222-8222-222222222051", "OS-00051")];
   const { db, ctx } = ambiente(linhas, {
-    tabelas: { receivables: [...contasDaMP(), { id: "r50", service_order_id: ID_50, client_id: MP, description: "Sinal", amount: 900, paid_amount: 0, balance_amount: 900, status: "pending", due_date: "2026-10-30" }] },
+    tabelas: {
+      receivables: [
+        ...contasDaMP(),
+        { id: "r50", service_order_id: ID_50, client_id: MP, description: "Sinal", amount: 900, paid_amount: 0, balance_amount: 900, status: "pending", due_date: "2026-10-30" },
+        { id: "avulsa", service_order_id: null, client_id: MP, description: "Venda de balcão", amount: 80, paid_amount: 30, balance_amount: 50, status: "partially_paid", due_date: "2026-10-01" },
+        // conta de OUTRO titular numa OS da MP: não é dívida da MP (cobra-se o titular da conta)
+        { id: "deOutro", service_order_id: ID_45, client_id: OUTRO, description: "Parte do Lenine", amount: 70, paid_amount: 0, balance_amount: 70, status: "pending", due_date: "2026-07-22" },
+      ],
+    },
   });
   const p = await pedir(ctx, db, { cliente_id: MP });
   const s = semNbsp(p.summary);
-  assertStringIncludes(s, "Cobrar juntas *2* OS de *MP MOTOR HOMES*");
-  assertEquals(s.includes("OS-00050"), false, "a agendada não entra");
-  assertEquals(s.includes("OS-00051"), false, "a sem saldo não entra");
+  assertStringIncludes(s, "Cobrar *MP MOTOR HOMES* por tudo que ele tem em aberto (4 contas)");
+  // as contas sem OS primeiro, depois as OS na ordem do número
+  assertStringIncludes(s, "- Sem OS · Venda de balcão · vence 01/10/2026 · em aberto *R$ 50,00* (vencido)\n- OS-00045 · Concluída · em aberto *R$ 1.650,00* (vencido)\n- OS-00046 · Concluída · em aberto *R$ 20,00* (vencido)\n- OS-00050 · Agendada · em aberto *R$ 900,00*\n");
+  assertStringIncludes(s, "Total em aberto: *R$ 2.620,00* (vencido: R$ 1.720,00)");
+  assertStringIncludes(s, "- OS-00050 (Agendada) ainda não foi executada: a conta entra mesmo assim, porque está em aberto.");
+  assertStringIncludes(s, "🔴 Venda de balcão · vence 01/10/2026 · vencido: *R$ 50,00* (de R$ 80,00)");
+  assertStringIncludes(s, "🟡 OS-00050 · Sinal · vence 30/10/2026 · a vencer: *R$ 900,00*");
+  assertStringIncludes(s, "Cliente: MP\nOS: OS-00045, OS-00046, OS-00050\n");
+  assertStringIncludes(s, "Total: R$ 2.650,00\nPago: R$ 30,00\n*Em aberto: R$ 2.620,00*");
+  assertEquals(s.includes("OS-00051"), false, "a OS sem saldo não entra");
+  assertEquals(s.includes("Lenine"), false, "a conta de outro titular não entra");
+  // duas OS que não começaram (o caso do César, 25/11/2026: duas "Aguardando cliente" vencidas): o aviso concorda
+  db.tabelas.service_orders.find((o: Linha) => o.id === ID_46).status = "awaiting_client";
+  const s2 = semNbsp(await buildPendingSummary(ctx.admin, "cobrar_juntas", { cliente_id: MP }, { userId: "dono-1" }));
+  assertStringIncludes(s2, "- OS-00046 (Aguardando cliente), OS-00050 (Agendada) ainda não foram executadas: as contas entram mesmo assim, porque estão em aberto.");
+  assertEquals(p.payload._retrato.contas.map((x: Linha) => x.id), ["avulsa", "r45", "r46", "r50"]);
+});
+
+Deno.test("pelo cliente: conta de OS cancelada ou agrupada em outra fica de fora, com aviso; sobrando só ela, recusa", async () => {
+  const linhas = [ordem(ID_45, "OS-00045"), ordem(ID_46, "OS-00046", { status: "cancelled" }), ordem(ID_50, "OS-00050", { status: "completed", merged_into_id: ID_45 })];
+  const contas = [
+    ...contasDaMP(),
+    { id: "r50", service_order_id: ID_50, client_id: MP, description: "Saldo OS-00050", amount: 300, paid_amount: 0, balance_amount: 300, status: "pending", due_date: "2026-08-01" },
+  ];
+  {
+    const { db, ctx } = ambiente(linhas, { tabelas: { receivables: contas } });
+    const p = await pedir(ctx, db, { cliente_id: MP });
+    const s = semNbsp(p.summary);
+    assertStringIncludes(s, "por tudo que ele tem em aberto (1 conta)");
+    assertStringIncludes(s, "- Ficou de fora: Saldo OS-00046, R$ 20,00 (OS-00046, cancelada); Saldo OS-00050, R$ 300,00 (OS-00050, agrupada em outra OS) — a OS não vale mais e a conta segue aberta. Confira em Contas a Receber.");
+    assertEquals(p.payload._retrato.contas, [{ id: "r45", saldo: 1650 }]);
+    assertEquals(String(p.summary).split("Mensagem que vai ao cliente:\n")[1].includes("OS-00046"), false, "a mensagem ao cliente não cita a conta que ficou de fora");
+  }
+  {
+    const { db, ctx } = ambiente(linhas, { tabelas: { receivables: contas.filter((c) => c.service_order_id !== ID_45) } });
+    const e = await recusado(ctx, db, { cliente_id: MP });
+    assertStringIncludes(e, "MP MOTOR HOMES não tem o que cobrar. Ficou de fora: Saldo OS-00046, R$ 20,00 (OS-00046, cancelada)");
+  }
+});
+
+Deno.test("pelo cliente: nada vencido avisa que é cobrança antes do vencimento; conta de OS que não se acha recusa", async () => {
+  {
+    const { db, ctx } = ambienteDaApolo({ tabelas: { receivables: parcelasDaApolo().filter((c) => c.id === "p3") } });
+    const p = await pedir(ctx, db, { cliente_id: APOLO });
+    const s = semNbsp(p.summary);
+    assertStringIncludes(s, "- Nenhuma conta está vencida (a primeira vence em 13/11/2026): é cobrança antes do vencimento.");
+    assertStringIncludes(s, "Total em aberto: *R$ 5.238,02* (vencido: R$ 0,00)");
+  }
+  {
+    const { db, ctx } = ambienteDaApolo({ tabelas: { receivables: parcelasDaApolo().map((c) => c.id === "p2" ? { ...c, service_order_id: ID_50 } : c) } });
+    const e = await recusado(ctx, db, { cliente_id: APOLO });
+    assertStringIncludes(e, "Não achei a OS de uma conta em aberto de APOLO INDUSTRIA E COMERCIO (NF-e 2/25 (parcela 2/3))");
+  }
+});
+
+Deno.test("pelo cliente: as mesmas travas — genérico, sem conta em aberto, cliente que não existe, entrada esperando, opt-out, piso, sem telefone, conta demais", async () => {
+  const fila = [{ suggested_client_id: APOLO, suggested_amount: 5237.99, suggested_date: "2026-10-16", title: "Receita: CREDITO DE BOLETO", status: "pending", kind: "create_receivable" }];
+  const casos: Array<{ cliente: string; tabelas?: Record<string, Linha[]>; trecho: string }> = [
+    { cliente: FINAL, trecho: "O cadastro Cliente Final é genérico, sem CPF/CNPJ" },
+    { cliente: OUTRO, trecho: "Lenine não tem conta em aberto: não há o que cobrar." },
+    { cliente: "8b2c3d4e-9999-4222-8333-444455556666", trecho: "Não achei esse cliente no cadastro" },
+    { cliente: APOLO, tabelas: { finance_review_queue: fila }, trecho: "Este cliente tem entrada esperando no Extrato (R$ 5237.99 de 2026-10-16): pode ser este pagamento." },
+    { cliente: APOLO, tabelas: { clients: [{ ...cadastroDaApolo(), opt_out_whatsapp: true }] }, trecho: "opt-out" },
+    { cliente: APOLO, tabelas: { app_settings: [{ key: "collection_min_amount", value: "20000" }] }, trecho: "Cobrança de R$ 10476.01 fica abaixo do piso de R$ 20000" },
+    { cliente: APOLO, tabelas: { clients: [{ ...cadastroDaApolo(), whatsapp: null }] }, trecho: "Sem telefone" },
+    {
+      cliente: APOLO,
+      tabelas: { receivables: Array.from({ length: 31 }, (_, i) => ({ ...parcelasDaApolo()[0], id: "p" + String(i).padStart(2, "0") })) },
+      trecho: "APOLO INDUSTRIA E COMERCIO tem 31 contas em aberto: é conta demais para uma mensagem só. Cobre pelas OS",
+    },
+  ];
+  for (const c of casos) {
+    const { db, ctx } = ambienteDaApolo({ tabelas: c.tabelas });
+    const e = await recusado(ctx, db, { cliente_id: c.cliente });
+    assertStringIncludes(e, c.trecho, e);
+  }
+});
+
+Deno.test("pelo cliente: leitura que falha recusa; o 'sim' recusa se apareceu conta nova ou uma conta foi paga depois do pedido", async () => {
+  for (const tabela of ["finance_review_queue", "receivables", "clients", "collections", "app_settings"]) {
+    const { ctx } = ambienteDaApolo({ falhas: [tabela] });
+    const resumo = await buildPendingSummary(ctx.admin, "cobrar_juntas", { cliente_id: APOLO }, { userId: "dono-1" });
+    assertStringIncludes(resumo, "⚠️ Não consegui conferir as contas do cliente agora", tabela);
+    assert(resumoQueRecusa("cobrar_juntas", resumo), tabela);
+  }
+  {
+    const { db, ctx } = ambienteDaApolo();
+    const p = await pedir(ctx, db, { cliente_id: APOLO });
+    db.tabelas.receivables.push({ ...parcelasDaApolo()[0], id: "p9", description: "NF-e 2/30", due_date: "2026-10-20" });
+    await comEnvio({ messageId: "m1" }, async (enviados) => {
+      // deno-lint-ignore no-explicit-any
+      const r = await toolsByName["cobrar_juntas"].execute(p.payload, ctx) as any;
+      assertStringIncludes(r.error, "Nada foi enviado: as contas em aberto do cliente não são mais as mesmas depois do pedido");
+      assertEquals(enviados, []);
+    });
+  }
+  {
+    // o banco deu baixa numa parcela entre o pedido e o "sim" (a baixa sozinha do boleto, por exemplo): não cobra a paga
+    const { db, ctx } = ambienteDaApolo();
+    const p = await pedir(ctx, db, { cliente_id: APOLO });
+    Object.assign(db.tabelas.receivables.find((c: Linha) => c.id === "p2"), { paid_amount: 5237.99, balance_amount: 0, status: "paid" });
+    await comEnvio({ messageId: "m1" }, async (enviados) => {
+      // deno-lint-ignore no-explicit-any
+      const r = await toolsByName["cobrar_juntas"].execute(p.payload, ctx) as any;
+      assertStringIncludes(r.error, "Nada foi enviado: as contas em aberto do cliente não são mais as mesmas");
+      assertEquals(enviados, []);
+      assertEquals(db.chamadas.rpc, []);
+    });
+  }
 });
 
 Deno.test("avisos: OS em andamento entra com aviso; lembrete já mandado hoje avisa", async () => {
@@ -493,7 +687,7 @@ Deno.test("recusas claras sem pendência: genérico, conta no genérico, não co
     },
     {
       tabelas: { receivables: contasDaMP().filter((c) => c.id !== "r46") },
-      trechos: ["OS-00046 não tem saldo em aberto.", "Sobra só OS-00045: cobre pela cobrança dela (send_collection_reminder)."],
+      trechos: ["OS-00046 não tem saldo em aberto.", "Sobra só OS-00045: peça a cobrança pelo cliente (só o cliente_id, sem as OS: entra tudo que ele tem em aberto) ou mande o lembrete da cobrança dela (send_collection_reminder)."],
     },
     {
       linhas: [ordem(ID_45, "OS-00045"), ordem(ID_46, "OS-00046", { status: "cancelled" })],
@@ -622,7 +816,7 @@ Deno.test("registro: risco alto, só admin/financeiro, nunca autônoma, título 
   assertEquals([...CARGOS_DE_COBRAR_JUNTAS].sort(), ["admin", "financial"]);
   assertEquals(tool.gravarSolicitante, true);
   assert(NEVER_AUTONOMOUS.has("cobrar_juntas"));
-  assertEquals(tituloDaAcao("cobrar_juntas"), "Cobrar OS juntas (WhatsApp)");
+  assertEquals(tituloDaAcao("cobrar_juntas"), "Cobrar o cliente (WhatsApp)");
   assert(allTools.some((t) => t.name === "cobrar_juntas"));
   assert(PERFIL_OPERACAO.has("cobrar_juntas"));
   assertEquals(PERFIL_ADMIN.has("cobrar_juntas"), false, "no perfil enxuto subiria o teto");
@@ -642,4 +836,101 @@ Deno.test("registro: risco alto, só admin/financeiro, nunca autônoma, título 
   // deno-lint-ignore no-explicit-any
   assertEquals((r.toolResult as any).pending, true, JSON.stringify(r.toolResult));
   assertEquals(pendencias(db)[0].action_name, "cobrar_juntas");
+});
+
+// ── consertos da revisão de 25/11/2026 ───────────────────────────────────────────────────────
+
+Deno.test("o retrato guarda o TEXTO: cartão às 20h30 com a conta 'a vencer' e 'sim' no dia seguinte (vencida) não envia", async () => {
+  const antes = relogioDoCobrarJuntas.agora;
+  try {
+    // 13/11 às 20h30 em Brasília: a parcela 3/3 vence hoje — "a vencer"
+    relogioDoCobrarJuntas.agora = () => new Date("2026-11-13T23:30:00Z");
+    const { db, ctx } = ambienteDaApolo({ tabelas: { receivables: parcelasDaApolo().filter((c) => c.id === "p3") } });
+    const p = await pedir(ctx, db, { cliente_id: APOLO });
+    assertStringIncludes(semNbsp(p.summary), "🟡 NF-e 2/25 (parcela 3/3) · vence 13/11/2026 · a vencer");
+    assertEquals(typeof p.payload._retrato.texto, "string");
+    // o "sim" às 8h10 do dia 14: a mesma conta, o mesmo saldo — mas o texto viraria "vencido"
+    relogioDoCobrarJuntas.agora = () => new Date("2026-11-14T11:10:00Z");
+    await comEnvio({ messageId: "m1" }, async (enviados) => {
+      // deno-lint-ignore no-explicit-any
+      const r = await toolsByName["cobrar_juntas"].execute(p.payload, ctx) as any;
+      assertStringIncludes(r.error, "Nada foi enviado: o texto da mensagem mudou");
+      assertEquals(enviados, []);
+    });
+  } finally {
+    relogioDoCobrarJuntas.agora = antes;
+  }
+});
+
+Deno.test("o retrato guarda o TEXTO: a chave Pix trocada entre o cartão e o 'sim' não envia; retrato antigo (sem texto) segue como antes", async () => {
+  const { db, ctx } = ambiente();
+  const p = await pedir(ctx, db, { os: ["OS-00045", "OS-00046"] });
+  db.tabelas.app_settings.find((s: Linha) => s.key === "pix_key").value = "outra-chave@pix";
+  await comEnvio({ messageId: "m1" }, async (enviados) => {
+    // deno-lint-ignore no-explicit-any
+    const r = await toolsByName["cobrar_juntas"].execute(p.payload, ctx) as any;
+    assertStringIncludes(r.error, "o texto da mensagem mudou");
+    assertEquals(enviados, []);
+  });
+  // a pendência de antes do deploy não tem o texto no retrato: compara só o resto, como antes
+  const { texto: _fora, ...semTexto } = p.payload._retrato;
+  await comEnvio({ messageId: "m1" }, async (enviados) => {
+    // deno-lint-ignore no-explicit-any
+    const r = await toolsByName["cobrar_juntas"].execute({ ...p.payload, _retrato: semTexto }, ctx) as any;
+    assertEquals(r.ok, true, JSON.stringify(r));
+    assertEquals(enviados.length, 1);
+  });
+});
+
+Deno.test("cartão: telefone que parece FIXO ganha a linha de atenção", async () => {
+  const { db, ctx } = ambienteDaApolo({ tabelas: { clients: [...cadastros(), { ...cadastroDaApolo(), whatsapp: "(47) 3333-4444" }] } });
+  const s = semNbsp((await pedir(ctx, db, { cliente_id: APOLO })).summary);
+  assertStringIncludes(s, "- Atenção: o número parece de telefone FIXO (sem WhatsApp, em geral): a mensagem pode não chegar. Confira o cadastro.");
+});
+
+Deno.test("com as OS ditas, a recusa da OS que não começou aponta também o caminho pelo cliente (uma vez só)", async () => {
+  const { db, ctx } = ambiente([ordem(ID_45, "OS-00045", { status: "scheduled" }), ordem(ID_46, "OS-00046", { status: "awaiting_client" })]);
+  const e = await recusado(ctx, db, { os: ["OS-00045", "OS-00046"] });
+  assertStringIncludes(e, "Para cobrar sem mexer na OS, peça pelo cliente (só o cliente_id, sem as OS): entra TUDO que ele tem em aberto");
+  assertEquals(e.split("Para cobrar sem mexer na OS").length - 1, 1, "uma vez só");
+  // cancelada não ganha a frase (não é caso de cobrar pelo cliente)
+  const cancelada = ambiente([ordem(ID_45, "OS-00045"), ordem(ID_46, "OS-00046", { status: "cancelled" })]);
+  assertEquals((await recusado(cancelada.ctx, cancelada.db, { os: ["OS-00045", "OS-00046"] })).includes("Para cobrar sem mexer na OS"), false);
+});
+
+Deno.test("pelo cliente: 30 contas ainda cabem numa mensagem; 31 não", async () => {
+  const muitas = (n: number) => Array.from({ length: n }, (_, i) => ({ ...parcelasDaApolo()[0], id: "p" + String(i).padStart(2, "0") }));
+  const { db, ctx } = ambienteDaApolo({ tabelas: { receivables: muitas(30) } });
+  assertStringIncludes(semNbsp((await pedir(ctx, db, { cliente_id: APOLO })).summary), "por tudo que ele tem em aberto (30 contas)");
+});
+
+Deno.test("retrato que falhou na hora da pendência: o cartão vira recusa em vez de pedir um 'sim' que nunca enviaria", async () => {
+  const { ctx } = ambienteDaApolo();
+  const semRetrato = await buildPendingSummary(ctx.admin, "cobrar_juntas", { cliente_id: APOLO }, { userId: "dono-1", retrato: null });
+  assertEquals(semRetrato, "⚠️ Não consegui conferir as contas agora. Nada foi registrado; tente de novo.");
+  assert(resumoQueRecusa("cobrar_juntas", semRetrato));
+});
+
+Deno.test("ensino: o prompt e as descrições mandam 'cobra o Fulano' ao cliente inteiro e o lembrete a uma cobrança", async () => {
+  const fonte = await Deno.readTextFile(new URL("../prompt.ts", import.meta.url));
+  for (const trecho of [
+    "cobrar_juntas SÓ COM O CLIENTE",
+    "LEMBRETE CURTO de UMA cobrança",
+    "Para efetivamente cobrar um cliente do plano → cobrar_juntas só com cliente_id",
+    "Não use list_pending_collections para saber se ele tem outras contas",
+  ]) assertStringIncludes(fonte, trecho);
+  assertEquals(fonte.includes("Uma OS só → send_collection_reminder"), false, "o ensino antigo saiu");
+  assertEquals(fonte.includes("entram as OS executadas dele com saldo"), false, "o ensino antigo saiu");
+  assertStringIncludes(tool.description, "(1) Pelo CLIENTE");
+  assertStringIncludes(toolsByName["get_delinquency_plan"].description, "cobrar_juntas só com cliente_id = o client_id do caso");
+  assertStringIncludes(toolsByName["send_collection_reminder"].description, "cobrar_juntas");
+});
+
+Deno.test("a OS dita que não começou e NÃO tem conta em aberto: a recusa não manda ao caminho pelo cliente (seria outra recusa)", async () => {
+  const { db, ctx } = ambiente([ordem(ID_45, "OS-00045"), ordem(ID_46, "OS-00046", { status: "scheduled" })], {
+    tabelas: { receivables: contasDaMP().filter((c) => c.service_order_id !== ID_46) },
+  });
+  const e = await recusado(ctx, db, { os: ["OS-00045", "OS-00046"] });
+  assertStringIncludes(e, "OS-00046 ainda não começou a ser executada");
+  assertEquals(e.includes("Para cobrar sem mexer na OS"), false, e);
 });

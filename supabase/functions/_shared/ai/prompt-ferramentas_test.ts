@@ -67,7 +67,8 @@ const NAO_SAO_TOOLS = new Set<string>([
   // argumentos e campos de tool
   // Orçamento pelo cartão (Retorno F3, P8.3): argumento de retorno_orcar_caso
   "mao_de_obra",
-  "action_name", "asset_type", "billing_unit", "client_id", "collection_ids", "custom_message", "delay_minutes",
+  // cliente_id: o campo do cobrar_juntas pelo cliente inteiro (25/11/2026)
+  "action_name", "asset_type", "billing_unit", "client_id", "cliente_id", "collection_ids", "custom_message", "delay_minutes",
   "display_name", "due_at", "entity_id", "extra_notes", "fiscal_verb", "force_new", "from_user", "internal_notes",
   "is_deposit", "is_quote", "item_id", "item_position", "lead_time_days", "markup_percent", "message_id",
   "new_description", "opt_out_whatsapp", "payment_conditions", "payment_status", "problem_description", "product_id",
