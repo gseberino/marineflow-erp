@@ -11,7 +11,7 @@ import { assert, assertEquals, assertStringIncludes } from "https://deno.land/st
 import { bancoFalso, ctxDe, type Linha } from "./banco-falso-fakes_test.ts";
 import { FALHA_AO_CONFERIR_A_COTACAO, precoDeVendaComMargem, quoteTools, resumirAplicacaoDoPreco } from "./quotes.ts";
 import { AVISO_DO_DESTINO_DO_DINHEIRO, favorecidoTools, resumirFavorecido, riscoDeAlterarFavorecido } from "./favorecidos.ts";
-import { clientTools, FALHA_AO_CONFERIR_O_CLIENTE, resumirTrocaDeContato, riscoDeAtualizarCliente } from "./clients.ts";
+import { clientTools, FALHA_AO_CONFERIR_O_CLIENTE, RECUSA_DE_APAGAR_CONTATO, resumirTrocaDeContato, riscoDeAtualizarCliente } from "./clients.ts";
 import { buildPendingSummary, executarChamadaDeTool, resumoQueRecusa, rotuloDoCampo, tituloDaAcao } from "../agent.ts";
 import type { ToolDef } from "./registry.ts";
 
@@ -286,8 +286,11 @@ Deno.test("S3 cliente: telefone, WhatsApp ou a marca de não receber mensagens p
   for (const args of [
     { phone: "47 99145-5678" }, { whatsapp: "47 99145-5678" }, { opt_out_whatsapp: true }, { opt_out_whatsapp: false },
     { email: "a@b.com", whatsapp: "47 99145-5678" },
-    // APAGAR também é troca de contato (crítica de risco): vazio, só espaço e nulo pedem o sim
+    // O pedido que SÓ apaga o número (vazio, só espaço ou nulo, e nada mais para gravar) não roda direto: o cartão recusa
     { phone: "" }, { whatsapp: "" }, { phone: null }, { whatsapp: null }, { phone: "   " }, { opt_out_whatsapp: null },
+    { phone: "", whatsapp: null }, { phone: "", email: "" }, { whatsapp: "  ", motivo: "pediu para tirar" }, { phone: null, city: null },
+    // número em branco junto de OUTRO contato: o em branco é descartado, e o que sobra ainda é troca de contato
+    { phone: "", whatsapp: "47 99145-5678" }, { whatsapp: null, opt_out_whatsapp: true }, { phone: "   ", opt_out_whatsapp: false },
     // valor torto na marca: erra para o lado do sim
     { opt_out_whatsapp: "true" }, { opt_out_whatsapp: 1 }, { phone: 47991455678 },
   ]) {
@@ -296,6 +299,9 @@ Deno.test("S3 cliente: telefone, WhatsApp ou a marca de não receber mensagens p
   for (const args of [
     { email: "a@b.com" }, { name: "João S." }, { active: false, motivo: "vendeu o barco" }, { cpf_cnpj: "50842188991", city: "Itajaí" },
     { display_name: "João" }, { phone: undefined, whatsapp: undefined, opt_out_whatsapp: undefined }, {},
+    // (acabamento da leva A) número em branco junto de campo que não é de contato: descartado, vale o que sobra
+    { phone: "", email: "a@b.com" }, { whatsapp: null, email: "a@b.com" }, { phone: "   ", city: "Itajaí" },
+    { phone: "", whatsapp: "", email: "a@b.com" }, { phone: null, whatsapp: "  ", active: false, motivo: "vendeu o barco" },
   ]) {
     assertEquals(riscoDeAtualizarCliente({ client_id: "c1", ...args }), "low", JSON.stringify(args));
   }
@@ -357,9 +363,13 @@ Deno.test("S3 cliente: leitura que falha, cliente que não existe e pedido de AP
     [{ client_id: "nao-existe", phone: "47 99145-5678" }, "⚠️ Cliente não encontrado."],
     [{ phone: "47 99145-5678" }, "⚠️ Cliente não encontrado."],
     // Apagar: a execução descarta o que vem vazio ou nulo, então o cartão "→ —" seria um sim sobre o que não acontece.
-    [{ client_id: "c1", phone: "" }, "⚠️ Telefone ou WhatsApp vazio: pelo assistente dá para trocar o número do cliente, mas não apagar (isso é na tela do cliente). Nada foi alterado."],
-    [{ client_id: "c1", whatsapp: null, email: "joao@x.com" }, "⚠️ Telefone ou WhatsApp vazio: pelo assistente dá para trocar o número do cliente, mas não apagar (isso é na tela do cliente). Nada foi alterado."],
-    [{ client_id: "c1", phone: "   ", whatsapp: "47 99145-5678" }, "⚠️ Telefone ou WhatsApp vazio: pelo assistente dá para trocar o número do cliente, mas não apagar (isso é na tela do cliente). Nada foi alterado."],
+    // É recusa quando o número em branco é TUDO o que o pedido traz (vazio, nulo ou só espaços; um ou os dois números).
+    [{ client_id: "c1", phone: "" }, `⚠️ ${RECUSA_DE_APAGAR_CONTATO}`],
+    [{ client_id: "c1", whatsapp: null }, `⚠️ ${RECUSA_DE_APAGAR_CONTATO}`],
+    [{ client_id: "c1", phone: "   " }, `⚠️ ${RECUSA_DE_APAGAR_CONTATO}`],
+    [{ client_id: "c1", phone: null, whatsapp: "" }, `⚠️ ${RECUSA_DE_APAGAR_CONTATO}`],
+    [{ client_id: "c1", whatsapp: "", email: "", motivo: "pediu para tirar" }, `⚠️ ${RECUSA_DE_APAGAR_CONTATO}`],
+    [{ client_id: "c1", phone: "", opt_out_whatsapp: null }, `⚠️ ${RECUSA_DE_APAGAR_CONTATO}`],
     [{ client_id: "c1", opt_out_whatsapp: "true" }, "⚠️ Não entendi se o cliente quer ou não receber mensagens no WhatsApp: diga sim ou não. Nada foi alterado."],
     [{ client_id: "c1", opt_out_whatsapp: null }, "⚠️ Nada para atualizar — informe ao menos um campo."],
     [undefined, "⚠️ Nada para atualizar — informe ao menos um campo."],
@@ -370,6 +380,110 @@ Deno.test("S3 cliente: leitura que falha, cliente que não existe e pedido de AP
     assert(resumoQueRecusa("update_client", resumo), JSON.stringify(args));
   }
   assertEquals(b.gravacoes, []);
+  assertEquals(RECUSA_DE_APAGAR_CONTATO,
+    "Telefone ou WhatsApp vazio: pelo assistente dá para trocar o número do cliente, mas não apagar (isso é na tela do cliente). Nada foi alterado.");
+});
+
+// ─── Acabamento da leva A (24/11/2026): número em branco JUNTO de outro campo ───────────────────
+// Regressão do S3: telefone ou WhatsApp vazio ou nulo que chegava junto de outro campo (o modelo costuma mandar "" no que
+// não quer mudar) recusava o pedido INTEIRO; antes da leva o vazio era descartado e o outro campo, gravado. O que se
+// fixa: (1) o número em branco é descartado e o resto segue, com o risco e o cartão do que sobra; (2) o pedido que SÓ
+// apaga continua recusado, com a frase de sempre; (3) número só com espaços entra na mesma conta e NUNCA apaga calado
+// (NOVO-p1-s3-01: antes passava pelo filtro, virava nulo e o update apagava o número).
+
+const EM_BRANCO: unknown[] = ["", null, "   ", "\t\n"];
+
+Deno.test("cliente (1): número vazio, nulo ou só com espaços junto do e-mail é descartado; o e-mail é gravado direto e o número fica", async () => {
+  for (const branco of EM_BRANCO) {
+    for (const campo of ["phone", "whatsapp"]) {
+      const b = bancoFalso(clientes());
+      const args = { client_id: "c1", [campo]: branco, email: "joao@x.com" };
+      const r = await executarChamadaDeTool({ name: "update_client", input: args }, aVista(atualizar, b.db));
+      const caso = JSON.stringify(args);
+      assertEquals(r.executou, true, caso);
+      assertEquals(r.proposal, undefined, caso);
+      assertEquals(pendencias(b), [], caso);
+      // deno-lint-ignore no-explicit-any
+      const feito = r.toolResult as any;
+      assertEquals([feito.ok, feito.atualizado], [true, ["email"]], caso);
+      assertEquals(b.tabelas.clients[0].email, "joao@x.com", caso);
+      assertEquals([b.tabelas.clients[0].phone, b.tabelas.clients[0].whatsapp], ["(47) 99165-3158", "(47) 99165-3158"], `${caso}: o número não é apagado`);
+    }
+  }
+  // Os dois números em branco e mais de um campo: sobra o que não é contato, e roda direto como antes do S3.
+  const b = bancoFalso(clientes());
+  const r = await executarChamadaDeTool(
+    { name: "update_client", input: { client_id: "c1", phone: "", whatsapp: null, email: "joao@x.com", city: "Itajaí" } }, aVista(atualizar, b.db));
+  assertEquals(r.executou, true);
+  // deno-lint-ignore no-explicit-any
+  assertEquals((r.toolResult as any).atualizado, ["email", "city"]);
+  assertEquals([b.tabelas.clients[0].phone, b.tabelas.clients[0].whatsapp], ["(47) 99165-3158", "(47) 99165-3158"]);
+  // Sem número em branco nada mudou: o cartão de contato não existe para esse pedido (resumo genérico).
+  assertEquals(await resumirTrocaDeContato(b.db, { client_id: "c1", phone: "", email: "joao@x.com" }), null);
+});
+
+Deno.test("cliente (1): número em branco junto de OUTRO contato é descartado; o cartão e o sim valem pelo que sobra", async () => {
+  for (const branco of EM_BRANCO) {
+    const b = bancoFalso(clientes());
+    const args = { client_id: "c1", phone: branco, whatsapp: "5547991455678", email: "joao@x.com" };
+    const r = await executarChamadaDeTool({ name: "update_client", input: args }, aVista(atualizar, b.db));
+    const caso = JSON.stringify(args);
+    assertEquals(r.executou, false, caso);
+    assertEquals(r.proposal?.risk_level, "medium", caso);
+    const [p] = pendencias(b);
+    // o cartão mostra só o que vai ser gravado: o telefone em branco não aparece como "→ —"
+    assertEquals(String(p.summary).split("\n"), [
+      "Trocar o contato do cliente *João da Silva*:",
+      "- WhatsApp: (47) 99165-3158 → *(47) 99145-5678*",
+      "- Também muda: E-mail",
+    ], caso);
+    assertEquals(b.tabelas.clients[0].whatsapp, "(47) 99165-3158", "nada muda antes do sim");
+    // o sim executa o pedido gravado: o WhatsApp e o e-mail mudam, e o telefone em branco NÃO apaga o telefone
+    // deno-lint-ignore no-explicit-any
+    const feito = await atualizar.execute(p.payload, ctxDe(b.db)) as any;
+    assertEquals([feito.ok, feito.atualizado], [true, ["whatsapp", "email"]], caso);
+    assertEquals([b.tabelas.clients[0].whatsapp, b.tabelas.clients[0].email, b.tabelas.clients[0].phone],
+      ["(47) 99145-5678", "joao@x.com", "(47) 99165-3158"], caso);
+  }
+  // Com a marca de não receber mensagens: o mesmo.
+  const b = bancoFalso(clientes());
+  assertEquals(await resumirTrocaDeContato(b.db, { client_id: "c1", whatsapp: "  ", opt_out_whatsapp: true }),
+    "Trocar o contato do cliente *João da Silva*:\n- Não receber mensagens no WhatsApp: não → *sim*");
+});
+
+Deno.test("cliente (2) e (3): o pedido que SÓ apaga o número é recusado no cartão e na execução; só com espaços não apaga calado", async () => {
+  for (const branco of EM_BRANCO) {
+    for (const args of [
+      { client_id: "c1", phone: branco }, { client_id: "c1", whatsapp: branco }, { client_id: "c1", phone: branco, whatsapp: branco },
+      { client_id: "c1", phone: branco, email: "", motivo: "pediu para tirar" },
+    ]) {
+      const caso = JSON.stringify(args);
+      const b = bancoFalso(clientes());
+      // pelo agente: não roda direto, a recusa é dita ao modelo e a pendência não nasce
+      const r = await executarChamadaDeTool({ name: "update_client", input: args }, aVista(atualizar, b.db));
+      assertEquals(r.executou, false, caso);
+      assertEquals(r.proposal, undefined, caso);
+      // deno-lint-ignore no-explicit-any
+      assertStringIncludes((r.toolResult as any).error, RECUSA_DE_APAGAR_CONTATO, caso);
+      assertEquals(pendencias(b), [], caso);
+      // direto na execução (o caminho de uma liberação de autonomia): a mesma recusa, e nada gravado
+      // deno-lint-ignore no-explicit-any
+      const direto = await atualizar.execute(args, ctxDe(b.db)) as any;
+      assertEquals(direto.error, RECUSA_DE_APAGAR_CONTATO, caso);
+      // (a recusa pelo agente deixa uma linha de auditoria; no cadastro, nada)
+      assertEquals(b.gravacoes.filter((g) => g.tabela === "clients"), [], caso);
+      assertEquals([b.tabelas.clients[0].phone, b.tabelas.clients[0].whatsapp], ["(47) 99165-3158", "(47) 99165-3158"], caso);
+    }
+  }
+  // Direto na execução, só com espaços JUNTO de outro campo: antes apagava o número (NOVO-p1-s3-01); agora descarta.
+  const b = bancoFalso(clientes());
+  // deno-lint-ignore no-explicit-any
+  const feito = await atualizar.execute({ client_id: "c1", phone: "   ", whatsapp: " ", email: "joao@x.com" }, ctxDe(b.db)) as any;
+  assertEquals([feito.ok, feito.atualizado], [true, ["email"]]);
+  assertEquals([b.tabelas.clients[0].phone, b.tabelas.clients[0].whatsapp, b.tabelas.clients[0].email], ["(47) 99165-3158", "(47) 99165-3158", "joao@x.com"]);
+  // Pedido sem nada (nem número em branco) continua com a frase de sempre.
+  // deno-lint-ignore no-explicit-any
+  assertEquals((await atualizar.execute({ client_id: "c1", email: "" }, ctxDe(b.db)) as any).error, "Nada para atualizar — informe ao menos um campo.");
 });
 
 Deno.test("S3 cliente (técnico): o que a execução recusaria é recusa antes do cartão; nome repetido igual ao gravado não entra", async () => {
