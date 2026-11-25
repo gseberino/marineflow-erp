@@ -123,17 +123,31 @@ export const NEVER_AUTONOMOUS = new Set<string>([
  * exatamente "link" (depois de tirar espaço e maiúscula) também trava: errar para o lado da
  * confirmação custa um "sim"; errar para o outro lado manda o PDF sem ninguém ver.
  * A tool normaliza igual (formatoDoEnvio em tools/whatsapp.ts) e o teste confere.
+ *
+ * Frase escrita pelo assistente (acabamento da leva A do pacote 1, 24/11/2026): no formato 'link', `custom_message`
+ * substitui o texto padrão. Com a liberação gravada, essa frase ia ao cliente sem cartão: texto livre para fora sem
+ * ninguém ler. É a mesma regra que a mensagem livre já segue (send_whatsapp_message nunca roda sozinha; no S1, motivo
+ * de risco trava a autonomia): texto livre para fora sempre passa pelo cartão. A liberação continua valendo para o
+ * link com o texto padrão. Frase vazia ou só com espaços não é frase (a tool manda o texto padrão); o que não é texto
+ * a tool ignoraria, e aqui trava: errar para o lado do "sim" custa um "sim".
  */
 export const NEVER_AUTONOMOUS_WHEN: Record<string, (args: Record<string, unknown> | undefined) => boolean> = {
   // Retorno F4 (P12.1): o destino parceiro trava em qualquer formato (a tool normaliza igual, destinoDoEnvio).
   send_service_order_link: (args) =>
-    String(args?.formato ?? "").trim().toLowerCase() !== "link" || String(args?.destino ?? "").trim().toLowerCase() === "parceiro",
+    String(args?.formato ?? "").trim().toLowerCase() !== "link" || String(args?.destino ?? "").trim().toLowerCase() === "parceiro" ||
+    trazFraseLivre(args?.custom_message),
 };
+
+/** O pedido traz frase escrita pelo assistente? Ausente, nula, vazia ou só com espaços = não traz. */
+function trazFraseLivre(frase: unknown): boolean {
+  if (frase === undefined || frase === null) return false;
+  return typeof frase === "string" ? frase.trim() !== "" : true;
+}
 
 /** Explicação da trava por argumento, para o que o agente diz ao liberar/listar autonomia. */
 export const EXPLICACAO_DA_TRAVA_POR_ARGUMENTO: Record<string, string> = {
   send_service_order_link:
-    "Só o envio de 'só o link' ao cliente pode agir sozinho. O PDF anexado ao cliente (o padrão) pede confirmação SEMPRE — leva preço e PIX num arquivo que não se desfaz. E tudo o que vai ao parceiro também.",
+    "Só o envio de 'só o link' ao cliente, com o texto padrão, pode agir sozinho. Com frase escrita pelo assistente, pede confirmação SEMPRE — texto livre para fora passa pelo cartão. O PDF anexado ao cliente (o padrão) pede confirmação SEMPRE — leva preço e PIX num arquivo que não se desfaz. E tudo o que vai ao parceiro também.",
 };
 
 /** Prefixo das chaves em app_settings. */

@@ -902,6 +902,60 @@ Deno.test("no agente: _retrato vindo do modelo é trocado pelo lido do banco", a
   assert(!String(pendencia!.summary).includes("forjado"), "o resumo é montado sem o retrato");
 });
 
+// ─── Acabamento da leva A do pacote 1 (24/11/2026): frase livre no link sempre passa pelo cartão ───
+// O formato 'link' é o único envio ao cliente que o dono pode liberar para sair sozinho (Confiança Graduada). Com a
+// liberação gravada, a frase ESCRITA PELO ASSISTENTE (custom_message, que no 'link' substitui o texto padrão) também
+// saía sem cartão: texto livre a cliente sem ninguém ler. Latente (nenhuma chave ai_autonomy_* gravada). O que se fixa:
+// a liberação vale para o link com o texto padrão; com frase do assistente, o envio vira pendência, como sem liberação.
+Deno.test("no agente, com autonomia 'auto' gravada: o link com o texto padrão sai sozinho, como hoje", async () => {
+  const { amb, resultado } = await rodarNoAgente({ service_order_id: ORC.id, formato: "link" });
+  assertEquals(amb.banco.inseridos.ai_operator_pending_actions, undefined, "sem pendência: a liberação vale");
+  assertEquals(resultado.proposal, undefined);
+  assertEquals(amb.chamadas.envio.length, 1);
+  assertEquals(amb.chamadas.envio[0].phone, CLIENTE.whatsapp);
+  assertStringIncludes(amb.chamadas.envio[0].message, `https://erp.example/view/${ORC.share_token}`);
+  // frase vazia ou só com espaços não é frase: vai o texto padrão, e a liberação continua valendo
+  for (const semFrase of ["", "   "]) {
+    const r = await rodarNoAgente({ service_order_id: ORC.id, formato: "link", custom_message: semFrase });
+    assertEquals(r.amb.banco.inseridos.ai_operator_pending_actions, undefined, JSON.stringify(semFrase));
+    assertEquals(r.amb.chamadas.envio.length, 1, JSON.stringify(semFrase));
+    assertEquals(r.amb.chamadas.envio[0].message, amb.chamadas.envio[0].message, "o mesmo texto padrão");
+  }
+});
+
+Deno.test("no agente, com autonomia 'auto' gravada: o link com frase escrita pelo assistente vira pendência e não envia", async () => {
+  for (const frase of ["Oi! Segue o orçamento que combinamos.", "Fechamos por R$ 15.000, pode aprovar hoje que eu garanto a entrega na sexta."]) {
+    const { amb, resultado } = await rodarNoAgente({ service_order_id: ORC.id, formato: "link", custom_message: frase });
+    assertEquals(amb.chamadas.envio.length, 0, `nada sai sem o 'sim': ${frase}`);
+    const pendencia = amb.banco.inseridos.ai_operator_pending_actions?.[0];
+    assert(pendencia, `a pendência foi gravada: ${frase}`);
+    assertEquals(pendencia.action_name, "send_service_order_link");
+    assertEquals(pendencia.risk_level, "high", "o mesmo risco de sempre: no WhatsApp, pede PIN");
+    assertStringIncludes(String(pendencia.summary), "só o link");
+    assertStringIncludes(String(pendencia.summary), frase, "o cartão mostra a frase que iria ao cliente");
+    assertEquals((pendencia.payload as any).custom_message, frase);
+    assert(resultado.proposal, "o turno devolve a proposta para o usuário confirmar");
+  }
+});
+
+Deno.test("a trava da autonomia do link: frase do assistente trava; sem frase, vazia ou só com espaços, não", () => {
+  const trava = NEVER_AUTONOMOUS_WHEN.send_service_order_link;
+  for (const semFrase of [{}, { custom_message: undefined }, { custom_message: null }, { custom_message: "" }, { custom_message: "  \n " }]) {
+    assertEquals(trava({ formato: "link", ...semFrase }), false, JSON.stringify(semFrase));
+    assertEquals(isAutonomyGranted("send_service_order_link", "high", AUTO, { formato: "link", ...semFrase }), true, JSON.stringify(semFrase));
+  }
+  // qualquer frase trava; o que não é texto (a ferramenta ignoraria) erra para o lado do "sim"
+  for (const frase of ["Oi!", " Segue o link. ", "R$ 350", 123, 0, false, {}, ["Oi"]]) {
+    assertEquals(trava({ formato: "link", custom_message: frase }), true, JSON.stringify(frase));
+    assertEquals(isAutonomyGranted("send_service_order_link", "high", AUTO, { formato: "link", custom_message: frase }), false, JSON.stringify(frase));
+  }
+  // os outros formatos e o parceiro continuam travados, com ou sem frase
+  assertEquals(trava({ formato: "pdf", custom_message: "Oi!" }), true);
+  assertEquals(trava({ formato: "link", destino: "parceiro" }), true);
+  // sem a liberação gravada nada muda: pede o "sim"
+  assertEquals(isAutonomyGranted("send_service_order_link", "high", {}, { formato: "link" }), false);
+});
+
 // ─── 8. O "sim" é sobre o retrato: telefone ou total mudou até a aprovação, não envia ─────
 Deno.test("execução: retrato igual ao de agora, envia", async () => {
   const amb = montarAmbiente();
