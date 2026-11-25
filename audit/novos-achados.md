@@ -5141,3 +5141,165 @@ quatro estão latentes.
 - **Menor mudança:** o arquivo só servir quando for o módulo principal (`if (import.meta.main)`), ou os testes
   importarem o `handler` de um módulo que não sobe servidor. Mexe em como toda função sobe e nos testes de três
   arquivos: tarefa própria (regra 5). Não mudado aqui.
+
+### [NOVO-p1-c2-05] O texto de venda do painel chama o OpenRouter mesmo com a reserva desligada e mostra o erro cru
+
+- **Onde:** `supabase/functions/ai-agent/index.ts`, bloco `// ---------- MODO SALES COPY` (`if (isSalesCopy)`). Usado por
+  `SendViaWhatsAppDialog`, `ProspectingPage`, `ActiveProspectingPage` e `AIConsultantDashboard` (`is_sales_copy: true`).
+  Achado da revisão da leva B (25/11/2026, gravidade baixa); conferido no código. Já era assim antes do pacote 1.
+- **Efeito:** esse caminho chama `callClaude` (OpenRouter) sem olhar `reservaLigada` nem a assinatura, e no erro devolve à
+  tela `e?.message`. Com a reserva desligada e o provedor sem saldo, quem pede um texto no diálogo de enviar pelo WhatsApp
+  lê "OpenRouter 402 (créditos insuficientes na conta): …" com o corpo cru do provedor. Fica fora do que o C2 promete
+  ("reserva desligada não chama mais o OpenRouter") e fere a decisão do dono de 24/11/2026 (não ser lembrado de crédito).
+- **Menor mudança:** no `catch`, `erroParaODono(e?.message)` no lugar de `e?.message` (uma linha e um teste). Se a reserva
+  desligada deve valer também aqui (devolver o aviso sem chamar `callClaude`, ou mandar o pedido pelo Claude da
+  assinatura), é decisão do dono. Não mudado aqui.
+
+### [NOVO-p1-c2-06] A foto que o fluxo de comprovantes devolve ao assistente some quando o Claude não atende
+
+- **Onde:** `encaminharAoAssistente` (`supabase/functions/_shared/comprovantes/fluxo.ts`): manda o pedido ao `ai-agent` e
+  só anota o status HTTP (`encaminhado`), que é sempre 200. Visto na revisão da leva B (25/11/2026), junto com o conserto
+  do turno do vigia das conversas.
+- **Efeito:** com o Claude da assinatura fora e a reserva desligada, o `ai-agent` responde a esse turno com
+  "⚠️ Não consegui responder: … mande de novo" (`entregue: "aviso"`). O dono mandou a foto antes, o aviso chega depois de
+  o fluxo ler a foto, e nada diz que é dela. O fluxo dá o encaminhamento por feito e não tenta de novo: a foto não vira
+  comprovante nem é respondida pelo assistente. Com a reserva ligada e falhando, o mesmo com o erro comum (já era assim).
+  Diferente do turno do vigia, aqui o dono mandou alguma coisa, então o aviso não foi calado. Não medido.
+- **Menor mudança:** ler o corpo da resposta em `encaminharAoAssistente`; com `entregue: "aviso"`, deixar a foto para a
+  rodada seguinte do vigia do fluxo (de 2 em 2 minutos), ou aceitar o aviso como está e mandar junto o `message_id`
+  (NOVO-p1-c4-03), para a rota ligar o aviso à foto. Mexe no fluxo de comprovantes: tarefa própria. Não mudado aqui.
+
+### [NOVO-p1-c2-07] O lembrete do vigia das conversas ainda se perde quando o Claude aceita o pedido e falha depois, ou com a reserva ligada
+
+- **Onde:** `avisar` (`supabase/functions/acompanhar-conversas/index.ts`) e `handleEntregaDoMax` /
+  `turnoDoModeloNoWhatsApp` (`supabase/functions/ai-agent/index.ts`). A revisão da leva B (25/11/2026) consertou só o caso
+  em que o Claude JÁ estava fora quando o vigia pediu e a reserva está desligada (o assistente se cala, devolve `calado` e
+  o vigia tenta de novo). Ficaram dois casos, os dois de antes do pacote 1:
+  1. **O Claude aceita o pedido e falha depois** (reserva desligada). O vigia recebeu `claude_max: <pedido>` e já marcou o
+     aviso como dado (o lembrete com hora e o de promessa ficam encerrados). Minutos depois `handleEntregaDoMax` manda ao
+     dono a causa e o "mande de novo": ele não mandou nada, e o lembrete não volta.
+  2. **A reserva ligada e falhando** (o valor de produção em 25/11/2026). O turno do vigia cai no laço da reserva, falha,
+     o dono lê a causa do Claude e o erro comum, e a resposta é 200 com `session_id`: o vigia marca o aviso como dado.
+- **Efeito:** nesses dois casos o dono recebe um aviso de falha sem saber de qual contato, e o lembrete com hora ou de
+  promessa se perde. Não medido (em 25/11/2026 havia 4 acompanhamentos ativos, todos do dono).
+- **Menor mudança:** o vigia mandar o id do acompanhamento no pedido; o `ai-agent` guardá-lo no pedido ao Claude e, na
+  falha, reabrir o acompanhamento em vez de avisar (caso 1). No caso 2, calar e devolver `calado` só quando o laço falhou
+  sem rodar ferramenta nenhuma (tentar de novo um turno que já gravou repetiria a gravação). Muda o que o dono recebe e
+  mexe no estado do acompanhamento: tarefa própria, com o OK dele. Não mudado aqui.
+
+### [NOVO-p1-s5-04] Lista de assinantes com lixo ou com um id errado tira o dono da assinatura sem deixar pista
+
+- **Onde:** `listaDosAssinantes` e `assinanteDoMax` (`supabase/functions/_shared/ai/max/claude-max.ts`). Achado da revisão
+  da leva B (25/11/2026, gravidade baixa); conferido no código.
+- **Efeito:** o que não tem forma de id é descartado calado, e `assinanteDoMax` só avisa no log quando a chave
+  `ai_max_assinantes` está AUSENTE. Com a chave presente e errada (um id com um caractere trocado, `{<id>}` com chaves, a
+  chave vazia; o cargo financeiro consegue gravá-la, NOVO-p1-s5-01), o próprio dono sai da assinatura. Com a reserva
+  ligada (produção em 25/11/2026), todo turno dele vai pelo OpenRouter, que está sem saldo, e ele lê só o erro comum; não
+  fica linha nenhuma dizendo que a causa é a lista. Com a reserva desligada ele lê "Este assistente funciona pela
+  assinatura Claude do dono e atende só o titular. Fale com o administrador." (ele é o administrador), e fica o registro
+  `nao_assinante` com o id de quem pediu.
+- **Menor mudança:** quando a chave existe, o canal pede o Claude, o cargo é admin e a pessoa não está na lista, um aviso
+  por instância no console e em `app_error_logs` (`action: 'assinante_fora_da_lista'`), só com a contagem de ids válidos e
+  de pedaços descartados, nunca os ids. Teste: lista com lixo e admin de fora gera uma linha só. Não mudado aqui.
+
+### [NOVO-p1-s5-05] O pedido do vigia das conversas para quem não é o titular manda a frase do titular e encerra o lembrete
+
+- **Onde:** `turnoDoModeloNoWhatsApp` (`supabase/functions/ai-agent/index.ts`), guarda `naoAssinanteSemReserva`, e `avisar`
+  (`supabase/functions/acompanhar-conversas/index.ts`). Visto na revisão da leva B (25/11/2026).
+- **Efeito:** o vigia das conversas abre o turno em nome de quem pediu o acompanhamento (`criado_por`). Se essa pessoa
+  não é o titular da assinatura e a reserva está desligada, ela recebe "Este assistente funciona pela assinatura Claude
+  do dono e atende só o titular. Fale com o administrador." sem ter mandado nada, e o vigia conta o aviso como dado (a
+  resposta é `entregue: "aviso"`, sem `calado`): o lembrete com hora e o de promessa ficam encerrados. Não acontece hoje:
+  em 25/11/2026 só o dono tem o assistente no WhatsApp, e os 4 acompanhamentos ativos são dele (conferido por contagem).
+  O conserto do turno do vigia (o `calado`) não cobre este ramo de propósito: tentar de novo a cada rodada um turno que
+  nunca vai ser atendido não leva a nada.
+- **Menor mudança:** decisão de quem especifica: o vigia não abrir turno para quem não é o titular quando a reserva está
+  desligada (e encerrar o acompanhamento com um motivo próprio), ou entregar o lembrete sem o assistente. Não mudado aqui.
+
+### [NOVO-p1-v1-06] As duas migrations da leva B se registram de jeitos diferentes, e a do V1 não é tudo ou nada
+
+- **Onde:** `supabase/migrations/20270301110000_assistente_quedas.sql` (V1) e
+  `supabase/migrations/20270301130000_assinatura_max_por_pessoa.sql` (S5). Achado da revisão da leva B (25/11/2026,
+  gravidade baixa, visto pelas duas lentes); conferido nos dois arquivos. Nenhuma das duas foi aplicada.
+- **Efeito:** a do V1 registra a própria versão na última linha do arquivo ("NÃO rodar um segundo insert do registro"); a
+  do S5 segue a regra 1 do `CLAUDE.md` (roda o arquivo e depois faz o insert do registro à mão). Quem aplica as duas pelo
+  hábito da regra 1 roda o insert também no V1 e recebe erro de versão repetida (não estraga nada, mas confunde o "deu
+  certo?"). Quem aplica as duas pelo jeito do V1 esquece o registro do S5 e deixa migration aplicada sem registro, que é o
+  incidente que a regra 1 cita. Além disso, o arquivo do V1 não tem `begin;` e `commit;`: se um comando falhar no meio, a
+  tabela pode ficar criada sem os revokes, sem a prova e sem o registro, e rodar de novo para no `create table`.
+- **Menor mudança:** deixar as duas iguais. A mais segura: tirar do arquivo do V1 o insert do registro, pôr no cabeçalho os
+  dois comandos da regra 1 e envolver o arquivo em `begin;` e `commit;`. Enquanto os arquivos ficarem como estão, o roteiro
+  de aplicação tem de dizer, arquivo por arquivo: na `20270301110000`, só o `-f`; na `20270301130000`, o `-f` e depois o
+  insert do registro; no fim, conferir as duas versões em `supabase_migrations.schema_migrations`. Não mudado aqui: mexer
+  numa migration pronta para o OK do dono é tarefa própria.
+
+### [NOVO-p1-v1-07] O "ensaio" que a migration do V1 promete antes de aplicar não existe
+
+- **Onde:** cabeçalho de `supabase/migrations/20270301110000_assistente_quedas.sql` ("Prova (depois de aplicar, ou antes,
+  como ensaio): supabase/tests/assistente_quedas.sql") e `supabase/tests/assistente_quedas.sql`. Achado da revisão da leva B
+  (25/11/2026, gravidade baixa); conferido nos dois arquivos.
+- **Efeito:** o teste começa por `update public.assistente_quedas … where ate is null`, sem criar a tabela. Antes de
+  aplicar a migration ele para na primeira linha (a tabela não existe) e não devolve resultado nenhum: o ensaio prometido
+  não roda. O teste do S5 tem o bloco A0, que no ensaio repete a gravação dentro da transação; este não tem. Depois de
+  aplicada a migration o teste funciona, mas segura as quedas abertas até o `rollback`, disputando com a rodada do vigia
+  (de 5 em 5 minutos): é rápido, e convém rodar fora dos minutos :00, :05, :10…
+- **Menor mudança:** tirar "ou antes, como ensaio" do cabeçalho da migration; ou dar ao teste um A0 como o do S5 (se a
+  tabela não existe, criar dentro da transação, que termina em `rollback`). Não mudado aqui.
+
+### [NOVO-p1-s6-04] Testes e um comentário guardam dois telefones e um CPF que existem no cadastro de clientes
+
+- **Onde:** os dois telefones (terminados em 5678 e em 3158, DDD 47) e o CPF (começa por 508) aparecem em:
+  `supabase/functions/_shared/ai/tools/acompanhamento_test.ts`, `agendamento_test.ts`, `cadastros_test.ts` e
+  `resposta_test.ts` (os telefones; em `cadastros_test.ts` também o CPF), no comentário do topo de
+  `supabase/functions/_shared/ai/busca-cadastro.ts` (um telefone e o CPF) e em `tools/clients.ts` (o CPF). Todos esses já
+  estão na `main` (o mais antigo desde 05/10/2026). E em `supabase/functions/_shared/ai/tools/riscos-de-ferramenta_test.ts`,
+  que NÃO está na `main`: entrou neste ramo pela leva A do pacote 1 (S3; 43 usos dos telefones e 4 do CPF).
+- **Efeito:** conferido só por contagem em 25/11/2026 (nenhum dado foi lido): cada telefone bate com 1 cadastro de cliente
+  e 1 contato do WhatsApp, e o CPF bate com 2 cadastros de cliente. São dados pessoais de cliente de verdade dentro do
+  repositório, em arquivos que dizem usar dado inventado. A revisão da leva B achou um dos telefones no teste novo do S6
+  (`agent-texto-de-fora_test.ts`), que foi limpo dos dois (commit "Revisão: o teste do S6 deixa de usar números…"). A
+  revisão supôs que os outros arquivos estavam todos na `main`; o `riscos-de-ferramenta_test.ts` não está.
+- **Menor mudança:** trocar pelos fictícios do padrão `(47) 90000-00NN` (não batem com cliente, fornecedor, usuário,
+  contato nem mensagem; conferido por contagem) e por um CPF de teste, arquivo por arquivo, rodando os testes de cada um.
+  Convém fazer `riscos-de-ferramenta_test.ts` ANTES de publicar o ramo, para a publicação não levar 47 cópias novas à
+  `main`. Não mudado aqui: são 7 arquivos fora do achado, e as asserções de `riscos-de-ferramenta_test.ts` conferem o
+  número formatado em vários pontos (tarefa própria, regra 3).
+
+### [NOVO-p1-s6-05] O S6 ficou mais largo que a especificação: 8 leituras e 10 escritas a mais (decisão do dono a confirmar)
+
+- **Onde:** `LEITURAS_DE_TEXTO_DE_FORA` e `SOBEM_PARA_SIM` (`supabase/functions/_shared/ai/texto-de-fora.ts`). Achado da
+  revisão da leva B (25/11/2026, gravidade baixa); conferido no código e medido no banco.
+- **Efeito:** a especificação tem 8 leituras e 14 escritas que sobem para o "sim". O código tem 8 leituras a mais
+  (`list_unanswered_messages`, `list_unidentified_contacts`, `get_open_loops`, `list_agenda_suggestions`,
+  `accept_agenda_suggestions`, `dismiss_agenda_suggestions`, `get_quote_comparison`, `rascunhar_resposta_email`) e 10
+  escritas a mais (`create_marina`, `update_marina`, `alterar_favorecido`, `cadastrar_freelancer`,
+  `link_contact_to_entity`, `link_whatsapp_lead_to_client`, `criar_cobranca`, `alterar_cobranca`,
+  `criar_missao_acompanhamento`, `update_service`). Tudo só sobe o risco (o lado seguro), mas pode pôr cartão de "sim" onde
+  hoje não há: uma cobrança criada ou uma missão de acompanhamento pedida no turno do vigia, que já nasce marcado.
+  **Medido em 25/11/2026** (90 dias, 472 turnos em `ai_jobs`, só nomes de ferramenta, pelo método de
+  `sql/p1-seguranca-2.sql`): das 10 escritas a mais, só `criar_cobranca` foi chamada (4 vezes), nenhuma depois de uma
+  leitura de texto de fora e nenhuma em turno do vigia; as outras 9 tiveram 0 chamadas. Em 90 dias o alargamento não teria
+  criado nenhum cartão. O turno que roda pelo OpenRouter não deixa essa lista: a medida vale para os turnos do Claude.
+- **Menor mudança:** nenhuma no código. Levar as 18 inclusões ao OK nomeado do dono na publicação do S6; se ele recusar,
+  voltar à lista da especificação mais as que gravam telefone (a raiz do NOVO-p1-s1-04).
+
+### [NOVO-p1-c4-06] A tela de atividade do assistente não tem teste que a renderize
+
+- **Onde:** `src/pages/AIActivityPage.tsx` (o filtro `.not('event_type', 'like', 'rota:%')` na lista dos últimos 50
+  eventos, do C4) e `src/test/atividade-sem-rota.test.ts`. Achado da revisão da leva B (25/11/2026, gravidade baixa).
+- **Efeito:** a mudança de tela é provada só por um teste que lê a fonte. Nenhum teste renderiza `AIActivityPage`, e a
+  regra da casa "validar tela por render" (`tsc` e o build não pegam erro de render) fica sem prova para ela. O risco é
+  pequeno: um método do supabase-js numa consulta que já existia.
+- **Menor mudança:** um `AIActivityPage.smoke.test.tsx` no padrão dos outros `*.smoke.test.tsx` de `src/pages`, com o
+  cliente do Supabase falso aceitando `.not()`. Não mudado aqui (fora dos achados de gravidade alta e média).
+
+### [NOVO-p1-c4-07] A rota do turno do vigia que o assistente calou sai igual à do aviso que foi ao dono
+
+- **Onde:** `rotaDaResposta` (`supabase/functions/_shared/ai/rota-da-mensagem.ts`): `entregue: "aviso"` vira
+  `rota:aviso_falha` com o código da causa. Visto na revisão da leva B (25/11/2026), ao criar a resposta
+  `{ entregue: "aviso", causa, calado: true }` do turno aberto pelo vigia das conversas.
+- **Efeito:** no rastro, o turno do vigia em que nada foi enviado ao dono aparece como `aviso_falha`, igual ao turno em
+  que o aviso saiu. Dá para separar pelo `mensagem_id` nulo (o turno do vigia não vem de mensagem do dono) e pelo registro
+  `max_fora_turno_do_vigia` em `app_error_logs`, mas a linha da rota sozinha não diz.
+- **Menor mudança:** em `rotaDaResposta`, com `calado === true`, o detalhe `calado:<causa>` (cabe no padrão de rótulo).
+  Mexe no arquivo do C4 e nos testes dele: não mudado aqui.
