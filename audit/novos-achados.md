@@ -5079,3 +5079,65 @@ quatro estão latentes.
   normalizam o fim de linha antes de recortar.
 - **Menor mudança:** `fonte.replace(/\r\n/g, "\n")` antes do recorte, como nos testes novos. Não mudado aqui (regra 5: teste
   existente não se mexe fora de tarefa própria, além do literal que a especificação mandou ajustar).
+
+### [NOVO-p1-c4-01] O ai-agent responde sempre HTTP 200: segredo interno errado, pedido sem texto e chave do provedor ausente não deixam rota
+
+- **Onde:** `jr` (`supabase/functions/ai-agent/index.ts`: responde sempre 200 e guarda o status de verdade no cabeçalho
+  `X-Actual-Status`) e `dispatchToAgent` (`supabase/functions/whatsapp-webhook/index.ts`), que só olha `res.ok`.
+- **Efeito:** o C4 grava `rota:despacho_falhou` quando o `ai-agent` não responde ou responde com erro HTTP de verdade (a
+  função caiu, passou do tempo, nem subiu). Três saídas do próprio `ai-agent` vêm ANTES do ponto do rastro e chegam ao
+  webhook como 200, então continuam mudas: 401 (o `AI_INTERNAL_SECRET` das duas funções não confere), 400 (pedido sem
+  texto) e 500 (`OPENROUTER_API_KEY` ausente; este ainda deixa uma linha em `app_error_logs`, os outros dois nem isso).
+  Com o segredo divergente, TODA mensagem do dono some sem resposta e sem rota. A especificação do C4 pedia "ai-agent que
+  responde 500 grava despacho_falhou": isso vale para o 500 do HTTP, não para o 500 que o `ai-agent` devolve dentro do
+  200.
+- **Como se vê:** em `docs/consultas/rota-das-mensagens-do-dono.sql`, a mensagem aparece como `SEM ROTA`.
+- **Menor mudança:** no `dispatchToAgent`, ler `X-Actual-Status` e gravar `rota:despacho_falhou` também para 400, 401 e
+  5xx. O 5xx que nasce dentro do turno já ganha `rota:erro` no `ai-agent`: decidir se ficam as duas linhas ou se o webhook
+  pula esse caso. Não mudado aqui (a especificação e as críticas fixam "`!res.ok` ou exceção").
+
+### [NOVO-p1-c4-02] A rota "comprovantes" não diz se a conversa dos comprovantes tratou a resposta ou se falhou
+
+- **Onde:** `rotearTextoDoDono` (`supabase/functions/_shared/comprovantes/webhook.ts`): devolve o mesmo destino quando o
+  `responder` tratou a mensagem (200), quando falhou e avisou o dono (5xx) e quando nem respondeu (rede ou tempo: nada é
+  feito, de propósito).
+- **Efeito:** o C4 grava `rota:comprovantes` com o destino (`comprovante`, `comando`, `dica`, `ambiguo`…) nos três casos.
+  A mensagem deixa de ser "sem rota", mas a linha não separa "foi tratada" de "o responder não respondeu", que é o caso
+  mudo de verdade (o "1" do menu que some).
+- **Menor mudança:** `rotearTextoDoDono` devolver também o desfecho do `responder` (tratada, falhou, sem resposta) e o
+  webhook pôr isso no detalhe. Muda o contrato de uma função com testes próprios, fora da lista de arquivos do C4. Não
+  mudado aqui.
+
+### [NOVO-p1-c4-03] A foto que o fluxo de comprovantes devolve ao assistente vai sem o id da mensagem
+
+- **Onde:** `encaminharAoAssistente` (`supabase/functions/_shared/comprovantes/fluxo.ts`): o pedido ao `ai-agent` leva
+  `phone_normalized`, `app_user_id` e `text`, sem `message_id`. O `acompanhar-conversas` também chama sem o id (esse não é
+  mensagem do dono: é turno aberto pelo sistema).
+- **Efeito:** a rota desses turnos é gravada com `mensagem_id` nulo. A foto fica com a linha `rota:comprovantes` (detalhe
+  `midia`) do webhook; se o fluxo a devolver ao assistente depois de ler, o turno que respondeu não se liga a ela, e a
+  consulta mostra só "comprovantes:midia" para aquela mensagem.
+- **Menor mudança:** mandar o `message_id` no corpo de `encaminharAoAssistente` (o fluxo tem o id da mensagem). Fora da
+  lista de arquivos do C4. Não mudado aqui.
+
+### [NOVO-p1-c4-04] A entrega do Claude que não acha usuário, sessão ou telefone marca o pedido como entregue e não manda nada
+
+- **Onde:** `handleEntregaDoMax` (`supabase/functions/ai-agent/index.ts`): `ai_job_marcar_entregue` roda ANTES da
+  conferência `if (!appUser || !sessionId || !phoneNormalized) return jr({ error: … }, 422)`.
+- **Efeito:** se o usuário foi desativado (ou perdeu o WhatsApp do assistente) entre o pedido e a resposta, ou se o pedido
+  veio sem telefone, o pedido fica marcado como entregue, nada é enviado e nada é avisado; a segunda chamada devolve
+  "já entregue". O C4 registra a rota "depois de cada envio", então aqui não há linha `rota:entrega`: na consulta, a
+  mensagem mostra `modelo_max` com a entrega vazia, sem a causa.
+- **Menor mudança:** gravar `rota:entrega` com um detalhe próprio (`sem_destino`) nessa saída, ou conferir usuário, sessão
+  e telefone antes de marcar o pedido como entregue. Não mudado aqui (a especificação pede a rota só depois de envio).
+
+### [NOVO-p1-c4-05] Os testes do whatsapp-webhook sobem um servidor na porta 8000: duas rodadas ao mesmo tempo derrubam uma
+
+- **Onde:** `index_test.ts`, `parceiro_test.ts` e `retorno_test.ts` de `supabase/functions/whatsapp-webhook/` importam
+  `./index.ts`, que chama `servirComCors` (`Deno.serve`, porta 8000) ao ser carregado.
+- **Efeito:** com duas rodadas de `deno test` ao mesmo tempo na máquina (duas sessões em worktrees diferentes, ou a suíte
+  e um arquivo avulso), a segunda falha com `Uncaught error … AddrInUse (os error 10048)` e "0 tests" naquele arquivo.
+  Reproduzido em 25/11/2026 rodando a pasta duas vezes em paralelo: `41 passed | 2 failed`. Rodando sozinha, a pasta
+  passa (6 de 6 vezes). É falha falsa: quem confere uma frente enquanto outra sessão testa pode ler isso como defeito.
+- **Menor mudança:** o arquivo só servir quando for o módulo principal (`if (import.meta.main)`), ou os testes
+  importarem o `handler` de um módulo que não sobe servidor. Mexe em como toda função sobe e nos testes de três
+  arquivos: tarefa própria (regra 5). Não mudado aqui.
