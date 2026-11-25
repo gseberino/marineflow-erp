@@ -760,7 +760,7 @@ Deno.test("mensagem acima do limite: recusada antes da pendência e no execute; 
 
 // ─── Pacote 1, S1 (24/11/2026): a frase escrita pelo assistente que cita valor, data ou promessa ───
 // O PIN deste envio já existe e não muda; o cartão só passa a dizer onde olhar.
-const AVISO_DA_FRASE = (cita: string) => `⚠️ A frase da legenda foi escrita pelo assistente e cita ${cita}. Confira antes do PIN.`;
+const AVISO_DA_FRASE = (cita: string) => `⚠️ A frase da legenda foi escrita pelo assistente e cita ${cita}. Confira antes de aprovar.`;
 
 Deno.test("S1 legenda: a frase do assistente que cita valor, data ou promessa ganha o aviso, logo depois dela", async () => {
   const amb = montarAmbiente();

@@ -349,9 +349,11 @@ Deno.test("S1 conteúdo: texto neutro não acusa nada; texto vazio ou estranho n
 });
 
 Deno.test("S1 legenda do PDF/link: o aviso só aparece quando a frase do assistente cita algo", () => {
-  assertEquals(avisoDaFraseDoAssistente("Segue o orçamento, total de R$ 350."), "⚠️ A frase da legenda foi escrita pelo assistente e cita valor. Confira antes do PIN.");
-  assertEquals(avisoDaFraseDoAssistente("Válido até 30/11, R$ 350."), "⚠️ A frase da legenda foi escrita pelo assistente e cita valor e data. Confira antes do PIN.");
-  assertEquals(avisoDaFraseDoAssistente("Fica pronto sexta."), "⚠️ A frase da legenda foi escrita pelo assistente e cita data e promessa. Confira antes do PIN.");
+  // "antes de aprovar", e não "antes do PIN": o cartão aparece também no chat do app, onde a aprovação é por botão
+  assertEquals(avisoDaFraseDoAssistente("Segue o orçamento, total de R$ 350."), "⚠️ A frase da legenda foi escrita pelo assistente e cita valor. Confira antes de aprovar.");
+  assertEquals(avisoDaFraseDoAssistente("Válido até 30/11, R$ 350."), "⚠️ A frase da legenda foi escrita pelo assistente e cita valor e data. Confira antes de aprovar.");
+  assertEquals(avisoDaFraseDoAssistente("Fica pronto sexta."), "⚠️ A frase da legenda foi escrita pelo assistente e cita data e promessa. Confira antes de aprovar.");
+  assertEquals(String(avisoDaFraseDoAssistente("Total de R$ 350.")).includes("PIN"), false, "o aviso não fala em PIN");
   for (const neutra of ["Segue o orçamento.", "Bom dia! Conforme conversamos:", "", "   ", undefined, null, 42]) {
     assertEquals(avisoDaFraseDoAssistente(neutra), null, String(neutra));
   }
@@ -359,7 +361,7 @@ Deno.test("S1 legenda do PDF/link: o aviso só aparece quando a frase do assiste
   const link = "https://erp.example/view/22222222-2222-4222-8222-222222222222";
   assertEquals(conteudoQuePedePin(link).data, true, "na mensagem livre o link segue contando (lado seguro)");
   assertEquals(avisoDaFraseDoAssistente(`Veja aqui: ${link} — qualquer dúvida me chama.`), null);
-  assertEquals(avisoDaFraseDoAssistente(`Veja aqui: ${link} — vale até 30/11.`), "⚠️ A frase da legenda foi escrita pelo assistente e cita data. Confira antes do PIN.");
+  assertEquals(avisoDaFraseDoAssistente(`Veja aqui: ${link} — vale até 30/11.`), "⚠️ A frase da legenda foi escrita pelo assistente e cita data. Confira antes de aprovar.");
 });
 
 // ─── O gancho das duas ferramentas ──────────────────────────────────────────────────────────────
