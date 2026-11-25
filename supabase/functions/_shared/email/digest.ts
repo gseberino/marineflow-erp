@@ -36,6 +36,24 @@ export interface DigestOpts {
 export const MAX_URGENTES_PADRAO = 3;
 const MAX_POR_CATEGORIA_PADRAO = 3;
 
+/**
+ * (Revisão do pacote 1, 24/11/2026) Cabe mais um aviso de urgente NA HORA, hoje? É a conta do teto do email-imap.
+ *
+ *  · aviso comum: enquanto os avisos de hoje (todos, de qualquer origem) forem menos que o teto;
+ *  · alerta de golpe que veio da regra fixa forte (troca de conta, de chave Pix, de dados bancários): tem a PRÓPRIA
+ *    cota, do mesmo tamanho. Não é barrado pelos avisos comuns do dia (três urgentes de manhã calavam o pedido de troca
+ *    de conta da tarde) e também não fica sem teto: quem dispara a regra é texto escrito por gente de fora.
+ *
+ * O que não cabe continua urgente no banco e entra no resumo da manhã; o email-imap conta em `urgentes_barrados`.
+ */
+export function cabeMaisUmAviso(
+  hoje: { daRegraDoGolpe: boolean; avisados: number; golpesDaRegra: number },
+  teto: number = MAX_URGENTES_PADRAO,
+): boolean {
+  const usados = hoje.daRegraDoGolpe ? hoje.golpesDaRegra : hoje.avisados;
+  return usados < Math.max(0, teto);
+}
+
 function linha(item: EmailDigestItem): string {
   const assunto = (item.assunto ?? "").trim();
   const corpo = assunto ? `"${assunto.slice(0, 60)}"` : "(sem assunto)";

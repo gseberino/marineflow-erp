@@ -57,6 +57,12 @@ export interface Triage {
    * (email-imap → registrarFalhaDeRotina): este arquivo não grava nada. Nunca leva texto do e-mail.
    */
   falha?: string;
+  /**
+   * (F1 e revisão, 24/11/2026) Preenchido quando a regra fixa do golpe casou: o nome da regra e se é forte (conta,
+   * chave Pix, dados bancários: saiu urgente com o alerta) ou só de boleto (não alerta). O email-imap usa para a cota
+   * do aviso e para contar.
+   */
+  golpePelaRegra?: { regra: string; forte: boolean };
 }
 
 /** O que quem chama decide: o modelo (o teste troca). */
@@ -116,6 +122,10 @@ export function normalizeTriage(raw: RawTriage, textoReal: string): Triage {
 /**
  * Atalho determinístico: cabeçalho de lista/automação e remetente no-reply decidem sozinhos,
  * sem LLM. Corta a maior fatia do volume (marketing e notificação automática) a custo zero.
+ *
+ * (Revisão do pacote 1, 24/11/2026) Os dois atalhos que MOSTRAM o e-mail (resposta automática e remetente que não
+ * aceita resposta) nunca chegam ao modelo, com ele de pé ou não: o texto deles passa pela regra fixa do golpe
+ * (golpeDeTrocaDeConta), como a crítica de viabilidade pede. O atalho de lista (ignore) não: é divulgação.
  */
 export function triageDeterministica(email: InboundEmail): Triage | null {
   const pre = preClassify(email.headers ?? {});
@@ -127,18 +137,18 @@ export function triageDeterministica(email: InboundEmail): Triage | null {
     };
   }
   if (pre.isAutoReply) {
-    return {
+    return comARegraDoGolpe({
       classe: "notify", confianca: 1, evidencia: pre.reason ?? "resposta automática",
       motivo: `Resposta automática (${pre.reason}) — não espera retorno`, alertaFraude: false,
       rebaixada: false, deterministica: true,
-    };
+    }, golpeDeTrocaDeConta(email), `Resposta automática (${pre.reason})`);
   }
   if (isNoReplySender(email.from?.address) && !(email.attachments ?? []).length) {
-    return {
+    return comARegraDoGolpe({
       classe: "notify", confianca: 1, evidencia: email.from?.address ?? "no-reply",
       motivo: "Remetente não aceita resposta", alertaFraude: false,
       rebaixada: false, deterministica: true,
-    };
+    }, golpeDeTrocaDeConta(email), "Remetente não aceita resposta");
   }
   return null;
 }
@@ -152,7 +162,19 @@ export function triageDeterministica(email: InboundEmail): Triage | null {
 // segue o MESMO caminho de aviso do urgente (email-imap: teto do dia, "não repetir" e o portão da voz única).
 // Não casou: `notify`, como antes. Nada vai ao remetente nem a terceiros.
 //
-// Com o modelo de pé esta regra não roda: quem decide é ele, que lê contexto e erra menos.
+// Com o modelo de pé esta regra não roda no e-mail que ele lê: quem decide é ele, que lê contexto e erra menos.
+//
+// (Revisão do pacote 1, 24/11/2026) Três acertos:
+//  1. A regra roda também nos dois atalhos de triageDeterministica que MOSTRAM o e-mail sem ninguém ler o texto
+//     (resposta automática e remetente que não aceita resposta), com o modelo de pé ou não: é o que a crítica de
+//     viabilidade pedia ("no catch de triageEmail e em triageDeterministica").
+//  2. Regras FORTES e regras SÓ DE BOLETO (`forte`). "Segue boleto atualizado", "segue novo boleto" e "substituição
+//     de boleto" são a segunda via de todo dia: saíam como possível golpe e gastavam os avisos urgentes do dia. Agora
+//     a regra só de boleto não muda a classe (notify, sem alerta); o motivo diz o que ela viu. Só a forte (conta,
+//     chave Pix, dados bancários) sai urgente com o alerta, e com cota própria no aviso (digest.ts, cabeMaisUmAviso).
+//  3. O que passava calado ganhou regra: pagamento na conta indicada no próprio e-mail, "nossa conta mudou",
+//     "desconsiderar os dados enviados anteriormente", Pix em CPF ou CNPJ "em nome de" outra pessoa, e o pedido em
+//     inglês ("we have changed our bank details").
 //
 // As expressões valem em dois lugares: aqui (RegExp do JavaScript) e na medição no banco (regex do Postgres, só
 // contagem, com `\b` trocado por `\y`). Por isso ficam no que os dois motores leem igual: grupos sem captura,
@@ -163,6 +185,10 @@ export function triageDeterministica(email: InboundEmail): Triage | null {
 // divulgação, que o cabeçalho descarta antes, e 1 do histórico que nunca passou por triagem); dos 96 sem triagem desde
 // 12/11, nenhum. O golpe que o modelo vinha marcando nesta caixa é outro (cobrança judicial falsa: 0 dos 17 marcados
 // casam aqui) e esta regra não o cobre: ela é só a do pedido de troca de dados de pagamento.
+// Medido de novo depois da revisão (24/11/2026, só contagem, as 16 regras): nos 1.921 e-mails guardados continuam os
+// mesmos 3, todos pela primeira regra; as regras novas e as de boleto pegam 0; nos 152 e-mails que saíram pelos dois
+// atalhos (remetente que não aceita resposta e resposta automática), 0. As 16 expressões foram conferidas no Postgres
+// contra os 67 exemplos do teste: nenhuma lê diferente do JavaScript.
 //
 // (Revisão do pacote 1, 24/11/2026) Não há interruptor em app_settings: a especificação do F1 não pede chave nova
 // (a primeira versão lia `email_golpe_regra_fixa` a cada rodada). Voltar atrás = reverter o commit.
@@ -171,8 +197,9 @@ export function triageDeterministica(email: InboundEmail): Triage | null {
 const DADO_FORTE = "(?:dados\\s+(?:bancarios|de\\s+pagamentos?|para\\s+(?:o\\s+)?(?:pagamentos?|depositos?|transferencias?))" +
   "|contas?\\s+(?:bancarias?|correntes?|para\\s+(?:o\\s+)?(?:pagamentos?|depositos?|transferencias?|recebimentos?))" +
   "|domicilio\\s+bancario|chaves?\\s+(?:d[oe]\\s+)?pix)";
-// …e os dois nomes curtos, que aparecem em todo e-mail de cobrança: só valem com a mudança colada neles.
-const DADO_FRACO = "(?:pix|boletos?)";
+// …e os dois nomes curtos, que aparecem em todo e-mail de cobrança: só valem com a mudança colada neles. O Pix dito
+// sozinho entra nas regras de conta; o boleto tem regras próprias, que não dão alerta (ver `forte`).
+const BOLETO = "boletos?";
 const MUDAR = "(?:alter(?:ar|acao|acoes|amos|ou|aram|ando)|mud(?:ar|anca|ancas|amos|ou|aram|ando)" +
   "|troc(?:ar|a|amos|ou|aram|ando)|atualiz(?:ar|acao|acoes|amos|ou|aram|ando)" +
   "|substitu(?:ir|icao|imos|iu|iram|indo)|modific(?:ar|acao|amos|ou|aram))";
@@ -182,6 +209,12 @@ const MUDADO = "(?:alterad[oa]s?|atualizad[oa]s?|substituid[oa]s?|trocad[oa]s?|m
 const ARTIGOS = "(?:\\s+(?:de|do|da|dos|das|o|a|os|as|no|na|nosso|nossa|nossos|nossas|meu|minha|seu|sua))";
 const PAGAR = "(?:pagamentos?|pagar|pague|paguem|depositos?|deposit(?:ar|e|em)|transferencias?|transferir|transfira|transfiram)";
 const NAO_USAR = "(?:desconsider(?:ar|e|em|ando)|nao\\s+(?:utiliz(?:ar|e|em)|us(?:ar|e|em)|deposit(?:ar|e|em)|pag(?:ar|ue|uem)|efetu(?:ar|e|em)|transferir|transfir(?:a|am)))";
+// Dentro da mesma frase, deixando passar o ponto que está no meio de um número ("123.456.789-00", "12.345.678/0001-90").
+const NA_FRASE = "(?:[^.!?]|[.][0-9])";
+// (Revisão) O e-mail em inglês: só com a palavra "bank" ou com "new account" ("update your payment details" e "your
+// account was updated" são rotina de assinatura de sistema e ficam de fora).
+const BANK = "bank(?:ing)?\\s+(?:details|accounts?|information)";
+const CHANGE = "(?:chang(?:e|ed|es|ing)|updat(?:e|ed|es|ing))";
 
 export interface RegraDoGolpe {
   nome: string;
@@ -189,25 +222,49 @@ export interface RegraDoGolpe {
   rotulo: string;
   /** A expressão, como texto (a medição no banco usa a mesma, com \b → \y). */
   fonte: string;
+  /**
+   * (Revisão do pacote 1, 24/11/2026) true = fala de CONTA, de CHAVE PIX ou de dados bancários: o e-mail sai urgente
+   * com o alerta de golpe. false = só de BOLETO ("segue boleto atualizado", "segue novo boleto": a segunda via de todo
+   * dia): o e-mail NÃO vira urgente nem alerta; fica como estava e o motivo passa a dizer o que a regra viu.
+   */
+  forte: boolean;
 }
 
+// A ordem importa: as fortes vêm antes (o e-mail que fala de boleto E de conta nova é pego pela de conta).
 export const REGRAS_DO_GOLPE: ReadonlyArray<RegraDoGolpe> = [
   // "informamos a alteração dos nossos dados bancários", "mudança de conta bancária", "atualizem a chave Pix"
-  { nome: "mudanca_de_dados", rotulo: "mudança de dados bancários ou de pagamento", fonte: `\\b(?:${MUDAR}|${MUDEM})\\b[^.!?]{0,30}\\b${DADO_FORTE}\\b` },
-  // "alteração do Pix", "troca do nosso boleto", "substituir o boleto"
-  { nome: "mudanca_de_pix_ou_boleto", rotulo: "mudança de Pix ou de boleto", fonte: `\\b${MUDAR}${ARTIGOS}{0,3}\\s+${DADO_FRACO}\\b` },
+  { nome: "mudanca_de_dados", forte: true, rotulo: "mudança de dados bancários ou de pagamento", fonte: `\\b(?:${MUDAR}|${MUDEM})\\b[^.!?]{0,30}\\b${DADO_FORTE}\\b` },
+  // "alteração do Pix", "troca do nosso Pix"
+  { nome: "mudanca_de_pix", forte: true, rotulo: "mudança de Pix", fonte: `\\b${MUDAR}${ARTIGOS}{0,3}\\s+pix\\b` },
   // "mudamos de banco", "troca de conta", "mudança de banco" (mas não "mudança de banco de dados")
-  { nome: "mudar_de_banco", rotulo: "troca de banco ou de conta", fonte: `\\b(?:mud(?:ar|anca|amos|ou|aram|ando)|troc(?:ar|a|amos|ou|aram|ando))\\s+de\\s+(?:banco|conta)\\b(?!\\s+de\\s+dados)` },
-  // "chave Pix alterada", "os dados bancários foram atualizados", "boleto atualizado", "o Pix mudou"
-  { nome: "dado_alterado", rotulo: "conta, chave Pix ou boleto alterado", fonte: `\\b(?:${DADO_FORTE}|${DADO_FRACO})\\b[^.!?,;:()]{0,20}\\b${MUDADO}\\b` },
+  { nome: "mudar_de_banco", forte: true, rotulo: "troca de banco ou de conta", fonte: `\\b(?:mud(?:ar|anca|amos|ou|aram|ando)|troc(?:ar|a|amos|ou|aram|ando))\\s+de\\s+(?:banco|conta)\\b(?!\\s+de\\s+dados)` },
+  // "chave Pix alterada", "os dados bancários foram atualizados", "o Pix mudou"
+  { nome: "dado_alterado", forte: true, rotulo: "conta ou chave Pix alterada", fonte: `\\b(?:${DADO_FORTE}|pix)\\b[^.!?,;:()]{0,20}\\b${MUDADO}\\b` },
+  // (Revisão) "nossa conta mudou", "minha conta foi alterada" (a conta dita sem "bancária"; "sua conta foi atualizada" é de sistema e não casa)
+  { nome: "conta_mudou", forte: true, rotulo: "conta que mudou", fonte: `\\b(?:nossa|minha)\\s+conta\\b[^.!?,;:()]{0,20}\\b${MUDADO}\\b` },
   // "a chave Pix agora é o CNPJ", "nossa conta bancária passa a ser…"
-  { nome: "dado_passa_a_ser", rotulo: "conta ou chave Pix que passa a ser outra", fonte: `\\b${DADO_FORTE}\\b[^.!?,;:()]{0,20}\\b(?:pass(?:a|ou|am|aram)\\s+a\\s+ser|agora\\s+e)\\b` },
-  // "nova chave Pix", "novos dados bancários", "nova conta bancária", "novo boleto", "chave Pix nova", "nossa nova conta"
-  { nome: "dado_novo", rotulo: "conta, chave Pix ou boleto novo", fonte: `\\b(?:nov[oa]s?\\s+(?:numero\\s+d[ae]\\s+)?(?:${DADO_FORTE}|${DADO_FRACO})|${DADO_FORTE}\\s+nov[oa]s?|(?:noss[oa]|meu|minha)\\s+nov[oa]\\s+(?:conta|banco))\\b` },
+  { nome: "dado_passa_a_ser", forte: true, rotulo: "conta ou chave Pix que passa a ser outra", fonte: `\\b${DADO_FORTE}\\b[^.!?,;:()]{0,20}\\b(?:pass(?:a|ou|am|aram)\\s+a\\s+ser|agora\\s+e)\\b` },
+  // "nova chave Pix", "novos dados bancários", "nova conta bancária", "chave Pix nova", "nossa nova conta"
+  { nome: "dado_novo", forte: true, rotulo: "conta ou chave Pix nova", fonte: `\\b(?:nov[oa]s?\\s+(?:numero\\s+d[ae]\\s+)?(?:${DADO_FORTE}|pix)|${DADO_FORTE}\\s+nov[oa]s?|(?:noss[oa]|meu|minha)\\s+nov[oa]\\s+(?:conta|banco))\\b` },
   // "os pagamentos devem ser feitos na nova conta", "favor depositar em outra conta"
-  { nome: "pagar_em_outra_conta", rotulo: "pagamento em outra conta", fonte: `\\b${PAGAR}\\b[^.!?]{0,50}\\b(?:nov[oa]|(?:em|na|para|para\\s+a)\\s+outra|noutra)\\s+conta\\b` },
-  // "favor desconsiderar o boleto anterior", "não utilizem mais a conta antiga"
-  { nome: "dado_antigo", rotulo: "pedido para não usar a conta, a chave Pix ou o boleto anterior", fonte: `\\b${NAO_USAR}\\b[^.!?]{0,40}\\b(?:contas?|dados|chaves?|pix|boletos?)\\s+(?:(?:bancari[oa]s?|corrente|pix)\\s+)?(?:antig[oa]s?|anterior(?:es)?)\\b` },
+  { nome: "pagar_em_outra_conta", forte: true, rotulo: "pagamento em outra conta", fonte: `\\b${PAGAR}\\b[^.!?]{0,50}\\b(?:nov[oa]|(?:em|na|para|para\\s+a)\\s+outra|noutra)\\s+conta\\b` },
+  // (Revisão) "os próximos pagamentos sejam realizados para a conta do Itaú abaixo", "os depósitos devem ser feitos no Banco X, agência…, em nome de J."
+  { nome: "pagar_na_conta_indicada", forte: true, rotulo: "pagamento na conta indicada no próprio e-mail", fonte: `\\b${PAGAR}\\b${NA_FRASE}{0,60}\\b(?:para|na|no|em)\\s+(?:(?:a|o|nossa|nosso|minha|meu)\\s+){0,2}(?:conta|banco)\\b${NA_FRASE}{0,80}\\b(?:abaixo|a\\s+seguir|seguintes?|em\\s+nome\\s+d[eoa]s?)\\b` },
+  // (Revisão) "pode fazer o Pix nesse CPF 123.456.789-00 em nome da minha esposa?"
+  { nome: "pix_em_nome_de", forte: true, rotulo: "Pix em CPF ou CNPJ em nome de outra pessoa", fonte: `\\bpix\\b${NA_FRASE}{0,40}\\b(?:nesse|neste|no)\\s+(?:cpf|cnpj)\\b${NA_FRASE}{0,60}\\bem\\s+nome\\s+d[eoa]s?\\b` },
+  // "não utilizem mais a conta antiga"; (Revisão) "desconsiderar os dados bancários enviados anteriormente"
+  { nome: "dado_antigo", forte: true, rotulo: "pedido para não usar a conta ou a chave Pix anterior", fonte: `\\b${NAO_USAR}\\b[^.!?]{0,40}\\b(?:contas?|dados|chaves?|pix)\\s+(?:(?:bancari[oa]s?|corrente|pix)\\s+)?(?:antig[oa]s?|anterior(?:es)?|(?:(?:enviad|informad|passad|fornecid|encaminhad)[oa]s?\\s+)?anteriormente)\\b` },
+  // (Revisão) "we have changed our bank details", "our bank account has changed", "please use our new bank account"
+  { nome: "dados_bancarios_em_ingles", forte: true, rotulo: "mudança de dados bancários (e-mail em inglês)", fonte: `\\b${CHANGE}\\b[^.!?]{0,40}\\b(?:${BANK}|new\\s+accounts?)\\b|\\b(?:${BANK}|new\\s+accounts?)\\b[^.!?]{0,40}\\b${CHANGE}\\b|\\bnew\\s+${BANK}\\b` },
+  // ── Só de boleto (forte: false): não alertam ──
+  // "substituição de boleto", "troca do nosso boleto", "substituir o boleto"
+  { nome: "troca_de_boleto", forte: false, rotulo: "troca de boleto", fonte: `\\b${MUDAR}${ARTIGOS}{0,3}\\s+${BOLETO}\\b` },
+  // "segue boleto atualizado"
+  { nome: "boleto_alterado", forte: false, rotulo: "boleto alterado", fonte: `\\b${BOLETO}\\b[^.!?,;:()]{0,20}\\b${MUDADO}\\b` },
+  // "segue novo boleto"
+  { nome: "boleto_novo", forte: false, rotulo: "boleto novo", fonte: `\\bnov[oa]s?\\s+${BOLETO}\\b` },
+  // "favor desconsiderar o boleto anterior"
+  { nome: "boleto_antigo", forte: false, rotulo: "pedido para não usar o boleto anterior", fonte: `\\b${NAO_USAR}\\b[^.!?]{0,40}\\b${BOLETO}\\s+(?:antig[oa]s?|anterior(?:es)?)\\b` },
 ];
 
 const REGRAS_COMPILADAS = REGRAS_DO_GOLPE.map((r) => ({ ...r, re: new RegExp(r.fonte) }));
@@ -236,18 +293,20 @@ export interface AchadoDoGolpe {
   rotulo: string;
   /** O trecho que casou (normalizado: sem acento e minúsculo), para a evidência. */
   trecho: string;
+  /** true = regra de conta, de chave Pix ou de dados bancários (dá o alerta); false = só de boleto (não dá). */
+  forte: boolean;
 }
 
 /**
  * O e-mail fala em troca de conta, de chave Pix ou de boleto? Regra fixa, sem modelo. null = não casou (ou a leitura
- * do texto falhou: a rede nunca derruba a triagem).
+ * do texto falhou: a rede nunca derruba a triagem). As regras fortes são conferidas antes das de boleto.
  */
 export function golpeDeTrocaDeConta(email: Pick<InboundEmail, "subject" | "text" | "html">): AchadoDoGolpe | null {
   try {
     const texto = textoParaARegraDoGolpe(email);
     for (const r of REGRAS_COMPILADAS) {
       const m = r.re.exec(texto);
-      if (m) return { regra: r.nome, rotulo: r.rotulo, trecho: m[0].slice(0, 120) };
+      if (m) return { regra: r.nome, rotulo: r.rotulo, trecho: m[0].slice(0, 120), forte: r.forte };
     }
     return null;
   } catch {
@@ -255,8 +314,31 @@ export function golpeDeTrocaDeConta(email: Pick<InboundEmail, "subject" | "text"
   }
 }
 
-/** O começo do motivo de quem foi pego pela regra (é o que as contagens procuram em triage_reason). */
-export const MOTIVO_DA_REGRA_DO_GOLPE = "A triagem por IA falhou; pela regra fixa, o e-mail fala em";
+/**
+ * A marca de quem foi pego pela regra fixa, no meio do motivo. É o que as contagens procuram em triage_reason e o que
+ * o email-imap usa para contar os alertas do dia que vieram da regra (sem vírgula, para servir de filtro).
+ */
+export const MARCA_DA_REGRA_FIXA = "pela regra fixa";
+const PELA_REGRA_FIXA = `${MARCA_DA_REGRA_FIXA}, o e-mail fala em`;
+/** O começo do motivo quando a regra rodou porque a chamada do modelo falhou. */
+export const MOTIVO_DA_REGRA_DO_GOLPE = `A triagem por IA falhou; ${PELA_REGRA_FIXA}`;
+
+/**
+ * O resultado de quem a regra fixa pegou. `porQue` diz por que foi a regra, e não o modelo, que leu ("A triagem por
+ * IA falhou", "Remetente não aceita resposta"). null = a regra não casou: fica `semARegra`.
+ *   · regra forte (conta, chave Pix, dados bancários): urgente com o alerta de golpe;
+ *   · regra só de boleto: a classe de `semARegra` não muda (notify, sem alerta); o motivo diz o que a regra viu.
+ */
+function comARegraDoGolpe(semARegra: Triage, golpe: AchadoDoGolpe | null, porQue: string): Triage {
+  if (!golpe) return semARegra;
+  const visto = {
+    evidencia: golpe.trecho,
+    motivo: `${porQue}; ${PELA_REGRA_FIXA} ${golpe.rotulo}.`,
+    golpePelaRegra: { regra: golpe.regra, forte: golpe.forte },
+  };
+  if (!golpe.forte) return { ...semARegra, ...visto };
+  return { ...semARegra, ...visto, classe: "urgent", confianca: 1, alertaFraude: true, rebaixada: false, deterministica: true };
+}
 
 const TRIAGE_TOOL: ClaudeToolSchema = {
   name: "classificar_email",
@@ -360,23 +442,15 @@ export async function triageEmail(email: InboundEmail, now: Date = new Date(), d
   } catch (e) {
     // (V2) a falha deixa de ser calada: quem chamou registra — casando a regra do golpe ou não
     const falha = String(e).slice(0, 300);
-    // (F1) a rede para esta hora: o golpe de troca de conta ou de Pix por regra fixa. Sai urgente com o alerta de
-    // fraude e segue o caminho de aviso que o urgente já tem.
-    const golpe = golpeDeTrocaDeConta(email);
-    if (golpe) {
-      return {
-        classe: "urgent", confianca: 1, evidencia: golpe.trecho,
-        motivo: `${MOTIVO_DA_REGRA_DO_GOLPE} ${golpe.rotulo}.`,
-        alertaFraude: true, rebaixada: false, deterministica: true,
-        falha,
-      };
-    }
-    // Indisponibilidade do modelo não pode esconder e-mail.
-    return {
+    // Indisponibilidade do modelo não pode esconder e-mail: sem a regra, notify com o motivo de sempre.
+    const semARegra: Triage = {
       classe: FALLBACK_CLASS, confianca: 0, evidencia: "",
       motivo: `falha na triagem: ${String(e).slice(0, 120)}`,
       alertaFraude: false, rebaixada: true, deterministica: false,
       falha,
     };
+    // (F1) a rede para esta hora: o golpe de troca de conta ou de Pix por regra fixa. Regra forte: sai urgente com o
+    // alerta de fraude e segue o caminho de aviso que o urgente já tem. Regra só de boleto: continua notify, com o motivo.
+    return comARegraDoGolpe(semARegra, golpeDeTrocaDeConta(email), "A triagem por IA falhou");
   }
 }

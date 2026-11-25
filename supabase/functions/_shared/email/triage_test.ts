@@ -2,7 +2,7 @@ import { assertEquals, assert } from "https://deno.land/std@0.224.0/assert/mod.t
 import {
   normalizeTriage, triageDeterministica, formatEmailForTriage, buildTriagePrompt, triageEmail,
   CLASS_FLOOR, FALLBACK_CLASS, type RawTriage,
-  golpeDeTrocaDeConta, MOTIVO_DA_REGRA_DO_GOLPE, REGRAS_DO_GOLPE, textoParaARegraDoGolpe,
+  golpeDeTrocaDeConta, MARCA_DA_REGRA_FIXA, MOTIVO_DA_REGRA_DO_GOLPE, REGRAS_DO_GOLPE, textoParaARegraDoGolpe,
 } from "./triage.ts";
 import * as triagem from "./triage.ts";
 import type { CallClaudeParams, CallClaudeResult } from "../ai/anthropic.ts";
@@ -207,25 +207,42 @@ const DEVE_CASAR: Array<[string, string, string]> = [
   ["mudanca_de_dados", "Financeiro", "Por favor, atualizem a base: houve atualização da chave Pix do fornecedor."],
   ["mudanca_de_dados", "Pagamento do pedido 4471", "Precisamos alterar os dados para pagamento deste pedido."],
   ["mudanca_de_dados", "Cadastro de fornecedor", "Por favor, atualizem nossos dados bancários em seu sistema."],
-  ["mudanca_de_pix_ou_boleto", "Financeiro", "Informamos a troca do nosso Pix."],
-  ["mudanca_de_pix_ou_boleto", "Substituição de boleto", "Segue em anexo."],
+  ["mudanca_de_pix", "Financeiro", "Informamos a troca do nosso Pix."],
+  ["mudanca_de_pix", "Alteração do Pix", "Veja abaixo."],
   ["mudar_de_banco", "Aviso", "Mudamos de banco neste mês; os dados seguem abaixo."],
   ["dado_alterado", "Aviso importante", "Nossa chave Pix foi alterada."],
   ["dado_alterado", "CHAVE PIX ALTERADA", "Veja abaixo."],
-  ["dado_alterado", "Pedido 4471", "Segue boleto atualizado para pagamento."],
   ["dado_alterado", "Aviso", "O Pix da empresa mudou."],
   ["dado_alterado", "Aviso", "Os dados bancários da HBR foram atualizados."],
   ["dado_passa_a_ser", "Aviso", "A chave Pix agora é o CNPJ da empresa."],
   ["dado_passa_a_ser", "Aviso", "Nossa conta bancária passa a ser a do Banco 000."],
   ["dado_novo", "Pagamento", "Segue a nova chave PIX: 12.345.678/0001-90"],
   ["dado_novo", "Pagamento", "Favor considerar os novos dados bancários abaixo."],
-  ["dado_novo", "Pedido 4471", "Segue novo boleto em anexo."],
   ["dado_novo", "Pagamento", "Use a conta corrente nova, informada abaixo."],
   ["dado_novo", "Pagamento", "Segue nossa nova conta: Banco 000, ag. 1234, c/c 56789-0."],
   ["pagar_em_outra_conta", "Pagamentos", "A partir de hoje os pagamentos devem ser feitos na nova conta: Banco 000, ag. 1234."],
   ["pagar_em_outra_conta", "Urgente", "Por um problema no banco, favor depositar em outra conta esta semana."],
-  ["dado_antigo", "Pedido 4471", "Favor desconsiderar o boleto anterior."],
   ["dado_antigo", "Aviso", "Não utilizem mais a conta antiga."],
+  // ── o que a revisão do pacote 1 mostrou que passava (24/11/2026) ──
+  ["conta_mudou", "Aviso", "Nossa conta mudou. Segue em anexo os dados."],
+  ["conta_mudou", "Aviso", "Informo que minha conta foi alterada, segue o comprovante."],
+  ["pagar_na_conta_indicada", "Pagamentos", "Solicitamos que os próximos pagamentos sejam realizados para a conta do Itaú abaixo: Ag 1234 CC 56789-0"],
+  ["pagar_na_conta_indicada", "Financeiro", "Informamos que os depósitos devem ser feitos no Banco Inter, agência 0001, conta 998877-1, em nome de J. Silva."],
+  ["pagar_na_conta_indicada", "Pedido 4471", "Favor transferir o sinal para a nossa conta a seguir."],
+  ["pix_em_nome_de", "Sinal do serviço", "Pode fazer o pix nesse CPF 123.456.789-00 em nome da minha esposa?"],
+  ["pix_em_nome_de", "Pagamento", "Faça o Pix no CNPJ 12.345.678/0001-90, em nome do meu sócio."],
+  ["dado_antigo", "Pagamento", "Favor desconsiderar os dados bancários enviados anteriormente e utilizar os abaixo."],
+  ["dado_antigo", "Pagamento", "Pedimos não usar a chave Pix informada anteriormente."],
+  ["dados_bancarios_em_ingles", "Payment", "Please note that we have changed our bank details."],
+  ["dados_bancarios_em_ingles", "Invoice 4471", "Our bank account has changed, see the attached letter."],
+  ["dados_bancarios_em_ingles", "Invoice 4471", "Please use our new bank account for this payment."],
+  ["dados_bancarios_em_ingles", "Remittance", "Kindly update your records with the new account below."],
+  // ── só de boleto: a regra casa, mas é das fracas (não alerta; ver o teste das fortes e das de boleto) ──
+  ["troca_de_boleto", "Substituição de boleto", "Segue em anexo."],
+  ["troca_de_boleto", "Financeiro", "Informamos a troca do nosso boleto deste mês."],
+  ["boleto_alterado", "Pedido 4471", "Segue boleto atualizado para pagamento."],
+  ["boleto_novo", "Pedido 4471", "Segue novo boleto em anexo."],
+  ["boleto_antigo", "Pedido 4471", "Favor desconsiderar o boleto anterior."],
 ];
 
 /** [o que é, assunto, corpo]: o que a regra NÃO pode pegar (o dia a dia da caixa). */
@@ -249,6 +266,16 @@ const NAO_DEVE_CASAR: Array<[string, string, string]> = [
   ["boleto pedido pelo app", "Aviso do aplicativo", "Atualize o aplicativo para emitir boletos e receber por Pix sem tarifa."],
   ["duas frases", "Pedido 4471", "Segue o boleto. Cadastro atualizado com sucesso."],
   ["orçamento", "Troca de óleo e filtros", "Segue o orçamento da troca de óleo do motor de popa. Novo prazo: sexta."],
+  // ── o dia a dia que as regras novas da revisão não podem pegar ──
+  ["crédito em conta", "Aviso de crédito", "O pagamento foi creditado em conta. Veja os detalhes abaixo."],
+  ["pagamento na conta cadastrada", "Repasse", "Seu pagamento será depositado na conta cadastrada em até 2 dias úteis."],
+  ["Pix feito pelo cliente", "Sinal", "Fiz o Pix agora, o comprovante está em nome de João da Silva."],
+  ["chave Pix do fornecedor na nota", "Pedido 4471", "Chave Pix: CNPJ 12.345.678/0001-90. Razão social: Náutica Sul Ltda."],
+  ["planilha reenviada", "Planilha", "Favor desconsiderar a planilha enviada anteriormente."],
+  ["conta de sistema (nossa)", "Acesso", "Nossa conta no portal está ativa; segue o usuário."],
+  ["inglês: assinatura de sistema", "Your account was updated", "Please update your payment details to keep your subscription active."],
+  ["inglês: conta nova de sistema", "Welcome", "Your new account is ready. Update your password to get started."],
+  ["inglês: extrato", "Your statement", "Your bank account statement for October is available online."],
 ];
 
 Deno.test("regra do golpe: pega o pedido de troca de conta, de chave Pix ou de boleto, com e sem acento", () => {
@@ -267,6 +294,33 @@ Deno.test("regra do golpe: não pega newsletter de banco, nota fiscal, extrato n
   for (const [oQueE, assunto, corpo] of NAO_DEVE_CASAR) {
     assertEquals(golpeDeTrocaDeConta(email({ subject: assunto, text: corpo })), null, oQueE);
   }
+});
+
+// (Revisão do pacote 1, 24/11/2026) "Segue boleto atualizado", "Segue novo boleto" e "Substituição de boleto" são a
+// segunda via de todo dia: saíam "🚨 possível GOLPE" e cada uma gastava um dos avisos urgentes do dia. O que se
+// protege: as regras só de boleto são FRACAS (não alertam); as de conta, de chave Pix e de dados bancários, fortes; e
+// as fortes são conferidas antes (o e-mail que fala de boleto E de conta nova é pego pela de conta).
+Deno.test("regra do golpe: as regras só de boleto são fracas (não alertam); as de conta e de Pix são fortes e vêm antes", () => {
+  const fracas = REGRAS_DO_GOLPE.filter((r) => !r.forte).map((r) => r.nome);
+  assertEquals(fracas, ["troca_de_boleto", "boleto_alterado", "boleto_novo", "boleto_antigo"]);
+  for (const r of REGRAS_DO_GOLPE) {
+    assertEquals(typeof r.forte, "boolean", r.nome);
+    // nenhuma regra forte depende da palavra boleto, e toda fraca só fala de boleto
+    assertEquals(r.fonte.includes("boleto"), !r.forte, r.nome);
+    assertEquals(/boleto/i.test(r.rotulo), !r.forte, r.nome);
+  }
+  const ultimaForte = REGRAS_DO_GOLPE.map((r) => r.forte).lastIndexOf(true);
+  assertEquals(REGRAS_DO_GOLPE.slice(0, ultimaForte + 1).every((r) => r.forte), true, "as fortes vêm antes das de boleto");
+
+  for (const [assunto, corpo] of [["Pedido 4471", "Segue boleto atualizado."], ["Pedido 4471", "Segue novo boleto."], ["Substituição de boleto", "Segue em anexo."]]) {
+    assertEquals(golpeDeTrocaDeConta(email({ subject: assunto, text: corpo }))?.forte, false, `${assunto} | ${corpo}`);
+  }
+  for (const [regra, assunto, corpo] of DEVE_CASAR) {
+    assertEquals(golpeDeTrocaDeConta(email({ subject: assunto, text: corpo }))?.forte, !regra.includes("boleto"), `${assunto} | ${corpo}`);
+  }
+  // boleto E conta nova no mesmo e-mail: vale a de conta
+  const misto = golpeDeTrocaDeConta(email({ subject: "Pedido 4471", text: "Segue novo boleto. Atenção: informamos a alteração dos nossos dados bancários." }));
+  assertEquals([misto?.regra, misto?.forte], ["mudanca_de_dados", true]);
 });
 
 Deno.test("regra do golpe: lê o corpo que veio só em HTML (letra acentuada como entidade) e ignora quebra de linha", () => {
@@ -333,10 +387,92 @@ Deno.test("triageEmail: com o modelo fora do ar, o pedido de troca de conta sai 
     alertaFraude: true, rebaixada: false, deterministica: true,
     // a falha do modelo continua registrada (V2), casando a regra ou não
     falha: "Error: OpenRouter 402 (créditos insuficientes na conta)",
+    // qual regra pegou e que é das fortes (o email-imap usa para a cota do aviso)
+    golpePelaRegra: { regra: "mudanca_de_dados", forte: true },
   });
   assert(t.motivo!.startsWith(MOTIVO_DA_REGRA_DO_GOLPE));
+  // a marca que o email-imap procura em triage_reason para a cota do alerta (sem vírgula: vai num filtro)
+  assertEquals(MARCA_DA_REGRA_FIXA, "pela regra fixa");
+  assert(t.motivo!.includes(MARCA_DA_REGRA_FIXA));
   // a evidência existe no texto em que a regra procurou
   assert(textoParaARegraDoGolpe(GOLPE()).includes(t.evidencia));
+});
+
+// (Revisão do pacote 1, 24/11/2026) A segunda via de boleto não vira alerta de golpe nem urgente.
+Deno.test("triageEmail: com o modelo fora do ar, o e-mail que só fala de boleto novo ou atualizado continua notify, com o motivo dito", async () => {
+  const erro = new Error("OpenRouter 402 (créditos insuficientes na conta)");
+  const casos: Array<[string, string, string, string, string]> = [
+    ["Pedido 4471", "Segue boleto atualizado para pagamento.", "boleto_alterado", "boleto alterado", "boleto atualizado"],
+    ["Pedido 4471", "Segue novo boleto em anexo.", "boleto_novo", "boleto novo", "novo boleto"],
+    ["Substituição de boleto", "Segue em anexo.", "troca_de_boleto", "troca de boleto", "substituicao de boleto"],
+    ["Pedido 4471", "Favor desconsiderar o boleto anterior.", "boleto_antigo", "pedido para não usar o boleto anterior", "desconsiderar o boleto anterior"],
+  ];
+  for (const [assunto, corpo, regra, rotulo, trecho] of casos) {
+    const t = await triageEmail(email({ subject: assunto, text: corpo }), AGORA, { chamar: modelo(erro).chamar });
+    assertEquals(t, {
+      classe: "notify", confianca: 0, evidencia: trecho,
+      motivo: `A triagem por IA falhou; pela regra fixa, o e-mail fala em ${rotulo}.`,
+      alertaFraude: false, rebaixada: true, deterministica: false,
+      falha: "Error: OpenRouter 402 (créditos insuficientes na conta)",
+      golpePelaRegra: { regra, forte: false },
+    }, `${assunto} | ${corpo}`);
+  }
+});
+
+// (Revisão do pacote 1, 24/11/2026) A crítica de viabilidade pede a regra também em triageDeterministica. Os dois
+// atalhos que mostram o e-mail (resposta automática e remetente que não aceita resposta) saíam notify sem o texto ser
+// lido por ninguém, com o modelo de pé ou não. O que se protege: o texto deles passa pela regra fixa; o atalho de
+// lista (ignore) não; e sem casar nada os dois atalhos devolvem exatamente o que devolviam.
+const NAO_RESPONDA = { name: "Financeiro", address: "nao-responda@nauticasul.com.br" };
+const TROCA = "Prezados, informamos a alteração dos nossos dados bancários. Os pagamentos devem ser feitos na nova conta.";
+
+Deno.test("triageDeterministica: remetente que não aceita resposta e resposta automática passam pela regra fixa do golpe", () => {
+  // sem casar: os dois atalhos como sempre foram
+  assertEquals(triageDeterministica(email({ from: NAO_RESPONDA })), {
+    classe: "notify", confianca: 1, evidencia: "nao-responda@nauticasul.com.br", motivo: "Remetente não aceita resposta",
+    alertaFraude: false, rebaixada: false, deterministica: true,
+  });
+  assertEquals(triageDeterministica(email({ headers: { "Auto-Submitted": "auto-replied" } })), {
+    classe: "notify", confianca: 1, evidencia: "Auto-Submitted: auto-replied", motivo: "Resposta automática (Auto-Submitted: auto-replied) — não espera retorno",
+    alertaFraude: false, rebaixada: false, deterministica: true,
+  });
+  // regra forte: urgente com o alerta de golpe, dizendo por que foi a regra que leu
+  assertEquals(triageDeterministica(email({ from: NAO_RESPONDA, subject: "Comunicado", text: TROCA })), {
+    classe: "urgent", confianca: 1, evidencia: "alteracao dos nossos dados bancarios",
+    motivo: "Remetente não aceita resposta; pela regra fixa, o e-mail fala em mudança de dados bancários ou de pagamento.",
+    alertaFraude: true, rebaixada: false, deterministica: true,
+    golpePelaRegra: { regra: "mudanca_de_dados", forte: true },
+  });
+  assertEquals(triageDeterministica(email({ headers: { "Auto-Submitted": "auto-generated" }, subject: "Aviso", text: "Nossa chave Pix foi alterada." })), {
+    classe: "urgent", confianca: 1, evidencia: "chave pix foi alterada",
+    motivo: "Resposta automática (Auto-Submitted: auto-generated); pela regra fixa, o e-mail fala em conta ou chave Pix alterada.",
+    alertaFraude: true, rebaixada: false, deterministica: true,
+    golpePelaRegra: { regra: "dado_alterado", forte: true },
+  });
+  // regra só de boleto: continua notify, sem alerta; o motivo diz o que a regra viu
+  assertEquals(triageDeterministica(email({ from: NAO_RESPONDA, subject: "Cobrança", text: "Segue boleto atualizado." })), {
+    classe: "notify", confianca: 1, evidencia: "boleto atualizado",
+    motivo: "Remetente não aceita resposta; pela regra fixa, o e-mail fala em boleto alterado.",
+    alertaFraude: false, rebaixada: false, deterministica: true,
+    golpePelaRegra: { regra: "boleto_alterado", forte: false },
+  });
+  // lista de divulgação: ignore, sem regra (as 2 ocorrências reais da regra em e-mail de lista são divulgação)
+  const lista = triageDeterministica(email({ from: NAO_RESPONDA, subject: "Comunicado", text: TROCA, headers: { "List-Unsubscribe": "<https://x/u>" } }));
+  assertEquals([lista?.classe, lista?.alertaFraude, lista?.golpePelaRegra], ["ignore", false, undefined]);
+  // no-reply COM anexo continua indo para o modelo (e, se o modelo falhar, para a regra, pelo catch)
+  assertEquals(triageDeterministica(email({ from: NAO_RESPONDA, text: TROCA, attachments: [{ filename: "comunicado.pdf", mimeType: "application/pdf", size: 100 }] })), null);
+});
+
+Deno.test("triageEmail: com o modelo de pé, o e-mail de remetente que não aceita resposta é lido pela regra fixa (o modelo nem é chamado)", async () => {
+  const m = modelo(new Error("não deveria ser chamado"));
+  const t = await triageEmail(email({ from: NAO_RESPONDA, subject: "Comunicado", text: TROCA }), AGORA, { chamar: m.chamar });
+  assertEquals(m.chamadas.length, 0);
+  assertEquals([t.classe, t.alertaFraude, t.deterministica, t.falha], ["urgent", true, true, undefined]);
+  assertEquals(t.golpePelaRegra, { regra: "mudanca_de_dados", forte: true });
+  assert(!t.motivo!.includes("falhou"), "a IA não falhou: o motivo diz que o remetente não aceita resposta");
+  // sem casar: notify, sem modelo, como antes
+  const comum = await triageEmail(email({ from: NAO_RESPONDA }), AGORA, { chamar: m.chamar });
+  assertEquals([comum.classe, comum.motivo, comum.golpePelaRegra, m.chamadas.length], ["notify", "Remetente não aceita resposta", undefined, 0]);
 });
 
 Deno.test("triageEmail: sem casar a regra, a falha fica como antes (notify)", async () => {
@@ -347,7 +483,7 @@ Deno.test("triageEmail: sem casar a regra, a falha fica como antes (notify)", as
   assertEquals(comum.falha, "Error: OpenRouter 402 (créditos insuficientes na conta)");
 });
 
-Deno.test("triageEmail: com o modelo de pé a regra fixa não roda (quem decide é o modelo); o atalho por cabeçalho também não", async () => {
+Deno.test("triageEmail: com o modelo de pé a regra fixa não roda no e-mail que o modelo lê (quem decide é ele); no atalho de lista também não", async () => {
   // o modelo respondeu "notify" para o mesmo texto: vale a resposta dele, sem alerta e sem falha
   const m = modelo({ classe: "notify", confianca: 0.9, evidencia: "informamos a alteração dos nossos dados bancários", motivo: "aviso do fornecedor" });
   const t = await triageEmail(GOLPE(), AGORA, { chamar: m.chamar });
