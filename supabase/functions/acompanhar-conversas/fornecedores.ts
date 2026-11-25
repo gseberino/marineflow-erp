@@ -134,9 +134,9 @@ export async function vigiarPrazosDosFornecedores(
             resultado.modelo++;
             const r = await escolher(p.trecho, compras.map((c) => ({ n: c.n, rotulo: c.rotulo })));
             // (V2, 24/11/2026) o modelo que falhou deixa registro (a manhã conta por rotina); a mensagem segue sem
-            // ele (nenhum), como antes. Nunca lança.
+            // ele (nenhum), como antes. Nunca lança. Vai só a classe do erro (classe-do-erro.ts), nunca o texto dele.
             if (r.falhou) {
-              await registrarFalhaDeRotina(admin, { rotina: "casar_fornecedor", mensagem: r.erro || "o modelo não respondeu", agora });
+              await registrarFalhaDeRotina(admin, { rotina: "casar_fornecedor", mensagem: r.erro ?? "", agora });
             }
             confianca = r.confianca;
             escolhida = r.n === null ? undefined : compras.find((c) => c.n === r.n);

@@ -393,7 +393,8 @@ servirComCors(async (req) => {
           let t: Triage = regra === "ignore_always"
             ? { classe: "ignore", confianca: 1, evidencia: "", motivo: "remetente silenciado", alertaFraude: false, rebaixada: false, deterministica: true }
             : await triageEmail(email);
-          // (V2, 24/11/2026) a triagem que falhou deixa registro, e a manhã conta por rotina. Nunca lança.
+          // (V2, 24/11/2026) a triagem que falhou deixa registro, e a manhã conta por rotina. Nunca lança. `t.falha` é só
+          // a classe do erro (classe-do-erro.ts), nunca o texto dele, que pode trazer um trecho do e-mail.
           if (t.falha) await registrarFalhaDeRotina(admin, { rotina: "triagem_email", mensagem: t.falha });
           // (F1) pego pela regra fixa do golpe. Regra forte (conta, chave Pix): sai urgente abaixo, pelo mesmo caminho de
           // aviso de sempre. Regra só de boleto (revisão, 24/11/2026): fica notify, com o motivo; só é contada.

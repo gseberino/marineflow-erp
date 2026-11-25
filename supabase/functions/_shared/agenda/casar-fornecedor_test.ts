@@ -6,7 +6,8 @@
 //     sem valor (R$) e sem número de OS; o modelo é o MODEL_LITE e a única ferramenta é a de saída;
 //   · nada a escolher (lista vazia, frase vazia) = nem chama o modelo.
 import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import type { CallClaudeParams, CallClaudeResult } from "../ai/anthropic.ts";
+import { ClaudeApiError, type CallClaudeParams, type CallClaudeResult } from "../ai/anthropic.ts";
+import { ehClasseDeErro } from "../ai/classe-do-erro.ts";
 import { MODEL_LITE } from "../ai/models.ts";
 import { type CompraCandidata, escolherCompra, textoParaOModelo } from "./casar-fornecedor.ts";
 
@@ -57,15 +58,35 @@ Deno.test("escolherCompra: fora da lista, sem a ferramenta, opção nula ou o mo
 });
 
 // (pacote 1, V2, 24/11/2026) A falha do modelo era calada: voltava "ninguém", igual a "não deu para saber". Agora vem
-// marcada, com o erro técnico, para o acompanhar-conversas registrar. Só a falha da CHAMADA marca: resposta fora da lista,
-// sem a ferramenta ou nula é o modelo respondendo, não a rotina falhando.
-Deno.test("escolherCompra: o modelo fora do ar continua 'ninguém', agora marcado com falhou e o erro técnico", async () => {
-  const fora = await escolherCompra("Já foi coletado", DUAS, { chamar: modelo(new Error("OpenRouter 402 (créditos insuficientes na conta)")).chamar });
-  assertEquals(fora, { n: null, confianca: 0, falhou: true, erro: "Error: OpenRouter 402 (créditos insuficientes na conta)" });
+// marcada, com a classe do erro, para o acompanhar-conversas registrar. Só a falha da CHAMADA marca: resposta fora da
+// lista, sem a ferramenta ou nula é o modelo respondendo, não a rotina falhando.
+// (Acabamento da leva A, 24/11/2026) `erro` é só a classe (frase fixa), nunca a mensagem do erro: o provedor pode
+// devolver nela o que foi enviado (a frase do fornecedor e os rótulos das compras, com o primeiro nome do cliente).
+Deno.test("escolherCompra: o modelo fora do ar continua 'ninguém', agora marcado com falhou e a classe do erro", async () => {
+  const fora = await escolherCompra("Já foi coletado", DUAS, {
+    chamar: modelo(new ClaudeApiError(402, "OpenRouter 402 (créditos insuficientes na conta): {}")).chamar,
+  });
+  assertEquals(fora, { n: null, confianca: 0, falhou: true, erro: "HTTP 402 (sem crédito)" });
   const longo = await escolherCompra("Já foi coletado", DUAS, { chamar: modelo(new Error("x".repeat(900))).chamar });
-  assertEquals([longo.falhou, longo.erro?.length], [true, 300]);
-  // o erro é o da chamada: a frase do fornecedor não vai junto
-  assert(!String(fora.erro).includes("coletado"));
+  assertEquals([longo.falhou, longo.erro], [true, "erro do tipo Error"]);
+  // O provedor que devolve o que recebeu (recusa de moderação, pedido recusado): nada da frase nem dos rótulos sai.
+  const frase = "Já foi coletado pela transportadora Rodomar, nota 88123";
+  const enviado = textoParaOModelo(frase, DUAS);
+  const corpo = JSON.stringify({ error: { code: 403, message: "Input flagged", metadata: { flagged_input: enviado } } });
+  const casos: Array<[unknown, string]> = [
+    [new ClaudeApiError(403, `OpenRouter 403: ${corpo}`), "HTTP 403 (recusado pelo provedor)"],
+    [new ClaudeApiError(400, `OpenRouter 400: ${corpo}`), "HTTP 400 (pedido recusado)"],
+    [new Error(enviado), "erro do tipo Error"],
+    [enviado, "erro não classificado"],
+  ];
+  for (const [erro, classe] of casos) {
+    const r = await escolherCompra(frase, DUAS, { chamar: () => Promise.reject(erro) });
+    assertEquals(r, { n: null, confianca: 0, falhou: true, erro: classe });
+    assert(ehClasseDeErro(r.erro));
+    for (const trecho of ["coletado", "Rodomar", "88123", "Flávio", "Compressor", "Nelson", "Painel"]) {
+      assert(!JSON.stringify(r).includes(trecho), `"${trecho}" saiu no erro: ${r.erro}`);
+    }
+  }
   for (const r of [
     escolheu({ opcao: 7, confianca: 0.95 }),
     escolheu({ opcao: null, confianca: 0.2 }),

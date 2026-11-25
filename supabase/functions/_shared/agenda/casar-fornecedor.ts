@@ -11,6 +11,7 @@
 // rótulos das candidatas, sem valor e sem nome de cliente além do primeiro. Falha, resposta fora da lista ou sem a
 // ferramenta = null (ninguém escolhido): a pergunta ao dono lista as compras.
 import { callClaude, type CallClaudeParams, type CallClaudeResult, type ClaudeToolSchema } from "../ai/anthropic.ts";
+import { classeDoErro } from "../ai/classe-do-erro.ts";
 import { MODEL_LITE } from "../ai/models.ts";
 
 export interface CompraCandidata {
@@ -27,7 +28,8 @@ export interface EscolhaDaCompra {
   confianca: number;
   /**
    * (V2, 24/11/2026) A chamada do modelo falhou (fora do ar, sem saldo). Continua "ninguém escolhido"; quem tem banco
-   * registra (acompanhar-conversas → registrarFalhaDeRotina). `erro` é só o erro técnico, nunca a frase do fornecedor.
+   * registra (acompanhar-conversas → registrarFalhaDeRotina). `erro` é só a classe do erro (classeDoErro: frase fixa,
+   * como "HTTP 402 (sem crédito)"), nunca a mensagem dele: o provedor pode devolver nela a frase do fornecedor.
    */
   falhou?: true;
   erro?: string;
@@ -129,6 +131,6 @@ export async function escolherCompra(
     if (!lista.some((c) => c.n === opcao)) return NINGUEM;
     return { n: opcao, confianca };
   } catch (e) {
-    return { ...NINGUEM, falhou: true, erro: String(e).slice(0, 300) };
+    return { ...NINGUEM, falhou: true, erro: classeDoErro(e) };
   }
 }

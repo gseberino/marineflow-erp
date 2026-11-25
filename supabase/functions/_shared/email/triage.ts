@@ -12,6 +12,7 @@
 // real a classificação é rebaixada — nunca aceita.
 
 import { callClaude, type CallClaudeParams, type CallClaudeResult, type ClaudeToolSchema } from "../ai/anthropic.ts";
+import { classeDoErro } from "../ai/classe-do-erro.ts";
 import { MODEL_LITE } from "../ai/models.ts";
 import { preClassify, isNoReplySender, readableBody, displaySender } from "./normalize.ts";
 import type { InboundEmail } from "./types.ts";
@@ -53,8 +54,9 @@ export interface Triage {
   /** Quando o resultado saiu sem gastar LLM. */
   deterministica: boolean;
   /**
-   * (V2, 24/11/2026) O erro técnico quando a chamada do modelo falhou. Quem tem banco registra
-   * (email-imap → registrarFalhaDeRotina): este arquivo não grava nada. Nunca leva texto do e-mail.
+   * (V2, 24/11/2026) A classe do erro quando a chamada do modelo falhou (classeDoErro: frase fixa, de lista
+   * fechada, como "HTTP 402 (sem crédito)"). Quem tem banco registra (email-imap → registrarFalhaDeRotina): este
+   * arquivo não grava nada. Nunca leva a mensagem do erro, que pode trazer texto do e-mail.
    */
   falha?: string;
   /**
@@ -440,8 +442,10 @@ export async function triageEmail(email: InboundEmail, now: Date = new Date(), d
     }
     return normalizeTriage(call.input as unknown as RawTriage, textoReal);
   } catch (e) {
-    // (V2) a falha deixa de ser calada: quem chamou registra — casando a regra do golpe ou não
-    const falha = String(e).slice(0, 300);
+    // (V2) a falha deixa de ser calada: quem chamou registra — casando a regra do golpe ou não.
+    // (Acabamento da leva A, 24/11/2026) Para o registro vai só a CLASSE do erro ("HTTP 402 (sem crédito)", "tempo
+    // esgotado"…), nunca a mensagem: o erro do provedor traz o corpo da resposta, que pode devolver um trecho do e-mail.
+    const falha = classeDoErro(e);
     // Indisponibilidade do modelo não pode esconder e-mail: sem a regra, notify com o motivo de sempre.
     const semARegra: Triage = {
       classe: FALLBACK_CLASS, confianca: 0, evidencia: "",
