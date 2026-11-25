@@ -4574,6 +4574,13 @@ quatro estão latentes.
   = 'auto'` gravada (0 chaves). Medido em 90 dias: 6 chamadas de `update_client`, 3 mexiam em contato, 0 com número vazio ou nulo.
 - **Menor mudança:** decisão do dono: o assistente apaga contato de cliente (com "sim" e cartão "antigo → —") ou não. Se não,
   tratar o texto só com espaços como vazio na leitura do pedido. Não corrigido aqui.
+- **Situação (acabamento da leva A, 24/11/2026, commit `168fa4c2`):** consertada a parte que apagava calado. O número só com
+  espaços passou a valer como vazio na leitura do pedido (`pedidoDeAtualizacao`), que é a mesma do cartão, do risco e da
+  execução: junto de outro campo é descartado e o resto é gravado; sozinho, é o pedido de apagar, recusado no cartão e também
+  na execução (`RECUSA_DE_APAGAR_CONTATO`). Não há mais caminho em que `update_client` apague telefone ou WhatsApp, com ou sem
+  chave de autonomia. O mesmo commit desfez uma regressão do S3: número vazio ou nulo junto de outro campo (o e-mail, por
+  exemplo) recusava o pedido inteiro; voltou a ser descartado, e o outro campo é gravado. **Continua aberto:** a decisão do
+  dono sobre o assistente poder apagar contato (hoje não pode; é pela tela do cliente).
 
 ### [NOVO-p1-s3-02] apply_quote_price: margem que não é número apaga o preço de venda da linha e responde "ok"
 
@@ -4631,6 +4638,11 @@ quatro estão latentes.
 - **Menor mudança:** decisão do dono: limpar o cadastro (tirar de clientes quem é só fornecedor) ou aceitar o PIN nesses
   números. Nada em código. O S1 conta fornecedor inativo como fornecedor (a especificação não filtra); filtrar só mexeria nos
   24 números inativos que não são de cliente.
+- **Medida de 24/11/2026 (só contagem):** dos 26 fornecedores ATIVOS cujo número também está no cadastro de clientes, 23 têm o
+  mesmo nome nos dois cadastros e nenhum tem orçamento nem OS como cliente. Nos inativos: 322 com número em clientes, 293 com o
+  mesmo nome e 5 com orçamento ou OS. Aqui a conta é por cadastro de fornecedor (26 + 322 = 348); a de cima é por número (333).
+  Reforça a hipótese de carga dos mesmos contatos nas duas tabelas: 316 dos 348 têm o mesmo nome nos dois cadastros, e só 5
+  têm orçamento ou OS como cliente. Decisão do dono pendente (cartão IA-20).
 
 ### [NOVO-p1-s1-03] No texto livre, a régua de data do validador do retorno acusa o verbo "ter", fração e código de peça
 
@@ -4705,6 +4717,12 @@ quatro estão latentes.
 - **Efeito:** pode ser aviso legítimo ou tentativa de golpe; ninguém olhou. A regra do F1 só vale para e-mail novo (48 horas),
   então ele não vira aviso sozinho.
 - **Menor mudança:** o dono olhar esse e-mail na caixa. Nada em código.
+- **Situação (24/11/2026): fechado, nada para o dono olhar.** Conferido em 24/11/2026 por remetente e assunto, sem ler o
+  corpo: o e-mail de 01/10 é campanha de divulgação de banco ("Benefícios exclusivos para conta PJ"), não é pedido de troca
+  de conta (por contagem: em 01/10 há 1 e-mail com esse assunto, nunca triado). Vale como exemplo de alarme falso da regra
+  fixa: divulgação de banco que fala em dados bancários casa com a regra "mudança de dados bancários ou de pagamento", que é
+  das fortes. Com a triagem por IA fora, um e-mail assim que chegasse hoje sairia como possível golpe e gastaria um dos 3
+  avisos da cota do dia.
 
 ### [NOVO-p1-s1-04] Cadastrar fornecedor, ou gravar telefone em fornecedor, roda sem o "sim" (a raiz do desvio do PIN achado na revisão do S1)
 
@@ -4743,3 +4761,102 @@ quatro estão latentes.
   alarme falso nem o golpe apareceram nesta caixa.
 - **Menor mudança:** decisão do dono. Para voltar a alertar só o pedido de não usar o boleto anterior, basta `forte: true` na
   regra `boleto_antigo` (uma palavra, com o teste). Não mudado aqui.
+
+### [NOVO-p1-s3-04] apply_quote_price: o cartão mostra um preço e o "sim" pode gravar outro
+
+- **Onde:** `supabase/functions/_shared/ai/tools/quotes.ts`, `apply_quote_price`. O cartão (`resumirAplicacaoDoPreco`) lê
+  `quote_responses.unit_price` e a linha do orçamento quando a pendência nasce; o `execute` lê tudo de novo na hora do "sim"
+  (a pendência vale 24 horas). `record_quote_response`, de risco baixo, roda direto e regrava o `unit_price` da mesma
+  resposta quando o fornecedor já tinha uma. A ferramenta não tem `retratoDaPendencia`. Achado 1 da revisão da leva A do
+  pacote 1; conferido no código em 24/11/2026 (ramo `session/assistente-p1`).
+- **Efeito:** o dono aprova "Custo: R$ 80,00 → R$ 100,00". Se o preço da resposta for corrigido antes do "sim" (pelo próprio
+  assistente, sem cartão, ou pela tela), o orçamento recebe o preço novo, e a venda é calculada com a margem sobre ele. O
+  mesmo vale para o custo e a venda "de antes", que podem ter mudado na linha. Latente: 0 chamadas de `apply_quote_price` em
+  90 dias.
+- **Menor mudança:** `retratoDaPendencia` com o preço cotado e o custo e a venda da linha lidos na hora do cartão, e recusa no
+  `execute` quando o de agora for outro ("desde o pedido, o preço mudou; peça de novo"), como o envio do PDF e do link da OS
+  já faz (`oQueMudouDesdeOPedido`, `tools/whatsapp.ts`). Não corrigido aqui.
+
+### [NOVO-p1-s1-05] Mensagem livre a fornecedor ou equipe: "Fechado por 350 cada", "Vou transferir agora" e "Confirmo o pedido das 10 baterias" saem só com o "sim"
+
+- **Onde:** `supabase/functions/_shared/ai/envio-livre.ts`, `conteudoQuePedePin`. Achado 2 da revisão da leva A; conferido em
+  24/11/2026 rodando a função: as três frases voltam como "não cita nada". "Fecho por 350" e "Fica por 350" acusam valor;
+  "Fechado por 350" não (o particípio não está entre os verbos de preço). "Vou transferir" e "Confirmo o pedido" não estão em
+  nenhuma lista de promessa (`_shared/retorno/validador.ts` e `_shared/ai/promessa.ts`). Quantidade ("10 baterias") não é valor.
+- **Efeito:** para número de fornecedor ou da equipe (o lado do "só o sim"), o assistente fecha preço, promete pagamento ou
+  confirma compra sem PIN. O cartão do "sim" mostra o texto inteiro; o que falta é o PIN. Para cliente, parceiro e número sem
+  cadastro nada muda (PIN sempre). Soma-se à lacuna que a crítica já aceitava: número solto sem verbo de preço nem moeda ("o
+  cabo é 350").
+- **Menor mudança:** depende da decisão do dono sobre PIN a fornecedor e equipe (pergunta 2 da crítica de viabilidade; decisão
+  4 da conferência da leva A). Se ficar a leitura estrita, completar as listas ("fechado por", "combinado em", "vou
+  transferir", "vou pagar", "confirmo o pedido", "confirmo a compra") e medir nas propostas de 90 dias antes de publicar. Não
+  corrigido aqui.
+
+### [NOVO-p1-s1-06] O texto livre tem listas próprias de valor e de data, além das do validador do retorno
+
+- **Onde:** `supabase/functions/_shared/ai/envio-livre.ts`, `VALOR_NO_TEXTO_LIVRE` (4 expressões: número com "mil", "k",
+  "conto" ou "pila"; valor por extenso; dezena por extenso com a moeda falada; número depois de verbo de preço) e
+  `DATA_NO_TEXTO_LIVRE` (4 expressões: "semana que vem", "dia 12", "em 5 dias", "duas semanas"), somadas à régua de
+  `citaValorDataOuPromessa` (`_shared/retorno/validador.ts`). A especificação do S1 pedia só o "N mil" a mais e mandava usar
+  a lista do validador como está. Achado 9 da revisão da leva A; conferido no código em 24/11/2026.
+- **Efeito:** nenhum dano: as listas só acrescentam (um PIN a mais). Mas são duas réguas para manter, e contradizem o
+  NOVO-p1-s1-03, que deixou de corrigir a régua de data ("ter", fração, código de peça) justamente por não criar lista
+  própria do texto livre. Frase nova de valor ou de data passa a ter dois lugares possíveis.
+- **Menor mudança:** decisão de quem especifica: assumir a lista própria do texto livre (e resolver nela o NOVO-p1-s1-03 e o
+  NOVO-p1-s1-05) ou levar essas expressões para o validador. Não mudado aqui.
+
+### [NOVO-p1-s1-07] A tabela parceiro_numeros não está no types.ts: a varredura dos .select() não confere a leitura nova
+
+- **Onde:** `src/integrations/supabase/types.ts` (0 ocorrências de `parceiro_numeros`, conferido em 24/11/2026) e
+  `supabase/functions/_shared/ai/envio-livre.ts`, `quemRecebe`: `admin.from("parceiro_numeros").select("id, chave")`. A
+  conferência da leva A viu no catálogo de produção que a tabela e a coluna existem. Achado 11 da revisão da leva A.
+- **Efeito:** a varredura `src/test/postgrest-select-columns.test.ts` confere as colunas de cada `.select()` contra o
+  `types.ts`, e pula a tabela que não está lá. Se a coluna mudar de nome, a leitura falha só em produção. Aqui a falha cai no
+  lado seguro (PIN, "não consegui conferir quem recebe"), mas toda mensagem livre passaria a pedir PIN sem aviso do porquê.
+- **Menor mudança:** regenerar o `types.ts` na fila única dele (várias frentes mexem no arquivo). Não corrigido aqui.
+
+### [NOVO-p1-f1-06] O boleto do e-mail vira conta a pagar antes da triagem: o e-mail marcado como possível golpe já gerou a conta
+
+- **Onde:** `supabase/functions/email-imap/index.ts`: `if (temBoleto(dados)) await registrarContas(admin, id)` roda no bloco
+  da extração, antes do bloco "Triagem só do que é recente". `contas_a_pagar_do_email` (migration `20270221100000`) não olha
+  `triage_class` nem `triage_fraud_alert` (conferido em 24/11/2026: nenhuma menção no arquivo). É da frente "o que vence"
+  (21/11/2026), fora do pacote 1. Achado 6 da revisão da leva A.
+- **Efeito:** o e-mail com boleto que a triagem (o modelo ou a regra fixa do F1) marca como possível golpe já deixou uma conta
+  a pagar aberta, sem marca nenhuma. Pela conferência da leva A ela entra nos pagamentos da semana como as outras (não
+  reconferido aqui). O alerta chega ao dono no WhatsApp, mas a conta e o alerta não se conhecem; e o golpe do boleto trocado
+  é justamente e-mail com boleto.
+- **Menor mudança:** quando a triagem der alerta de fraude, marcar a conta nascida daquele e-mail como em conferência (ou não
+  criar e deixar só a proposta) e dizer isso na linha dos pagamentos da semana. Mexe em migration e na fila do que vence:
+  tarefa própria, com decisão do dono. Não corrigido aqui.
+
+### [NOVO-p1-v2-02] O motivo "falha na triagem: …" guarda o texto cru do erro no e-mail, e o assistente lê esse motivo
+
+- **Onde:** `supabase/functions/_shared/email/triage.ts`, `catch` de `triageEmail`: o motivo é "falha na triagem: " seguido
+  de `String(e).slice(0, 120)`. Ele vai para `email_messages.triage_reason` (`email-imap/index.ts`) e sai no campo `motivo`
+  do que o assistente lê ao listar e-mails (`_shared/ai/tools/email.ts`). Existe desde o núcleo do e-mail (commit
+  `d677e1c1`), antes do pacote 1. Visto em 24/11/2026 no acabamento da leva A, ao tirar o texto cru do erro do registro em
+  `app_error_logs` (commit `2df7f661`), que não mexeu no motivo.
+- **Efeito:** o erro do provedor carrega o corpo da resposta, que pode devolver um trecho do e-mail (recusa de moderação,
+  pedido recusado). Em `triage_reason` isso não sai da linha do próprio e-mail; o ponto é outro: o assistente lê o motivo
+  como texto do sistema, fora das marcas de "dado de terceiro" que cercam o corpo do e-mail. Até 120 caracteres escritos por
+  quem mandou o e-mail poderiam chegar a ele por aí, furando a quarentena da triagem. Estreito: o começo do erro
+  ("ClaudeApiError: OpenRouter 403: {"error":…") já gasta boa parte dos 120. Não medido. Dois vizinhos do mesmo tipo, também
+  anteriores ao pacote 1: `anthropic.ts` escreve o corpo inteiro da resposta no console da função nos erros 400 e 401, e
+  `registrarFalhaDoAssistente` (falha de turno do `ai-agent`) grava em `app_error_logs` a mensagem crua do erro do turno.
+- **Menor mudança:** usar no motivo a mesma classe do registro (`classeDoErro(e)`, de `_shared/ai/classe-do-erro.ts`, no
+  lugar de `String(e).slice(0, 120)`). O começo "falha na triagem", que as contagens e a reclassificação (V3) procuram, não
+  muda; muda o resto do texto que o dono lê no motivo ("…HTTP 402 (sem crédito)" no lugar de "…ClaudeApiError: OpenRouter 402
+  (créditos insuficientes na conta)…"). Uma linha, mais os testes que fixam o motivo. Não corrigido aqui: a tarefa era o que
+  vai para o log.
+
+### [NOVO-p1-conf-01] Rodar as suítes suja a árvore: os .tsbuildinfo estão fora do .gitignore
+
+- **Onde:** `.gitignore` (sem `*.tsbuildinfo`; `git check-ignore tsconfig.app.tsbuildinfo` não casa, conferido em
+  24/11/2026) e `tsconfig.json`, que tem `references`: o `npx tsc -b` grava `tsconfig.app.tsbuildinfo` e
+  `tsconfig.node.tsbuildinfo` na raiz. A conferência da leva A viu mais dois: o `deno.lock`, regravado pelo `check:edge` e
+  pelo `test:edge`, e `src/pages/__snapshots__/FiscalEmission.emissao.test.tsx.snap`, regravado pelo Vitest só no fim de
+  linha (conteúdo idêntico). Achado 12 da revisão da leva A.
+- **Efeito:** depois das quatro suítes o `git status` mostra arquivos que ninguém mexeu. Com várias sessões no mesmo
+  repositório, um `git add` descuidado leva o lixo junto, e toda conferência de "árvore limpa" precisa desfazer à mão.
+- **Menor mudança:** `*.tsbuildinfo` no `.gitignore`, em tarefa própria. O `deno.lock` (que é versionado) e o fim de linha
+  do snapshot pedem olhar à parte. Não corrigido aqui.
