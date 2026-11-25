@@ -369,6 +369,34 @@ export function avisoDeQueOClaudeNaoRespondeu(c: CausaDaFalha): string {
   return `⚠️ O Claude não respondeu (${c.curta}).`;
 }
 
+// ═══ O REGISTRO DO TURNO DO WHATSAPP QUE TERMINOU SEM RESPOSTA ═══
+//
+// Revisão da leva B (25/11/2026). O turno que termina sem resposta é registrado em app_error_logs
+// (registrarFalhaDoAssistente), e o nome do registro vira a coluna `action`. São DOIS nomes porque o vigia de queda (V1)
+// pergunta "o dono já leu a causa numa resposta de falha?" olhando esse nome:
+//   · com a causa do Claude: a linha de avisoDeQueOClaudeNaoRespondeu foi no topo da resposta. O dono leu a causa.
+//   · sem causa: o turno nem passou pelo Claude (o canal não está nele, ou quem pede não é o titular). O dono leu só o
+//     erro comum ("não consegui concluir agora…"), que não diz o que caiu.
+// Até aqui os dois saíam com o mesmo nome, e o vigia contava o segundo como "o dono já soube": com o login do Claude
+// caído e a reserva ligada, o dono lia só o erro comum e o aviso de queda nunca saía.
+// Os dois nomes contam igual para o aviso de "o assistente falhou N vezes na última hora", que soma pelo contexto da
+// hora e não olha o nome.
+
+/** O turno do WhatsApp sem resposta e SEM a causa do Claude na resposta (o dono leu só o erro comum). */
+export const TURNO_SEM_RESPOSTA = "turno_whatsapp";
+/** O turno do WhatsApp sem resposta COM a causa do Claude no topo da resposta. É o que o vigia de queda conta como lido. */
+export const TURNO_SEM_RESPOSTA_COM_CAUSA = "turno_whatsapp_com_causa";
+
+/**
+ * Com que nome registrar o turno do WhatsApp que terminou sem resposta (pura). `causaDoMax` é a causa que o turno
+ * carrega (TurnoDoModelo.causaDoMax, no ai-agent): a mesma condição que põe a linha da causa no topo da resposta.
+ */
+export function ondeDoTurnoSemResposta(
+  causaDoMax: CausaDaFalha | null | undefined,
+): typeof TURNO_SEM_RESPOSTA | typeof TURNO_SEM_RESPOSTA_COM_CAUSA {
+  return causaDoMax ? TURNO_SEM_RESPOSTA_COM_CAUSA : TURNO_SEM_RESPOSTA;
+}
+
 /** Como a causa vai para o log: o código da frase e, entre parênteses, o código cru de onde ela saiu. */
 export function rotuloDaCausaNoLog(c: CausaDaFalha): string {
   return c.cru && c.cru !== c.codigo ? `${c.codigo} (${c.cru})` : c.codigo;

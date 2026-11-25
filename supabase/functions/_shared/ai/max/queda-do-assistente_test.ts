@@ -7,7 +7,7 @@
 // assistente é aberta; o texto que o dono leria, letra por letra.
 import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
-  causaDaFalha, type EstadoDoMax, estadoDoMax, FRASE_CURTA_DA_CAUSA, type ProgramaDoPc, SEM_SINAL_QUEDA_S,
+  causaDaFalha, type EstadoDoMax, estadoDoMax, FRASE_CURTA_DA_CAUSA, ondeDoTurnoSemResposta, type ProgramaDoPc, SEM_SINAL_QUEDA_S,
 } from "./causa-da-falha.ts";
 import {
   causaDoMotivo, CAUSAS_DO_ASSISTENTE, CHAVE_DO_VIGIA_DO_ASSISTENTE, CODIGO_DA_FRASE, decidirQuedaDoAssistente, FALHAS_QUE_O_DONO_LEU,
@@ -108,8 +108,14 @@ Deno.test("frase: uma voz só — para o mesmo estado, o vigia diz a mesma frase
   for (const c of CAUSAS_DO_ASSISTENTE) assert(!/cr[eé]dito|recarga|reserva|saldo/i.test(fraseDaCausaDaQueda(c)), c);
 });
 
-Deno.test("registros que o dono leu: só os três que respondem pelo WhatsApp (o painel e o tratador ficam de fora)", () => {
-  assertEquals([...FALHAS_QUE_O_DONO_LEU], ["max_sem_reserva", "max_fora_sem_reserva", "turno_whatsapp"]);
+Deno.test("registros que o dono leu: só os três que respondem pelo WhatsApp COM a causa (o painel, o tratador e o turno sem causa ficam de fora)", () => {
+  assertEquals([...FALHAS_QUE_O_DONO_LEU], ["max_sem_reserva", "max_fora_sem_reserva", "turno_whatsapp_com_causa"]);
+  // revisão da leva B (25/11/2026): o turno que o dono leu só como "erro do sistema" não prova que ele sabe da queda
+  assert(!(FALHAS_QUE_O_DONO_LEU as readonly string[]).includes("turno_whatsapp"), "o turno sem causa não conta como lido");
+  // o nome é o que o ai-agent grava quando a causa foi no topo da resposta (a mesma peça do C2)
+  const comCausa = ondeDoTurnoSemResposta(causaDaFalha({ job: null, estado: pausa("auth_failed"), agora: T0 }));
+  assert((FALHAS_QUE_O_DONO_LEU as readonly string[]).includes(comCausa), comCausa);
+  assert(!(FALHAS_QUE_O_DONO_LEU as readonly string[]).includes(ondeDoTurnoSemResposta(undefined)));
 });
 
 // ─── O problema à vista ──────────────────────────────────────────────────────────────────────────────────────────────

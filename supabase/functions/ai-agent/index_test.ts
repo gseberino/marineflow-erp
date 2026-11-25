@@ -351,7 +351,9 @@ Deno.test("lote F1: no painel, a frase do assistente acima do cartão (OpenRoute
 // O que se protege: todo turno que termina sem resposta conta para o aviso do vigia; o Max que falha com a reserva ligada é
 // só aviso, porque a reserva ainda pode responder; o log nunca troca o 500 do handler por outro erro.
 Deno.test("F0a-2: turno sem resposta entra na conta, nos quatro caminhos (e no do Max fora sem reserva, C2)", () => {
-  assertStringIncludes(fonte, 'registrarFalhaDoAssistente(admin, { onde: "turno_whatsapp"');
+  // revisão da leva B (25/11/2026): o turno do WhatsApp registra como "turno_whatsapp" ou "turno_whatsapp_com_causa"
+  // (ondeDoTurnoSemResposta, em causa-da-falha.ts). Os dois contam: a conta por hora soma pelo contexto, não pelo nome.
+  assertStringIncludes(fonte, "if (result.error) await registrarFalhaDoAssistente(admin, { onde: ondeDoTurnoSemResposta(turno.causaDoMax)");
   assertStringIncludes(fonte, 'registrarFalhaDoAssistente(admin, { onde: "turno_painel"');
   assertStringIncludes(fonte, 'registrarFalhaDoAssistente(admin, { onde: "max_sem_reserva"');
   assertStringIncludes(fonte, 'registrarFalhaDoAssistente(admin, { onde: "handler"');
@@ -442,6 +444,34 @@ Deno.test("C2 (WhatsApp): com a reserva ligada, a causa segue com o turno e só 
   assertStringIncludes(modeloWa, "aviso: result.error && turno.causaDoMax ? avisoDeQueOClaudeNaoRespondeu(turno.causaDoMax) : undefined,");
   // só neste ponto: o turno normal (sem causa do Max) não ganha aviso nenhum
   assertEquals((fonte.match(/avisoDeQueOClaudeNaoRespondeu\(/g) ?? []).length, 1);
+});
+
+// Revisão da leva B (25/11/2026). O que se protege: com a reserva LIGADA, o turno que cai no laço porque o Claude já
+// estava fora (ou porque o pedido não entrou na fila) também leva a causa, lida antes do laço; e o registro do turno sem
+// resposta sai com o nome que diz se a causa foi junto. Sem isso o dono lia só "erro do sistema" e o vigia de queda (V1)
+// contava esse turno como "o dono já soube": o aviso do login caído nunca saía.
+Deno.test("revisão B (WhatsApp): com a reserva ligada, Max fora ou falha ao enfileirar também levam a causa para o laço", () => {
+  const ramoDoMax = modeloWa.slice(modeloWa.indexOf("// ---- Claude Max (assinatura do dono"), modeloWa.indexOf("// ---- OpenRouter (loop aqui na edge) ----"));
+  const pegou = ramoDoMax.indexOf("} catch (e) {");
+  const fora = ramoDoMax.indexOf("} else {", pegou);
+  assert(pegou > 0 && fora > pegou, "os dois ramos existem");
+  // falha ao enfileirar: depois da guarda da reserva desligada (que sai com o aviso) e do log de "só aviso"
+  const ramoDeEnfileirar = ramoDoMax.slice(pegou, fora);
+  const causaDeEnfileirar = ramoDeEnfileirar.indexOf('turno.causaDoMax = await lerCausaDaFalha(admin, { motivo: "enfileirar" });');
+  assert(causaDeEnfileirar > ramoDeEnfileirar.indexOf('action: "enfileirar_max"'), "enfileirar: a causa é guardada no caminho que segue pela reserva");
+  assert(causaDeEnfileirar > ramoDeEnfileirar.indexOf("return await avisarQueOMaxNaoAtende("), "enfileirar: depois da saída da reserva desligada");
+  // Max indisponível: a causa é lida do estado do PC (sem pedido e sem motivo), depois da saída da reserva desligada
+  const ramoDeFora = ramoDoMax.slice(fora);
+  const causaDeFora = ramoDeFora.indexOf("turno.causaDoMax = await lerCausaDaFalha(admin);");
+  assert(causaDeFora > ramoDeFora.indexOf("return await avisarQueOMaxNaoAtende(turno, await lerCausaDaFalha(admin));"), "Max fora: depois da saída da reserva desligada");
+  // só estes dois pontos escrevem a causa dentro do turno, e os dois antes do laço
+  assertEquals((modeloWa.match(/turno\.causaDoMax = /g) ?? []).length, 2);
+  assert(modeloWa.lastIndexOf("turno.causaDoMax = ") < modeloWa.indexOf("const result = await runAgentLoop(loopParams);"), "antes do laço");
+  // a mesma causa decide as duas coisas: a linha no topo da resposta e o nome do registro
+  assertStringIncludes(modeloWa, "aviso: result.error && turno.causaDoMax ? avisoDeQueOClaudeNaoRespondeu(turno.causaDoMax) : undefined,");
+  assertStringIncludes(modeloWa, "onde: ondeDoTurnoSemResposta(turno.causaDoMax), mensagem: `Turno do WhatsApp sem resposta: ${result.error}`");
+  // o nome antigo não é mais escrito à mão em lugar nenhum do ai-agent
+  assert(!fonte.includes('onde: "turno_whatsapp"'), "o registro do turno sai só por ondeDoTurnoSemResposta");
 });
 
 Deno.test("C2 (painel): depois de escolhido o Max, nenhum 'return null' sem conferir a reserva", () => {

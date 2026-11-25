@@ -54,6 +54,8 @@ interface Cenario {
   jobs?: Array<{ completed_at: string; requested_by: string | null }> | "erro";
   /** linhas de app_error_logs que casam com a consulta do "dono já soube" */
   falhas?: number | "erro";
+  /** as linhas de app_error_logs como estão no banco: aqui os filtros da consulta (action, last_seen_at) valem de verdade */
+  registros?: Array<{ action: string; last_seen_at: string }>;
   vozUnica?: "ligado" | "sombra" | "desligado";
   // deno-lint-ignore no-explicit-any
   portao?: (p: any) => Record<string, unknown> | null;
@@ -130,6 +132,10 @@ function banco(c: Cenario = {}) {
         return ok(bons.slice(0, op.limite ?? bons.length));
       }
       case "app_error_logs":
+        if (c.registros) {
+          const lidos = c.registros.filter((l) => casa(l, op.filtros.filter(([o]) => o === "in" || o === "gte")));
+          return ok(lidos.slice(0, op.limite ?? lidos.length).map(() => ({ id: "e" })));
+        }
         return c.falhas === "erro" ? { data: null, error: { message: "x" } } : ok(Array.from({ length: Math.min(c.falhas ?? 0, op.limite ?? 99) }, () => ({ id: "e" })));
       case "app_users":
         return ok(op.colunas === "id" ? [{ id: "dono-1" }, { id: "admin-2" }] : [{ id: "dono-1", phone_normalized: FONE_DO_DONO }]);
@@ -361,7 +367,7 @@ Deno.test("ligado: o dono já leu a causa numa resposta de falha = não manda; a
   assertEquals(consulta.colunas, "id", "nenhum texto de erro é lido");
   assertEquals(consulta.filtros, [
     ["like", "context", "ai-agent@%"],
-    ["in", "action", ["max_sem_reserva", "max_fora_sem_reserva", "turno_whatsapp"]],
+    ["in", "action", ["max_sem_reserva", "max_fora_sem_reserva", "turno_whatsapp_com_causa"]],
     ["eq", "level", "error"],
     // 10 minutos antes do início gravado: a falha que abriu a pausa é anterior à rodada que a viu
     ["gte", "last_seen_at", iso(-10)],
@@ -369,6 +375,35 @@ Deno.test("ligado: o dono já leu a causa numa resposta de falha = não manda; a
   // não avisa de novo nas rodadas seguintes
   await vigiarOAssistente(b.db, { modo: "ligado", pc: NO_AR, whatsappAberto: true, agora: min(20) });
   assertEquals(b.ops.filter((o) => o.tabela === "app_error_logs").length, 1);
+});
+
+// Revisão da leva B (25/11/2026). O caso: o login do Claude cai com o WhatsApp de pé e a reserva ligada; o dono manda
+// "oi", a reserva falha e ele lê só "erro do sistema, já anotado". Esse turno deixa o registro `turno_whatsapp`, que NÃO
+// diz a causa. O vigia contava esse registro como "o dono já soube" e nunca avisava da queda.
+Deno.test("ligado: o turno que falhou SEM a causa na resposta (turno_whatsapp) não conta como 'o dono já soube' — o aviso sai", async () => {
+  const b = banco({ quedas: [queda()], registros: [{ action: "turno_whatsapp", last_seen_at: iso(2) }] });
+  const r = await vigiarOAssistente(b.db, { modo: "ligado", pc: NO_AR, whatsappAberto: true, agora: min(15) });
+  assertEquals(r.avisou, "whatsapp");
+  assertEquals([b.sinos().length, b.perguntas().length, b.fila().length], [1, 1, 1]);
+  assertEquals([b.quedas[0].dono_soube, b.quedas[0].avisado_por], ["aviso", "whatsapp"]);
+  assertEquals(b.fila()[0].valores.message, TEXTO_DO_LOGIN);
+  // o painel e o tratador continuam de fora, como antes
+  for (const action of ["turno_painel", "handler", "max_falhou", "enfileirar_max", "nao_assinante"]) {
+    const x = banco({ quedas: [queda()], registros: [{ action, last_seen_at: iso(2) }] });
+    assertEquals((await vigiarOAssistente(x.db, { modo: "ligado", pc: NO_AR, whatsappAberto: true, agora: min(15) })).avisou, "whatsapp", action);
+  }
+});
+
+Deno.test("ligado: o turno que falhou COM a causa no topo (turno_whatsapp_com_causa) e os dois avisos sem reserva contam — não manda", async () => {
+  for (const action of ["turno_whatsapp_com_causa", "max_sem_reserva", "max_fora_sem_reserva"]) {
+    const b = banco({ quedas: [queda()], registros: [{ action: "turno_whatsapp", last_seen_at: iso(1) }, { action, last_seen_at: iso(2) }] });
+    const r = await vigiarOAssistente(b.db, { modo: "ligado", pc: NO_AR, whatsappAberto: true, agora: min(15) });
+    assertEquals(r.avisou, "ja_soube", action);
+    assertEquals([b.sinos().length, b.perguntas().length, b.fila().length, b.quedas[0].dono_soube], [0, 0, 0, "resposta_de_falha"], action);
+  }
+  // a resposta com a causa de ANTES da margem (mais de 10 minutos antes do início da queda) é de outra queda: não conta
+  const velha = banco({ quedas: [queda()], registros: [{ action: "turno_whatsapp_com_causa", last_seen_at: iso(-11) }] });
+  assertEquals((await vigiarOAssistente(velha.db, { modo: "ligado", pc: NO_AR, whatsappAberto: true, agora: min(15) })).avisou, "whatsapp");
 });
 
 Deno.test("ligado: leitura do registro de falhas que falha = não conclui nada nesta rodada (tenta na próxima), sem mandar e sem marcar", async () => {

@@ -11,13 +11,17 @@ import {
   FRASE_CURTA_DA_CAUSA,
   lerCausaDaFalha,
   lerEstadoDoMax,
+  ondeDoTurnoSemResposta,
   type ProgramaDoPc,
   rotuloDaCausaNoLog,
   SEM_SINAL_AGORA_S,
   SEM_SINAL_QUEDA_S,
   TEXTO_PARA_QUEM_NAO_E_O_TITULAR,
   textoDaFalhaParaODono,
+  TURNO_SEM_RESPOSTA,
+  TURNO_SEM_RESPOSTA_COM_CAUSA,
 } from "./causa-da-falha.ts";
+import { ERRO_DO_SISTEMA_PARA_O_DONO, respostaDoTurnoNoWhatsApp } from "../whatsapp-resposta.ts";
 
 // terça-feira, 24/11/2026, 09:32 em Brasília
 const AGORA = new Date("2026-11-24T12:32:00Z");
@@ -374,4 +378,40 @@ Deno.test("causa de agora: nunca lança (roda também quando a reserva ainda vai
   // relógio inválido também não derruba
   const semRelogio = await lerCausaDaFalha(banco({ data: programas({ assistenteHa: 3600 }) }).admin, { agora: new Date("lixo") });
   assert(CODIGOS_DA_CAUSA.includes(semRelogio.codigo));
+});
+
+// ─── Revisão da leva B (25/11/2026): o Claude já estava fora ANTES do pedido, com a reserva ligada ───────────────────
+// O caso: o login do Claude cai no PC, o WhatsApp segue de pé e o dono manda "oi". O turno nem vira pedido (o Claude está
+// em pausa), cai no laço da reserva e a reserva falha. Até aqui o dono lia só "erro do sistema"; o registro saía com o
+// mesmo nome do turno que leva a causa, e o vigia de queda concluía que ele já sabia.
+
+Deno.test("revisão B: Claude em pausa por login, reserva ligada e também falhando — a resposta começa pela causa do Claude", async () => {
+  // o que o ai-agent faz no ramo "Max fora": lê a causa do estado do PC, sem pedido nenhum
+  const emPausa = programas({ claude: { available: false, reason: "auth_failed", until: "2026-11-24T12:42:00.000Z" } });
+  const causa = await lerCausaDaFalha(banco({ data: emPausa }).admin, { agora: AGORA });
+  assertEquals([causa.codigo, causa.cru], ["login", "auth_failed"]);
+  const r = respostaDoTurnoNoWhatsApp(
+    { texto: "", error: "OpenRouter 402 (créditos insuficientes na conta)", aviso: avisoDeQueOClaudeNaoRespondeu(causa) },
+    {},
+  );
+  assert(r.replyText.startsWith("⚠️ O Claude não respondeu (o login do Claude caiu)."), r.replyText);
+  assertEquals(r.replyText, `⚠️ O Claude não respondeu (o login do Claude caiu).\n\n⚠️ ${ERRO_DO_SISTEMA_PARA_O_DONO}`);
+  // nada de crédito, reserva ou código cru (decisão do dono de 24/11/2026)
+  assert(!/cr[eé]dito|recarg|saldo|reserva|openrouter|auth_failed/i.test(r.replyText), r.replyText);
+  // o PC sem sinal e o pedido que não entrou na fila saem do mesmo jeito
+  const semSinal = await lerCausaDaFalha(banco({ data: programas({ assistenteHa: 60 }) }).admin, { agora: AGORA });
+  assertEquals(avisoDeQueOClaudeNaoRespondeu(semSinal), "⚠️ O Claude não respondeu (o PC da oficina está sem sinal).");
+  const fila = await lerCausaDaFalha(banco("lanca").admin, { motivo: "enfileirar", agora: AGORA });
+  assertEquals(avisoDeQueOClaudeNaoRespondeu(fila), "⚠️ O Claude não respondeu (o pedido não entrou na fila).");
+});
+
+Deno.test("revisão B: o registro do turno sem resposta tem dois nomes — com a causa do Claude na resposta e sem ela", () => {
+  assertEquals([TURNO_SEM_RESPOSTA, TURNO_SEM_RESPOSTA_COM_CAUSA], ["turno_whatsapp", "turno_whatsapp_com_causa"]);
+  const causa = causaDaFalha({ job: null, estado: estado({ pausa: { motivo: "auth_failed", ate: null } }), agora: AGORA });
+  assertEquals(ondeDoTurnoSemResposta(causa), "turno_whatsapp_com_causa");
+  // o turno que nem passou pelo Claude (o canal não está nele, ou quem pede não é o titular): o dono leu só o erro comum
+  assertEquals(ondeDoTurnoSemResposta(undefined), "turno_whatsapp");
+  assertEquals(ondeDoTurnoSemResposta(null), "turno_whatsapp");
+  // a causa que não se sabe dizer melhor ainda é causa dita ("deu um erro no assistente do PC")
+  assertEquals(ondeDoTurnoSemResposta(causaDaFalha({ job: null, estado: null, agora: AGORA })), "turno_whatsapp_com_causa");
 });

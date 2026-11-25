@@ -40,6 +40,7 @@ import {
   avisoDeQueOClaudeNaoRespondeu,
   type CausaDaFalha,
   lerCausaDaFalha,
+  ondeDoTurnoSemResposta,
   rotuloDaCausaNoLog,
   textoDaFalhaParaODono,
 } from "../_shared/ai/max/causa-da-falha.ts";
@@ -1028,7 +1029,11 @@ interface TurnoDoModelo {
   effectiveText: string;
   /** false na reserva: o Max já falhou neste turno, vai direto pelo OpenRouter. */
   permitirMax: boolean;
-  /** C2: por que o Max falhou neste turno (só na reserva). Se a reserva também falhar, o dono lê a causa no topo. */
+  /**
+   * C2: por que o Claude não atendeu este turno (só quando ele segue pela reserva). Se a reserva também falhar, o dono lê
+   * a causa no topo. Vem de handleEntregaDoMax (o pedido falhou depois de entrar na fila) ou é lida aqui, antes do laço
+   * (o Claude já estava fora, ou o pedido não entrou na fila). Sem ela, o turno nem passou pelo Claude.
+   */
   causaDoMax?: CausaDaFalha;
 }
 
@@ -1167,6 +1172,8 @@ async function turnoDoModeloNoWhatsApp(turno: TurnoDoModelo): Promise<Response> 
         console.error("[ai-agent][whatsapp] não consegui enfileirar no Claude Max; turno pelo OpenRouter:", e);
         // Só aviso: a reserva ainda pode responder. Não conta para o aviso do vigia.
         await logEdgeError(admin, { context: "ai-agent", action: "enfileirar_max", level: "warn", message: "Não enfileirou no Claude Max; turno pelo OpenRouter", error: e });
+        // Revisão da leva B: a causa segue com o turno. Se a reserva também falhar, o dono lê por que o Claude não atendeu.
+        turno.causaDoMax = await lerCausaDaFalha(admin, { motivo: "enfileirar" });
       }
     } else {
       // C2: reserva desligada = o turno fecha aqui, com a causa lida do estado do PC. Nada vai ao OpenRouter.
@@ -1175,12 +1182,17 @@ async function turnoDoModeloNoWhatsApp(turno: TurnoDoModelo): Promise<Response> 
         return await avisarQueOMaxNaoAtende(turno, await lerCausaDaFalha(admin));
       }
       console.log("[ai-agent][whatsapp] Claude Max fora do ar (gateway sem sinal ou em pausa); turno pelo OpenRouter");
+      // Revisão da leva B: a causa é lida AGORA, do estado do PC (o login caiu, o limite acabou, o PC está sem sinal), e
+      // segue com o turno. Até aqui só a falha DEPOIS do pedido levava a causa: com o Claude já fora, a reserva falhava
+      // e o dono lia só "erro do sistema". Com a reserva respondendo, nada muda (a causa só aparece no erro).
+      turno.causaDoMax = await lerCausaDaFalha(admin);
     }
   }
 
   // ---- OpenRouter (loop aqui na edge) ----
   const result = await runAgentLoop(loopParams);
-  if (result.error) await registrarFalhaDoAssistente(admin, { onde: "turno_whatsapp", mensagem: `Turno do WhatsApp sem resposta: ${result.error}` });
+  // O nome do registro diz se a causa do Claude foi junto na resposta (é o que o vigia de queda conta como "o dono já soube").
+  if (result.error) await registrarFalhaDoAssistente(admin, { onde: ondeDoTurnoSemResposta(turno.causaDoMax), mensagem: `Turno do WhatsApp sem resposta: ${result.error}` });
   // (Fase 3, P6) a carona da agenda: no fim da resposta ao dono sobre UMA OS, no máximo uma pergunta aberta dela
   // (agenda_carona decide; nunca com cartão de sim, opções ou fluxo). Entra também no histórico (aplicarCarona).
   if (appUser.role === "admin") {

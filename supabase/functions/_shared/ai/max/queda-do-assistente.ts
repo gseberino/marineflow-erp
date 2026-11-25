@@ -36,6 +36,7 @@ import { diaBR, horaBR } from "../../pdf/datas.ts";
 import { ddmm } from "../../secretario/base.ts";
 import {
   type CodigoDaCausa, type EstadoDoMax, FRASE_CURTA_DA_CAUSA, fraseDeQuandoLibera, trechoDeDesdeQuando,
+  TURNO_SEM_RESPOSTA_COM_CAUSA,
 } from "./causa-da-falha.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -92,8 +93,12 @@ export const MARGEM_DO_JA_SOUBE_MIN = 10;
 /**
  * Os registros de falha (app_error_logs.action, gravados por registrarFalhaDoAssistente) em que o dono LEU a causa na
  * resposta do WhatsApp. A falha do painel (turno_painel) e a do tratador (handler) não chegaram ao WhatsApp dele.
+ *
+ * Revisão da leva B (25/11/2026): o turno que caiu no laço da reserva e falhou só conta quando a causa do Claude foi no
+ * topo da resposta (turno_whatsapp_com_causa). O `turno_whatsapp` puro é o turno que o dono leu só como "erro do
+ * sistema": contá-lo calava o aviso de queda justamente quando o login do Claude caía com a reserva ligada.
  */
-export const FALHAS_QUE_O_DONO_LEU = ["max_sem_reserva", "max_fora_sem_reserva", "turno_whatsapp"] as const;
+export const FALHAS_QUE_O_DONO_LEU = ["max_sem_reserva", "max_fora_sem_reserva", TURNO_SEM_RESPOSTA_COM_CAUSA] as const;
 
 function ehCausaDoAssistente(v: unknown): v is CausaDoAssistente {
   return typeof v === "string" && (CAUSAS_DO_ASSISTENTE as readonly string[]).includes(v);
