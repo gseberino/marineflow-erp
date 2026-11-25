@@ -233,6 +233,14 @@ export const FORA_DA_BANCADA = new Set([
   // Cobranças só admin/financeiro (de OUTRA sessão; na main desde 21/11): só as policies de collections, com is_external_seller, que a bancada não
   // modela ("function ... does not exist", 23/11). Não toca em função da agenda.
   '20270212120000_cobrancas_so_admin_financeiro.sql',
+  // Financeiro e gateway (de OUTRAS sessões; na main de 24 e 25/11): pagamentos da semana, posição e calendário do cartão, a falha do gateway antes
+  // do prazo e a baixa do recebimento pelo boleto. A bancada parava na 1ª ("relation public.bank_connections does not exist", 25/11). Nenhuma recria
+  // função da agenda (procurado em 25/11: nenhuma agenda_*, _agenda_*, os_registrar_* nem agenda_perguntas).
+  '20270224100000_pagamentos_da_semana.sql',
+  '20270225100000_posicao_do_cartao.sql',
+  '20270226140000_gateway_falha_antes_do_prazo.sql',
+  '20270227100000_tela_le_calendario_do_cartao.sql',
+  '20270228100000_baixa_do_recebimento_pelo_boleto.sql',
 ]);
 
 /**
