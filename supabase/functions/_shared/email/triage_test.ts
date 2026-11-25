@@ -2,8 +2,9 @@ import { assertEquals, assert } from "https://deno.land/std@0.224.0/assert/mod.t
 import {
   normalizeTriage, triageDeterministica, formatEmailForTriage, buildTriagePrompt, triageEmail,
   CLASS_FLOOR, FALLBACK_CLASS, type RawTriage,
-  CHAVE_DA_REGRA_DO_GOLPE, golpeDeTrocaDeConta, MOTIVO_DA_REGRA_DO_GOLPE, regraDoGolpeLigada, REGRAS_DO_GOLPE, textoParaARegraDoGolpe,
+  golpeDeTrocaDeConta, MOTIVO_DA_REGRA_DO_GOLPE, REGRAS_DO_GOLPE, textoParaARegraDoGolpe,
 } from "./triage.ts";
+import * as triagem from "./triage.ts";
 import type { CallClaudeParams, CallClaudeResult } from "../ai/anthropic.ts";
 import type { InboundEmail } from "./types.ts";
 
@@ -195,7 +196,7 @@ Deno.test("triageEmail: o modelo que responde não deixa falha; o atalho por cab
 // ─── Golpe de troca de conta ou de Pix por regra fixa (pacote 1, F1, 24/11/2026) ─────────────────────
 // O alerta de golpe só saía de e-mail classificado pelo modelo e parou em 12/11, com o provedor sem saldo. O que se
 // protege: quando a chamada do modelo falha, o e-mail que pede troca de dados de pagamento sai urgente com o alerta de
-// fraude; o que não pede continua notify; com o modelo de pé a regra não roda; e a chave desliga.
+// fraude; o que não pede continua notify; com o modelo de pé a regra não roda.
 
 /** [regra esperada, assunto, corpo]: o que a regra TEM de pegar, com e sem acento. */
 const DEVE_CASAR: Array<[string, string, string]> = [
@@ -301,14 +302,19 @@ Deno.test("regra do golpe: as expressões ficam no que o Postgres lê igual (a m
   assertEquals(new Set(REGRAS_DO_GOLPE.map((r) => r.nome)).size, REGRAS_DO_GOLPE.length);
 });
 
-Deno.test("regra do golpe: a chave ausente ou qualquer valor que não seja 'desligado' mantém a rede ligada", () => {
-  assertEquals(CHAVE_DA_REGRA_DO_GOLPE, "email_golpe_regra_fixa");
-  for (const ligada of [undefined, null, "", "ligado", "ligada", "on", "true", "1", "sim", "qualquer coisa"]) {
-    assertEquals(regraDoGolpeLigada(ligada), true, String(ligada));
-  }
-  for (const desligada of ["desligado", " Desligado ", "DESLIGADA", "off", "false", "0", "não", "nao", false, 0]) {
-    assertEquals(regraDoGolpeLigada(desligada), false, String(desligada));
-  }
+// (Revisão do pacote 1, 24/11/2026) A primeira versão do F1 nasceu com uma chave de app_settings que a especificação
+// não pede (`email_golpe_regra_fixa`, lida a cada rodada). O que se protege: a regra não tem interruptor; quem chama
+// não consegue desligá-la por argumento, e o arquivo não cita chave nenhuma de configuração.
+Deno.test("regra do golpe: não tem interruptor (nem chave de app_settings, nem argumento que a desligue)", async () => {
+  for (const sumiu of ["CHAVE_DA_REGRA_DO_GOLPE", "regraDoGolpeLigada"]) assertEquals(sumiu in triagem, false, sumiu);
+  const fonte = await Deno.readTextFile(new URL("./triage.ts", import.meta.url));
+  const semComentario = fonte.split("\n").filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*") && !l.trim().startsWith("/*")).join("\n");
+  for (const proibido of ["app_settings", "email_golpe_regra_fixa"]) assert(!semComentario.includes(proibido), proibido);
+  // um argumento a mais (o que a versão antiga aceitava) não desliga nada
+  const erro = new Error("OpenRouter 402 (créditos insuficientes na conta)");
+  // deno-lint-ignore no-explicit-any
+  const t = await triageEmail(GOLPE(), AGORA, { chamar: modelo(erro).chamar, regraDoGolpe: false } as any);
+  assertEquals([t.classe, t.alertaFraude], ["urgent", true]);
 });
 
 const GOLPE = () => email({
@@ -333,18 +339,12 @@ Deno.test("triageEmail: com o modelo fora do ar, o pedido de troca de conta sai 
   assert(textoParaARegraDoGolpe(GOLPE()).includes(t.evidencia));
 });
 
-Deno.test("triageEmail: sem casar a regra, ou com a regra desligada, a falha fica como antes (notify)", async () => {
+Deno.test("triageEmail: sem casar a regra, a falha fica como antes (notify)", async () => {
   const erro = new Error("OpenRouter 402 (créditos insuficientes na conta)");
   const comum = await triageEmail(email(), AGORA, { chamar: modelo(erro).chamar });
   assertEquals([comum.classe, comum.alertaFraude, comum.deterministica, comum.rebaixada], ["notify", false, false, true]);
   assertEquals(comum.motivo, "falha na triagem: Error: OpenRouter 402 (créditos insuficientes na conta)");
-  // desligada pela chave: o mesmo e-mail de golpe volta a sair notify, e a falha continua indo ao registro
-  const desligada = await triageEmail(GOLPE(), AGORA, { chamar: modelo(erro).chamar, regraDoGolpe: false });
-  assertEquals([desligada.classe, desligada.alertaFraude, desligada.deterministica], ["notify", false, false]);
-  assertEquals(desligada.motivo, "falha na triagem: Error: OpenRouter 402 (créditos insuficientes na conta)");
-  assertEquals(desligada.falha, "Error: OpenRouter 402 (créditos insuficientes na conta)");
-  // regraDoGolpe: true é o mesmo que ausente
-  assertEquals((await triageEmail(GOLPE(), AGORA, { chamar: modelo(erro).chamar, regraDoGolpe: true })).classe, "urgent");
+  assertEquals(comum.falha, "Error: OpenRouter 402 (créditos insuficientes na conta)");
 });
 
 Deno.test("triageEmail: com o modelo de pé a regra fixa não roda (quem decide é o modelo); o atalho por cabeçalho também não", async () => {

@@ -37,8 +37,8 @@
 // Pacote 1, F1 (24/11/2026): o alerta de golpe só saía de e-mail que o modelo classificou, e parou em 12/11 com o
 // provedor sem saldo. Quando a triagem por IA falha, uma regra fixa (triage.ts, golpeDeTrocaDeConta) procura no assunto
 // e no corpo o pedido de troca de conta, de chave Pix ou de boleto; casou, o e-mail sai urgente com o alerta de fraude
-// e segue o MESMO aviso ao dono (teto do dia, "não repetir", portão da voz única). Nada vai ao remetente. Para
-// desligar: app_settings.email_golpe_regra_fixa = 'desligado' (a chave ausente = ligada; não há migration).
+// e segue o MESMO aviso ao dono (teto do dia, "não repetir", portão da voz única). Nada vai ao remetente. Não há
+// chave de app_settings para desligar (a especificação não pede; revisão de 24/11/2026): voltar atrás = reverter o commit.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
@@ -47,7 +47,7 @@ import { ClienteImap, dataImap, internalDateParaIso } from "../_shared/email/ima
 import { mimeParaInbound } from "../_shared/email/mime.ts";
 import { applySenderRules, persistInboundEmail, storagePathFor } from "../_shared/email/store.ts";
 import { matchSender, type MatchCandidate } from "../_shared/email/sender-match.ts";
-import { CHAVE_DA_REGRA_DO_GOLPE, regraDoGolpeLigada, triageEmail, type Triage } from "../_shared/email/triage.ts";
+import { triageEmail, type Triage } from "../_shared/email/triage.ts";
 import { MAX_URGENTES_PADRAO } from "../_shared/email/digest.ts";
 import { displaySender, normalizeAddress } from "../_shared/email/normalize.ts";
 import { extrairDados, fornecedorPelaNota } from "../_shared/email/dados.ts";
@@ -281,12 +281,6 @@ servirComCors(async (req) => {
   const portao = diagnostico ? PORTAO_DESLIGADO : await lerPortao(admin);
   // (20/10/2026, P4.5) o dono só é lido com a voz ligada de verdade (sombra/desligada: nada a mais)
   const dono = portao.modo === "ligado" ? await lerDonoDaVoz(admin) : null;
-  // (F1, 24/11/2026) a regra fixa do golpe, para quando a triagem por IA falha. Chave ausente ou ilegível = ligada
-  // (é rede de segurança); só o valor "desligado" a desliga. O diagnóstico não lê a chave (não tria nada).
-  const { data: cfgGolpe } = diagnostico
-    ? { data: null }
-    : await admin.from("app_settings").select("value").eq("key", CHAVE_DA_REGRA_DO_GOLPE).maybeSingle();
-  const regraDoGolpe = regraDoGolpeLigada(cfgGolpe?.value);
   const resultados: Record<string, unknown>[] = [];
 
   for (const conta of (contas ?? []) as any[]) {
@@ -374,7 +368,7 @@ servirComCors(async (req) => {
         if (recente || regra) {
           let t: Triage = regra === "ignore_always"
             ? { classe: "ignore", confianca: 1, evidencia: "", motivo: "remetente silenciado", alertaFraude: false, rebaixada: false, deterministica: true }
-            : await triageEmail(email, new Date(), { regraDoGolpe });
+            : await triageEmail(email);
           // (V2, 24/11/2026) a triagem que falhou deixa registro, e a manhã conta por rotina. Nunca lança.
           if (t.falha) await registrarFalhaDeRotina(admin, { rotina: "triagem_email", mensagem: t.falha });
           // (F1) pego pela regra fixa do golpe: sai urgente abaixo, pelo mesmo caminho de aviso de sempre
