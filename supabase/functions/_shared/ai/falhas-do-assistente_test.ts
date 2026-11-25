@@ -1,6 +1,8 @@
 // A conta das falhas do assistente (Retorno rápido, F0a-2). O que se protege: uma linha por hora no
 // log (o que torna `occurrences` uma contagem), a virada da hora, e a leitura que falha não vira "zero".
-import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { ClaudeApiError } from "./anthropic.ts";
+import { classeDoErro } from "./classe-do-erro.ts";
 import {
   contextoDaHora,
   contextoDaRotina,
@@ -106,7 +108,7 @@ Deno.test("contextoDaRotina: uma linha por rotina e dia, no dia de Brasília", (
   assertEquals(contextoDaRotina("casar_fornecedor", new Date("2026-11-24T15:00:00.000Z")), "rotina-ia:casar_fornecedor@2026-11-24");
 });
 
-Deno.test("registrarFalhaDeRotina: grava o contexto do dia, a rotina como ação e o erro técnico", async () => {
+Deno.test("registrarFalhaDeRotina: grava o contexto do dia, a rotina como ação e a classe do erro", async () => {
   const chamadas: Array<{ fn: string; args: Record<string, unknown> }> = [];
   const admin = {
     rpc: (fn: string, args: Record<string, unknown>) => {
@@ -115,19 +117,55 @@ Deno.test("registrarFalhaDeRotina: grava o contexto do dia, a rotina como ação
     },
   };
   const agora = new Date("2026-11-24T13:00:00.000Z");
-  await registrarFalhaDeRotina(admin, { rotina: "triagem_email", mensagem: "ClaudeApiError: OpenRouter 402 (créditos insuficientes na conta)", agora });
+  await registrarFalhaDeRotina(admin, { rotina: "triagem_email", mensagem: classeDoErro(new ClaudeApiError(402, "OpenRouter 402 (créditos insuficientes na conta): {}")), agora });
   assertEquals(chamadas.length, 1);
   assertEquals(chamadas[0].fn, "log_app_error");
   assertEquals(chamadas[0].args.p_source, "edge");
   assertEquals(chamadas[0].args.p_context, "rotina-ia:triagem_email@2026-11-24");
   assertEquals(chamadas[0].args.p_action, "triagem_email");
   assertEquals(chamadas[0].args.p_level, "error");
-  assertEquals(chamadas[0].args.p_message, "ClaudeApiError: OpenRouter 402 (créditos insuficientes na conta)");
+  assertEquals(chamadas[0].args.p_message, "HTTP 402 (sem crédito)");
+  assertEquals(chamadas[0].args.p_details, {});
   // a falha sem texto ainda conta (logEdgeError descartaria a mensagem vazia)
   await registrarFalhaDeRotina(admin, { rotina: "casar_fornecedor", mensagem: "  ", agora });
   assertEquals(chamadas.length, 2);
   assertEquals(chamadas[1].args.p_context, "rotina-ia:casar_fornecedor@2026-11-24");
   assertEquals(chamadas[1].args.p_message, "falha sem mensagem de erro");
+});
+
+// (Acabamento da leva A do pacote 1, 24/11/2026) O registro gravava o texto cru do erro, e o erro do provedor pode
+// devolver um trecho do e-mail ou da mensagem enviada para ler. O que se protege aqui, no último passo antes do banco:
+// mesmo que uma rotina passe o texto cru por engano, o que é gravado é uma frase da lista fechada.
+Deno.test("registrarFalhaDeRotina: texto cru de erro não é gravado: vira 'erro não classificado', e nada dele vai para o log", async () => {
+  const chamadas: Array<{ fn: string; args: Record<string, unknown> }> = [];
+  const admin = { rpc: (fn: string, args: Record<string, unknown>) => { chamadas.push({ fn, args }); return Promise.resolve({ error: null }); } };
+  const agora = new Date("2026-11-24T13:00:00.000Z");
+  const deFora = 'De: Maria Segredo <maria.segredo@cliente-inventado.com.br> Assunto: Proposta do veleiro Albatroz. A senha do portão é 4471.';
+  const erro = new ClaudeApiError(403, `OpenRouter 403: {"error":{"code":403,"metadata":{"flagged_input":${JSON.stringify(deFora)}}}}`);
+  const crus: unknown[] = [
+    String(erro), String(erro).slice(0, 300), erro.message, deFora, `HTTP 403 (recusado pelo provedor) ${deFora}`,
+    // quem errar o tipo e passar o erro em si, ou um objeto, também não grava o texto
+    erro, { message: deFora }, [deFora],
+  ];
+  for (const cru of crus) {
+    // deno-lint-ignore no-explicit-any
+    await registrarFalhaDeRotina(admin, { rotina: "triagem_email", mensagem: cru as any, agora });
+  }
+  assertEquals(chamadas.length, crus.length);
+  assertEquals(chamadas.map((c) => c.args.p_message), [
+    "erro não classificado", "erro não classificado", "erro não classificado", "erro não classificado", "erro não classificado",
+    "falha sem mensagem de erro", "falha sem mensagem de erro", "falha sem mensagem de erro",
+  ]);
+  const tudo = JSON.stringify(chamadas);
+  for (const trecho of ["Maria", "Segredo", "maria.segredo", "cliente-inventado", "Albatroz", "4471", "senha", "flagged_input", "OpenRouter"]) {
+    assert(!tudo.includes(trecho), `"${trecho}" foi para o registro`);
+  }
+  // E não há por onde mandar a pilha do erro (que começa pela mensagem): um `erro` passado junto é ignorado.
+  // deno-lint-ignore no-explicit-any
+  await registrarFalhaDeRotina(admin, { rotina: "triagem_email", mensagem: "HTTP 403 (recusado pelo provedor)", erro, agora } as any);
+  const ultimo = chamadas.at(-1)!.args;
+  assertEquals([ultimo.p_message, ultimo.p_details], ["HTTP 403 (recusado pelo provedor)", {}]);
+  assert(!JSON.stringify(ultimo).includes("Albatroz"));
 });
 
 Deno.test("registrarFalhaDeRotina: o banco fora do ar não derruba a rotina", async () => {

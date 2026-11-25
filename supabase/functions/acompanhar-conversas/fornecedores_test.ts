@@ -8,6 +8,8 @@
 //     derruba as outras; a função ausente (migration não aplicada) é silêncio ({ pulado }).
 import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { type MensagemDeFornecedor, vigiarPrazosDosFornecedores } from "./fornecedores.ts";
+import { escolherCompra } from "../_shared/agenda/casar-fornecedor.ts";
+import { ClaudeApiError } from "../_shared/ai/anthropic.ts";
 
 const AGORA = new Date("2026-10-13T21:00:00.000Z"); // ter 13/10, 18:00 em Brasília
 
@@ -180,14 +182,14 @@ Deno.test("V2: o modelo que falha na escolha deixa registro de rotina e a mensag
   const d = deps();
   const r = await vigiarPrazosDosFornecedores(db, AGORA, {
     ...d,
-    escolher: () => Promise.resolve({ n: null, confianca: 0, falhou: true as const, erro: "ClaudeApiError: OpenRouter 402 (créditos insuficientes na conta)" }),
+    escolher: () => Promise.resolve({ n: null, confianca: 0, falhou: true as const, erro: "HTTP 402 (sem crédito)" }),
   });
   assertEquals(r, { lidas: 1, sinais: 1, modelo: 1 });
   const registros = db.chamadas.filter((c) => c.fn === "log_app_error").map((c) => c.args);
   assertEquals(registros.length, 1);
   // 21:00 UTC de 13/10 = 18:00 de Brasília: o dia do contexto é o de Brasília
   assertEquals([registros[0].p_context, registros[0].p_action, registros[0].p_level], ["rotina-ia:casar_fornecedor@2026-10-13", "casar_fornecedor", "error"]);
-  assertEquals(registros[0].p_message, "ClaudeApiError: OpenRouter 402 (créditos insuficientes na conta)");
+  assertEquals(registros[0].p_message, "HTTP 402 (sem crédito)");
   assert(!JSON.stringify(registros[0]).includes("painel"), "a frase do fornecedor não vai ao registro");
   // o registro vem antes de gravar o sinal, e o sinal sai como antes
   const ordem = db.chamadas.map((c) => c.fn).filter((f) => f === "log_app_error" || f === "material_sinal_registrar");
@@ -199,13 +201,55 @@ Deno.test("V2: o modelo que falha na escolha deixa registro de rotina e a mensag
   // sem o texto do erro, o registro sai com a frase padrão
   const dbSemTexto = banco([msg("w1", "O painel foi postado hoje", [COMPRESSOR, PAINEL])]);
   await vigiarPrazosDosFornecedores(dbSemTexto, AGORA, { ...deps(), escolher: () => Promise.resolve({ n: null, confianca: 0, falhou: true as const }) });
-  assertEquals(dbSemTexto.chamadas.find((c) => c.fn === "log_app_error")!.args.p_message, "o modelo não respondeu");
+  assertEquals(dbSemTexto.chamadas.find((c) => c.fn === "log_app_error")!.args.p_message, "falha sem mensagem de erro");
+  // (acabamento da leva A, 24/11/2026) texto que não é classe de erro não é gravado: vira frase fixa
+  const dbCru = banco([msg("w1", "O painel foi postado hoje", [COMPRESSOR, PAINEL])]);
+  await vigiarPrazosDosFornecedores(dbCru, AGORA, {
+    ...deps(),
+    escolher: () => Promise.resolve({ n: null, confianca: 0, falhou: true as const, erro: "ClaudeApiError: OpenRouter 403: O painel foi postado hoje" }),
+  });
+  assertEquals(dbCru.chamadas.find((c) => c.fn === "log_app_error")!.args.p_message, "erro não classificado");
 
   // o modelo que respondeu (escolheu ou não) não é falha de rotina
   for (const escolha of [{ n: 2, confianca: 0.8 }, { n: null, confianca: 0.3 }]) {
     const db2 = banco([msg("w1", "O painel foi postado hoje", [COMPRESSOR, PAINEL])]);
     await vigiarPrazosDosFornecedores(db2, AGORA, { ...deps(), escolher: () => Promise.resolve(escolha) });
     assert(!db2.chamadas.some((c) => c.fn === "log_app_error"), JSON.stringify(escolha));
+  }
+});
+
+// (acabamento da leva A do pacote 1, 24/11/2026) O erro do provedor carrega o corpo da resposta, que pode devolver o que
+// foi enviado: a frase do fornecedor e os rótulos das compras. O que se protege, de ponta a ponta e com o escolherCompra
+// de verdade (só a chamada do modelo é de mentira): nada disso chega a app_error_logs; vai só a classe do erro.
+Deno.test("o erro do provedor que devolve a frase do fornecedor não leva nada dela para o registro em app_error_logs", async () => {
+  const frase = "O painel foi postado hoje pela Rodomar, rastreio BR88123";
+  const trechos = ["painel", "postado", "Rodomar", "BR88123", "Flávio", "Compressor", "Nelson", "Painel Touch"];
+  const casos: Array<[(enviado: string) => unknown, string]> = [
+    [(enviado) => new ClaudeApiError(403, `OpenRouter 403: ${JSON.stringify({ error: { code: 403, metadata: { flagged_input: enviado } } })}`), "HTTP 403 (recusado pelo provedor)"],
+    [(enviado) => new ClaudeApiError(400, `OpenRouter 400: ${enviado}`), "HTTP 400 (pedido recusado)"],
+    [(enviado) => new Error(enviado), "erro do tipo Error"],
+    [(enviado) => enviado, "erro não classificado"],
+  ];
+  for (const [erroCom, classe] of casos) {
+    const db = banco([msg("w1", frase, [COMPRESSOR, PAINEL])]);
+    let visto = "";
+    await vigiarPrazosDosFornecedores(db, AGORA, {
+      ...deps(),
+      escolher: (trecho, candidatos) =>
+        escolherCompra(trecho, candidatos, {
+          chamar: (p) => {
+            visto = JSON.stringify(p.messages);
+            return Promise.reject(erroCom(visto));
+          },
+        }),
+    });
+    // o exemplo vale: o que foi ao modelo trazia a frase e os rótulos
+    for (const trecho of trechos) assert(visto.includes(trecho), `o exemplo perdeu "${trecho}"`);
+    const registros = db.chamadas.filter((c) => c.fn === "log_app_error").map((c) => c.args);
+    assertEquals(registros, [{
+      p_source: "edge", p_message: classe, p_context: "rotina-ia:casar_fornecedor@2026-10-13", p_action: "casar_fornecedor", p_level: "error", p_details: {},
+    }], classe);
+    for (const trecho of trechos) assert(!JSON.stringify(registros).includes(trecho), `"${trecho}" foi para o registro (${classe})`);
   }
 });
 

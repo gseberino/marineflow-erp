@@ -5,7 +5,9 @@ import {
   golpeDeTrocaDeConta, MARCA_DA_REGRA_FIXA, MOTIVO_DA_REGRA_DO_GOLPE, REGRAS_DO_GOLPE, textoParaARegraDoGolpe,
 } from "./triage.ts";
 import * as triagem from "./triage.ts";
-import type { CallClaudeParams, CallClaudeResult } from "../ai/anthropic.ts";
+import { ClaudeApiError, type CallClaudeParams, type CallClaudeResult } from "../ai/anthropic.ts";
+import { ehClasseDeErro, soAClasseDoErro } from "../ai/classe-do-erro.ts";
+import { registrarFalhaDeRotina } from "../ai/falhas-do-assistente.ts";
 import type { InboundEmail } from "./types.ts";
 
 function email(over: Partial<InboundEmail> = {}): InboundEmail {
@@ -164,8 +166,8 @@ function modelo(resposta: Record<string, unknown> | Error) {
 }
 
 Deno.test("triageEmail: o modelo que falha não esconde o e-mail (notify) e sai com a falha para registrar", async () => {
-  const erro = new Error("OpenRouter 402 (créditos insuficientes na conta): saldo zerado");
-  erro.name = "ClaudeApiError";
+  // o erro como o anthropic.ts lança: o status e, na mensagem, o corpo da resposta do provedor
+  const erro = new ClaudeApiError(402, "OpenRouter 402 (créditos insuficientes na conta): saldo zerado");
   const m = modelo(erro);
   const t = await triageEmail(email(), AGORA, { chamar: m.chamar });
   assertEquals(m.chamadas.length, 1);
@@ -173,12 +175,71 @@ Deno.test("triageEmail: o modelo que falha não esconde o e-mail (notify) e sai 
   assertEquals(t.classe, FALLBACK_CLASS);
   assertEquals(t.motivo, "falha na triagem: ClaudeApiError: OpenRouter 402 (créditos insuficientes na conta): saldo zerado");
   assertEquals([t.confianca, t.evidencia, t.alertaFraude, t.rebaixada, t.deterministica], [0, "", false, true, false]);
-  // o que é novo: o erro técnico, para o registro
-  assertEquals(t.falha, "ClaudeApiError: OpenRouter 402 (créditos insuficientes na conta): saldo zerado");
-  // erro comprido é cortado em 300 (o motivo continua em 120)
+  // o que vai para o registro: só a classe do erro (acabamento da leva A), nunca a mensagem dele
+  assertEquals(t.falha, "HTTP 402 (sem crédito)");
+  // erro comprido não muda nada no registro: a classe é uma frase fixa (o motivo continua cortado em 120)
   const longo = await triageEmail(email(), AGORA, { chamar: modelo(new Error("x".repeat(900))).chamar });
-  assertEquals(longo.falha?.length, 300);
+  assertEquals(longo.falha, "erro do tipo Error");
   assertEquals(longo.motivo?.length, "falha na triagem: ".length + 120);
+});
+
+// ─── Texto de e-mail não vai para o log (acabamento da leva A do pacote 1, 24/11/2026) ───────────────
+// O erro do provedor carrega o corpo da resposta, e o corpo pode devolver um trecho do que foi enviado (na recusa de
+// moderação vem o trecho acusado). O registro da falha gravava esse texto cru em app_error_logs, até 300 caracteres. O
+// que se protege: de ponta a ponta (triageEmail → t.falha → registrarFalhaDeRotina → log_app_error), nada do remetente,
+// do assunto nem do corpo aparece no que é gravado no log; vai só a classe do erro.
+
+Deno.test("triageEmail: o erro do provedor que devolve um trecho do e-mail não leva nada dele para o registro em app_error_logs", async () => {
+  const endereco = "maria.segredo@cliente-inventado.com.br";
+  const assunto = "Proposta confidencial do veleiro Albatroz";
+  const texto = "Prezado Gustavo, o valor combinado é de R$ 48.750,00 e a senha do portão é 4471.";
+  const carta = email({ from: { name: "Maria Segredo", address: endereco }, subject: assunto, text: texto });
+  const enviado = formatEmailForTriage(carta);
+  const trechos = ["Maria", "Segredo", "maria.segredo", "cliente-inventado", "confidencial", "Albatroz", "Prezado", "48.750", "4471", "senha"];
+  for (const trecho of trechos) assert(enviado.includes(trecho), `o exemplo perdeu "${trecho}"`);
+  // a recusa de moderação como o provedor responde: o trecho acusado vem no corpo
+  const corpo = JSON.stringify({ error: { code: 403, message: "Input flagged", metadata: { reasons: ["harassment"], flagged_input: enviado } } });
+  const comNomeDeFora = new Error(texto);
+  comNomeDeFora.name = assunto;
+  const casos: Array<[string, unknown, string]> = [
+    ["recusa de moderação", new ClaudeApiError(403, `OpenRouter 403: ${corpo}`), "HTTP 403 (recusado pelo provedor)"],
+    ["pedido recusado", new ClaudeApiError(400, `OpenRouter 400: ${corpo}`), "HTTP 400 (pedido recusado)"],
+    ["limite de chamadas", new ClaudeApiError(429, `OpenRouter 429: ${corpo}`), "HTTP 429 (limite de chamadas)"],
+    ["erro comum com o e-mail na mensagem", new Error(`não li: ${enviado}`), "erro do tipo Error"],
+    ["resposta que não é JSON", new SyntaxError(`Unexpected token in "${assunto}"`), "resposta inválida"],
+    ["erro com o assunto no nome", comNomeDeFora, "erro não classificado"],
+    ["texto lançado", `${endereco}: ${texto}`, "erro não classificado"],
+    ["objeto lançado", { message: enviado, error: corpo }, "erro não classificado"],
+  ];
+  for (const [nome, erro, classe] of casos) {
+    const t = await triageEmail(carta, AGORA, { chamar: () => Promise.reject(erro) });
+    assertEquals(t.falha, classe, nome);
+    // o e-mail continua à vista (notify), como antes
+    assertEquals([t.classe, t.rebaixada], [FALLBACK_CLASS, true], nome);
+    // o caminho do email-imap: `if (t.falha) await registrarFalhaDeRotina(admin, { rotina: "triagem_email", mensagem: t.falha })`
+    const gravado: Array<{ fn: string; args: Record<string, unknown> }> = [];
+    const admin = { rpc: (fn: string, args: Record<string, unknown>) => { gravado.push({ fn, args }); return Promise.resolve({ error: null }); } };
+    await registrarFalhaDeRotina(admin, { rotina: "triagem_email", mensagem: t.falha!, agora: AGORA });
+    assertEquals(gravado.length, 1, nome);
+    assertEquals(gravado[0].fn, "log_app_error", nome);
+    assertEquals(gravado[0].args, {
+      p_source: "edge", p_message: classe, p_context: "rotina-ia:triagem_email@2026-11-24", p_action: "triagem_email", p_level: "error", p_details: {},
+    }, nome);
+    const tudo = JSON.stringify(gravado);
+    for (const trecho of trechos) assert(!tudo.includes(trecho), `${nome}: "${trecho}" foi para o registro`);
+  }
+});
+
+Deno.test("triageEmail: a falha que sai é sempre uma classe da lista fechada (o registro não a troca por 'erro não classificado' à toa)", async () => {
+  for (const erro of [
+    new ClaudeApiError(402, "OpenRouter 402 (créditos insuficientes na conta): {}"), new ClaudeApiError(503, "OpenRouter 503: fora"),
+    new DOMException("Signal timed out.", "TimeoutError"), new TypeError("error sending request for url (https://openrouter.ai/api/v1/chat/completions)"),
+    new Error("OPENROUTER_API_KEY não configurada no Supabase"), new Error("qualquer"), "texto", null, undefined,
+  ]) {
+    const t = await triageEmail(email(), AGORA, { chamar: () => Promise.reject(erro) });
+    assert(ehClasseDeErro(t.falha), String(t.falha));
+    assertEquals(soAClasseDoErro(t.falha), t.falha);
+  }
 });
 
 Deno.test("triageEmail: o modelo que responde não deixa falha; o atalho por cabeçalho nem chama o modelo", async () => {
@@ -385,8 +446,8 @@ Deno.test("triageEmail: com o modelo fora do ar, o pedido de troca de conta sai 
     classe: "urgent", confianca: 1, evidencia: "alteracao de dados bancarios",
     motivo: "A triagem por IA falhou; pela regra fixa, o e-mail fala em mudança de dados bancários ou de pagamento.",
     alertaFraude: true, rebaixada: false, deterministica: true,
-    // a falha do modelo continua registrada (V2), casando a regra ou não
-    falha: "Error: OpenRouter 402 (créditos insuficientes na conta)",
+    // a falha do modelo continua registrada (V2), casando a regra ou não: só a classe do erro (aqui, um Error comum)
+    falha: "erro do tipo Error",
     // qual regra pegou e que é das fortes (o email-imap usa para a cota do aviso)
     golpePelaRegra: { regra: "mudanca_de_dados", forte: true },
   });
@@ -413,7 +474,7 @@ Deno.test("triageEmail: com o modelo fora do ar, o e-mail que só fala de boleto
       classe: "notify", confianca: 0, evidencia: trecho,
       motivo: `A triagem por IA falhou; pela regra fixa, o e-mail fala em ${rotulo}.`,
       alertaFraude: false, rebaixada: true, deterministica: false,
-      falha: "Error: OpenRouter 402 (créditos insuficientes na conta)",
+      falha: "erro do tipo Error",
       golpePelaRegra: { regra, forte: false },
     }, `${assunto} | ${corpo}`);
   }
@@ -480,7 +541,7 @@ Deno.test("triageEmail: sem casar a regra, a falha fica como antes (notify)", as
   const comum = await triageEmail(email(), AGORA, { chamar: modelo(erro).chamar });
   assertEquals([comum.classe, comum.alertaFraude, comum.deterministica, comum.rebaixada], ["notify", false, false, true]);
   assertEquals(comum.motivo, "falha na triagem: Error: OpenRouter 402 (créditos insuficientes na conta)");
-  assertEquals(comum.falha, "Error: OpenRouter 402 (créditos insuficientes na conta)");
+  assertEquals(comum.falha, "erro do tipo Error");
 });
 
 Deno.test("triageEmail: com o modelo de pé a regra fixa não roda no e-mail que o modelo lê (quem decide é ele); no atalho de lista também não", async () => {

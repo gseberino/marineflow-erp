@@ -17,6 +17,7 @@
 // e quando a última falha caiu. Basta para o aviso, que é de "continua falhando", não de auditoria.
 import { diaBR } from "../agenda-dia.ts";
 import { logEdgeError } from "../log-error.ts";
+import { soAClasseDoErro } from "./classe-do-erro.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -88,9 +89,11 @@ export async function falhasNaUltimaHora(admin: Db, agora: Date): Promise<number
 // linha por rotina e dia, e o `occurrences` dela é a contagem do dia. Se o texto do erro mudar em
 // palavras, o dia ganha mais de uma linha; a soma por rotina continua certa.
 //
-// Só o erro técnico vai para o registro (já mascarado por logEdgeError): nunca texto de e-mail nem de
-// mensagem. Função sob pedido (botão, ferramenta do assistente) não registra aqui: o erro já aparece
-// para quem pediu.
+// Só a CLASSE do erro vai para o registro (classe-do-erro.ts: "HTTP 402 (sem crédito)", "tempo esgotado"…),
+// nunca a mensagem dele: o erro do provedor carrega o corpo da resposta, que pode devolver um trecho do
+// e-mail ou da mensagem enviada para ler. Quem falha já classifica; aqui a frase é conferida de novo
+// (soAClasseDoErro), e o que não for da lista fechada é gravado como "erro não classificado".
+// Função sob pedido (botão, ferramenta do assistente) não registra aqui: o erro já aparece para quem pediu.
 
 export type RotinaDeIA = "triagem_email" | "casar_fornecedor" | "detector_agenda" | "followup";
 
@@ -121,17 +124,20 @@ export function rotinaDoContexto(contexto: unknown): RotinaDeIA | null {
 /**
  * Uma rotina automática de IA que falhou. Nunca lança (logEdgeError não lança); o chamador dá `await`
  * para o log sair antes de a função terminar.
+ *
+ * `mensagem` é a classe do erro (classeDoErro). O que vier fora da lista fechada é gravado como "erro não
+ * classificado"; vazio, como "falha sem mensagem de erro" (logEdgeError descartaria a mensagem vazia, e a
+ * falha sem texto ainda conta). Não há como passar o erro em si: a pilha dele começa pela mensagem, e
+ * logEdgeError a gravaria nos detalhes.
  */
 export async function registrarFalhaDeRotina(
   admin: Db,
-  p: { rotina: RotinaDeIA; mensagem: string; erro?: unknown; agora?: Date },
+  p: { rotina: RotinaDeIA; mensagem: string; agora?: Date },
 ): Promise<void> {
   await logEdgeError(admin, {
     context: contextoDaRotina(p.rotina, p.agora ?? new Date()),
     action: p.rotina,
-    // logEdgeError descarta mensagem vazia: a falha sem texto ainda conta
-    message: String(p.mensagem ?? "").trim() || "falha sem mensagem de erro",
-    error: p.erro,
+    message: soAClasseDoErro(p.mensagem),
   });
 }
 
