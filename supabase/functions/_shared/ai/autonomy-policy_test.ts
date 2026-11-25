@@ -1,5 +1,5 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { NEVER_AUTONOMOUS, autonomyKey, isAutonomyGranted } from "./autonomy-policy.ts";
+import { EXPLICACAO_DA_TRAVA_POR_ARGUMENTO, NEVER_AUTONOMOUS, autonomyKey, isAutonomyGranted } from "./autonomy-policy.ts";
 import { allTools } from "./tools/index.ts";
 import { buildSystemBlocks } from "./prompt.ts";
 
@@ -127,6 +127,19 @@ Deno.test("S2: o link da OS não entrou no teto — só o formato 'link' continu
   assertEquals(isAutonomyGranted("send_service_order_link", "high", link, { formato: "link" }), true);
   assertEquals(isAutonomyGranted("send_service_order_link", "high", link, { formato: "pdf_e_link" }), false);
   assertEquals(isAutonomyGranted("send_service_order_link", "high", link, { formato: "link", destino: "parceiro" }), false);
+});
+
+// (Acabamento da leva A do pacote 1, 24/11/2026) No formato 'link' a frase do assistente (custom_message) substitui o
+// texto padrão. Com a liberação gravada ela saía sem cartão. Texto livre para fora sempre passa pelo cartão: a
+// liberação vale só para o link com o texto padrão. O caminho inteiro pelo agente está em tools/envio-ao-cliente_test.ts.
+Deno.test("link da OS liberado: com frase escrita pelo assistente não roda sozinho; com o texto padrão, sim", () => {
+  const link = { [autonomyKey("send_service_order_link")]: "auto" };
+  assertEquals(isAutonomyGranted("send_service_order_link", "high", link, { formato: "link" }), true);
+  assertEquals(isAutonomyGranted("send_service_order_link", "high", link, { formato: "link", custom_message: "" }), true);
+  assertEquals(isAutonomyGranted("send_service_order_link", "high", link, { formato: "link", custom_message: "Oi! Segue o orçamento." }), false);
+  assertEquals(isAutonomyGranted("send_service_order_link", "high", link, { formato: " LINK ", custom_message: "Fechado por R$ 350." }), false);
+  // o que o assistente diz ao liberar ou listar a autonomia conta a exceção
+  assertEquals(EXPLICACAO_DA_TRAVA_POR_ARGUMENTO.send_service_order_link.includes("Com frase escrita pelo assistente, pede confirmação SEMPRE"), true);
 });
 
 Deno.test("S2: o prompt não ensina o dono a liberar o que está no teto (o pedido de cotação saiu dos liberáveis)", () => {
