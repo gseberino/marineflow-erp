@@ -115,6 +115,7 @@ export const SOBEM_PARA_SIM: ReadonlySet<string> = new Set([
   // — preço —
   "apply_quote_price",
   "update_product",
+  "update_service", // o preço do serviço do catálogo (o par de update_product; a especificação citava só o do produto)
   "set_quote_supplier_terms",
 ]);
 

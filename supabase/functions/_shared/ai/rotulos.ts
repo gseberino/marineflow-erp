@@ -150,8 +150,15 @@ export const ROTULOS_DOS_CAMPOS: Record<string, string> = {
   ie_indicator: "Indicador de IE",
   response_id: "Resposta da cotação",
   markup_percent: "Margem sobre o custo (%)",
-  // Pacote 1, S6 (24/11/2026): depois de o turno ler texto de fora, o cadastro de fornecedor, de embarcação ou veículo e
-  // de produto e a observação sobre um cadastro passaram a poder virar cartão (rodavam direto, à vista do admin)
+  // Pacote 1, S6 (24/11/2026): depois de o turno ler texto de fora, o cadastro de fornecedor, de embarcação ou veículo,
+  // de produto e de serviço e a observação sobre um cadastro passaram a poder virar cartão (rodavam direto, à vista do admin)
+  default_warranty_days: "Garantia (dias)",
+  fiscal_verb: "Verbo fiscal",
+  national_tax_code: "Código de tributação nacional",
+  service_code: "Código municipal do serviço",
+  cnae: "CNAE",
+  iss_rate: "Alíquota de ISS (%)",
+  iss_withheld: "ISS retido pelo tomador",
   trade_name: "Nome fantasia",
   cnpj_cpf: "CNPJ/CPF",
   payment_terms: "Condição de pagamento",

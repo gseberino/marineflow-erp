@@ -226,6 +226,14 @@ Deno.test("S6 listas: o que a especificação manda NÃO subir continua fora das
   }
 });
 
+Deno.test("S6 listas: preço da cotação e do catálogo (produto e serviço) e as seis da memória", () => {
+  // update_service é o par de update_product (muda o preço do serviço do catálogo): a especificação citava só o do produto.
+  for (const n of ["apply_quote_price", "update_product", "update_service", "set_quote_supplier_terms"]) assert(SOBEM_PARA_SIM.has(n), n);
+  assertEquals([...SOBEM_PARA_PIN].sort(), ["forget_note", "learn_product_alias", "record_routine", "remember_about_entity", "remember_note", "review_entity_note"]);
+  // Produto e serviço NOVOS ficam fora de propósito: fazem parte de montar o orçamento a partir da conversa (NOVO-p1-s6-03).
+  for (const n of ["create_product", "create_service"]) assertEquals(SOBEM_PARA_SIM.has(n), false, n);
+});
+
 Deno.test("S6 cartão: toda ferramenta das duas listas tem título e todos os campos com rótulo em português", () => {
   // Várias rodavam direto, à vista do admin, e nunca tinham virado cartão: fornecedor, embarcação ou veículo, produto e a
   // observação sobre um cadastro. Sem rótulo, o cartão sairia "- Cost Price: 80", "- Hull Id Or Registration: …", "- Body: …".
