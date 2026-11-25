@@ -16,7 +16,8 @@ import { ultimoDiaDaValidade } from "../_shared/pdf/documento.ts";
 import { diaBR, somarDiasAoDia } from "../_shared/pdf/datas.ts";
 import { historicoSemIdentidade } from "../_shared/banking/proposals.ts";
 import { normalizeText } from "../_shared/banking/matching.ts";
-import { linhasDoExtratoNoResumo } from "./extrato.ts";
+import { comQuemPagouOBoleto, ehRecebimentoPeloBoleto, type LancadoSozinho, linhasDoExtratoNoResumo, type RecebimentoCasado } from "./extrato.ts";
+import { contasDaBaixaDePe, lerBaixasDePe, nomeDeChamar } from "./secretario-boleto.ts";
 import { canceladasSemComprovante, debitosSemComprovante, linhasDosComprovantes } from "./comprovantes.ts";
 import { lerAnalise } from "../_shared/financeiro/vigia-do-negocio.ts";
 import { chaveDoAviso, montarSecaoEmail, type EmailDigestItem } from "../_shared/email/digest.ts";
@@ -443,7 +444,7 @@ servirComCors(async (req) => {
       const desde24h = new Date(Date.now() - 24 * 3600_000).toISOString();
       const [{ data: sozinhos }, { data: pendentes }, { data: canceladas }] = await Promise.all([
         admin.from("finance_review_queue")
-          .select("title, suggested_amount, suggested_category, automatica")
+          .select("title, suggested_amount, suggested_category, automatica, kind, bank_transaction_id")
           .not("automatica", "is", null).eq("status", "approved").gte("decided_at", desde24h)
           .order("decided_at", { ascending: false }).limit(200),
         admin.from("finance_review_queue")
@@ -484,7 +485,36 @@ servirComCors(async (req) => {
           quem: a.suppliers?.name ?? a.payees?.name ?? a.clients?.name ?? a.nome ?? null,
           motivo: String(a.motivo_cancelamento),
         }));
-      extratoNoResumo = linhasDoExtratoNoResumo((sozinhos as any[]) || [], debitos, (v) => fmtExtrato.format(v),
+      // Recebimento baixado pelo boleto (24/11/2026): o título da fila é só "Receita: CREDITO DE BOLETO", então o nome
+      // de quem pagou vem da conta a receber ainda casada com a linha do banco; sem conta casada, a baixa foi desfeita
+      // e não aparece. Falha nessa leitura = a linha sai sem o nome (não derruba o resto do bloco do extrato).
+      // (24/11/2026, revisão) "Ainda casada" não basta: a proposta fica approved/boleto para sempre, e a conta que o
+      // dono casasse à mão com a mesma linha depois de desfazer saía aqui como baixada sozinha, com o cliente da conta
+      // nova. Só vale a conta que o registro da linha (reconciliation_log) diz ser a da baixa automática, sem mais
+      // nada depois (lerBaixasDePe, o mesmo critério da manhã nova, da tela e da ferramenta). O registro que não
+      // deu para ler cai no mesmo catch: a linha sai sem o nome.
+      let lancadosSozinhos: LancadoSozinho[] = (sozinhos as any[]) || [];
+      const linhasDoRecebido = lancadosSozinhos.filter(ehRecebimentoPeloBoleto).map((l) => l.bank_transaction_id).filter(Boolean);
+      if (linhasDoRecebido.length > 0) {
+        let casadas: RecebimentoCasado[] | null = null;
+        try {
+          const { data: contas, error: erroContas } = await admin.from("receivables")
+            .select("id, bank_transaction_id, clients(name, display_name)").in("bank_transaction_id", linhasDoRecebido);
+          if (erroContas) throw erroContas;
+          const contasCasadas = ((contas as any[]) || []).filter((c) => c?.bank_transaction_id);
+          const dePe = contasCasadas.length
+            ? await lerBaixasDePe(admin, contasCasadas.map((c) => String(c.bank_transaction_id)))
+            : new Map<string, string>();
+          casadas = contasDaBaixaDePe(contasCasadas, dePe).map((c) => ({
+            bank_transaction_id: c.bank_transaction_id ?? null,
+            quem: nomeDeChamar(Array.isArray(c.clients) ? c.clients[0] : c.clients),
+          }));
+        } catch (e) {
+          console.warn("[ai-daily-briefing] recebimentos baixados pelo boleto: não li as contas ou o registro das linhas:", (e as Error).message);
+        }
+        lancadosSozinhos = comQuemPagouOBoleto(lancadosSozinhos, casadas);
+      }
+      extratoNoResumo = linhasDoExtratoNoResumo(lancadosSozinhos, debitos, (v) => fmtExtrato.format(v),
         { anoAtual: new Date(Date.now() - 3 * 3600_000).getUTCFullYear(), anotadosEsperando, naoAplicadas });
     } catch (e) {
       console.warn("[ai-daily-briefing] bloco do extrato falhou:", (e as Error).message);

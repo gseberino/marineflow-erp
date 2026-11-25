@@ -103,6 +103,20 @@ Deno.test("desfazer, cancelar e casar chamam a função certa; cancelar sem moti
   assertEquals(chamadas[2].args, { p_tipo: "payable", p_id: "p2", p_transacao: "t1", p_autor: "u-dono" });
 });
 
+// Recebimento baixado pelo boleto (24/11/2026): "desfaz a baixa da Apolo" é esta ferramenta com o receivable_id que
+// listar_lancados_sozinhos devolve — no banco, a conta volta a ficar em aberto e a linha volta para a fila.
+Deno.test("desfazer a baixa de um recebimento: o receivable_id vai como conta a receber, com o motivo e quem pediu", async () => {
+  const chamadas: Chamada[] = [];
+  const r = await tool("desfazer_aprovacao_de_lancamento").execute(
+    { receivable_id: "rec-apolo", motivo: "o boleto era de outra nota" }, ctxFalso(chamadas) as never,
+  ) as { ok?: boolean };
+  assertEquals(r.ok, true);
+  assertEquals(chamadas, [{
+    nome: "desfazer_aprovacao",
+    args: { p_tipo: "receivable", p_id: "rec-apolo", p_motivo: "o boleto era de outra nota", p_autor: "u-dono" },
+  }]);
+});
+
 Deno.test("erro da função volta legível para o modelo", async () => {
   const ctx = {
     sb: { rpc: () => Promise.resolve({ data: null, error: { message: "P0001: O mês 08/2026 está fechado. Reabra-o em Financeiro › Fechamento para corrigir este lançamento." } }) },

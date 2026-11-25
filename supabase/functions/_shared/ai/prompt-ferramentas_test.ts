@@ -25,7 +25,7 @@
 //   deno test --allow-all supabase/functions/_shared/ai/prompt-ferramentas_test.ts
 import { assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { buildSystemBlocks } from "./prompt.ts";
-import { PERFIL_OPERACAO, SO_PELA_REDE } from "./perfil-operacao.ts";
+import { PERFIL_ADMIN, PERFIL_OPERACAO, rodaDiretoPelaRede, SO_PELA_REDE } from "./perfil-operacao.ts";
 import { allTools } from "./tools/index.ts";
 import { STATUS_OS } from "../service-order-status.ts";
 import { registryCrudTools } from "./tools/registry-crud.ts";
@@ -138,6 +138,9 @@ NAO_SAO_TOOLS.add("o_que_fazer");
 for (const campo of ["ver_versao", "registro_ids"]) NAO_SAO_TOOLS.add(campo);
 // Revisão do documento (17/11/2026): o modo conferir_codigo da mesma tool (o código do rodapé do PDF).
 NAO_SAO_TOOLS.add("conferir_codigo");
+// Baixa que o sistema fez sozinho pelo boleto (24/11/2026): o campo que listar_lancados_sozinhos devolve no recebimento
+// e que vai em desfazer_aprovacao_de_lancamento (o payable_id da conta a pagar já está acima).
+NAO_SAO_TOOLS.add("receivable_id");
 
 /** A conversa dos comprovantes ligada (F2): as linhas dos CMPs só entram no prompt assim. */
 const CONVERSA_LIGADA = { comprovante_fluxo: "dono", comprovante_conversa: "on" };
@@ -900,4 +903,44 @@ Deno.test("agenda de produção (Fase 7g, P7): por que, como pensou, o placar e 
   for (const f of ["como_pensou", "porque", "placar"]) assertEquals((props.foco.enum ?? []).includes(f), true, f);
   assertEquals("simular_aprovacao" in props, true);
   assertEquals(secao.includes("`"), false);
+});
+
+// Baixa que o sistema fez sozinho pelo boleto (24/11/2026). A manhã diz "Diga *desfaz a baixa de Apolo*", e o caminho
+// (listar_lancados_sozinhos → desfazer_aprovacao_de_lancamento) estava ensinado só na DESCRIÇÃO de
+// listar_lancados_sozinhos — que o dono não lê: no perfil enxuto do admin ela fica fora da vista (PERFIL_ADMIN), é só
+// um nome na ferramenta_extra, e a ferramenta_extra só é usada para o que o PROMPT cita. A única frase do prompt com
+// "desfaz a baixa" mandava para estornar_pagamento (motivo e sim com PIN, para depois recusar), e buscar_lancamentos
+// não distingue a conta baixada sozinha da casada à mão. O que se protege: a linha no prompt, com as frases que a
+// manhã manda dizer, separada do estorno; e o alcance da ferramenta para o dono SEM entrar no PERFIL_ADMIN (o teto
+// de ferramentas à vista é decisão do dono).
+Deno.test("baixa que o sistema fez sozinho: 'desfaz a baixa de <cliente>' vai a listar_lancados_sozinhos e desfaz pelo id, sem passar pelo estorno", () => {
+  const texto = textoDoPrompt();
+  const linhas = texto.split("\n").filter((l) => l.includes("listar_lancados_sozinhos"));
+  // uma linha por canal (o bloco estável é o mesmo nos dois), e as duas iguais
+  assertEquals(new Set(linhas).size, 1, "a linha da baixa que o sistema fez sozinho sumiu do prompt (ou há mais de uma)");
+  const linha = linhas[0];
+  for (const trecho of [
+    "Baixei sozinho pelo boleto", "\"desfaz a baixa de Apolo\"", "\"desfaz a baixa\" + o nome do cliente ou o valor",
+    "receivable_id", "payable_id", "desfazer_aprovacao_de_lancamento passando esse id",
+    "NÃO é estornar_pagamento nem se escolhe a conta por buscar_lancamentos",
+    "Não está na lista? Repita com dias=30. Se ainda não estiver, pode ser baixa antiga ou conta em que já mexeram depois: aí vá pelo ESTORNO acima, que indica o caminho — sem dizer que o sistema não baixou.",
+  ]) assertStringIncludes(linha, trecho);
+  // fica logo depois da linha do estorno, que continua com o exemplo dela: as duas disputam a mesma expressão
+  const todas = texto.split("\n");
+  const estorno = todas[todas.indexOf(linha) - 1];
+  assertStringIncludes(estorno, "- ESTORNO de pagamento registrado errado");
+  assertStringIncludes(estorno, "\"desfaz a baixa da conta de luz, ainda não paguei\") → estornar_pagamento");
+  // … e a descrição do estorno (a única à vista do dono com "desfaz a baixa") aponta a saída para a baixa do sistema
+  assertStringIncludes(porNome.get("estornar_pagamento")!.description, "não é aqui: listar_lancados_sozinhos e desfazer_aprovacao_de_lancamento");
+  // o que a linha promete existe na ferramenta: o id do recebimento sai dela e entra no desfazer
+  const esquemaDoDesfazer = (porNome.get("desfazer_aprovacao_de_lancamento")!.input_schema as { properties: Record<string, unknown> }).properties;
+  for (const campo of ["receivable_id", "payable_id"]) assertEquals(campo in esquemaDoDesfazer, true, campo);
+  assertStringIncludes(String(porNome.get("listar_lancados_sozinhos")!.execute), "receivable_id: recebido.id");
+  // o dono alcança as duas: o desfazer à vista; a lista pela ferramenta_extra, rodando direto (é leitura)
+  assertEquals(PERFIL_ADMIN.has("desfazer_aprovacao_de_lancamento"), true);
+  assertEquals(PERFIL_OPERACAO.has("listar_lancados_sozinhos"), true);
+  assertEquals(
+    PERFIL_ADMIN.has("listar_lancados_sozinhos") || rodaDiretoPelaRede(porNome.get("listar_lancados_sozinhos")!),
+    true, "o dono não alcança listar_lancados_sozinhos sem um sim: nem à vista, nem direto pela ferramenta_extra",
+  );
 });

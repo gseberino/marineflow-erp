@@ -4,6 +4,14 @@
 // sugestões ordenadas. Só a camada de certeza (identificador do Pix, ou documento do
 // pagador com valor exato) pode ser aplicada sozinha — decisão do usuário em 27/07/2026.
 //
+// (24/11/2026) A frase acima é a decisão de 27/07 e NÃO vale mais: em 26/09/2026 o dono decidiu que
+// "o sistema deve sempre questionar", e esta função não aplica nada sozinha (ver `aplicarSozinha =
+// false`, mais abaixo). As únicas baixas sem pergunta são as duas exceções estritas dele — conta a
+// pagar baixada pelo boleto (22/11/2026) e conta a receber de NF-e baixada pelo 'CREDITO DE BOLETO'
+// de mesmo valor no dia do vencimento (24/11/2026) — e as duas são feitas pela varredura do
+// finance-review (baixa-boleto.ts), não aqui. Este aviso existe para ninguém religar o automático
+// daqui achando que ele é o caminho da baixa do boleto.
+//
 // O que mudou em relação à tela antiga: ela só comparava contas a receber e a pagar já
 // lançadas, e para dinheiro entrando só enxergava OS concluída ou faturada. Sinal de
 // orçamento — o caso mais comum de entrada avulsa — nunca virava candidato, porque só

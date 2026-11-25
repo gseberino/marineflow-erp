@@ -23,6 +23,7 @@ import { type ExtraDaManha, lerExtra, lerRetorno, linhasDaManha, type RetornoDaM
 import { impressoraNoAr } from "../_shared/impressao/fila.ts";
 import { osDaAgendaDoDia } from "../_shared/impressao/agenda.ts";
 import { comPagamentos, lerPagamentosDaManha, type PagamentosDaSemana, pagamentosDaManha } from "../_shared/pagamentos/semana.ts";
+import { comRecebidosPeloBoleto, lerRecebidosPeloBoleto, linhaDosRecebidosPeloBoleto, type RecebidoPeloBoleto } from "./secretario-boleto.ts";
 
 // deno-lint-ignore no-explicit-any
 type Admin = any;
@@ -276,6 +277,13 @@ export function montarDosDados(p: {
    * Ausente, null ou sem conta = o texto de antes, byte a byte.
    */
   pagamentos?: PagamentosDaSemana | null;
+  /**
+   * (24/11/2026, baixa do recebimento pelo boleto) As contas a receber que o sistema baixou sozinho desde a última manhã
+   * (lerRecebidosPeloBoleto): uma linha depois dos pagamentos e antes da sugestão de imprimir, só em dia útil — o dono
+   * recebe esta manhã, e sem a linha a conta sumia do "Na rua" sem explicação. Ausente, null ou vazio = o texto de
+   * antes, byte a byte.
+   */
+  recebidosPeloBoleto?: RecebidoPeloBoleto[] | null;
 }): ManhaNova {
   const tipo = tipoDoDia(p.hoje);
   const opcoes = p.opcoes ?? OPCOES_PADRAO;
@@ -293,9 +301,10 @@ export function montarDosDados(p: {
   // (P14) "Clientes esperando" e "Para conferir": os sem prazo que já têm letra na manhã não repetem
   const retorno = p.retorno ? linhasDaManha(p.retorno, fonesDaManha(selecao), p.agora, p.retornoExtra ?? null) : null;
   const aprovacoes = tipo === "util" && p.aprovacoes?.texto ? p.aprovacoes : null;
-  const texto = comSugestaoDeImpressao(comPagamentos(comAprovacoesAoCliente(textoDaManha({
+  const texto = comSugestaoDeImpressao(comRecebidosPeloBoleto(comPagamentos(comAprovacoesAoCliente(textoDaManha({
     hoje: p.hoje, tipoDoDia: tipo, feriado: feriadoDoDia(p.hoje), selecao, naRua: p.naRua, deHoje: p.deHoje, guardado: plano, retorno,
-  }), tipo, aprovacoes), pagamentosDaManha(p.pagamentos, p.hoje)), tipo, p.viasParaImprimir ?? 0);
+  }), tipo, aprovacoes), pagamentosDaManha(p.pagamentos, p.hoje)), tipo, linhaDosRecebidosPeloBoleto(p.recebidosPeloBoleto, p.hoje)),
+    tipo, p.viasParaImprimir ?? 0);
   return {
     texto,
     tipoDoDia: tipo,
@@ -377,10 +386,13 @@ export async function montarManhaNova(admin: Admin, p: {
   const aprovacoes = tipoDoDia(p.hoje) === "util" ? await lerAprovacoesDaManha(admin, p.hoje, p.agora) : null;
   // (24/11/2026) a fila do que pagar; lerPagamentosDaManha nunca lança (erro ou chave desligada = null = sem o bloco)
   const pagamentos = tipoDoDia(p.hoje) === "util" ? await lerPagamentosDaManha(admin, p.hoje) : null;
+  // (24/11/2026) o que foi baixado sozinho pelo boleto desde a última manhã ENTREGUE ao dono (por isso o telefone: a janela
+  // vem da fila do WhatsApp, não do calendário); lerRecebidosPeloBoleto nunca lança (erro = null = sem a linha)
+  const recebidosPeloBoleto = tipoDoDia(p.hoje) === "util" ? await lerRecebidosPeloBoleto(admin, p.hoje, p.dono.phone) : null;
   return montarDosDados({
     hoje: p.hoje, agora: p.agora, ...lido, escritorio: p.escritorio,
     opcoes: { semanaVoltaComFatoNovo: portao.regras.semana_volta_com_fato_novo }, guardado, retorno, retornoExtra, viasParaImprimir, aprovacoes,
-    pagamentos,
+    pagamentos, recebidosPeloBoleto,
   });
 }
 

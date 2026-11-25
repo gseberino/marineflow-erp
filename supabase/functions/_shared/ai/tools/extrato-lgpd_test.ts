@@ -470,6 +470,27 @@ Deno.test("estorno, lançados sozinhos, contas a pagar e Pix esperando: o CPF do
   const sozinhos = await fechamentoTools.find((x) => x.name === "listar_lancados_sozinhos")!.execute({}, ctxDe(fila)) as Qualquer;
   assertEquals(sozinhos.lancados[0].o_que, "Despesa: ***.456.789-**-JOAO PRESTADOR");
 
+  // … e o recebimento baixado pelo boleto (24/11/2026): o o_que não vem do título ("Receita: CREDITO DE BOLETO"), vem
+  // do nome do cliente e da descrição da CONTA — texto novo a caminho do modelo, com a mesma máscara.
+  const filaDoRecebido = bancoFalso({
+    finance_review_queue: [{
+      title: "Receita: CREDITO DE BOLETO", suggested_amount: 1500, suggested_category: "Outras receitas", suggested_date: "2026-10-12",
+      automatica: "boleto", kind: "create_receivable", created_payable_id: null, bank_transaction_id: LINHA_CREDITO, status: "approved",
+    }],
+    receivables: [{
+      id: "r1", bank_transaction_id: LINHA_CREDITO, description: "NF-e 2/25 (parcela 2/3) 98765432100", clients: { name: "12345678901-MARIA SOUZA" },
+    }],
+    // o registro que a baixa deixa na linha (24/11/2026): sem ele — um só, o da baixa, da mesma conta — a marca não vale
+    reconciliation_log: [{
+      bank_transaction_id: LINHA_CREDITO, receivable_id: "r1", acao: "conciliou", detalhe: "Baixa automática pelo boleto · Conciliado com o extrato de 12/10/2026",
+    }],
+    app_settings: [],
+  });
+  const recebidos = await fechamentoTools.find((x) => x.name === "listar_lancados_sozinhos")!.execute({}, ctxDe(filaDoRecebido)) as Qualquer;
+  assertEquals(recebidos.lancados[0].o_que, "Recebimento: ***.456.789-**-MARIA SOUZA — NF-e 2/25 (parcela 2/3) ***.654.321-**");
+  assertEquals([recebidos.lancados[0].receivable_id, recebidos.lancados[0].payable_id], ["r1", null]);
+  assertEquals(temCpfInteiro(recebidos), false, JSON.stringify(recebidos));
+
   // list_payables_due: a descrição e o nome livre do fornecedor
   const contas = bancoFalso({
     payables: [{
