@@ -447,9 +447,13 @@ export async function triageEmail(email: InboundEmail, now: Date = new Date(), d
     // esgotado"…), nunca a mensagem: o erro do provedor traz o corpo da resposta, que pode devolver um trecho do e-mail.
     const falha = classeDoErro(e);
     // Indisponibilidade do modelo não pode esconder e-mail: sem a regra, notify com o motivo de sempre.
+    // (NOVO-p1-v2-02, fecho da leva A, 24/11/2026) O motivo também leva só a CLASSE do erro, e não mais o texto dele
+    // (eram até 120 caracteres): ele é gravado em email_messages.triage_reason, e o assistente o lê como texto do
+    // sistema, fora das marcas de "dado de terceiro" que cercam o corpo do e-mail. O começo "falha na triagem" não
+    // muda: as contagens procuram por ele.
     const semARegra: Triage = {
       classe: FALLBACK_CLASS, confianca: 0, evidencia: "",
-      motivo: `falha na triagem: ${String(e).slice(0, 120)}`,
+      motivo: `falha na triagem: ${falha}`,
       alertaFraude: false, rebaixada: true, deterministica: false,
       falha,
     };
