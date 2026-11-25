@@ -5024,3 +5024,58 @@ quatro estão latentes.
   quebraria esse uso. Entrou na lista, além do que a especificação citava, só `update_service` (o preço do serviço do
   catálogo, o par de `update_product`; 0 chamadas em 90 dias).
 - **Menor mudança:** é o assunto do pacote de orçamento (regra de texto de fora para o orçamento). Não mudado aqui.
+
+### [NOVO-p1-v1-01] Queda do Claude vista numa rodada só fica aberta até o próximo pedido bom, e com a chave ligada viraria aviso
+
+- **Onde:** `decidirQuedaDoAssistente` (`supabase/functions/_shared/ai/max/queda-do-assistente.ts`), regra da queda do tipo
+  `claude` sem problema à vista. Visto em 25/11/2026, ao construir o V1.
+- **Efeito:** a pausa de 1 minuto do programa do PC quando o servidor de ferramentas não conecta (`provider_unavailable`) é
+  indistinguível, no estado publicado, da pausa de 30 minutos por faturamento. Se a rodada de 5 minutos cair dentro desse
+  minuto, a queda abre e só fecha no próximo pedido bom (ou em 24 h). Em sombra isso é só uma linha no histórico. Com
+  `vigia_assistente = 'ligado'`, 15 minutos depois o dono receberia "fora do ar" com o assistente funcionando, e gastaria
+  um dos dois acordes do dia. É o desenho da especificação (a queda do Claude não fecha só pelo estado, por causa da pausa
+  do login que vence sem teste); o "teste de volta", que cobriria o caso, foi cortado pelas críticas. Não medido: não há
+  histórico de pausas antes desta tabela.
+- **Menor mudança:** medir na semana de sombra: `select causa, count(*) from assistente_quedas where tipo = 'claude' and
+  visto_em = desde group by 1` (quedas vistas numa rodada só). Se aparecerem, exigir duas rodadas com o problema à vista
+  antes de avisar (o login fica 10 minutos em pausa: é visto em duas). Decidir antes de ligar. Não mudado aqui.
+
+### [NOVO-p1-v1-02] A frase "o PC da oficina está sem sinal" sai também quando o vigia sabe que o PC está ligado
+
+- **Onde:** `FRASE_CURTA_DA_CAUSA.pc_fora` e `causaDaFalha` (`supabase/functions/_shared/ai/max/causa-da-falha.ts`, do C2).
+  `EstadoDoMax.pcComSinal` distingue "só o programa do assistente parou" de "o PC inteiro sumiu", e a frase não usa.
+- **Efeito:** o histórico novo separa `programa_parado` de `sem_rede`, mas o aviso de queda do V1 e a resposta de falha do
+  turno dizem a mesma frase nos dois casos, e ela fala em PC "sem sinal" quando o WhatsApp do mesmo PC está respondendo. A
+  especificação do V1 trazia texto próprio com o que fazer ("o religador tenta de hora em hora; se não voltar, reinicie o
+  PC" e "confira a internet do PC"); ele não foi usado porque as críticas mandam uma fonte única de frase de causa.
+- **Menor mudança:** dois códigos novos no mapa do C2 (programa parado; PC sem rede), escolhidos por `pcComSinal` em
+  `causaDaFalha`, e `CODIGO_DA_FRASE` do V1 passa a apontar para eles. Muda texto que o dono lê no turno: pede o OK dele.
+  Não mudado aqui.
+
+### [NOVO-p1-v1-03] O sino não conhece os avisos novos do assistente e os mostra com o ícone de lembrete de tarefa
+
+- **Onde:** `TIPO_DO_BANCO` em `src/hooks/use-notifications.ts` e o mapa de ícones de `src/components/NotificationBell.tsx`.
+  O V1 grava `app_notifications.type` = `assistente_caiu` e `assistente_voltou` (só com a chave ligada).
+- **Efeito:** tipo desconhecido vira "lembrete de tarefa": o aviso aparece e leva para a tela certa
+  (`/v2/settings?tab=assistente`), mas com o ícone errado. Nada aparece enquanto a chave estiver em sombra.
+- **Menor mudança:** duas linhas no mapa e dois ícones (os do WhatsApp caído e de volta servem de modelo), antes de ligar a
+  chave. Fora da lista de arquivos da especificação do V1. Não mudado aqui.
+
+### [NOVO-p1-v1-04] `types.ts` não tem a coluna `allowed_providers` de `ai_gateway_workers`
+
+- **Onde:** `src/integrations/supabase/types.ts`, tabela `ai_gateway_workers`. A coluna existe no banco desde a migration
+  `20261011104000` (as críticas do pacote 1 já apontavam).
+- **Efeito:** nenhum hoje: o leitor do estado do PC (`lerEstadoDoMax`) pede só `id, last_seen_at, estado`. Quem um dia
+  selecionar a coluna reprova a varredura `src/test/postgrest-select-columns.test.ts`.
+- **Menor mudança:** regenerar os tipos, ou acrescentar a coluna à mão. O V1 não a seleciona e por isso não mexeu.
+
+### [NOVO-p1-v1-05] Os dois testes antigos de `whatsapp-conexao/index_test.ts` recortam a função até o fim do arquivo no Windows
+
+- **Onde:** `fonte.slice(ini, fonte.indexOf("\n}\n", ini))`, nos testes "a volta do WhatsApp vai ao portão…" e "P4.5: a
+  volta acorda o dono…". Com o arquivo em CRLF na pasta (o git converte no checkout), `"\n}\n"` não existe, o `indexOf`
+  devolve -1 e o recorte vai até o penúltimo caractere do arquivo.
+- **Efeito:** no Windows os dois testes passam olhando o arquivo quase inteiro, e não só o `vigiar`: a ordem que eles
+  conferem continua valendo, mas com menos precisão. No CI (Linux, LF) o recorte é o certo. Os testes novos do V1
+  normalizam o fim de linha antes de recortar.
+- **Menor mudança:** `fonte.replace(/\r\n/g, "\n")` antes do recorte, como nos testes novos. Não mudado aqui (regra 5: teste
+  existente não se mexe fora de tarefa própria, além do literal que a especificação mandou ajustar).
