@@ -59,11 +59,9 @@ export interface Triage {
   falha?: string;
 }
 
-/** O que quem chama decide: o modelo (o teste troca) e a regra fixa do golpe (app_settings desliga). */
+/** O que quem chama decide: o modelo (o teste troca). */
 export interface DepsDaTriagem {
   chamar?: (p: CallClaudeParams) => Promise<CallClaudeResult>;
-  /** (F1) false = sem a regra fixa do golpe quando o modelo falha. Ausente = ligada. */
-  regraDoGolpe?: boolean;
 }
 
 const MAX_BODY_CHARS = 4000;
@@ -165,15 +163,9 @@ export function triageDeterministica(email: InboundEmail): Triage | null {
 // divulgação, que o cabeçalho descarta antes, e 1 do histórico que nunca passou por triagem); dos 96 sem triagem desde
 // 12/11, nenhum. O golpe que o modelo vinha marcando nesta caixa é outro (cobrança judicial falsa: 0 dos 17 marcados
 // casam aqui) e esta regra não o cobre: ela é só a do pedido de troca de dados de pagamento.
-
-/** A chave de app_settings que desliga a regra. Ausente = ligada (não há migration: a chave só nasce para desligar). */
-export const CHAVE_DA_REGRA_DO_GOLPE = "email_golpe_regra_fixa";
-
-/** Ausente, vazia ou qualquer outro valor = ligada. Só um "desligado" explícito desliga a rede. */
-export function regraDoGolpeLigada(valor: unknown): boolean {
-  const v = comparavel(String(valor ?? ""));
-  return !["desligado", "desligada", "off", "false", "0", "nao"].includes(v);
-}
+//
+// (Revisão do pacote 1, 24/11/2026) Não há interruptor em app_settings: a especificação do F1 não pede chave nova
+// (a primeira versão lia `email_golpe_regra_fixa` a cada rodada). Voltar atrás = reverter o commit.
 
 // Os dados de pagamento ditos por extenso (dizem sozinhos do que se trata)…
 const DADO_FORTE = "(?:dados\\s+(?:bancarios|de\\s+pagamentos?|para\\s+(?:o\\s+)?(?:pagamentos?|depositos?|transferencias?))" +
@@ -369,8 +361,8 @@ export async function triageEmail(email: InboundEmail, now: Date = new Date(), d
     // (V2) a falha deixa de ser calada: quem chamou registra — casando a regra do golpe ou não
     const falha = String(e).slice(0, 300);
     // (F1) a rede para esta hora: o golpe de troca de conta ou de Pix por regra fixa. Sai urgente com o alerta de
-    // fraude e segue o caminho de aviso que o urgente já tem; quem desliga é app_settings (CHAVE_DA_REGRA_DO_GOLPE).
-    const golpe = deps.regraDoGolpe === false ? null : golpeDeTrocaDeConta(email);
+    // fraude e segue o caminho de aviso que o urgente já tem.
+    const golpe = golpeDeTrocaDeConta(email);
     if (golpe) {
       return {
         classe: "urgent", confianca: 1, evidencia: golpe.trecho,

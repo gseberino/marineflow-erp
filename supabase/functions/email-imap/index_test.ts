@@ -105,23 +105,18 @@ Deno.test("V2: a triagem que falhou é registrada logo depois de triageEmail, s�
 
 // Pacote 1, F1 (24/11/2026). O alerta de golpe parou em 12/11 porque só saía de e-mail classificado pelo modelo, e o
 // provedor ficou sem saldo. O que se protege: a regra fixa (triage.ts) entra pela MESMA triagem e pelo MESMO aviso do
-// urgente (teto do dia, "não repetir", portão), sem caminho próprio; a chave de app_settings é lida como as outras do
-// arquivo e só desliga (ausente = ligada); o diagnóstico não lê a chave; e o aviso só vai aos admins, nunca ao remetente.
-Deno.test("F1: a regra fixa do golpe entra pela triagem e usa o aviso do urgente; a chave só desliga; nada vai ao remetente", () => {
-  assertStringIncludes(fonte, 'import { CHAVE_DA_REGRA_DO_GOLPE, regraDoGolpeLigada, triageEmail, type Triage } from "../_shared/email/triage.ts";');
-  // a chave, lida como o arquivo já lê app_settings (select value / eq key / maybeSingle), fora do diagnóstico
-  const leitura = fonte.indexOf("const { data: cfgGolpe } = diagnostico");
-  assert(leitura > 0, "a leitura da chave");
-  const trecho = fonte.slice(leitura, fonte.indexOf("const resultados", leitura));
-  assertStringIncludes(trecho, "? { data: null }");
-  assertStringIncludes(trecho, ': await admin.from("app_settings").select("value").eq("key", CHAVE_DA_REGRA_DO_GOLPE).maybeSingle();');
-  assertStringIncludes(trecho, "const regraDoGolpe = regraDoGolpeLigada(cfgGolpe?.value);");
-  // lida uma vez por rodada (antes do laço das caixas), não a cada e-mail
-  assert(leitura < fonte.indexOf("for (const conta of (contas ?? [])"), "a chave é lida antes das caixas");
-  // vai para a triagem; o remetente silenciado continua sem triagem nenhuma
+// urgente (teto do dia, "não repetir", portão), sem caminho próprio; e o aviso só vai aos admins, nunca ao remetente.
+// (Revisão, 24/11/2026) Sem interruptor: a especificação não pede chave nova, e a rodada não lê app_settings por ela.
+Deno.test("F1: a regra fixa do golpe entra pela triagem e usa o aviso do urgente; sem chave para desligar; nada vai ao remetente", () => {
+  assertStringIncludes(fonte, 'import { triageEmail, type Triage } from "../_shared/email/triage.ts";');
+  // nenhuma chave nova: a única leitura de app_settings do arquivo é a do CNPJ, que já existia
+  for (const sumiu of ["CHAVE_DA_REGRA_DO_GOLPE", "regraDoGolpeLigada", "cfgGolpe", "regraDoGolpe"]) assert(!fonte.includes(sumiu), sumiu);
+  assertEquals(fonte.split('admin.from("app_settings")').length, 2, "uma leitura de app_settings, a do CNPJ");
+  assertStringIncludes(fonte, 'await admin.from("app_settings").select("value").eq("key", "cnpj").maybeSingle();');
+  // a triagem é chamada como antes do F1; o remetente silenciado continua sem triagem nenhuma
   const ini = fonte.indexOf("// Triagem só do que é recente");
   const bloco = fonte.slice(ini, fonte.indexOf("cursor = uid;", ini));
-  assertStringIncludes(bloco, ": await triageEmail(email, new Date(), { regraDoGolpe });");
+  assertStringIncludes(bloco, ": await triageEmail(email);");
   assert(bloco.indexOf('regra === "ignore_always"') < bloco.indexOf("await triageEmail(email"), "silenciado decide antes");
   // um aviso só, o do urgente, com as mesmas travas: nenhum atalho pela regra
   assertEquals(fonte.split("await avisarUrgente(").length, 2, "um ponto de aviso só");
