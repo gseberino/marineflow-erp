@@ -7,6 +7,7 @@
 --       caso, P0g) e _agenda_cfg() com elas;
 --       a porta de _agenda_rotina_conclusao (a de antes: invoker, ninguém de fora executa); nenhum UPDATE/DELETE sem WHERE; tirados os 3 blocos
 --       "-- P1 AGENDA:", o corpo é o de produção de 24/11 (md5 sem CR ae91e221…); tirados também os "-- TERMINOU:", o de 23/11 (ff5397d8…)
+--       (o conserto B do A2, 20270301120310, põe 1 bloco "-- P1 AGENDA: (A2" a mais: o removedor também o tira e a conta é dos blocos do A3)
 --   Sobre a fixture-fase3 (o Roberto no Vanderlei, OS-00069, de ter 03 a qui 05/11 o dia todo; o Gustavo, o dono, abre na terça de manhã e fecha na
 --   quinta à tarde: a presença "abre e fecha", o padrão da casa):
 --   T1  chave false, só o técnico no último dia, "ok, terminei" às 17:15: nada conclui, a OS fica em andamento e nasce 1 pergunta concluir
@@ -146,13 +147,14 @@ begin
     not exists (select 1 from pg_temp.sem_where(coalesce(pg_temp.src(c_f), ''))),
     (select string_agg(x, ' | ') from pg_temp.sem_where(coalesce(pg_temp.src(c_f), '')) x));
   v_txt := coalesce(pg_temp.src(c_f), '');
-  v_res := pg_temp.ok(v_res, 'P0e sem os 3 blocos "-- P1 AGENDA:" o corpo é o de produção de 24/11/2026 (md5 sem CR ae91e221…); sem eles e sem os "-- TERMINOU:", o de 23/11 (ff5397d8…)',
+  v_res := pg_temp.ok(v_res, 'P0e sem os blocos "-- P1 AGENDA:" (os 3 do A3 e, com a 20270301120310, o do A2) o corpo é o de produção de 24/11/2026 (md5 sem CR ae91e221…); sem eles e sem os "-- TERMINOU:", o de 23/11 (ff5397d8…)',
     md5(pg_temp.sem_blocos(v_txt, 'P1 AGENDA')) = 'ae91e2216c9eede4ce794e7a9ba86b2f'
     and md5(pg_temp.sem_blocos(v_txt, 'P1 AGENDA|TERMINOU')) = 'ff5397d86f0ae999dda0b3f74a730170'
     and md5(v_txt) <> 'ae91e2216c9eede4ce794e7a9ba86b2f'
-    and (select count(*) from regexp_matches(v_txt, '-- P1 AGENDA: fim', 'g')) = 3,
-    format('%s / %s / %s blocos', md5(pg_temp.sem_blocos(v_txt, 'P1 AGENDA')), md5(pg_temp.sem_blocos(v_txt, 'P1 AGENDA|TERMINOU')),
-           (select count(*) from regexp_matches(v_txt, '-- P1 AGENDA: fim', 'g'))));
+    -- P1 AGENDA (A2, conserto B, 20270301120310): os blocos do A3 contados pelo começo deles; o do A2, se houver, sai junto no removedor
+    and (select count(*) from regexp_matches(v_txt, '-- P1 AGENDA: \(A3,', 'g')) = 3,
+    format('%s / %s / %s blocos do A3', md5(pg_temp.sem_blocos(v_txt, 'P1 AGENDA')), md5(pg_temp.sem_blocos(v_txt, 'P1 AGENDA|TERMINOU')),
+           (select count(*) from regexp_matches(v_txt, '-- P1 AGENDA: \(A3,', 'g'))));
   v_res := pg_temp.ok(v_res, 'P0f o ramo novo só vale com a chave em false e o motor ligado, e nada nele chama a porta (os_registrar_marco fica fora dos blocos)',
     v_txt like '%if not cf.equipe_terminei_conclui and cf.modo_proposta = ''ligado'' then%'
     and (select count(*) from regexp_matches(v_txt, 'os_registrar_marco', 'g'))

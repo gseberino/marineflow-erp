@@ -31,13 +31,15 @@ begin;
 -- de OS paga), com a linha de antes devolvida onde o bloco a trocou ("--antes:" na coluna 0, dentro dele), é a de antes; as
 -- conferências de cópia abaixo a leem assim. (F2b, 18/11/2026, 20270126100000: e os blocos "-- FICHA PAGA B: … -- FICHA PAGA B: fim",
 -- do mesmo jeito; um bloco B pode estar dentro de um da F2: a conta é por nível. F2c, 20270127100000: e os "-- FICHA PAGA C:".)
+-- (Pacote 1 do assistente, A2, 20270301120300: e os "-- P1 AGENDA: … -- P1 AGENDA: fim", pela mesma convenção; _agenda_rotina_acordes_da_equipe
+-- ganhou 1 deles. Tirados, a prova "o resto é a origem, byte a byte" do E9a continua valendo.)
 create function pg_temp.sem_ficha_paga(p text) returns text language sql immutable as $fp$
   select array_to_string(array(
            select case when dentro > 0 and l ~ '^--antes:' then substr(l, 9) else l end
-             from (select l, o, sum(case when l ~ '^\s*-- FICHA PAGA( [BC])?:' and l !~ '^\s*-- FICHA PAGA( [BC])?: fim' then 1
-                                         when l ~ '^\s*-- FICHA PAGA( [BC])?: fim' then -1 else 0 end)
+             from (select l, o, sum(case when l ~ '^\s*-- (FICHA PAGA( [BC])?|P1 AGENDA):' and l !~ '^\s*-- (FICHA PAGA( [BC])?|P1 AGENDA): fim' then 1
+                                         when l ~ '^\s*-- (FICHA PAGA( [BC])?|P1 AGENDA): fim' then -1 else 0 end)
                                 over (order by o rows between unbounded preceding and current row) as dentro,
-                          l ~ '^\s*-- FICHA PAGA( [BC])?: fim' as fecha
+                          l ~ '^\s*-- (FICHA PAGA( [BC])?|P1 AGENDA): fim' as fecha
                      from unnest(string_to_array(p, E'\n')) with ordinality u(l, o)) x
             where (dentro = 0 and not fecha) or (dentro > 0 and l ~ '^--antes:')
             order by o), E'\n')
@@ -212,9 +214,15 @@ select 'E0c as portas: anon e PUBLIC nunca; authenticated só onde o chamador in
   from f join pg_proc p on p.oid = to_regprocedure(f.sig);
 -- quem chama o registro (o grep no banco): cada um é exercitado abaixo (E1, E2, E3, E5, E6), pelos testes de antes na bancada inteira, e o eval da 3ª mensagem
 insert into _resultado
-select 'E0d quem chama o registro é a lista conhecida (as 6 de antes e as 4 novas); toda chamada é de 5 a 10 argumentos com nome (nenhuma "não é única")',
+select 'E0d quem chama o registro é a lista conhecida (as 6 de antes e as 4 novas; com o A2 do pacote 1, também _agenda_rotina_silencio); toda chamada é de 5 a 10 argumentos com nome (nenhuma "não é única")',
        string_agg(p.proname, ',' order by p.proname)
-       = '_agenda_comunicar_convites,_agenda_comunicar_mudancas_equipe,_agenda_comunicar_previsto,_agenda_equipe_mudanca_na_hora,_agenda_local_avisar_acesso,_agenda_rotina_como_foi,_agenda_rotina_confirmar,_agenda_rotina_ficha,agenda_equipe_semana,agenda_resposta_da_equipe',
+       = '_agenda_comunicar_convites,_agenda_comunicar_mudancas_equipe,_agenda_comunicar_previsto,_agenda_equipe_mudanca_na_hora,_agenda_local_avisar_acesso,_agenda_rotina_como_foi,_agenda_rotina_confirmar,_agenda_rotina_ficha,'
+         -- P1 AGENDA (A2, 20270301120300): o 2º pedido do silêncio que mantém o dia (tipo resposta, chave reconfirmar:<dia>) é registrado por
+         -- _agenda_rotina_silencio, só com o bloco do A2 nela (cortada antes do pacote 1, a lista de antes)
+         || case when coalesce((select s.prosrc like '%-- P1 AGENDA: (A2,%' from pg_proc s
+                                 where s.oid = to_regprocedure('public._agenda_rotina_silencio(date,timestamptz)')), false)
+                 then '_agenda_rotina_silencio,' else '' end
+         || 'agenda_equipe_semana,agenda_resposta_da_equipe',
        string_agg(p.proname, ',' order by p.proname)
   from pg_proc p
  where p.pronamespace = 'public'::regnamespace and p.prosrc ~ 'public\._agenda_equipe_registrar\(' and p.proname <> '_agenda_equipe_registrar';

@@ -71,14 +71,16 @@ select 'C4 o freio — só mostra (com gestor_so_propor, o que ligar vale como e
 -- blocos e as marcas da 7g, do mesmo jeito: a 7g recria agenda_saude em 20261112100500 com a chave explicar numa marca "-- (7g". Prazo no bloco, 17/11/2026: e os
 -- blocos "-- PRAZO NO BLOCO: (…) … -- PRAZO NO BLOCO: fim", do mesmo jeito: 20270122100000 recria _agenda_saude_comunicacao com 1 bloco desses.)
 -- (23/11/2026, 20270223100000) o "terminou ou falta dia?" recria agenda_saude (e outras 2) com blocos "-- TERMINOU: … -- TERMINOU: fim" que trocam
--- linhas (as de antes em "--antes:"): sem eles, devolvidas as linhas de antes, o corpo é o de antes dela
+-- linhas (as de antes em "--antes:"): sem eles, devolvidas as linhas de antes, o corpo é o de antes dela. (Pacote 1 do assistente, A2,
+-- 20270301120300: e os "-- P1 AGENDA: … -- P1 AGENDA: fim", pela mesma convenção; _agenda_rotina_acordes_da_equipe ganhou 1 deles. Tirados,
+-- o F2 continua provando "o resto é o corpo do pacote final, byte a byte", sem trocar o md5 esperado.)
 create function pg_temp.sem_terminou(p text) returns text language sql immutable as $st$
   select array_to_string(array(
            select case when dentro > 0 and l ~ '^--antes:' then substr(l, 9) else l end
-             from (select l, o, sum(case when l ~ '^\s*-- TERMINOU:' and l !~ '^\s*-- TERMINOU: fim' then 1
-                                         when l ~ '^\s*-- TERMINOU: fim' then -1 else 0 end)
+             from (select l, o, sum(case when l ~ '^\s*-- (TERMINOU|P1 AGENDA):' and l !~ '^\s*-- (TERMINOU|P1 AGENDA): fim' then 1
+                                         when l ~ '^\s*-- (TERMINOU|P1 AGENDA): fim' then -1 else 0 end)
                                 over (order by o rows between unbounded preceding and current row) as dentro,
-                          l ~ '^\s*-- TERMINOU: fim' as fecha
+                          l ~ '^\s*-- (TERMINOU|P1 AGENDA): fim' as fecha
                      from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
             where (dentro = 0 and not fecha) or (dentro > 0 and l ~ '^--antes:')
             order by o), E'\n')
