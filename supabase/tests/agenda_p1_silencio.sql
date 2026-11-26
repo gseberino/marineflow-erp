@@ -40,7 +40,8 @@
 --   B   (conserto B, com a chave no padrão 'tirar': vale com qualquer chave) na qua 04/11, que não é o último dia: B1 o "ok" puro (e B1b o "tudo
 --       certo", também tipo ok) ao "como foi" não abre pergunta nenhuma, nem nos tiques seguintes, e a diária e os meios-dias ficam como hoje
 --       (lançada, cumpridos); B2 o "ok, terminei" e B2b o "terminei" seguem com a pergunta de hoje; B3 o último dia (qui 05/11) com o "ok" puro
---       é o do A3 (a pergunta "respondeu *ok*", a OS não conclui)
+--       é o do A3 (a pergunta "respondeu *ok*", a OS não conclui); B4 o último dia do PLANO com a estimativa sobrando (sem dia depois): o "ok"
+--       puro segue com a pergunta de hoje ("… mas o plano tinha mais serviço do que você disse"), como o A3 o deixou
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -232,8 +233,8 @@ begin
     format('%s / %s', md5(pg_temp.sem_a2(v_s)), md5(pg_temp.sem_blocos(v_s, 'P1 AGENDA'))));
   v_res := pg_temp.ok(v_res, 'P0i o conserto B é uma linha só, no ramo do plano com mais dias: a mensagem de leitura tipo ok (o "ok" puro) não abre a pergunta',
     btrim(regexp_replace(substring(v_s from '-- P1 AGENDA: \(A2, 26/11/2026, conserto B\).*?-- P1 AGENDA: fim'), '--[^\n]*', '', 'g'), E' \n')
-      = 'continue when m.leitura ->> ''tipo'' = ''ok'';'
-    and position('continue when m.leitura ->> ''tipo'' = ''ok'';' || E'\n      -- P1 AGENDA: fim\n      if public._agenda_equipe_perguntar(''concluir'', format(''concluir:%s:%s'', v_x, p_hoje)' in v_s) > 0,
+      = 'continue when m.leitura ->> ''tipo'' = ''ok'' and cardinality(v_fut) > 0;'
+    and position('continue when m.leitura ->> ''tipo'' = ''ok'' and cardinality(v_fut) > 0;' || E'\n      -- P1 AGENDA: fim\n      if public._agenda_equipe_perguntar(''concluir'', format(''concluir:%s:%s'', v_x, p_hoje)' in v_s) > 0,
     btrim(regexp_replace(substring(v_s from '-- P1 AGENDA: \(A2, 26/11/2026, conserto B\).*?-- P1 AGENDA: fim'), '--[^\n]*', '', 'g'), E' \n'));
   v_res := pg_temp.ok(v_res, 'P0j agenda_rotina_rodar: sem os 2 blocos "-- P1 AGENDA: (A2" (devolvidas as linhas "--antes:") o corpo é o de produção (md5 sem CR c418e862…, o de 20261026100300)',
     md5(pg_temp.sem_a2(v_a)) = 'c418e86267bf6e6021e3e1ff855f1013' and md5(v_a) <> 'c418e86267bf6e6021e3e1ff855f1013'
@@ -782,6 +783,24 @@ begin
       and (r #>> '{contagens,conclusao,perguntas}')::int = 1 and (r #>> '{contagens,conclusao,concluidas}')::int = 0
       and exists (select 1 from public.agenda_perguntas q where q.chave = c_chave and q.estado = 'aberta' and q.texto = c_ok),
       (r #> '{contagens,conclusao}')::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  begin
+    -- o plano acaba na qua 04/11 (os meios-dias de qui 05/11 saem) e a estimativa ainda tem meios-dias: sem dia depois, v_rest > 0
+    update public.agenda_alocacoes set estado = 'cancelada', cancelada_motivo = 'dono'
+     where service_order_id = c_vand and dia = d05 and estado in ('publicada', 'fixada');
+    perform pg_temp.rodar(d04, '17:00');
+    perform pg_temp.resp('ok', d04, '17:15');
+    r := pg_temp.rodar(d04, '17:30');
+    v_res := pg_temp.ok(v_res, 'B4 o último dia do PLANO com a estimativa sobrando (qua 04/11, sem dia depois): o "ok" puro segue com a pergunta de hoje, como o A3 o deixou ("… mas o plano tinha mais serviço do que você disse")',
+      (r #>> '{contagens,conclusao,perguntas}')::int = 1 and (r #>> '{contagens,conclusao,concluidas}')::int = 0
+      and (public.agenda_meios_da_os(c_vand, d05) ->> 'restantes')::numeric > 0
+      and exists (select 1 from public.agenda_perguntas q
+                   where q.tipo = 'concluir' and q.estado = 'aberta' and q.service_order_id = c_vand
+                     and q.texto = 'O Roberto disse que terminou o Vanderlei (OS-00069), mas o plano tinha mais serviço do que você disse. *concluiu Vanderlei* fecha a OS.'),
+      (r #> '{contagens,conclusao}')::text || ' | '
+      || coalesce((select string_agg(q.texto, ' ; ') from public.agenda_perguntas q where q.service_order_id = c_vand), '(nenhuma pergunta)'));
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
