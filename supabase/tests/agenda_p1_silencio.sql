@@ -1,12 +1,15 @@
 -- Prova do A2 do pacote 1 do assistente (decisão do dono de 24/11/2026; migration 20270301120300_agenda_p1_silencio_mantem.sql): com
 -- agenda_config.equipe_silencio_acao = 'manter', o silêncio das 9h não tira o dia do técnico; avisa o dono (o acorde) e pede de novo ao técnico
--- (no máximo 1 por pessoa e dia, em todo dia de silêncio). Com 'tirar' (o padrão), o de antes.
--- bancada: depende de 20270301120300
+-- (no máximo 1 por pessoa e dia, em todo dia de silêncio). Com 'tirar' (o padrão), o de antes. E os 2 consertos (20270301120310_agenda_p1_
+-- silencio_consertos.sql): (A) o acorde do silêncio que manteve o dia fica fora da cota acordes_dia_max em agenda_rotina_rodar; (B) o "ok" puro
+-- ao "como foi" num dia que não é o último do plano não abre a pergunta "disse que terminou… mas o plano tinha mais N dias" (com qualquer chave).
+-- bancada: depende de 20270301120310
 --
---   P0  a forma (vale em produção, nada grava): as portas das 2 recriadas (invoker, ninguém de fora: anon, authenticated, service_role e PUBLIC
---       sem EXECUTE) e da rodada que as chama; nenhum UPDATE/DELETE sem WHERE; tirados os blocos "-- P1 AGENDA:", cada corpo é o de produção
---       de 24/11/2026 (md5 do corpo sem CR: silêncio 3fd0c50d…, acordes ae015c82…); o ramo novo só com 'manter', e ele não chama o replano nem
---       grava disponibilidade; a chave nasce 'tirar'; os comentários ganharam o trecho do A2
+--   P0  a forma (vale em produção, nada grava): as portas das 4 recriadas (silêncio, acordes e conclusão invoker, ninguém de fora: anon,
+--       authenticated, service_role e PUBLIC sem EXECUTE; a rodada definer, só service_role); nenhum UPDATE/DELETE sem WHERE; tirados os
+--       blocos "-- P1 AGENDA: (A2", cada corpo é o de antes (md5 do corpo sem CR: silêncio 3fd0c50d…, acordes ae015c82…, os de produção de
+--       24/11; conclusão 3fcde03f…, o da 20270301120200, em produção desde 26/11; rodada c418e862…, a de produção); o ramo novo só com
+--       'manter', e ele não chama o replano nem grava disponibilidade; a chave nasce 'tirar'; os comentários ganharam o trecho do A2
 --   Sobre a fixture-fase3 (o Roberto, telefone sintético 5547900000001, no Vanderlei, OS-00069, de ter 03 a qui 05/11 o dia todo; o Gustavo,
 --   o dono, abre e fecha), a confirmação das 07:45 "saída" às 07:46:
 --   S1  'tirar' (o padrão): o de hoje — indisponível, replano, a confirmação sem_resposta, o acorde "Mudei a agenda de hoje", nenhum 2º pedido
@@ -16,10 +19,10 @@
 --       envio: nada (não é silêncio, como antes)
 --   S3  o tique das 09:15: nada novo (nem ação, nem mensagem, nem acorde)
 --   S4  "ok" às 10:00: responde à confirmação (respondida, disponibilidade confirmada), não ao 2º pedido nem ao "como foi"
---   S5  "não vou" às 10:00: o caminho de hoje (indisponível, replano, a ação nao_vou com acorde "avisou que não vem"). LIMITE (achado novo):
---       com o acorde das 9h já contado, a cota do dia (acordes_dia_max = 1) corta o acorde do "não vou" no mesmo dia
+--   S5  "não vou" às 10:00: o caminho de hoje (indisponível, replano, a ação nao_vou com acorde "avisou que não vem"); S5c (conserto A) com o
+--       acorde das 9h já contado, o do "não vou" sai no mesmo dia (o do silêncio não gasta a cota acordes_dia_max = 1)
 --   S6  17:00: o "como foi" sai (1 proativa antes dele) e leva a ficha de amanhã; 19:30 nada; no dia, 3 mensagens à equipe (confirmação,
---       2º pedido, "como foi"); 21:45 a confirmação vira sem_resposta e o 2º pedido fica como está
+--       2º pedido, "como foi"); 22:00 a confirmação vira sem_resposta e o 2º pedido fica como está
 --   S7  (decisão de 26/11: a regra "não pede de novo se ontem também ficou sem resposta" saiu) ontem com 2º pedido e sem resposta: hoje sai
 --       outro 2º pedido, 1 só
 --   S8  sem telefone: o 2º pedido recusado (sem_telefone) e o texto na 2ª variante ("Não consegui pedir de novo."); S8b no teto de respostas
@@ -32,6 +35,12 @@
 --       dia do plano, com o A3 no ar (equipe_terminei_conclui = false), vira a pergunta "terminou ou falta dia?" ao dono e a OS NÃO conclui;
 --       C0 o mesmo "ok" às 10:00 responde à confirmação e não vira pergunta; C2 o controle: com equipe_terminei_conclui = true, a OS concluiria
 --       (por isso ligar só com o A3 no ar)
+--   S11 (conserto A) um acorde que já saiu antes das 9h e o silêncio com 'manter': os dois saem no dia (o do silêncio não é cortado pela cota);
+--       S11b o controle: com 'tirar', o acorde do silêncio (o replano) é cortado pela cota como antes
+--   B   (conserto B, com a chave no padrão 'tirar': vale com qualquer chave) na qua 04/11, que não é o último dia: B1 o "ok" puro (e B1b o "tudo
+--       certo", também tipo ok) ao "como foi" não abre pergunta nenhuma, nem nos tiques seguintes, e a diária e os meios-dias ficam como hoje
+--       (lançada, cumpridos); B2 o "ok, terminei" e B2b o "terminei" seguem com a pergunta de hoje; B3 o último dia (qui 05/11) com o "ok" puro
+--       é o do A3 (a pergunta "respondeu *ok*", a OS não conclui)
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -84,6 +93,26 @@ create function pg_temp.so_blocos(p text) returns text language sql immutable as
             where dentro > 0 or fecha
             order by o), E'\n')
 $st$;
+-- Tira só os blocos do A2 ("-- P1 AGENDA: (A2, …" até o "-- P1 AGENDA: fim" seguinte), devolvendo as linhas "--antes:" de dentro deles; os
+-- outros blocos "-- P1 AGENDA:" (os do A3 em _agenda_rotina_conclusao) ficam. Os blocos do A2 não se aninham em outros.
+create function pg_temp.sem_a2(p text) returns text language plpgsql immutable as $st$
+declare
+  l      text;
+  fora   text[] := '{}';
+  dentro boolean := false;
+begin
+  foreach l in array string_to_array(replace(p, chr(13), ''), E'\n') loop
+    if not dentro and l ~ '^\s*-- P1 AGENDA: \(A2,' then dentro := true; continue; end if;
+    if dentro then
+      if l ~ '^\s*-- P1 AGENDA: fim' then dentro := false;
+      elsif l ~ '^--antes:' then fora := fora || substr(l, 9);
+      end if;
+      continue;
+    end if;
+    fora := fora || l;
+  end loop;
+  return array_to_string(fora, E'\n');
+end $st$;
 -- A porta de uma função: "definer volatilidade | anon authenticated service_role public" (EXECUTE; t ou f).
 create function pg_temp.porta(p_assinatura text) returns text language sql stable as $f$
   select format('%s %s | %s %s %s %s', p.prosecdef, p.provolatile, has_function_privilege('anon', p.oid, 'execute'),
@@ -188,6 +217,40 @@ begin
     and (select count(*) from regexp_matches(coalesce(obj_description(to_regprocedure(c_a), 'pg_proc'), ''), 'P1 AGENDA \(A2, 24/11/2026', 'g')) = 1
     and obj_description(to_regprocedure(c_a), 'pg_proc') like 'Agenda de Produção (Fase 3, P4)%',
     left(coalesce(obj_description(to_regprocedure(c_s), 'pg_proc'), '(sem)'), 60));
+  -- 20270301120310: os consertos A (agenda_rotina_rodar) e B (_agenda_rotina_conclusao)
+  v_s := coalesce(pg_temp.src('public._agenda_rotina_conclusao(date,timestamptz)'), '');
+  v_a := coalesce(pg_temp.src('public.agenda_rotina_rodar(date,timestamptz)'), '');
+  v_res := pg_temp.ok(v_res, 'P0g public._agenda_rotina_conclusao(date,timestamptz): a porta de antes (invoker, volátil | ninguém de fora) e nenhum UPDATE/DELETE sem WHERE; agenda_rotina_rodar também sem',
+    pg_temp.porta('public._agenda_rotina_conclusao(date,timestamptz)') = 'f v | f f f f'
+    and not exists (select 1 from pg_temp.sem_where(v_s)) and not exists (select 1 from pg_temp.sem_where(v_a)),
+    pg_temp.porta('public._agenda_rotina_conclusao(date,timestamptz)'));
+  v_res := pg_temp.ok(v_res, 'P0h _agenda_rotina_conclusao: sem o bloco "-- P1 AGENDA: (A2" o corpo é o de 20270301120200, em produção desde 26/11 (md5 sem CR 3fcde03f…); sem todos os "-- P1 AGENDA:", o de 24/11 (ae91e221…); 1 bloco do A2 e os 3 do A3',
+    md5(pg_temp.sem_a2(v_s)) = '3fcde03f330c85e6d0fe93a20b4dd2e8' and md5(v_s) <> '3fcde03f330c85e6d0fe93a20b4dd2e8'
+    and md5(pg_temp.sem_blocos(v_s, 'P1 AGENDA')) = 'ae91e2216c9eede4ce794e7a9ba86b2f'
+    and (select count(*) from regexp_matches(v_s, '-- P1 AGENDA: \(A2,', 'g')) = 1
+    and (select count(*) from regexp_matches(v_s, '-- P1 AGENDA: \(A3,', 'g')) = 3,
+    format('%s / %s', md5(pg_temp.sem_a2(v_s)), md5(pg_temp.sem_blocos(v_s, 'P1 AGENDA'))));
+  v_res := pg_temp.ok(v_res, 'P0i o conserto B é uma linha só, no ramo do plano com mais dias: a mensagem de leitura tipo ok (o "ok" puro) não abre a pergunta',
+    btrim(regexp_replace(substring(v_s from '-- P1 AGENDA: \(A2, 26/11/2026, conserto B\).*?-- P1 AGENDA: fim'), '--[^\n]*', '', 'g'), E' \n')
+      = 'continue when m.leitura ->> ''tipo'' = ''ok'';'
+    and position('continue when m.leitura ->> ''tipo'' = ''ok'';' || E'\n      -- P1 AGENDA: fim\n      if public._agenda_equipe_perguntar(''concluir'', format(''concluir:%s:%s'', v_x, p_hoje)' in v_s) > 0,
+    btrim(regexp_replace(substring(v_s from '-- P1 AGENDA: \(A2, 26/11/2026, conserto B\).*?-- P1 AGENDA: fim'), '--[^\n]*', '', 'g'), E' \n'));
+  v_res := pg_temp.ok(v_res, 'P0j agenda_rotina_rodar: sem os 2 blocos "-- P1 AGENDA: (A2" (devolvidas as linhas "--antes:") o corpo é o de produção (md5 sem CR c418e862…, o de 20261026100300)',
+    md5(pg_temp.sem_a2(v_a)) = 'c418e86267bf6e6021e3e1ff855f1013' and md5(v_a) <> 'c418e86267bf6e6021e3e1ff855f1013'
+    and (select count(*) from regexp_matches(v_a, '-- P1 AGENDA: \(A2,', 'g')) = 2,
+    md5(pg_temp.sem_a2(v_a)));
+  v_res := pg_temp.ok(v_res, 'P0k o conserto A só mexe na cota dos acordes: fora dela fica a ação silencio_manteve; continua "só com a vigia ligada e a ação executada"',
+    pg_temp.so_blocos(v_a) like '%a.depois ->> ''motivo'' is distinct from ''silencio_manteve''%'
+    and pg_temp.so_blocos(v_a) like '%where q.ord <= v_cota or q.fora_da_cota;%'
+    and pg_temp.so_blocos(v_a) like '%and a.executada)) q%'
+    and pg_temp.sem_blocos(v_a, 'P1 AGENDA') like '%if cf.modo_vigia = ''ligado'' and jsonb_array_length(v_acordes) > 0 then%',
+    null);
+  v_res := pg_temp.ok(v_res, 'P0l os comentários da conclusão e da rodada ganharam o trecho do conserto uma vez (o de antes fica à frente)',
+    (select count(*) from regexp_matches(coalesce(obj_description(to_regprocedure('public._agenda_rotina_conclusao(date,timestamptz)'), 'pg_proc'), ''), 'P1 AGENDA \(A2, conserto B', 'g')) = 1
+    and (select count(*) from regexp_matches(coalesce(obj_description(to_regprocedure('public.agenda_rotina_rodar(date,timestamptz)'), 'pg_proc'), ''), 'P1 AGENDA \(A2, conserto A', 'g')) = 1
+    and obj_description(to_regprocedure('public.agenda_rotina_rodar(date,timestamptz)'), 'pg_proc') like 'Agenda de Produção (Fase 3, P4)%'
+    and obj_description(to_regprocedure('public._agenda_rotina_conclusao(date,timestamptz)'), 'pg_proc') like '%P1 AGENDA (A3, 24/11/2026%P1 AGENDA (A2, conserto B%',
+    null);
   perform pg_temp.gravar(v_res);
 end
 $p0$;
@@ -222,6 +285,7 @@ declare
   v_n_acoes int;
   v_n_msgs  int;
   v_txt     text;
+  v_id      uuid;
 begin
   if coalesce(current_setting('agenda_teste.fase3', true), '') = '' then
     insert into _resultado values ('S1–S10 e C (fixture-fase3)', true, 'PULADO: sem agenda_teste.fase3 (rode pela bancada)');
@@ -473,10 +537,21 @@ begin
       and r2 -> 'acordes' -> 0 ->> 'acao_id' <> a.id::text,
       (r2 -> 'acordes')::text);
     r := pg_temp.rodar(d03, '10:15');
-    v_res := pg_temp.ok(v_res, 'S5c LIMITE (achado novo): com o acorde das 09:00 contado, a cota do dia (acordes_dia_max = 1) corta o do "não vou" no mesmo dia — o passo o monta, a rodada não o devolve',
-      jsonb_array_length(r -> 'acordes') = 0 and (select cfg.acordes_dia_max from public.agenda_config cfg) = 1
+    v_res := pg_temp.ok(v_res, 'S5c (conserto A) com o acorde das 09:00 já contado e a cota do dia em 1 (acordes_dia_max), o do "não vou" sai no MESMO dia: o do silêncio não gasta a cota',
+      jsonb_array_length(r -> 'acordes') = 1 and r -> 'acordes' -> 0 ->> 'texto' like 'O Roberto avisou que não vem hoje (ter 03/11). Mudei a agenda de hoje:%'
+      and r -> 'acordes' -> 0 ->> 'acao_id' = r2 -> 'acordes' -> 0 ->> 'acao_id'
+      and (select cfg.acordes_dia_max from public.agenda_config cfg) = 1
       and (select count(*) from public.agenda_acoes e where e.dia = d03 and e.contada_via = 'acorde') = 1,
-      format('rodada %s | passo %s', jsonb_array_length(r -> 'acordes'), r2 ->> 'acordes_da_equipe'));
+      format('rodada %s | passo %s | %s', jsonb_array_length(r -> 'acordes'), r2 ->> 'acordes_da_equipe', r -> 'acordes' -> 0 ->> 'texto'));
+    -- e o do "não vou", contado, gasta a cota: um 3º acorde comum no mesmo dia continua cortado
+    if r -> 'acordes' -> 0 ->> 'acao_id' is not null then
+      r1 := pg_temp.acordou((r -> 'acordes' -> 0 ->> 'acao_id')::uuid, d03, '10:16');
+    end if;
+    v_res := pg_temp.ok(v_res, 'S5d a cota continua valendo para os outros: contado o do "não vou", a cota do dia fica em 0 (o do silêncio não entra na conta)',
+      (select cfg.acordes_dia_max from public.agenda_config cfg)
+        - (select count(*) from public.agenda_acoes e where e.dia = d03 and e.contada_via = 'acorde' and e.depois ->> 'motivo' is distinct from 'silencio_manteve') = 0
+      and (select count(*) from public.agenda_acoes e where e.dia = d03 and e.contada_via = 'acorde') = 2,
+      (select string_agg(coalesce(e.depois ->> 'motivo', e.tipo), ', ' order by e.contada_em) from public.agenda_acoes e where e.dia = d03 and e.contada_via = 'acorde'));
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
@@ -627,6 +702,86 @@ begin
       and exists (select 1 from public.agenda_acoes x where x.tipo = 'concluir' and x.service_order_id = c_vand and x.origem = 'equipe')
       and (r #>> '{contagens,conclusao,concluidas}')::int = 1,
       (r #> '{contagens,conclusao}')::text || ' | ' || (select so.status from public.service_orders so where so.id = c_vand));
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- ── S11. (conserto A) Um acorde que já saiu antes das 9h e o silêncio: os dois saem no dia ──
+  for v_txt in select x from unnest(array['manter', 'tirar']) x loop
+    begin
+      update public.agenda_config set equipe_silencio_acao = v_txt where id;
+      perform pg_temp.rodar(d03, '07:45');
+      perform pg_temp.saiu(d03, '07:46');
+      -- um acorde da agenda que saiu às 08:30 (outro assunto do dia: a ação já executada e contada pelo envio de sempre)
+      insert into public.agenda_acoes (criada_em, dia, executada, origem, tipo, service_order_id, os_ids, payee_id, depois, texto)
+      values (pg_temp.em(d03, '08:29'), d03, true, 'equipe', 'equipe', c_vand, array[c_vand], c_gustavo,
+              jsonb_build_object('motivo', 'teste_acorde_das_8h', 'dia', d03), 'Um acorde de outro assunto, às 08:30.')
+      returning id into v_id;
+      r1 := pg_temp.acordou(v_id, d03, '08:30');
+      r := pg_temp.rodar(d03, '09:00');
+      if v_txt = 'manter' then
+        v_res := pg_temp.ok(v_res, 'S11 (conserto A) ''manter'', com um acorde que já saiu às 08:30 (a cota do dia, 1, gasta): o "Mantive o dia dele" sai às 09:00 mesmo assim — os dois no dia',
+          (select count(*) from public.agenda_acoes e where e.dia = d03 and e.contada_via = 'acorde') = 1
+          and jsonb_array_length(r -> 'acordes') = 1 and r -> 'acordes' -> 0 ->> 'texto' = c_dono1,
+          coalesce((r -> 'acordes')::text, '(nenhum)'));
+      else
+        v_res := pg_temp.ok(v_res, 'S11b o controle: com ''tirar'' (o padrão) e o mesmo acorde das 08:30, o acorde do silêncio (o replano) é cortado pela cota, como antes',
+          (pg_temp.acao(c_roberto, d03, 'silencio')).id is not null and jsonb_array_length(r -> 'acordes') = 0
+          and (select count(*) from public.agenda_acoes e where e.dia = d03 and e.contada_via = 'acorde') = 1,
+          coalesce((r -> 'acordes')::text, '(nenhum)'));
+      end if;
+      raise exception 'desfaz' using errcode = 'P0099';
+    exception when sqlstate 'P0099' then null;
+    end;
+  end loop;
+
+  -- ── B. (conserto B, com a chave no padrão 'tirar': vale com qualquer chave) O "como foi" na qua 04/11, que não é o último dia ──
+  for v_txt in select x from unnest(array['ok', 'tudo certo', 'ok, terminei', 'terminei']) x loop
+    begin
+      perform pg_temp.rodar(d04, '17:00');
+      r2 := pg_temp.resp(v_txt, d04, '17:15');
+      r := pg_temp.rodar(d04, '17:30');
+      r1 := pg_temp.rodar(d04, '17:45');
+      p2 := pg_temp.msg(c_roberto, 'como_foi', d04);
+      if v_txt in ('ok', 'tudo certo') then
+        v_res := pg_temp.ok(v_res, format('B1%s o "%s" puro ao "como foi" num dia que não é o último: nenhuma pergunta (nem "disse que terminou", nem nos tiques seguintes); o leitor como hoje (tipo ok, terminou por padrão); a diária lançada e os meios-dias cumpridos, como hoje',
+                                          case when v_txt = 'ok' then '' else 'b' end, v_txt),
+          (r2 ->> 'consumiu')::boolean and p2.estado = 'respondida' and p2.leitura ->> 'tipo' = 'ok' and (p2.leitura ->> 'terminou')::boolean
+          and (r #>> '{contagens,conclusao,perguntas}')::int = 0 and (r1 #>> '{contagens,conclusao,perguntas}')::int = 0
+          and not exists (select 1 from public.agenda_perguntas q where q.service_order_id = c_vand and q.tipo = 'concluir')
+          and not exists (select 1 from public.agenda_perguntas q where q.payee_id = c_roberto and q.texto like '%terminou%')
+          and exists (select 1 from public.agenda_acoes x where x.tipo = 'diaria' and x.payee_id = c_roberto and x.executada
+                                                         and x.texto like 'Roberto, qua 04/11: dia inteiro no Vanderlei (OS-00069)%')
+          and (select string_agg(x.turno || ' ' || coalesce(x.resultado, '-'), ', ' order by x.turno) from public.agenda_alocacoes x
+                where x.payee_id = c_roberto and x.dia = d04 and x.estado in ('publicada', 'fixada')) = 'manha cumprido, tarde cumprido',
+          format('leitura %s | perguntas %s/%s | %s', p2.leitura ->> 'tipo', r #>> '{contagens,conclusao,perguntas}', r1 #>> '{contagens,conclusao,perguntas}',
+                 coalesce((select string_agg(q.texto, ' ; ') from public.agenda_perguntas q where q.service_order_id = c_vand), '(nenhuma pergunta)')));
+      else
+        v_res := pg_temp.ok(v_res, format('B2%s "%s" num dia que não é o último: a pergunta de hoje, igual ("O Roberto disse que terminou o Vanderlei (OS-00069), mas o plano tinha mais 1 dia (qui 05/11). *concluiu Vanderlei* fecha a OS."), e a OS não conclui',
+                                          case when v_txt = 'ok, terminei' then '' else 'b' end, v_txt),
+          p2.leitura ->> 'tipo' = 'turnos' and (p2.leitura ->> 'terminou')::boolean
+          and (r #>> '{contagens,conclusao,perguntas}')::int = 1
+          and exists (select 1 from public.agenda_perguntas q
+                       where q.tipo = 'concluir' and q.estado = 'aberta' and q.service_order_id = c_vand
+                         and q.texto = 'O Roberto disse que terminou o Vanderlei (OS-00069), mas o plano tinha mais 1 dia (qui 05/11). *concluiu Vanderlei* fecha a OS.')
+          and (select so.status from public.service_orders so where so.id = c_vand) <> 'completed',
+          format('leitura %s | %s', p2.leitura ->> 'tipo', coalesce((select string_agg(q.texto, ' ; ') from public.agenda_perguntas q where q.service_order_id = c_vand), '(nenhuma pergunta)')));
+      end if;
+      raise exception 'desfaz' using errcode = 'P0099';
+    exception when sqlstate 'P0099' then null;
+    end;
+  end loop;
+  begin
+    update public.agenda_alocacoes set estado = 'cancelada', cancelada_motivo = 'dono'
+     where service_order_id = c_vand and dia = d05 and payee_id = c_gustavo and estado in ('publicada', 'fixada');
+    perform pg_temp.rodar(d05, '17:00');
+    perform pg_temp.resp('ok', d05, '17:15');
+    r := pg_temp.rodar(d05, '17:30');
+    v_res := pg_temp.ok(v_res, 'B3 o último dia (qui 05/11, só o técnico) com o "ok" puro e a chave no padrão: o do A3, igual — a pergunta "respondeu *ok*" e a OS não conclui',
+      (select so.status = 'in_progress' from public.service_orders so where so.id = c_vand)
+      and (r #>> '{contagens,conclusao,perguntas}')::int = 1 and (r #>> '{contagens,conclusao,concluidas}')::int = 0
+      and exists (select 1 from public.agenda_perguntas q where q.chave = c_chave and q.estado = 'aberta' and q.texto = c_ok),
+      (r #> '{contagens,conclusao}')::text);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
