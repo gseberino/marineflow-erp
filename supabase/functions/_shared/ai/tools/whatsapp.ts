@@ -20,7 +20,6 @@ import { diasDeValidade } from "../../dias-de-validade.ts";
 import { guardarEEntregar, impressaoDigitalDoDocumento, montarDocumentoDaOrdem, montarResumoDeValores } from "../../pdf/gerar-e-guardar.ts";
 import { desviadoPorTeste, modoDeTesteSemNumero, numeroDeTesteAtivo } from "../../whatsapp/marcar-enviado.ts";
 import { normalizePhoneNumber } from "../../whatsapp/normalize.ts";
-import { pixEsperandoNoExtrato } from "./pix-esperando.ts";
 import {
   cadastrarContatoDoAgendamento,
   destinoDoAgendamento,
@@ -38,6 +37,19 @@ import { validarMensagem } from "./resposta.ts";
 import { agrupadoEm, ehOsAgrupada } from "./service-orders.ts";
 // Frente financeiro (07/10/2026): o lembrete enviado entra no histórico da cobrança, como na tela.
 import { registrarEnvioDaCobranca } from "./cobrancas.ts";
+// Lembrete individual (25/11/2026): o valor e o vencimento pela CONTA a receber, as travas, o cartão e o retrato moram ao lado.
+import {
+  CARGOS_DO_LEMBRETE,
+  ehErro as lembreteRecusado,
+  type LembreteDeCobranca,
+  montarLembreteDeCobranca,
+  oQueMudouNoLembrete,
+  relogioDoLembrete,
+  retratoDoLembreteDeCobranca,
+  SEM_CARGO_DO_LEMBRETE,
+  SEM_RETRATO_DO_LEMBRETE,
+} from "./lembrete-de-cobranca.ts";
+import { horaEmBrasilia } from "../../receivables/cobrar-juntas.ts";
 // Retorno F5 (P11.4): a O21 e a O22 que o banco devolve passam pelo validador do retorno (o isolamento proíbe só o caminho
 // contrário: _shared/retorno/ nunca importa _shared/ai/).
 import { validarSaida } from "../../retorno/validador.ts";
@@ -1150,7 +1162,13 @@ export const whatsappTools: ToolDef[] = [
   },
   {
     name: "send_collection_reminder",
-    description: "Envia um lembrete de cobrança por WhatsApp para o contato da cobrança.",
+    description:
+      "Envia UM lembrete de cobrança por WhatsApp para o contato da cobrança (collection_id de list_pending_collections). O valor " +
+      "e o vencimento que vão na mensagem vêm da CONTA A RECEBER ligada à cobrança (o saldo de hoje, não o valor que a cobrança " +
+      "guardava); cobrança sem conta usa o próprio valor. Sem custom_message vai o texto padrão; com ela, a frase é o texto " +
+      "inteiro. A chamada já pede o 'sim' ao dono mostrando o número, o valor conferido e a mensagem exata: não pergunte antes. " +
+      "Recusa cobrança ou conta paga/cancelada, valor abaixo do piso, entrada do cliente esperando no Extrato, opt-out e cadastro " +
+      "genérico sem contato próprio. Para cobrar TUDO o que o cliente deve numa mensagem só → cobrar_juntas, com o cliente.",
     input_schema: {
       type: "object",
       properties: { collection_id: { type: "string" }, custom_message: { type: "string" } },
@@ -1158,62 +1176,60 @@ export const whatsappTools: ToolDef[] = [
     },
     // Sempre envia pro contato da cobrança — sempre cliente, nunca equipe.
     risk: "high",
-    roles: NON_TECHNICIAN_ROLES,
+    // Só admin e financeiro (revisão de 25/11/2026): o MESMO que CARGOS_DO_LEMBRETE, escrito aqui porque o import é circular
+    // (lembrete-de-cobranca.ts → … → este arquivo) e a constante importada ainda não existe quando esta lista é montada.
+    roles: ["admin", "financial"],
+    // O retrato do que o cartão mostrou (25/11/2026): cobrança, telefone, valor, vencimento e texto. Mudou até o "sim", não envia.
+    retratoDaPendencia: (args, ctx) => retratoDoLembreteDeCobranca(ctx.admin, args),
     async execute(args, ctx) {
       const blocked = blockTechnician(ctx);
       if (blocked) return blocked;
+      // A pendência de antes de 25/11/2026 pode ser de um vendedor: o cargo de quem confirma decide.
+      if (!CARGOS_DO_LEMBRETE.includes(ctx.userRole as (typeof CARGOS_DO_LEMBRETE)[number])) return { error: SEM_CARGO_DO_LEMBRETE, nada_enviado: true };
       const { sb, admin, jwt } = ctx;
-      const { data: col, error } = await sb
-        .from("collections")
-        .select("id, amount, due_date, contact_whatsapp, phone, contact_name, client_id, description, status")
-        .eq("id", args.collection_id)
-        .maybeSingle();
-      if (error || !col) return { error: "Cobrança não encontrada" };
-      // Cobrança paga ou cancelada não se cobra (07/10/2026): cobrar quem pagou custa a relação.
-      if (col.status === "paid" || col.status === "cancelled") {
-        return { error: `Esta cobrança está ${col.status === "paid" ? "paga" : "cancelada"}: não mando lembrete.` };
+      // O "sim" foi sobre o retrato (o valor da conta, o número e a mensagem que o cartão mostrou): sem ele, não envia.
+      // Só a pendência chama este execute (risco alto e nunca autônoma), e ela sempre grava o retrato.
+      const retrato = lerRetrato(args);
+      if (!retrato) return { error: SEM_RETRATO_DO_LEMBRETE, nada_enviado: true };
+      // A leitura, o valor e o vencimento pela CONTA a receber e as travas, na ordem de sempre (lembrete-de-cobranca.ts).
+      let l: LembreteDeCobranca | { error: string };
+      try {
+        l = await montarLembreteDeCobranca(sb, admin, args);
+      } catch (e) {
+        return { error: `Nada foi enviado: não consegui conferir a cobrança agora (${String((e as Error)?.message ?? e)}). Peça de novo.`, nada_enviado: true };
       }
-      // D21 (dono, 17/09/2026): piso de materialidade — abaixo dele não se cobra por mensagem.
-      const { data: cfgPiso } = await admin.from("app_settings").select("value").eq("key", "collection_min_amount").maybeSingle();
-      const piso = Number((cfgPiso as { value?: string } | null)?.value) || 0;
-      if (piso > 0 && Number(col.amount) < piso) {
-        return { error: `Cobrança de R$ ${Number(col.amount).toFixed(2)} fica abaixo do piso de R$ ${piso} (Configurações): só listar, não cobrar por WhatsApp.` };
+      if (lembreteRecusado(l)) return { error: l.error, nada_enviado: true };
+      const mudou = oQueMudouNoLembrete(retrato, l);
+      if (mudou) {
+        return { error: `Nada foi enviado: ${mudou} depois do pedido. Peça de novo que eu confiro e mostro a mensagem atualizada.`, nada_enviado: true };
       }
-      // Pix do cliente esperando no Extrato: pode ser este pagamento. Não cobra até decidir a linha
-      // (aplicar na conta, ou aprovar como receita nova) — cobrar quem pagou custa a relação.
-      if (col.client_id) {
-        const pix = (await pixEsperandoNoExtrato(ctx, [String(col.client_id)])).get(String(col.client_id)) ?? [];
-        if (pix.length) {
-          const lista = pix.map((p) => `R$ ${p.valor.toFixed(2)}${p.data ? ` de ${p.data}` : ""}`).join(", ");
-          return {
-            error: `Este cliente tem entrada esperando no Extrato (${lista}): pode ser este pagamento. `
-              + "Confira no Extrato (Este Pix paga…) antes de cobrar; se for outra coisa, decida a linha lá e cobre depois.",
-          };
-        }
-      }
-      // Perfil do contato: nome usado (display_name) e opt-out.
-      let c: any = null;
-      if (col.client_id) {
-        const r = await sb.from("clients").select("whatsapp, phone, name, display_name, opt_out_whatsapp, generico").eq("id", col.client_id).maybeSingle();
-        c = r.data;
-      }
-      if (c?.opt_out_whatsapp) return { error: "Este cliente pediu para não receber mensagens no WhatsApp (opt-out). Cobre por outro canal." };
-      // A cobrança pode ter contato próprio; só recusa quando o destino seria o telefone do cadastro genérico.
-      if (c?.generico && !col.contact_whatsapp && !col.phone) return { error: RECUSA_CLIENTE_FINAL, nada_enviado: true };
-      const phone = col.contact_whatsapp || col.phone || c?.whatsapp || c?.phone;
-      if (!phone) return { error: "Sem telefone para enviar o lembrete." };
-      const fmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(col.amount);
-      const nomeUsado = c?.display_name || col.contact_name || (c?.name ? String(c.name).trim().split(/\s+/)[0] : "");
-      const msg =
-        args.custom_message ||
-        `Olá${nomeUsado ? ` ${nomeUsado}` : ""}, lembrete amigável: você possui um valor de ${fmt} com vencimento em ${col.due_date}. Qualquer dúvida estamos à disposição.`;
+      const col = l.cobranca;
+      const phone = l.telefone;
+      const msg = l.mensagem;
+      const agora = relogioDoLembrete.agora();
       // Portão: conformidade (horário, número identificado) bloqueia; estilo (ameaça) avisa.
-      const g = guardaDeEnvio(msg, { tipo: "cobranca", audiencia: "cliente", canal: "whatsapp", destinatarioIdentificado: !!col.client_id, texto: msg });
+      const g = guardaDeEnvio(msg, {
+        tipo: "cobranca", audiencia: "cliente", canal: "whatsapp", destinatarioIdentificado: !!col.client_id, texto: msg,
+        horaBrasilia: horaEmBrasilia(agora),
+      });
       if (g.bloqueado) {
         await registrarEnvio(admin, { tipo: "cobranca", audiencia: "cliente", entityKind: "client", entityId: col.client_id, phone, preview: msg, status: "blocked", blockCode: g.codigoBloqueio });
         return { error: g.motivo };
       }
-      const r = await sendWhatsapp(phone, msg, jwt, chaveDeEnvio("cobranca", col.id, diaLocal()), ctx.userId);
+      // Modo de teste (revisão de 25/11/2026, como o cobrar_juntas): o whatsapp-send desvia para o número de teste. A chave
+      // ganha ":teste" e nada se registra na cobrança — sem isso o teste marcava o cliente como cobrado e queimava a chave
+      // do dia, e o envio de verdade no mesmo dia voltava "já enviado" sem o cliente receber.
+      const modoTeste = desviadoPorTeste(ctx.settings);
+      const r = await sendWhatsapp(phone, msg, jwt, chaveDeEnvio("cobranca", col.id, diaLocal(agora), modoTeste ? "teste" : null), ctx.userId);
+      if (r.ok && modoTeste && r.deduplicated) {
+        const texto = "Este lembrete já tinha saído hoje para o número de TESTE (modo de teste ligado); não reenviei. Nada foi registrado na cobrança.";
+        return { ...r, aviso: texto, message: texto };
+      }
+      if (r.ok && modoTeste) {
+        await registrarEnvio(admin, { tipo: "cobranca", audiencia: "cliente", entityKind: "client", entityId: col.client_id, phone, preview: msg, status: "sent" });
+        const texto = "O modo de teste do WhatsApp está ligado: o lembrete foi para o número de TESTE, NÃO para o cliente. Nada foi registrado na cobrança. Diga isso.";
+        return { ...r, enviado_para: "o número de TESTE do WhatsApp (modo de teste ligado), não o cliente", aviso: texto, message: texto };
+      }
       // Enviado: o contato 'whatsapp_sent' no histórico e a situação 'enviada', como a tela faz
       // (useSendCollectionWhatsApp) — antes só o last_auto_sent_at mudava (07/10/2026).
       const avisoDoRegistro = r.ok && !r.deduplicated

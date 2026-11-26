@@ -58,6 +58,27 @@ Deno.test("erroParaODono: marcas técnicas viram frase; mensagem de negócio pas
   assertEquals(erroParaODono({ code: "23505" }), ERRO_DO_SISTEMA_PARA_O_DONO, "objeto de erro é técnico");
 });
 
+// Pacote 1, C2 (24/11/2026). A especificação previa uma frase própria para a reserva sem saldo; o dono decidiu em 24/11/2026
+// que não vai pôr crédito na reserva e não quer ser lembrado disso. A reserva que falha continua no erro comum, e o que o
+// dono lê a mais, quando o Claude também falhou, é só a causa do Claude, no topo (aviso).
+Deno.test("C2: a reserva sem saldo fica no erro comum; com a causa do Claude no topo, nada fala de crédito nem de reserva", async () => {
+  const { avisoDeQueOClaudeNaoRespondeu, causaDaFalha } = await import("./max/causa-da-falha.ts");
+  const semSaldo = "OpenRouter 402 (créditos insuficientes na conta)";
+  assertEquals(erroParaODono(semSaldo), ERRO_DO_SISTEMA_PARA_O_DONO);
+  assertEquals(erroParaODono(`ClaudeApiError: ${semSaldo}`), ERRO_DO_SISTEMA_PARA_O_DONO);
+  assertEquals(/cr[eé]dito|recarg|saldo|reserva|openrouter/i.test(ERRO_DO_SISTEMA_PARA_O_DONO), false);
+  // o que o dono lê com a reserva LIGADA quando o Claude passou do tempo e a reserva também não respondeu
+  const aviso = avisoDeQueOClaudeNaoRespondeu(causaDaFalha({ job: { error_code: "timeout", timeout_seconds: 150 }, estado: null, agora: new Date("2026-11-24T12:32:00Z") }));
+  const r = respostaDoTurnoNoWhatsApp({ texto: "", error: semSaldo, aviso }, antes);
+  assertEquals(
+    r.replyText,
+    "⚠️ O Claude não respondeu (passou do tempo máximo).\n\n⚠️ não consegui concluir agora (erro do sistema, já anotado). Tente de novo em instantes.",
+  );
+  assertEquals(/cr[eé]dito|recarg|saldo|reserva|openrouter/i.test(r.replyText), false, r.replyText);
+  // sem causa do Claude (turno que nem passou por ele), a resposta é a de sempre
+  assertEquals(respostaDoTurnoNoWhatsApp({ texto: "", error: semSaldo }, antes).replyText, `⚠️ ${ERRO_DO_SISTEMA_PARA_O_DONO}`);
+});
+
 Deno.test("texto com pendência VIVA: guarda a referência e lembra dela (05/10/2026)", () => {
   const viva = { title: "Enviar orçamento/OS ao cliente (WhatsApp)", risk_level: "high" };
   const t = respostaDoTurnoNoWhatsApp({ texto: "Não consigo tirar o link desse formato." }, antes, viva);

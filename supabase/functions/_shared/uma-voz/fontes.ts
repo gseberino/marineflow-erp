@@ -153,6 +153,25 @@ export function avisoDaVoltaDoWhatsApp(queda: { desde: string; ate: string }, te
   };
 }
 
+/**
+ * A queda e a volta do assistente (pacote 1, V1, 25/11/2026): o Claude da assinatura parou de atender com o WhatsApp de
+ * pé. Uma chave por queda e por momento (a mesma queda não acorda duas vezes) e assunto próprio, não "sistema": o
+ * guardado lê o aviso "sistema" como "a manhã não chegou". A volta é fato novo do mesmo assunto (pode acordar no mesmo
+ * dia da queda). O guardado escreve a linha pelos dados (guardado.ts) e some com a queda que já fechou.
+ */
+export function avisoDaQuedaDoAssistente(
+  q: { id: string; desde: string; causa: string; ate?: string | null },
+  momento: "caiu" | "voltou",
+  texto: string,
+): AvisoDaFonte {
+  return {
+    fonte: "assistente", chave: `assistente:${momento}:${q.id}`, assunto: "assistente", destino: "acorde", texto,
+    referencia: `queda:${q.id}`,
+    dados: { queda_id: q.id, momento, desde: q.desde, causa: q.causa, ...(q.ate ? { ate: q.ate } : {}) },
+    ...(momento === "voltou" ? { novo_fato: true } : {}),
+  };
+}
+
 // ── lembretes de revisão (lembretes-de-revisao) ────────────────────────────────────────────────
 
 /** A rodada das 09:35 (ter–qui) é a sua própria mensagem fixa: fica como está. */

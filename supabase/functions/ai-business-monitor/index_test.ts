@@ -109,7 +109,10 @@ Deno.test("assistente falhando: limite antes do claim, portão com a voz ligada,
   const ini = fonte.indexOf("// (7) O assistente que continua falhando");
   assert(ini > 0, "falta o bloco");
   const bloco = fonte.slice(ini, fonte.indexOf("if (alerts.length === 0)", ini));
-  assertStringIncludes(bloco, "const falhas = await falhasNaUltimaHora(admin, now);");
+  // (pacote 1, V1) com o vigia de queda ligado este bloco não conta nem avisa: `falhas` fica nulo, e nulo não conclui nada
+  assertStringIncludes(bloco, 'const vigiaDeQuedaLigado = (await lerModoDoVigia(admin)) === "ligado";');
+  assertStringIncludes(bloco, "const falhas = vigiaDeQuedaLigado ? null : await falhasNaUltimaHora(admin, now);");
+  assert(bloco.indexOf("try {") < bloco.indexOf("await lerModoDoVigia(admin)"), "a leitura da chave fica presa no bloco");
   assertStringIncludes(bloco, "dono && falhas !== null && falhas >= LIMITE_DE_FALHAS_NA_HORA && await claim(`assistente_falhando:${todayISO}`");
   assertStringIncludes(bloco, "falaPeloPortao(portao, dono, dono.phone)");
   assertStringIncludes(bloco, "await falarAoDono(admin");

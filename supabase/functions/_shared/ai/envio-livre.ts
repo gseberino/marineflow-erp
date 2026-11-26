@@ -3,8 +3,25 @@
 // ═══ POR QUE EXISTE ═══
 //
 // Regra do dono (24/11/2026): a mensagem de texto livre pede PIN quando vai a CLIENTE ou quando o texto cita VALOR, DATA
-// ou PROMESSA; para fornecedor e equipe basta o "sim" (se o texto a eles citar valor, data ou promessa, pede PIN).
+// ou PROMESSA; para fornecedor e equipe basta o "sim". Desde 25/11/2026 (cartão IA-19, abaixo), a eles o PIN é só quando
+// o texto fala de dinheiro.
 // Destinatário sem cadastro conta como cliente.
+//
+// (25/11/2026, cartão IA-19) Para fornecedor, equipe e o próprio dono o PIN passou a ser só pelo DINHEIRO. A escolha do
+// dono: "PIN só quando o texto fala de dinheiro (valor, Pix, pagamento). Data, horário e prazo saem só com o 'sim'."
+// O aviso do horário ao técnico sai com o "sim"; "fecha por R$ 4.200" ao fornecedor pede PIN. Para cliente, parceiro,
+// número sem cadastro e número em mais de um tipo de cadastro nada mudou: PIN sempre, e o motivo segue dizendo valor,
+// data e promessa. Ver CONTEUDO_PARA_FORNECEDOR_E_EQUIPE.
+//
+// (25/11/2026, cartão IA-20) O número que está no cadastro de clientes E no de fornecedores deixa de contar como cliente
+// quando o fornecedor é ativo e antigo (mais de 24 horas) e NENHUM cadastro de cliente desse número tem orçamento nem OS
+// (linha em service_orders, de qualquer status). A escolha do dono: "Contar como fornecedor quando o cadastro de cliente
+// desse número nunca teve orçamento nem OS. Os 26 passam a sair só com o 'sim'; se um deles virar cliente de verdade,
+// volta a pedir PIN sozinho". Com client_id o envio continua sendo a cliente. Medido em produção em 25/11/2026 (só
+// contagem): 26 números são de fornecedor ativo e de cliente ao mesmo tempo, e nenhum dos 26 tem orçamento, OS, conta a
+// receber nem embarcação. Só com fornecedor inativo são 307 números, 5 deles com orçamento ou OS: para esses nada muda
+// (fornecedor inativo que também é cliente segue valendo os dois, PIN). Nenhum fornecedor tinha sido criado ou alterado
+// nas 24 horas anteriores. Ver quemRecebe e algumTemOrcamentoOuOs.
 //
 // Até aqui o PIN era decidido pelo ARGUMENTO que o modelo escolhia: com client_id, PIN; com to_phone, só "sim". E a
 // descrição da ferramenta manda usar to_phone para responder uma conversa. Em 90 dias, 19 de 23 mensagens propostas com
@@ -106,11 +123,25 @@ async function lerLista(consulta: PromiseLike<{ data: unknown; error: unknown }>
 const texto = (v: unknown): string | null => (typeof v === "string" ? v : null);
 
 /**
+ * (25/11/2026, cartão IA-20) Algum destes cadastros de cliente tem orçamento ou ordem de serviço? Os dois ficam em
+ * service_orders, pela coluna client_id; qualquer linha, de qualquer status (rascunho, cancelada, concluída), conta como
+ * histórico. Basta saber se existe uma (limit 1). Cadastro sem id legível não dá para conferir: conta como tendo
+ * histórico (lado seguro). Leitura que falha LANÇA, como as outras.
+ */
+// deno-lint-ignore no-explicit-any
+async function algumTemOrcamentoOuOs(admin: any, clientes: Linha[]): Promise<boolean> {
+  const ids = clientes.map((c) => (texto(c.id) ?? "").trim());
+  if (ids.some((id) => id === "")) return true;
+  const linhas = await lerLista(admin.from("service_orders").select("id").in("client_id", ids).limit(1), "orçamentos e ordens de serviço");
+  return linhas.length > 0;
+}
+
+/**
  * Em que cadastros o número aparece, pelos 8 últimos dígitos (ai/phone.ts, a régua da casa). `clienteId` = o envio veio
  * com client_id e o número é o do cadastro dele: é cliente, e as outras tabelas ainda são lidas (o número pode ser
  * também de fornecedor ou da equipe).
  *
- *  · clients (whatsapp ou phone), ativo ou não            → "cliente"
+ *  · clients (whatsapp ou phone), ativo ou não            → "cliente" (menos no caso do cartão IA-20, mais abaixo)
  *  · parceiro_numeros (qualquer situação)                 → "parceiro"
  *  · suppliers (phone), ativo ou não                      → "fornecedor"
  *  · app_users ATIVO: o de quem pede → "o_proprio"; outro → "equipe". Inativo não conta (quem saiu é de fora)
@@ -119,6 +150,16 @@ const texto = (v: unknown): string | null => (typeof v === "string" ? v : null);
  *
  * O cadastro de fornecedor ou de favorecido criado ou alterado há menos de 24 horas NÃO conta (CADASTRO_RECENTE_MS):
  * a linha é pulada e `cadastroRecente` sai true. Os outros cadastros do mesmo número contam como sempre.
+ *
+ * (25/11/2026, cartão IA-20) Número de cliente que também é de fornecedor: sai "cliente" e fica só "fornecedor" quando
+ * as três condições valem juntas:
+ *   1. algum cadastro de fornecedor com o número está ATIVO (suppliers.active = true) e não é recente (a regra das 24
+ *      horas de cima). Fornecedor inativo que também é cliente segue contando os dois (PIN);
+ *   2. NENHUM dos cadastros de cliente com o número tem orçamento nem OS (algumTemOrcamentoOuOs);
+ *   3. o envio NÃO veio endereçado por client_id (com client_id é a cliente que o dono está escrevendo).
+ * O número volta a contar como cliente sozinho, no primeiro orçamento. service_orders só é lida quando 1 e 3 já valem e
+ * há cliente casado: o caso comum (só cliente, só fornecedor, ninguém) não ganha leitura. As outras regras seguem
+ * valendo sobre o que sobrar (se o número também é de parceiro ou da equipe, continua em mais de um cadastro: PIN).
  *
  * Leitura que falha LANÇA; quem chama trata como risco alto. `admin` é o service-role: o risco não pode depender do
  * que a RLS de quem pede deixa ver. `agora` só existe para o teste escolher a hora.
@@ -136,7 +177,7 @@ export async function quemRecebe(
   const L = LIMITE_POR_CADASTRO;
   const [clientes, fornecedores, favorecidos, usuarios, parceiros] = await Promise.all([
     lerLista(admin.from("clients").select("id, whatsapp, phone").or(`whatsapp.ilike.${padrao},phone.ilike.${padrao}`).limit(L), "clientes"),
-    lerLista(admin.from("suppliers").select("id, phone, created_at, updated_at").ilike("phone", padrao).limit(L), "fornecedores"),
+    lerLista(admin.from("suppliers").select("id, phone, active, created_at, updated_at").ilike("phone", padrao).limit(L), "fornecedores"),
     lerLista(admin.from("payees").select("id, phone, active, app_user_id, created_at, updated_at").ilike("phone", padrao).limit(L), "favorecidos"),
     lerLista(
       admin.from("app_users").select("id, phone, phone_normalized, active").or(`phone_normalized.ilike.${padrao},phone.ilike.${padrao}`).limit(L),
@@ -147,15 +188,20 @@ export async function quemRecebe(
 
   const achados = new Set<Destino>();
   if (quem.clienteId) achados.add("cliente");
-  if (clientes.some((c) => mesmoTelefone(texto(c.whatsapp), telefone) || mesmoTelefone(texto(c.phone), telefone))) achados.add("cliente");
+  const clientesDoNumero = clientes.filter((c) => mesmoTelefone(texto(c.whatsapp), telefone) || mesmoTelefone(texto(c.phone), telefone));
+  if (clientesDoNumero.length > 0) achados.add("cliente");
   if (parceiros.some((n) => n.chave === chave)) achados.add("parceiro");
   // Fornecedor e favorecido são os cadastros em que o assistente escreve: o criado ou alterado há menos de 24 horas é pulado.
   const agoraMs = agora.getTime();
   let recente = false;
+  let fornecedorAtivoEAntigo = false;
   for (const s of fornecedores) {
     if (!mesmoTelefone(texto(s.phone), telefone)) continue;
     if (cadastroRecente(s, agoraMs)) recente = true;
-    else achados.add("fornecedor");
+    else {
+      achados.add("fornecedor");
+      if (s.active === true) fornecedorAtivoEAntigo = true;
+    }
   }
   for (const u of usuarios) {
     if (u.active !== true) continue;
@@ -166,6 +212,11 @@ export async function quemRecebe(
     if (f.active !== true || !mesmoTelefone(texto(f.phone), telefone)) continue;
     if (cadastroRecente(f, agoraMs)) recente = true;
     else achados.add(f.app_user_id && f.app_user_id === quem.userId ? "o_proprio" : "equipe");
+  }
+  // (IA-20) Fornecedor ativo e antigo cujo número também está no cadastro de clientes, sem orçamento nem OS e sem
+  // client_id no envio: conta só como fornecedor. A leitura de service_orders fica por último na condição, de propósito.
+  if (fornecedorAtivoEAntigo && !quem.clienteId && clientesDoNumero.length > 0 && !(await algumTemOrcamentoOuOs(admin, clientesDoNumero))) {
+    achados.delete("cliente");
   }
   const destinos = ORDEM_DOS_DESTINOS.filter((d) => achados.has(d));
   return { telefone, destinos: destinos.length > 0 ? destinos : ["sem_cadastro"], ...(recente ? { cadastroRecente: true } : {}) };
@@ -186,6 +237,13 @@ const DEPOIS = "(?![\\p{L}\\p{N}])";
 function semAcento(s: string): string {
   return s.normalize("NFKC").toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
 }
+
+/**
+ * O número inteiro (o grupo dentro do lookahead não volta atrás: "30 dias" não vira "3" + "0 dias"), desde que não seja
+ * prazo, hora, data ou quantidade.
+ */
+const NUMERO_QUE_E_PRECO = "(?=(\\d[\\d.,]*))\\1(?!\\s*(?:[/:]|(?:dias?|semanas?|mes|meses|anos?|horas?|hs?|min|minutos?|unidades?|un" +
+  "|pecas?|itens?|caixas?|metros?|m|kg|litros?|l|pes|vezes|x)" + DEPOIS + "))";
 
 // O que a lista do validador não tem, porque foi escrita para o texto FIXO do retorno. No texto livre o valor também vem
 // abreviado ou por extenso, sem moeda ("uns 2 mil", "trezentos", "sai 350"), e a data vem relativa ("semana que vem",
@@ -210,6 +268,34 @@ const VALOR_NO_TEXTO_LIVRE: RegExp[] = [
       "|faco\\s+por|fazemos\\s+por|fecho\\s+por|fechamos\\s+por)\\s+(?:uns\\s+|umas\\s+|por\\s+|a\\s+)?\\d",
     "u",
   ),
+  // (Revisão do IA-19, 25/11/2026) Preço fechado em número sem moeda: "fecha por 4.200", "fechado em 3800", "faz por
+  // 3800?", "acertamos 4200", "Combinado em 350". Para fornecedor e equipe o valor é o único gatilho do PIN, e o próprio
+  // exemplo do dono sem o "R$" passava só com o "sim". O número que é prazo, hora, data ou quantidade não conta
+  // ("fechado por 3 dias", "fecha em 30/11", "combinado 10h", "combinamos 10 peças").
+  new RegExp(
+    ANTES + "(?:fecha|fechad[oa]|fechou|fechar|fechamos|fecho|faz|fazer|faria|fazemos|faco|acertamos|acertad[oa]|acertei|acertou" +
+      "|combinad[oa]|combinamos|combinei|combinou)\\s+(?:por|em)\\s+" + NUMERO_QUE_E_PRECO,
+    "u",
+  ),
+  new RegExp(ANTES + "(?:acertamos|acertad[oa]|acertei|acertou|combinad[oa]|combinamos|combinei|combinou)\\s+(?:de\\s+)?" + NUMERO_QUE_E_PRECO, "u"),
+];
+
+// (25/11/2026, cartão IA-19) Pagamento falado sem número. Para fornecedor e equipe o PIN passou a ser só pelo dinheiro,
+// e "já paguei", "vou transferir agora" e "depósito feito" não trazem moeda nem número para as listas de cima acharem.
+// As três famílias inteiras (pagar, transferir, depositar), palavra inteira e sem acento: "apagar" e "página" não casam.
+// Ficam de fora, de propósito, as palavras do pedido comum a fornecedor (orçamento, cotação, estoque, entrega, nota,
+// comprovante): "me manda o orçamento", "tem em estoque?" e "chega quando?" saem só com o "sim".
+// Lado seguro conhecido: "deposito" também é o depósito de guardar peça ("tem no depósito?"), e acusa.
+const PAGAMENTO_FALADO: RegExp[] = [
+  new RegExp(
+    ANTES + "(?:pagar|pago|paga|pagos|pagas|paguei|pagou|pagamos|pagam|pagaram|pagando|pague|paguem|pagarei|pagara|pagaremos|pagarao)" + DEPOIS,
+    "u",
+  ),
+  new RegExp(
+    ANTES + "(?:transferir|transferi|transfiro|transfere|transferiu|transferimos|transferindo|transferid[oa]s?|transferencias?)" + DEPOIS,
+    "u",
+  ),
+  new RegExp(ANTES + "(?:depositar|depositei|deposita|depositou|depositamos|depositando|depositad[oa]s?|depositos?)" + DEPOIS, "u"),
 ];
 
 const DATA_NO_TEXTO_LIVRE: RegExp[] = [
@@ -232,8 +318,9 @@ const DATA_NO_TEXTO_LIVRE: RegExp[] = [
 /**
  * O texto cita valor, data/hora ou promessa? Erra para o lado de ACHAR (um PIN a mais custa pouco; um valor ou uma
  * promessa que sai sem o dono ver custa caro).
- *   valor    = a lista do validador do retorno (R$, %, 350,00, reais, pix, preço, boleto, sinal, "valor de 3"…) ou valor
- *              abreviado, por extenso ou depois de verbo de preço;
+ *   valor    = a lista do validador do retorno (R$, %, 350,00, reais, pix, preço, boleto, sinal, "valor de 3"…), valor
+ *              abreviado, por extenso ou depois de verbo de preço, ou pagamento falado sem número ("já paguei",
+ *              "transferência feita", "vou depositar"). É o "fala de dinheiro" da regra de fornecedor e equipe;
  *   data     = a lista do validador (dd/mm, dia da semana, hoje/amanhã/ontem, mês, 19h, 21:40, 30 min) ou data relativa;
  *   promessa = a lista do validador ("garanto", "pode deixar", "fica pronto") ou a promessa do dono de ai/promessa.ts
  *              ("te mando", "vou enviar", "amanhã mando", "deixa comigo").
@@ -245,7 +332,7 @@ export function conteudoQuePedePin(textoDaMensagem: unknown): ConteudoDoTexto {
     const doValidador = citaValorDataOuPromessa(bruto);
     const t = semAcento(bruto);
     return {
-      valor: doValidador.valor || VALOR_NO_TEXTO_LIVRE.some((r) => r.test(t)),
+      valor: doValidador.valor || VALOR_NO_TEXTO_LIVRE.some((r) => r.test(t)) || PAGAMENTO_FALADO.some((r) => r.test(t)),
       data: doValidador.data || DATA_NO_TEXTO_LIVRE.some((r) => r.test(t)),
       promessa: doValidador.promessa || detectarPromessa(bruto, new Date()) !== null,
     };
@@ -286,10 +373,16 @@ export function avisoDaFraseDoAssistente(frase: unknown): string | null {
 // ─── A regra ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * As duas leituras da regra do dono. true (a que vale, confirmada em 24/11/2026): o conteúdo vale para todos, e a
- * mensagem a fornecedor ou equipe que cita valor, data ou promessa pede PIN. false: fornecedor e equipe sempre só "sim".
+ * O que, no texto, faz a mensagem a fornecedor, equipe ou ao próprio dono pedir PIN. As três leituras da regra do dono:
+ *   "dinheiro" (a que vale, cartão IA-19 de 25/11/2026): só quando o texto fala de dinheiro (o campo `valor`); data,
+ *              hora, prazo e promessa, sozinhos, saem só com o "sim";
+ *   "tudo"     (a de 24/11/2026): valor, data ou promessa pedem PIN;
+ *   "nada"     : fornecedor e equipe sempre só o "sim".
+ * Voltar atrás é trocar a palavra da constante (uma linha). Para cliente, parceiro, número sem cadastro e número em mais
+ * de um tipo de cadastro a leitura não muda nada: PIN sempre.
  */
-export const CONTEUDO_VALE_PARA_FORNECEDOR_E_EQUIPE = true;
+export type ConteudoParaFornecedorEEquipe = "dinheiro" | "tudo" | "nada";
+export const CONTEUDO_PARA_FORNECEDOR_E_EQUIPE: ConteudoParaFornecedorEEquipe = "dinheiro";
 
 const ROTULO_DO_DESTINO: Record<Destino, string> = {
   cliente: "de cliente",
@@ -308,18 +401,22 @@ export const CADASTRO_FEITO_HA_POUCO = "o cadastro deste número foi criado ou a
 
 /**
  * A regra pura (sem banco): risco e motivo pelo destino e pelo conteúdo. O motivo é o que o dono lê depois de
- * "🔒 No WhatsApp, pede PIN: ". null = só o "sim" (fornecedor, equipe ou o próprio dono, com texto que não cita nada).
+ * "🔒 No WhatsApp, pede PIN: ". null = só o "sim" (fornecedor, equipe ou o próprio dono, com texto que não fala de
+ * dinheiro).
  *
- *  · sem número conferido                          → PIN
- *  · número em mais de um tipo de cadastro         → PIN ("vale o mais protegido"), mesmo sem cliente entre eles
- *  · cliente, parceiro ou sem cadastro             → PIN (sem cadastro por ter só cadastro feito há pouco: diz isso)
- *  · fornecedor, equipe ou o próprio, com conteúdo → PIN (com conteudoParaTodos, a leitura que vale)
- *  · fornecedor, equipe ou o próprio, sem conteúdo → só "sim"
+ *  · sem número conferido                            → PIN
+ *  · número em mais de um tipo de cadastro           → PIN ("vale o mais protegido"), mesmo sem cliente entre eles
+ *  · cliente, parceiro ou sem cadastro               → PIN (sem cadastro por ter só cadastro feito há pouco: diz isso)
+ *  · fornecedor, equipe ou o próprio, com dinheiro   → PIN, e o motivo diz só o que disparou: "o texto cita valor"
+ *  · fornecedor, equipe ou o próprio, sem dinheiro   → só "sim", mesmo com data, hora, prazo ou promessa no texto
+ *
+ * Nas quatro primeiras linhas o motivo junta tudo o que o texto cita (valor, data e promessa), como sempre. `leitura`
+ * só existe para o teste e para voltar atrás (CONTEUDO_PARA_FORNECEDOR_E_EQUIPE); leitura que não existe vale "tudo".
  */
 export function riscoDoEnvioLivrePorDestino(
   q: QuemRecebe,
   c: ConteudoDoTexto,
-  conteudoParaTodos: boolean = CONTEUDO_VALE_PARA_FORNECEDOR_E_EQUIPE,
+  leitura: ConteudoParaFornecedorEEquipe = CONTEUDO_PARA_FORNECEDOR_E_EQUIPE,
 ): { risco: "high" | "medium"; motivo: string | null } {
   const cita = oQueCita(c);
   const doTexto = cita ? `o texto cita ${cita}` : null;
@@ -331,8 +428,10 @@ export function riscoDoEnvioLivrePorDestino(
   else if (destinos[0] === "parceiro") doDestino = "o número é de parceiro";
   else if (destinos[0] === "sem_cadastro") doDestino = q.cadastroRecente === true ? CADASTRO_FEITO_HA_POUCO : "o número não tem cadastro (vale como cliente)";
   if (doDestino) return { risco: "high", motivo: doTexto ? `${doDestino}; ${doTexto}` : doDestino };
-  if (conteudoParaTodos && doTexto) return { risco: "high", motivo: doTexto };
-  return { risco: "medium", motivo: null };
+  // Daqui para baixo o destino é um só: fornecedor, equipe ou o próprio dono. Quem decide é o texto, pela leitura que vale.
+  if (leitura === "nada") return { risco: "medium", motivo: null };
+  if (leitura === "dinheiro") return c.valor ? { risco: "high", motivo: "o texto cita valor" } : { risco: "medium", motivo: null };
+  return doTexto ? { risco: "high", motivo: doTexto } : { risco: "medium", motivo: null };
 }
 
 /**

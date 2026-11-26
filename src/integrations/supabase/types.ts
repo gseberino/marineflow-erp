@@ -2666,6 +2666,57 @@ export type Database = {
         }
         Relationships: []
       }
+      assistente_quedas: {
+        Row: {
+          ate: string | null
+          avisado_em: string | null
+          avisado_por: string | null
+          aviso_id: string | null
+          causa: string
+          criado_em: string
+          desde: string
+          detalhe: string | null
+          dono_soube: string | null
+          fechada_por: string | null
+          id: string
+          tipo: string
+          visto_em: string
+          volta_avisada_em: string | null
+        }
+        Insert: {
+          ate?: string | null
+          avisado_em?: string | null
+          avisado_por?: string | null
+          aviso_id?: string | null
+          causa: string
+          criado_em?: string
+          desde: string
+          detalhe?: string | null
+          dono_soube?: string | null
+          fechada_por?: string | null
+          id?: string
+          tipo: string
+          visto_em?: string
+          volta_avisada_em?: string | null
+        }
+        Update: {
+          ate?: string | null
+          avisado_em?: string | null
+          avisado_por?: string | null
+          aviso_id?: string | null
+          causa?: string
+          criado_em?: string
+          desde?: string
+          detalhe?: string | null
+          dono_soube?: string | null
+          fechada_por?: string | null
+          id?: string
+          tipo?: string
+          visto_em?: string
+          volta_avisada_em?: string | null
+        }
+        Relationships: []
+      }
       audit_log: {
         Row: {
           action: string

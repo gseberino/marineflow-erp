@@ -9,6 +9,9 @@ import { STATUS_QUE_A_OC_MOVE } from "../../agenda-modo.ts";
 // Continua saindo daqui para quem já importava.
 export { generatePONumber } from "./compras-base.ts";
 
+/** Os campos que create_supplier grava: os do input_schema dele, e só eles. */
+const CAMPOS_DO_FORNECEDOR = ["name", "contact_name", "phone", "email", "city", "state"];
+
 /**
  * Depois da OC criada a partir da OS: a OS passa a "aguardando peças" pela porta (via 'oc') — de aberta,
  * aprovada ou agendada; em andamento a porta mantém e diz; aguardando o cliente (e o resto) fica como está.
@@ -422,9 +425,19 @@ export const purchasingTools: ToolDef[] = [
       const blocked = blockTechnician(ctx);
       if (blocked) return blocked;
       const { admin } = ctx;
-      const { data, error } = await admin.from("suppliers").insert(args).select().single();
+      // (Revisão do IA-20, 25/11/2026) Só os campos do schema vão ao banco. Com insert(args) cru, created_at e updated_at
+      // mandados pelo modelo gravavam um fornecedor "antigo" e pulavam a regra das 24 horas de envio-livre.ts
+      // (CADASTRO_RECENTE_MS): o número de um interessado passava a sair só com o "sim" no mesmo turno. As datas, o id e
+      // o active ficam com o banco (padrões das colunas).
+      const linha: Record<string, unknown> = {};
+      const ignorados: string[] = [];
+      for (const [campo, valor] of Object.entries((args ?? {}) as Record<string, unknown>)) {
+        if (CAMPOS_DO_FORNECEDOR.includes(campo)) linha[campo] = valor;
+        else ignorados.push(campo);
+      }
+      const { data, error } = await admin.from("suppliers").insert(linha).select().single();
       if (error) throw error;
-      return { ok: true, supplier: data };
+      return { ok: true, supplier: data, ...(ignorados.length ? { campos_ignorados: ignorados } : {}) };
     },
   },
   {

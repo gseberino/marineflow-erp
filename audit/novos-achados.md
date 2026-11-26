@@ -4602,6 +4602,8 @@ quatro estão latentes.
   chave exige `set_tool_autonomy`, que pede "sim" com PIN.
 - **Menor mudança:** decisão do dono, junto com a do NOVO-p1-s2-01. A crítica de risco do pacote 1 já pede, no S6, que subida
   de risco com motivo não seja anulada por autonomia. Não corrigido aqui.
+  (S6, 25/11/2026: no turno que leu texto de fora, as duas levam o motivo e a chave 'auto' não vale. Fora desse turno
+  continua como está descrito acima.)
 
 ### [NOVO-p1-s4-01] Aprovar observação da memória: o cartão mostra o código da nota, não o texto
 
@@ -4643,6 +4645,16 @@ quatro estão latentes.
   mesmo nome e 5 com orçamento ou OS. Aqui a conta é por cadastro de fornecedor (26 + 322 = 348); a de cima é por número (333).
   Reforça a hipótese de carga dos mesmos contatos nas duas tabelas: 316 dos 348 têm o mesmo nome nos dois cadastros, e só 5
   têm orçamento ou OS como cliente. Decisão do dono pendente (cartão IA-20).
+- **Situação (25/11/2026, commit `2e332613`):** decidido e construído no ramo `session/assistente-leva-a`; não publicado até
+  este registro. O dono respondeu o cartão IA-20: "Contar como fornecedor quando o cadastro de cliente desse número nunca teve
+  orçamento nem OS. Os 26 passam a sair só com o 'sim'; se um deles virar cliente de verdade, volta a pedir PIN sozinho". Em
+  `quemRecebe` (`supabase/functions/_shared/ai/envio-livre.ts`) o número deixa de contar como cliente quando as três condições
+  valem juntas: há cadastro de fornecedor ativo e antigo (mais de 24 horas) com ele; nenhum cadastro de cliente do número tem
+  linha em `service_orders` (orçamento ou OS, de qualquer status); e o envio não veio por `client_id`. Aí vale a regra do
+  fornecedor (só o "sim"; PIN quando o texto fala de dinheiro, NOVO-p1-s1-05). Medida de 25/11/2026 (só contagem): 26 números
+  são de fornecedor ativo e de cliente ao mesmo tempo, e nenhum dos 26 tem orçamento, OS, conta a receber nem embarcação.
+  **Continuam pedindo PIN** os 307 números só de fornecedor inativo (NOVO-p1-s1-08) e o número que também é de parceiro ou da
+  equipe. O que a regra nova abre está no NOVO-p1-s1-09.
 
 ### [NOVO-p1-s1-03] No texto livre, a régua de data do validador do retorno acusa o verbo "ter", fração e código de peça
 
@@ -4736,17 +4748,35 @@ quatro estão latentes.
   escolhendo o risco por uma escrita calada; um turno que leu texto de fora (conversa, e-mail) pode ser levado a isso.
   **Fechado na leitura** (commit "Revisão: mensagem livre…", `envio-livre.ts`, `CADASTRO_RECENTE_MS`): cadastro de fornecedor ou de
   favorecido criado ou alterado há menos de 24 horas não conta, e o cartão diz "o cadastro deste número foi criado ou alterado
-  há menos de 24 horas (vale como cliente)". **Continua aberto:** a escrita em si segue sem o "sim". Passadas 24 horas, o número
-  que o assistente cadastrou sozinho vale "fornecedor, só o sim". O S6 (subir essas escritas depois de ler texto de fora) não
-  está neste ramo.
+  há menos de 24 horas (vale como cliente)".
+  **Fechado dentro do turno que leu texto de fora** (S6, 25/11/2026, commit "Assistente: depois de ler conversa, e-mail ou
+  mensagem de fornecedor…", `_shared/ai/texto-de-fora.ts`): no turno em que o assistente leu conversa, e-mail ou mensagem de
+  fornecedor, as três escritas pedem o "sim", com a linha "Este turno leu texto de fora (conversa, e-mail ou mensagem de
+  fornecedor): por isso pede *sim*." no cartão, e com esse motivo a chave de autonomia não vale. Entram junto as outras que
+  gravam telefone: `link_contact_identity`, `link_whatsapp_lead_to_client`, `create_client`, `update_client`, contato de
+  embarcação, marina, favorecido, freelancer, cobrança e missão de acompanhamento. O teste varre o catálogo: ferramenta nova
+  que grave e aceite telefone nos argumentos tem de entrar na lista ou numa exceção com motivo.
+  **Continua aberto:** (1) fora desse turno a escrita segue sem o "sim": o pedido ditado ("cadastra o fornecedor X, telefone Y")
+  roda direto, e o texto lido num turno ANTERIOR não marca o seguinte; passadas 24 horas, o número que o assistente cadastrou
+  sozinho vale "fornecedor, só o sim"; (2) no Claude Max, a escrita disparada em paralelo com a leitura pode passar sem a marca
+  (a lista do job só ganha o nome depois de a ferramenta rodar); (3) a marca depende da lista de ferramentas do job
+  (NOVO-p1-s6-01) e das portas de texto de terceiro que o S6 conhece (NOVO-p1-s6-02).
 - **Custo do conserto, medido em 24/11/2026 (só contagem):** quem acabou de ser cadastrado ou corrigido pede PIN por um dia. Dos
   534 fornecedores, 0 tinham sido criados ou alterados nas 24 horas anteriores e 0 nos 7 dias anteriores; 198 nos 30 dias
   anteriores (uma alteração em lote no cadastro faz todos os números tocados pedirem PIN por 24 horas). Dos 9 favorecidos, 0 nas
   24 horas e 1 nos 7 dias. Nenhuma linha sem data de criação ou de alteração; os gatilhos `set_updated_at_suppliers` e
   `payees_updated_at` existem em produção.
 - **Menor mudança:** decisão do dono (está no "Fora do pacote 1" da especificação de segurança): `create_supplier`,
-  `update_supplier` e `link_contact_to_entity` pedirem o "sim" quando gravam telefone, dentro ou fora do turno que leu texto de
-  fora. Não construído aqui.
+  `update_supplier` e `link_contact_to_entity` pedirem o "sim" quando gravam telefone também FORA do turno que leu texto de
+  fora (dentro dele, o S6 já pede). Não construído.
+- **Situação (25/11/2026, commit `a369247f`):** a revisão de segurança do IA-20 achou um caminho que pulava as 24 horas:
+  `create_supplier` gravava os argumentos crus (`insert(args)`), e o executor só descarta campo fora do schema na ferramenta
+  que chega pela rede. Com `created_at` e `updated_at` antigos nos argumentos, o fornecedor nascia "antigo", e o número sem
+  cadastro saía só com o "sim" no mesmo turno (em produção desde a revisão do S1). Consertado no ramo
+  `session/assistente-leva-a`, não publicado até este registro: `create_supplier` grava só os campos do schema, e as datas
+  ficam com o banco. `update_supplier` e `link_contact_to_entity` não tinham o furo (o gatilho `set_updated_at_suppliers`
+  regrava `updated_at` em todo update, pela migration `20260407211146`). **Continua
+  aberto** o que está acima: a escrita em si segue sem o "sim".
 
 ### [NOVO-p1-f1-05] Com a IA fora, e-mail que só fala de boleto novo ou trocado não dá alerta de golpe (decisão a confirmar)
 
@@ -4791,6 +4821,14 @@ quatro estão latentes.
   4 da conferência da leva A). Se ficar a leitura estrita, completar as listas ("fechado por", "combinado em", "vou
   transferir", "vou pagar", "confirmo o pedido", "confirmo a compra") e medir nas propostas de 90 dias antes de publicar. Não
   corrigido aqui.
+- **Situação (25/11/2026, commit `f9da297a`):** decidido, e consertado em parte, no ramo `session/assistente-leva-a`; não
+  publicado até este registro. O dono respondeu o cartão IA-19: "PIN só quando o texto fala de dinheiro (valor, Pix,
+  pagamento). Data, horário e prazo saem só com o 'sim'. Exemplo: o aviso do horário ao Alex sai com 'sim'; 'fecha por R$
+  4.200' ao fornecedor pede PIN". A fornecedor, equipe e ao próprio dono o PIN passou a depender só do valor
+  (`CONTEUDO_PARA_FORNECEDOR_E_EQUIPE = "dinheiro"`), com o motivo "o texto cita valor", e o valor ganhou o pagamento falado
+  sem número (`PAGAMENTO_FALADO`: famílias de pagar, transferir e depositar). "Vou transferir agora" passou a pedir PIN.
+  **Continuam saindo só com o "sim"** "Fechado por 350 cada" e "Confirmo o pedido das 10 baterias" (conferido em 25/11/2026
+  rodando a função: as duas voltam sem valor): ver NOVO-p1-s1-10. As listas não foram medidas nas propostas de 90 dias.
 
 ### [NOVO-p1-s1-06] O texto livre tem listas próprias de valor e de data, além das do validador do retorno
 
@@ -4804,6 +4842,9 @@ quatro estão latentes.
   própria do texto livre. Frase nova de valor ou de data passa a ter dois lugares possíveis.
 - **Menor mudança:** decisão de quem especifica: assumir a lista própria do texto livre (e resolver nela o NOVO-p1-s1-03 e o
   NOVO-p1-s1-05) ou levar essas expressões para o validador. Não mudado aqui.
+- **Situação (25/11/2026, commit `f9da297a`):** as listas próprias cresceram. Entrou `PAGAMENTO_FALADO` (3 expressões: as
+  famílias de pagar, transferir e depositar), ao lado de `VALOR_NO_TEXTO_LIVRE`, a pedido do cartão IA-19 (NOVO-p1-s1-05). O
+  validador do retorno não mudou. A decisão sobre onde essas listas devem morar continua aberta.
 
 ### [NOVO-p1-s1-07] A tabela parceiro_numeros não está no types.ts: a varredura dos .select() não confere a leitura nova
 
@@ -4867,6 +4908,564 @@ quatro estão latentes.
   repositório, um `git add` descuidado leva o lixo junto, e toda conferência de "árvore limpa" precisa desfazer à mão.
 - **Menor mudança:** `*.tsbuildinfo` no `.gitignore`, em tarefa própria. O `deno.lock` (que é versionado) e o fim de linha
   do snapshot pedem olhar à parte. Não corrigido aqui.
+
+### [NOVO-p1-s1-08] Fornecedor inativo que também está no cadastro de clientes continua pedindo PIN (307 números)
+
+- **Onde:** `supabase/functions/_shared/ai/envio-livre.ts`, `quemRecebe`, a condição 1 da regra do cartão IA-20 (commit
+  `2e332613`): só o cadastro de fornecedor com `active = true` tira o "cliente" do número. Registrado em 25/11/2026 ao
+  construir a regra (ramo `session/assistente-leva-a`).
+- **Efeito:** gravidade baixa. A mensagem de texto livre a esses números segue pedindo PIN com qualquer texto, com o motivo "o
+  número é de cliente e de fornecedor (vale o mais protegido)". Medida de 25/11/2026 (só contagem): 307 números são de
+  fornecedor inativo e de cliente ao mesmo tempo, 5 deles com orçamento ou OS. Erra para o lado seguro (um PIN a mais), e é o
+  que a escolha do dono cobre: o cartão IA-20 fala dos 26 de fornecedor ativo. `active` nulo também conta como inativo aqui
+  (a coluna aceita nulo no `types.ts`; não medi quantos fornecedores estão assim), enquanto as leituras da agenda usam
+  `coalesce(s.active, true)`.
+- **Menor mudança:** decisão do dono: limpar o cadastro (tirar de clientes quem é só fornecedor) ou estender a regra ao
+  fornecedor inativo cujo cliente não tem orçamento nem OS (tirar a condição `active`, uma linha, mais os testes). Não mudado
+  aqui.
+
+### [NOVO-p1-s1-09] Depois do IA-20, pôr o número de um interessado num cadastro de fornecedor troca o PIN pelo "sim" passadas 24 horas
+
+- **Onde:** `supabase/functions/_shared/ai/envio-livre.ts`, `quemRecebe` (regra do cartão IA-20, commit `2e332613`), somada ao
+  NOVO-p1-s1-04: `create_supplier`, `update_supplier` e `link_contact_to_entity` gravam telefone em fornecedor sem o "sim".
+  Registrado em 25/11/2026 (ramo `session/assistente-leva-a`).
+- **Efeito:** gravidade baixa. Até o IA-20, número que estava no cadastro de clientes pedia PIN sempre, estivesse ou não em
+  fornecedores. Agora o cliente que ainda não tem orçamento nem OS (um interessado recém-cadastrado) e cujo número for gravado
+  num fornecedor ativo passa a valer "fornecedor": nas primeiras 24 horas nada muda (`CADASTRO_RECENTE_MS`: "vai a cliente",
+  PIN; há teste do caminho inteiro num turno só); depois delas, a mensagem de texto livre pelo número (`to_phone`) sai só com
+  o "sim", enquanto o texto não falar de dinheiro. O histórico que conta é só `service_orders`: conversa no WhatsApp,
+  embarcação, conta a receber e agenda não fazem o número voltar a ser cliente. O que segura: o "sim" continua obrigatório
+  (`send_whatsapp_message` e `schedule_whatsapp_message` estão em `NEVER_AUTONOMOUS`); com `client_id` o envio continua
+  pedindo PIN; e o primeiro orçamento devolve o PIN sozinho. Latente: pede uma escrita no cadastro de fornecedores, 24 horas
+  e um cliente sem orçamento. Na medida de 25/11/2026 nenhum fornecedor tinha sido criado ou alterado nas 24 horas
+  anteriores, e nenhum dos 26 números de fornecedor ativo que também são de cliente tinha conta a receber nem embarcação.
+  Não conferi o valor com que `active` nasce no fornecedor criado pelo assistente (o esquema de `create_supplier` não tem a
+  coluna, vale o padrão do banco): se nascer nulo, esse cadastro não vale a condição.
+- **Menor mudança:** a do NOVO-p1-s1-04 (as três escritas pedirem o "sim" quando gravam telefone) fecha a porta. Sem ela:
+  exigir também que o cadastro de cliente seja antigo (`clients.created_at` e `updated_at` existem no `types.ts`), ou contar
+  mais sinais de cliente (embarcação, conta a receber). Decisão do dono. Não construído aqui.
+- **Situação (25/11/2026, commit `a369247f`):** a revisão de segurança do IA-20 mostrou que "nas primeiras 24 horas nada
+  muda" não valia por um caminho: `create_supplier` aceitava `created_at` e `updated_at` nos argumentos, e o fornecedor
+  nascia "antigo". Provado no banco falso: "Amanhã às 9h passo aí, pode deixar." ao interessado ia de "vai a cliente; o
+  texto cita data e promessa" (PIN) para só o "sim", no mesmo turno. Consertado no ramo `session/assistente-leva-a`, não
+  publicado até este registro: `create_supplier` grava só os campos do schema, e o teste do caminho inteiro está em
+  `tools/mensagem-livre-pin_test.ts`. Sobre o `active`: a migration `20260407211146` tem `suppliers.active DEFAULT true`, então
+  o fornecedor criado pelo assistente nasce ativo (no repositório; produção não conferida). **Continua aberto** o resto do
+  achado: passadas as 24 horas, o caminho vale. A reativação de um fornecedor inativo é outro caminho: NOVO-p1-s1-13.
+
+### [NOVO-p1-s1-10] Mensagem livre a fornecedor ou equipe: valor em número solto e compra confirmada seguem só com o "sim", e a data deixou de cobrir
+
+- **Onde:** `supabase/functions/_shared/ai/envio-livre.ts`, `conteudoQuePedePin` (o campo `valor`) e
+  `riscoDoEnvioLivrePorDestino` com a leitura "dinheiro" do cartão IA-19 (commit `f9da297a`). É o que sobrou do NOVO-p1-s1-05.
+  Conferido em 25/11/2026 rodando a função.
+- **Efeito:** gravidade baixa. Voltam sem valor, e por isso saem só com o "sim" a fornecedor, equipe e ao próprio dono:
+  "Fechado por 350 cada", "fecha por 4.200" (sem "R$"), "Combinado em 350", "o cabo é 350" (número sem moeda e sem verbo de
+  preço da lista), "Confirmo o pedido das 10 baterias" e "Pode faturar as 10 baterias." (compra confirmada sem valor). Com a
+  regra de 24/11 a data ou a promessa do mesmo texto ainda pedia PIN; pela escolha do IA-19 não pede mais: "Fechado por 350
+  cada, entrego na sexta" hoje sai só com o "sim". O cartão do "sim" mostra o texto inteiro; o que falta é o PIN. Para o outro
+  lado (um PIN a mais): "Tem no depósito?" e "Segue a transferência de titularidade do barco." acusam valor. E as palavras de
+  pagamento passaram a contar como valor também no motivo dos outros destinos e no aviso da frase do PDF e do link ("…cita
+  valor. Confira antes de aprovar."). Nada disso foi medido nas propostas reais de 90 dias.
+- **Menor mudança:** decisão do dono sobre o que é "falar de dinheiro": completar os verbos de preço ("fecha por", "fechado
+  por", "combinado em" seguidos de número; cuidado com "fechado por 3 dias") e decidir se compra confirmada ("confirmo o
+  pedido", "pode faturar") pede PIN. Medir nas propostas de 90 dias antes de publicar. Não corrigido aqui.
+- **Situação (25/11/2026, commit `a895761c`):** consertada a parte do preço fechado, no ramo `session/assistente-leva-a`, não
+  publicado até este registro. A revisão de segurança do IA-19 subiu esta parte para média, porque "fecha por 4.200" é o
+  próprio exemplo do dono sem o "R$": é dinheiro pela regra que ele escolheu, e passava só com o "sim". Entrou em
+  `VALOR_NO_TEXTO_LIVRE` o número depois de fechar, fazer, acertar e combinar ("fecha por 4.200", "fecha em 4200", "Fechado
+  por 350 cada", "fechado em 3800", "faz por 3800?", "acertamos 4200", "Combinado em 350"), sem contar o número que é prazo,
+  hora, data ou quantidade ("fechado por 3 dias", "fecha em 30/11", "combinado 10h", "combinamos 10 peças"). **Continuam
+  saindo só com o "sim"** (conferido rodando a função em 25/11/2026): "o cabo é 350", "4200 fechado", "fica 4200 a vista",
+  "mandei 4200", "adiantamento de 1500", "Confirmo o pedido das 10 baterias" e "Pode faturar as 10 baterias.". O que é
+  compra confirmada continua decisão do dono. Nada medido nas propostas de 90 dias.
+
+### [NOVO-p1-s1-11] Mensagem livre a fornecedor ou equipe: pagamento abreviado ou por sinônimo sai só com o "sim"
+
+- **Onde:** `supabase/functions/_shared/ai/envio-livre.ts`, `PAGAMENTO_FALADO` (famílias de pagar, transferir e depositar) e
+  a lista `DINHEIRO` do validador do retorno. Achado da revisão de segurança do IA-19 (25/11/2026); conferido rodando a função.
+- **Efeito:** gravidade baixa. Voltam sem valor, e por isso saem só com o "sim" a fornecedor, equipe e ao próprio dono: "pgto
+  feito", "mandei o TED", "transf. feita", "vou quitar", "pode faturar", "3x no cartão" e "segue o comprovante". Para o outro
+  lado (um PIN a mais), "precisa pagar o frete?" e "a peça chegou paga?" pedem PIN, o que parece aceitável. O cartão do "sim"
+  mostra o texto inteiro; o que falta é o PIN.
+- **Menor mudança:** decisão do dono sobre quais palavras são "falar de dinheiro". Candidatos de pouco PIN à toa: pgto, pagto,
+  ted, quitar, quitado, quitei, faturar, faturado, transf, a vista, a prazo, parcelado, número seguido de "x". "Comprovante" e
+  "chave" ficaram de fora de propósito (pedido comum). Medir nas propostas de 90 dias antes. Não mudado aqui.
+
+### [NOVO-p1-s1-12] As listas próprias do texto livre não tiram caractere invisível: "paguei" com um espaço de largura zero no meio escapa
+
+- **Onde:** `supabase/functions/_shared/ai/envio-livre.ts`, `semAcento`, que prepara o texto para `VALOR_NO_TEXTO_LIVRE`,
+  `PAGAMENTO_FALADO` e `DATA_NO_TEXTO_LIVRE`. O validador do retorno tira `\p{Cf}` (`INVISIVEL_OU_ESPACO`); `semAcento` não.
+  Achado da revisão de segurança do IA-19 (25/11/2026); conferido rodando a função.
+- **Efeito:** gravidade baixa. "já paguei" com um espaço de largura zero (U+200B) entre as letras, com um hífen invisível (U+00AD) ou
+  com o "a" trocado pelo "a" cirílico (U+0430) volta sem valor. No WhatsApp, os três aparecem como "já paguei". A fornecedor e equipe o valor é o único gatilho
+  do PIN desde o IA-19, então um texto escrito assim sai só com o "sim". Pede um modelo induzido a escrever desse jeito; o
+  cartão mostra o texto, que parece normal. O que já está na lista do validador ("R$", "pix") segue pegando.
+- **Menor mudança:** em `semAcento`, tirar `\p{Cf}` antes de normalizar, como faz o validador (uma linha, com teste). Letra de
+  outra escrita misturada em palavra latina pede regra à parte (por exemplo: vale valor). Não corrigido aqui.
+
+### [NOVO-p1-s1-13] IA-20: reativar um fornecedor inativo que também é cliente (update_supplier, sem cartão) troca o PIN pelo "sim" passadas 24 horas
+
+- **Onde:** `supabase/functions/_shared/ai/envio-livre.ts`, `quemRecebe` (regra do cartão IA-20, commit `2e332613`), somada a
+  `tools/registry-crud.ts`, `update_supplier`: risco baixo, roda direto e aceita `active`. Achado da revisão de segurança do
+  IA-20 (25/11/2026); conferido no código.
+- **Efeito:** gravidade baixa. `update_supplier {supplier_id, active: true}` num dos fornecedores inativos que também são
+  cliente (307 números na medida de 25/11/2026, 5 deles com orçamento ou OS) regrava `updated_at`, e por 24 horas o número
+  segue pedindo PIN. Depois, se o cliente não tem orçamento nem OS, o número vale "fornecedor": data e promessa saem só com o
+  "sim". O dono escolheu "os 26"; por esse caminho o conjunto pode passar de 26 para cerca de 328 números, um cadastro
+  reativado por vez. O que segura é o mesmo do NOVO-p1-s1-09 (o "sim" continua obrigatório, `client_id` continua PIN, o
+  primeiro orçamento devolve o PIN).
+- **Menor mudança:** a do NOVO-p1-s1-04 (escrita no cadastro de fornecedor pedir o "sim") fecha também esta. Sem ela: congelar
+  o conjunto na escolha do dono (só tira o cliente o fornecedor com `created_at` e `updated_at` anteriores a 25/11/2026), ou
+  exigir histórico de compra do fornecedor. Muda a regra escolhida: decisão do dono. Não mudado aqui.
+
+### [NOVO-p1-s1-14] IA-20: fornecedor e cliente casam pelos 8 últimos dígitos; fornecedor de outro DDD tira o "cliente" de um interessado
+
+- **Onde:** `supabase/functions/_shared/ai/envio-livre.ts`, `quemRecebe`, e `_shared/ai/phone.ts` (`mesmoTelefone` compara a
+  chave dos 8 últimos dígitos). Achado da revisão de segurança do IA-20 (25/11/2026); conferido no código.
+- **Efeito:** gravidade baixa, raro. Interessado (47) 9XXXX-1234 no cadastro de clientes, sem orçamento nem OS, e um fornecedor
+  ativo e antigo (11) 9XXXX-1234: os dois casam com o número do interessado, e pelo IA-20 ele passa a valer só "fornecedor".
+  Antes do IA-20 ficava "cliente e fornecedor", PIN. A mesma colisão já existia antes, sem o IA-20, para o número sem cadastro
+  (a régua dos 8 dígitos é a da casa).
+- **Menor mudança:** na condição do IA-20, exigir que o telefone do fornecedor e o do cliente batam em DDD e número (10 ou 11
+  últimos dígitos) quando os dois tiverem DDD; sem DDD em um deles, não tirar o cliente. Não corrigido aqui.
+
+### [NOVO-p1-s1-15] IA-20: o cartão diz "(cliente do cadastro)" e vem sem a linha do PIN, sem dizer por quê
+
+- **Onde:** `supabase/functions/_shared/ai/tools/resposta.ts` (`resumirMensagem`) e `tools/agendamento.ts`
+  (`resumirAgendamento`): `destinoDoAgendamento` procura o cliente pelo telefone e escreve "Para: *Nome* (cliente do
+  cadastro)". Achado da revisão de segurança do IA-20 (25/11/2026); conferido no código.
+- **Efeito:** gravidade baixa. Para o número que o IA-20 passou a contar como fornecedor, o cartão diz "cliente do cadastro" e
+  sai sem "🔒". Até 24/11, "cliente do cadastro" vinha sempre com PIN. O dono pode achar que a trava falhou, ou não perceber
+  que aprova só com o "sim" uma mensagem a um cadastro de cliente.
+- **Menor mudança:** quando `quemRecebe` tirar o cliente pelo IA-20, acrescentar ao cartão uma linha como "Conta como
+  fornecedor: o cadastro de cliente deste número não tem orçamento nem OS (cartão IA-20)". Texto novo ao dono: pede o OK dele.
+  Não construído aqui.
+
+### [NOVO-p1-c2-01] Chat do app: a resposta que chega tarde e falha ainda mostra o código cru do erro
+
+- **Onde:** `supabase/functions/ai-agent/index.ts`, `handleEntregaDoPainel`: quando a tela desistiu de esperar (passou de
+  ~110 s), o pedido falha depois e não deixou nada gravado, a conversa recebe "⚠️ Não consegui terminar este pedido pelo
+  Claude Max (`timeout`). Peça de novo.", com `job.error_code ?? job.status` entre parênteses. Visto em 24/11/2026 ao
+  construir o C2 do pacote 1, que trocou o código cru pela causa em frase nos outros avisos (turno do WhatsApp e os três
+  ramos de `turnoDoPainelPeloMax`); este ponto não está na lista da especificação.
+- **Efeito:** é o único aviso de falha do Claude da assinatura que ainda mostra "timeout", "deadline_exceeded" ou
+  "auth_failed" ao dono, e o único que não diz a causa. Só aparece no chat do app, e só em pedido que passou de 110 s e
+  falhou depois. Não medido.
+- **Menor mudança:** `textoDaFalhaParaODono(await lerCausaDaFalha(admin, { job }))`, de `_shared/ai/max/causa-da-falha.ts`,
+  no lugar da frase com o código; a leitura do job em `handleEntregaDoMax` já traz `error` e `timeout_seconds`. Uma linha,
+  mais o teste. Não corrigido aqui: fora da lista do C2.
+
+### [NOVO-p1-c2-02] Chat do app com a reserva desligada: o pedido que o Claude não atende depois de entrar na fila não conta como falha
+
+- **Onde:** `supabase/functions/ai-agent/index.ts`, `turnoDoPainelPeloMax`, ramo `d.tipo === "reserva"` com
+  `!reservaLigada(p.settings)`: grava o aviso na conversa e devolve à tela, sem `registrarFalhaDoAssistente`. O mesmo em
+  `handleEntregaDoPainel` (a resposta tardia que falha). Já era assim antes do C2. Os outros caminhos de turno sem
+  resposta registram (`turno_whatsapp`, `turno_painel`, `max_sem_reserva`, `handler` e, desde o C2,
+  `max_fora_sem_reserva`); no C2 os dois ramos novos do painel (Claude indisponível antes do pedido e falha ao pôr na fila)
+  registram como `turno_painel`, porque já contavam assim quando caíam no OpenRouter sem saldo.
+- **Efeito:** com a reserva desligada, a falha do chat do app em que o pedido chegou à fila (ninguém pegou em 20 s, login,
+  limite, tempo máximo) não entra na conta de falhas por hora que o vigia lê (`falhasNaUltimaHora`). Hoje não acontece: a
+  chave está ligada. Passa a valer quando o dono desligar a reserva. O dono vê o aviso na tela; o que falta é só a conta.
+- **Menor mudança:** `registrarFalhaDoAssistente(p.admin, { onde: "turno_painel", … })` nesses dois pontos, com o código da
+  causa na mensagem. Decidir junto com o V1, que filtra por `action`. Não corrigido aqui.
+
+### [NOVO-p1-c2-03] WhatsApp com a reserva desligada: a lista de opções já foi consumida quando o Claude falha depois de entrar na fila
+
+- **Onde:** `supabase/functions/ai-agent/index.ts`. Em `handleWhatsAppTurn`, a resposta "2" a uma lista de opções vira o
+  texto da opção e `metadata.pending_options` é zerado em memória; em `turnoDoModeloNoWhatsApp`, ao pôr o pedido na fila
+  do Claude, esse `metadata` é gravado na sessão. Se o pedido falha depois e a reserva está desligada,
+  `handleEntregaDoMax` avisa e pede para mandar de novo, e a lista não volta. Já era assim antes do C2 (o ramo do aviso
+  existe desde 03/10); com a reserva ligada não aparece, porque a reserva refaz o turno com o texto já resolvido.
+- **Efeito:** o dono lê "mande a mensagem de novo", manda "2" outra vez, e o "2" segue ao modelo como texto solto, sem ser
+  a opção 2. O pedido original (com o texto da opção) e o aviso estão na conversa, então o modelo costuma entender; não
+  medido. Nos dois ramos novos do C2 (Claude indisponível antes do pedido, falha ao pôr na fila) isso não acontece: o
+  estado da sessão não é gravado, e o "2" mandado de novo volta a ser a opção.
+- **Menor mudança:** gravar na sessão, ao pôr o pedido na fila, o que o turno consumiu (a lista), e devolvê-lo no ramo do
+  aviso de `handleEntregaDoMax`; ou só gravar o `metadata` consumido na entrega que deu certo. Mexe no estado da sessão
+  entre o pedido e a entrega: tarefa própria, junto com o C1 (um turno por vez). Não corrigido aqui.
+
+### [NOVO-p1-c2-04] A pausa do Claude por "serviço indisponível" não diz se foi faturamento ou ferramentas
+
+- **Onde:** o programa do assistente no PC publica em `ai_gateway_workers.estado` só `available`, `until` e `reason` do
+  Claude (conferido em 24/11/2026 no estado de produção e no código do programa, só leitura). O motivo
+  `provider_unavailable` cobre dois casos: a assinatura recusada por faturamento (pausa de 30 minutos) e o servidor de
+  ferramentas do sistema que não conectou (pausa de 1 minuto). O detalhe só existe no erro do pedido que falhou.
+- **Efeito:** quando não há pedido (o Claude já estava em pausa), `causaDaFalha` (`_shared/ai/max/causa-da-falha.ts`) diz
+  a frase das ferramentas ("…não conseguiu se ligar às ferramentas do sistema. Tente de novo em 1 minuto."), como a
+  especificação do C2 mandou. Se a pausa for a de faturamento, a frase erra a causa e o "1 minuto" por até 30 minutos. O
+  primeiro pedido, o que causou a pausa, sai com a frase certa (lê o erro dele). Nunca aconteceu em 120 dias (0 pedidos
+  com esse código; conferido por contagem em 24/11/2026).
+- **Menor mudança:** no programa do PC, publicar no estado uma classe fixa do detalhe (por exemplo `faturamento` ou
+  `ferramentas`), nunca o texto. É mudança no repositório do programa, fora do pacote 1. Não corrigido aqui.
+
+### [NOVO-p1-s5-01] A lista de quem usa a assinatura Claude (`ai_max_assinantes`) pode ser gravada pelo cargo financeiro
+
+- **Onde:** policies de escrita de `app_settings` (`app_settings_auth_insert`, `_update` e `_delete`:
+  `is_admin_or_financial(auth.uid())` e `key <> 'cron_worker_secret'`, em `supabase/schemas/producao/08-politicas-rls.sql`)
+  e o gatilho `_app_settings_chaves_do_dono` (última versão em `20261016130000_papelada_lote.sql`), cuja lista de chaves
+  que só o administrador muda não tem nenhuma `ai_*`. Visto em 24/11/2026 ao construir o S5 do pacote 1, que cria a chave.
+- **Efeito:** com o S5, quem pode usar a assinatura passa a ser decidido por uma chave que um usuário de cargo financeiro
+  consegue gravar. Ele pode pôr o próprio id na lista (o servidor passaria a mandá-lo pelo Claude, e a trava que sobra é a
+  lista do programa do PC, que o servidor não lê) ou esvaziar a lista (o dono sai da assinatura: com a reserva ligada vai
+  pelo OpenRouter; desligada, lê a frase do titular). As chaves vizinhas já eram assim antes do S5: `ai_provedor_whatsapp`,
+  `ai_provedor_painel`, `ai_whatsapp_max_reserva` e `ai_autonomy_*`. Latente: 0 usuários ativos além do dono (contagem de
+  24/11/2026). Leitura: qualquer usuário logado lê a chave (um id interno, não é segredo); quem não está logado não lê
+  (`anon_public_settings_whitelist`), e o teste `supabase/tests/assinatura_max_por_pessoa.sql` confere isso (A6).
+- **Menor mudança:** incluir `ai_max_assinantes` na lista de `_app_settings_chaves_do_dono` (e decidir as vizinhas), em
+  migration própria, com a guarda do md5 do corpo de produção que as anteriores usam. Decisão do dono. Não corrigido aqui:
+  a especificação do S5 pede só a chave, e recriar o gatilho é outra migration.
+
+### [NOVO-p1-s5-02] A tela e o documento do assistente ainda dizem que a assinatura é "do administrador"
+
+- **Onde:** `src/pages/settings/AssistenteIATab.tsx` (o aviso "A assinatura Claude Max é pessoal: só você (administrador)
+  é atendido por ela. Os demais usuários seguem no OpenRouter mesmo com a chave ligada.", e o comentário do cabeçalho) e
+  `docs/ai-operator-setup.md` ("Desde 03/10 o **admin** (só o dono…) pode ir pela assinatura Claude Max", e a lista de
+  chaves, sem `ai_max_assinantes`). Visto em 24/11/2026 ao construir o S5.
+- **Efeito:** depois do S5 quem decide é a pessoa da lista, não o cargo; e depois do C2 e do S5, com a reserva desligada,
+  os demais usuários não "seguem no OpenRouter": leem que o assistente atende só o titular. Para o dono a frase da tela
+  continua verdadeira hoje (ele é o único administrador ativo e o único da lista). A lista não aparece em tela nenhuma:
+  mudar o assinante é pelo banco.
+- **Menor mudança:** ajustar as duas frases e citar a chave no documento. Mostrar ou editar a lista na tela é decisão do
+  dono. Não corrigido aqui: o S5 não toca em `src/` nem em `docs/`.
+
+### [NOVO-p1-s5-03] ai-agent: a leitura das configurações que falha vira "tudo no padrão", sem erro
+
+- **Onde:** `supabase/functions/ai-agent/index.ts`, as três leituras
+  `const { data: settingsRows } = await admin.from("app_settings").select("key, value");` (turno do WhatsApp, entrega do
+  Claude e chat do app): o `error` não é lido, e a leitura que falha deixa `settings` vazio. Visto em 24/11/2026 ao
+  construir o S5. No `erp-mcp` a mesma leitura passou a recusar o pedido quando falha (S5: sem a lista não há como saber
+  quem é o assinante); o resto do `ai-agent` ficou como estava.
+- **Efeito:** com `settings` vazio, o turno do dono vai pelo OpenRouter (a chave do provedor não foi lida), a reserva conta
+  como ligada, o perfil de ferramentas e todos os modos atrás de chave valem o padrão do código, e nada avisa. Para o S5
+  o lado é o seguro (sem a chave do provedor ninguém vai pela assinatura). Não medido: precisa de uma falha de leitura do
+  banco no instante do turno.
+- **Menor mudança:** ler o `error` nas três leituras e fechar o turno com o aviso de erro do sistema, registrando a falha.
+  Tarefa própria (mexe no começo de todo turno). Não corrigido aqui.
+
+### [NOVO-p1-s6-01] No Claude Max, o S6 decide por uma lista que nasceu como diagnóstico e pode ficar incompleta calada
+
+- **Onde:** `supabase/migrations/20261003235000_assistente_max_painel.sql`, `ai_job_registrar_ferramenta` (o nome da
+  ferramenta só entra em `ai_jobs.metadata.ferramentas_usadas` enquanto o metadata couber em 18.000 bytes: "a lista de
+  ferramentas é diagnóstico") e `supabase/functions/erp-mcp/index.ts`, `chamar` (o erro dessa RPC só vai para o log). Visto em
+  25/11/2026 ao construir o S6 do pacote 1.
+- **Efeito:** no Max cada chamada tem contexto novo, e o S6 sabe que o turno leu texto de fora por essa lista. Dois jeitos
+  de uma leitura não aparecer nela: (a) o metadata no teto: **tratado no S6** (`texto-de-fora.ts`, acima de 17.000 bytes o
+  turno vale como "leu"; em 90 dias o maior metadata teve 2.396 bytes, e o teto só é alcançado com mais de 500 chamadas num
+  turno); (b) a RPC falhar depois de a leitura rodar: a leitura não fica registrada, e as escritas seguintes do turno não
+  sobem. Latente: precisa de uma falha do banco entre a leitura e o registro. A chamada seguinte relê o job e, se essa
+  leitura falhar também, o turno vale como "leu".
+- **Menor mudança:** a RPC devolver se o nome entrou na lista, e o `erp-mcp` tratar "não entrou" depois de uma leitura como
+  turno marcado (ou tentar de novo). Pede migration, que a especificação do S6 não tem. Não corrigido aqui.
+
+### [NOVO-p1-s6-02] Texto de terceiro chega ao assistente por portas que o S6 não marca
+
+- **Onde:** ferramentas fora de `LEITURAS_DE_TEXTO_DE_FORA` (`supabase/functions/_shared/ai/texto-de-fora.ts`), vistas em
+  25/11/2026 ao varrer o catálogo: `list_external_quotes` (devolve o começo do "problema" escrito por quem pediu o orçamento
+  de fora); as leituras do extrato (`listar_transacoes_pendentes` e as vizinhas devolvem a descrição e o nome de quem pagou,
+  escritos pelo pagador ou pelo banco); o nome do contato sem cadastro, que vem do WhatsApp e aparece em várias leituras
+  (`get_situation_overview`, por exemplo). Não conferidas aqui, mas da mesma família: as leituras de nota fiscal de
+  fornecedor e de arquivos do Dropbox. E o que a especificação já aponta como limite: o texto lido num turno anterior.
+- **Efeito:** o turno que só passou por essas portas e depois grava cadastro, contato, preço ou memória não pede o "sim" do
+  S6. O S6 cobre o que a especificação definiu (conversa, e-mail, mensagem de fornecedor) e as leituras que devolvem a frase
+  original dessas fontes por RPC, view ou coluna. Não medido por porta; `list_external_quotes` teve 0 chamadas em 90 dias.
+- **Menor mudança:** decisão de quem especifica: quais dessas portas contam como "texto de fora". O extrato é usado em muitos
+  turnos; incluí-lo faria quase toda escrita de cadastro depois de olhar o extrato pedir o "sim". Não mudado aqui.
+
+### [NOVO-p1-s6-03] Depois de ler texto de fora, ainda rodam direto: produto novo, serviço novo e as escritas do orçamento
+
+- **Onde:** fora de `SOBEM_PARA_SIM` (`texto-de-fora.ts`). À vista do admin e de risco baixo: `create_product`,
+  `edit_service_order_item`, `set_service_order_charges`, `apply_service_order_discount`, além das quatro que a especificação
+  manda não subir (`add_service_order_item`, `create_quote_from_items`, `record_quote_response`, `create_service_order`).
+  Pela ferramenta_extra (já pedem o "sim" pela regra da rede, sem o motivo do S6): `create_service`,
+  `create_composed_product`, `convert_external_quote_to_so` (cria cliente e unidade com os dados do pedido de fora),
+  `cadastrar_favorecido` e `cadastrar_contraparte_do_extrato`. Visto em 25/11/2026.
+- **Efeito:** no turno que leu conversa, e-mail ou mensagem de fornecedor, o preço de uma linha do orçamento, o desconto, a
+  taxa e um produto novo com preço entram sem cartão. É o "lê a conversa e monta o orçamento", que a especificação preserva
+  de propósito (o orçamento só vai ao cliente com PIN). `create_product` teve 35 chamadas em 12 turnos em 90 dias: subir
+  quebraria esse uso. Entrou na lista, além do que a especificação citava, só `update_service` (o preço do serviço do
+  catálogo, o par de `update_product`; 0 chamadas em 90 dias).
+- **Menor mudança:** é o assunto do pacote de orçamento (regra de texto de fora para o orçamento). Não mudado aqui.
+
+### [NOVO-p1-v1-01] Queda do Claude vista numa rodada só fica aberta até o próximo pedido bom, e com a chave ligada viraria aviso
+
+- **Onde:** `decidirQuedaDoAssistente` (`supabase/functions/_shared/ai/max/queda-do-assistente.ts`), regra da queda do tipo
+  `claude` sem problema à vista. Visto em 25/11/2026, ao construir o V1.
+- **Efeito:** a pausa de 1 minuto do programa do PC quando o servidor de ferramentas não conecta (`provider_unavailable`) é
+  indistinguível, no estado publicado, da pausa de 30 minutos por faturamento. Se a rodada de 5 minutos cair dentro desse
+  minuto, a queda abre e só fecha no próximo pedido bom (ou em 24 h). Em sombra isso é só uma linha no histórico. Com
+  `vigia_assistente = 'ligado'`, 15 minutos depois o dono receberia "fora do ar" com o assistente funcionando, e gastaria
+  um dos dois acordes do dia. É o desenho da especificação (a queda do Claude não fecha só pelo estado, por causa da pausa
+  do login que vence sem teste); o "teste de volta", que cobriria o caso, foi cortado pelas críticas. Não medido: não há
+  histórico de pausas antes desta tabela.
+- **Menor mudança:** medir na semana de sombra: `select causa, count(*) from assistente_quedas where tipo = 'claude' and
+  visto_em = desde group by 1` (quedas vistas numa rodada só). Se aparecerem, exigir duas rodadas com o problema à vista
+  antes de avisar (o login fica 10 minutos em pausa: é visto em duas). Decidir antes de ligar. Não mudado aqui.
+
+### [NOVO-p1-v1-02] A frase "o PC da oficina está sem sinal" sai também quando o vigia sabe que o PC está ligado
+
+- **Onde:** `FRASE_CURTA_DA_CAUSA.pc_fora` e `causaDaFalha` (`supabase/functions/_shared/ai/max/causa-da-falha.ts`, do C2).
+  `EstadoDoMax.pcComSinal` distingue "só o programa do assistente parou" de "o PC inteiro sumiu", e a frase não usa.
+- **Efeito:** o histórico novo separa `programa_parado` de `sem_rede`, mas o aviso de queda do V1 e a resposta de falha do
+  turno dizem a mesma frase nos dois casos, e ela fala em PC "sem sinal" quando o WhatsApp do mesmo PC está respondendo. A
+  especificação do V1 trazia texto próprio com o que fazer ("o religador tenta de hora em hora; se não voltar, reinicie o
+  PC" e "confira a internet do PC"); ele não foi usado porque as críticas mandam uma fonte única de frase de causa.
+- **Menor mudança:** dois códigos novos no mapa do C2 (programa parado; PC sem rede), escolhidos por `pcComSinal` em
+  `causaDaFalha`, e `CODIGO_DA_FRASE` do V1 passa a apontar para eles. Muda texto que o dono lê no turno: pede o OK dele.
+  Não mudado aqui.
+
+### [NOVO-p1-v1-03] O sino não conhece os avisos novos do assistente e os mostra com o ícone de lembrete de tarefa
+
+- **Onde:** `TIPO_DO_BANCO` em `src/hooks/use-notifications.ts` e o mapa de ícones de `src/components/NotificationBell.tsx`.
+  O V1 grava `app_notifications.type` = `assistente_caiu` e `assistente_voltou` (só com a chave ligada).
+- **Efeito:** tipo desconhecido vira "lembrete de tarefa": o aviso aparece e leva para a tela certa
+  (`/v2/settings?tab=assistente`), mas com o ícone errado. Nada aparece enquanto a chave estiver em sombra.
+- **Menor mudança:** duas linhas no mapa e dois ícones (os do WhatsApp caído e de volta servem de modelo), antes de ligar a
+  chave. Fora da lista de arquivos da especificação do V1. Não mudado aqui.
+
+### [NOVO-p1-v1-04] `types.ts` não tem a coluna `allowed_providers` de `ai_gateway_workers`
+
+- **Onde:** `src/integrations/supabase/types.ts`, tabela `ai_gateway_workers`. A coluna existe no banco desde a migration
+  `20261011104000` (as críticas do pacote 1 já apontavam).
+- **Efeito:** nenhum hoje: o leitor do estado do PC (`lerEstadoDoMax`) pede só `id, last_seen_at, estado`. Quem um dia
+  selecionar a coluna reprova a varredura `src/test/postgrest-select-columns.test.ts`.
+- **Menor mudança:** regenerar os tipos, ou acrescentar a coluna à mão. O V1 não a seleciona e por isso não mexeu.
+
+### [NOVO-p1-v1-05] Os dois testes antigos de `whatsapp-conexao/index_test.ts` recortam a função até o fim do arquivo no Windows
+
+- **Onde:** `fonte.slice(ini, fonte.indexOf("\n}\n", ini))`, nos testes "a volta do WhatsApp vai ao portão…" e "P4.5: a
+  volta acorda o dono…". Com o arquivo em CRLF na pasta (o git converte no checkout), `"\n}\n"` não existe, o `indexOf`
+  devolve -1 e o recorte vai até o penúltimo caractere do arquivo.
+- **Efeito:** no Windows os dois testes passam olhando o arquivo quase inteiro, e não só o `vigiar`: a ordem que eles
+  conferem continua valendo, mas com menos precisão. No CI (Linux, LF) o recorte é o certo. Os testes novos do V1
+  normalizam o fim de linha antes de recortar.
+- **Menor mudança:** `fonte.replace(/\r\n/g, "\n")` antes do recorte, como nos testes novos. Não mudado aqui (regra 5: teste
+  existente não se mexe fora de tarefa própria, além do literal que a especificação mandou ajustar).
+
+### [NOVO-p1-c4-01] O ai-agent responde sempre HTTP 200: segredo interno errado, pedido sem texto e chave do provedor ausente não deixam rota
+
+- **Onde:** `jr` (`supabase/functions/ai-agent/index.ts`: responde sempre 200 e guarda o status de verdade no cabeçalho
+  `X-Actual-Status`) e `dispatchToAgent` (`supabase/functions/whatsapp-webhook/index.ts`), que só olha `res.ok`.
+- **Efeito:** o C4 grava `rota:despacho_falhou` quando o `ai-agent` não responde ou responde com erro HTTP de verdade (a
+  função caiu, passou do tempo, nem subiu). Três saídas do próprio `ai-agent` vêm ANTES do ponto do rastro e chegam ao
+  webhook como 200, então continuam mudas: 401 (o `AI_INTERNAL_SECRET` das duas funções não confere), 400 (pedido sem
+  texto) e 500 (`OPENROUTER_API_KEY` ausente; este ainda deixa uma linha em `app_error_logs`, os outros dois nem isso).
+  Com o segredo divergente, TODA mensagem do dono some sem resposta e sem rota. A especificação do C4 pedia "ai-agent que
+  responde 500 grava despacho_falhou": isso vale para o 500 do HTTP, não para o 500 que o `ai-agent` devolve dentro do
+  200.
+- **Como se vê:** em `docs/consultas/rota-das-mensagens-do-dono.sql`, a mensagem aparece como `SEM ROTA`.
+- **Menor mudança:** no `dispatchToAgent`, ler `X-Actual-Status` e gravar `rota:despacho_falhou` também para 400, 401 e
+  5xx. O 5xx que nasce dentro do turno já ganha `rota:erro` no `ai-agent`: decidir se ficam as duas linhas ou se o webhook
+  pula esse caso. Não mudado aqui (a especificação e as críticas fixam "`!res.ok` ou exceção").
+
+### [NOVO-p1-c4-02] A rota "comprovantes" não diz se a conversa dos comprovantes tratou a resposta ou se falhou
+
+- **Onde:** `rotearTextoDoDono` (`supabase/functions/_shared/comprovantes/webhook.ts`): devolve o mesmo destino quando o
+  `responder` tratou a mensagem (200), quando falhou e avisou o dono (5xx) e quando nem respondeu (rede ou tempo: nada é
+  feito, de propósito).
+- **Efeito:** o C4 grava `rota:comprovantes` com o destino (`comprovante`, `comando`, `dica`, `ambiguo`…) nos três casos.
+  A mensagem deixa de ser "sem rota", mas a linha não separa "foi tratada" de "o responder não respondeu", que é o caso
+  mudo de verdade (o "1" do menu que some).
+- **Menor mudança:** `rotearTextoDoDono` devolver também o desfecho do `responder` (tratada, falhou, sem resposta) e o
+  webhook pôr isso no detalhe. Muda o contrato de uma função com testes próprios, fora da lista de arquivos do C4. Não
+  mudado aqui.
+
+### [NOVO-p1-c4-03] A foto que o fluxo de comprovantes devolve ao assistente vai sem o id da mensagem
+
+- **Onde:** `encaminharAoAssistente` (`supabase/functions/_shared/comprovantes/fluxo.ts`): o pedido ao `ai-agent` leva
+  `phone_normalized`, `app_user_id` e `text`, sem `message_id`. O `acompanhar-conversas` também chama sem o id (esse não é
+  mensagem do dono: é turno aberto pelo sistema).
+- **Efeito:** a rota desses turnos é gravada com `mensagem_id` nulo. A foto fica com a linha `rota:comprovantes` (detalhe
+  `midia`) do webhook; se o fluxo a devolver ao assistente depois de ler, o turno que respondeu não se liga a ela, e a
+  consulta mostra só "comprovantes:midia" para aquela mensagem.
+- **Menor mudança:** mandar o `message_id` no corpo de `encaminharAoAssistente` (o fluxo tem o id da mensagem). Fora da
+  lista de arquivos do C4. Não mudado aqui.
+
+### [NOVO-p1-c4-04] A entrega do Claude que não acha usuário, sessão ou telefone marca o pedido como entregue e não manda nada
+
+- **Onde:** `handleEntregaDoMax` (`supabase/functions/ai-agent/index.ts`): `ai_job_marcar_entregue` roda ANTES da
+  conferência `if (!appUser || !sessionId || !phoneNormalized) return jr({ error: … }, 422)`.
+- **Efeito:** se o usuário foi desativado (ou perdeu o WhatsApp do assistente) entre o pedido e a resposta, ou se o pedido
+  veio sem telefone, o pedido fica marcado como entregue, nada é enviado e nada é avisado; a segunda chamada devolve
+  "já entregue". O C4 registra a rota "depois de cada envio", então aqui não há linha `rota:entrega`: na consulta, a
+  mensagem mostra `modelo_max` com a entrega vazia, sem a causa.
+- **Menor mudança:** gravar `rota:entrega` com um detalhe próprio (`sem_destino`) nessa saída, ou conferir usuário, sessão
+  e telefone antes de marcar o pedido como entregue. Não mudado aqui (a especificação pede a rota só depois de envio).
+
+### [NOVO-p1-c4-05] Os testes do whatsapp-webhook sobem um servidor na porta 8000: duas rodadas ao mesmo tempo derrubam uma
+
+- **Onde:** `index_test.ts`, `parceiro_test.ts` e `retorno_test.ts` de `supabase/functions/whatsapp-webhook/` importam
+  `./index.ts`, que chama `servirComCors` (`Deno.serve`, porta 8000) ao ser carregado.
+- **Efeito:** com duas rodadas de `deno test` ao mesmo tempo na máquina (duas sessões em worktrees diferentes, ou a suíte
+  e um arquivo avulso), a segunda falha com `Uncaught error … AddrInUse (os error 10048)` e "0 tests" naquele arquivo.
+  Reproduzido em 25/11/2026 rodando a pasta duas vezes em paralelo: `41 passed | 2 failed`. Rodando sozinha, a pasta
+  passa (6 de 6 vezes). É falha falsa: quem confere uma frente enquanto outra sessão testa pode ler isso como defeito.
+- **Menor mudança:** o arquivo só servir quando for o módulo principal (`if (import.meta.main)`), ou os testes
+  importarem o `handler` de um módulo que não sobe servidor. Mexe em como toda função sobe e nos testes de três
+  arquivos: tarefa própria (regra 5). Não mudado aqui.
+
+### [NOVO-p1-c2-05] O texto de venda do painel chama o OpenRouter mesmo com a reserva desligada e mostra o erro cru
+
+- **Onde:** `supabase/functions/ai-agent/index.ts`, bloco `// ---------- MODO SALES COPY` (`if (isSalesCopy)`). Usado por
+  `SendViaWhatsAppDialog`, `ProspectingPage`, `ActiveProspectingPage` e `AIConsultantDashboard` (`is_sales_copy: true`).
+  Achado da revisão da leva B (25/11/2026, gravidade baixa); conferido no código. Já era assim antes do pacote 1.
+- **Efeito:** esse caminho chama `callClaude` (OpenRouter) sem olhar `reservaLigada` nem a assinatura, e no erro devolve à
+  tela `e?.message`. Com a reserva desligada e o provedor sem saldo, quem pede um texto no diálogo de enviar pelo WhatsApp
+  lê "OpenRouter 402 (créditos insuficientes na conta): …" com o corpo cru do provedor. Fica fora do que o C2 promete
+  ("reserva desligada não chama mais o OpenRouter") e fere a decisão do dono de 24/11/2026 (não ser lembrado de crédito).
+- **Menor mudança:** no `catch`, `erroParaODono(e?.message)` no lugar de `e?.message` (uma linha e um teste). Se a reserva
+  desligada deve valer também aqui (devolver o aviso sem chamar `callClaude`, ou mandar o pedido pelo Claude da
+  assinatura), é decisão do dono. Não mudado aqui.
+
+### [NOVO-p1-c2-06] A foto que o fluxo de comprovantes devolve ao assistente some quando o Claude não atende
+
+- **Onde:** `encaminharAoAssistente` (`supabase/functions/_shared/comprovantes/fluxo.ts`): manda o pedido ao `ai-agent` e
+  só anota o status HTTP (`encaminhado`), que é sempre 200. Visto na revisão da leva B (25/11/2026), junto com o conserto
+  do turno do vigia das conversas.
+- **Efeito:** com o Claude da assinatura fora e a reserva desligada, o `ai-agent` responde a esse turno com
+  "⚠️ Não consegui responder: … mande de novo" (`entregue: "aviso"`). O dono mandou a foto antes, o aviso chega depois de
+  o fluxo ler a foto, e nada diz que é dela. O fluxo dá o encaminhamento por feito e não tenta de novo: a foto não vira
+  comprovante nem é respondida pelo assistente. Com a reserva ligada e falhando, o mesmo com o erro comum (já era assim).
+  Diferente do turno do vigia, aqui o dono mandou alguma coisa, então o aviso não foi calado. Não medido.
+- **Menor mudança:** ler o corpo da resposta em `encaminharAoAssistente`; com `entregue: "aviso"`, deixar a foto para a
+  rodada seguinte do vigia do fluxo (de 2 em 2 minutos), ou aceitar o aviso como está e mandar junto o `message_id`
+  (NOVO-p1-c4-03), para a rota ligar o aviso à foto. Mexe no fluxo de comprovantes: tarefa própria. Não mudado aqui.
+
+### [NOVO-p1-c2-07] O lembrete do vigia das conversas ainda se perde quando o Claude aceita o pedido e falha depois, ou com a reserva ligada
+
+- **Onde:** `avisar` (`supabase/functions/acompanhar-conversas/index.ts`) e `handleEntregaDoMax` /
+  `turnoDoModeloNoWhatsApp` (`supabase/functions/ai-agent/index.ts`). A revisão da leva B (25/11/2026) consertou só o caso
+  em que o Claude JÁ estava fora quando o vigia pediu e a reserva está desligada (o assistente se cala, devolve `calado` e
+  o vigia tenta de novo). Ficaram dois casos, os dois de antes do pacote 1:
+  1. **O Claude aceita o pedido e falha depois** (reserva desligada). O vigia recebeu `claude_max: <pedido>` e já marcou o
+     aviso como dado (o lembrete com hora e o de promessa ficam encerrados). Minutos depois `handleEntregaDoMax` manda ao
+     dono a causa e o "mande de novo": ele não mandou nada, e o lembrete não volta.
+  2. **A reserva ligada e falhando** (o valor de produção em 25/11/2026). O turno do vigia cai no laço da reserva, falha,
+     o dono lê a causa do Claude e o erro comum, e a resposta é 200 com `session_id`: o vigia marca o aviso como dado.
+- **Efeito:** nesses dois casos o dono recebe um aviso de falha sem saber de qual contato, e o lembrete com hora ou de
+  promessa se perde. Não medido (em 25/11/2026 havia 4 acompanhamentos ativos, todos do dono).
+- **Menor mudança:** o vigia mandar o id do acompanhamento no pedido; o `ai-agent` guardá-lo no pedido ao Claude e, na
+  falha, reabrir o acompanhamento em vez de avisar (caso 1). No caso 2, calar e devolver `calado` só quando o laço falhou
+  sem rodar ferramenta nenhuma (tentar de novo um turno que já gravou repetiria a gravação). Muda o que o dono recebe e
+  mexe no estado do acompanhamento: tarefa própria, com o OK dele. Não mudado aqui.
+
+### [NOVO-p1-s5-04] Lista de assinantes com lixo ou com um id errado tira o dono da assinatura sem deixar pista
+
+- **Onde:** `listaDosAssinantes` e `assinanteDoMax` (`supabase/functions/_shared/ai/max/claude-max.ts`). Achado da revisão
+  da leva B (25/11/2026, gravidade baixa); conferido no código.
+- **Efeito:** o que não tem forma de id é descartado calado, e `assinanteDoMax` só avisa no log quando a chave
+  `ai_max_assinantes` está AUSENTE. Com a chave presente e errada (um id com um caractere trocado, `{<id>}` com chaves, a
+  chave vazia; o cargo financeiro consegue gravá-la, NOVO-p1-s5-01), o próprio dono sai da assinatura. Com a reserva
+  ligada (produção em 25/11/2026), todo turno dele vai pelo OpenRouter, que está sem saldo, e ele lê só o erro comum; não
+  fica linha nenhuma dizendo que a causa é a lista. Com a reserva desligada ele lê "Este assistente funciona pela
+  assinatura Claude do dono e atende só o titular. Fale com o administrador." (ele é o administrador), e fica o registro
+  `nao_assinante` com o id de quem pediu.
+- **Menor mudança:** quando a chave existe, o canal pede o Claude, o cargo é admin e a pessoa não está na lista, um aviso
+  por instância no console e em `app_error_logs` (`action: 'assinante_fora_da_lista'`), só com a contagem de ids válidos e
+  de pedaços descartados, nunca os ids. Teste: lista com lixo e admin de fora gera uma linha só. Não mudado aqui.
+
+### [NOVO-p1-s5-05] O pedido do vigia das conversas para quem não é o titular manda a frase do titular e encerra o lembrete
+
+- **Onde:** `turnoDoModeloNoWhatsApp` (`supabase/functions/ai-agent/index.ts`), guarda `naoAssinanteSemReserva`, e `avisar`
+  (`supabase/functions/acompanhar-conversas/index.ts`). Visto na revisão da leva B (25/11/2026).
+- **Efeito:** o vigia das conversas abre o turno em nome de quem pediu o acompanhamento (`criado_por`). Se essa pessoa
+  não é o titular da assinatura e a reserva está desligada, ela recebe "Este assistente funciona pela assinatura Claude
+  do dono e atende só o titular. Fale com o administrador." sem ter mandado nada, e o vigia conta o aviso como dado (a
+  resposta é `entregue: "aviso"`, sem `calado`): o lembrete com hora e o de promessa ficam encerrados. Não acontece hoje:
+  em 25/11/2026 só o dono tem o assistente no WhatsApp, e os 4 acompanhamentos ativos são dele (conferido por contagem).
+  O conserto do turno do vigia (o `calado`) não cobre este ramo de propósito: tentar de novo a cada rodada um turno que
+  nunca vai ser atendido não leva a nada.
+- **Menor mudança:** decisão de quem especifica: o vigia não abrir turno para quem não é o titular quando a reserva está
+  desligada (e encerrar o acompanhamento com um motivo próprio), ou entregar o lembrete sem o assistente. Não mudado aqui.
+
+### [NOVO-p1-v1-06] As duas migrations da leva B se registram de jeitos diferentes, e a do V1 não é tudo ou nada
+
+- **Onde:** `supabase/migrations/20270301110000_assistente_quedas.sql` (V1) e
+  `supabase/migrations/20270301130000_assinatura_max_por_pessoa.sql` (S5). Achado da revisão da leva B (25/11/2026,
+  gravidade baixa, visto pelas duas lentes); conferido nos dois arquivos. Nenhuma das duas foi aplicada.
+- **Efeito:** a do V1 registra a própria versão na última linha do arquivo ("NÃO rodar um segundo insert do registro"); a
+  do S5 segue a regra 1 do `CLAUDE.md` (roda o arquivo e depois faz o insert do registro à mão). Quem aplica as duas pelo
+  hábito da regra 1 roda o insert também no V1 e recebe erro de versão repetida (não estraga nada, mas confunde o "deu
+  certo?"). Quem aplica as duas pelo jeito do V1 esquece o registro do S5 e deixa migration aplicada sem registro, que é o
+  incidente que a regra 1 cita. Além disso, o arquivo do V1 não tem `begin;` e `commit;`: se um comando falhar no meio, a
+  tabela pode ficar criada sem os revokes, sem a prova e sem o registro, e rodar de novo para no `create table`.
+- **Menor mudança:** deixar as duas iguais. A mais segura: tirar do arquivo do V1 o insert do registro, pôr no cabeçalho os
+  dois comandos da regra 1 e envolver o arquivo em `begin;` e `commit;`. Enquanto os arquivos ficarem como estão, o roteiro
+  de aplicação tem de dizer, arquivo por arquivo: na `20270301110000`, só o `-f`; na `20270301130000`, o `-f` e depois o
+  insert do registro; no fim, conferir as duas versões em `supabase_migrations.schema_migrations`. Não mudado aqui: mexer
+  numa migration pronta para o OK do dono é tarefa própria.
+
+### [NOVO-p1-v1-07] O "ensaio" que a migration do V1 promete antes de aplicar não existe
+
+- **Onde:** cabeçalho de `supabase/migrations/20270301110000_assistente_quedas.sql` ("Prova (depois de aplicar, ou antes,
+  como ensaio): supabase/tests/assistente_quedas.sql") e `supabase/tests/assistente_quedas.sql`. Achado da revisão da leva B
+  (25/11/2026, gravidade baixa); conferido nos dois arquivos.
+- **Efeito:** o teste começa por `update public.assistente_quedas … where ate is null`, sem criar a tabela. Antes de
+  aplicar a migration ele para na primeira linha (a tabela não existe) e não devolve resultado nenhum: o ensaio prometido
+  não roda. O teste do S5 tem o bloco A0, que no ensaio repete a gravação dentro da transação; este não tem. Depois de
+  aplicada a migration o teste funciona, mas segura as quedas abertas até o `rollback`, disputando com a rodada do vigia
+  (de 5 em 5 minutos): é rápido, e convém rodar fora dos minutos :00, :05, :10…
+- **Menor mudança:** tirar "ou antes, como ensaio" do cabeçalho da migration; ou dar ao teste um A0 como o do S5 (se a
+  tabela não existe, criar dentro da transação, que termina em `rollback`). Não mudado aqui.
+
+### [NOVO-p1-s6-04] Testes e um comentário guardam dois telefones e um CPF que existem no cadastro de clientes
+
+- **Onde:** os dois telefones (terminados em 5678 e em 3158, DDD 47) e o CPF (começa por 508) aparecem em:
+  `supabase/functions/_shared/ai/tools/acompanhamento_test.ts`, `agendamento_test.ts`, `cadastros_test.ts` e
+  `resposta_test.ts` (os telefones; em `cadastros_test.ts` também o CPF), no comentário do topo de
+  `supabase/functions/_shared/ai/busca-cadastro.ts` (um telefone e o CPF) e em `tools/clients.ts` (o CPF). Todos esses já
+  estão na `main` (o mais antigo desde 05/10/2026). E em `supabase/functions/_shared/ai/tools/riscos-de-ferramenta_test.ts`,
+  que NÃO está na `main`: entrou neste ramo pela leva A do pacote 1 (S3; 43 usos dos telefones e 4 do CPF).
+- **Efeito:** conferido só por contagem em 25/11/2026 (nenhum dado foi lido): cada telefone bate com 1 cadastro de cliente
+  e 1 contato do WhatsApp, e o CPF bate com 2 cadastros de cliente. São dados pessoais de cliente de verdade dentro do
+  repositório, em arquivos que dizem usar dado inventado. A revisão da leva B achou um dos telefones no teste novo do S6
+  (`agent-texto-de-fora_test.ts`), que foi limpo dos dois (commit "Revisão: o teste do S6 deixa de usar números…"). A
+  revisão supôs que os outros arquivos estavam todos na `main`; o `riscos-de-ferramenta_test.ts` não está.
+- **Menor mudança:** trocar pelos fictícios do padrão `(47) 90000-00NN` (não batem com cliente, fornecedor, usuário,
+  contato nem mensagem; conferido por contagem) e por um CPF de teste, arquivo por arquivo, rodando os testes de cada um.
+  Convém fazer `riscos-de-ferramenta_test.ts` ANTES de publicar o ramo, para a publicação não levar 47 cópias novas à
+  `main`. Não mudado aqui: são 7 arquivos fora do achado, e as asserções de `riscos-de-ferramenta_test.ts` conferem o
+  número formatado em vários pontos (tarefa própria, regra 3).
+- **Situação (25/11/2026, na junção deste ramo com a `main`):** a leva A foi publicada em 25/11 (`main` em `38bec295`) e
+  `riscos-de-ferramenta_test.ts` já está na `main`. A limpeza passou a ser tarefa própria na `main`, nos sete arquivos.
+
+### [NOVO-p1-s6-05] O S6 ficou mais largo que a especificação: 8 leituras e 10 escritas a mais (decisão do dono a confirmar)
+
+- **Onde:** `LEITURAS_DE_TEXTO_DE_FORA` e `SOBEM_PARA_SIM` (`supabase/functions/_shared/ai/texto-de-fora.ts`). Achado da
+  revisão da leva B (25/11/2026, gravidade baixa); conferido no código e medido no banco.
+- **Efeito:** a especificação tem 8 leituras e 14 escritas que sobem para o "sim". O código tem 8 leituras a mais
+  (`list_unanswered_messages`, `list_unidentified_contacts`, `get_open_loops`, `list_agenda_suggestions`,
+  `accept_agenda_suggestions`, `dismiss_agenda_suggestions`, `get_quote_comparison`, `rascunhar_resposta_email`) e 10
+  escritas a mais (`create_marina`, `update_marina`, `alterar_favorecido`, `cadastrar_freelancer`,
+  `link_contact_to_entity`, `link_whatsapp_lead_to_client`, `criar_cobranca`, `alterar_cobranca`,
+  `criar_missao_acompanhamento`, `update_service`). Tudo só sobe o risco (o lado seguro), mas pode pôr cartão de "sim" onde
+  hoje não há: uma cobrança criada ou uma missão de acompanhamento pedida no turno do vigia, que já nasce marcado.
+  **Medido em 25/11/2026** (90 dias, 472 turnos em `ai_jobs`, só nomes de ferramenta, pelo método de
+  `sql/p1-seguranca-2.sql`): das 10 escritas a mais, só `criar_cobranca` foi chamada (4 vezes), nenhuma depois de uma
+  leitura de texto de fora e nenhuma em turno do vigia; as outras 9 tiveram 0 chamadas. Em 90 dias o alargamento não teria
+  criado nenhum cartão. O turno que roda pelo OpenRouter não deixa essa lista: a medida vale para os turnos do Claude.
+- **Menor mudança:** nenhuma no código. Levar as 18 inclusões ao OK nomeado do dono na publicação do S6; se ele recusar,
+  voltar à lista da especificação mais as que gravam telefone (a raiz do NOVO-p1-s1-04).
+
+### [NOVO-p1-c4-06] A tela de atividade do assistente não tem teste que a renderize
+
+- **Onde:** `src/pages/AIActivityPage.tsx` (o filtro `.not('event_type', 'like', 'rota:%')` na lista dos últimos 50
+  eventos, do C4) e `src/test/atividade-sem-rota.test.ts`. Achado da revisão da leva B (25/11/2026, gravidade baixa).
+- **Efeito:** a mudança de tela é provada só por um teste que lê a fonte. Nenhum teste renderiza `AIActivityPage`, e a
+  regra da casa "validar tela por render" (`tsc` e o build não pegam erro de render) fica sem prova para ela. O risco é
+  pequeno: um método do supabase-js numa consulta que já existia.
+- **Menor mudança:** um `AIActivityPage.smoke.test.tsx` no padrão dos outros `*.smoke.test.tsx` de `src/pages`, com o
+  cliente do Supabase falso aceitando `.not()`. Não mudado aqui (fora dos achados de gravidade alta e média).
+
+### [NOVO-p1-c4-07] A rota do turno do vigia que o assistente calou sai igual à do aviso que foi ao dono
+
+- **Onde:** `rotaDaResposta` (`supabase/functions/_shared/ai/rota-da-mensagem.ts`): `entregue: "aviso"` vira
+  `rota:aviso_falha` com o código da causa. Visto na revisão da leva B (25/11/2026), ao criar a resposta
+  `{ entregue: "aviso", causa, calado: true }` do turno aberto pelo vigia das conversas.
+- **Efeito:** no rastro, o turno do vigia em que nada foi enviado ao dono aparece como `aviso_falha`, igual ao turno em
+  que o aviso saiu. Dá para separar pelo `mensagem_id` nulo (o turno do vigia não vem de mensagem do dono) e pelo registro
+  `max_fora_turno_do_vigia` em `app_error_logs`, mas a linha da rota sozinha não diz.
+- **Menor mudança:** em `rotaDaResposta`, com `calado === true`, o detalhe `calado:<causa>` (cabe no padrão de rótulo).
+  Mexe no arquivo do C4 e nos testes dele: não mudado aqui.
 
 ### [NOVO-agenda-p1-01] *falta dia <alvo>* dito no mesmo dia do "terminei" marca como parcial o dia do plano anterior a hoje
 

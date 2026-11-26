@@ -353,10 +353,20 @@ export function textoDaNfe(p: { numero: string | number | null; cliente: string 
   return `*A NF-e${p.numero ? ` nº ${p.numero}` : ""}${quem ? ` (${quem})` : ""} foi rejeitada.*${motivo}${reemitir}`;
 }
 
-/** Sistema fora do ar, avisado na volta. `manhaNaoChegou` = a queda derrubou a manhã de hoje. */
-export function textoDoSistema(p: { desde: string | null; ate: string | null; manhaNaoChegou: boolean }): string {
+/** (pacote 1, V1) Por que o servidor do WhatsApp ficou inalcançável, quando o vigia soube dizer. Outra causa = nada. */
+const CAUSA_DO_WHATSAPP_FORA: Readonly<Record<string, string>> = {
+  pc_fora: "o PC da oficina estava desligado ou sem internet",
+  docker_ou_tunel: "o PC estava ligado, mas o Docker ou o túnel tinha parado",
+};
+
+/**
+ * Sistema fora do ar, avisado na volta. `manhaNaoChegou` = a queda derrubou a manhã de hoje.
+ * `causa` (pacote 1, V1) = a causa gravada no histórico de quedas; ausente, nula ou outra = o texto de sempre.
+ */
+export function textoDoSistema(p: { desde: string | null; ate: string | null; manhaNaoChegou: boolean; causa?: string | null }): string {
+  const porque = p.causa && Object.hasOwn(CAUSA_DO_WHATSAPP_FORA, p.causa) ? `: ${CAUSA_DO_WHATSAPP_FORA[p.causa]}` : "";
   const fora = p.desde && p.ate
-    ? `O WhatsApp ficou fora das ${horaBR(new Date(p.desde))} às ${horaBR(new Date(p.ate))}${diaBR(new Date(p.desde)) !== diaBR(new Date(p.ate)) ? ` (desde ${ddmm(diaBR(new Date(p.desde)))})` : ""}.`
+    ? `O WhatsApp ficou fora das ${horaBR(new Date(p.desde))} às ${horaBR(new Date(p.ate))}${diaBR(new Date(p.desde)) !== diaBR(new Date(p.ate)) ? ` (desde ${ddmm(diaBR(new Date(p.desde)))})` : ""}${porque}.`
     : "O WhatsApp ficou fora do ar.";
   const manha = p.manhaNaoChegou ? " A manhã de hoje não chegou: me peça *como estão as coisas?* se quiser o resumo." : "";
   return `${fora}${manha}`;

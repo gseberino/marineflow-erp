@@ -19,8 +19,19 @@ import { resumirLembreteDeRevisao, TITULOS_DOS_PLANOS } from "./tools/planos-man
 import { resumirAgrupamento, resumirDesagrupamento } from "./tools/agrupar-orcamentos.ts";
 // agrupar OS (28/10/2026): o mesmo para ordens de serviço — o impedimento (já começou, nota, outro cliente) vira recusa.
 import { resumirAgrupamentoDeOS, resumirDesagrupamentoDeOS } from "./tools/agrupar-os.ts";
-// cobrar juntas (28/10/2026, Fase 0 do Fechar juntas): o resumo mostra cada OS com o saldo e a mensagem exata; trava vira recusa.
+// cobrar juntas (28/10/2026, Fase 0 do Fechar juntas; 25/11/2026: também o cliente inteiro): o resumo mostra cada OS (ou conta
+// sem OS) com o saldo e a mensagem exata; trava vira recusa.
 import { resumirCobrancaConjunta } from "./tools/cobrar-juntas.ts";
+// lembrete individual de cobrança (25/11/2026): o resumo mostra o número, o valor conferido na conta e a mensagem exata; trava vira recusa.
+import {
+  cartaoBateComORetrato,
+  cartaoDoLote,
+  conferirLoteDeLembretes,
+  LOTE_GRANDE,
+  MAX_DO_LOTE,
+  resumirLembreteDeCobranca,
+} from "./tools/lembrete-de-cobranca.ts";
+import { desviadoPorTeste } from "../whatsapp/marcar-enviado.ts";
 // histórico de documentos (16/11/2026): o cartão do "sim" é a simulação da restauração (o que muda, total, assinatura).
 import { resumirRestauracao } from "./tools/historico-documento.ts";
 import {
@@ -57,6 +68,9 @@ import { resumirAplicacaoDoPreco } from "./tools/quotes.ts";
 import { FALHA_AO_CONFERIR_O_CLIENTE, resumirTrocaDeContato } from "./tools/clients.ts";
 // pacote 1, S4 (24/11/2026): o cartão da nota global mostra o texto inteiro da regra.
 import { resumirNotaGlobal } from "./tools/memory.ts";
+// pacote 1, S6 (24/11/2026): o turno que leu texto de fora (conversa, e-mail, fornecedor) e depois grava cadastro, contato,
+// preço ou memória.
+import { leuTextoDeFora, LEITURAS_DE_TEXTO_DE_FORA, LINHA_DO_SIM_DEPOIS_DE_TEXTO_DE_FORA, riscoDepoisDeTextoDeFora } from "./texto-de-fora.ts";
 import { resolverCobrancasDoLote } from "./tools/flow-macros.ts";
 import { comFusoDeBrasilia, FUSO_DE_BRASILIA } from "./fuso.ts";
 
@@ -285,7 +299,8 @@ const TOOL_LABELS_PT: Record<string, string> = {
   desagrupar_os: "Desagrupar OS",
   listar_os_para_agrupar: "Listar OS para agrupar",
   // cobrar juntas (28/10/2026): o saldo de várias OS executadas do mesmo cliente numa mensagem só.
-  cobrar_juntas: "Cobrar OS juntas (WhatsApp)",
+  // 25/11/2026: a mesma tool cobra o cliente inteiro (uma conta só, conta sem OS) — "OS juntas" deixava o cartão errado.
+  cobrar_juntas: "Cobrar o cliente (WhatsApp)",
   // histórico de documentos (16/11/2026): paridade com a linha do tempo da tela (consultar roda direto; restaurar pede o "sim").
   consultar_historico_documento: "Ver o histórico do documento",
   restaurar_documento: "Restaurar orçamento/OS (desfazer ou voltar versão)",
@@ -510,6 +525,11 @@ RESUMO_QUE_RESOLVE.add("desagrupar_os");
 // cobrar juntas (28/10/2026): cadastro genérico, OS que não começou, outro cliente, sem saldo, Pix esperando no Extrato,
 // opt-out, piso — o resumo diz por quê numa linha "⚠️": é recusa, não pendência.
 RESUMO_QUE_RESOLVE.add("cobrar_juntas");
+// lembrete individual de cobrança (25/11/2026): cobrança ou conta paga/cancelada, piso, entrada esperando no Extrato, opt-out,
+// cadastro genérico sem contato próprio, sem telefone — o resumo diz por quê numa linha "⚠️": é recusa, não pendência.
+RESUMO_QUE_RESOLVE.add("send_collection_reminder");
+// lote de lembretes (25/11/2026): nenhum sairia, leitura que falha — o resumo diz por quê numa linha "⚠️": recusa, não pendência.
+RESUMO_QUE_RESOLVE.add("send_bulk_collection_reminders");
 // "Sim, é do X" (leva 8, revisão de 23/10/2026): entrada confirmada sem cliente sugerido, cliente fora do cadastro ou
 // leitura que falha — o resumo diz por quê numa linha "⚠️": é recusa, não pendência.
 RESUMO_QUE_RESOLVE.add("aprovar_propostas_de_lancamento");
@@ -810,10 +830,30 @@ export async function buildPendingSummary(
   // ao cliente. Trava (genérico, Pix esperando, opt-out, piso…) vira uma linha "⚠️"; leitura que falha também.
   if (toolName === "cobrar_juntas") {
     try {
-      return await resumirCobrancaConjunta(admin, args);
+      const r = await resumirCobrancaConjunta(admin, args);
+      // Revisão de 25/11/2026: o retrato falhou (leitura que caiu entre as duas conferências) e o cartão saiu certo — sem
+      // retrato o "sim" nunca envia, então nem pede o "sim". `=== null`: quem chama sem a pendência não passa retrato.
+      if (quem.retrato === null && !r.trim().startsWith("⚠️")) return "⚠️ Não consegui conferir as contas agora. Nada foi registrado; tente de novo.";
+      return r;
     } catch (e) {
       const motivo = String((e as { message?: string })?.message ?? e).replace(/\s*\n+\s*/g, " ");
-      return `⚠️ Não consegui conferir as contas das OS agora (${motivo}). Nada foi registrado; tente de novo.`;
+      // com as OS ditas, "das OS"; só com o cliente (25/11/2026), "do cliente" — pode nem haver OS
+      const deQuem = Array.isArray(args?.os) ? args.os.length > 0 : !!String(args?.os ?? "").trim();
+      return `⚠️ Não consegui conferir as contas ${deQuem ? "das OS" : "do cliente"} agora (${motivo}). Nada foi registrado; tente de novo.`;
+    }
+  }
+  // Lembrete individual de cobrança (25/11/2026): o "sim" é sobre quem recebe, o número inteiro, o valor e o vencimento
+  // conferidos na CONTA a receber (a cobrança guarda o valor antigo) e a MENSAGEM EXATA que vai ao cliente. Trava (paga,
+  // piso, entrada esperando no Extrato, opt-out, cadastro genérico, sem telefone) vira uma linha "⚠️"; leitura que falha também.
+  if (toolName === "send_collection_reminder") {
+    try {
+      const r = await resumirLembreteDeCobranca(admin, args);
+      // sem retrato o "sim" nunca envia (ver o cobrar_juntas acima): recusa em vez de pedir o "sim"
+      if (quem.retrato === null && !r.trim().startsWith("⚠️")) return "⚠️ Não consegui conferir a cobrança agora. Nada foi enviado; tente de novo.";
+      return r;
+    } catch (e) {
+      const motivo = String((e as { message?: string })?.message ?? e).replace(/\s*\n+\s*/g, " ");
+      return `⚠️ Não consegui conferir a cobrança agora (${motivo}). Nada foi enviado; tente de novo.`;
     }
   }
   // Restaurar orçamento/OS (16/11/2026): o "sim" é sobre a SIMULAÇÃO do banco — o que muda, o total antes e depois, o que
@@ -828,24 +868,25 @@ export async function buildPendingSummary(
   }
   // Macros de fluxo: a confirmação PRECISA mostrar o que vai acontecer de verdade (a lista
   // do lote, os passos da aprovação) — os args crus não bastam. Resolve o conteúdo real.
+  // Lote de lembretes (25/11/2026): o cartão é a conferência do envio — cada cliente com o número, o valor e o vencimento
+  // da CONTA, o que fica de fora e por quê, e a mensagem. Nenhum sairia, leitura que falha ou retrato que falhou: "⚠️".
   if (toolName === "send_bulk_collection_reminders") {
-    const ids: string[] = Array.isArray(args?.collection_ids) ? (args.collection_ids as string[]) : [];
-    if (ids.length === 0) return "Nenhuma cobrança selecionada.";
-    let rows: any[] = [];
+    const ids: string[] = Array.isArray(args?.collection_ids) ? (args.collection_ids as string[]).filter(Boolean) : [];
+    if (ids.length === 0) return "⚠️ Nenhuma cobrança selecionada: levante a lista (list_pending_collections ou get_delinquency_plan) e passe os ids.";
+    if (ids.length > MAX_DO_LOTE) return `⚠️ ${LOTE_GRANDE}`;
     try {
-      // O mesmo resolvedor do envio (id da cobrança OU receivable_id de get_delinquency_plan): o resumo mostra o lote
-      // que vai sair de verdade.
-      rows = (await resolverCobrancasDoLote(admin, ids)).flatMap((i) => (i.cobranca ? [i.cobranca] : []));
-    } catch { /* best-effort */ }
-    if (rows.length === 0) return `Enviar cobrança para ${ids.length} cliente(s) selecionado(s).`;
-    const hoje = Date.now();
-    const linhas = rows.map((r) => {
-      const dias = r.due_date ? Math.floor((hoje - new Date(`${r.due_date}T00:00:00`).getTime()) / 86400000) : 0;
-      const atraso = dias > 0 ? ` · ${dias}d de atraso` : "";
-      return `- ${r.contact_name || "cliente"}: ${fmtBRL.format(Number(r.amount) || 0)}${atraso}`;
-    });
-    const total = rows.reduce((a, r) => a + (Number(r.amount) || 0), 0);
-    return `Enviar cobrança por WhatsApp para *${rows.length}* cliente(s):\n${linhas.join("\n")}\nTotal: *${fmtBRL.format(total)}*`;
+      const modoTeste = desviadoPorTeste((quem.settings ?? {}) as Record<string, string>);
+      const itens = await conferirLoteDeLembretes(admin, admin, await resolverCobrancasDoLote(admin, ids), args?.custom_message, { modoTeste });
+      const r = cartaoDoLote(itens, args?.custom_message);
+      if (r.trim().startsWith("⚠️")) return r;
+      if (quem.retrato === null) return "⚠️ Não consegui conferir o lote agora. Nada foi enviado; tente de novo.";
+      // o retrato saiu de outra conferência, segundos antes: a lista tem de ser a mesma que o cartão mostra
+      if (quem.retrato && !cartaoBateComORetrato(itens, quem.retrato)) return "⚠️ A lista mudou enquanto eu conferia (um pagamento ou uma cobrança mexeu agora). Nada foi enviado; peça de novo.";
+      return r;
+    } catch (e) {
+      const motivo = String((e as { message?: string })?.message ?? e).replace(/\s*\n+\s*/g, " ");
+      return `⚠️ Não consegui conferir o lote agora (${motivo}). Nada foi enviado; tente de novo.`;
+    }
   }
   if (toolName === "approve_quote_full") {
     const osLabel = args?.service_order_id ? await resolveIdLabel(admin, "service_order_id", String(args.service_order_id)) : "orçamento";
@@ -1300,7 +1341,13 @@ export async function executarChamadaDeTool(
   // confirmação. Só sobe o risco, nunca rebaixa.
   const riscoSemAmarra = foraDoPerfil && riscoDaTool === "low" && !rodaDiretoPelaRede(foraDoPerfil) ? "medium" : riscoDaTool;
   // Retorno F2 (P9): depois de o modelo ler um caso do cartão, o envio livre pede PIN e mostra o número.
-  const effectiveRisk = riscoDoEnvioLivre(tc.name, riscoSemAmarra, amb.toolCtx.sessaoAmarrada, tc.input as Record<string, unknown>);
+  const riscoDoEnvio = riscoDoEnvioLivre(tc.name, riscoSemAmarra, amb.toolCtx.sessaoAmarrada, tc.input as Record<string, unknown>);
+  // Pacote 1, S6 (24/11/2026): depois de o turno ler texto de fora (conversa, e-mail, mensagem de fornecedor), escrita em
+  // cadastro, contato e preço pede o "sim" e escrita na memória pede PIN (texto-de-fora.ts). Só SOBE o risco; sem a marca
+  // do turno, nada muda. O motivo entra na mesma lista do S1: vai para o cartão, para risk_reason e trava a autonomia.
+  const depoisDeTextoDeFora = riscoDepoisDeTextoDeFora(tc.name, riscoDoEnvio, amb.toolCtx.leuTextoDeFora === true);
+  const effectiveRisk = depoisDeTextoDeFora.risco;
+  if (depoisDeTextoDeFora.motivo) motivosDoRisco.push(depoisDeTextoDeFora.motivo);
 
   // Autonomia concedida pelo dono para ESTA ação (Onda 2). Ações de dinheiro/destrutivas
   // nunca entram aqui — ver NEVER_AUTONOMOUS. Pela rede também não: a autonomia foi dada
@@ -1308,6 +1355,7 @@ export async function executarChamadaDeTool(
   // argumentos vão junto porque há trava por argumento: o envio do PDF ao cliente nunca roda
   // sozinho (NEVER_AUTONOMOUS_WHEN). Pacote 1, S1: com motivo de risco dado pelo servidor também não
   // (isAutonomyGranted não olha o nível: uma chave 'auto' pularia o PIN que o motivo acabou de pedir).
+  // S6: o motivo do texto de fora vale igual (uma chave 'auto' pularia o "sim" que a leitura acabou de pedir).
   const autonomo = toolDef && !foraDoPerfil && motivosDoRisco.length === 0
     ? isAutonomyGranted(tc.name, effectiveRisk, amb.toolCtx.settings, tc.input as Record<string, unknown>)
     : false;
@@ -1372,6 +1420,9 @@ export async function executarChamadaDeTool(
       // aprovação é por botão: por isso "No WhatsApp"). Só quando o risco final é alto e o servidor deu o motivo.
       const motivoDoRisco = motivosDoRisco.join("; ");
       if (effectiveRisk === "high" && motivoDoRisco) resumo += `\n${linhaDoPin(motivosDoRisco)}`;
+      // Pacote 1, S6: no risco médio (cadastro, contato, preço) a última linha diz por que este cartão pede o "sim". No
+      // risco alto o motivo do texto de fora já está na linha do PIN, acima, junto dos outros.
+      if (effectiveRisk === "medium" && depoisDeTextoDeFora.motivo) resumo += `\n${LINHA_DO_SIM_DEPOIS_DE_TEXTO_DE_FORA}`;
       const payloadDaPendencia = limpa
         ? {
           ...entrada,
@@ -1418,6 +1469,10 @@ export async function executarChamadaDeTool(
     } catch (e: any) {
       toolResult = { error: e?.message || "Falha na execução da tool" };
     }
+    // Pacote 1, S6: a leitura que rodou sem erro trouxe texto de terceiro para o turno. A marca fica no contexto, que no
+    // laço do OpenRouter é o mesmo até o fim do turno (no Claude Max cada chamada tem contexto novo, e o erp-mcp refaz a
+    // marca pela lista de ferramentas do job). Não vai para a sessão: vale para este turno.
+    if (LEITURAS_DE_TEXTO_DE_FORA.has(tc.name) && !temErro(toolResult)) amb.toolCtx.leuTextoDeFora = true;
     await writeAudit(amb, {
       eventType: `tool:${tc.name}`,
       risk: toolDef.risk,
@@ -1527,6 +1582,9 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
   let pausadoPorTempo = false;
   // aprovação em lote (29/10/2026): o turno ganha um id, que vai a cada linha de auditoria dele.
   const turno = { id: crypto.randomUUID(), inicio: new Date(inicioDoTurno).toISOString() };
+  // Pacote 1, S6: o pedido do vigia ("🤖 …", acompanhar-conversas) já traz mensagem de terceiro citada. O turno começa
+  // marcado, como no Claude Max (erp-mcp, pelo texto do job). A marca só liga; nunca desliga a que já veio no contexto.
+  if (leuTextoDeFora(null, textoDoUltimoPedido(params.messages))) params.toolCtx.leuTextoDeFora = true;
 
   for (let iter = 0; iter < maxIterations; iter++) {
     if (Date.now() - inicioDoTurno > orcamentoMs) {

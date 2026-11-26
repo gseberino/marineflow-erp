@@ -203,6 +203,26 @@ Deno.test("os outros acordes: golpe, certificado, NF-e e sistema — sem emoji, 
   }
 });
 
+// Pacote 1, V1 (25/11/2026): a causa da queda do WhatsApp, gravada no histórico de quedas. O que se protege: sem causa,
+// com causa nula ou com causa que não diz nada do PC, o texto é EXATAMENTE o de sempre.
+Deno.test("sistema: a volta do WhatsApp diz a causa só quando o vigia a gravou (PC fora, ou Docker/túnel)", () => {
+  const queda = { desde: "2026-10-13T16:00:00Z", ate: "2026-10-13T17:05:00Z", manhaNaoChegou: false };
+  const deSempre = "O WhatsApp ficou fora das 13:00 às 14:05.";
+  assertEquals(textoDoSistema(queda), deSempre);
+  for (const causa of [null, undefined, "", "desconectado", "travado", "desconhecida", "login", "toString"]) {
+    assertEquals(textoDoSistema({ ...queda, causa }), deSempre, String(causa));
+  }
+  assertEquals(textoDoSistema({ ...queda, causa: "pc_fora" }), "O WhatsApp ficou fora das 13:00 às 14:05: o PC da oficina estava desligado ou sem internet.");
+  assertEquals(textoDoSistema({ ...queda, causa: "docker_ou_tunel" }), "O WhatsApp ficou fora das 13:00 às 14:05: o PC estava ligado, mas o Docker ou o túnel tinha parado.");
+  // a queda que atravessou o dia e a que derrubou a manhã: a causa entra depois das horas, e o resto continua
+  assertEquals(textoDoSistema({ desde: "2026-10-12T16:00:00Z", ate: "2026-10-13T17:05:00Z", manhaNaoChegou: false, causa: "pc_fora" }),
+    "O WhatsApp ficou fora das 13:00 às 14:05 (desde 12/10): o PC da oficina estava desligado ou sem internet.");
+  assertEquals(textoDoSistema({ desde: "2026-10-13T05:45:00Z", ate: "2026-10-13T12:10:00Z", manhaNaoChegou: true, causa: "docker_ou_tunel" }),
+    "O WhatsApp ficou fora das 02:45 às 09:10: o PC estava ligado, mas o Docker ou o túnel tinha parado. A manhã de hoje não chegou: me peça *como estão as coisas?* se quiser o resumo.");
+  // sem as horas não há onde pôr a causa
+  assertEquals(textoDoSistema({ desde: null, ate: null, manhaNaoChegou: false, causa: "pc_fora" }), "O WhatsApp ficou fora do ar.");
+});
+
 Deno.test("a queda derrubou a manhã: começou antes das 07:30 e acabou depois das 09:05", () => {
   assert(quedaDerrubouAManha("2026-10-13T05:45:00Z", "2026-10-13T12:10:00Z"), "02:45 → 09:10");
   assert(!quedaDerrubouAManha("2026-10-13T05:45:00Z", "2026-10-13T11:45:00Z"), "02:45 → 08:45: a fila ainda entrega");

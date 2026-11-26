@@ -15,9 +15,10 @@ import { executarChamadaDeTool, interrupcaoDaTool } from "../_shared/ai/agent.ts
 import { osDoTurno } from "../_shared/agenda/carona.ts";
 import type { Role } from "../_shared/ai/tools/index.ts";
 import { casoAmarradoDaSessao } from "../_shared/ai/tools/registry.ts";
+import { leuTextoDeForaNoJob } from "../_shared/ai/texto-de-fora.ts";
 import { ferramentasDoJob } from "../_shared/ai/max/ferramentas-do-job.ts";
 import { responderMcp, type ServidorDoTurno } from "../_shared/ai/max/mcp.ts";
-import { sha256Hex, TIPOS_DO_AGENTE } from "../_shared/ai/max/claude-max.ts";
+import { assinanteDoMax, sha256Hex, TIPOS_DO_AGENTE } from "../_shared/ai/max/claude-max.ts";
 import { timingSafeEqual } from "../_shared/cron-auth.ts";
 import { servirComCors } from "../_shared/cors.ts";
 
@@ -65,17 +66,29 @@ export async function handler(req: Request): Promise<Response> {
   // WhatsApp exige o canal habilitado para o usuário; o painel só exige o usuário ativo.
   if (!usuario?.active || (canal === "whatsapp" && !usuario.ai_whatsapp_enabled)) return naoAutorizado();
 
-  const { data: linhas } = await admin.from("app_settings").select("key, value");
+  const { data: linhas, error: erroDasSettings } = await admin.from("app_settings").select("key, value");
   const settings: Record<string, string> = {};
   (linhas ?? []).forEach((r: any) => {
     if (r.key) settings[r.key] = String(r.value ?? "");
   });
 
+  // S5 (pacote 1, 24/11/2026): estas ferramentas só rodam para a assinatura Claude, que é de uma pessoa. Quem pediu o job
+  // tem de estar em app_settings.ai_max_assinantes (pessoa, não cargo); sem a chave, vale a regra antiga (cargo admin).
+  // É a mesma conferência do ai-agent ao enfileirar, repetida aqui porque o job pode ter nascido de outro lugar e a
+  // lista pode ter mudado no meio do turno. Fica depois da leitura das settings, que é de onde a lista sai.
+  // Leitura que falhou não é "chave ausente": sem a lista não há como saber quem é o assinante, e valer o cargo aqui
+  // seria abrir a porta calado. Recusa, e o turno falha como qualquer outro em que o banco não respondeu.
+  if (erroDasSettings) {
+    console.error(`[erp-mcp] não consegui ler app_settings no job ${jobId}; sem a lista de assinantes, recusando:`, erroDasSettings.message);
+    return naoAutorizado();
+  }
+  if (!assinanteDoMax(settings, usuario.id, String(usuario.role ?? ""))) return naoAutorizado();
+
   const cargo = (usuario.role as Role) || ("unknown" as Role);
   const { toolsByName, alcancaveisPelaRede } = ferramentasDoJob(cargo, input.ferramentas?.visiveis, input.ferramentas?.rede, canal);
   const sessionId = String(input.sessao ?? meta.session_id ?? "");
-  // Mesmo contexto do canal WhatsApp em ai-agent: sem JWT de usuário, client service-role (no painel
-  // só o admin chega aqui pelo Max — ver provedorDoTurno).
+  // Mesmo contexto do canal WhatsApp em ai-agent: sem JWT de usuário, client service-role (nos dois
+  // canais só o assinante chega aqui pelo Max — ver assinanteDoMax, acima, e provedorDoTurno).
   // Retorno F2 (P9): a marca de quem leu um caso do cartão vale para o turno do Max também.
   const { data: sessao } = sessionId
     ? await admin.from("ai_operator_sessions").select("metadata, client_id, vessel_id").eq("id", sessionId).maybeSingle()
@@ -85,7 +98,10 @@ export async function handler(req: Request): Promise<Response> {
   const toolCtx = { sb: adminDoTurno, admin: adminDoTurno, userId: usuario.id, userRole: cargo, jwt: "", appOrigin: settings.app_public_url || "", settings, canal,
     sessaoId: sessionId || undefined,
     sessaoAmarrada: (sessao?.metadata as Record<string, unknown> | null)?.retorno_amarrada === true,
-    casoAmarrado: casoAmarradoDaSessao(sessao) };
+    casoAmarrado: casoAmarradoDaSessao(sessao),
+    // S6 (pacote 1, 24/11/2026): o turno já leu texto de fora? Aqui pela linha do job lida no começo desta requisição;
+    // `chamar` refaz a conta com a linha relida na hora, logo antes de cada ferramenta.
+    leuTextoDeFora: leuTextoDeForaNoJob(job, false, input.texto) };
 
   // O turno é o job (aprovação em lote, 29/10/2026): cada linha de auditoria leva o id dele, e a entrega confere por ali o
   // que o turno gravou e o que falhou.
@@ -101,7 +117,7 @@ export async function handler(req: Request): Promise<Response> {
     listar: () => Object.values(toolsByName).map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema })),
     async chamar(nome, argumentos) {
       // Pendência ou opções já encerraram o turno: nada mais roda (o usuário ainda vai decidir).
-      const { data: atual } = await admin.from("ai_jobs").select("metadata").eq("id", jobId).maybeSingle();
+      const { data: atual, error: erroDoJob } = await admin.from("ai_jobs").select("metadata").eq("id", jobId).maybeSingle();
       if ((atual?.metadata as Record<string, any> | null)?.interrupcao) {
         // Registro da recusa (29/10/2026): mede o que o modelo tenta chamar depois da pendência antes de a Fase 2 deixar o
         // turno seguir. Best-effort: a auditoria nunca derruba a ferramenta.
@@ -119,6 +135,12 @@ export async function handler(req: Request): Promise<Response> {
         }
         return { resultado: { error: "Turno encerrado: aguardando a decisão do usuário. Não chame mais ferramentas." } };
       }
+      // S6 (pacote 1, 24/11/2026): depois de o turno ler texto de fora (conversa, e-mail, mensagem de fornecedor), escrita
+      // em cadastro, contato e preço pede o "sim" e escrita na memória pede PIN. Aqui cada chamada tem contexto novo, então
+      // a marca sai da lista de ferramentas já usadas no job (metadata.ferramentas_usadas, que a RPC abaixo grava DEPOIS de
+      // a ferramenta rodar) e do texto do pedido (o do vigia começa com 🤖). Linha do job que não deu para ler, ou lista
+      // perto do limite em que para de crescer, vale como "leu" (texto-de-fora.ts). A marca nunca vem do corpo da requisição.
+      toolCtx.leuTextoDeFora = leuTextoDeForaNoJob(atual, !!erroDoJob, input.texto);
       const tc = { name: nome, input: argumentos ?? {} };
       const r = await executarChamadaDeTool(tc, { toolsByName, alcancaveisPelaRede, toolCtx, sessionId, channel: canal, turno });
       // Sem desambiguação forçada aqui (trabalhoComposto=true): o MCP recebe uma chamada por vez e

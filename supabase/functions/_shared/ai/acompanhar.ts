@@ -1,6 +1,7 @@
 // Regras do vigia acompanhar-conversas (06/10/2026) — puras, para testar sem banco.
 // plans/marineflow-acompanhar-conversa.md
 import { dentroDaJanela } from "./promessa.ts";
+import { MARCA_DO_VIGIA } from "./texto-de-fora.ts";
 import { MOTIVO_CONTATO_ENCERROU } from "../whatsapp/contato-encerrou.ts";
 import { depoisDaJanelaDaManha } from "../uma-voz/janela.ts";
 
@@ -151,4 +152,42 @@ export function textoDoAviso(a: Acompanhamento, c: EstadoDaConversa, agora: Date
     ? `🤖 Lembrete que você pediu: responder ${quem}.`
     : `🤖 Acompanhamento (pedido seu): ${quem} está esperando resposta.`;
   return `${abertura}${ultima} ${ler}, me diga em uma linha o que ele quer e ${sugerir}`;
+}
+
+// ═══ O ASSISTENTE QUE NÃO PODE ATENDER O PEDIDO DO VIGIA (revisão da leva B do pacote 1, 25/11/2026) ═══
+//
+// O pedido do vigia chega ao ai-agent pelo mesmo caminho de uma mensagem do dono, mas o dono não mandou nada. Com o
+// Claude da assinatura fora e a reserva desligada, o ai-agent respondia a esse pedido como responde ao dono ("⚠️ Não
+// consegui responder: o PC da oficina está sem sinal… Confira o PC e mande de novo.") e devolvia HTTP 200. O vigia lia o
+// 200 como "aviso dado": o lembrete com hora e o de promessa eram ENCERRADOS, e o dono ficava com um "mande de novo"
+// sem saber do quê. Com N lembretes vencidos na rodada, N avisos iguais.
+//
+// As três pontas do combinado moram aqui, para não se desencontrarem:
+//   · ORIGEM_DO_VIGIA: o vigia diz, no pedido, que o turno é dele (`origem`);
+//   · turnoAbertoPeloVigia: o ai-agent reconhece o pedido do vigia e, se não puder atender, não manda nada ao dono e
+//     não grava nada na conversa; devolve `calado: true` (fica o registro em app_error_logs);
+//   · assistenteCalou: o vigia lê `calado: true` e NÃO marca o aviso como dado. O lembrete volta na rodada seguinte.
+// As duas funções podem ser publicadas em qualquer ordem. O ai-agent só se cala para quem mandou a origem (o vigia que
+// já sabe ler o `calado`), e o vigia só reabre com `calado: true`. Uma ponta nova com a outra velha = como antes: o
+// aviso sai e conta como dado. A frase para quem não é o titular da assinatura também segue como antes.
+
+/** O que o vigia das conversas põe em `origem`, no pedido ao ai-agent: "este turno é meu, não do dono". */
+export const ORIGEM_DO_VIGIA = "acompanhar-conversas";
+
+/**
+ * O turno foi aberto pelo vigia das conversas, e não por uma mensagem do dono? (pura) São duas condições juntas: o
+ * pedido diz que veio do vigia (`origem`, que só ele manda; o pedido é autenticado pelo segredo interno) E o texto
+ * começa com a marca do vigia (🤖, a de textoDoAviso). A mensagem que o dono escreve chega pelo webhook, sem origem:
+ * se ele mesmo começar uma mensagem com 🤖, ela continua sendo dele, e a falha é dita a ele como sempre.
+ */
+export function turnoAbertoPeloVigia(origem: unknown, texto: unknown): boolean {
+  return origem === ORIGEM_DO_VIGIA && typeof texto === "string" && texto.trimStart().startsWith(MARCA_DO_VIGIA);
+}
+
+/**
+ * A resposta do ai-agent diz que ele não pôde atender o pedido do vigia e não mandou nada ao dono? (pura)
+ * Só o `calado: true` exato vale: corpo ilegível, resposta comum ou aviso que saiu = false (o aviso conta como dado).
+ */
+export function assistenteCalou(corpo: unknown): boolean {
+  return !!corpo && typeof corpo === "object" && !Array.isArray(corpo) && (corpo as Record<string, unknown>).calado === true;
 }

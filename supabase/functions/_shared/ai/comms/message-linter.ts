@@ -47,7 +47,13 @@ const DETECTORES: Record<ProibicaoCodigo, (orig: string, norm: string) => Proble
     return m ? { codigo: "preco", detalhe: "cita preço/custo/margem", trecho: m[0].slice(0, 30) } : null;
   },
   jargao_tecnico: (orig) => {
-    const m = orig.match(/\b\d{2,4}\/\d{2,4}\b/) || orig.match(/\b(MPPT|MultiPlus|SmartShunt|SKU|NCM)\b/i);
+    // Data (dd/mm ou dd/mm/aaaa) não é código técnico (25/11/2026): a cobrança e o lembrete citam o vencimento e voltavam
+    // com aviso de estilo — e o prompt manda "não repetir o vício". Código como 100/50 ou 12/24 continua pego.
+    // Sem ano, dd/mm só é data depois de "dia/em/até/vence/de" — "Orion 24/12" e "Orion 12/12-30" são conversores Victron.
+    const semDatas = orig
+      .replace(/\b(?:0?[1-9]|[12]\d|3[01])\/(?:0?[1-9]|1[0-2])\/(?:\d{4}|\d{2})\b/g, " ")
+      .replace(/\b(dia|em|até|ate|vence|vencimento|de)\s+(?:0?[1-9]|[12]\d|3[01])\/(?:0?[1-9]|1[0-2])\b(?![\/-]\d)/gi, "$1 ");
+    const m = semDatas.match(/\b\d{2,4}\/\d{2,4}\b/) || orig.match(/\b(MPPT|MultiPlus|SmartShunt|SKU|NCM)\b/i);
     return m ? { codigo: "jargao_tecnico", detalhe: "jargão/código técnico para cliente", trecho: m[0] } : null;
   },
   ameaca: (_o, norm) => {

@@ -9,7 +9,11 @@
 //   POST com x-cron-secret                   pg_cron a cada 5 min: o vigia. Guarda o estado em
 //                                            whatsapp_conexao_vigia e avisa no sino dos admins
 //                                            quando fica 10 min fora do ar (e quando volta).
-//                                            "Fora do ar" inclui a sessão travada (conexao.ts)
+//                                            "Fora do ar" inclui a sessão travada (conexao.ts).
+//                                            Na mesma rodada (pacote 1, V1), conforme a chave
+//                                            app_settings.vigia_assistente: guarda o histórico de quedas
+//                                            (assistente_quedas) e, com 'ligado', avisa o dono quando só o
+//                                            Claude da assinatura cai (vigia-do-assistente.ts)
 //
 // verify_jwt = false porque o pg_cron chama sem JWT. Quem não traz o segredo do cron precisa de
 // JWT de admin ativo — as duas portas são conferidas ANTES de qualquer chamada à Evolution.
@@ -19,9 +23,10 @@ import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { logEdgeError } from "../_shared/log-error.ts";
 import {
-  confirmaTravada, decidirVigia, type EstadoConexao, hhmm, lerEstado, lerRespostaDoConnect, lerSaidas,
+  causaDoWhatsApp, causaQueOAvisoDiz, confirmaTravada, decidirVigia, type EstadoConexao, hhmm, lerEstado, lerRespostaDoConnect, lerSaidas,
   motivoDaQueda, numeroParaPareamento, suspeitaDeTravada, textoDoAviso,
 } from "./conexao.ts";
+import { lerCausaDaQuedaDoWhatsApp, olharDoVigia, type ResumoDaRodada, rodadaDoVigia } from "./vigia-do-assistente.ts";
 import { avisoDaVoltaDoWhatsApp } from "../_shared/uma-voz/fontes.ts";
 import { quedaDerrubouAManha, textoDoSistema } from "../_shared/uma-voz/acorde.ts";
 import { enfileirarAcorde, lerDonoDaVoz, lerPortao, perguntarAoPortao, registrarParaTodos } from "../_shared/uma-voz/registrar.ts";
@@ -146,6 +151,9 @@ async function vigiar(db: Db, evo: Evolution): Promise<Response> {
   if (erroLeitura) throw new Error(`ler vigia: ${erroLeitura.message}`);
   const { estado, detalhe } = await situacaoAtual(evo, anterior?.pedido_em ?? null);
   const agora = new Date();
+  // (pacote 1, V1, 25/11/2026) O vigia do assistente: a chave vigia_assistente e, se ela não for "desligado", o estado
+  // dos programas do PC. Nunca lança: chave ausente, erro ou exceção = "desligado", e daqui para baixo nada muda.
+  const olhar = await olharDoVigia(db, agora);
   const { registro, aviso } = decidirVigia(
     anterior ? { estado: anterior.estado, desde: anterior.desde, avisado_em: anterior.avisado_em } : null,
     estado,
@@ -162,7 +170,9 @@ async function vigiar(db: Db, evo: Evolution): Promise<Response> {
         new Date(d.quedaEm).getTime() >= new Date(registro.desde).getTime() - 15 * 60000;
       if (daQuedaAtual) motivo = motivoDaQueda(d.quedaCodigo);
     }
-    const texto = textoDoAviso(aviso, registro, motivo);
+    // (V1) só com o vigia do assistente LIGADO o "fora do ar" diz se foi o PC ou o Docker/túnel; senão, o texto de sempre
+    const causaNoAviso = olhar.modo === "ligado" ? causaQueOAvisoDiz(causaDoWhatsApp(registro.estado, olhar.pc)) : null;
+    const texto = textoDoAviso(aviso, registro, motivo, causaNoAviso, !!olhar.pc && !olhar.pc.semSinal && !olhar.pc.pausa);
     const { data: admins } = await db.from("app_users").select("id").eq("role", "admin").eq("active", true);
     const linhas = (admins ?? []).map((a: { id: string }) => ({
       user_id: a.id, type: aviso === "caiu" ? "whatsapp_caiu" : "whatsapp_voltou", title: texto.title, body: texto.body, navigate_to: TELA_DA_CONEXAO,
@@ -183,7 +193,9 @@ async function vigiar(db: Db, evo: Evolution): Promise<Response> {
         const portao = await lerPortao(db);
         // (16/10/2026, P4.2) com o texto do ACORDE de sistema
         const ate = agora.toISOString();
-        const doPortao = textoDoSistema({ desde: anterior.desde, ate, manhaNaoChegou: quedaDerrubouAManha(anterior.desde, ate) });
+        // (V1) a causa gravada no histórico de quedas, só com o vigia do assistente ligado (nunca lança; null = o texto de sempre)
+        const causaDaQueda = olhar.modo === "ligado" ? await lerCausaDaQuedaDoWhatsApp(db) : null;
+        const doPortao = textoDoSistema({ desde: anterior.desde, ate, manhaNaoChegou: quedaDerrubouAManha(anterior.desde, ate), causa: causaDaQueda });
         const avisoDaVolta = avisoDaVoltaDoWhatsApp({ desde: anterior.desde, ate }, doPortao);
         if (portao.modo === "ligado") {
           const dono = await lerDonoDaVoz(db);
@@ -207,7 +219,18 @@ async function vigiar(db: Db, evo: Evolution): Promise<Response> {
     id: 1, ...registro, verificado_em: agora.toISOString(), detalhe,
   });
   if (error) throw new Error(`gravar vigia: ${error.message}`);
-  return jr({ ok: true, estado, aviso });
+
+  // (pacote 1, V1) O histórico de quedas e, com a chave 'ligado', o aviso da queda do assistente. Só DEPOIS de o vigia da
+  // conexão ter avisado e gravado, e sem poder derrubá-lo: rodadaDoVigia não lança, e o try cobre o que escapar.
+  let assistente: ResumoDaRodada | null = null;
+  if (olhar.modo !== "desligado") {
+    try {
+      assistente = await rodadaDoVigia(db, { modo: olhar.modo, pc: olhar.pc, aviso, registro, agora });
+    } catch (e) {
+      await logEdgeError(db, { context: "whatsapp-conexao", action: "vigiar_assistente", message: String((e as Error)?.message ?? e), error: e });
+    }
+  }
+  return jr({ ok: true, estado, aviso, ...(assistente ? { assistente } : {}) });
 }
 
 servirComCors(async (req: Request) => {

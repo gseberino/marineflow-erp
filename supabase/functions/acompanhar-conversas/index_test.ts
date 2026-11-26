@@ -136,3 +136,42 @@ Deno.test("prazo do fornecedor: na rodada de avisos, por último (depois dos avi
   assertStringIncludes(h, "...(fornecedores ? { fornecedores } : {})");
   assertStringIncludes(fonte, 'import { vigiarPrazosDosFornecedores } from "./fornecedores.ts";');
 });
+
+// (25/11/2026, revisão da leva B do pacote 1) O assistente que não pôde atender. O ai-agent responde HTTP 200 também
+// quando o Claude está fora e a reserva, desligada; o laço lia o 200 como "aviso dado" e ENCERRAVA o lembrete com hora e
+// o de promessa. O que se protege, na ordem do laço:
+//   1. o pedido diz a origem (é o que faz o ai-agent se calar em vez de mandar "mande de novo" ao dono);
+//   2. o corpo da resposta é lido DEPOIS do `!res.ok` e ANTES de registrar no portão e de marcar o aviso como dado;
+//   3. com `calado`, o acorde volta a guardado (o mesmo caminho do ai-agent que recusou), nada é marcado e o laço segue;
+//   4. depois do primeiro `calado` da rodada, os avisos seguintes nem perguntam ao portão nem chamam o ai-agent.
+Deno.test("revisão B: o assistente que calou não conta como aviso dado; o lembrete fica devido e a rodada não insiste", () => {
+  const ini = fonte.indexOf("async function avisar(");
+  const fn = fonte.slice(ini, fonte.indexOf("\n}\n", ini));
+  // 1. a origem vai no pedido, com a constante que o ai-agent confere
+  assertStringIncludes(fn, "body: JSON.stringify({ channel: \"whatsapp\", phone_normalized: dono.phone, app_user_id: dono.id, text: texto, origem: ORIGEM_DO_VIGIA }),");
+  // 2. a ordem
+  const recusou = fn.indexOf("if (!res.ok) {");
+  const le = fn.indexOf("const corpo = await res.json().catch(() => null);");
+  const calou = fn.indexOf("if (assistenteCalou(corpo)) {");
+  const registro = fn.indexOf("if (modoRegistro && !peloPortao) {");
+  const marca = fn.lastIndexOf("await marcarAvisado();");
+  assert(recusou > 0 && le > recusou && calou > le && registro > calou && marca > registro,
+    `ordem: recusou ${recusou}, lê ${le}, calou ${calou}, registro ${registro}, marca ${marca}`);
+  // 3. o ramo: reabre o acorde, anota, segue; não marca, não registra no portão e não conta como avisado
+  const ramo = fn.slice(calou, registro);
+  assertStringIncludes(ramo, "if (fala?.acordou && await reabrirNoPortao(admin, fala.acordou, agora)) resultado.reabertos++;");
+  assertStringIncludes(ramo, "assistenteFora = true;");
+  assertStringIncludes(ramo, "resultado.sem_assistente++;");
+  assertStringIncludes(ramo, "continue;");
+  for (const proibido of ["marcarAvisado", "registrarNoPortao", "resultado.avisados"]) {
+    assert(!ramo.includes(proibido), `o ramo do assistente que calou não usa ${proibido}`);
+  }
+  // 4. a rodada não insiste: a guarda vem depois da conferência do dono ocupado e antes do portão e do ai-agent
+  const guarda = fn.indexOf("if (assistenteFora) {");
+  assert(guarda > fn.indexOf("if (ocupado.ocupado) {") && guarda < fn.indexOf("fala = await perguntarAoPortao(") && guarda < fn.indexOf("/functions/v1/ai-agent"),
+    "a guarda fica antes de perguntar ao portão e de chamar o ai-agent");
+  assertStringIncludes(fn.slice(guarda, fn.indexOf("const texto = textoDoAviso(")), "resultado.sem_assistente++;");
+  assertStringIncludes(fn, "let assistenteFora = false;");
+  // o contador novo sai no resumo da rodada, começando em zero
+  assertStringIncludes(fn, "guardados_pelo_portao: 0, reabertos: 0, sem_assistente: 0,");
+});

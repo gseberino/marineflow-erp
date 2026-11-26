@@ -313,5 +313,16 @@ Deno.test("guarda da reserva pela auditoria: pendência ou escrita do turno = tr
   assertEquals(await trabalhoNaAuditoria(comLinhas([{ event_type: "tool:agenda_ver" }, { event_type: "tool:analise_do_negocio" }]), "s1", "job-1"), false);
   const comErro = { from: () => { const q = { select: () => q, eq: () => q, limit: async () => ({ data: null, error: { message: "x" } }) }; return q; } };
   assertEquals(await trabalhoNaAuditoria(comErro, "s1", "job-1"), true);
-  assertStringIncludes(avisoDoTurnoInterrompido("timeout"), "parou no meio desta resposta (timeout)");
+  // C2 (24/11/2026): entre parênteses vai a causa em meia frase, nunca o código cru
+  assertEquals(
+    avisoDoTurnoInterrompido("timeout"),
+    "⚠️ O assistente parou no meio desta resposta (passou do tempo máximo). O que ele já tinha feito ficou registrado e não foi repetido — confira antes de pedir de novo o que faltou.",
+  );
+  assertStringIncludes(avisoDoTurnoInterrompido("auth_failed"), "parou no meio desta resposta (o login do Claude caiu). O que ele já tinha feito");
+  assertStringIncludes(avisoDoTurnoInterrompido("rate_limited"), "(acabou o limite da assinatura)");
+  for (const cru of ["engine_error", "worker_shutdown", "cancelled", null, undefined, ""]) {
+    const aviso = avisoDoTurnoInterrompido(cru);
+    assertStringIncludes(aviso, "parou no meio desta resposta (deu um erro no assistente do PC). O que ele já tinha feito", String(cru));
+    assert(!/[a-z]_[a-z]|timeout|falha do Claude Max/.test(aviso), `código cru no aviso: ${aviso}`);
+  }
 });

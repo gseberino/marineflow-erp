@@ -7,6 +7,7 @@ import { contactTools } from "./contacts.ts";
 import { autonomiaValeNoPerfil, autonomyTools, perfilDeTools, registrarCatalogoDaAutonomia } from "./autonomy.ts";
 import { PERFIL_ADMIN } from "../perfil-operacao.ts";
 import { flowMacroTools, resolverCobrancasDoLote } from "./flow-macros.ts";
+import { buildPendingSummary, resumoQueRecusa } from "../agent.ts";
 import { bankingTools } from "./banking.ts";
 import { financeRulesTools } from "./finance-rules.ts";
 import { serviceOrderTools } from "./service-orders.ts";
@@ -315,14 +316,18 @@ Deno.test("fakes 6a. o lote aceita receivable_id (de get_delinquency_plan) e ach
   ]);
 });
 
-Deno.test("fakes 6b. nenhum envio: ok:false com o motivo (antes: ok:true com 0 enviados)", async () => {
+Deno.test("fakes 6b. nenhum sairia: o cartão já recusa com o motivo de cada um (25/11/2026: antes ia ao sino)", async () => {
   const b = bancoFalso({ collections: COBRANCAS(), receivables: [], clients: [] });
+  const resumo = await buildPendingSummary(b.db, "send_bulk_collection_reminders", { collection_ids: ["rec-1", "zzz"] }, { userId: "u1" });
+  assertStringIncludes(resumo, "⚠️ Nenhum lembrete sairia");
+  // a conta rec-1 tem a cobrança col-1 (de Ana): ela é conferida como o lembrete individual (aqui o id do teste não é uuid)
+  assertStringIncludes(resumo, "Ana (Cobrança não encontrada.");
+  assertStringIncludes(resumo, "cobrança não encontrada");
+  assert(resumoQueRecusa("send_bulk_collection_reminders", resumo));
+  // e o envio direto, sem o retrato do cartão, não sai
   // deno-lint-ignore no-explicit-any
-  const r = await ferramenta(flowMacroTools, "send_bulk_collection_reminders").execute({ collection_ids: ["rec-1", "zzz"] }, ctxDe(b.db)) as any;
-  assertEquals(r.ok, false);
-  assertStringIncludes(r.error, "Nenhum lembrete foi enviado");
-  assertStringIncludes(r.error, "sem telefone");
-  assertStringIncludes(r.error, "cobrança não encontrada");
+  const r = await ferramenta(flowMacroTools, "send_bulk_collection_reminders").execute({ collection_ids: ["rec-1", "zzz"] }, ctxDe(b.db, { userRole: "admin" })) as any;
+  assertEquals(r.nada_enviado, true);
 });
 
 Deno.test("fakes 6c. leitura das cobranças com erro não vira 'não encontrada'", async () => {

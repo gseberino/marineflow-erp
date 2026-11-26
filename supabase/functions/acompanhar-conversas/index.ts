@@ -43,8 +43,8 @@ import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { detectarPromessa } from "../_shared/ai/promessa.ts";
 import {
-  type Acompanhamento, aplicarFreio, decidir, diaEmBrasilia, type EstadoDaConversa, janelaDoEncerramento,
-  MOTIVO_FREIO, podeAvisarNoModo, textoDoAviso,
+  type Acompanhamento, aplicarFreio, assistenteCalou, decidir, diaEmBrasilia, type EstadoDaConversa, janelaDoEncerramento,
+  MOTIVO_FREIO, ORIGEM_DO_VIGIA, podeAvisarNoModo, textoDoAviso,
 } from "../_shared/ai/acompanhar.ts";
 import { avisoDoAcompanhamento, referenciaDoAcompanhamento } from "../_shared/uma-voz/fontes.ts";
 import {
@@ -142,9 +142,12 @@ async function avisar(admin: Db, agora: Date, conversaLigada: boolean, portao: P
   if (error) throw error;
   const resultado = {
     avaliados: 0, avisados: 0, encerrados: 0, adiados_por_pendencia: 0, na_janela_da_manha: 0, parados_pelo_freio: 0, no_portao: 0,
-    guardados_pelo_portao: 0, reabertos: 0,
+    guardados_pelo_portao: 0, reabertos: 0, sem_assistente: 0,
   };
   const donos = new Map<string, { id: string; phone: string } | null>();
+  // (revisão da leva B do pacote 1, 25/11/2026) o assistente já disse, nesta rodada, que não pode atender (o Claude está
+  // fora e a reserva, desligada): os avisos seguintes nem são pedidos. Ficam devidos e voltam na próxima rodada.
+  let assistenteFora = false;
 
   for (const a of (ativos ?? []) as Array<Acompanhamento & { criado_por: string | null }>) {
     resultado.avaliados++;
@@ -194,6 +197,11 @@ async function avisar(admin: Db, agora: Date, conversaLigada: boolean, portao: P
       resultado.adiados_por_pendencia++;
       continue;
     }
+    // O assistente já calou nesta rodada: nem pergunta ao portão nem chama o ai-agent (seria outra falha igual).
+    if (assistenteFora) {
+      resultado.sem_assistente++;
+      continue;
+    }
 
     const texto = textoDoAviso(a, conversa, agora, telefoneLegivel(a.phone_normalized));
     // O aviso para o portão: registrado DEPOIS de sair (sombra / a conta do freio) ou, com a voz ligada e o dono,
@@ -238,13 +246,26 @@ async function avisar(admin: Db, agora: Date, conversaLigada: boolean, portao: P
     const res = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/ai-agent`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-internal-secret": Deno.env.get("AI_INTERNAL_SECRET") ?? "" },
-      body: JSON.stringify({ channel: "whatsapp", phone_normalized: dono.phone, app_user_id: dono.id, text: texto }),
+      // `origem`: este turno é do vigia, não do dono. Se o assistente não puder atender, ele se cala e avisa aqui (`calado`).
+      body: JSON.stringify({ channel: "whatsapp", phone_normalized: dono.phone, app_user_id: dono.id, text: texto, origem: ORIGEM_DO_VIGIA }),
       signal: AbortSignal.timeout(110_000),
     }).catch((e) => ({ ok: false, status: 0, text: () => Promise.resolve(String(e)) }) as unknown as Response);
     if (!res.ok) {
       console.error("[acompanhar-conversas] ai-agent recusou o aviso", a.id, res.status, await res.text().catch(() => ""));
       // o acorde não saiu: volta a guardado (a próxima mensagem fixa leva) e a vaga do dia fica livre
       if (fala?.acordou && await reabrirNoPortao(admin, fala.acordou, agora)) resultado.reabertos++;
+      continue;
+    }
+    // (revisão da leva B do pacote 1, 25/11/2026) O ai-agent responde 200 também quando o assistente NÃO pôde atender
+    // (o Claude está fora e a reserva, desligada). Nesse caso ele não manda nada ao dono e devolve `calado: true`. O aviso
+    // não saiu: não conta como dado (antes, o lembrete com hora e o de promessa eram encerrados aqui) e segue o caminho
+    // do ai-agent que recusou: o acorde volta a guardado e o acompanhamento fica devido para a próxima rodada.
+    const corpo = await res.json().catch(() => null);
+    if (assistenteCalou(corpo)) {
+      console.warn("[acompanhar-conversas] o assistente não pôde atender o aviso; fica para a próxima rodada", a.id);
+      if (fala?.acordou && await reabrirNoPortao(admin, fala.acordou, agora)) resultado.reabertos++;
+      assistenteFora = true;
+      resultado.sem_assistente++;
       continue;
     }
     // O aviso SAIU: registra no portão (a conta do freio e a sombra da voz única). Ligada: já registrou antes.

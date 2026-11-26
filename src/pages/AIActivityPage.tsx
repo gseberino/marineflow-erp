@@ -86,6 +86,9 @@ export default function AIActivityPage() {
       const { data, error } = await supabase
         .from('ai_operator_audit')
         .select('id, event_type, event_category, actor_kind, actor_user_id, created_at, session_id, payload')
+        // O rastro por mensagem (event_type "rota:…", uma linha por mensagem do WhatsApp) fica fora desta lista:
+        // são ~15 linhas por dia que empurrariam a atividade de verdade para fora dos 50 últimos.
+        .not('event_type', 'like', 'rota:%')
         .order('created_at', { ascending: false })
         .limit(50);
       if (error) throw error;
