@@ -53,7 +53,8 @@ export function ClientStatementDialog({ open, onOpenChange, cliente, items, modo
   const cobranca = modo === 'cobranca';
   const [message, setMessage] = useState('');
   const [copied, setCopied] = useState(false);
-  const { data: settingsMap } = useAppSettings();
+  const config = useAppSettings();
+  const settingsMap = config.data;
   const pixKey = settingsMap?.['pix_key'] ?? null;
   const piso = Number(settingsMap?.['collection_min_amount']) || 0;
   const enviar = useEnviarExtrato();
@@ -102,7 +103,9 @@ export function ClientStatementDialog({ open, onOpenChange, cliente, items, modo
     telefone: phone,
     horaBrasilia: horaDoCobrarJuntas(),
   };
-  const trava = total > 0 && pix.error
+  const trava = config.isError
+    ? 'Não consegui ler as configurações (a chave Pix e o piso). Nada foi enviado; feche e abra de novo.'
+    : total > 0 && pix.error
     ? (pix.error as Error).message
     : cobranca
       ? travaDoCobrarJuntas({ ...entradaDasTravas, quantidadeOs: null })
@@ -121,7 +124,8 @@ export function ClientStatementDialog({ open, onOpenChange, cliente, items, modo
     : cobradoHoje.error
       ? 'Não consegui conferir se este cliente já recebeu cobrança hoje. Confira em Cobranças antes de enviar.'
       : avisoDeCobradoHoje(cobradoHoje.data);
-  const carregando = !cliente.generico && total > 0 && pix.isLoading;
+  // Espera o que a conferência mostra: a entrada esperando, o "já cobrado hoje" e as configurações (a chave Pix da mensagem).
+  const carregando = (!cliente.generico && total > 0 && (pix.isLoading || cobradoHoje.isLoading)) || !!config.isLoading;
   const sending = enviar.isPending || cobrar.isPending;
   const podeEnviar = !trava && !carregando && message.trim().length > 0;
 

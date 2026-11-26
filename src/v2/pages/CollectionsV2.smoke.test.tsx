@@ -42,7 +42,8 @@ describe('Aba Cobranças — cobrar com a conferência da ficha', () => {
     expect(icones).toHaveLength(3);
     expect(icones[0]).toBeEnabled();
     expect(icones[1]).toBeDisabled();
-    expect(icones[1]).toHaveAttribute('title', expect.stringContaining('não está ligada a um cliente do cadastro'));
+    expect(icones[1].parentElement).toHaveAttribute('title', expect.stringContaining('não está ligada a um cliente do cadastro'));
+    expect(icones[2].parentElement).toHaveAttribute('title', 'Cobrança paga ou cancelada');
     expect(icones[2]).toBeDisabled();
     await user.click(icones[0]);
     expect(screen.getByTestId('cobrar-cliente')).toHaveTextContent('cobrar cli-1');

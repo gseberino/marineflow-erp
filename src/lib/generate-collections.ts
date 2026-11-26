@@ -4,9 +4,6 @@ interface GenerateInput {
   serviceOrderId: string;
   approvalDate: string; // ISO date YYYY-MM-DD
   trigger: 'signature' | 'status_change' | 'invoice';
-  /** Dispara o WhatsApp de cobrança automaticamente (default true). Na CONCLUSÃO passamos false:
-   * o aviso ao cliente é opt-in (CompletionSendDialog), não automático. */
-  autoSend?: boolean;
 }
 
 interface Installment {
@@ -124,89 +121,9 @@ export async function generateCollectionsFromOS(
     else failed += 1;
   }
 
-  // 6. Auto-send WhatsApp (fire-and-forget) — só quando autoSend !== false.
-  if (created.length > 0 && input.autoSend !== false) {
-    void autoSendCollectionWhatsApp(created);
-  }
-
+  // Nada vai ao cliente daqui (26/11/2026, dono: os envios de cobrança sem trava ganham a conferência da ficha — "1. A" e
+  // "2. A"). Até então a geração (botão "Gerar Cobranças", assinatura e faturamento da OS) mandava em segundo plano o
+  // modelo de cobrança pelo WhatsApp: sem prévia, sem opt-out, horário, piso nem entrada esperando no Extrato, e sem a
+  // regra de uma cobrança por dia. Cobrar é o "Cobrar" da conta em Contas a Receber (CobrarClienteDialog).
   return { created: created.length, skipped: false, failed };
-}
-
-async function autoSendCollectionWhatsApp(collectionIds: string[]) {
-  for (const id of collectionIds) {
-    try {
-      const { data: coll } = await supabase
-        .from('collections')
-        .select(`
-          *,
-          client:clients(name, phone, whatsapp),
-          service_order:service_orders(service_order_number, payment_method, card_installments)
-        `)
-        .eq('id', id)
-        .single();
-
-      if (!coll) continue;
-      const c: any = coll;
-
-      const phone =
-        c.contact_whatsapp ||
-        c.phone ||
-        c.client?.whatsapp ||
-        c.client?.phone ||
-        '';
-      if (!phone) continue;
-
-      const { data: templates } = await supabase
-        .from('collection_templates')
-        .select('*')
-        .eq('is_default', true)
-        .limit(1);
-      const template = templates?.[0];
-      if (!template) continue;
-
-      // Sem as configurações a mensagem sai sem chave Pix/dados de pagamento: não envia.
-      const { data: settingsRows, error: settingsErr } = await supabase
-        .from('app_settings')
-        .select('key, value');
-      if (settingsErr) throw settingsErr;
-      const settings: Record<string, string> = {};
-      for (const r of settingsRows || []) {
-        if (r.key) settings[r.key] = String(r.value || '');
-      }
-
-      const digits = phone.replace(/\D/g, '');
-      const normalized = digits.startsWith('55') ? digits : `55${digits}`;
-
-      const { renderTemplate } = await import('@/hooks/use-collections');
-      const { buildCollectionMessage } = await import('@/lib/collection-message');
-      const message = buildCollectionMessage({
-        template: template.body,
-        renderTemplate,
-        collection: c,
-        paymentMethod: c.service_order?.payment_method,
-        cardInstallments: c.service_order?.card_installments,
-        settings,
-      });
-
-      // Envio que falhou não vira "enviada": sem isto a cobrança ficava 'sent' e com contato
-      // registrado sem ter saído mensagem nenhuma (19/11/2026).
-      const { error: sendErr } = await supabase.functions.invoke('whatsapp-send', {
-        body: { phone: normalized, message, context: 'billing', kind: 'text' },
-      });
-      if (sendErr) throw sendErr;
-
-      await supabase.from('collection_contacts').insert({
-        collection_id: id,
-        contact_type: 'whatsapp_sent',
-        notes: 'Enviado automaticamente após aprovação',
-      } as never);
-
-      await supabase
-        .from('collections')
-        .update({ status: 'sent' } as never)
-        .eq('id', id);
-    } catch (err) {
-      console.error('Auto WhatsApp failed for collection', id, err);
-    }
-  }
 }

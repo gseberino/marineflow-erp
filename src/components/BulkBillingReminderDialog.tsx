@@ -26,7 +26,7 @@ import {
 } from '@/hooks/use-cobrar-juntas';
 import {
   MAX_CLIENTES_DO_LOTE, intervaloDoLote, montarLoteDaTela, type ClienteParaOLote, type ContaParaOLote, type FiltroDoLote,
-  type ItemDoLoteDaTela,
+  type ItemDoLoteDaTela, type LoteDaTela,
 } from '@/lib/cobrar-em-lote';
 import {
   HORA_FIM_COBRANCA, HORA_INICIO_COBRANCA, hojeLocal,
@@ -49,6 +49,7 @@ type Situacao =
   | { fase: 'recusado'; motivo: string }
   | { fase: 'parado' };
 
+const CHAVE_DO_LOTE = ['receivables', 'cobrar-em-lote'];
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const esperar = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -59,20 +60,32 @@ async function lerOLote(): Promise<{
   pix: Map<string, Array<{ valor: number; data: string | null }>>;
   cobradosHoje: Map<string, string>;
 }> {
-  const { data: linhas, error } = await supabase.from('receivables')
-    .select('id, client_id, description, due_date, status, amount, paid_amount, balance_amount, service_order_id, service_orders!receivables_service_order_id_fkey(service_order_number)')
-    .not('status', 'in', '(paid,cancelled)')
-    .order('due_date', { ascending: true })
-    .limit(1000);
-  if (error) throw new Error(`Não consegui ler as contas em aberto: ${error.message}`);
-  const contas = ((linhas ?? []) as unknown as Array<ContaParaOLote & { service_orders?: { service_order_number?: string | null } | null }>)
-    .map(({ service_orders, ...c }) => ({ ...c, numero_os: service_orders?.service_order_number ?? null }));
+  // Em páginas: o servidor corta em 1.000 linhas sem avisar, e a conta cortada faria a mensagem sair incompleta (e o envio
+  // recusaria sempre, porque a releitura do cliente acha a conta que faltou).
+  const contas: ContaParaOLote[] = [];
+  for (let de = 0; de < 20_000; de += 1000) {
+    const { data: linhas, error } = await supabase.from('receivables')
+      .select('id, client_id, description, due_date, status, amount, paid_amount, balance_amount, service_order_id, service_orders!receivables_service_order_id_fkey(service_order_number)')
+      .not('status', 'in', '(paid,cancelled)')
+      .order('due_date', { ascending: true })
+      .order('id', { ascending: true })
+      .range(de, de + 999);
+    if (error) throw new Error(`Não consegui ler as contas em aberto: ${error.message}`);
+    const lote = (linhas ?? []) as unknown as Array<ContaParaOLote & { service_orders?: { service_order_number?: string | null } | null }>;
+    contas.push(...lote.map(({ service_orders, ...c }) => ({ ...c, numero_os: service_orders?.service_order_number ?? null })));
+    if (lote.length < 1000) break;
+  }
   const ids = [...new Set(contas.map((c) => c.client_id).filter((x): x is string => !!x))];
   if (!ids.length) return { contas, clientes: [], pix: new Map(), cobradosHoje: new Map() };
-  // A coluna generico é pedida pelo nome: sem ela a leitura falha e nada sai (falha fechada, como a ficha).
-  const { data: cli, error: eCli } = await supabase.from('clients')
-    .select('id, name, generico, opt_out_whatsapp, whatsapp, phone').in('id', ids);
-  if (eCli) throw new Error(`Não consegui ler o cadastro dos clientes: ${eCli.message}`);
+  // A coluna generico é pedida pelo nome: sem ela a leitura falha e nada sai (falha fechada, como a ficha). Em blocos: a
+  // lista de códigos vai na URL do pedido.
+  const cli: ClienteParaOLote[] = [];
+  for (let i = 0; i < ids.length; i += 150) {
+    const { data, error: eCli } = await supabase.from('clients')
+      .select('id, name, generico, opt_out_whatsapp, whatsapp, phone').in('id', ids.slice(i, i + 150));
+    if (eCli) throw new Error(`Não consegui ler o cadastro dos clientes: ${eCli.message}`);
+    cli.push(...((data ?? []) as ClienteParaOLote[]));
+  }
   const [esperando, cobradosHoje] = await Promise.all([lerDinheiroEsperando(supabase), lerCobradosHoje(ids)]);
   const pix = new Map<string, Array<{ valor: number; data: string | null }>>();
   for (const e of esperando) {
@@ -81,22 +94,38 @@ async function lerOLote(): Promise<{
     lista.push({ valor: e.valor, data: e.data });
     pix.set(e.clienteId, lista);
   }
-  return { contas, clientes: (cli ?? []) as ClienteParaOLote[], pix, cobradosHoje };
+  return { contas, clientes: cli, pix, cobradosHoje };
+}
+
+/** Já recebeu cobrança hoje, conferido na hora do envio (outra aba ou o assistente pode ter cobrado depois da leitura). */
+async function cobradoAgora(clienteId: string): Promise<string | null> {
+  try {
+    const ultima = (await lerCobradosHoje([clienteId])).get(clienteId);
+    if (!ultima) return null;
+    const hora = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })
+      .format(new Date(ultima)).replace(':', 'h');
+    return `Já recebeu cobrança hoje (às ${hora}), depois que a lista foi aberta: não mandei outra.`;
+  } catch (e) {
+    return `Não consegui conferir se já recebeu cobrança hoje (${(e as Error).message}): não mandei.`;
+  }
 }
 
 export function BulkBillingReminderDialog({ open, onOpenChange, initialFilter = 'overdue' }: Props) {
   const qc = useQueryClient();
-  const { data: settings } = useAppSettings();
+  const config = useAppSettings();
+  const settings = config.data;
   const [filtro, setFiltro] = useState<FiltroDoLote>(initialFilter === 'all' ? 'todas' : 'vencidas');
   const [desmarcados, setDesmarcados] = useState<Set<string>>(new Set());
   const [aberta, setAberta] = useState<string | null>(null);
   const [confirmando, setConfirmando] = useState(false);
   const [rodando, setRodando] = useState(false);
   const [situacao, setSituacao] = useState<Record<string, Situacao>>({});
+  /** O lote como estava quando o envio começou: a releitura depois do envio não apaga o resultado de cada um. */
+  const [congelado, setCongelado] = useState<LoteDaTela | null>(null);
   const parar = useRef(false);
 
   const leitura = useQuery({
-    queryKey: ['receivables', 'cobrar-em-lote'],
+    queryKey: CHAVE_DO_LOTE,
     enabled: open,
     queryFn: lerOLote,
     staleTime: 0,
@@ -104,16 +133,24 @@ export function BulkBillingReminderDialog({ open, onOpenChange, initialFilter = 
   });
 
   useEffect(() => {
-    if (!open) return;
+    // Fechado: o que foi lido sai do cache — reabrir nunca mostra (nem envia) a lista velha enquanto relê.
+    if (!open) {
+      qc.removeQueries({ queryKey: CHAVE_DO_LOTE });
+      return;
+    }
     setFiltro(initialFilter === 'all' ? 'todas' : 'vencidas');
     setDesmarcados(new Set());
     setAberta(null);
     setConfirmando(false);
     setSituacao({});
+    setCongelado(null);
     parar.current = false;
-  }, [open, initialFilter]);
+  }, [open, initialFilter, qc]);
 
-  const lote = useMemo(() => {
+  // A tela saiu no meio do envio (voltar do navegador, outra rota): o laço para depois do cliente da vez.
+  useEffect(() => () => { parar.current = true; }, []);
+
+  const lido = useMemo(() => {
     if (!leitura.data) return null;
     return montarLoteDaTela({
       contas: leitura.data.contas,
@@ -126,13 +163,16 @@ export function BulkBillingReminderDialog({ open, onOpenChange, initialFilter = 
       cobradosHoje: leitura.data.cobradosHoje,
     });
   }, [leitura.data, filtro, settings]);
+  const lote = congelado ?? lido;
 
   const hora = horaDoCobrarJuntas();
   const foraDoHorario = hora < HORA_INICIO_COBRANCA || hora >= HORA_FIM_COBRANCA;
   const escolhidos: ItemDoLoteDaTela[] = (lote?.vao ?? []).filter((i) => !desmarcados.has(i.cliente.id));
   const totalEscolhido = escolhidos.reduce((s, i) => s + i.total, 0);
   const terminou = !rodando && Object.keys(situacao).length > 0;
-  const podeEnviar = !rodando && !terminou && !foraDoHorario && escolhidos.length > 0 && !leitura.isFetching;
+  // Só com a leitura desta abertura completa e sem erro, e com as configurações (a chave Pix da mensagem e o piso) lidas.
+  const leituraBoa = leitura.isSuccess && !leitura.isError && !leitura.isFetching && config.isSuccess && !config.isError;
+  const podeEnviar = !rodando && !terminou && !foraDoHorario && escolhidos.length > 0 && leituraBoa;
 
   const alternar = (id: string) => setDesmarcados((d) => {
     const n = new Set(d);
@@ -143,6 +183,7 @@ export function BulkBillingReminderDialog({ open, onOpenChange, initialFilter = 
   async function enviarTodos() {
     setConfirmando(false);
     setRodando(true);
+    setCongelado(lote);
     parar.current = false;
     const fila = [...escolhidos];
     setSituacao(Object.fromEntries(fila.map((i) => [i.cliente.id, { fase: 'fila' } as Situacao])));
@@ -151,6 +192,11 @@ export function BulkBillingReminderDialog({ open, onOpenChange, initialFilter = 
       if (parar.current) break;
       setSituacao((s) => ({ ...s, [item.cliente.id]: { fase: 'enviando' } }));
       let nova: Situacao;
+      const jaCobrado = await cobradoAgora(item.cliente.id);
+      if (jaCobrado) {
+        setSituacao((s) => ({ ...s, [item.cliente.id]: { fase: 'recusado', motivo: jaCobrado } }));
+        continue;
+      }
       try {
         const r = await enviarCobrancaDoCliente({
           cliente: { id: item.cliente.id, name: item.cliente.name, generico: item.cliente.generico },
@@ -212,6 +258,12 @@ export function BulkBillingReminderDialog({ open, onOpenChange, initialFilter = 
           {leitura.isLoading && (
             <p className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" /> Conferindo as contas, os cadastros e o Extrato…
+            </p>
+          )}
+          {config.isError && (
+            <p role="alert" className="flex gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span className="min-w-0 break-words">Não consegui ler as configurações (a chave Pix e o piso). Nada foi enviado; feche e abra de novo.</span>
             </p>
           )}
           {leitura.error && (

@@ -389,38 +389,6 @@ export function useMarkCollectionPaid() {
   });
 }
 
-// ----- WhatsApp send -----
-function fmtBRL(v: number) {
-  return v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-function fmtDateBR(iso: string) {
-  const [y, m, d] = iso.split('T')[0].split('-');
-  return `${d}/${m}/${y}`;
-}
-
-export function renderTemplate(
-  body: string,
-  ctx: { nome: string; numero_os: string; valor: number; vencimento: string; pix: string; empresa: string },
-) {
-  // Aceita {chave} e {{chave}} (retro-compatível) e expõe aliases amigáveis
-  // (cliente, os) iguais aos usados em SendViaWhatsAppDialog/TEMPLATE_VARIABLES.
-  const replacements: Record<string, string> = {
-    nome: ctx.nome,
-    numero_os: ctx.numero_os,
-    valor: fmtBRL(ctx.valor),
-    vencimento: fmtDateBR(ctx.vencimento),
-    pix: ctx.pix,
-    empresa: ctx.empresa,
-    cliente: ctx.nome,
-    os: ctx.numero_os,
-  };
-  const sub = (key: string) =>
-    replacements[key] !== undefined ? replacements[key] : `{${key}}`;
-  return body
-    .replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, key) => sub(key))
-    .replace(/\{(\w+)\}/g, (_m, key) => sub(key));
-}
-
 // O envio da cobrança no clique (useSendCollectionWhatsApp) saiu em 26/11/2026 (dono: "1. A"): mandava o valor guardado
 // na cobrança, a número que podia ser digitado, sem nenhuma trava. Cobrar pela tela é o CobrarClienteDialog
 // (src/components/client/CobrarClienteDialog.tsx), com a conferência da ficha.

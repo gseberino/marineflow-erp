@@ -10,7 +10,7 @@ import { generateCollectionsFromOS } from './generate-collections';
 import { banco, ok, falha, reiniciarBanco, chamadasA } from '@/test/banco-falso';
 
 const os = { id: 'so-1', grand_total: 1000, client_id: 'c1', payment_condition_preset_id: 'p1', clients: { name: 'Ana' } };
-const entrada = { serviceOrderId: 'so-1', approvalDate: '2026-11-19', trigger: 'status_change' as const, autoSend: false };
+const entrada = { serviceOrderId: 'so-1', approvalDate: '2026-11-19', trigger: 'status_change' as const };
 
 beforeEach(() => {
   reiniciarBanco();
@@ -44,6 +44,21 @@ describe('generateCollectionsFromOS — leituras que falham', () => {
     banco.respostas['payment_condition_presets.select'] = ok({ installments: [], auto_generate_collections: false });
     await expect(generateCollectionsFromOS(entrada)).resolves.toEqual({ created: 0, skipped: true, failed: 0 });
     expect(chamadasA('collections.insert')).toHaveLength(0);
+  });
+
+  // 26/11/2026: gerar não manda nada ao cliente (antes, o WhatsApp de cobrança saía em segundo plano, sem trava).
+  it('gera as parcelas e não chama o WhatsApp', async () => {
+    banco.respostas['collections.select'] = ok([]);
+    banco.respostas['payment_condition_presets.select'] = ok({
+      auto_generate_collections: true,
+      installments: [{ label: 'Sinal', percent: 50, days_after_approval: 0 }, { label: 'Saldo', percent: 50, days_after_approval: 30 }],
+    });
+    banco.respostas['app_settings.select'] = ok([]);
+    banco.respostas['collections.insert'] = [ok({ id: 'col-1' }), ok({ id: 'col-2' })];
+    await expect(generateCollectionsFromOS({ ...entrada, trigger: 'signature' })).resolves.toEqual({ created: 2, skipped: false, failed: 0 });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(chamadasA('fn.whatsapp-send')).toHaveLength(0);
+    expect(chamadasA('collection_contacts.insert')).toHaveLength(0);
   });
 
   it('parcela que não grava é contada em failed', async () => {

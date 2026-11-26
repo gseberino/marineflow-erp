@@ -15,6 +15,7 @@ const { estado, enviarMock } = vi.hoisted(() => ({
     erroContas: null as null | { message: string },
     pix: [] as Array<{ clienteId: string; valor: number; data: string | null }>,
     cobradosHoje: new Map<string, string>(),
+    erroConfig: false,
   },
   enviarMock: vi.fn(),
 }));
@@ -23,7 +24,7 @@ vi.mock('@/integrations/supabase/client', () => {
   const consulta = (tabela: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const q: any = {};
-    for (const m of ['select', 'not', 'order', 'limit', 'in', 'eq']) q[m] = () => q;
+    for (const m of ['select', 'not', 'order', 'limit', 'in', 'eq', 'range']) q[m] = () => q;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     q.then = (ok: any, erro: any) => Promise.resolve(
       tabela === 'receivables'
@@ -37,11 +38,14 @@ vi.mock('@/integrations/supabase/client', () => {
 vi.mock('@/hooks/use-cobrar-juntas', () => ({
   enviarCobrancaDoCliente: enviarMock,
   horaDoCobrarJuntas: () => estado.hora,
-  invalidarDepoisDoLote: () => {},
+  // como o de verdade: relê tudo de ['receivables'] (inclusive a lista do lote aberta)
+  invalidarDepoisDoLote: (qc: { invalidateQueries: (f: unknown) => unknown }) => qc.invalidateQueries({ queryKey: ['receivables'] }),
   lerCobradosHoje: async () => estado.cobradosHoje,
 }));
 vi.mock('@/hooks/use-app-settings', () => ({
-  useAppSettings: () => ({ data: { pix_key: 'hbr@pix', collection_min_amount: '200' } }),
+  useAppSettings: () => (estado.erroConfig
+    ? { data: undefined, isSuccess: false, isError: true, isLoading: false }
+    : { data: { pix_key: 'hbr@pix', collection_min_amount: '200' }, isSuccess: true, isError: false, isLoading: false }),
 }));
 vi.mock('../../supabase/functions/_shared/receivables/dinheiro-esperando', () => ({
   lerDinheiroEsperando: async () => estado.pix,
@@ -70,6 +74,7 @@ beforeEach(() => {
   estado.erroContas = null;
   estado.pix = [];
   estado.cobradosHoje = new Map();
+  estado.erroConfig = false;
   estado.contas = [conta('a1', '1', { amount: 3000, balance_amount: 3000 }), conta('a2', '1', { due_date: '2099-01-01' }), conta('b1', '2'), conta('c1', '3')];
   estado.clientes = [cliente('1', 'Bertoldi'), cliente('2', 'João Hang'), cliente('3', 'Nelson', { opt_out_whatsapp: true })];
   enviarMock.mockReset();
@@ -141,5 +146,58 @@ describe('BulkBillingReminderDialog (Cobrar em lote)', () => {
     const fora = screen.getByTestId('lote-fora');
     expect(fora).toHaveTextContent('Bertoldi: Já recebeu cobrança hoje (às 10h15).');
     expect(fora).toHaveTextContent('João Hang: Este cliente tem entrada esperando no Extrato');
+  });
+});
+
+// Revisão de 26/11/2026: o que muda entre a leitura e o envio, a releitura depois do envio, as configurações e a saída da tela.
+describe('BulkBillingReminderDialog — consertos da revisão', () => {
+  it('cobrado por outro caminho DEPOIS da leitura: aquele não recebe; o outro sim', async () => {
+    const user = userEvent.setup();
+    abrir();
+    await screen.findAllByTestId('lote-item');
+    estado.cobradosHoje = new Map([['1', '2026-11-26T13:05:00Z']]); // o assistente cobrou o Bertoldi às 10h05
+    await user.click(screen.getByRole('button', { name: /Enviar a 2 clientes/ }));
+    await user.click(screen.getByRole('button', { name: /Confirmar: enviar 2 mensagens/ }));
+    await waitFor(() => expect(screen.getByTestId('lote-resultado')).toHaveTextContent('Enviadas: 1 · já tinham saído hoje: 0 · não saíram: 1'));
+    expect(enviarMock).toHaveBeenCalledTimes(1);
+    expect(enviarMock.mock.calls[0][0].cliente.id).toBe('2');
+    expect(screen.getByText((_, el) => el?.tagName === 'SPAN' && (el.textContent ?? '').includes('Já recebeu cobrança hoje (às 10h05), depois que a lista foi aberta'))).toBeInTheDocument();
+  });
+
+  it('depois do envio a releitura não apaga o resultado de cada um', async () => {
+    const user = userEvent.setup();
+    enviarMock.mockImplementation(async (e: { cliente: { id: string } }) => {
+      estado.cobradosHoje = new Map([...estado.cobradosHoje, [e.cliente.id, '2026-11-26T13:00:00Z']]);
+      return { deduplicado: false, aviso: null, cobrancasRegistradas: 1, cobrancasCriadas: 0 };
+    });
+    abrir();
+    await screen.findAllByTestId('lote-item');
+    await user.click(screen.getByRole('button', { name: /Enviar a 2 clientes/ }));
+    await user.click(screen.getByRole('button', { name: /Confirmar: enviar 2 mensagens/ }));
+    await waitFor(() => expect(screen.getByTestId('lote-resultado')).toHaveTextContent('Enviadas: 2'));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getAllByText('Enviada.')).toHaveLength(2);
+    expect(screen.queryByTestId('lote-vazio')).toBeNull();
+  });
+
+  it('configurações que não leram: o motivo aparece e nada sai', async () => {
+    estado.erroConfig = true;
+    abrir();
+    await screen.findAllByTestId('lote-item');
+    expect(screen.getByText(/Não consegui ler as configurações/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Enviar a 2 clientes/ })).toBeDisabled();
+  });
+
+  it('a tela saiu no meio do envio: o laço para depois do cliente da vez', async () => {
+    const user = userEvent.setup();
+    intervaloDoLote.ms = 300;
+    const r = abrir();
+    await screen.findAllByTestId('lote-item');
+    await user.click(screen.getByRole('button', { name: /Enviar a 2 clientes/ }));
+    await user.click(screen.getByRole('button', { name: /Confirmar: enviar 2 mensagens/ }));
+    await waitFor(() => expect(enviarMock).toHaveBeenCalledTimes(1));
+    r.unmount();
+    await new Promise((res) => setTimeout(res, 500));
+    expect(enviarMock).toHaveBeenCalledTimes(1);
   });
 });

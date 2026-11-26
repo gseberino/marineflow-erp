@@ -287,15 +287,22 @@ export function PainelDeCobrancas() {
           rowClassName={(c) => (c.status === 'overdue' ? 'bg-destructive/5' : undefined)}
           rowActions={(c) => (
             <>
-              <Button
-                variant="ghost" size="icon" className="h-8 w-8"
-                aria-label="Cobrar o cliente pelo WhatsApp"
-                title={c.client_id ? 'Cobrar o cliente pelo WhatsApp' : MOTIVO_SEM_CLIENTE}
-                disabled={!podeCobrar(c)}
-                onClick={(e) => { e.stopPropagation(); if (podeCobrar(c)) setCobrarCliente(c.client_id); }}
+              {/* O motivo do botão travado fica no invólucro: botão desabilitado não recebe o mouse (nem a dica), e o
+                  clique nele não pode atravessar para a linha e abrir o detalhe. */}
+              <span
+                className="inline-flex"
+                title={podeCobrar(c) ? 'Cobrar o cliente pelo WhatsApp' : c.client_id ? 'Cobrança paga ou cancelada' : MOTIVO_SEM_CLIENTE}
+                onClick={(e) => e.stopPropagation()}
               >
-                <MessageCircle className="h-4 w-4" />
-              </Button>
+                <Button
+                  variant="ghost" size="icon" className="h-8 w-8"
+                  aria-label="Cobrar o cliente pelo WhatsApp"
+                  disabled={!podeCobrar(c)}
+                  onClick={() => { if (podeCobrar(c)) setCobrarCliente(c.client_id); }}
+                >
+                  <MessageCircle className="h-4 w-4" />
+                </Button>
+              </span>
               {renderMenu(c)}
             </>
           )}

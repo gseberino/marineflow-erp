@@ -730,10 +730,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       } else if (result.created === 0) {
         toast.error('Nenhuma cobrança foi gravada. Tente de novo.');
       } else {
-        // O WhatsApp sai em segundo plano depois daqui: dizer "enviadas" antes de enviar era
-        // prometer o que ainda não aconteceu (19/11/2026).
+        // Nada vai ao cliente daqui (26/11/2026): cobrar é o "Cobrar" da conta, com a mensagem e as travas antes.
         const faltou = result.failed > 0 ? ` ${result.failed} parcela(s) não gravaram — confira em Cobranças.` : '';
-        toast.success(`${result.created} cobrança(s) gerada(s). O aviso pelo WhatsApp sai em seguida.${faltou}`);
+        toast.success(`${result.created} cobrança(s) gerada(s). Nada foi enviado ao cliente: para cobrar, use "Cobrar" na conta em Contas a Receber.${faltou}`);
       }
     } catch (err: any) {
       toast.error(err?.message || 'Erro ao gerar cobranças');
@@ -1140,7 +1139,6 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             serviceOrderId: orderId!,
             approvalDate: new Date().toISOString().slice(0, 10),
             trigger: 'status_change',
-            autoSend: false,
           })
             .then((res) => {
               if (res.created > 0) {
@@ -1170,7 +1168,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           })
             .then((res) => {
               if (res.created > 0) {
-                toast.success(`${res.created} cobrança(s) gerada(s) automaticamente.`);
+                toast.success(`${res.created} cobrança(s) gerada(s) automaticamente. Nada foi enviado ao cliente.`);
               }
               if (res.failed > 0) {
                 toast.error(`${res.failed} cobrança(s) não gravaram — confira em Cobranças.`);
