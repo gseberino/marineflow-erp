@@ -41,7 +41,9 @@
 --       certo", também tipo ok) ao "como foi" não abre pergunta nenhuma, nem nos tiques seguintes, e a diária e os meios-dias ficam como hoje
 --       (lançada, cumpridos); B2 o "ok, terminei" e B2b o "terminei" seguem com a pergunta de hoje; B3 o último dia (qui 05/11) com o "ok" puro
 --       é o do A3 (a pergunta "respondeu *ok*", a OS não conclui); B4 o último dia do PLANO com a estimativa sobrando (sem dia depois): o "ok"
---       puro segue com a pergunta de hoje ("… mas o plano tinha mais serviço do que você disse"), como o A3 o deixou
+--       puro abre a pergunta de sempre (chave concluir:<os>:<dia>, uma só) no estilo do A3, sem dizer que ele terminou (o texto exato); B4b
+--       *falta dia Vanderlei* e B4c *concluiu Vanderlei* fazem o que dizem (LIMITE de antes: a pergunta fica aberta e a manhã não a mostra);
+--       B4d o "ok, terminei" no mesmo caso segue com a pergunta de hoje ("… mas o plano tinha mais serviço do que você disse")
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -231,11 +233,13 @@ begin
     and (select count(*) from regexp_matches(v_s, '-- P1 AGENDA: \(A2,', 'g')) = 1
     and (select count(*) from regexp_matches(v_s, '-- P1 AGENDA: \(A3,', 'g')) = 3,
     format('%s / %s', md5(pg_temp.sem_a2(v_s)), md5(pg_temp.sem_blocos(v_s, 'P1 AGENDA'))));
-  v_res := pg_temp.ok(v_res, 'P0i o conserto B é uma linha só, no ramo do plano com mais dias: a mensagem de leitura tipo ok (o "ok" puro) não abre a pergunta',
-    btrim(regexp_replace(substring(v_s from '-- P1 AGENDA: \(A2, 26/11/2026, conserto B\).*?-- P1 AGENDA: fim'), '--[^\n]*', '', 'g'), E' \n')
-      = 'continue when m.leitura ->> ''tipo'' = ''ok'' and cardinality(v_fut) > 0;'
-    and position('continue when m.leitura ->> ''tipo'' = ''ok'' and cardinality(v_fut) > 0;' || E'\n      -- P1 AGENDA: fim\n      if public._agenda_equipe_perguntar(''concluir'', format(''concluir:%s:%s'', v_x, p_hoje)' in v_s) > 0,
-    btrim(regexp_replace(substring(v_s from '-- P1 AGENDA: \(A2, 26/11/2026, conserto B\).*?-- P1 AGENDA: fim'), '--[^\n]*', '', 'g'), E' \n'));
+  v_bl := btrim(regexp_replace(substring(v_s from '-- P1 AGENDA: \(A2, 26/11/2026, conserto B\).*?-- P1 AGENDA: fim'), '--[^\n]*', '', 'g'), E' \n');
+  v_res := pg_temp.ok(v_res, 'P0i o conserto B fica no ramo do plano com mais dias, logo antes da pergunta de sempre: o "ok" puro (leitura tipo ok) com dia depois não abre pergunta; sem dia depois, a pergunta de sempre (concluir:<os>:<dia>) no estilo do A3, sem "disse que terminou"; nada grava fora da pergunta',
+    v_bl like 'continue when m.leitura ->> ''tipo'' = ''ok'' and cardinality(v_fut) > 0;%'
+    and v_bl like '%if m.leitura ->> ''tipo'' = ''ok'' then%public._agenda_equipe_perguntar(''concluir'', format(''concluir:%s:%s'', v_x, p_hoje), m.payee_id, v_x, p_hoje,%respondeu *ok* ao "como foi hoje?" no último dia do plano do %s, mas a estimativa ainda tem serviço.%'
+    and v_bl not like '%disse que terminou%' and v_bl !~* '(os_registrar_marco|\mupdate\M|\minsert\M|\mdelete\M)'
+    and position(E'-- P1 AGENDA: fim\n      if public._agenda_equipe_perguntar(''concluir'', format(''concluir:%s:%s'', v_x, p_hoje), m.payee_id, v_x, p_hoje,\n           format(''O %s disse que terminou o %s, mas o plano tinha mais %s.' in v_s) > 0,
+    left(v_bl, 200));
   v_res := pg_temp.ok(v_res, 'P0j agenda_rotina_rodar: sem os 2 blocos "-- P1 AGENDA: (A2" (devolvidas as linhas "--antes:") o corpo é o de produção (md5 sem CR c418e862…, o de 20261026100300)',
     md5(pg_temp.sem_a2(v_a)) = 'c418e86267bf6e6021e3e1ff855f1013' and md5(v_a) <> 'c418e86267bf6e6021e3e1ff855f1013'
     and (select count(*) from regexp_matches(v_a, '-- P1 AGENDA: \(A2,', 'g')) = 2,
@@ -273,6 +277,7 @@ declare
   c_como_foi constant text := 'Como foi hoje? Ficou manhã e tarde? Terminou o previsto? Se foi tudo como o previsto, responde OK.';
   c_ok      constant text := 'O Roberto respondeu *ok* ao "como foi hoje?" no último dia da OS-00069 (Vanderlei). Responda *concluiu OS-00069* para fechar, ou *falta dia OS-00069* se ainda tem serviço.';
   c_chave   constant text := 'terminou:05000000-0000-4000-8000-000000000069';
+  c_b4      constant text := 'O Roberto respondeu *ok* ao "como foi hoje?" no último dia do plano do Vanderlei (OS-00069), mas a estimativa ainda tem serviço. Responda *concluiu Vanderlei* para fechar, ou *falta dia Vanderlei* se ainda tem serviço.';
   r         jsonb;
   r1        jsonb;
   r2        jsonb;
@@ -786,24 +791,61 @@ begin
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
-  begin
-    -- o plano acaba na qua 04/11 (os meios-dias de qui 05/11 saem) e a estimativa ainda tem meios-dias: sem dia depois, v_rest > 0
-    update public.agenda_alocacoes set estado = 'cancelada', cancelada_motivo = 'dono'
-     where service_order_id = c_vand and dia = d05 and estado in ('publicada', 'fixada');
-    perform pg_temp.rodar(d04, '17:00');
-    perform pg_temp.resp('ok', d04, '17:15');
-    r := pg_temp.rodar(d04, '17:30');
-    v_res := pg_temp.ok(v_res, 'B4 o último dia do PLANO com a estimativa sobrando (qua 04/11, sem dia depois): o "ok" puro segue com a pergunta de hoje, como o A3 o deixou ("… mas o plano tinha mais serviço do que você disse")',
-      (r #>> '{contagens,conclusao,perguntas}')::int = 1 and (r #>> '{contagens,conclusao,concluidas}')::int = 0
-      and (public.agenda_meios_da_os(c_vand, d05) ->> 'restantes')::numeric > 0
-      and exists (select 1 from public.agenda_perguntas q
-                   where q.tipo = 'concluir' and q.estado = 'aberta' and q.service_order_id = c_vand
-                     and q.texto = 'O Roberto disse que terminou o Vanderlei (OS-00069), mas o plano tinha mais serviço do que você disse. *concluiu Vanderlei* fecha a OS.'),
-      (r #> '{contagens,conclusao}')::text || ' | '
-      || coalesce((select string_agg(q.texto, ' ; ') from public.agenda_perguntas q where q.service_order_id = c_vand), '(nenhuma pergunta)'));
-    raise exception 'desfaz' using errcode = 'P0099';
-  exception when sqlstate 'P0099' then null;
-  end;
+  -- B4: o plano acaba na qua 04/11 (os meios-dias de qui 05/11 saem) e a estimativa ainda tem meios-dias: sem dia depois, v_rest > 0
+  for v_txt in select x from unnest(array['ok', 'ok, terminei']) x loop
+    begin
+      update public.agenda_alocacoes set estado = 'cancelada', cancelada_motivo = 'dono'
+       where service_order_id = c_vand and dia = d05 and estado in ('publicada', 'fixada');
+      perform pg_temp.rodar(d04, '17:00');
+      perform pg_temp.resp(v_txt, d04, '17:15');
+      r := pg_temp.rodar(d04, '17:30');
+      if v_txt = 'ok' then
+        r1 := pg_temp.rodar(d04, '17:45');
+        v_res := pg_temp.ok(v_res, 'B4 o último dia do PLANO com a estimativa sobrando (qua 04/11, sem dia depois) e o "ok" puro: a pergunta de sempre continua (concluir:<os>:<dia>, do Roberto, aberta, uma só), com o texto exato "' || c_b4 || '"; o tique seguinte não abre outra; a OS não conclui',
+          (public.agenda_meios_da_os(c_vand, d05) ->> 'restantes')::numeric > 0
+          and (r #>> '{contagens,conclusao,perguntas}')::int = 1 and (r #>> '{contagens,conclusao,concluidas}')::int = 0
+          and (r1 #>> '{contagens,conclusao,perguntas}')::int = 0
+          and (select count(*) from public.agenda_perguntas q where q.service_order_id = c_vand) = 1
+          and exists (select 1 from public.agenda_perguntas q
+                       where q.chave = format('concluir:%s:%s', c_vand, d04) and q.tipo = 'concluir' and q.estado = 'aberta'
+                         and q.payee_id = c_roberto and q.dia = d04 and q.texto = c_b4)
+          and not exists (select 1 from public.agenda_perguntas q where q.service_order_id = c_vand and q.texto like '%disse que terminou%')
+          and (select so.status from public.service_orders so where so.id = c_vand) = 'in_progress',
+          (r #> '{contagens,conclusao}')::text || ' | '
+          || coalesce((select string_agg(q.chave || ' ' || q.estado || ': ' || q.texto, ' ; ') from public.agenda_perguntas q where q.service_order_id = c_vand), '(nenhuma pergunta)'));
+        r1 := pg_temp.rodar(d05, '00:15');
+        begin
+          r1 := public.agenda_falta_dia_dito(c_admin, 'Vanderlei', 'whatsapp', d05, pg_temp.em(d05, '08:00'));
+          v_res := pg_temp.ok(v_res, 'B4b *falta dia Vanderlei* na manhã seguinte faz o que diz (ontem andou em parte; o motor encaixa o resto). LIMITE (de antes, não muda aqui): a pergunta concluir:<os>:<dia> fica aberta',
+            (r1 ->> 'ok')::boolean and r1 ->> 'status' = 'ok' and (r1 ->> 'dia')::date = d04
+            and exists (select 1 from public.agenda_perguntas q where q.chave = format('concluir:%s:%s', c_vand, d04) and q.estado = 'aberta'),
+            coalesce(r1 ->> 'status', '-') || ' | ' || left(coalesce(r1 ->> 'texto', '-'), 120));
+          raise exception 'desfaz' using errcode = 'P0098';
+        exception when sqlstate 'P0098' then null;
+        end;
+        begin
+          r1 := public.agenda_concluir_dito(c_admin, 'Vanderlei', 'whatsapp', d05, pg_temp.em(d05, '08:00'));
+          r2 := pg_temp.rodar(d05, '08:15');
+          v_res := pg_temp.ok(v_res, 'B4c *concluiu Vanderlei* conclui a OS pela porta. LIMITE (de antes, não muda aqui): a pergunta concluir:<os>:<dia> fica aberta depois do tique seguinte',
+            (r1 ->> 'ok')::boolean and (select so.status from public.service_orders so where so.id = c_vand) = 'completed'
+            and exists (select 1 from public.agenda_perguntas q where q.chave = format('concluir:%s:%s', c_vand, d04) and q.estado = 'aberta'),
+            coalesce((select q.estado from public.agenda_perguntas q where q.chave = format('concluir:%s:%s', c_vand, d04)), '(sem pergunta)'));
+          raise exception 'desfaz' using errcode = 'P0098';
+        exception when sqlstate 'P0098' then null;
+        end;
+      else
+        v_res := pg_temp.ok(v_res, 'B4d no mesmo caso, o "ok, terminei" segue com a pergunta de hoje ("O Roberto disse que terminou o Vanderlei (OS-00069), mas o plano tinha mais serviço do que você disse. *concluiu Vanderlei* fecha a OS.")',
+          (r #>> '{contagens,conclusao,perguntas}')::int = 1 and (r #>> '{contagens,conclusao,concluidas}')::int = 0
+          and not exists (select 1 from public.agenda_perguntas q where q.chave = c_chave)
+          and exists (select 1 from public.agenda_perguntas q
+                       where q.chave = format('concluir:%s:%s', c_vand, d04) and q.estado = 'aberta'
+                         and q.texto = 'O Roberto disse que terminou o Vanderlei (OS-00069), mas o plano tinha mais serviço do que você disse. *concluiu Vanderlei* fecha a OS.'),
+          coalesce((select string_agg(q.chave || ': ' || q.texto, ' ; ') from public.agenda_perguntas q where q.service_order_id = c_vand), '(nenhuma pergunta)'));
+      end if;
+      raise exception 'desfaz' using errcode = 'P0099';
+    exception when sqlstate 'P0099' then null;
+    end;
+  end loop;
 
   raise exception 'desfaz' using errcode = 'P0096';
   exception when sqlstate 'P0096' then null;
