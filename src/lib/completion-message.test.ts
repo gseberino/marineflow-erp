@@ -1,59 +1,31 @@
+// A mensagem de conclusão só avisa que o serviço terminou (dono, 26/11/2026: "2. A"): o saldo e o Pix iam a um número
+// digitável, sem as travas da cobrança; cobrar é pelo "Cobrar o cliente", com a conferência da ficha.
 import { describe, it, expect } from 'vitest';
 import { buildCompletionMessage } from './completion-message';
 
 describe('buildCompletionMessage', () => {
-  it('com saldo: cita valor e vencimento', () => {
-    const msg = buildCompletionMessage({
-      clientName: 'Charline Souza', osNumber: 'OS-00060', balance: 1998.96, dueDate: '2026-08-26',
-    });
-    expect(msg).toContain('Charline'); // só o primeiro nome
-    expect(msg).not.toContain('Souza');
-    expect(msg).toContain('OS-00060');
-    expect(msg).toContain('1.998,96');
-    expect(msg).toContain('26/08/2026');
-    expect(msg.toLowerCase()).toContain('conclu');
+  it('avisa a conclusão da OS com o primeiro nome', () => {
+    const msg = buildCompletionMessage({ clientName: 'Charline Souza', osNumber: 'OS-00060' });
+    expect(msg).toBe('Olá Charline!\n\nConcluímos o serviço da OS-00060.\n\nObrigado pela confiança — qualquer coisa, é só chamar!');
   });
 
-  it('sem saldo: mensagem de quitado, sem valor', () => {
-    const msg = buildCompletionMessage({ clientName: 'João', osNumber: 'OS-00051', balance: 0 });
-    expect(msg).toContain('João');
-    expect(msg).toContain('OS-00051');
-    expect(msg).not.toMatch(/R\$/);
-    expect(msg.toLowerCase()).toMatch(/quitad|tudo certo/);
-  });
-
-  it('sem vencimento: cita o saldo, sem a frase de vencimento', () => {
-    const msg = buildCompletionMessage({ clientName: 'Ana', osNumber: 'OS-1', balance: 500 });
-    expect(msg).toContain('500,00');
-    expect(msg).not.toContain('vencimento');
+  it('nunca leva valor, saldo, vencimento, Pix nem "quitado"', () => {
+    const msg = buildCompletionMessage({ clientName: 'Ana', osNumber: 'OS-1', assetType: 'Motorhome' });
+    expect(msg).not.toMatch(/R\$|saldo|venc|pix|quitad|pagamento/i);
   });
 
   it('sem nome: usa "Cliente"', () => {
-    const msg = buildCompletionMessage({ osNumber: 'OS-1', balance: 0 });
-    expect(msg).toContain('Cliente');
-  });
-
-  it('com saldo + chave Pix: inclui a linha do Pix', () => {
-    const msg = buildCompletionMessage({ osNumber: 'OS-1', balance: 500, pixKey: 'hbr@marine.com.br' });
-    expect(msg).toContain('Pix');
-    expect(msg).toContain('hbr@marine.com.br');
-  });
-
-  it('sem saldo: NÃO inclui Pix mesmo com chave', () => {
-    const msg = buildCompletionMessage({ osNumber: 'OS-1', balance: 0, pixKey: 'hbr@marine.com.br' });
-    expect(msg).not.toContain('hbr@marine.com.br');
+    expect(buildCompletionMessage({ osNumber: 'OS-1' }).startsWith('Olá Cliente!\n\n')).toBe(true);
   });
 });
 
 describe('emoji pelo tipo da unidade (22/10/2026: motorhome recebia 🚤)', () => {
-  it('veículo 🚐, barco 🛥️, equipamento ou sem tipo: nenhum — nas duas variantes', () => {
-    for (const balance of [0, 250]) {
-      const motorhome = buildCompletionMessage({ clientName: 'Rodrigo', osNumber: 'OS-00100', balance, assetType: 'Motorhome' });
-      expect(motorhome.startsWith('Olá Rodrigo! 🚐\n\n')).toBe(true);
-      expect(motorhome).not.toContain('🚤');
-      expect(buildCompletionMessage({ clientName: 'Ana', osNumber: 'OS-1', balance, assetType: 'Lancha' }).startsWith('Olá Ana! 🛥️\n\n')).toBe(true);
-      expect(buildCompletionMessage({ clientName: 'Ana', osNumber: 'OS-1', balance, assetType: 'Equipamento' }).startsWith('Olá Ana!\n\n')).toBe(true);
-      expect(buildCompletionMessage({ clientName: 'Ana', osNumber: 'OS-1', balance }).startsWith('Olá Ana!\n\n')).toBe(true);
-    }
+  it('veículo 🚐, barco 🛥️, equipamento ou sem tipo: nenhum', () => {
+    const motorhome = buildCompletionMessage({ clientName: 'Rodrigo', osNumber: 'OS-00100', assetType: 'Motorhome' });
+    expect(motorhome.startsWith('Olá Rodrigo! 🚐\n\n')).toBe(true);
+    expect(motorhome).not.toContain('🚤');
+    expect(buildCompletionMessage({ clientName: 'Ana', osNumber: 'OS-1', assetType: 'Lancha' }).startsWith('Olá Ana! 🛥️\n\n')).toBe(true);
+    expect(buildCompletionMessage({ clientName: 'Ana', osNumber: 'OS-1', assetType: 'Equipamento' }).startsWith('Olá Ana!\n\n')).toBe(true);
+    expect(buildCompletionMessage({ clientName: 'Ana', osNumber: 'OS-1' }).startsWith('Olá Ana!\n\n')).toBe(true);
   });
 });

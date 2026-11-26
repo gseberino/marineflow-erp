@@ -35,8 +35,8 @@ export function StatusQuickChange({ orderId, currentStatus }: Props) {
   const [reopenOpen, setReopenOpen] = useState(false);
   const [reason, setReason] = useState('');
   const [completionSend, setCompletionSend] = useState<{
-    open: boolean; osNumber: string; balance: number; dueDate: string | null; clientName: string | null; clientPhone: string | null;
-  }>({ open: false, osNumber: '', balance: 0, dueDate: null, clientName: null, clientPhone: null });
+    open: boolean; osNumber: string; balance: number; clientId: string | null; clientName: string | null; clientPhone: string | null;
+  }>({ open: false, osNumber: '', balance: 0, clientId: null, clientName: null, clientPhone: null });
   // Assistente "Faturar OS" (NFS-e + NF-e). Abre ao concluir, ANTES do aviso de WhatsApp —
   // primeiro o documento fiscal, depois a cobrança. Só para admin: a página fiscal e a
   // emissão são admin-only, oferecer a outro papel seria porta para um 401.
@@ -143,10 +143,10 @@ export function StatusQuickChange({ orderId, currentStatus }: Props) {
       if (ficou === 'completed') {
         const [{ data: so, error: soErr }, { data: recRows, error: recErr }] = await Promise.all([
           supabase.from('service_orders')
-            .select('service_order_number, clients(name, whatsapp, phone)')
+            .select('service_order_number, client_id, clients(name, whatsapp, phone)')
             .eq('id', orderId).maybeSingle(),
           supabase.from('receivables')
-            .select('balance_amount, due_date, is_deposit, status')
+            .select('balance_amount, is_deposit, status')
             .eq('service_order_id', orderId).neq('status', 'cancelled'),
         ]);
         // Leitura que falha não é "sem saldo": o aviso ao cliente sumia calado (19/11/2026).
@@ -163,13 +163,12 @@ export function StatusQuickChange({ orderId, currentStatus }: Props) {
         const osNumber = (so as any)?.service_order_number || '';
         let promptSaldo: typeof completionSend | null = null;
         if (outstanding > 0.009) {
-          const dueRow = pend.slice().sort((a: any, b: any) => String(a.due_date).localeCompare(String(b.due_date)))[0];
           const cli = (so as any)?.clients;
           promptSaldo = {
             open: true,
             osNumber,
             balance: Math.round(outstanding * 100) / 100,
-            dueDate: dueRow?.due_date ?? null,
+            clientId: (so as any)?.client_id ?? null,
             clientName: cli?.name ?? null,
             clientPhone: cli?.whatsapp || cli?.phone || null,
           };
@@ -364,7 +363,7 @@ export function StatusQuickChange({ orderId, currentStatus }: Props) {
         }}
       />
 
-      {/* Prompt opt-in de conclusão (avisar cliente + saldo) — ao concluir pela lista */}
+      {/* Prompt opt-in de conclusão (avisar o cliente; o saldo, pelo "Cobrar o cliente") — ao concluir pela lista */}
       <CompletionSendDialog
         open={completionSend.open}
         onOpenChange={v => {
@@ -373,10 +372,10 @@ export function StatusQuickChange({ orderId, currentStatus }: Props) {
         }}
         serviceOrderId={orderId}
         osNumber={completionSend.osNumber}
+        clientId={completionSend.clientId}
         clientName={completionSend.clientName}
         clientPhone={completionSend.clientPhone}
         balance={completionSend.balance}
-        dueDate={completionSend.dueDate}
       />
     </>
   );
