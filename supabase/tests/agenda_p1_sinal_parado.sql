@@ -172,7 +172,7 @@ begin
   v_a := pg_temp.como('anon', 'select public._agenda_sinal_parado(''{}''::jsonb, date ''2026-10-29'')::text');
   v_b := pg_temp.como('authenticated', 'select public._agenda_sinal_parado(''{}''::jsonb, date ''2026-10-29'')::text');
   v_res := pg_temp.ok(v_res, 'S0b anon chamando de fato é recusado (42501: revoke de PUBLIC não fecha anon, o revoke de anon fecha); authenticated chama (a cadeia da classe) e, com uma prontidão vazia, é false',
-    v_a like 'erro 42501:%' and v_b = 'false', 'anon: ' || coalesce(v_a, '-') || ' | authenticated: ' || coalesce(v_b, '-'));
+    v_a like 'erro 42501:%_agenda_sinal_parado%' and v_b = 'false', 'anon: ' || coalesce(v_a, '-') || ' | authenticated: ' || coalesce(v_b, '-'));
   v_res := pg_temp.ok(v_res, format('S0c %s: a porta de antes (invoker, STABLE | anon f, authenticated t, service_role t, PUBLIC f) e search_path=public', c_cls),
     pg_temp.porta(c_cls) = 'f s | f t t f'
     and exists (select 1 from pg_proc p where p.oid = to_regprocedure(c_cls) and array_to_string(p.proconfig, ',') = 'search_path=public'),
