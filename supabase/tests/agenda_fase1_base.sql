@@ -1162,6 +1162,9 @@ insert into _definer_da_agenda values ('agenda_aprovacoes_da_manha');
 -- "Terminou ou falta dia?" (23/11/2026), 20270223100000: a palavra *falta dia* (o administrador por _autor_da_agenda, como agenda_concluir_dito; escreve o
 -- resultado do dia pela agenda_registrar_dia e responde a pergunta). As 3 internas novas são invoker e sem grant. agenda_terminou_falta_dia.sql P0 prova as portas
 insert into _definer_da_agenda values ('agenda_falta_dia_dito');
+-- Pacote 1 do assistente, A1b (24/11/2026), 20270301120100: o orçamento parado no sinal (lê audit_log, que tem RLS e o técnico não lê; devolve só o booleano;
+-- execute para authenticated e service_role, a cadeia de _agenda_classe_da_os, nunca anon nem PUBLIC). agenda_p1_sinal_parado.sql S0a e S0b provam as portas
+insert into _definer_da_agenda values ('_agenda_sinal_parado');
   -- FASE 7f: fim
   -- FASE 7e: (7e P1, 20261111100000) nenhuma definer nova: o modo, a credibilidade, o z e a temporada são invoker, e o gatilho _agenda_medidas_compra_so_muda só mexe na própria linha. agenda_fase7e_base.sql prova as portas.
   -- FASE 7e: fim
