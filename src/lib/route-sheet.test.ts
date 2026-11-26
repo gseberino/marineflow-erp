@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { buildRouteSheetHtml, faltasDaVia, segurancaSemRoteiro, type LinhaDeSeguranca } from './route-sheet';
 import type { ServiceOrderStep, RouteMaterial } from '@/hooks/use-service-steps';
 
@@ -518,6 +518,45 @@ describe('via do técnico no servidor (13/11/2026)', () => {
       expect(html).toContain('<b>26/11/2026, 08:00</b>');
     } finally {
       if (antes === undefined) delete process.env.TZ; else process.env.TZ = antes;
+    }
+  });
+});
+
+// Imprimir da tela (26/11/2026): as fontes da marca chegam sob demanda (marca-fontes-sob-demanda.ts). A janela tem de
+// abrir JÁ, no clique (senão o bloqueador de pop-up a barra), e a folha só é escrita depois que as fontes chegam.
+describe('printRouteSheet — fontes da marca sob demanda', () => {
+  it('abre a janela na hora, escreve a folha com as fontes depois e chama a impressão', async () => {
+    const { printRouteSheet } = await import('./route-sheet');
+    const { carregarFontesDaMarca } = await import('./marca-fontes-sob-demanda');
+    const escrito: string[] = [];
+    const win = {
+      closed: false,
+      document: { write: (h: string) => escrito.push(h), close: () => {} },
+      focus: () => {},
+      print: vi.fn(),
+      setTimeout: (f: () => void) => f(),
+    };
+    const abrir = vi.spyOn(window, 'open').mockReturnValue(win as unknown as Window);
+    try {
+      expect(printRouteSheet({ orderNumber: 'OS-00001', technicianName: 'Fulano' }, [step()])).toBe(true);
+      expect(abrir).toHaveBeenCalledTimes(1);
+      await carregarFontesDaMarca();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(escrito).toHaveLength(1);
+      expect(escrito[0]).toContain('@font-face');
+      expect(win.print).toHaveBeenCalledTimes(1);
+    } finally {
+      abrir.mockRestore();
+    }
+  });
+
+  it('pop-up bloqueado: devolve false e não escreve nada', async () => {
+    const { printRouteSheet } = await import('./route-sheet');
+    const abrir = vi.spyOn(window, 'open').mockReturnValue(null);
+    try {
+      expect(printRouteSheet({ orderNumber: 'OS-00001' }, [])).toBe(false);
+    } finally {
+      abrir.mockRestore();
     }
   });
 });

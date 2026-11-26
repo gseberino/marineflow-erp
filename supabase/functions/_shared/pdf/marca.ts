@@ -47,6 +47,9 @@ export const FIO_EM_DEGRADE =
  * carregando, o texto sai na Open Sans — nunca invisível, como faria `block`.
  */
 export function cssDasFontesDaMarca(): string {
+  // Na tela as fontes chegam sob demanda (src/lib/marca-fontes-sob-demanda.ts, troca feita pelo vite.config.ts): antes
+  // de chegarem, nada de @font-face com data: vazio — a folha sai na letra de reserva da pilha. No servidor estão sempre aqui.
+  if (!ARCHIVO_WOFF2_BASE64 || !HANKEN_GROTESK_WOFF2_BASE64) return '';
   return `@font-face { font-family: "Archivo"; font-style: normal; font-weight: 100 900; font-display: swap;
     src: url(data:font/woff2;base64,${ARCHIVO_WOFF2_BASE64}) format("woff2"); }
   @font-face { font-family: "Hanken Grotesk"; font-style: normal; font-weight: 100 900; font-display: swap;
