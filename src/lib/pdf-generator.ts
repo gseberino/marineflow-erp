@@ -23,6 +23,8 @@ import {
   type PDFOptions,
 } from '../../supabase/functions/_shared/pdf/documento';
 import { linhaDaUnidade } from './unidade';
+import { carregarFontesDaMarca } from './marca-fontes-sob-demanda';
+import { cssDasFontesDaMarca } from '../../supabase/functions/_shared/pdf/marca';
 import { precisaDeRevisao } from '../../supabase/functions/_shared/pdf/revisao';
 import { documentoMascarado, nomeSemCpf } from '../../supabase/functions/_shared/banking/contraparte';
 
@@ -60,22 +62,23 @@ export async function comRevisaoSeFaltar(data: PDFData, ctx?: { shareToken?: str
 }
 
 /**
- * As fontes da marca (Archivo e Hanken Grotesk, ~93 KB em base64), pedidas só quando um documento vai ser gerado
- * (26/11/2026). Ficam num pedaço separado do app: as telas que importam este arquivo — listas, formulário da OS —
- * não baixam as fontes junto. Falhou o carregamento (rede, app atualizado com a aba aberta), o documento sai na
- * fonte de reserva (Open Sans/Arial), nunca deixa de sair.
+ * O CSS das fontes da marca (Archivo e Hanken Grotesk, ~93 KB em base64) para o documento (26/11/2026). Na tela elas
+ * chegam sob demanda (marca-fontes-sob-demanda.ts, pedaço próprio do app): esta função espera o carregamento e devolve
+ * o @font-face pronto. Falhou (rede, app atualizado com a aba aberta), devolve '' e o documento sai na fonte de
+ * reserva (Open Sans/Arial) — nunca deixa de sair; a próxima geração tenta de novo.
  */
 let cssDasFontes: string | null = null;
-export async function carregarFontesDaMarca(): Promise<string> {
+export async function carregarCssDasFontes(): Promise<string> {
   if (cssDasFontes !== null) return cssDasFontes;
   try {
-    const { cssDasFontesDaMarca } = await import('../../supabase/functions/_shared/pdf/marca');
-    cssDasFontes = cssDasFontesDaMarca();
-    return cssDasFontes;
+    await carregarFontesDaMarca();
   } catch (e) {
     console.warn('[pdf] fontes da marca não carregaram; o documento sai na fonte de reserva', e);
     return '';
   }
+  const css = cssDasFontesDaMarca();
+  if (css) cssDasFontes = css;
+  return css;
 }
 /** Já carregadas: o Imprimir pode montar o documento ainda no clique (pdf-print.ts). */
 export function fontesDaMarcaCarregadas(): boolean {
@@ -207,7 +210,7 @@ export async function generatePDFBlob(
   ctx?: { shareToken?: string },
 ): Promise<Blob> {
   // A revisão (Rev. N) é pedida na GERAÇÃO — aqui passam o Baixar, o anexo do WhatsApp e o portal do cliente.
-  const [data, fontes] = await Promise.all([comRevisaoSeFaltar(dadosRecebidos, ctx), carregarFontesDaMarca()]);
+  const [data, fontes] = await Promise.all([comRevisaoSeFaltar(dadosRecebidos, ctx), carregarCssDasFontes()]);
   const html = comFontesDaMarca(buildHTMLDocument(data, options), fontes);
 
   // Primeiro o servidor (/api/pdf, Chromium): texto real, o mesmo motor da impressão, sem

@@ -1,6 +1,6 @@
 import { toast } from 'sonner';
 import {
-  carregarFontesDaMarca,
+  carregarCssDasFontes,
   comRevisaoSeFaltar,
   fontesDaMarcaCarregadas,
   generatePDF,
@@ -26,7 +26,7 @@ import { precisaDeRevisao } from '../../supabase/functions/_shared/pdf/revisao';
  * a revisão chega. Sem resposta, o documento sai sem a revisão, como antes.
  *
  * Fontes da marca (26/11/2026): na primeira impressão da sessão elas ainda não chegaram (vêm sob demanda,
- * carregarFontesDaMarca); a janela abre no clique, do mesmo jeito, e o documento entra quando elas chegam.
+ * carregarCssDasFontes); a janela abre no clique, do mesmo jeito, e o documento entra quando elas chegam.
  */
 export function printPDF(data: PDFData, options: PDFOptions): void {
   if (!precisaDeRevisao(data) && fontesDaMarcaCarregadas()) {
@@ -40,8 +40,8 @@ export function printPDF(data: PDFData, options: PDFOptions): void {
     );
   }
   const revisao = comRevisaoSeFaltar(data).catch(() => ({ ...data, revisao: null }));
-  // carregarFontesDaMarca nunca falha (sem as fontes, devolve '' e o documento sai na reserva).
-  void Promise.all([revisao, carregarFontesDaMarca()]).then(([pronto]) => imprimir(pronto, options, janela));
+  // carregarCssDasFontes nunca falha (sem as fontes, devolve '' e o documento sai na reserva).
+  void Promise.all([revisao, carregarCssDasFontes()]).then(([pronto]) => imprimir(pronto, options, janela));
 }
 
 function imprimir(data: PDFData, options: PDFOptions, janela?: Window | null): void {

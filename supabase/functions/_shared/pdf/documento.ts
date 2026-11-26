@@ -26,6 +26,7 @@ import { primeiraValidade } from '../dias-de-validade.ts';
 import { campoDaUnidade, grupoDoTipo, rotuloDaIdentificacao, type UnidadeResumo } from '../unidade.ts';
 import type { RevisaoDoDocumento } from './revisao.ts';
 import { linhasDoQuadroDeValores } from './quadro-de-valores.ts';
+import { FIO_EM_DEGRADE, FONTE_DO_TEXTO, FONTE_DOS_TITULOS, SLOGAN } from './marca.ts';
 
 export type PDFDocumentType = 'quote' | 'service_order' | 'invoice' | 'receipt';
 
@@ -647,9 +648,9 @@ export const SETA_DE_DETALHE =
  * documento.
  *
  * Fica FORA de `pageWrapper` de propósito: são ~93 KB de texto. O servidor (gerar-e-guardar.ts) passa o CSS direto;
- * a tela o carrega sob demanda (src/lib/pdf-generator.ts, `carregarFontesDaMarca`), para as telas que nunca geram
- * documento não baixarem as fontes junto com o resto do app. Sem o CSS, o documento sai na Open Sans (a reserva das
- * pilhas de fonte) — e as referências de __referencia__ continuam legíveis, sem o base64.
+ * na tela as fontes chegam sob demanda (src/lib/marca-fontes-sob-demanda.ts) e quem monta o documento espera por elas
+ * (`carregarCssDasFontes`, src/lib/pdf-generator.ts). Sem o CSS, o documento sai na Open Sans (a reserva das pilhas de
+ * fonte) — e as referências de __referencia__ continuam legíveis, sem o base64.
  */
 export function comFontesDaMarca(html: string, cssDasFontes: string): string {
   return cssDasFontes ? html.replace('</head>', `<style>${cssDasFontes}</style>\n</head>`) : html;
@@ -683,18 +684,6 @@ export function rodapeDaPaginaCss(docNumber: string, revisao?: RevisaoDoDocument
   return `@page { @bottom-right { content: "${prefixo} · pág. " counter(page) "/" counter(pages); ` +
     `font-family: ${FONTE_DO_TEXTO}; font-size: 7pt; color: #274A6D; } }`;
 }
-
-/**
- * As pilhas de fonte e o slogan da marca (marca.ts), repetidos aqui de propósito: importar marca.ts traria junto as
- * fontes embutidas (marca-fontes.ts) para o pedaço do app que monta o documento — e ele é carregado por telas que nunca
- * geram PDF. O teste documento_test.ts confere que os valores são os mesmos de marca.ts.
- */
-export const FONTE_DO_TEXTO = '"Hanken Grotesk", "Open Sans", Arial, sans-serif';
-export const FONTE_DOS_TITULOS = '"Archivo", "Open Sans", Arial, sans-serif';
-export const SLOGAN_DO_RODAPE = 'Energia. Controle. Confiança.';
-/** O fio sob o cabeçalho: dourado → cinza → azul (FIO_EM_DEGRADE de marca.ts). */
-export const FIO_DO_CABECALHO =
-  'linear-gradient(90deg, #B8894A 0%, #C8A063 30%, #D9DDE1 52%, #7FA0B8 78%, #274A6D 100%)';
 
 export function pageWrapper(title: string, body: string, rodapeDaPagina = ''): string {
   // O CSS sai preso à raiz do documento. É isto que impede as regras globais
@@ -730,7 +719,7 @@ export function pageWrapper(title: string, body: string, rodapeDaPagina = ''): s
   @media print {
     .container { padding: 0; }
     @page { margin: 12mm; size: A4; }
-    @page { @bottom-left { content: "${SLOGAN_DO_RODAPE}"; font-family: ${FONTE_DO_TEXTO}; font-weight: 600; font-size: 6.5pt; letter-spacing: 0.14em; color: #0D1B2A; } }
+    @page { @bottom-left { content: "${SLOGAN}"; font-family: ${FONTE_DO_TEXTO}; font-weight: 600; font-size: 6.5pt; letter-spacing: 0.14em; color: #0D1B2A; } }
     ${rodapeDaPagina}
   }
 
@@ -742,7 +731,7 @@ export function pageWrapper(title: string, body: string, rodapeDaPagina = ''): s
     background: var(--pdf-primary); color: #fff; font-family: ${FONTE_DOS_TITULOS};
     font-size: 22px; font-weight: 800; line-height: 1.2; letter-spacing: 0.02em; white-space: nowrap;
   }
-  .fio { height: 3.4px; border-radius: 4px; background: ${FIO_DO_CABECALHO}; margin: -16px 0 18px; }
+  .fio { height: 3.4px; border-radius: 4px; background: ${FIO_EM_DEGRADE}; margin: -16px 0 18px; }
 
   .card {
     border: 1px solid var(--pdf-grade);

@@ -5,14 +5,9 @@
  *
  * A capa é HTML simples: servidor (/api/pdf, Chromium) primeiro, html2pdf de reserva — a mesma ordem do resto.
  */
-import { carregarFontesDaMarca, generatePDFBlob, opcoesPadraoDoDocumento, type PDFData } from '@/lib/pdf-generator';
-import {
-  FIO_DO_CABECALHO,
-  FONTE_DO_TEXTO,
-  FONTE_DOS_TITULOS,
-  SLOGAN_DO_RODAPE,
-  comFontesDaMarca,
-} from '../../supabase/functions/_shared/pdf/documento';
+import { carregarCssDasFontes, generatePDFBlob, opcoesPadraoDoDocumento, type PDFData } from '@/lib/pdf-generator';
+import { comFontesDaMarca } from '../../supabase/functions/_shared/pdf/documento';
+import { FIO_EM_DEGRADE, FONTE_DO_TEXTO, FONTE_DOS_TITULOS, SLOGAN } from '../../supabase/functions/_shared/pdf/marca';
 import {
   type Conjunto,
   listaNatural,
@@ -42,7 +37,7 @@ export interface EmpresaDaCapa {
 
 /**
  * HTML da capa (puro: testável sem navegador). `hoje` no formato dd/mm/aaaa. `cssDasFontes`: as fontes da marca
- * (carregarFontesDaMarca); sem elas, a capa sai na fonte de reserva.
+ * (carregarCssDasFontes); sem elas, a capa sai na fonte de reserva.
  *
  * Marca (26/11/2026, a opção 4 dos documentos): letras e cores das folhas novas, o fio em degradê sob o topo, o
  * cabeçalho da tabela claro e o slogan no pé. Texto pequeno nunca mais claro que o azul #274A6D (modo rascunho).
@@ -65,11 +60,11 @@ export function htmlDaCapa(c: Conjunto, empresa: EmpresaDaCapa | null, hoje: str
 <html lang="pt-BR"><head><meta charset="utf-8"><title>${esc(c.nome)}</title>
 <style>
   @page { size: A4; margin: 14mm 12mm; }
-  @page { @bottom-left { content: "${SLOGAN_DO_RODAPE}"; font-family: ${FONTE_DO_TEXTO}; font-weight: 600; font-size: 6.5pt; letter-spacing: .14em; color: #0D1B2A; } }
+  @page { @bottom-left { content: "${SLOGAN}"; font-family: ${FONTE_DO_TEXTO}; font-weight: 600; font-size: 6.5pt; letter-spacing: .14em; color: #0D1B2A; } }
   * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   body { font-family: ${FONTE_DO_TEXTO}; color: #0D1B2A; font-size: 11pt; margin: 0; }
   .topo { display: flex; align-items: center; justify-content: space-between; padding-bottom: 8px; }
-  .fio { height: 3.4px; border-radius: 4px; background: ${FIO_DO_CABECALHO}; }
+  .fio { height: 3.4px; border-radius: 4px; background: ${FIO_EM_DEGRADE}; }
   .topo img { max-height: 48px; max-width: 180px; }
   .empresa { font-family: ${FONTE_DOS_TITULOS}; font-size: 13pt; font-weight: 800; color: #0D1B2A; }
   .contato { font-size: 8.5pt; color: #274A6D; margin-top: 2px; }
@@ -175,7 +170,7 @@ export interface DependenciasDoPdf {
   capa?: (html: string, nome: string) => Promise<Blob>;
   juntar?: (partes: Blob[]) => Promise<Blob>;
   hoje?: () => string;
-  /** As fontes da marca para a capa (padrão: carregarFontesDaMarca, sob demanda). */
+  /** As fontes da marca para a capa (padrão: carregarCssDasFontes, sob demanda). */
   fontes?: () => Promise<string>;
 }
 
@@ -201,7 +196,7 @@ export async function gerarPdfDoConjunto(
     partes.push(await gerar({ ...dados, documentType: tipo } as PDFData, opcoes));
   }
   const hoje = dep.hoje ? dep.hoje() : new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-  const fontes = await (dep.fontes ?? carregarFontesDaMarca)();
+  const fontes = await (dep.fontes ?? carregarCssDasFontes)();
   const capa = await (dep.capa ?? capaEmPdf)(htmlDaCapa(c, empresa, hoje, fontes), filename);
   const blob = await (dep.juntar ?? juntarPdfs)([capa, ...partes]);
   return { blob, filename };

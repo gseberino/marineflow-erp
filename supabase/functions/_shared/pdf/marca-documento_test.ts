@@ -1,22 +1,14 @@
 import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { FakeTime } from "https://deno.land/std@0.224.0/testing/time.ts";
-import {
-  buildOrderHTML,
-  comFontesDaMarca,
-  DEFAULT_PDF_OPTIONS,
-  FIO_DO_CABECALHO,
-  FONTE_DO_TEXTO,
-  FONTE_DOS_TITULOS,
-  SLOGAN_DO_RODAPE,
-} from "./documento.ts";
+import { buildOrderHTML, comFontesDaMarca, DEFAULT_PDF_OPTIONS } from "./documento.ts";
 import { AGORA, ORCAMENTO, ORCAMENTO_COM_PARCELAS, OS_COM_PAGAMENTO, VALIDADE_POR_DATA } from "./amostras.ts";
-import { cssDasFontesDaMarca, FIO_EM_DEGRADE, FONTE_DO_TEXTO as FONTE_DO_TEXTO_DA_MARCA, FONTE_DOS_TITULOS as FONTE_DOS_TITULOS_DA_MARCA, MARCA, SLOGAN } from "./marca.ts";
+import { cssDasFontesDaMarca, FIO_EM_DEGRADE, FONTE_DO_TEXTO, FONTE_DOS_TITULOS, MARCA, SLOGAN } from "./marca.ts";
 import { FAIXAS_DA_OPEN_SANS_DO_SERVIDOR } from "./open-sans-faixas.ts";
 import { caracteresForaDaFonteDoServidor, coresDeTextoClarasDemais } from "./marca-documento-regras.ts";
 
 // A marca nos documentos do cliente (26/11/2026, opção 4 aprovada pelo dono): orçamento, OS (e, na tela, fatura,
 // recibo e a capa do conjunto — src/lib/pdf-marca.test.ts). O que trava aqui:
-//  · as cores e as letras são as de marca.ts (documento.ts repete os valores para não puxar as fontes embutidas);
+//  · as cores e as letras são as de marca.ts (as variáveis --pdf-* ficam em hex no CSS: pdf-css-isolation.test.ts);
 //  · nenhum texto mais claro que o azul #274A6D — o cinza de antes sumia no modo rascunho da impressora (dono);
 //  · nenhum caractere que a Open Sans do servidor não desenhe ("📷" e "↳" saíam como quadradinho);
 //  · a Inter do Google saiu (as fontes vão embutidas por comFontesDaMarca).
@@ -36,10 +28,12 @@ function documentos(): string[] {
 }
 
 Deno.test("documento usa as letras, o fio e o slogan de marca.ts", () => {
-  assertEquals(FONTE_DO_TEXTO, FONTE_DO_TEXTO_DA_MARCA);
-  assertEquals(FONTE_DOS_TITULOS, FONTE_DOS_TITULOS_DA_MARCA);
-  assertEquals(FIO_DO_CABECALHO, FIO_EM_DEGRADE);
-  assertEquals(SLOGAN_DO_RODAPE, SLOGAN);
+  for (const html of documentos()) {
+    assertStringIncludes(html, `font-family: ${FONTE_DO_TEXTO};`);
+    assertStringIncludes(html, `font-family: ${FONTE_DOS_TITULOS};`);
+    assertStringIncludes(html, FIO_EM_DEGRADE);
+    assertStringIncludes(html, `content: "${SLOGAN}"`);
+  }
 });
 
 Deno.test("documento usa as cores de marca.ts e não a Inter do Google", () => {

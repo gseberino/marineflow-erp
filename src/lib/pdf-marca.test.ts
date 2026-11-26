@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildHTMLDocument, carregarFontesDaMarca, DEFAULT_PDF_OPTIONS, type PDFData } from './pdf-generator';
+import { buildHTMLDocument, carregarCssDasFontes, DEFAULT_PDF_OPTIONS, type PDFData } from './pdf-generator';
 import { htmlDaCapa } from './pdf-conjunto';
 import { normalizarConjunto } from './conjunto';
 import { AGORA, OS_COM_PAGAMENTO } from '../../supabase/functions/_shared/pdf/amostras';
@@ -66,7 +66,7 @@ describe('capa do conjunto com a marca', () => {
     expect(semFontes).toContain(`content: "${SLOGAN}"`);
     expect(semFontes).toContain('"Hanken Grotesk"');
     expect(semFontes).not.toContain('@font-face');
-    const comFontes = htmlDaCapa(conjunto, { name: 'HBR' }, '18/11/2026', await carregarFontesDaMarca());
+    const comFontes = htmlDaCapa(conjunto, { name: 'HBR' }, '18/11/2026', await carregarCssDasFontes());
     expect(comFontes.slice(0, comFontes.indexOf('</head>'))).toContain('@font-face');
   });
   it('nenhum texto mais claro que o azul da marca e nenhum caractere fora da fonte do servidor', () => {
@@ -77,19 +77,24 @@ describe('capa do conjunto com a marca', () => {
 });
 
 describe('fontes da marca sob demanda', () => {
-  it('carregarFontesDaMarca traz as duas fontes e guarda para a próxima', async () => {
-    const css = await carregarFontesDaMarca();
+  it('carregarCssDasFontes traz as duas fontes e guarda para a próxima', async () => {
+    const css = await carregarCssDasFontes();
     expect(css).toContain('font-family: "Archivo"');
     expect(css).toContain('font-family: "Hanken Grotesk"');
-    expect(await carregarFontesDaMarca()).toBe(css);
+    expect(await carregarCssDasFontes()).toBe(css);
   });
-  it('o gerador não importa as fontes de forma estática (elas não pesam nas telas que nunca geram documento)', async () => {
+  // Na tela as fontes só chegam pelo marca.ts, cujo './marca-fontes.ts' o vite.config.ts troca pelo carregamento sob
+  // demanda (marca-fontes-sob-demanda.ts). Importar o marca-fontes direto as poria de volta no pedaço das telas.
+  it('nem o molde, nem o gerador, nem a capa importam as fontes direto', async () => {
     const { readFileSync } = await import('node:fs');
     const { join } = await import('node:path');
     const ler = (...p: string[]) => readFileSync(join(process.cwd(), ...p), 'utf8');
-    const gerador = ler('src', 'lib', 'pdf-generator.ts');
-    const molde = ler('supabase', 'functions', '_shared', 'pdf', 'documento.ts');
-    expect(gerador).not.toMatch(/^import[^;]*from '[^']*\/(marca|marca-fontes)'/m);
-    expect(molde).not.toMatch(/^import[^;]*from '\.\/(marca|marca-fontes)(\.ts)?'/m);
+    for (const fonte of [
+      ler('src', 'lib', 'pdf-generator.ts'),
+      ler('src', 'lib', 'pdf-conjunto.ts'),
+      ler('supabase', 'functions', '_shared', 'pdf', 'documento.ts'),
+    ]) {
+      expect(fonte).not.toMatch(/^import[^;]*from '[^']*marca-fontes(\.ts)?'/m);
+    }
   });
 });
