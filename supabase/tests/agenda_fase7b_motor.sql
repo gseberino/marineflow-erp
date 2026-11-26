@@ -90,14 +90,22 @@ $f$;
 -- FASE 7c: (7c P2) a 20261102100100 recria o motor de novo, com os blocos "-- FASE 7c: … -- FASE 7c: fim" (no nível de fora, só
 -- acréscimo): o M8 os tira antes; e o motor da 7c grava em cada alocação do item o critério que decidiu a pessoa (criterio e
 -- criterio_detalhe, em qualquer modo) e o contexto ganha hab, habf e custo: o M9 compara sem eles (a projeção da spec-fase7c §3.8 d8)
+-- (Pacote 1 do assistente, A1b, 20270301120100: e os blocos "-- P1 AGENDA: … -- P1 AGENDA: fim", devolvendo as linhas "--antes:" de dentro deles — a
+-- convenção de agenda_p1_terminei.sql; _agenda_classe_da_os ganhou 1 deles, dentro do bloco "-- FASE 7: (7a P12" da origem. O resto é provado em
+-- agenda_p1_sinal_parado.sql, S0d.)
 create function pg_temp.sem_7c(p text) returns text language sql immutable as $f$
   select array_to_string(array(
-           select l from (select l, o, sum(case when l ~ '^\s*-- (FASE 7[cdefg]:|\(7e )' and l !~ '-- FASE 7[cdefg]: fim' then 1
-                                                when l ~ '^\s*-- (FASE 7[cdefg]: fim|\(7e: fim\))' then -1 else 0 end)
-                                       over (order by o rows between unbounded preceding and current row) as dentro,
-                                 l ~ '^\s*-- (FASE 7[cdefg]: fim|\(7e: fim\))' as fecha
-                            from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
-            where dentro = 0 and not fecha order by o), E'\n')
+           select case when p1 > 0 then substr(l, 9) else l end
+             from (select l, o, sum(case when l ~ '^\s*-- (FASE 7[cdefg]:|\(7e )' and l !~ '-- FASE 7[cdefg]: fim' then 1
+                                         when l ~ '^\s*-- (FASE 7[cdefg]: fim|\(7e: fim\))' then -1 else 0 end)
+                                over (order by o rows between unbounded preceding and current row) as dentro,
+                          l ~ '^\s*-- (FASE 7[cdefg]: fim|\(7e: fim\))' as fecha,
+                          sum(case when l ~ '^\s*-- P1 AGENDA:' and l !~ '^\s*-- P1 AGENDA: fim' then 1
+                                   when l ~ '^\s*-- P1 AGENDA: fim' then -1 else 0 end)
+                            over (order by o rows between unbounded preceding and current row) as p1,
+                          l ~ '^\s*-- P1 AGENDA: fim' as fecha_p1
+                     from unnest(string_to_array(replace(p, E'\r\n', E'\n'), E'\n')) with ordinality u(l, o)) x
+            where dentro = 0 and not fecha and not fecha_p1 and (p1 = 0 or l ~ '^--antes:') order by o), E'\n')
 $f$;
 create function pg_temp.sem_criterio(p jsonb) returns jsonb language sql immutable as $f$
   select case when jsonb_typeof(p -> 'itens') <> 'array' then p

@@ -45,17 +45,27 @@ $f$;
 create function pg_temp.gravar(p_res jsonb) returns void language sql as $f$
   insert into _resultado select e ->> 0, (e ->> 1)::boolean, e ->> 2 from jsonb_array_elements(p_res) e
 $f$;
--- o corpo sem os blocos do P5b (o tirador do montador, linha a linha)
+-- o corpo sem os blocos do P5b (o tirador do montador, linha a linha). (Pacote 1 do assistente, A1b, 20270301120100: e sem os "-- P1 AGENDA: … -- P1 AGENDA:
+-- fim", devolvendo as linhas "--antes:" de dentro deles, a convenção de agenda_p1_terminei.sql; _agenda_classe_da_os ganhou 1 deles, fora do P5b. O resto é
+-- provado em agenda_p1_sinal_parado.sql, S0d.)
 create function pg_temp.sem_p5b(p text) returns text language plpgsql immutable as $f$
 declare
   v_fora   text[] := '{}';
   v_dentro boolean := false;
+  v_p1     boolean := false;
   l        text;
 begin
   foreach l in array string_to_array(p, E'\n') loop
-    if not v_dentro and l ~ '^\s*-- FASE 7g: \(7g P5b' then v_dentro := true; continue; end if;
+    if not v_dentro and not v_p1 and l ~ '^\s*-- FASE 7g: \(7g P5b' then v_dentro := true; continue; end if;
     if v_dentro and l ~ '^\s*-- FASE 7g: fim\s*$' then v_dentro := false; continue; end if;
     if v_dentro then continue; end if;
+    if not v_p1 and l ~ '^\s*-- P1 AGENDA:' and l !~ '^\s*-- P1 AGENDA: fim' then v_p1 := true; continue; end if;
+    if v_p1 then
+      if l ~ '^\s*-- P1 AGENDA: fim' then v_p1 := false;
+      elsif l ~ '^--antes:' then v_fora := v_fora || substr(l, 9);
+      end if;
+      continue;
+    end if;
     v_fora := v_fora || l;
   end loop;
   return array_to_string(v_fora, E'\n');
