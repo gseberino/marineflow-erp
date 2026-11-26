@@ -1,5 +1,12 @@
 import { toast } from 'sonner';
-import { comRevisaoSeFaltar, generatePDF, type PDFData, type PDFOptions } from './pdf-generator';
+import {
+  carregarFontesDaMarca,
+  comRevisaoSeFaltar,
+  fontesDaMarcaCarregadas,
+  generatePDF,
+  type PDFData,
+  type PDFOptions,
+} from './pdf-generator';
 import { precisaDeRevisao } from '../../supabase/functions/_shared/pdf/revisao';
 
 /**
@@ -17,9 +24,12 @@ import { precisaDeRevisao } from '../../supabase/functions/_shared/pdf/revisao';
  * Revisão (17/11/2026): o documento de uma ordem leva a Rev. N, que vem do banco. A janela abre AQUI, ainda no
  * clique — `window.open` depois de esperar a resposta cairia no bloqueador de pop-up — e recebe o documento quando
  * a revisão chega. Sem resposta, o documento sai sem a revisão, como antes.
+ *
+ * Fontes da marca (26/11/2026): na primeira impressão da sessão elas ainda não chegaram (vêm sob demanda,
+ * carregarFontesDaMarca); a janela abre no clique, do mesmo jeito, e o documento entra quando elas chegam.
  */
 export function printPDF(data: PDFData, options: PDFOptions): void {
-  if (!precisaDeRevisao(data)) {
+  if (!precisaDeRevisao(data) && fontesDaMarcaCarregadas()) {
     imprimir(data, options);
     return;
   }
@@ -29,10 +39,9 @@ export function printPDF(data: PDFData, options: PDFOptions): void {
       '<p style="font-family:system-ui,sans-serif;padding:24px;color:#64748B">Preparando o documento…</p>',
     );
   }
-  void comRevisaoSeFaltar(data).then(
-    (comRevisao) => imprimir(comRevisao, options, janela),
-    () => imprimir({ ...data, revisao: null }, options, janela),
-  );
+  const revisao = comRevisaoSeFaltar(data).catch(() => ({ ...data, revisao: null }));
+  // carregarFontesDaMarca nunca falha (sem as fontes, devolve '' e o documento sai na reserva).
+  void Promise.all([revisao, carregarFontesDaMarca()]).then(([pronto]) => imprimir(pronto, options, janela));
 }
 
 function imprimir(data: PDFData, options: PDFOptions, janela?: Window | null): void {

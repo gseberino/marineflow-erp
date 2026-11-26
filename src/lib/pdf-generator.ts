@@ -5,6 +5,7 @@ import {
   buildPaymentSection,
   buildPDFFilename,
   companyHeaderHTML,
+  comFontesDaMarca,
   descontoDoItem,
   esc,
   fmtCurrency,
@@ -59,6 +60,29 @@ export async function comRevisaoSeFaltar(data: PDFData, ctx?: { shareToken?: str
 }
 
 /**
+ * As fontes da marca (Archivo e Hanken Grotesk, ~93 KB em base64), pedidas só quando um documento vai ser gerado
+ * (26/11/2026). Ficam num pedaço separado do app: as telas que importam este arquivo — listas, formulário da OS —
+ * não baixam as fontes junto. Falhou o carregamento (rede, app atualizado com a aba aberta), o documento sai na
+ * fonte de reserva (Open Sans/Arial), nunca deixa de sair.
+ */
+let cssDasFontes: string | null = null;
+export async function carregarFontesDaMarca(): Promise<string> {
+  if (cssDasFontes !== null) return cssDasFontes;
+  try {
+    const { cssDasFontesDaMarca } = await import('../../supabase/functions/_shared/pdf/marca');
+    cssDasFontes = cssDasFontesDaMarca();
+    return cssDasFontes;
+  } catch (e) {
+    console.warn('[pdf] fontes da marca não carregaram; o documento sai na fonte de reserva', e);
+    return '';
+  }
+}
+/** Já carregadas: o Imprimir pode montar o documento ainda no clique (pdf-print.ts). */
+export function fontesDaMarcaCarregadas(): boolean {
+  return cssDasFontes !== null;
+}
+
+/**
  * `janela`: a janela de impressão já aberta por quem chamou. O Imprimir precisa pedir a revisão ao banco ANTES de
  * montar o documento, e `window.open` depois de um `await` cai no bloqueador de pop-up — então quem chama abre a
  * janela no clique e passa para cá (pdf-print.ts). Sem ela, abre aqui, como sempre.
@@ -66,7 +90,7 @@ export async function comRevisaoSeFaltar(data: PDFData, ctx?: { shareToken?: str
 export function generatePDF(data: PDFData, options: PDFOptions, janela?: Window | null): void {
   // O título da janela é o nome que "Salvar como PDF" sugere. Com "ORÇAMENTO ORÇ-00100"
   // o arquivo salvo pela impressão não batia com o do botão Baixar; agora é o mesmo nome.
-  const html = buildHTMLDocument(data, options).replace(
+  const html = comFontesDaMarca(buildHTMLDocument(data, options), cssDasFontes ?? '').replace(
     /<title>[^<]*<\/title>/,
     `<title>${esc(tituloParaImpressao(data, options))}</title>`,
   );
@@ -183,8 +207,8 @@ export async function generatePDFBlob(
   ctx?: { shareToken?: string },
 ): Promise<Blob> {
   // A revisão (Rev. N) é pedida na GERAÇÃO — aqui passam o Baixar, o anexo do WhatsApp e o portal do cliente.
-  const data = await comRevisaoSeFaltar(dadosRecebidos, ctx);
-  const html = buildHTMLDocument(data, options);
+  const [data, fontes] = await Promise.all([comRevisaoSeFaltar(dadosRecebidos, ctx), carregarFontesDaMarca()]);
+  const html = comFontesDaMarca(buildHTMLDocument(data, options), fontes);
 
   // Primeiro o servidor (/api/pdf, Chromium): texto real, o mesmo motor da impressão, sem
   // limite de canvas do celular. Qualquer falha — sem sessão, offline, função desligada —
@@ -532,7 +556,7 @@ function buildInvoiceHTML(data: PDFData, options: PDFOptions): string {
   const notaDeDesconto = (item: { quantity: number; unit_price: number; discount_amount?: number | null }) => {
     if (!options.showDiscount || descontoDoItem(item) <= 0) return '';
     const pct = percentualDoDesconto(item);
-    return `<div style="font-weight:400;color:#dc2626;font-size:9px;">${fmtCurrency(item.quantity * item.unit_price)} com desconto de ${fmtCurrency(descontoDoItem(item))}${pct ? ` (${pct})` : ''}</div>`;
+    return `<div style="font-weight:400;color:#B91C1C;font-size:9px;">${fmtCurrency(item.quantity * item.unit_price)} com desconto de ${fmtCurrency(descontoDoItem(item))}${pct ? ` (${pct})` : ''}</div>`;
   };
 
   const serviceRows = data.services.map(s => `
@@ -573,7 +597,7 @@ ${companyHeaderHTML(data.company, 'Fatura de Serviço', docNumber, { revisao: da
   <div class="card" style="border-left:4px solid var(--pdf-secondary);">
     <div class="section-title">Resumo Financeiro</div>
     <div style="font-size:10px;color:var(--pdf-text-muted);">Vencimento:</div>
-    <div style="font-size:16px;font-weight:800;color:#dc2626;margin-bottom:8px;">${dueDate}</div>
+    <div style="font-size:16px;font-weight:800;color:#B91C1C;margin-bottom:8px;">${dueDate}</div>
     <div style="font-size:10px;color:var(--pdf-text-muted);">Total a Pagar:</div>
     <div style="font-size:18px;font-weight:800;color:var(--pdf-primary);">${fmtCurrency(data.serviceOrder.grand_total)}</div>
   </div>
@@ -621,14 +645,14 @@ ${buildPaymentSection(data.serviceOrder)}
 ${buildPaymentHistorySection(data.serviceOrder)}
 
 ${data.serviceOrder.deposit_paid && data.serviceOrder.deposit_paid > 0 ? `
-<div class="card" style="border-left:4px solid #16a34a;background:#f0fdf4;">
+<div class="card" style="border-left:4px solid #15803D;background:#f0fdf4;">
   <div style="display:flex;justify-content:space-between;align-items:center;">
     <div>
-      <div class="section-title" style="color:#16a34a;">Sinal Recebido</div>
+      <div class="section-title" style="color:#15803D;">Sinal Recebido</div>
       <div style="font-size:10px;color:#166534;">Pagamento antecipado registrado</div>
     </div>
     <div style="text-align:right;">
-      <div style="font-size:14px;font-weight:800;color:#16a34a;">− ${fmtCurrency(data.serviceOrder.deposit_paid)}</div>
+      <div style="font-size:14px;font-weight:800;color:#15803D;">− ${fmtCurrency(data.serviceOrder.deposit_paid)}</div>
       <div style="font-size:11px;font-weight:700;color:var(--pdf-primary);">Saldo: ${fmtCurrency(data.serviceOrder.grand_total - data.serviceOrder.deposit_paid)}</div>
     </div>
   </div>

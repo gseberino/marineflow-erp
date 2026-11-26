@@ -4,46 +4,56 @@
 <meta charset="UTF-8"/>
 <title>Ordem de Serviço OS-00075</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-  
   .mf-pdf-doc {
-    --pdf-primary: #002B5B;
-    --pdf-primary-light: #1A4D8B;
-    --pdf-secondary: #D4AF37;
-    --pdf-text-main: #1E293B;
-    --pdf-text-muted: #64748B;
-    --pdf-bg-light: #F8FAFC;
-    --pdf-border: #E2E8F0;
+    --pdf-primary: #0D1B2A;
+    --pdf-primary-light: #274A6D;
+    --pdf-secondary: #B8894A;
+    --pdf-text-main: #0D1B2A;
+    --pdf-text-muted: #274A6D;
+    --pdf-bg-light: #F6F8FA;
+    --pdf-border: #C3CFDA;
+    --pdf-grade: #B9C6D3;
+    --pdf-fundo: #EEF2F6;
   }
 
   .mf-pdf-doc * { margin:0; padding:0; box-sizing:border-box; }
-  .mf-pdf-doc { 
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
-    font-size: 11px; 
-    color: var(--pdf-text-main); 
+  .mf-pdf-doc {
+    font-family: "Hanken Grotesk", "Open Sans", Arial, sans-serif;
+    font-size: 11px;
+    color: var(--pdf-text-main);
     line-height: 1.5;
     background: #fff;
   }
 
   .mf-pdf-doc .container { padding: 40px; width: 100%; max-width: 800px; margin: 0 auto; }
-  
+
   @media print {
     .mf-pdf-doc .container { padding: 0; }
     @page { margin: 12mm; size: A4; }
-    @page { @bottom-right { content: "OS-00075 · pág. " counter(page) "/" counter(pages); font-family: 'Inter', -apple-system, 'Segoe UI', Roboto, sans-serif; font-size: 7pt; color: #94A3B8; } }
+    @page { @bottom-left { content: "Energia. Controle. Confiança."; font-family: "Hanken Grotesk", "Open Sans", Arial, sans-serif; font-weight: 600; font-size: 6.5pt; letter-spacing: 0.14em; color: #0D1B2A; } }
+    @page { @bottom-right { content: "OS-00075 · pág. " counter(page) "/" counter(pages); font-family: "Hanken Grotesk", "Open Sans", Arial, sans-serif; font-size: 7pt; color: #274A6D; } }
   }
 
-  .mf-pdf-doc h1, .mf-pdf-doc h2, .mf-pdf-doc h3 { color: var(--pdf-primary); font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
-  
-  .mf-pdf-doc .card { 
-    border: 1px solid var(--pdf-border); 
-    border-radius: 8px; 
-    padding: 16px; 
+  .mf-pdf-doc h1, .mf-pdf-doc h2, .mf-pdf-doc h3 { font-family: "Archivo", "Open Sans", Arial, sans-serif; color: var(--pdf-primary); font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
+
+  .mf-pdf-doc /* O número do documento numa caixa marinho, .mf-pdf-doc e o fio em degradê embaixo do cabeçalho. */
+  .doc-numero {
+    display: inline-block; margin-top: 4px; padding: 3px 12px 4px; border-radius: 5px;
+    background: var(--pdf-primary); color: #fff; font-family: "Archivo", "Open Sans", Arial, sans-serif;
+    font-size: 22px; font-weight: 800; line-height: 1.2; letter-spacing: 0.02em; white-space: nowrap;
+  }
+  .mf-pdf-doc .fio { height: 3.4px; border-radius: 4px; background: linear-gradient(90deg, #B8894A 0%, #C8A063 30%, #D9DDE1 52%, #7FA0B8 78%, #274A6D 100%); margin: -16px 0 18px; }
+
+  .mf-pdf-doc .card {
+    border: 1px solid var(--pdf-grade);
+    border-radius: 8px;
+    padding: 16px;
     margin-bottom: 20px;
-    background: var(--pdf-bg-light);
+    background: #fff;
   }
 
   .mf-pdf-doc .section-title {
+    font-family: "Archivo", "Open Sans", Arial, sans-serif;
     font-size: 10px;
     font-weight: 700;
     color: var(--pdf-primary-light);
@@ -57,16 +67,32 @@
     break-after: avoid;
     page-break-after: avoid;
   }
+  .mf-pdf-doc /* O título de seção em faixa marinho cheia (o jeito da folha de follow-up): o do topo de um card, .mf-pdf-doc o solto entre
+     as seções (o das tabelas de itens) e o da galeria. O do card encosta nas bordas dele. */
+  .container > .section-title, .mf-pdf-doc .card > .section-title:first-child, .mf-pdf-doc .galeria > .section-title {
+    background: var(--pdf-primary);
+    color: #fff;
+    border-bottom: 0;
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    padding: 7px 12px 6px;
+    align-items: center;
+  }
+  .mf-pdf-doc .container > .section-title, .mf-pdf-doc .galeria > .section-title { border-radius: 6px 6px 0 0; margin-bottom: 0; }
+  .mf-pdf-doc .card > .section-title:first-child { margin: -16px -16px 12px; padding: 7px 16px 6px; border-radius: 7px 7px 0 0; }
 
   .mf-pdf-doc table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-  .mf-pdf-doc th { 
-    background: var(--pdf-primary); 
-    color: #fff; 
-    text-align: left; 
-    padding: 8px 12px; 
-    font-size: 9px; 
+  .mf-pdf-doc th {
+    background: var(--pdf-fundo);
+    color: var(--pdf-primary-light);
+    text-align: left;
+    padding: 8px 12px;
+    font-size: 9px;
     text-transform: uppercase;
-    font-weight: 600;
+    font-family: "Archivo", "Open Sans", Arial, sans-serif;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    border-bottom: 1px solid var(--pdf-grade);
   }
   .mf-pdf-doc td { padding: 8px 12px; border-bottom: 1px solid var(--pdf-border); vertical-align: top; }
   .mf-pdf-doc tr:last-child td { border-bottom: none; }
@@ -134,12 +160,13 @@
       </div>
       <div style="text-align:right;">
         <h1 style="font-size:24px;margin-bottom:4px;color:var(--pdf-primary);">Ordem de Serviço</h1>
-        <div style="font-size:16px;font-weight:700;color:var(--pdf-secondary);">OS-00075</div>
+        <div class="doc-numero">OS-00075</div>
         <div style="margin-top:8px;font-size:10px;color:var(--pdf-text-muted);">
           Emissão: 10/09/2026
         </div><div style="margin-top:2px;font-size:10px;color:var(--pdf-text-muted);">Agendado para: 25/09/2026 21:30</div>
       </div>
     </header>
+    <div class="fio"></div>
   
 
 
@@ -250,7 +277,7 @@
     <div class="card" style="margin-top:20px;border-left:4px solid var(--pdf-secondary); background:#fff;">
       <div class="section-title">
         <span>Situação de Pagamento</span>
-        <span style="font-size:8px;font-weight:700;padding:2px 8px;border-radius:10px;color:#fff;background:#d97706;">Parcialmente pago</span>
+        <span style="font-size:8px;font-weight:700;padding:2px 8px;border-radius:10px;color:#fff;background:#B45309;">Parcialmente pago</span>
       </div>
       <div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:10px;">
         <div style="flex:1;text-align:center;padding:8px;background:var(--pdf-bg-light);border-radius:4px;">
@@ -259,11 +286,11 @@
         </div>
         <div style="flex:1;text-align:center;padding:8px;background:var(--pdf-bg-light);border-radius:4px;">
           <div style="font-size:8px;color:var(--pdf-text-muted);text-transform:uppercase;">Pago</div>
-          <div style="font-size:13px;font-weight:700;color:#16a34a;">R$ 2.500,00</div>
+          <div style="font-size:13px;font-weight:700;color:#15803D;">R$ 2.500,00</div>
         </div>
         <div style="flex:1;text-align:center;padding:8px;background:var(--pdf-bg-light);border-radius:4px;">
           <div style="font-size:8px;color:var(--pdf-text-muted);text-transform:uppercase;">Saldo em Aberto</div>
-          <div style="font-size:13px;font-weight:700;color:#dc2626;">R$ 2.500,00</div>
+          <div style="font-size:13px;font-weight:700;color:#B91C1C;">R$ 2.500,00</div>
         </div>
       </div>
       <table style="width:100%; border-collapse:collapse;">
@@ -272,12 +299,12 @@
         <td style="font-weight:600;padding:6px 12px;">Sinal — Sinal</td>
         <td style="text-align:right;padding:6px 12px;">
           R$ 2.500,00
-          <span style="font-size:8px;font-weight:600;margin-left:6px;color:#16a34a;">Pago</span>
+          <span style="font-size:8px;font-weight:600;margin-left:6px;color:#15803D;">Pago</span>
         </td>
       </tr>
       
         <tr>
-          <td style="padding:2px 12px 2px 24px;font-size:9px;color:var(--pdf-text-muted);">↳ Pago em 20/09/2026 — PIX</td>
+          <td style="padding:2px 12px 2px 24px;font-size:9px;color:var(--pdf-text-muted);"><svg viewBox="0 0 10 10" width="8" height="8" aria-hidden="true" style="vertical-align:0;margin-right:3px;"><path d="M2 1v4.5h6M6 3.5l2 2-2 2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>Pago em 20/09/2026 — PIX</td>
           <td style="text-align:right;padding:2px 12px;font-size:9px;color:var(--pdf-text-muted);">R$ 2.500,00</td>
         </tr>
       
@@ -298,7 +325,7 @@
 
 
 
-<div class="card" style="margin-top:20px; background:rgba(212, 175, 55, 0.03); border:1px solid rgba(212, 175, 55, 0.2);">
+<div class="card" style="margin-top:20px; background:rgba(184, 137, 74, 0.03); border:1px solid rgba(184, 137, 74, 0.2);">
   <div class="section-title">Informações para Pagamento</div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;font-size:10px;">
     <div>
@@ -308,9 +335,9 @@
       Favorecido: HBR Marine Solutions<br/>
       CNPJ: 00.000.000/0001-00
     </div>
-    <div style="border-left:1px solid rgba(212, 175, 55, 0.2);padding-left:20px;">
+    <div style="border-left:1px solid rgba(184, 137, 74, 0.2);padding-left:20px;">
       <strong style="color:var(--pdf-primary);display:block;margin-bottom:4px;">PAGAMENTO VIA PIX</strong>
-      Chave: <span style="font-size:12px;font-weight:800;color:var(--pdf-secondary);">00.000.000/0001-00</span><br/>
+      Chave: <span style="font-size:12px;font-weight:800;color:var(--pdf-primary);">00.000.000/0001-00</span><br/>
       <span style="font-size:9px;color:var(--pdf-text-muted);display:block;margin-top:6px;">Por favor, envie o comprovante para <strong>contato@hbr.example</strong> para agilizar a baixa.</span>
     </div>
   </div>

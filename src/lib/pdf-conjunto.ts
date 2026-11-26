@@ -5,7 +5,14 @@
  *
  * A capa é HTML simples: servidor (/api/pdf, Chromium) primeiro, html2pdf de reserva — a mesma ordem do resto.
  */
-import { generatePDFBlob, opcoesPadraoDoDocumento, type PDFData } from '@/lib/pdf-generator';
+import { carregarFontesDaMarca, generatePDFBlob, opcoesPadraoDoDocumento, type PDFData } from '@/lib/pdf-generator';
+import {
+  FIO_DO_CABECALHO,
+  FONTE_DO_TEXTO,
+  FONTE_DOS_TITULOS,
+  SLOGAN_DO_RODAPE,
+  comFontesDaMarca,
+} from '../../supabase/functions/_shared/pdf/documento';
 import {
   type Conjunto,
   listaNatural,
@@ -33,8 +40,14 @@ export interface EmpresaDaCapa {
   logo_url?: string;
 }
 
-/** HTML da capa (puro: testável sem navegador). `hoje` no formato dd/mm/aaaa. */
-export function htmlDaCapa(c: Conjunto, empresa: EmpresaDaCapa | null, hoje: string): string {
+/**
+ * HTML da capa (puro: testável sem navegador). `hoje` no formato dd/mm/aaaa. `cssDasFontes`: as fontes da marca
+ * (carregarFontesDaMarca); sem elas, a capa sai na fonte de reserva.
+ *
+ * Marca (26/11/2026, a opção 4 dos documentos): letras e cores das folhas novas, o fio em degradê sob o topo, o
+ * cabeçalho da tabela claro e o slogan no pé. Texto pequeno nunca mais claro que o azul #274A6D (modo rascunho).
+ */
+export function htmlDaCapa(c: Conjunto, empresa: EmpresaDaCapa | null, hoje: string, cssDasFontes = ''): string {
   const q = quadroDeValores(c);
   const temSinal = q.aPagarAgora > 0;
   const temRecebido = q.recebido > 0;
@@ -48,27 +61,29 @@ export function htmlDaCapa(c: Conjunto, empresa: EmpresaDaCapa | null, hoje: str
       </tr>`).join('');
   const contato = [empresa?.cnpj ? `CNPJ ${esc(empresa.cnpj)}` : '', esc(empresa?.phone ?? ''), esc(empresa?.email ?? '')]
     .filter(Boolean).join(' · ');
-  return `<!doctype html>
+  return comFontesDaMarca(`<!doctype html>
 <html lang="pt-BR"><head><meta charset="utf-8"><title>${esc(c.nome)}</title>
 <style>
   @page { size: A4; margin: 14mm 12mm; }
-  * { box-sizing: border-box; }
-  body { font-family: Arial, Helvetica, sans-serif; color: #1f2937; font-size: 11pt; margin: 0; }
-  .topo { display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #0f3d5e; padding-bottom: 8px; }
+  @page { @bottom-left { content: "${SLOGAN_DO_RODAPE}"; font-family: ${FONTE_DO_TEXTO}; font-weight: 600; font-size: 6.5pt; letter-spacing: .14em; color: #0D1B2A; } }
+  * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { font-family: ${FONTE_DO_TEXTO}; color: #0D1B2A; font-size: 11pt; margin: 0; }
+  .topo { display: flex; align-items: center; justify-content: space-between; padding-bottom: 8px; }
+  .fio { height: 3.4px; border-radius: 4px; background: ${FIO_DO_CABECALHO}; }
   .topo img { max-height: 48px; max-width: 180px; }
-  .empresa { font-size: 13pt; font-weight: bold; color: #0f3d5e; }
-  .contato { font-size: 8.5pt; color: #6b7280; margin-top: 2px; }
-  h1 { font-size: 16pt; color: #0f3d5e; margin: 18px 0 4px; }
-  .sub { color: #4b5563; margin: 0 0 14px; }
+  .empresa { font-family: ${FONTE_DOS_TITULOS}; font-size: 13pt; font-weight: 800; color: #0D1B2A; }
+  .contato { font-size: 8.5pt; color: #274A6D; margin-top: 2px; }
+  h1 { font-family: ${FONTE_DOS_TITULOS}; font-size: 16pt; font-weight: 800; color: #0D1B2A; margin: 18px 0 4px; }
+  .sub { color: #274A6D; margin: 0 0 14px; }
   .dados { display: flex; gap: 24px; margin-bottom: 14px; font-size: 10pt; }
-  .dados div span { display: block; color: #6b7280; font-size: 8.5pt; text-transform: uppercase; letter-spacing: .03em; }
+  .dados div span { display: block; color: #274A6D; font-size: 8.5pt; text-transform: uppercase; letter-spacing: .03em; }
   table { width: 100%; border-collapse: collapse; font-size: 10pt; }
-  th { text-align: left; background: #eef3f7; color: #0f3d5e; font-size: 8.5pt; text-transform: uppercase; letter-spacing: .03em; padding: 6px 8px; }
+  th { text-align: left; background: #EEF2F6; color: #274A6D; font-family: ${FONTE_DOS_TITULOS}; font-weight: 700; font-size: 8.5pt; text-transform: uppercase; letter-spacing: .03em; padding: 6px 8px; border-bottom: 1px solid #B9C6D3; }
   th.v, td.v { text-align: right; white-space: nowrap; }
-  td { padding: 7px 8px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
-  .sit { color: #6b7280; font-size: 8.5pt; }
-  tfoot td { font-weight: bold; border-top: 2px solid #0f3d5e; border-bottom: none; }
-  .nota { margin-top: 16px; font-size: 9pt; color: #4b5563; line-height: 1.45; }
+  td { padding: 7px 8px; border-bottom: 1px solid #C3CFDA; vertical-align: top; }
+  .sit { color: #274A6D; font-size: 8.5pt; }
+  tfoot td { font-weight: bold; border-top: 2px solid #0D1B2A; border-bottom: none; }
+  .nota { margin-top: 16px; font-size: 9pt; color: #274A6D; line-height: 1.45; }
 </style></head>
 <body>
   <div class="topo">
@@ -78,6 +93,7 @@ export function htmlDaCapa(c: Conjunto, empresa: EmpresaDaCapa | null, hoje: str
     </div>
     ${empresa?.logo_url ? `<img src="${esc(empresa.logo_url)}" alt="">` : ''}
   </div>
+  <div class="fio"></div>
   <h1>${esc(c.nome)}</h1>
   <p class="sub">Este arquivo reúne ${esc(listaNatural(numerosDoConjunto(c)))}. Cada documento vem a seguir, completo, com as condições dele.</p>
   <div class="dados">
@@ -102,7 +118,7 @@ export function htmlDaCapa(c: Conjunto, empresa: EmpresaDaCapa | null, hoje: str
   </table>
   <p class="nota">Cada documento mantém as próprias condições de pagamento${temSinal ? '; o sinal a pagar é só o dos documentos que ainda pedem sinal' : ''}.
   O que já foi aprovado e assinado continua valendo como está.</p>
-</body></html>`;
+</body></html>`, cssDasFontes);
 }
 
 /** O pedaço do html2pdf.js usado aqui (a lib não traz tipos). */
@@ -159,6 +175,8 @@ export interface DependenciasDoPdf {
   capa?: (html: string, nome: string) => Promise<Blob>;
   juntar?: (partes: Blob[]) => Promise<Blob>;
   hoje?: () => string;
+  /** As fontes da marca para a capa (padrão: carregarFontesDaMarca, sob demanda). */
+  fontes?: () => Promise<string>;
 }
 
 /** O PDF inteiro do conjunto: capa + cada documento ativo, na ordem (principal primeiro). */
@@ -183,7 +201,8 @@ export async function gerarPdfDoConjunto(
     partes.push(await gerar({ ...dados, documentType: tipo } as PDFData, opcoes));
   }
   const hoje = dep.hoje ? dep.hoje() : new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-  const capa = await (dep.capa ?? capaEmPdf)(htmlDaCapa(c, empresa, hoje), filename);
+  const fontes = await (dep.fontes ?? carregarFontesDaMarca)();
+  const capa = await (dep.capa ?? capaEmPdf)(htmlDaCapa(c, empresa, hoje, fontes), filename);
   const blob = await (dep.juntar ?? juntarPdfs)([capa, ...partes]);
   return { blob, filename };
 }

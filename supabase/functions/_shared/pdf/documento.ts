@@ -601,6 +601,8 @@ export function companyHeaderHTML(
         ${esc(company.name).toUpperCase()}
        </div>`;
 
+  // Marca (26/11/2026, opção 4 aprovada pelo dono): o número numa caixa marinho e, embaixo do cabeçalho, o fio em
+  // degradê dourado → azul das folhas novas. O texto do cabeçalho é o mesmo de antes.
   return `
     <header style="display:flex;justify-content:space-between;margin-bottom:30px;align-items:flex-start;">
       <div style="flex:1;">
@@ -614,13 +616,43 @@ export function companyHeaderHTML(
       </div>
       <div style="text-align:right;">
         <h1 style="font-size:24px;margin-bottom:4px;color:var(--pdf-primary);">${docTypeLabel}</h1>
-        <div style="font-size:16px;font-weight:700;color:var(--pdf-secondary);">${esc(docNumber)}</div>${linhaRevisao}
+        <div class="doc-numero">${esc(docNumber)}</div>${linhaRevisao}
         <div style="margin-top:8px;font-size:10px;color:var(--pdf-text-muted);">
           Emissão: ${dataCurta(datas.emissao)}
         </div>${linhaAgendado}
       </div>
     </header>
+    <div class="fio"></div>
   `;
+}
+
+/**
+ * Os dois sinais que o documento desenhava como caractere — "📷" (resposta do levantamento com foto) e "↳" (a linha
+ * que detalha a de cima) — não existem na Open Sans, a única fonte do Chromium do /api/pdf (open-sans-faixas.ts), nem
+ * no recorte latino das fontes da marca: no PDF do servidor saíam como quadradinho vazio. Viram desenho, como o
+ * triângulo da via do técnico. `currentColor`: a cor é a do texto em volta.
+ */
+export const ICONE_DE_FOTO =
+  '<svg viewBox="0 0 16 12" width="13" height="10" role="img" aria-label="com foto" style="vertical-align:-1px;">' +
+  '<title>com foto</title><path fill="currentColor" fill-rule="evenodd" d="M5.2 0 4 1.6H1.6A1.6 1.6 0 0 0 0 3.2v7.2A1.6 ' +
+  '1.6 0 0 0 1.6 12h12.8a1.6 1.6 0 0 0 1.6-1.6V3.2a1.6 1.6 0 0 0-1.6-1.6H12L10.8 0zM8 3.2a3.2 3.2 0 1 1 0 6.4 3.2 3.2 0 ' +
+  '0 1 0-6.4zm0 1.6a1.6 1.6 0 1 0 0 3.2 1.6 1.6 0 0 0 0-3.2z"/></svg>';
+export const SETA_DE_DETALHE =
+  '<svg viewBox="0 0 10 10" width="8" height="8" aria-hidden="true" style="vertical-align:0;margin-right:3px;">' +
+  '<path d="M2 1v4.5h6M6 3.5l2 2-2 2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" ' +
+  'stroke-linejoin="round"/></svg>';
+
+/**
+ * Põe as fontes da marca (o CSS de `cssDasFontesDaMarca()`, marca.ts: @font-face com o woff2 embutido) no `<head>` do
+ * documento.
+ *
+ * Fica FORA de `pageWrapper` de propósito: são ~93 KB de texto. O servidor (gerar-e-guardar.ts) passa o CSS direto;
+ * a tela o carrega sob demanda (src/lib/pdf-generator.ts, `carregarFontesDaMarca`), para as telas que nunca geram
+ * documento não baixarem as fontes junto com o resto do app. Sem o CSS, o documento sai na Open Sans (a reserva das
+ * pilhas de fonte) — e as referências de __referencia__ continuam legíveis, sem o base64.
+ */
+export function comFontesDaMarca(html: string, cssDasFontes: string): string {
+  return cssDasFontes ? html.replace('</head>', `<style>${cssDasFontes}</style>\n</head>`) : html;
 }
 
 /**
@@ -647,55 +679,81 @@ function textoCss(v: string): string {
  */
 export function rodapeDaPaginaCss(docNumber: string, revisao?: RevisaoDoDocumento | null): string {
   const prefixo = textoCss([docNumber, revisao ? `Rev. ${revisao.numero}` : ''].filter(Boolean).join(' · '));
+  // Azul da marca, não o cinza claro de antes (#94A3B8): no modo rascunho da impressora o cinza sumia (dono, 26/11/2026).
   return `@page { @bottom-right { content: "${prefixo} · pág. " counter(page) "/" counter(pages); ` +
-    `font-family: 'Inter', -apple-system, 'Segoe UI', Roboto, sans-serif; font-size: 7pt; color: #94A3B8; } }`;
+    `font-family: ${FONTE_DO_TEXTO}; font-size: 7pt; color: #274A6D; } }`;
 }
+
+/**
+ * As pilhas de fonte e o slogan da marca (marca.ts), repetidos aqui de propósito: importar marca.ts traria junto as
+ * fontes embutidas (marca-fontes.ts) para o pedaço do app que monta o documento — e ele é carregado por telas que nunca
+ * geram PDF. O teste documento_test.ts confere que os valores são os mesmos de marca.ts.
+ */
+export const FONTE_DO_TEXTO = '"Hanken Grotesk", "Open Sans", Arial, sans-serif';
+export const FONTE_DOS_TITULOS = '"Archivo", "Open Sans", Arial, sans-serif';
+export const SLOGAN_DO_RODAPE = 'Energia. Controle. Confiança.';
+/** O fio sob o cabeçalho: dourado → cinza → azul (FIO_EM_DEGRADE de marca.ts). */
+export const FIO_DO_CABECALHO =
+  'linear-gradient(90deg, #B8894A 0%, #C8A063 30%, #D9DDE1 52%, #7FA0B8 78%, #274A6D 100%)';
 
 export function pageWrapper(title: string, body: string, rodapeDaPagina = ''): string {
   // O CSS sai preso à raiz do documento. É isto que impede as regras globais
   // (`*`, `body`, `h1`) de repintarem o app enquanto o html2canvas captura —
   // o solavanco visual de um segundo ao clicar em Baixar.
+  // A marca (26/11/2026, opção 4 aprovada pelo dono): as cores e as letras das folhas novas — marinho, azul, dourado;
+  // Hanken Grotesk no texto e Archivo nos títulos, embutidas por comFontesDaMarca (a Inter vinha do Google pela rede).
+  // Texto pequeno nunca mais claro que o azul #274A6D: o cinza de antes sumia no modo rascunho da impressora.
   const css = scopeCss(`
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-  
   :root {
-    --pdf-primary: #002B5B;
-    --pdf-primary-light: #1A4D8B;
-    --pdf-secondary: #D4AF37;
-    --pdf-text-main: #1E293B;
-    --pdf-text-muted: #64748B;
-    --pdf-bg-light: #F8FAFC;
-    --pdf-border: #E2E8F0;
+    --pdf-primary: #0D1B2A;
+    --pdf-primary-light: #274A6D;
+    --pdf-secondary: #B8894A;
+    --pdf-text-main: #0D1B2A;
+    --pdf-text-muted: #274A6D;
+    --pdf-bg-light: #F6F8FA;
+    --pdf-border: #C3CFDA;
+    --pdf-grade: #B9C6D3;
+    --pdf-fundo: #EEF2F6;
   }
 
   * { margin:0; padding:0; box-sizing:border-box; }
-  body { 
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
-    font-size: 11px; 
-    color: var(--pdf-text-main); 
+  body {
+    font-family: ${FONTE_DO_TEXTO};
+    font-size: 11px;
+    color: var(--pdf-text-main);
     line-height: 1.5;
     background: #fff;
   }
 
   .container { padding: 40px; width: 100%; max-width: 800px; margin: 0 auto; }
-  
+
   @media print {
     .container { padding: 0; }
     @page { margin: 12mm; size: A4; }
+    @page { @bottom-left { content: "${SLOGAN_DO_RODAPE}"; font-family: ${FONTE_DO_TEXTO}; font-weight: 600; font-size: 6.5pt; letter-spacing: 0.14em; color: #0D1B2A; } }
     ${rodapeDaPagina}
   }
 
-  h1, h2, h3 { color: var(--pdf-primary); font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
-  
-  .card { 
-    border: 1px solid var(--pdf-border); 
-    border-radius: 8px; 
-    padding: 16px; 
+  h1, h2, h3 { font-family: ${FONTE_DOS_TITULOS}; color: var(--pdf-primary); font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
+
+  /* O número do documento numa caixa marinho, e o fio em degradê embaixo do cabeçalho. */
+  .doc-numero {
+    display: inline-block; margin-top: 4px; padding: 3px 12px 4px; border-radius: 5px;
+    background: var(--pdf-primary); color: #fff; font-family: ${FONTE_DOS_TITULOS};
+    font-size: 22px; font-weight: 800; line-height: 1.2; letter-spacing: 0.02em; white-space: nowrap;
+  }
+  .fio { height: 3.4px; border-radius: 4px; background: ${FIO_DO_CABECALHO}; margin: -16px 0 18px; }
+
+  .card {
+    border: 1px solid var(--pdf-grade);
+    border-radius: 8px;
+    padding: 16px;
     margin-bottom: 20px;
-    background: var(--pdf-bg-light);
+    background: #fff;
   }
 
   .section-title {
+    font-family: ${FONTE_DOS_TITULOS};
     font-size: 10px;
     font-weight: 700;
     color: var(--pdf-primary-light);
@@ -709,16 +767,32 @@ export function pageWrapper(title: string, body: string, rodapeDaPagina = ''): s
     break-after: avoid;
     page-break-after: avoid;
   }
+  /* O título de seção em faixa marinho cheia (o jeito da folha de follow-up): o do topo de um card, o solto entre
+     as seções (o das tabelas de itens) e o da galeria. O do card encosta nas bordas dele. */
+  .container > .section-title, .card > .section-title:first-child, .galeria > .section-title {
+    background: var(--pdf-primary);
+    color: #fff;
+    border-bottom: 0;
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    padding: 7px 12px 6px;
+    align-items: center;
+  }
+  .container > .section-title, .galeria > .section-title { border-radius: 6px 6px 0 0; margin-bottom: 0; }
+  .card > .section-title:first-child { margin: -16px -16px 12px; padding: 7px 16px 6px; border-radius: 7px 7px 0 0; }
 
   table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-  th { 
-    background: var(--pdf-primary); 
-    color: #fff; 
-    text-align: left; 
-    padding: 8px 12px; 
-    font-size: 9px; 
+  th {
+    background: var(--pdf-fundo);
+    color: var(--pdf-primary-light);
+    text-align: left;
+    padding: 8px 12px;
+    font-size: 9px;
     text-transform: uppercase;
-    font-weight: 600;
+    font-family: ${FONTE_DOS_TITULOS};
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    border-bottom: 1px solid var(--pdf-grade);
   }
   td { padding: 8px 12px; border-bottom: 1px solid var(--pdf-border); vertical-align: top; }
   tr:last-child td { border-bottom: none; }
@@ -850,7 +924,7 @@ export function buildPaymentSection(so: PDFData['serviceOrder']): string {
     installmentsHtml = `
       <table style="margin-bottom:0; width:100%; border-collapse:collapse;">
         <thead>
-          <tr style="background:rgba(212, 175, 55, 0.05);color:var(--pdf-primary);">
+          <tr style="background:rgba(184, 137, 74, 0.05);color:var(--pdf-primary);">
             <th style="background:transparent;color:var(--pdf-primary);width:30%;">Vencimento</th>
             <th style="background:transparent;color:var(--pdf-primary);width:40%;">Data/Evento</th>
             <th style="background:transparent;color:var(--pdf-primary);text-align:right;">Valor</th>
@@ -865,7 +939,7 @@ export function buildPaymentSection(so: PDFData['serviceOrder']): string {
     <div class="card" style="margin-top:20px;border-left:4px solid var(--pdf-secondary); background:#fff;">
       <div class="section-title">
         <span>Programação de Pagamento</span>
-        <span style="color:var(--pdf-text-muted);font-size:8px;">${esc(so.payment_condition_label || 'Condição Comercial')}</span>
+        <span style="font-size:8px;font-weight:500;opacity:0.85;">${esc(so.payment_condition_label || 'Condição Comercial')}</span>
       </div>
       ${installmentsHtml}
       ${(hasText && !hasInstallments) ? (() => {
@@ -943,10 +1017,10 @@ export function buildPaymentHistorySection(so: PDFData['serviceOrder']): string 
   // Selo de situação global da OS.
   const isPaid = totalCharged > 0 && totalBalance <= 0.01;
   const statusLabel = isPaid ? 'Quitado' : totalPaid > 0 ? 'Parcialmente pago' : 'Em aberto';
-  const statusColor = isPaid ? '#16a34a' : totalPaid > 0 ? '#d97706' : '#dc2626';
+  const statusColor = isPaid ? '#15803D' : totalPaid > 0 ? '#B45309' : '#B91C1C';
 
   const rows = receivables.map((r) => {
-    const recColor = r.status === 'paid' ? '#16a34a' : r.status === 'partially_paid' ? '#d97706' : 'var(--pdf-text-muted)';
+    const recColor = r.status === 'paid' ? '#15803D' : r.status === 'partially_paid' ? '#B45309' : 'var(--pdf-text-muted)';
     // Rótulo claro: "Sinal" para depósito, senão a descrição do recebível.
     const recLabel = r.is_deposit ? `Sinal — ${esc(r.description)}` : esc(r.description);
     const relatedPayments = payments.filter((p) => p.receivable_id === r.id);
@@ -954,7 +1028,7 @@ export function buildPaymentHistorySection(so: PDFData['serviceOrder']): string 
       const methodLabel = PAYMENT_METHOD_LABELS[p.payment_method] || p.payment_method;
       return `
         <tr>
-          <td style="padding:2px 12px 2px 24px;font-size:9px;color:var(--pdf-text-muted);">↳ Pago em ${esc(fmtDate(p.payment_date))}${methodLabel ? ` — ${esc(methodLabel)}` : ''}</td>
+          <td style="padding:2px 12px 2px 24px;font-size:9px;color:var(--pdf-text-muted);">${SETA_DE_DETALHE}Pago em ${esc(fmtDate(p.payment_date))}${methodLabel ? ` — ${esc(methodLabel)}` : ''}</td>
           <td style="text-align:right;padding:2px 12px;font-size:9px;color:var(--pdf-text-muted);">${fmtCurrency(p.amount)}</td>
         </tr>
       `;
@@ -984,11 +1058,11 @@ export function buildPaymentHistorySection(so: PDFData['serviceOrder']): string 
         </div>
         <div style="flex:1;text-align:center;padding:8px;background:var(--pdf-bg-light);border-radius:4px;">
           <div style="font-size:8px;color:var(--pdf-text-muted);text-transform:uppercase;">Pago</div>
-          <div style="font-size:13px;font-weight:700;color:#16a34a;">${fmtCurrency(totalPaid)}</div>
+          <div style="font-size:13px;font-weight:700;color:#15803D;">${fmtCurrency(totalPaid)}</div>
         </div>
         <div style="flex:1;text-align:center;padding:8px;background:var(--pdf-bg-light);border-radius:4px;">
           <div style="font-size:8px;color:var(--pdf-text-muted);text-transform:uppercase;">Saldo em Aberto</div>
-          <div style="font-size:13px;font-weight:700;color:${totalBalance > 0.01 ? '#dc2626' : '#16a34a'};">${fmtCurrency(totalBalance)}</div>
+          <div style="font-size:13px;font-weight:700;color:${totalBalance > 0.01 ? '#B91C1C' : '#15803D'};">${fmtCurrency(totalBalance)}</div>
         </div>
       </div>
       <table style="width:100%; border-collapse:collapse;">
@@ -1053,7 +1127,7 @@ export function celulaDeDesconto(item: { quantity: number; unit_price: number; d
   const desconto = descontoDoItem(item);
   if (desconto <= 0) return `<td style="text-align:right;color:var(--pdf-text-muted);">—</td>`;
   const pct = percentualDoDesconto(item);
-  return `<td style="text-align:right;color:#dc2626;white-space:nowrap;">− ${fmtCurrency(desconto)}${pct ? `<div style="font-size:8px;">(${pct})</div>` : ''}</td>`;
+  return `<td style="text-align:right;color:#B91C1C;white-space:nowrap;">− ${fmtCurrency(desconto)}${pct ? `<div style="font-size:8px;">(${pct})</div>` : ''}</td>`;
 }
 
 /**
@@ -1073,7 +1147,7 @@ export function linhaDeTotalDaTabela(
   return `
     <tr>
       <td colspan="${2 + (colunas.unitario ? 1 : 0)}" style="${fundo}text-align:right;font-weight:700;color:var(--pdf-primary);">${esc(rotulo)}</td>
-      ${colunas.desconto ? `<td style="${fundo}text-align:right;font-weight:700;color:#dc2626;white-space:nowrap;">${somaDesconto > 0 ? `− ${fmtCurrency(somaDesconto)}` : '—'}</td>` : ''}
+      ${colunas.desconto ? `<td style="${fundo}text-align:right;font-weight:700;color:#B91C1C;white-space:nowrap;">${somaDesconto > 0 ? `− ${fmtCurrency(somaDesconto)}` : '—'}</td>` : ''}
       <td style="${fundo}text-align:right;font-weight:800;color:var(--pdf-primary);white-space:nowrap;">${fmtCurrency(somaTotal)}</td>
     </tr>`;
 }
@@ -1099,7 +1173,7 @@ export function linhasDoResumo(data: PDFData, options: PDFOptions): { linhas: st
   const linha = (rotulo: string, valor: number, estilo = '') =>
     `<tr><td style="${estilo}">${rotulo}</td><td style="text-align:right;white-space:nowrap;${estilo}">${fmtCurrency(valor)}</td></tr>`;
   const linhaNegativa = (rotulo: string, valor: number, estilo = '') =>
-    `<tr><td style="color:#dc2626;${estilo}">${rotulo}</td><td style="text-align:right;color:#dc2626;white-space:nowrap;${estilo}">− ${fmtCurrency(valor)}</td></tr>`;
+    `<tr><td style="color:#B91C1C;${estilo}">${rotulo}</td><td style="text-align:right;color:#B91C1C;white-space:nowrap;${estilo}">− ${fmtCurrency(valor)}</td></tr>`;
 
   const mostraDesconto = !!options.showDiscount;
   const dosItens = descontosDosItens(data);
@@ -1117,7 +1191,9 @@ export function linhasDoResumo(data: PDFData, options: PDFOptions): { linhas: st
     descontoDosItens: dosItens.total,
   }).map((l) => {
     const estilo = l.tipo === 'detalhe' ? 'padding-left:16px;' : l.tipo === 'destaque' ? 'font-weight:600;' : '';
-    return l.negativo ? linhaNegativa(l.rotulo, l.valor, estilo) : linha(l.rotulo, l.valor, estilo);
+    // O "↳" do rótulo é do texto do WhatsApp; no PDF ele vira desenho (a fonte do servidor não tem o caractere).
+    const rotulo = l.tipo === 'detalhe' ? `${SETA_DE_DETALHE}${l.rotulo.replace(/^↳\s*/, '')}` : l.rotulo;
+    return l.negativo ? linhaNegativa(rotulo, l.valor, estilo) : linha(rotulo, l.valor, estilo);
   }).join('');
 
   // A economia inteira num lugar só: o desconto dos itens está espalhado pelas tabelas, e o
@@ -1125,7 +1201,7 @@ export function linhasDoResumo(data: PDFData, options: PDFOptions): { linhas: st
   // do quadro já diz tudo).
   const economia = arred2(dosItens.total + descontoGeral);
   const descontosConcedidos = mostraDesconto && dosItens.total > 0
-    ? `<div style="text-align:right;font-size:10px;font-weight:700;color:#16a34a;margin-top:4px;padding-right:12px;">
+    ? `<div style="text-align:right;font-size:10px;font-weight:700;color:#15803D;margin-top:4px;padding-right:12px;">
         Total de descontos concedidos: ${fmtCurrency(economia)}
         ${descontoGeral > 0 ? `<div style="font-size:8.5px;font-weight:500;color:var(--pdf-text-muted);">nos itens ${fmtCurrency(dosItens.total)} + adicional ${fmtCurrency(descontoGeral)}</div>` : ''}
       </div>`
@@ -1237,7 +1313,7 @@ export function buildOrderHTML(data: PDFData, options: PDFOptions): string {
   `;}).join('');
 
   const photoGallery = (data.photos && data.photos.length > 0) ? `
-    <div style="page-break-before: always; margin-top: 40px;">
+    <div class="galeria" style="page-break-before: always; margin-top: 40px;">
       <div class="section-title">Galeria Técnica / Evidências do Serviço</div>
       <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-top: 10px;">
         ${data.photos.map(url => `
@@ -1327,7 +1403,7 @@ ${(data.survey?.answers?.length || 0) > 0 ? `
             a.skipped
               ? `<span style="color:var(--pdf-text-muted);font-style:italic;">não foi possível verificar — ${esc(a.skipped)}</span>`
               : esc(a.answer || '—')
-          }${a.hasPhoto ? ' <span style="color:var(--pdf-primary);">📷</span>' : ''}</td>
+          }${a.hasPhoto ? ` <span style="color:var(--pdf-primary);">${ICONE_DE_FOTO}</span>` : ''}</td>
         </tr>`)
         .join('')}
     </tbody>
@@ -1391,7 +1467,7 @@ ${vis.resumoFinanceiro ? `
       </tbody>
     </table>
     ${resumo.descontosConcedidos ? `<div style="margin-top:-10px;margin-bottom:12px;">${resumo.descontosConcedidos}</div>` : ''}
-    ${isQuote ? `<div style="text-align:right;font-size:10px;font-weight:700;color:var(--pdf-secondary);margin-top:${resumo.descontosConcedidos ? '0' : '-10px'};padding-right:12px;">${getValidityText()}</div>` : ''}
+    ${isQuote ? `<div style="text-align:right;font-size:10px;font-weight:700;color:var(--pdf-primary-light);margin-top:${resumo.descontosConcedidos ? '0' : '-10px'};padding-right:12px;">${getValidityText()}</div>` : ''}
   </div>
 </div>` : ''}
 
@@ -1406,7 +1482,7 @@ ${data.serviceOrder.financial_notes ? `
 ` : ''}`}
 
 ${!semValores && options.showBankDetails !== false && data.bank && (data.bank.bank_name || data.bank.pix_key) ? `
-<div class="card" style="margin-top:20px; background:rgba(212, 175, 55, 0.03); border:1px solid rgba(212, 175, 55, 0.2);">
+<div class="card" style="margin-top:20px; background:rgba(184, 137, 74, 0.03); border:1px solid rgba(184, 137, 74, 0.2);">
   <div class="section-title">Informações para Pagamento${data.serviceOrder.payment_method_preferred ? ` — ${PAYMENT_METHOD_LABELS[data.serviceOrder.payment_method_preferred] || data.serviceOrder.payment_method_preferred}` : ''}</div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;font-size:10px;">
     <div>
@@ -1416,9 +1492,9 @@ ${!semValores && options.showBankDetails !== false && data.bank && (data.bank.ba
       Favorecido: ${esc(data.company.name)}<br/>
       CNPJ: ${esc(data.company.cnpj || '—')}
     </div>
-    <div style="border-left:1px solid rgba(212, 175, 55, 0.2);padding-left:20px;">
+    <div style="border-left:1px solid rgba(184, 137, 74, 0.2);padding-left:20px;">
       <strong style="color:var(--pdf-primary);display:block;margin-bottom:4px;">PAGAMENTO VIA PIX</strong>
-      Chave: <span style="font-size:12px;font-weight:800;color:var(--pdf-secondary);">${esc(data.bank.pix_key || '—')}</span><br/>
+      Chave: <span style="font-size:12px;font-weight:800;color:var(--pdf-primary);">${esc(data.bank.pix_key || '—')}</span><br/>
       <span style="font-size:9px;color:var(--pdf-text-muted);display:block;margin-top:6px;">Por favor, envie o comprovante para <strong>${esc(data.company.email)}</strong> para agilizar a baixa.</span>
     </div>
   </div>

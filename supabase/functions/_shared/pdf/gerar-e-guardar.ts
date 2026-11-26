@@ -20,6 +20,7 @@ import { documentTypeFor, type OrderDocumentType } from "./document-type.ts";
 import {
   buildOrderHTML,
   buildPDFFilename,
+  comFontesDaMarca,
   descontosDosItens,
   esc,
   fmtCurrency,
@@ -29,6 +30,7 @@ import {
   tituloParaImpressao,
 } from "./documento.ts";
 import { renderizarPdf } from "./renderizar.ts";
+import { cssDasFontesDaMarca } from "./marca.ts";
 import { carimbarRevisao, type ChamadorDeRpc, type RevisaoDoDocumento } from "./revisao.ts";
 import { buildQuoteWhatsAppSummary } from "./resumo-whatsapp.ts";
 import { dataBR } from "./datas.ts";
@@ -108,7 +110,8 @@ export async function montarDocumentoDaOrdem(
     ...opcoesPadraoDoDocumento(settings, tipoDoc, dados.serviceOrder),
     ...(reduzida ? { ocultarDadosDoCliente: true } : {}),
   };
-  const html = buildOrderHTML(dados, opcoes).replace(
+  // As fontes da marca embutidas (o Chromium do /api/pdf só tem a Open Sans) — 26/11/2026.
+  const html = comFontesDaMarca(buildOrderHTML(dados, opcoes), cssDasFontesDaMarca()).replace(
     /<title>[^<]*<\/title>/,
     `<title>${esc(tituloParaImpressao(dados, opcoes))}</title>`,
   );
