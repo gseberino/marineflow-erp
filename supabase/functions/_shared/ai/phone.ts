@@ -33,3 +33,9 @@ export function mesmoTelefone(a: string | null | undefined, b: string | null | u
   const kb = chaveTelefone(b);
   return ka !== null && ka === kb;
 }
+
+/** Celular brasileiro tem 9 dígitos depois do DDD; 8 dígitos começando por 2 a 5 é telefone fixo (sem WhatsApp, em geral). */
+export function pareceTelefoneFixo(digitos: string): boolean {
+  return /^55\d{2}[2-5]\d{7}$/.test(String(digitos ?? ""));
+}
+export const AVISO_DE_FIXO = "Atenção: o número parece de telefone FIXO (sem WhatsApp, em geral): a mensagem pode não chegar. Confira o cadastro.";

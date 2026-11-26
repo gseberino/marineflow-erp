@@ -179,6 +179,18 @@ export function avisoDosLembretesDeRevisao(dia: string, propostas: number, texto
   return { fonte: "lembretes_revisao", chave: `lembretes_revisao:${dia}`, assunto: "lembretes_revisao", destino: "deixar", texto, dados: { propostas } };
 }
 
+/**
+ * A rodada do lembrete antes do vencimento (10:40 e 15:40, receivable-reminders) é a sua própria pergunta fixa: fica como
+ * está. A chave leva a hora: as duas rodadas do dia são registros diferentes.
+ */
+export function avisoDosLembretesDeVencimento(dia: string, agora: Date, propostas: number, texto: string): AvisoDaFonte {
+  const hora = new Intl.DateTimeFormat("en-GB", { timeZone: "America/Sao_Paulo", hour: "2-digit", hourCycle: "h23" }).format(agora);
+  return {
+    fonte: "lembretes_vencimento", chave: `lembretes_vencimento:${dia}:${hora}`, assunto: "lembretes_vencimento", destino: "deixar", texto,
+    dados: { propostas },
+  };
+}
+
 // ── acompanhamento, promessa e lembrete pedido (acompanhar-conversas) ──────────────────────────
 
 /** A referência do freio: o acompanhamento e a última mensagem do contato que o aviso cobre. */

@@ -1,169 +1,114 @@
-// Edge Function: receivable-reminders
-// Runs daily via pg_cron at 11:00 UTC (08:00 BRT).
-// Sends WhatsApp reminders for receivables due in 3 days that haven't received a reminder yet.
-// Só em dia útil (agenda_dia_util: sem domingo e feriado); o dia útil seguinte lembra também os
-// vencimentos que cairiam nos dias pulados. Envia pelo whatsapp-send, como envio automático
-// (Retorno F0a-1, 05/11/2026: ver enviar.ts).
-
+// Edge Function: receivable-reminders — o lembrete ANTES do vencimento de uma conta a receber ("vence em 3 dias").
+//
+// Dono, 26/11/2026 ("2. A"): o lembrete passa a pedir o "sim" dele. Até aqui a rotina rodava às 08:00 e mandava sozinha ao
+// cliente (origem "sistema"). Agora NADA sai para o cliente aqui: a rodada (propor.ts) acha as contas que vencem nos
+// próximos dias, confere cada uma (_shared/receivables/lembrete-de-vencimento.ts) e pergunta ao dono no WhatsApp, como os
+// lembretes de revisão; o "sim" executa a tool enviar_lembrete_de_vencimento, que confere tudo de novo e manda com a MESMA
+// chave de antes (lembrete-recebivel:<conta>:<vencimento>).
+//
+// Chamada pelo pg_cron (x-cron-secret) às 10:40 e às 15:40 de Brasília (migration 20270302100000_lembrete_de_vencimento_pede_sim;
+// antes, 08:00). Antes das 09:30 não pergunta (janela da manhã: só a manhã do secretário pergunta). Só em dia útil
+// (agenda_dia_util; sem resposta do banco, nada). Uma pergunta por vez: com o dono ocupado (outra confirmação aberta), a
+// rodada espera a próxima — a janela de N dias não perde a conta. Com a voz única, a rodada que perguntou fica registrada
+// no portão como "fica como está".
+// Interruptor: app_settings.lembrete_vencimento_ativo ('off' desliga; ausente = ligado). ?dry=1 devolve o que seria
+// perguntado e o que ficou de fora, sem gravar nada (a qualquer hora e em qualquer dia).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
-import { chaveDeEnvio, diaLocal } from "../_shared/whatsapp/idempotencia.ts";
-import {
-  descricaoDaCobranca,
-  diasEntre,
-  enviarLembrete,
-  somarDias,
-  textoDoPrazo,
-  vencimentosDoDia,
-} from "./enviar.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
+import { diaLocal } from "../_shared/whatsapp/idempotencia.ts";
+import { modoDeTesteSemNumero, numeroDeTesteAtivo } from "../_shared/whatsapp/marcar-enviado.ts";
+import {
+  conversaDosComprovantesLigada,
+  donoOcupadoParaPerguntar,
+  resolveOrCreateWhatsAppSession,
+} from "../_shared/ai/whatsapp-channel.ts";
+import { cartaoDoLembreteDeVencimento } from "../_shared/receivables/lembrete-de-vencimento.ts";
+import { depoisDaJanelaDaManha } from "../_shared/uma-voz/janela.ts";
+import { avisoDosLembretesDeVencimento } from "../_shared/uma-voz/fontes.ts";
+import { portaoDasConfiguracoes, registrarNoPortao } from "../_shared/uma-voz/registrar.ts";
+import { pedirSimAoDono, proporLembretesDeVencimento } from "./propor.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
 };
+const jr = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
-function jr(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
-}
+const ligado = (v: string | undefined) => (v ?? "on").trim().toLowerCase().replace(/"/g, "") !== "off";
 
 servirComCors(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-
   // Era fail-OPEN (`if (cronSecret) { ... }`): sem o env var, a função ficava aberta.
   const recusa = verificarCronSecret(req, corsHeaders, "receivable-reminders");
   if (recusa) return recusa;
 
+  const dry = new URL(req.url).searchParams.get("dry") === "1";
+  const agora = new Date();
+  // Janela da manhã (07:30–09:30): só a manhã pergunta. O ?dry=1 roda a qualquer hora.
+  if (!dry && !depoisDaJanelaDaManha(agora)) return jr({ ok: true, fora_da_janela: true });
+
+  const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
   try {
-    const SUPABASE_URL  = Deno.env.get("SUPABASE_URL")!;
-    const SERVICE_ROLE  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const admin         = createClient(SUPABASE_URL, SERVICE_ROLE);
+    const { data: linhas, error: eS } = await admin.from("app_settings").select("key, value");
+    if (eS) throw new Error(`Falha ao ler as configurações: ${eS.message}`);
+    const settings: Record<string, string> = {};
+    for (const r of (linhas ?? []) as Array<{ key: string; value: unknown }>) settings[r.key] = String(r.value ?? "");
+    if (!ligado(settings.lembrete_vencimento_ativo)) return jr({ ok: true, desligado: true });
+    // Modo de teste sem número: o envio iria ao cliente de verdade — nem pergunta.
+    if (modoDeTesteSemNumero(settings)) return jr({ ok: false, reason: "test_mode_no_number" });
 
-    // Carrega configurações operacionais (modo de teste)
-    const { data: settings } = await admin
-      .from("app_settings")
-      .select("key, value")
-      .in("key", ["wa_test_mode", "wa_test_number", "zapi_test_mode", "zapi_test_number",
-                   "receivable_reminder_days_before", "company_name", "collection_min_amount"]);
-    const settingsMap = Object.fromEntries((settings || []).map((s: any) => [s.key, s.value]));
-    // D21 (dono, 17/09/2026): abaixo do piso de materialidade não se manda lembrete.
-    const pisoCobranca = Number(settingsMap["collection_min_amount"]) || 0;
-
-    const testMode   = (settingsMap["wa_test_mode"] ?? settingsMap["zapi_test_mode"]) === "true";
-    const testNumber = ((settingsMap["wa_test_number"] ?? settingsMap["zapi_test_number"]) || "").replace(/\D/g, "");
-    const companyName = settingsMap["company_name"] || "MarineFlow";
-
-    // Modo de teste ativo sem número → aborta para não vazar dados
-    if (testMode && !testNumber) {
-      console.warn("[receivable-reminders] TEST MODE ativo mas sem número de redirecionamento. Abortando.");
-      return jr({ ok: false, skipped: 0, reason: "test_mode_no_number" });
+    // Dia útil pela agenda. Sem resposta do banco, não pergunta (falha fechada).
+    const hoje = diaLocal(agora);
+    if (!dry) {
+      const { data: util, error: eU } = await admin.rpc("agenda_dia_util", { p_dia: hoje });
+      if (eU) throw new Error(`agenda_dia_util(${hoje}): ${eU.message}`);
+      if (util !== true) return jr({ ok: true, dia_util: false, hoje });
     }
 
-    // Dia útil pela agenda. Sem resposta do banco, não envia (falha fechada).
-    const hoje = diaLocal();
-    const ehDiaUtil = async (dia: string): Promise<boolean> => {
-      const { data, error } = await admin.rpc("agenda_dia_util", { p_dia: dia });
-      if (error) throw new Error(`agenda_dia_util(${dia}): ${error.message}`);
-      return data === true;
-    };
-    if (!(await ehDiaUtil(hoje))) {
-      console.log(`[receivable-reminders] ${hoje} não é dia útil: nenhum lembrete hoje.`);
-      return jr({ ok: true, sent: 0, skipped: 0, errors: 0, dia_util: false, hoje });
-    }
-    // O último dia útil antes de hoje, procurado por até duas semanas (recesso mais longo: a janela
-    // começa em hoje — vencimentosDoDia nunca volta antes de hoje).
-    let ultimoDiaUtil = somarDias(hoje, -1);
-    for (let voltas = 0; !(await ehDiaUtil(ultimoDiaUtil)) && voltas < 14; voltas++) {
-      ultimoDiaUtil = somarDias(ultimoDiaUtil, -1);
-    }
-
-    const daysBefore = parseInt(settingsMap["receivable_reminder_days_before"] || "3", 10);
-    const { de, ate } = vencimentosDoDia(hoje, ultimoDiaUtil, daysBefore);
-
-    // Recebíveis que vencem nesse intervalo e ainda não receberam lembrete
-    const { data: receivables, error } = await admin
-      .from("receivables")
-      .select(`
-        id, amount, balance_amount, due_date, description, service_order_id,
-        clients!receivables_client_id_fkey(name, whatsapp, phone),
-        service_orders!receivables_service_order_id_fkey(service_order_number)
-      `)
-      .in("status", ["pending", "partially_paid"])
-      .gte("due_date", de)
-      .lte("due_date", ate)
-      .is("reminder_sent_at", null)
-      .is("is_deposit", false); // Não enviar lembrete para sinais/depósitos
-
-    if (error) throw error;
-
-    const fmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
-    // O whatsapp-send desvia para o número de teste sozinho (numeroDeTesteAtivo).
-    const chamarEnvio = async (corpo: Record<string, unknown>) => {
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_ROLE}` },
-        body: JSON.stringify(corpo),
+    const diasAntes = parseInt(settings.receivable_reminder_days_before || "3", 10);
+    const rodada = await proporLembretesDeVencimento(admin, { hoje, diasAntes: Number.isFinite(diasAntes) ? diasAntes : 3, agora });
+    const teste = numeroDeTesteAtivo(settings) !== null;
+    if (dry) {
+      return jr({
+        ok: true, dry: true, hoje,
+        propostas: rodada.propostas.map((l) => ({ conta: l.conta.id, cliente: l.nomeDoCliente, cartao: cartaoDoLembreteDeVencimento(l, { teste }) })),
+        pulados: rodada.pulados,
+        ja_pedidas: rodada.jaPedidas,
       });
-      return { status: res.status, corpo: await res.json().catch(() => ({})) };
-    };
+    }
+    for (const x of rodada.pulados) console.info(`[receivable-reminders] ${x.conta}: ${x.motivo}`);
+    if (!rodada.propostas.length) return jr({ ok: true, propostas: 0, pulados: rodada.pulados.length, ja_pedidas: rodada.jaPedidas });
 
-    let sent = 0, skipped = 0, errors = 0;
+    // Quem aprova: o primeiro admin ativo com o assistente no WhatsApp (o dono). Um só, de propósito: a mesma mensagem em
+    // duas conversas seria aprovada duas vezes.
+    const { data: donos, error: eD } = await admin.from("app_users").select("id, phone_normalized")
+      .eq("role", "admin").eq("active", true).eq("ai_whatsapp_enabled", true).not("phone_normalized", "is", null)
+      .order("created_at", { ascending: true }).limit(1);
+    if (eD) throw new Error(`Falha ao ler o dono: ${eD.message}`);
+    const dono = donos?.[0] ? { id: donos[0].id as string, phone: donos[0].phone_normalized as string } : null;
+    if (!dono) return jr({ ok: true, sem_dono: true, propostas: rodada.propostas.length });
 
-    for (const rec of receivables || []) {
-      const client: any = rec.clients;
-      const originalPhone = (client?.whatsapp || client?.phone || "").replace(/\D/g, "");
-
-      if (!originalPhone || originalPhone.length < 10) {
-        skipped++;
-        console.log(`[receivable-reminders] skipped ${rec.id} — sem telefone`);
-        continue;
-      }
-
-      const dueDate  = new Date(rec.due_date + "T12:00:00");
-      const dueDateBR = dueDate.toLocaleDateString("pt-BR");
-      const clientFirstName = (client?.name || "").split(" ")[0] || "Cliente";
-      const soNumber = (rec as any).service_orders?.service_order_number || "";
-      const description = descricaoDaCobranca(rec.description, soNumber);
-      const balanceValue = Number(rec.balance_amount || rec.amount);
-      if (pisoCobranca > 0 && balanceValue < pisoCobranca) {
-        console.info(`[receivable-reminders] ${rec.id}: R$ ${balanceValue} abaixo do piso de R$ ${pisoCobranca}, sem lembrete.`);
-        continue;
-      }
-
-      const message =
-        `Olá ${clientFirstName}! 👋 Lembramos que o pagamento de *${fmt.format(balanceValue)}* ` +
-        `referente a *${description}* ${textoDoPrazo(diasEntre(hoje, rec.due_date))} ` +
-        `(*${dueDateBR}*). Em caso de dúvidas, entre em contato. — *${companyName}*`;
-
-      if (testMode) {
-        console.log(`[receivable-reminders] TEST MODE: enviando para ${testNumber} (original: ${originalPhone})`);
-      }
-
-      // A mesma chave de antes (o vencimento é o dia-alvo): o que já saiu não sai de novo.
-      const chave = chaveDeEnvio("lembrete-recebivel", rec.id, rec.due_date);
-      const envio = await enviarLembrete({
-        admin, chamarEnvio, chave, phone: originalPhone, message, recebivelId: rec.id, ordemId: rec.service_order_id,
-      });
-      if (envio.situacao === "enviado") {
-        sent++;
-      } else if (envio.situacao === "erro") {
-        errors++;
-        console.error(`[receivable-reminders] erro no envio ${rec.id}:`, envio.erro);
-      } else {
-        skipped++;
-        console.info(`[receivable-reminders] ${rec.id}: ${envio.situacao === "recusado" ? envio.motivo : "já tinha saído"}`);
-      }
+    const sessao = await resolveOrCreateWhatsAppSession(admin, dono.phone, dono.id);
+    const { data: s } = await admin.from("ai_operator_sessions").select("metadata").eq("id", sessao).maybeSingle();
+    const metadata = (s?.metadata ?? {}) as Record<string, unknown>;
+    // Uma pergunta por vez no WhatsApp do dono (erro na leitura = ocupado): a rodada espera a próxima.
+    const conversaLigada = conversaDosComprovantesLigada(settings);
+    const ocupado = await donoOcupadoParaPerguntar(admin, { phone: dono.phone, metadata, ligada: conversaLigada, agora });
+    if (ocupado.ocupado) {
+      return jr({ ok: true, adiado_por_pergunta: true, por: ocupado.por, propostas: rodada.propostas.length, pulados: rodada.pulados.length });
     }
 
-    console.log(`[receivable-reminders] done — sent:${sent} skipped:${skipped} errors:${errors}`);
-    return jr({ ok: true, sent, skipped, errors, due_from: de, due_to: ate });
-
-  } catch (err: any) {
-    console.error("[receivable-reminders] fatal error", err);
-    return jr({ error: err.message }, 500);
+    const ids = await pedirSimAoDono(admin, dono, sessao, metadata, rodada.propostas, { teste, conversaLigada, agora });
+    // Voz única: a rodada que perguntou fica registrada como "fica como está". Nunca lança.
+    await registrarNoPortao(admin, portaoDasConfiguracoes(settings).modo, dono.phone,
+      avisoDosLembretesDeVencimento(hoje, agora, ids.length, `Lembretes antes do vencimento para aprovar: ${ids.length}.`), agora);
+    return jr({ ok: true, propostas: ids.length, pulados: rodada.pulados.length, ja_pedidas: rodada.jaPedidas });
+  } catch (e) {
+    console.error("[receivable-reminders] erro", e);
+    return jr({ error: String((e as Error)?.message ?? e) }, 500);
   }
 });

@@ -379,11 +379,9 @@ export function avisoDaFrasePropria(frase: string, valor: number, vencimento = "
   return avisos;
 }
 
-/** Celular brasileiro tem 9 dígitos depois do DDD; 8 dígitos começando por 2 a 5 é telefone fixo (sem WhatsApp, em geral). */
-export function pareceTelefoneFixo(digitos: string): boolean {
-  return /^55\d{2}[2-5]\d{7}$/.test(String(digitos ?? ""));
-}
-export const AVISO_DE_FIXO = "Atenção: o número parece de telefone FIXO (sem WhatsApp, em geral): a mensagem pode não chegar. Confira o cadastro.";
+// O "parece telefone fixo" mora em ../phone.ts desde 26/11/2026 (o lembrete de vencimento usa sem puxar as tools).
+import { AVISO_DE_FIXO, pareceTelefoneFixo } from "../phone.ts";
+export { AVISO_DE_FIXO, pareceTelefoneFixo };
 
 /**
  * O que o dono precisa saber do cliente antes do "sim": outro lembrete já saiu hoje (para não cobrar duas vezes no dia) e

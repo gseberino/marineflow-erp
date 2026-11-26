@@ -74,6 +74,8 @@ import { agruparOrcamentosTools } from "./agrupar-orcamentos.ts";
 import { agruparOsTools } from "./agrupar-os.ts";
 // Cobrar juntas (28/10/2026, Fase 0 do Fechar juntas): o saldo de várias OS executadas do mesmo cliente numa mensagem só.
 import { cobrarJuntasTools } from "./cobrar-juntas.ts";
+// Lembrete ANTES do vencimento (26/11/2026, dono "2. A"): a rotina receivable-reminders prepara e pede o "sim"; esta tool envia.
+import { lembreteDeVencimentoTools } from "./lembrete-de-vencimento.ts";
 // O lote semanal da papelada (16/10/2026, secretário Passo 5): só pela pendência do comando *lote*.
 import { papeladaTools } from "./papelada.ts";
 // O cartão do retorno rápido (F2): só pela pendência do cartão
@@ -164,6 +166,8 @@ export const allTools: ToolDef[] = [
   ...agruparOsTools,
   // cobrar juntas (28/10/2026)
   ...cobrarJuntasTools,
+  // lembrete antes do vencimento com o "sim" do dono (26/11/2026)
+  ...lembreteDeVencimentoTools,
   // o ditado do retorno rápido (F2)
   ...retornoTools,
   // histórico de documentos (16/11/2026)
