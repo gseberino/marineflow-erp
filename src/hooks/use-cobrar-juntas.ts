@@ -19,13 +19,19 @@
 // (travaDoExtrato: só genérico, opt-out, telefone e horário) e não é cobrança; COM saldo, ele "conta
 // como cobrança do dia" — depois do envio confirmado passa pela mesma cobrar_juntas_registrar_envio,
 // com p_os nulo (o cliente inteiro), e entra na regra "1 por dia" (last_auto_sent_at).
+//
+// "Cobrar o cliente" pela tela (dono, 26/11/2026: "1. A" — os botões sem trava ganham a mesma conferência): o botão da
+// linha em Contas a Receber, o da aba Cobranças e o Cobrar em lote mandam a cobrança do cliente inteiro (só as contas
+// com saldo, o mesmo texto do "cobra o Fulano" do assistente) pelo MESMO conferirEEnviar, e registram como o extrato.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { extractInvokeErrorMessage } from '@/lib/invoke-error';
 import { normalizePhoneE164 } from '@/lib/masks';
 import {
   chaveDoCobrarJuntas, hojeLocal, horaEmBrasilia, mudancaNasContas, travaDoCobrarJuntas, travaDoExtrato,
+  type TipoDaCobrancaDaTela,
 } from '../../supabase/functions/_shared/receivables/cobrar-juntas';
+import { diaLocal } from '../../supabase/functions/_shared/whatsapp/idempotencia';
 import { lerDinheiroEsperando } from '../../supabase/functions/_shared/receivables/dinheiro-esperando';
 import { desviadoPorTeste } from '../../supabase/functions/_shared/whatsapp/marcar-enviado';
 import { criarFaturaParaCobrar } from '@/hooks/use-faturas';
@@ -158,9 +164,9 @@ interface Conferencia {
   cliente: { id: string; name?: string | null; generico?: boolean | null };
   mensagem: string;
   contas: Array<{ id: string; saldo: number }>;
-  /** As OS escolhidas (Cobrar juntas); null = o cliente inteiro ("Enviar extrato"). */
+  /** As OS escolhidas (Cobrar juntas); null = o cliente inteiro ("Enviar extrato", cobrança do cliente). */
   servicoIds: string[] | null;
-  tipo: 'cobrar-juntas' | 'extrato';
+  tipo: TipoDaCobrancaDaTela;
   /**
    * Roda depois de todas as travas e antes do WhatsApp, e devolve a mensagem final (a fatura do
    * Cobrar juntas põe o número FAT-N nela). Se lançar, nada sai.
@@ -194,6 +200,8 @@ async function conferirEEnviar(e: Conferencia): Promise<{ deduplicado: boolean; 
   const { data: contasAgora, error: contasErr } = await consulta;
   if (contasErr) throw new Error(`Não consegui conferir o saldo ${e.servicoIds ? 'das OS' : 'do cliente'}: ${contasErr.message}`);
   const mudou = mudancaNasContas(e.contas, (contasAgora ?? []) as Parameters<typeof mudancaNasContas>[1], e.tipo);
+  // A cobrança do cliente sem nada em aberto não sai (não vira comprovante de quitação: isso é o extrato).
+  if (e.tipo === 'cobrar-cliente' && !e.contas.length) throw new Error('Este cliente não tem saldo em aberto: não há o que cobrar.');
   if (mudou) throw new Error(mudou);
 
   const totalEmAberto = e.contas.reduce((s, x) => s + x.saldo, 0);
@@ -324,6 +332,106 @@ function invalidarDepoisDaRecusa(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ['app-settings'] });
   // A fatura pode ter nascido antes de o WhatsApp falhar: a ficha mostra.
   qc.invalidateQueries({ queryKey: ['faturas'] });
+}
+
+/** Início do dia de hoje em Brasília (ISO) — o corte do "já cobrado hoje", como o lote do assistente. */
+function inicioDoDiaEmBrasilia(agora: Date = relogioDoCobrarJuntasTela.agora()): string {
+  return new Date(`${diaLocal(agora)}T00:00:00-03:00`).toISOString();
+}
+
+/**
+ * Os clientes (entre estes) que já receberam cobrança hoje, com a hora da última: qualquer envio que registra a cobrança
+ * do dia (last_auto_sent_at — a tela, o assistente, o lote). Só as de hoje são lidas (um histórico grande passaria do
+ * corte de 1000 linhas). Leitura que falha LANÇA: "ninguém foi cobrado" por erro cobraria duas vezes no dia.
+ */
+export async function lerCobradosHoje(clientIds: string[]): Promise<Map<string, string>> {
+  const ids = [...new Set(clientIds.filter(Boolean))];
+  const saida = new Map<string, string>();
+  if (!ids.length) return saida;
+  const { data, error } = await supabase.from('collections').select('client_id, last_auto_sent_at')
+    .in('client_id', ids).gte('last_auto_sent_at', inicioDoDiaEmBrasilia());
+  if (error) throw new Error(`Não consegui ler as cobranças de hoje: ${error.message}`);
+  for (const k of (data ?? []) as Array<{ client_id: string | null; last_auto_sent_at: string | null }>) {
+    if (!k.client_id || !k.last_auto_sent_at) continue;
+    const antes = saida.get(k.client_id);
+    if (!antes || k.last_auto_sent_at > antes) saida.set(k.client_id, k.last_auto_sent_at);
+  }
+  return saida;
+}
+
+/** Para o aviso antes do botão: a hora da última cobrança de hoje deste cliente (null = nenhuma). */
+export function useCobradoHoje(clientId: string | null | undefined, enabled = true) {
+  return useQuery({
+    queryKey: ['collections', 'cobrado-hoje', clientId],
+    enabled: enabled && !!clientId,
+    queryFn: async () => (await lerCobradosHoje([clientId!])).get(clientId!) ?? null,
+    staleTime: 30 * 1000,
+  });
+}
+
+/** "Este cliente já recebeu cobrança hoje (às 10h15)…", para o aviso da tela. */
+export function avisoDeCobradoHoje(ultima: string | null | undefined): string | null {
+  if (!ultima) return null;
+  const hora = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })
+    .format(new Date(ultima)).replace(':', 'h');
+  return `Este cliente já recebeu cobrança hoje (às ${hora}). Confira se precisa mesmo de outra mensagem.`;
+}
+
+export interface EnvioDaCobrancaDoCliente {
+  cliente: { id: string; name?: string | null; generico?: boolean | null };
+  mensagem: string;
+  /** As contas com saldo do cliente, com o saldo que a tela mostrou (o envio relê e recusa se mudou). */
+  contas: Array<{ id: string; saldo: number }>;
+}
+
+export interface ResultadoDaCobrancaDoCliente {
+  deduplicado: boolean;
+  aviso: string | null;
+  modoTeste?: boolean;
+  cobrancasRegistradas?: number;
+  cobrancasCriadas?: number;
+}
+
+/** A nota do contato 'whatsapp_sent' que a cobrança do cliente pela tela deixa em cada cobrança. */
+export const NOTA_DA_COBRANCA_DO_CLIENTE = 'Cobrança do cliente pela tela (tudo que ele tem em aberto)';
+
+/**
+ * Cobrar o cliente pela tela: as travas de novo com dado fresco (conferirEEnviar, tipo 'cobrar-cliente'), o envio e,
+ * confirmado (não desviado pelo modo de teste, não "já enviado hoje"), o registro da cobrança do dia como o extrato
+ * com saldo (cobrar_juntas_registrar_envio com p_os nulo). Recusa = LANÇA com a frase pronta (nada saiu). É a função
+ * que o Cobrar em lote chama cliente a cliente.
+ */
+export async function enviarCobrancaDoCliente(e: EnvioDaCobrancaDoCliente): Promise<ResultadoDaCobrancaDoCliente> {
+  const envio = await conferirEEnviar({ ...e, servicoIds: null, tipo: 'cobrar-cliente' });
+  if (envio.modoTeste) return { deduplicado: envio.deduplicado, aviso: envio.deduplicado ? null : AVISO_MODO_TESTE, modoTeste: true };
+  if (envio.deduplicado) return { deduplicado: true, aviso: null };
+  const r = await registrarNoBanco(e, null, NOTA_DA_COBRANCA_DO_CLIENTE);
+  return {
+    deduplicado: false,
+    cobrancasRegistradas: r.registradas,
+    cobrancasCriadas: r.criadas,
+    aviso: r.erro
+      ? `A cobrança foi enviada, mas não consegui registrá-la (${r.erro}). Nada foi gravado nas cobranças: `
+        + 'confira em Cobranças antes de cobrar este cliente de novo hoje.'
+      : null,
+  };
+}
+
+export function useEnviarCobrancaDoCliente() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: enviarCobrancaDoCliente,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['collections'] });
+      qc.invalidateQueries({ queryKey: ['receivables'] });
+    },
+    onError: () => invalidarDepoisDaRecusa(qc),
+  });
+}
+
+/** Depois do Cobrar em lote (com ou sem recusa no meio): a tela relê o que o envio mudou. */
+export function invalidarDepoisDoLote(qc: ReturnType<typeof useQueryClient>) {
+  invalidarDepoisDaRecusa(qc);
 }
 
 export interface EnvioDoExtrato {

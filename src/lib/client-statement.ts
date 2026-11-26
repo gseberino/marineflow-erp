@@ -61,6 +61,12 @@ export interface ClientStatementInput {
    * Ausente = extrato completo do cliente.
    */
   servicoIds?: string[];
+  /**
+   * A cobrança do cliente (dono, 26/11/2026: os botões da tela ganham a conferência da ficha): o cliente inteiro, mas só
+   * as contas com saldo, com o cabeçalho "Cobrança" — o mesmo texto do "cobra o Fulano" do assistente
+   * (mensagemDaCobrancaConjunta). Sem histórico pago nem comprovante de quitação.
+   */
+  cobranca?: boolean;
   /** Hoje (YYYY-MM-DD), para "vencido". Padrão: a data local. */
   hoje?: string;
   /**
@@ -86,14 +92,16 @@ function rotuloDa(r: StatementItem): string {
 const cent = (v: number) => Math.round(v * 100) / 100;
 
 /** Monta o extrato do cliente em texto. Ignora lançamentos cancelados. */
-export function buildClientStatement({ clientName, items, pixKey, servicoIds, hoje = hojeLocal(), fatura }: ClientStatementInput): string {
+export function buildClientStatement({ clientName, items, pixKey, servicoIds, cobranca, hoje = hojeLocal(), fatura }: ClientStatementInput): string {
   const nome = (clientName || '').trim().split(/\s+/)[0] || 'Cliente';
   const filtrarOs = Array.isArray(servicoIds);
   const escolhidas = new Set(servicoIds ?? []);
+  // Cobrança (Cobrar juntas ou a do cliente inteiro): só as contas com saldo, cabeçalho "Cobrança".
+  const soComSaldo = filtrarOs || cobranca === true;
   const active = (items || []).filter((r) => {
     if (r.status === 'cancelled') return false;
-    if (!filtrarOs) return true;
-    return !!r.service_order_id && escolhidas.has(r.service_order_id) && saldoDaConta(r) > 0;
+    if (filtrarOs) return !!r.service_order_id && escolhidas.has(r.service_order_id) && saldoDaConta(r) > 0;
+    return soComSaldo ? saldoDaConta(r) > 0 : true;
   });
   const rows = [...active].sort((a, b) =>
     String(a.numero_os ?? '').localeCompare(String(b.numero_os ?? ''))
@@ -118,8 +126,8 @@ export function buildClientStatement({ clientName, items, pixKey, servicoIds, ho
 
   const numeros = [...new Set(rows.map((r) => (r.numero_os || '').trim()).filter(Boolean))];
   // Extrato do cliente inteiro sem nada em aberto: sai como comprovante de quitação (dono, 20/11/2026).
-  const quitado = !filtrarOs && rows.length > 0 && open <= 0.009;
-  const cabecalho = filtrarOs
+  const quitado = !soComSaldo && rows.length > 0 && open <= 0.009;
+  const cabecalho = soComSaldo
     ? `📋 *Cobrança — HBR*\nCliente: ${nome}${numeros.length ? `\nOS: ${numeros.join(', ')}` : ''}${fatura ? `\nFatura: ${fatura}` : ''}\n\n`
     : quitado
       ? `✅ *Comprovante de quitação — HBR*\nCliente: ${nome}\n\n`

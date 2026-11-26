@@ -32,6 +32,8 @@ import {
   resumirLembreteDeCobranca,
 } from "./tools/lembrete-de-cobranca.ts";
 import { desviadoPorTeste } from "../whatsapp/marcar-enviado.ts";
+// lembrete antes do vencimento (26/11/2026): o cartão do "sim" é o mesmo que a rotina receivable-reminders manda ao dono.
+import { resumirLembreteDeVencimento } from "../receivables/lembrete-de-vencimento.ts";
 // histórico de documentos (16/11/2026): o cartão do "sim" é a simulação da restauração (o que muda, total, assinatura).
 import { resumirRestauracao } from "./tools/historico-documento.ts";
 import {
@@ -201,6 +203,7 @@ const TOOL_LABELS_PT: Record<string, string> = {
   reopen_service_order: "Reabrir OS",
   send_whatsapp_message: "Enviar WhatsApp a cliente",
   send_collection_reminder: "Enviar lembrete de cobrança",
+  enviar_lembrete_de_vencimento: "Lembrete antes do vencimento (WhatsApp)",
   // Desde 26/09/2026 o padrão é o PDF anexado; o formato vai no resumo da confirmação.
   send_service_order_link: "Enviar orçamento/OS ao cliente (WhatsApp)",
   schedule_whatsapp_message: "Agendar WhatsApp a cliente",
@@ -530,6 +533,8 @@ RESUMO_QUE_RESOLVE.add("cobrar_juntas");
 RESUMO_QUE_RESOLVE.add("send_collection_reminder");
 // lote de lembretes (25/11/2026): nenhum sairia, leitura que falha — o resumo diz por quê numa linha "⚠️": recusa, não pendência.
 RESUMO_QUE_RESOLVE.add("send_bulk_collection_reminders");
+// lembrete antes do vencimento (26/11/2026): conta paga, vencida, sinal, piso, entrada esperando, opt-out, sem telefone — "⚠️": recusa.
+RESUMO_QUE_RESOLVE.add("enviar_lembrete_de_vencimento");
 // "Sim, é do X" (leva 8, revisão de 23/10/2026): entrada confirmada sem cliente sugerido, cliente fora do cadastro ou
 // leitura que falha — o resumo diz por quê numa linha "⚠️": é recusa, não pendência.
 RESUMO_QUE_RESOLVE.add("aprovar_propostas_de_lancamento");
@@ -854,6 +859,19 @@ export async function buildPendingSummary(
     } catch (e) {
       const motivo = String((e as { message?: string })?.message ?? e).replace(/\s*\n+\s*/g, " ");
       return `⚠️ Não consegui conferir a cobrança agora (${motivo}). Nada foi enviado; tente de novo.`;
+    }
+  }
+  // Lembrete ANTES do vencimento (26/11/2026, dono "2. A"): o "sim" é sobre quem recebe, o número inteiro, a conta (saldo e
+  // vencimento conferidos) e a MENSAGEM EXATA — o mesmo cartão que a rotina receivable-reminders manda ao dono. Trava vira "⚠️".
+  if (toolName === "enviar_lembrete_de_vencimento") {
+    try {
+      const teste = desviadoPorTeste((quem.settings ?? {}) as Record<string, string>);
+      const r = await resumirLembreteDeVencimento(admin, args, { teste });
+      if (quem.retrato === null && !r.trim().startsWith("⚠️")) return "⚠️ Não consegui conferir a conta agora. Nada foi enviado; tente de novo.";
+      return r;
+    } catch (e) {
+      const motivo = String((e as { message?: string })?.message ?? e).replace(/\s*\n+\s*/g, " ");
+      return `⚠️ Não consegui conferir a conta agora (${motivo}). Nada foi enviado; tente de novo.`;
     }
   }
   // Restaurar orçamento/OS (16/11/2026): o "sim" é sobre a SIMULAÇÃO do banco — o que muda, o total antes e depois, o que

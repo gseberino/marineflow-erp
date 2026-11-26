@@ -22,7 +22,7 @@ import { PERFIL_ADMIN, PERFIL_OPERACAO, rodaDiretoPelaRede, SO_PELA_REDE } from 
 import { ferramentasDoJob } from "../max/ferramentas-do-job.ts";
 import { NOME_DA_FERRAMENTA_EXTRA } from "../ferramenta-extra.ts";
 import { FORA_DO_WHATSAPP } from "../channel-scope.ts";
-import { PARIDADE_COBRAR_JUNTAS as P } from "../../receivables/cobrar-juntas_paridade.ts";
+import { PARIDADE_COBRANCA_DO_CLIENTE as PC, PARIDADE_COBRAR_JUNTAS as P } from "../../receivables/cobrar-juntas_paridade.ts";
 
 /** Intl põe espaço sem quebra entre "R$" e o valor. */
 const semNbsp = (x: unknown) => String(x ?? "").replace(/ /g, " ");
@@ -933,4 +933,18 @@ Deno.test("a OS dita que não começou e NÃO tem conta em aberto: a recusa não
   const e = await recusado(ctx, db, { os: ["OS-00045", "OS-00046"] });
   assertStringIncludes(e, "OS-00046 ainda não começou a ser executada");
   assertEquals(e.includes("Para cobrar sem mexer na OS"), false, e);
+});
+
+Deno.test("paridade com a tela: a cobrança do cliente inteiro dá a MESMA mensagem da cobrança do cliente pela tela (buildClientStatement com cobranca)", async () => {
+  // O caso mora em _shared/receivables/cobrar-juntas_paridade.ts e o client-statement.test.ts (vitest) compara o texto da tela
+  // (o botão da linha, a aba Cobranças, o Cobrar em lote — 26/11/2026) com o MESMO esperado.
+  const { db } = ambiente(PC.os.map((o) => ordem(o.id, o.numero)), {
+    tabelas: {
+      receivables: PC.contas.map((x) => ({ ...x, client_id: MP })),
+      app_settings: [{ key: "pix_key", value: PC.pixKey }],
+    },
+  });
+  const c = await montarCobrancaConjunta(db, db, { cliente_id: MP });
+  assert(!("error" in c), JSON.stringify(c));
+  assertEquals(c.mensagem, PC.esperado);
 });

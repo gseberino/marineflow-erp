@@ -22,6 +22,7 @@ export const ASSUNTO_DAS_ACOES: Readonly<Record<string, readonly string[]>> = {
   send_fiscal_pdf_to_client: ["os", "nota", "cliente", "tipo"],
   send_supplier_quote_request: ["quote_request_id"],
   enviar_lembrete_de_revisao: ["embarcacao", "planos", "toque"],
+  enviar_lembrete_de_vencimento: ["receivable_id"],
   followup_send_touch: ["mission_id", "event_id"],
   // dinheiro: a conta
   register_payment: ["receivable_id"],

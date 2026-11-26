@@ -49,3 +49,43 @@ export const PARIDADE_COBRAR_JUNTAS = {
     '💠 Para pagar por Pix, use a chave: *12.345.678/0001-90*\n\n' +
     '_Qualquer dúvida sobre os valores, estamos à disposição._',
 } as const;
+
+/**
+ * A cobrança do cliente INTEIRO (26/11/2026): o "cobra o Fulano" do assistente (cobrar_juntas só com cliente_id) e a
+ * cobrança do cliente pela tela (buildClientStatement com cobranca: true — o botão da linha, a aba Cobranças e o Cobrar em
+ * lote) mandam o MESMO texto. Conta sem OS entra primeiro; a paga e a cancelada ficam fora; a linha "OS:" lista só os
+ * números que existem. Lido por client-statement.test.ts (vitest) e cobrar-juntas_test.ts (deno).
+ */
+export const PARIDADE_COBRANCA_DO_CLIENTE = {
+  clienteNome: 'MP MOTOR HOMES',
+  pixKey: '12.345.678/0001-90',
+  hoje: '2026-10-28',
+  os: [{ id: '22222222-2222-4222-8222-222222222045', numero: 'OS-00045' }],
+  contas: [
+    {
+      id: 'q0', service_order_id: null, numero_os: null,
+      description: 'Venda de balcão', amount: 756, paid_amount: 0, balance_amount: 756, status: 'pending', due_date: '2026-10-10',
+    },
+    {
+      id: 'q45s', service_order_id: '22222222-2222-4222-8222-222222222045', numero_os: 'OS-00045',
+      description: 'Sinal OS-00045', amount: 500, paid_amount: 500, balance_amount: 0, status: 'paid', due_date: '2026-06-05',
+    },
+    {
+      id: 'q45', service_order_id: '22222222-2222-4222-8222-222222222045', numero_os: 'OS-00045',
+      description: 'Saldo OS-00045', amount: 1650, paid_amount: 650, balance_amount: 1000, status: 'partially_paid', due_date: '2026-11-10',
+    },
+    {
+      id: 'q45c', service_order_id: '22222222-2222-4222-8222-222222222045', numero_os: 'OS-00045',
+      description: 'Antiga', amount: 300, paid_amount: 0, balance_amount: 300, status: 'cancelled', due_date: '2026-07-01',
+    },
+  ],
+  esperado:
+    '📋 *Cobrança — HBR*\nCliente: MP\nOS: OS-00045\n\n' +
+    '🔴 Venda de balcão · vence 10/10/2026 · vencido: *R$ 756,00*\n' +
+    '🟠 Saldo OS-00045 · vence 10/11/2026 · parcial: *R$ 1.000,00* (de R$ 1.650,00)\n\n' +
+    'Total: R$ 2.406,00\n' +
+    'Pago: R$ 650,00\n' +
+    '*Em aberto: R$ 1.756,00*\n\n' +
+    '💠 Para pagar por Pix, use a chave: *12.345.678/0001-90*\n\n' +
+    '_Qualquer dúvida sobre os valores, estamos à disposição._',
+} as const;

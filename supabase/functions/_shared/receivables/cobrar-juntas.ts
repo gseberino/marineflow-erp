@@ -224,6 +224,13 @@ export function travaDoCobrarJuntas(e: EntradaDasTravas): string | null {
   return null;
 }
 
+/**
+ * Os envios da tela com estas travas: o Cobrar juntas (OS escolhidas), o Enviar extrato (o cliente inteiro, também como
+ * comprovante de quitação) e a cobrança do cliente (o cliente inteiro, só com saldo — dono, 26/11/2026: os botões da
+ * linha, da aba Cobranças e o Cobrar em lote ganham a mesma conferência).
+ */
+export type TipoDaCobrancaDaTela = 'cobrar-juntas' | 'extrato' | 'cobrar-cliente';
+
 export interface EntradaDoExtrato extends Omit<EntradaDasTravas, 'quantidadeOs'> {
   /** Lançamentos do cliente que não estão cancelados (pagos ou não). 0 = não há extrato para mandar. */
   lancamentos: number;
@@ -260,24 +267,27 @@ export function travaDoExtrato(e: EntradaDoExtrato): string | null {
  * (id e saldo) que a mensagem mostra; `agora`: as contas relidas do banco, das mesmas OS e do
  * mesmo cliente. Mesmo critério de oQueMudouNaCobrancaConjunta (tool): conjunto e saldo de cada uma.
  * tipo 'extrato': o "Enviar extrato" (o cliente inteiro, sem escolha de OS) — as mesmas regras.
+ * tipo 'cobrar-cliente': a cobrança do cliente pela tela (botão da linha, aba Cobranças, Cobrar em lote;
+ * dono, 26/11/2026) — o cliente inteiro, como o extrato.
  */
 export function mudancaNasContas(
   antes: Array<{ id: string; saldo: number }>,
   agora: Array<Pick<ContaDoCliente, 'id' | 'status' | 'amount' | 'paid_amount' | 'balance_amount'>>,
-  tipo: 'cobrar-juntas' | 'extrato' = 'cobrar-juntas',
+  tipo: TipoDaCobrancaDaTela = 'cobrar-juntas',
 ): string | null {
   const abertas = (agora || []).filter((c) => saldoDaConta(c) > 0);
   const idsAntes = antes.map((c) => c.id).sort().join('|');
   const idsAgora = abertas.map((c) => c.id).sort().join('|');
   const totalAntes = centavos(antes.reduce((s, c) => s + n(c.saldo), 0));
   const totalAgora = centavos(abertas.reduce((s, c) => s + saldoDaConta(c), 0));
-  const extrato = tipo === 'extrato';
-  const fecheEAbra = `Nada foi enviado: feche e abra ${extrato ? 'o extrato' : 'o Cobrar juntas'} de novo para conferir a mensagem.`;
+  const doCliente = tipo !== 'cobrar-juntas';
+  const oQue = tipo === 'extrato' ? 'o extrato' : tipo === 'cobrar-cliente' ? 'a cobrança' : 'o Cobrar juntas';
+  const fecheEAbra = `Nada foi enviado: feche e abra ${oQue} de novo para conferir a mensagem.`;
   if (idsAntes !== idsAgora) {
-    return `As contas em aberto ${extrato ? 'do cliente' : 'destas OS'} mudaram desde que a tela abriu (era ${brl(totalAntes)}, agora ${brl(totalAgora)}). ${fecheEAbra}`;
+    return `As contas em aberto ${doCliente ? 'do cliente' : 'destas OS'} mudaram desde que a tela abriu (era ${brl(totalAntes)}, agora ${brl(totalAgora)}). ${fecheEAbra}`;
   }
   const mexida = abertas.find((c) => Math.round(saldoDaConta(c) * 100) !== Math.round(n(antes.find((a) => a.id === c.id)?.saldo) * 100));
-  if (mexida) return `O saldo ${extrato ? 'do cliente' : 'das OS'} mudou desde que a tela abriu (era ${brl(totalAntes)}, agora ${brl(totalAgora)}). ${fecheEAbra}`;
+  if (mexida) return `O saldo ${doCliente ? 'do cliente' : 'das OS'} mudou desde que a tela abriu (era ${brl(totalAntes)}, agora ${brl(totalAgora)}). ${fecheEAbra}`;
   return null;
 }
 
@@ -301,7 +311,7 @@ function hashCurto(s: string): string {
  */
 export function chaveDoCobrarJuntas(
   clientId: string, contaIds: string[], dia: string, mensagem: string, desviadoPorTeste = false,
-  tipo: 'cobrar-juntas' | 'extrato' = 'cobrar-juntas',
+  tipo: TipoDaCobrancaDaTela = 'cobrar-juntas',
 ): string {
   const contas = [...contaIds].sort().join(',');
   const chave = `${tipo}:${clientId}:${dia}:${hashCurto(`${contas}|${mensagem.trim()}`)}`;

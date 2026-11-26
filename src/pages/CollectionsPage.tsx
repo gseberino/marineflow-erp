@@ -18,14 +18,15 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import {
-  MoreHorizontal, MessageCircle, RefreshCw, CheckCircle, ClipboardList,
+  MoreHorizontal, MessageCircle, CheckCircle, ClipboardList,
   History, FileText, Pencil, X, Plus, SlidersHorizontal, ArrowUpDown,
   AlertCircle, TrendingUp, Wallet, Clock, Phone, Download, ArrowUp, ArrowDown,
 } from 'lucide-react';
 import {
-  useCollections, useMarkOverdueCollections, useCancelCollection, useSendCollectionWhatsApp,
+  useCollections, useMarkOverdueCollections, useCancelCollection,
   type CollectionFilters, type Collection, type CollectionStatus,
 } from '@/hooks/use-collections';
+import { CobrarClienteDialog } from '@/components/client/CobrarClienteDialog';
 import { useClients } from '@/hooks/use-clients';
 import { CollectionStatusBadge, COLLECTION_STATUS_OPTIONS } from '@/components/collections/CollectionStatusBadge';
 import { CreateCollectionDialog } from '@/components/collections/CreateCollectionDialog';
@@ -53,6 +54,8 @@ export default function CollectionsPage() {
   const [editContactTarget, setEditContactTarget] = useState<Collection | null>(null);
   const [cancelTarget, setCancelTarget] = useState<Collection | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
+  /** O cliente a cobrar (26/11/2026, dono "1. A": a mesma conferência da ficha); null = fechado. */
+  const [cobrarCliente, setCobrarCliente] = useState<string | null>(null);
 
   const { data: collections = [], isLoading } = useCollections(filters);
 
@@ -69,7 +72,6 @@ export default function CollectionsPage() {
   };
   const { data: clients } = useClients();
   const cancel = useCancelCollection();
-  const send = useSendCollectionWhatsApp();
   const markOverdue = useMarkOverdueCollections();
 
   // Run once on mount to mark any past-due collections as overdue
@@ -293,14 +295,11 @@ export default function CollectionsPage() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onClick={() => send.mutate({ collection: c })}
-                          className="text-green-600 focus:text-green-700">
-                          <MessageCircle className="h-4 w-4 mr-2" /> Enviar WhatsApp
-                        </DropdownMenuItem>
-                        {c.status === 'sent' && (
-                          <DropdownMenuItem onClick={() => send.mutate({ collection: c })}>
-                            <RefreshCw className="h-4 w-4 mr-2" /> Reenviar lembrete
+                        {c.client_id && c.status !== 'paid' && c.status !== 'cancelled' && (
+                          <DropdownMenuItem
+                            onClick={() => setCobrarCliente(c.client_id)}
+                            className="text-green-600 focus:text-green-700">
+                            <MessageCircle className="h-4 w-4 mr-2" /> Cobrar o cliente…
                           </DropdownMenuItem>
                         )}
                         <DropdownMenuItem onClick={() => setPayTarget(c)}>
@@ -338,6 +337,7 @@ export default function CollectionsPage() {
 
       <CreateCollectionDialog open={createOpen} onOpenChange={setCreateOpen} />
       <AutoRuleDialog open={ruleOpen} onOpenChange={setRuleOpen} />
+      <CobrarClienteDialog clienteId={cobrarCliente} onFechar={() => setCobrarCliente(null)} />
       <PaymentConfirmDialog open={!!payTarget} onOpenChange={v => !v && setPayTarget(null)} collection={payTarget} />
       {contactTarget && (
         <AddContactDialog open={!!contactTarget} onOpenChange={v => !v && setContactTarget(null)} collectionId={contactTarget.id} />

@@ -40,6 +40,7 @@ function labelFor(name: string): string {
     reopen_service_order: 'Reabrir OS',
     send_whatsapp_message: 'Enviar WhatsApp a cliente',
     send_collection_reminder: 'Enviar lembrete de cobrança',
+    enviar_lembrete_de_vencimento: 'Lembrete antes do vencimento (WhatsApp)',
     send_service_order_link: 'Enviar orçamento/OS ao cliente (WhatsApp)',
     schedule_whatsapp_message: 'Agendar WhatsApp a cliente',
     // fiscal e compras (07/10/2026)

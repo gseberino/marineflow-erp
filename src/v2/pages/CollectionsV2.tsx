@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   CheckCircle, ClipboardList, Download, FileText, History, MessageCircle,
-  MoreHorizontal, Pencil, Plus, SlidersHorizontal, X,
+  MoreHorizontal, Pencil, Plus, X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
-  useCollections, useMarkOverdueCollections, useCancelCollection, useSendCollectionWhatsApp,
+  useCollections, useMarkOverdueCollections, useCancelCollection,
   type CollectionFilters, type Collection, type CollectionStatus,
 } from '@/hooks/use-collections';
 import { useClients } from '@/hooks/use-clients';
@@ -27,8 +27,8 @@ import { CreateCollectionDialog } from '@/components/collections/CreateCollectio
 import { PaymentConfirmDialog } from '@/components/collections/PaymentConfirmDialog';
 import { AddContactDialog } from '@/components/collections/AddContactDialog';
 import { EditContactDialog } from '@/components/collections/EditContactDialog';
-import { AutoRuleDialog } from '@/components/collections/AutoRuleDialog';
 import { CollectionDetailSheet } from '@/components/collections/CollectionDetailSheet';
+import { CobrarClienteDialog } from '@/components/client/CobrarClienteDialog';
 import { KPIStat } from '@/v2/components/KPIStat';
 import { EntityCard } from '@/v2/components/EntityCard';
 import { DataTable, type DataColumn } from '@/v2/components/DataTable';
@@ -40,7 +40,17 @@ import '@/v2/tokens.css';
 
    26/09/2026: deixou de ser tela solta. Perseguir quem deve é a mesma conversa de Contas a
    Receber, então Cobranças virou aba de lá (/v2/receivables/cobrancas) e saiu do menu. O link
-   antigo /v2/collections leva para a aba. Aqui fica só o painel, sem invólucro de página. */
+   antigo /v2/collections leva para a aba. Aqui fica só o painel, sem invólucro de página.
+
+   26/11/2026 (dono: "1. A"): o WhatsApp da linha ENVIAVA no clique, sem prévia nem trava, com o valor
+   guardado na cobrança (que diverge da conta). Agora abre a cobrança do cliente com a conferência da
+   ficha (CobrarClienteDialog). Saiu também a "Régua": ela gravava configurações que nenhuma rotina lê
+   (collection_rule_*), e o texto dizia que lembretes saíam sozinhos. */
+
+const MOTIVO_SEM_CLIENTE = "Esta cobrança não está ligada a um cliente do cadastro: ligue-a a um cliente para cobrar pelo WhatsApp.";
+
+/** Dá para cobrar pela linha: cobrança aberta e ligada a um cliente do cadastro (o destino é o WhatsApp dele). */
+const podeCobrar = (c: Collection) => !!c.client_id && c.status !== 'paid' && c.status !== 'cancelled';
 
 const fmtBRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -48,17 +58,17 @@ const todayISO = () => new Date().toISOString().slice(0, 10);
 export function PainelDeCobrancas() {
   const [filters, setFilters] = useState<CollectionFilters>({ sort_by: 'due_date', sort_dir: 'asc' });
   const [createOpen, setCreateOpen] = useState(false);
-  const [ruleOpen, setRuleOpen] = useState(false);
   const [payTarget, setPayTarget] = useState<Collection | null>(null);
   const [contactTarget, setContactTarget] = useState<Collection | null>(null);
   const [editContactTarget, setEditContactTarget] = useState<Collection | null>(null);
   const [cancelTarget, setCancelTarget] = useState<Collection | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
+  /** O cliente a cobrar (CobrarClienteDialog); null = fechado. */
+  const [cobrarCliente, setCobrarCliente] = useState<string | null>(null);
 
   const { data: collections = [], isLoading } = useCollections(filters);
   const { data: clients } = useClients();
   const cancel = useCancelCollection();
-  const send = useSendCollectionWhatsApp();
   const markOverdue = useMarkOverdueCollections();
 
   // Igual à v1: marca vencidas ao montar
@@ -191,14 +201,11 @@ export function PainelDeCobrancas() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">
-          {collections.length} cobrança(s) · a régua automática manda os lembretes pelo WhatsApp.
+          {collections.length} cobrança(s) · cobrar abre a mensagem e as travas antes de enviar.
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" className="hidden gap-1.5 sm:inline-flex" onClick={exportCsv}>
             <Download className="h-4 w-4" /> Exportar CSV
-          </Button>
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setRuleOpen(true)}>
-            <SlidersHorizontal className="h-4 w-4" /> Régua
           </Button>
           <Button size="sm" className="gap-1.5" onClick={() => setCreateOpen(true)}>
             <Plus className="h-4 w-4" /> Nova cobrança
@@ -280,13 +287,22 @@ export function PainelDeCobrancas() {
           rowClassName={(c) => (c.status === 'overdue' ? 'bg-destructive/5' : undefined)}
           rowActions={(c) => (
             <>
-              <Button
-                variant="ghost" size="icon" className="h-8 w-8"
-                aria-label="Enviar WhatsApp" title="Enviar WhatsApp"
-                onClick={() => send.mutate({ collection: c })}
+              {/* O motivo do botão travado fica no invólucro: botão desabilitado não recebe o mouse (nem a dica), e o
+                  clique nele não pode atravessar para a linha e abrir o detalhe. */}
+              <span
+                className="inline-flex"
+                title={podeCobrar(c) ? 'Cobrar o cliente pelo WhatsApp' : c.client_id ? 'Cobrança paga ou cancelada' : MOTIVO_SEM_CLIENTE}
+                onClick={(e) => e.stopPropagation()}
               >
-                <MessageCircle className="h-4 w-4" />
-              </Button>
+                <Button
+                  variant="ghost" size="icon" className="h-8 w-8"
+                  aria-label="Cobrar o cliente pelo WhatsApp"
+                  disabled={!podeCobrar(c)}
+                  onClick={() => { if (podeCobrar(c)) setCobrarCliente(c.client_id); }}
+                >
+                  <MessageCircle className="h-4 w-4" />
+                </Button>
+              </span>
               {renderMenu(c)}
             </>
           )}
@@ -307,9 +323,11 @@ export function PainelDeCobrancas() {
             onClick={() => setDetailId(c.id)}
             actions={
               <>
-                <Button className="flex-1 gap-1.5" onClick={() => send.mutate({ collection: c })}>
-                  <MessageCircle className="h-4 w-4" /> Cobrar
-                </Button>
+                {podeCobrar(c) && (
+                  <Button className="flex-1 gap-1.5" onClick={(e) => { e.stopPropagation(); setCobrarCliente(c.client_id); }}>
+                    <MessageCircle className="h-4 w-4" /> Cobrar
+                  </Button>
+                )}
                 {renderMenu(c)}
               </>
             }
@@ -326,7 +344,7 @@ export function PainelDeCobrancas() {
       </div>
 
       <CreateCollectionDialog open={createOpen} onOpenChange={setCreateOpen} />
-      <AutoRuleDialog open={ruleOpen} onOpenChange={setRuleOpen} />
+      <CobrarClienteDialog clienteId={cobrarCliente} onFechar={() => setCobrarCliente(null)} />
       <PaymentConfirmDialog open={!!payTarget} onOpenChange={(v) => !v && setPayTarget(null)} collection={payTarget} />
       {contactTarget && (
         <AddContactDialog open={!!contactTarget} onOpenChange={(v) => !v && setContactTarget(null)} collectionId={contactTarget.id} />

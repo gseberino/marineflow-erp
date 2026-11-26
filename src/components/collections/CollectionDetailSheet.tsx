@@ -1,15 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
+// 26/11/2026 (dono: "1. A"): o "Enviar via WhatsApp" daqui mandava o modelo com o valor guardado na cobrança, sem
+// trava nenhuma. Agora "Cobrar o cliente" abre a cobrança do cliente com a conferência da ficha (CobrarClienteDialog).
+import { useState } from 'react';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { MessageCircle, Pencil, Plus } from 'lucide-react';
 import {
-  useCollection, useCollectionContacts, useCollectionTemplates,
-  useUpdateCollection, useSendCollectionWhatsApp, renderTemplate,
+  useCollection, useCollectionContacts, useUpdateCollection,
   type CollectionStatus,
 } from '@/hooks/use-collections';
-import { useAppSettings } from '@/hooks/use-app-settings';
+import { CobrarClienteDialog } from '@/components/client/CobrarClienteDialog';
 import { CollectionStatusBadge, COLLECTION_STATUS_OPTIONS } from './CollectionStatusBadge';
 import { ContactHistoryTimeline } from './ContactHistoryTimeline';
 import { AddContactDialog } from './AddContactDialog';
@@ -21,34 +22,11 @@ export function CollectionDetailSheet({ collectionId, onClose }: Props) {
   const open = !!collectionId;
   const { data: collection } = useCollection(collectionId || undefined);
   const { data: contacts } = useCollectionContacts(collectionId || undefined);
-  const { data: templates } = useCollectionTemplates();
-  const { data: settings } = useAppSettings();
   const update = useUpdateCollection();
-  const send = useSendCollectionWhatsApp();
 
-  const [templateId, setTemplateId] = useState('');
   const [editContact, setEditContact] = useState(false);
   const [addContact, setAddContact] = useState(false);
-
-  useEffect(() => {
-    if (templates?.length && !templateId) {
-      setTemplateId((templates.find(t => t.is_default) || templates[0]).id);
-    }
-  }, [templates, templateId]);
-
-  const selectedTpl = templates?.find(t => t.id === templateId);
-
-  const preview = useMemo(() => {
-    if (!collection || !selectedTpl) return '';
-    return renderTemplate(selectedTpl.body, {
-      nome: collection.contact_name || collection.client?.name || 'Cliente',
-      numero_os: collection.service_order?.service_order_number || 'Avulso',
-      valor: Number(collection.amount),
-      vencimento: collection.due_date,
-      pix: settings?.['pix_key'] || settings?.['company_pix'] || '',
-      empresa: settings?.['company_name'] || 'HBR Marine',
-    });
-  }, [collection, selectedTpl, settings]);
+  const [cobrar, setCobrar] = useState(false);
 
   if (!collection) {
     return (
@@ -104,26 +82,21 @@ export function CollectionDetailSheet({ collectionId, onClose }: Props) {
             </div>
 
             <div className="space-y-2">
-              <Label>Template</Label>
-              <Select value={templateId} onValueChange={setTemplateId}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {(templates || []).map(t => (
-                    <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <div className="rounded-lg bg-muted p-3 text-sm whitespace-pre-wrap font-mono max-h-48 overflow-y-auto">
-                {preview}
-              </div>
+              <Label>Cobrar pelo WhatsApp</Label>
+              <p className="text-xs text-muted-foreground">
+                A mensagem vai com tudo que o cliente tem em aberto, só para o WhatsApp do cadastro e com as travas da
+                ficha (entrada esperando no Extrato, piso, horário, opt-out). Você confere antes de enviar.
+              </p>
               <Button
-                className="w-full bg-green-600 hover:bg-green-700 text-white"
-                disabled={send.isPending}
-                onClick={() => send.mutate({ collection, template: selectedTpl })}
+                className="w-full gap-2"
+                disabled={!collection.client_id || collection.status === 'paid' || collection.status === 'cancelled'}
+                onClick={() => setCobrar(true)}
               >
-                <MessageCircle className="h-4 w-4 mr-2" />
-                {send.isPending ? 'Enviando...' : 'Enviar via WhatsApp'}
+                <MessageCircle className="h-4 w-4" /> Cobrar o cliente
               </Button>
+              {!collection.client_id && (
+                <p className="text-xs text-destructive">Esta cobrança não está ligada a um cliente do cadastro: ligue-a a um cliente para cobrar pelo WhatsApp.</p>
+              )}
             </div>
 
             <div className="space-y-3 border-t pt-4">
@@ -141,6 +114,7 @@ export function CollectionDetailSheet({ collectionId, onClose }: Props) {
 
       <AddContactDialog open={addContact} onOpenChange={setAddContact} collectionId={collection.id} />
       <EditContactDialog open={editContact} onOpenChange={setEditContact} collection={collection} />
+      <CobrarClienteDialog clienteId={cobrar ? collection.client_id || null : null} onFechar={() => setCobrar(false)} />
     </>
   );
 }
