@@ -5572,3 +5572,84 @@ quatro estão latentes.
 - **Menor mudança:** na descrição de `schedule_self_reminder`, dizer que "deixa em espera até <data>" de uma OS ou de um
   orçamento é `os_planejar` com `congelar_ate`, e não lembrete. Ou, no prompt, a regra: "em espera" dito sobre OS/ORÇ vai
   ao plano. Mexe no texto que o modelo lê, então entra num lote com teste de escolha de ferramenta. Não corrigido aqui.
+- **Causa provável (26/11/2026):** no rastro, 10 s entre o turno e a chamada, só `schedule_self_reminder` e a mensagem
+  "Você deixou em espera: não estava combinado". O modelo leu que a espera JÁ estava feita e pediu só o lembrete da data,
+  com o lembrete à vista e o `os_planejar` só pela `ferramenta_extra`. O prompt ainda dizia "congelar_ate só com \"não mexe
+  até\"". Seis ensaios limpos com Sonnet (recorte e prompt inteiro, inclusive o texto antigo) escolheram `os_planejar`: o
+  erro não reproduz fora do turno real (material em `pacote1/agenda-lote2/p1-06/ensaio-resultado.md`).
+- **Situação (26/11/2026, ramo `session/agenda2`, commit `26d3654a`, NÃO publicado):** o texto que o modelo lê diz, em
+  três lugares do `prompt.ts` (o "Fato que o dono conta", o item de `congelar_ate` e LEMBRETES), na descrição de
+  `schedule_self_reminder` e na de `congelar_ate`, que "deixa em espera até <data>", "em espera até" e "não mexe até" de uma
+  OS ou de um orçamento é `os_planejar` com `congelar_ate`, nunca lembrete. "Segura até" ficou de fora ("segura o motorhome
+  até dia 13" pode ser `sai_em`). `prompt-ferramentas_test.ts` cobra as frases. Prova: publicar `ai-agent` + `erp-mcp` e o
+  dono mandar de novo a frase; o assistente tem de devolver a releitura do plano pedindo *grava*.
+
+### [NOVO-agenda-p1-09] Com `equipe_silencio_acao = 'tirar'`, o acorde do silêncio sem replano diz "A agenda automática não está ligada"
+
+- **Onde:** `_agenda_rotina_acordes_da_equipe`, o `else` de `v_rep` nulo (já existia antes do pacote 1).
+- **Efeito:** quando o técnico não tinha OS no dia ou o replano falhou, o acorde ao dono diz "A agenda automática não está
+  ligada: reveja o dia dele." mesmo com `modo_proposta` ligado. A frase é falsa nesses dois casos.
+- **Menor mudança:** separar o caso `modo_proposta <> 'ligado'` de "não consegui refazer a agenda". Não corrigido aqui
+  (achado do construtor do A2, 26/11/2026).
+
+### [NOVO-agenda-p1-10] `_agenda_sinal_parado` é definer e executável por `authenticated`: um usuário logado sabe 1 bit do `audit_log` de qualquer OS
+
+- **Onde:** `supabase/migrations/20270301120100_agenda_p1_sinal_parado.sql` (A1b). A função lê `audit_log`, que tem RLS
+  (o técnico não lê), e precisa de execute para `authenticated` porque `_agenda_classe_da_os` roda nas leituras do painel.
+- **Efeito:** com `sinal_cobrar_max_dias` preenchida, qualquer usuário logado, inclusive o técnico, consegue saber de
+  qualquer OS se o orçamento "virou aguardando sinal há mais de N dias". Só o booleano; a prontidão vem do chamador. Com a
+  chave nula, a função devolve false sem ler `audit_log`.
+- **Menor mudança:** aceitar (a crítica de risco aceitou: "devolve só o booleano"). Receber só o uuid e ler `status` e
+  `quote_status` de `service_orders` não fecha o bit. Não corrigido aqui.
+- **Nota do mesmo construtor:** sem uma virada no `audit_log`, a idade conta do `aprovada_em` da prontidão, que num
+  orçamento não assinado é o `created_at`. Um orçamento antigo aprovado por um caminho que não gravou `audit_log` seria
+  tratado como parado. É o lado seguro (ele espera o sinal). Em 26/11/2026 o único orçamento em "aguardando sinal" é o
+  ORÇ-00095, com a virada registrada em 25/09.
+
+### [NOVO-agenda-p1-11] "Mando? (vence 19h)" no bloco do cliente da manhã convida um "sim" que pode aprovar outro cartão
+
+- **Onde:** o bloco do cliente em `agenda_aprovacoes_da_manha` (no ar desde 19/11/2026).
+- **Efeito:** a pergunta "Mando?" convida o dono a responder "sim". Com um cartão do assistente esperando, o "sim" aprova
+  o cartão, não o envio ao cliente. É o mesmo furo do ponto 4 da crítica de risco do pacote 1.
+- **Menor mudança:** tirar "Mando?": a última linha do bloco já traz *manda cliente*. Não corrigido aqui (é a frente do
+  "agrupar para o cliente"; achado do construtor do A5/A4, 26/11/2026).
+
+### [NOVO-agenda-p1-12] Pergunta do gestor com prazo gravado só aparece no bloco das 17:30
+
+- **Onde:** `_agenda_ontem_da_manha` (A5/A4, `20270301120400`) deixa de fora toda pergunta com `veto_ate` preenchido: a
+  manhã escreve só o título, sem a data, e mostrar a pergunta antes do prazo arma a opção padrão
+  (`_agenda_gestor_vetos`, `mostrada_em < veto_ate`).
+- **Efeito:** essas perguntas podem vencer sem que o dono as veja de manhã. O prazo não arma sem ter sido mostrado, então
+  é o lado seguro. Em 26/11/2026: 1 das 16 abertas (a crítica de atraso longo), e o bloco das 17:30 nunca corta a crítica.
+- **Menor mudança:** depois de a manhã passar pela trava do "1", mostrá-las com a data. Não corrigido aqui.
+
+### [NOVO-agenda-p1-13] O título da pergunta corta a escolha: a crítica aparece só com a primeira frase
+
+- **Onde:** `_agenda_titulo_da_pergunta` fica com a 1ª frase.
+- **Efeito:** na manhã do A5, a crítica sai como "Nelson: Não cabe tudo até qui 05/11.", sem o "Qual aceita atrasar?".
+  O dono vê o problema, mas não a decisão que se espera dele (a linha leva a palavra *agenda pendências*).
+- **Menor mudança:** quando o efeito for "opcao", usar o texto até " 1) ". Não corrigido aqui.
+
+### [NOVO-agenda-p1-14] Sábado: o Secretário manda a manhã, a agenda não conta o sábado como dia útil
+
+- **Onde:** o Secretário trata sábado como dia útil (`tipoDoDia`); a agenda não (`sabado_util` false).
+- **Efeito:** com `manha_sobras_max` ligada, a conferência de sexta sai no sábado e de novo na segunda, se o dono não
+  responder no sábado. As sobras mostradas no sábado já contam para o teto de `perguntas_vezes_max`.
+- **Menor mudança, se o dono quiser:** `_agenda_ontem_da_manha` sai cedo quando `agenda_dia_util(p_hoje)` for falso. Não
+  corrigido aqui.
+
+### [NOVO-agenda-p1-15] Na manhã, a crítica obedece o teto de vezes; no bloco das 17:30, não
+
+- **Onde:** `_agenda_ontem_da_manha` aplica `perguntas_vezes_max` também à crítica (como a spec pediu); o bloco das 17:30
+  nunca corta a crítica.
+- **Efeito:** a crítica mostrada 2 vezes some da manhã e continua no bloco das 17:30. Coerente com a spec, mas é uma
+  diferença entre os dois blocos.
+- **Menor mudança:** nenhuma por ora; rever junto com o NOVO-agenda-p1-12.
+
+### [NOVO-agenda-p1-16] O erro ao montar a parte "ficou de ontem" da manhã não fica registrado
+
+- **Onde:** `_agenda_ontem_da_manha` devolve a manhã como veio, mais `ontem = {erro, sqlstate}`. A função roda na
+  transação só de leitura do PostgREST e não tem onde gravar.
+- **Efeito:** se a parte nova falhar, a manhã sai sem ela, calada.
+- **Menor mudança:** o Secretário (`ai-daily-briefing`) gravar `ontem.erro` em `app_error_logs`. É TypeScript; fica para
+  depois.
