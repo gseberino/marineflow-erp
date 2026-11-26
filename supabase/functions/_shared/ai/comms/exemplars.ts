@@ -17,7 +17,7 @@ export const EXEMPLARES: Record<TipoMensagem, Exemplar> = {
     tipo: "cotacao",
     titulo: "Cotação a fornecedor",
     ruim: 'Olá ANDERSON DOS SANTOS ELETRONICA... Cotação para sistema LiFePO4 12V Victron. Prazo desejado: o mais breve. Pode responder com nº, preço e prazo? Ex.: "1 - R$ 850".',
-    bom: "Olá, tudo bem? Aqui é da HBR Marine Solutions.\nGostaríamos de uma cotação (COT-00002):\n1. 8x Porta Fusível MIDI\n2. 1x Fusível 50A\n\nObrigado!",
+    bom: "Olá, tudo bem? Aqui é da HBR Marine & RV Systems.\nGostaríamos de uma cotação (COT-00002):\n1. 8x Porta Fusível MIDI\n2. 1x Fusível 50A\n\nObrigado!",
     porque: "Saudação neutra (sem razão social), sem aplicação, sem prazo estipulado, sem ensinar a responder.",
   },
   cobranca: {

@@ -57,6 +57,8 @@ export interface DadosDaEmpresa {
   bankName?: string | null;
   bankAgency?: string | null;
   bankAccount?: string | null;
+  /** Titular da conta, como o banco mostra no PIX. Vazio = o nome da empresa. */
+  titular?: string | null;
 }
 
 export interface ResumoDeOrcamentoInput {
@@ -256,7 +258,7 @@ export function buildQuoteWhatsAppSummary(input: ResumoDeOrcamentoInput): string
     if (mostrar.banco && (agencia || conta)) {
       linhas.push(`   ${[agencia && `Ag ${agencia}`, conta && `Conta ${conta}`].filter(Boolean).join(' · ')}`);
     }
-    linhas.push(`_Favorecido: ${empresaNome}_`);
+    linhas.push(`_Favorecido: ${(empresa.titular || '').trim() || empresaNome}_`);
     if (temSinal) {
       // O próximo passo, dito por escrito: sem isso o cliente paga e fica esperando sem
       // saber se alguém viu.

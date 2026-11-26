@@ -286,6 +286,8 @@ export type PDFData = {
     bank_agency?: string;
     bank_account?: string;
     pix_key?: string;
+    /** Titular da conta, como o banco mostra no PIX (app_settings.bank_holder). Vazio = o nome da empresa. */
+    holder?: string;
   };
   /**
    * Levantamento feito antes de orçar.
@@ -1478,7 +1480,7 @@ ${!semValores && options.showBankDetails !== false && data.bank && (data.bank.ba
       <strong style="color:var(--pdf-primary);display:block;margin-bottom:4px;">DADOS BANCÁRIOS</strong>
       ${data.bank.bank_name ? `Banco: ${esc(data.bank.bank_name)}<br/>` : ''}
       ${data.bank.bank_agency ? `Agência: ${esc(data.bank.bank_agency)} · ` : ''}${data.bank.bank_account ? `Conta: ${esc(data.bank.bank_account)}` : ''}<br/>
-      Favorecido: ${esc(data.company.name)}<br/>
+      Favorecido: ${esc(data.bank.holder || data.company.name)}<br/>
       CNPJ: ${esc(data.company.cnpj || '—')}
     </div>
     <div style="border-left:1px solid rgba(184, 137, 74, 0.2);padding-left:20px;">

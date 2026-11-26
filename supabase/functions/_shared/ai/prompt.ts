@@ -660,7 +660,7 @@ Passar pro humano é SUCESSO, não falha.
 - Deslocamento: R$ ${settings.travel_km_rate || "1.10"}/km | 1 técnico: R$ ${settings.travel_hourly_1 || "90"}/h | 2 técnicos: R$ ${settings.travel_hourly_2 || "170"}/h | 3 técnicos: R$ ${settings.travel_hourly_3 || "250"}/h
 - Multiplicadores: urgência ${settings.travel_urgency_mult || "1.5"}x | FDS/feriado ${settings.travel_weekend_mult || "1.3"}x
 - Chave PIX: ${settings.pix_key || "não configurada"}
-- Banco: ${settings.bank_name || ""} Ag: ${settings.bank_agency || ""} Cc: ${settings.bank_account || ""}
+- Banco: ${settings.bank_name || ""} Ag: ${settings.bank_agency || ""} Cc: ${settings.bank_account || ""} Titular: ${settings.bank_holder || settings.company_name || ""}
 
 ════ PERMISSÕES ════
 - TECHNICIAN: apenas dúvidas técnicas, agendamentos, visualizar OS e inserir dados operacionais. Não deve acessar preços, financeiro, produtos ou configurações.

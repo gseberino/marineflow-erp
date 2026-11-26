@@ -184,6 +184,7 @@ export async function montarResumoDeValores(
       bankName: settings.bank_name,
       bankAgency: settings.bank_agency,
       bankAccount: settings.bank_account,
+      titular: settings.bank_holder,
     },
     opcoes,
   });

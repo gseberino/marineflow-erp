@@ -135,6 +135,7 @@ export async function montarDadosDoRecibo(r: ReceivableRow, paymentId?: string):
       bank_agency: get('bank_agency') || undefined,
       bank_account: get('bank_account') || undefined,
       pix_key: get('pix_key') || undefined,
+      holder: get('bank_holder') || undefined,
     },
     serviceOrder: {
       service_order_number: referencia || r.id.slice(0, 8),

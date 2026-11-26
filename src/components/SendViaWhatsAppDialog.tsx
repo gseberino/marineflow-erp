@@ -514,6 +514,7 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
         bankName: appSettings?.['bank_name'],
         bankAgency: appSettings?.['bank_agency'],
         bankAccount: appSettings?.['bank_account'],
+        titular: appSettings?.['bank_holder'],
       },
       opcoes: pdfOptions,
     }));

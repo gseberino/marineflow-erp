@@ -46,6 +46,7 @@ export function CompanyTab() {
     bank_agency: '',
     bank_account: '',
     pix_key: '',
+    bank_holder: '',
     payment_link_url: '',
     app_public_url: 'https://marineflow-erp.vercel.app',
   });
@@ -87,6 +88,7 @@ export function CompanyTab() {
           bank_agency: map.bank_agency || '',
           bank_account: map.bank_account || '',
           pix_key: map.pix_key || '',
+          bank_holder: map.bank_holder || '',
           payment_link_url: map.payment_link_url || '',
           app_public_url: map.app_public_url || 'https://marineflow-erp.vercel.app',
         }));
@@ -417,6 +419,12 @@ export function CompanyTab() {
             <label className="text-xs font-medium text-muted-foreground">Chave PIX</label>
             <Input value={form.pix_key} onChange={e => set('pix_key', e.target.value)}
               placeholder="CNPJ, e-mail, telefone ou chave aleatória" className="mt-1" />
+          </div>
+          <div className="md:col-span-2">
+            <label className="text-xs font-medium text-muted-foreground">Titular da conta (como o banco mostra no PIX)</label>
+            <Input value={form.bank_holder} onChange={e => set('bank_holder', e.target.value)}
+              placeholder="Razão social da conta, ex.: EMPRESA LTDA" className="mt-1" />
+            <p className="mt-1 text-xs text-muted-foreground">Sai como "Favorecido" no orçamento, na OS, na fatura, no recibo e no resumo do WhatsApp. Vazio = o nome da empresa.</p>
           </div>
           <div className="md:col-span-2">
             <label className="text-xs font-medium text-muted-foreground">Link de Pagamento Online (Portal do Cliente)</label>

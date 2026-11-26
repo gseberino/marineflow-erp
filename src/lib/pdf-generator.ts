@@ -684,7 +684,7 @@ ${(mostraDadosBancarios || mostraInstrucoes) && hasBank ? `
       <strong>Dados Bancários:</strong><br/>
       ${bank.bank_name ? `Banco: ${esc(bank.bank_name)}<br/>` : ''}
       ${bank.bank_agency ? `Agência: ${esc(bank.bank_agency)} · ` : ''}${bank.bank_account ? `Conta: ${esc(bank.bank_account)}` : ''}<br/>
-      Favorecido: ${esc(data.company.name)}<br/>
+      Favorecido: ${esc(bank.holder || data.company.name)}<br/>
       ${data.company.cnpj ? `CNPJ: ${esc(data.company.cnpj)}` : ''}
     </div>` : ''}
     ${mostraInstrucoes ? `<div style="${duasColunas ? 'border-left:1px solid var(--pdf-border);padding-left:12px;' : ''}">

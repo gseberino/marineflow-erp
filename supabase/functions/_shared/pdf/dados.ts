@@ -286,6 +286,7 @@ export async function carregarPDFData(
       bank_agency: get('bank_agency') || undefined,
       bank_account: get('bank_account') || undefined,
       pix_key: get('pix_key') || undefined,
+      holder: get('bank_holder') || undefined,
     },
     serviceOrder: {
       // Por ele a geração pede a revisão (./revisao.ts). O link do cliente lê `id` (OS_PUBLICA).
