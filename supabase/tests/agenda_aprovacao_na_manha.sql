@@ -40,9 +40,24 @@ $f$;
 create function pg_temp.em(p_quando text) returns timestamptz language sql immutable as $f$
   select (p_quando::timestamp) at time zone 'America/Sao_Paulo'
 $f$;
+-- (26/11/2026, pacote 1 do assistente, A5/A4, 20270301120400) Tira os blocos "-- P1 AGENDA: … -- P1 AGENDA: fim", devolvendo as linhas "--antes:" de
+-- dentro deles, e o CR: a camada mais nova sai primeiro. A manhã ganhou 3 deles, cada um DENTRO de um bloco TERMINOU (a linha de antes de cada um é
+-- a do "terminou?"); sem eles, o corpo volta ao de produção de 26/11, e o src abaixo tira os TERMINOU como antes. Provado em agenda_p1_manha.sql.
+create function pg_temp.sem_p1(p text) returns text language sql immutable as $p1$
+  select array_to_string(array(
+           select case when dentro > 0 and l ~ '^--antes:' then substr(l, 9) else l end
+             from (select l, o, sum(case when l ~ '^\s*-- P1 AGENDA:' and l !~ '^\s*-- P1 AGENDA: fim' then 1
+                                         when l ~ '^\s*-- P1 AGENDA: fim' then -1 else 0 end)
+                                over (order by o rows between unbounded preceding and current row) as dentro,
+                          l ~ '^\s*-- P1 AGENDA: fim' as fecha
+                     from unnest(string_to_array(replace(p, chr(13), ''), E'\n')) with ordinality u(l, o)) x
+            where (dentro = 0 and not fecha) or (dentro > 0 and l ~ '^--antes:')
+            order by o), E'\n')
+$p1$;
 -- O corpo (prosrc, sem CR) de uma função pela assinatura.
 -- (23/11/2026, 20270223100000) Sem os blocos "-- TERMINOU: … -- TERMINOU: fim" (devolvidas as linhas "--antes:"): o "terminou ou falta dia?" acrescentou
 -- 3 deles a agenda_aprovacoes_da_manha, e o corpo desta Opção A continua o mesmo; o resto é provado em agenda_terminou_falta_dia.sql.
+-- (26/11/2026, 20270301120400) e antes, sem os "-- P1 AGENDA:" (pg_temp.sem_p1): o md5 esperado não muda.
 create function pg_temp.src(p_assinatura text) returns text language sql stable as $f$
   select array_to_string(array(
            select case when dentro > 0 and l ~ '^--antes:' then substr(l, 9) else l end
@@ -50,7 +65,7 @@ create function pg_temp.src(p_assinatura text) returns text language sql stable 
                                          when l ~ '^\s*-- TERMINOU: fim' then -1 else 0 end)
                                 over (order by o rows between unbounded preceding and current row) as dentro,
                           l ~ '^\s*-- TERMINOU: fim' as fecha
-                     from unnest(string_to_array(replace(p.prosrc, chr(13), ''), E'\n')) with ordinality u(l, o)) x
+                     from unnest(string_to_array(pg_temp.sem_p1(p.prosrc), E'\n')) with ordinality u(l, o)) x
             where (dentro = 0 and not fecha) or (dentro > 0 and l ~ '^--antes:')
             order by o), E'\n')
     from pg_proc p where p.oid = to_regprocedure(p_assinatura)
