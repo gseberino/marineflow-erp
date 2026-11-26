@@ -779,7 +779,10 @@ Deno.test("agenda de produção (Fase 7d, P8): o local é os_planejar, amarrado 
   // (correção, Onda 4, M5) a saída das recusas: o prefixo é do banco, e o modelo não o tira
   assertStringIncludes(secao, "\"lugar novo: X\" vai em local inteiro");
   assertStringIncludes(secao, "com o verbo dele no trecho (\"chegou dia 5\"): quem decide o mês é o banco");
-  assertStringIncludes(secao, "\"Até dia 13\": sobre o bem na HBR ou no pátio é sai_em, que leva \"dia 13\", sem o \"até\"; prazo do cliente é precisa_ate; o bem indisponível é bem_fora; congelar_ate só com \"não mexe até\".");
+  // (pacote 1, NOVO-agenda-p1-06, 26/11/2026) congelar_ate vale também para "deixa em espera até": dito assim, o ORÇ-00095
+  // virou lembrete. O "até dia 13" solto sobre o bem continua sai_em; frase sem "espera" nem "não mexe" não congela.
+  assertStringIncludes(secao, "\"Até dia 13\": sobre o bem na HBR ou no pátio é sai_em, que leva \"dia 13\", sem o \"até\"; prazo do cliente é precisa_ate; o bem indisponível é bem_fora; congelar_ate só com \"não mexe até\", \"deixa em espera até\" ou \"em espera até\".");
+  assertStringIncludes(secao, "\"deixa em espera até 31/01\", \"em espera até\" ou \"não mexe até\" (de uma OS ou de um orçamento) é os_planejar com congelar_ate");
   // (correção, Onda 3, G6, T8) o que não é lugar não vai em local; "em seco" junto do lugar vai em bem_onde; a ferramenta para de dizer "pergunta se não achar"
   assertStringIncludes(secao, "O que não é nome de lugar (\"depois te digo\", \"tanto faz\", \"longe\") não vai em local: pergunte onde é.");
   assertStringIncludes(secao, "\"Em seco\" ou \"na água\" junto do lugar vai em bem_onde, e local leva só o lugar.");

@@ -1712,7 +1712,7 @@ export const whatsappTools: ToolDef[] = [
     // então não há caminho para chegar a um cliente. É ferramenta de trabalho pessoal.
     name: "schedule_self_reminder",
     description:
-      "LEMBRETE PARA O PRÓPRIO USUÁRIO (a pessoa que está falando com você), NUNCA para um cliente. Use SEMPRE que o pedido for 'me lembre', 'me avise', 'lembrete pra mim', 'não me deixe esquecer', 'me cutuca amanhã' etc. Agenda uma mensagem de WhatsApp para o número do próprio solicitante. NÃO use client_id, NÃO use schedule_whatsapp_message, NÃO peça confirmação — é uma ação interna e segura.",
+      "LEMBRETE PARA O PRÓPRIO USUÁRIO (a pessoa que está falando com você), NUNCA para um cliente. Use SEMPRE que o pedido for 'me lembre', 'me avise', 'lembrete pra mim', 'não me deixe esquecer', 'me cutuca amanhã' etc. Agenda uma mensagem de WhatsApp para o número do próprio solicitante. NÃO use client_id, NÃO use schedule_whatsapp_message, NÃO peça confirmação — é uma ação interna e segura. NÃO é para 'deixa em espera até <data>' / 'não mexe até' de uma OS ou de um orçamento: isso é os_planejar com congelar_ate (o lembrete não tira os dias marcados da agenda).",
     input_schema: {
       type: "object",
       properties: {

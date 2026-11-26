@@ -256,7 +256,11 @@ export const agendaProducaoTools: ToolDef[] = [
         nao_antes_motivo: { type: "string" },
         escopo_em_aberto: { type: "string", description: "A pergunta de escopo que ficou em aberto." },
         escopo_decidido: { type: "string", description: "O que o dono decidiu (\"só a primeira parte\")." },
-        congelar_ate: { type: "string", description: "Em espera até (como o dono disse)." },
+        congelar_ate: {
+          type: "string",
+          description: "Em espera até (como o dono disse): \"deixa em espera até 31/01\", \"em espera até\", \"não mexe até\". " +
+            "Depois do *grava*, a agenda tira os dias marcados até essa data. Não é lembrete (schedule_self_reminder).",
+        },
         revisar_em: { type: "string" },
         prioridade: { type: "integer", enum: [1, 2, 3], description: "1 = passa na frente." },
         sem_material: { type: "boolean", description: "true = \"não tem peça a comprar\"." },
