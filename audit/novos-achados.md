@@ -5559,3 +5559,16 @@ quatro estão latentes.
 - **Menor mudança:** citar o trecho da resposta (`left(m.resposta_texto, 60)`) no lugar de *ok* e de "disse que terminou", e
   usar o nome curto de `_agenda_terminou_candidatas` (`display_name` primeiro). Mexe no texto que o dono lê: pede o OK dele.
   Não corrigido aqui.
+
+### [NOVO-agenda-p1-06] "Deixa em espera até 31/01" virou lembrete, e o orçamento continuou com os dias marcados
+
+- **Onde:** o turno do assistente de 26/11/2026 às 09:23 (canal WhatsApp, `rota:modelo_max`). O dono mandou a frase do
+  A1a do pacote 1 ("O ORÇ-00095 não está combinado. Deixa em espera até 31/01."). O modelo chamou `schedule_self_reminder`
+  (lembrete em 31/01/2027 08:00) e não chamou `os_planejar` com `congelar_ate`. A ferramenta certa existe
+  (`supabase/functions/_shared/ai/tools/agenda-producao.ts`, `congelar_ate`: "Em espera até (como o dono disse)") e a
+  descrição dela cita "espera".
+- **Efeito:** não nasceu releitura nem *grava*. Às 09:27 o ORÇ-00095 seguia com 4 meios-dias publicados (09/12 tarde e
+  10/12 manhã, dono e técnico) e com o "compre até 26/11" do material. O dono só percebeu porque o *grava* não veio.
+- **Menor mudança:** na descrição de `schedule_self_reminder`, dizer que "deixa em espera até <data>" de uma OS ou de um
+  orçamento é `os_planejar` com `congelar_ate`, e não lembrete. Ou, no prompt, a regra: "em espera" dito sobre OS/ORÇ vai
+  ao plano. Mexe no texto que o modelo lê, então entra num lote com teste de escolha de ferramenta. Não corrigido aqui.

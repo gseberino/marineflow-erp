@@ -241,6 +241,11 @@ export const FORA_DA_BANCADA = new Set([
   '20270226140000_gateway_falha_antes_do_prazo.sql',
   '20270227100000_tela_le_calendario_do_cartao.sql',
   '20270228100000_baixa_do_recebimento_pelo_boleto.sql',
+  // Leva B do assistente (na main de 25/11). V1: a tabela assistente_quedas é criada sem "if not exists", e a 2ª rodada da bancada para nela
+  // ("relation \"assistente_quedas\" already exists", 26/11). S5: grava ai_max_assinantes com o único administrador ativo e recusa se não
+  // houver exatamente um ("esperava 1 administrador ativo (o assinante), achei 0", 26/11). Nenhuma das duas recria função da agenda.
+  '20270301110000_assistente_quedas.sql',
+  '20270301130000_assinatura_max_por_pessoa.sql',
 ]);
 
 /**
