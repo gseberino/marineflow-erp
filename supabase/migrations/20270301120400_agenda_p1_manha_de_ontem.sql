@@ -164,7 +164,9 @@ begin
       v_sobras := v_sobras + 1;
       continue when cardinality(v_txt) >= v_max;
       v_fr := public._agenda_pergunta_frases(q, p_hoje);
-      v_base := coalesce(nullif(btrim(case when q.padrao_efeito = 'opcao' then v_fr ->> 'titulo' else v_fr ->> 'frase' end), ''), btrim(q.texto));
+      -- a frase: fora do efeito nada ela é o próprio título (_agenda_pergunta_frases), então é o "título no efeito opcao, a frase no resto" da
+      -- especificação sem ler o padrão aqui (a régua B10c de agenda_fase7f_base.sql: quem lê as colunas do padrão é a função das frases)
+      v_base := coalesce(nullif(btrim(v_fr ->> 'frase'), ''), btrim(q.texto));
       v_linha := case when v_base ~ '[?]' and v_base !~ '[*][^*]+[*]'
                       then public._agenda_corta(v_base, c_linha_max - char_length(c_inteira)) || c_inteira
                       else public._agenda_corta(v_base, c_linha_max) end;
