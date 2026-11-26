@@ -8,6 +8,7 @@
 
 import { esc } from "./documento.ts";
 import { dataBR, dataHoraBR } from "./datas.ts";
+import { cssDasCoresDaMarca, cssDasFontesDaMarca, FIO_EM_DEGRADE, FONTE_DO_TEXTO, FONTE_DOS_TITULOS, SLOGAN } from "./marca.ts";
 
 export interface ColunaDoRelatorio {
   titulo: string;
@@ -36,6 +37,8 @@ export interface Relatorio {
   /** Avisos que mudam a leitura (compras ainda não lançadas, consulta parcial…). */
   avisos?: string[];
   geradoEm?: Date;
+  /** O logo da empresa (app_settings.company_logo_url, o desenho original). Sem ele, o cabeçalho sai só com o título. */
+  logoUrl?: string | null;
 }
 
 const REAL = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -67,40 +70,59 @@ function tabela(t: TabelaDoRelatorio): string {
 
 export function montarRelatorioHtml(r: Relatorio): string {
   const gerado = dataHoraBR(r.geradoEm ?? new Date());
+  // A identidade das folhas de papel novas (25/11/2026, marca.ts): logo | fio cinza | título, o fio em degradê, títulos
+  // de tabela com a marca em círculo e o fio fino, cabeçalho de tabela claro e o slogan no pé. Só o desenho mudou.
+  const logo = (r.logoUrl ?? "").trim();
   return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>${esc(r.titulo)}</title>
 <style>
+${cssDasFontesDaMarca()}
+${cssDasCoresDaMarca()}
 @page{size:A4;margin:12mm}
 *{box-sizing:border-box}
-body{font-family:"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#18293a;font-size:10.5pt;margin:0}
-header{border-bottom:2px solid #0b3d66;padding-bottom:6px;margin-bottom:10px}
-.empresa{font-size:9pt;color:#55687c;letter-spacing:.06em;text-transform:uppercase}
-h1{font-size:16pt;margin:2px 0 2px;color:#0b3d66}
-.periodo{font-size:10pt;color:#55687c}
-.filtros{font-size:9pt;color:#55687c;margin-top:2px}
-.resumo{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 4px}
-.resumo div{border:1px solid #d5dee7;border-radius:6px;padding:5px 9px;min-width:120px}
-.resumo b{display:block;font-size:12pt}
-.resumo span{font-size:8.5pt;color:#55687c}
-.avisos{background:#f5edd6;border:1px solid #e3d3a4;border-radius:6px;padding:6px 9px;margin:8px 0;font-size:9pt}
-.avisos p{margin:2px 0}
-h2{font-size:11.5pt;margin:12px 0 2px;color:#0b3d66}
-.nota{font-size:8.5pt;color:#55687c;margin:0 0 4px}
+body{font-family:${FONTE_DO_TEXTO};color:var(--marinho);font-size:10.5pt;margin:0;line-height:1.36;
+  -webkit-print-color-adjust:exact;print-color-adjust:exact}
+header{display:flex;align-items:center;gap:5mm}
+.logo{display:block;flex:none;height:13mm;width:auto;max-width:36mm;object-fit:contain}
+.nome{flex:1;min-width:0}
+.logo+.nome{border-left:.3mm solid var(--cinza);padding-left:5mm}
+.empresa{font-size:7.5pt;font-weight:600;color:var(--azul);letter-spacing:.08em;text-transform:uppercase}
+h1{font-family:${FONTE_DOS_TITULOS};font-weight:800;font-size:16pt;line-height:1.1;margin:.6mm 0 .8mm;color:var(--marinho);
+  text-transform:uppercase;letter-spacing:.02em}
+.periodo{font-size:9.5pt;color:var(--azul)}
+.filtros{font-size:8.5pt;color:var(--azul);margin-top:.5mm}
+.fio{height:.9mm;border-radius:1mm;background:${FIO_EM_DEGRADE};margin:2.2mm 0 3.2mm}
+.resumo{display:flex;flex-wrap:wrap;gap:2mm;margin:0 0 1.5mm}
+.resumo div{border:.3mm solid var(--claro);border-radius:1.2mm;padding:1.4mm 3mm;min-width:32mm}
+.resumo b{display:block;font-family:${FONTE_DOS_TITULOS};font-weight:700;font-size:12pt;line-height:1.25}
+.resumo span{font-size:8pt;color:var(--azul)}
+.avisos{background:#FBF7F0;border:.3mm solid var(--ouro-claro);border-left:1.2mm solid var(--ouro);border-radius:1.1mm;
+  padding:1.6mm 3mm;margin:2.5mm 0;font-size:9pt}
+.avisos p{margin:.5mm 0}
+h2{display:flex;align-items:center;gap:2.2mm;font-family:${FONTE_DOS_TITULOS};font-size:10.5pt;font-weight:700;
+  text-transform:uppercase;letter-spacing:.07em;color:var(--marinho);margin:4mm 0 1mm;break-after:avoid}
+h2::before{content:"";flex:none;width:2.6mm;height:2.6mm;border-radius:50%;background:var(--marinho)}
+h2::after{content:"";flex:1 1 8mm;height:.3mm;background:var(--cinza)}
+.nota{font-size:8.5pt;color:var(--azul);margin:0 0 1.5mm}
 table{width:100%;border-collapse:collapse;font-size:9pt}
-th,td{text-align:left;padding:3px 5px;border-bottom:1px solid #e3e9ef;vertical-align:top}
-th{font-size:8pt;text-transform:uppercase;letter-spacing:.04em;color:#55687c;border-bottom:1px solid #b9c6d3}
+th,td{text-align:left;padding:1mm 1.6mm;border-bottom:.25mm solid var(--pauta);vertical-align:top}
+th{font-size:7.5pt;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--azul);background:var(--fundo);
+  border-top:.25mm solid var(--grade);border-bottom:.25mm solid var(--grade)}
 .num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
-tfoot td{font-weight:700;border-top:1px solid #b9c6d3;border-bottom:none}
+tfoot td{font-weight:700;border-top:.4mm solid var(--marinho);border-bottom:none}
 tr{break-inside:avoid}
 thead{display:table-header-group}
-.vazio{color:#55687c;font-style:italic}
-footer{margin-top:14px;font-size:8pt;color:#55687c}
+.vazio{color:var(--azul);font-style:italic}
+footer{margin-top:5mm;padding-top:1.6mm;border-top:.3mm solid var(--cinza);display:flex;justify-content:space-between;
+  align-items:baseline;gap:4mm;font-size:8pt;color:var(--azul)}
+footer em{flex:none;font-style:normal;font-size:6.5pt;font-weight:600;letter-spacing:.14em;color:var(--marinho)}
 </style></head><body>
-<header><div class="empresa">${esc(r.empresa)}</div><h1>${esc(r.titulo)}</h1>
-<div class="periodo">${esc(r.periodo)}</div>${r.filtros?.length ? `<div class="filtros">${r.filtros.map(esc).join(" · ")}</div>` : ""}</header>
+<header>${logo ? `<img class="logo" src="${esc(logo)}" alt="">` : ""}<div class="nome"><div class="empresa">${esc(r.empresa)}</div><h1>${esc(r.titulo)}</h1>
+<div class="periodo">${esc(r.periodo)}</div>${r.filtros?.length ? `<div class="filtros">${r.filtros.map(esc).join(" · ")}</div>` : ""}</div></header>
+<div class="fio"></div>
 ${r.resumo.length ? `<div class="resumo">${r.resumo.map((x) => `<div><b>${esc(x.valor)}</b><span>${esc(x.rotulo)}</span></div>`).join("")}</div>` : ""}
 ${r.avisos?.length ? `<div class="avisos">${r.avisos.map((a) => `<p>${esc(a)}</p>`).join("")}</div>` : ""}
 ${r.tabelas.map(tabela).join("\n")}
-<footer>Gerado pelo assistente do MarineFlow em ${esc(gerado)}. Valores do sistema na hora do pedido.</footer>
+<footer><span>Gerado pelo assistente do MarineFlow em ${esc(gerado)}. Valores do sistema na hora do pedido.</span><em>${esc(SLOGAN)}</em></footer>
 </body></html>`;
 }
 

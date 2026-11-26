@@ -17,6 +17,15 @@ import { numerarLinhas, ordenarLinhas } from '../linhas-da-os.ts';
 import { isQuoteStatus } from './document-type.ts';
 import { ehCobranca, notaDoMaterial, semValores } from './via-texto.ts';
 import { type LinhaDeAtencao, linhasDeAtencao } from './via-atencao.ts';
+import {
+  cssDasCoresDaMarca,
+  cssDasFontesDaMarca,
+  FIO_EM_DEGRADE,
+  FONTE_DO_TEXTO,
+  FONTE_DOS_TITULOS,
+  MARCA,
+  SLOGAN,
+} from './marca.ts';
 
 // semValores mora em via-texto.ts (porte da via v2, F1); continua saindo daqui para quem já importava.
 export { semValores };
@@ -281,18 +290,18 @@ export function segurancaSemRoteiro(serviceOrderId: string, linhas: LinhaDeSegur
   });
 }
 
-/** Azul-marinho da HBR, o mesmo do PDF que o cliente já recebe. */
-const BRAND = '#002B5B';
-
 /**
- * A fonte: "Open Sans" primeiro — é a ÚNICA fonte do Chromium do /api/pdf (@sparticuz/chromium); o PDF do WhatsApp
- * sai nela e as contagens de folhas aprovadas foram medidas nela. No navegador do escritório cai na Arial.
- * Ela NÃO tem "⚠" nem "→": o ⚠ é o desenho TRI e a seta entre as datas virou "até".
+ * As fontes da marca (25/11/2026: a via ganhou a identidade das folhas de papel novas — marca.ts). Vão EMBUTIDAS no HTML:
+ * o Chromium do /api/pdf (@sparticuz/chromium) só tem a Open Sans, que fica logo depois na pilha e desenha o que o
+ * subconjunto latino da marca não tiver. Por isso o teste de glifos continua contra a Open Sans do servidor: nada de
+ * "⚠" nem "→" (o ⚠ é o desenho TRI e a seta entre as datas virou "até"). As contagens de folhas aprovadas foram medidas
+ * na Open Sans; o corpo usa a altura de linha dela (1,36) para a folha não crescer.
  */
-const FONTE = '"Open Sans", Arial, Helvetica, sans-serif';
+const FONTE = FONTE_DO_TEXTO;
+const FONTE_TITULO = FONTE_DOS_TITULOS;
 
 /** O ⚠ como desenho (a fonte do servidor não tem o caractere U+26A0). */
-const TRI = '<svg class="tri" viewBox="0 0 20 18" role="img" aria-label="perigo"><path d="M10 1 19.3 17H.7Z" fill="#111"/><path d="M10 6.3v5.4" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/><circle cx="10" cy="14.3" r="1.25" fill="#fff"/></svg>';
+const TRI = `<svg class="tri" viewBox="0 0 20 18" role="img" aria-label="perigo"><path d="M10 1 19.3 17H.7Z" fill="${MARCA.marinho}"/><path d="M10 6.3v5.4" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/><circle cx="10" cy="14.3" r="1.25" fill="#fff"/></svg>`;
 
 function escapeHtml(value: string | null | undefined): string {
   if (!value) return '';
@@ -515,9 +524,11 @@ export function contatoDoFechamento(h: RouteSheetHeader): string {
  * material e limites), o que faço em cada serviço, e o que devolvo ao sair. O
  * roteiro de passos, quando existe, vem depois dos serviços.
  *
- * Preto e branco, fonte grande, quadradinho para marcar — a cor nunca carrega
- * informação sozinha e tudo aguenta fotocópia. Preço não entra (decisão do dono,
- * 12/08), nem o link do portal do cliente, que mostra preço.
+ * Fonte grande, quadradinho para marcar — a cor nunca carrega informação sozinha e
+ * tudo aguenta fotocópia. Preço não entra (decisão do dono, 12/08), nem o link do
+ * portal do cliente, que mostra preço. Desde 25/11/2026 com a identidade da marca
+ * (marca.ts: logo, cores, Archivo e Hanken Grotesk embutidas, fio em degradê, slogan
+ * no pé da página) — só o visual: conteúdo, ordem e paginação são os aprovados.
  *
  * Avaliação que orientou o desenho (01/10/2026): a via imprimia só o nome dos
  * serviços e deixava de fora o que já estava no sistema (pedido do cliente,
@@ -773,33 +784,40 @@ export function buildRouteSheetHtml(
 <meta charset="utf-8">
 <title>Via do técnico ${numero}</title>
 <style>
-  /* Número da OS e página em toda folha: folha solta continua identificável. */
+  ${cssDasFontesDaMarca()}
+  ${cssDasCoresDaMarca()}
+  /* Número da OS e página em toda folha: folha solta continua identificável. O slogan da marca à esquerda (25/11/2026). */
   @page {
     size: A4; margin: 11mm 10mm 14mm;
+    @bottom-left { content: "${SLOGAN}"; font: 600 6.5pt ${FONTE}; letter-spacing: .14em; color: ${MARCA.marinho}; }
     @bottom-right { content: "${numero} · pág. " counter(page) " de " counter(pages);
-                    font: 8pt ${FONTE}; color: #444; }
+                    font: 8pt ${FONTE}; color: ${MARCA.azul}; }
   }
   * { box-sizing: border-box; }
-  body { font-family: ${FONTE}; color: #000; margin: 0; font-size: 11pt;
+  /* A altura de linha da Open Sans (1,36): as folhas aprovadas foram medidas nela, e a letra da marca não pode crescer a via. */
+  body { font-family: ${FONTE}; color: var(--marinho); margin: 0; font-size: 11pt; line-height: 1.36;
          -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   /* Texto sem espaço maior que a coluna (um link longo do Maps no acesso, na marina, nas instruções, no levantamento)
      quebra em qualquer ponto: sem isto, o Chromium encolhia a folha INTEIRA para caber (letra de 10 para ~6,7 pt). */
   body { overflow-wrap: anywhere; }
   p { margin: 0 0 1mm; }
 
-  /* Cabeçalho: marca discreta — logo pequeno e um filete, sem faixa cheia. */
-  .head { border-bottom: 1.2pt solid ${BRAND}; padding-bottom: 3mm; margin-bottom: 4mm; }
-  .brand { display: flex; align-items: center; justify-content: space-between; gap: 6mm; }
-  .brandleft { display: flex; align-items: center; gap: 3mm; min-width: 0; }
-  .logo { height: 11mm; width: auto; max-width: 45mm; object-fit: contain; }
-  .coname { font-size: 11pt; font-weight: bold; color: ${BRAND}; letter-spacing: .01em; }
-  .doctype { text-align: right; white-space: nowrap; }
-  .doctype .kind { font-size: 8pt; letter-spacing: .1em; text-transform: uppercase; color: #444; }
-  /* Para pendurar: número da OS e veículo legíveis de longe (rodada 2, f). */
-  .doctype .num { font-size: 28pt; font-weight: bold; color: ${BRAND}; line-height: 1.05; letter-spacing: .01em; }
+  /* Cabeçalho da marca (o das folhas de papel novas): logo | fio cinza | o que é a folha | o número da OS numa caixa
+     marinho, grande, para ler de longe com a ficha pendurada (rodada 2, f: 28 pt). Embaixo, o fio em degradê. */
+  .head { display: flex; align-items: center; gap: 5mm; }
+  .logo { display: block; flex: none; height: 14mm; width: auto; max-width: 40mm; object-fit: contain; }
+  .doctype { flex: 1; min-width: 0; }
+  .logo + .doctype { border-left: .3mm solid var(--cinza); padding-left: 5mm; }
+  .doctype .kind { font-family: ${FONTE_TITULO}; font-weight: 800; font-size: 13pt; line-height: 1.05;
+                   text-transform: uppercase; letter-spacing: .02em; color: var(--marinho); }
+  .coname { display: block; margin-top: 1mm; font-size: 9pt; color: var(--azul); }
+  .num { flex: none; background: var(--marinho); color: #fff; border-radius: 1.6mm; padding: 1.4mm 4.5mm 1.8mm;
+         font-family: ${FONTE_TITULO}; font-size: 28pt; font-weight: 800; line-height: 1.05; letter-spacing: .02em;
+         white-space: nowrap; }
+  .fio { height: .9mm; border-radius: 1mm; background: ${FIO_EM_DEGRADE}; margin: 2.2mm 0 3.2mm; }
   .unidade { margin: 0 0 3.5mm; page-break-inside: avoid; }
-  .unidade .uval { font-size: 16pt; font-weight: bold; line-height: 1.2; }
-  .unidade .uval .vazio { font-size: 11pt; font-weight: normal; }
+  .unidade .uval { font-family: ${FONTE_TITULO}; font-size: 16pt; font-weight: 700; line-height: 1.2; }
+  .unidade .uval .vazio { font-family: ${FONTE}; font-size: 11pt; font-weight: normal; }
 
   /* Folha de rosto numa linha: quando · onde · com quem falar; o técnico embaixo. */
   .rosto { display: grid; grid-template-columns: fit-content(66mm) fit-content(47mm) minmax(0, 1fr); gap: 2.5mm 7mm;
@@ -807,134 +825,142 @@ export function buildRouteSheetHtml(
   .rosto > .campo.contato .vazio { white-space: nowrap; }
   .rosto > .campo.tecnico { grid-column: span 2; }
   .campo { font-size: 10pt; line-height: 1.35; }
-  .lab { display: block; font-size: 7.5pt; letter-spacing: .09em; text-transform: uppercase; color: #444; }
-  .vazio { font-style: italic; color: #333; }
+  .lab { display: block; font-size: 7.5pt; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--azul); }
+  .vazio { font-style: italic; color: var(--azul); }
   .secao { margin-bottom: 4mm; }
-  /* Título de seção nunca sozinho no pé da folha. */
-  .sectitle { font-size: 11pt; text-transform: uppercase; letter-spacing: .06em; font-weight: bold;
-              padding: 2mm 0 1mm; border-bottom: 1pt solid #000; margin-bottom: 2mm;
-              break-after: avoid; page-break-after: avoid; }
+  /* Título de seção como nas folhas novas: marca em círculo, o texto em Archivo e o fio fino até a margem. Nunca sozinho
+     no pé da folha. */
+  .sectitle { display: flex; align-items: center; gap: 2.2mm; font-family: ${FONTE_TITULO}; font-size: 11pt;
+              font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--marinho);
+              padding: 2mm 0 1mm; margin-bottom: 2mm; break-after: avoid; page-break-after: avoid; }
+  .sectitle::before { content: ""; flex: none; width: 2.6mm; height: 2.6mm; border-radius: 50%; background: var(--marinho); }
+  .sectitle::after { content: ""; flex: 1 1 8mm; height: .3mm; background: var(--cinza); }
   .pedido { font-size: 10pt; line-height: 1.4; }
   .acesso { font-size: 9.5pt; margin-top: .8mm; }
-  .instrucao { border-left: 2.5pt solid #000; padding: 1.5mm 0 1.5mm 3mm; margin-bottom: 4mm;
-               font-size: 10pt; line-height: 1.4; page-break-inside: avoid; }
-  .instrucao.sm { font-size: 9pt; margin: 1mm 0 .5mm; border-left-width: 1.8pt; }
+  .instrucao { border-left: 1mm solid var(--azul); background: var(--fundo); border-radius: 0 1mm 1mm 0;
+               padding: 1.5mm 2mm 1.5mm 3mm; margin-bottom: 4mm; font-size: 10pt; line-height: 1.4; page-break-inside: avoid; }
+  .instrucao.sm { font-size: 9pt; margin: 1mm 0 .5mm; padding: .6mm 1.5mm .6mm 2.4mm; border-left-width: .7mm; }
   /* O rótulo "Instrução" na mesma linha do texto (rodada 3, k). */
   .instrucao.sm .lab { display: inline; margin-right: 1.5mm; }
-  .selo { font-size: 7.5pt; font-weight: bold; letter-spacing: .05em; border: 1pt solid #000;
-          padding: 0 1.2mm; white-space: nowrap; vertical-align: 1px; }
+  .selo { font-size: 7.5pt; font-weight: 700; letter-spacing: .05em; color: var(--azul); background: var(--fundo);
+          border: .3mm solid var(--azul); border-radius: .6mm; padding: 0 1.2mm; white-space: nowrap; vertical-align: 1px; }
   .situacao { font-size: 9pt; font-weight: bold; margin-top: .8mm; }
-  .aviso { border: 1.2pt solid #000; padding: 2.5mm 3mm; margin-bottom: 4mm; font-size: 10pt;
-           page-break-inside: avoid; }
+  .aviso { border: .3mm solid var(--ouro-claro); border-left: 1.2mm solid var(--ouro); background: #FBF7F0;
+           border-radius: 1.1mm; padding: 2.5mm 3mm; margin-bottom: 4mm; font-size: 10pt; page-break-inside: avoid; }
   /* Orçamento em aprovação (rodada 1, c). */
-  .aviso.orc { border-width: 1.6pt; font-size: 13pt; margin-bottom: 3.5mm; }
-  .limite { border: 1pt dashed #000; padding: 2.5mm 3mm; margin-bottom: 5mm; font-size: 10pt;
+  .aviso.orc { font-size: 13pt; margin-bottom: 3.5mm; }
+  .limite { border: .35mm dashed var(--azul); border-radius: 1.1mm; padding: 2.5mm 3mm; margin-bottom: 5mm; font-size: 10pt;
             page-break-inside: avoid; }
 
   /* Separação de materiais em 2 colunas (rodada 1, b). */
-  .materiais .matnota { font-size: 8.5pt; color: #333; margin: -1mm 0 1mm; }
+  .materiais .matnota { font-size: 8.5pt; color: var(--azul); margin: -1mm 0 1mm; }
   /* A nota presa aos itens: título e nota nunca sozinhos no pé da folha (o .sectitle só prende a nota). */
   .materiais .matnota { break-after: avoid; page-break-after: avoid; }
   .matcols { columns: 2; column-gap: 7mm; }
   .matitem { display: flex; gap: 2mm; align-items: flex-start; break-inside: avoid; page-break-inside: avoid;
-             padding: 1mm 0; border-bottom: .4pt dotted #999; font-size: 9.5pt; line-height: 1.3; }
+             padding: 1mm 0; border-bottom: .25mm solid var(--pauta); font-size: 9.5pt; line-height: 1.3; }
 
   /* Cartão de serviço: o que fazer e o que devolver, juntos (mais baixo, rodada 1, a). */
-  .svc { border: .8pt solid #555; padding: 1.6mm 2.5mm 1.8mm; margin-bottom: 2mm; page-break-inside: avoid; }
+  .svc { border: .3mm solid var(--claro); border-radius: 1.1mm; padding: 1.6mm 2.5mm 1.8mm; margin-bottom: 2mm;
+         page-break-inside: avoid; }
   .svctitle { font-weight: bold; font-size: 10.5pt; line-height: 1.25; }
   .svcmat { font-size: 9pt; margin-top: 1.5mm; }
   .resp { font-size: 9pt; margin-top: .8mm; }
-  .outros { border: 1pt dashed #000; padding: 2.5mm 3mm; margin-bottom: 4mm; font-size: 9.5pt;
+  .outros { border: .35mm dashed var(--claro); border-radius: 1.1mm; padding: 2.5mm 3mm; margin-bottom: 4mm; font-size: 9.5pt;
             line-height: 1.4; page-break-inside: avoid; }
   .volta { font-size: 9pt; margin-top: 1.2mm; padding-top: 0; border-top: 0;
            display: flex; align-items: center; flex-wrap: wrap; gap: 1mm; }
   .rule.inline { display: inline-block; flex: 1; min-width: 40mm; height: 3.5mm; }
 
+  /* Tabelas (levantamento e roteiro): a barra marinho com o nome e o cabeçalho claro das folhas novas. */
   table.block { width: 100%; border-collapse: collapse; margin-bottom: 5mm; page-break-inside: auto; }
-  .blockname { text-align: left; font-size: 11pt; text-transform: uppercase;
-               letter-spacing: .06em; padding: 2mm 0 1mm; border-bottom: 1pt solid #000; }
-  .blocknote { text-align: left; font-size: 9pt; font-weight: normal; color: #222;
-               padding: 1.2mm 0 .6mm; border-bottom: .4pt dotted #999; }
-  .blockmat { text-align: left; font-size: 9pt; font-weight: normal; color: #000;
-              padding: 1.2mm 0 .6mm; border-bottom: .4pt dotted #999; }
-  .matlabel { text-transform: uppercase; font-size: 7.5pt; letter-spacing: .08em; color: #444; }
-  tr.cols th { font-size: 8pt; font-weight: normal; text-transform: uppercase;
-               letter-spacing: .05em; text-align: left; padding: 1mm 1mm; border-bottom: .5pt solid #999; }
+  .blockname { text-align: left; font-family: ${FONTE_TITULO}; font-size: 10pt; font-weight: 700; text-transform: uppercase;
+               letter-spacing: .06em; padding: 1.6mm 2.4mm 1.4mm; background: var(--marinho); color: #fff; }
+  .blocknote { text-align: left; font-size: 9pt; font-weight: normal; color: var(--azul);
+               padding: 1.2mm 1mm .6mm; border-bottom: .25mm solid var(--pauta); }
+  .blockmat { text-align: left; font-size: 9pt; font-weight: normal; color: var(--marinho);
+              padding: 1.2mm 1mm .6mm; border-bottom: .25mm solid var(--pauta); }
+  .matlabel { text-transform: uppercase; font-size: 7.5pt; font-weight: 600; letter-spacing: .08em; color: var(--azul); }
+  tr.cols th { font-size: 8pt; font-weight: 700; text-transform: uppercase; color: var(--azul); background: var(--fundo);
+               letter-spacing: .05em; text-align: left; padding: 1mm 1mm; border-bottom: .25mm solid var(--grade); }
   tbody tr { page-break-inside: avoid; }
-  td { padding: 2mm 1mm; border-bottom: .5pt dotted #999; vertical-align: top; }
+  td { padding: 2mm 1mm; border-bottom: .25mm solid var(--pauta); vertical-align: top; }
   td.box { width: 8mm; }
-  .check { display: block; width: 5mm; height: 5mm; border: 1pt solid #000;
+  .check { display: block; width: 5mm; height: 5mm; border: .35mm solid var(--azul); border-radius: .8mm; background: #fff;
            font-size: 9pt; line-height: 4.6mm; text-align: center; font-weight: bold; }
-  .check.sm { display: inline-block; width: 3.6mm; height: 3.6mm; vertical-align: -.6mm; }
+  .check.sm { display: inline-block; width: 3.6mm; height: 3.6mm; border-radius: .6mm; vertical-align: -.6mm; }
   .matitem .check.sm { flex: none; margin-top: .5mm; }
   .stnote { font-size: 8.5pt; font-style: italic; margin-top: .8mm; }
-  td.seq { width: 7mm; font-size: 9pt; color: #444; }
+  td.seq { width: 7mm; font-size: 9pt; color: var(--azul); }
   td.mat { font-size: 10pt; }
-  .sku { font-size: 8.5pt; color: #555; }
+  .sku { font-size: 8.5pt; color: var(--azul); }
   .title { font-weight: bold; font-size: 10.5pt; line-height: 1.3; }
-  .marks { font-weight: normal; font-size: 7.5pt; letter-spacing: .05em; border: .5pt solid #000;
+  .marks { font-weight: normal; font-size: 7.5pt; letter-spacing: .05em; border: .3mm solid var(--azul); border-radius: .6mm;
            padding: 0 1mm; white-space: nowrap; }
-  .detail { font-size: 9pt; color: #333; margin-top: .8mm; line-height: 1.35; }
+  .detail { font-size: 9pt; color: var(--azul); margin-top: .8mm; line-height: 1.35; }
   .svc .detail { margin-top: .5mm; }
   .matitem .detail { margin-top: .3mm; }
   .measure { font-size: 9pt; margin-top: 1.2mm; }
-  .roteironote { font-size: 9pt; color: #222; }
+  .roteironote { font-size: 9pt; color: var(--azul); }
   td.std { width: 14mm; font-size: 9pt; text-align: right; white-space: nowrap; }
   td.time { width: 32mm; }
-  .rule { display: block; border-bottom: .5pt solid #000; height: 4mm; }
+  .rule { display: block; border-bottom: .3mm solid var(--claro); height: 4mm; }
 
   td.notes { border-bottom: none; padding-top: 1.5mm; }
-  .cap { font-size: 8pt; text-transform: uppercase; letter-spacing: .07em; color: #444; }
-  .lines i { display: block; border-bottom: .4pt solid #bbb; height: 5mm; }
+  .cap { font-size: 8pt; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; color: var(--azul); }
+  .lines i { display: block; border-bottom: .25mm solid var(--pauta); height: 5mm; }
 
   /* Atenção: uma linha curta por risco grave; o triângulo é desenho (a fonte do servidor não tem o caractere). */
-  .atencao-box { border: 1pt solid #000; border-left-width: 3pt; padding: 2mm 3mm 2.5mm; page-break-inside: avoid; }
-  .atencao-box .sectitle { border-bottom: 0; margin-bottom: 1mm; }
+  .atencao-box { border: .3mm solid var(--ouro-claro); border-left: 1.2mm solid var(--ouro); background: #FBF7F0;
+                 border-radius: 1.1mm; padding: 2mm 3mm 2.5mm; page-break-inside: avoid; }
+  .atencao-box .sectitle { gap: 1.6mm; margin-bottom: 1mm; }
+  .atencao-box .sectitle::before { display: none; }
+  .atencao-box .sectitle::after { background: #E7D6B8; }
   .atencao-box .at { font-size: 10pt; margin: .9mm 0; line-height: 1.3; }
-  .tri { display: inline-block; width: 1.05em; height: .95em; vertical-align: -.13em; margin-right: .3em; }
+  .tri { display: inline-block; flex: none; width: 1.05em; height: .95em; vertical-align: -.13em; margin-right: .3em; }
+  .atencao-box .tri { margin-right: 0; }
 
   /* O fechamento (chegada/saída, relato, material, assinaturas, foto e rodapé) nunca se parte. */
   .fechamento { break-inside: avoid; page-break-inside: avoid; }
-  .write { border: 1pt solid #000; padding: 2mm 3mm; margin-bottom: 3mm;
+  .write { border: .3mm solid var(--claro); border-radius: 1.1mm; padding: 2mm 3mm; margin-bottom: 3mm;
            page-break-inside: avoid; }
-  .write .wcap { font-size: 10pt; font-weight: bold; text-transform: uppercase;
-                 letter-spacing: .05em; }
-  .write .wsub { font-size: 8.5pt; color: #444; margin: .5mm 0 1.5mm; }
+  .write .wcap { font-family: ${FONTE_TITULO}; font-size: 10pt; font-weight: 700; text-transform: uppercase;
+                 letter-spacing: .04em; }
+  .write .wsub { font-size: 8.5pt; color: var(--azul); margin: .5mm 0 1.5mm; }
   .horas { display: flex; align-items: baseline; gap: 7mm; font-size: 10pt; margin-bottom: 3mm; page-break-inside: avoid; }
   .horas > div { flex: none; white-space: nowrap; }
-  .horas span { display: inline-block; min-width: 22mm; border-bottom: .5pt solid #000; }
+  .horas span { display: inline-block; min-width: 22mm; border-bottom: .3mm solid var(--claro); }
   /* Os números do cliente, no espaço livre ao lado de chegada/saída (rodada 2, g). */
   .horas > div.contatofim { flex: 1 1 0; min-width: 0; white-space: normal; text-align: right;
                             font-size: 8.5pt; line-height: 1.3; }
   .horas .contatofim span.tel { white-space: nowrap; display: inline; min-width: 0; border-bottom: 0; }
   /* A volta por foto, numa faixa de 1 linha (rodada 1, d). */
-  .fotofim { border: 1pt solid #000; padding: 1.3mm 2.5mm; margin-top: 4mm; font-size: 9.5pt; line-height: 1.3; }
+  .fotofim { background: var(--fundo); border: .25mm solid var(--grade); border-left: 1mm solid var(--azul);
+             border-radius: 1mm; padding: 1.3mm 2.5mm; margin-top: 4mm; font-size: 9.5pt; line-height: 1.3; }
 
-  .foot { margin-top: 3mm; border-top: 1.2pt solid ${BRAND}; padding-top: 2mm; font-size: 8.5pt;
-          color: #333; display: flex; justify-content: space-between; gap: .8mm 6mm; flex-wrap: wrap; }
+  .foot { margin-top: 3mm; border-top: .3mm solid var(--cinza); padding-top: 2mm; font-size: 8.5pt;
+          color: var(--azul); display: flex; justify-content: space-between; gap: .8mm 6mm; flex-wrap: wrap; }
+  .foot b { color: var(--marinho); }
   .sign { margin-top: 4mm; display: flex; gap: 10mm; page-break-inside: avoid; }
   .sign > div { flex: 1; font-size: 8.5pt; }
   .sign .atesta { font-size: 9pt; min-height: 8mm; }
-  .sign .linha { border-top: .5pt solid #000; padding-top: 1.2mm; margin-top: 7mm; }
+  .sign .linha { border-top: .3mm solid var(--claro); padding-top: 1.2mm; margin-top: 7mm; color: var(--azul); }
   td.qa { font-size: 9.5pt; width: 50%; }
-  .pulada { color: #666; font-style: italic; }
-  .foto { display: block; max-height: 45mm; max-width: 80mm; margin-top: 1.5mm; border: .5pt solid #999; }
+  .pulada { color: var(--azul); font-style: italic; }
+  .foto { display: block; max-height: 45mm; max-width: 80mm; margin-top: 1.5mm; border: .3mm solid var(--grade); border-radius: .8mm; }
 </style>
 </head>
 <body>
   <div class="head">
-    <div class="brand">
-      <div class="brandleft">
-        ${logoHtml}
-        ${header.companyName ? `<span class="coname">${escapeHtml(header.companyName)}</span>` : ''}
-      </div>
-      <div class="doctype">
-        <div class="kind">${soSeguranca || !passos.length ? 'Via do técnico' : 'Via do técnico · roteiro completo'}${
-          pessoa ? ` · ${escapeHtml(pessoa)}` : ''}</div>
-        <div class="num">${numero}</div>
-      </div>
+    ${logoHtml}
+    <div class="doctype">
+      <div class="kind">${soSeguranca || !passos.length ? 'Via do técnico' : 'Via do técnico · roteiro completo'}${
+        pessoa ? ` · ${escapeHtml(pessoa)}` : ''}</div>
+      ${header.companyName ? `<span class="coname">${escapeHtml(header.companyName)}</span>` : ''}
     </div>
+    <div class="num">${numero}</div>
   </div>
+  <div class="fio"></div>
 
   ${unidadeHtml}${avisoOrcamentoHtml}
   ${rostoHtml}
@@ -1288,10 +1314,12 @@ export function htmlDaVia(m: ViaMontada): string {
  * "dado diferente e papel igual", em que subir faz MANDAR (decidirAVia). Quem protege contra o falso "A OS mudou" é o
  * contrato do dado (VERSAO_DO_DADO). 1 = hash do HTML, sem prefixo (até 16/11/2026); 2 = desenho de produção com a
  * impressão por conteúdo (F0); 3 = a via aprovada pelo dono (base limpa + rodadas 1, 2 e 3: quadro Atenção, cartões
- * numerados pela OS inteira sem a cobrança, veículo em linha própria, telefones no fechamento…).
+ * numerados pela OS inteira sem a cobrança, veículo em linha própria, telefones no fechamento…); 4 = a identidade da
+ * marca (25/11/2026: fontes, cores, cabeçalho com o número em caixa marinho, slogan) — só o desenho, o dado é o mesmo:
+ * via já entregue com a OS igual, a agenda PULA ("via em formato novo; a OS não mudou"), não reenvia.
  * O teste-trava de via-do-tecnico_test.ts fixa o papel e o dado de fixtures: mudou a regra sem subir esta versão, ele falha.
  */
-export const VERSAO_DA_VIA = 3;
+export const VERSAO_DA_VIA = 4;
 /**
  * Sobe só quando muda a LISTA de campos de retratoDoDado (é contrato). Raro: subir faz a próxima via sair com o aviso
  * neutro ("Esta via substitui a de dd/mm"). Sem subir, junto de uma subida de VERSAO_DA_VIA (ou de papel diferente), toda

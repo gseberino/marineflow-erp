@@ -53,9 +53,16 @@ Regras que os testes guardam:
 - **Sem local na OS = "Oficina HBR"** (`ONDE_PADRAO`); campo vazio continua virando frase para o técnico
   ("A combinar com o escritório", "sem telefone no cadastro"), nunca recado para o escritório.
 - **Nota interna do material não vai** ("Cadastrado pelo orçamento — confirmar preço…", `notaDoMaterial`).
+- **A marca HBR (25/11/2026)**: via e relatório do assistente usam `_shared/pdf/marca.ts` — cores, Archivo
+  (títulos) e Hanken Grotesk (texto) EMBUTIDAS no HTML (`marca-fontes.ts`, woff2 latino), fio em degradê, slogan.
+  Documento novo reaproveita daqui. A pilha é `"Hanken Grotesk", "Open Sans", …`: o que a marca não tiver sai na
+  Open Sans do servidor. **Na tela as fontes chegam sob demanda** (26/11/2026): o `vite.config.ts` troca o
+  `./marca-fontes.ts` do marca.ts por `src/lib/marca-fontes-sob-demanda.ts` (pedaço próprio, ~70 KB gzip); quem monta
+  folha no navegador chama `await carregarFontesDaMarca()` antes (como `printRouteSheet`), senão sai sem @font-face.
+  Servidor (Deno) e vitest usam o arquivo de verdade.
 - **Nenhum caractere fora da Open Sans do servidor** (a única fonte do `/api/pdf`): nada de "⚠" (o triângulo é
   SVG) nem "→" (entre as datas sai "até"). O teste usa as faixas de `_shared/pdf/open-sans-faixas.ts`.
-- **Mudou o desenho ou a regra do papel? Suba `VERSAO_DA_VIA`** (hoje 3) e regrave a trava de
+- **Mudou o desenho ou a regra do papel? Suba `VERSAO_DA_VIA`** (hoje 4) e regrave a trava de
   `via-do-tecnico_test.ts`: a agenda só reenvia quando o DADO muda (`impressaoDaVia`).
 - Hora de agendamento: o formulário converte com `src/lib/datetime-local.ts`. Mandar o texto
   do `datetime-local` direto gravava a hora local como UTC (3 h de diferença).
