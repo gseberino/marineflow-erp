@@ -25,6 +25,10 @@ vi.mock('@/hooks/use-financial', () => ({
     }, {
       id: 'r2', description: 'OS 99/0001', due_date: '2099-01-10', status: 'pending', amount: 800, balance_amount: 800,
       paid_amount: 0, client_id: 'c2', clients: { id: 'c2', name: 'Veleiro do Futuro' }, service_orders: null, service_order_id: null,
+    }, {
+      // conta sem cliente do cadastro: não tem como cobrar pela linha (a cobrança vai ao WhatsApp do cadastro)
+      id: 'r3', description: 'Venda avulsa sem cliente', due_date: '2026-09-02', status: 'pending', amount: 300, balance_amount: 300,
+      paid_amount: 0, client_id: null, clients: null, service_orders: null, service_order_id: null,
     }],
   }),
   useFinancialSummary: () => ({ data: { total_receivable: 1200, overdue_receivable: 1200, entrou_no_mes: 12367.99, collected_this_month: 0 } }),
@@ -39,7 +43,10 @@ vi.mock('@/components/PaymentDialog', () => ({ PaymentDialog: () => null }));
 vi.mock('@/components/ReceivableFormDialog', () => ({ ReceivableFormDialog: () => null }));
 vi.mock('@/components/CorrigirLancamentoDialog', () => ({ CorrigirLancamentoDialog: () => null }));
 vi.mock('@/components/DesfazerOuCancelarDialog', () => ({ DesfazerOuCancelarDialog: () => null }));
-vi.mock('@/components/SendViaWhatsAppDialog', () => ({ SendViaWhatsAppDialog: () => null }));
+// "Cobrar" na linha (dono, 26/11/2026: "1. A") abre a cobrança do cliente com a conferência da ficha.
+vi.mock('@/components/client/CobrarClienteDialog', () => ({
+  CobrarClienteDialog: ({ clienteId }: { clienteId: string | null }) => (clienteId ? <div data-testid="cobrar-cliente">cobrar {clienteId}</div> : null),
+}));
 vi.mock('@/components/BulkBillingReminderDialog', () => ({ BulkBillingReminderDialog: () => null }));
 vi.mock('@/v2/lib/receipt', () => ({ generateReceivableReceipt: vi.fn() }));
 // O painel de cobranças tem as próprias consultas; aqui importa que a aba o alcança.
@@ -109,5 +116,23 @@ describe('Contas a Receber — abas Contas · Cobranças', () => {
   it('sem ?view=, abre no que está em aberto (vencido e a vencer)', async () => {
     renderReceber('/v2/receivables');
     expect((await screen.findAllByText('Veleiro do Futuro')).length).toBeGreaterThan(0);
+  });
+});
+
+describe('Contas a Receber — cobrar pela linha (dono, 26/11/2026: "1. A")', () => {
+  it('"Cobrar" abre a cobrança do CLIENTE da conta (a conferência da ficha); conta sem cliente não tem o botão', async () => {
+    const user = userEvent.setup();
+    renderReceber();
+    const botoes = await screen.findAllByRole('button', { name: 'Cobrar o cliente pelo WhatsApp' });
+    expect(botoes).toHaveLength(2); // Marina Azul e Veleiro do Futuro; a venda sem cliente fica sem botão
+    expect(screen.queryByTestId('cobrar-cliente')).toBeNull();
+    await user.click(botoes[0]);
+    expect(screen.getByTestId('cobrar-cliente')).toHaveTextContent('cobrar c1');
+  });
+
+  it('a descrição da aba não promete mais lembrete automático', async () => {
+    renderReceber();
+    expect(await screen.findByText(/a mensagem e as travas aparecem antes de enviar/)).toBeInTheDocument();
+    expect(screen.queryByText(/régua automática/)).toBeNull();
   });
 });

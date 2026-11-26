@@ -31,7 +31,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { generateReceivableReceipt, type ReceivableRow } from '@/v2/lib/receipt';
 import { BulkBillingReminderDialog } from '@/components/BulkBillingReminderDialog';
-import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/SendViaWhatsAppDialog';
+import { CobrarClienteDialog } from '@/components/client/CobrarClienteDialog';
+import { saldoDaConta } from '../../supabase/functions/_shared/receivables/cobrar-juntas';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { Send, Pencil } from 'lucide-react';
 import { AcoesDaLinha } from '@/components/AcoesDaLinha';
@@ -134,7 +135,8 @@ export default function FinancialPage() {
   // Filtro rápido por OS (client-side, sobre o resultado já filtrado)
   const [recOsSearch, setRecOsSearch] = useState('');
   const [payOsSearch, setPayOsSearch] = useState('');
-  const [whatsAppTarget, setWhatsAppTarget] = useState<SendViaWhatsAppTarget | null>(null);
+  /** O cliente a cobrar (CobrarClienteDialog); null = fechado. */
+  const [cobrarCliente, setCobrarCliente] = useState<string | null>(null);
   const [recFilters, setRecFilters] = useState<FinancialFilters>({ ...defaultFilters });
   const [payFilters, setPayFilters] = useState<FinancialFilters>({ ...defaultFilters });
   const [paySubTab, setPaySubTab] = useState<'list' | 'reimbursements' | 'forecast'>('list');
@@ -236,27 +238,14 @@ export default function FinancialPage() {
   }
 
   /**
-   * Abre o envio por WhatsApp de um recebível.
-   *
-   * Vive aqui fora porque o mesmo punhado de linhas era um `onClick` de quarenta linhas
-   * dentro da célula da tabela — e a célula agora declara suas ações como dados.
+   * Cobrar o cliente da conta pelo WhatsApp (26/11/2026, dono "1. A"): abre a cobrança do cliente com a conferência da
+   * ficha (CobrarClienteDialog). Antes abria o envio livre, com número editável e sem trava. Só em conta com saldo e cliente.
    */
-  const abrirEnvioWhatsApp = (r: any) => {
-    const client = (r as any).clients;
-    const so = (r as any).service_orders;
-    const target: SendViaWhatsAppTarget = {
-      kind: 'receivable',
-      receivableId: r.id,
-      description: r.description,
-      serviceOrderId: so?.id || null,
-      shareToken: so?.share_token || null,
-      clientId: client?.id || (r as any).client_id || null,
-      clientName: client?.name || null,
-      clientPhone: client?.whatsapp || client?.phone || null,
-      amount: Number(r.balance_amount ?? r.amount) || null,
-      dueDate: r.due_date || null,
-    };
-    setWhatsAppTarget(target);
+  const podeCobrarConta = (r: ReceivableRow) => !!(r.clients?.id || r.client_id) && saldoDaConta(r) > 0;
+  const abrirEnvioWhatsApp = (r: ReceivableRow) => {
+    const clienteId = r.clients?.id || r.client_id || null;
+    if (!clienteId || !podeCobrarConta(r)) return;
+    setCobrarCliente(clienteId);
     void writeAuditLog({
       table_name: 'receivables',
       record_id: r.id,
@@ -264,13 +253,13 @@ export default function FinancialPage() {
       new_value: {
         description: r.description,
         amount: Number(r.amount),
-        balance: Number(r.balance_amount ?? r.amount),
+        balance: saldoDaConta(r),
         due_date: r.due_date,
-        client_id: target.clientId,
-        service_order_id: target.serviceOrderId,
-        has_share_token: !!target.shareToken,
+        client_id: clienteId,
+        service_order_id: r.service_orders?.id || r.service_order_id || null,
+        cobranca_do_cliente: true,
       },
-      reason: 'Abriu envio WhatsApp de recibo/cobrança',
+      reason: 'Abriu a cobrança do cliente pela conta (tela antiga)',
     });
   };
 
@@ -643,11 +632,13 @@ export default function FinancialPage() {
                               ...(Number(r.paid_amount || 0) > 0 && r.status !== 'paid'
                                 ? [{ texto: 'Gerar recibo', icone: ReceiptIcon, onClick: () => void handleGenerateReceipt(r) }]
                                 : []),
-                              {
-                                texto: 'Enviar por WhatsApp', icone: Send,
-                                titulo: 'Recibo ou cobrança pelo WhatsApp',
-                                onClick: () => abrirEnvioWhatsApp(r),
-                              },
+                              ...(podeCobrarConta(r)
+                                ? [{
+                                  texto: 'Cobrar o cliente…', icone: Send,
+                                  titulo: 'A cobrança do cliente pelo WhatsApp, com as travas da ficha',
+                                  onClick: () => abrirEnvioWhatsApp(r),
+                                }]
+                                : []),
                               ...(r.status !== 'paid' && r.status !== 'cancelled'
                                 ? [{ texto: 'Editar este recebível', icone: Pencil, onClick: () => setEditingReceivable(r) }]
                                 : []),
@@ -842,11 +833,7 @@ export default function FinancialPage() {
         onOpenChange={v => { if (!v) setEditingPayable(null); }}
         initialData={editingPayable}
       />
-      <SendViaWhatsAppDialog
-        open={!!whatsAppTarget}
-        onOpenChange={v => { if (!v) setWhatsAppTarget(null); }}
-        target={whatsAppTarget}
-      />
+      <CobrarClienteDialog clienteId={cobrarCliente} onFechar={() => setCobrarCliente(null)} />
     </div>
   );
 }

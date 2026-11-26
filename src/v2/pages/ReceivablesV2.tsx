@@ -17,7 +17,8 @@ import { PaymentDialog } from '@/components/PaymentDialog';
 import { ReceivableFormDialog } from '@/components/ReceivableFormDialog';
 import { CorrigirLancamentoDialog } from '@/components/CorrigirLancamentoDialog';
 import { DesfazerOuCancelarDialog, type AcaoNoLancamento } from '@/components/DesfazerOuCancelarDialog';
-import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/SendViaWhatsAppDialog';
+import { CobrarClienteDialog } from '@/components/client/CobrarClienteDialog';
+import { saldoDaConta } from '../../../supabase/functions/_shared/receivables/cobrar-juntas';
 // MF-AUD-050: a cobrança em lote por WhatsApp (546 linhas, com throttle e retry)
 // vivia só no Financeiro v1 — desde 30/07 só era alcançável com ?legacy=1.
 import { BulkBillingReminderDialog } from '@/components/BulkBillingReminderDialog';
@@ -44,14 +45,24 @@ import '@/v2/tokens.css';
    26/09/2026: a tela se chama Contas a Receber (o nome do menu) e ganhou a aba Cobranças
    (/v2/receivables/cobrancas) — perseguir quem deve é a mesma conversa. Cobranças saiu do
    menu; o link antigo /v2/collections leva para a aba.
+
+   26/11/2026 (dono: "1. A"): "Cobrar" na linha abre a cobrança do CLIENTE com a conferência da ficha
+   (CobrarClienteDialog: a mensagem com tudo que ele tem em aberto, as travas, o WhatsApp do cadastro).
+   Antes abria o envio livre: número editável, mensagem sem valor e nenhuma trava. Só aparece em conta
+   com saldo e cliente; o "Cobrar em lote" manda uma mensagem por cliente, com as mesmas travas.
 ──────────────────────────────────────────────────────────────────────────── */
 
 const ABAS = [
-  { aba: 'contas', rotulo: 'Contas', paraQueServe: 'O que os clientes devem à empresa: cada conta, quando vence e quanto falta. Cobrar pelo WhatsApp é um clique na linha.' },
-  { aba: 'cobrancas', rotulo: 'Cobranças', paraQueServe: 'As cobranças em andamento e a régua automática que manda os lembretes pelo WhatsApp.' },
+  { aba: 'contas', rotulo: 'Contas', paraQueServe: 'O que os clientes devem à empresa: cada conta, quando vence e quanto falta. Cobrar pelo WhatsApp começa na linha: a mensagem e as travas aparecem antes de enviar.' },
+  { aba: 'cobrancas', rotulo: 'Cobranças', paraQueServe: 'As cobranças em andamento: quem já foi cobrado, quando, e o que ficou combinado.' },
 ] as const;
 
 const PAGE_SIZE = 25;
+
+/** Dá para cobrar pela linha: a conta tem saldo e um cliente do cadastro (a cobrança vai ao WhatsApp dele). */
+function podeCobrar(r: ReceivableRow): boolean {
+  return !!(r.clients?.id || r.client_id) && saldoDaConta(r) > 0;
+}
 
 function isOverdue(r: ReceivableRow): boolean {
   // Vencimento é um dia do calendário (src/lib/dia.ts): a conta que vence hoje não está em atraso.
@@ -109,7 +120,8 @@ export default function ReceivablesV2() {
   const [acaoNoTitulo, setAcaoNoTitulo] = useState<{ acao: AcaoNoLancamento; titulo: ReceivableRow } | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
-  const [whatsAppTarget, setWhatsAppTarget] = useState<SendViaWhatsAppTarget | null>(null);
+  /** O cliente da linha a cobrar (CobrarClienteDialog); null = fechado. */
+  const [cobrarCliente, setCobrarCliente] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     const activeView = QUICK_VIEWS.find((v) => v.id === view) ?? QUICK_VIEWS[0];
@@ -143,19 +155,9 @@ export default function ReceivablesV2() {
   };
 
   const openCharge = (r: ReceivableRow) => {
-    const target: SendViaWhatsAppTarget = {
-      kind: 'receivable',
-      receivableId: r.id,
-      description: r.description,
-      serviceOrderId: r.service_orders?.id || null,
-      shareToken: r.service_orders?.share_token || null,
-      clientId: r.clients?.id || r.client_id || null,
-      clientName: r.clients?.name || null,
-      clientPhone: r.clients?.whatsapp || r.clients?.phone || null,
-      amount: Number(r.balance_amount ?? r.amount) || null,
-      dueDate: r.due_date || null,
-    };
-    setWhatsAppTarget(target);
+    const clienteId = r.clients?.id || r.client_id || null;
+    if (!clienteId || !podeCobrar(r)) return;
+    setCobrarCliente(clienteId);
     void writeAuditLog({
       table_name: 'receivables',
       record_id: r.id,
@@ -163,14 +165,14 @@ export default function ReceivablesV2() {
       new_value: {
         description: r.description,
         amount: Number(r.amount),
-        balance: Number(r.balance_amount ?? r.amount),
+        balance: saldoDaConta(r),
         due_date: r.due_date,
-        client_id: target.clientId,
-        service_order_id: target.serviceOrderId,
-        has_share_token: !!target.shareToken,
+        client_id: clienteId,
+        service_order_id: r.service_orders?.id || r.service_order_id || null,
         source: 'v2_receivables',
+        cobranca_do_cliente: true,
       },
-      reason: 'Abriu envio WhatsApp de recibo/cobrança (v2)',
+      reason: 'Abriu a cobrança do cliente pela linha (v2)',
     });
   };
 
@@ -194,9 +196,11 @@ export default function ReceivablesV2() {
             <Pencil className="h-4 w-4" /> Corrigir
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem onClick={() => openCharge(r)} className="gap-2">
-          <Send className="h-4 w-4" /> Enviar WhatsApp…
-        </DropdownMenuItem>
+        {podeCobrar(r) && (
+          <DropdownMenuItem onClick={() => openCharge(r)} className="gap-2">
+            <Send className="h-4 w-4" /> Cobrar o cliente…
+          </DropdownMenuItem>
+        )}
         {r.status !== 'cancelled' && (r as { bank_transaction_id?: string | null }).bank_transaction_id && (
           <DropdownMenuItem onClick={() => setAcaoNoTitulo({ acao: 'desfazer', titulo: r })} className="gap-2">
             <Undo2 className="h-4 w-4" /> Desfazer aprovação
@@ -389,13 +393,15 @@ export default function ReceivablesV2() {
                       rowClassName={(r) => (isOverdue(r) ? 'bg-destructive/5' : undefined)}
                       rowActions={(r) => (
                         <>
-                          <Button
-                            variant="ghost" size="icon" className="h-8 w-8"
-                            aria-label="Cobrar via WhatsApp" title="Cobrar via WhatsApp"
-                            onClick={() => openCharge(r)}
-                          >
-                            <Send className="h-4 w-4" />
-                          </Button>
+                          {podeCobrar(r) && (
+                            <Button
+                              variant="ghost" size="icon" className="h-8 w-8"
+                              aria-label="Cobrar o cliente pelo WhatsApp" title="Cobrar o cliente pelo WhatsApp"
+                              onClick={() => openCharge(r)}
+                            >
+                              <Send className="h-4 w-4" />
+                            </Button>
+                          )}
                           {r.status !== 'paid' ? (
                             <Button
                               variant="ghost" size="icon" className="h-8 w-8"
@@ -436,9 +442,11 @@ export default function ReceivablesV2() {
                           ]}
                           actions={
                             <>
-                              <Button className="flex-1 gap-1.5" onClick={() => openCharge(r)}>
-                                <Send className="h-4 w-4" /> Cobrar
-                              </Button>
+                              {podeCobrar(r) && (
+                                <Button className="flex-1 gap-1.5" onClick={() => openCharge(r)}>
+                                  <Send className="h-4 w-4" /> Cobrar
+                                </Button>
+                              )}
                               {r.status !== 'paid' && (
                                 <Button variant="outline" size="icon" className="h-11 w-11" aria-label="Registrar pagamento" onClick={() => setPaymentTarget(r)}>
                                   <DollarSign className="h-4 w-4" />
@@ -489,11 +497,7 @@ export default function ReceivablesV2() {
         lancamento={acaoNoTitulo?.titulo ?? null}
         onFechar={() => setAcaoNoTitulo(null)}
       />
-      <SendViaWhatsAppDialog
-        open={!!whatsAppTarget}
-        onOpenChange={(v) => { if (!v) setWhatsAppTarget(null); }}
-        target={whatsAppTarget}
-      />
+      <CobrarClienteDialog clienteId={cobrarCliente} onFechar={() => setCobrarCliente(null)} />
       <BulkBillingReminderDialog open={bulkOpen} onOpenChange={setBulkOpen} initialFilter="overdue" />
     </V2Shell>
   );

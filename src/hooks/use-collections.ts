@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { normalizePhoneE164 } from '@/lib/masks';
 
 export type CollectionStatus =
   | 'pending' | 'sent' | 'viewed' | 'paid' | 'overdue' | 'disputed' | 'cancelled';
@@ -422,115 +421,6 @@ export function renderTemplate(
     .replace(/\{(\w+)\}/g, (_m, key) => sub(key));
 }
 
-async function getAppSettings() {
-  const { data } = await supabase.from('app_settings').select('key, value');
-  const map: Record<string, string> = {};
-  for (const r of data || []) if (r.key) map[r.key] = String(r.value || '');
-  return map;
-}
-
-async function invokeWhatsAppSend(body: Record<string, unknown>) {
-  const { data, error } = await supabase.functions.invoke('whatsapp-send', { body });
-  if (error) throw new Error(error.message || 'Falha no envio');
-  if ((data as any)?.error) throw new Error((data as any).error);
-  return data;
-}
-
-export function useSendCollectionWhatsApp() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (input: {
-      collection: Collection;
-      template?: CollectionTemplate;
-      overrideMethod?: CollectionSendMethod;
-      pdfUrl?: string;
-      pdfFilename?: string;
-      paymentMethod?: string;
-      cardInstallments?: number;
-    }) => {
-      const c = input.collection;
-      const phoneRaw = c.contact_whatsapp || c.phone || c.client?.whatsapp || c.client?.phone || '';
-      const phone = normalizePhoneE164(phoneRaw, '55');
-      if (!phone || phone.length < 10) throw new Error('Telefone inválido');
-
-      const settings = await getAppSettings();
-
-      // Resolve payment method: explicit override > linked OS lookup
-      let paymentMethod = input.paymentMethod;
-      let cardInstallments = input.cardInstallments;
-      if (!paymentMethod && c.service_order_id) {
-        const { data: so } = await supabase
-          .from('service_orders')
-          .select('payment_method, card_installments')
-          .eq('id', c.service_order_id)
-          .maybeSingle();
-        paymentMethod = (so as any)?.payment_method || undefined;
-        cardInstallments = (so as any)?.card_installments || undefined;
-      }
-
-      const body = c.message_template || input.template?.body
-        || 'Olá, {{nome}}! Lembrete da fatura {{numero_os}} de R$ {{valor}} venc. {{vencimento}}.';
-
-      const { buildCollectionMessage } = await import('@/lib/collection-message');
-      const message = buildCollectionMessage({
-        template: body,
-        renderTemplate,
-        collection: c,
-        paymentMethod,
-        cardInstallments,
-        settings,
-      });
-
-      const method = input.overrideMethod || c.send_method || 'text_link';
-      const tryOrder: CollectionSendMethod[] = method === 'pdf'
-        ? ['pdf', 'text_link', 'text']
-        : method === 'text_link' ? ['text_link', 'text'] : ['text'];
-
-      let lastErr: any = null;
-      for (const m of tryOrder) {
-        try {
-          if (m === 'pdf' && input.pdfUrl) {
-            await invokeWhatsAppSend({
-              phone,
-              message,
-              context: 'billing',
-              kind: 'document',
-              document_url: input.pdfUrl,
-              document_filename: input.pdfFilename || 'cobranca.pdf',
-              document_caption: message,
-            });
-          } else if (m === 'text_link') {
-            await invokeWhatsAppSend({
-              phone,
-              message,
-              context: 'billing',
-              kind: 'text',
-            });
-          } else {
-            await invokeWhatsAppSend({ phone, message, context: 'billing', kind: 'text' });
-          }
-          // success
-          await supabase.from('collection_contacts').insert({
-            collection_id: c.id,
-            contact_type: 'whatsapp_sent',
-            notes: `Enviado via ${m}`,
-          } as never);
-          await supabase.from('collections').update({
-            status: c.status === 'paid' ? 'paid' : 'sent',
-          } as never).eq('id', c.id);
-          return { success: true, method: m };
-        } catch (err) {
-          lastErr = err;
-        }
-      }
-      throw lastErr || new Error('Falha no envio');
-    },
-    onSuccess: (_, vars) => {
-      qc.invalidateQueries({ queryKey: ['collections'] });
-      qc.invalidateQueries({ queryKey: ['collection', vars.collection.id] });
-      qc.invalidateQueries({ queryKey: ['collection-contacts', vars.collection.id] });
-      toast.success('Cobrança enviada por WhatsApp');
-    },
-    onError: (e: any) => toast.error(e.message || 'Falha no envio'),
-  });
-}
+// O envio da cobrança no clique (useSendCollectionWhatsApp) saiu em 26/11/2026 (dono: "1. A"): mandava o valor guardado
+// na cobrança, a número que podia ser digitado, sem nenhuma trava. Cobrar pela tela é o CobrarClienteDialog
+// (src/components/client/CobrarClienteDialog.tsx), com a conferência da ficha.

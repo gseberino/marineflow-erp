@@ -26,7 +26,7 @@ vi.mock('@/integrations/supabase/client', () => {
     const registro = { alvo: tabela, op: 'select', valores: undefined as unknown, filtros: [] as unknown[][] };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const q: any = {};
-    for (const m of ['select', 'eq', 'not', 'in', 'is', 'range', 'limit', 'order']) {
+    for (const m of ['select', 'eq', 'not', 'in', 'is', 'range', 'limit', 'order', 'gte']) {
       q[m] = (...a: unknown[]) => { registro.filtros.push([m, ...a]); return q; };
     }
     q.update = (v: unknown) => { registro.op = 'update'; registro.valores = v; return q; };
@@ -61,7 +61,9 @@ vi.mock('@/integrations/supabase/client', () => {
 });
 
 import {
-  AVISO_MODO_TESTE, AVISO_MODO_TESTE_EXTRATO, NOTA_DO_EXTRATO, relogioDoCobrarJuntasTela, useCobrancasFormais, useEnviarCobrarJuntas, useEnviarExtrato,
+  AVISO_MODO_TESTE, AVISO_MODO_TESTE_EXTRATO, NOTA_DA_COBRANCA_DO_CLIENTE, NOTA_DO_EXTRATO, avisoDeCobradoHoje,
+  enviarCobrancaDoCliente, lerCobradosHoje, relogioDoCobrarJuntasTela, useCobrancasFormais, useEnviarCobrarJuntas,
+  useEnviarExtrato,
 } from './use-cobrar-juntas';
 import { NUMERO_DA_FATURA_NOVA } from '@/lib/fatura';
 
@@ -528,5 +530,114 @@ describe('useEnviarCobrarJuntas com fatura', () => {
   it('sem comFatura: nada muda (nenhuma chamada a fatura_criar)', async () => {
     await enviar();
     expect(banco.chamadas.some((c) => c.alvo === 'rpc.fatura_criar')).toBe(false);
+  });
+});
+
+// A cobrança do cliente pela tela (dono, 26/11/2026: "1. A" — o botão da linha, o da aba Cobranças e o Cobrar em lote
+// ganham a conferência da ficha): o mesmo conferirEEnviar do extrato, sem comprovante de quitação, chave "cobrar-cliente:".
+describe('enviarCobrancaDoCliente', () => {
+  const COBRANCA = {
+    cliente: { id: 'cli', name: 'MP MOTOR HOMES' },
+    mensagem: 'Cobrança — HBR …',
+    contas: [{ id: 'r45', saldo: 1650 }, { id: 'r46', saldo: 20 }],
+  };
+  const tentar = async (e = COBRANCA) => {
+    try { return { ok: await enviarCobrancaDoCliente(e), erro: null as string | null }; } catch (x) { return { ok: null, erro: (x as Error).message }; }
+  };
+
+  it('envia ao cadastro com a chave "cobrar-cliente:", relê as contas do cliente inteiro e registra a cobrança do dia DEPOIS do envio', async () => {
+    banco.respostas['rpc.cobrar_juntas_registrar_envio'] = ok({ criadas: 1, registradas: 2, cobrancas_criadas: ['k-nova'] });
+    const r = await tentar();
+    expect(r.erro).toBeNull();
+    expect(r.ok).toEqual({ deduplicado: false, cobrancasRegistradas: 2, cobrancasCriadas: 1, aviso: null });
+    expect(banco.invocacoes[0].body).toMatchObject({ phone: '5547999990000', context: 'billing', kind: 'text', message: 'Cobrança — HBR …' });
+    expect(String(banco.invocacoes[0].body.dedupe_key)).toMatch(/^cobrar-cliente:cli:\d{4}-\d{2}-\d{2}:/);
+    const contas = banco.chamadas.find((c) => c.alvo === 'receivables');
+    expect(contas?.filtros).toContainEqual(['eq', 'client_id', 'cli']);
+    expect(contas?.filtros.some((f) => f[0] === 'in')).toBe(false);
+    const rpc = banco.chamadas.filter((c) => c.alvo === 'rpc.cobrar_juntas_registrar_envio');
+    expect(rpc).toHaveLength(1);
+    expect(rpc[0].valores).toEqual({ p_cliente: 'cli', p_contas: ['r45', 'r46'], p_os: null, p_nota: NOTA_DA_COBRANCA_DO_CLIENTE });
+    expect(banco.chamadas.filter((c) => c.alvo === 'collection_contacts' || (c.alvo === 'collections' && c.op !== 'select'))).toEqual([]);
+  });
+
+  it('sem conta com saldo: não vira comprovante de quitação — não sai nada', async () => {
+    banco.respostas['receivables.select'] = ok([{ id: 's45', status: 'paid', amount: 500, paid_amount: 500, balance_amount: 0 }]);
+    const r = await tentar({ ...COBRANCA, contas: [] });
+    expect(r.erro).toBe('Este cliente não tem saldo em aberto: não há o que cobrar.');
+    expect(banco.invocacoes).toEqual([]);
+  });
+
+  it('as travas da ficha barram com dado fresco: entrada esperando no Extrato, opt-out, genérico, piso e fora do horário', async () => {
+    banco.respostas['finance_review_queue.select'] = ok([{ suggested_client_id: 'cli', suggested_amount: 1670, suggested_date: '2026-10-28' }]);
+    expect((await tentar()).erro).toContain('entrada esperando no Extrato');
+    banco.respostas['finance_review_queue.select'] = ok([]);
+    banco.respostas['clients.select'] = ok({ name: 'MP MOTOR HOMES', opt_out_whatsapp: true, generico: false, whatsapp: '(47) 99999-0000', phone: null });
+    expect((await tentar()).erro).toContain('opt-out');
+    banco.respostas['clients.select'] = ok({ name: 'Cliente Final', opt_out_whatsapp: false, generico: true, whatsapp: '(47) 99999-0000', phone: null });
+    expect((await tentar()).erro).toContain('é genérico');
+    banco.respostas['clients.select'] = ok({ name: 'MP MOTOR HOMES', opt_out_whatsapp: false, generico: false, whatsapp: '(47) 99999-0000', phone: null });
+    banco.respostas['app_settings.select'] = ok({ value: '5000' });
+    expect((await tentar()).erro).toContain('abaixo do piso');
+    banco.respostas['app_settings.select'] = ok({ value: '0' });
+    relogioDoCobrarJuntasTela.agora = () => new Date('2026-10-29T01:00:00Z'); // 22h em Brasília
+    expect((await tentar()).erro).toContain('Fora do horário de cobrança');
+    expect(banco.invocacoes).toEqual([]);
+  });
+
+  it('saldo mudou desde que a tela abriu: não envia, e a frase manda abrir a cobrança de novo', async () => {
+    banco.respostas['receivables.select'] = ok(CONTAS_NO_BANCO.map((c) => c.id === 'r46' ? { ...c, paid_amount: 40, balance_amount: 10 } : c));
+    const r = await tentar();
+    expect(r.erro).toContain('O saldo do cliente mudou desde que a tela abriu');
+    expect(r.erro).toContain('feche e abra a cobrança de novo');
+    expect(banco.invocacoes).toEqual([]);
+  });
+
+  it('não saiu, saiu repetida ou foi para o número de teste → nada registrado; teste com chave ":teste" e aviso', async () => {
+    banco.envio = { data: null, error: { message: 'falhou' } };
+    expect((await tentar()).erro).toBeTruthy();
+    banco.envio = { data: { success: true, deduplicated: true }, error: null };
+    expect((await tentar()).ok).toEqual({ deduplicado: true, aviso: null });
+    banco.envio = { data: { success: true }, error: null };
+    banco.invocacoes = [];
+    banco.respostas['app_settings.select:modo-teste'] = ok([
+      { key: 'wa_test_mode', value: 'true' }, { key: 'wa_test_number', value: '5547900001111' },
+    ]);
+    expect((await tentar()).ok).toEqual({ deduplicado: false, aviso: AVISO_MODO_TESTE, modoTeste: true });
+    expect(String(banco.invocacoes[0].body.dedupe_key)).toMatch(/^cobrar-cliente:cli:.*:teste$/);
+    expect(banco.chamadas.filter((c) => c.alvo.startsWith('rpc.'))).toEqual([]);
+  });
+
+  it('enviou mas o registro falhou → aviso (a mensagem saiu, nada gravado), não erro', async () => {
+    banco.respostas['rpc.cobrar_juntas_registrar_envio'] = { data: null, error: { message: 'boom' } };
+    const r = await tentar();
+    expect(r.erro).toBeNull();
+    expect(r.ok?.aviso).toContain('A cobrança foi enviada, mas não consegui registrá-la (boom)');
+  });
+});
+
+// "Já cobrado hoje" (o aviso da cobrança do cliente e o "fica de fora" do Cobrar em lote): só as de hoje em Brasília.
+describe('lerCobradosHoje', () => {
+  it('lê só as cobranças registradas desde a meia-noite de Brasília e guarda a última de cada cliente', async () => {
+    relogioDoCobrarJuntasTela.agora = () => new Date('2026-11-26T02:30:00Z'); // 25/11 às 23h30 em Brasília
+    banco.respostas['collections.select'] = ok([
+      { client_id: 'a', last_auto_sent_at: '2026-11-25T13:00:00Z' },
+      { client_id: 'a', last_auto_sent_at: '2026-11-25T18:15:00Z' },
+      { client_id: 'b', last_auto_sent_at: '2026-11-25T12:00:00Z' },
+    ]);
+    const m = await lerCobradosHoje(['a', 'b', 'a']);
+    expect([...m.entries()]).toEqual([['a', '2026-11-25T18:15:00Z'], ['b', '2026-11-25T12:00:00Z']]);
+    const leitura = banco.chamadas.find((c) => c.alvo === 'collections');
+    expect(leitura?.filtros).toContainEqual(['in', 'client_id', ['a', 'b']]);
+    expect(leitura?.filtros).toContainEqual(['gte', 'last_auto_sent_at', '2026-11-25T03:00:00.000Z']);
+    expect(avisoDeCobradoHoje('2026-11-25T18:15:00Z')).toBe('Este cliente já recebeu cobrança hoje (às 15h15). Confira se precisa mesmo de outra mensagem.');
+    expect(avisoDeCobradoHoje(null)).toBeNull();
+  });
+
+  it('sem clientes não lê; leitura que falha LANÇA (nunca "ninguém foi cobrado")', async () => {
+    expect((await lerCobradosHoje([])).size).toBe(0);
+    expect(banco.chamadas).toEqual([]);
+    banco.respostas['collections.select'] = { data: null, error: { message: 'permission denied' } };
+    await expect(lerCobradosHoje(['a'])).rejects.toThrow('Não consegui ler as cobranças de hoje: permission denied');
   });
 });

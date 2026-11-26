@@ -7,9 +7,12 @@ import userEvent from '@testing-library/user-event';
 import { ClientStatementDialog } from './ClientStatementDialog';
 import type { ClienteParaCobrar } from '@/components/client/CobrarJuntasDialog';
 
-const { enviarMock, estado } = vi.hoisted(() => ({
+const { enviarMock, cobrarMock, estado } = vi.hoisted(() => ({
   enviarMock: vi.fn(),
+  cobrarMock: vi.fn(),
   estado: {
+    cobradoHoje: null as string | null,
+    cobradoHojeErro: null as Error | null,
     pix: [] as Array<{ valor: number; data: string | null }>,
     settings: { pix_key: 'hbr@pix' } as Record<string, string>,
     hora: 14,
@@ -20,6 +23,9 @@ const { enviarMock, estado } = vi.hoisted(() => ({
 vi.mock('@/hooks/use-cobrar-juntas', () => ({
   usePixEsperandoDoCliente: () => ({ data: estado.pix, isLoading: false, error: null }),
   useEnviarExtrato: () => ({ mutate: enviarMock, isPending: false }),
+  useEnviarCobrancaDoCliente: () => ({ mutate: cobrarMock, isPending: false }),
+  useCobradoHoje: () => ({ data: estado.cobradoHoje, isLoading: false, error: estado.cobradoHojeErro }),
+  avisoDeCobradoHoje: (u: string | null) => (u ? `Este cliente já recebeu cobrança hoje (às ${u}). Confira se precisa mesmo de outra mensagem.` : null),
   useCobrancasFormais: () => ({ data: estado.cobrancas, isLoading: false, error: null }),
   horaDoCobrarJuntas: () => estado.hora,
 }));
@@ -34,12 +40,15 @@ const CONTAS = [
 ];
 const MP: ClienteParaCobrar = { id: 'cli', name: 'MP MOTOR HOMES', whatsapp: '47999990000', generico: false, opt_out_whatsapp: false };
 
-function renderizar(cliente: ClienteParaCobrar = MP, items = CONTAS) {
-  return render(<ClientStatementDialog open onOpenChange={() => {}} cliente={cliente} items={items} />);
+function renderizar(cliente: ClienteParaCobrar = MP, items = CONTAS, modo: 'extrato' | 'cobranca' = 'extrato') {
+  return render(<ClientStatementDialog open onOpenChange={() => {}} cliente={cliente} items={items} modo={modo} />);
 }
 
 beforeEach(() => {
   enviarMock.mockReset();
+  cobrarMock.mockReset();
+  estado.cobradoHoje = null;
+  estado.cobradoHojeErro = null;
   estado.pix = [];
   estado.settings = { pix_key: 'hbr@pix' };
   estado.hora = 14;
@@ -144,5 +153,68 @@ describe('ClientStatementDialog (Enviar extrato)', () => {
     renderizar(MP, [CONTAS[1]]);
     expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.getByRole('button', { name: /Enviar ao cliente/ })).toBeEnabled();
+  });
+});
+
+// A cobrança do cliente pela tela (dono, 26/11/2026: "1. A"): o botão da linha e o da aba Cobranças abrem este diálogo no
+// modo "cobranca" — só as contas com saldo, sem comprovante de quitação, envio pela cobrança do cliente.
+describe('ClientStatementDialog no modo cobrança', () => {
+  it('título "Cobrar <cliente>", mensagem "Cobrança" só com o que tem saldo, e o envio vai pela cobrança do cliente', async () => {
+    const user = userEvent.setup();
+    renderizar(MP, CONTAS, 'cobranca');
+    expect(screen.getByRole('heading', { name: 'Cobrar MP MOTOR HOMES' })).toBeInTheDocument();
+    const msg = screen.getByLabelText('Mensagem') as HTMLTextAreaElement;
+    expect(msg.value.startsWith('📋 *Cobrança — HBR*')).toBe(true);
+    expect(msg.value).not.toContain('Sinal'); // o sinal pago não entra na cobrança
+    expect(msg.value).toMatch(/Em aberto: R\$\s1\.670,00/);
+    expect(screen.getByTestId('enviar-extrato-efeito')).toHaveTextContent('A mensagem conta como a cobrança de hoje deste cliente');
+    await user.click(screen.getByRole('button', { name: /Enviar ao cliente/ }));
+    expect(enviarMock).not.toHaveBeenCalled();
+    expect(cobrarMock).toHaveBeenCalledTimes(1);
+    expect(cobrarMock.mock.calls[0][0]).toMatchObject({ cliente: { id: 'cli' }, contas: [{ id: 'r45', saldo: 1650 }, { id: 'r46', saldo: 20 }] });
+    expect(cobrarMock.mock.calls[0][0].mensagem.startsWith('📋 *Cobrança — HBR*')).toBe(true);
+  });
+
+  it('sem saldo: não vira comprovante de quitação — trava "não há o que cobrar"', () => {
+    renderizar(MP, [CONTAS[0]], 'cobranca');
+    expect(screen.getByRole('alert')).toHaveTextContent('Este cliente não tem saldo em aberto: não há o que cobrar.');
+    expect(screen.getByRole('button', { name: /Enviar ao cliente/ })).toBeDisabled();
+    expect(screen.queryByText(/Comprovante de quitação/)).toBeNull();
+  });
+
+  it('as travas da ficha valem: entrada esperando no Extrato e fora do horário', () => {
+    estado.pix = [{ valor: 1670, data: '2026-10-27' }];
+    const r = renderizar(MP, CONTAS, 'cobranca');
+    expect(screen.getByRole('alert')).toHaveTextContent('entrada esperando no Extrato');
+    r.unmount();
+    estado.pix = [];
+    estado.hora = 21;
+    renderizar(MP, CONTAS, 'cobranca');
+    expect(screen.getByRole('alert')).toHaveTextContent('Fora do horário de cobrança (21h');
+    expect(screen.getByRole('button', { name: /Enviar ao cliente/ })).toBeDisabled();
+  });
+});
+
+// "Já cobrado hoje" (os dois modos): aviso antes do botão, não trava — o dono decide.
+describe('ClientStatementDialog — já recebeu cobrança hoje', () => {
+  it('mostra o aviso com a hora e deixa enviar; leitura que falha também avisa', () => {
+    estado.cobradoHoje = '10h15';
+    let r = renderizar(MP, CONTAS, 'cobranca');
+    expect(screen.getByTestId('enviar-extrato-ja-cobrado')).toHaveTextContent('Este cliente já recebeu cobrança hoje (às 10h15)');
+    expect(screen.getByRole('button', { name: /Enviar ao cliente/ })).toBeEnabled();
+    r.unmount();
+    r = renderizar();
+    expect(screen.getByTestId('enviar-extrato-ja-cobrado')).toHaveTextContent('já recebeu cobrança hoje');
+    r.unmount();
+    estado.cobradoHoje = null;
+    estado.cobradoHojeErro = new Error('permission denied');
+    renderizar(MP, CONTAS, 'cobranca');
+    expect(screen.getByTestId('enviar-extrato-ja-cobrado')).toHaveTextContent('Não consegui conferir se este cliente já recebeu cobrança hoje');
+  });
+
+  it('comprovante de quitação não mostra o aviso (não é cobrança)', () => {
+    estado.cobradoHoje = '10h15';
+    renderizar(MP, [CONTAS[0]]);
+    expect(screen.queryByTestId('enviar-extrato-ja-cobrado')).toBeNull();
   });
 });

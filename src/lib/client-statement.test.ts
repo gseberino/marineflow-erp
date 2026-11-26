@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { buildClientStatement } from './client-statement';
-import { PARIDADE_COBRAR_JUNTAS as P } from '../../supabase/functions/_shared/receivables/cobrar-juntas_paridade';
+import {
+  PARIDADE_COBRANCA_DO_CLIENTE as PC, PARIDADE_COBRAR_JUNTAS as P,
+} from '../../supabase/functions/_shared/receivables/cobrar-juntas_paridade';
 
 const ITEMS = [
   { description: 'Sinal — OS-00060', due_date: '2026-07-27', status: 'paid', amount: 18001.04, balance_amount: 0 },
@@ -126,5 +128,28 @@ describe('buildClientStatement — Cobrar juntas com fatura', () => {
   it('o extrato do cliente inteiro não ganha a linha', () => {
     const s = buildClientStatement({ clientName: 'MP', items: MP, pixKey: 'hbr@pix', fatura: 'FAT-00001' });
     expect(s).not.toContain('Fatura:');
+  });
+});
+
+// A cobrança do cliente pela tela (dono, 26/11/2026: "1. A"): o cliente inteiro, só as contas com saldo, cabeçalho "Cobrança".
+describe('buildClientStatement — cobrança do cliente (cobranca: true)', () => {
+  it('paridade com o assistente: o mesmo caso fixo dá a MESMA mensagem do "cobra o Fulano" (cobrar_juntas com cliente_id)', () => {
+    const s = buildClientStatement({ clientName: PC.clienteNome, items: [...PC.contas], pixKey: PC.pixKey, hoje: PC.hoje, cobranca: true });
+    expect(s).toBe(PC.esperado);
+  });
+
+  it('sem histórico pago e sem comprovante de quitação: sem saldo não inventa linha nem Pix', () => {
+    const pago = { id: 'x', description: 'Saldo', status: 'paid', amount: 100, paid_amount: 100, balance_amount: 0, due_date: '2026-10-01' };
+    const s = buildClientStatement({ clientName: 'MP', items: [pago], pixKey: 'hbr@pix', cobranca: true });
+    expect(s.startsWith('📋 *Cobrança — HBR*')).toBe(true);
+    expect(s).toContain('_Sem lançamentos._');
+    expect(s).not.toContain('quitação');
+    expect(s).not.toContain('hbr@pix');
+  });
+
+  it('o extrato (sem cobranca) segue com o histórico e o cabeçalho de extrato', () => {
+    const s = buildClientStatement({ clientName: PC.clienteNome, items: [...PC.contas], pixKey: PC.pixKey, hoje: PC.hoje });
+    expect(s.startsWith('📋 *Extrato financeiro — HBR*')).toBe(true);
+    expect(s).toContain('Sinal OS-00045');
   });
 });

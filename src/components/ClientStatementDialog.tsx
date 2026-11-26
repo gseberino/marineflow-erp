@@ -14,6 +14,12 @@
 //   genérico, o opt-out, o telefone e o horário barram. Não é cobrança: nada é registrado.
 // - Com saldo, "conta como cobrança do dia": depois do envio, a cobrança fica registrada (e a da
 //   conta que não tem nenhuma é criada junto, como no Cobrar juntas). O aviso aparece antes do botão.
+//
+// modo "cobranca" (dono, 26/11/2026: "1. A" — os botões sem trava da tela ganham esta conferência): o botão da linha em
+// Contas a Receber e o da aba Cobranças abrem este diálogo pelo CobrarClienteDialog. A mensagem é a cobrança do cliente
+// inteiro (só as contas com saldo, o texto do "cobra o Fulano" do assistente), sem comprovante de quitação, com as travas
+// do Cobrar juntas; o envio é useEnviarCobrancaDoCliente, que registra como o extrato com saldo. Nos dois modos, quem já
+// recebeu cobrança hoje ganha um aviso antes do botão (não trava: o dono decide).
 import { useEffect, useMemo, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -23,12 +29,13 @@ import { AlertTriangle, Loader2, Send, Copy, Check, FileText, Info } from 'lucid
 import { toast } from 'sonner';
 import { useAppSettings } from '@/hooks/use-app-settings';
 import {
-  horaDoCobrarJuntas, useCobrancasFormais, useEnviarExtrato, usePixEsperandoDoCliente,
+  avisoDeCobradoHoje, horaDoCobrarJuntas, useCobradoHoje, useCobrancasFormais, useEnviarCobrancaDoCliente, useEnviarExtrato,
+  usePixEsperandoDoCliente,
 } from '@/hooks/use-cobrar-juntas';
 import { buildClientStatement, type StatementItem } from '@/lib/client-statement';
 import type { ClienteParaCobrar } from '@/components/client/CobrarJuntasDialog';
 import {
-  avisoDaCobrancaCriada, contasSemCobranca, saldoDaConta, travaDoExtrato,
+  avisoDaCobrancaCriada, contasSemCobranca, saldoDaConta, travaDoCobrarJuntas, travaDoExtrato,
 } from '../../supabase/functions/_shared/receivables/cobrar-juntas';
 
 interface Props {
@@ -36,17 +43,21 @@ interface Props {
   onOpenChange: (v: boolean) => void;
   cliente: ClienteParaCobrar;
   items: StatementItem[];
+  /** "extrato" (padrão): o Enviar extrato da ficha. "cobranca": a cobrança do cliente pela tela (só o que tem saldo). */
+  modo?: 'extrato' | 'cobranca';
 }
 
 const plural = (n: number, um: string, varios: string) => `${n} ${n === 1 ? um : varios}`;
 
-export function ClientStatementDialog({ open, onOpenChange, cliente, items }: Props) {
+export function ClientStatementDialog({ open, onOpenChange, cliente, items, modo = 'extrato' }: Props) {
+  const cobranca = modo === 'cobranca';
   const [message, setMessage] = useState('');
   const [copied, setCopied] = useState(false);
   const { data: settingsMap } = useAppSettings();
   const pixKey = settingsMap?.['pix_key'] ?? null;
   const piso = Number(settingsMap?.['collection_min_amount']) || 0;
   const enviar = useEnviarExtrato();
+  const cobrar = useEnviarCobrancaDoCliente();
 
   // O envio vai SEMPRE ao cadastro (o hook relê na hora); aqui só se mostra o número.
   const phone = cliente.whatsapp || cliente.phone || '';
@@ -60,7 +71,8 @@ export function ClientStatementDialog({ open, onOpenChange, cliente, items }: Pr
   );
   const total = Math.round(contasComSaldo.reduce((s, c) => s + c.saldo, 0) * 100) / 100;
   const lancamentos = (items || []).filter((r) => r.status !== 'cancelled').length;
-  const quitado = !(total > 0) && lancamentos > 0;
+  // A cobrança sem saldo não vira comprovante de quitação: a trava diz que não há o que cobrar.
+  const quitado = !cobranca && !(total > 0) && lancamentos > 0;
 
   // Pix esperando só importa quando há o que cobrar (no comprovante de quitação não se lê).
   const pix = usePixEsperandoDoCliente(cliente.id, open && !cliente.generico && total > 0);
@@ -71,26 +83,30 @@ export function ClientStatementDialog({ open, onOpenChange, cliente, items }: Pr
     [contasComSaldo],
   );
   const cobrancas = useCobrancasFormais(contaIds, osIds, open && !cliente.generico && total > 0);
+  // Quem já recebeu cobrança hoje (qualquer caminho que registra): aviso antes do botão, não trava.
+  const cobradoHoje = useCobradoHoje(cliente.id, open && !cliente.generico && total > 0);
 
   useEffect(() => {
     if (!open) return;
-    setMessage(buildClientStatement({ clientName: cliente.name, items, pixKey }));
+    setMessage(buildClientStatement({ clientName: cliente.name, items, pixKey, cobranca }));
     setCopied(false);
-  }, [open, cliente.name, items, pixKey]);
+  }, [open, cliente.name, items, pixKey, cobranca]);
 
+  const entradaDasTravas = {
+    clienteNome: cliente.name,
+    generico: cliente.generico,
+    optOut: cliente.opt_out_whatsapp,
+    piso,
+    totalEmAberto: total,
+    pixEsperando: pix.data ?? [],
+    telefone: phone,
+    horaBrasilia: horaDoCobrarJuntas(),
+  };
   const trava = total > 0 && pix.error
     ? (pix.error as Error).message
-    : travaDoExtrato({
-      clienteNome: cliente.name,
-      generico: cliente.generico,
-      optOut: cliente.opt_out_whatsapp,
-      piso,
-      totalEmAberto: total,
-      lancamentos,
-      pixEsperando: pix.data ?? [],
-      telefone: phone,
-      horaBrasilia: horaDoCobrarJuntas(),
-    });
+    : cobranca
+      ? travaDoCobrarJuntas({ ...entradaDasTravas, quantidadeOs: null })
+      : travaDoExtrato({ ...entradaDasTravas, lancamentos });
   // O que acontece com o envio, antes do botão: quitação não é cobrança; com saldo é a cobrança do dia.
   const criadas = !trava && total > 0 && cobrancas.data
     ? avisoDaCobrancaCriada(contasSemCobranca(contasComSaldo, cobrancas.data).length)
@@ -99,9 +115,14 @@ export function ClientStatementDialog({ open, onOpenChange, cliente, items }: Pr
     ? null
     : quitado
       ? 'Tudo quitado: o extrato sai como comprovante de quitação e não conta como cobrança.'
-      : `O extrato com saldo conta como a cobrança de hoje deste cliente (fica registrado em Cobranças).${criadas ? ` ${criadas}` : ''}`;
+      : `${cobranca ? 'A mensagem' : 'O extrato com saldo'} conta como a cobrança de hoje deste cliente (fica registrado em Cobranças).${criadas ? ` ${criadas}` : ''}`;
+  const jaCobrado = trava || quitado
+    ? null
+    : cobradoHoje.error
+      ? 'Não consegui conferir se este cliente já recebeu cobrança hoje. Confira em Cobranças antes de enviar.'
+      : avisoDeCobradoHoje(cobradoHoje.data);
   const carregando = !cliente.generico && total > 0 && pix.isLoading;
-  const sending = enviar.isPending;
+  const sending = enviar.isPending || cobrar.isPending;
   const podeEnviar = !trava && !carregando && message.trim().length > 0;
 
   const handleCopy = async () => {
@@ -116,6 +137,29 @@ export function ClientStatementDialog({ open, onOpenChange, cliente, items }: Pr
 
   const handleSend = () => {
     if (!podeEnviar) return;
+    if (cobranca) {
+      cobrar.mutate(
+        { cliente, mensagem: message, contas: contasComSaldo.map(({ id, saldo }) => ({ id, saldo })) },
+        {
+          onSuccess: (r) => {
+            if (r.deduplicado) {
+              toast.info(r.modoTeste
+                ? 'Esta mesma cobrança já tinha saído hoje para o número de teste: não enviei de novo.'
+                : 'Esta mesma cobrança já tinha saído hoje: não enviei de novo.');
+            } else if (r.modoTeste || r.aviso) {
+              toast.warning(r.aviso);
+            } else {
+              const criadasAgora = r.cobrancasCriadas ?? 0;
+              toast.success(`Cobrança enviada ao cliente. Ficou registrada como a cobrança de hoje${
+                criadasAgora ? ` (${plural(criadasAgora, 'cobrança criada', 'cobranças criadas')} em Cobranças)` : ''}.`);
+            }
+            onOpenChange(false);
+          },
+          onError: (e) => toast.error((e as Error).message || 'Erro ao enviar a cobrança'),
+        },
+      );
+      return;
+    }
     enviar.mutate(
       { cliente, mensagem: message, contas: contasComSaldo.map(({ id, saldo }) => ({ id, saldo })) },
       {
@@ -142,13 +186,19 @@ export function ClientStatementDialog({ open, onOpenChange, cliente, items }: Pr
 
   return (
     <Dialog open={open} onOpenChange={v => !sending && onOpenChange(v)}>
-      <DialogContent className="max-h-[90dvh] max-w-md overflow-y-auto" data-testid="enviar-extrato">
+      <DialogContent className="max-h-[90dvh] max-w-md overflow-y-auto" data-testid="enviar-extrato" data-modo={modo}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <FileText className="h-5 w-5 text-primary" />
-            {quitado ? 'Comprovante de quitação' : 'Extrato financeiro do cliente'}
+            <FileText className="h-5 w-5 shrink-0 text-primary" />
+            <span className="min-w-0 break-words">
+              {cobranca ? `Cobrar ${(cliente.name || '').trim() || 'o cliente'}` : quitado ? 'Comprovante de quitação' : 'Extrato financeiro do cliente'}
+            </span>
           </DialogTitle>
-          <DialogDescription>Revise e envie o extrato — nada é enviado sem confirmar.</DialogDescription>
+          <DialogDescription>
+            {cobranca
+              ? 'Uma mensagem com tudo que o cliente tem em aberto. Revise e envie — nada é enviado sem confirmar.'
+              : 'Revise e envie o extrato — nada é enviado sem confirmar.'}
+          </DialogDescription>
         </DialogHeader>
 
         <div className="min-w-0 space-y-3 py-1">
@@ -161,7 +211,7 @@ export function ClientStatementDialog({ open, onOpenChange, cliente, items }: Pr
           </div>
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <Label htmlFor="enviar-extrato-msg" className="text-xs text-muted-foreground">Extrato</Label>
+              <Label htmlFor="enviar-extrato-msg" className="text-xs text-muted-foreground">{cobranca ? 'Mensagem' : 'Extrato'}</Label>
               <Button type="button" variant="ghost" size="sm" onClick={handleCopy} className="h-6 gap-1 px-2 text-xs">
                 {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
                 {copied ? 'Copiado' : 'Copiar'}
@@ -180,6 +230,12 @@ export function ClientStatementDialog({ open, onOpenChange, cliente, items }: Pr
             <p role="alert" className="flex gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
               <span className="min-w-0 break-words">{trava}</span>
+            </p>
+          )}
+          {jaCobrado && (
+            <p className="flex gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm" data-testid="enviar-extrato-ja-cobrado">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+              <span className="min-w-0 break-words">{jaCobrado}</span>
             </p>
           )}
           {efeito && (

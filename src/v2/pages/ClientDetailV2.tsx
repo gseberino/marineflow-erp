@@ -17,6 +17,7 @@ import { ClientStatementDialog } from '@/components/ClientStatementDialog';
 import { CobrarJuntasDialog } from '@/components/client/CobrarJuntasDialog';
 import { FaturasDoCliente } from '@/components/client/FaturasDoCliente';
 import { useFaturasDoCliente } from '@/hooks/use-faturas';
+import { useContasDoCliente, type ContaDoClienteComOs } from '@/hooks/use-contas-do-cliente';
 import { osEntraNaFatura } from '@/lib/fatura';
 import { RecordHistory } from '@/components/RecordHistory';
 import { PagadoresDoCliente } from '@/components/PagadoresDoCliente';
@@ -45,16 +46,7 @@ type SORow = {
   /** Origem de um agrupamento (agrupar_orcamentos / agrupar_os): o valor dela já está no orçamento/OS que a reúne. */
   merged_into_id?: string | null;
 };
-type RecRow = {
-  id: string; description: string; due_date: string; status?: string | null; amount: number;
-  paid_amount?: number | null; balance_amount?: number | null; service_order_id?: string | null;
-  /** Número da OS da conta (embed pela FK): a conta pode ser de OS de outro cliente (pagador). */
-  numero_os?: string | null;
-  /** Situação da OS da conta: só OS que já começou entra no "Cobrar juntas". */
-  os?: { status?: string | null; merged_into_id?: string | null } | null;
-  /** A fatura FAT-N da conta (Fechar juntas F1), se estiver numa. */
-  invoice_id?: string | null;
-};
+type RecRow = ContaDoClienteComOs;
 
 export default function ClientDetailV2() {
   const { id } = useParams<{ id: string }>();
@@ -85,21 +77,8 @@ export default function ClientDetailV2() {
   // A tabela segue mostrando todas, como histórico.
   const ordensQueContam = (orders ?? []).filter((o) => !o.merged_into_id);
 
-  const { data: clientReceivables } = useQuery({
-    // Chave própria (com o número e a situação da OS): a ficha v1 usa ['receivables', 'client', id] com
-    // select('*'), e o cache de uma serviria a outra sem os campos da OS. O prefixo ['receivables'] segue invalidando.
-    queryKey: ['receivables', 'client', id, 'com-os'],
-    queryFn: async () => {
-      if (!id) return [];
-      const { data, error } = await supabase
-        .from('receivables').select('*, service_orders!receivables_service_order_id_fkey(service_order_number, status, merged_into_id)').eq('client_id', id)
-        .order('due_date', { ascending: false });
-      if (error) throw error;
-      return ((data ?? []) as unknown as Array<RecRow & { service_orders?: { service_order_number?: string | null; status?: string | null; merged_into_id?: string | null } | null }>)
-        .map(({ service_orders, ...r }) => ({ ...r, numero_os: service_orders?.service_order_number ?? null, os: service_orders ?? null }));
-    },
-    enabled: !!id,
-  });
+  // As contas com o número e a situação da OS: a mesma leitura (e o mesmo cache) da cobrança do cliente pela tela.
+  const { data: clientReceivables } = useContasDoCliente(id);
 
   if (isLoading) {
     return (
@@ -384,7 +363,7 @@ export default function ClientDetailV2() {
         open={statementOpen}
         onOpenChange={setStatementOpen}
         cliente={clienteParaCobrar}
-        items={(clientReceivables ?? []) as any}
+        items={clientReceivables ?? []}
       />
       <CobrarJuntasDialog
         open={cobrarJuntas !== null}

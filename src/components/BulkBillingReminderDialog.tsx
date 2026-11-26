@@ -1,548 +1,352 @@
+// "Cobrar em lote" (Contas a Receber) — dono, 26/11/2026: "1. A", o lote ganha a mesma conferência da ficha, com prévia.
+//
+// Antes (MF-AUD-050): uma mensagem POR CONTA, com modelo, a número sem conferência, sem piso, sem olhar a entrada
+// esperando no Extrato, sem opt-out, sem horário, sem registrar nada, e com agendamento/repetição que mandava sozinho
+// depois. Nunca foi usado (levantamento de 24/11/2026: 0 envios, 0 agendados).
+//
+// Agora (montarLoteDaTela, src/lib/cobrar-em-lote.ts): UMA mensagem por cliente — a cobrança do cliente inteiro, o mesmo
+// texto do "cobra o Fulano" do assistente —, as travas da ficha em cada um, quem fica de fora com o motivo, uma mensagem
+// por número, no máximo 20. Cada mensagem pode ser lida antes. No envio, cliente a cliente, enviarCobrancaDoCliente relê
+// o cadastro e as contas, confere as travas de novo e registra a cobrança do dia; recusa ou falha aparece na lista e
+// NÃO se repete sozinha (falha incerta não reenvia). Sem agendamento: a conferência vale para a hora do envio.
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
-import { Input } from '@/components/ui/input';
-import { Progress } from '@/components/ui/progress';
 import {
-  Loader2, Send, AlertTriangle, Pause, Play, X, CalendarClock, CheckCircle2, XCircle,
+  AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Info, Loader2, Send, XCircle,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
-import { toast } from 'sonner';
-import { useReceivables } from '@/hooks/use-financial';
-import { useClients } from '@/hooks/use-clients';
-import { normalizePhoneE164 } from '@/lib/masks';
-import { useWhatsAppTemplates, applyTemplateVariables } from '@/hooks/use-whatsapp-templates';
-import { useI18n } from '@/i18n';
-import { useQueryClient } from '@tanstack/react-query';
-import { useCreateScheduledSend } from '@/hooks/use-scheduled-sends';
+import { useAppSettings } from '@/hooks/use-app-settings';
 import {
-  ScheduleSettings, defaultScheduleConfig, type ScheduleConfig,
-} from '@/components/whatsapp/ScheduleSettings';
+  enviarCobrancaDoCliente, horaDoCobrarJuntas, invalidarDepoisDoLote, lerCobradosHoje,
+} from '@/hooks/use-cobrar-juntas';
+import {
+  MAX_CLIENTES_DO_LOTE, intervaloDoLote, montarLoteDaTela, type ClienteParaOLote, type ContaParaOLote, type FiltroDoLote,
+  type ItemDoLoteDaTela,
+} from '@/lib/cobrar-em-lote';
+import {
+  HORA_FIM_COBRANCA, HORA_INICIO_COBRANCA, hojeLocal,
+} from '../../supabase/functions/_shared/receivables/cobrar-juntas';
+import { lerDinheiroEsperando } from '../../supabase/functions/_shared/receivables/dinheiro-esperando';
 
 interface Props {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  /** Filtro inicial: 'overdue' (vencidas) ou 'upcoming' (vence em N dias) */
-  initialFilter?: 'overdue' | 'upcoming' | 'all';
-  /** Janela em dias para "upcoming" */
-  upcomingDays?: number;
+  /** 'overdue' (padrão): clientes com conta vencida. 'all': todo cliente com saldo. */
+  initialFilter?: 'overdue' | 'all';
 }
 
-type RowStatus = 'queued' | 'sending' | 'ok' | 'fail' | 'skipped';
-interface RowProgress {
-  id: string;
-  status: RowStatus;
-  attempts: number;
-  error?: string;
+type Situacao =
+  | { fase: 'fila' }
+  | { fase: 'enviando' }
+  | { fase: 'enviado'; aviso?: string | null }
+  | { fase: 'ja-saiu' }
+  | { fase: 'teste' }
+  | { fase: 'recusado'; motivo: string }
+  | { fase: 'parado' };
+
+const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const esperar = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** Tudo que o lote precisa, numa leitura (ao abrir). Leitura que falha = nada sai (a tela mostra o erro). */
+async function lerOLote(): Promise<{
+  contas: ContaParaOLote[];
+  clientes: ClienteParaOLote[];
+  pix: Map<string, Array<{ valor: number; data: string | null }>>;
+  cobradosHoje: Map<string, string>;
+}> {
+  const { data: linhas, error } = await supabase.from('receivables')
+    .select('id, client_id, description, due_date, status, amount, paid_amount, balance_amount, service_order_id, service_orders!receivables_service_order_id_fkey(service_order_number)')
+    .not('status', 'in', '(paid,cancelled)')
+    .order('due_date', { ascending: true })
+    .limit(1000);
+  if (error) throw new Error(`Não consegui ler as contas em aberto: ${error.message}`);
+  const contas = ((linhas ?? []) as unknown as Array<ContaParaOLote & { service_orders?: { service_order_number?: string | null } | null }>)
+    .map(({ service_orders, ...c }) => ({ ...c, numero_os: service_orders?.service_order_number ?? null }));
+  const ids = [...new Set(contas.map((c) => c.client_id).filter((x): x is string => !!x))];
+  if (!ids.length) return { contas, clientes: [], pix: new Map(), cobradosHoje: new Map() };
+  // A coluna generico é pedida pelo nome: sem ela a leitura falha e nada sai (falha fechada, como a ficha).
+  const { data: cli, error: eCli } = await supabase.from('clients')
+    .select('id, name, generico, opt_out_whatsapp, whatsapp, phone').in('id', ids);
+  if (eCli) throw new Error(`Não consegui ler o cadastro dos clientes: ${eCli.message}`);
+  const [esperando, cobradosHoje] = await Promise.all([lerDinheiroEsperando(supabase), lerCobradosHoje(ids)]);
+  const pix = new Map<string, Array<{ valor: number; data: string | null }>>();
+  for (const e of esperando) {
+    if (!e.clienteId) continue;
+    const lista = pix.get(e.clienteId) ?? [];
+    lista.push({ valor: e.valor, data: e.data });
+    pix.set(e.clienteId, lista);
+  }
+  return { contas, clientes: (cli ?? []) as ClienteParaOLote[], pix, cobradosHoje };
 }
 
-const THROTTLE_KEY = 'wa.bulk.throttleMs';
-const MAX_ATTEMPTS_KEY = 'wa.bulk.maxAttempts';
+export function BulkBillingReminderDialog({ open, onOpenChange, initialFilter = 'overdue' }: Props) {
+  const qc = useQueryClient();
+  const { data: settings } = useAppSettings();
+  const [filtro, setFiltro] = useState<FiltroDoLote>(initialFilter === 'all' ? 'todas' : 'vencidas');
+  const [desmarcados, setDesmarcados] = useState<Set<string>>(new Set());
+  const [aberta, setAberta] = useState<string | null>(null);
+  const [confirmando, setConfirmando] = useState(false);
+  const [rodando, setRodando] = useState(false);
+  const [situacao, setSituacao] = useState<Record<string, Situacao>>({});
+  const parar = useRef(false);
 
-export function BulkBillingReminderDialog({
-  open,
-  onOpenChange,
-  initialFilter = 'overdue',
-  upcomingDays = 7,
-}: Props) {
-  const { data: receivables } = useReceivables();
-  const { data: clients } = useClients();
-  const { data: templates } = useWhatsAppTemplates('billing');
-  const { formatCurrency, formatDate } = useI18n();
-  const queryClient = useQueryClient();
-  const createScheduled = useCreateScheduledSend();
-
-  const [filter, setFilter] = useState<'overdue' | 'upcoming' | 'all'>(initialFilter);
-  const [templateId, setTemplateId] = useState<string>('');
-  const [customMessage, setCustomMessage] = useState<string>('');
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-
-  // Throttle (ms) e retry
-  const [throttleMs, setThrottleMs] = useState<number>(() => {
-    try {
-      const v = parseInt(localStorage.getItem(THROTTLE_KEY) || '2500', 10);
-      return Number.isFinite(v) && v >= 500 && v <= 60000 ? v : 2500;
-    } catch { return 2500; }
-  });
-  const [maxAttempts, setMaxAttempts] = useState<number>(() => {
-    try {
-      const v = parseInt(localStorage.getItem(MAX_ATTEMPTS_KEY) || '3', 10);
-      return Number.isFinite(v) && v >= 1 && v <= 5 ? v : 3;
-    } catch { return 3; }
+  const leitura = useQuery({
+    queryKey: ['receivables', 'cobrar-em-lote'],
+    enabled: open,
+    queryFn: lerOLote,
+    staleTime: 0,
+    gcTime: 0,
   });
 
   useEffect(() => {
-    try { localStorage.setItem(THROTTLE_KEY, String(throttleMs)); } catch { /* sem localStorage (modo privado, cota): segue sem lembrar a preferência */ }
-  }, [throttleMs]);
-  useEffect(() => {
-    try { localStorage.setItem(MAX_ATTEMPTS_KEY, String(maxAttempts)); } catch { /* sem localStorage (modo privado, cota): segue sem lembrar a preferência */ }
-  }, [maxAttempts]);
+    if (!open) return;
+    setFiltro(initialFilter === 'all' ? 'todas' : 'vencidas');
+    setDesmarcados(new Set());
+    setAberta(null);
+    setConfirmando(false);
+    setSituacao({});
+    parar.current = false;
+  }, [open, initialFilter]);
 
-  // Estado de execução
-  const [running, setRunning] = useState(false);
-  const [paused, setPaused] = useState(false);
-  const [progress, setProgress] = useState<Record<string, RowProgress>>({});
-  const cancelRef = useRef(false);
-  const pauseRef = useRef(false);
+  const lote = useMemo(() => {
+    if (!leitura.data) return null;
+    return montarLoteDaTela({
+      contas: leitura.data.contas,
+      clientes: leitura.data.clientes,
+      filtro,
+      hoje: hojeLocal(),
+      piso: Number(settings?.['collection_min_amount']) || 0,
+      pixKey: settings?.['pix_key'] ?? null,
+      pixEsperando: leitura.data.pix,
+      cobradosHoje: leitura.data.cobradosHoje,
+    });
+  }, [leitura.data, filtro, settings]);
 
-  // Agendamento opcional do lote
-  const [schedule, setSchedule] = useState<ScheduleConfig>(defaultScheduleConfig());
+  const hora = horaDoCobrarJuntas();
+  const foraDoHorario = hora < HORA_INICIO_COBRANCA || hora >= HORA_FIM_COBRANCA;
+  const escolhidos: ItemDoLoteDaTela[] = (lote?.vao ?? []).filter((i) => !desmarcados.has(i.cliente.id));
+  const totalEscolhido = escolhidos.reduce((s, i) => s + i.total, 0);
+  const terminou = !rodando && Object.keys(situacao).length > 0;
+  const podeEnviar = !rodando && !terminou && !foraDoHorario && escolhidos.length > 0 && !leitura.isFetching;
 
-  const clientById = useMemo(() => {
-    const m = new Map<string, any>();
-    (clients || []).forEach(c => m.set(c.id, c));
-    return m;
-  }, [clients]);
-
-  const candidates = useMemo(() => {
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    const limitUpcoming = new Date(today); limitUpcoming.setDate(limitUpcoming.getDate() + upcomingDays);
-    return (receivables || [])
-      .filter((r: any) => r.status !== 'paid' && r.status !== 'cancelled')
-      .filter((r: any) => {
-        const due = new Date(r.due_date); due.setHours(0, 0, 0, 0);
-        if (filter === 'overdue') return due < today;
-        if (filter === 'upcoming') return due >= today && due <= limitUpcoming;
-        return true;
-      })
-      .map((r: any) => {
-        const client = clientById.get(r.client_id);
-        const phoneRaw = client?.whatsapp || client?.phone || '';
-        return {
-          ...r,
-          client_name: client?.name || 'Cliente',
-          phone_normalized: normalizePhoneE164(phoneRaw),
-          has_phone: !!normalizePhoneE164(phoneRaw),
-        };
-      });
-  }, [receivables, clientById, filter, upcomingDays]);
-
-  const eligible = candidates.filter(c => c.has_phone);
-
-  // Template default ao abrir / quando mudar filtro
-  useEffect(() => {
-    if (!templates?.length || templateId) return;
-    const preferKey = filter === 'overdue' ? 'vencida' : 'lembrete';
-    const t = templates.find(x => x.name.toLowerCase().includes(preferKey)) || templates[0];
-    if (t) { setTemplateId(t.id); setCustomMessage(t.body); }
-  }, [templates, filter, templateId]);
-
-  // Reset ao fechar
-  useEffect(() => {
-    if (!open) {
-      cancelRef.current = false;
-      pauseRef.current = false;
-      setRunning(false);
-      setPaused(false);
-      setProgress({});
-      setSchedule(defaultScheduleConfig());
-    }
-  }, [open]);
-
-  const handleTemplateChange = (id: string) => {
-    setTemplateId(id);
-    const tpl = templates?.find(x => x.id === id);
-    if (tpl) setCustomMessage(tpl.body);
-  };
-
-  const toggleAll = () => {
-    if (selectedIds.size === eligible.length) setSelectedIds(new Set());
-    else setSelectedIds(new Set(eligible.map(e => e.id)));
-  };
-
-  const renderForReceivable = (r: any) => applyTemplateVariables(customMessage, {
-    cliente: r.client_name,
-    descricao: r.description,
-    valor: formatCurrency(Number(r.balance_amount ?? r.amount)),
-    vencimento: formatDate(r.due_date),
-    os: r.service_order_id ? `(OS vinculada)` : '',
-    link: '',
+  const alternar = (id: string) => setDesmarcados((d) => {
+    const n = new Set(d);
+    if (n.has(id)) n.delete(id); else n.add(id);
+    return n;
   });
 
-  // Helpers para pausar/cancelar dentro do loop
-  async function waitWhilePaused() {
-    while (pauseRef.current && !cancelRef.current) {
-      await new Promise(r => setTimeout(r, 250));
-    }
-  }
-  async function sleep(ms: number) {
-    const step = 100;
-    let elapsed = 0;
-    while (elapsed < ms) {
-      if (cancelRef.current) return;
-      await waitWhilePaused();
-      await new Promise(r => setTimeout(r, step));
-      elapsed += step;
-    }
-  }
-
-  function updateRow(id: string, patch: Partial<RowProgress>) {
-    setProgress(prev => ({ ...prev, [id]: { ...(prev[id] || { id, status: 'queued', attempts: 0 }), ...patch, id } }));
-  }
-
-  async function sendOneWithRetry(r: any): Promise<boolean> {
-    for (let attempt = 1; attempt <= Math.max(1, maxAttempts); attempt++) {
-      if (cancelRef.current) return false;
-      await waitWhilePaused();
-      updateRow(r.id, { status: 'sending', attempts: attempt });
+  async function enviarTodos() {
+    setConfirmando(false);
+    setRodando(true);
+    parar.current = false;
+    const fila = [...escolhidos];
+    setSituacao(Object.fromEntries(fila.map((i) => [i.cliente.id, { fase: 'fila' } as Situacao])));
+    for (let k = 0; k < fila.length; k++) {
+      const item = fila[k];
+      if (parar.current) break;
+      setSituacao((s) => ({ ...s, [item.cliente.id]: { fase: 'enviando' } }));
+      let nova: Situacao;
       try {
-        const { data, error } = await supabase.functions.invoke('whatsapp-send', {
-          body: {
-            phone: r.phone_normalized,
-            kind: 'text',
-            message: renderForReceivable(r),
-            receivable_id: r.id,
-            service_order_id: r.service_order_id || undefined,
-            context: 'billing_bulk',
-            attempt,
-          },
+        const r = await enviarCobrancaDoCliente({
+          cliente: { id: item.cliente.id, name: item.cliente.name, generico: item.cliente.generico },
+          mensagem: item.mensagem,
+          contas: item.contas,
         });
-        if (error || (data as any)?.error) {
-          throw new Error((data as any)?.error || error?.message || 'Falha desconhecida');
-        }
-        updateRow(r.id, { status: 'ok' });
-        return true;
-      } catch (e: any) {
-        const msg = e?.message || 'Erro';
-        updateRow(r.id, { status: attempt < maxAttempts ? 'sending' : 'fail', error: msg });
-        if (attempt < maxAttempts) {
-          // Backoff exponencial entre tentativas (1s, 2s, 4s…)
-          const delay = Math.min(8000, 1000 * Math.pow(2, attempt - 1));
-          await sleep(delay);
-        }
-      }
-    }
-    return false;
-  }
-
-  // ============ Agendamento em lote ============
-  async function handleScheduleBatch() {
-    if (!selectedIds.size) { toast.error('Selecione ao menos uma cobrança.'); return; }
-    const scheduledIso = new Date(schedule.scheduledAt).toISOString();
-    if (new Date(scheduledIso).getTime() <= Date.now()) {
-      toast.error('Escolha uma data/hora futura.');
-      return;
-    }
-    const tId = toast.loading(`Agendando ${selectedIds.size} envio(s)…`);
-    let ok = 0, fail = 0;
-    for (const id of selectedIds) {
-      const r = eligible.find(e => e.id === id);
-      if (!r) continue;
-      try {
-        await createScheduled.mutateAsync({
-          target_kind: 'receivable',
-          receivable_id: r.id,
-          service_order_id: r.service_order_id || null,
-          client_id: r.client_id,
-          phone: r.phone_normalized,
-          message: renderForReceivable(r),
-          // Texto puro, como o envio na hora (20/10/2026, decisão do dono: o link só vai quando pedido).
-          // Antes era 'link': mandava o link da OS e falhava ("share_token indisponível") na cobrança sem OS.
-          send_mode: 'text',
-          context: 'billing',
-          scheduled_at: scheduledIso,
-          recurrence_type: schedule.recurrenceType,
-          recurrence_days_of_week:
-            schedule.recurrenceType === 'weekly' ? schedule.daysOfWeek : undefined,
-          recurrence_day_of_month:
-            schedule.recurrenceType === 'monthly' ? schedule.dayOfMonth : undefined,
-          recurrence_end_date: schedule.endDate
-            ? new Date(schedule.endDate).toISOString()
-            : null,
-          auto_retry: true,
-          max_attempts: maxAttempts,
-        });
-        ok++;
+        nova = r.deduplicado ? { fase: 'ja-saiu' } : r.modoTeste ? { fase: 'teste' } : { fase: 'enviado', aviso: r.aviso };
       } catch (e) {
-        console.error('schedule bulk error', r.id, e);
-        fail++;
+        nova = { fase: 'recusado', motivo: (e as Error).message || 'Não saiu.' };
       }
+      setSituacao((s) => ({ ...s, [item.cliente.id]: nova }));
+      if (k < fila.length - 1 && !parar.current) await esperar(intervaloDoLote.ms);
     }
-    toast.success(`${ok} agendamento(s) criado(s)${fail ? `, ${fail} falha(s)` : ''}.`, { id: tId });
-    if (!fail) onOpenChange(false);
+    // Parou no meio: quem ficou na fila não foi enviado.
+    setSituacao((s) => Object.fromEntries(Object.entries(s).map(([id, x]) => [id, x.fase === 'fila' ? { fase: 'parado' } as Situacao : x])));
+    setRodando(false);
+    invalidarDepoisDoLote(qc);
   }
 
-  // ============ Envio imediato com throttle ============
-  async function handleSendNow() {
-    if (!selectedIds.size) { toast.error('Selecione ao menos uma cobrança.'); return; }
-    cancelRef.current = false;
-    pauseRef.current = false;
-    setPaused(false);
-    setRunning(true);
-
-    const queue = eligible.filter(e => selectedIds.has(e.id));
-    const initial: Record<string, RowProgress> = {};
-    queue.forEach(r => { initial[r.id] = { id: r.id, status: 'queued', attempts: 0 }; });
-    setProgress(initial);
-
-    const tId = toast.loading(`Enviando 0 / ${queue.length}…`);
-    let ok = 0, fail = 0;
-
-    for (let i = 0; i < queue.length; i++) {
-      if (cancelRef.current) break;
-      await waitWhilePaused();
-      const r = queue[i];
-      const success = await sendOneWithRetry(r);
-      if (success) ok++; else fail++;
-      toast.loading(`Enviando ${i + 1} / ${queue.length} (${ok} ok, ${fail} falhas)…`, { id: tId });
-      // Throttle entre envios
-      if (i < queue.length - 1 && !cancelRef.current) {
-        await sleep(throttleMs);
-      }
-    }
-
-    setRunning(false);
-    setPaused(false);
-    pauseRef.current = false;
-
-    if (cancelRef.current) {
-      toast.warning(`Envio cancelado. ${ok} enviada(s), ${fail} falha(s).`, { id: tId });
-    } else {
-      toast.success(`Concluído: ${ok} enviada(s)${fail ? `, ${fail} falha(s)` : ''}.`, { id: tId });
-    }
-
-    queryClient.invalidateQueries({ queryKey: ['whatsapp-send-status'] });
-    queryClient.invalidateQueries({ queryKey: ['whatsapp-send-history'] });
-
-    if (!fail && !cancelRef.current) {
-      // Pequeno delay para o usuário ver o estado final antes de fechar
-      setTimeout(() => onOpenChange(false), 800);
-    }
-  }
-
-  function handlePauseToggle() {
-    pauseRef.current = !pauseRef.current;
-    setPaused(pauseRef.current);
-  }
-  function handleCancel() {
-    cancelRef.current = true;
-    pauseRef.current = false;
-    setPaused(false);
-  }
-
-  // ====== Resumo de progresso ======
-  const totalSelected = selectedIds.size;
-  const counts = useMemo(() => {
-    const list = Object.values(progress);
-    return {
-      ok: list.filter(r => r.status === 'ok').length,
-      fail: list.filter(r => r.status === 'fail').length,
-      sending: list.filter(r => r.status === 'sending').length,
-      done: list.filter(r => r.status === 'ok' || r.status === 'fail').length,
-    };
-  }, [progress]);
-  const percent = totalSelected ? Math.round((counts.done / totalSelected) * 100) : 0;
+  const contagem = (fase: Situacao['fase']) => Object.values(situacao).filter((s) => s.fase === fase).length;
 
   return (
-    <Dialog open={open} onOpenChange={v => !running && onOpenChange(v)}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+    <Dialog open={open} onOpenChange={(v) => { if (!rodando) onOpenChange(v); }}>
+      <DialogContent className="max-h-[90dvh] max-w-2xl overflow-y-auto" data-testid="cobrar-em-lote">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Send className="h-5 w-5" /> Cobrança em massa via WhatsApp
+            <Send className="h-5 w-5 text-primary" /> Cobrar em lote
           </DialogTitle>
           <DialogDescription>
-            Selecione cobranças e envie via WhatsApp com throttle, retry automático e progresso ao vivo.
+            Uma mensagem por cliente, com tudo que ele tem em aberto e as mesmas travas da ficha. Confira antes de enviar.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <Label className="!mb-0">Filtro:</Label>
-            <Button size="sm" variant={filter === 'overdue' ? 'default' : 'outline'} disabled={running} onClick={() => { setFilter('overdue'); setSelectedIds(new Set()); }}>Vencidas</Button>
-            <Button size="sm" variant={filter === 'upcoming' ? 'default' : 'outline'} disabled={running} onClick={() => { setFilter('upcoming'); setSelectedIds(new Set()); }}>A vencer ({upcomingDays}d)</Button>
-            <Button size="sm" variant={filter === 'all' ? 'default' : 'outline'} disabled={running} onClick={() => { setFilter('all'); setSelectedIds(new Set()); }}>Todas pendentes</Button>
-          </div>
-
-          <div>
-            <Label>Template</Label>
-            <select
-              className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
-              value={templateId}
-              disabled={running}
-              onChange={e => handleTemplateChange(e.target.value)}
+        <div className="min-w-0 space-y-3">
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Quais clientes">
+            <Button
+              type="button" size="sm" variant={filtro === 'vencidas' ? 'default' : 'outline'}
+              disabled={rodando || terminou} onClick={() => { setFiltro('vencidas'); setDesmarcados(new Set()); }}
             >
-              <option value="">— selecionar —</option>
-              {(templates || []).map(t => (
-                <option key={t.id} value={t.id}>{t.name}</option>
-              ))}
-            </select>
+              Com conta vencida
+            </Button>
+            <Button
+              type="button" size="sm" variant={filtro === 'todas' ? 'default' : 'outline'}
+              disabled={rodando || terminou} onClick={() => { setFiltro('todas'); setDesmarcados(new Set()); }}
+            >
+              Todos com saldo
+            </Button>
           </div>
 
-          <div>
-            <Label>Mensagem (use placeholders)</Label>
-            <Textarea rows={4} value={customMessage} disabled={running} onChange={e => setCustomMessage(e.target.value)} />
-            <p className="text-xs text-muted-foreground mt-1">Placeholders: {'{cliente}'} {'{descricao}'} {'{valor}'} {'{vencimento}'}</p>
-          </div>
+          {foraDoHorario && (
+            <p role="alert" className="flex gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span className="min-w-0 break-words">
+                Fora do horário de cobrança ({hora}h; janela {HORA_INICIO_COBRANCA}–{HORA_FIM_COBRANCA}h em Brasília): envie a partir das {HORA_INICIO_COBRANCA}h.
+              </span>
+            </p>
+          )}
 
-          {/* Configurações de envio */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-lg border bg-muted/20">
-            <div>
-              <Label className="text-xs">Intervalo entre mensagens (ms)</Label>
-              <Input
-                type="number"
-                min={500}
-                max={60000}
-                step={500}
-                value={throttleMs}
-                disabled={running}
-                onChange={e => setThrottleMs(Math.max(500, Math.min(60000, parseInt(e.target.value || '2500', 10) || 2500)))}
-              />
-              <p className="text-[11px] text-muted-foreground mt-1">
-                Recomendado: 2000–5000ms para evitar bloqueio pelo provedor.
-              </p>
-            </div>
-            <div>
-              <Label className="text-xs">Tentativas por mensagem</Label>
-              <Input
-                type="number"
-                min={1}
-                max={5}
-                value={maxAttempts}
-                disabled={running}
-                onChange={e => setMaxAttempts(Math.max(1, Math.min(5, parseInt(e.target.value || '3', 10) || 3)))}
-              />
-              <p className="text-[11px] text-muted-foreground mt-1">
-                Backoff exponencial entre tentativas (1s → 2s → 4s…).
-              </p>
-            </div>
-          </div>
+          {leitura.isLoading && (
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Conferindo as contas, os cadastros e o Extrato…
+            </p>
+          )}
+          {leitura.error && (
+            <p role="alert" className="flex gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span className="min-w-0 break-words">{(leitura.error as Error).message} Nada foi enviado; feche e abra de novo.</span>
+            </p>
+          )}
 
-          {/* Lista de elegíveis */}
-          <div className="border rounded-lg overflow-hidden">
-            <div className="flex items-center justify-between px-3 py-2 bg-muted/30 border-b">
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  checked={selectedIds.size === eligible.length && eligible.length > 0}
-                  onCheckedChange={toggleAll}
-                  disabled={running}
-                />
-                <span className="text-sm font-medium">
-                  {selectedIds.size} de {eligible.length} selecionada(s)
-                </span>
-              </div>
-              {candidates.length > eligible.length && (
-                <span className="text-xs text-amber-700 inline-flex items-center gap-1">
-                  <AlertTriangle className="h-3 w-3" />
-                  {candidates.length - eligible.length} sem telefone
-                </span>
-              )}
-            </div>
-            <div className="max-h-[40vh] overflow-y-auto divide-y">
-              {eligible.length === 0 && (
-                <p className="p-6 text-sm text-muted-foreground text-center">Nenhuma cobrança elegível.</p>
-              )}
-              {eligible.map(r => {
-                const p = progress[r.id];
-                return (
-                  <label key={r.id} className="flex items-start gap-3 p-3 hover:bg-muted/30 cursor-pointer">
-                    <Checkbox
-                      checked={selectedIds.has(r.id)}
-                      disabled={running}
-                      onCheckedChange={v => {
-                        const next = new Set(selectedIds);
-                        if (v) next.add(r.id); else next.delete(r.id);
-                        setSelectedIds(next);
-                      }}
-                      className="mt-1"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-sm font-medium truncate">{r.client_name}</p>
-                        {p && (
-                          <span className="text-[11px] inline-flex items-center gap-1 shrink-0">
-                            {p.status === 'ok' && <><CheckCircle2 className="h-3.5 w-3.5 text-success" /><span className="text-success">Enviado</span></>}
-                            {p.status === 'fail' && <><XCircle className="h-3.5 w-3.5 text-destructive" /><span className="text-destructive">Falhou</span></>}
-                            {p.status === 'sending' && <><Loader2 className="h-3.5 w-3.5 animate-spin" /><span className="text-muted-foreground">Tentativa {p.attempts}/{maxAttempts}</span></>}
-                            {p.status === 'queued' && <span className="text-muted-foreground">Na fila</span>}
-                          </span>
+          {lote && (
+            <>
+              {lote.vao.length === 0 ? (
+                <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm" data-testid="lote-vazio">
+                  Nenhum cliente para cobrar agora{lote.fora.length ? ': veja abaixo quem ficou de fora e por quê.' : '.'}
+                </p>
+              ) : (
+                <ul className="space-y-2" aria-label="Recebem a cobrança">
+                  {lote.vao.map((i) => {
+                    const s = situacao[i.cliente.id];
+                    const marcado = !desmarcados.has(i.cliente.id);
+                    return (
+                      <li key={i.cliente.id} className="min-w-0 rounded-md border p-2.5" data-testid="lote-item">
+                        <div className="flex items-start gap-2">
+                          <Checkbox
+                            checked={marcado}
+                            disabled={rodando || terminou}
+                            onCheckedChange={() => alternar(i.cliente.id)}
+                            aria-label={`Cobrar ${i.cliente.name || 'cliente'}`}
+                            className="mt-0.5"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="break-words text-sm font-medium">{(i.cliente.name || '').trim() || 'Cliente'}</p>
+                            <p className="break-words text-xs text-muted-foreground tabular-nums">
+                              {i.telefone} · em aberto {brl(i.total)}{i.vencido > 0 ? ` · vencido ${brl(i.vencido)}` : ''}
+                            </p>
+                            {s && <LinhaDaSituacao s={s} />}
+                          </div>
+                          <Button
+                            type="button" variant="ghost" size="sm" className="h-7 shrink-0 gap-1 px-2 text-xs"
+                            onClick={() => setAberta(aberta === i.cliente.id ? null : i.cliente.id)}
+                            aria-expanded={aberta === i.cliente.id}
+                          >
+                            Mensagem {aberta === i.cliente.id ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                          </Button>
+                        </div>
+                        {aberta === i.cliente.id && (
+                          <pre className="mt-2 max-h-64 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-muted p-2 font-mono text-xs">
+                            {i.mensagem}
+                          </pre>
                         )}
-                      </div>
-                      <p className="text-xs text-muted-foreground truncate">{r.description}</p>
-                      <p className="text-xs">
-                        <span className="font-mono">{formatCurrency(Number(r.balance_amount ?? r.amount))}</span>
-                        {' • '}
-                        <span>{formatDate(r.due_date)}</span>
-                        {' • '}
-                        <span className="text-muted-foreground">{r.phone_normalized}</span>
-                      </p>
-                      {p?.error && p.status === 'fail' && (
-                        <p className="text-[11px] text-destructive mt-1 truncate" title={p.error}>{p.error}</p>
-                      )}
-                    </div>
-                  </label>
-                );
-              })}
-            </div>
-          </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
 
-          {/* Progresso */}
-          {running || counts.done > 0 ? (
-            <div className="space-y-2 p-3 rounded-lg border bg-muted/10">
-              <div className="flex items-center justify-between text-sm">
-                <span className="font-medium">
-                  {counts.done} / {totalSelected} processadas
-                </span>
-                <span className="text-muted-foreground">
-                  ✓ {counts.ok} • ✗ {counts.fail}{counts.sending ? ` • ⏳ ${counts.sending}` : ''}
-                </span>
-              </div>
-              <Progress value={percent} />
-              {running && (
-                <div className="flex items-center gap-2 pt-1">
-                  <Button size="sm" variant="outline" onClick={handlePauseToggle} className="gap-1">
-                    {paused ? <><Play className="h-3.5 w-3.5" /> Retomar</> : <><Pause className="h-3.5 w-3.5" /> Pausar</>}
-                  </Button>
-                  <Button size="sm" variant="destructive" onClick={handleCancel} className="gap-1">
-                    <X className="h-3.5 w-3.5" /> Cancelar
-                  </Button>
-                  {paused && <span className="text-xs text-warning">Pausado…</span>}
+              {lote.fora.length > 0 && (
+                <div className="space-y-1" data-testid="lote-fora">
+                  <p className="text-xs font-medium text-muted-foreground">Ficam de fora (não recebem):</p>
+                  <ul className="space-y-1">
+                    {lote.fora.map((f, k) => (
+                      <li key={`${f.cliente}-${k}`} className="break-words text-xs text-muted-foreground">
+                        <span className="font-medium text-foreground">{f.cliente}</span>: {f.motivo}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
-            </div>
-          ) : null}
 
-          {/* Agendamento opcional do lote inteiro */}
-          {!running && (
-            <ScheduleSettings
-              value={schedule}
-              onChange={setSchedule}
-              disabled={createScheduled.isPending}
-            />
+              {!terminou && escolhidos.length > 0 && (
+                <p className="flex gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+                  <Info className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 break-words">
+                    Cada mensagem conta como a cobrança de hoje do cliente (fica registrada em Cobranças). No envio, cada
+                    um é conferido de novo: o que mudou desde agora não sai. Até {MAX_CLIENTES_DO_LOTE} clientes por vez.
+                  </span>
+                </p>
+              )}
+
+              {terminou && (
+                <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm" data-testid="lote-resultado">
+                  Enviadas: {contagem('enviado')} · já tinham saído hoje: {contagem('ja-saiu')} · não saíram: {contagem('recusado')}
+                  {contagem('teste') ? ` · para o número de TESTE: ${contagem('teste')}` : ''}
+                  {contagem('parado') ? ` · não enviadas (parou): ${contagem('parado')}` : ''}
+                </p>
+              )}
+            </>
           )}
         </div>
 
-        <DialogFooter className="gap-2 flex-wrap">
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={running || createScheduled.isPending}>
-            Fechar
-          </Button>
-          {schedule.enabled ? (
-            <Button
-              onClick={handleScheduleBatch}
-              disabled={running || createScheduled.isPending || !selectedIds.size}
-              className="gap-2"
-            >
-              {createScheduled.isPending
-                ? <Loader2 className="h-4 w-4 animate-spin" />
-                : <CalendarClock className="h-4 w-4" />}
-              Agendar lote ({selectedIds.size})
-            </Button>
+        <DialogFooter className="gap-2 sm:gap-0">
+          {rodando ? (
+            <Button variant="outline" onClick={() => { parar.current = true; }}>Parar depois deste</Button>
+          ) : confirmando ? (
+            <>
+              <Button variant="outline" onClick={() => setConfirmando(false)}>Voltar</Button>
+              <Button onClick={() => void enviarTodos()} className="gap-2" disabled={!podeEnviar}>
+                <Send className="h-4 w-4" /> Confirmar: enviar {escolhidos.length} {escolhidos.length === 1 ? 'mensagem' : 'mensagens'}
+              </Button>
+            </>
           ) : (
-            <Button
-              onClick={handleSendNow}
-              disabled={running || !selectedIds.size}
-              className="gap-2"
-            >
-              {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              Enviar agora ({selectedIds.size})
-            </Button>
+            <>
+              <Button variant="outline" onClick={() => onOpenChange(false)}>Fechar</Button>
+              {lote && !terminou && (
+                <Button onClick={() => setConfirmando(true)} className="gap-2" disabled={!podeEnviar}>
+                  <Send className="h-4 w-4" />
+                  Enviar a {escolhidos.length} {escolhidos.length === 1 ? 'cliente' : 'clientes'} ({brl(totalEscolhido)})
+                </Button>
+              )}
+            </>
           )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function LinhaDaSituacao({ s }: { s: Situacao }) {
+  if (s.fase === 'fila') return <p className="mt-1 text-xs text-muted-foreground">Na fila…</p>;
+  if (s.fase === 'enviando') {
+    return <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" /> Enviando…</p>;
+  }
+  if (s.fase === 'enviado') {
+    return (
+      <p className="mt-1 flex items-start gap-1 break-words text-xs text-success">
+        <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0" /> <span className="min-w-0">Enviada.{s.aviso ? ` ${s.aviso}` : ''}</span>
+      </p>
+    );
+  }
+  if (s.fase === 'ja-saiu') return <p className="mt-1 text-xs text-muted-foreground">Esta mesma cobrança já tinha saído hoje: não enviei de novo.</p>;
+  if (s.fase === 'teste') return <p className="mt-1 text-xs text-warning">Foi para o número de TESTE (modo de teste ligado): o cliente não recebeu.</p>;
+  if (s.fase === 'parado') return <p className="mt-1 text-xs text-muted-foreground">Não enviada.</p>;
+  return (
+    <p className="mt-1 flex items-start gap-1 break-words text-xs text-destructive">
+      <XCircle className="mt-0.5 h-3 w-3 shrink-0" /> <span className="min-w-0">Não saiu: {s.motivo}</span>
+    </p>
   );
 }
