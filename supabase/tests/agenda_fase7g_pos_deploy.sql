@@ -196,14 +196,15 @@ select format('F1 %s (%s): existe, 1 por nome, %s, %s, search_path=public, execu
   left join pg_proc p on p.oid = to_regprocedure('public.' || r.f);
 -- (23/11/2026, 20270223100000) O "terminou ou falta dia?" recria agenda_saude com 1 bloco "-- TERMINOU: … -- TERMINOU: fim" (a linha de antes em "--antes:"): o F2 e o
 -- F3 comparam o corpo sem esses blocos (devolvidas as linhas "--antes:"), que é o da ponta da 7g; sem blocos, o corpo como está. O resto é provado em
--- agenda_terminou_falta_dia.sql (P0c).
+-- agenda_terminou_falta_dia.sql (P0c). (Pacote 1 do assistente, A1b, 20270301120100: e os "-- P1 AGENDA: … -- P1 AGENDA: fim", pela mesma convenção;
+-- _agenda_classe_da_os ganhou 1 deles. O resto é provado em agenda_p1_sinal_parado.sql, S0d.)
 create function pg_temp.sem_terminou(p text) returns text language sql immutable as $st$
   select array_to_string(array(
            select case when dentro > 0 and l ~ '^--antes:' then substr(l, 9) else l end
-             from (select l, o, sum(case when l ~ '^\s*-- TERMINOU:' and l !~ '^\s*-- TERMINOU: fim' then 1
-                                         when l ~ '^\s*-- TERMINOU: fim' then -1 else 0 end)
+             from (select l, o, sum(case when l ~ '^\s*-- (TERMINOU|P1 AGENDA):' and l !~ '^\s*-- (TERMINOU|P1 AGENDA): fim' then 1
+                                         when l ~ '^\s*-- (TERMINOU|P1 AGENDA): fim' then -1 else 0 end)
                                 over (order by o rows between unbounded preceding and current row) as dentro,
-                          l ~ '^\s*-- TERMINOU: fim' as fecha
+                          l ~ '^\s*-- (TERMINOU|P1 AGENDA): fim' as fecha
                      from unnest(string_to_array(p, E'\n')) with ordinality u(l, o)) x
             where (dentro = 0 and not fecha) or (dentro > 0 and l ~ '^--antes:')
             order by o), E'\n')
