@@ -13,8 +13,13 @@
 -- linhas "--antes:", o corpo é o de antes, byte a byte, sem CR):
 --   · _agenda_rotina_conclusao (do 20270301120200, o de produção desde 26/11: md5 de pg_get_functiondef 77bad502…): 1 bloco. No ramo do plano
 --     com mais dias, quando há dia dele no plano depois de hoje (cardinality(v_fut) > 0), a mensagem de leitura tipo ok não abre pergunta
---     (continue). O último dia do plano com a estimativa sobrando (sem dia depois, v_rest > 0) fica como o A3 o deixou: a pergunta de
---     sempre ("… mas o plano tinha mais serviço do que você disse"). A leitura de tipo ok é o "ok" puro por construção:
+--     (continue). No último dia do plano com a estimativa sobrando (sem dia depois, v_rest > 0), o "ok" puro continua abrindo a pergunta de
+--     sempre (chave concluir:<os>:<dia>), no estilo do A3 e sem dizer que ele terminou:
+--       "O Roberto respondeu *ok* ao "como foi hoje?" no último dia do plano do Vanderlei (OS-00069), mas a estimativa ainda tem serviço.
+--        Responda *concluiu Vanderlei* para fechar, ou *falta dia Vanderlei* se ainda tem serviço."
+--     LIMITE (de antes, não muda aqui): nenhuma palavra do dono fecha a pergunta concluir:<os>:<dia> (*concluiu* conclui a OS e *falta dia*
+--     marca o dia, mas ela fica aberta), a manhã das 07:30 não a mostra e, aberta, segura a pergunta geral "terminou ou falta dia?".
+--     A leitura de tipo ok é o "ok" puro por construção:
 --     _agenda_ler_resposta_da_equipe só devolve tipo ok com terminou nulo; "ok, terminei", "terminei", "acabei", "ok, mas não terminei" são
 --     tipo turnos (o terminou dito). É o mesmo critério do texto do A3 no último dia ("respondeu *ok*"). Por que aqui e não no leitor: o
 --     leitor tem 46 mil letras, é security definer, e o terminou = true do "ok" é o que o último dia (A3) e a diária leem; aqui só a pergunta
@@ -167,9 +172,24 @@ begin
       -- devolve tipo ok com terminou nulo, e é agenda_resposta_da_equipe que grava terminou = true por padrão) num dia que NÃO é o último do
       -- plano (há dia dele no plano depois de hoje) é "tudo como o previsto": o plano segue e não há o que perguntar. Sem isto nascia "O
       -- Roberto disse que terminou o Vanderlei (OS-00069), mas o plano tinha mais 2 dias…" sem ele ter dito. Vale com qualquer chave. Seguem
-      -- com a pergunta: o "ok, terminei", o "terminei", o "acabei" (tipo turnos, o terminou dito); o último dia do plano, como o A3 o deixou
-      -- (sem dia depois: o ramo de cima, ou este com a estimativa sobrando); a diária e os meios-dias são do leitor (nada muda).
+      -- com a pergunta de sempre: o "ok, terminei", o "terminei", o "acabei" (tipo turnos, o terminou dito). A diária e os meios-dias são do
+      -- leitor (nada muda).
       continue when m.leitura ->> 'tipo' = 'ok' and cardinality(v_fut) > 0;
+      -- E o último dia do plano com a estimativa sobrando (sem dia dele depois, v_rest > 0) com o "ok" puro: a pergunta continua (a mesma
+      -- chave concluir:<os>:<dia> de sempre; o dono decide entre concluir e falta dia), no estilo do texto do A3 e sem dizer que ele terminou.
+      -- O rótulo e o alvo das palavras são os do ramo de sempre. (Não a chave terminou:<os> do A3: _agenda_terminou_rodar, no fim do passo, a
+      -- fecharia no mesmo tique — com a estimativa sobrando, "a agenda voltou a ter o que marcar".)
+      if m.leitura ->> 'tipo' = 'ok' then
+        if public._agenda_equipe_perguntar('concluir', format('concluir:%s:%s', v_x, p_hoje), m.payee_id, v_x, p_hoje,
+             format('O %s respondeu *ok* ao "como foi hoje?" no último dia do plano do %s, mas a estimativa ainda tem serviço. Responda *concluiu %s* para fechar, ou *falta dia %s* se ainda tem serviço.',
+                    v_nome, public._agenda_rotulo_da_os(v_x),
+                    coalesce(v_cli, (select so.service_order_number from public.service_orders so where so.id = v_x)),
+                    coalesce(v_cli, (select so.service_order_number from public.service_orders so where so.id = v_x))),
+             'ligado', p_agora) then
+          v_perg := v_perg + 1;
+        end if;
+        continue;
+      end if;
       -- P1 AGENDA: fim
       if public._agenda_equipe_perguntar('concluir', format('concluir:%s:%s', v_x, p_hoje), m.payee_id, v_x, p_hoje,
            format('O %s disse que terminou o %s, mas o plano tinha mais %s. *concluiu %s* fecha a OS.', v_nome,
@@ -320,7 +340,7 @@ declare
 begin
   if coalesce(obj_description(to_regprocedure(c_c), 'pg_proc'), '') not like '%P1 AGENDA (A2, conserto B%' then
     execute format('comment on function %s is %L', c_c, ltrim(coalesce(obj_description(to_regprocedure(c_c), 'pg_proc'), '')
-      || ' P1 AGENDA (A2, conserto B, 26/11/2026, 20270301120310): o "ok" puro ao "como foi hoje?" (leitura tipo ok) num dia que não é o último do plano (há dia dele depois) não abre a pergunta "disse que terminou… mas o plano tinha mais N dias"; o "terminei" dito, sim, como antes.'));
+      || ' P1 AGENDA (A2, conserto B, 26/11/2026, 20270301120310): o "ok" puro ao "como foi hoje?" (leitura tipo ok) num dia que não é o último do plano (há dia dele depois) não abre a pergunta "disse que terminou… mas o plano tinha mais N dias"; no último dia do plano com a estimativa sobrando, a pergunta de sempre (concluir:<os>:<dia>) no estilo do A3 ("O Roberto respondeu *ok* ao "como foi hoje?" no último dia do plano do Vanderlei (OS-00069), mas a estimativa ainda tem serviço. Responda *concluiu Vanderlei* para fechar, ou *falta dia Vanderlei* se ainda tem serviço."); o "terminei" dito segue com a pergunta de antes.'));
   end if;
   if coalesce(obj_description(to_regprocedure(c_r), 'pg_proc'), '') not like '%P1 AGENDA (A2, conserto A%' then
     execute format('comment on function %s is %L', c_r, ltrim(coalesce(obj_description(to_regprocedure(c_r), 'pg_proc'), '')
