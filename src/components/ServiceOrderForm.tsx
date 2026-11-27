@@ -1431,6 +1431,12 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     try {
       const productId = await ensureProductInCatalog(draft);
 
+      // Falta de estoque NÃO trava o lançamento (27/11/2026): o dono precisa montar o
+      // valor do documento e cobrar o cliente mesmo sem saldo — peça a comprar, ou insumo
+      // que existe na prateleira mas não foi lançado no estoque. A peça entra na OS e, se o
+      // saldo não cobre, aparece um aviso com a opção (opcional) de pedir a compra.
+      let faltaEstoque: typeof stockAlert = null;
+
       // Stock check: only for actual OS (non-draft). During the quote phase
       // the OS doesn't exist yet, so creating a PO at this point makes no sense —
       // the PO flow is triggered later at the moment of conversion (PurchaseNeedsDialog).
@@ -1458,7 +1464,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             .filter(Boolean)
             .map((s: any) => ({ id: s.id, name: s.name }));
           const leadTimeDays = (prodData as any)?.product_suppliers?.[0]?.lead_time_days ?? undefined;
-          setStockAlert({
+          faltaEstoque = {
             cardKey: cardKey,
             productId,
             productName: draft.name,
@@ -1469,8 +1475,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             notes: draft.notes,
             suppliers,
             leadTimeDays,
-          });
-          return; // pause — user chooses action in dialog
+          };
         }
       }
 
@@ -1501,7 +1506,18 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           discount_pct: draft.discount_pct || 0,
           discount_amount: draft.discount_amount || 0,
         });
-        toast.success('Peça adicionada');
+        if (faltaEstoque) {
+          const falta = faltaEstoque;
+          toast.warning(
+            `Peça lançada. Estoque abaixo do necessário: há ${falta.available}, a OS usa ${falta.needed}.`,
+            {
+              duration: 10000,
+              action: { label: 'Pedir compra', onClick: () => setStockAlert(falta) },
+            },
+          );
+        } else {
+          toast.success('Peça adicionada');
+        }
       }
       setOpenNewPartCards((prev) => prev.filter((k) => k !== cardKey));
       setEditingPart((prev) => {
@@ -2897,21 +2913,6 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           unitCost={stockAlert.unitCost}
           suppliers={stockAlert.suppliers}
           leadTimeDays={stockAlert.leadTimeDays}
-          onAddAnyway={async () => {
-            if (!orderId) return;
-            await addPart.mutateAsync({
-              service_order_id: orderId,
-              product_id: stockAlert.productId,
-              quantity: stockAlert.needed,
-              unit_cost_snapshot: stockAlert.unitCost,
-              unit_sale_snapshot: stockAlert.unitSale,
-              notes: stockAlert.notes,
-            });
-            setOpenNewPartCards(prev => prev.filter(k => k !== stockAlert.cardKey));
-            setEditingPart(prev => { const n = { ...prev }; delete n[stockAlert.cardKey]; return n; });
-            setStockAlert(null);
-            toast.success('Peça adicionada (estoque negativo)');
-          }}
         />
       )}
 

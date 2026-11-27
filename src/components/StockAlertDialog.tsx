@@ -18,7 +18,8 @@ interface Props {
   unitCost: number;
   suppliers?: { id: string; name: string }[];
   leadTimeDays?: number;
-  onAddAnyway: () => void;   // proceed with negative stock
+  /** Só quando a peça AINDA não foi lançada. Sem ele, o diálogo serve só para pedir a compra. */
+  onAddAnyway?: () => void;
 }
 
 const fmt = (v: number) =>
@@ -62,7 +63,7 @@ export function StockAlertDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-amber-700">
             <AlertTriangle className="h-5 w-5" />
-            Estoque insuficiente
+            {onAddAnyway ? 'Estoque insuficiente' : 'Peça lançada — estoque abaixo do necessário'}
           </DialogTitle>
           <DialogDescription asChild>
             <div className="space-y-2 mt-1">
@@ -122,18 +123,20 @@ export function StockAlertDialog({
         </div>
 
         <DialogFooter className="gap-2 sm:gap-0 flex-col sm:flex-row">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-muted-foreground text-xs"
-            onClick={() => { onAddAnyway(); onOpenChange(false); }}
-            disabled={createPO.isPending}
-          >
-            Adicionar assim mesmo (estoque negativo)
-          </Button>
+          {onAddAnyway && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground text-xs"
+              onClick={() => { onAddAnyway(); onOpenChange(false); }}
+              disabled={createPO.isPending}
+            >
+              Adicionar assim mesmo
+            </Button>
+          )}
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => onOpenChange(false)} disabled={createPO.isPending}>
-              Cancelar
+              {onAddAnyway ? 'Cancelar' : 'Agora não'}
             </Button>
             <Button
               onClick={handleCreatePO}
