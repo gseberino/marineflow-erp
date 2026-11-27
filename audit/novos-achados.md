@@ -5584,6 +5584,33 @@ quatro estão latentes.
   até dia 13" pode ser `sai_em`). `prompt-ferramentas_test.ts` cobra as frases. Prova: publicar `ai-agent` + `erp-mcp` e o
   dono mandar de novo a frase; o assistente tem de devolver a releitura do plano pedindo *grava*.
 
+### [NOVO-agenda-p1-07] Com o silêncio que mantém o dia, a cota de 1 acorde por dia corta o "não vou" do técnico
+
+- **Onde:** `agenda_rotina_rodar`, a cota `acordes_dia_max` (1), contada pelas ações de hoje com `contada_via = 'acorde'`.
+- **Efeito:** com `equipe_silencio_acao = 'manter'`, o aviso das 9h ("Mantive o dia dele…") gasta a cota. Se o técnico
+  disser "não vou" às 10h, a agenda é refeita, mas o acorde que conta isso ao dono não sai no dia. No outro sentido, um
+  acorde antes das 9h cortaria o "Mantive o dia dele". Em produção, nas 3 semanas até 26/11/2026, saiu no máximo 1 acorde
+  por dia, e nos dias de silêncio o do silêncio foi o único: raro, mas o dono decidiu "manter e avisá-lo".
+- **Situação (26/11/2026, ramo `session/agenda2`, migration `20270301120310`, NÃO aplicada):** o acorde da ação
+  `silencio_manteve` fica fora da cota nos dois sentidos (não gasta e não é cortado). Continua valendo "só com a vigia
+  ligada e a ação executada". Provas S5c, S5d, S11 e S11b de `agenda_p1_silencio.sql`.
+- **Fica aberto:** `agenda_vigiar` e a rodada do cliente fazem a mesma conta de `contada_via = 'acorde'` e ainda contam o
+  acorde do silêncio. Com 'manter', um acorde da vigia depois do aviso das 9h continua cortado no dia, igual a hoje com
+  'tirar'. Menor mudança: a mesma exclusão nas duas contas. Não corrigido aqui.
+
+### [NOVO-agenda-p1-08] O "ok" puro ao "como foi hoje?" num dia que não é o último vira "disse que terminou…"
+
+- **Onde:** `agenda_resposta_da_equipe` grava `terminou = true` por padrão no "ok" puro, e `_agenda_rotina_conclusao`, no
+  ramo "o plano tinha mais dias", abre a pergunta "O Roberto disse que terminou o Vanderlei (OS-00069), mas o plano tinha
+  mais 2 dias (…). *concluiu Vanderlei* fecha a OS."
+- **Efeito:** o dono lê que o técnico disse ter terminado, quando ele só respondeu "ok". Latente: até 26/11/2026 nenhum
+  "como foi" tinha sido respondido em produção. Com o silêncio que mantém o dia, o "como foi" passa a sair ao Alex.
+- **Situação (26/11/2026, ramo `session/agenda2`, migration `20270301120310`, NÃO aplicada):** com leitura tipo `ok` (o
+  leitor só dá esse tipo sem palavra de terminar; "ok, terminei" e "terminei" viram `turnos` com `terminou = true`) e dia
+  do técnico no plano depois de hoje, nenhuma pergunta nasce; a diária e os meios-dias seguem como hoje. No último dia do
+  plano com a estimativa ainda sobrando, a pergunta continua e o texto passa a dizer "respondeu *ok*" no lugar de "disse
+  que terminou". Provas B1 a B4 de `agenda_p1_silencio.sql`. `agenda_resposta_da_equipe` não foi tocada.
+
 ### [NOVO-agenda-p1-09] Com `equipe_silencio_acao = 'tirar'`, o acorde do silêncio sem replano diz "A agenda automática não está ligada"
 
 - **Onde:** `_agenda_rotina_acordes_da_equipe`, o `else` de `v_rep` nulo (já existia antes do pacote 1).
@@ -5653,3 +5680,13 @@ quatro estão latentes.
 - **Efeito:** se a parte nova falhar, a manhã sai sem ela, calada.
 - **Menor mudança:** o Secretário (`ai-daily-briefing`) gravar `ontem.erro` em `app_error_logs`. É TypeScript; fica para
   depois.
+
+### [NOVO-agenda-p1-17] A pergunta `concluir:<os>:<dia>` continua aberta depois de *concluiu* ou *falta dia*, e segura o "terminou ou falta dia?"
+
+- **Onde:** `_agenda_rotina_conclusao`, as perguntas de chave `concluir:<os>:<dia>` (o ramo "o plano tinha mais dias" e o
+  das etapas pendentes); já existia antes do pacote 1.
+- **Efeito:** a palavra *falta dia <alvo>* ou *concluiu <alvo>* faz o que diz, mas a pergunta fica aberta. A manhã das
+  07:30 não a mostra. Aberta, ela segura a pergunta geral "A OS-X terminou ou falta dia?" (`_agenda_terminou_rodar`).
+  Provado na bancada pelos casos B4b e B4c de `agenda_p1_silencio.sql` (26/11/2026).
+- **Menor mudança:** fechar a pergunta `concluir:<os>:%` quando a OS concluir ou quando o dono disser *falta dia* dela.
+  Não corrigido aqui (achado do construtor do A2).
