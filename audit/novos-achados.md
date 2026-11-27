@@ -5709,12 +5709,44 @@ quatro estão latentes.
   pergunta é adiada e a ficha sai como a 2ª do dia) e V1c (o controle: com o corpo de antes o defeito se repete); V2, V3,
   V4, V4b e V4c (iguais ao corpo de antes, byte a byte); V5 e V5c ("não vou" e o dono tira o dia, com 'manter'); V6 (o
   "como foi" registrado sem a ficha: a conta dá 1, antes 0); V7 (a pergunta adiada sai no sábado às 16:45); V8 (nenhum dia
-  passa de 2 mensagens).
+  passa de 2 mensagens). Acrescentados na revisão de 27/11/2026, cada um com o controle do corpo de antes: V5 e V5c também
+  com a ficha às 17:45; V5d (a sexta, com a ficha de segunda); V5e (a véspera de feriado, qui 19/11 → seg 23/11); V5f (os
+  modos de produção de 27/11: o cadastro ligado, o previsto e o convite em sombra); V8b (o teto em 3 e em 1).
 - **Fica aberto:**
   - rotas que a conta não fecha, em que a ficha ainda pode nascer recusada por teto: o plano de amanhã que nasce depois das
     16:45 com a pergunta dos dias já enviada como a 2ª; o "mande" do dono entre o "como foi" das 17:00 e a hora da ficha;
     tiques perdidos entre as 17:00 e a hora da ficha; o convite, o previsto e a mudança quando saírem de teste (o convite
     confere só a fila); o teto em 3;
+  - mais uma rota aberta, fora dessa lista (revisão de 27/11/2026): o plano de amanhã que nasce depois do "como foi" das
+    17:00 (o "puxar", que em produção roda às 17:30, ou uma mudança do dono), mesmo sem nenhuma pergunta dos dias enviada
+    no dia. A 2ª mensagem do dia já é o "como foi", que foi sem a ficha, e a ficha nasce recusada por teto, calada. Vale
+    em qualquer dia da semana, é igual com o corpo de antes (a conta não alcança) e a chave de saúde
+    `ficha_recusada_por_teto_com_dias` não vê (fica em 0). Provado na bancada ('manter', calado, plano de sex 06/11
+    criado às 17:20): "17:00 como_foi enfileirada; 19:30 ficha recusada/teto", e "17:45 ficha recusada/teto" com a ficha
+    às 17:45. O aviso ao dono e a chave de saúde do segundo passo precisam cobrir a ficha recusada por teto em dia sem
+    pergunta dos dias;
+  - com a ficha de amanhã vetada (segurada), a conta guarda a vaga de uma ficha que não vai sair: a pergunta dos dias passa
+    das 16:45 para o tique da hora da ficha (19:30; 17:45 depois da troca da hora), quando a linha recusada por veto nasce
+    e a vaga abre. Nada se perde e o dia fica em 2 mensagens; muda só a hora. Provado na bancada ('tirar', calado): novo
+    "19:30 dias enfileirada; 19:30 ficha recusada/veto", antes "16:45 dias enfileirada; 19:30 ficha recusada/veto". Sem
+    caso no teste commitado (é efeito colateral, não regra a travar);
+  - tiques perdidos da hora da ficha até as 20:00: a conta segura a pergunta dos dias até a ficha ser registrada; se o
+    primeiro tique depois disso é o das 20:00, a pergunta nasce recusada por janela e não é mais tentada na semana. A causa
+    é de antes e fica em `agenda_equipe_semana` (`20261101100200`): `v_hora_ok := v_local::time >= cf.equipe_hora_dias` não
+    tem limite de cima, e o `continue when exists (… m.tipo = 'dias' and m.dia = v_seg …)` não olha o estado, então a linha
+    recusada barra as outras tentativas. Só em dia em que a confirmação saiu e o dia saiu do plano. Provado na bancada
+    ('tirar', calado, ficha às 19:30, tiques de 17:15 a 19:45 perdidos): novo "20:00 dias recusada/janela; 20:00 ficha
+    recusada/janela"; antes "16:45 dias enfileirada; 20:00 ficha recusada/janela". Por leitura, não executado: com a ficha
+    às 19:30 bastam os tiques de 19:30 e 19:45 falharem (com 17:45, os de 17:45 a 19:45), e a mesma fragilidade vale para
+    o sábado em que a pergunta adiada sairia. Menor mudança, para outra etapa (recria `agenda_equipe_semana`): no passo 4,
+    só perguntar com `v_local::time < cf.equipe_janela_fim`, para a pergunta adiada continuar adiada depois das 20:00. Não
+    corrigido aqui;
+  - o teste novo: quatro versões erradas da regra só caem na conferência do texto (P0d), não por cenário: o plano de hoje
+    contando a reserva; a confirmação sem o filtro do modo; a confirmação `sem_resposta` não valendo como enviada; o "como
+    foi" recusado não valendo como registrado (a metade do caso do V6 em que a conta mudaria a decisão: o V6 prova o
+    número, 1 contra 0, com a fila já em 2). Quem mexer na regra e no P0d juntos não tem cenário que acuse;
+  - as cenas de bancada citadas acima não estão no repositório: os SQL e a saída ficam em
+    `D:/IA-HBR/Trabalho/rotina-do-time/publicar-vaga/bancada/revisao/`;
   - a recusa continua calada: o aviso ao dono quando a ficha de amanhã não sai é o segundo passo, em outra migration
     (`_agenda_rotina_ficha`), e depende do NOVO-agenda-p1-19 para chegar no mesmo dia;
   - a chave de saúde `ficha_recusada_por_teto_com_dias` não tem janela de tempo: continua em 1 pela linha de 26/11 (lido em
