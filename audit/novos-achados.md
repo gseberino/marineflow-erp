@@ -5731,8 +5731,10 @@ quatro estão latentes.
   `silencio_manteve`: a exclusão do NOVO-agenda-p1-07 ficou só na cota de `agenda_rotina_rodar`.
 - **Efeito:** com `equipe_silencio_acao = 'manter'` (produção desde 27/11/2026) e o técnico calado, o acorde das 9h zera a
   cota (`acordes_dia_max` = 1) e qualquer outra exceção do dia fica presa (`agenda_aviso_pecas` devolve o motivo `cota`):
-  só sai no bloco do fechamento seguinte. Lido em produção em 27/11/2026 03:52 (só SELECT): `_agenda_lote_cota` = 0 em
-  18/11, 24/11 e 26/11 (os dias com o acorde do silêncio) e 1 em 25/11; ainda não havia nenhuma ação `silencio_manteve`.
+  só sai no bloco do fechamento seguinte. Lido em produção em 27/11/2026 03:52 e 04:43 (só SELECT): `_agenda_lote_cota`
+  = 0 em 24/11 e 26/11 (1 acorde do silêncio contado às 09:00 em cada) e em 18/11 (ali a vaga foi gasta por 1 aviso de
+  exceção já enviado, o da ficha segurada; nenhum acorde contado), e 1 em 25/11; ainda não havia nenhuma ação
+  `silencio_manteve`.
   As 3 confirmações enviadas até hoje (18/11, 24/11 e 26/11) ficaram sem resposta: por ora, o dia de silêncio é o dia
   comum. Não provado por execução: saiu da leitura do corpo e dessas contagens.
 - **Menor mudança:** em `_agenda_lote_cota`, a mesma exclusão do p1-07 (`a.depois ->> 'motivo' is distinct from
