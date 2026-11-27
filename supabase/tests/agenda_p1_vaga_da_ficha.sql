@@ -28,11 +28,15 @@
 --       confirmação não sai (ele já confirmou o dia na véspera) com plano hoje e amanhã: a conta dá 2 (o "como foi" e a ficha, cada um com
 --       a sua vaga), a pergunta é adiada, o "como foi" vai sem a ficha e a ficha vai sozinha. Igual ao corpo de antes. V4c a confirmação
 --       nasce RECUSADA (veto: a ficha de hoje segurada) com plano hoje e amanhã: recusada não é "saiu", a conta dá 2. Igual ao de antes
---   V5  'manter' e o dia sai do plano depois da confirmação (V5a ele diz "hoje não vou"; V5b o dono tira o dia): 16:45 a pergunta é adiada
---       e a ficha vai sozinha como a 2ª. V5c o controle com o corpo de antes: a pergunta sai e a ficha é recusada por teto
+--   V5  'manter' e o dia sai do plano depois da confirmação (V5a ele diz "hoje não vou"; V5b o dono tira o dia), com a ficha às 19:30 e às
+--       17:45: 16:45 a pergunta é adiada e a ficha vai sozinha como a 2ª. V5c o controle com o corpo de antes: a pergunta sai e a ficha é
+--       recusada por teto. A mesma rota noutros dias e nos modos de produção (casos da revisão de 27/11/2026), cada um com o controle
+--       dele: V5d a sexta 06/11 com a ficha de seg 09/11 (o próximo dia útil pula o fim de semana); V5e a quinta 19/11, véspera de
+--       feriado, com a ficha de seg 23/11; V5f os modos de produção em 27/11/2026 (o cadastro ligado; o previsto e o convite em sombra)
 --   V6  a confirmação saiu e o "como foi" de hoje já foi registrado SEM a ficha (ela espera o "mande" do dono): a conta dá 1 (antes 0)
 --   V7  a pergunta adiada sai noutro dia: na sexta, com 2 mensagens, adia de novo; no sábado às 16:45 sai (1 linha 'dias' na semana)
---   V8  o teto nunca é passado: em todos os cenários acima com o corpo novo, as proativas na fila do dia <= equipe_proativas_dia_max
+--   V8  o teto nunca é passado: em todos os cenários acima com o corpo novo, as proativas na fila do dia <= equipe_proativas_dia_max (2).
+--       V8b o cenário do V1 com o teto em 3 e em 1 (o CHECK aceita de 1 a 3): o dia fica em no máximo 3 e em no máximo 1
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -169,12 +173,13 @@ end $f$;
 -- "hoje não vou" às 08:10), 'dono_tira' (o dono tira o dia dele às 08:10, depois da confirmação), 'sem_plano_hoje' (o dia sai antes das
 -- 07:45), 'ja_confirmou' (ele respondeu "ok" à ficha na véspera: o dia já está confirmado e a confirmação das 07:45 não sai) ou
 -- 'confirmacao_vetada' (a ficha de HOJE está segurada: a confirmação das 07:45 nasce recusada por veto). Devolve o que se observou. Não
--- desfaz nada: quem chama desfaz (pg_temp.roda).
-create function pg_temp.quinta(p_acao text, p_hora_ficha text, p_manha text) returns jsonb language plpgsql as $f$
+-- desfaz nada: quem chama desfaz (pg_temp.roda). p_mais (opcional) troca só o que o caso pede: 'dia' (outro dia no lugar da quinta
+-- 05/11; "amanhã" é sempre o próximo dia útil dele) e 'teto' (equipe_proativas_dia_max). Sem p_mais, é a quinta 05/11 com o teto da casa.
+create function pg_temp.quinta(p_acao text, p_hora_ficha text, p_manha text, p_mais jsonb default '{}'::jsonb) returns jsonb language plpgsql as $f$
 declare
   c_rob   constant uuid := 'bb000000-0000-4000-8000-000000000002';
-  d       constant date := date '2026-11-05';
-  am      constant date := date '2026-11-06';
+  d       constant date := coalesce((p_mais ->> 'dia')::date, date '2026-11-05');
+  am      constant date := public.agenda_somar_du(d, 1);
   c_ficha constant time := p_hora_ficha::time;
   t       jsonb;
   v       jsonb := '{}'::jsonb;
@@ -187,6 +192,9 @@ begin
      set equipe_silencio_acao = p_acao, equipe_hora_ficha = c_ficha,
          veto_hora = case when veto_hora < c_ficha then veto_hora else c_ficha - interval '15 minutes' end
    where id;
+  if p_mais ? 'teto' then
+    update public.agenda_config set equipe_proativas_dia_max = (p_mais ->> 'teto')::int where id;
+  end if;
   if p_manha = 'sem_plano_hoje' then
     update public.agenda_alocacoes set estado = 'cancelada', cancelada_motivo = 'dono'
      where payee_id = c_rob and dia = d and estado in ('publicada', 'fixada');
@@ -277,7 +285,7 @@ begin
     'retrato', pg_temp.retrato(c_rob));
 end $f$;
 -- Roda a quinta com o corpo novo ('novo') ou com o de antes ('antes') e desfaz tudo (a subtransação): só o que se observou fica.
-create function pg_temp.roda(p_corpo text, p_acao text, p_hora_ficha text, p_manha text) returns jsonb language plpgsql as $f$
+create function pg_temp.roda(p_corpo text, p_acao text, p_hora_ficha text, p_manha text, p_mais jsonb default '{}'::jsonb) returns jsonb language plpgsql as $f$
 declare
   r jsonb;
 begin
@@ -287,7 +295,7 @@ begin
     else
       r := jsonb_build_object('md5_do_corpo', md5(pg_temp.src('public._agenda_equipe_previstas_hoje(uuid,date,timestamptz)')));
     end if;
-    r := r || pg_temp.quinta(p_acao, p_hora_ficha, p_manha);
+    r := r || pg_temp.quinta(p_acao, p_hora_ficha, p_manha, p_mais);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
@@ -370,6 +378,8 @@ declare
   d06       constant date := date '2026-11-06';   -- a sexta (amanhã)
   d07       constant date := date '2026-11-07';   -- o sábado
   d09       constant date := date '2026-11-09';   -- a segunda
+  d19       constant date := date '2026-11-19';   -- a quinta véspera de feriado (sex 20/11 não é dia útil)
+  d23       constant date := date '2026-11-23';   -- a segunda depois do feriado
   v_teto    int;
   v_vivo    text;
   v_h       text;
@@ -383,6 +393,7 @@ declare
   v_j       int;
   v_k       int;
   v_txt     text;
+  v_b       boolean;
 begin
   if coalesce(current_setting('agenda_teste.fase3', true), '') = '' then
     insert into _resultado values ('V0–V8 (fixture-fase3)', true, 'PULADO: sem agenda_teste.fase3 (rode pela bancada)');
@@ -538,30 +549,117 @@ begin
     and a ->> 'md5_do_corpo' = c_antes and (n - 'md5_do_corpo') = (a - 'md5_do_corpo'),
     format('%s | previstas %s | igual ao de antes: %s', n ->> 'linha', n ->> 'previstas_1645', (n - 'md5_do_corpo') = (a - 'md5_do_corpo')));
 
-  -- ── V5. 'manter' e o dia sai do plano depois da confirmação ──
-  foreach v_m in array array['nao_vou', 'dono_tira'] loop
-    n := pg_temp.roda('novo', 'manter', '19:30', v_m);
-    a := pg_temp.roda('antes', 'manter', '19:30', v_m);
-    v_prox := v_prox || jsonb_build_object(format('V5 %s', v_m), n -> 'proativas');
-    v_res := pg_temp.ok(v_res, format('V5%s ''manter'' e o dia sai do plano depois da confirmação das 07:45 (%s): às 16:45 ele não tem plano vivo hoje e tem amanhã; a conta dá 1, a pergunta dos dias é ADIADA (nenhuma linha ''dias''); não há "como foi"; na hora da ficha ela vai sozinha, enfileirada como a 2ª do dia; 2 proativas',
-                                      case when v_m = 'nao_vou' then 'a' else 'b' end,
+  -- ── V5. 'manter' e o dia sai do plano depois da confirmação; com a ficha às 19:30 e às 17:45 (a hora de produção a partir de 27/11) ──
+  foreach v_h in array array['19:30', '17:45'] loop foreach v_m in array array['nao_vou', 'dono_tira'] loop
+    n := pg_temp.roda('novo', 'manter', v_h, v_m);
+    a := pg_temp.roda('antes', 'manter', v_h, v_m);
+    v_prox := v_prox || jsonb_build_object(format('V5 %s %s', v_m, v_h), n -> 'proativas');
+    v_res := pg_temp.ok(v_res, format('V5%s (ficha às %s) ''manter'' e o dia sai do plano depois da confirmação das 07:45 (%s): às 16:45 ele não tem plano vivo hoje e tem amanhã; a conta dá 1, a pergunta dos dias é ADIADA (nenhuma linha ''dias''); não há "como foi"; na hora da ficha ela vai sozinha, enfileirada como a 2ª do dia; 2 proativas',
+                                      case when v_m = 'nao_vou' then 'a' else 'b' end, v_h,
                                       case when v_m = 'nao_vou' then 'ele responde "hoje não vou" às 08:10' else 'o dono tira o dia dele às 08:10' end),
       n ->> 'confirmar_0745' = 'enfileirada' and (n ->> 'silencio_0900')::int = 0 and n ->> 'segundo_pedido' = '-'
       and n ->> 'confirmar_0900' = case when v_m = 'nao_vou' then 'respondida' else 'enfileirada' end
       and (n ->> 'hoje_vivo')::int = 0 and (n ->> 'amanha_vivo')::int = 1 and (n ->> 'fila_1645')::int = 1 and (n ->> 'previstas_1645')::int = 1
       and (n ->> 'adiada_1645')::int = 1 and (n ->> 'saiu_1645')::int = 0 and (n ->> 'dias_1645')::int = 0 and n ->> 'como_foi' = '-'
       and n ->> 'ficha_antes_da_hora' = '-' and (n ->> 'fila_na_hora')::int = 1 and n -> 'ficha_no_tique' = '{"enfileirada": 1}'::jsonb
-      and n ->> 'ficha' = 'enfileirada na fila às 19:30' and n ->> 'dias' = '-' and (n ->> 'proativas')::int = 2 and (n ->> 'saude')::int = 0
+      and n ->> 'ficha' = format('enfileirada na fila às %s', v_h) and n ->> 'dias' = '-' and (n ->> 'proativas')::int = 2 and (n ->> 'saude')::int = 0
       and (n ->> 'erros')::int = 0,
       format('%s | previstas %s | proativas %s, respostas %s', n ->> 'linha', n ->> 'previstas_1645', n ->> 'proativas', n ->> 'respostas'));
-    v_res := pg_temp.ok(v_res, format('V5c (%s) o CONTROLE com o corpo de antes: a conta dá 0, a pergunta dos dias sai às 16:45 como a 2ª e a ficha de sex 06/11 nasce recusada por teto (com ''manter'' o furo continuava aberto nesta rota)',
-                                      case when v_m = 'nao_vou' then '"hoje não vou"' else 'o dono tira o dia' end),
+    v_res := pg_temp.ok(v_res, format('V5c (ficha às %s; %s) o CONTROLE com o corpo de antes: a conta dá 0, a pergunta dos dias sai às 16:45 como a 2ª e a ficha de sex 06/11 nasce recusada por teto (com ''manter'' o furo continuava aberto nesta rota)',
+                                      v_h, case when v_m = 'nao_vou' then '"hoje não vou"' else 'o dono tira o dia' end),
       a ->> 'md5_do_corpo' = c_antes and (a ->> 'hoje_vivo')::int = 0 and (a ->> 'amanha_vivo')::int = 1 and (a ->> 'fila_1645')::int = 1
       and (a ->> 'previstas_1645')::int = 0 and (a ->> 'saiu_1645')::int = 1 and a ->> 'dias' = 'enfileirada 05/11 16:45'
-      and a -> 'ficha_no_tique' = '{"recusada": 1}'::jsonb and a ->> 'ficha' = 'recusada/teto às 19:30' and (a ->> 'proativas')::int = 2
+      and a -> 'ficha_no_tique' = '{"recusada": 1}'::jsonb and a ->> 'ficha' = format('recusada/teto às %s', v_h) and (a ->> 'proativas')::int = 2
       and (a ->> 'saude')::int = 1,
       format('%s | previstas %s | saúde %s', a ->> 'linha', a ->> 'previstas_1645', a ->> 'saude'));
-  end loop;
+  end loop; end loop;
+
+  -- ── V5d. A mesma rota na sexta: "amanhã" é a segunda (o próximo dia útil pula o fim de semana) ──
+  begin
+    -- o plano de segunda que fica de pé: o dono fixa o Roberto no Lenine na seg 09/11 à tarde (a publicada da manhã, que a fixture traz na
+    -- mesma OS da sexta, o replano do "não vou" tira)
+    insert into public.agenda_alocacoes (service_order_id, payee_id, dia, turno, presenca, tipo, estado, origem, fixado_por, publicada_em)
+    values (c_lenine, c_roberto, d09, 'tarde', 'turno', 'execucao', 'fixada', 'dono', 'dono', pg_temp.em(d05, '07:00'));
+    n := pg_temp.roda('novo', 'manter', '17:45', 'nao_vou', jsonb_build_object('dia', d06));
+    a := pg_temp.roda('antes', 'manter', '17:45', 'nao_vou', jsonb_build_object('dia', d06));
+    v_prox := v_prox || jsonb_build_object('V5d', n -> 'proativas');
+    v_res := pg_temp.ok(v_res, 'V5d a mesma rota na SEXTA 06/11 (''manter'', a confirmação das 07:45 sai, ele responde "hoje não vou" às 08:10; a ficha às 17:45), com o plano de seg 09/11 de pé: "amanhã" é a segunda — às 16:45 a conta dá 1, a pergunta dos dias é ADIADA, e às 17:45 a ficha de seg 09/11 é enfileirada como a 2ª do dia; 2 proativas. O CONTROLE com o corpo de antes: a pergunta sai às 16:45 e a ficha de segunda nasce recusada por teto',
+      extract(isodow from d06)::int = 5 and public.agenda_somar_du(d06, 1) = d09
+      and n ->> 'confirmar_0745' = 'enfileirada' and n ->> 'confirmar_0900' = 'respondida' and (n ->> 'silencio_0900')::int = 0
+      and (n ->> 'hoje_vivo')::int = 0 and (n ->> 'amanha_vivo')::int = 1 and (n ->> 'fila_1645')::int = 1 and (n ->> 'previstas_1645')::int = 1
+      and (n ->> 'adiada_1645')::int = 1 and (n ->> 'saiu_1645')::int = 0 and (n ->> 'dias_1645')::int = 0 and n ->> 'como_foi' = '-'
+      and n ->> 'ficha_antes_da_hora' = '-' and n -> 'ficha_no_tique' = '{"enfileirada": 1}'::jsonb and n ->> 'ficha' = 'enfileirada na fila às 17:45'
+      and n ->> 'dias' = '-' and (n ->> 'proativas')::int = 2 and (n ->> 'saude')::int = 0 and (n ->> 'erros')::int = 0
+      and n ->> 'linha' = '07:45 confirmar respondida; 08:10 resposta enfileirada; 17:45 ficha enfileirada'
+      and a ->> 'md5_do_corpo' = c_antes and n ->> 'md5_do_corpo' <> c_antes
+      and (a ->> 'hoje_vivo')::int = 0 and (a ->> 'amanha_vivo')::int = 1 and (a ->> 'fila_1645')::int = 1 and (a ->> 'previstas_1645')::int = 0
+      and (a ->> 'saiu_1645')::int = 1 and a ->> 'dias' = 'enfileirada 06/11 16:45' and a -> 'ficha_no_tique' = '{"recusada": 1}'::jsonb
+      and a ->> 'ficha' = 'recusada/teto às 17:45' and (a ->> 'proativas')::int = 2 and (a ->> 'saude')::int = 1 and (a ->> 'erros')::int = 0
+      and a ->> 'linha' = '07:45 confirmar respondida; 08:10 resposta enfileirada; 16:45 dias enfileirada; 17:45 ficha recusada/teto',
+      format('novo: %s | previstas %s, vivo hoje %s, segunda %s | antes: %s | previstas %s, saúde %s', n ->> 'linha', n ->> 'previstas_1645',
+             n ->> 'hoje_vivo', n ->> 'amanha_vivo', a ->> 'linha', a ->> 'previstas_1645', a ->> 'saude'));
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- ── V5e. A mesma rota na véspera de feriado: qui 19/11, com sex 20/11 fora dos dias úteis; "amanhã" é a seg 23/11 ──
+  begin
+    insert into public.agenda_alocacoes (service_order_id, payee_id, dia, turno, presenca, tipo, estado, origem, fixado_por, publicada_em)
+    values (c_lenine, c_roberto, d19, 'manha', 'turno', 'execucao', 'fixada', 'dono', 'dono', pg_temp.em(d19 - 1, '07:00')),
+           (c_lenine, c_roberto, d23, 'manha', 'turno', 'execucao', 'fixada', 'dono', 'dono', pg_temp.em(d19 - 1, '07:00'));
+    n := pg_temp.roda('novo', 'manter', '19:30', 'nao_vou', jsonb_build_object('dia', d19));
+    a := pg_temp.roda('antes', 'manter', '19:30', 'nao_vou', jsonb_build_object('dia', d19));
+    v_prox := v_prox || jsonb_build_object('V5e', n -> 'proativas');
+    v_res := pg_temp.ok(v_res, 'V5e a mesma rota na VÉSPERA DE FERIADO, qui 19/11 (sex 20/11 não é dia útil: "amanhã" é a seg 23/11; ''manter'', ele responde "hoje não vou" às 08:10; a ficha às 19:30): às 16:45 a conta dá 1, a pergunta dos dias é ADIADA, e às 19:30 a ficha de seg 23/11 é enfileirada como a 2ª do dia; 2 proativas. O CONTROLE com o corpo de antes: a pergunta sai às 16:45 e a ficha de seg 23/11 nasce recusada por teto',
+      extract(isodow from d19)::int = 4 and not public.agenda_dia_util(d19 + 1) and public.agenda_somar_du(d19, 1) = d23
+      and n ->> 'confirmar_0745' = 'enfileirada' and n ->> 'confirmar_0900' = 'respondida' and (n ->> 'silencio_0900')::int = 0
+      and (n ->> 'hoje_vivo')::int = 0 and (n ->> 'amanha_vivo')::int = 1 and (n ->> 'fila_1645')::int = 1 and (n ->> 'previstas_1645')::int = 1
+      and (n ->> 'adiada_1645')::int = 1 and (n ->> 'saiu_1645')::int = 0 and (n ->> 'dias_1645')::int = 0 and n ->> 'como_foi' = '-'
+      and n ->> 'ficha_antes_da_hora' = '-' and n -> 'ficha_no_tique' = '{"enfileirada": 1}'::jsonb and n ->> 'ficha' = 'enfileirada na fila às 19:30'
+      and n ->> 'dias' = '-' and (n ->> 'proativas')::int = 2 and (n ->> 'saude')::int = 0 and (n ->> 'erros')::int = 0
+      and n ->> 'linha' = '07:45 confirmar respondida; 08:10 resposta enfileirada; 19:30 ficha enfileirada'
+      and a ->> 'md5_do_corpo' = c_antes and n ->> 'md5_do_corpo' <> c_antes
+      and (a ->> 'hoje_vivo')::int = 0 and (a ->> 'amanha_vivo')::int = 1 and (a ->> 'fila_1645')::int = 1 and (a ->> 'previstas_1645')::int = 0
+      and (a ->> 'saiu_1645')::int = 1 and a ->> 'dias' = 'enfileirada 19/11 16:45' and a -> 'ficha_no_tique' = '{"recusada": 1}'::jsonb
+      and a ->> 'ficha' = 'recusada/teto às 19:30' and (a ->> 'proativas')::int = 2 and (a ->> 'saude')::int = 1 and (a ->> 'erros')::int = 0
+      and a ->> 'linha' = '07:45 confirmar respondida; 08:10 resposta enfileirada; 16:45 dias enfileirada; 19:30 ficha recusada/teto',
+      format('novo: %s | previstas %s, vivo hoje %s, seg 23/11 %s | antes: %s | previstas %s, saúde %s', n ->> 'linha', n ->> 'previstas_1645',
+             n ->> 'hoje_vivo', n ->> 'amanha_vivo', a ->> 'linha', a ->> 'previstas_1645', a ->> 'saude'));
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- ── V5f. A mesma rota com os modos de produção em 27/11/2026: o cadastro ligado; o previsto e o convite em sombra ──
+  begin
+    update public.agenda_config set modo_cadastro = 'ligado', modo_equipe_previsto = 'sombra', modo_equipe_convite = 'sombra' where id;
+    -- como em produção (que já mandou as de 14/11 e 19/11), uma pergunta dos dias em ligado de uma semana anterior já está registrada:
+    -- sem ela, com o cadastro ligado, a 1ª pergunta em ligado esperaria a chamada ao dono (o passo 4 de agenda_equipe_semana) e o caso
+    -- não chegaria à conta. Na bancada ninguém a manda: a fila velha a derruba por janela no 1º tique; só a existência dela importa
+    perform public._agenda_equipe_registrar(c_roberto, d09, 'dias', 'A pergunta dos dias de uma semana anterior (preparo do caso V5f).',
+                                            pg_temp.em(date '2026-10-29', '16:45'));
+    v_b := (select cfg.modo_cadastro = 'ligado' and cfg.modo_equipe_previsto = 'sombra' and cfg.modo_equipe_convite = 'sombra'
+                   and cfg.modo_equipe = 'ligado' and cfg.modo_dias = 'ligado' from public.agenda_config cfg)
+           and (select count(*) from public.agenda_equipe_mensagens m where m.payee_id = c_roberto and m.tipo = 'dias' and m.modo = 'ligado' and m.dia = d09) = 1;
+    n := pg_temp.roda('novo', 'manter', '17:45', 'dono_tira');
+    a := pg_temp.roda('antes', 'manter', '17:45', 'dono_tira');
+    v_prox := v_prox || jsonb_build_object('V5f', n -> 'proativas');
+    v_res := pg_temp.ok(v_res, 'V5f a mesma rota com os MODOS DE PRODUÇÃO em 27/11/2026 (o cadastro ligado; o previsto e o convite em sombra; uma pergunta dos dias de semana anterior já registrada em ligado), ''manter'', o dono tira o dia às 08:10, a ficha às 17:45: às 16:45 a conta dá 1, a pergunta dos dias da semana de 16/11 é ADIADA (não espera a chamada: é a conta que adia), e às 17:45 a ficha de sex 06/11 é enfileirada como a 2ª do dia; 2 proativas. O CONTROLE com o corpo de antes: a pergunta sai às 16:45 e a ficha nasce recusada por teto',
+      v_b
+      and n ->> 'confirmar_0745' = 'enfileirada' and n ->> 'confirmar_0900' = 'enfileirada' and (n ->> 'silencio_0900')::int = 0
+      and (n ->> 'hoje_vivo')::int = 0 and (n ->> 'amanha_vivo')::int = 1 and (n ->> 'fila_1645')::int = 1 and (n ->> 'previstas_1645')::int = 1
+      and (n ->> 'adiada_1645')::int = 1 and (n ->> 'saiu_1645')::int = 0 and (n ->> 'dias_1645')::int = 1 and n ->> 'como_foi' = '-'
+      and n ->> 'ficha_antes_da_hora' = '-' and n -> 'ficha_no_tique' = '{"enfileirada": 1}'::jsonb and n ->> 'ficha' = 'enfileirada na fila às 17:45'
+      and n ->> 'dias' = 'recusada 29/10 16:45' and (n ->> 'proativas')::int = 2 and (n ->> 'saude')::int = 0 and (n ->> 'erros')::int = 0
+      and a ->> 'md5_do_corpo' = c_antes and n ->> 'md5_do_corpo' <> c_antes
+      and (a ->> 'hoje_vivo')::int = 0 and (a ->> 'amanha_vivo')::int = 1 and (a ->> 'fila_1645')::int = 1 and (a ->> 'previstas_1645')::int = 0
+      and (a ->> 'saiu_1645')::int = 1 and (a ->> 'dias_1645')::int = 2 and a ->> 'dias' = 'recusada 29/10 16:45, enfileirada 05/11 16:45'
+      and a -> 'ficha_no_tique' = '{"recusada": 1}'::jsonb and a ->> 'ficha' = 'recusada/teto às 17:45' and (a ->> 'proativas')::int = 2
+      and (a ->> 'saude')::int = 1 and (a ->> 'erros')::int = 0,
+      format('modos de produção %s | novo: %s | previstas %s | antes: %s | previstas %s, saúde %s', v_b, n ->> 'linha', n ->> 'previstas_1645',
+             a ->> 'linha', a ->> 'previstas_1645', a ->> 'saude'));
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
 
   -- ── V6. A confirmação saiu e o "como foi" de hoje já foi registrado SEM a ficha (ela espera o "mande" do dono) ──
   begin
@@ -664,9 +762,25 @@ begin
   end;
 
   -- ── V8. O teto nunca é passado ──
-  v_res := pg_temp.ok(v_res, 'V8 o teto nunca é passado: em todos os cenários acima com o corpo novo (V1 a V5 e V7), as proativas na fila do dia ficam em no máximo equipe_proativas_dia_max (2); a conta só decide quem espera',
-    (select count(*) = 14 and bool_and((e.value)::int <= v_teto) and bool_and((e.value)::int >= 1) from jsonb_each_text(v_prox) e),
+  v_res := pg_temp.ok(v_res, 'V8 o teto nunca é passado: em todos os cenários acima com o corpo novo (V1 a V5 e V7), com o teto da casa, as proativas na fila do dia ficam em no máximo equipe_proativas_dia_max (2); a conta só decide quem espera',
+    (select count(*) = 19 and bool_and((e.value)::int <= v_teto) and bool_and((e.value)::int >= 1) from jsonb_each_text(v_prox) e),
     format('teto %s | %s', v_teto, v_prox::text));
+
+  -- ── V8b. O cenário do V1 ('tirar', calado, ficha às 19:30) com o teto em 3 e em 1 (o CHECK de agenda_config aceita de 1 a 3) ──
+  n := pg_temp.roda('novo', 'tirar', '19:30', 'calado', jsonb_build_object('teto', 3));
+  x := pg_temp.roda('novo', 'tirar', '19:30', 'calado', jsonb_build_object('teto', 1));
+  a := pg_temp.roda('antes', 'tirar', '19:30', 'calado', jsonb_build_object('teto', 1));
+  v_res := pg_temp.ok(v_res, 'V8b o teto nunca é passado também com o teto em 3 e em 1 (o cenário do V1). Com 3: às 16:45 a conta dá 1 e cabe (1 na fila + 1 prevista < 3), a pergunta dos dias sai como a 2ª e a ficha como a 3ª; 3 proativas no dia, o teto. Com 1: a confirmação das 07:45 gasta a única vaga, a pergunta dos dias é adiada e a ficha nasce recusada por teto; 1 proativa no dia — as mesmas mensagens do corpo de antes (com o teto em 1 a recusa da ficha não é efeito da conta)',
+    (n ->> 'fila_1645')::int = 1 and (n ->> 'previstas_1645')::int = 1 and (n ->> 'saiu_1645')::int = 1 and (n ->> 'adiada_1645')::int = 0
+    and n -> 'ficha_no_tique' = '{"enfileirada": 1}'::jsonb and (n ->> 'proativas')::int = 3 and (n ->> 'saude')::int = 0 and (n ->> 'erros')::int = 0
+    and n ->> 'linha' = '07:45 confirmar sem_resposta; 16:45 dias enfileirada; 19:30 ficha enfileirada'
+    and (x ->> 'fila_1645')::int = 1 and (x ->> 'previstas_1645')::int = 1 and (x ->> 'adiada_1645')::int = 1 and (x ->> 'saiu_1645')::int = 0
+    and x -> 'ficha_no_tique' = '{"recusada": 1}'::jsonb and x ->> 'ficha' = 'recusada/teto às 19:30' and x ->> 'dias' = '-'
+    and (x ->> 'proativas')::int = 1 and (x ->> 'saude')::int = 0 and (x ->> 'erros')::int = 0
+    and x ->> 'linha' = '07:45 confirmar sem_resposta; 19:30 ficha recusada/teto'
+    and a ->> 'md5_do_corpo' = c_antes and a ->> 'linha' = x ->> 'linha' and (a ->> 'proativas')::int = 1 and (a ->> 'adiada_1645')::int = 1,
+    format('teto 3: %s | proativas %s || teto 1: %s | proativas %s | antes: %s', n ->> 'linha', n ->> 'proativas', x ->> 'linha', x ->> 'proativas',
+           a ->> 'linha'));
 
   raise exception 'desfaz' using errcode = 'P0096';
   exception when sqlstate 'P0096' then null;
