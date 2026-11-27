@@ -487,10 +487,11 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [showFinancialDialog, setShowFinancialDialog] = useState(true);
   const [depositDialogOpen, setDepositDialogOpen] = useState(false);
   const [depositFromFinancial, setDepositFromFinancial] = useState(false);
-  // Prompt opt-in de conclusão (avisar cliente + saldo) — aberto ao concluir a OS.
+  // Prompt opt-in de conclusão — aberto ao concluir a OS com saldo: avisa o cliente (sem valor) e oferece cobrar o
+  // saldo pela conferência da ficha (dono, 26/11/2026: "2. A").
   const [completionSend, setCompletionSend] = useState<{
-    open: boolean; balance: number; dueDate: string | null; clientName: string | null; clientPhone: string | null;
-  }>({ open: false, balance: 0, dueDate: null, clientName: null, clientPhone: null });
+    open: boolean; balance: number; clientId: string | null; clientName: string | null; clientPhone: string | null;
+  }>({ open: false, balance: 0, clientId: null, clientName: null, clientPhone: null });
   // Assistente "Faturar OS" (NFS-e + NF-e): abre ao concluir, ANTES do aviso de saldo —
   // documento fiscal primeiro, cobrança depois. Só admin (a emissão é admin-only).
   const authUser = useOptionalAuth()?.user ?? null;
@@ -1305,7 +1306,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         try {
           const [{ data: recRows }, cliRes] = await Promise.all([
             supabase.from('receivables')
-              .select('balance_amount, due_date, is_deposit, status')
+              .select('balance_amount, is_deposit, status')
               .eq('service_order_id', orderId)
               .neq('status', 'cancelled'),
             form.client_id
@@ -1316,13 +1317,11 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           const outstanding = pend.reduce((s: number, r: any) => s + Number(r.balance_amount || 0), 0);
           let promptSaldo: typeof completionSend | null = null;
           if (outstanding > 0.009) {
-            const dueRow = pend.slice().sort((a: any, b: any) =>
-              String(a.due_date).localeCompare(String(b.due_date)))[0];
             const cli = (cliRes as any).data;
             promptSaldo = {
               open: true,
               balance: Math.round(outstanding * 100) / 100,
-              dueDate: dueRow?.due_date ?? null,
+              clientId: form.client_id || null,
               clientName: cli?.name ?? null,
               clientPhone: cli?.whatsapp || cli?.phone || null,
             };
@@ -2322,7 +2321,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       <JanelaDoMotivo para={paradaDaOs} ocupado={updateStatus.isPending} onFechar={() => setParadaDaOs(null)}
         onConfirmar={(para, motivo) => handleStatusChange(para, motivo)} />
 
-      {/* Prompt opt-in de conclusão (avisar cliente + saldo) */}
+      {/* Prompt opt-in de conclusão (avisar o cliente; o saldo, pelo "Cobrar o cliente") */}
       {!isNew && orderId && (
         <CompletionSendDialog
           open={completionSend.open}
@@ -2332,10 +2331,10 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           }}
           serviceOrderId={orderId}
           osNumber={orderData?.service_order_number || ''}
+          clientId={completionSend.clientId}
           clientName={completionSend.clientName}
           clientPhone={completionSend.clientPhone}
           balance={completionSend.balance}
-          dueDate={completionSend.dueDate}
           assetType={(orderData as { vessels?: { asset_type?: string | null } | null } | undefined)?.vessels?.asset_type ?? null}
         />
       )}

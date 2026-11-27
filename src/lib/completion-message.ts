@@ -1,58 +1,28 @@
-// Texto padrão (editável) da mensagem de CONCLUSÃO de serviço enviada ao cliente — com o saldo
-// pendente, quando houver. É o momento recomendado para avisar/cobrar (job completion notification).
-// O usuário revisa e decide enviar (opt-in) no CompletionSendDialog.
-import { format, parseISO, isValid } from 'date-fns';
+// Texto padrão (editável) da mensagem de CONCLUSÃO de serviço enviada ao cliente: o aviso de que o serviço terminou.
+// Não fala de dinheiro (dono, 26/11/2026: "2. A"). O saldo, o vencimento e a chave Pix iam aqui, para um número que se
+// digita à mão e sem as travas da cobrança; cobrar é pelo "Cobrar o cliente" do CompletionSendDialog, que abre a
+// conferência da ficha. O usuário revisa e decide enviar (opt-in) no CompletionSendDialog.
 import { emojiDaUnidade } from '@/lib/unidade';
-
-const brl = (v: number) =>
-  new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 
 function firstName(name?: string | null): string {
   return (name || '').trim().split(/\s+/)[0] || 'Cliente';
 }
 
-function duePhrase(dueDate?: string | null): string {
-  if (!dueDate) return '';
-  const d = parseISO(dueDate.slice(0, 10));
-  return isValid(d) ? `, com vencimento em ${format(d, 'dd/MM/yyyy')}` : '';
-}
-
 export interface CompletionMessageInput {
   clientName?: string | null;
   osNumber: string;
-  /** saldo em aberto (0 ou ausente = tudo quitado). */
-  balance?: number | null;
-  /** vencimento do saldo (ISO 'yyyy-MM-dd'); usa a conclusão real quando o saldo é "na entrega". */
-  dueDate?: string | null;
-  /**
-   * Instrução de pagamento a incluir quando há saldo. Hoje = chave Pix estática da empresa
-   * (Configurações). SEAM: quando a integração bancária estiver pronta, passar aqui o Pix
-   * copia-e-cola / link dinâmico daquele saldo (mesmo ponto de injeção, sem mudar o resto).
-   */
-  pixKey?: string | null;
   /** vessels.asset_type: o emoji vem do tipo (🛥️ barco, 🚐 veículo; nada no resto) — nunca lancha para motorhome. */
   assetType?: string | null;
 }
 
-/** Monta a mensagem padrão de conclusão. Com saldo em aberto, inclui valor, vencimento e (se houver) Pix. */
-export function buildCompletionMessage({ clientName, osNumber, balance, dueDate, pixKey, assetType }: CompletionMessageInput): string {
+/** Monta a mensagem padrão de conclusão: o serviço da OS terminou. Sem valor, vencimento nem Pix. */
+export function buildCompletionMessage({ clientName, osNumber, assetType }: CompletionMessageInput): string {
   const nome = firstName(clientName);
   // Era 🚤 fixo para todos (22/10/2026: motorhome recebia lancha).
   const emoji = emojiDaUnidade(assetType);
-  const ola = `Olá ${nome}!${emoji ? ` ${emoji}` : ''}\n\n`;
-  const saldo = Number(balance || 0);
-  if (saldo > 0.009) {
-    const pixLine = pixKey && pixKey.trim() ? `\n\n💠 Para pagar por Pix, use a chave: *${pixKey.trim()}*` : '';
-    return (
-      ola +
-      `Concluímos o serviço da ${osNumber}. Ficou um saldo de *${brl(saldo)}*${duePhrase(dueDate)}.` +
-      pixLine +
-      `\n\nQualquer dúvida sobre o pagamento ou o serviço, estamos à disposição. Obrigado pela confiança!`
-    );
-  }
   return (
-    ola +
-    `Concluímos o serviço da ${osNumber} e está tudo certo/quitado.\n\n` +
+    `Olá ${nome}!${emoji ? ` ${emoji}` : ''}\n\n` +
+    `Concluímos o serviço da ${osNumber}.\n\n` +
     `Obrigado pela confiança — qualquer coisa, é só chamar!`
   );
 }
