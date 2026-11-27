@@ -5690,3 +5690,53 @@ quatro estão latentes.
   Provado na bancada pelos casos B4b e B4c de `agenda_p1_silencio.sql` (26/11/2026).
 - **Menor mudança:** fechar a pergunta `concluir:<os>:%` quando a OS concluir ou quando o dono disser *falta dia* dela.
   Não corrigido aqui (achado do construtor do A2).
+
+### [NOVO-agenda-p1-18] A pergunta dos dias toma a vaga da ficha de amanhã quando o dia sai do plano depois da confirmação
+
+- **Onde:** `_agenda_equipe_previstas_hoje`, a conta que `agenda_equipe_semana` soma à fila do dia antes de mandar a pergunta
+  dos dias. A ficha de amanhã deixava de contar sempre que a confirmação de hoje tinha saído, supondo que o "como foi" das
+  17:00 a levaria. O "como foi" só nasce para quem ainda tem plano hoje.
+- **Efeito:** na qui 26/11/2026 a confirmação das 07:45 saiu, o silêncio das 9h tirou o dia, a pergunta dos dias das 16:45
+  ocupou a 2ª vaga (1 na fila + 0 previstas < 2) e a ficha de sex 27/11 nasceu recusada por teto às 19:30: sem aviso ao
+  dono, sem nova tentativa e sem a via em PDF. Com `equipe_silencio_acao = 'manter'` o caso típico some (o "como foi" leva
+  a ficha), mas o furo continuava sempre que o dia sai do plano depois da confirmação (o técnico diz "não vou", o dono tira
+  o dia).
+- **Situação (27/11/2026, ramo `session/ficha-1745`, migration `20270301120500`, NÃO aplicada no momento do commit):** a
+  ficha só deixa de contar à parte quando o "como foi" de hoje ainda vai nascer: a confirmação de hoje saiu (não recusada),
+  a pessoa ainda tem plano vivo hoje e o "como foi" de hoje não foi registrado. Nos outros casos conta +1 e a pergunta dos
+  dias espera outro tique ou outro dia. A conta não lê a chave do silêncio nem a hora da ficha; o teto e as duas travas não
+  mudam. Provas de `agenda_p1_vaga_da_ficha.sql`, na bancada: V1 (o caso de 26/11 com a ficha às 19:30 e às 17:45: a
+  pergunta é adiada e a ficha sai como a 2ª do dia) e V1c (o controle: com o corpo de antes o defeito se repete); V2, V3,
+  V4, V4b e V4c (iguais ao corpo de antes, byte a byte); V5 e V5c ("não vou" e o dono tira o dia, com 'manter'); V6 (o
+  "como foi" registrado sem a ficha: a conta dá 1, antes 0); V7 (a pergunta adiada sai no sábado às 16:45); V8 (nenhum dia
+  passa de 2 mensagens).
+- **Fica aberto:**
+  - rotas que a conta não fecha, em que a ficha ainda pode nascer recusada por teto: o plano de amanhã que nasce depois das
+    16:45 com a pergunta dos dias já enviada como a 2ª; o "mande" do dono entre o "como foi" das 17:00 e a hora da ficha;
+    tiques perdidos entre as 17:00 e a hora da ficha; o convite, o previsto e a mudança quando saírem de teste (o convite
+    confere só a fila); o teto em 3;
+  - a recusa continua calada: o aviso ao dono quando a ficha de amanhã não sai é o segundo passo, em outra migration
+    (`_agenda_rotina_ficha`), e depende do NOVO-agenda-p1-19 para chegar no mesmo dia;
+  - a chave de saúde `ficha_recusada_por_teto_com_dias` não tem janela de tempo: continua em 1 pela linha de 26/11 (lido em
+    produção em 27/11/2026 03:52) e mantém `agenda_saude.ok` falso. O conserto evita novas, não apaga a antiga;
+  - a pergunta dos dias cede a vez mais vezes: nas semanas em que o técnico trabalha quinta e sexta ela sai no sábado às
+    16:45 (já é assim com 'manter'; aconteceu em 14/11/2026), e numa semana com 2 mensagens em todos os dias de quinta a
+    terça ela não sai. Decisão do dono, ainda sem resposta;
+  - a ficha de sex 27/11 não é recuperada (a linha recusada não reabre).
+
+### [NOVO-agenda-p1-19] O "Mantive o dia dele" das 9h gasta a única vaga do aviso de exceção do dono
+
+- **Onde:** `_agenda_lote_cota` (`20261109100300_agenda_fase7f_lote.sql`): `acordes_dia_max` menos todos os acordes
+  contados no dia (`agenda_acoes.contada_via = 'acorde'`) e os avisos de exceção já enviados. Não exclui o acorde da ação
+  `silencio_manteve`: a exclusão do NOVO-agenda-p1-07 ficou só na cota de `agenda_rotina_rodar`.
+- **Efeito:** com `equipe_silencio_acao = 'manter'` (produção desde 27/11/2026) e o técnico calado, o acorde das 9h zera a
+  cota (`acordes_dia_max` = 1) e qualquer outra exceção do dia fica presa (`agenda_aviso_pecas` devolve o motivo `cota`):
+  só sai no bloco do fechamento seguinte. Lido em produção em 27/11/2026 03:52 (só SELECT): `_agenda_lote_cota` = 0 em
+  18/11, 24/11 e 26/11 (os dias com o acorde do silêncio) e 1 em 25/11; ainda não havia nenhuma ação `silencio_manteve`.
+  As 3 confirmações enviadas até hoje (18/11, 24/11 e 26/11) ficaram sem resposta: por ora, o dia de silêncio é o dia
+  comum. Não provado por execução: saiu da leitura do corpo e dessas contagens.
+- **Menor mudança:** em `_agenda_lote_cota`, a mesma exclusão do p1-07 (`a.depois ->> 'motivo' is distinct from
+  'silencio_manteve'`; com "is distinct from" os acordes antigos, sem motivo, continuam contando). Nesses dias o dono
+  passaria a poder receber 2 mensagens urgentes (a das 9h e a exceção). Não corrigido aqui: é decisão do dono e é da frente
+  da agenda. Sem isso, o aviso do segundo passo do NOVO-agenda-p1-18 ("Não mandei a ficha…") só chegaria no dia seguinte,
+  depois de o serviço começar.
