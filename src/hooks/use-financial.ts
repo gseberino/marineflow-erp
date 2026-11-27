@@ -8,9 +8,10 @@ import { montarAging, type ContaEmAberto } from '@/lib/aging';
 import { rotuloDoMes, hojeEmBrasilia, somarDias, type FluxoDeCaixa } from '@/lib/fluxo-de-caixa';
 import { carregarFluxoDeCaixa, chaveDoFluxo } from '@/hooks/use-fluxo-de-caixa';
 import {
-  cartoesDoExtrato, categoriaNaPrevisao, gastosQueSeRepetem, gastosQueSeRepetemPorDia, mesesDeReferencia,
+  aReceberNaPrevisao, cartoesDoExtrato, categoriaNaPrevisao, gastosQueSeRepetem, gastosQueSeRepetemPorDia, lerDinheiroEsperando,
+  mesesDeReferencia,
   type CartaoNaFila, type ContaEmAberto as ContaDaPrevisao, type DebitoLido, type DespesaLancada, type FaturaLida,
-  type GastoQueSeRepete, type LinhaLida,
+  type GastoQueSeRepete, type LinhaLida, type ParteDaPrevisao,
 } from '@/lib/previsao-de-caixa';
 
 export function useReceivables() {
@@ -291,6 +292,11 @@ export interface ExtrasDaPrevisao {
   recorrentes: GastoQueSeRepete[];
   /** O que não deu para ler — a previsão segue sem aquela parte e diz qual. */
   avisos: string[];
+  /**
+   * (27/11/2026) O que ficou FORA das entradas: o que já está no banco esperando baixa no Extrato (já está no saldo de
+   * hoje) e o vencido há mais de 90 dias (sem data para entrar). Ausente = a leitura antiga, tudo nas entradas.
+   */
+  aReceber?: { noBanco: ParteDaPrevisao; antigas: ParteDaPrevisao };
 }
 
 /**
@@ -405,7 +411,10 @@ async function lerExtrasDaPrevisao(hoje: string): Promise<{
  * mostra "saldo previsto" — sem saldo conhecido, projetar seria inventar número.
  *
  * Contas já vencidas e ainda em aberto entram na primeira semana, porque é quando elas
- * pressionam o caixa de verdade.
+ * pressionam o caixa de verdade. Desde 27/11/2026 (fatia 6 da cobrança), a entrada de cada conta a
+ * receber não leva o dinheiro que já entrou no banco e espera baixa no Extrato (ele já está no saldo de hoje: contava
+ * duas vezes) nem o vencido há mais de 90 dias (sem data para entrar); os dois aparecem à parte (`extras.aReceber`).
+ * Regra em supabase/functions/_shared/receivables/a-receber-na-previsao.ts.
  *
  * Desde 27/09/2026 as saídas somam também a fatura de cada cartão (o que já está no cartão, no
  * vencimento que o banco informa — até 24/11/2026 era o dia provável de pagamento, deduzido) e os gastos que se repetem todo mês, pela média — quase todo gasto
@@ -424,7 +433,7 @@ export function useCashForecast(semanas: number = 8) {
 
       const [recRes, payRes] = await Promise.all([
         supabase.from('receivables')
-          .select('balance_amount, due_date')
+          .select('id, client_id, balance_amount, due_date')
           .not('status', 'in', '("paid","cancelled")')
           .lte('due_date', limiteISO),
         supabase.from('payables')
@@ -437,7 +446,29 @@ export function useCashForecast(semanas: number = 8) {
       if (recRes.error) throw new Error(`Não consegui carregar as contas a receber: ${recRes.error.message}`);
       if (payRes.error) throw new Error(`Não consegui carregar as contas a pagar: ${payRes.error.message}`);
       const hojeLocal = hojeEmBrasilia();
-      const { extras, pagoNoMes } = await lerExtrasDaPrevisao(hojeLocal);
+      // O dinheiro de cliente que já entrou no banco e espera baixa no Extrato — a MESMA leitura da trava da cobrança.
+      // Falha aqui não derruba a previsão: ela segue contando a conta inteira (como antes), com o aviso.
+      const [{ extras, pagoNoMes }, lidoDoExtrato] = await Promise.all([
+        lerExtrasDaPrevisao(hojeLocal),
+        lerDinheiroEsperando(supabase).then(
+          (entradas) => ({ entradas, erro: null as string | null }),
+          (e: unknown) => ({ entradas: [], erro: (e as Error)?.message || 'erro' }),
+        ),
+      ]);
+      if (lidoDoExtrato.erro) {
+        extras.avisos.push(`Não consegui ler as entradas que esperam no Extrato (${lidoDoExtrato.erro}): o que já entrou no banco pode estar contado de novo nas entradas.`);
+      }
+      const aReceber = aReceberNaPrevisao(
+        (recRes.data || []).map((r) => ({
+          id: String((r as { id: string }).id),
+          client_id: (r as { client_id?: string | null }).client_id ?? null,
+          due_date: String(r.due_date),
+          saldo: Number(r.balance_amount || 0),
+        })),
+        lidoDoExtrato.entradas,
+        hojeLocal,
+      );
+      extras.aReceber = { noBanco: aReceber.noBanco, antigas: aReceber.antigas };
 
       // Segunda-feira da semana corrente é a âncora das faixas.
       const inicioSemana = (d: Date) => {
@@ -471,11 +502,13 @@ export function useCashForecast(semanas: number = 8) {
         return diff >= 0 && diff < buckets.length ? diff : -1;
       };
 
-      for (const r of (recRes.data || [])) {
-        const i = indiceDe(r.due_date as string);
+      // A entrada de cada conta: o saldo menos o que já está no banco; vencida há mais de 90 dias, nada (fica à parte).
+      for (const c of aReceber.contas) {
+        if (c.aReceber <= 0) continue;
+        const i = indiceDe(c.due_date);
         if (i < 0) continue;
-        buckets[i].entradas += Number(r.balance_amount || 0);
-        if (i === 0 && new Date(`${r.due_date}T12:00:00`) < hoje) buckets[0].contemAtrasados = true;
+        buckets[i].entradas += c.aReceber;
+        if (i === 0 && new Date(`${c.due_date}T12:00:00`) < hoje) buckets[0].contemAtrasados = true;
       }
       for (const p of (payRes.data || [])) {
         const i = indiceDe(p.due_date as string);
@@ -514,6 +547,7 @@ export function useCashForecast(semanas: number = 8) {
         buckets[i].saidasRecorrentes! += valor;
       }
       for (const b of buckets) {
+        b.entradas = Number(b.entradas.toFixed(2));
         b.saidas = Number(b.saidas.toFixed(2));
         b.saidasDasContas = Number((b.saidasDasContas ?? 0).toFixed(2));
         b.saidasDaFatura = Number((b.saidasDaFatura ?? 0).toFixed(2));

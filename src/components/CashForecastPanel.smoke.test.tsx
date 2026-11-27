@@ -29,6 +29,9 @@ const { forecast, duplicadas, estado } = vi.hoisted(() => ({
       ],
       recorrentes: [{ categoria: 'Contabilidade e assessoria', mediaMensal: 915.35, meses: 3 }],
       avisos: [],
+      // 27/11/2026: o dado real do dia — 5 contas com o dinheiro já no banco, 1 vencida há mais de 90 dias.
+      aReceber: { noBanco: { total: 9080.06, contas: 5 }, antigas: { total: 756, contas: 1 } } as
+        { noBanco: { total: number; contas: number }; antigas: { total: number; contas: number } } | undefined,
     },
   },
   duplicadas: [
@@ -144,5 +147,31 @@ describe('CashForecastPanel', () => {
     expect(screen.getByText(/o vencimento é o que o banco informa; o valor é estimado pelo extrato/)).toBeInTheDocument();
     // a regra antiga (data deduzida) dizia "por volta de" no vencimento: não diz mais
     expect(screen.queryByText(/vence por volta de|venceu por volta de/)).not.toBeInTheDocument();
+  });
+
+  // 27/11/2026 (cobrança, fatia 6): o dinheiro já no banco e o vencido de mais de 90 dias saem das entradas e aparecem à parte.
+  it('diz o que ficou fora das entradas: já no banco esperando baixa e o vencido há mais de 90 dias', async () => {
+    renderPainel(5000);
+    const bloco = (await screen.findByTestId('previsao-fora-das-entradas')).textContent!.replace(/\s/g, ' ');
+    expect(bloco).toContain('Das contas a receber, fica fora das entradas:');
+    expect(bloco).toContain('Já no banco, esperando baixa no Extrato R$ 9.080,06 (5 contas) — o dinheiro já está no saldo de hoje; falta dar a baixa no Extrato.');
+    expect(bloco).toContain('Vencido há mais de 90 dias R$ 756,00 (1 conta) — sem data para entrar, não conta como entrada desta semana.');
+  });
+
+  it('sem nada fora das entradas (ou leitura antiga, sem o campo), o bloco não aparece', async () => {
+    const antes = forecast.extras.aReceber;
+    try {
+      forecast.extras.aReceber = { noBanco: { total: 0, contas: 0 }, antigas: { total: 0, contas: 0 } };
+      const r = renderPainel(5000);
+      await screen.findByText('Esta semana');
+      expect(screen.queryByTestId('previsao-fora-das-entradas')).toBeNull();
+      r.unmount();
+      forecast.extras.aReceber = undefined;
+      renderPainel(5000);
+      await screen.findByText('Esta semana');
+      expect(screen.queryByTestId('previsao-fora-das-entradas')).toBeNull();
+    } finally {
+      forecast.extras.aReceber = antes;
+    }
   });
 });

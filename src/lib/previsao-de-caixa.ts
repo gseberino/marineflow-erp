@@ -58,6 +58,12 @@ export type {
 // continua exportada e testada.
 export { cartoesDoExtrato } from '../../supabase/functions/_shared/pagamentos/cartoes';
 export type { CartaoNaFila, DebitoLido, FaturaLida, LinhaLida } from '../../supabase/functions/_shared/pagamentos/cartoes';
+// (27/11/2026) O que entra de cada conta a receber: sem o dinheiro que já está no banco esperando baixa no Extrato (ele
+// já está no saldo de hoje) e sem o vencido há mais de 90 dias. A regra mora no servidor, ao lado da trava da cobrança
+// (a mesma leitura do Extrato, lerDinheiroEsperando).
+export { aReceberNaPrevisao, DIAS_SEM_DATA } from '../../supabase/functions/_shared/receivables/a-receber-na-previsao';
+export type { AReceberNaPrevisao, ContaParaAPrevisao, Parte as ParteDaPrevisao } from '../../supabase/functions/_shared/receivables/a-receber-na-previsao';
+export { lerDinheiroEsperando } from '../../supabase/functions/_shared/receivables/dinheiro-esperando';
 
 // ── Gastos que se repetem ────────────────────────────────────────────────────────────────
 

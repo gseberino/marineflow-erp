@@ -1,5 +1,6 @@
 import { useI18n } from '@/i18n';
 import { useCashForecast, useDuplicatePayables, type ForecastWeek } from '@/hooks/use-financial';
+import { DIAS_SEM_DATA } from '@/lib/previsao-de-caixa';
 import { StatusBadge } from '@/components/StatusBadge';
 import { ErroAoCarregar } from '@/components/ErroAoCarregar';
 import { DataTable, type DataColumn } from '@/v2/components/DataTable';
@@ -39,7 +40,11 @@ export function CashForecastPanel({ saldoInicial = null }: { saldoInicial?: numb
   const { weeks, totalEntradas, totalSaidas, semanasNegativas } = forecast;
   const extras = forecast.extras ?? { faturas: [], recorrentes: [], avisos: [] };
   const faturasNaPrevisao = extras.faturas.filter((f) => f.naPrevisao);
-  const dataCurta = (d: string) => d.slice(8, 10) + '/' + d.slice(5, 7);
+  // (27/11/2026) O que ficou fora das entradas: já no banco esperando baixa e o vencido há mais de 90 dias.
+  const noBanco = extras.aReceber?.noBanco ?? { total: 0, contas: 0 };
+  const antigas = extras.aReceber?.antigas ?? { total: 0, contas: 0 };
+  const nContas = (n: number) => `${n} ${n === 1 ? 'conta' : 'contas'}`;
+  const dataCurta =(d: string) => d.slice(8, 10) + '/' + d.slice(5, 7);
   // (24/11/2026) A mesma leitura da fila de pagamentos do WhatsApp (linhaDoCartao, no servidor): o vencimento é o que o
   // banco informa e o valor é estimado pelo extrato — por isso "cerca de", menos no total que o próprio banco informou.
   const oQueDizAFatura = (f: (typeof faturasNaPrevisao)[number]): { valor: string; detalhe: string } => {
@@ -187,6 +192,30 @@ export function CashForecastPanel({ saldoInicial = null }: { saldoInicial?: numb
         density="compact"
         emptyMessage="Nada programado."
       />
+
+      {(noBanco.contas > 0 || antigas.contas > 0) && (
+        <div className="space-y-1 rounded-lg border bg-card p-3 text-sm" data-testid="previsao-fora-das-entradas">
+          <p className="font-medium">Das contas a receber, fica fora das entradas:</p>
+          {noBanco.contas > 0 && (
+            <p className="min-w-0">
+              <span className="font-medium">Já no banco, esperando baixa no Extrato</span>{' '}
+              <span className="tabular-nums">{formatCurrency(noBanco.total)}</span>
+              <span className="text-muted-foreground">
+                {` (${nContas(noBanco.contas)}) — o dinheiro já está no saldo de hoje; falta dar a baixa no Extrato.`}
+              </span>
+            </p>
+          )}
+          {antigas.contas > 0 && (
+            <p className="min-w-0">
+              <span className="font-medium">Vencido há mais de {DIAS_SEM_DATA} dias</span>{' '}
+              <span className="tabular-nums">{formatCurrency(antigas.total)}</span>
+              <span className="text-muted-foreground">
+                {` (${nContas(antigas.contas)}) — sem data para entrar, não conta como entrada desta semana.`}
+              </span>
+            </p>
+          )}
+        </div>
+      )}
 
       {(faturasNaPrevisao.length > 0 || extras.recorrentes.length > 0 || extras.avisos.length > 0) && (
         <div className="space-y-2 rounded-lg border bg-card p-3 text-sm">
