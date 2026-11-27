@@ -1,9 +1,12 @@
-// A sugestão de imprimir as vias de amanhã na hora da ficha das 19:30 (20/11/2026): quando vai, quando não vai, o texto e a
+// A sugestão de imprimir as vias de amanhã na hora da ficha da véspera (20/11/2026): quando vai, quando não vai, o texto e a
 // chave. O pedido que ela sugere ("imprime as vias de amanhã") é provado em _shared/ai/atalho-impressao_test.ts.
+// (27/11/2026) A hora é a de agenda_config.equipe_hora_ficha; sem conseguir ler, vale 19:30 (os testes de cima usam essa reserva).
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   CHAVE_DO_INTERRUPTOR,
+  janelaDaSugestao,
   linhaDaSugestao,
+  minutosDaHora,
   ORIGEM_DA_SUGESTAO,
   type PecasDaSugestao,
   sugerirImpressaoDaVespera,
@@ -17,6 +20,8 @@ const AS_1930 = new Date("2026-11-19T22:30:05Z");
 
 function pecas(over: Partial<PecasDaSugestao> = {}, fila: Array<Record<string, unknown>> = [], dias: string[] = []): PecasDaSugestao {
   return {
+    // null = a hora da ficha não pôde ser lida: vale a reserva, 19:30
+    horaDaFicha: async () => null,
     desligada: async () => false,
     impressoraNoAr: async () => true,
     osDoDia: async (_db, dia) => {
@@ -95,4 +100,63 @@ Deno.test("o interruptor e as peças: a chave lida é a da véspera; o dia segui
   assertEquals(diaSeguinte("2026-12-31"), "2027-01-01");
   assertEquals(diaSeguinte("2028-02-28"), "2028-02-29");
   assertEquals(linhaDaSugestao({ phone: "1", texto: "t", amanha: "2026-12-01", agora: AS_1930 }).dedupe_key, "impressao_sugestao:2026-12-01");
+});
+
+// ── (27/11/2026) a hora segue a ficha (agenda_config.equipe_hora_ficha) ──────────────────────────────────────────────────────
+
+Deno.test("a hora lida e a janela: do tique da ficha ao seguinte, nunca depois das 20h; sem hora, 19:30", () => {
+  assertEquals(minutosDaHora("17:45:00"), 17 * 60 + 45);
+  assertEquals(minutosDaHora("19:30"), 19 * 60 + 30);
+  assertEquals(minutosDaHora(" 07:30:00 "), 7 * 60 + 30);
+  for (const lixo of [null, undefined, "", "abc", "25:00:00", "10:75:00", 1745]) assertEquals(minutosDaHora(lixo), null, String(lixo));
+  assertEquals(janelaDaSugestao(17 * 60 + 45), { de: 17 * 60 + 45, ate: 18 * 60 + 15 });
+  assertEquals(janelaDaSugestao(null), { de: 19 * 60 + 30, ate: 20 * 60 });
+  // ficha às 19:45: só o tique dela cabe antes das 20h; às 20:00 ou depois, janela vazia (nada à noite)
+  assertEquals(janelaDaSugestao(19 * 60 + 45), { de: 19 * 60 + 45, ate: 20 * 60 });
+  assertEquals(janelaDaSugestao(20 * 60).de >= janelaDaSugestao(20 * 60).ate, true);
+});
+
+Deno.test("com a ficha às 17:45: sugere no tique das 17:45, não repete às 18:00, e não sugere às 17:30, 18:15 nem 19:30", async () => {
+  // qui 19/11/2026: 17:45 em Brasília = 20:45 UTC
+  const hora = { horaDaFicha: async () => 17 * 60 + 45 };
+  const fila: Array<Record<string, unknown>> = [];
+  const dias: string[] = [];
+  assertEquals(await sugerirImpressaoDaVespera({}, new Date("2026-11-19T20:30:05Z"), pecas(hora, fila, dias)), { pulou: "fora_da_hora" });
+  assertEquals(dias, []);
+  assertEquals(await sugerirImpressaoDaVespera({}, new Date("2026-11-19T20:45:05Z"), pecas(hora, fila, dias)), { enviada: 2 });
+  assertEquals(dias, ["2026-11-20"]);
+  assertEquals(fila.length, 1);
+  assertEquals(fila[0].dedupe_key, "impressao_sugestao:2026-11-20");
+  // 17:45 → 20:00: a 1ª na próxima volta e as outras de 10 em 10 min
+  assertEquals(fila[0].max_attempts, 13);
+  assertEquals(await sugerirImpressaoDaVespera({}, new Date("2026-11-19T21:00:05Z"), pecas(hora, fila, dias)), { pulou: "ja_foi" });
+  assertEquals(await sugerirImpressaoDaVespera({}, new Date("2026-11-19T21:15:05Z"), pecas(hora, fila, dias)), { pulou: "fora_da_hora" });
+  assertEquals(await sugerirImpressaoDaVespera({}, AS_1930, pecas(hora, fila, dias)), { pulou: "fora_da_hora" });
+  assertEquals(fila.length, 1);
+});
+
+Deno.test("de madrugada e à noite nem a hora da ficha é lida; no resto do dia só ela", async () => {
+  let leuHora = 0, leuResto = 0;
+  const p = pecas({
+    horaDaFicha: async () => { leuHora++; return 17 * 60 + 45; },
+    desligada: async () => { leuResto++; return false; },
+  });
+  // 05:59 e 20:00 de Brasília (08:59 e 23:00 UTC); 22:30 de Brasília (01:30 UTC do dia seguinte)
+  for (const t of ["2026-11-19T08:59:59Z", "2026-11-19T23:00:00Z", "2026-11-20T01:30:00Z"]) {
+    assertEquals(await sugerirImpressaoDaVespera({}, new Date(t), p), { pulou: "fora_da_hora" }, t);
+  }
+  assertEquals(leuHora, 0);
+  // 10:00 de Brasília: lê a hora, vê que não é a dela e para
+  assertEquals(await sugerirImpressaoDaVespera({}, new Date("2026-11-19T13:00:00Z"), p), { pulou: "fora_da_hora" });
+  assertEquals([leuHora, leuResto], [1, 0]);
+});
+
+Deno.test("a hora da ficha que não pôde ser lida não derruba a sugestão: sai às 19:30; erro lançado vira { erro }", async () => {
+  const fila: Array<Record<string, unknown>> = [];
+  assertEquals(await sugerirImpressaoDaVespera({}, AS_1930, pecas({ horaDaFicha: async () => null }, fila)), { enviada: 2 });
+  const logs: unknown[] = [];
+  const db = { rpc: (f: string, v: unknown) => { if (f === "log_app_error") logs.push(v); return Promise.resolve({ error: null }); } };
+  const r = await sugerirImpressaoDaVespera(db, AS_1930, pecas({ horaDaFicha: async () => { throw new Error("agenda_config fora do ar"); } }));
+  assertEquals(r, { erro: "agenda_config fora do ar" });
+  assertEquals(logs.length, 1);
 });

@@ -651,9 +651,9 @@ servirComCors(async (req) => {
       agendaVia = { erro: String((e as any)?.message ?? e) };
     }
 
-    // (20/11/2026) A sugestão de imprimir as vias de amanhã, no tique da ficha das 19:30 (sugestao-impressao.ts: só sugere, nada
-    // imprime; só das 19:30 às 20:00 de Brasília, com OS amanhã e a impressora no ar; uma por véspera). Nunca lança; o try de fora é
-    // a segunda trava, para nada daqui parar as regras.
+    // (20/11/2026) A sugestão de imprimir as vias de amanhã, no tique da ficha da véspera (sugestao-impressao.ts: só sugere, nada
+    // imprime; só no tique da ficha e no seguinte, pela hora de agenda_config.equipe_hora_ficha — 27/11/2026, era fixa em 19:30 —,
+    // com OS amanhã e a impressora no ar; uma por véspera). Nunca lança; o try de fora é a segunda trava, para nada daqui parar as regras.
     let impressaoVespera: unknown = null;
     try {
       impressaoVespera = await sugerirImpressaoDaVespera(db, new Date());

@@ -1,10 +1,13 @@
-// A sugestão de imprimir as vias de amanhã, na hora da ficha das 19:30 (20/11/2026, decisão do dono: "Junto da ficha das
+// A sugestão de imprimir as vias de amanhã, na hora da ficha da véspera (20/11/2026, decisão do dono: "Junto da ficha das
 // 19:30 (véspera)"). O assistente SÓ SUGERE; nada é impresso sozinho (a impressão continua sob pedido: "imprime as vias de
 // amanhã" é lido sem modelo por _shared/ai/atalho-pdf.ts e impresso por _shared/ai/tools/impressao.ts).
 //
-// A ficha das 19:30 vai só à EQUIPE (agenda_rotina_rodar → agenda_equipe_mensagens tipo 'ficha'); o dono não recebe ficha.
-// Por isso a linha vai ao dono numa mensagem curta própria, no mesmo tique da ficha (o 1º a partir das 19:30 de Brasília),
-// e só quando:
+// (27/11/2026) A hora deixou de ser fixa: é a da ficha, agenda_config.equipe_hora_ficha (o dono mudou a ficha de 19:30 para
+// 17:45 e a sugestão ficaria chegando uma hora e meia depois dela). Se a hora não puder ser lida, vale a de sempre, 19:30.
+//
+// A ficha vai só à EQUIPE (agenda_rotina_rodar → agenda_equipe_mensagens tipo 'ficha'); o dono não recebe ficha.
+// Por isso a linha vai ao dono numa mensagem curta própria, no mesmo tique da ficha (o 1º a partir da hora dela, em
+// Brasília) ou no seguinte, e só quando:
 //   · há OS na agenda de amanhã (a mesma regra de "as vias de amanhã" e da manhã: alocação publicada ou fixada, reserva não
 //     conta) — o N da mensagem é o que o pedido imprime;
 //   · a impressora do escritório está no ar (o mesmo teste da manhã);
@@ -24,9 +27,14 @@ import type { Dono } from "../_shared/whatsapp/dono.ts";
 // deno-lint-ignore no-explicit-any
 type Db = any;
 
-/** A partir de quando (minutos em Brasília) e até quando (exclusive): o tique da ficha (19:30) e o seguinte (19:45). */
+/** A hora da ficha (minutos em Brasília) quando a configuração não pôde ser lida: 19:30, o DEFAULT da coluna. */
 export const SUGESTAO_DE_MIN = 19 * 60 + 30;
+/** Nada à noite: a janela nunca passa das 20h de Brasília (exclusive). */
 export const SUGESTAO_ATE_MIN = 20 * 60;
+/** A janela dura dois tiques do motor de 15 minutos: o da ficha e o seguinte. */
+export const SUGESTAO_JANELA_MIN = 30;
+/** A ficha nunca é antes das 06:00 (CHECK de agenda_config.equipe_janela_inicio): antes disso nem a hora é lida. */
+export const SUGESTAO_MAIS_CEDO_MIN = 6 * 60;
 export const ORIGEM_DA_SUGESTAO = "impressao_sugestao";
 export const CHAVE_DO_INTERRUPTOR = "impressao_sugestao_vespera";
 
@@ -36,6 +44,23 @@ export interface ResultadoDaSugestao {
   /** mandou para a fila (N = quantas vias) */
   enviada?: number;
   erro?: string;
+}
+
+/** "17:45:00" → 1065 (minutos do dia). Null quando não é hora. */
+export function minutosDaHora(hora: unknown): number | null {
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(hora ?? "").trim());
+  if (!m) return null;
+  const h = Number(m[1]), mi = Number(m[2]);
+  return h < 24 && mi < 60 ? h * 60 + mi : null;
+}
+
+/**
+ * A janela da sugestão no dia (minutos em Brasília; `ate` exclusive): do tique da ficha ao seguinte, nunca depois das 20h.
+ * Sem hora lida, a das 19:30. Ficha às 20:00 ou depois: janela vazia (nada à noite).
+ */
+export function janelaDaSugestao(horaDaFichaMin: number | null): { de: number; ate: number } {
+  const de = horaDaFichaMin ?? SUGESTAO_DE_MIN;
+  return { de, ate: Math.min(de + SUGESTAO_JANELA_MIN, SUGESTAO_ATE_MIN) };
 }
 
 /** A linha ao dono. Null sem vias. */
@@ -59,6 +84,8 @@ export function linhaDaSugestao(p: { phone: string; texto: string; amanha: strin
 
 /** O que a sugestão lê de fora (injetável no teste). */
 export interface PecasDaSugestao {
+  /** A hora da ficha em minutos do dia (agenda_config.equipe_hora_ficha). Null = não deu para ler: vale 19:30. */
+  horaDaFicha: (db: Db) => Promise<number | null>;
   desligada: (db: Db) => Promise<boolean>;
   impressoraNoAr: (db: Db, agora: Date) => Promise<boolean>;
   osDoDia: (db: Db, dia: string) => Promise<string[]>;
@@ -68,6 +95,15 @@ export interface PecasDaSugestao {
 }
 
 const PECAS: PecasDaSugestao = {
+  horaDaFicha: async (db) => {
+    const { data, error } = await db.from("agenda_config").select("equipe_hora_ficha").maybeSingle();
+    if (error) {
+      // sem a hora, a sugestão não some: sai na hora de sempre
+      console.error("impressao:vespera: não consegui ler a hora da ficha, vale 19:30:", error.message ?? error);
+      return null;
+    }
+    return minutosDaHora(data?.equipe_hora_ficha);
+  },
   desligada: async (db) => {
     const { data, error } = await db.from("app_settings").select("value").eq("key", CHAVE_DO_INTERRUPTOR).maybeSingle();
     if (error) throw new Error(`não consegui ler ${CHAVE_DO_INTERRUPTOR} (${error.message})`);
@@ -89,8 +125,11 @@ export async function sugerirImpressaoDaVespera(
   db: Db, agora: Date = new Date(), pecas: PecasDaSugestao = PECAS,
 ): Promise<ResultadoDaSugestao> {
   const { dia, min } = emBrasilia(agora);
-  if (min < SUGESTAO_DE_MIN || min >= SUGESTAO_ATE_MIN) return { pulou: "fora_da_hora" };
+  // de madrugada e à noite nada é lido: a ficha só existe entre as 06:00 e as 20:00
+  if (min < SUGESTAO_MAIS_CEDO_MIN || min >= SUGESTAO_ATE_MIN) return { pulou: "fora_da_hora" };
   try {
+    const { de, ate } = janelaDaSugestao(await pecas.horaDaFicha(db));
+    if (min < de || min >= ate) return { pulou: "fora_da_hora" };
     if (await pecas.desligada(db)) return { pulou: "desligada" };
     const amanha = diaSeguinte(dia);
     const vias = (await pecas.osDoDia(db, amanha)).length;
